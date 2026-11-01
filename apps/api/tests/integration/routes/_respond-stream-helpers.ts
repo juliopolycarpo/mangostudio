@@ -75,8 +75,12 @@ export const realExecuteTool = realTools.executeTool;
 export const realGetTool = realTools.getTool;
 export const realGetSafeEffectiveToolSettings = realTools.getSafeEffectiveToolSettings;
 const realGetAgentProfile = getAgentProfile;
+const getAgentProfileMock = mock(realGetAgentProfile);
 const realGetAppSettings = getAppSettings;
 const realRunSubagentTurn = runSubagentTurn;
+// Invalid-result fixtures exercise the production result validator.
+type SubagentTurnFixture = (...args: Parameters<typeof runSubagentTurn>) => Promise<unknown>;
+const runSubagentTurnMock = mock<SubagentTurnFixture>(realRunSubagentTurn);
 export const realSubagentDelegationError = SubagentDelegationError;
 const realGemini = { ...realGeminiNs };
 const realProviderSettingsRepo = { ...realProviderSettingsRepoNs };
@@ -89,9 +93,50 @@ const realLoadRichHistory = loadRichHistory;
 const realVerifyMessageOwnership = verifyMessageOwnership;
 const realListLegacyGalleryImages = listLegacyGalleryImages;
 
+// Install the delegates before the first request can capture an unmocked binding.
+// Both initially call the real implementation; cases only replace the delegate.
+await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+  getAgentProfile: getAgentProfileMock,
+}));
+await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
+  runSubagentTurn: runSubagentTurnMock,
+  SubagentDelegationError: realSubagentDelegationError,
+}));
+
 export { AgentSettingsError };
 
+/**
+ * Keep one loader identity: after a route is exercised under Bun coverage,
+ * its named import can retain an earlier mock across module re-registration.
+ * Vary the delegate instead, and restore the real one in restoreAllMocks.
+ */
+export async function mockAgentProfile(
+  factory: () => { getAgentProfile: typeof getAgentProfile }
+): Promise<void> {
+  getAgentProfileMock.mockImplementation(factory().getAgentProfile);
+  await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+    getAgentProfile: getAgentProfileMock,
+  }));
+}
+
+/** Use the same stable delegate strategy for the subagent entrypoint. */
+export async function mockSubagentRunner(
+  factory: () => {
+    runSubagentTurn: SubagentTurnFixture;
+    SubagentDelegationError: typeof SubagentDelegationError;
+  }
+): Promise<void> {
+  const fixture = factory();
+  runSubagentTurnMock.mockImplementation(fixture.runSubagentTurn);
+  await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
+    ...fixture,
+    runSubagentTurn: runSubagentTurnMock,
+  }));
+}
+
 export async function restoreAllMocks(): Promise<void> {
+  getAgentProfileMock.mockImplementation(realGetAgentProfile);
+  runSubagentTurnMock.mockImplementation(realRunSubagentTurn);
   clearSubagentCache();
   await mock.module('../../../src/db/database', () => ({ getDb: realGetDb }));
   await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
@@ -122,10 +167,10 @@ export async function restoreAllMocks(): Promise<void> {
     () => realToolSettingsRepo
   );
   await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
-    getAgentProfile: realGetAgentProfile,
+    getAgentProfile: getAgentProfileMock,
   }));
   await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
-    runSubagentTurn: realRunSubagentTurn,
+    runSubagentTurn: runSubagentTurnMock,
     SubagentDelegationError: realSubagentDelegationError,
   }));
   await mock.module('../../../src/modules/messages/infrastructure/message-repository', () => ({
@@ -397,7 +442,7 @@ export function makeRegisteredTool(
 export async function mockSubagentAgentSettings(
   options: SubagentProfileMockOptions = {}
 ): Promise<void> {
-  await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+  await mockAgentProfile(() => ({
     getAgentProfile: (_db: unknown, _userId: string, agentId: string) =>
       Promise.resolve(resolveSubagentProfile(agentId, options)),
   }));

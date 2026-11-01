@@ -176,3 +176,37 @@ export function expectedGateNeeds(workflow: string): string[] {
     .map(({ job }) => job)
     .sort();
 }
+
+/**
+ * JavaScript inputs of actions/github-script in workflows and composite actions.
+ * Parse YAML rather than matching source lines: quoted keys, flow mappings and
+ * folded or multiline scalars are equally capable of interpolating source.
+ * Report the job/step path because YAML decoding can change source line layout.
+ */
+export function githubScripts(source: string): Array<{ path: string; script: string }> {
+  const document = Bun.YAML.parse(source) as {
+    jobs?: Record<string, { steps?: GithubScriptStep[] }>;
+    runs?: { steps?: GithubScriptStep[] };
+  };
+  const found: Array<{ path: string; script: string }> = [];
+  const collect = (steps: GithubScriptStep[] | undefined, path: string) => {
+    for (const [index, step] of (steps ?? []).entries()) {
+      if (!step.uses?.startsWith('actions/github-script@')) continue;
+      // The runner treats input names case-insensitively and exports INPUT_SCRIPT.
+      for (const [input, script] of Object.entries(step.with ?? {})) {
+        if (input.toLowerCase() !== 'script' || typeof script !== 'string') continue;
+        found.push({ path: `${path}.steps[${index}]`, script });
+      }
+    }
+  };
+  for (const [job, value] of Object.entries(document.jobs ?? {})) {
+    collect(value.steps, `jobs.${job}`);
+  }
+  collect(document.runs?.steps, 'runs');
+  return found;
+}
+
+interface GithubScriptStep {
+  uses?: string;
+  with?: Record<string, unknown>;
+}

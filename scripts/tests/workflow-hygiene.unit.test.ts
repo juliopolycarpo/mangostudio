@@ -5,6 +5,7 @@ import {
   extractJobBlock,
   extractJobBlocks,
   extractStepBlocks,
+  githubScripts,
   runScriptLines,
 } from './support/workflow-blocks';
 import { compositeActionFiles, workflowFiles } from './support/workflow-files';
@@ -152,6 +153,108 @@ describe('workflow hygiene', () => {
     }
     expect(offenders).toEqual([]);
   });
+
+  test('no github-script script interpolates a workflow expression', () => {
+    const offenders: string[] = [];
+    for (const file of [...workflowFiles(), ...compositeActionFiles()]) {
+      for (const { path, script } of githubScripts(readText(file))) {
+        if (script.includes(EXPRESSION_OPEN)) offenders.push(`${file} → ${path}: ${script}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  test('github-script extraction reports unsafe source and preserves data bindings', () => {
+    // These strings are fixture data only; no JavaScript is evaluated.
+    const title = "'); throw new Error('fixture'); ('";
+    const expression = `${EXPRESSION_OPEN} github.event.issue.title }}`;
+    const fixture = [
+      'jobs:',
+      '  build:',
+      '    steps:',
+      '      - uses: actions/github-script@v8',
+      '        with:',
+      '          script: |',
+      `            core.info('${expression}');`,
+      `            // Syntax-breaking title: ${title}`,
+      '        env:',
+      `          TITLE: ${expression}`,
+      '      - name: Inputs before uses',
+      '        with:',
+      `          script: core.info('${expression}')`,
+      '        uses: "actions/github-script@pinned-sha" # pinned action',
+      '      - uses: actions/github-script@v8',
+      '        with:',
+      '          script: >-',
+      '            core.info(process.env.TITLE)',
+      '          result-encoding: string',
+      '        env:',
+      `          TITLE: ${expression}`,
+      '      - uses: other/action@v1',
+      '        with:',
+      `          script: ${expression}`,
+      '      - run: |',
+      '          - uses: actions/github-script@v8',
+      '            with:',
+      `              script: ${expression}`,
+    ].join('\n');
+    const scripts = githubScripts(fixture);
+    expect(scripts.map(({ path }) => path)).toEqual([
+      'jobs.build.steps[0]',
+      'jobs.build.steps[1]',
+      'jobs.build.steps[2]',
+    ]);
+    expect(
+      scripts.filter(({ script }) => script.includes(EXPRESSION_OPEN)).map(({ path }) => path)
+    ).toEqual(['jobs.build.steps[0]', 'jobs.build.steps[1]']);
+    expect(scripts[0].script).toContain(`// Syntax-breaking title: ${title}`);
+    expect(scripts[2].script).toBe('core.info(process.env.TITLE)');
+  });
+
+  test('github-script extraction handles composite actions and YAML scalar spellings', () => {
+    const expression = `${EXPRESSION_OPEN} inputs.title }}`;
+    const fixture = [
+      'runs:',
+      '  using: composite',
+      '  steps:',
+      `    - {uses: actions/github-script@v9, with: {script: "core.info('${expression}')"}}`,
+      '    - uses: actions/github-script@v9',
+      '      with:',
+      '        "script": "core.info(',
+      `          '${expression}')"`,
+      '    - uses: actions/github-script-extra@v9',
+      `      with: {script: "${expression}"}`,
+      '    - uses: other/action@v1',
+      `      with: {script: "${expression}"}`,
+    ].join('\n');
+    const scripts = githubScripts(fixture);
+    expect(scripts.map(({ path }) => path)).toEqual(['runs.steps[0]', 'runs.steps[1]']);
+    expect(scripts.every(({ script }) => script.includes(expression))).toBe(true);
+  });
+
+  for (const input of ['SCRIPT', 'Script']) {
+    for (const [header, path] of [
+      [['jobs:', '  build:', '    steps:'], 'jobs.build.steps[0]'],
+      [['runs:', '  using: composite', '  steps:'], 'runs.steps[0]'],
+    ] as const) {
+      test(`github-script input names ignore case: ${input} in ${path}`, () => {
+        const expression = `${EXPRESSION_OPEN} github.event.issue.title }}`;
+        const steps = [
+          '      - uses: actions/github-script@v9',
+          '        with:',
+          `          ${input}: core.info('${expression}')`,
+          '        env:',
+          `          TITLE: ${expression}`,
+          '      - uses: other/action@v1',
+          '        with:',
+          `          ${input}: ${expression}`,
+        ];
+        expect(githubScripts([...header, ...steps].join('\n'))).toEqual([
+          { path, script: `core.info('${expression}')` },
+        ]);
+      });
+    }
+  }
 
   test('the expression scan reads block scalars, not just inline run: lines', () => {
     // The failure this guards against is silent: a walk that only matched
