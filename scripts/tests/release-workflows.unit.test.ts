@@ -734,7 +734,7 @@ describe('release workflow binary gate', () => {
     }
     for (const job of ['homebrew', 'scoop']) {
       expect(extractJobBlock(workflow, job), job).toContain(
-        "if: needs.prepare.outputs.prerelease != 'true'"
+        "if: needs.prepare.outputs.prerelease == 'false'"
       );
     }
     expect(extractJobBlock(workflow, 'cargo-publish')).not.toContain('PRERELEASE');

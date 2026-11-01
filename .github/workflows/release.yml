@@ -216,9 +216,31 @@ jobs:
           fi
           echo "Source verified: ${SOURCE_SHA} is on main and the CI workflow Gate job passed (run ${run_id})."
 
+  validate-classification:
+    name: Validate release channel classification
+    needs: prepare
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      # Validate the job output boundary, not just the local value in resolve:
+      # a dropped or misspelled output must stop every publishing channel.
+      - name: Validate prerelease classification
+        env:
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          case "$PRERELEASE" in
+            true|false) ;;
+            *)
+              echo "::error::Invalid prerelease classification; expected exactly true or false" >&2
+              exit 1
+              ;;
+          esac
+
   build:
     name: Build immutable release distribution
-    needs: prepare
+    needs: [prepare, validate-classification]
     permissions:
       contents: read
       id-token: write # mint provenance for the stable release distribution
@@ -546,7 +568,7 @@ jobs:
     # there would hand it to every tap user.
     name: Update Homebrew tap
     needs: [prepare, build, verify-build, github-release]
-    if: needs.prepare.outputs.prerelease != 'true'
+    if: needs.prepare.outputs.prerelease == 'false'
     runs-on: ubuntu-latest
     environment: release
     timeout-minutes: 10
@@ -603,7 +625,7 @@ jobs:
     # for a channel.
     name: Update Scoop bucket
     needs: [prepare, build, verify-build, github-release]
-    if: needs.prepare.outputs.prerelease != 'true'
+    if: needs.prepare.outputs.prerelease == 'false'
     runs-on: ubuntu-latest
     environment: release
     timeout-minutes: 10

@@ -13,7 +13,7 @@ import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
 import { readText } from './support/read-text';
-import { extractJobBlock, extractStepBlocks } from './support/workflow-blocks';
+import { extractJobBlock, extractStepBlocks, parseNeedsList } from './support/workflow-blocks';
 
 // Neither release path is reachable from a branch build, and a scratch tag is
 // not an option: immutable releases are enabled on this repository, so a
@@ -221,6 +221,186 @@ describe('the resolve step classifies the version it is releasing', () => {
       'version=0.2.0malicious=true',
     ]);
   });
+});
+
+// Exercise the workflow's classification gate before its real publishing scripts.
+function classificationScript(): string {
+  return stepScript('validate-classification', 'Validate prerelease classification');
+}
+
+describe('release classification fails before any channel can publish', () => {
+  test.each(['github-release', 'docker', 'npm-publish', 'homebrew', 'scoop'])(
+    '%s cannot bypass validation through the build dependency',
+    (channel) => {
+      const block = extractJobBlock(releaseWorkflow, channel);
+      expect(parseNeedsList(block)).toContain('build');
+      expect(block).not.toMatch(/(?:always|failure)\(\)/);
+      expect(parseNeedsList(extractJobBlock(releaseWorkflow, 'build'))).toContain(
+        'validate-classification'
+      );
+      const gate = extractJobBlock(releaseWorkflow, 'validate-classification');
+      expect(gate).toContain('needs: prepare');
+      expect(gate).toContain('if: $' + '{{ always() }}');
+      expect(extractJobBlock(releaseWorkflow, 'build')).not.toMatch(/(?:always|failure)\(\)/);
+      expect(gate).toContain('PRERELEASE: $' + '{{ needs.prepare.outputs.prerelease }}');
+      expect(gate).not.toContain('continue-on-error:');
+    }
+  );
+
+  test.each(['', 'TRUE', 'False', 'yes', '0', ' true', 'false\n'])(
+    'rejects %j before GitHub Release or Docker publication',
+    (prerelease) => {
+      for (const [job, step, bin] of [
+        [
+          'github-release',
+          'Create the GitHub Release',
+          {
+            gh: argvRecorder('[ "$1" = "release" ] && [ "$2" = "view" ] && exit 1'),
+          },
+        ],
+        [
+          'docker',
+          'Build and publish images (retrying transient registry failures)',
+          {
+            docker: argvRecorder(),
+          },
+        ],
+      ] as const) {
+        const result = runStepScript(`${classificationScript()}\n${stepScript(job, step)}`, {
+          env: {
+            PRERELEASE: prerelease,
+            VERSION: '0.2.0-rc.1',
+            IMAGE: 'ghcr.io/example/mangostudio',
+            GH_TOKEN: 'fake',
+          },
+          bin,
+        });
+        expect(result.exitCode, `${job} published as stable: ${result.argv.join('\n')}`).not.toBe(
+          0
+        );
+        expect(result.output).toContain('Invalid prerelease classification');
+        expect(result.argv).toEqual([]);
+      }
+    }
+  );
+
+  test.each(['true', 'false'])('accepts exactly %s', (prerelease) => {
+    const result = runStepScript(classificationScript(), {
+      env: { PRERELEASE: prerelease },
+      bin: {},
+    });
+    expect(result.exitCode, result.output).toBe(0);
+  });
+});
+
+type SimulatedResult = 'success' | 'failure' | 'skipped';
+interface ChannelJob {
+  needs?: string | string[];
+  if?: string;
+  steps?: Array<{ env?: Record<string, string>; with?: Record<string, string> }>;
+}
+
+// A deliberately bounded Actions simulation: dependencies and the three actual
+// channel expressions come from YAML. Builds/publish actions are receipts only;
+// the classification gate runs its real shell script with no network commands.
+function simulateReleaseChannels(
+  prepare: SimulatedResult,
+  prerelease?: string
+): { validation: SimulatedResult; publications: string[] } {
+  const workflow = Bun.YAML.parse(releaseWorkflow) as { jobs: Record<string, ChannelJob> };
+  const results = new Map<string, SimulatedResult>([['prepare', prepare]]);
+  const publications: string[] = [];
+  const output = prerelease ?? '';
+  const compare = (expression: string): boolean => {
+    const match = /^needs\.prepare\.outputs\.prerelease (==|!=) '([^']*)'$/.exec(expression);
+    if (!match) throw new Error(`Unsupported channel condition: ${expression}`);
+    // GitHub string equality ignores case. The real shell validation must
+    // reject TRUE/False before this comparison can select a publishing job.
+    const equal = output.toLowerCase() === match[2].toLowerCase();
+    return match[1] === '==' ? equal : !equal;
+  };
+  const run = (id: string): SimulatedResult => {
+    const previous = results.get(id);
+    if (previous) return previous;
+    const job = workflow.jobs[id];
+    if (!job) throw new Error(`Missing release job: ${id}`);
+    const needs = typeof job.needs === 'string' ? [job.needs] : (job.needs ?? []);
+    const dependenciesSucceeded = needs.map(run).every((result) => result === 'success');
+    const always = job.if === '$' + '{{ always() }}';
+    let result: SimulatedResult = 'skipped';
+    if (always || (dependenciesSucceeded && (!job.if || compare(job.if)))) {
+      result = 'success';
+      if (id === 'validate-classification') {
+        const binding = job.steps?.find((step) => step.env?.PRERELEASE)?.env?.PRERELEASE;
+        if (binding !== '$' + '{{ needs.prepare.outputs.prerelease }}') {
+          throw new Error(`Unsupported classification binding: ${binding}`);
+        }
+        // Skipped/failed prepare exposes no job output, even if an old value
+        // was supplied by the fixture. A missing output omits the env key.
+        const value = prepare === 'success' ? prerelease : undefined;
+        const gate = runStepScript(classificationScript(), {
+          env: value === undefined ? {} : { PRERELEASE: value },
+          bin: {},
+        });
+        result = gate.exitCode === 0 ? 'success' : 'failure';
+      } else if (id === 'npm-publish') {
+        const expression = job.steps?.find((step) => step.with?.['dist-tag'])?.with?.['dist-tag'];
+        const choice = /^\$\{\{ (.*?) && '([^']*)' \|\| '([^']*)' \}\}$/.exec(expression ?? '');
+        if (!choice) throw new Error(`Unsupported npm dist-tag expression: ${expression}`);
+        publications.push(`npm:${(compare(choice[1]) ? choice[2] : choice[3]) || 'latest'}`);
+      } else if (['github-release', 'docker', 'homebrew', 'scoop'].includes(id)) {
+        publications.push(id);
+      }
+    }
+    results.set(id, result);
+    return result;
+  };
+  for (const channel of ['github-release', 'docker', 'npm-publish', 'homebrew', 'scoop']) {
+    run(channel);
+  }
+  return { validation: results.get('validate-classification') ?? 'skipped', publications };
+}
+
+describe('all publishing channel decisions share the validated output boundary', () => {
+  test.each([
+    {
+      name: 'stable',
+      value: 'false',
+      expected: ['github-release', 'docker', 'npm:latest', 'homebrew', 'scoop'],
+    },
+    { name: 'prerelease', value: 'true', expected: ['github-release', 'docker', 'npm:next'] },
+  ])('$name selects the expected channels and npm dist-tag', ({ value, expected }) => {
+    expect(simulateReleaseChannels('success', value)).toEqual({
+      validation: 'success',
+      publications: [...expected],
+    });
+  });
+
+  test.each([
+    { name: 'missing output', value: undefined },
+    { name: 'empty output', value: '' },
+    { name: 'uppercase true', value: 'TRUE' },
+    { name: 'mixed-case false', value: 'False' },
+    { name: 'unexpected spelling', value: 'yes' },
+    { name: 'numeric false', value: '0' },
+    { name: 'leading space', value: ' true' },
+    { name: 'trailing newline', value: 'false\n' },
+  ])('$name fails validation and selects no publishing channel', ({ value }) => {
+    expect(simulateReleaseChannels('success', value)).toEqual({
+      validation: 'failure',
+      publications: [],
+    });
+  });
+
+  test.each(['skipped', 'failure'] as const)(
+    '%s prepare still runs validation and blocks every channel',
+    (prepare) => {
+      expect(simulateReleaseChannels(prepare, 'false')).toEqual({
+        validation: 'failure',
+        publications: [],
+      });
+    }
+  );
 });
 
 describe('the GitHub Release step marks a pre-release as one', () => {
