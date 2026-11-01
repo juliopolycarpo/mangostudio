@@ -13,6 +13,7 @@ import {
   mockPassThroughDb,
   mockProviderRegistry,
   mockSubagentAgentSettings,
+  mockSubagentRunner,
   mockToolsModule,
   mockVerifiedChatOwnership,
   parsePersistedParts,
@@ -182,7 +183,7 @@ describe('POST /respond/stream — subagent delegation', () => {
     await mockVerifiedChatOwnership();
     await mockSubagentAgentSettings();
 
-    await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
+    await mockSubagentRunner(() => ({
       runSubagentTurn: () => {
         callCount += 1;
         if (callCount === 1) return Promise.resolve({});
@@ -262,11 +263,8 @@ describe('POST /respond/stream — subagent delegation', () => {
     await mockMultiAgentAppSettings();
     await mockSubagentAgentSettings();
 
-    await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
-      runSubagentTurn: (input: {
-        request: { task: string };
-        onEvent?: (event: unknown) => void;
-      }) => {
+    await mockSubagentRunner(() => ({
+      runSubagentTurn: (input) => {
         callCount += 1;
         input.onEvent?.({
           type: 'started',
@@ -338,7 +336,7 @@ describe('POST /respond/stream — subagent delegation', () => {
     await mockMultiAgentAppSettings();
     await mockSubagentAgentSettings();
 
-    await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
+    await mockSubagentRunner(() => ({
       runSubagentTurn: () => {
         callCount += 1;
         return Promise.resolve({});
@@ -396,7 +394,7 @@ describe('POST /respond/stream — subagent delegation', () => {
     await mockMultiAgentAppSettings({ timeoutMs: 25 });
     await mockSubagentAgentSettings();
 
-    await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
+    await mockSubagentRunner(() => ({
       runSubagentTurn: () => {
         callCount += 1;
         return new Promise(() => undefined);
@@ -453,7 +451,7 @@ describe('POST /respond/stream — subagent delegation', () => {
     await mockMultiAgentAppSettings({ traceVisibility: 'off', maxSubagentCalls: 10 });
     await mockSubagentAgentSettings();
 
-    await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
+    await mockSubagentRunner(() => ({
       runSubagentTurn: () =>
         Promise.resolve({
           agentId: 'user:explorer',
