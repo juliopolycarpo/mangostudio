@@ -7,6 +7,8 @@ import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-
 import {
   createTestStreamDb,
   makeAgentProfile,
+  mockAgentProfile,
+  mockSubagentRunner,
   parsePersistedParts,
   parseSseEvents,
   restoreAllMocks,
@@ -42,7 +44,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
         }),
     }));
 
-    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+    await mockAgentProfile(() => ({
       getAgentProfile: (_db: unknown, _userId: string, _agentId: string) =>
         Promise.resolve(
           makeAgentProfile({
@@ -177,7 +179,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
         }),
     }));
 
-    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+    await mockAgentProfile(() => ({
       getAgentProfile: (_db: unknown, _userId: string, _agentId: string) =>
         Promise.resolve(
           makeAgentProfile({
@@ -316,7 +318,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
         }),
     }));
 
-    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+    await mockAgentProfile(() => ({
       getAgentProfile: (_db: unknown, _userId: string, agentId: string) =>
         Promise.resolve(
           agentId === 'user:explorer'
@@ -340,7 +342,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
         ),
     }));
 
-    await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
+    await mockSubagentRunner(() => ({
       runSubagentTurn: () => {
         delegationCallCount += 1;
         // Abort synchronously on the first attempt: the empty result below is
