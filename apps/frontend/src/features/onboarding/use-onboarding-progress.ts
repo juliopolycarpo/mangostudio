@@ -10,7 +10,6 @@
  */
 
 import {
-  DEFAULT_APP_SETTINGS,
   normalizeAppSettings,
   onboardingFor,
   onboardingPatch,
@@ -22,7 +21,12 @@ import { useCallback } from 'react';
 
 import { updateAppSettings } from '@/features/settings/app/api';
 import { markAppSettingsLocalWrite } from '@/features/settings/app/local-write-window';
-import { appSettingsKeys, appSettingsQueryOptions } from '@/features/settings/app/queries';
+import {
+  appSettingsForWrite,
+  appSettingsKeys,
+  appSettingsQueryOptions,
+  refreshAppSettingsAfterConflict,
+} from '@/features/settings/app/queries';
 
 export interface OnboardingProgress {
   readonly state: OnboardingState;
@@ -41,6 +45,7 @@ export function useOnboardingProgress(): OnboardingProgress {
 
   const save = useMutation({
     mutationFn: (next: OnboardingState | null) => updateAppSettings(onboardingPatch(next)),
+    onError: (error) => refreshAppSettingsAfterConflict(queryClient, error),
     onSuccess: (saved) => {
       // The write window has to open here as well as at the click: the server
       // publishes its own `app` invalidation for this write, and without the
@@ -56,15 +61,11 @@ export function useOnboardingProgress(): OnboardingProgress {
       // Read at call time rather than from the render that created this
       // callback, so a caller that awaits one write and then makes another
       // builds the second on what the first confirmed. Two writes started
-      // *concurrently* are still last-one-wins: nothing is written to the cache
+      // *concurrently* can conflict: nothing is written to the cache
       // until the server answers, deliberately, because a record this one gates
       // navigation on must not be believed before it is stored. Callers that
       // can fire twice take `isSaving` and disable while one is open.
-      const current = onboardingFor(
-        normalizeAppSettings(
-          queryClient.getQueryData(appSettingsKeys.current()) ?? DEFAULT_APP_SETTINGS
-        )
-      );
+      const current = onboardingFor(await appSettingsForWrite(queryClient));
       markAppSettingsLocalWrite();
       await mutateAsync(updater(current));
     },

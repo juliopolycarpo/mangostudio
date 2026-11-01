@@ -19,9 +19,12 @@ import { QueryClient } from '@tanstack/react-query';
 import {
   appSettingsForLocationWrite,
   appSettingsKeys,
+  appSettingsQueryOptions,
   keepLibraryDefaultsPending,
   libraryLocationDefaultsPending,
+  refreshAppSettingsAfterConflict,
 } from '../../../../src/features/settings/app/queries';
+import { ApiError } from '../../../../src/lib/utils';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
 
 const PENDING_ANSWER: AppSettingsResponse = {
@@ -86,6 +89,62 @@ describe('appSettingsForLocationWrite', () => {
       libraryLocationsFor(settings),
       'expected the refetched detected locations | received: the cached placeholder'
     ).toEqual(libraryLocationsFor(DETECTED_SETTINGS));
+  });
+
+  it('refetches an invalidated cache instead of building a location retry on stale settings', async () => {
+    queryClient.setQueryData(appSettingsKeys.current(), DEFAULT_APP_SETTINGS);
+    await queryClient.invalidateQueries({
+      queryKey: appSettingsKeys.current(),
+      refetchType: 'none',
+    });
+    fetchScenario.respondWithJson('GET', '/api/settings/app', {
+      body: { ...DETECTED_SETTINGS, libraryLocationDefaultsPending: false },
+    });
+    const settings = await appSettingsForLocationWrite(queryClient);
+    expect(libraryLocationsFor(settings)).toEqual(libraryLocationsFor(DETECTED_SETTINGS));
+    expect(fetchScenario.fetchMock.mock.calls).toHaveLength(1);
+  });
+
+  it('keeps the conflict invalidation while canceling an older read', async () => {
+    queryClient.setQueryData(appSettingsKeys.current(), DEFAULT_APP_SETTINGS);
+    const firstRead = Promise.withResolvers<Response>();
+    const secondRead = Promise.withResolvers<Response>();
+    const firstStarted = Promise.withResolvers<void>();
+    const secondStarted = Promise.withResolvers<void>();
+    let reads = 0;
+    const originalFetch = fetchScenario.fetchMock.getMockImplementation();
+    if (!originalFetch) throw new Error('Expected an installed fetch scenario');
+    fetchScenario.fetchMock.mockImplementation(async (_input, init) => {
+      if (init?.method !== 'GET') throw new Error('Unexpected non-GET request');
+      reads += 1;
+      if (reads === 1) {
+        firstStarted.resolve();
+        return firstRead.promise;
+      }
+      if (reads === 2) {
+        secondStarted.resolve();
+        return secondRead.promise;
+      }
+      throw new Error('Unexpected extra settings read');
+    });
+    const older = queryClient
+      .fetchQuery({ ...appSettingsQueryOptions(), staleTime: 0 })
+      .catch(() => undefined);
+    await firstStarted.promise;
+    const refresh = refreshAppSettingsAfterConflict(
+      queryClient,
+      new ApiError({ code: 'CONFLICT' })
+    );
+    try {
+      await secondStarted.promise;
+      expect(queryClient.getQueryState(appSettingsKeys.current())?.isInvalidated).toBe(true);
+    } finally {
+      fetchScenario.fetchMock.mockImplementation(originalFetch);
+      firstRead.resolve(Response.json(DEFAULT_APP_SETTINGS));
+      secondRead.resolve(Response.json(DETECTED_SETTINGS));
+      await Promise.all([older, refresh]);
+    }
+    expect(queryClient.getQueryData(appSettingsKeys.current())).toMatchObject(DETECTED_SETTINGS);
   });
 
   it('refuses while the hub is still detecting, naming the state', async () => {

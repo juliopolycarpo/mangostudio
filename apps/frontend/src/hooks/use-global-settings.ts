@@ -35,9 +35,12 @@ import { markAppSettingsLocalWrite } from '@/features/settings/app/local-write-w
 import {
   appSettingsKeys,
   appSettingsQueryOptions,
+  isAppSettingsConflict,
   keepLibraryDefaultsPending,
+  refreshAppSettingsAfterConflict,
 } from '@/features/settings/app/queries';
 import { useI18n } from '@/hooks/use-i18n';
+import { ApiError } from '@/lib/utils';
 
 export {
   DEFAULT_CHAT_TITLE_SETTINGS,
@@ -102,7 +105,7 @@ export function useGlobalSettings() {
       saveSequenceRef.current += 1;
       return { previousSettings: rollbackRef.current, sequence: saveSequenceRef.current };
     },
-    onError: (_error, _nextSettings, context) => {
+    onError: async (error, _nextSettings, context) => {
       // A superseded save must not roll back: a newer submission either already
       // persisted its value or will report its own failure against it.
       const restoredSettings =
@@ -119,6 +122,18 @@ export function useGlobalSettings() {
         restoredSettings ? t.settings.autoSave.errorRevertedToast : t.settings.autoSave.errorToast,
         'error'
       );
+      if (context?.sequence === saveSequenceRef.current) {
+        if (isAppSettingsConflict(error)) {
+          // A queued burst was also built on the rejected snapshot. Let the
+          // error remain visible and require a fresh edit after the refetch;
+          // its old whole-field values must never replay over the winner.
+          if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+          saveTimerRef.current = null;
+          pendingSaveRef.current = null;
+          rollbackRef.current = null;
+        }
+        await refreshAppSettingsAfterConflict(queryClient, error);
+      }
     },
     onSuccess: (savedSettings, _nextSettings, context) => {
       // Re-marked here so the echo window still covers the server's own event,
@@ -177,6 +192,15 @@ export function useGlobalSettings() {
 
   const saveSettings = useCallback(
     (updater: (current: AppSettings) => AppSettings) => {
+      if (queryClient.getQueryState(appSettingsKeys.current())?.isInvalidated) {
+        // A conflict refresh is pending or failed. Do not build another whole
+        // field from that rejected cache, including consent writes callers await.
+        toast(t.settings.autoSave.errorToast, 'error');
+        void queryClient
+          .fetchQuery({ ...appSettingsQueryOptions(), staleTime: 0 })
+          .catch(() => undefined);
+        return false;
+      }
       const cachedSettings = queryClient.getQueryData<AppSettings>(appSettingsKeys.current());
       const currentSettings = normalizeAppSettings(cachedSettings ?? DEFAULT_APP_SETTINGS);
 
@@ -204,8 +228,9 @@ export function useGlobalSettings() {
       saveTimerRef.current = setTimeout(() => {
         flushPendingSave();
       }, SETTINGS_SAVE_DEBOUNCE_MS);
+      return true;
     },
-    [flushPendingSave, queryClient]
+    [flushPendingSave, queryClient, t, toast]
   );
 
   /**
@@ -224,7 +249,9 @@ export function useGlobalSettings() {
    */
   const saveSettingsNow = useCallback(
     async (updater: (current: AppSettings) => AppSettings) => {
-      saveSettings(updater);
+      if (!saveSettings(updater)) {
+        throw new ApiError({ error: t.settings.autoSave.errorToast, code: 'CONFLICT' });
+      }
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
@@ -234,7 +261,7 @@ export function useGlobalSettings() {
       pendingSaveRef.current = null;
       await mutateAsync(appSettingsPatchExcludingProfiles(pendingSettings));
     },
-    [mutateAsync, saveSettings]
+    [mutateAsync, saveSettings, t]
   );
 
   const updatePromptSettings = useCallback(

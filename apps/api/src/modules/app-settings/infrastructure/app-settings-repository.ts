@@ -13,6 +13,7 @@ import type { Kysely } from 'kysely';
 import type { Database, UserAppSettingsSelect } from '../../../db/types';
 import { safeJsonParse } from '../../../lib/safe-parse';
 import { generateId } from '../../../utils/id';
+import { AppSettingsConflict } from '../domain/app-settings-conflict';
 
 export async function getSavedAppSettings(
   db: Kysely<Database>,
@@ -31,9 +32,10 @@ export async function getSavedAppSettings(
 /**
  * Apply a settings patch to the row this user already has.
  *
- * Read, merge, normalize, write — in that order, and inside one call so the
- * stored value the patch lands on is the newest one rather than whatever the
- * client last saw. Normalizing *after* the merge is what gives `null` its
+ * Read, merge, normalize, then compare-and-swap the exact stored JSON. A
+ * competing writer makes this call fail explicitly instead of overwriting the
+ * winner. A fresh call must re-read and apply only the intended patch.
+ * Normalizing *after* the merge is what gives `null` its
  * meaning: the normalizer maps a missing subtree to its default, so an explicit
  * clear and a never-set field arrive at the same place.
  *
@@ -62,6 +64,10 @@ export async function patchAppSettings(
   const settingsJson = JSON.stringify({
     ...preserved,
     ...normalized,
+    // A fresh opaque version prevents ABA (including equal-millisecond writes
+    // and writes that normalize to the same preferences). It stays private to
+    // storage; timestamps are not revision identifiers.
+    _writeVersion: generateId(),
     // Keep the pre-nesting and pre-library shapes in storage so an application
     // downgrade retains the two source choices even though they are no longer
     // public API. Both mirrors are flat because both predate scope, and every
@@ -73,17 +79,30 @@ export async function patchAppSettings(
     },
   });
 
-  await db
-    .insertInto('user_app_settings')
-    .values({
-      id: generateId(),
-      userId,
-      settingsJson,
-      createdAt: now,
-      updatedAt: now,
-    })
-    .onConflict((oc) => oc.column('userId').doUpdateSet({ settingsJson, updatedAt: now }))
-    .execute();
+  const written = existing
+    ? await db
+        .updateTable('user_app_settings')
+        .set({ settingsJson, updatedAt: now })
+        .where('userId', '=', userId)
+        .where('settingsJson', '=', existing.settingsJson)
+        .returning('id')
+        .executeTakeFirst()
+    : await db
+        .insertInto('user_app_settings')
+        .values({
+          id: generateId(),
+          userId,
+          settingsJson,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .onConflict((oc) => oc.column('userId').doNothing())
+        .returning('id')
+        .executeTakeFirst();
+
+  // Never retry a stale subtree automatically: it may contain an older
+  // onboarding step or a location choice another writer just changed.
+  if (!written) throw new AppSettingsConflict();
 
   return normalized;
 }
