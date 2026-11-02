@@ -28,18 +28,18 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.137.0",
-    "@better-auth/api-key": "1.7.12",
+    "@better-auth/api-key": "1.7.14",
     "@elysia/cors": "2.0.0-rc.0",
     "@elysia/openapi": "2.0.0-rc.0",
-    "@google/genai": "^2.31.0",
+    "@google/genai": "^2.32.0",
     "@mangostudio/protocol": "workspace:*",
     "@mangostudio/shared": "workspace:*",
-    "better-auth": "^1.7.12",
+    "better-auth": "^1.7.14",
     "elysia": "2.0.0-rc.0",
     "exact-mirror": "1.2.6",
-    "file-type": "^22.2.0",
+    "file-type": "^22.3.0",
     "kysely": "^0.29.7",
-    "openai": "^7.43.0",
+    "openai": "^7.45.1",
     "typebox": "1.4.3"
   },
   "devDependencies": {
