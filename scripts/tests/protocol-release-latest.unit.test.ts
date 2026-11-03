@@ -4,7 +4,7 @@ import { readText } from './support/read-text';
 import { extractJobBlock, extractStepBlocks } from './support/workflow-blocks';
 
 class FakeReleaseCommands {
-  run(script: string, prerelease: boolean, version: string) {
+  run(script: string, prerelease: boolean | string, version: string) {
     return Bun.spawnSync(
       [
         'bash',
@@ -25,6 +25,15 @@ class FakeReleaseCommands {
       }
     );
   }
+}
+
+function releaseScript(): string {
+  const job = extractJobBlock(readText('.github/workflows/protocol-release.yml'), 'github-release');
+  const step = extractStepBlocks(job).find((block) => block.includes('name: Create the release'));
+  const script = step?.split('        run: |\n')[1]?.replace(/^ {10}/gm, '');
+  if (script === undefined)
+    throw new Error('expected the Create the release step to have a run script');
+  return script;
 }
 
 describe('protocol release latest selection', () => {
@@ -63,6 +72,19 @@ describe('protocol release latest selection', () => {
         'mango-protocol-schema-1-protocol.json',
         'mango-protocol-schema-1-catalog.json',
       ]);
+    }
+  );
+
+  test.each(['', 'True', 'yes', 'tru'])(
+    'refuses to publish when the prerelease classification is %p',
+    (classification) => {
+      const result = new FakeReleaseCommands().run(releaseScript(), classification, '0.2.1');
+      // A stable release is immutable, so anything but exact true/false must stop before gh runs.
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr.toString()).toContain(
+        `Invalid prerelease classification '${classification}'; expected exactly true or false`
+      );
+      expect(result.stdout.toString()).toBe('');
     }
   );
 });

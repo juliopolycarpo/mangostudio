@@ -274,6 +274,16 @@ jobs:
           VERSION: ${{ needs.verify.outputs.version }}
         run: |
           set -euo pipefail
+          # A release is immutable once published, and only an exact `true`
+          # marks a pre-release, so an empty or misspelled job output would
+          # publish a stable release. Stop before touching the repository.
+          case "$PRERELEASE" in
+            true|false) ;;
+            *)
+              echo "::error::Invalid prerelease classification '$PRERELEASE'; expected exactly true or false" >&2
+              exit 1
+              ;;
+          esac
           # Re-runnable, like the npm and crates.io jobs: a rerun after a
           # partial failure must not die here on a complete release that
           # already landed. Release immutability is enabled on this repository,
