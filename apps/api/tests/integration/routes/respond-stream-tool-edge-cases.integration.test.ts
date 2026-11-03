@@ -8,6 +8,7 @@ import {
   createTestStreamDb,
   makeAgentProfile,
   mockAgentSettings,
+  mockSubagentRunner,
   parsePersistedParts,
   parseSseEvents,
   restoreAllMocks,
@@ -341,7 +342,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
         ),
     }));
 
-    await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
+    mockSubagentRunner(() => ({
       runSubagentTurn: () => {
         delegationCallCount += 1;
         // Abort synchronously on the first attempt: the empty result below is
@@ -349,15 +350,6 @@ describe('POST /respond/stream — tool execution edge cases', () => {
         // Aborting here must stop it before attempt 2's backoff completes.
         cancelStream?.();
         return Promise.resolve({});
-      },
-      SubagentDelegationError: class SubagentDelegationError extends Error {
-        constructor(
-          message: string,
-          readonly code: string
-        ) {
-          super(message);
-          this.name = 'SubagentDelegationError';
-        }
       },
     }));
 

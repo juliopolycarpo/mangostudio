@@ -19,10 +19,7 @@ import {
   verifyChatOwnership,
 } from '../../../src/modules/chats/infrastructure/chat-repository';
 import { clearSubagentCache } from '../../../src/modules/generation/application/subagent-response-cache';
-import {
-  runSubagentTurn,
-  SubagentDelegationError,
-} from '../../../src/modules/generation/application/subagent-runner';
+import * as subagentRunner from '../../../src/modules/generation/application/subagent-runner';
 import {
   insertMessage,
   listByChatId as listMessagesByChatId,
@@ -75,8 +72,7 @@ export const realExecuteTool = realTools.executeTool;
 export const realGetTool = realTools.getTool;
 export const realGetSafeEffectiveToolSettings = realTools.getSafeEffectiveToolSettings;
 const realGetAppSettings = getAppSettings;
-const realRunSubagentTurn = runSubagentTurn;
-export const realSubagentDelegationError = SubagentDelegationError;
+
 const realGemini = { ...realGeminiNs };
 const realProviderSettingsRepo = { ...realProviderSettingsRepoNs };
 const realToolSettingsRepo = { ...realToolSettingsRepoNs };
@@ -122,10 +118,8 @@ export async function restoreAllMocks(): Promise<void> {
   );
   agentProfileSpy?.mockRestore();
   agentProfileSpy = undefined;
-  await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
-    runSubagentTurn: realRunSubagentTurn,
-    SubagentDelegationError: realSubagentDelegationError,
-  }));
+  subagentRunnerSpy?.mockRestore();
+  subagentRunnerSpy = undefined;
   await mock.module('../../../src/modules/messages/infrastructure/message-repository', () => ({
     insertMessage: realInsertMessage,
     updateMessage: realUpdateMessage,
@@ -411,22 +405,6 @@ export async function mockMultiAgentAppSettings(
   }));
 }
 
-/**
- * Returns the delegation error class expected by subagent-runner mocks.
- * // Usage: SubagentDelegationError: createSubagentDelegationError()
- */
-export function createSubagentDelegationError(): typeof realSubagentDelegationError {
-  return class SubagentDelegationError extends Error {
-    constructor(
-      message: string,
-      readonly code: string
-    ) {
-      super(message);
-      this.name = 'SubagentDelegationError';
-    }
-  } as typeof realSubagentDelegationError;
-}
-
 function createCapturedDbMock(
   userId: string,
   insertedMessages: Array<Record<string, unknown>>,
@@ -624,5 +602,19 @@ export function mockAgentSettings(
 ): void {
   agentProfileSpy = spyOn(agentSettings, 'getAgentProfile').mockImplementation(
     factory().getAgentProfile as typeof agentSettings.getAgentProfile
+  );
+}
+
+let subagentRunnerSpy:
+  ReturnType<typeof spyOn<typeof subagentRunner, 'runSubagentTurn'>> | undefined;
+
+/** Replaces delegated turns with a restorable spy. Example: mockSubagentRunner(() => ({ runSubagentTurn: async () => result })). */
+export function mockSubagentRunner(
+  factory: () => {
+    runSubagentTurn: (...args: never[]) => unknown;
+  }
+): void {
+  subagentRunnerSpy = spyOn(subagentRunner, 'runSubagentTurn').mockImplementation(
+    factory().runSubagentTurn as typeof subagentRunner.runSubagentTurn
   );
 }

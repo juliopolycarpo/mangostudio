@@ -6,13 +6,13 @@ import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import {
   buildRespondStreamRequest,
-  createSubagentDelegationError,
   makeRegisteredTool,
   mockDbWithMessageCapture,
   mockMultiAgentAppSettings,
   mockPassThroughDb,
   mockProviderRegistry,
   mockSubagentAgentSettings,
+  mockSubagentRunner,
   mockToolsModule,
   mockVerifiedChatOwnership,
   parsePersistedParts,
@@ -182,7 +182,7 @@ describe('POST /respond/stream — subagent delegation', () => {
     await mockVerifiedChatOwnership();
     mockSubagentAgentSettings();
 
-    await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
+    mockSubagentRunner(() => ({
       runSubagentTurn: () => {
         callCount += 1;
         if (callCount === 1) return Promise.resolve({});
@@ -209,7 +209,6 @@ describe('POST /respond/stream — subagent delegation', () => {
           },
         });
       },
-      SubagentDelegationError: createSubagentDelegationError(),
     }));
 
     await mockSubagentTools();
@@ -262,7 +261,7 @@ describe('POST /respond/stream — subagent delegation', () => {
     await mockMultiAgentAppSettings();
     mockSubagentAgentSettings();
 
-    await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
+    mockSubagentRunner(() => ({
       runSubagentTurn: (input: {
         request: { task: string };
         onEvent?: (event: unknown) => void;
@@ -284,7 +283,6 @@ describe('POST /respond/stream — subagent delegation', () => {
         });
         return Promise.resolve({});
       },
-      SubagentDelegationError: createSubagentDelegationError(),
     }));
 
     await mockSubagentTools();
@@ -338,12 +336,11 @@ describe('POST /respond/stream — subagent delegation', () => {
     await mockMultiAgentAppSettings();
     mockSubagentAgentSettings();
 
-    await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
+    mockSubagentRunner(() => ({
       runSubagentTurn: () => {
         callCount += 1;
         return Promise.resolve({});
       },
-      SubagentDelegationError: createSubagentDelegationError(),
     }));
 
     await mockSubagentTools();
@@ -396,12 +393,11 @@ describe('POST /respond/stream — subagent delegation', () => {
     await mockMultiAgentAppSettings({ timeoutMs: 25 });
     mockSubagentAgentSettings();
 
-    await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
+    mockSubagentRunner(() => ({
       runSubagentTurn: () => {
         callCount += 1;
         return new Promise(() => undefined);
       },
-      SubagentDelegationError: createSubagentDelegationError(),
     }));
 
     await mockSubagentTools();
@@ -453,7 +449,7 @@ describe('POST /respond/stream — subagent delegation', () => {
     await mockMultiAgentAppSettings({ traceVisibility: 'off', maxSubagentCalls: 10 });
     mockSubagentAgentSettings();
 
-    await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
+    mockSubagentRunner(() => ({
       runSubagentTurn: () =>
         Promise.resolve({
           agentId: 'user:explorer',
@@ -477,7 +473,6 @@ describe('POST /respond/stream — subagent delegation', () => {
             tools: [],
           },
         }),
-      SubagentDelegationError: createSubagentDelegationError(),
     }));
 
     await mockSubagentTools();
