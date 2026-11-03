@@ -233,7 +233,7 @@ jobs:
           case "$PRERELEASE" in
             true|false) ;;
             *)
-              echo "::error::Invalid prerelease classification; expected exactly true or false" >&2
+              echo "::error::Invalid prerelease classification '$PRERELEASE'; expected exactly true or false" >&2
               exit 1
               ;;
           esac

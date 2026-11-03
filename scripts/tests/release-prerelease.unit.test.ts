@@ -278,7 +278,9 @@ describe('release classification fails before any channel can publish', () => {
         expect(result.exitCode, `${job} published as stable: ${result.argv.join('\n')}`).not.toBe(
           0
         );
-        expect(result.output).toContain('Invalid prerelease classification');
+        expect(result.output).toContain(
+          `Invalid prerelease classification '${prerelease}'; expected exactly true or false`
+        );
         expect(result.argv).toEqual([]);
       }
     }
