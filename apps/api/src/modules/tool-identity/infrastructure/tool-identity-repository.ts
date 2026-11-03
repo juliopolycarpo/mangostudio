@@ -2,6 +2,7 @@ import type { ToolIdentity, ToolImage, ToolImageSource } from '@mangostudio/shar
 import type { Kysely, Transaction } from 'kysely';
 
 import type { Database, ToolIdentitySelect } from '../../../db/types';
+import { computeHash } from '../../../utils/hash';
 import { generateId } from '../../../utils/id';
 
 /** The image half of a row, resolved before a write and always written whole. */
@@ -108,7 +109,9 @@ export async function deleteToolIdentityRow(
     .execute();
 }
 
-/** Row → wire shape. Storage columns and the contract are allowed to diverge. */
+/** Map stored identity fields to their public response, including image cache identity.
+ * @example const identity = toToolIdentity(row);
+ */
 export function toToolIdentity(row: ToolIdentityRecord): ToolIdentity {
   return {
     subjectKey: row.subjectKey,
@@ -128,7 +131,12 @@ export function toToolIdentity(row: ToolIdentityRecord): ToolIdentity {
 function toToolImage(row: ToolIdentityRecord): ToolImage | null {
   if (!isToolImageSource(row.imageSource)) return null;
 
-  return { source: row.imageSource, url: row.imageUrl, cached: row.imagePath !== null };
+  return {
+    source: row.imageSource,
+    url: row.imageUrl,
+    cached: row.imagePath !== null,
+    ...(row.imagePath === null ? {} : { cacheKey: computeHash(row.imagePath) }),
+  };
 }
 
 function isToolImageSource(value: string | null): value is ToolImageSource {

@@ -121,7 +121,20 @@ describe('ToolAvatar', () => {
 });
 
 describe('toolImageDisplay', () => {
-  it('serves a cached image from our API with the identity as the cache-buster', () => {
+  it('uses the opaque stored-image key independently of metadata timestamps', () => {
+    const image = {
+      source: 'upload',
+      url: null,
+      cached: true,
+      cacheKey: 'opaque/key?x=1&y=2',
+    } as const;
+    const first = toolImageDisplay('agent:claude', image, 1000);
+    const renamed = toolImageDisplay('agent:claude', image, 1001);
+    expect(first?.src).toContain('/image?v=opaque%2Fkey%3Fx%3D1%26y%3D2');
+    expect(renamed?.src).toBe(first?.src);
+  });
+
+  it('falls back to the timestamp for legacy cached images', () => {
     const display = toolImageDisplay(
       'agent:claude',
       { source: 'url', url: 'https://cdn.example.com/logo.png', cached: true },
@@ -137,7 +150,12 @@ describe('toolImageDisplay', () => {
   it('hotlinks an uncached image straight from the address the user gave', () => {
     const display = toolImageDisplay(
       'agent:claude',
-      { source: 'url', url: 'https://cdn.example.com/logo.png', cached: false },
+      {
+        source: 'url',
+        url: 'https://cdn.example.com/logo.png',
+        cached: false,
+        cacheKey: 'ignored-remote-key',
+      },
       1234
     );
 

@@ -12,6 +12,9 @@ import type { ToolImage } from '@mangostudio/shared/tool-identity';
 import type { ToolImageDisplay } from '@/components/ui/ToolAvatar';
 import { getApiBaseUrl } from '@/lib/api-base-url';
 
+/** Resolve cached bytes through our API and hotlinks through their remote URL.
+ * @example const image = toolImageDisplay(identity.subjectKey, identity.image, identity.updatedAt);
+ */
 export function toolImageDisplay(
   subjectKey: string,
   image: ToolImage | null,
@@ -20,12 +23,12 @@ export function toolImageDisplay(
   if (!image) return null;
 
   if (image.cached) {
-    // The address never changes when the image does, so the identity's
-    // `updatedAt` is what retires the copy a browser is already holding.
+    // Image identity survives metadata edits and changes even when two uploads
+    // share a timestamp. Legacy responses still use their timestamp version.
     return {
       // Subject keys are lowercase alphanumerics, hyphens, and one colon, all
       // legal in a path segment — encoding them would only obscure the URL.
-      src: `${getApiBaseUrl()}/api/tool-identities/${subjectKey}/image?v=${updatedAt}`,
+      src: `${getApiBaseUrl()}/api/tool-identities/${subjectKey}/image?v=${encodeURIComponent(image.cacheKey ?? String(updatedAt))}`,
       remote: false,
     };
   }

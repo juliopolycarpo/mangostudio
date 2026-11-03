@@ -19,6 +19,7 @@ import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import type { SafeFetchDeps } from '../../../lib/safe-fetch';
 import { publishSettingsInvalidation } from '../../../services/realtime/settings-invalidation';
+import { computeHash } from '../../../utils/hash';
 import {
   deleteToolIdentityRow,
   getToolIdentityRow,
@@ -149,13 +150,17 @@ export interface StoredToolImage {
   readonly body: Blob;
   /** Validated when the image was stored; never re-derived from the file. */
   readonly mimeType: string;
-  /** Cache-buster the client already knows, so a replaced image is not stale. */
+  /** Last customization update, independent of the immutable image identity. */
   readonly updatedAt: number;
+  /** Opaque version of the stored bytes used by the image response ETag. */
+  readonly cacheKey: string;
 }
 
 /**
  * The bytes behind an identity's avatar, when we hold any. A hotlinked URL has
  * none by definition — the browser fetches those itself.
+ *
+ * @example const image = await readToolIdentityImage(db, userId, subjectKey);
  */
 export async function readToolIdentityImage(
   db: Kysely<Database>,
@@ -170,7 +175,12 @@ export async function readToolIdentityImage(
   const body = await readToolImage(row.imagePath);
   if (!body) return null;
 
-  return { body, mimeType: row.imageMimeType, updatedAt: row.updatedAt };
+  return {
+    body,
+    mimeType: row.imageMimeType,
+    updatedAt: row.updatedAt,
+    cacheKey: computeHash(row.imagePath),
+  };
 }
 
 /**

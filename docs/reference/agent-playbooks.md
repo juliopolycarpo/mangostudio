@@ -444,6 +444,10 @@ derived from it. Consumers live in environments cards, `library/CoverageMatrix`,
   there is no orphan sweep.
 - Serving pins the type recorded at write time and sends `nosniff`. Never infer
   the type from the file at serve time.
+- Cached image responses expose an opaque `image.cacheKey` derived from the
+  stored file identity. The frontend URL and image ETag use it; `updatedAt`
+  stays an ordinary customization timestamp. Legacy responses without the key
+  fall back to `updatedAt`.
 - Caching a URL fetches it through `lib/safe-fetch.ts`; that path, not the
   storage layer, is where the SSRF guard lives.
 - The frontend never renders a stored image without a fallback:

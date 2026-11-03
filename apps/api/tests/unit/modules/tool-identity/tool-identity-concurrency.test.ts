@@ -201,7 +201,7 @@ describe('concurrent tool identity patches', () => {
       imagePatch('https://cdn.example.test/last.png'),
       remote.deps
     );
-    let replacedPath: string | null = null;
+    let replacedPath: string | null;
     try {
       await remote.requested.promise;
       await uploadToolIdentityImage(db, userId, 'agent:claude', pngFile());

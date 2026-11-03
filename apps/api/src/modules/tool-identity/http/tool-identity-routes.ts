@@ -49,11 +49,11 @@ const errorResponses = {
 const subjectKeyParams = t.Object({ subjectKey: SubjectKeySchema });
 
 /**
- * The client asks for an avatar at `?v=<updatedAt>`, so a given address holds
- * one set of bytes for good: replacing the image moves the identity's
- * `updatedAt` and therefore asks for a different URL. That makes the copy the
- * browser already has safe to reuse without a round trip, which matters because
- * an avatar is fetched on every page that draws its tool.
+ * The client asks for an avatar at `?v=<cacheKey>`, identifying its immutable
+ * stored file. Replacing the image creates a new file and key even when the
+ * customization timestamps match. Older response payloads fall back to
+ * `updatedAt`. The browser can reuse its copy without a round trip on every
+ * page that draws the tool.
  *
  * `private` because the bytes are behind the owner's session and no shared
  * cache may keep them.
@@ -173,7 +173,7 @@ export const toolIdentityRoutes = new Elysia().use(requireAuth).group('/tool-ide
             return { error: 'No stored image for this tool.', code: ERROR_CODES.NOT_FOUND };
           }
 
-          const etag = `"${image.updatedAt}"`;
+          const etag = `"${image.cacheKey}"`;
           set.headers['X-Content-Type-Options'] = 'nosniff';
           set.headers['Cache-Control'] = IMAGE_CACHE_CONTROL;
           set.headers.ETag = etag;
