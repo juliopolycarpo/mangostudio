@@ -34,6 +34,26 @@ GET  /api/settings/app    → Retorna AppSettingsResponse (AppSettings + library
 PUT  /api/settings/app    → Mescla um patch e retorna AppSettingsResponse normalizado
 ```
 
+O repositório grava por compare-and-swap do JSON lido, incluindo uma versão
+opaca privada renovada em cada gravação, sem usar timestamps como revisão.
+Criações concorrentes usam insert-or-do-nothing. O perdedor recebe HTTP 409 com
+`ApiErrorResponse` e código `CONFLICT`, sem invalidar settings. O frontend
+mostra a falha e busca o estado atual; a próxima ação recompõe apenas o patch
+pretendido, sem repetir automaticamente um subtree antigo de onboarding ou
+biblioteca. Se essa busca falha, o cache permanece invalidado: onboarding e
+biblioteca exigem uma leitura bem-sucedida antes de recompor o patch; auto-save
+recusa a edição e inicia nova leitura. Saves aguardados também rejeitam a
+operação, sem liberar uma ação dependente de consentimento sem confirmação.
+Rajadas de auto-save ainda na fila, baseadas no snapshot recusado, são
+descartadas com indicação de falha. Os formatos existentes de pedido e sucesso continuam compatíveis;
+clientes devem tratar 409 buscando settings atuais e reconstruindo a edição.
+Esta garantia cobre a concorrência do read/merge/write no servidor. Se a
+leitura do repositório começa após outra gravação confirmar, o pedido ainda
+pode substituir o mesmo campo completo, mesmo com um payload construído antes.
+Nesse caso prevalece a última gravação. A garantia recusa snapshots antigos
+do repositório, não todo snapshot antigo do cliente; não há precondição de
+revisão do cliente.
+
 Quais locais da biblioteca vêm ligados por padrão é detectado a partir das CLIs
 de agente instaladas na máquina do hub, e a primeira detecção após o hub iniciar
 pode levar segundos. O `GET` nunca espera por ela: enquanto não existe um valor
