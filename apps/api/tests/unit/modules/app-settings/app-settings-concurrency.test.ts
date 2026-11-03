@@ -11,13 +11,92 @@ import {
 import { getDb } from '../../../../src/db/database';
 import {
   getSavedAppSettings,
+  getSavedAppSettingsSnapshot,
   patchAppSettings,
+  patchAppSettingsSnapshot,
 } from '../../../../src/modules/app-settings/infrastructure/app-settings-repository';
 import { grantWorkspaceTrust } from '../../../../src/modules/external-agents/application/external-workspace-trust';
 import { holdFirstAppSettingsRead } from '../../../support/app-settings-read-barrier';
 import { makeTestIdentity } from '../../../support/factories';
 
 describe('atomic app-settings patches', () => {
+  it('rejects an older client token after preferences return to the same value', async () => {
+    const user = makeTestIdentity('settings-client-aba', 'Settings client ABA');
+    const db = getDb();
+    const initial = await patchAppSettingsSnapshot(db, user.id, { thinkingEnabled: false });
+    await patchAppSettingsSnapshot(db, user.id, { thinkingEnabled: true });
+    const returned = await patchAppSettingsSnapshot(db, user.id, { thinkingEnabled: false });
+    expect(returned.settings).toEqual(initial.settings);
+    expect(returned.revision).not.toBe(initial.revision);
+    await expect(
+      patchAppSettingsSnapshot(
+        db,
+        user.id,
+        { globalImageQuality: '4K' },
+        undefined,
+        initial.revision
+      )
+    ).rejects.toMatchObject({ name: 'AppSettingsConflict' });
+  });
+
+  it('keeps a legacy row revision stable without writing and rejects it after a change', async () => {
+    const user = makeTestIdentity('settings-legacy-revision', 'Settings legacy revision');
+    const db = getDb();
+    await patchAppSettings(db, user.id, { thinkingEnabled: false });
+    const legacy = JSON.stringify({ ...DEFAULT_APP_SETTINGS, thinkingEnabled: false });
+    await db
+      .updateTable('user_app_settings')
+      .set({ settingsJson: legacy })
+      .where('userId', '=', user.id)
+      .execute();
+    const initial = await getSavedAppSettingsSnapshot(db, user.id);
+    expect((await getSavedAppSettingsSnapshot(db, user.id)).revision).toBe(initial.revision);
+    expect(
+      (
+        await db
+          .selectFrom('user_app_settings')
+          .select('settingsJson')
+          .where('userId', '=', user.id)
+          .executeTakeFirstOrThrow()
+      ).settingsJson
+    ).toBe(legacy);
+    await db
+      .updateTable('user_app_settings')
+      .set({ settingsJson: JSON.stringify({ ...DEFAULT_APP_SETTINGS, thinkingEnabled: true }) })
+      .where('userId', '=', user.id)
+      .execute();
+    await expect(
+      patchAppSettingsSnapshot(
+        db,
+        user.id,
+        { globalImageQuality: '4K' },
+        undefined,
+        initial.revision
+      )
+    ).rejects.toMatchObject({ name: 'AppSettingsConflict' });
+    expect((await getSavedAppSettings(db, user.id)).globalImageQuality).toBe(
+      DEFAULT_APP_SETTINGS.globalImageQuality
+    );
+  });
+
+  it('rejects an initial revision after another client creates the row', async () => {
+    const user = makeTestIdentity('settings-initial-revision', 'Settings initial revision');
+    const db = getDb();
+    const initial = await getSavedAppSettingsSnapshot(db, user.id);
+    const saved = await patchAppSettingsSnapshot(
+      db,
+      user.id,
+      { thinkingEnabled: true },
+      undefined,
+      initial.revision
+    );
+    expect(saved.revision).not.toBe(initial.revision);
+    await expect(
+      patchAppSettingsSnapshot(db, user.id, { thinkingEnabled: false }, undefined, initial.revision)
+    ).rejects.toMatchObject({ name: 'AppSettingsConflict' });
+    expect((await getSavedAppSettings(db, user.id)).thinkingEnabled).toBe(true);
+  });
+
   for (const existing of [false, true]) {
     it(`reports a disjoint writer conflict on ${existing ? 'an existing' : 'a new'} row and permits a fresh patch`, async () => {
       const user = makeTestIdentity('settings-concurrency', 'Settings concurrency');

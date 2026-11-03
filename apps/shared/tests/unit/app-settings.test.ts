@@ -4,6 +4,8 @@ import Value from 'typebox/value';
 
 import {
   AppSettingsPutBodySchema,
+  AppSettingsPutHeadersSchema,
+  AppSettingsResponseSchema,
   AppSettingsSchema,
   clampMaxToolIterations,
   DEFAULT_APP_SETTINGS,
@@ -938,5 +940,27 @@ describe('onboarding progress inside profile settings', () => {
     });
 
     expect(Value.Check(AppSettingsSchema, settings)).toBe(true);
+  });
+});
+
+describe('app settings revision contracts', () => {
+  it('requires a nonempty response revision and leaves it out of normalized preferences', () => {
+    const response = {
+      ...DEFAULT_APP_SETTINGS,
+      libraryLocationDefaultsPending: false,
+      revision: '"r1"',
+    };
+    expect(Value.Check(AppSettingsResponseSchema, response)).toBe(true);
+    expect(Value.Check(AppSettingsResponseSchema, { ...response, revision: '' })).toBe(false);
+    const missing: Partial<typeof response> = { ...response };
+    delete missing.revision;
+    expect(Value.Check(AppSettingsResponseSchema, missing)).toBe(false);
+    expect(normalizeAppSettings(response)).not.toHaveProperty('revision');
+  });
+
+  it('permits legacy writes without a precondition and accepts an opaque If-Match', () => {
+    expect(Value.Check(AppSettingsPutHeadersSchema, {})).toBe(true);
+    expect(Value.Check(AppSettingsPutHeadersSchema, { 'if-match': '"r1"' })).toBe(true);
+    expect(Value.Check(AppSettingsPutHeadersSchema, { 'if-match': 1 })).toBe(false);
   });
 });

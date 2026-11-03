@@ -30,7 +30,7 @@ Theme and language are frontend preferences stored in browser `localStorage`, ow
 **API:**
 
 ```
-GET  /api/settings/app    → Returns AppSettingsResponse (AppSettings + libraryLocationDefaultsPending)
+GET  /api/settings/app    → Returns AppSettingsResponse (AppSettings + revision + libraryLocationDefaultsPending)
 PUT  /api/settings/app    → Merges a patch and returns normalized AppSettingsResponse
 ```
 
@@ -64,13 +64,19 @@ An awaited save also rejects instead of allowing a consent-gated action to
 continue without a confirmed write. Queued auto-save bursts based on the
 rejected snapshot are discarded and reported as failed.
 
-Existing request and success-response shapes remain compatible; clients must
-handle 409 by reading current settings and rebuilding their edit. This is a
-server read/merge/write concurrency guarantee, not a client revision
-precondition. A request whose repository read starts after another write has
-committed can still replace the same complete field, even when its payload
-was built earlier. That case remains last-writer-wins; the guarantee rejects
-a stale repository snapshot, not every stale client snapshot.
+Every response includes an opaque `revision` entity tag. A client sends it
+unchanged as the `If-Match` header when saving an edit built from that snapshot.
+The server checks that revision before merging and retains the JSON
+compare-and-swap check during the write. A stale client snapshot returns the
+same HTTP 409 `CONFLICT`, even when its repository read starts after the winning
+write. Reads never create a row or change its revision; every successful write
+rotates the revision, including writes that leave preferences unchanged.
+
+The frontend retains the snapshot revision through optimistic edits and queued
+auto-save bursts, and carries the revision returned by a confirmed save into
+later edits. It does not relabel an older draft with a newer cache revision.
+Clients that omit `If-Match` retain the repository concurrency guarantee and
+must handle 409 by fetching current settings and rebuilding their edit.
 
 The rule, in full:
 

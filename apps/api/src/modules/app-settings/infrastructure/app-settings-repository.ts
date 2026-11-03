@@ -1,6 +1,9 @@
+import { createHash } from 'node:crypto';
+
 import type {
   AppSettings,
   AppSettingsPutBody,
+  AppSettingsResponse,
   LibraryLocationSettings,
 } from '@mangostudio/shared/app-settings';
 import {
@@ -15,18 +18,35 @@ import { safeJsonParse } from '../../../lib/safe-parse';
 import { generateId } from '../../../utils/id';
 import { AppSettingsConflict } from '../domain/app-settings-conflict';
 
+/** Read normalized preferences without HTTP response metadata.
+ * @example const settings = await getSavedAppSettings(db, user.id);
+ */
 export async function getSavedAppSettings(
   db: Kysely<Database>,
   userId: string,
   libraryLocationDefaults?: LibraryLocationSettings
 ): Promise<AppSettings> {
-  const row = await db
-    .selectFrom('user_app_settings')
-    .select(['settingsJson'])
-    .where('userId', '=', userId)
-    .executeTakeFirst();
+  return parseAppSettingsRow(await readAppSettingsRow(db, userId), libraryLocationDefaults);
+}
 
-  return parseAppSettingsRow(row, libraryLocationDefaults);
+type AppSettingsSnapshot = {
+  readonly settings: AppSettings;
+  readonly revision: AppSettingsResponse['revision'];
+};
+
+/** Read preferences and the revision of the same stored row without writing.
+ * @example const { settings, revision } = await getSavedAppSettingsSnapshot(db, user.id);
+ */
+export async function getSavedAppSettingsSnapshot(
+  db: Kysely<Database>,
+  userId: string,
+  libraryLocationDefaults?: LibraryLocationSettings
+): Promise<AppSettingsSnapshot> {
+  const row = await readAppSettingsRow(db, userId);
+  return {
+    settings: parseAppSettingsRow(row, libraryLocationDefaults),
+    revision: rowRevision(row),
+  };
 }
 
 /**
@@ -40,20 +60,25 @@ export async function getSavedAppSettings(
  * clear and a never-set field arrive at the same place.
  *
  * @example
- * await patchAppSettings(db, user.id, { thinkingEnabled: false });
+ * await patchAppSettingsSnapshot(db, user.id, { thinkingEnabled: false }, undefined, revision);
  */
-export async function patchAppSettings(
+export async function patchAppSettingsSnapshot(
   db: Kysely<Database>,
   userId: string,
   patch: AppSettingsPutBody,
-  libraryLocationDefaults?: LibraryLocationSettings
-): Promise<AppSettings> {
+  libraryLocationDefaults?: LibraryLocationSettings,
+  expectedRevision?: string
+): Promise<AppSettingsSnapshot> {
   const now = Date.now();
   const existing = await db
     .selectFrom('user_app_settings')
     .select('settingsJson')
     .where('userId', '=', userId)
     .executeTakeFirst();
+  if (expectedRevision !== undefined && expectedRevision !== rowRevision(existing)) {
+    throw new AppSettingsConflict();
+  }
+  const revision = `"${generateId()}"`;
   const persisted = safeJsonParse(existing?.settingsJson);
   const preserved = isRecord(persisted) ? persisted : {};
   const normalized = normalizeAppSettings(
@@ -65,9 +90,9 @@ export async function patchAppSettings(
     ...preserved,
     ...normalized,
     // A fresh opaque version prevents ABA (including equal-millisecond writes
-    // and writes that normalize to the same preferences). It stays private to
-    // storage; timestamps are not revision identifiers.
-    _writeVersion: generateId(),
+    // and writes that normalize to the same preferences). The private storage
+    // key is omitted from preferences; the token travels as response metadata.
+    _writeVersion: revision,
     // Keep the pre-nesting and pre-library shapes in storage so an application
     // downgrade retains the two source choices even though they are no longer
     // public API. Both mirrors are flat because both predate scope, and every
@@ -104,7 +129,40 @@ export async function patchAppSettings(
   // onboarding step or a location choice another writer just changed.
   if (!written) throw new AppSettingsConflict();
 
-  return normalized;
+  return { settings: normalized, revision };
+}
+
+/** Apply a patch for an internal caller without a client revision precondition.
+ * @example await patchAppSettings(db, user.id, { thinkingEnabled: false });
+ */
+export async function patchAppSettings(
+  db: Kysely<Database>,
+  userId: string,
+  patch: AppSettingsPutBody,
+  libraryLocationDefaults?: LibraryLocationSettings
+): Promise<AppSettings> {
+  return (await patchAppSettingsSnapshot(db, userId, patch, libraryLocationDefaults)).settings;
+}
+
+function readAppSettingsRow(db: Kysely<Database>, userId: string) {
+  return db
+    .selectFrom('user_app_settings')
+    .select('settingsJson')
+    .where('userId', '=', userId)
+    .executeTakeFirst();
+}
+
+function rowRevision(row: Pick<UserAppSettingsSelect, 'settingsJson'> | undefined): string {
+  if (!row) return '"absent"';
+  const parsed = safeJsonParse(row.settingsJson);
+  // Hash legacy rows too: reads cannot mutate them to create a version, and
+  // their timestamp need not change when their stored preferences do.
+  if (isRecord(parsed) && typeof parsed._writeVersion === 'string') {
+    return parsed._writeVersion.startsWith('"')
+      ? parsed._writeVersion
+      : `"${parsed._writeVersion}"`;
+  }
+  return `"legacy-${createHash('sha256').update(row.settingsJson).digest('hex')}"`;
 }
 
 function parseAppSettingsRow(

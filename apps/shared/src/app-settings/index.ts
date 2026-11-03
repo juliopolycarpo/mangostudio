@@ -47,6 +47,8 @@ export {
   type AppSettings,
   type AppSettingsPutBody,
   AppSettingsPutBodySchema,
+  type AppSettingsPutHeaders,
+  AppSettingsPutHeadersSchema,
   type AppSettingsResponse,
   AppSettingsResponseSchema,
   AppSettingsSchema,

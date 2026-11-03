@@ -86,6 +86,52 @@ describe('useGlobalSettings', () => {
     );
   });
 
+  it('keeps a queued draft revision when another owner confirms a newer cache snapshot', async () => {
+    mockGet.mockResolvedValue(mockQueryResult({ ...DEFAULT_APP_SETTINGS, revision: '"r1"' }));
+    const { result } = renderHook(() => ({
+      settings: useGlobalSettings(),
+      queryClient: useQueryClient(),
+    }));
+    await waitFor(() => expect(result.current.settings.isLoading).toBe(false));
+    useFakeTimers();
+    try {
+      act(() => result.current.settings.setTextSystemPrompt('older draft'));
+      // Another owner has committed a new snapshot while this draft is still
+      // in the debounce. That response cannot authorize the older whole field.
+      act(() => {
+        result.current.queryClient.setQueryData(appSettingsKeys.current(), {
+          ...DEFAULT_APP_SETTINGS,
+          revision: '"r2"',
+          promptSettings: {
+            ...DEFAULT_APP_SETTINGS.promptSettings,
+            textSystemPrompt: 'newer confirmed',
+          },
+        });
+      });
+      await advanceTimersByTimeAsync(300);
+      expect(mockPut).toHaveBeenCalledTimes(1);
+      expect(mockPut.mock.calls[0]?.[0].promptSettings.textSystemPrompt).toBe('older draft');
+      expect(mockPut.mock.calls[0]?.[1]).toEqual({ headers: { 'if-match': '"r1"' } });
+    } finally {
+      await restoreRealTimers();
+    }
+  });
+
+  it('uses the confirmed response revision for a later edit', async () => {
+    mockGet.mockResolvedValue(mockQueryResult({ ...DEFAULT_APP_SETTINGS, revision: '"r1"' }));
+    mockPut.mockResolvedValue(mockMutationResult({ ...DEFAULT_APP_SETTINGS, revision: '"r2"' }));
+    const { result } = renderHook(() => useGlobalSettings());
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    await act(async () => {
+      await result.current.updateExternalAgentSettings({});
+    });
+    await act(async () => {
+      await result.current.updateExternalAgentSettings({});
+    });
+    expect(mockPut.mock.calls[0]?.[1]).toEqual({ headers: { 'if-match': '"r1"' } });
+    expect(mockPut.mock.calls[1]?.[1]).toEqual({ headers: { 'if-match': '"r2"' } });
+  });
+
   it('clamps maxToolIterations before persisting', async () => {
     const { result } = renderHook(() => useGlobalSettings());
 
@@ -488,6 +534,127 @@ describe('useGlobalSettings', () => {
         await Promise.resolve();
       });
     }
+
+    for (const succeeds of [true, false]) {
+      it(`awaited consent waits for its prior revision-backed save (${succeeds ? 'success' : 'failure'})`, async () => {
+        mockGet.mockResolvedValue(mockQueryResult({ ...DEFAULT_APP_SETTINGS, revision: '"r1"' }));
+        const settlePut = holdEveryPut();
+        const { result } = renderHook(() => useGlobalSettings());
+        await waitFor(() => expect(result.current.isLoading).toBe(false));
+        useFakeTimers();
+        try {
+          act(() => result.current.setTextSystemPrompt('first'));
+          await advanceTimersByTimeAsync(300);
+          let completed = false;
+          let failure: unknown;
+          let consent: Promise<void> | undefined;
+          act(() => {
+            consent = result.current.updateExternalAgentSettings({}).then(
+              () => {
+                completed = true;
+              },
+              (error: unknown) => {
+                failure = error;
+              }
+            );
+          });
+          await advanceTimersByTimeAsync(0);
+          expect(mockPut).toHaveBeenCalledTimes(1);
+          expect(completed).toBe(false);
+          await settle(
+            settlePut[0],
+            succeeds
+              ? mockMutationResult({ ...DEFAULT_APP_SETTINGS, revision: '"r2"' })
+              : failedPut()
+          );
+          await advanceTimersByTimeAsync(0);
+          if (succeeds) {
+            expect(mockPut).toHaveBeenCalledTimes(2);
+            expect(mockPut.mock.calls[1]?.[1]).toEqual({ headers: { 'if-match': '"r2"' } });
+            expect(completed).toBe(false);
+            await settle(
+              settlePut[1],
+              mockMutationResult({ ...DEFAULT_APP_SETTINGS, revision: '"r3"' })
+            );
+          }
+          await act(async () => {
+            await consent;
+          });
+          expect(completed).toBe(succeeds);
+          if (!succeeds) {
+            expect(mockPut).toHaveBeenCalledTimes(1);
+            expect(failure).toBeInstanceOf(ApiError);
+          }
+        } finally {
+          await restoreRealTimers();
+        }
+      });
+    }
+
+    it('waits for its prior revision-backed PUT when the next debounce expires', async () => {
+      mockGet.mockResolvedValue(mockQueryResult({ ...DEFAULT_APP_SETTINGS, revision: '"r1"' }));
+      const settlePut = holdEveryPut();
+      const { result } = renderHook(() => useGlobalSettings());
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      useFakeTimers();
+      try {
+        act(() => result.current.setTextSystemPrompt('first'));
+        await advanceTimersByTimeAsync(300);
+        act(() => result.current.setTextSystemPrompt('second'));
+        await advanceTimersByTimeAsync(300);
+        expect(mockPut).toHaveBeenCalledTimes(1);
+        await settle(
+          settlePut[0],
+          mockMutationResult({
+            ...DEFAULT_APP_SETTINGS,
+            revision: '"r2"',
+            promptSettings: { ...DEFAULT_APP_SETTINGS.promptSettings, textSystemPrompt: 'first' },
+          })
+        );
+        await advanceTimersByTimeAsync(0);
+        expect(mockPut).toHaveBeenCalledTimes(2);
+        expect(mockPut.mock.calls[1]?.[0].promptSettings.textSystemPrompt).toBe('second');
+        expect(mockPut.mock.calls[1]?.[1]).toEqual({ headers: { 'if-match': '"r2"' } });
+        await settle(
+          settlePut[1],
+          mockMutationResult({ ...DEFAULT_APP_SETTINGS, revision: '"r3"' })
+        );
+      } finally {
+        await restoreRealTimers();
+      }
+    });
+
+    it('advances its own queued typing to the confirmed revision and rollback baseline', async () => {
+      mockGet.mockResolvedValue(mockQueryResult({ ...DEFAULT_APP_SETTINGS, revision: '"r1"' }));
+      const settlePut = holdEveryPut();
+      const { result } = renderHook(() => useGlobalSettings());
+      await waitFor(() => expect(result.current.isLoading).toBe(false));
+      useFakeTimers();
+      try {
+        act(() => result.current.setTextSystemPrompt('first'));
+        await advanceTimersByTimeAsync(300);
+        expect(mockPut).toHaveBeenCalledTimes(1);
+        act(() => result.current.setTextSystemPrompt('second'));
+        await settle(
+          settlePut[0],
+          mockMutationResult({
+            ...DEFAULT_APP_SETTINGS,
+            revision: '"r2"',
+            promptSettings: { ...DEFAULT_APP_SETTINGS.promptSettings, textSystemPrompt: 'first' },
+          })
+        );
+        await advanceTimersByTimeAsync(0);
+        expect(result.current.promptSettings.textSystemPrompt).toBe('second');
+        await advanceTimersByTimeAsync(300);
+        expect(mockPut).toHaveBeenCalledTimes(2);
+        expect(mockPut.mock.calls[1]?.[1]).toEqual({ headers: { 'if-match': '"r2"' } });
+        await settle(settlePut[1], failedPut());
+        await advanceTimersByTimeAsync(0);
+        expect(result.current.promptSettings.textSystemPrompt).toBe('first');
+      } finally {
+        await restoreRealTimers();
+      }
+    });
 
     it('does not claim a rollback when a superseded save fails', async () => {
       const settlePut = holdEveryPut();

@@ -10,7 +10,6 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 
 import {
-  type AppSettings,
   type AppSettingsResponse,
   DEFAULT_APP_SETTINGS,
   DEFAULT_LIBRARY_LOCATION_SETTINGS,
@@ -22,6 +21,7 @@ import { SETTINGS_TOPIC } from '@mangostudio/shared/realtime';
 
 import { resetRealtimeInvalidations } from '@/lib/realtime/use-realtime-invalidation';
 
+import { resetAppSettingsLocalWriteWindow } from '../../../../src/features/settings/app/local-write-window';
 import { act, renderHook, screen, waitFor } from '../../../support/harness/render';
 import { renderWithRouter } from '../../../support/harness/render-with-router';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
@@ -49,6 +49,7 @@ const l = en.library.locationSettings;
 const PENDING_ANSWER: AppSettingsResponse = {
   ...DEFAULT_APP_SETTINGS,
   libraryLocationDefaultsPending: true,
+  revision: '"initial"',
 };
 
 /** What it answers after: Claude detected, so its skills directory is on. */
@@ -58,7 +59,8 @@ const DETECTED_ANSWER: AppSettingsResponse = {
     home: { ...DEFAULT_LIBRARY_LOCATION_SETTINGS.home, 'claude-skills': true },
   }),
   libraryLocationDefaultsPending: false,
-} satisfies AppSettings & { libraryLocationDefaultsPending: boolean };
+  revision: '"detected"',
+} satisfies AppSettingsResponse;
 
 const LOCATIONS = [
   location({ id: 'mango-skills', path: '/home/dev/.mango/skills', targetIds: ['mangostudio'] }),
@@ -77,6 +79,7 @@ describe('library location defaults while the hub is detecting agents', () => {
   beforeEach(() => {
     setTestSession({ user: { id: 'user-test' } });
     resetRealtimeInvalidations();
+    resetAppSettingsLocalWriteWindow();
     fetchScenario.install();
     fetchScenario.respondWithJson('GET', '/api/environments', { body: [] });
     fetchScenario.respondWithJson('GET', '/api/library/locations', { body: LOCATIONS });

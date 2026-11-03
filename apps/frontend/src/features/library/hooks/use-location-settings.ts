@@ -11,11 +11,7 @@
  * // Usage: const { groups, setEnabled } = useLocationSettings(environmentId);
  */
 
-import {
-  libraryLocationsFor,
-  libraryLocationsPatch,
-  normalizeAppSettings,
-} from '@mangostudio/shared/app-settings';
+import { libraryLocationsFor, libraryLocationsPatch } from '@mangostudio/shared/app-settings';
 import type {
   LibraryLocationId,
   LibraryLocationStatus,
@@ -31,8 +27,8 @@ import { useMemo } from 'react';
 import { updateAppSettings } from '@/features/settings/app/api';
 import {
   appSettingsForLocationWrite,
-  appSettingsKeys,
-  refreshAppSettingsAfterConflict,
+  appSettingsRevision,
+  beginAppSettingsWrite,
 } from '@/features/settings/app/queries';
 import { useLibraryDefaultsDetection } from '@/features/settings/app/use-library-defaults-detection';
 
@@ -83,7 +79,8 @@ export function useLocationSettings(environmentId?: string): LocationSettingsSta
       locationId: LibraryLocationId;
       enabled: boolean;
     }) => {
-      const locations = libraryLocationsFor(await appSettingsForLocationWrite(queryClient));
+      const snapshot = await appSettingsForLocationWrite(queryClient);
+      const locations = libraryLocationsFor(snapshot);
       // Only the locations travel: a settings tab editing an unrelated
       // preference must not have its value rolled back by this toggle.
       return updateAppSettings(
@@ -92,12 +89,14 @@ export function useLocationSettings(environmentId?: string): LocationSettingsSta
           // Every location defined today is home-scoped; the workspace map is
           // carried through untouched rather than rebuilt from nothing.
           home: { ...locations.home, [locationId]: enabled },
-        })
+        }),
+        appSettingsRevision(snapshot)
       );
     },
-    onError: (error) => refreshAppSettingsAfterConflict(queryClient, error),
-    onSuccess: async (saved) => {
-      queryClient.setQueryData(appSettingsKeys.current(), normalizeAppSettings(saved));
+    onMutate: () => ({ write: beginAppSettingsWrite(queryClient) }),
+    onError: (error, _variables, context) => context?.write.reject(error),
+    onSuccess: async (saved, _variables, context) => {
+      await context.write.publish(saved);
       // The scan answer changes with the enabled set, so every matrix built on
       // the old one is stale the moment this lands.
       await queryClient.invalidateQueries({ queryKey: libraryKeys.all });
