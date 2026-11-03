@@ -13,7 +13,6 @@ import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { ToolImageUpdate } from '@mangostudio/shared/tool-identity';
 import { TOOL_IMAGE_MAX_BYTES } from '@mangostudio/shared/tool-identity';
 
-import type { ToolIdentitySelect } from '../../../db/types';
 import { safeFetchBytes, type SafeFetchDeps, SafeFetchError } from '../../../lib/safe-fetch';
 import type { ToolImageFields } from '../infrastructure/tool-identity-repository';
 import {
@@ -43,112 +42,66 @@ const NO_IMAGE: ToolImageFields = {
   imageMimeType: null,
 };
 
-function toImageFields(row: ToolIdentitySelect | undefined): ToolImageFields {
-  if (!row) return NO_IMAGE;
-  return {
-    imageSource: row.imageSource,
-    imageUrl: row.imageUrl,
-    imagePath: row.imagePath,
-    imageMimeType: row.imageMimeType,
-  };
-}
-
-/** True when this patch leaves the identity with an image, without fetching one. */
-export function patchKeepsImage(
-  patch: ToolImageUpdate | null | undefined,
-  existing: ToolIdentitySelect | undefined
-): boolean {
-  if (patch === undefined) return existing?.imageSource != null;
-  return patch !== null;
-}
-
 /**
- * The image half of an update, with the disk work it implies still pending.
- *
- * The file a change replaces cannot be deleted while resolving it, because the
- * row that stops pointing at that file has not been written yet — and if the
- * write then fails, the identity is left naming bytes that are gone. So the two
- * deletions an update can owe are handed back as the two ways it can end:
- * `commit` drops what was replaced, `rollback` drops what was written.
+ * Validated fields prepared outside the database transaction. Newly staged
+ * bytes belong to the caller until a row write succeeds; a failed write must
+ * roll them back. Replaced-file cleanup uses the row changed by the transaction.
  */
-export interface ResolvedToolImage {
+export interface PreparedToolImage {
   readonly fields: ToolImageFields;
-  /** Call once the row is written: drops the file the update replaced. */
-  commit(): Promise<void>;
-  /** Call when the row write failed: drops the file the update wrote. */
   rollback(): Promise<void>;
 }
 
-const NOTHING_TO_CLEAN = (): Promise<void> => Promise.resolve();
-
-/** No file changed hands, so neither ending has anything to clean up. */
-function unchanged(fields: ToolImageFields): ResolvedToolImage {
-  return { fields, commit: NOTHING_TO_CLEAN, rollback: NOTHING_TO_CLEAN };
-}
-
-function replacing(
-  fields: ToolImageFields,
-  existing: ToolIdentitySelect | undefined
-): ResolvedToolImage {
-  const replaced = existing?.imagePath ?? null;
-  // Keeping the new file would strand it: nothing else records its name.
-  const written = fields.imagePath !== replaced ? fields.imagePath : null;
-  return {
-    fields,
-    commit: () => deleteToolImage(replaced),
-    rollback: () => deleteToolImage(written),
-  };
+function prepared(fields: ToolImageFields): PreparedToolImage {
+  return { fields, rollback: () => deleteToolImage(fields.imagePath) };
 }
 
 /**
  * Resolves the image half of an update, performing the one-time fetch when the
- * user asked for a cached URL.
+ * user asked for a cached URL. The caller handles cache reuse under its row lock.
+ *
+ * @example const image = await resolveToolImageFields(patch, userId);
  */
 export async function resolveToolImageFields(
-  patch: ToolImageUpdate | null | undefined,
-  existing: ToolIdentitySelect | undefined,
+  patch: ToolImageUpdate | null,
   userId: string,
   fetchDeps: Partial<SafeFetchDeps> = {}
-): Promise<ResolvedToolImage> {
-  if (patch === undefined) return unchanged(toImageFields(existing));
-
-  if (patch === null) return replacing(NO_IMAGE, existing);
+): Promise<PreparedToolImage> {
+  if (patch === null) return prepared(NO_IMAGE);
 
   if (!patch.cache) {
     // Hotlinked: the browser loads it, so we keep the address and nothing else.
-    return replacing(
-      { imageSource: 'url', imageUrl: patch.url, imagePath: null, imageMimeType: null },
-      existing
-    );
-  }
-
-  // Saving an unrelated field — a rename — re-sends the image the dialog is
-  // showing. Re-downloading it every time would turn every keystroke's worth of
-  // editing into a request to someone else's server.
-  if (existing?.imagePath && existing.imageUrl === patch.url) {
-    return unchanged(toImageFields(existing));
+    return prepared({
+      imageSource: 'url',
+      imageUrl: patch.url,
+      imagePath: null,
+      imageMimeType: null,
+    });
   }
 
   const stored = await cacheRemoteImage(patch.url, userId, fetchDeps);
-  return replacing({ imageSource: 'url', imageUrl: patch.url, ...stored }, existing);
+  return prepared({ imageSource: 'url', imageUrl: patch.url, ...stored });
 }
 
-/** Stores an uploaded file, replacing whatever the identity had before. */
+/** Stage validated upload bytes before a row write.
+ * @example const image = await storeUploadedToolImage(file, userId);
+ */
 export async function storeUploadedToolImage(
   file: File,
-  existing: ToolIdentitySelect | undefined,
   userId: string
-): Promise<ResolvedToolImage> {
+): Promise<PreparedToolImage> {
   const bytes = new Uint8Array(await file.arrayBuffer());
   const validated = await validateToolImage(bytes);
 
   const imagePath = buildToolImagePath(userId, validated.extension);
   await writeToolImage(imagePath, validated.bytes);
 
-  return replacing(
-    { imageSource: 'upload', imageUrl: null, imagePath, imageMimeType: validated.mimeType },
-    existing
-  );
+  return prepared({
+    imageSource: 'upload',
+    imageUrl: null,
+    imagePath,
+    imageMimeType: validated.mimeType,
+  });
 }
 
 async function cacheRemoteImage(

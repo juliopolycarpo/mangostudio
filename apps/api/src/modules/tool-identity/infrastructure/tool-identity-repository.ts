@@ -1,5 +1,5 @@
 import type { ToolIdentity, ToolImage, ToolImageSource } from '@mangostudio/shared/tool-identity';
-import type { Kysely } from 'kysely';
+import type { Kysely, Transaction } from 'kysely';
 
 import type { Database, ToolIdentitySelect } from '../../../db/types';
 import { generateId } from '../../../utils/id';
@@ -56,13 +56,15 @@ export function getToolIdentityRow(
 }
 
 /**
- * Writes both fields every time. The service has already merged the patch onto
+ * Writes all fields inside the transaction that merged the patch onto
  * the stored row, so a partial update never reaches here as a partial write —
  * which is what keeps "field absent means leave it" and "field null means reset
  * it" from collapsing into each other.
+ *
+ * @example await upsertToolIdentityRow(transaction, userId, profileId, subjectKey, fields);
  */
 export async function upsertToolIdentityRow(
-  db: Kysely<Database>,
+  db: Transaction<Database>,
   userId: string,
   profileId: string,
   subjectKey: string,
@@ -89,8 +91,11 @@ export async function upsertToolIdentityRow(
   return now;
 }
 
+/** Remove a row under the same transaction that inspected its current fields.
+ * @example await deleteToolIdentityRow(transaction, userId, profileId, subjectKey);
+ */
 export async function deleteToolIdentityRow(
-  db: Kysely<Database>,
+  db: Transaction<Database>,
   userId: string,
   profileId: string,
   subjectKey: string

@@ -16,7 +16,7 @@ import {
 } from '@mangostudio/shared/tool-identity';
 import type { Kysely } from 'kysely';
 
-import type { Database, ToolIdentitySelect } from '../../../db/types';
+import type { Database } from '../../../db/types';
 import type { SafeFetchDeps } from '../../../lib/safe-fetch';
 import { publishSettingsInvalidation } from '../../../services/realtime/settings-invalidation';
 import {
@@ -24,13 +24,13 @@ import {
   getToolIdentityRow,
   listToolIdentityRows,
   type ToolIdentityFields,
+  type ToolImageFields,
   toToolIdentity,
   upsertToolIdentityRow,
 } from '../infrastructure/tool-identity-repository';
 import { deleteToolImage, readToolImage } from '../infrastructure/tool-image-storage';
 import {
-  patchKeepsImage,
-  type ResolvedToolImage,
+  type PreparedToolImage,
   resolveToolImageFields,
   storeUploadedToolImage,
 } from './tool-image-service';
@@ -47,7 +47,9 @@ export async function listToolIdentities(
 }
 
 /**
- * Merges a patch onto the stored row and writes the result.
+ * Merges a patch onto the current row under a short database transaction.
+ *
+ * @example await updateToolIdentity(db, userId, 'agent:claude', { displayName: 'Claude' });
  *
  * An absent field keeps what is stored; an explicit `null` resets that field to
  * its derived default. A patch that resets every field deletes the row instead
@@ -64,33 +66,28 @@ export async function updateToolIdentity(
 ): Promise<ToolIdentity | null> {
   const subject = parseKnownSubject(subjectKey);
 
-  const existing = await getToolIdentityRow(db, userId, DEFAULT_PROFILE_ID, subjectKey);
-  const displayName = resolveField(patch.displayName, existing?.displayName ?? null, (value) =>
-    value.trim()
-  );
-  const monogram = resolveField(patch.monogram, existing?.monogram ?? null, normalizeMonogram);
-
-  // Answered before the image is resolved, because resolving one can mean
-  // fetching it, and a patch that clears everything must not spend a request on
-  // an image it is about to throw away.
-  if (displayName === null && monogram === null && !patchKeepsImage(patch.image, existing)) {
-    await clearToolIdentity(db, userId, subjectKey, existing);
-    return null;
+  if (patch.image?.cache) {
+    // Reuse is decided against the row being changed, not a pre-fetch snapshot.
+    const reused = await writeIdentity(db, userId, subjectKey, patch, undefined, patch.image.url);
+    if (reused) return finishIdentityWrite(userId, reused);
+    // A cached URL can cause network I/O, so ownership must be checked first.
+    await assertOwnedMcpSubject(db, userId, subject);
   }
 
-  // Before the fetch, too: an `mcp:` key the caller does not own must not be
-  // able to make the server reach out to an address of the caller's choosing.
-  await assertOwnedMcpSubject(db, userId, subject);
-
-  const image = await resolveToolImageFields(patch.image, existing, userId, fetchDeps);
-  return writeIdentityWithImage(image, () =>
-    writeIdentity(db, userId, subjectKey, { displayName, monogram, ...image.fields })
+  const image =
+    patch.image === undefined
+      ? undefined
+      : await resolveToolImageFields(patch.image, userId, fetchDeps);
+  return writeIdentityWithImage(userId, image, () =>
+    writeIdentity(db, userId, subjectKey, patch, image?.fields)
   );
 }
 
 /**
  * Replaces the identity's image with an uploaded file, leaving its name and
  * monogram alone. Multipart, so it cannot ride on the JSON update route.
+ *
+ * @example await uploadToolIdentityImage(db, userId, 'agent:claude', file);
  */
 export async function uploadToolIdentityImage(
   db: Kysely<Database>,
@@ -101,16 +98,13 @@ export async function uploadToolIdentityImage(
   const subject = parseKnownSubject(subjectKey);
   await assertOwnedMcpSubject(db, userId, subject);
 
-  const existing = await getToolIdentityRow(db, userId, DEFAULT_PROFILE_ID, subjectKey);
-  const image = await storeUploadedToolImage(file, existing, userId);
-
-  return writeIdentityWithImage(image, () =>
-    writeIdentity(db, userId, subjectKey, {
-      displayName: existing?.displayName ?? null,
-      monogram: existing?.monogram ?? null,
-      ...image.fields,
-    })
+  const image = await storeUploadedToolImage(file, userId);
+  const identity = await writeIdentityWithImage(userId, image, () =>
+    writeIdentity(db, userId, subjectKey, {}, image.fields)
   );
+  if (identity === null)
+    throw new Error('(tool image upload): expected a stored identity | received: null');
+  return identity;
 }
 
 /**
@@ -121,20 +115,34 @@ export async function uploadToolIdentityImage(
  * database is enough — leaves the identity pointing at an avatar that no longer
  * exists, and that loss is not recoverable.
  */
-async function writeIdentityWithImage<T>(
-  image: ResolvedToolImage,
-  write: () => Promise<T>
-): Promise<T> {
-  let written: T;
+async function writeIdentityWithImage(
+  userId: string,
+  image: PreparedToolImage | undefined,
+  write: () => Promise<ToolIdentityMutation>
+): Promise<ToolIdentity | null> {
+  let written: ToolIdentityMutation;
   try {
     written = await write();
   } catch (error) {
-    await image.rollback();
+    await image?.rollback();
     throw error;
   }
 
-  await image.commit();
-  return written;
+  return finishIdentityWrite(userId, written);
+}
+
+interface ToolIdentityMutation {
+  readonly identity: ToolIdentity | null;
+  readonly replacedImagePath: string | null;
+}
+
+async function finishIdentityWrite(
+  userId: string,
+  written: ToolIdentityMutation
+): Promise<ToolIdentity | null> {
+  await deleteToolImage(written.replacedImagePath);
+  publishSettingsInvalidation(userId, 'tool-identity');
+  return written.identity;
 }
 
 export interface StoredToolImage {
@@ -165,45 +173,96 @@ export async function readToolIdentityImage(
   return { body, mimeType: row.imageMimeType, updatedAt: row.updatedAt };
 }
 
+/**
+ * Removes the current identity and releases the file that row actually owned.
+ * @example await resetToolIdentity(db, userId, 'agent:claude');
+ */
 export async function resetToolIdentity(
   db: Kysely<Database>,
   userId: string,
   subjectKey: string
 ): Promise<void> {
-  // Grammar and static membership only. Deleting an MCP server must not strand
-  // its label: requiring the server to still exist would make the orphaned row
-  // permanently unresettable, which is the opposite of what a reset is for.
   parseKnownSubject(subjectKey);
-  const existing = await getToolIdentityRow(db, userId, DEFAULT_PROFILE_ID, subjectKey);
-  await clearToolIdentity(db, userId, subjectKey, existing);
+  await writeIdentityWithImage(userId, undefined, () =>
+    writeIdentity(
+      db,
+      userId,
+      subjectKey,
+      { displayName: null, monogram: null },
+      {
+        imageSource: null,
+        imageUrl: null,
+        imagePath: null,
+        imageMimeType: null,
+      }
+    )
+  );
 }
 
+/** Merge and write under the SQLite driver's transaction lock; never hold it for image I/O. */
+function writeIdentity(
+  db: Kysely<Database>,
+  userId: string,
+  subjectKey: string,
+  patch: ToolIdentityUpdate,
+  image?: ToolImageFields
+): Promise<ToolIdentityMutation>;
+function writeIdentity(
+  db: Kysely<Database>,
+  userId: string,
+  subjectKey: string,
+  patch: ToolIdentityUpdate,
+  image: undefined,
+  reuseImageUrl: string
+): Promise<ToolIdentityMutation | undefined>;
 async function writeIdentity(
   db: Kysely<Database>,
   userId: string,
   subjectKey: string,
-  fields: ToolIdentityFields
-): Promise<ToolIdentity> {
-  const updatedAt = await upsertToolIdentityRow(db, userId, DEFAULT_PROFILE_ID, subjectKey, fields);
-  publishSettingsInvalidation(userId, 'tool-identity');
-
-  return toToolIdentity({ subjectKey, updatedAt, ...fields });
-}
-
-/**
- * Drops the row and the file it owned. Stored images are keyed by the row, so
- * deleting one here is the whole of image cleanup — there is no orphan sweep
- * to run later.
- */
-async function clearToolIdentity(
-  db: Kysely<Database>,
-  userId: string,
-  subjectKey: string,
-  existing: ToolIdentitySelect | undefined
-): Promise<void> {
-  await deleteToolIdentityRow(db, userId, DEFAULT_PROFILE_ID, subjectKey);
-  await deleteToolImage(existing?.imagePath ?? null);
-  publishSettingsInvalidation(userId, 'tool-identity');
+  patch: ToolIdentityUpdate,
+  image?: ToolImageFields,
+  reuseImageUrl?: string
+): Promise<ToolIdentityMutation | undefined> {
+  return db.transaction().execute(async (transaction) => {
+    const existing = await getToolIdentityRow(transaction, userId, DEFAULT_PROFILE_ID, subjectKey);
+    if (
+      reuseImageUrl !== undefined &&
+      (!existing?.imagePath || existing.imageUrl !== reuseImageUrl)
+    )
+      return undefined;
+    const fields: ToolIdentityFields = {
+      displayName: resolveField(patch.displayName, existing?.displayName ?? null, (value) =>
+        value.trim()
+      ),
+      monogram: resolveField(patch.monogram, existing?.monogram ?? null, normalizeMonogram),
+      imageSource: existing?.imageSource ?? null,
+      imageUrl: existing?.imageUrl ?? null,
+      imagePath: existing?.imagePath ?? null,
+      imageMimeType: existing?.imageMimeType ?? null,
+      ...image,
+    };
+    let identity: ToolIdentity | null = null;
+    if (fields.displayName === null && fields.monogram === null && fields.imageSource === null) {
+      await deleteToolIdentityRow(transaction, userId, DEFAULT_PROFILE_ID, subjectKey);
+    } else {
+      await assertOwnedMcpSubject(transaction, userId, parseKnownSubject(subjectKey));
+      const updatedAt = await upsertToolIdentityRow(
+        transaction,
+        userId,
+        DEFAULT_PROFILE_ID,
+        subjectKey,
+        fields
+      );
+      identity = toToolIdentity({ subjectKey, updatedAt, ...fields });
+    }
+    return {
+      identity,
+      replacedImagePath:
+        existing?.imagePath !== (identity === null ? null : fields.imagePath)
+          ? (existing?.imagePath ?? null)
+          : null,
+    };
+  });
 }
 
 /** Absent keeps the stored value; `null` resets it; a value is normalized. */
