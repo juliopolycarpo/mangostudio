@@ -18,6 +18,7 @@ import { ToolAvatar, type ToolImageDisplay } from '@/components/ui/ToolAvatar';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 
+import { buildToolIdentityPatch } from './dirty-patch';
 import { deriveMonogram, type ResolvedToolIdentity } from './resolve';
 import { IMAGE_URL_PATTERN, ToolImageFields, type ToolImageMode } from './ToolImageFields';
 import { useSaveToolIdentity } from './use-tool-identities';
@@ -67,6 +68,11 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
   // Seeded from the stored overrides, never from the resolved values: a stored
   // monogram that happens to equal the derived one still has to come back as
   // stored, or the next rename would silently discard it.
+  // Keep the opening baseline across realtime prop refreshes, just like the draft.
+  const [opening] = useState(() => ({
+    ...identity,
+    storedImage: identity.storedImage ? { ...identity.storedImage } : null,
+  }));
   const [name, setName] = useState(identity.storedName ?? '');
   const [monogram, setMonogram] = useState(identity.storedMonogram ?? '');
   const [imageMode, setImageMode] = useState<ToolImageMode>(() => initialMode(identity));
@@ -82,7 +88,7 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
   const monogramInvalid = trimmedMonogram.length > 0 && !MONOGRAM_PATTERN.test(trimmedMonogram);
   const urlInvalid = imageMode === 'url' && !IMAGE_URL_PATTERN.test(trimmedUrl);
 
-  const hasStoredUpload = identity.storedImage?.source === 'upload';
+  const hasStoredUpload = opening.storedImage?.source === 'upload';
   // Switching to upload without picking anything would ask the server to store
   // an image that does not exist.
   const fileMissing = imageMode === 'upload' && !file && !hasStoredUpload;
@@ -113,16 +119,13 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
     save.mutate(
       {
         subjectKey: identity.subjectKey,
-        displayName: trimmedName.length > 0 ? trimmedName : null,
-        monogram: trimmedMonogram.length > 0 ? trimmedMonogram : null,
-        // `undefined` leaves the stored image alone, which is what an upload
-        // needs: the file that replaces it arrives in the next request.
-        image:
-          imageMode === 'monogram'
-            ? null
-            : imageMode === 'url'
-              ? { source: 'url' as const, url: trimmedUrl, cache: cacheImage }
-              : undefined,
+        ...buildToolIdentityPatch(opening, {
+          name,
+          monogram,
+          imageMode,
+          imageUrl,
+          cacheImage,
+        }),
         imageFile: imageMode === 'upload' ? file : null,
       },
       { onSuccess: onClose }
