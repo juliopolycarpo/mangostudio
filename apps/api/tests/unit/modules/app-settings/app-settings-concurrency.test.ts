@@ -9,6 +9,7 @@ import {
 } from '@mangostudio/shared/app-settings';
 
 import { getDb } from '../../../../src/db/database';
+import { AppSettingsConflict } from '../../../../src/modules/app-settings/domain/app-settings-conflict';
 import {
   getSavedAppSettings,
   getSavedAppSettingsSnapshot,
@@ -207,6 +208,79 @@ describe('atomic app-settings patches', () => {
     );
   });
 
+  it('rejects a workspace trust grant built before another workspace was revoked', async () => {
+    const user = makeTestIdentity('settings-trust-revocation', 'Settings trust revocation');
+    const db = getDb();
+    const scope = {
+      userId: user.id,
+      targetId: 'cursor' as const,
+      environmentId: 'local',
+      workspacePath: '/work/revoked',
+    };
+    await grantWorkspaceTrust(scope, db);
+    const barrier = holdFirstAppSettingsRead();
+    const stale = grantWorkspaceTrust(
+      { ...scope, workspacePath: '/work/new' },
+      db.withPlugin(barrier.plugin)
+    ).then(
+      () => null,
+      (error: unknown) => error
+    );
+    try {
+      await barrier.read;
+      const current = await getSavedAppSettings(db, user.id);
+      await patchAppSettings(db, user.id, {
+        externalAgentSettings: { ...current.externalAgentSettings, workspaceTrust: [] },
+      });
+    } finally {
+      barrier.release();
+    }
+    expect(await stale).toBeInstanceOf(AppSettingsConflict);
+    expect((await getSavedAppSettings(db, user.id)).externalAgentSettings.workspaceTrust).toEqual(
+      []
+    );
+    await grantWorkspaceTrust({ ...scope, workspacePath: '/work/new' }, db);
+    expect(
+      (await getSavedAppSettings(db, user.id)).externalAgentSettings.workspaceTrust.map(
+        (grant) => grant.workspacePath
+      )
+    ).toEqual(['/work/new']);
+  });
+
+  it('rejects a competing workspace grant without replacing the winning grant', async () => {
+    const user = makeTestIdentity('settings-trust-competing', 'Settings trust competing');
+    const db = getDb();
+    const scope = {
+      userId: user.id,
+      targetId: 'cursor' as const,
+      environmentId: 'local',
+      workspacePath: '/work/first',
+    };
+    const barrier = holdFirstAppSettingsRead();
+    const stale = grantWorkspaceTrust(scope, db.withPlugin(barrier.plugin)).then(
+      () => null,
+      (error: unknown) => error
+    );
+    try {
+      await barrier.read;
+      await grantWorkspaceTrust({ ...scope, workspacePath: '/work/winner' }, db);
+    } finally {
+      barrier.release();
+    }
+    expect(await stale).toBeInstanceOf(AppSettingsConflict);
+    expect(
+      (await getSavedAppSettings(db, user.id)).externalAgentSettings.workspaceTrust.map(
+        (grant) => grant.workspacePath
+      )
+    ).toEqual(['/work/winner']);
+    await grantWorkspaceTrust(scope, db);
+    expect(
+      (await getSavedAppSettings(db, user.id)).externalAgentSettings.workspaceTrust
+        .map((grant) => grant.workspacePath)
+        .sort()
+    ).toEqual(['/work/first', '/work/winner']);
+  });
+
   it('does not carry an older app snapshot through a workspace trust grant', async () => {
     const user = makeTestIdentity('settings-trust-patch', 'Settings trust patch');
     const db = getDb();
@@ -219,6 +293,9 @@ describe('atomic app-settings patches', () => {
         workspacePath: '/work/repo',
       },
       db.withPlugin(barrier.plugin)
+    ).then(
+      () => null,
+      (error: unknown) => error
     );
     try {
       await barrier.read;
@@ -229,7 +306,11 @@ describe('atomic app-settings patches', () => {
     } finally {
       barrier.release();
     }
-    await grant;
+    expect(await grant).toBeInstanceOf(AppSettingsConflict);
+    await grantWorkspaceTrust(
+      { userId: user.id, targetId: 'cursor', environmentId: 'local', workspacePath: '/work/repo' },
+      db
+    );
     const saved = await getSavedAppSettings(db, user.id);
     expect(saved.globalImageQuality).toBe('4K');
     expect(onboardingFor(saved).completedAt).toBe(1234);
