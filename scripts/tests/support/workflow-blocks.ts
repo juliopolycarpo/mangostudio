@@ -1,3 +1,5 @@
+import { posix } from 'node:path';
+
 // Regex-level GitHub workflow block extraction shared by the workflow policy
 // tests. Isolating a single block keeps an assertion about one job or section
 // from being masked or satisfied by a later one that happens to share the
@@ -182,6 +184,8 @@ export function expectedGateNeeds(workflow: string): string[] {
  * Parse YAML rather than matching source lines: quoted keys, flow mappings and
  * folded or multiline scalars are equally capable of interpolating source.
  * Report the job/step path because YAML decoding can change source line layout.
+ *
+ * @example githubScripts(workflow).filter(({ script }) => script.includes("${{"))
  */
 export function githubScripts(source: string): Array<{ path: string; script: string }> {
   const document = Bun.YAML.parse(source) as {
@@ -191,7 +195,24 @@ export function githubScripts(source: string): Array<{ path: string; script: str
   const found: Array<{ path: string; script: string }> = [];
   const collect = (steps: GithubScriptStep[] | undefined, path: string) => {
     for (const [index, step] of (steps ?? []).entries()) {
-      if (!step.uses?.startsWith('actions/github-script@')) continue;
+      // The runner decodes a standalone expression string as a literal before
+      // validating uses; repository owner/name lookup is case-insensitive.
+      const reference = step.uses?.replace(
+        /^\$\{\{\s*'((?:[^']|'')*)'\s*\}\}$/,
+        (_expression, literal: string) => literal.replaceAll("''", "'")
+      );
+      const [repositoryPath, revision, ...extra] = reference?.split('@') ?? [];
+      const [owner, repository, ...directories] =
+        repositoryPath?.split(/[\\/]+/).filter(Boolean) ?? [];
+      if (
+        !revision ||
+        extra.length !== 0 ||
+        owner?.toLowerCase() !== 'actions' ||
+        repository?.toLowerCase() !== 'github-script'
+      )
+        continue;
+      const root = posix.resolve('/_actions', owner, repository, revision);
+      if (posix.resolve(root, directories.join('/')) !== root) continue;
       // The runner treats input names case-insensitively and exports INPUT_SCRIPT.
       for (const [input, script] of Object.entries(step.with ?? {})) {
         if (input.toLowerCase() !== 'script' || typeof script !== 'string') continue;

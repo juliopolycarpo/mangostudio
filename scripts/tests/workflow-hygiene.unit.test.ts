@@ -232,6 +232,44 @@ describe('workflow hygiene', () => {
     expect(scripts.every(({ script }) => script.includes(expression))).toBe(true);
   });
 
+  for (const reference of [
+    `${EXPRESSION_OPEN} 'actions/github-script@v9' }}`,
+    `${EXPRESSION_OPEN} 'actions/github-script@refs/tags/it''s' }}`,
+    'Actions/GitHub-Script@v9',
+    'actions/github-script/.@v9',
+    'actions/github-script/././@v9',
+    'actions/github-script/dist/..@v9',
+    'actions/github-script/../v9@v9',
+    'actions/github-script/../v9@refs/tags/v9',
+    `${EXPRESSION_OPEN} 'actions/github-script/.@v9' }}`,
+  ]) {
+    for (const [header, path] of [
+      [['jobs:', '  build:', '    steps:'], 'jobs.build.steps[0]'],
+      [['runs:', '  using: composite', '  steps:'], 'runs.steps[0]'],
+    ] as const) {
+      test(`github-script recognizes literal action reference ${reference} in ${path}`, () => {
+        const expression = `${EXPRESSION_OPEN} github.event.issue.title }}`;
+        const steps = [
+          `      - uses: ${reference}`,
+          '        with:',
+          `          script: core.info('${expression}')`,
+          `      - uses: ${EXPRESSION_OPEN} 'actions/github-script-extra@v9' }}`,
+          '        with:',
+          `          script: ${expression}`,
+          `      - uses: ${EXPRESSION_OPEN} 'other/action@v1' }}`,
+          '        with:',
+          `          script: ${expression}`,
+          '      - uses: actions/github-script/dist@v9',
+          '        with:',
+          `          script: ${expression}`,
+        ];
+        expect(githubScripts([...header, ...steps].join('\n'))).toEqual([
+          { path, script: `core.info('${expression}')` },
+        ]);
+      });
+    }
+  }
+
   for (const input of ['SCRIPT', 'Script']) {
     for (const [header, path] of [
       [['jobs:', '  build:', '    steps:'], 'jobs.build.steps[0]'],
