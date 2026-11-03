@@ -11,7 +11,7 @@ import { SETTINGS_TOPIC, type SettingsScope } from '@mangostudio/shared/realtime
 import type {
   ToolIdentityKind,
   ToolIdentityMap,
-  ToolImageUpdate,
+  ToolIdentityUpdate,
 } from '@mangostudio/shared/tool-identity';
 import { toolSubjectKey } from '@mangostudio/shared/tool-identity';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -84,10 +84,10 @@ export function useToolIdentities(): ToolIdentityResolver {
 /**
  * Saves a rename and whatever the image should become.
  *
- * Name and monogram are sent explicitly, `null` meaning "back to the derived
- * default", so the dialog never has to reason about which of them changed. The
- * image is the exception: an absent `image` means "leave it", which is what
- * lets a file upload be a second request without the first one wiping it.
+ * Only changed fields are sent; omitted fields retain concurrent writes. A
+ * file-only save skips the JSON update and uploads directly.
+ *
+ * @example save.mutate({ subjectKey: 'agent:claude', monogram: 'CC' });
  *
  * Two requests means a failure can land between them, with the rename stored
  * and the image not. The cache is therefore refreshed on settlement rather than
@@ -99,19 +99,17 @@ export function useSaveToolIdentity() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async (variables: {
-      subjectKey: string;
-      displayName: string | null;
-      monogram: string | null;
-      image?: ToolImageUpdate | null;
-      /** Uploaded after the update, since multipart cannot ride along with it. */
-      imageFile?: File | null;
-    }) => {
-      await updateToolIdentity(variables.subjectKey, {
-        displayName: variables.displayName,
-        monogram: variables.monogram,
-        ...(variables.image !== undefined && { image: variables.image }),
-      });
+    mutationFn: async (
+      variables: ToolIdentityUpdate & {
+        subjectKey: string;
+        /** Uploaded after the update, since multipart cannot ride along with it. */
+        imageFile?: File | null;
+      }
+    ) => {
+      const { subjectKey, imageFile: _imageFile, ...patch } = variables;
+      if (Object.values(patch).some((value) => value !== undefined)) {
+        await updateToolIdentity(subjectKey, patch);
+      }
 
       if (variables.imageFile) {
         await uploadToolIdentityImage(variables.subjectKey, variables.imageFile);
