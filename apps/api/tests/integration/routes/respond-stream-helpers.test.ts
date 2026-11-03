@@ -12,7 +12,6 @@ import { recordTurnCompletedActivity } from '../../../src/modules/chats/applicat
 import { ActivityInsertCapture } from '../../support/activity-insert-capture';
 import {
   buildRespondStreamRequest,
-  createSubagentDelegationError,
   createTestStreamDb,
   mockDbWithFullCapture,
   mockPassThroughDb,
@@ -158,15 +157,6 @@ describe('respond stream test helpers', () => {
       environmentId: 'local',
       restrictToolsToWorkdir: null,
     });
-  });
-
-  it('creates the subagent delegation error class used by runner mocks', () => {
-    const SubagentDelegationError = createSubagentDelegationError();
-    const error = new SubagentDelegationError('No output', 'EMPTY_RESULT');
-
-    expect(error).toBeInstanceOf(Error);
-    expect(error.name).toBe('SubagentDelegationError');
-    expect(error.code).toBe('EMPTY_RESULT');
   });
 });
 

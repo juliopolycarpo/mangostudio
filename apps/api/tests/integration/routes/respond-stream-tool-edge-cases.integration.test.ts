@@ -7,6 +7,8 @@ import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-
 import {
   createTestStreamDb,
   makeAgentProfile,
+  mockAgentSettings,
+  mockSubagentRunner,
   parsePersistedParts,
   parseSseEvents,
   restoreAllMocks,
@@ -42,7 +44,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
         }),
     }));
 
-    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+    mockAgentSettings(() => ({
       getAgentProfile: (_db: unknown, _userId: string, _agentId: string) =>
         Promise.resolve(
           makeAgentProfile({
@@ -177,7 +179,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
         }),
     }));
 
-    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+    mockAgentSettings(() => ({
       getAgentProfile: (_db: unknown, _userId: string, _agentId: string) =>
         Promise.resolve(
           makeAgentProfile({
@@ -316,7 +318,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
         }),
     }));
 
-    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+    mockAgentSettings(() => ({
       getAgentProfile: (_db: unknown, _userId: string, agentId: string) =>
         Promise.resolve(
           agentId === 'user:explorer'
@@ -340,7 +342,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
         ),
     }));
 
-    await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
+    mockSubagentRunner(() => ({
       runSubagentTurn: () => {
         delegationCallCount += 1;
         // Abort synchronously on the first attempt: the empty result below is
@@ -348,15 +350,6 @@ describe('POST /respond/stream — tool execution edge cases', () => {
         // Aborting here must stop it before attempt 2's backoff completes.
         cancelStream?.();
         return Promise.resolve({});
-      },
-      SubagentDelegationError: class SubagentDelegationError extends Error {
-        constructor(
-          message: string,
-          readonly code: string
-        ) {
-          super(message);
-          this.name = 'SubagentDelegationError';
-        }
       },
     }));
 

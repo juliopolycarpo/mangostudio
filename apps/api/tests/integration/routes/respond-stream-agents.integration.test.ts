@@ -8,6 +8,7 @@ import {
   AgentSettingsError,
   buildRespondStreamRequest,
   makeAgentProfile,
+  mockAgentSettings,
   mockDbWithFullCapture,
   mockNoopTools,
   mockPassThroughDb,
@@ -36,7 +37,7 @@ describe('POST /respond/stream — agent resolution', () => {
   it('defaults to the Default agent when no agentId is given', async () => {
     const requestedAgentIds: string[] = [];
     await mockVerifiedChatOwnership();
-    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+    mockAgentSettings(() => ({
       getAgentProfile: (_db: unknown, _userId: string, agentId: string) => {
         requestedAgentIds.push(agentId);
         return Promise.resolve({ id: 'default' });
@@ -56,7 +57,7 @@ describe('POST /respond/stream — agent resolution', () => {
 
   it('returns 404 for an unknown agent before SSE starts', async () => {
     await mockVerifiedChatOwnership();
-    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+    mockAgentSettings(() => ({
       getAgentProfile: () =>
         Promise.reject(new AgentSettingsError('Agent not found.', 404, 'NOT_FOUND')),
     }));
@@ -84,7 +85,7 @@ describe('POST /respond/stream — agent resolution', () => {
   it("falls back to Default when the chat's persisted runner names a deleted agent", async () => {
     const requestedAgentIds: string[] = [];
     await mockVerifiedChatOwnership(null, { kind: 'mangostudio', agentId: 'user:deleted' });
-    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+    mockAgentSettings(() => ({
       getAgentProfile: (_db: unknown, _userId: string, agentId: string) => {
         requestedAgentIds.push(agentId);
         if (agentId !== 'default') {
@@ -111,7 +112,7 @@ describe('POST /respond/stream — agent resolution', () => {
     let capturedToolCount = -1;
 
     await mockVerifiedChatOwnership();
-    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+    mockAgentSettings(() => ({
       getAgentProfile: () =>
         Promise.resolve(
           makeAgentProfile({
@@ -248,7 +249,7 @@ describe('POST /respond/stream — agent resolution', () => {
           }),
       })
     );
-    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+    mockAgentSettings(() => ({
       getAgentProfile: () =>
         Promise.resolve(
           makeAgentProfile({
@@ -308,7 +309,7 @@ describe('POST /respond/stream — agent resolution', () => {
           }),
       })
     );
-    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+    mockAgentSettings(() => ({
       getAgentProfile: () =>
         Promise.resolve(
           makeAgentProfile({

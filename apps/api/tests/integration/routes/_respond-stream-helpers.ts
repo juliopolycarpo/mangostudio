@@ -1,4 +1,4 @@
-import { mock } from 'bun:test';
+import { mock, spyOn } from 'bun:test';
 
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import type { ChatRunnerConfiguration, ChatRunnerPermissions } from '@mangostudio/shared/chat';
@@ -6,7 +6,7 @@ import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { ProviderType } from '@mangostudio/shared/types';
 
 import { getDb } from '../../../src/db/database';
-import { getAgentProfile } from '../../../src/modules/agents/application/agent-settings-service';
+import * as agentSettings from '../../../src/modules/agents/application/agent-settings-service';
 import { AgentSettingsError } from '../../../src/modules/agents/domain/agent-profile';
 import { getAppSettings } from '../../../src/modules/app-settings/application/app-settings-service';
 import {
@@ -19,10 +19,7 @@ import {
   verifyChatOwnership,
 } from '../../../src/modules/chats/infrastructure/chat-repository';
 import { clearSubagentCache } from '../../../src/modules/generation/application/subagent-response-cache';
-import {
-  runSubagentTurn,
-  SubagentDelegationError,
-} from '../../../src/modules/generation/application/subagent-runner';
+import * as subagentRunner from '../../../src/modules/generation/application/subagent-runner';
 import {
   insertMessage,
   listByChatId as listMessagesByChatId,
@@ -74,10 +71,8 @@ export const realGetAllToolDefinitions = realTools.getAllToolDefinitions;
 export const realExecuteTool = realTools.executeTool;
 export const realGetTool = realTools.getTool;
 export const realGetSafeEffectiveToolSettings = realTools.getSafeEffectiveToolSettings;
-const realGetAgentProfile = getAgentProfile;
 const realGetAppSettings = getAppSettings;
-const realRunSubagentTurn = runSubagentTurn;
-export const realSubagentDelegationError = SubagentDelegationError;
+
 const realGemini = { ...realGeminiNs };
 const realProviderSettingsRepo = { ...realProviderSettingsRepoNs };
 const realToolSettingsRepo = { ...realToolSettingsRepoNs };
@@ -121,13 +116,10 @@ export async function restoreAllMocks(): Promise<void> {
     '../../../src/modules/tool-settings/infrastructure/tool-settings-repository',
     () => realToolSettingsRepo
   );
-  await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
-    getAgentProfile: realGetAgentProfile,
-  }));
-  await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
-    runSubagentTurn: realRunSubagentTurn,
-    SubagentDelegationError: realSubagentDelegationError,
-  }));
+  agentProfileSpy?.mockRestore();
+  agentProfileSpy = undefined;
+  subagentRunnerSpy?.mockRestore();
+  subagentRunnerSpy = undefined;
   await mock.module('../../../src/modules/messages/infrastructure/message-repository', () => ({
     insertMessage: realInsertMessage,
     updateMessage: realUpdateMessage,
@@ -392,12 +384,10 @@ export function makeRegisteredTool(
 
 /**
  * Mocks default parent/subagent profiles used by delegation tests.
- * // Usage: await mockSubagentAgentSettings({ subagentOverrides: { toolsEnabled: true } })
+ * // Usage: mockSubagentAgentSettings({ subagentOverrides: { toolsEnabled: true } })
  */
-export async function mockSubagentAgentSettings(
-  options: SubagentProfileMockOptions = {}
-): Promise<void> {
-  await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+export function mockSubagentAgentSettings(options: SubagentProfileMockOptions = {}): void {
+  mockAgentSettings(() => ({
     getAgentProfile: (_db: unknown, _userId: string, agentId: string) =>
       Promise.resolve(resolveSubagentProfile(agentId, options)),
   }));
@@ -413,22 +403,6 @@ export async function mockMultiAgentAppSettings(
   await mock.module('../../../src/modules/app-settings/application/app-settings-service', () => ({
     getAppSettings: () => Promise.resolve({ multiAgentSettings: multiAgentSettings(overrides) }),
   }));
-}
-
-/**
- * Returns the delegation error class expected by subagent-runner mocks.
- * // Usage: SubagentDelegationError: createSubagentDelegationError()
- */
-export function createSubagentDelegationError(): typeof realSubagentDelegationError {
-  return class SubagentDelegationError extends Error {
-    constructor(
-      message: string,
-      readonly code: string
-    ) {
-      super(message);
-      this.name = 'SubagentDelegationError';
-    }
-  } as typeof realSubagentDelegationError;
 }
 
 function createCapturedDbMock(
@@ -616,4 +590,31 @@ export function makeAgentProfile(overrides: Partial<AgentProfile>): AgentProfile
     metadata: {},
     ...overrides,
   };
+}
+
+// Keep a restorable spy rather than repeatedly replacing the module: consumers
+// loaded through the full app can retain the first mock.module replacement.
+let agentProfileSpy: ReturnType<typeof spyOn<typeof agentSettings, 'getAgentProfile'>> | undefined;
+
+/** Replaces agent lookup without rebinding an already imported module. Example: mockAgentSettings(() => ({ getAgentProfile: async () => profile })). */
+export function mockAgentSettings(
+  factory: () => { getAgentProfile: (...args: never[]) => unknown }
+): void {
+  agentProfileSpy = spyOn(agentSettings, 'getAgentProfile').mockImplementation(
+    factory().getAgentProfile as typeof agentSettings.getAgentProfile
+  );
+}
+
+let subagentRunnerSpy:
+  ReturnType<typeof spyOn<typeof subagentRunner, 'runSubagentTurn'>> | undefined;
+
+/** Replaces delegated turns with a restorable spy. Example: mockSubagentRunner(() => ({ runSubagentTurn: async () => result })). */
+export function mockSubagentRunner(
+  factory: () => {
+    runSubagentTurn: (...args: never[]) => unknown;
+  }
+): void {
+  subagentRunnerSpy = spyOn(subagentRunner, 'runSubagentTurn').mockImplementation(
+    factory().runSubagentTurn as typeof subagentRunner.runSubagentTurn
+  );
 }
