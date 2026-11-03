@@ -43,17 +43,7 @@ describe('protocol release latest selection', () => {
   ] as const)(
     'never replaces the application latest, prerelease=%s version=%s',
     (prerelease, version) => {
-      const job = extractJobBlock(
-        readText('.github/workflows/protocol-release.yml'),
-        'github-release'
-      );
-      const step = extractStepBlocks(job).find((block) =>
-        block.includes('name: Create the release')
-      );
-      expect(step).toBeDefined();
-      const script = step?.split('        run: |\n')[1]?.replace(/^ {10}/gm, '');
-      expect(script).toBeDefined();
-      const result = new FakeReleaseCommands().run(script ?? '', prerelease, version);
+      const result = new FakeReleaseCommands().run(releaseScript(), prerelease, version);
       expect(result.exitCode, result.stderr.toString()).toBe(0);
       const args = result.stdout.toString().trim().split('\n');
       // An optional flag contributes zero arguments on a stable release, rather
