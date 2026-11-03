@@ -7,12 +7,19 @@
  * socket or resolves a name.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { existsSync, readdirSync, rmSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
-import type { ToolIdentityUpdateResponse } from '@mangostudio/shared/tool-identity';
+import {
+  type ToolIdentityListResponse,
+  ToolIdentityListResponseSchema,
+  type ToolIdentityUpdateResponse,
+  ToolIdentityUpdateResponseSchema,
+} from '@mangostudio/shared/tool-identity';
+import Value from 'typebox/value';
 
 import { getDb } from '../../../src/db/database';
 import { getConfig } from '../../../src/lib/config';
@@ -30,6 +37,13 @@ import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-
 const PNG_BYTES = Uint8Array.from(
   atob(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='
+  ),
+  (character) => character.charCodeAt(0)
+);
+
+const SECOND_PNG_BYTES = Uint8Array.from(
+  atob(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jAWYAAAAASUVORK5CYII='
   ),
   (character) => character.charCodeAt(0)
 );
@@ -111,6 +125,26 @@ afterEach(() => {
 });
 
 describe('tool identity image upload', () => {
+  it('does not accept response cache metadata as an image write field', async () => {
+    const app = mountApp();
+    const response = await app.handle(
+      jsonRequest('/tool-identities/agent:claude', 'PUT', {
+        image: {
+          source: 'url',
+          url: 'https://cdn.example.test/logo.png',
+          cache: false,
+          cacheKey: 'forged',
+        },
+      })
+    );
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      error: 'Invalid request body',
+      code: ERROR_CODES.VALIDATION,
+    });
+    expect(storedFiles()).toEqual([]);
+  });
+
   it('stores an uploaded PNG and reports it as cached on our origin', async () => {
     const app = mountApp();
 
@@ -120,7 +154,12 @@ describe('tool identity image upload', () => {
     expect(response.status).toBe(200);
 
     const { identity } = (await response.json()) as ToolIdentityUpdateResponse;
-    expect(identity?.image).toEqual({ source: 'upload', url: null, cached: true });
+    expect(identity?.image).toEqual({
+      source: 'upload',
+      url: null,
+      cached: true,
+      cacheKey: expect.any(String),
+    });
     expect(storedFiles()).toHaveLength(1);
   });
 
@@ -208,6 +247,73 @@ describe('tool identity image upload', () => {
 });
 
 describe('tool identity image serving', () => {
+  for (const reset of [false, true]) {
+    it(`retires cached bytes changed in the same clock tick, reset=${reset}`, async () => {
+      const clock = spyOn(Date, 'now').mockReturnValue(1000);
+      try {
+        const app = mountApp();
+        const firstUpload = await app.handle(
+          uploadRequest('agent:claude', PNG_BYTES, 'first.png', 'image/png')
+        );
+        expect(firstUpload.status).toBe(200);
+        const firstPayload = (await firstUpload.json()) as ToolIdentityUpdateResponse;
+        expect(Value.Check(ToolIdentityUpdateResponseSchema, firstPayload)).toBe(true);
+        const firstIdentity = firstPayload.identity;
+        const [firstFile] = storedFiles();
+        const first = await app.handle(
+          new Request('http://localhost/tool-identities/agent:claude/image')
+        );
+        const firstTag = first.headers.get('etag') ?? '';
+        expect(new Uint8Array(await first.arrayBuffer())).toEqual(PNG_BYTES);
+        if (reset)
+          expect(
+            (await app.handle(jsonRequest('/tool-identities/agent:claude', 'DELETE'))).status
+          ).toBe(204);
+        const nextUpload = await app.handle(
+          uploadRequest('agent:claude', SECOND_PNG_BYTES, 'next.png', 'image/png')
+        );
+        expect(nextUpload.status).toBe(200);
+        const nextPayload = (await nextUpload.json()) as ToolIdentityUpdateResponse;
+        expect(Value.Check(ToolIdentityUpdateResponseSchema, nextPayload)).toBe(true);
+        const nextIdentity = nextPayload.identity;
+        expect(firstIdentity?.updatedAt).toBe(1000);
+        expect(nextIdentity?.updatedAt).toBe(1000);
+        const next = await app.handle(
+          new Request('http://localhost/tool-identities/agent:claude/image', {
+            headers: { 'If-None-Match': firstTag },
+          })
+        );
+        expect(next.status).toBe(200);
+        expect(new Uint8Array(await next.arrayBuffer())).toEqual(SECOND_PNG_BYTES);
+        expect(firstIdentity?.image?.cacheKey).toEqual(expect.any(String));
+        expect(firstIdentity?.image?.cacheKey).not.toContain(firstFile);
+        expect(nextIdentity?.image?.cacheKey).not.toBe(firstIdentity?.image?.cacheKey);
+        expect(next.headers.get('etag')).toBe(`"${nextIdentity?.image?.cacheKey}"`);
+        const listed = await app.handle(new Request('http://localhost/tool-identities'));
+        const list = (await listed.json()) as ToolIdentityListResponse;
+        expect(Value.Check(ToolIdentityListResponseSchema, list)).toBe(true);
+        expect(list.identities['agent:claude']?.image?.cacheKey).toBe(
+          nextIdentity?.image?.cacheKey
+        );
+        clock.mockReturnValue(1001);
+        const rename = await app.handle(
+          jsonRequest('/tool-identities/agent:claude', 'PUT', { displayName: 'Renamed' })
+        );
+        const renamed = ((await rename.json()) as ToolIdentityUpdateResponse).identity;
+        expect(renamed?.updatedAt).toBe(1001);
+        expect(renamed?.image?.cacheKey).toBe(nextIdentity?.image?.cacheKey);
+        const unchanged = await app.handle(
+          new Request('http://localhost/tool-identities/agent:claude/image', {
+            headers: { 'If-None-Match': next.headers.get('etag') ?? '' },
+          })
+        );
+        expect(unchanged.status).toBe(304);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+  }
+
   it('serves the stored bytes with the type recorded at upload time', async () => {
     const app = mountApp();
     await app.handle(uploadRequest('agent:claude', PNG_BYTES, 'logo.png', 'image/png'));
@@ -232,9 +338,9 @@ describe('tool identity image serving', () => {
       new Request('http://localhost/tool-identities/agent:claude/image?v=1')
     );
 
-    // The client asks for `?v=<updatedAt>`, so these bytes are what this address
-    // means for good — revalidating on every page that draws the tool would
-    // re-transfer up to 512 KiB to be told nothing changed.
+    // The client asks for `?v=<cacheKey>` and changes the URL for new images.
+    // Revalidating on every page that draws the tool would re-transfer up to
+    // 512 KiB to be told nothing changed.
     const cacheControl = response.headers.get('cache-control');
     expect(cacheControl).toContain('private');
     expect(cacheControl).toContain('immutable');

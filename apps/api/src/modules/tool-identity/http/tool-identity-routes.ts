@@ -173,7 +173,7 @@ export const toolIdentityRoutes = new Elysia().use(requireAuth).group('/tool-ide
             return { error: 'No stored image for this tool.', code: ERROR_CODES.NOT_FOUND };
           }
 
-          const etag = `"${image.updatedAt}"`;
+          const etag = `"${image.cacheKey}"`;
           set.headers['X-Content-Type-Options'] = 'nosniff';
           set.headers['Cache-Control'] = IMAGE_CACHE_CONTROL;
           set.headers.ETag = etag;

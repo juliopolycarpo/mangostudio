@@ -96,6 +96,8 @@ const ToolImageSchema = Type.Object(
     /** The remote address for a `url` image; null for an upload. */
     url: Type.Union([ToolImageUrlSchema, Type.Null()]),
     cached: Type.Boolean(),
+    /** Opaque version of locally stored bytes; absent for remote and legacy images. */
+    cacheKey: Type.Optional(Type.String({ minLength: 1 })),
   },
   { additionalProperties: false }
 );
@@ -131,10 +133,7 @@ export const ToolIdentitySchema = Type.Object(
     monogram: Type.Union([ToolMonogramSchema, Type.Null()]),
     /** Null means the avatar draws its monogram. */
     image: Type.Union([ToolImageSchema, Type.Null()]),
-    /**
-     * Doubles as the cache-buster on the image URL: a replaced image keeps the
-     * same address, so without it a browser would keep the old bytes.
-     */
+    /** Last customization update, in epoch milliseconds. */
     updatedAt: Type.Number({ minimum: 0 }),
   },
   { additionalProperties: false }
