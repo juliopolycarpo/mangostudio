@@ -1,4 +1,7 @@
-/** A patch read a row that another writer replaced before it could commit. */
+/**
+ * A patch read a row that another writer replaced before it could commit.
+ * @example throw new AppSettingsConflict();
+ */
 export class AppSettingsConflict extends Error {
   constructor() {
     super('Settings changed while saving. Reload current settings and reapply your edit.');

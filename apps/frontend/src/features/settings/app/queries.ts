@@ -102,7 +102,10 @@ const conflictEpochs = new WeakMap<
   { epoch: number; refreshEpoch: number; rejectedWrite: number }
 >();
 
-/** The conflict generation a queued app-settings snapshot was built against. */
+/**
+ * The conflict generation a queued app-settings snapshot was built against.
+ * @example const epoch = appSettingsConflictEpoch(queryClient);
+ */
 export function appSettingsConflictEpoch(queryClient: QueryClient): number {
   return conflictEpochs.get(queryClient)?.epoch ?? 0;
 }
@@ -110,6 +113,7 @@ export function appSettingsConflictEpoch(queryClient: QueryClient): number {
 /**
  * Reject older queues. A superseded request identifies its submission, so a
  * queue derived from a later confirmed write may survive without a refetch.
+ * @example recordAppSettingsConflict(queryClient);
  */
 export function recordAppSettingsConflict(queryClient: QueryClient, rejectedWrite?: number): void {
   const previous = conflictEpochs.get(queryClient);
@@ -121,7 +125,10 @@ export function recordAppSettingsConflict(queryClient: QueryClient, rejectedWrit
   });
 }
 
-/** A queue must survive every refresh boundary, even if a later save succeeds. */
+/**
+ * A queue must survive every refresh boundary, even if a later save succeeds.
+ * @example const canSave = appSettingsQueueCanSave(queryClient, epoch, confirmedWrite);
+ */
 export function appSettingsQueueCanSave(
   queryClient: QueryClient,
   epoch: number,
@@ -141,6 +148,7 @@ export function appSettingsQueueCanSave(
  * A rejected compare-and-swap never replays its old subtree. Refresh before
  * the surface offers another edit so its updater runs against current state.
  * Keep the original mutation error visible even if this refresh also fails.
+ * @example await refreshAppSettingsAfterConflict(queryClient, error);
  */
 export async function refreshAppSettingsAfterConflict(
   queryClient: QueryClient,
@@ -165,12 +173,18 @@ export async function refreshAppSettingsAfterConflict(
   });
 }
 
-/** The app-settings endpoint rejected an outdated repository snapshot. */
+/**
+ * The app-settings endpoint rejected an outdated repository snapshot.
+ * @example const rejectedSnapshot = isAppSettingsConflict(error);
+ */
 export function isAppSettingsConflict(error: unknown): boolean {
   return error instanceof ApiError && error.code === 'CONFLICT';
 }
 
-/** Re-read a rejected baseline before an updater constructs its next patch. */
+/**
+ * Re-read a rejected baseline before an updater constructs its next patch.
+ * @example const settings = await appSettingsForWrite(queryClient);
+ */
 export async function appSettingsForWrite(queryClient: QueryClient): Promise<AppSettings> {
   const cached = queryClient.getQueryData<AppSettings>(appSettingsKeys.current());
   if (

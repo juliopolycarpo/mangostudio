@@ -16,7 +16,10 @@ import { requireAuth } from '../../../plugins/auth-middleware';
 import { readAppSettings, writeAppSettings } from '../application/app-settings-service';
 import { AppSettingsConflict } from '../domain/app-settings-conflict';
 
-/** Build the settings routes with the host's database provider. */
+/**
+ * Build the settings routes with the host's database provider.
+ * @example const routes = createAppSettingsRoutes(() => db);
+ */
 export function createAppSettingsRoutes(database: () => Kysely<Database> = getDb) {
   return (
     new Elysia()
