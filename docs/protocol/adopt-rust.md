@@ -345,6 +345,14 @@ peer.terminate().await;
 let argv = ssh_argv(&SshArgv::new("build-box", ["mango-runtime", "--stdio"]))?;
 ```
 
+Termination also returns `None` if its background owner is dropped or fails before completing
+escalation. All callers share that incomplete result; it does not prove that the child exited
+or that cleanup succeeded. Keep responsibility for the child and use `peer.kill()` and the exit
+observation when recovery is possible. Later calls recheck an observed exit without restarting
+the kill sequence. The public return type is unchanged; `None` now also covers abandoned work.
+Dropping a `terminate()` waiter alone leaves the shared background escalation running. Observers
+need a running executor: a retained, undriven runtime cannot complete their asynchronous calls.
+
 `examples/conformance_peer` is a complete peer over every one of these, and what the interop
 lane drives:
 
