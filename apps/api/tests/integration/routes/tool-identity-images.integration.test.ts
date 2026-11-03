@@ -9,14 +9,17 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, readdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import type { ToolIdentityUpdateResponse } from '@mangostudio/shared/tool-identity';
 
 import { getDb } from '../../../src/db/database';
 import { getConfig } from '../../../src/lib/config';
-import { updateToolIdentity } from '../../../src/modules/tool-identity/application/tool-identity-service';
+import {
+  updateToolIdentity,
+  uploadToolIdentityImage,
+} from '../../../src/modules/tool-identity/application/tool-identity-service';
 import { storeUploadedToolImage } from '../../../src/modules/tool-identity/application/tool-image-service';
 import { toolIdentityRoutes } from '../../../src/modules/tool-identity/http/tool-identity-routes';
 import { getToolIdentityRow } from '../../../src/modules/tool-identity/infrastructure/tool-identity-repository';
@@ -343,7 +346,6 @@ describe('tool identity image cleanup ordering', () => {
 
     const resolved = await storeUploadedToolImage(
       new File([PNG_BYTES], 'next.png', { type: 'image/png' }),
-      await storedRow(),
       testUser.id
     );
 
@@ -363,12 +365,14 @@ describe('tool identity image cleanup ordering', () => {
     await app.handle(uploadRequest('agent:claude', PNG_BYTES, 'logo.png', 'image/png'));
     const [original] = storedFiles();
 
-    const resolved = await storeUploadedToolImage(
-      new File([PNG_BYTES], 'next.png', { type: 'image/png' }),
-      await storedRow(),
-      testUser.id
+    await uploadToolIdentityImage(
+      getDb(),
+      testUser.id,
+      'agent:claude',
+      new File([PNG_BYTES], 'next.png', { type: 'image/png' })
     );
-    await resolved.commit();
+    const stored = await storedRow();
+    expect(storedFiles()).toEqual([basename(stored?.imagePath ?? '')]);
 
     expect(storedFiles()).toHaveLength(1);
     expect(storedFiles()).not.toContain(original);
