@@ -26,7 +26,7 @@ import {
   type WorkspacePanelSettings,
   type WorkspaceSettings,
 } from '@mangostudio/shared/workspaces';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import { useToast } from '@/components/ui/Toast';
@@ -61,6 +61,9 @@ const confirmedCacheWrites = new WeakMap<object, number>();
 // Shared ordering lets a delayed conflict recognize confirmed writes from any
 // mounted owner. This is client bookkeeping, never a server revision precondition.
 let writeSequence = 0;
+// Submission ownership follows the shared cache, including saves from another
+// mounted hook. Hook-local sequence numbers cannot order those submissions.
+const latestSubmittedWrites = new WeakMap<QueryClient, number>();
 
 function createCustomRule(): RuleFileSetting {
   return {
@@ -118,6 +121,7 @@ export function useGlobalSettings() {
     onMutate: () => {
       saveSequenceRef.current += 1;
       writeSequence += 1;
+      latestSubmittedWrites.set(queryClient, writeSequence);
       return {
         previousSettings: rollbackRef.current,
         sequence: saveSequenceRef.current,
@@ -128,7 +132,9 @@ export function useGlobalSettings() {
       // A superseded save must not roll back: a newer submission either already
       // persisted its value or will report its own failure against it.
       const restoredSettings =
-        context?.sequence === saveSequenceRef.current ? context.previousSettings : null;
+        context !== undefined && context.write === latestSubmittedWrites.get(queryClient)
+          ? context.previousSettings
+          : null;
       if (restoredSettings) {
         queryClient.setQueryData(appSettingsKeys.current(), restoredSettings);
       }
@@ -141,7 +147,7 @@ export function useGlobalSettings() {
         restoredSettings ? t.settings.autoSave.errorRevertedToast : t.settings.autoSave.errorToast,
         'error'
       );
-      if (context?.sequence === saveSequenceRef.current) {
+      if (context !== undefined && context.write === latestSubmittedWrites.get(queryClient)) {
         if (isAppSettingsConflict(error)) {
           // A queued burst was also built on the rejected snapshot. Let the
           // error remain visible and require a fresh edit after the refetch;
@@ -158,13 +164,18 @@ export function useGlobalSettings() {
         recordAppSettingsConflict(queryClient, context?.write);
       }
     },
-    onSuccess: (savedSettings, _nextSettings, context) => {
+    onSuccess: async (savedSettings, _nextSettings, context) => {
       // Re-marked here so the echo window still covers the server's own event,
       // which cannot arrive before the write that triggered it has settled. Only
       // a successful write publishes one, so a failure leaves the window closed
       // and the next invalidation is free to repair the rolled-back cache.
       markAppSettingsLocalWrite();
-      if (context.sequence !== saveSequenceRef.current) return;
+      if (context.write !== latestSubmittedWrites.get(queryClient)) return;
+      // A read started before this confirmed response can still be in flight.
+      // Cancel its cache publication before accepting the response, even when
+      // another mounted settings surface started that read after a conflict.
+      await queryClient.cancelQueries({ queryKey: appSettingsKeys.current() }, { revert: false });
+      if (context.write !== latestSubmittedWrites.get(queryClient)) return;
       const cached = queryClient.setQueryData(
         appSettingsKeys.current(),
         normalizeAppSettings(savedSettings)

@@ -34,8 +34,13 @@ void mock.module('../../../src/lib/api-client', () => ({
 // Static imports are evaluated before any statement above runs, so the hook
 // has to come in afterwards or it binds the real api-client.
 const { useGlobalSettings } = await import('../../../src/hooks/use-global-settings');
-const { appSettingsKeys, appSettingsQueryOptions, libraryLocationDefaultsPending } =
-  await import('../../../src/features/settings/app/queries');
+const { ApiError } = await import('../../../src/lib/utils');
+const {
+  appSettingsKeys,
+  appSettingsQueryOptions,
+  libraryLocationDefaultsPending,
+  refreshAppSettingsAfterConflict,
+} = await import('../../../src/features/settings/app/queries');
 
 type MockGetResult = Awaited<ReturnType<typeof mockGet>>;
 type MockPutResult = Awaited<ReturnType<typeof mockPut>>;
@@ -523,6 +528,93 @@ describe('useGlobalSettings', () => {
       expect(result.current.promptSettings.textSystemPrompt).toBe('second');
       expect(mockGet.mock.calls).toHaveLength(reads);
       await settle(settlePut[1], savedPut('second'));
+    });
+
+    it('does not refetch over a newer submission owned by another hook', async () => {
+      const settlePut = holdEveryPut();
+      const { result } = renderHook(() => ({
+        layout: useGlobalSettings(),
+        outlet: useGlobalSettings(),
+      }));
+      await waitFor(() => expect(result.current.layout.isLoading).toBe(false));
+      const refresh = Promise.withResolvers<MockGetResult>();
+      const stale = mockQueryResult({
+        ...DEFAULT_APP_SETTINGS,
+        promptSettings: { ...DEFAULT_APP_SETTINGS.promptSettings, textSystemPrompt: 'old winner' },
+      });
+      mockGet.mockImplementation(() => refresh.promise);
+      const reads = mockGet.mock.calls.length;
+      useFakeTimers();
+      try {
+        act(() => result.current.layout.setTextSystemPrompt('first'));
+        await advanceTimersByTimeAsync(300);
+        act(() => result.current.outlet.setTextSystemPrompt('second'));
+        await advanceTimersByTimeAsync(300);
+        expect(mockPut).toHaveBeenCalledTimes(2);
+        await settle(
+          settlePut[0],
+          mockMutationResult(null, { value: { error: 'Settings changed', code: 'CONFLICT' } })
+        );
+        await settle(settlePut[1], savedPut('second'));
+        await advanceTimersByTimeAsync(0);
+        expect(result.current.outlet.promptSettings.textSystemPrompt).toBe('second');
+        await act(async () => {
+          refresh.resolve(stale);
+          await refresh.promise;
+        });
+        await advanceTimersByTimeAsync(0);
+        expect(result.current.layout.promptSettings.textSystemPrompt).toBe('second');
+        expect(mockGet.mock.calls).toHaveLength(reads);
+      } finally {
+        refresh.resolve(stale);
+        for (const complete of settlePut) complete(savedPut('second'));
+        await restoreRealTimers();
+      }
+    });
+
+    it('keeps a confirmed save when an older conflict refresh finishes afterward', async () => {
+      const settlePut = holdEveryPut();
+      const { result } = renderHook(() => ({
+        settings: useGlobalSettings(),
+        queryClient: useQueryClient(),
+      }));
+      await waitFor(() => expect(result.current.settings.isLoading).toBe(false));
+      const refresh = Promise.withResolvers<MockGetResult>();
+      const stale = mockQueryResult({
+        ...DEFAULT_APP_SETTINGS,
+        promptSettings: { ...DEFAULT_APP_SETTINGS.promptSettings, textSystemPrompt: 'old winner' },
+      });
+      mockGet.mockImplementation(() => refresh.promise);
+      useFakeTimers();
+      let read: Promise<unknown> | undefined;
+      try {
+        act(() => result.current.settings.setTextSystemPrompt('confirmed'));
+        await advanceTimersByTimeAsync(300);
+        expect(mockPut).toHaveBeenCalledTimes(1);
+        read = refreshAppSettingsAfterConflict(
+          result.current.queryClient,
+          new ApiError({ code: 'CONFLICT' })
+        );
+        await advanceTimersByTimeAsync(0);
+        expect(mockGet).toHaveBeenCalledTimes(2);
+        await settle(settlePut[0], savedPut('confirmed'));
+        await advanceTimersByTimeAsync(0);
+        expect(result.current.settings.promptSettings.textSystemPrompt).toBe('confirmed');
+        await act(async () => {
+          refresh.resolve(stale);
+          await read;
+        });
+        await advanceTimersByTimeAsync(0);
+        expect(result.current.settings.promptSettings.textSystemPrompt).toBe('confirmed');
+        expect(
+          result.current.queryClient.getQueryState(appSettingsKeys.current())?.isInvalidated
+        ).toBe(false);
+      } finally {
+        refresh.resolve(stale);
+        await read;
+        for (const complete of settlePut) complete(savedPut('confirmed'));
+        await restoreRealTimers();
+      }
     });
 
     for (const owner of ['layout', 'outlet'] as const) {
