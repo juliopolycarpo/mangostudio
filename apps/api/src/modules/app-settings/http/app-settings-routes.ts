@@ -2,7 +2,11 @@ import {
   AppSettingsPutBodySchema,
   type AppSettingsResponse,
 } from '@mangostudio/shared/app-settings';
-import { type ApiErrorResponse, ApiErrorResponseSchema } from '@mangostudio/shared/errors';
+import {
+  type ApiErrorResponse,
+  ApiErrorResponseSchema,
+  ERROR_CODES,
+} from '@mangostudio/shared/errors';
 import { Elysia } from 'elysia';
 import type { Kysely } from 'kysely';
 
@@ -40,7 +44,7 @@ export function createAppSettingsRoutes(database: () => Kysely<Database> = getDb
           } catch (error) {
             if (!(error instanceof AppSettingsConflict)) throw error;
             set.status = 409;
-            return { error: error.message, code: 'CONFLICT' };
+            return { error: error.message, code: ERROR_CODES.CONFLICT };
           }
         }
       )
