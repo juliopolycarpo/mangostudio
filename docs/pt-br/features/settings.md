@@ -30,7 +30,7 @@ Tema e idioma são preferências do frontend em `localStorage`, controladas por 
 **API:**
 
 ```
-GET  /api/settings/app    → Retorna AppSettingsResponse (AppSettings + libraryLocationDefaultsPending)
+GET  /api/settings/app    → Retorna AppSettingsResponse (AppSettings + revision + libraryLocationDefaultsPending)
 PUT  /api/settings/app    → Mescla um patch e retorna AppSettingsResponse normalizado
 ```
 
@@ -45,14 +45,21 @@ biblioteca exigem uma leitura bem-sucedida antes de recompor o patch; auto-save
 recusa a edição e inicia nova leitura. Saves aguardados também rejeitam a
 operação, sem liberar uma ação dependente de consentimento sem confirmação.
 Rajadas de auto-save ainda na fila, baseadas no snapshot recusado, são
-descartadas com indicação de falha. Os formatos existentes de pedido e sucesso continuam compatíveis;
-clientes devem tratar 409 buscando settings atuais e reconstruindo a edição.
-Esta garantia cobre a concorrência do read/merge/write no servidor. Se a
-leitura do repositório começa após outra gravação confirmar, o pedido ainda
-pode substituir o mesmo campo completo, mesmo com um payload construído antes.
-Nesse caso prevalece a última gravação. A garantia recusa snapshots antigos
-do repositório, não todo snapshot antigo do cliente; não há precondição de
-revisão do cliente.
+descartadas com indicação de falha.
+
+Toda resposta inclui uma entity tag opaca em `revision`. O cliente envia esse
+valor sem alteração no header `If-Match` ao salvar uma edição construída sobre
+o snapshot. O servidor valida a revisão antes da mesclagem e mantém o
+compare-and-swap durante a gravação. Um snapshot antigo do cliente recebe o
+mesmo HTTP 409 `CONFLICT`, mesmo quando a leitura no repositório começa depois
+da gravação vencedora. Leituras não criam registros nem alteram a revisão;
+toda gravação bem-sucedida renova a revisão, inclusive sem mudar preferências.
+
+O frontend preserva a revisão do snapshot nas edições otimistas e rajadas de
+auto-save na fila. Edições posteriores usam a revisão de uma gravação
+confirmada, sem atribuir a um rascunho antigo a revisão nova do cache. Clientes
+que omitem `If-Match` mantêm a garantia de concorrência do repositório e devem
+tratar 409 buscando settings atuais e reconstruindo a edição.
 
 Quais locais da biblioteca vêm ligados por padrão é detectado a partir das CLIs
 de agente instaladas na máquina do hub, e a primeira detecção após o hub iniciar

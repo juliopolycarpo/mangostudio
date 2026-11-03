@@ -18,6 +18,10 @@ import {
   patchAppSettings,
 } from '../../../src/modules/app-settings/infrastructure/app-settings-repository';
 import { settingsRoutes } from '../../../src/routes/settings';
+import {
+  createRealtimeBus,
+  setRealtimeBusForTests,
+} from '../../../src/services/realtime/realtime-bus';
 import { holdFirstAppSettingsRead } from '../../support/app-settings-read-barrier';
 import { makeTestIdentity, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
@@ -40,6 +44,7 @@ let testUser: UserFixture;
 let otherUser: UserFixture;
 
 let restoreAuth: (() => void) | null = null;
+let releaseInvalidations: (() => void) | undefined;
 
 /**
  * What a new user reads. Never pending here: the test preload pins the
@@ -48,6 +53,7 @@ let restoreAuth: (() => void) | null = null;
 const DEFAULT_ANSWER: AppSettingsResponse = {
   ...DEFAULT_APP_SETTINGS,
   libraryLocationDefaultsPending: false,
+  revision: '"absent"',
 };
 
 beforeEach(() => {
@@ -56,6 +62,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  releaseInvalidations?.();
+  releaseInvalidations = undefined;
+  setRealtimeBusForTests(undefined);
   restoreAuth?.();
   restoreAuth = null;
 });
@@ -153,6 +162,9 @@ describe('settings app settings routes', () => {
       },
     });
 
+    releaseInvalidations?.();
+    releaseInvalidations = undefined;
+    setRealtimeBusForTests(undefined);
     restoreAuth?.();
     const other = createAuthenticatedApiTestApp(otherUser, settingsRoutes);
     restoreAuth = other.restore;
@@ -184,10 +196,10 @@ describe('settings app settings routes', () => {
     restoreAuth = restore;
 
     const response = await app.handle(new Request('http://localhost/settings/app'));
-    const payload = (await response.json()) as AppSettings;
+    const payload = (await response.json()) as AppSettingsResponse;
 
     expect(response.status).toBe(200);
-    expect(payload).toEqual(DEFAULT_ANSWER);
+    expect(payload).toEqual({ ...DEFAULT_ANSWER, revision: expect.stringMatching(/^"legacy-/) });
   });
 
   it('accepts a PUT body missing the workspace library scope and normalizes on save', async () => {
@@ -424,6 +436,82 @@ describe('settings app settings partial updates', () => {
 });
 
 describe('settings app settings conflict response', () => {
+  it('returns stable read revisions and rotates them after each conditional write', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(testUser, settingsRoutes);
+    restoreAuth = restore;
+    const read = async () =>
+      (await (
+        await app.handle(new Request('http://localhost/settings/app'))
+      ).json()) as AppSettingsResponse;
+    const first = await read();
+    expect((await read()).revision).toBe(first.revision);
+    expect(
+      await getDb()
+        .selectFrom('user_app_settings')
+        .select('id')
+        .where('userId', '=', testUser.id)
+        .executeTakeFirst()
+    ).toBeUndefined();
+    const response = await app.handle(
+      new Request('http://localhost/settings/app', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'If-Match': first.revision },
+        body: JSON.stringify({ thinkingEnabled: true }),
+      })
+    );
+    const saved = (await response.json()) as AppSettingsResponse;
+    expect(response.status).toBe(200);
+    expect(Value.Check(AppSettingsResponseSchema, saved)).toBe(true);
+    expect(saved.revision).not.toBe(first.revision);
+    expect((await read()).revision).toBe(saved.revision);
+    const repeated = await app.handle(
+      new Request('http://localhost/settings/app', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'If-Match': saved.revision },
+        body: JSON.stringify({ thinkingEnabled: true }),
+      })
+    );
+    const repeatedSaved = (await repeated.json()) as AppSettingsResponse;
+    expect(repeated.status).toBe(200);
+    expect(repeatedSaved.revision).not.toBe(saved.revision);
+    const raw = await getDb()
+      .selectFrom('user_app_settings')
+      .select('settingsJson')
+      .where('userId', '=', testUser.id)
+      .executeTakeFirstOrThrow();
+    expect(JSON.parse(raw.settingsJson)).not.toHaveProperty('revision');
+  });
+
+  it('rejects a stale client revision even when its repository read starts after the winner', async () => {
+    const bus = createRealtimeBus();
+    setRealtimeBusForTests(bus);
+    const invalidations: unknown[] = [];
+    releaseInvalidations = bus.subscribe(testUser.id, (event) => invalidations.push(event));
+
+    const { app, restore } = createAuthenticatedApiTestApp(testUser, settingsRoutes);
+    restoreAuth = restore;
+    const first = await app.handle(new Request('http://localhost/settings/app'));
+    const snapshot = (await first.json()) as AppSettingsResponse;
+    await app.handle(
+      new Request('http://localhost/settings/app', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ thinkingEnabled: true }),
+      })
+    );
+    const stale = await app.handle(
+      new Request('http://localhost/settings/app', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'If-Match': snapshot.revision },
+        body: JSON.stringify({ thinkingEnabled: false }),
+      })
+    );
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toMatchObject({ code: 'CONFLICT' });
+    expect(invalidations).toHaveLength(1);
+    expect((await getSavedAppSettings(getDb(), testUser.id)).thinkingEnabled).toBe(true);
+  });
+
   it('returns a typed 409 instead of overwriting a winning patch', async () => {
     const barrier = holdFirstAppSettingsRead();
     const db = getDb();

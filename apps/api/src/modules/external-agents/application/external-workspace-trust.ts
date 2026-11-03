@@ -30,11 +30,11 @@ import {
 import type { Kysely } from 'kysely';
 
 import type { Database } from '../../../db/types';
+import { writeAppSettings } from '../../app-settings/application/app-settings-service';
 import {
-  getAppSettings,
-  updateAppSettings,
-} from '../../app-settings/application/app-settings-service';
-import { getSavedAppSettings } from '../../app-settings/infrastructure/app-settings-repository';
+  getSavedAppSettings,
+  getSavedAppSettingsSnapshot,
+} from '../../app-settings/infrastructure/app-settings-repository';
 
 export interface ExternalWorkspaceTrustScope {
   readonly userId: string;
@@ -78,9 +78,13 @@ export async function requiresWorkspaceTrust(
  * gave — paying for a Codex grant with a Cursor re-prompt.
  *
  * Only the external-agent subtree travels with this acknowledgement. A
- * concurrent write to an unrelated preference must survive the earlier read
- * this grant used to build its trust list. Competing writes during the
- * repository read/merge/write fail explicitly and must be retried by the user.
+ * write that changes the saved snapshot makes this acknowledgement fail with
+ * AppSettingsConflict, including a revoked trust entry or another grant. The
+ * caller must retry from a fresh read; it cannot restore a trust list derived
+ * from an older snapshot. Unrelated preferences survive that fresh retry.
+ *
+ * @example
+ * await grantWorkspaceTrust(scope, db);
  */
 export async function grantWorkspaceTrust(
   scope: ExternalWorkspaceTrustScope,
@@ -90,7 +94,8 @@ export async function grantWorkspaceTrust(
   if (!targetLoadsWorkspaceConfiguration(scope.targetId)) return;
   // The trust list belongs to externalAgentSettings, whose remaining fields
   // this read preserves. No other settings may travel back with the grant.
-  const settings = await getAppSettings(db, scope.userId);
+  const snapshot = await getSavedAppSettingsSnapshot(db, scope.userId);
+  const settings = snapshot.settings;
   const workspaceTrust = withWorkspaceTrust(
     settings.externalAgentSettings.workspaceTrust,
     {
@@ -100,7 +105,12 @@ export async function grantWorkspaceTrust(
     },
     now()
   );
-  await updateAppSettings(db, scope.userId, {
-    externalAgentSettings: { ...settings.externalAgentSettings, workspaceTrust },
-  });
+  await writeAppSettings(
+    db,
+    scope.userId,
+    {
+      externalAgentSettings: { ...settings.externalAgentSettings, workspaceTrust },
+    },
+    snapshot.revision
+  );
 }

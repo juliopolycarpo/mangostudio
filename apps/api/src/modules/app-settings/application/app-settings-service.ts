@@ -10,7 +10,11 @@ import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { publishSettingsInvalidation } from '../../../services/realtime/settings-invalidation';
 import { environmentProbingService } from '../../environments/application/probing-service';
-import { getSavedAppSettings, patchAppSettings } from '../infrastructure/app-settings-repository';
+import {
+  getSavedAppSettings,
+  getSavedAppSettingsSnapshot,
+  patchAppSettingsSnapshot,
+} from '../infrastructure/app-settings-repository';
 import {
   createDetectedLibraryDefaults,
   type DetectedLibraryDefaults,
@@ -139,21 +143,25 @@ export async function readAppSettings(
   userId: string
 ): Promise<AppSettingsResponse> {
   if (libraryLocationDefaultsOverride !== null) {
-    return answer(await getSavedAppSettings(db, userId, libraryLocationDefaultsOverride), false);
+    return answer(
+      await getSavedAppSettingsSnapshot(db, userId, libraryLocationDefaultsOverride),
+      false
+    );
   }
   const current = detection;
   const detected = current.defaults.peek();
-  if (detected !== null) return answer(await getSavedAppSettings(db, userId, detected), false);
+  if (detected !== null)
+    return answer(await getSavedAppSettingsSnapshot(db, userId, detected), false);
 
   // Registered before the first await: the probe can only land on a later tick.
   current.awaitingUsers.add(userId);
-  const placeholder = await getSavedAppSettings(db, userId);
+  const placeholder = await getSavedAppSettingsSnapshot(db, userId);
   // Detection may have landed during that read, and its invalidation may then
   // reach the client before this answer does. Answering "pending" after it
   // would leave that client waiting for an event that was already sent.
   const landed = current.defaults.peek();
   if (landed === null) return answer(placeholder, true);
-  return answer(await getSavedAppSettings(db, userId, landed), false);
+  return answer(await getSavedAppSettingsSnapshot(db, userId, landed), false);
 }
 
 /**
@@ -166,13 +174,38 @@ export async function readAppSettings(
 export async function writeAppSettings(
   db: Kysely<Database>,
   userId: string,
-  patch: AppSettingsPutBody
+  patch: AppSettingsPutBody,
+  expectedRevision?: string
 ): Promise<AppSettingsResponse> {
-  return answer(await updateAppSettings(db, userId, patch), false);
+  return answer(await persistAppSettings(db, userId, patch, expectedRevision), false);
 }
 
-function answer(settings: AppSettings, pending: boolean): AppSettingsResponse {
-  return { ...settings, libraryLocationDefaultsPending: pending };
+async function persistAppSettings(
+  db: Kysely<Database>,
+  userId: string,
+  patch: AppSettingsPutBody,
+  expectedRevision?: string
+) {
+  const snapshot = await patchAppSettingsSnapshot(
+    db,
+    userId,
+    patch,
+    await libraryLocationDefaultsForWrite(),
+    expectedRevision
+  );
+  publishSettingsInvalidation(userId, 'app');
+  return snapshot;
+}
+
+function answer(
+  snapshot: Awaited<ReturnType<typeof getSavedAppSettingsSnapshot>>,
+  pending: boolean
+): AppSettingsResponse {
+  return {
+    ...snapshot.settings,
+    revision: snapshot.revision,
+    libraryLocationDefaultsPending: pending,
+  };
 }
 
 /**
@@ -195,12 +228,5 @@ export async function updateAppSettings(
   // against what this machine actually has installed: without the detected
   // defaults, saving an unrelated preference on a fresh account would persist
   // every location as off.
-  const persistedSettings = await patchAppSettings(
-    db,
-    userId,
-    patch,
-    await libraryLocationDefaultsForWrite()
-  );
-  publishSettingsInvalidation(userId, 'app');
-  return persistedSettings;
+  return (await persistAppSettings(db, userId, patch)).settings;
 }

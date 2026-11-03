@@ -20,7 +20,8 @@ import {
   appSettingsForLocationWrite,
   appSettingsKeys,
   appSettingsQueryOptions,
-  keepLibraryDefaultsPending,
+  appSettingsRevision,
+  keepAppSettingsMetadata,
   libraryLocationDefaultsPending,
   refreshAppSettingsAfterConflict,
 } from '../../../../src/features/settings/app/queries';
@@ -30,6 +31,7 @@ import { createFetchScenario } from '../../../support/mocks/create-fetch-scenari
 const PENDING_ANSWER: AppSettingsResponse = {
   ...DEFAULT_APP_SETTINGS,
   libraryLocationDefaultsPending: true,
+  revision: '"initial"',
 };
 
 const DETECTED_SETTINGS = withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
@@ -44,6 +46,7 @@ describe('libraryLocationDefaultsPending', () => {
       libraryLocationDefaultsPending({
         ...DEFAULT_APP_SETTINGS,
         libraryLocationDefaultsPending: false,
+        revision: '"detected"',
       })
     ).toBe(false);
   });
@@ -157,18 +160,37 @@ describe('appSettingsForLocationWrite', () => {
   });
 });
 
-describe('keepLibraryDefaultsPending', () => {
+describe('keepAppSettingsMetadata', () => {
   it('re-applies the flag a normalizer dropped when the source was pending', () => {
-    expect(keepLibraryDefaultsPending(PENDING_ANSWER, DETECTED_SETTINGS)).toEqual({
+    expect(keepAppSettingsMetadata(PENDING_ANSWER, DETECTED_SETTINGS)).toEqual({
       ...DETECTED_SETTINGS,
       libraryLocationDefaultsPending: true,
+      revision: '"initial"',
     });
   });
 
   it('leaves settings untouched when the source was detected or absent', () => {
-    expect(keepLibraryDefaultsPending(DEFAULT_APP_SETTINGS, DETECTED_SETTINGS)).toBe(
+    expect(keepAppSettingsMetadata(DEFAULT_APP_SETTINGS, DETECTED_SETTINGS)).toBe(
       DETECTED_SETTINGS
     );
-    expect(keepLibraryDefaultsPending(undefined, DETECTED_SETTINGS)).toBe(DETECTED_SETTINGS);
+    expect(keepAppSettingsMetadata(undefined, DETECTED_SETTINGS)).toBe(DETECTED_SETTINGS);
+  });
+});
+
+describe('app settings revision metadata', () => {
+  it('retains the source revision through normalized optimistic changes', () => {
+    const source = {
+      ...DEFAULT_APP_SETTINGS,
+      revision: '"r1"',
+      libraryLocationDefaultsPending: true,
+    };
+    const optimistic = keepAppSettingsMetadata(source, {
+      ...DEFAULT_APP_SETTINGS,
+      thinkingEnabled: true,
+    });
+    expect(appSettingsRevision(optimistic)).toBe('"r1"');
+    expect(libraryLocationDefaultsPending(optimistic)).toBe(true);
+    expect(appSettingsRevision(undefined)).toBeUndefined();
+    expect(appSettingsRevision({ revision: 1 })).toBeUndefined();
   });
 });

@@ -2,6 +2,7 @@ import type { ChatDisplaySettings, DiffPreviewMode } from '@mangostudio/shared/a
 import {
   type AppSettings,
   appSettingsPatchExcludingProfiles,
+  type AppSettingsPutBody,
   type ChatTitleSettings,
   type ChatTitleStrategy,
   clampMaxToolIterations,
@@ -12,6 +13,7 @@ import {
   type ImageQuality,
   MAX_TOOL_ITERATIONS_MAX,
   MAX_TOOL_ITERATIONS_MIN,
+  mergeAppSettingsPatch,
   type MultiAgentSettings,
   normalizeAppSettings,
   normalizeChatTitleSettings,
@@ -26,19 +28,23 @@ import {
   type WorkspacePanelSettings,
   type WorkspaceSettings,
 } from '@mangostudio/shared/workspaces';
-import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import { useToast } from '@/components/ui/Toast';
 import { updateAppSettings } from '@/features/settings/app/api';
 import { markAppSettingsLocalWrite } from '@/features/settings/app/local-write-window';
 import {
+  appSettingsConfirmedWrite,
   appSettingsConflictEpoch,
   appSettingsKeys,
   appSettingsQueryOptions,
   appSettingsQueueCanSave,
+  appSettingsRevision,
+  beginAppSettingsWrite,
+  inheritAppSettingsWrite,
   isAppSettingsConflict,
-  keepLibraryDefaultsPending,
+  keepAppSettingsMetadata,
   recordAppSettingsConflict,
   refreshAppSettingsAfterConflict,
 } from '@/features/settings/app/queries';
@@ -54,16 +60,6 @@ export {
 };
 
 const SETTINGS_SAVE_DEBOUNCE_MS = 300;
-
-// Cache object provenance, shared across mounted hooks without retaining another
-// settings snapshot. Optimistic edits inherit the confirmed response they used.
-const confirmedCacheWrites = new WeakMap<object, number>();
-// Shared ordering lets a delayed conflict recognize confirmed writes from any
-// mounted owner. This is client bookkeeping, never a server revision precondition.
-let writeSequence = 0;
-// Submission ownership follows the shared cache, including saves from another
-// mounted hook. Hook-local sequence numbers cannot order those submissions.
-const latestSubmittedWrites = new WeakMap<QueryClient, number>();
 
 function createCustomRule(): RuleFileSetting {
   return {
@@ -83,9 +79,9 @@ function createCustomRule(): RuleFileSetting {
  *
  * The PUT carries only the fields this surface owns, so a concurrent edit to a
  * setting it does not show — a library toggle, first-run progress — survives.
- * Within those fields two tabs are still last-writer-wins on the whole burst; a
- * realtime `app` invalidation brings the loser back in sync as soon as its own
- * write window closes.
+ * Each burst retains the revision of the snapshot it edited. A stale revision
+ * is rejected rather than overwriting another writer; a conflict refreshes the
+ * confirmed settings before another edit can be submitted.
  */
 export function useGlobalSettings() {
   const queryClient = useQueryClient();
@@ -93,10 +89,14 @@ export function useGlobalSettings() {
   const { t } = useI18n();
   const pendingSaveRef = useRef<{
     readonly settings: AppSettings;
+    readonly revision: string | undefined;
     readonly conflictEpoch: number;
     readonly confirmedWrite: number | undefined;
   } | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeSaveRef = useRef<{ promise: Promise<unknown>; revision: string | undefined } | null>(
+    null
+  );
   /**
    * State to restore when a save fails, captured when an edit burst starts.
    * It cannot be read at mutate time: the setters write the cache immediately,
@@ -117,24 +117,26 @@ export function useGlobalSettings() {
 
   const mutation = useMutation({
     mutationKey: appSettingsKeys.save(),
-    mutationFn: updateAppSettings,
+    mutationFn: ({
+      patch,
+      revision,
+    }: {
+      patch: AppSettingsPutBody;
+      revision: string | undefined;
+    }) => updateAppSettings(patch, revision),
     onMutate: () => {
       saveSequenceRef.current += 1;
-      writeSequence += 1;
-      latestSubmittedWrites.set(queryClient, writeSequence);
+      const write = beginAppSettingsWrite(queryClient);
       return {
         previousSettings: rollbackRef.current,
         sequence: saveSequenceRef.current,
-        write: writeSequence,
+        write,
       };
     },
     onError: async (error, _nextSettings, context) => {
       // A superseded save must not roll back: a newer submission either already
       // persisted its value or will report its own failure against it.
-      const restoredSettings =
-        context !== undefined && context.write === latestSubmittedWrites.get(queryClient)
-          ? context.previousSettings
-          : null;
+      const restoredSettings = context?.write.isLatest() ? context.previousSettings : null;
       if (restoredSettings) {
         queryClient.setQueryData(appSettingsKeys.current(), restoredSettings);
       }
@@ -147,7 +149,7 @@ export function useGlobalSettings() {
         restoredSettings ? t.settings.autoSave.errorRevertedToast : t.settings.autoSave.errorToast,
         'error'
       );
-      if (context !== undefined && context.write === latestSubmittedWrites.get(queryClient)) {
+      if (context?.write.isLatest()) {
         if (isAppSettingsConflict(error)) {
           // A queued burst was also built on the rejected snapshot. Let the
           // error remain visible and require a fresh edit after the refetch;
@@ -161,26 +163,48 @@ export function useGlobalSettings() {
       } else if (isAppSettingsConflict(error)) {
         // Do not refetch over a newer submission. A queue derived from its
         // confirmed success is still fresh; older queues must be discarded.
-        recordAppSettingsConflict(queryClient, context?.write);
+        recordAppSettingsConflict(queryClient, context?.write.order);
       }
     },
-    onSuccess: async (savedSettings, _nextSettings, context) => {
+    onSuccess: async (savedSettings, submitted, context) => {
       // Re-marked here so the echo window still covers the server's own event,
       // which cannot arrive before the write that triggered it has settled. Only
       // a successful write publishes one, so a failure leaves the window closed
       // and the next invalidation is free to repair the rolled-back cache.
       markAppSettingsLocalWrite();
-      if (context.write !== latestSubmittedWrites.get(queryClient)) return;
+      if (!context.write.isLatest()) return;
       // A read started before this confirmed response can still be in flight.
       // Cancel its cache publication before accepting the response, even when
       // another mounted settings surface started that read after a conflict.
       await queryClient.cancelQueries({ queryKey: appSettingsKeys.current() }, { revert: false });
-      if (context.write !== latestSubmittedWrites.get(queryClient)) return;
-      const cached = queryClient.setQueryData(
-        appSettingsKeys.current(),
-        normalizeAppSettings(savedSettings)
-      );
-      if (cached) confirmedCacheWrites.set(cached, context.write);
+      if (!context.write.isLatest()) return;
+      const confirmed = keepAppSettingsMetadata(savedSettings, normalizeAppSettings(savedSettings));
+      let nextCache = confirmed;
+      const pending = pendingSaveRef.current;
+      const revision = appSettingsRevision(savedSettings);
+      if (
+        pending &&
+        revision !== undefined &&
+        submitted.revision !== undefined &&
+        pending.revision === submitted.revision
+      ) {
+        // This owner's queued typing extends the exact snapshot its own PUT
+        // just confirmed. Advance that queue only; another owner's older draft
+        // cannot borrow this revision. Keep detection-derived profiles from the
+        // confirmed response instead of a pending placeholder in the draft.
+        const settings = normalizeAppSettings(
+          mergeAppSettingsPatch(confirmed, appSettingsPatchExcludingProfiles(pending.settings))
+        );
+        pendingSaveRef.current = {
+          ...pending,
+          settings,
+          revision,
+          confirmedWrite: context.write.order,
+        };
+        rollbackRef.current = confirmed;
+        nextCache = keepAppSettingsMetadata(savedSettings, settings);
+      }
+      await context.write.publish(nextCache);
     },
     onSettled: (_savedSettings, _error, _nextSettings, context) => {
       // A newer submission still in flight keeps the burst open just as a queued
@@ -203,17 +227,23 @@ export function useGlobalSettings() {
    * whenever its dependency changes, so an unstable one would flush the pending
    * save on every re-render and the debounce would never coalesce anything.
    */
-  const { mutate, mutateAsync } = mutation;
+  const { mutateAsync } = mutation;
 
-  const flushPendingSave = useCallback(() => {
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
+  const submitPendingSave = useCallback(async (): Promise<void> => {
+    // Revision-backed edits from this owner extend its prior write. Await that
+    // write so its confirmed revision can authorize the queued typing. Legacy
+    // servers without revisions keep the existing overlap behavior.
+    while (activeSaveRef.current?.revision !== undefined) {
+      try {
+        await activeSaveRef.current.promise;
+      } catch (error) {
+        pendingSaveRef.current = null;
+        rollbackRef.current = null;
+        throw error;
+      }
     }
-
     const pendingSettings = pendingSaveRef.current;
     if (!pendingSettings) return;
-
     pendingSaveRef.current = null;
     if (
       !appSettingsQueueCanSave(
@@ -222,16 +252,27 @@ export function useGlobalSettings() {
         pendingSettings.confirmedWrite
       )
     ) {
-      // Another mounted owner already reported a conflict. Its refetch may
-      // have finished, so query invalidation alone cannot reject this queue.
       rollbackRef.current = null;
-      return;
+      throw new ApiError({ error: t.settings.autoSave.errorToast, code: 'CONFLICT' });
     }
-    // The settings surface owns none of `profileSettings` — library locations
-    // and first-run progress are written by their own screens — so the snapshot
-    // it read at mount must not travel with the edit.
-    mutate(appSettingsPatchExcludingProfiles(pendingSettings.settings));
-  }, [mutate, queryClient]);
+    const promise = mutateAsync({
+      patch: appSettingsPatchExcludingProfiles(pendingSettings.settings),
+      revision: pendingSettings.revision,
+    });
+    const active = { promise, revision: pendingSettings.revision };
+    activeSaveRef.current = active;
+    try {
+      await promise;
+    } finally {
+      if (activeSaveRef.current === active) activeSaveRef.current = null;
+    }
+  }, [mutateAsync, queryClient, t]);
+
+  const flushPendingSave = useCallback(() => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = null;
+    void submitPendingSave().catch(() => undefined);
+  }, [submitPendingSave]);
 
   useEffect(
     () => () => {
@@ -253,7 +294,7 @@ export function useGlobalSettings() {
       }
       const conflictEpoch = appSettingsConflictEpoch(queryClient);
       const cachedSettings = queryClient.getQueryData<AppSettings>(appSettingsKeys.current());
-      const confirmedWrite = cachedSettings ? confirmedCacheWrites.get(cachedSettings) : undefined;
+      const confirmedWrite = appSettingsConfirmedWrite(cachedSettings);
       if (
         pendingSaveRef.current &&
         (!appSettingsQueueCanSave(
@@ -271,19 +312,22 @@ export function useGlobalSettings() {
       // Both cache writes keep the "library defaults pending" flag the
       // normalizer drops: until this edit's PUT answers (after detection), the
       // library locations in the cache are still placeholders.
-      rollbackRef.current ??= keepLibraryDefaultsPending(cachedSettings, currentSettings);
+      rollbackRef.current ??= keepAppSettingsMetadata(cachedSettings, currentSettings);
       // Normalizing here is what keeps auto-save from ever sending an
       // out-of-range value: every clamp the schema declares is applied to the
       // local edit before it is queued.
       const nextSettings = normalizeAppSettings(updater(currentSettings));
-      const optimisticCache = queryClient.setQueryData(
+      const optimisticCache = queryClient.setQueryData<AppSettings>(
         appSettingsKeys.current(),
-        keepLibraryDefaultsPending(cachedSettings, nextSettings)
+        keepAppSettingsMetadata(cachedSettings, nextSettings)
       );
-      if (optimisticCache && confirmedWrite) {
-        confirmedCacheWrites.set(optimisticCache, confirmedWrite);
-      }
-      pendingSaveRef.current = { settings: nextSettings, conflictEpoch, confirmedWrite };
+      inheritAppSettingsWrite(cachedSettings, optimisticCache);
+      pendingSaveRef.current = {
+        settings: nextSettings,
+        revision: appSettingsRevision(cachedSettings),
+        conflictEpoch,
+        confirmedWrite,
+      };
       // Opens the echo window at the first keystroke, not at the PUT, so the
       // whole debounce is protected too.
       markAppSettingsLocalWrite();
@@ -323,12 +367,9 @@ export function useGlobalSettings() {
         clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
       }
-      const pendingSettings = pendingSaveRef.current;
-      if (!pendingSettings) return;
-      pendingSaveRef.current = null;
-      await mutateAsync(appSettingsPatchExcludingProfiles(pendingSettings.settings));
+      await submitPendingSave();
     },
-    [mutateAsync, saveSettings, t]
+    [saveSettings, submitPendingSave, t]
   );
 
   const updatePromptSettings = useCallback(

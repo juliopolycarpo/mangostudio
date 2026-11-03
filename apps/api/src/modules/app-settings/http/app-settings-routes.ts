@@ -1,6 +1,8 @@
 import {
   AppSettingsPutBodySchema,
+  AppSettingsPutHeadersSchema,
   type AppSettingsResponse,
+  AppSettingsResponseSchema,
 } from '@mangostudio/shared/app-settings';
 import {
   type ApiErrorResponse,
@@ -27,23 +29,28 @@ export function createAppSettingsRoutes(database: () => Kysely<Database> = getDb
 
       // Never waits for agent-CLI detection: this read gates the first screen.
       // Migrated from ESLint
-      .get('/app', async ({ user }): Promise<AppSettingsResponse> => {
-        return readAppSettings(database(), user?.id ?? '');
-      })
+      .get(
+        '/app',
+        { response: AppSettingsResponseSchema },
+        async ({ user }): Promise<AppSettingsResponse> => {
+          return readAppSettings(database(), user?.id ?? '');
+        }
+      )
 
       .put(
         '/app',
         {
           body: AppSettingsPutBodySchema,
-          response: { 409: ApiErrorResponseSchema },
+          headers: AppSettingsPutHeadersSchema,
+          response: { 200: AppSettingsResponseSchema, 409: ApiErrorResponseSchema },
         },
         // The body is a patch: what it omits keeps its stored value, and merging
         // happens against the row rather than against whatever the caller last
         // read. Normalization belongs after that merge, so it runs in the service.
         // Migrated from ESLint
-        async ({ body, user, set }): Promise<AppSettingsResponse | ApiErrorResponse> => {
+        async ({ body, headers, user, set }): Promise<AppSettingsResponse | ApiErrorResponse> => {
           try {
-            return await writeAppSettings(database(), user?.id ?? '', body);
+            return await writeAppSettings(database(), user?.id ?? '', body, headers['if-match']);
           } catch (error) {
             if (!(error instanceof AppSettingsConflict)) throw error;
             set.status = 409;

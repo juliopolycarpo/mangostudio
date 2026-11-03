@@ -16,6 +16,59 @@ export const appSettingsKeys = {
   save: () => [...appSettingsKeys.all, 'save'] as const,
 };
 
+export type AppSettingsCache = AppSettings &
+  Partial<Pick<AppSettingsResponse, 'revision' | 'libraryLocationDefaultsPending'>>;
+
+const confirmedCacheWrites = new WeakMap<object, number>();
+const latestSubmittedWrites = new WeakMap<QueryClient, number>();
+let writeSequence = 0;
+
+/** Identify the confirmed write an optimistic cache entry extends.
+ * @example const baseline = appSettingsConfirmedWrite(cached);
+ */
+export function appSettingsConfirmedWrite(settings: object | undefined): number | undefined {
+  return settings === undefined ? undefined : confirmedCacheWrites.get(settings);
+}
+
+/** Retain confirmed provenance when a local edit replaces a cache object.
+ * @example inheritAppSettingsWrite(cached, optimistic);
+ */
+export function inheritAppSettingsWrite(
+  source: object | undefined,
+  target: object | undefined
+): void {
+  const write = appSettingsConfirmedWrite(source);
+  if (write !== undefined && target !== undefined) confirmedCacheWrites.set(target, write);
+}
+
+/** Coordinate publication across every app-settings mutation owner sharing a cache.
+ * @example const write = beginAppSettingsWrite(queryClient); await write.publish(saved);
+ */
+export function beginAppSettingsWrite(queryClient: QueryClient) {
+  const order = ++writeSequence;
+  latestSubmittedWrites.set(queryClient, order);
+  const isLatest = () => latestSubmittedWrites.get(queryClient) === order;
+  return {
+    order,
+    isLatest,
+    async publish(settings: AppSettingsCache): Promise<AppSettingsCache | undefined> {
+      if (!isLatest()) return undefined;
+      await queryClient.cancelQueries({ queryKey: appSettingsKeys.current() }, { revert: false });
+      if (!isLatest()) return undefined;
+      const cached = queryClient.setQueryData<AppSettingsCache>(
+        appSettingsKeys.current(),
+        keepAppSettingsMetadata(settings, normalizeAppSettings(settings))
+      );
+      if (cached) confirmedCacheWrites.set(cached, order);
+      return cached;
+    },
+    async reject(error: unknown): Promise<void> {
+      if (isLatest()) await refreshAppSettingsAfterConflict(queryClient, error);
+      else if (isAppSettingsConflict(error)) recordAppSettingsConflict(queryClient, order);
+    },
+  };
+}
+
 export function appSettingsQueryOptions() {
   return queryOptions({
     queryKey: appSettingsKeys.current(),
@@ -23,15 +76,15 @@ export function appSettingsQueryOptions() {
     // Either shape: a read answers with the pending flag, while a write's
     // answer lands here normalized and without one (see
     // `libraryLocationDefaultsPending`).
-    queryFn: async (): Promise<AppSettings | AppSettingsResponse> => {
+    queryFn: async (): Promise<AppSettingsCache> => {
       const { data, error } = await client.api.settings.app.get();
       if (error) throw new ApiError(error.value);
       // The normalizer only knows stored preferences, so the flag describing
       // this answer is carried across it explicitly.
-      return {
-        ...normalizeAppSettings(data ?? DEFAULT_APP_SETTINGS),
-        libraryLocationDefaultsPending: libraryLocationDefaultsPending(data ?? undefined),
-      };
+      return keepAppSettingsMetadata(
+        data ?? undefined,
+        normalizeAppSettings(data ?? DEFAULT_APP_SETTINGS)
+      );
     },
   });
 }
@@ -51,20 +104,40 @@ export function libraryLocationDefaultsPending(settings: object | undefined): bo
 }
 
 /**
- * Carries the pending flag of `source` over to `settings`. For a client-side
+ * Carries response revision and pending-default metadata over to normalized settings. For a client-side
  * rewrite of the cache (an optimistic edit, its rollback) that normalized the
  * flag away: dropped, it would make placeholder library-location defaults read
  * as detected until the next refetch, and a location write would store them.
  *
  * @example
- * queryClient.setQueryData(key, keepLibraryDefaultsPending(cached, nextSettings));
+ * queryClient.setQueryData(key, keepAppSettingsMetadata(cached, nextSettings));
  */
-export function keepLibraryDefaultsPending(
+export function keepAppSettingsMetadata(
   source: object | undefined,
   settings: AppSettings
-): AppSettings | AppSettingsResponse {
-  if (!libraryLocationDefaultsPending(source)) return settings;
-  return { ...settings, libraryLocationDefaultsPending: true };
+): AppSettingsCache {
+  const revision = appSettingsRevision(source);
+  const pending =
+    source !== undefined &&
+    'libraryLocationDefaultsPending' in source &&
+    typeof source.libraryLocationDefaultsPending === 'boolean'
+      ? source.libraryLocationDefaultsPending
+      : undefined;
+  if (revision === undefined && pending === undefined) return settings;
+  return {
+    ...settings,
+    ...(revision === undefined ? {} : { revision }),
+    ...(pending === undefined ? {} : { libraryLocationDefaultsPending: pending }),
+  };
+}
+
+/** Read the response's opaque revision without treating a preference as metadata.
+ * @example await updateAppSettings(patch, appSettingsRevision(snapshot));
+ */
+export function appSettingsRevision(settings: object | undefined): string | undefined {
+  return settings !== undefined && 'revision' in settings && typeof settings.revision === 'string'
+    ? settings.revision
+    : undefined;
 }
 
 /**
@@ -76,7 +149,9 @@ export function keepLibraryDefaultsPending(
  * @example
  * const locations = libraryLocationsFor(await appSettingsForLocationWrite(queryClient));
  */
-export async function appSettingsForLocationWrite(queryClient: QueryClient): Promise<AppSettings> {
+export async function appSettingsForLocationWrite(
+  queryClient: QueryClient
+): Promise<AppSettingsCache> {
   const cached = queryClient.getQueryData<AppSettings | AppSettingsResponse>(
     appSettingsKeys.current()
   );
@@ -85,10 +160,11 @@ export async function appSettingsForLocationWrite(queryClient: QueryClient): Pro
     !libraryLocationDefaultsPending(cached) &&
     !queryClient.getQueryState(appSettingsKeys.current())?.isInvalidated
   ) {
-    return normalizeAppSettings(cached);
+    return keepAppSettingsMetadata(cached, normalizeAppSettings(cached));
   }
   const fetched = await queryClient.fetchQuery({ ...appSettingsQueryOptions(), staleTime: 0 });
-  if (!libraryLocationDefaultsPending(fetched)) return normalizeAppSettings(fetched);
+  if (!libraryLocationDefaultsPending(fetched))
+    return keepAppSettingsMetadata(fetched, normalizeAppSettings(fetched));
   throw new Error(
     'expected app settings with detected library-location defaults | received: libraryLocationDefaultsPending: true (the hub is still detecting installed agent CLIs)'
   );
@@ -185,8 +261,8 @@ export function isAppSettingsConflict(error: unknown): boolean {
  * Re-read a rejected baseline before an updater constructs its next patch.
  * @example const settings = await appSettingsForWrite(queryClient);
  */
-export async function appSettingsForWrite(queryClient: QueryClient): Promise<AppSettings> {
-  const cached = queryClient.getQueryData<AppSettings>(appSettingsKeys.current());
+export async function appSettingsForWrite(queryClient: QueryClient): Promise<AppSettingsCache> {
+  const cached = queryClient.getQueryData<AppSettingsCache>(appSettingsKeys.current());
   if (
     cached !== undefined &&
     !queryClient.getQueryState(appSettingsKeys.current())?.isInvalidated

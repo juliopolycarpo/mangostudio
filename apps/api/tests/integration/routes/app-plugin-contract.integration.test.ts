@@ -86,6 +86,32 @@ function routeInventory(document: OpenApiDocument): Record<string, string[]> {
 // asserted structurally, and scripts/test-build.ts for where it is exercised
 // for real.
 describe('CORS policy', () => {
+  it('permits the revision precondition header for cross-origin settings saves', async () => {
+    const response = await app.handle(
+      new Request('http://localhost/api/settings/app', {
+        method: 'OPTIONS',
+        headers: {
+          Origin: SPLIT_DEPLOYMENT_TEST_ORIGIN,
+          'Access-Control-Request-Method': 'PUT',
+          'Access-Control-Request-Headers': 'content-type,if-match',
+        },
+      })
+    );
+    expect(response.headers.get('access-control-allow-origin')).toBe(SPLIT_DEPLOYMENT_TEST_ORIGIN);
+    expect(
+      response.headers
+        .get('access-control-allow-methods')
+        ?.split(',')
+        .map((method) => method.trim().toUpperCase())
+    ).toContain('PUT');
+    expect(
+      response.headers
+        .get('access-control-allow-headers')
+        ?.split(',')
+        .map((header) => header.trim().toLowerCase())
+    ).toContain('if-match');
+  });
+
   it('grants a configured origin credentialed access with the configured verbs', async () => {
     const response = await app.handle(
       new Request('http://localhost/api/health', {
@@ -104,7 +130,7 @@ describe('CORS policy', () => {
       'GET, POST, PUT, DELETE, OPTIONS'
     );
     expect(response.headers.get('access-control-allow-headers')).toBe(
-      'Content-Type, Authorization, x-api-key'
+      'Content-Type, Authorization, x-api-key, If-Match'
     );
     expect(response.headers.get('vary')).toContain('Origin');
   });

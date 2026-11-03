@@ -2,11 +2,7 @@
  * Hooks: skills settings list, per-skill toggle, and source opt-in toggle.
  */
 
-import {
-  libraryLocationsFor,
-  libraryLocationsPatch,
-  normalizeAppSettings,
-} from '@mangostudio/shared/app-settings';
+import { libraryLocationsFor, libraryLocationsPatch } from '@mangostudio/shared/app-settings';
 import type { LibraryLocationId } from '@mangostudio/shared/library';
 import type { SkillDescriptor, SkillListResponse } from '@mangostudio/shared/skills';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -15,8 +11,8 @@ import { invalidateChatCapabilities } from '@/features/chat/hooks/capability-inv
 import { updateAppSettings } from '@/features/settings/app/api';
 import {
   appSettingsForLocationWrite,
-  appSettingsKeys,
-  refreshAppSettingsAfterConflict,
+  appSettingsRevision,
+  beginAppSettingsWrite,
 } from '@/features/settings/app/queries';
 
 import { rescanLibrary, updateSkillSetting } from '../api';
@@ -83,7 +79,8 @@ export function useToggleSkillSource() {
     mutationFn: async ({ source, enabled }: { source: SkillSourceKey; enabled: boolean }) => {
       // Never the pending placeholder: every location in the map below
       // travels as an explicit value.
-      const locations = libraryLocationsFor(await appSettingsForLocationWrite(queryClient));
+      const snapshot = await appSettingsForLocationWrite(queryClient);
+      const locations = libraryLocationsFor(snapshot);
 
       // Only the locations travel — see `libraryLocationsPatch`.
       return updateAppSettings(
@@ -91,12 +88,14 @@ export function useToggleSkillSource() {
           ...locations,
           // Both sources are home directories; the workspace scope is untouched.
           home: { ...locations.home, [LOCATION_BY_SOURCE[source]]: enabled },
-        })
+        }),
+        appSettingsRevision(snapshot)
       );
     },
-    onError: (error) => refreshAppSettingsAfterConflict(queryClient, error),
-    onSuccess: async (savedSettings) => {
-      queryClient.setQueryData(appSettingsKeys.current(), normalizeAppSettings(savedSettings));
+    onMutate: () => ({ write: beginAppSettingsWrite(queryClient) }),
+    onError: (error, _variables, context) => context?.write.reject(error),
+    onSuccess: async (savedSettings, _variables, context) => {
+      await context.write.publish(savedSettings);
       await queryClient.invalidateQueries({ queryKey: skillSettingsKeys.all });
     },
   });

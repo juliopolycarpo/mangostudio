@@ -161,7 +161,7 @@ export const AppSettingsSchema = Type.Object({
 });
 
 /**
- * What `GET` and `PUT /api/settings/app` answer: the settings plus whether the
+ * What `GET` and `PUT /api/settings/app` answer: the settings, their opaque stored revision, and whether
  * library-location defaults in them are real yet.
  *
  * Which locations default to on is detected from the agent CLIs installed on
@@ -173,12 +173,14 @@ export const AppSettingsSchema = Type.Object({
  * publishes an `app` settings invalidation once detection lands. A `PUT`
  * always waits for detection, so its answer is never pending.
  *
- * Kept out of `AppSettingsSchema` on purpose: the flag describes this answer,
- * not a stored preference, so it must never reach a PUT body or the row.
+ * Response metadata stays out of `AppSettingsSchema`: the flag and revision
+ * describe this answer, not stored preferences, and never belong in a PUT body.
  */
 export const AppSettingsResponseSchema = Type.Object({
   ...AppSettingsSchema.properties,
   libraryLocationDefaultsPending: Type.Boolean(),
+  /** Opaque entity tag for the stored snapshot; send unchanged as If-Match. */
+  revision: Type.String({ minLength: 1 }),
 });
 
 /**
@@ -211,6 +213,11 @@ export const AppSettingsPutBodySchema = Type.Partial(
   })
 );
 
+/** Optional precondition for a settings patch built from a prior response. */
+export const AppSettingsPutHeadersSchema = Type.Object({
+  'if-match': Type.Optional(Type.String()),
+});
+
 export type ImageQuality = Static<typeof ImageQualitySchema>;
 export type DiffPreviewMode = Static<typeof DiffPreviewModeSchema>;
 export type ChatDisplaySettings = Static<typeof ChatDisplaySettingsSchema>;
@@ -226,4 +233,5 @@ export type GitSettings = Static<typeof GitSettingsSchema>;
 export type ExternalApiSettings = Static<typeof ExternalApiSettingsSchema>;
 export type AppSettings = Static<typeof AppSettingsSchema>;
 export type AppSettingsResponse = Static<typeof AppSettingsResponseSchema>;
+export type AppSettingsPutHeaders = Static<typeof AppSettingsPutHeadersSchema>;
 export type AppSettingsPutBody = Static<typeof AppSettingsPutBodySchema>;

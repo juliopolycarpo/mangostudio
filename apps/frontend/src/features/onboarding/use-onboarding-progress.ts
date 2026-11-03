@@ -9,11 +9,7 @@
  * // Usage: const { state, update } = useOnboardingProgress();
  */
 
-import {
-  normalizeAppSettings,
-  onboardingFor,
-  onboardingPatch,
-} from '@mangostudio/shared/app-settings';
+import { onboardingFor, onboardingPatch } from '@mangostudio/shared/app-settings';
 import type { OnboardingState } from '@mangostudio/shared/onboarding';
 import { DEFAULT_ONBOARDING_STATE } from '@mangostudio/shared/onboarding';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -23,9 +19,9 @@ import { updateAppSettings } from '@/features/settings/app/api';
 import { markAppSettingsLocalWrite } from '@/features/settings/app/local-write-window';
 import {
   appSettingsForWrite,
-  appSettingsKeys,
   appSettingsQueryOptions,
-  refreshAppSettingsAfterConflict,
+  appSettingsRevision,
+  beginAppSettingsWrite,
 } from '@/features/settings/app/queries';
 
 export interface OnboardingProgress {
@@ -44,14 +40,21 @@ export function useOnboardingProgress(): OnboardingProgress {
   const settings = useQuery(appSettingsQueryOptions());
 
   const save = useMutation({
-    mutationFn: (next: OnboardingState | null) => updateAppSettings(onboardingPatch(next)),
-    onError: (error) => refreshAppSettingsAfterConflict(queryClient, error),
-    onSuccess: (saved) => {
+    mutationFn: ({
+      next,
+      revision,
+    }: {
+      next: OnboardingState | null;
+      revision: string | undefined;
+    }) => updateAppSettings(onboardingPatch(next), revision),
+    onMutate: () => ({ write: beginAppSettingsWrite(queryClient) }),
+    onError: (error, _variables, context) => context?.write.reject(error),
+    onSuccess: async (saved, _variables, context) => {
       // The write window has to open here as well as at the click: the server
       // publishes its own `app` invalidation for this write, and without the
       // window that echo would refetch over the value it just confirmed.
       markAppSettingsLocalWrite();
-      queryClient.setQueryData(appSettingsKeys.current(), normalizeAppSettings(saved));
+      await context.write.publish(saved);
     },
   });
 
@@ -65,17 +68,19 @@ export function useOnboardingProgress(): OnboardingProgress {
       // until the server answers, deliberately, because a record this one gates
       // navigation on must not be believed before it is stored. Callers that
       // can fire twice take `isSaving` and disable while one is open.
-      const current = onboardingFor(await appSettingsForWrite(queryClient));
+      const snapshot = await appSettingsForWrite(queryClient);
+      const current = onboardingFor(snapshot);
       markAppSettingsLocalWrite();
-      await mutateAsync(updater(current));
+      await mutateAsync({ next: updater(current), revision: appSettingsRevision(snapshot) });
     },
     [mutateAsync, queryClient]
   );
 
   const reset = useCallback(async () => {
     markAppSettingsLocalWrite();
-    await mutateAsync(null);
-  }, [mutateAsync]);
+    const snapshot = await appSettingsForWrite(queryClient);
+    await mutateAsync({ next: null, revision: appSettingsRevision(snapshot) });
+  }, [mutateAsync, queryClient]);
 
   return {
     state: settings.data ? onboardingFor(settings.data) : DEFAULT_ONBOARDING_STATE,
