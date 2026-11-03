@@ -9,6 +9,7 @@ import {
   buildRespondStreamRequest,
   createTestStreamDb,
   makeAgentProfile,
+  mockAgentSettings,
   mockProviderRegistry,
   mockVerifiedChatOwnership,
   parsePersistedParts,
@@ -88,7 +89,7 @@ async function mockRejectedToolPolicy(options: {
     execute: () => Promise.resolve({ ok: true }),
   };
 
-  await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+  mockAgentSettings(() => ({
     getAgentProfile: () =>
       Promise.resolve(
         makeAgentProfile({

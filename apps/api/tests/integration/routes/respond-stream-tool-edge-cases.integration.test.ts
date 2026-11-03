@@ -7,6 +7,7 @@ import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-
 import {
   createTestStreamDb,
   makeAgentProfile,
+  mockAgentSettings,
   parsePersistedParts,
   parseSseEvents,
   restoreAllMocks,
@@ -42,7 +43,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
         }),
     }));
 
-    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+    mockAgentSettings(() => ({
       getAgentProfile: (_db: unknown, _userId: string, _agentId: string) =>
         Promise.resolve(
           makeAgentProfile({
@@ -177,7 +178,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
         }),
     }));
 
-    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+    mockAgentSettings(() => ({
       getAgentProfile: (_db: unknown, _userId: string, _agentId: string) =>
         Promise.resolve(
           makeAgentProfile({
@@ -316,7 +317,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
         }),
     }));
 
-    await mock.module('../../../src/modules/agents/application/agent-settings-service', () => ({
+    mockAgentSettings(() => ({
       getAgentProfile: (_db: unknown, _userId: string, agentId: string) =>
         Promise.resolve(
           agentId === 'user:explorer'

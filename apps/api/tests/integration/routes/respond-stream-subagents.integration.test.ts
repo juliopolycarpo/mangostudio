@@ -47,7 +47,7 @@ describe('POST /respond/stream — subagent delegation', () => {
     const parentToolResults: string[] = [];
 
     await mockVerifiedChatOwnership();
-    await mockSubagentAgentSettings();
+    mockSubagentAgentSettings();
 
     await mockProviderRegistry(async function* streamDelegationLifecycle(req: AgentTurnRequest) {
       await Promise.resolve();
@@ -118,7 +118,7 @@ describe('POST /respond/stream — subagent delegation', () => {
     let summarizeTurnCount = 0;
 
     await mockVerifiedChatOwnership();
-    await mockSubagentAgentSettings({
+    mockSubagentAgentSettings({
       subagentOverrides: { toolNames: ['noop'], toolsEnabled: true },
     });
 
@@ -180,7 +180,7 @@ describe('POST /respond/stream — subagent delegation', () => {
     let callCount = 0;
 
     await mockVerifiedChatOwnership();
-    await mockSubagentAgentSettings();
+    mockSubagentAgentSettings();
 
     await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
       runSubagentTurn: () => {
@@ -260,7 +260,7 @@ describe('POST /respond/stream — subagent delegation', () => {
 
     await mockVerifiedChatOwnership();
     await mockMultiAgentAppSettings();
-    await mockSubagentAgentSettings();
+    mockSubagentAgentSettings();
 
     await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
       runSubagentTurn: (input: {
@@ -336,7 +336,7 @@ describe('POST /respond/stream — subagent delegation', () => {
 
     await mockVerifiedChatOwnership();
     await mockMultiAgentAppSettings();
-    await mockSubagentAgentSettings();
+    mockSubagentAgentSettings();
 
     await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
       runSubagentTurn: () => {
@@ -394,7 +394,7 @@ describe('POST /respond/stream — subagent delegation', () => {
 
     await mockVerifiedChatOwnership();
     await mockMultiAgentAppSettings({ timeoutMs: 25 });
-    await mockSubagentAgentSettings();
+    mockSubagentAgentSettings();
 
     await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
       runSubagentTurn: () => {
@@ -451,7 +451,7 @@ describe('POST /respond/stream — subagent delegation', () => {
 
     await mockVerifiedChatOwnership();
     await mockMultiAgentAppSettings({ traceVisibility: 'off', maxSubagentCalls: 10 });
-    await mockSubagentAgentSettings();
+    mockSubagentAgentSettings();
 
     await mock.module('../../../src/modules/generation/application/subagent-runner', () => ({
       runSubagentTurn: () =>
