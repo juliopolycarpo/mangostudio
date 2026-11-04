@@ -188,6 +188,99 @@ describe('approved distribution artifact', () => {
       );
     }
   });
+  test.each([
+    '2026-02-31T00:00:00Z',
+    '2026-11-04',
+    '2026-11-04T10:05:00+00:00',
+    '2026-11-04T10:05:00.000000Z',
+  ])('rejects noncanonical artifact time %j before correlating its producer', (value) => {
+    const current = evidence();
+    const parsed = Date.parse(value);
+    expect(Number.isFinite(parsed)).toBe(true);
+    const job = current.jobs[0];
+    if (!job) throw new Error('Expected producer timestamp fixture');
+    const aligned = {
+      ...current,
+      artifact: { ...current.artifact, created_at: new Date(parsed).toISOString() },
+      jobs: [
+        {
+          ...job,
+          started_at: new Date(parsed - 60_000).toISOString(),
+          completed_at: new Date(parsed + 60_000).toISOString(),
+        },
+      ],
+    };
+    expect(() => validateArtifactEvidence(approval, aligned)).not.toThrow();
+    expect(() =>
+      validateArtifactEvidence(approval, {
+        ...aligned,
+        artifact: { ...aligned.artifact, created_at: value },
+      })
+    ).toThrow('Distribution artifact created_at: expected UTC ISO timestamp');
+  });
+  for (const field of ['started_at', 'completed_at'] as const) {
+    test.each([
+      '2026-02-31T00:00:00Z',
+      '2026-11-04',
+      '2026-11-04T10:05:00+00:00',
+      '2026-11-04T10:05:00.000000Z',
+    ])(`rejects noncanonical producer ${field}=%j before correlation`, (value) => {
+      const current = evidence();
+      const parsed = Date.parse(value);
+      expect(Number.isFinite(parsed)).toBe(true);
+      const job = current.jobs[0];
+      if (!job) throw new Error('Expected producer timestamp fixture');
+      const started = field === 'started_at' ? parsed : parsed - 60_000;
+      const completed = field === 'completed_at' ? parsed : parsed + 60_000;
+      const aligned = {
+        ...current,
+        artifact: {
+          ...current.artifact,
+          created_at: new Date((started + completed) / 2).toISOString(),
+        },
+        jobs: [
+          {
+            ...job,
+            started_at: new Date(started).toISOString(),
+            completed_at: new Date(completed).toISOString(),
+          },
+        ],
+      };
+      expect(() => validateArtifactEvidence(approval, aligned)).not.toThrow();
+      expect(() =>
+        validateArtifactEvidence(approval, {
+          ...aligned,
+          jobs: [
+            {
+              ...job,
+              started_at: new Date(started).toISOString(),
+              completed_at: new Date(completed).toISOString(),
+              [field]: value,
+            },
+          ],
+        })
+      ).toThrow(`Distribution producer ${field}: expected UTC ISO timestamp`);
+    });
+  }
+  test('keeps unrelated job timestamps outside the approved producer boundary', () => {
+    const current = evidence();
+    const job = current.jobs[0];
+    if (!job) throw new Error('Expected producer fixture');
+    expect(() =>
+      validateArtifactEvidence(approval, {
+        ...current,
+        jobs: [
+          ...current.jobs,
+          {
+            ...job,
+            run_attempt: 3,
+            started_at: 'not a timestamp',
+            completed_at: 'not a timestamp',
+          },
+        ],
+      })
+    ).not.toThrow();
+  });
   test('accepts only one flat bundle member', () => {
     expect(distributionBundleMember('npm.tar.gz\n')).toBe('npm.tar.gz');
     expect(distributionBundleMember('linux-x64.tar\n')).toBe('linux-x64.tar');

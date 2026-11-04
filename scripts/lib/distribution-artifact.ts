@@ -1,3 +1,5 @@
+import { parseGitHubTimestamp } from './github-timestamp';
+
 /** Frozen identity supplied by the source-selection job. */
 export interface ApprovedArtifact {
   readonly repository: string;
@@ -114,17 +116,19 @@ export function validateArtifactEvidence(
   }
   // A successful final rerun may reuse earlier successful jobs. Require explicit
   // evidence from that earlier attempt; artifact metadata has no attempt field.
-  const created = Date.parse(artifact.created_at);
-  const producers = jobs.filter(
-    (job) =>
-      job.name === 'Distribution / Build immutable distribution' &&
-      job.run_id === approval.runId &&
-      job.run_attempt === approval.producerAttempt &&
-      job.conclusion === 'success' &&
-      Number.isFinite(created) &&
-      Date.parse(job.started_at) <= created &&
-      created <= Date.parse(job.completed_at)
-  );
+  const created = parseGitHubTimestamp(artifact.created_at, 'Distribution artifact created_at');
+  const producers = jobs.filter((job) => {
+    if (
+      job.name !== 'Distribution / Build immutable distribution' ||
+      job.run_id !== approval.runId ||
+      job.run_attempt !== approval.producerAttempt ||
+      job.conclusion !== 'success'
+    )
+      return false;
+    const started = parseGitHubTimestamp(job.started_at, 'Distribution producer started_at');
+    const completed = parseGitHubTimestamp(job.completed_at, 'Distribution producer completed_at');
+    return started <= created && created <= completed;
+  });
   if (producers.length !== 1) fail('successful producing jobs', producers.length, 1);
 }
 
