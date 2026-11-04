@@ -218,8 +218,11 @@ function logRunning(host: string, port: number, devFrontend: boolean): void {
  * file, and close the database.
  */
 async function gracefulStop(): Promise<void> {
-  // Drain HTTP writers before closing the DB and releasing capture ownership.
-  if (app.server) await app.stop();
+  // Stop admission immediately, but drain concurrently: active streams and
+  // WebSocket close handlers may depend on the session/runtime cleanup below.
+  // Observe a rejection now and report it after cleanup, without releasing
+  // data ownership before HTTP writers have settled.
+  const httpStopped = drainHttp();
   await staleTurnReconcileSweep?.stop();
   staleTurnReconcileSweep = null;
   stopTerminalIdleReaper?.();
@@ -243,10 +246,22 @@ async function gracefulStop(): Promise<void> {
   // After the connections close, so a scope withdrawn while they closed is still reaped.
   stopRuntimeScopeReaps?.();
   stopRuntimeScopeReaps = null;
+  const httpStopError = await httpStopped;
+  if (httpStopError) throw httpStopError;
   await removeState();
   await closeDb();
   await releaseCaptureLock?.();
   releaseCaptureLock = undefined;
+}
+
+/** Gate new traffic now; keep a drain failure observable after resource cleanup. */
+async function drainHttp(): Promise<Error | undefined> {
+  try {
+    if (app.server) await app.stop();
+    return undefined;
+  } catch (error) {
+    return error instanceof Error ? error : new Error('HTTP shutdown failed.', { cause: error });
+  }
 }
 
 function registerShutdown(): void {

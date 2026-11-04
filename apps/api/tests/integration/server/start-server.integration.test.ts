@@ -280,6 +280,53 @@ describe('startServer via __serve', () => {
 
   // Windows has no SIGTERM: a kill there terminates the process, so no handler runs.
   it.skipIf(process.platform === 'win32')(
+    'cleans sessions, terminals and runtimes before awaiting active HTTP drain',
+    async () => {
+      if (!fixture) throw new Error('Expected a managed process fixture.');
+      const preload = fileURLToPath(
+        new URL('../../support/fixtures/shutdown-dependent-stream.ts', import.meta.url)
+      );
+      const { pid, pidFile } = await startServing(fixture, preload);
+      if (!pid) throw new Error('Expected the fixture server PID.');
+      const response = await fetch(`http://127.0.0.1:${fixture.port}/__shutdown-stream`);
+      expect(response.status).toBe(200);
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('Expected a live shutdown-dependent response body.');
+      expect(new TextDecoder().decode((await reader.read()).value)).toContain('stream-ready');
+      const socket = new WebSocket(`ws://127.0.0.1:${fixture.port}/__shutdown-socket`);
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(
+            () => reject(new Error('Fixture WebSocket did not become ready.')),
+            5000
+          );
+          socket.onmessage = () => {
+            clearTimeout(timer);
+            resolve();
+          };
+          socket.onerror = () => {
+            clearTimeout(timer);
+            reject(new Error('Fixture WebSocket failed to connect.'));
+          };
+        });
+        expect(socket.readyState).toBe(WebSocket.OPEN);
+        process.kill(pid, 'SIGTERM');
+        expect(await fixture.waitForExit(15_000)).toBe(0);
+        const diagnostics = fixture.diagnostics();
+        expect(diagnostics).toContain('shutdown-fixture:external-reaped');
+        expect(diagnostics).toContain('shutdown-fixture:terminals-closed');
+        expect(diagnostics).toContain('shutdown-fixture:runtime-closed');
+        expect(existsSync(pidFile)).toBe(false);
+      } finally {
+        socket.close();
+        await reader.cancel().catch(() => undefined);
+        reader.releaseLock();
+      }
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  it.skipIf(process.platform === 'win32')(
     'exits cleanly and removes its state on SIGTERM',
     async () => {
       if (!fixture) throw new Error('Expected a managed process fixture.');
