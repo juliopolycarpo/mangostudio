@@ -517,6 +517,21 @@ describe('read-only canary owner planning before publication', () => {
     });
     expect(ancestry.calls).toEqual(['resolve:aaaaaaa']);
   });
+  test('accepts the SHA-stamped version produced from a prerelease root version', async () => {
+    const { manifest, ancestry } = await fixture();
+    const version = '1.2.3-rc.0-canary.aaaaaaa';
+    expect(
+      await planCanaryTagUpdates(
+        { ...manifest, packageVersion: version },
+        ownerMap(version),
+        ancestry
+      )
+    ).toEqual({
+      updates: [],
+      unchanged: NAMES,
+    });
+    expect(ancestry.calls).toEqual(['resolve:aaaaaaa']);
+  });
   test('a full source mismatch cannot be hidden behind a shared short owner prefix', async () => {
     const { manifest, ancestry } = await fixture();
     ancestry.commits.set('bbbbbbb', 'd'.repeat(40));

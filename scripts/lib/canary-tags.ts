@@ -272,14 +272,19 @@ export async function planCanaryTagUpdates(
 }
 
 function sourcePrefix(version: string, name: string): string {
-  const match =
-    /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-canary\.(g0\d{6}|[0-9a-f]{7})$/.exec(version);
-  if (!isValidSemver(version) || normalizeVersion(version) !== version || !match?.[1]) {
+  const match = /^(.+)-canary\.(g0\d{6}|[0-9a-f]{7})$/.exec(version);
+  if (
+    !isValidSemver(version) ||
+    normalizeVersion(version) !== version ||
+    !match?.[1] ||
+    !isValidSemver(match[1]) ||
+    normalizeVersion(match[1]) !== match[1]
+  ) {
     throw new Error(
       `Invalid canary owner for ${name}: expected SHA-stamped canary version; received ${JSON.stringify(version)}`
     );
   }
-  return match[1].startsWith('g') ? match[1].slice(1) : match[1];
+  return match[2].startsWith('g') ? match[2].slice(1) : match[2];
 }
 
 function requireCommand(result: NpmCommandResult, label: string, oidcWrite = false): void {
