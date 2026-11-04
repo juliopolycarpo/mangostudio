@@ -162,7 +162,14 @@ export function FirstChatStep({
     }
   };
 
+  const receipt = operation.data;
+  const busy = receipt?.state === 'accepted' || receipt?.state === 'running';
+  // Completion remains the result of this setup attempt, even while its
+  // transcript is loading. Only an unsuccessful/unknown attempt can be reset.
+  const canStartNewRequest =
+    !answered && receipt?.state !== 'completed' && ((receipt && !busy) || operation.isError);
   const newRequest = async () => {
+    if (!canStartNewRequest || sending.current) return;
     onWritingChange(true);
     try {
       await onChange((current) => ({
@@ -177,9 +184,6 @@ export function FirstChatStep({
       onWritingChange(false);
     }
   };
-  const receipt = operation.data;
-  const busy = receipt?.state === 'accepted' || receipt?.state === 'running';
-
   return (
     <StepFrame title={s.title} lead={s.lead} hint={s.hint}>
       {state.workdir ? (
@@ -276,7 +280,7 @@ export function FirstChatStep({
         </Callout>
       ) : null}
       {operation.isError ? <Callout tone="warning">{s.operationUnavailable}</Callout> : null}
-      {(receipt && !busy) || operation.isError ? (
+      {canStartNewRequest ? (
         <Button
           variant="secondary"
           data-testid="onboarding-new-operation"

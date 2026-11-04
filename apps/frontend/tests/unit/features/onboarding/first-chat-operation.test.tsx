@@ -115,6 +115,115 @@ function posts() {
 }
 
 describe('first-chat operation recovery', () => {
+  it('keeps a completed first chat satisfied without exposing a reset or repeat send', async () => {
+    factsWithOldReply();
+    scenario
+      .respondWithJson('GET', '/api/operations/persisted-turn', {
+        body: { ...existing('completed'), messageId: 'old-reply' },
+      })
+      .install();
+    const initial: OnboardingState = {
+      ...base,
+      requiresTurnReceipt: true,
+      turnOperation: { operationId: 'persisted-turn', prompt: 'Already answered' },
+    };
+    const writes: OnboardingState[] = [];
+    const view = render(
+      <FactsHarness
+        initial={initial}
+        save={(next) => {
+          writes.push(next);
+        }}
+      />
+    );
+    await waitFor(() => expect(screen.getByTestId('chat-fact')).toHaveTextContent(/^satisfied$/));
+    // Exercise the reported control if the old UI exposes it. A finished chat
+    // must survive every action the screen offers, without a progress write.
+    const reset = screen.queryByTestId('onboarding-new-operation');
+    if (reset) await userEvent.click(reset);
+    expect(screen.getByTestId('chat-fact')).toHaveTextContent(/^satisfied$/);
+    expect(screen.queryByTestId('onboarding-new-operation')).not.toBeInTheDocument();
+    expect(screen.getByTestId('onboarding-send-prompt')).toBeDisabled();
+    await userEvent.dblClick(screen.getByTestId('onboarding-send-prompt'));
+    expect(posts()).toHaveLength(0);
+    expect(writes).toHaveLength(0);
+    view.unmount();
+    render(
+      <FactsHarness
+        initial={normalizeOnboardingState(JSON.parse(JSON.stringify(initial)))}
+        save={(next) => {
+          writes.push(next);
+        }}
+      />
+    );
+    await waitFor(() => expect(screen.getByTestId('chat-fact')).toHaveTextContent(/^satisfied$/));
+    expect(screen.queryByTestId('onboarding-new-operation')).not.toBeInTheDocument();
+    expect(screen.getByTestId('onboarding-send-prompt')).toBeDisabled();
+    expect(writes).toHaveLength(0);
+  });
+  it('does not reset a completed receipt while the answer fact is still unavailable', async () => {
+    scenario
+      .respondWithJson('GET', '/api/operations/persisted-turn', { body: existing('completed') })
+      .install();
+    render(
+      <Harness
+        initial={{
+          ...base,
+          turnOperation: { operationId: 'persisted-turn', prompt: 'Already submitted' },
+        }}
+      />
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('onboarding-operation-state')).toHaveTextContent(
+        en.onboarding.chat.operationStates.completed
+      )
+    );
+    expect(screen.queryByTestId('onboarding-new-operation')).not.toBeInTheDocument();
+    expect(screen.getByTestId('onboarding-send-prompt')).toBeDisabled();
+    expect(posts()).toHaveLength(0);
+  });
+  it.each(['failed', 'unresolved'] as const)(
+    'retains the %s receipt when preparing a new request is interrupted, then permits explicit retry',
+    async (status) => {
+      scenario
+        .respondWithJson('GET', '/api/operations/persisted-turn', { body: existing(status) })
+        .install();
+      let attempts = 0;
+      let saved: OnboardingState | undefined;
+      render(
+        <Harness
+          initial={{
+            ...base,
+            requiresTurnReceipt: true,
+            turnOperation: { operationId: 'persisted-turn', prompt: 'Try again' },
+          }}
+          save={(next) => {
+            attempts++;
+            if (attempts === 1) return Promise.reject(new Error('interrupted progress write'));
+            saved = next;
+            return Promise.resolve();
+          }}
+        />
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId('onboarding-new-operation')).toBeInTheDocument()
+      );
+      await userEvent.click(screen.getByTestId('onboarding-new-operation'));
+      await waitFor(() => expect(screen.getByTestId('onboarding-chat-failed')).toBeInTheDocument());
+      expect(screen.getByTestId('onboarding-operation-state')).toHaveTextContent(
+        en.onboarding.chat.operationStates[status]
+      );
+      expect(screen.getByTestId('onboarding-send-prompt')).toBeDisabled();
+      expect(saved).toBeUndefined();
+      expect(posts()).toHaveLength(0);
+      await userEvent.click(screen.getByTestId('onboarding-new-operation'));
+      await waitFor(() => expect(screen.getByTestId('onboarding-send-prompt')).toBeEnabled());
+      expect(attempts).toBe(2);
+      expect(saved?.requiresTurnReceipt).toBe(true);
+      expect(saved?.turnOperation).toBeUndefined();
+      expect(posts()).toHaveLength(0);
+    }
+  );
   it.each(['failed', 'unresolved'] as const)(
     'keeps a new request unsatisfied after %s despite an older reply, including reload',
     async (status) => {
@@ -191,19 +300,27 @@ describe('first-chat operation recovery', () => {
       );
       await waitFor(() => expect(screen.getByTestId('chat-fact')).toHaveTextContent('unsatisfied'));
       expect(screen.getByTestId('onboarding-send-prompt')).toBeEnabled();
-      await userEvent.click(screen.getByTestId('onboarding-send-prompt'));
+      await userEvent.dblClick(screen.getByTestId('onboarding-send-prompt'));
       await waitFor(() => expect(saved.turnOperation?.operationId).toBeTruthy());
       expect(saved.turnOperation?.operationId).not.toBe('persisted-turn');
       const operationId = saved.turnOperation?.operationId;
       if (!operationId) throw new Error('new request identity was not persisted');
       await waitFor(() => expect(dispatched).toEqual([operationId]));
+      await waitFor(() =>
+        expect(screen.getByTestId('onboarding-operation-state')).toHaveTextContent(
+          en.onboarding.chat.operationStates.completed
+        )
+      );
+      expect(screen.queryByTestId('onboarding-new-operation')).not.toBeInTheDocument();
+      await userEvent.dblClick(screen.getByTestId('onboarding-send-prompt'));
+      expect(dispatched).toEqual([operationId]);
     }
   );
   it('keeps transcript completion for genuinely legacy records', async () => {
     factsWithOldReply();
     scenario.install();
     render(<FactsHarness initial={base} save={() => undefined} />);
-    await waitFor(() => expect(screen.getByTestId('chat-fact')).toHaveTextContent('satisfied'));
+    await waitFor(() => expect(screen.getByTestId('chat-fact')).toHaveTextContent(/^satisfied$/));
     expect(screen.getByTestId('onboarding-send-prompt')).toBeDisabled();
   });
   it('stores operation identity and exact prompt before any chat/turn request', async () => {
