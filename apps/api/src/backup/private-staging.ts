@@ -1,5 +1,7 @@
 import { chmod } from 'node:fs/promises';
 
+import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
+
 interface CommandResult {
   exitCode: number;
   stdout: string;
@@ -7,7 +9,12 @@ interface CommandResult {
 type Run = (argv: string[]) => Promise<CommandResult>;
 
 async function runCommand(argv: string[]): Promise<CommandResult> {
-  const child = Bun.spawn(argv, { stdout: 'pipe', stderr: 'ignore', timeout: 5000 });
+  const child = Bun.spawn(argv, {
+    stdout: 'pipe',
+    stderr: 'ignore',
+    timeout: 5000,
+    ...HIDDEN_WINDOW,
+  });
   const stdout = await new Response(child.stdout).text();
   return { exitCode: await child.exited, stdout };
 }
