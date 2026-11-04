@@ -48,11 +48,9 @@
 //!
 //! Nameable-but-broken entries are invalid instances with a stable reason,
 //! unnameable ones are `unreadableEntries` rows, and malformed arguments are
-//! `tool_argument` errors. One case is inherited from the baseline as is: a
-//! location directory that exists but cannot be listed (permission denied,
-//! or a file where a directory belongs) contributes no rows and writes a
-//! diagnostic line to stderr, because the contract has no location-level
-//! slot to report it in. Changing that is a contract decision, not a port.
+//! `tool_argument` errors. A location that cannot be listed emits a stable
+//! `locationDiagnostics` row and a stderr diagnostic. Missing paths remain
+//! ordinary absence; valid resources from other locations remain available.
 
 mod cache;
 mod collation;

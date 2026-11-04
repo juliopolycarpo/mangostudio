@@ -21,6 +21,7 @@ import { useCandidateLocations } from '../hooks/use-candidate-locations';
 import { useLibraryMatrix } from '../hooks/use-library-matrix';
 import { CoverageMatrix, MatrixLegend } from './CoverageMatrix';
 import { LibraryPageState } from './LibraryPageState';
+import { LocationDiagnostics } from './LocationDiagnostics';
 import { MatrixFilters } from './MatrixFilters';
 import { PropagationWizard } from './PropagationWizard';
 import { UnrecognisedEntries } from './UnrecognisedEntries';
@@ -142,9 +143,11 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
         environmentId={scope.environmentId}
       />
 
-      {matrix.resources.length === 0 ? (
+      <LocationDiagnostics diagnostics={matrix.locationDiagnostics} />
+
+      {matrix.resources.length === 0 && matrix.locationDiagnostics?.length === 0 ? (
         <LibraryPageState variant="empty" title={l.matrix.empty} hint={l.matrix.emptyHint} />
-      ) : matrix.visible.length === 0 ? (
+      ) : matrix.resources.length > 0 && matrix.visible.length === 0 ? (
         <LibraryPageState
           variant="empty"
           title={l.matrix.emptyFiltered}

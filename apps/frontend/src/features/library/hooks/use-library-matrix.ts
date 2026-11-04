@@ -8,6 +8,7 @@
  */
 
 import type {
+  LibraryLocationDiagnostic,
   LibraryLocationStatus,
   LibraryResource,
   LibraryTargetDescriptor,
@@ -34,6 +35,7 @@ import {
 } from '../queries';
 
 export interface LibraryMatrixState {
+  readonly locationDiagnostics: readonly LibraryLocationDiagnostic[] | undefined;
   readonly resources: readonly LibraryResource[];
   readonly unreadableEntries: readonly LibraryUnreadableEntry[];
   readonly visible: readonly LibraryResource[];
@@ -123,6 +125,7 @@ export function useLibraryMatrix(kind: ResourceKind, environmentId?: string): Li
 
   return {
     resources,
+    locationDiagnostics: resourcesQuery.data?.locationDiagnostics,
     unreadableEntries,
     visible,
     groups,

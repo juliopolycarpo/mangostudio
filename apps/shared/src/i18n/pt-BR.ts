@@ -2231,6 +2231,16 @@ export const messages = {
       'invalid-metadata': 'Os metadados não puderam ser interpretados.',
       'unsafe-name': 'O nome de um dos arquivos internos não pode ser representado com segurança.',
     },
+    scanDiagnostics: {
+      heading: 'Não foi possível verificar alguns locais da biblioteca',
+      legacy:
+        'Este runtime não informa falhas de verificação dos locais. Atualize-o para distinguir locais vazios de falhas.',
+      reason: {
+        'permission-denied': 'Permissão negada. Verifique o acesso a este local.',
+        'not-directory': 'Este local é um arquivo, mas um diretório é necessário.',
+        unreadable: 'Não foi possível ler este local. Verifique o caminho e tente novamente.',
+      },
+    },
     unreadable: {
       heading: 'Entradas não reconhecidas',
       rule: 'Os nomes só podem usar letras, números, "_", "-" e ".", sem espaços ou outros caracteres.',

@@ -17,6 +17,7 @@ import {
   LibraryBackupSetSchema,
   LibraryEnvironmentIdSchema,
   LibraryInstanceSchema,
+  LibraryLocationDiagnosticSchema,
   LibraryLocationIdSchema,
   LibraryLocationStatusSchema,
   LibraryResourceRefSchema,
@@ -74,6 +75,7 @@ export type RuntimeLibraryScanEntry = Static<typeof RuntimeLibraryScanEntrySchem
 
 export const RuntimeLibraryScanResultSchema = Type.Object({
   entries: ReadonlyArraySchema(RuntimeLibraryScanEntrySchema),
+  locationDiagnostics: Type.Optional(ReadonlyArraySchema(LibraryLocationDiagnosticSchema)),
   unreadableEntries: ReadonlyArraySchema(LibraryUnreadableEntrySchema),
 });
 export type RuntimeLibraryScanResult = Static<typeof RuntimeLibraryScanResultSchema>;

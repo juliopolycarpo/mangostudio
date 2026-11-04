@@ -409,8 +409,12 @@ async fn corrupt_and_oversized_inputs_are_reported_not_dropped() {
 /// existing location that cannot be listed contributes no rows but always
 /// emits a diagnostic naming it.
 #[tokio::test]
-async fn an_unlistable_location_is_empty_but_diagnosed() {
+async fn an_unlistable_location_preserves_other_results_and_is_diagnosed() {
     let home = scratch_dir("library-unlistable");
+    write(
+        &home.join(".claude/skills/good/SKILL.md"),
+        b"---\nname: good\n---\nGood skill\n",
+    );
     write(
         &home.join(".claude/commands"),
         b"a file where a directory belongs",
@@ -419,7 +423,10 @@ async fn an_unlistable_location_is_empty_but_diagnosed() {
     let scanned = harness
         .service
         .scan(
-            scan_params(&[("home", "claude-commands")], None),
+            scan_params(
+                &[("home", "claude-commands"), ("home", "claude-skills")],
+                None,
+            ),
             CancellationToken::new(),
         )
         .await
@@ -430,6 +437,17 @@ async fn an_unlistable_location_is_empty_but_diagnosed() {
             .iter()
             .all(|entry| entry.instance.location_id != "claude-commands")
     );
+    assert!(
+        scanned
+            .entries
+            .iter()
+            .any(|entry| entry.resource.slug == "good")
+    );
+    assert_eq!(
+        scanned.location_diagnostics[0].location_id,
+        "claude-commands"
+    );
+    assert_eq!(scanned.location_diagnostics[0].reason, "not-directory");
     let warnings = harness.warnings.lock().unwrap();
     assert!(
         warnings

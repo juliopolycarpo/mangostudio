@@ -195,10 +195,10 @@ mod memory_fs {
                 Node::Dir(names) => (names, 0),
                 Node::Generated { count, .. } => (Vec::new(), count),
                 _ => {
-                    return Err(Error::other(format!(
-                        "MemFs: {} is not a directory",
-                        path.display()
-                    )));
+                    return Err(Error::new(
+                        ErrorKind::NotADirectory,
+                        format!("MemFs: {} is not a directory", path.display()),
+                    ));
                 }
             };
             Ok(Box::new(Entries {
@@ -497,6 +497,32 @@ mod location_scan {
     }
 
     #[test]
+    fn location_failures_are_distinct_from_empty_and_missing() {
+        let cases = [
+            (MemFs::default().dir("/lib/skills", &[]), None),
+            (MemFs::default(), None),
+            (
+                MemFs::default()
+                    .dir("/lib/skills", &[])
+                    .unlistable("/lib/skills"),
+                Some("permission-denied"),
+            ),
+            (
+                MemFs::default().file("/lib/skills", b"file"),
+                Some("not-directory"),
+            ),
+        ];
+        for (fs, expected) in cases {
+            let warnings = Mutex::new(Vec::new());
+            let scanned = scan(&fs, &warnings);
+            assert_eq!(
+                scanned.location_diagnostics.first().map(|d| d.reason),
+                expected
+            );
+        }
+    }
+
+    #[test]
     fn a_location_listing_that_fails_part_way_is_skipped_with_a_diagnostic() {
         let fs = MemFs::default()
             .dir("/lib/skills", &["alpha", "beta"])
@@ -505,6 +531,7 @@ mod location_scan {
             .failing_at("/lib/skills", 1);
         let warnings = Mutex::new(Vec::new());
         let scanned = scan(&fs, &warnings);
+        assert_eq!(scanned.location_diagnostics[0].reason, "unreadable");
         assert_eq!(
             (scanned.entries.len(), warnings.lock().unwrap().len()),
             (0, 1),

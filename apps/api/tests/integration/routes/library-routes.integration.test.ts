@@ -130,6 +130,28 @@ function createService(
 }
 
 describe('library routes', () => {
+  it('preserves valid rows and filters location diagnostics by scan scope only', async () => {
+    const { service } = createService();
+    service.discover = () =>
+      Promise.resolve({
+        resources: [skillResource],
+        unreadableEntries: [],
+        locationDiagnostics: [
+          { locationId: 'mango-skills', reason: 'permission-denied' },
+          { locationId: 'claude-commands', reason: 'not-directory' },
+        ],
+      });
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
+    restoreAuth = restore;
+    const response = await app.handle(new Request('http://localhost/library/resources?kind=skill'));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      resources: [skillResource],
+      unreadableEntries: [],
+      locationDiagnostics: [{ locationId: 'mango-skills', reason: 'permission-denied' }],
+    });
+  });
+
   it('filters resources by kind, target, location, and coverage state', async () => {
     const { service } = createService();
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));

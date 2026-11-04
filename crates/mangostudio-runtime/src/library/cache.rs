@@ -383,6 +383,7 @@ mod tests {
 
     fn scan_of(slug: &str) -> ScanResult {
         ScanResult {
+            location_diagnostics: Vec::new(),
             entries: Vec::new(),
             unreadable_entries: vec![super::super::types::UnreadableEntry {
                 location_id: "mango-skills",

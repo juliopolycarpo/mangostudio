@@ -6,9 +6,7 @@
 //! a nameable entry that cannot be hashed becomes an invalid instance with a
 //! stable `invalidReason` (never a dropped row), an unnameable one becomes an
 //! `unreadableEntries` row, and only an absent path contributes nothing. The
-//! one silent case is inherited unchanged: a location directory that exists
-//! but cannot be listed contributes no rows and a diagnostic line, because
-//! the contract has no location-level slot to carry it (see `mod.rs`).
+//! location failure has its own diagnostic channel, without dropping other locations.
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
@@ -27,7 +25,10 @@ use super::hash::{
 };
 use super::js::text_decoder_decode;
 use super::names::{file_slug, is_valid_kind_slug, is_valid_resource_slug, matches_format};
-use super::types::{Instance, InvalidReason, ResourceRef, ScanEntry, ScanResult, UnreadableEntry};
+use super::types::{
+    Instance, InvalidReason, LocationDiagnostic, ResourceRef, ScanEntry, ScanResult,
+    UnreadableEntry,
+};
 use crate::probing::detection::path_env::normalize_path;
 use crate::probing::locations::{LocationDefinition, LocationLayout};
 
@@ -145,7 +146,18 @@ pub(crate) fn read_location_instances(
                     location.id
                 ));
             }
-            return Ok(ScanResult::default());
+            let mut result = ScanResult::default();
+            if error.kind() != std::io::ErrorKind::NotFound {
+                result.location_diagnostics.push(LocationDiagnostic {
+                    location_id: location.id,
+                    reason: match error.kind() {
+                        std::io::ErrorKind::PermissionDenied => "permission-denied",
+                        std::io::ErrorKind::NotADirectory => "not-directory",
+                        _ => "unreadable",
+                    },
+                });
+            }
+            return Ok(result);
         }
     };
 

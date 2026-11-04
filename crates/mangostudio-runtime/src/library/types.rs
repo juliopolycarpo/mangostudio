@@ -76,6 +76,7 @@ pub(crate) struct UnreadableEntry {
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ScanResult {
+    pub location_diagnostics: Vec<LocationDiagnostic>,
     pub entries: Vec<ScanEntry>,
     pub unreadable_entries: Vec<UnreadableEntry>,
 }
@@ -83,6 +84,7 @@ pub(crate) struct ScanResult {
 impl ScanResult {
     pub(crate) fn instance(entry: ScanEntry) -> Self {
         Self {
+            location_diagnostics: Vec::new(),
             entries: vec![entry],
             unreadable_entries: Vec::new(),
         }
@@ -90,12 +92,14 @@ impl ScanResult {
 
     pub(crate) fn unreadable(entry: UnreadableEntry) -> Self {
         Self {
+            location_diagnostics: Vec::new(),
             entries: Vec::new(),
             unreadable_entries: vec![entry],
         }
     }
 
     pub(crate) fn extend(&mut self, other: Self) {
+        self.location_diagnostics.extend(other.location_diagnostics);
         self.entries.extend(other.entries);
         self.unreadable_entries.extend(other.unreadable_entries);
     }
@@ -153,4 +157,12 @@ impl ReadTreeResult {
             reason: Some(reason),
         }
     }
+}
+
+/// Stable location-level failure, separate from entry validation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LocationDiagnostic {
+    pub location_id: &'static str,
+    pub reason: &'static str,
 }

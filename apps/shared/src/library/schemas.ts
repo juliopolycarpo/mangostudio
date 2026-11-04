@@ -194,8 +194,20 @@ export const LibraryUnreadableEntrySchema = Type.Object({
  * channel outside `resources` rather than relaxing the ref shape, so a slug is always safe to use
  * as a path segment everywhere one becomes a filesystem path.
  */
+/** A location failed before its entries could be read. Absence means a legacy producer. */
+export const LibraryLocationDiagnosticSchema = Type.Object({
+  locationId: LibraryLocationIdSchema,
+  reason: Type.Union([
+    Type.Literal('permission-denied'),
+    Type.Literal('not-directory'),
+    Type.Literal('unreadable'),
+  ]),
+});
+export type LibraryLocationDiagnostic = Static<typeof LibraryLocationDiagnosticSchema>;
+
 export const LibraryScanResultSchema = Type.Object({
   resources: LibraryResourceListSchema,
+  locationDiagnostics: Type.Optional(Type.Array(LibraryLocationDiagnosticSchema)),
   unreadableEntries: Type.Array(LibraryUnreadableEntrySchema),
 });
 
