@@ -161,7 +161,7 @@ function setArchiveBytes(registry: FakeRegistry, name: string, bytes: Uint8Array
         integrity: `sha512-${createHash('sha512').update(bytes).digest('base64')}`,
         tarball: url,
         attestations: {
-          url: `${REGISTRY}/-/npm/v1/attestations/${name.replace('/', '%2f')}@${VERSION}`,
+          url: `${REGISTRY}/-/npm/v1/attestations/${name.replaceAll('/', '%2f')}@${VERSION}`,
           provenance: { predicateType: 'https://slsa.dev/provenance/v1' },
         },
       },

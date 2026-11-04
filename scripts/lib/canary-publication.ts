@@ -218,7 +218,7 @@ function validatePackageMetadata(
   }
   const attestations = object(dist.attestations, `${name}@${version} attestations`);
   const provenance = object(attestations.provenance, `${name}@${version} provenance`);
-  const provenanceUrl = `${REGISTRY}/-/npm/v1/attestations/${name.replace('/', '%2f')}@${version}`;
+  const provenanceUrl = `${REGISTRY}/-/npm/v1/attestations/${name.replaceAll('/', '%2f')}@${version}`;
   if (attestations.url !== provenanceUrl || provenance.predicateType !== PROVENANCE_PREDICATE) {
     throw new Error(
       `Invalid provenance metadata for ${name}@${version}: ${JSON.stringify(attestations)}; expected ${provenanceUrl} with ${PROVENANCE_PREDICATE}`
