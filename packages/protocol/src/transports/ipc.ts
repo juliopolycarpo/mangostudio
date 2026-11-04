@@ -29,6 +29,8 @@ const FIRST_HELLO_TIMEOUT_MS = 15_000;
 const CLOSE_GRACE_MS = 2000;
 
 const WINDOWS = process.platform === 'win32';
+/** Leave one byte for NUL in the native sockaddr_un pathname. */
+const UNIX_SOCKET_PATH_MAX_BYTES = process.platform === 'linux' ? 107 : 103;
 
 export interface IpcOptions {
   /** Largest line the decoder accepts; the 16 MiB default of §11 when absent. */
@@ -93,6 +95,14 @@ export async function listenIpc(
   onConnection: (port: Port) => void,
   options: IpcOptions = {}
 ): Promise<IpcServer> {
+  if (!WINDOWS && Buffer.byteLength(path) > UNIX_SOCKET_PATH_MAX_BYTES) {
+    throw Object.assign(
+      new Error(
+        `${path}: public Unix socket pathname has ${Buffer.byteLength(path)} bytes; expected at most ${UNIX_SOCKET_PATH_MAX_BYTES}; no endpoint published`
+      ),
+      { code: 'ENAMETOOLONG', path, syscall: 'listen' }
+    );
+  }
   const sockets = new Set<Socket>();
   const ports = new Set<Port>();
   const server = createServer((socket) => {
@@ -180,7 +190,7 @@ async function createStagingDirectory(path: string): Promise<string> {
   const parent = dirname(path);
   const device = (await stat(parent)).dev;
   // Linux sun_path is 108 bytes including NUL; Darwin/BSD use 104.
-  const maximum = process.platform === 'linux' ? 107 : 103;
+  const maximum = UNIX_SOCKET_PATH_MAX_BYTES;
   let candidate = parent;
   let lastError: Error | undefined;
   for (;;) {

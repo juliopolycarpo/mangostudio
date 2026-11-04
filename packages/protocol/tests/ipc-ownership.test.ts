@@ -251,3 +251,25 @@ test.skipIf(!unix || Bun.which('node') === null)(
     }
   }
 );
+
+test.skipIf(!unix)(
+  'public pathname bounds count UTF-8 bytes before any endpoint is published',
+  async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'ipc-public-bytes-'));
+    const maximum = process.platform === 'linux' ? 107 : 103;
+    const path = join(
+      directory,
+      'é'.repeat(Math.floor((maximum - Buffer.byteLength(directory) - 1) / 2) + 1)
+    );
+    expect(path.length).toBeLessThanOrEqual(maximum);
+    expect(Buffer.byteLength(path)).toBeGreaterThan(maximum);
+    try {
+      await expect(listenIpc(path, () => undefined)).rejects.toMatchObject({
+        code: 'ENAMETOOLONG',
+      });
+      await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+);

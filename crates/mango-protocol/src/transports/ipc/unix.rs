@@ -178,12 +178,15 @@ impl IpcListener {
 ///
 /// # Errors
 ///
-/// Binding, restricting or no-replace publication errors; `AlreadyExists` for a
+/// `InvalidInput` for an invalid native socket pathname, before staging;
+/// binding, restricting or no-replace publication errors; `AlreadyExists` for a
 /// non-socket or competing publisher; `AddrInUse` for an existing socket path.
 /// Filesystems that cannot hard-link sockets fail closed rather than rename over
 /// a possibly live endpoint. Externally coordinate old-path cleanup before reuse.
 pub async fn listen_ipc(path: impl AsRef<Path>) -> io::Result<IpcListener> {
     let path = path.as_ref().to_path_buf();
+    // A short staged bind must not hide an undialable public pathname.
+    std::os::unix::net::SocketAddr::from_pathname(&path)?;
     refuse_occupied_socket(&path).await?;
 
     let staging = staging_path(&path);
@@ -907,6 +910,56 @@ mod tests {
 
         dial.await.expect("the dial task runs");
         first.close().await;
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[tokio::test]
+    async fn public_path_at_native_socket_limit_is_dialable() {
+        let address = Address::new();
+        let limit = if cfg!(target_os = "linux") { 107 } else { 103 };
+        let path = address
+            .0
+            .join("x".repeat(limit - address.0.as_os_str().len() - 1));
+        assert_eq!(path.as_os_str().len(), limit);
+        drop(
+            std::os::unix::net::UnixListener::bind(&path)
+                .expect("the exact public boundary is natively bindable"),
+        );
+        std::fs::remove_file(&path)
+            .expect("the exclusive fixture owns the dropped native listener");
+        let listener = listen_ipc(&path)
+            .await
+            .expect("valid public boundary must remain available");
+        let connected = connect_ipc(&path, &ConnectDeadline::default())
+            .await
+            .expect("the published boundary must be dialable");
+        drop(connected);
+        listener.close().await;
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[tokio::test]
+    async fn public_path_above_native_socket_limit_is_not_published() {
+        let address = Address::new();
+        let limit = if cfg!(target_os = "linux") { 107 } else { 103 };
+        let path = address
+            .0
+            .join("x".repeat(limit - address.0.as_os_str().len()));
+        assert_eq!(path.as_os_str().len(), limit + 1);
+        match listen_ipc(&path).await {
+            Ok(listener) => {
+                let dial_error = tokio::net::UnixStream::connect(&path)
+                    .await
+                    .expect_err("native dial must reject this oversized address");
+                listener.close().await;
+                panic!("listen_ipc published an undialable public pathname: {dial_error}");
+            }
+            Err(error) => assert_eq!(error.kind(), io::ErrorKind::InvalidInput),
+        }
+        assert!(
+            !path.exists(),
+            "rejection must not publish an unreachable endpoint"
+        );
     }
 
     #[tokio::test]

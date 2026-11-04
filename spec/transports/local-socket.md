@@ -78,7 +78,11 @@ lifecycle behavior requires caller migration; it does not change protocol wire v
 The TypeScript SDK binds within a fresh `0700` directory on the destination filesystem and
 hard-links the socket to the public name without replacement. Staging may move to an ancestor
 directory so its pathname also fits the native Unix socket limit; when no suitable private
-staging location is available, publication fails closed. Node/libuv's automatic close unlink affects only its
+staging location is available, publication fails closed. Public pathnames are also validated before
+staging or publication: TypeScript enforces the UTF-8 byte ceiling (107 on Linux, 103 on other
+POSIX hosts), and Rust uses the native Unix socket address constructor. A shorter staged bind
+must never make an undialable public pathname appear available. Windows named pipes are exempt
+from these POSIX pathname checks. Node/libuv's automatic close unlink affects only its
 private bound name, so a late close cannot delete the public successor. Rust likewise publishes
 with a non-replacing hard link and never falls back to replacing rename. Private staging names
 are reserved for that SDK instance and must not be repurposed by the application.
