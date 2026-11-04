@@ -33,24 +33,3 @@ pub(crate) fn command(target: &str) -> &'static str {
     })[target]
         .as_str()
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn descriptor_matches_the_adopted_vendor_login_metadata() {
-        assert_eq!(
-            super::command("codex"),
-            mango_agent_codex::harness::CODEX_LOGIN_HINT
-        );
-        assert_eq!(
-            super::command("claude"),
-            mango_agent_claude::pinned::LOGIN_COMMAND
-        );
-        assert_eq!(
-            super::command("cursor"),
-            mango_agent_acp::builtin_profile("cursor")
-                .unwrap()
-                .login_text()
-        );
-    }
-}

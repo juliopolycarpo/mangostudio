@@ -165,6 +165,7 @@ fn the_guard_catches_every_dependency_and_type_escape() {
         }
     }
     assert!(!allowed("src/external_agents/supervisor/tests.rs"));
+    assert!(!allowed("src/terminal/login.rs"));
     assert!(!allowed("tests/new_sdk_fixture.rs"));
     assert!(!allowed("src/external_agents/adapter.rs"));
     assert!(allowed("src/external_agents/adapter/session.rs"));
