@@ -443,3 +443,19 @@ test.each([
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test.each([true, null, 'false', 0])(
+  'refuses explicitly truncated or malformed comparison marker %j',
+  (truncated) => {
+    const api = new FakeQualificationApi();
+    api.absent(43);
+    api.values.set(`compare/${'b'.repeat(40)}...${source.sourceSha}`, {
+      status: 'ahead',
+      base_commit: { sha: 'b'.repeat(40) },
+      merge_base_commit: { sha: 'b'.repeat(40) },
+      files: [{ filename: 'README.md', status: 'modified' }],
+      truncated,
+    });
+    expect(() => qualifyCanarySource(source, api)).toThrow('exact push range unproven');
+  }
+);

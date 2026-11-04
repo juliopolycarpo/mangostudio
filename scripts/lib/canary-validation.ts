@@ -179,6 +179,7 @@ function relevance(
     'push comparison'
   );
   if (
+    (comparison.truncated !== undefined && comparison.truncated !== false) ||
     !['ahead', 'identical'].includes(String(comparison.status)) ||
     object(comparison.base_commit, 'comparison base').sha !== source.pushBeforeSha ||
     object(comparison.merge_base_commit, 'comparison merge base').sha !== source.pushBeforeSha ||
