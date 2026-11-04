@@ -17,6 +17,7 @@ import type { CanaryTagAncestry } from '../lib/canary-tags';
 import type { DistributionManifest } from '../lib/distribution-manifest';
 import { MAIN_PACKAGE, NPM_PLATFORMS, platformPackageName } from '../lib/npm-pack';
 import type { NpmCommandResult } from '../lib/npm-publish';
+import { canaryReleaseVersion } from '../lib/release-version';
 import {
   CanaryAuditReadRunner,
   runAuditCanaryPublicationCli,
@@ -292,6 +293,16 @@ function missingPackages(registry: AuditRegistry, names: readonly string[]): voi
   for (const name of names) registry.versions.set(versionUrl(name), { status: 404, body: {} });
 }
 
+function producedCanaryVersion(rootVersion: string, source: string): string {
+  const directory = mkdtempSync(join(tmpdir(), 'fix-canary-publication-audit-producer-'));
+  try {
+    writeFileSync(join(directory, 'package.json'), JSON.stringify({ version: rootVersion }));
+    return canaryReleaseVersion(source, directory);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
 describe('fresh canary publication decisions', () => {
   test('only complete actual npm/archive and GitHub asset receipts allow selected-owner noop', async () => {
     const { manifest, expected, dependencies } = await fixture();
@@ -465,6 +476,36 @@ describe('fresh canary publication decisions', () => {
     ];
     expect((await auditCanaryPublication(manifest, expected, dependencies)).decision).toBe('noop');
     expect(ancestry.calls).toEqual([]);
+  });
+  test('producer prerelease canary roots are accepted in published history', async () => {
+    const { manifest, expected, github, dependencies } = await fixture();
+    const version = producedCanaryVersion('1.2.2-rc.0', OLD);
+    expect(version).toBe('1.2.2-rc.0-canary.bbbbbbb');
+    github.releases = [releaseRecord(`v${version}`, 18, OLD)];
+    github.tags.set(`v${version}`, { status: 200, body: OLD });
+    const audit = await auditCanaryPublication(manifest, expected, dependencies);
+    expect(audit.reason).toBe('already-complete');
+    expect(audit.receipts.publishedCanaries[0]?.version).toBe(version);
+  });
+  test('producer prerelease canary roots can unanimously supersede complete selected versions', async () => {
+    const { manifest, expected, registry, github, dependencies } = await fixture();
+    const version = producedCanaryVersion('1.2.4-rc.0', NEW);
+    expect(version).toBe('1.2.4-rc.0-canary.ccccccc');
+    owners(registry, version);
+    github.releases = [releaseRecord(TAG, 17, SOURCE), releaseRecord(`v${version}`, 18, NEW)];
+    github.tags.set(`v${version}`, { status: 200, body: NEW });
+    const audit = await auditCanaryPublication(manifest, expected, dependencies);
+    expect(audit.reason).toBe('superseded');
+    expect(audit.supersededBy).toEqual({ version, sourceSha: NEW });
+  });
+  test('valid whole SemVer does not excuse a noncanonical producer root', async () => {
+    const { manifest, expected, github, dependencies } = await fixture();
+    const tag = 'v1.2.3--canary.bbbbbbb';
+    github.releases = [releaseRecord(tag, 18, OLD)];
+    github.tags.set(tag, { status: 200, body: OLD });
+    await expect(auditCanaryPublication(manifest, expected, dependencies)).rejects.toThrow(
+      'expected canonical v<version>-canary.<sha7>'
+    );
   });
   test.each(['canary', 'v1.2.3-canary.bad', 'v1.2.3-canary.0000000'])(
     'published canary prefix %s must be canonical and source-proven',

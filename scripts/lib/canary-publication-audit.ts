@@ -294,13 +294,22 @@ async function resolveCanaryTag(
   allowAbsent = false
 ): Promise<string | null> {
   const version = tag.startsWith('v') ? tag.slice(1) : '';
-  const match = /-canary\.(g0\d{6}|[0-9a-f]{7})$/.exec(version);
-  if (!isValidSemver(version) || normalizeVersion(version) !== version || !match?.[1]) {
+  const match = /^(.+)-canary\.(g0\d{6}|[0-9a-f]{7})$/.exec(version);
+  const root = match?.[1];
+  const identifier = match?.[2];
+  if (
+    !isValidSemver(version) ||
+    normalizeVersion(version) !== version ||
+    !root ||
+    !isValidSemver(root) ||
+    normalizeVersion(root) !== root ||
+    !identifier
+  ) {
     throw new Error(
       `Invalid published canary tag ${JSON.stringify(tag)}: expected canonical v<version>-canary.<sha7>`
     );
   }
-  const prefix = match[1].startsWith('g') ? match[1].slice(1) : match[1];
+  const prefix = identifier.startsWith('g') ? identifier.slice(1) : identifier;
   const resolved = await github.resolveTag(tag);
   if (allowAbsent && resolved.status === 404) return null;
   if (
