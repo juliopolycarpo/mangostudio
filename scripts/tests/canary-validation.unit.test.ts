@@ -64,7 +64,7 @@ class FakeQualificationApi implements CanaryValidationApi {
   readonly values = new Map<string, unknown>();
   constructor() {
     this.values.set('actions/workflows/ci.yml', { id: 42 });
-    this.values.set('actions/runs/100', run(100, 'ci.yml', 42));
+    this.values.set('actions/runs/100/attempts/2', run(100, 'ci.yml', 42));
     this.values.set('actions/runs/100/jobs?filter=all&per_page=100', jobs(100, ciNames));
     this.values.set(`compare/${'b'.repeat(40)}...${source.sourceSha}`, {
       status: 'ahead',
@@ -121,7 +121,7 @@ class FakeQualificationApi implements CanaryValidationApi {
   updateRun(id: number, patch: Record<string, unknown>) {
     const key =
       id === 100
-        ? 'actions/runs/100'
+        ? 'actions/runs/100/attempts/2'
         : `actions/workflows/${id}/runs?branch=main&event=push&head_sha=${source.sourceSha}&per_page=100`;
     const previous = this.values.get(key);
     if (Array.isArray(previous)) this.values.set(key, [{ ...previous[0], ...patch }]);
@@ -252,7 +252,7 @@ describe('canary required validation producers', () => {
       status: 'ahead',
       base_commit: { sha: 'b'.repeat(40) },
       merge_base_commit: { sha: 'b'.repeat(40) },
-      files: [],
+      // Missing file list is unproven; an explicit empty list is valid.
     },
     {
       status: 'ahead',
@@ -459,3 +459,43 @@ test.each([true, null, 'false', 0])(
     expect(() => qualifyCanarySource(source, api)).toThrow('exact push range unproven');
   }
 );
+
+test('accepts an authenticated exact push range with no net file changes', () => {
+  const api = new FakeQualificationApi();
+  api.absent(43);
+  api.absent(44);
+  api.values.set(`compare/${'b'.repeat(40)}...${source.sourceSha}`, {
+    status: 'ahead',
+    base_commit: { sha: 'b'.repeat(40) },
+    merge_base_commit: { sha: 'b'.repeat(40) },
+    files: [],
+  });
+  expect(qualifyCanarySource(source, api).siblings.map((sibling) => sibling.result)).toEqual([
+    'not-triggered',
+    'not-triggered',
+    'success',
+  ]);
+});
+
+test('qualifies the frozen successful attempt while a later rerun changes mutable run metadata', () => {
+  const api = new FakeQualificationApi();
+  api.values.set('actions/runs/100/attempts/2', run(100, 'ci.yml', 42));
+  api.values.set(
+    'actions/runs/100',
+    run(100, 'ci.yml', 42, { run_attempt: 3, status: 'in_progress', conclusion: null })
+  );
+  const previous = jobs(100, ciNames);
+  api.values.set('actions/runs/100/jobs?filter=all&per_page=100', [
+    ...previous,
+    ...previous.map((job) => ({
+      ...job,
+      id: job.id + 10000,
+      run_attempt: 3,
+      status: 'in_progress',
+      conclusion: null,
+    })),
+  ]);
+  expect(qualifyCanarySource(source, api).source.runAttempt).toBe(2);
+  expect(api.requests).toContain('repos/owner/repo/actions/runs/100/attempts/2');
+  expect(api.requests).not.toContain('repos/owner/repo/actions/runs/100');
+});

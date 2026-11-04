@@ -35,8 +35,9 @@ For each job name, the qualifier takes the newest producer attempt no later than
 the frozen successful run attempt. Earlier successful jobs may be reused by a
 partial rerun. A newer failed, cancelled, skipped or pending producer blocks
 qualification. Gate and smoke evidence cannot predate a rebuilt distribution.
-If the selected CI run advances to another attempt, qualification refuses it;
-the next execution must select and freeze the run again.
+The qualifier reads the exact frozen successful attempt. A later rerun cannot
+substitute mutable run metadata or future producer jobs for that approval. A
+response naming a different run or attempt than the frozen endpoint is rejected.
 
 Producer contracts are checked against the selected source. The CI, distribution,
 binary smoke, container smoke, Cargo Shim, Protocol CI and CodeQL workflow files
@@ -54,6 +55,10 @@ workflow dispatch value. The helper does not establish artifact trust itself.
 Legacy runs without that receipt require both sibling runs. A preceding observed
 CI run cannot prove the push boundary: an intervening push can skip CI or its run
 can be deleted, and a later revert can hide the selected push's relevant paths.
+
+An authenticated comparison with an explicit empty file list proves no net path
+changes and permits the filtered siblings to be absent. A missing file list does
+not establish that proof.
 
 The whole push range matters, including both sides of renames; the head commit's
 first parent alone is insufficient. The qualifier uses the canonical Cargo Shim

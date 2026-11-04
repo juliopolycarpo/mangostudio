@@ -184,10 +184,17 @@ function relevance(
     object(comparison.base_commit, 'comparison base').sha !== source.pushBeforeSha ||
     object(comparison.merge_base_commit, 'comparison merge base').sha !== source.pushBeforeSha ||
     !Array.isArray(comparison.files) ||
-    comparison.files.length >= 300 ||
-    comparison.files.length === 0
+    comparison.files.length >= 300
   )
     return unknown;
+  // The API proves an exact empty range; a bare empty CLI path list cannot
+  // make this claim, so do not send it through the conservative CLI predicate.
+  if (comparison.files.length === 0)
+    return {
+      cargo: false,
+      protocol: false,
+      reason: `verified exact push comparison ${source.pushBeforeSha}...${source.sourceSha}: no net file changes`,
+    };
   const paths: string[] = [];
   for (const entry of comparison.files) {
     const file = object(entry, 'changed file');
@@ -262,14 +269,16 @@ export function qualifyCanarySource(
   );
   const ciWorkflowId = integer(ciWorkflow.id, 'CI workflow ID');
   const ci = validateRun(
-    api.get(`repos/${source.repository}/actions/runs/${source.runId}`),
+    api.get(
+      `repos/${source.repository}/actions/runs/${source.runId}/attempts/${source.runAttempt}`
+    ),
     source,
     'ci.yml',
     ciWorkflowId
   );
   if (ci.id !== source.runId || ci.run_attempt !== source.runAttempt) {
     throw new Error(
-      `Selected CI run changed: expected ${source.runId} attempt ${source.runAttempt}; received ${JSON.stringify(ci)}`
+      `Frozen CI attempt metadata mismatch: expected ${source.runId} attempt ${source.runAttempt}; received ${JSON.stringify(ci)}`
     );
   }
   const ciJobs = requireJobs(
