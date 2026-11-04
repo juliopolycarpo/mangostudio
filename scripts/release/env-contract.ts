@@ -11,6 +11,7 @@ interface ConditionalEnvRequirement {
 }
 
 export const RELEASE_SCRIPT_ENV_CONTRACTS = {
+  'scripts/release/promote-canary-tags.ts': { requiredEnv: ['REPO'] },
   'scripts/release/archive-assets.ts': {
     requiredEnv: ['VERSION'],
   },
