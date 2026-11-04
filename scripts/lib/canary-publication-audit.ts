@@ -25,6 +25,8 @@ export interface CanaryPublicationAuditDependencies {
   readonly ancestry: CanaryTagAncestry;
 }
 
+type CanaryApprovalOrigin = 'ci' | 'actions' | 'release';
+
 interface PublishedCanary {
   readonly releaseId: number;
   readonly tag: string;
@@ -60,13 +62,17 @@ export interface CanaryPublicationAudit {
  * mixed owners must pass fresh ordering guards and recover forward instead.
  * The caller authenticates both expected inputs and repeats this audit inside each
  * publisher job, because successful preparation outputs can outlive a failed-job retry.
+ * Fresh CI approval cannot fill any previously published version without the
+ * original authenticated approval evidence recovered from Actions or its release.
  * @example const audit = await auditCanaryPublication(manifest, expectedRelease, dependencies);
  */
 export async function auditCanaryPublication(
   manifest: DistributionManifest,
   expectedRelease: CanaryReleaseExpectation,
-  dependencies: CanaryPublicationAuditDependencies
+  dependencies: CanaryPublicationAuditDependencies,
+  approvalOrigin?: CanaryApprovalOrigin
 ): Promise<CanaryPublicationAudit> {
+  const origin = parseCanaryApprovalOrigin(approvalOrigin);
   if (
     manifest.sourceSha !== expectedRelease.sourceSha ||
     manifest.packageVersion !== expectedRelease.version
@@ -88,6 +94,30 @@ export async function auditCanaryPublication(
     );
   }
   const github = await verifyCanaryReleasePublication(expectedRelease, dependencies.github);
+  if (origin === 'ci') {
+    const tag = `v${manifest.packageVersion}`;
+    const selectedTag = await dependencies.github.resolveTag(tag);
+    if (selectedTag.status !== 200 && selectedTag.status !== 404) {
+      throw new Error(
+        `Fresh CI approval tag ${tag}: expected HTTP200 or HTTP404; received ${selectedTag.status}`
+      );
+    }
+    if (
+      selectedTag.status === 200 &&
+      (typeof selectedTag.body !== 'string' ||
+        !/^[0-9a-f]{40}$/.test(selectedTag.body) ||
+        selectedTag.body !== manifest.sourceSha)
+    ) {
+      throw new Error(
+        `Fresh CI approval tag ${tag}: expected exact full source ${manifest.sourceSha}; received ${JSON.stringify(selectedTag.body)}`
+      );
+    }
+    if (npm.present.length > 0 || github.state !== 'absent' || selectedTag.status === 200) {
+      throw new Error(
+        `Fresh CI approval for ${manifest.packageVersion} found prior publication side effects: ${npm.present.length} selected npm packages, GitHub release ${github.state}, selected tag ${selectedTag.status === 200 ? 'present' : 'absent'}; recover original approval evidence from Actions or the release before resuming. Never fill a partial version from a fresh CI artifact set.`
+      );
+    }
+  }
   const publishedCanaries = await inspectPublishedCanaries(expectedRelease, dependencies);
   const receipts = { npm, github, publishedCanaries };
   const complete =
@@ -165,6 +195,19 @@ export async function auditCanaryPublication(
     supersededBy: null,
     receipts,
   };
+}
+
+/**
+ * Parse the acquisition origin without treating a caller label as approval proof.
+ * The caller authenticates any recovered Actions/release evidence separately.
+ * @example const origin = parseCanaryApprovalOrigin(process.env.APPROVAL_ORIGIN);
+ */
+export function parseCanaryApprovalOrigin(value: unknown): CanaryApprovalOrigin | undefined {
+  if (value === undefined) return undefined;
+  if (value === 'ci' || value === 'actions' || value === 'release') return value;
+  throw new Error(
+    `Invalid APPROVAL_ORIGIN: expected ci | actions | release; received ${JSON.stringify(value)}`
+  );
 }
 
 async function inspectPublishedCanaries(

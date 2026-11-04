@@ -8,6 +8,7 @@ import {
   auditCanaryPublication,
   type CanaryPublicationAudit,
   type CanaryPublicationAuditDependencies,
+  parseCanaryApprovalOrigin,
 } from '../lib/canary-publication-audit';
 import type { CanaryReleaseExpectation } from '../lib/canary-release';
 import type { CanaryTagRunner } from '../lib/canary-tags';
@@ -77,6 +78,7 @@ export async function runAuditCanaryPublicationCli(
     );
   const repository = env.REPO;
   validateRepository(repository);
+  const approvalOrigin = parseCanaryApprovalOrigin(env.APPROVAL_ORIGIN);
   const manifestPath = resolve(args[0] ?? 'distribution-manifest.json');
   const expectedPath = resolve(args[1] ?? env.EXPECTED_RELEASE ?? 'expected-release.json');
   const outputPath = resolve(args[2] ?? env.PUBLICATION_AUDIT ?? 'canary-publication-audit.json');
@@ -115,7 +117,8 @@ export async function runAuditCanaryPublicationCli(
   const audit = await auditCanaryPublication(
     manifest,
     expected as CanaryReleaseExpectation,
-    boundaries
+    boundaries,
+    approvalOrigin
   );
   mkdirSync(dirname(outputPath), { recursive: true });
   writeFileSync(outputPath, `${JSON.stringify(audit, null, 2)}\n`);

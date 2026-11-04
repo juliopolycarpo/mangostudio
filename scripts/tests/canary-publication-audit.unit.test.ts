@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
@@ -10,6 +10,7 @@ import {
   auditCanaryPublication,
   type CanaryPublicationAuditDependencies,
   type CanaryPublicationAuditGitHub,
+  parseCanaryApprovalOrigin,
 } from '../lib/canary-publication-audit';
 import type { CanaryReleaseExpectation, CanaryReleaseResponse } from '../lib/canary-release';
 import type { CanaryTagAncestry } from '../lib/canary-tags';
@@ -93,6 +94,7 @@ class AuditGitHub implements CanaryPublicationAuditGitHub {
     [`v${OLD_VERSION}`, { status: 200, body: OLD }],
     [`v${NEW_VERSION}`, { status: 200, body: NEW }],
   ]);
+  readonly tagSequences = new Map<string, CanaryReleaseResponse[]>();
   assets: unknown = [];
   releases: unknown = [releaseRecord(TAG, 17, SOURCE)];
   readonly failures = new Map<string, Error>();
@@ -104,7 +106,7 @@ class AuditGitHub implements CanaryPublicationAuditGitHub {
   }
   resolveTag(tag: string): Promise<CanaryReleaseResponse> {
     this.record(`tag:${tag}`);
-    const response = this.tags.get(tag);
+    const response = this.tagSequences.get(tag)?.shift() ?? this.tags.get(tag);
     if (!response) throw new Error(`Unexpected audit tag ${tag}`);
     return Promise.resolve(response);
   }
@@ -586,6 +588,116 @@ describe('fresh canary publication decisions', () => {
   });
 });
 
+describe('fresh CI approval cannot replace deleted original approval evidence', () => {
+  test('partial selected npm packages cannot be filled from a fresh CI artifact set', async () => {
+    const { manifest, expected, registry, github, dependencies } = await fixture();
+    missingPackages(registry, NAMES.slice(3));
+    owners(registry, OLD_VERSION);
+    for (const name of NAMES.slice(0, 3)) registry.owners.set(name, VERSION);
+    github.release = { status: 404, body: {} };
+    github.tags.set(TAG, { status: 404, body: {} });
+    github.releases = [];
+    await expect(auditCanaryPublication(manifest, expected, dependencies, 'ci')).rejects.toThrow(
+      'original approval evidence'
+    );
+  });
+  test('a matching leftover selected tag is a prior side effect even without packages or release', async () => {
+    const { manifest, expected, registry, github, dependencies } = await fixture();
+    missingPackages(registry, NAMES);
+    owners(registry, OLD_VERSION);
+    github.release = { status: 404, body: {} };
+    github.tags.set(TAG, { status: 200, body: SOURCE });
+    github.releases = [];
+    await expect(auditCanaryPublication(manifest, expected, dependencies, 'ci')).rejects.toThrow(
+      'original approval evidence'
+    );
+  });
+});
+
+describe('approval origin parsing and recovery policy', () => {
+  test.each(['ci', 'actions', 'release'] as const)(
+    'accepts only the verified acquisition label %s',
+    (origin) => {
+      expect(parseCanaryApprovalOrigin(origin)).toBe(origin);
+    }
+  );
+  test('origin stays optional for independent read-only callers', () => {
+    expect(parseCanaryApprovalOrigin(undefined)).toBe(undefined);
+  });
+  test.each(['CI', '', 'fresh', null, 42, {}].map((origin) => [origin]))(
+    'rejects invalid approval origin %j',
+    (origin) => {
+      expect(() => parseCanaryApprovalOrigin(origin)).toThrow('expected ci | actions | release');
+    }
+  );
+  test('fresh CI may approve an untouched selected version while older versions exist', async () => {
+    const { manifest, expected, registry, github, dependencies } = await fixture();
+    missingPackages(registry, NAMES);
+    owners(registry, OLD_VERSION);
+    github.release = { status: 404, body: {} };
+    github.tags.set(TAG, { status: 404, body: {} });
+    github.releases = [releaseRecord(`v${OLD_VERSION}`, 18, OLD)];
+    const audit = await auditCanaryPublication(manifest, expected, dependencies, 'ci');
+    expect(audit.decision).toBe('publish');
+    expect(audit.reason).toBe('new-publication');
+    expect(audit.needed.packages).toEqual(NAMES);
+  });
+  test.each(['actions', 'release'] as const)(
+    'authenticated %s approval can resume matching partial bytes',
+    async (origin) => {
+      const { manifest, expected, registry, github, dependencies } = await fixture();
+      missingPackages(registry, NAMES.slice(3));
+      owners(registry, OLD_VERSION);
+      for (const name of NAMES.slice(0, 3)) registry.owners.set(name, VERSION);
+      github.release = { status: 404, body: {} };
+      github.tags.set(TAG, { status: 404, body: {} });
+      github.releases = [];
+      const audit = await auditCanaryPublication(manifest, expected, dependencies, origin);
+      expect(audit.decision).toBe('publish');
+      expect(audit.needed.packages).toEqual(NAMES.slice(3));
+    }
+  );
+  test('a leftover draft alone blocks fresh CI approval even without packages or tag', async () => {
+    const { manifest, expected, registry, github, dependencies } = await fixture();
+    missingPackages(registry, NAMES);
+    owners(registry, OLD_VERSION);
+    github.release = { status: 200, body: releaseRecord(TAG, 17, SOURCE, true) };
+    github.tags.set(TAG, { status: 404, body: {} });
+    github.releases = [];
+    await expect(auditCanaryPublication(manifest, expected, dependencies, 'ci')).rejects.toThrow(
+      'original approval evidence'
+    );
+  });
+  test('selected tag auth errors retain their real status instead of becoming absence', async () => {
+    const { manifest, expected, registry, github, dependencies } = await fixture();
+    missingPackages(registry, NAMES);
+    owners(registry, OLD_VERSION);
+    github.release = { status: 404, body: {} };
+    github.releases = [];
+    github.tagSequences.set(TAG, [
+      { status: 404, body: {} },
+      { status: 403, body: {} },
+    ]);
+    await expect(auditCanaryPublication(manifest, expected, dependencies, 'ci')).rejects.toThrow(
+      'expected HTTP200 or HTTP404; received 403'
+    );
+  });
+  test('a tag appearing after the release check still needs its exact full source', async () => {
+    const { manifest, expected, registry, github, dependencies } = await fixture();
+    missingPackages(registry, NAMES);
+    owners(registry, OLD_VERSION);
+    github.release = { status: 404, body: {} };
+    github.releases = [];
+    github.tagSequences.set(TAG, [
+      { status: 404, body: {} },
+      { status: 200, body: OLD },
+    ]);
+    await expect(auditCanaryPublication(manifest, expected, dependencies, 'ci')).rejects.toThrow(
+      `expected exact full source ${SOURCE}`
+    );
+  });
+});
+
 describe('read-only audit CLI', () => {
   test('writes actual receipts and decisions to a separate audit JSON file without OIDC', async () => {
     const { manifest, expected, dependencies } = await fixture();
@@ -633,7 +745,7 @@ describe('read-only audit CLI', () => {
       writeFileSync(expectedPath, JSON.stringify(expected));
       await runAuditCanaryPublicationCli(
         [manifestPath, expectedPath, outputPath],
-        { REPO: REPOSITORY, GITHUB_OUTPUT: shellPath },
+        { REPO: REPOSITORY, GITHUB_OUTPUT: shellPath, APPROVAL_ORIGIN: 'actions' },
         dependencies
       );
       expect(readFileSync(shellPath, 'utf8')).toBe(
@@ -684,6 +796,47 @@ describe('read-only audit CLI', () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+  test('CLI fresh-CI recovery refusal emits no approval or publisher outputs', async () => {
+    const { manifest, expected, registry, github, dependencies } = await fixture();
+    missingPackages(registry, NAMES.slice(3));
+    owners(registry, OLD_VERSION);
+    for (const name of NAMES.slice(0, 3)) registry.owners.set(name, VERSION);
+    github.release = { status: 404, body: {} };
+    github.tags.set(TAG, { status: 404, body: {} });
+    github.releases = [];
+    const directory = mkdtempSync(join(tmpdir(), 'fix-canary-publication-audit-ci-cli-'));
+    try {
+      const manifestPath = join(directory, 'manifest.json');
+      const expectedPath = join(directory, 'expected.json');
+      const outputPath = join(directory, 'audit.json');
+      const shellPath = join(directory, 'github-output');
+      writeFileSync(manifestPath, JSON.stringify(manifest));
+      writeFileSync(expectedPath, JSON.stringify(expected));
+      await expect(
+        runAuditCanaryPublicationCli(
+          [manifestPath, expectedPath, outputPath],
+          { REPO: REPOSITORY, APPROVAL_ORIGIN: 'ci', GITHUB_OUTPUT: shellPath },
+          dependencies
+        )
+      ).rejects.toThrow('original approval evidence');
+      expect(existsSync(outputPath)).toBe(false);
+      expect(existsSync(shellPath)).toBe(false);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+  test('invalid CLI approval origin fails before reading inputs or publication state', async () => {
+    const { dependencies, registry, github } = await fixture();
+    await expect(
+      runAuditCanaryPublicationCli(
+        [],
+        { REPO: REPOSITORY, APPROVAL_ORIGIN: 'rebuild' },
+        dependencies
+      )
+    ).rejects.toThrow('expected ci | actions | release');
+    expect(registry.calls).toEqual([]);
+    expect(github.calls).toEqual([]);
   });
   test('requires repository identity and bounded positional arguments', async () => {
     await expect(runAuditCanaryPublicationCli([], {})).rejects.toThrow('expected owner/repository');
