@@ -32,7 +32,12 @@ shared API error shape. Missing/foreign/deleted-chat receipts return 404.
 States are `accepted`, `running`, `completed`, `failed`, and `unresolved`.
 Acceptance means the hub reserved the logical request, not that a vendor
 performed an external effect. A stream's explicit terminal error records failed;
-EOF alone never proves completion. Stream preflight refusals release the
+EOF alone never proves completion. For external streams, `done` is transport
+closure: only an authoritative `external_turn_completed` reason of `completed`
+without an external error can establish success. Vendor failures, cancellation
+and limits produce failed receipts; runtime disconnect, hub restart, sequence
+gaps, lost sessions and unknown acceptance remain unresolved. Partial text does
+not promote either outcome to completed. Stream preflight refusals release the
 reservation because no execution started, allowing consent/model correction with
 the same ID. A keyed non-streaming request is admitted before its application
 preflight; refusal becomes a failed receipt. Ordinary keyless preflight behavior
@@ -69,9 +74,13 @@ own existing retention policy.
 Profile onboarding state stores creation ID/title and turn ID/prompt before
 network side effects. It reuses freshly read identities when another surface
 already stored them. Lost acknowledgements recover via the receipt; transcript
-text is never an admission predicate. Only a completed operation's own assistant
-message satisfies the answer fact. Legacy records without IDs retain transcript
-completion compatibility.
+text is never an admission predicate. The settings normalizer preserves the
+schema-validated operation IDs and exact title/prompt bytes. A sticky
+`requiresTurnReceipt` marker survives clearing the turn identity for a new draft;
+this cannot restore the transcript-only legacy completion rule. Only a completed
+operation's own assistant message satisfies the answer fact. Records that have
+never opted into operation identity retain legacy transcript completion
+compatibility.
 
 A failed or unresolved operation offers an explicit new-request action. That
 clears the turn ID while retaining the chat. A running operation cannot be

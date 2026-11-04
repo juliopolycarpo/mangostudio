@@ -626,7 +626,13 @@ export const respondStreamRoutes = (app: Elysia) =>
             await finishOperation(db, userId, operationId, 'running');
             // The hub drains its own runner stream; losing the HTTP acknowledgement
             // does not cancel accepted work or create a second execution.
-            void drainOperationStream(response, db, userId, operationId);
+            void drainOperationStream(
+              response,
+              db,
+              userId,
+              operationId,
+              chat.runner.kind === 'external'
+            );
             return operationReceipt({ ...row, state: 'running' });
           } catch (error) {
             await finishOperation(db, userId, operationId, 'unresolved');

@@ -5,6 +5,10 @@ import { join } from 'node:path';
 
 import type { Chat } from '@mangostudio/shared/chat';
 import { type OperationReceipt, OperationReceiptSchema } from '@mangostudio/shared/operations';
+import {
+  externalAgentEventToStreamChunk,
+  externalTurnCompletedChunk,
+} from '@mangostudio/shared/streaming';
 import Value from 'typebox/value';
 
 import { getDb } from '../../../src/db/database';
@@ -284,6 +288,73 @@ describe('durable authorized product operations over real routes/storage', () =>
       .executeTakeFirst();
     expect(message?.text).toBe('Answer');
   });
+  it.each([
+    ['completed', 'completed'],
+    ['vendor-error', 'failed'],
+    ['cancelled-by-user', 'failed'],
+    ['interrupted', 'failed'],
+    ['consent-revoked', 'failed'],
+    ['limit-exceeded', 'failed'],
+    ['runtime-disconnected', 'unresolved'],
+    ['hub-restarted', 'unresolved'],
+    ['sequence-gap', 'unresolved'],
+    ['session-lost', 'unresolved'],
+    ['acceptance-unknown', 'unresolved'],
+  ] as const)(
+    'recovers external terminal %s as %s even when followed by done and partial text',
+    async (reason, expected) => {
+      const operationId = `external-${reason}`;
+      await claimOperation(db, user.id, operationId, 'submit-turn', { prompt: 'Hello' }, chatId);
+      const events = [
+        { type: 'text', text: 'Partial answer', done: false },
+        ...(reason === 'vendor-error'
+          ? [
+              externalAgentEventToStreamChunk({
+                type: 'error',
+                error: { code: 'vendor-failed', message: 'Controlled vendor failure' },
+              }),
+            ]
+          : []),
+        externalTurnCompletedChunk(reason),
+        { type: 'done', done: true, messageId: 'partial-message' },
+      ];
+      await drainOperationStream(
+        new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('')),
+        db,
+        user.id,
+        operationId,
+        true
+      );
+      expect((await receipt(operationId)).state).toBe(expected);
+    }
+  );
+  it('does not treat an external error followed by generic done as success', async () => {
+    await claimOperation(db, user.id, 'external-error-only', 'submit-turn', {}, chatId);
+    const error = externalAgentEventToStreamChunk({
+      type: 'error',
+      error: { code: 'vendor-failed', message: 'Controlled failure' },
+    });
+    await drainOperationStream(
+      new Response(`data: ${JSON.stringify(error)}\n\ndata: {"type":"done","done":true}\n\n`),
+      db,
+      user.id,
+      'external-error-only',
+      true
+    );
+    expect((await receipt('external-error-only')).state).toBe('failed');
+  });
+  it('keeps an external done without an authoritative terminal reason unresolved', async () => {
+    await claimOperation(db, user.id, 'external-unknown-terminal', 'submit-turn', {}, chatId);
+    await drainOperationStream(
+      new Response('data: {"type":"done","done":true}\n\n'),
+      db,
+      user.id,
+      'external-unknown-terminal',
+      true
+    );
+    expect((await receipt('external-unknown-terminal')).state).toBe('unresolved');
+  });
+
   it('keeps an ended stream without a terminal success unresolved', async () => {
     await claimOperation(db, user.id, 'empty-stream', 'submit-turn', { prompt: 'Hello' }, chatId);
     await drainOperationStream(
