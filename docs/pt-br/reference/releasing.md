@@ -267,10 +267,23 @@ no `Cargo.lock` raiz. A versão do protocolo no mesmo lockfile continua independ
 `.github/workflows/canary.yml` roda diariamente às 06:17 UTC e aceita
 `workflow_dispatch` manual em `main`. O job `source` seleciona o último run
 bem-sucedido de `ci.yml` por push em `main`, valida o SHA e resolve a versão
-canary desse commit. O job `build` compila esse SHA uma vez por meio de
-`distribution-build.yml`; os dois canais de publicação consomem seus artefatos.
-O `Gate` agregado do CI rejeita falhas, cancelamentos e skips inesperados em
-jobs obrigatórios antes que um run de push em main seja considerado bem-sucedido.
+canary desse commit. A seleção congela ID, tentativa bem-sucedida, número
+original do run, SHA, repositório e workflow; um rerun antigo não ultrapassa
+um push mais novo. Reruns completos restauram o snapshot `source.json` original.
+
+O job `approve` qualifica os produtores de validação e reutiliza os três
+artefatos shipping desse CI, sem recompilar. Exige CI Gate, builder, seis smokes
+nativos, container, análises CodeQL no mesmo SHA e Cargo Shim/Protocol quando
+relevantes. O seed de cache continua obrigatório pelo resultado do CI completo.
+IDs imutáveis, digest ZIP, tentativa produtora e proveniência vinculam os bytes
+ao manifesto original. Artefatos PR/light, expirados, ausentes ou conflitantes
+falham; não há fallback de rebuild.
+
+O código publicador executa na revisão confiável do workflow; os bytes da
+aplicação vêm do CI selecionado. O recibo registra as duas revisões, manifesto,
+horário original de build e qualificação. Checkout não muda claims de OIDC ou
+proveniência. A política exige definições produtoras compatíveis; veja a
+[qualificação em inglês](../../reference/canary-validation.md).
 
 Este repositório tem **releases imutáveis** habilitadas, então o canary não é
 mais uma pre-release rolling: ele corta **uma release por commit verde**,
@@ -311,12 +324,37 @@ Nada reconstrói mais uma tag canary a partir de uma versão: `install.sh
 --canary`, `install.ps1 -Canary` e a verificação de atualização do hub sempre
 resolvem a pre-release canary mais recente na lista de releases do GitHub.
 
-Cada canal é independente e idempotente (igual à release por tag): uma falha não
-bloqueia a outra e **Re-run failed jobs** re-executa só o canal que falhou (o
-job `canary-summary` escreve uma tabela ✅/❌ por canal). O grupo de concorrência
-`canary-publish` cancela runs superadas em voo, então a dist-tag npm sempre
-acompanha o commit verde mais recente; versões npm por commit são únicas,
-então um run cancelado nunca deixa um half-publish conflitante.
+Os canais publicam de forma independente após aprovação. Antes de declarar
+no-op, a verificação baixa os sete pacotes npm e compara arquivos, hashes e
+permissões com o manifesto aprovado; também exige a tag fonte e todos os assets
+imutáveis da release GitHub. Somente HTTP 404 prova ausência. Erros de rede,
+registry ou API falham.
+
+A recuperação publica apenas versões ausentes, plataformas antes do wrapper,
+e repara somente as dist-tags `canary`. Todos os sete Trusted Publishers devem
+usar `canary.yml`, environment `canary`, com **Allow npm dist-tag** habilitado.
+Um draft GitHub compatível recebe apenas assets ausentes e só se torna público
+quando o conjunto completo confere. Conflitos falham sem sobrescrever assets,
+versões ou tags; `latest` permanece igual.
+
+O grupo `canary-publish` serializa runs manuais e agendados com
+`cancel-in-progress: false`. Cada publicador relê o estado externo antes de
+escrever, inclusive em **Re-run failed jobs**, e recusa regressão ou divergência
+de fonte. Uma versão antiga completa pode ser no-op superado se as sete tags
+apontarem para a mesma versão descendente. Falha ou cancelamento pode deixar
+publicação parcial; o resumo informa resultados e evidências, sem prometer rollback.
+
+Snapshots de fonte, reservas de aprovação e os três bundles de publicação do
+CI principal retêm por 30 dias desde sua produção; inputs temporários e bundles
+de smoke retêm por sete dias. Todo job de aprovação bem-sucedido, inclusive
+no-op e recuperação, preserva o arquivo original atestado. A release publicada
+também carrega `promotion.json`, o bundle original de checksums do builder e o
+arquivo original de aprovação, vinculados pelo `SHA256SUMS` atestado pelo
+publicador. Isso permite verificar uma versão completa após os artefatos Actions
+expirarem. Recuperar publicação parcial ainda exige os payloads originais
+faltantes: se expiraram ou foram apagados, falha e exige nova versão fonte.
+Reserva apagada nunca é substituída silenciosamente por outro build. Releases
+superadas removidas pela janela de retenção não são recriadas por reruns antigos.
 
 Ressalvas:
 

@@ -111,7 +111,9 @@ manifest rendering and lifecycle assertions. Both release dry-run gates accept
 the skipped clean runtime producer on this reuse path. On main pushes, the
 light runtime cache seed explicitly requires successful direct producers after
 Gate accepts the skipped PR-only dry run. Daily Canary selects the latest
-successful main-push CI run and builds that commit in `canary.yml`.
+successful main-push CI run and promotes its existing shipping artifacts in
+`canary.yml`, after qualifying its validation producers. No Canary rebuild
+fallback is allowed; see [Canary publication](releasing.md#canary-channel).
 
 Weekly and manual dry runs keep separate clean, uncached shipping-profile
 runtime builds and the `0.0.0-dryrun` version. The Linux packaging/Docker checks,
@@ -221,12 +223,10 @@ runs are predictable and `main` never loses a green publish path:
   serves pushes to `main` (see below).
 - **Pushes to `main`.** Runs on `refs/heads/main` are never cancelled in
   progress, so each run can finish and qualify as a source for daily Canary.
-- **Publish workflows.** `release.yml` never cancels mid-publish
-  (`cancel-in-progress: false`). `canary.yml` is the exception: it cancels
-  in-flight canary publishes so only the newest green commit owns the npm
-  `canary` dist-tag; per-commit versions are unique, and canary now cuts one
-  immutable GitHub release per commit, so superseding does not leave a
-  half-published conflict.
+- **Publish workflows.** `release.yml` and `canary.yml` never cancel mid-publish
+  (`cancel-in-progress: false`). Canary serializes scheduled and manual runs,
+  retains original version approvals, and checks channel ancestry inside each
+  publisher before writes. Cancellation or failure can leave partial publication.
 - **Scheduled workflows.** Cron-driven runs other than Canary never cancel in progress.
 
 Reusable workflows do not inherit a `concurrency` group from their caller, but
