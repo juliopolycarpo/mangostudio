@@ -100,13 +100,11 @@ export function stageCanaryAssets(options: StageCanaryAssetsOptions): readonly s
     staged.push(stageAsset(assetName, { inDir, outDir }));
   }
 
-  const manifest = buildManifest({
-    plan,
-    selection,
+  const manifest = createCanaryManifestFromDigests({
+    digests: new Map(staged.map((name) => [name, sha256File(join(outDir, name))])),
     version,
     sourceSha,
     builtAt: options.builtAt ?? new Date().toISOString(),
-    outDir,
   });
   writeFileSync(join(outDir, MANIFEST_NAME), `${JSON.stringify(manifest, null, 2)}\n`);
   staged.push(MANIFEST_NAME);
@@ -128,23 +126,27 @@ function stageAsset(
   return assetName;
 }
 
-function buildManifest(context: {
-  readonly plan: ReturnType<typeof createReleaseAssetPlan>;
-  readonly selection: ReturnType<typeof selectCanaryAssets>;
+/** Reproduce release identity from authenticated digests without downloading binary assets. Example: createCanaryManifestFromDigests({version,sourceSha,builtAt,digests}). */
+export function createCanaryManifestFromDigests(context: {
   readonly version: string;
   readonly sourceSha: string;
   readonly builtAt: string;
-  readonly outDir: string;
+  readonly digests: ReadonlyMap<string, string>;
 }): CanaryManifest {
+  if (!Number.isFinite(Date.parse(context.builtAt)))
+    throw new Error(
+      `Invalid canary build time: ${context.builtAt}; expected ISO build completion time`
+    );
+  const plan = createReleaseAssetPlan({ version: context.version });
   const pairs = CANARY_PAIR_PLATFORMS.map((platform) => {
-    const forPlatform = context.plan.rawBinaries.filter((asset) => asset.platform === platform);
+    const forPlatform = plan.rawBinaries.filter((asset) => asset.platform === platform);
     const named = (kind: 'hub' | 'runtime'): PairAsset => {
       const asset = forPlatform.find((candidate) => candidate.kind === kind);
       if (!asset) throw new Error(`Canary platform ${platform} is missing its ${kind} binary.`);
-      return {
-        asset: asset.assetName,
-        digest: sha256File(join(context.outDir, asset.assetName)),
-      };
+      const digest = context.digests.get(asset.assetName);
+      if (!digest || !/^[a-f0-9]{64}$/.test(digest))
+        throw new Error(`Invalid canary digest for ${asset.assetName}: ${digest}; expected SHA256`);
+      return { asset: asset.assetName, digest };
     };
     return { platform, hub: named('hub'), runtime: named('runtime') };
   });

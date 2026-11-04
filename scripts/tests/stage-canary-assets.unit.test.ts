@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { createReleaseAssetPlan, selectCanaryAssets } from '../lib/release-assets';
-import { stageCanaryAssets } from '../release/stage-canary-assets';
+import { createCanaryManifestFromDigests, stageCanaryAssets } from '../release/stage-canary-assets';
 
 /** The sha-stamped version the binaries report, their file names and their tag. */
 const VERSION = '1.2.3-canary.abcdef0';
@@ -131,4 +131,31 @@ describe('stageCanaryAssets', () => {
 
     expect(readFileSync(join(outDir, 'SHA256SUMS'), 'utf8')).not.toContain('0.0.1');
   });
+});
+
+test('reproduces staged manifest from approved digests for early completeness checks', () => {
+  const staged = stage();
+  const digests = new Map(
+    staged.map((name) => [
+      name,
+      createHash('sha256')
+        .update(readFileSync(join(outDir, name)))
+        .digest('hex'),
+    ])
+  );
+  const options = {
+    version: VERSION,
+    sourceSha: SOURCE_SHA,
+    builtAt: '2026-08-05T00:00:00.000Z',
+    digests,
+  };
+  expect(createCanaryManifestFromDigests(options)).toEqual(
+    JSON.parse(readFileSync(join(outDir, 'canary-manifest.json'), 'utf8'))
+  );
+  expect(() => createCanaryManifestFromDigests({ ...options, builtAt: 'invalid' })).toThrow(
+    'expected ISO build completion time'
+  );
+  expect(() => createCanaryManifestFromDigests({ ...options, digests: new Map() })).toThrow(
+    'expected SHA256'
+  );
 });
