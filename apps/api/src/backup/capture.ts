@@ -123,13 +123,16 @@ export async function captureBackup(
 ): Promise<BackupManifest> {
   check(options.signal);
   if (config.database.path === ':memory:') throw new Error('Backup requires a persisted database.');
-  const requestedOutput = resolve(options.output);
-  const output = join(await realpath(dirname(requestedOutput)), basename(requestedOutput));
-  let configurationPath = resolve(config.configFilePath);
+  // Consult the filesystem before simplifying these selectors: lexical '..'
+  // removal across a symlink can change the output parent or hide a config
+  // file actually inside a data root from the overlap/privacy guard.
+  const output = join(await realpath(dirname(options.output)), basename(options.output));
+  let configurationPath = config.configFilePath;
   try {
     configurationPath = await realpath(configurationPath);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    configurationPath = resolve(configurationPath);
   }
   const roots = backupRoots(config, options.checkpoints);
   const databasePath = await realpath(config.database.path);
