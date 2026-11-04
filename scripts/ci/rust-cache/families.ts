@@ -27,7 +27,6 @@ export const RUST_CACHE_FAMILIES = [
 // Including conservative callers that turn caching off is harmless: their
 // completion also triggers cleanup, so it cannot strand a deferred sweep.
 export const RUST_CACHE_WRITERS = [
-  { path: '.github/workflows/canary.yml', name: 'Canary' },
   { path: '.github/workflows/ci.yml', name: 'CI' },
   { path: '.github/workflows/cargo-shim.yml', name: 'Cargo Shim' },
   { path: '.github/workflows/protocol-ci.yml', name: 'Protocol CI' },
