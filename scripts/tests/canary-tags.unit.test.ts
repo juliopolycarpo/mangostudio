@@ -186,7 +186,7 @@ async function fixture(): Promise<Fixture> {
           integrity: `sha512-${createHash('sha512').update(archive).digest('base64')}`,
           tarball,
           attestations: {
-            url: `https://registry.npmjs.org/-/npm/v1/attestations/${description.name.replace('/', '%2f')}@${VERSION}`,
+            url: `https://registry.npmjs.org/-/npm/v1/attestations/${description.name.replaceAll('/', '%2f')}@${VERSION}`,
             provenance: { predicateType: 'https://slsa.dev/provenance/v1' },
           },
         },
