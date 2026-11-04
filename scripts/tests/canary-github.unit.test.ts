@@ -297,3 +297,26 @@ test('writes through the owned runner and rejects failure without echoing secret
   expect(() => client.writeCommand(args)).toThrow('expected exit0; received 1');
   expect(() => client.writeCommand([])).toThrow('expected nonempty argument list');
 });
+
+test('reads generic Actions binary bytes with exact HTTP status', async () => {
+  const { runner, client } = fixture();
+  const path = `${BASE}/actions/artifacts/5/zip`;
+  const bytes = new Uint8Array([0, 255, 1]);
+  runner.respond(['api', '--include', path], http(200, bytes));
+  expect(await client.readBytes(path)).toEqual({ status: 200, body: bytes });
+  runner.respond(
+    ['api', '--include', '--header', 'Accept: application/octet-stream', path],
+    http(404, '{}')
+  );
+  expect((await client.readBytes(path, 'application/octet-stream')).status).toBe(404);
+  await expect(client.readBytes('repos/other/repo/file')).rejects.toThrow('expected path inside');
+});
+
+test('reads the repository root endpoint for stable repository ID association', async () => {
+  const { runner, client } = fixture();
+  runner.json(BASE, { id: 123, full_name: 'owner/repo' });
+  expect(await client.getJson(BASE)).toEqual({
+    status: 200,
+    body: { id: 123, full_name: 'owner/repo' },
+  });
+});

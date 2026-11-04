@@ -94,6 +94,11 @@ export class CanaryGitHub {
     return { status: response.status, body };
   }
 
+  /** Read binary repository evidence while retaining actual HTTP status. Example: await client.readBytes('repos/owner/repo/actions/artifacts/123/zip'). */
+  async readBytes(path: string, accept?: string): Promise<GitHubResponse<Uint8Array>> {
+    return await Promise.resolve(this.read(path, accept));
+  }
+
   /** Download a small release evidence asset without rendering bytes or credentials. Example: await client.readAsset(456). */
   async readAsset(assetId: number): Promise<GitHubResponse<Uint8Array>> {
     positiveId(assetId, 'asset ID');
@@ -233,7 +238,7 @@ export class CanaryGitHub {
 
   private requireRepositoryPath(path: string): void {
     if (
-      !path.startsWith(`${this.base}/`) ||
+      (path !== this.base && !path.startsWith(`${this.base}/`)) ||
       /[\r\n#\\]/.test(path) ||
       path.split(/[/?]/).some((part) => part === '.' || part === '..')
     ) {
