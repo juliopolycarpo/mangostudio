@@ -1,11 +1,11 @@
 import { createHash } from 'node:crypto';
 
 import { createCanaryManifestFromDigests } from '../release/stage-canary-assets';
-import type { CanaryDistribution } from './canary-promotion';
+import { type CanaryDistribution, parseCanaryPushContext } from './canary-promotion';
 import type { CanarySource } from './canary-source';
 import type { CanaryValidationReceipt } from './canary-validation';
 import type { ApprovedArtifact } from './distribution-artifact';
-import { parseDistributionManifest } from './distribution-manifest';
+import { type DistributionManifest, parseDistributionManifest } from './distribution-manifest';
 import { createReleaseAssetPlan, selectCanaryAssets } from './release-assets';
 import { isValidSemver, normalizeVersion } from './release-version';
 
@@ -13,6 +13,7 @@ import { isValidSemver, normalizeVersion } from './release-version';
 export interface CanaryPromotionReceipt {
   readonly schemaVersion: 1;
   readonly selectedRun: CanarySource;
+  /** Execution revision that first fixed this approval, which can precede a later publishing execution. */
   readonly workflowRevision: string;
   readonly manifestSha256: string;
   readonly distribution: CanaryDistribution;
@@ -23,12 +24,13 @@ export interface CanaryPromotionReceipt {
  * Reproduce the complete release asset map from an authenticated builder manifest.
  * The caller verifies both the original bundle's builder provenance and its extracted
  * manifest before calling this function. No binary download or compilation is needed.
- * Example: createCanaryPublicationEvidence(manifestRaw, receipt, verifiedChecksumsBundle).
+ * Example: createCanaryPublicationEvidence(manifestRaw, receipt, verifiedChecksumsBundle, approvalPayload).
  */
 export function createCanaryPublicationEvidence(
   manifestRaw: string,
   receipt: CanaryPromotionReceipt,
-  checksumsBundle: Uint8Array
+  checksumsBundle: Uint8Array,
+  approvalPayload: Uint8Array
 ): {
   readonly expected: {
     readonly repository: string;
@@ -42,6 +44,85 @@ export function createCanaryPublicationEvidence(
   };
   readonly generated: ReadonlyMap<string, Uint8Array>;
 } {
+  const manifest = approvedPublicationManifest(manifestRaw, receipt);
+  const source = receipt.qualification.source;
+  const plan = createReleaseAssetPlan({ version: manifest.packageVersion });
+  const selection = selectCanaryAssets(plan);
+  const assets = [...selection.archives, ...selection.rawBinaries, ...selection.scripts].map(
+    (name) => {
+      const file = manifest.files.find((entry) => entry.path === `release-assets/${name}`);
+      if (!file)
+        throw new Error(
+          `Missing approved release asset ${name}: expected manifest file release-assets/${name}`
+        );
+      return { name, size: file.size, sha256: file.sha256 };
+    }
+  );
+  const generated = new Map<string, Uint8Array>();
+  generated.set(
+    'canary-manifest.json',
+    jsonBytes(
+      createCanaryManifestFromDigests({
+        version: manifest.packageVersion,
+        sourceSha: source.sourceSha,
+        builtAt: receipt.distribution.builtAt,
+        digests: new Map(assets.map((asset) => [asset.name, asset.sha256])),
+      })
+    )
+  );
+  generated.set('promotion.json', jsonBytes(receipt));
+  generated.set('promotion-checksums.tar.gz', checksumsBundle);
+  generated.set('promotion-approval.tar.gz', approvalPayload);
+  for (const [name, bytes] of generated)
+    assets.push({ name, size: bytes.byteLength, sha256: hash(bytes) });
+  const checksums = `${[...assets]
+    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    .map((asset) => `${asset.sha256}  ${asset.name}`)
+    .join('\n')}\n`;
+  const checksumBytes = Buffer.from(checksums);
+  generated.set('SHA256SUMS', checksumBytes);
+  assets.push({ name: 'SHA256SUMS', size: checksumBytes.byteLength, sha256: hash(checksumBytes) });
+  return {
+    expected: {
+      repository: source.repository,
+      sourceSha: source.sourceSha,
+      version: manifest.packageVersion,
+      assets,
+    },
+    generated,
+  };
+}
+
+/** Create a frozen approval archive once; recovered executions copy its original bytes. The caller authenticates builder bytes and qualification first. Example: await createCanaryApprovalPayload(manifestRaw, receipt, builderBundle, pushContextRaw). */
+export async function createCanaryApprovalPayload(
+  manifestRaw: string,
+  receipt: CanaryPromotionReceipt,
+  checksumsBundle: Uint8Array,
+  pushContextRaw?: string
+): Promise<Uint8Array> {
+  const manifest = approvedPublicationManifest(manifestRaw, receipt);
+  const files: Record<string, Uint8Array> = {
+    'promotion.json': jsonBytes(receipt),
+    'promotion-checksums.tar.gz': checksumsBundle,
+    'distribution-manifest.json': Buffer.from(manifestRaw),
+  };
+  if (pushContextRaw !== undefined) {
+    const context = parseCanaryPushContext(
+      pushContextRaw,
+      receipt.qualification.source.repository,
+      manifest.sourceSha
+    );
+    if (context.before !== receipt.qualification.source.pushBeforeSha)
+      throw new Error('Approval push context differs from the qualified exact push range');
+    files['ci-push-context.json'] = Buffer.from(pushContextRaw);
+  }
+  return new Bun.Archive(files, { compress: 'gzip' }).bytes();
+}
+
+function approvedPublicationManifest(
+  manifestRaw: string,
+  receipt: CanaryPromotionReceipt
+): DistributionManifest {
   const manifest = parseDistributionManifest(manifestRaw);
   const source = receipt.qualification.source;
   // Parse the same persisted contract even for a newly assembled receipt.
@@ -75,50 +156,7 @@ export function createCanaryPublicationEvidence(
         `Invalid ${scope} artifact name: ${name}; expected exact source/version and content suffix`
       );
   }
-  const plan = createReleaseAssetPlan({ version: manifest.packageVersion });
-  const selection = selectCanaryAssets(plan);
-  const assets = [...selection.archives, ...selection.rawBinaries, ...selection.scripts].map(
-    (name) => {
-      const file = manifest.files.find((entry) => entry.path === `release-assets/${name}`);
-      if (!file)
-        throw new Error(
-          `Missing approved release asset ${name}: expected manifest file release-assets/${name}`
-        );
-      return { name, size: file.size, sha256: file.sha256 };
-    }
-  );
-  const generated = new Map<string, Uint8Array>();
-  generated.set(
-    'canary-manifest.json',
-    jsonBytes(
-      createCanaryManifestFromDigests({
-        version: manifest.packageVersion,
-        sourceSha: source.sourceSha,
-        builtAt: receipt.distribution.builtAt,
-        digests: new Map(assets.map((asset) => [asset.name, asset.sha256])),
-      })
-    )
-  );
-  generated.set('promotion.json', jsonBytes(receipt));
-  generated.set('promotion-checksums.tar.gz', checksumsBundle);
-  for (const [name, bytes] of generated)
-    assets.push({ name, size: bytes.byteLength, sha256: hash(bytes) });
-  const checksums = `${[...assets]
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .map((asset) => `${asset.sha256}  ${asset.name}`)
-    .join('\n')}\n`;
-  const checksumBytes = Buffer.from(checksums);
-  generated.set('SHA256SUMS', checksumBytes);
-  assets.push({ name: 'SHA256SUMS', size: checksumBytes.byteLength, sha256: hash(checksumBytes) });
-  return {
-    expected: {
-      repository: source.repository,
-      sourceSha: source.sourceSha,
-      version: manifest.packageVersion,
-      assets,
-    },
-    generated,
-  };
+  return manifest;
 }
 
 /** Read a persisted receipt before authenticating its publisher signature; values remain untrusted until that verification succeeds. Example: parseCanaryPromotionReceipt(raw, 'owner/repo', sourceSha). */

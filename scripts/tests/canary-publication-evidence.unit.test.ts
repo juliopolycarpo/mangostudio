@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import {
   assertCanaryManifestIdentity,
   type CanaryPromotionReceipt,
+  createCanaryApprovalPayload,
   createCanaryPublicationEvidence,
   parseCanaryPromotionReceipt,
   sameApprovedArtifact,
@@ -71,7 +72,7 @@ function fixture() {
 test('reproduces complete expected release map and durable evidence without binary IO', () => {
   const { raw, receipt, sha } = fixture();
   const bundle = new Uint8Array([1, 2, 3]);
-  const evidence = createCanaryPublicationEvidence(raw, receipt, bundle);
+  const evidence = createCanaryPublicationEvidence(raw, receipt, bundle, new Uint8Array([4]));
   expect(evidence.expected.sourceSha).toBe(sha);
   expect(
     evidence.expected.assets.find((asset) => asset.name === 'promotion-checksums.tar.gz')?.sha256
@@ -125,7 +126,8 @@ test('refuses missing files and mismatched authenticated manifest', () => {
     createCanaryPublicationEvidence(
       raw,
       { ...receipt, manifestSha256: 'f'.repeat(64) },
-      new Uint8Array()
+      new Uint8Array(),
+      new Uint8Array([4])
     )
   ).toThrow('expected clean shipping');
   const missing = JSON.stringify({ ...manifest, files: [] });
@@ -133,7 +135,8 @@ test('refuses missing files and mismatched authenticated manifest', () => {
     createCanaryPublicationEvidence(
       missing,
       { ...receipt, manifestSha256: createHash('sha256').update(missing).digest('hex') },
-      new Uint8Array()
+      new Uint8Array(),
+      new Uint8Array([4])
     )
   ).toThrow('Missing approved release asset');
 });
@@ -196,12 +199,60 @@ test('validates full job and sibling receipt structures without authenticating t
 test('retains frozen workflow and run identity separately from publisher revision', () => {
   const { raw, receipt, sha } = fixture();
   expect(
-    createCanaryPublicationEvidence(raw, receipt, new Uint8Array([1])).generated.has(
-      'promotion.json'
-    )
+    createCanaryPublicationEvidence(
+      raw,
+      receipt,
+      new Uint8Array([1]),
+      new Uint8Array([4])
+    ).generated.has('promotion.json')
   ).toBe(true);
   Object.assign(receipt.selectedRun, { workflowId: 0 });
   expect(() => parseCanaryPromotionReceipt(JSON.stringify(receipt), 'owner/repo', sha)).toThrow(
     'selected run workflowId'
   );
+});
+
+test('creates one archive binding the original manifest, receipt and builder bundle', async () => {
+  const { raw, receipt } = fixture();
+  const bundle = new Uint8Array([1, 2, 3]);
+  const payload = await createCanaryApprovalPayload(raw, receipt, bundle);
+  const files = await new Bun.Archive(payload).files();
+  expect([...files.keys()].sort()).toEqual([
+    'distribution-manifest.json',
+    'promotion-checksums.tar.gz',
+    'promotion.json',
+  ]);
+  expect(await files.get('distribution-manifest.json')?.text()).toBe(raw);
+  expect(await files.get('promotion-checksums.tar.gz')?.bytes()).toEqual(bundle);
+  const evidence = createCanaryPublicationEvidence(raw, receipt, bundle, payload);
+  expect(evidence.generated.get('promotion-approval.tar.gz')).toBe(payload);
+  const rows = Buffer.from(evidence.generated.get('SHA256SUMS') ?? [])
+    .toString()
+    .trim()
+    .split('\n')
+    .map((line) => line.split('  ')[1]);
+  expect(rows).toEqual([...rows].sort());
+});
+test('binds the approval context to the exact range used for qualification', async () => {
+  const { raw, receipt, sha } = fixture();
+  Object.assign(receipt.qualification.source, { pushBeforeSha: 'b'.repeat(40) });
+  const context = JSON.stringify({
+    repository: 'owner/repo',
+    after: sha,
+    before: 'b'.repeat(40),
+    event: 'push',
+    ref: 'refs/heads/main',
+  });
+  const payload = await createCanaryApprovalPayload(raw, receipt, new Uint8Array([1]), context);
+  expect(await (await new Bun.Archive(payload).files()).get('ci-push-context.json')?.text()).toBe(
+    context
+  );
+  await expect(
+    createCanaryApprovalPayload(
+      raw,
+      receipt,
+      new Uint8Array([1]),
+      context.replace('b'.repeat(40), 'c'.repeat(40))
+    )
+  ).rejects.toThrow('differs from the qualified');
 });
