@@ -275,10 +275,17 @@ async function verifyPackageArchive(
       );
     }
     if (path === 'package/package.json') {
-      const packaged = object(
-        JSON.parse(Buffer.from(content).toString('utf8')),
-        `${expected.name} package.json`
-      );
+      const text = Buffer.from(content).toString('utf8');
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch (cause) {
+        throw new Error(
+          `Invalid packaged manifest for ${expected.name}@${version}: expected JSON object in package/package.json; received ${JSON.stringify(text.slice(0, 160))}`,
+          { cause }
+        );
+      }
+      const packaged = object(parsed, `${expected.name} package.json`);
       if (packaged.name !== expected.name || packaged.version !== version) {
         throw new Error(
           `Packaged identity mismatch: expected ${expected.name}@${version}, received ${JSON.stringify(packaged)}`
@@ -301,6 +308,18 @@ function assertRegularTar(tar: Buffer, name: string): void {
       }
       return;
     }
+    const checksumField = header.subarray(148, 156).toString('ascii').replace(/\0.*$/s, '').trim();
+    const recordedChecksum = /^[0-7]+$/.test(checksumField)
+      ? Number.parseInt(checksumField, 8)
+      : Number.NaN;
+    const actualChecksum = header.reduce(
+      (total, byte, index) => total + (index >= 148 && index < 156 ? 32 : byte),
+      0
+    );
+    if (recordedChecksum !== actualChecksum)
+      throw new Error(
+        `Invalid npm tar for ${name}: expected valid tar header checksum ${actualChecksum}, received ${checksumField}`
+      );
     const path = header.subarray(0, 100).toString('utf8').replace(/\0.*$/s, '');
     const prefix = header.subarray(345, 500).toString('utf8').replace(/\0.*$/s, '');
     const sizeField = header.subarray(124, 136).toString('ascii').replace(/\0.*$/s, '').trim();

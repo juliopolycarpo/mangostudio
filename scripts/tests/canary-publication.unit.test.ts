@@ -459,6 +459,13 @@ describe('canary npm publication integrity', () => {
       if (!bytes) throw new Error('Fixture missing wrapper archive');
       const tar = gunzipSync(bytes);
       tar[156] = type;
+      const header = tar.subarray(0, 512);
+      header.fill(32, 148, 156);
+      const checksum = header
+        .reduce((total, byte) => total + byte, 0)
+        .toString(8)
+        .padStart(6, '0');
+      header.write(`${checksum}\0 `, 148, 8, 'ascii');
       setArchiveBytes(registry, MAIN_PACKAGE, gzipSync(tar));
       await expect(verifyCanaryNpmPublication(manifest, registry)).rejects.toThrow(
         'expected unique regular package file or directory'
@@ -499,3 +506,59 @@ test.each(['0000644', '0000641'])(
     );
   }
 );
+
+test('rejects an extra member even when its corrupt header hides it from the native listing', async () => {
+  const { manifest, registry, contents } = await fixture();
+  await replaceArchive(registry, MAIN_PACKAGE, {
+    ...contents.get(MAIN_PACKAGE),
+    'package/unapproved.txt': 'unapproved payload',
+  });
+  await expect(verifyCanaryNpmPublication(manifest, registry)).rejects.toThrow(
+    'Registry archive paths mismatch'
+  );
+  const bytes = registry.archives.get(tarballUrl(MAIN_PACKAGE))?.body;
+  if (!bytes) throw new Error('Expected wrapper archive fixture');
+  const tar = gunzipSync(bytes);
+  let offset = 0,
+    checksumOffset = -1;
+  while (offset + 512 <= tar.length) {
+    const header = tar.subarray(offset, offset + 512);
+    const path = header.subarray(0, 100).toString().replace(/\0.*$/s, '');
+    const size = Number.parseInt(
+      header.subarray(124, 136).toString().replace(/\0.*$/s, '').trim(),
+      8
+    );
+    if (path === 'package/unapproved.txt') {
+      checksumOffset = offset + 148;
+      break;
+    }
+    offset += 512 + Math.ceil(size / 512) * 512;
+  }
+  expect(checksumOffset).toBeGreaterThan(0);
+  const corrupted = Buffer.from(tar);
+  corrupted[checksumOffset] = corrupted[checksumOffset] === 48 ? 49 : 48;
+  expect([...tar.keys()].filter((index) => tar[index] !== corrupted[index])).toEqual([
+    checksumOffset,
+  ]);
+  setArchiveBytes(registry, MAIN_PACKAGE, gzipSync(corrupted));
+  await expect(verifyCanaryNpmPublication(manifest, registry)).rejects.toThrow(
+    'expected valid tar header checksum'
+  );
+});
+
+test('names the package and expected JSON shape when approved package.json is corrupt', async () => {
+  const { manifest, registry, contents } = await fixture();
+  const invalid = 'not a package manifest';
+  await replaceArchive(registry, MAIN_PACKAGE, {
+    ...contents.get(MAIN_PACKAGE),
+    'package/package.json': invalid,
+  });
+  const files = manifest.files.map((file) =>
+    file.path === 'dist-npm/cli/package.json'
+      ? { ...file, size: Buffer.byteLength(invalid), sha256: sha256(Buffer.from(invalid)) }
+      : file
+  );
+  await expect(verifyCanaryNpmPublication({ ...manifest, files }, registry)).rejects.toThrow(
+    `Invalid packaged manifest for ${MAIN_PACKAGE}@${VERSION}: expected JSON object in package/package.json`
+  );
+});
