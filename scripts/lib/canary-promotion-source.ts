@@ -1,5 +1,6 @@
 import { type CanaryDistribution, resolveCanaryDistribution } from './canary-promotion';
 import { type ApprovedArtifact, type ArtifactEvidence } from './distribution-artifact';
+import { parseGitHubTimestamp } from './github-timestamp';
 
 /** Frozen CI identity selected before resolving any distribution metadata. */
 export type CanaryPromotionSelection = Pick<
@@ -25,20 +26,6 @@ function integer(value: unknown, label: string): number {
     throw new Error(`${label}: expected positive safe integer; received ${JSON.stringify(value)}`);
   }
   return value;
-}
-
-function timestamp(value: unknown, label: string): number {
-  if (
-    typeof value === 'string' &&
-    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value)
-  ) {
-    const parsed = Date.parse(value);
-    const canonical = value.length === 20 ? `${value.slice(0, -1)}.000Z` : value;
-    if (Number.isFinite(parsed) && new Date(parsed).toISOString() === canonical) return parsed;
-  }
-  throw new Error(
-    `Distribution producer ${label}: expected UTC ISO timestamp; received ${JSON.stringify(value)}`
-  );
 }
 
 /**
@@ -123,8 +110,11 @@ export function resolveCanaryPromotionSource(
       `Distribution producer: expected completed successful builder; received ${JSON.stringify(producer)}`
     );
   }
-  const started = timestamp(producer.started_at, 'started_at');
-  const completed = timestamp(producer.completed_at, 'completed_at');
+  const started = parseGitHubTimestamp(producer.started_at, 'Distribution producer started_at');
+  const completed = parseGitHubTimestamp(
+    producer.completed_at,
+    'Distribution producer completed_at'
+  );
   if (completed < started) {
     throw new Error(
       `Distribution producer: expected ordered timestamps; received ${JSON.stringify(producer)}`

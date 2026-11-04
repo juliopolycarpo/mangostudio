@@ -245,6 +245,10 @@ describe('canary distribution metadata resolver', () => {
   test.each([
     'Wed Nov 04 2026 10:05:00 GMT+0000 (ignored\ninjected=value)',
     '2026-11-31T10:05:00Z',
+    '2026-11-04',
+    '2026-11-04T10:05:00+00:00',
+    '2026-11-04T10:05:00.000000Z',
+    '2026-11-04T10:05:00Z\n',
   ])('rejects a malformed build timestamp before writing outputs: %j', (completedAt) => {
     const api = new FakePromotionApi();
     api.values.set(jobsPath, [builder(1, { completed_at: completedAt })]);

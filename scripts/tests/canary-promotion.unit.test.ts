@@ -116,3 +116,24 @@ test('binds push context to the signed checksums bundle without changing legacy 
     'release-assets/SHA256SUMS',
   ]);
 });
+
+// Matching retained records must be canonical before deciding whether they belong to the window.
+test.each([
+  '2026-02-31T00:00:00Z',
+  '2026-11-04',
+  '2026-11-04T11:00:00+00:00',
+  '2026-11-04T11:00:00.000000Z',
+  '2026-11-04T11:00:00Z\n',
+])('rejects noncanonical matching artifact metadata before correlation: %j', (createdAt) => {
+  const npm = artifacts[2];
+  if (!npm) throw new Error('Expected npm artifact fixture');
+  expect(() =>
+    resolveCanaryDistribution(source, version, {
+      run,
+      jobs,
+      artifacts: [...artifacts, { ...npm, id: 9, created_at: createdAt }],
+    })
+  ).toThrow(
+    `Distribution artifact created_at: expected UTC ISO timestamp; received ${JSON.stringify(createdAt)}`
+  );
+});

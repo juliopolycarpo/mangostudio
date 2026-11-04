@@ -3,6 +3,7 @@ import {
   type ArtifactEvidence,
   validateArtifactEvidence,
 } from './distribution-artifact';
+import { parseGitHubTimestamp } from './github-timestamp';
 import { isValidSemver } from './release-version';
 
 /** Immutable CI distribution approved for both independent publication channels. */
@@ -74,24 +75,30 @@ export function resolveCanaryDistribution(
       job.conclusion === 'success'
   );
   const producer = producers[0];
-  if (
-    producers.length !== 1 ||
-    !producer ||
-    !Number.isFinite(Date.parse(producer.started_at)) ||
-    !Number.isFinite(Date.parse(producer.completed_at))
-  )
+  if (producers.length !== 1 || !producer)
     throw new Error(
       `Invalid distribution producer: expected one completed successful builder in attempt ${source.producerAttempt}`
     );
+  const started = parseGitHubTimestamp(producer.started_at, 'Distribution producer started_at');
+  const completed = parseGitHubTimestamp(
+    producer.completed_at,
+    'Distribution producer completed_at'
+  );
+  if (completed < started)
+    throw new Error(
+      `Distribution producer: expected ordered timestamps; received ${JSON.stringify(producer)}`
+    );
   const resolve = (scope: string): ApprovedArtifact => {
     const prefix = `distribution-${scope}-${source.sourceSha.slice(0, 12)}-${version}-`;
-    const matches = evidence.artifacts.filter(
-      (artifact) =>
-        artifact.name?.startsWith(prefix) &&
-        /^[a-f0-9]{12}$/.test(artifact.name.slice(prefix.length)) &&
-        Date.parse(producer.started_at) <= Date.parse(artifact.created_at) &&
-        Date.parse(artifact.created_at) <= Date.parse(producer.completed_at)
-    );
+    const matches = evidence.artifacts.filter((artifact) => {
+      if (
+        !artifact.name?.startsWith(prefix) ||
+        !/^[a-f0-9]{12}$/.test(artifact.name.slice(prefix.length))
+      )
+        return false;
+      const created = parseGitHubTimestamp(artifact.created_at, 'Distribution artifact created_at');
+      return started <= created && created <= completed;
+    });
     const artifact = matches[0];
     if (matches.length !== 1 || !artifact)
       throw new Error(
