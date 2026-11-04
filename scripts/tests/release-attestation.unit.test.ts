@@ -45,8 +45,8 @@ describe('release provenance for checksums and install scripts', () => {
     expect(job.indexOf(ATTEST_ACTION)).toBeLessThan(job.indexOf('publish_release'));
   });
 
-  test("ci.yml's canary caller grants the ceiling the called workflow needs", () => {
-    const job = jobBlock(readWorkflow('ci.yml'), 'canary');
+  test("canary.yml's build caller grants distribution provenance permissions", () => {
+    const job = jobBlock(readWorkflow('canary.yml'), 'build');
     expect(job).toContain('attestations: write');
     expect(job).toContain('id-token: write');
   });

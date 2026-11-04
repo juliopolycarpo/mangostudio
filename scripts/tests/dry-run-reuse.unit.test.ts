@@ -145,65 +145,6 @@ describe('PR dry-run caller after a skipped distribution', () => {
   });
 });
 
-describe('Canary prerequisites after the PR-only dry run was added', () => {
-  const mainPush: JobScenario = {
-    results: {
-      ...Object.fromEntries(extractJobBlocks(CI).map(({ job }) => [job, 'success'])),
-      'release-dry-run': 'skipped',
-    },
-    event: 'push',
-    ref: 'refs/heads/main',
-  };
-  const canaryRuns = (scenario: JobScenario, override?: string): boolean =>
-    jobRuns(CI, 'canary', scenario, override);
-
-  test('runs on a green main push despite the skipped PR-only ancestor and retains every direct producer', () => {
-    expect(parseNeedsList(extractJobBlock(CI, 'canary'))).toEqual([
-      'gate',
-      'distribution-identity',
-      'distribution',
-    ]);
-    expect(jobAncestors(CI, 'canary')).toContain('release-dry-run');
-    expect(
-      canaryRuns(mainPush, "github.event_name == 'push' && github.ref == 'refs/heads/main'")
-    ).toBe(false);
-    expect(canaryRuns(mainPush)).toBe(true);
-  });
-
-  test('other skips accepted by a successful Gate cannot suppress the publisher', () => {
-    const gate = extractJobBlock(CI, 'gate');
-    for (const skipped of ['rust-coverage', 'smoke', 'smoke-container']) {
-      expect(gate).toContain(`&& '${skipped}' || ''`);
-      // Gate owns relevance and has already accepted the skip. Canary must
-      // trust that verdict while still requiring its three direct producers.
-      expect(
-        canaryRuns({ ...mainPush, results: { ...mainPush.results, [skipped]: 'skipped' } })
-      ).toBe(true);
-    }
-  });
-
-  test.each(['gate', 'distribution-identity', 'distribution'])(
-    'refuses every unsuccessful or missing direct producer (%s)',
-    (producer) => {
-      for (const result of ['failure', 'cancelled', 'skipped', undefined])
-        expect(
-          canaryRuns({ ...mainPush, results: { ...mainPush.results, [producer]: result } })
-        ).toBe(false);
-    }
-  );
-
-  test('refuses cancellation, non-main refs, non-push events and unknown prerequisite syntax', () => {
-    expect(canaryRuns({ ...mainPush, cancelled: true })).toBe(false);
-    for (const ref of ['refs/heads/feature', 'refs/tags/v0.1.1', undefined])
-      expect(canaryRuns({ ...mainPush, ref })).toBe(false);
-    for (const event of ['pull_request', 'workflow_dispatch', 'schedule', undefined])
-      expect(canaryRuns({ ...mainPush, event })).toBe(false);
-    expect(() => canaryRuns(mainPush, "!cancelled() && needs.check.result == 'success'")).toThrow(
-      'Condition reads undeclared prerequisite'
-    );
-  });
-});
-
 describe('light runtime cache seed after the PR-only dry run was added', () => {
   const mainPush: JobScenario = {
     results: {

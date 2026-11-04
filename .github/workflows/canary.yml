@@ -1,37 +1,22 @@
 name: Canary
 
-# Publish a canary build from the latest green commit on main. ci.yml calls this
-# reusable workflow as a job gated on every CI job passing + a push to main, so
-# the commit that just went green is the canary source — no SHA re-resolution.
+# Publish daily from the latest successful push CI run on main. Resolve the
+# source once, then build and publish that exact commit.
 #
 # Channels are independent fan-out jobs off a single build. Each is idempotent and
 # individually re-runnable, so one failing never blocks the others and a maintainer
 # can re-run just the failed job (see the canary-summary job):
 #   - npm: mangostudio@<root>-canary.<sha7> under the `canary` dist-tag, so
 #     `latest` never moves. Install with `npm i -g mangostudio@canary`.
-#   - GitHub Releases: one `v<version>` pre-release per green main commit, with
+#   - GitHub Releases: one `v<version>` pre-release per selected main commit, with
 #     platform archives and checksums. Never a rolling tag: this repository has
 #     immutable releases enabled, so a published release's assets can never be
 #     replaced and a tag that carried one can never be reused.
 
 on:
-  workflow_call:
-    inputs:
-      version:
-        type: string
-        required: true
-      source_sha:
-        type: string
-        required: true
-      channel:
-        type: string
-        required: true
-      assets_artifact:
-        type: string
-        required: true
-      npm_artifact:
-        type: string
-        required: true
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -44,8 +29,68 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  source:
+    name: Resolve latest green main commit
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read # find successful main push CI runs
+      contents: read
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+      version: ${{ steps.identity.outputs.version }}
+      channel: ${{ steps.identity.outputs.channel }}
+    steps:
+      - id: source
+        name: Select latest successful main push
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=1" \
+            --jq '.workflow_runs[0].head_sha // empty')"
+          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Expected a successful main push CI commit SHA, received: $sha"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.source.outputs.sha }}
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - id: identity
+        name: Resolve canary identity from selected source
+        env:
+          EVENT_NAME: push
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        run: bun ./scripts/ci/distribution-identity.ts >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build daily canary
+    needs: [source]
+    permissions:
+      contents: read
+      id-token: write # mint distribution build provenance token
+      attestations: write # persist distribution build provenance
+    uses: ./.github/workflows/distribution-build.yml
+    with:
+      source_sha: ${{ needs.source.outputs.source_sha }}
+      version: ${{ needs.source.outputs.version }}
+      channel: ${{ needs.source.outputs.channel }}
+      retention_days: 7
+      cache: true
+
   npm-canary:
     name: Publish npm (canary dist-tag)
+    needs: [source, build]
     environment: canary
     runs-on: ubuntu-latest
     # Seven sequential publishes reached the old 10-minute job limit after setup.
@@ -73,10 +118,10 @@ jobs:
 
       - uses: ./.github/actions/download-distribution
         with:
-          artifact-name: ${{ inputs.npm_artifact }}
-          source-sha: ${{ inputs.source_sha }}
-          version: ${{ inputs.version }}
-          channel: ${{ inputs.channel }}
+          artifact-name: ${{ needs.build.outputs.npm_artifact }}
+          source-sha: ${{ needs.source.outputs.source_sha }}
+          version: ${{ needs.source.outputs.version }}
+          channel: ${{ needs.source.outputs.channel }}
           scope: npm
           runtime-profile: shipping
           verify-attestation: "true"
@@ -91,6 +136,7 @@ jobs:
 
   github-release-canary:
     name: Publish GitHub pre-release assets
+    needs: [source, build]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -108,18 +154,18 @@ jobs:
 
       - uses: ./.github/actions/download-distribution
         with:
-          artifact-name: ${{ inputs.assets_artifact }}
-          source-sha: ${{ inputs.source_sha }}
-          version: ${{ inputs.version }}
-          channel: ${{ inputs.channel }}
+          artifact-name: ${{ needs.build.outputs.assets_artifact }}
+          source-sha: ${{ needs.source.outputs.source_sha }}
+          version: ${{ needs.source.outputs.version }}
+          channel: ${{ needs.source.outputs.channel }}
           scope: assets
           runtime-profile: shipping
           verify-attestation: "true"
 
       - name: Stage canary release assets
         env:
-          VERSION: ${{ inputs.version }}
-          SOURCE_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ needs.source.outputs.version }}
+          SOURCE_SHA: ${{ needs.source.outputs.source_sha }}
         # Named selection, not a glob. `release-assets/mangostudio-<version>-*`
         # absorbed the eight raw hub binaries the moment raw assets shipped while
         # never matching a raw runtime binary, so canary paid ~760 MB per green
@@ -153,8 +199,8 @@ jobs:
         # rolling tag to reconstruct.
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ inputs.version }}
-          SOURCE_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ needs.source.outputs.version }}
+          SOURCE_SHA: ${{ needs.source.outputs.source_sha }}
         run: |
           source scripts/release/publish-release.sh
           tag="v${VERSION}"
@@ -168,8 +214,8 @@ jobs:
 
       - name: Prune superseded canary releases
         # Non-fatal: the build above is published either way, and a transient
-        # listing failure must not redden `main`. Storage grows until the next
-        # green commit prunes again.
+        # listing failure must not fail publication. Storage grows until the next
+        # daily run prunes again.
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -177,7 +223,7 @@ jobs:
 
   canary-summary:
     name: Canary publish summary
-    needs: [npm-canary, github-release-canary]
+    needs: [source, npm-canary, github-release-canary]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -190,7 +236,7 @@ jobs:
 
       - name: Write canary publish summary
         env:
-          TITLE: Canary ${{ inputs.version }}
+          TITLE: Canary ${{ needs.source.outputs.version }}
           NPM_RESULT: ${{ needs.npm-canary.result }}
           RELEASE_RESULT: ${{ needs.github-release-canary.result }}
           NPM_PUBLISH_AUTH: ${{ needs.npm-canary.outputs.auth }}

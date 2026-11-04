@@ -282,11 +282,7 @@ describe('compatibility checks preserve enforcement producers', () => {
       expect(names.filter((name) => name === 'Gate')).toHaveLength(1);
     }
     const ci = readText('.github/workflows/ci.yml');
-    expect(parseNeedsList(extractJobBlock(ci, 'canary'))).toEqual([
-      'gate',
-      'distribution-identity',
-      'distribution',
-    ]);
+    expect(extractJobBlock(ci, 'canary')).toBe('');
     expect(extractJobBlock(ci, 'gate-unique')).not.toContain('actions: read');
     expect(extractJobBlock(ci, 'gate-unique')).not.toContain('report-cache-usage.ts');
   });

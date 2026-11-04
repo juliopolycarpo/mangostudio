@@ -1247,31 +1247,57 @@ describe('release workflow binary gate', () => {
     expect(workflow).toContain('actions: read');
   });
 
-  test('ci gates the canary publish on the aggregate gate and a push to main', () => {
-    const workflow = readText('.github/workflows/ci.yml');
-    const canaryBlock = extractJobBlock(workflow, 'canary');
-    const mainPushIf =
-      '$' +
-      "{{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.gate.result == 'success' && needs['distribution-identity'].result == 'success' && needs.distribution.result == 'success' }}";
-    expect(canaryBlock, 'canary job not found in ci.yml').not.toBe('');
+  test('canary runs daily independently of CI and builds the selected green source', () => {
+    const ci = readText('.github/workflows/ci.yml');
+    const workflow = readText('.github/workflows/canary.yml');
+    expect(extractJobBlock(ci, 'canary')).toBe('');
+    expect(ci).not.toContain('uses: ./.github/workflows/canary.yml');
+    expect(workflow).toContain('cron: "17 6 * * *"');
+    expect(workflow).not.toContain('workflow_call:');
+    expect(workflow).not.toContain('workflow_run:');
+    const source = extractJobBlock(workflow, 'source');
+    expect(source).toContain("if: github.ref == 'refs/heads/main'");
+    expect(source).toContain('actions: read');
+    expect(source).toContain('ci.yml/runs?branch=main&event=push&status=success&per_page=1');
+    expect(source).toContain(`ref: ${'$'}{{ steps.source.outputs.sha }}`);
+    expect(source).toContain('EVENT_NAME: push');
+    expectJobNeeds(workflow, 'build', String.raw`\[source\]`);
+    const build = extractJobBlock(workflow, 'build');
+    expect(build).toContain('uses: ./.github/workflows/distribution-build.yml');
+    expect(build).toContain(`source_sha: ${'$'}{{ needs.source.outputs.source_sha }}`);
+    expect(build).not.toContain('runtime_profile: light');
+    for (const job of ['npm-canary', 'github-release-canary']) {
+      expectJobNeeds(workflow, job, String.raw`\[source, build\]`);
+      const block = extractJobBlock(workflow, job);
+      expect(block).toContain(`source-sha: ${'$'}{{ needs.source.outputs.source_sha }}`);
+      expect(block).toContain(`version: ${'$'}{{ needs.source.outputs.version }}`);
+      expect(block).toContain('needs.build.outputs.');
+    }
+    expect(extractJobBlock(workflow, 'npm-canary')).toContain('environment: canary');
+  });
 
-    // The gate is the definition of a green commit; the other dependencies
-    // expose the exact artifact identity to the reusable publisher.
-    expectJobNeeds(workflow, 'canary', String.raw`\[gate, distribution-identity, distribution\]`);
-    expect(canaryBlock).toContain(`if: ${mainPushIf}`);
-    expect(canaryBlock).toContain('uses: ./.github/workflows/canary.yml');
-    expect(canaryBlock).toContain('assets_artifact:');
-    expect(canaryBlock).toContain('npm_artifact:');
-    // The reusable publisher exchanges its OIDC identity without a publish token.
-    expect(canaryBlock).not.toContain('secrets:');
-    expect(canaryBlock).not.toContain('NPM_TOKEN');
-    expect(readText('.github/workflows/canary.yml')).not.toContain('NPM_TOKEN');
-
-    // The calling job's permissions are the ceiling for the reusable workflow,
-    // since ci.yml's top-level grant is read-only.
-    expect(canaryBlock).not.toContain('packages: write');
-    expect(canaryBlock).toContain('id-token: write');
-    expect(canaryBlock).toContain('contents: write');
+  test.each([
+    ['a'.repeat(40), true],
+    ['', false],
+    ['main', false],
+  ])('canary source resolution validates API result %j', (sha, valid) => {
+    const source = extractJobBlock(readText('.github/workflows/canary.yml'), 'source');
+    const selection = extractStepBlocks(source).find((step) => step.includes('id: source'));
+    expect(selection).toBeDefined();
+    const script = selection
+      ?.split('run: |\n')[1]
+      ?.replace(/^ {10}/gm, '')
+      .replace('>> "$GITHUB_OUTPUT"', '');
+    expect(script).toBeDefined();
+    // Named fake for the GitHub API, avoiding network I/O.
+    const fakeGitHubApi = 'gh() { printf "%s" "$FAKE_SOURCE_SHA"; }';
+    const result = Bun.spawnSync(['bash', '-c', `${fakeGitHubApi}\n${script}`], {
+      env: { ...process.env, FAKE_SOURCE_SHA: sha, REPO: 'owner/repo' },
+    });
+    expect(result.exitCode).toBe(valid ? 0 : 1);
+    expect(result.stdout.toString()).toContain(
+      valid ? `sha=${sha}` : `Expected a successful main push CI commit SHA, received: ${sha}`
+    );
   });
 
   test('canary publishes npm and GitHub release assets as isolated jobs', () => {
@@ -1280,8 +1306,8 @@ describe('release workflow binary gate', () => {
     const cargoVersionVar = '$' + '{CARGO_VERSION}';
     const versionVar = '$' + '{VERSION}';
 
-    // Reusable workflow; only the newest green commit owns the rolling tags.
-    expect(workflow).toContain('on:\n  workflow_call:');
+    // Daily workflow; publishing is serialized across scheduled and manual runs.
+    expect(workflow).toContain('on:\n  schedule:');
     expect(workflow).toContain('group: canary-publish');
     expect(workflow).toContain('cancel-in-progress: true');
 
@@ -1310,12 +1336,12 @@ describe('release workflow binary gate', () => {
     // sha-stamped version, because an immutable release cannot be republished.
     const releaseBlock = extractJobBlock(workflow, 'github-release-canary');
     expect(releaseBlock).toContain('scope: assets');
-    expect(releaseBlock).toContain(`VERSION: ${'$'}{{ inputs.version }}`);
+    expect(releaseBlock).toContain(`VERSION: ${'$'}{{ needs.source.outputs.version }}`);
     // Staging is a named selection in TypeScript, not a shell glob: a glob over
     // the release plan silently absorbed every raw hub binary the moment raw
     // assets shipped, while never matching a raw runtime binary.
     expect(releaseBlock).toContain('run: bun ./scripts/release/stage-canary-assets.ts');
-    expect(releaseBlock).toContain(`SOURCE_SHA: ${'$'}{{ inputs.source_sha }}`);
+    expect(releaseBlock).toContain(`SOURCE_SHA: ${'$'}{{ needs.source.outputs.source_sha }}`);
     expect(releaseBlock).not.toContain('cp "$asset"');
     expect(releaseBlock).not.toContain('sha256sum mangostudio-');
     expect(releaseBlock).toContain(`tag="v${versionVar}"`);
@@ -1348,7 +1374,11 @@ describe('release workflow binary gate', () => {
     const githubReleaseResult = '$' + '{{ needs.github-release-canary.result }}';
     expect(summaryBlock, 'canary-summary job not found').not.toBe('');
 
-    expectJobNeeds(workflow, 'canary-summary', String.raw`\[npm-canary, github-release-canary\]`);
+    expectJobNeeds(
+      workflow,
+      'canary-summary',
+      String.raw`\[source, npm-canary, github-release-canary\]`
+    );
     expect(summaryBlock).toContain(`if: ${alwaysExpression}`);
     expect(summaryBlock).toContain('bash scripts/release/publish-summary.sh');
     expect(summaryBlock).toContain(`NPM_RESULT: ${npmResult}`);

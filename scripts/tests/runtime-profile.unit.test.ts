@@ -521,7 +521,7 @@ describe('runtime profile callers and cache isolation', () => {
     expect(changes).toContain('echo "distribution=true" >> "$GITHUB_OUTPUT"');
     const gate = parseNeedsList(extractJobBlock(ci, 'gate'));
     for (const lane of ['distribution', 'smoke', 'smoke-container']) expect(gate).toContain(lane);
-    expect(parseNeedsList(extractJobBlock(ci, 'canary'))).toContain('gate');
+    expect(extractJobBlock(ci, 'canary')).toBe('');
   });
 
   test('the seed job is cache-only, main-push-only, non-gating and serialized', () => {
@@ -544,7 +544,7 @@ describe('runtime profile callers and cache isolation', () => {
     // The seed waits for the gate (so it only seeds a green commit and is exempt from the gate's
     // own needs); nothing mandatory or publishing waits for the seed.
     expect(parseNeedsList(seed)).toEqual(['gate', 'distribution-identity']);
-    for (const job of ['gate', 'gate-unique', 'canary', 'smoke', 'smoke-container', 'qa-metrics']) {
+    for (const job of ['gate', 'gate-unique', 'smoke', 'smoke-container', 'qa-metrics']) {
       expect(
         parseNeedsList(extractJobBlock(ci, job)),
         `${job} must not need the seed`
