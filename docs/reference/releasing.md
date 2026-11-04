@@ -650,7 +650,9 @@ complete-version verification after Actions artifacts expire. Partial publicatio
 still needs its original missing payloads: if those are expired or manually
 deleted, fail and publish a new source version. A deleted reservation is never
 silently replaced with a later build. Superseded releases removed by the existing
-keep-window are not recreated by stale retries.
+keep-window are not recreated by stale retries. Frozen `v<root>-canary` rolling aliases
+are excluded from per-SHA channel ordering; source-stamped history still requires
+immutable releases and proven source ancestry.
 
 ### Distribution bundle compression
 

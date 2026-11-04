@@ -322,6 +322,27 @@ describe('fresh canary publication decisions', () => {
     });
     expect(audit.receipts.publishedCanaries[0]?.sourceSha).toBe(SOURCE);
   });
+  test.each([
+    ['v0.1.0-canary', false, false],
+    ['v0.1.0-canary', false, true],
+    ['v0.1.1-canary', true, false],
+    ['v0.1.1-canary', true, true],
+  ] as const)(
+    'legacy rolling alias %s (immutable=%s, missing wrapper=%s) does not change publication decisions',
+    async (tag, immutable, missingWrapper) => {
+      const { manifest, expected, registry, github, dependencies } = await fixture();
+      github.releases = [
+        ...(github.releases as unknown[]),
+        { ...releaseRecord(tag, 18, OLD), immutable },
+      ];
+      if (missingWrapper) missingPackages(registry, [MAIN_PACKAGE]);
+      const audit = await auditCanaryPublication(manifest, expected, dependencies);
+      expect(audit.decision).toBe(missingWrapper ? 'publish' : 'noop');
+      expect(audit.needed.packages).toEqual(missingWrapper ? [MAIN_PACKAGE] : []);
+      expect(audit.receipts.publishedCanaries.map((release) => release.tag)).toEqual([TAG]);
+      expect(github.calls).not.toContain(`tag:${tag}`);
+    }
+  );
   test('wrapper existence cannot hide six missing platform packages', async () => {
     const { manifest, expected, registry, dependencies } = await fixture();
     missingPackages(registry, NAMES.slice(0, 6));

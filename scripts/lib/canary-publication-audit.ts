@@ -235,6 +235,7 @@ async function inspectPublishedCanaries(
     if (
       release.draft ||
       tag.startsWith('protocol-') ||
+      /^v.+-canary$/.test(tag) ||
       !(tag.includes('-canary') || tag === 'canary' || tag.startsWith('canary-'))
     )
       continue;

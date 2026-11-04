@@ -357,7 +357,9 @@ publicador. Isso permite verificar uma versão completa após os artefatos Actio
 expirarem. Recuperar publicação parcial ainda exige os payloads originais
 faltantes: se expiraram ou foram apagados, falha e exige nova versão fonte.
 Reserva apagada nunca é substituída silenciosamente por outro build. Releases
-superadas removidas pela janela de retenção não são recriadas por reruns antigos.
+superadas removidas pela janela de retenção não são recriadas por reruns antigos. Aliases rolling
+legados `v<root>-canary` ficam fora da ordenação por SHA; releases com SHA
+continuam exigindo imutabilidade e ancestralidade comprovada.
 
 Ressalvas:
 
