@@ -10,9 +10,9 @@ export interface CanarySource {
   readonly runUrl: string;
 }
 
-function record(value: unknown): Record<string, unknown> {
+function record(value: unknown, field = 'workflow run'): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`Expected workflow run object, received: ${JSON.stringify(value)}`);
+    throw new Error(`Expected ${field} object, received: ${JSON.stringify(value)}`);
   }
   return value as Record<string, unknown>;
 }
@@ -26,6 +26,8 @@ function positiveInteger(value: unknown, field: string): number {
 
 /**
  * Freeze the newest original push run, independent of rerun completion time.
+ * Validate ordering for every success and identity only for the winner; never
+ * fall through to an older source when the winner is invalid.
  * Example: selectCanarySource(runs, 'owner/repo', 123).
  */
 export function selectCanarySource(
@@ -38,49 +40,64 @@ export function selectCanarySource(
   }
   positiveInteger(workflowId, 'workflow_id');
   const candidates = runs
-    .map(record)
+    .map((value) => record(value))
     .filter((run) => run.status === 'completed' && run.conclusion === 'success');
   if (candidates.length === 0) throw new Error('No eligible completed successful main push CI run');
-  const sources = candidates.map((run): CanarySource => {
-    const runId = positiveInteger(run.id, 'id');
-    const runRepository = record(run.repository).full_name;
-    const headRepository = record(run.head_repository).full_name;
-    const workflowPath = '.github/workflows/ci.yml';
-    const runUrl = `https://github.com/${repository}/actions/runs/${runId}`;
-    if (
-      runRepository !== repository ||
-      headRepository !== repository ||
-      run.workflow_id !== workflowId ||
-      run.path !== workflowPath ||
-      run.event !== 'push' ||
-      run.head_branch !== 'main' ||
-      run.html_url !== runUrl
-    ) {
-      throw new Error(
-        `Inconsistent CI run ${runId}: expected ${repository} ${workflowPath} (${workflowId}) push main at ${runUrl}; received ${JSON.stringify(run)}`
-      );
-    }
-    if (typeof run.head_sha !== 'string' || !/^[0-9a-f]{40}$/.test(run.head_sha)) {
-      throw new Error(
-        `Invalid head_sha: ${JSON.stringify(run.head_sha)}; expected full lowercase 40-character SHA`
-      );
-    }
-    return {
-      runId,
-      runAttempt: positiveInteger(run.run_attempt, 'run_attempt'),
-      runNumber: positiveInteger(run.run_number, 'run_number'),
-      sourceSha: run.head_sha,
-      repository,
-      workflowId,
-      workflowPath,
-      runUrl,
-    };
-  });
-  sources.sort((left, right) => right.runNumber - left.runNumber);
-  if (sources.length > 1 && sources[0]?.runNumber === sources[1]?.runNumber) {
-    throw new Error(`Ambiguous CI run_number: ${sources[0]?.runNumber}; expected unique push run`);
+  const ranked = candidates
+    .map((run) => ({ run, runNumber: positiveInteger(run.run_number, 'run_number') }))
+    .sort((left, right) => right.runNumber - left.runNumber);
+  if (ranked.length > 1 && ranked[0]?.runNumber === ranked[1]?.runNumber) {
+    throw new Error(`Ambiguous CI run_number: ${ranked[0]?.runNumber}; expected unique push run`);
   }
-  const selected = sources[0];
+  const selected = ranked[0];
   if (!selected) throw new Error('No eligible completed successful main push CI run');
-  return selected;
+  const { run, runNumber } = selected;
+  const runId = positiveInteger(run.id, 'id');
+  const runRepository = record(run.repository, `CI run ${runId} repository`).full_name;
+  const headRepository = record(run.head_repository, `CI run ${runId} head_repository`).full_name;
+  const workflowPath = '.github/workflows/ci.yml';
+  const runUrl = `https://github.com/${repository}/actions/runs/${runId}`;
+  const received: Record<string, unknown> = {
+    repository: runRepository,
+    head_repository: headRepository,
+    workflow_id: run.workflow_id,
+    path: run.path,
+    event: run.event,
+    head_branch: run.head_branch,
+    html_url: run.html_url,
+  };
+  const expected: Record<string, unknown> = {
+    repository,
+    head_repository: repository,
+    workflow_id: workflowId,
+    path: workflowPath,
+    event: 'push',
+    head_branch: 'main',
+    html_url: runUrl,
+  };
+  const mismatches = Object.fromEntries(
+    Object.entries(expected)
+      .filter(([field, value]) => received[field] !== value)
+      .map(([field, value]) => [field, { expected: value, received: received[field] }])
+  );
+  if (Object.keys(mismatches).length > 0) {
+    throw new Error(
+      `Inconsistent CI run ${runId}: expected ${repository} ${workflowPath} (${workflowId}) push main at ${runUrl}; mismatched fields ${JSON.stringify(mismatches)}`
+    );
+  }
+  if (typeof run.head_sha !== 'string' || !/^[0-9a-f]{40}$/.test(run.head_sha)) {
+    throw new Error(
+      `Invalid head_sha: ${JSON.stringify(run.head_sha)}; expected full lowercase 40-character SHA`
+    );
+  }
+  return {
+    runId,
+    runAttempt: positiveInteger(run.run_attempt, 'run_attempt'),
+    runNumber,
+    sourceSha: run.head_sha,
+    repository,
+    workflowId,
+    workflowPath,
+    runUrl,
+  };
 }

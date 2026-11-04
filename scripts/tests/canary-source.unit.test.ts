@@ -82,6 +82,60 @@ describe('frozen canary source', () => {
       expect(() => selectCanarySource([run({ [field]: value })], repository, 42)).toThrow();
     });
   }
+  test.each([
+    { head_repository: null },
+    { head_repository: { full_name: 'legacy/fork' } },
+    { html_url: 'https://example.com/legacy-run' },
+    { path: '.github/workflows/legacy-ci.yml' },
+    { head_sha: 'legacy-short-sha' },
+    { run_attempt: 0 },
+    { id: -1 },
+  ])('a malformed older identity %j cannot reject a valid newer winner', (legacy) => {
+    const winner = run({
+      id: 101,
+      run_number: 11,
+      html_url: 'https://github.com/owner/repo/actions/runs/101',
+    });
+    expect(selectCanarySource([run(legacy), winner], repository, 42).runId).toBe(101);
+  });
+  test('an invalid newest identity is fatal instead of falling through to an older source', () => {
+    expect(() =>
+      selectCanarySource(
+        [run(), run({ run_number: 11, head_branch: 'unexpected' })],
+        repository,
+        42
+      )
+    ).toThrow('Inconsistent CI run');
+  });
+  test('every successful candidate still needs a valid run number to establish ordering', () => {
+    expect(() =>
+      selectCanarySource([run({ run_number: undefined }), run({ run_number: 11 })], repository, 42)
+    ).toThrow('Invalid run_number: undefined; expected positive safe integer');
+  });
+  test('identity failures identify the mismatched fields without logging unrelated API payloads', () => {
+    let failure: unknown;
+    try {
+      selectCanarySource(
+        [run({ head_branch: 'unexpected', head_commit: { message: 'private-commit-message' } })],
+        repository,
+        42
+      );
+    } catch (caught) {
+      failure = caught;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    const message = (failure as Error).message;
+    expect(message).toContain('head_branch');
+    expect(message).toContain('unexpected');
+    expect(message).toContain('main');
+    expect(message).not.toContain('private-commit-message');
+    expect(message).not.toContain('head_commit');
+  });
+  test('a malformed winning repository object names its field and expected shape', () => {
+    expect(() => selectCanarySource([run({ head_repository: null })], repository, 42)).toThrow(
+      'head_repository object'
+    );
+  });
   test('rejects ambiguous ordering and invalid lookup identity', () => {
     expect(() => selectCanarySource([run(), run()], repository, 42)).toThrow(
       'Ambiguous CI run_number: 10'
