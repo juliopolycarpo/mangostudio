@@ -136,6 +136,11 @@ export async function captureBackup(
   const resolvedRoots = await Promise.all(
     roots.map(async (root) => {
       try {
+        // Inspect the configured directory entry before canonicalizing it:
+        // realpath alone would hide both live and dangling root symlinks.
+        const entry = await lstat(root.source);
+        if (entry.isSymbolicLink()) throw new Error('Backup refuses symlinks at configured roots.');
+        if (!entry.isDirectory()) throw new Error('Configured backup roots must be directories.');
         return { ...root, source: await realpath(root.source), present: true };
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT')

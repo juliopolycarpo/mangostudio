@@ -355,3 +355,22 @@ it.skipIf(process.platform === 'win32')(
     ).rejects.toThrow('overlaps');
   }
 );
+
+it.skipIf(process.platform === 'win32')(
+  'refuses symlinks at configured roots, including dangling ones',
+  async () => {
+    const { root, config, output } = await fixture();
+    const linkedRoot = join(root, 'linked-images');
+    await symlink(config.uploads.dir, linkedRoot, 'dir');
+    config.images.dir = linkedRoot;
+    await expect(
+      captureBackup(config, { output, checkpoints: true, includeSecrets: false }, 'test')
+    ).rejects.toThrow('symlink');
+    expect(await Bun.file(output).exists()).toBe(false);
+    await rm(linkedRoot);
+    await symlink(join(root, 'absent-directory'), linkedRoot, 'dir');
+    await expect(
+      captureBackup(config, { output, checkpoints: true, includeSecrets: false }, 'test')
+    ).rejects.toThrow('symlink');
+  }
+);

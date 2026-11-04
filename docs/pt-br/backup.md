@@ -13,7 +13,8 @@ arquivo sobre uma instalação em execução. O backup resolve os caminhos confi
 banco, uploads, imagens geradas, avatares, agentes, skills e checkpoints. Checkpoints são
 incluídos por padrão. Perfis, preferências e histórico estão no banco. Raízes opcionais
 ausentes são registradas; locais ilegíveis, links, arquivos especiais, nomes não portáteis
-ou colisões de nomes interrompem a captura inteira. O destino deve ficar fora das raízes
+ou colisões de nomes interrompem a captura inteira. Links na própria raiz configurada são
+recusados, mesmo quando o destino não existe. O destino deve ficar fora das raízes
 e suportar hard links. Arquivos de destino existentes nunca são substituídos.
 
 ## Consistência e privacidade
