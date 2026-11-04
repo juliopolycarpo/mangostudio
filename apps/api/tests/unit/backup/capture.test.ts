@@ -419,3 +419,49 @@ it.skipIf(process.platform === 'win32')(
     expect(await Bun.file(output).exists()).toBe(false);
   }
 );
+
+it.skipIf(process.platform === 'win32')(
+  'checks the physical configuration path without collapsing a symlink and parent traversal',
+  async () => {
+    const { root, config, output } = await fixture();
+    const lexicalParent = join(root, 'a');
+    const physicalParent = join(root, 'b');
+    await mkdir(lexicalParent);
+    await mkdir(join(physicalParent, 'child'), { recursive: true });
+    await mkdir(join(physicalParent, 'images'));
+    await symlink(join(physicalParent, 'child'), join(lexicalParent, 'link'), 'dir');
+    config.images.dir = join(physicalParent, 'images');
+    await writeFile(
+      join(config.images.dir, 'config.toml'),
+      '[auth]\nsecret="config-sensitive-fixture"'
+    );
+    config.configFilePath = `${lexicalParent}/link/../images/config.toml`;
+    await expect(
+      captureBackup(config, { output, checkpoints: true, includeSecrets: false }, 'test')
+    ).rejects.toThrow('overlaps');
+    expect(await Bun.file(output).exists()).toBe(false);
+  }
+);
+
+it.skipIf(process.platform === 'win32')(
+  'publishes to the physical output parent instead of a different lexical directory',
+  async () => {
+    const { root, config } = await fixture();
+    const lexicalParent = join(root, 'a');
+    const physicalParent = join(root, 'b');
+    await mkdir(lexicalParent);
+    await mkdir(join(physicalParent, 'child'), { recursive: true });
+    await symlink(join(physicalParent, 'child'), join(lexicalParent, 'link'), 'dir');
+    await captureBackup(
+      config,
+      {
+        output: `${lexicalParent}/link/../archive.tar.gz`,
+        checkpoints: true,
+        includeSecrets: false,
+      },
+      'test'
+    );
+    expect(await Bun.file(join(physicalParent, 'archive.tar.gz')).exists()).toBe(true);
+    expect(await Bun.file(join(lexicalParent, 'archive.tar.gz')).exists()).toBe(false);
+  }
+);
