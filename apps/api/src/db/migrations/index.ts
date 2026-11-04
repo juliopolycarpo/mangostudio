@@ -57,6 +57,7 @@ import { externalTurnAttempts } from './056_external_turn_attempts';
 import { dropAttemptConnectionRevision } from './057_drop_attempt_connection_revision';
 import { messagesGeneratingIndex } from './058_messages_generating_index';
 import { externalContinuationUnresumable } from './059_external_continuation_unresumable';
+import { productOperations } from './060_product_operations';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -118,4 +119,5 @@ export const allMigrations = {
   '057_drop_attempt_connection_revision': dropAttemptConnectionRevision,
   '058_messages_generating_index': messagesGeneratingIndex,
   '059_external_continuation_unresumable': externalContinuationUnresumable,
+  '060_product_operations': productOperations,
 };

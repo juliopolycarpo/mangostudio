@@ -7,6 +7,7 @@ import {
   ExternalPermissionLevelSchema,
   ExternalVendorIdSchema,
 } from '../external-agents/choices';
+import { OperationIdSchema } from '../operations';
 
 const InteractionModeSchema = Type.Union([
   Type.Literal('chat'),
@@ -199,6 +200,7 @@ export const UploadChatAttachmentResponseSchema = Type.Object({
 export type UploadChatAttachmentResponse = Static<typeof UploadChatAttachmentResponseSchema>;
 
 export const CreateChatBodySchema = Type.Object({
+  operationId: Type.Optional(OperationIdSchema),
   title: Type.String(),
   model: Type.Optional(Type.String()),
 });

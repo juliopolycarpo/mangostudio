@@ -1,20 +1,9 @@
-/**
- * The step that proves the whole thing works: one chat, in the chosen folder,
- * answered by the chosen runner.
- *
- * Sending is always an explicit click — nothing is dispatched by arriving here.
- * The two failure shapes that matter are both about *repeating*: a reload after
- * the chat was created, and a second click after the prompt was accepted but
- * the answer was lost. Neither may produce a second chat or a second turn, so
- * the chat reference is persisted the moment creation returns, before anything
- * is sent, and the transcript is consulted for an identical prompt before one
- * is sent again.
- */
+/** Explicit first-chat operations survive reloads; transcript text never admits a turn. */
 
 import { GENERATION_PROMPT_MAX_LENGTH } from '@mangostudio/shared/generation/values';
 import type { OnboardingState } from '@mangostudio/shared/onboarding';
 import { useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
@@ -23,17 +12,16 @@ import { Textarea } from '@/components/ui/Textarea';
 import {
   chatKeys,
   messageKeys,
-  messagesQueryOptions,
   useCreateChatMutation,
-  useMessagesQuery,
   useUpdateChatMutation,
 } from '@/features/chat/queries';
 import { sendWithExternalConsent } from '@/features/external-agents/send-with-consent';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
-import { respondTextStream } from '@/services/generation-service';
+import { submitOperation } from '@/services/operation-service';
 
 import { StepFrame } from '../StepFrame';
+import { useFirstChatOperation } from '../use-first-chat-operation';
 
 interface FirstChatStepProps {
   readonly environmentId: string;
@@ -68,43 +56,74 @@ export function FirstChatStep({
   const { t } = useI18n();
   const s = t.onboarding.chat;
   const queryClient = useQueryClient();
-  const [prompt, setPrompt] = useState(s.defaultPrompt);
+  const [prompt, setPrompt] = useState(state.turnOperation?.prompt ?? s.defaultPrompt);
   const [isSending, setSending] = useState(false);
   const [hasFailed, setFailed] = useState(false);
   const createChat = useCreateChatMutation();
   const updateChat = useUpdateChatMutation();
-  const messages = useMessagesQuery(state.chatId ?? null);
+  const operation = useFirstChatOperation(
+    state.chatId ? state.turnOperation?.operationId : state.createChatOperation?.operationId
+  );
+  const sending = useRef(false);
+  useEffect(() => {
+    if (state.turnOperation) setPrompt(state.turnOperation.prompt);
+  }, [state.turnOperation]);
+  useEffect(() => {
+    const receipt = operation.data;
+    if (!state.chatId && receipt?.kind === 'create-chat' && receipt.chatId) {
+      onWritingChange(true);
+      void onChange((current) => ({ ...current, chatId: receipt.chatId ?? undefined }))
+        .catch(() => setFailed(true))
+        .finally(() => onWritingChange(false));
+    }
+  }, [operation.data, state.chatId, onChange, onWritingChange]);
+  useEffect(() => {
+    if (operation.data?.state === 'completed' && state.chatId) {
+      void queryClient.invalidateQueries({ queryKey: messageKeys.list(state.chatId) });
+      void queryClient.invalidateQueries({ queryKey: chatKeys.all });
+    }
+  }, [operation.data?.state, state.chatId, queryClient]);
 
   const runnerName =
     state.runner?.kind === 'external'
       ? t.library.targets[state.runner.targetId]
       : t.library.targets.mangostudio;
 
-  const alreadyAsked = (text: string): boolean =>
-    (messages.data?.pages ?? []).some((page) =>
-      page.messages.some((message) => message.role === 'user' && message.text === text)
-    );
-
   const send = async () => {
+    if (sending.current) return;
+    sending.current = true;
     setSending(true);
     setFailed(false);
+    let pendingOperationId: string | undefined;
+    let pendingCreationId: string | undefined;
     try {
+      // Persist identity and exact input before sending either request. A lost
+      // settings acknowledgement stops here; reload reads the committed identity.
+      let creation = state.createChatOperation ?? {
+        operationId: crypto.randomUUID(),
+        title: prompt.slice(0, 60),
+      };
+      let turn = state.turnOperation ?? { operationId: crypto.randomUUID(), prompt };
+      onWritingChange(true);
       let chatId = state.chatId;
-      if (!chatId) {
-        // Held across the create *and* the write it leads to: the id is built
-        // on the record as it reads now, so a Finish or a Skip that lands in
-        // between would be overwritten by it — the run would report itself
-        // unfinished again and the gate would send the person back here.
-        onWritingChange(true);
-        try {
-          const chat = await createChat.mutateAsync({ title: prompt.slice(0, 60) });
+      try {
+        await onChange((current) => {
+          // Another tab may have recorded identity since this render. Keep
+          // the confirmed operation instead of replacing it with our candidate.
+          creation = current.createChatOperation ?? creation;
+          turn = current.turnOperation ?? turn;
+          chatId = current.chatId ?? chatId;
+          pendingOperationId = turn.operationId;
+          pendingCreationId = creation.operationId;
+          return { ...current, createChatOperation: creation, turnOperation: turn };
+        });
+        if (!chatId) {
+          const chat = await createChat.mutateAsync(creation);
           chatId = chat.id;
-          // Persisted before a single byte of the prompt is sent. A crash on the
-          // next line then costs a retry, not a duplicate chat.
           await onChange((current) => ({ ...current, chatId }));
-        } finally {
-          onWritingChange(false);
         }
+      } finally {
+        onWritingChange(false);
       }
 
       await updateChat.mutateAsync({
@@ -115,45 +134,45 @@ export function FirstChatStep({
           ...(state.runner ? { runner: state.runner } : {}),
         },
       });
-
-      // A resumed flow may be looking at a transcript that already carries this
-      // exact prompt: the send was accepted and only the answer was lost.
-      // Re-reading is cheap; a second identical turn is not.
-      await queryClient.refetchQueries({ queryKey: chatKeys.detail(chatId) });
-      const fresh = await queryClient.fetchInfiniteQuery(messagesQueryOptions(chatId));
-      const asked = fresh.pages.some((page) =>
-        page.messages.some((message) => message.role === 'user' && message.text === prompt)
-      );
-
-      if (!asked) {
-        const sendChatId = chatId;
-        // Wrapped in the same consent retry the composer uses: a first send to
-        // a vendor CLI is exactly the send that gets refused for a disclosure
-        // nobody has acknowledged yet.
-        await sendWithExternalConsent(sendChatId, () =>
-          respondTextStream({ chatId: sendChatId, prompt }, () => {
-            // Chunks are the chat page's business; this step only needs to know
-            // that the turn ran. The transcript below is the source of truth
-            // for whether anything was actually answered.
-          })
-        );
-      }
-
-      // The transcript is what says whether anything answered, and it lives
-      // under its own key — invalidating the chat list alone would leave this
-      // step reading the empty transcript it fetched a moment ago to decide
-      // whether to send.
-      await queryClient.invalidateQueries({ queryKey: messageKeys.list(chatId) });
-      await queryClient.invalidateQueries({ queryKey: chatKeys.all });
+      const sendChatId = chatId;
+      await sendWithExternalConsent(sendChatId, async () => {
+        const receipt = await submitOperation({
+          chatId: sendChatId,
+          prompt: turn.prompt,
+          operationId: turn.operationId,
+        });
+        queryClient.setQueryData(['product-operation', turn.operationId], receipt);
+      });
     } catch {
-      // The raw message is a stream or HTTP failure, and none of them tell this
-      // person anything they can act on: the step's own sentence — try again,
-      // or open the chat — is the whole remedy.
       setFailed(true);
+      if (pendingCreationId)
+        await queryClient.invalidateQueries({ queryKey: ['product-operation', pendingCreationId] });
+      if (pendingOperationId)
+        await queryClient.invalidateQueries({
+          queryKey: ['product-operation', pendingOperationId],
+        });
     } finally {
+      sending.current = false;
       setSending(false);
     }
   };
+
+  const newRequest = async () => {
+    onWritingChange(true);
+    try {
+      await onChange((current) => ({
+        ...current,
+        turnOperation: undefined,
+        ...(!current.chatId ? { createChatOperation: undefined } : {}),
+      }));
+    } catch {
+      setFailed(true);
+    } finally {
+      onWritingChange(false);
+    }
+  };
+  const receipt = operation.data;
+  const busy = receipt?.state === 'accepted' || receipt?.state === 'running';
 
   return (
     <StepFrame title={s.title} lead={s.lead} hint={s.hint}>
@@ -194,7 +213,7 @@ export function FirstChatStep({
           maxLength={GENERATION_PROMPT_MAX_LENGTH}
           // Nowhere to send it yet: a live field beside a disabled Send invites
           // writing a message that has no place to go.
-          disabled={!state.workdir}
+          disabled={!state.workdir || Boolean(state.turnOperation)}
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
         />
@@ -206,7 +225,14 @@ export function FirstChatStep({
         <Button
           data-testid="onboarding-send-prompt"
           loading={isSending}
-          disabled={!state.workdir || prompt.trim().length === 0 || answered}
+          disabled={
+            !state.workdir ||
+            prompt.trim().length === 0 ||
+            answered ||
+            Boolean(receipt) ||
+            operation.isError ||
+            isSending
+          }
           onClick={() => void send()}
         >
           {isSending ? s.sending : s.send}
@@ -234,11 +260,25 @@ export function FirstChatStep({
         </Callout>
       ) : null}
 
-      {!answered && state.chatId && !isSending && alreadyAsked(prompt) ? (
-        <p className="flex items-center gap-2 text-sm text-fg-muted">
-          <Spinner size="sm" />
-          {s.waiting}
-        </p>
+      {receipt ? (
+        <Callout
+          tone={receipt.state === 'failed' || receipt.state === 'unresolved' ? 'warning' : 'info'}
+          data-testid="onboarding-operation-state"
+        >
+          {busy ? <Spinner size="sm" /> : null}
+          {s.operationStates[receipt.state]}
+        </Callout>
+      ) : null}
+      {operation.isError ? <Callout tone="warning">{s.operationUnavailable}</Callout> : null}
+      {(receipt && !busy) || operation.isError ? (
+        <Button
+          variant="secondary"
+          data-testid="onboarding-new-operation"
+          disabled={isSending}
+          onClick={() => void newRequest()}
+        >
+          {s.newRequest}
+        </Button>
       ) : null}
 
       {hasFailed ? (

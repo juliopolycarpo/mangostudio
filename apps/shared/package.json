@@ -18,6 +18,7 @@
     "./frontend-build/host": "./src/frontend-build/host.ts",
     "./activity": "./src/activity/index.ts",
     "./chat": "./src/chat/index.ts",
+    "./operations": "./src/operations/index.ts",
     "./generation": "./src/generation/index.ts",
     "./generation/values": "./src/generation/values.ts",
     "./app-settings": "./src/app-settings/index.ts",

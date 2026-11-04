@@ -1,6 +1,8 @@
 import Type, { type Static } from 'typebox';
 
 import { ChatRunnerConfigurationSchema } from '../chat/schemas';
+import { GENERATION_PROMPT_MAX_LENGTH } from '../generation/limits';
+import { OperationIdSchema } from '../operations';
 
 /**
  * The first-run flow, in order. A step is a question the person answers once,
@@ -45,6 +47,15 @@ export const ID_MAX_LENGTH = 128;
  * can say whether someone has read the welcome step, so it carries its own bit.
  */
 export const OnboardingStateSchema = Type.Object({
+  createChatOperation: Type.Optional(
+    Type.Object({ operationId: OperationIdSchema, title: Type.String({ maxLength: 60 }) })
+  ),
+  turnOperation: Type.Optional(
+    Type.Object({
+      operationId: OperationIdSchema,
+      prompt: Type.String({ maxLength: GENERATION_PROMPT_MAX_LENGTH }),
+    })
+  ),
   /** Set once the flow is finished or fully skipped. Absent means "not done". */
   completedAt: Type.Optional(Type.Integer({ minimum: 0 })),
   welcomeAcknowledged: Type.Boolean(),

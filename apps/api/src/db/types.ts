@@ -1,8 +1,8 @@
+import type { ChatAttachmentKind } from '@mangostudio/shared/chat';
 /**
  * Kysely database types for the MangoStudio SQLite schema.
  */
-
-import type { ChatAttachmentKind } from '@mangostudio/shared/chat';
+import type { OperationReceipt, OperationState } from '@mangostudio/shared/operations';
 import type { InteractionMode } from '@mangostudio/shared/types';
 import type { Generated, Insertable, Selectable, Updateable } from 'kysely';
 
@@ -559,8 +559,24 @@ interface ExternalTurnAttemptsTable {
   updatedAt: number;
 }
 
+/** Fingerprint-bound product receipts; result is serialized Chat JSON for creation only. */
+export interface ProductOperationsTable {
+  userId: string;
+  operationId: string;
+  kind: OperationReceipt['kind'];
+  fingerprint: string;
+  owner: string;
+  state: OperationState;
+  chatId: string | null;
+  messageId: string | null;
+  result: string | null;
+  createdAt: number;
+  expiresAt: number;
+}
+
 /** Root Kysely Database interface. */
 export interface Database {
+  product_operations: ProductOperationsTable;
   chats: ChatsTable;
   environments: EnvironmentsTable;
   runtime_pairing_tokens: RuntimePairingTokensTable;

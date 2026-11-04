@@ -3,10 +3,13 @@ import type { Kysely } from 'kysely';
 
 import type { Database } from '../../../db/types';
 import { recordActivity } from '../../activity/application/record-activity';
-import { createChat, type CreateChatData } from '../infrastructure/chat-repository';
+import { claimOperation } from '../../operations/application/product-operation';
+import { ChatNotFoundError } from '../domain/chat-ownership';
+import { createChat, type CreateChatData, getOwnedChat } from '../infrastructure/chat-repository';
 import { toPublicChat } from './public-chat';
 
 export interface CreateChatInput {
+  operationId?: string;
   title: string;
   model?: string | null;
   userId: string;
@@ -16,6 +19,44 @@ export async function createChatUseCase(
   input: CreateChatInput,
   db: Kysely<Database>
 ): Promise<Chat> {
+  const operationId = input.operationId;
+  if (operationId) {
+    let created = false;
+    const chat = await db.transaction().execute(async (tx) => {
+      const { row, claimed } = await claimOperation(tx, input.userId, operationId, 'create-chat', {
+        title: input.title,
+        model: input.model,
+      });
+      if (!claimed) {
+        if (!row.result || !row.chatId || !(await getOwnedChat(row.chatId, input.userId, tx)))
+          throw new ChatNotFoundError(row.chatId ?? '');
+        return JSON.parse(row.result) as Chat;
+      }
+      const chat = toPublicChat(
+        await createChat({ title: input.title, model: input.model, userId: input.userId }, tx)
+      );
+      await tx
+        .updateTable('product_operations')
+        .set({ state: 'completed', chatId: chat.id, result: JSON.stringify(chat) })
+        .where('userId', '=', input.userId)
+        .where('operationId', '=', operationId)
+        .execute();
+      created = true;
+      return chat;
+    });
+    if (created)
+      void recordActivity(
+        {
+          userId: input.userId,
+          kind: 'chat_created',
+          chatId: chat.id,
+          environmentId: chat.environmentId,
+          payload: { title: chat.title },
+        },
+        { db }
+      );
+    return chat;
+  }
   const data: CreateChatData = {
     title: input.title,
     model: input.model,

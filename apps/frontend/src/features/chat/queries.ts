@@ -104,7 +104,7 @@ export function useChatsQuery() {
 export function useCreateChatMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (newChat: { title: string; model?: string }) => {
+    mutationFn: async (newChat: { title: string; model?: string; operationId?: string }) => {
       const { data, error } = await client.api.chats.post(newChat);
       if (error) throw new ApiError(error.value);
       return data as Chat;

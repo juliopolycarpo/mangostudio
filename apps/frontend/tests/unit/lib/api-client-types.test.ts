@@ -62,9 +62,9 @@ assertType<
 >();
 
 // 4. A schema-backed POST keeps its request body exactly as the TypeBox schema
-//    declares it: `title` required, `model` optional. This is the direction
+//    declares it: `title` required, `model` and `operationId` optional. This is the direction
 //    that matters most — an `any` body accepts every typo silently.
-assertType<Equals<ChatsPostBody, { title: string; model?: string }>>();
+assertType<Equals<ChatsPostBody, { title: string; model?: string; operationId?: string }>>();
 
 // 5. And its response keeps the full entity, including the discriminated
 //    `runner` union and the template-literal agent id. That id survives a

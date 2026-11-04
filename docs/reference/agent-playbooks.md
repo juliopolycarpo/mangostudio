@@ -696,6 +696,9 @@ Open these first:
 - `apps/frontend/src/features/external-agents/send-with-consent.ts` (one consent-retry rule, two send paths)
 - `apps/api/src/cli/commands/setup.ts` (the terminal twin)
 - `docs/guides/first-run.md`
+- `apps/api/src/modules/operations/application/` (durable product admission and stream receipts)
+- `apps/shared/src/operations/` and `docs/architecture/product-operations.md` (identity, recovery and retention)
+- `apps/api/tests/integration/routes/product-operations.integration.test.ts` (real route/storage concurrency and restart probes)
 
 ## Image Generation
 

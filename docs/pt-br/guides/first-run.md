@@ -118,17 +118,22 @@ O último passo cria um chat na pasta escolhida, apontado para o runner
 escolhido, e envia a mensagem da caixa. É sempre um clique explícito — nada é
 enviado só por chegar no passo.
 
-Duas coisas que ele deliberadamente não faz:
+Antes de cada pedido, o setup salva o ID da operação e a entrada exata no seu
+perfil. Recarregar ou perder a confirmação mantém esse ID. O hub aceita um
+pedido por ID; repeti-lo recupera o recibo em vez de criar outro chat ou turno.
+Um ID diferente pode enviar legitimamente o mesmo texto.
 
-- **Criar um segundo chat.** A referência do chat é salva no instante em que a
-  criação retorna, antes de qualquer envio. Recarregar no meio reabre aquele
-  chat.
-- **Enviar o mesmo prompt duas vezes.** Antes de enviar, ele relê a transcrição;
-  um prompt que já está lá significa que o envio foi aceito e só a resposta se
-  perdeu, então ele espera em vez de perguntar de novo.
+O passo mostra o estado aceito, em execução, concluído, falhou ou incerto. Um
+turno aceito que falhou oferece **Iniciar novo pedido**. Se o resultado for
+incerto, confira a conversa antes: o trabalho externo pode já ter sido
+executado. Iniciar outro pedido exige uma ação explícita; o setup nunca repete
+automaticamente trabalho incerto. Abrir a conversa ou pular continua disponível.
 
-Um chat existir não é prova de que algo respondeu. O passo só fica pronto quando
-a transcrição realmente carrega uma resposta — ou quando você o pula.
+O passo só considera que houve resposta quando a mensagem da operação concluída
+está presente com uma resposta. Registros antigos sem IDs de operação continuam
+usando a transcrição para essa verificação. Os recibos ficam disponíveis por
+sete dias; IDs expirados não podem ser reutilizados. O [contrato de operações](../../architecture/product-operations.md)
+descreve autorização, reinício e retenção.
 
 Se o runner for uma CLI de agente que você ainda não usou, o aviso de terceiros
 aparece aqui, e a pergunta de confiança no workspace aparece na primeira vez que

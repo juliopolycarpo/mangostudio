@@ -25,6 +25,10 @@ import { parseQueryInt } from '../../../utils/query';
 import { NoModelAvailableError } from '../../generation/application/resolve-model';
 import { modelUnavailableResponse } from '../../generation/http/model-unavailable-response';
 import { InvalidTranscriptCursorError } from '../../messages/domain/transcript-cursor';
+import {
+  OperationConflictError,
+  OperationExpiredError,
+} from '../../operations/application/product-operation';
 import { WorkdirValidationError } from '../../workspaces/application/workdir-validation';
 import {
   compactChatUseCase,
@@ -68,13 +72,38 @@ export const chatRoutes = (app: Elysia) =>
       /** Create a new chat for the authenticated user. */
       .post(
         '/',
-        { body: CreateChatBodySchema, response: { 200: ChatSchema } },
+        {
+          body: CreateChatBodySchema,
+          response: {
+            200: ChatSchema,
+            404: ApiErrorResponseSchema,
+            409: ApiErrorResponseSchema,
+            410: ApiErrorResponseSchema,
+          },
+        },
         // Migrated from ESLint
-        async ({ body, user }) => {
-          return createChatUseCase(
-            { title: body.title, model: body.model, userId: user?.id ?? '' },
-            getDb()
-          );
+        async ({ body, user, set }) => {
+          try {
+            return await createChatUseCase(
+              {
+                title: body.title,
+                model: body.model,
+                userId: user?.id ?? '',
+                operationId: body.operationId,
+              },
+              getDb()
+            );
+          } catch (error) {
+            if (error instanceof OperationConflictError || error instanceof OperationExpiredError) {
+              set.status = error instanceof OperationExpiredError ? 410 : 409;
+              return apiError(error.message, ERROR_CODES.CONFLICT);
+            }
+            if (error instanceof ChatNotFoundError) {
+              set.status = 404;
+              return apiError('Chat not found', ERROR_CODES.NOT_FOUND);
+            }
+            throw error;
+          }
         }
       )
 

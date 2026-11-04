@@ -4361,6 +4361,17 @@ export const messages = {
       send: 'Enviar',
       sending: 'Abrindo o chat…',
       answered: 'Respondeu. Configuração concluída.',
+      operationStates: {
+        accepted: 'O pedido foi aceito.',
+        running: 'O pedido aceito está em execução.',
+        completed: 'O pedido terminou. Abra a conversa para ver o resultado.',
+        failed: 'O pedido aceito falhou. Você pode iniciar um novo pedido.',
+        unresolved:
+          'O resultado é incerto. Confira a conversa antes de iniciar outro pedido; o trabalho pode já ter sido executado.',
+      },
+      operationUnavailable:
+        'Não foi possível recuperar o estado do pedido. Confira a conversa antes de iniciar outro pedido; o trabalho pode já ter sido executado.',
+      newRequest: 'Iniciar novo pedido',
       waiting: 'Esperando a resposta…',
       failed: 'A resposta não chegou. Abra o chat e tente de novo por lá.',
       openChat: 'Abrir o chat',

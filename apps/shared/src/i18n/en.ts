@@ -4388,6 +4388,17 @@ export const messages: Messages = {
       send: 'Send it',
       sending: 'Opening the chat…',
       answered: 'It answered. Setup is done.',
+      operationStates: {
+        accepted: 'The request was accepted.',
+        running: 'The accepted request is running.',
+        completed: 'The request completed. Open the chat to see the result.',
+        failed: 'The accepted request failed. You can start a new request.',
+        unresolved:
+          'The result is uncertain. Check the chat before starting a new request; work may already have run.',
+      },
+      operationUnavailable:
+        'The request status could not be recovered. Check the chat before starting a new request; work may already have run.',
+      newRequest: 'Start a new request',
       waiting: 'Waiting for the answer…',
       failed: 'The answer did not arrive. Open the chat and try again there.',
       openChat: 'Open the chat',

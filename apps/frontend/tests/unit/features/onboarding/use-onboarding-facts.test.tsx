@@ -77,6 +77,39 @@ afterEach(() => {
 });
 
 describe('useOnboardingFacts', () => {
+  it('does not call an accepted failed turn answered because older assistant text exists', async () => {
+    scenario.respondWithJson('GET', '/api/external-agents?environmentId=local', {
+      body: { agents: [] },
+    });
+    scenario.respondWithJson('GET', '/api/chats/first-chat/messages?limit=50&order=desc', {
+      body: {
+        messages: [{ id: 'older-reply', role: 'ai', text: 'An older answer', isGenerating: false }],
+        nextCursor: null,
+        hasMore: false,
+      },
+    });
+    scenario.respondWithJson('GET', '/api/operations/failed-turn', {
+      body: {
+        operationId: 'failed-turn',
+        kind: 'submit-turn',
+        state: 'failed',
+        chatId: 'first-chat',
+        messageId: null,
+        createdAt: 1,
+        expiresAt: Date.now() + 100000,
+      },
+    });
+    const { result } = renderHook(() =>
+      useOnboardingFacts({
+        ...CHOSE_CODEX,
+        chatId: 'first-chat',
+        turnOperation: { operationId: 'failed-turn', prompt: 'Repeat' },
+      })
+    );
+    await discoverySettled();
+    expect(result.current.chat).toBe('unsatisfied');
+  });
+
   it('leaves the agent step undecided when discovery itself was refused', async () => {
     scenario.respondWithJson('GET', '/api/external-agents?environmentId=local', {
       status: 500,

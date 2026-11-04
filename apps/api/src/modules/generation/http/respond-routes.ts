@@ -6,6 +6,14 @@ import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { ChatAttachmentNotFoundError } from '../../attachments/infrastructure/attachment-repository';
 import { ChatNotFoundError } from '../../chats/domain/chat-ownership';
+import { getOwnedChat } from '../../chats/infrastructure/chat-repository';
+import {
+  claimOperation,
+  finishOperation,
+  OperationConflictError,
+  OperationExpiredError,
+  operationReceipt,
+} from '../../operations/application/product-operation';
 import { NoModelAvailableError } from '../application/resolve-model';
 import { sendTextMessage, UnsupportedChatRunnerError } from '../application/send-text-message';
 import { EmptyTextTurnError } from '../application/text-turn-content';
@@ -20,6 +28,55 @@ export const respondRoutes = (app: Elysia) =>
        * Text-chat: persists user message, calls provider, persists AI reply, returns both.
        */
       .post('/respond', { body: GenerateTextBodySchema }, async ({ body, set, user }) => {
+        const db = getDb();
+        const userId = user?.id ?? '';
+        const operationId = body.operationId;
+        if (operationId) {
+          const chat = await getOwnedChat(body.chatId, userId, db);
+          if (!chat) {
+            set.status = 404;
+            return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
+          }
+          try {
+            const { row, claimed } = await claimOperation(
+              db,
+              userId,
+              operationId,
+              'submit-turn',
+              {
+                transport: 'respond',
+                request: { ...body, operationId: undefined },
+                runner: chat.runner,
+                environmentId: chat.environmentId,
+                workdir: chat.workdir,
+                restrictToolsToWorkdir: chat.restrictToolsToWorkdir,
+              },
+              body.chatId
+            );
+            if (!claimed) return operationReceipt(row);
+            await finishOperation(db, userId, operationId, 'running');
+            void (async () => {
+              try {
+                const result = await sendTextMessage({ ...body, userId }, db);
+                await finishOperation(db, userId, operationId, 'completed', result.aiMessage.id);
+              } catch {
+                // No automatic replay; the request was admitted even if execution failed.
+                try {
+                  await finishOperation(db, userId, operationId, 'failed');
+                } catch (error) {
+                  console.error('[respond] Could not persist operation failure', error);
+                }
+              }
+            })();
+            return operationReceipt({ ...row, state: 'running' });
+          } catch (error) {
+            if (error instanceof OperationConflictError || error instanceof OperationExpiredError) {
+              set.status = error instanceof OperationExpiredError ? 410 : 409;
+              return { error: error.message, code: ERROR_CODES.CONFLICT };
+            }
+            throw error;
+          }
+        }
         try {
           return await sendTextMessage(
             {
