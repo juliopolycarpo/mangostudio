@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import { ROOT_DIR } from '../../lib/config';
 import { extractJobBlocks, extractStepBlocks, extractStepBlocksAtIndent } from './workflow-blocks';
+import { scanWorkflowScalars } from './workflow-scalars';
 
 /** Repo-relative paths of every workflow under `.github/workflows/`. */
 export function workflowFiles(): string[] {
@@ -39,18 +40,19 @@ export interface CacheScopedCallSite {
 }
 
 /** Parse a step's `with:` mapping into a flat string record. */
-function parseWithInputs(step: string): Record<string, string> {
+export function parseWithInputs(step: string): Record<string, string> {
   const withMatch = /\n(\s*)with:\n([\s\S]*?)(?=\n\1\S|$)/.exec(`\n${step}`);
   if (!withMatch) return {};
 
   const body = withMatch[2];
   const inputs: Record<string, string> = {};
-  for (const line of body.split('\n')) {
-    const match = /^\s+([\w-]+):\s*(.*)$/.exec(line);
-    if (!match) continue;
-    const [, key, raw] = match;
-    if (raw === '' || raw.startsWith('|') || raw.startsWith('>')) continue;
-    inputs[key] = raw.trim().replace(/^['"]|['"]$/g, '');
+  for (const scalar of scanWorkflowScalars(body, {
+    opener: /^(?<indent>[ \t]+)(?<key>[\w-]+):[ \t]*(?<value>.*)$/,
+    comments: 'ignore',
+    inlineOnly: true,
+  })) {
+    if (scalar.block || scalar.value === '') continue;
+    inputs[scalar.key] = scalar.value.trim().replace(/^['"]|['"]$/g, '');
   }
   return inputs;
 }
@@ -105,26 +107,11 @@ export function uploadArtifactSteps(text: string): string[] {
  * step keeps step names and YAML comments from being mistaken for a payload.
  */
 export function uploadPaths(step: string): string[] {
-  const lines = step.split('\n');
-  const paths: string[] = [];
-
-  for (let index = 0; index < lines.length; index += 1) {
-    const match = /^(\s*)path:[ \t]*(.*)$/.exec(lines[index]);
-    if (!match) continue;
-
-    const [, indent, inline] = match;
-    if (inline !== '' && !inline.startsWith('|') && !inline.startsWith('>')) {
-      paths.push(inline.trim());
-      continue;
-    }
-
-    for (let next = index + 1; next < lines.length; next += 1) {
-      const entry = lines[next].trim();
-      if (entry === '' || entry.startsWith('#')) continue;
-      if (lines[next].search(/\S/) <= indent.length) break;
-      paths.push(entry);
-    }
-  }
-
-  return paths;
+  return scanWorkflowScalars(step, {
+    opener: /^(?<indent>[ \t]*)(?<key>path):[ \t]*(?<value>.*)$/,
+    comments: 'ignore',
+    emptyIsBlock: true,
+  }).flatMap((scalar) =>
+    scalar.block ? scalar.lines.map(({ text }) => text.trim()) : [scalar.value.trim()]
+  );
 }

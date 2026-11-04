@@ -1,5 +1,7 @@
 import { posix } from 'node:path';
 
+import { scanWorkflowScalars } from './workflow-scalars';
+
 // Regex-level GitHub workflow block extraction shared by the workflow policy
 // tests. Isolating a single block keeps an assertion about one job or section
 // from being masked or satisfied by a later one that happens to share the
@@ -90,46 +92,16 @@ export interface RunScriptLine {
  * // Usage: runScriptLines(readText('.github/workflows/ci.yml')) // [{ line: 42, text: '          bun run check' }, …]
  */
 export function runScriptLines(source: string): RunScriptLine[] {
-  const found: RunScriptLine[] = [];
-  let scriptIndent = -1;
-  let previousKey = '';
-
-  source.split('\n').forEach((text, index) => {
-    const trimmed = text.trim();
-    if (trimmed === '') return;
-
-    if (scriptIndent >= 0) {
-      if (text.search(/\S/) > scriptIndent) {
-        found.push({ line: index + 1, text });
-        return;
-      }
-      scriptIndent = -1;
-    }
-
-    const opener = /^(\s*)(-\s+)?run:(.*)$/.exec(text);
-    if (opener) {
-      const [, indent, marker, inline] = opener;
-      const isDefaultsMapping = previousKey === 'defaults:';
-      previousKey = trimmed;
-      scriptIndent = isDefaultsMapping ? -1 : indent.length + (marker?.length ?? 0);
-      if (
-        !isDefaultsMapping &&
-        inline.trim() !== '' &&
-        !inline.trimStart().startsWith('|') &&
-        !inline.trimStart().startsWith('>')
-      ) {
-        found.push({ line: index + 1, text });
-      }
-      return;
-    }
-
-    // A comment must not become the `previousKey` a `defaults:` block is
-    // recognised by, or one written between the two keys would re-open the
-    // mapping as a script.
-    if (!trimmed.startsWith('#')) previousKey = trimmed;
-  });
-
-  return found;
+  return scanWorkflowScalars(source, {
+    opener: /^(?<indent>\s*)(?<marker>-\s+)?(?<key>run):(?<value>.*)$/,
+    comments: 'content',
+    emptyIsBlock: true,
+    inlineContinuation: true,
+    skip: (_match, previousKey) => previousKey === 'defaults:',
+  }).flatMap((scalar) => [
+    ...(scalar.block || scalar.value.trim() === '' ? [] : [scalar.opener]),
+    ...scalar.lines,
+  ]);
 }
 
 /** Isolate the body of the top-level `on:` trigger section. */
