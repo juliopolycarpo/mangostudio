@@ -53,6 +53,7 @@ jobs:
         timeout-minutes: 2
         with:
           persist-credentials: false
+          ref: ${{ inputs.source_sha }}
 
       - uses: ./.github/actions/setup-mango
         timeout-minutes: 5

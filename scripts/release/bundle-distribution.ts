@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { createHash } from 'node:crypto';
-import { appendFileSync, createReadStream, mkdirSync, rmSync } from 'node:fs';
+import { appendFileSync, createReadStream, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
@@ -17,10 +17,19 @@ import { error, header, success } from '../lib/runner';
 const BUNDLE_DIR = join(ROOT_DIR, '.distribution-bundles');
 
 const BUNDLE_SCOPES = {
-  checksums: [DISTRIBUTION_MANIFEST_FILE, 'release-assets/SHA256SUMS'],
+  checksums: checksumsBundleMembers(existsSync(join(ROOT_DIR, 'ci-push-context.json'))),
   assets: [DISTRIBUTION_MANIFEST_FILE, 'release-assets'],
   npm: [DISTRIBUTION_MANIFEST_FILE, 'dist-npm'],
 } as const;
+
+/** Include the exact push boundary in the builder-attested promotion evidence when available. Example: checksumsBundleMembers(true). */
+export function checksumsBundleMembers(includePushContext: boolean): readonly string[] {
+  return [
+    DISTRIBUTION_MANIFEST_FILE,
+    'release-assets/SHA256SUMS',
+    ...(includePushContext ? ['ci-push-context.json'] : []),
+  ];
+}
 
 /**
  * How a bundle's payload responds to gzip. Not uniform, because the payloads are

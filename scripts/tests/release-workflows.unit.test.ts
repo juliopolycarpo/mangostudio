@@ -7,6 +7,7 @@ import { ROOT_DIR } from '../lib/config';
 import { ALL_BINARY_TARGETS } from '../lib/release-targets';
 import {
   bundleFileName,
+  checksumsBundleMembers,
   SCOPED_BUNDLE_COMPRESSION,
   TARGET_BUNDLE_COMPRESSION,
   targetBundleMembers,
@@ -1400,11 +1401,11 @@ describe('release workflow binary gate', () => {
   });
 
   test('the checksums scope stays small enough to be worth splitting out', () => {
-    const source = readText('scripts/release/bundle-distribution.ts');
-    const checksums = /checksums:\s*\[([^\]]*)\]/.exec(source)?.[1] ?? '';
-    expect(checksums).toContain('SHA256SUMS');
-    expect(checksums).not.toContain("'dist-npm'");
-    expect(checksums).not.toMatch(/'release-assets'(?!\/)/);
+    expect(checksumsBundleMembers(true)).toEqual([
+      'distribution-manifest.json',
+      'release-assets/SHA256SUMS',
+      'ci-push-context.json',
+    ]);
   });
 
   test('target bundles carry archives once and materialize them after verification', () => {

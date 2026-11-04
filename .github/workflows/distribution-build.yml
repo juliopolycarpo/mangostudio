@@ -258,6 +258,16 @@ jobs:
           bun ./scripts/release/distribution-manifest.ts
           bun ./scripts/release/distribution-manifest.ts --validate distribution-manifest.json --expect built
 
+      - name: Record original push boundary for promotion
+        env:
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.event.after || github.sha }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: bun ./scripts/ci/write-push-context.ts
+
       - id: bundle
         name: Create content-addressed bundles
         run: bun ./scripts/release/bundle-distribution.ts
