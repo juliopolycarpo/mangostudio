@@ -168,6 +168,11 @@ export async function captureBackup(
       throw new Error('Backup database exceeds the file byte limit.');
     source = new Database(databasePath, { create: false });
     source.exec('PRAGMA busy_timeout=0; BEGIN IMMEDIATE');
+    const pages = source.query('PRAGMA page_count').get() as { page_count: number };
+    const pageSize = source.query('PRAGMA page_size').get() as { page_size: number };
+    if (pages.page_count * pageSize.page_size > CAPTURE_LIMITS.fileBytes) {
+      throw new Error('Backup database including committed WAL exceeds the file byte limit.');
+    }
     // serialize() includes the committed WAL state while the write reservation
     // prevents a concurrent DB writer from changing referenced media rows.
     const serialized = source.serialize();

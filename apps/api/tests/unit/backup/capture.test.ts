@@ -85,6 +85,8 @@ async function fixture() {
 
 it('captures configured data, hashes, WAL contents and a redacted intact database', async () => {
   const { config, db, output } = await fixture();
+  const chunked = Uint8Array.from({ length: 3 * 64 * 1024 + 17 }, (_, index) => index % 251);
+  await writeFile(join(config.uploads.dir, 'chunks.bin'), chunked);
   const manifest = await captureBackup(
     config,
     { output, checkpoints: true, includeSecrets: false },
@@ -95,6 +97,9 @@ it('captures configured data, hashes, WAL contents and a redacted intact databas
   expect(files.has('checkpoints/checkpoint.txt')).toBe(true);
   expect(files.has('uploads/.env')).toBe(false);
   expect(await files.get('uploads/media.txt')?.text()).toBe('media fixture');
+  expect(
+    new Uint8Array((await files.get('uploads/chunks.bin')?.arrayBuffer()) as ArrayBuffer)
+  ).toEqual(chunked);
   for (const entry of manifest.files) {
     const bytes = await files.get(entry.path)?.arrayBuffer();
     expect(bytes?.byteLength).toBe(entry.sizeBytes);
