@@ -1,3 +1,4 @@
+import { Database as SQLiteDatabase } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -150,7 +151,13 @@ describe('startServer via __serve', () => {
   async function startServing(
     running: ManagedProcessFixture,
     preload?: string,
-    ambient: NodeJS.ProcessEnv = process.env
+    {
+      ambient = process.env,
+      databasePath = ':memory:',
+    }: {
+      ambient?: NodeJS.ProcessEnv;
+      databasePath?: string;
+    } = {}
   ): Promise<{ pid: number | undefined; pidFile: string }> {
     const { port, tempDir: home } = running;
     const pidFile = join(home, '.mango', 'run', 'server.json');
@@ -159,6 +166,7 @@ describe('startServer via __serve', () => {
       cmd: ['bun', ...(preload ? ['--preload', preload] : []), ENTRY, '__serve', String(port)],
       env: {
         ...serverEnv(home, port, ambient),
+        DATABASE_PATH: databasePath,
         BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
       },
     });
@@ -224,7 +232,7 @@ describe('startServer via __serve', () => {
         );
         const ambient = { ...process.env };
         for (const key of keys) ambient[key] = external;
-        await startServing(fixture, preload, ambient);
+        await startServing(fixture, preload, { ambient });
         const roots = JSON.parse(await readFile(reportFile, 'utf8'));
         for (const key of keys) {
           const path = relative(fixture.tempDir, roots[key]);
@@ -353,6 +361,30 @@ describe('startServer via __serve', () => {
       expect(existsSync(pidFile)).toBe(false);
       expect(fixture.diagnostics()).toContain('fixture runtime teardown failed');
       expect(fixture.diagnostics()).toContain('Runtime connection teardown failed during shutdown');
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'reports a failed HTTP drain, removes state and releases ownership at process exit',
+    async () => {
+      if (!fixture) throw new Error('Expected a managed process fixture.');
+      const preload = fileURLToPath(
+        new URL('../../support/fixtures/failing-http-shutdown.ts', import.meta.url)
+      );
+      const database = join(fixture.tempDir, 'drain-failure.sqlite');
+      const { pidFile } = await startServing(fixture, preload, { databasePath: database });
+      expect(await fixture.stop('SIGTERM')).toBe(1);
+      expect(fixture.diagnostics()).toContain('fixture HTTP drain failed');
+      expect(existsSync(pidFile)).toBe(false);
+      const release = await acquireCaptureLock(database);
+      await release();
+      const reopened = new SQLiteDatabase(database, { readonly: true });
+      try {
+        expect(reopened.query('PRAGMA integrity_check').get()).toEqual({ integrity_check: 'ok' });
+      } finally {
+        reopened.close();
+      }
     },
     TEST_TIMEOUT_MS
   );
