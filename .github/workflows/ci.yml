@@ -2,8 +2,8 @@ name: CI
 
 # The pull_request event is the authoritative CI signal for development
 # branches: one commit on an open PR produces exactly one run, and that run
-# produces the PR's checks and artifacts. Pushes to main gate Canary. Pre-PR
-# validation is local (`bun run check && bun run test`) or a manual
+# produces the PR's checks and artifacts. Pushes to main establish green
+# commits for the daily Canary workflow. Pre-PR validation is local (`bun run check && bun run test`) or a manual
 # workflow_dispatch of this workflow.
 
 on:
@@ -19,7 +19,7 @@ permissions:
 # One authoritative run per PR — keyed by PR number so a new push supersedes
 # (cancels) the previous run even across branch renames or forks, and never by
 # SHA, which would let stale runs survive. Runs on main are never cancelled so
-# every green push reaches Canary.
+# every push can establish a green baseline.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -370,30 +370,6 @@ jobs:
             needs.changes.outputs.rust == 'false' && 'rust-coverage' || '') }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts
-
-  canary:
-    # Publish a canary build from the latest green commit on main. The
-    # aggregate gate is the single definition of "green": if any mandatory job
-    # failed, was cancelled, or skipped unexpectedly, the gate fails and this
-    # job never runs. The job-level permissions here are the ceiling for the
-    # called workflow (ci.yml's top-level grant is read-only); canary.yml's
-    # own jobs scope down further.
-    name: Canary
-    needs: [gate, distribution-identity, distribution]
-    # Gate accepts deliberate ancestor skips, including the PR-only dry run.
-    # Require each direct producer explicitly instead of implicit success().
-    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.gate.result == 'success' && needs['distribution-identity'].result == 'success' && needs.distribution.result == 'success' }}
-    permissions:
-      attestations: write # canary jobs verify build provenance and attest this build's checksums
-      contents: write # canary.yml creates this commit's GitHub pre-release
-      id-token: write # npm Trusted Publishing OIDC and canary checksum attestation
-    uses: ./.github/workflows/canary.yml
-    with:
-      version: ${{ needs.distribution-identity.outputs.version }}
-      source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
-      channel: ${{ needs.distribution-identity.outputs.channel }}
-      assets_artifact: ${{ needs.distribution.outputs.assets_artifact }}
-      npm_artifact: ${{ needs.distribution.outputs.npm_artifact }}
 
   runtime-cache-seed:
     # Saves the light-profile cargo cache entry that pull request distribution

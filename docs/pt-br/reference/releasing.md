@@ -92,9 +92,9 @@ como secrets soltos no repositório:
 - **Jobs que o declaram:** `github-release`, `docker`, `npm-publish`,
   `homebrew`, `scoop` e `cargo-publish`. Um novo canal de publish entra neste
   environment; não se adiciona um secret de repositório.
-- **Canary fica de fora:** `.github/workflows/canary.yml` publica a cada push
-  verde em `main`, o que a regra de tag bloquearia. Usa Trusted Publishing OIDC
-  pelo workflow chamador `ci.yml`, com environment `canary`.
+- **Canary fica de fora:** `.github/workflows/canary.yml` publica diariamente a partir
+  do último CI de push bem-sucedido em `main`, o que a regra de tag bloquearia.
+  Usa Trusted Publishing OIDC pelo workflow `canary.yml`, com environment `canary`.
 - **Dispatch manual:** como o environment é restrito a tags, um
   `workflow_dispatch` de `release.yml` precisa apontar para uma ref de tag
   `v*.*.*` (`gh workflow run release.yml --ref v0.2.0`), não para um branch.
@@ -111,9 +111,9 @@ Complete uma vez por fork ou org antes do primeiro push de tag:
 6. Depois que uma release provar que `cargo-publish` gerou o token de Trusted Publishing, revogue e remova `CARGO_REGISTRY_TOKEN`.
 7. Configure duas entradas de Trusted Publishing no npm para cada pacote abaixo, em **Settings -> Trusted Publisher**. Ambas usam owner `juliopolycarpo`, repository `mangostudio` e ação `npm publish` (habilite publicação direta):
    - Releases estáveis: workflow `release.yml`, GitHub Environment `release`.
-   - Canary: workflow `ci.yml`, GitHub Environment `canary`. O npm valida o workflow chamador, então use `ci.yml` mesmo que o passo de publish rode no workflow reutilizável `canary.yml`. Ambos concedem `id-token: write`.
+   - Canary: workflow `canary.yml`, GitHub Environment `canary`. Atualize o trusted publisher de `ci.yml` ao habilitar o workflow diário. O job de publicação npm concede `id-token: write`.
 
-   Crie o GitHub Environment `canary` com deployment restrito ao branch `main`, sem reviewers obrigatórios e sem tempo de espera. O job npm canary declara esse environment; seu publish via OIDC não precisa de secret de token npm. Assim, um `main` verde continua publicando o canary automaticamente.
+   Crie o GitHub Environment `canary` com deployment restrito ao branch `main`, sem reviewers obrigatórios e sem tempo de espera. O job npm canary declara esse environment; seu publish via OIDC não precisa de secret de token npm. Assim, a publicação diária de canary a partir de um `main` verde continua automática.
 
    O inventário mantido de empacotamento npm inclui `mangostudio`, `@mangostudio/cli-linux-x64`, `@mangostudio/cli-linux-arm64`, `@mangostudio/cli-darwin-x64`, `@mangostudio/cli-darwin-arm64`, `@mangostudio/cli-win32-x64` e `@mangostudio/cli-win32-arm64`. Configure cada pacote. Veja os [requisitos de Trusted Publishing do npm](https://docs.npmjs.com/trusted-publishers/).
 
@@ -264,11 +264,13 @@ no `Cargo.lock` raiz. A versão do protocolo no mesmo lockfile continua independ
 
 ## Canal canary
 
-Todo commit que entra verde em `main` é publicado como **canary**. O job `canary`
-em `.github/workflows/ci.yml` depende do job agregado `gate`, chamado `Gate`
-(contexto da API `Gate`), e de um push para `main`, então o commit que acabou de
-ficar verde é a fonte do canary — sem trigger separado. Ele chama o reutilizável
-`.github/workflows/canary.yml`.
+`.github/workflows/canary.yml` roda diariamente às 06:17 UTC e aceita
+`workflow_dispatch` manual em `main`. O job `source` seleciona o último run
+bem-sucedido de `ci.yml` por push em `main`, valida o SHA e resolve a versão
+canary desse commit. O job `build` compila esse SHA uma vez por meio de
+`distribution-build.yml`; os dois canais de publicação consomem seus artefatos.
+O `Gate` agregado do CI rejeita falhas, cancelamentos e skips inesperados em
+jobs obrigatórios antes que um run de push em main seja considerado bem-sucedido.
 
 Este repositório tem **releases imutáveis** habilitadas, então o canary não é
 mais uma pre-release rolling: ele corta **uma release por commit verde**,

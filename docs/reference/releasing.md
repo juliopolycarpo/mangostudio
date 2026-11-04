@@ -161,9 +161,9 @@ the latest stable `v0.1.1` has no installer-script assets (checked 2026-10-22).
 `brew` and `scoop` have no pre-release form, by the same constraint that skips
 their jobs above.
 
-A pre-release is not the canary channel. Canary cuts a release from every green
-`main` commit and carries a curated asset subset; a pre-release tag is cut by
-hand and publishes the full stable artifact set.
+Canary runs daily at 06:17 UTC from the latest successful push CI run on
+`main` and carries a curated asset subset. A pre-release tag is cut by hand
+and publishes the full stable artifact set.
 
 ### `release` environment
 
@@ -175,9 +175,9 @@ as free-floating repository secrets:
 - **Jobs that declare it:** `github-release`, `docker`, `npm-publish`,
   `homebrew`, `scoop`, and `cargo-publish`. Adding a new publish channel means
   joining this environment, not adding a repository secret.
-- **Canary is excluded:** `.github/workflows/canary.yml` publishes on every
+- **Canary is excluded:** `.github/workflows/canary.yml` publishes daily from the latest
   green push to `main`, which the tag rule would block. It uses
-  Trusted Publishing OIDC for caller workflow `ci.yml`, with environment `canary`.
+  Trusted Publishing OIDC for workflow `canary.yml`, with environment `canary`.
 - **Manual dispatch:** because the environment is tag-restricted, a
   `workflow_dispatch` run of `release.yml` must target a `v*.*.*` tag ref
   (`gh workflow run release.yml --ref v0.2.0`), not a branch.
@@ -194,9 +194,9 @@ Complete these once per fork or org before the first tag push:
 6. After a release proves `cargo-publish` minted a Trusted Publishing token successfully, revoke and delete `CARGO_REGISTRY_TOKEN`. Do not leave a long-lived crates.io write token in the repository once OIDC is proven.
 7. Configure two npm Trusted Publishing rows for every package below in npm package **Settings -> Trusted Publisher**. Both rows use owner `juliopolycarpo`, repository `mangostudio`, and allowed action `npm publish` (direct publishing must be enabled):
    - Stable releases: workflow filename `release.yml`, GitHub Environment `release`.
-   - Canary: workflow filename `ci.yml`, GitHub Environment `canary`. npm validates the calling workflow, so use `ci.yml` even though the publish step runs in reusable `canary.yml`. Both workflows grant `id-token: write`.
+   - Canary: workflow filename `canary.yml`, GitHub Environment `canary`. Update the trusted publisher from `ci.yml` when enabling the daily workflow. The npm publishing job grants `id-token: write`.
 
-   Create the `canary` GitHub Environment with deployment restricted to branch `main`, no required reviewers and no wait timer. The npm canary job declares this environment; no npm token secret is needed for its OIDC publication. This keeps green-main canary publication automatic.
+   Create the `canary` GitHub Environment with deployment restricted to branch `main`, no required reviewers and no wait timer. The npm canary job declares this environment; no npm token secret is needed for its OIDC publication. This keeps daily green-main canary publication automatic.
 
    The maintained npm packaging inventory stages `mangostudio`, `@mangostudio/cli-linux-x64`, `@mangostudio/cli-linux-arm64`, `@mangostudio/cli-darwin-x64`, `@mangostudio/cli-darwin-arm64`, `@mangostudio/cli-win32-x64` and `@mangostudio/cli-win32-arm64`. Configure each package. See [npm's trusted-publishing requirements](https://docs.npmjs.com/trusted-publishers/).
 
@@ -364,7 +364,7 @@ substitutes another runtime.
 A stable release publishes everything, and so does a pre-release tag — the
 difference there is which pointers move, not which assets are built (see
 [Pre-release tags](#pre-release-tags)). Canary does not: it cuts a release from
-every green `main` commit, so each asset it carries is paid for many times a day.
+the latest green `main` commit once a day.
 
 | Channel             | Platform archives | Raw hub + runtime pairs                    |
 | ------------------- | ----------------- | ------------------------------------------ |
@@ -391,7 +391,7 @@ appearing in the next release.
 
 ### Per-commit identity and `canary-manifest.json`
 
-Canary cuts **one release per green commit**, tagged `v<version>` with the
+Canary cuts **one release per selected commit**, tagged `v<version>` with the
 sha-stamped version the binaries report — `v0.1.0-canary.abc1234`, carrying
 `mangostudio-runtime-0.1.0-canary.abc1234-linux-x64`. Tag, file names and
 reported version all agree.
@@ -408,8 +408,8 @@ Two consequences worth knowing:
   `install.ps1 -Canary` and the hub's own update check all resolve the newest
   canary pre-release from the release list.
 - **Old canary releases are pruned**, tag included, to a keep-window
-  (`scripts/release/prune-canary-releases.ts`, 14 by default — roughly eight
-  days at the current merge rate, and ~15 GB of release storage at ~1.1 GB per
+  (`scripts/release/prune-canary-releases.ts`, 14 by default, roughly fourteen
+  days when main advances daily, and ~15 GB of release storage at ~1.1 GB per
   release). A hub older than the window can no longer download its own runtime
   pair and has to upgrade first; it is told exactly that.
 
@@ -553,14 +553,13 @@ Those steps stay in `.github/workflows/release.yml`.
 
 ## Canary channel
 
-Every commit that lands green on `main` is published as a **canary**. The canary
-job in `.github/workflows/ci.yml` depends on its aggregate job `gate`, named
-`Gate` (API context `Gate`) — the single definition of a green commit, which fails on any
-mandatory job failure,
-cancellation, or unexpected skip — and on a push to `main`, so the commit that
-just went green is the canary source — there is no separate trigger or SHA
-re-resolution. It calls the reusable
-`.github/workflows/canary.yml`, whose jobs share the build and fan out per channel.
+`.github/workflows/canary.yml` runs daily at 06:17 UTC and supports manual
+`workflow_dispatch` on `main`. Its `source` job selects the latest successful
+`ci.yml` push run on `main`, validates its commit SHA, and resolves the canary
+version from that commit. The `build` job builds that SHA once through
+`distribution-build.yml`; both publishing channels consume its artifacts.
+CI's aggregate `Gate` rejects mandatory job failures, cancellations and
+unexpected skips before a main push run can qualify as successful.
 
 Both channels use the same version, `<root-version>-canary.<sha7>` (e.g.
 `0.1.0-canary.1234abc`), where `<sha7>` is the 7-char short commit SHA: npm
@@ -1074,8 +1073,8 @@ The [One-shot contract](#one-shot-contract) table lists every secret. In short:
   with publish rights to `mangostudio` and the `@mangostudio/cli-*` platform
   packages, used only when a maintainer sets `allow_legacy_npm_token=true` on
   `workflow_dispatch`. Stable releases use Trusted Publishing OIDC
-  (`release.yml`, environment `release`); canaries use OIDC through caller
-  `ci.yml`, environment `canary`. Register both publisher rows on npmjs.com
+  (`release.yml`, environment `release`); canaries use OIDC through
+  `canary.yml`, environment `canary`. Register both publisher rows on npmjs.com
   using the [one-time setup checklist](#one-time-setup-checklist).
 - **`DIST_REPOS_TOKEN`** — `release` environment secret: fine-grained PAT with
   contents read/write on `juliopolycarpo/homebrew-tap` (see
