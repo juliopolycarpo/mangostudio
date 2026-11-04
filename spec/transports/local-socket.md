@@ -75,7 +75,7 @@ exclusive cleanup outside the listener, or choose a fresh endpoint and publish i
 an application-owned mechanism. A blind `unlink` retry is not that coordination. This stricter
 lifecycle behavior requires caller migration; it does not change protocol wire version 1.
 
-The TypeScript SDK binds within a fresh `0700` directory on the destination filesystem and
+Both SDKs bind within a fresh `0700` directory on the destination filesystem and
 hard-links the socket to the public name without replacement. Staging may move to an ancestor
 directory so its pathname also fits the native Unix socket limit; when no suitable private
 staging location is available, publication fails closed. Public pathnames are also validated before

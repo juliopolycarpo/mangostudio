@@ -164,7 +164,7 @@ impl IpcListener {
 
 /// Listens on a local socket, owner-only from the instant the address exists.
 ///
-/// The socket is bound inside an owner-only directory beside `path`,
+/// The socket is bound inside an owner-only directory on the same device as `path`,
 /// restricted to `0600` there, and then published at `path`. `bind` takes its
 /// mode from the umask, so binding straight onto the address would publish a
 /// world-connectable socket for as long as a `chmod` takes; the TypeScript SDK
@@ -189,10 +189,7 @@ pub async fn listen_ipc(path: impl AsRef<Path>) -> io::Result<IpcListener> {
     std::os::unix::net::SocketAddr::from_pathname(&path)?;
     refuse_occupied_socket(&path).await?;
 
-    let staging = staging_path(&path);
-    let staged = stage_and_publish(&staging, &path).await;
-    discard(&staging).await;
-    let (listener, inode) = staged?;
+    let (listener, inode) = stage_and_publish(&path).await?;
     let _ = inode;
 
     Ok(IpcListener {
@@ -280,16 +277,66 @@ struct Staging {
     socket: PathBuf,
 }
 
-/// Binds inside a fresh owner-only directory, restricts the socket, and links
-/// it onto the address. Whatever this fails at, [`discard`] cleans up after.
-///
-/// The staged identity is retained only for deterministic collision fixtures;
-/// it is never used as cleanup authority.
-async fn stage_and_publish(staging: &Staging, path: &Path) -> io::Result<(UnixListener, u64)> {
-    let listener = stage(staging).await?;
-    let inode = tokio::fs::symlink_metadata(&staging.socket).await?.ino();
-    publish(&staging.socket, path).await?;
-    Ok((listener, inode))
+/// Finds short private staging on the destination device, then publishes without replacement.
+/// A valid public path may have too little room left in its parent for our private suffix.
+/// Try same-device ancestors; a mount boundary never justifies replacing rename.
+async fn stage_and_publish(path: &Path) -> io::Result<(UnixListener, u64)> {
+    let parent = path
+        .parent()
+        .filter(|value| !value.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let device = tokio::fs::metadata(parent).await?.dev();
+    let mut last_failure: Option<io::Error> = None;
+    for ancestor in parent.ancestors() {
+        if ancestor.as_os_str().is_empty() && parent == Path::new(".") {
+            continue;
+        }
+        let ancestor = if ancestor.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            ancestor
+        };
+        let staging = staging_path(&ancestor.join("endpoint"));
+        if std::os::unix::net::SocketAddr::from_pathname(&staging.socket).is_err()
+            || tokio::fs::metadata(ancestor).await?.dev() != device
+        {
+            continue;
+        }
+        match stage(&staging).await {
+            Ok(listener) => {
+                let result = async {
+                    // The staged identity is diagnostic/test data, never unlink authority.
+                    let inode = tokio::fs::symlink_metadata(&staging.socket).await?.ino();
+                    publish(&staging.socket, path).await?;
+                    Ok((listener, inode))
+                }
+                .await;
+                discard(&staging).await;
+                return result;
+            }
+            Err(error) => {
+                discard(&staging).await;
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::PermissionDenied | io::ErrorKind::ReadOnlyFilesystem
+                ) {
+                    last_failure = Some(error);
+                } else {
+                    return Err(error);
+                }
+            }
+        }
+    }
+    let kind = last_failure
+        .as_ref()
+        .map_or(io::ErrorKind::Unsupported, io::Error::kind);
+    Err(io::Error::new(
+        kind,
+        format!(
+            "{} could not be published: expected private same-device staging within the native socket pathname limit; public path preserved; last staging failure: {last_failure:?}",
+            path.display()
+        ),
+    ))
 }
 
 /// Binds the socket somewhere no other user may reach it.
@@ -910,6 +957,42 @@ mod tests {
 
         dial.await.expect("the dial task runs");
         first.close().await;
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[tokio::test]
+    async fn a_long_parent_does_not_make_private_staging_exceed_the_native_limit() {
+        let address = Address::new();
+        let limit = if cfg!(target_os = "linux") { 107 } else { 103 };
+        let parent = address
+            .0
+            .join("p".repeat(limit - address.0.as_os_str().len() - 3));
+        std::fs::create_dir(&parent).unwrap();
+        let path = parent.join("s");
+        assert_eq!(path.as_os_str().len(), limit);
+        drop(
+            std::os::unix::net::UnixListener::bind(&path)
+                .expect("the exact long-parent public path binds natively"),
+        );
+        std::fs::remove_file(&path).expect("exclusive fixture cleanup");
+        let listener = listen_ipc(&path)
+            .await
+            .expect("private staging must fit when the public path is valid");
+        assert_eq!(
+            std::fs::read_dir(&address.0).unwrap().count(),
+            1,
+            "ancestor staging must be removed before returning the listener"
+        );
+        assert_eq!(
+            std::fs::read_dir(&parent).unwrap().count(),
+            1,
+            "the public parent must contain only its socket"
+        );
+        let connected = connect_ipc(&path, &ConnectDeadline::default())
+            .await
+            .expect("the published public address dials");
+        drop(connected);
+        listener.close().await;
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
