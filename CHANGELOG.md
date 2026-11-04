@@ -70,6 +70,7 @@ project adheres to [Semantic Versioning](https://semver.org).
 
 - **(release)** Enforce release env contracts (#461)
 - **(canary)** Publish canary to npm and GitHub releases only (#456)
+
 ## [0.1.0] - 2026-06-30
 
 ### 🚀 Features
@@ -131,6 +132,7 @@ project adheres to [Semantic Versioning](https://semver.org).
 ### 👷 CI
 
 - **(labeler)** Split area: build into type: dependencies and area: tooling (#382)
+
 ## [0.1.0-canary] - 2026-06-15
 
 ### 🚀 Features

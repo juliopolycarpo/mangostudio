@@ -181,3 +181,35 @@ export function parseChangelogArgs(
 
   return null;
 }
+
+/**
+ * Repair the historical generator's missing blank line between a final bullet
+ * and a dated release heading. Keep all existing bytes, including line endings,
+ * and skip fenced examples. This never renders history or selects release tags.
+ */
+export function normalizeChangelogSeparators(source: string): string {
+  let result = '';
+  let previous = '';
+  let fence: { character: string; length: number } | undefined;
+
+  for (const line of source.split(/(?<=\n)/)) {
+    const content = line.replace(/\r?\n$/, '');
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(content);
+    if (fence) {
+      if (
+        marker?.[1][0] === fence.character &&
+        marker[1].length >= fence.length &&
+        marker[2].trim() === ''
+      ) {
+        fence = undefined;
+      }
+    } else if (marker) {
+      fence = { character: marker[1][0], length: marker[1].length };
+    } else if (previous.startsWith('- ') && /^## \[[^\]]+\] - \d{4}-\d{2}-\d{2}$/.test(content)) {
+      result += previous.endsWith('\r\n') ? '\r\n' : '\n';
+    }
+    result += line;
+    previous = line;
+  }
+  return result;
+}

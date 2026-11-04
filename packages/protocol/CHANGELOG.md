@@ -48,6 +48,7 @@ project adheres to [Semantic Versioning](https://semver.org).
 ### 👷 CI
 
 - **(release)** Check crates.io before asking for a trusted-publishing token
+
 ## [0.1.0] - 2026-09-10
 
 ### 🚀 Features
