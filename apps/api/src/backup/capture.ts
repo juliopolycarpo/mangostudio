@@ -367,18 +367,23 @@ export async function captureBackup(
     check(options.signal);
     const archivePath = join(staging, 'archive.tar.gz');
     await Bun.Archive.write(archivePath, files, { compress: 'gzip', level: 6 });
-    if ((await stat(archivePath)).size > CAPTURE_LIMITS.archiveBytes)
-      throw new Error('Backup exceeds the compressed byte limit.');
-    check(options.signal);
-    // Same-directory staging guarantees the same filesystem. A hard link is
-    // atomic and exclusive: a crash never publishes a partly written archive.
-    await chmod(archivePath, 0o600);
-    const archiveHandle = await open(archivePath, 'r');
+    // Inspect and flush the same opened file, rather than checking a pathname
+    // and reopening a potentially different entry. Staging is owner-private;
+    // O_NOFOLLOW also refuses a substituted final symlink where supported.
+    const archiveHandle = await open(archivePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
     try {
+      const archive = await archiveHandle.stat();
+      if (!archive.isFile()) throw new Error('Backup archive is not a regular file.');
+      if (archive.size > CAPTURE_LIMITS.archiveBytes)
+        throw new Error('Backup exceeds the compressed byte limit.');
+      check(options.signal);
+      await archiveHandle.chmod(0o600);
       await archiveHandle.sync();
     } finally {
       await archiveHandle.close();
     }
+    // Same-directory staging guarantees the same filesystem. A hard link is
+    // atomic and exclusive: a crash never publishes a partly written archive.
     await link(archivePath, output);
     destinationCreated = true;
     check(options.signal);

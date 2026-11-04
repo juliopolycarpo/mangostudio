@@ -81,7 +81,11 @@ Staging is adjacent to the destination, private (0700 directory / 0600 files on 
 and removed on success, cancellation or failure. On Windows, the current user SID is resolved
 with whoami and icacls removes inherited grants and grants that user full access before
 any data is staged. Failure to establish this ACL refuses capture. Choose a private destination
-directory as well. Cancellation is checked between bounded operations;
+directory as well. Archive size, permissions and flush operate on one opened descriptor;
+on systems supporting O_NOFOLLOW, a substituted final symlink is refused. The final hard
+link still names a file within owner-private staging. This protects against replacement by
+other unprivileged accounts, not a hostile process already running as the same user.
+Cancellation is checked between bounded operations;
 a single SQLite/compression operation finishes before cancellation is observed.
 
 The archive is flushed and published through an exclusive atomic hard link, so success
