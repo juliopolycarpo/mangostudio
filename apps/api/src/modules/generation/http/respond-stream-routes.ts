@@ -563,6 +563,7 @@ export const respondStreamRoutes = (app: Elysia) =>
           params: t.Object({ operationId: OperationIdSchema }),
           response: {
             200: OperationReceiptSchema,
+            401: ApiErrorResponseSchema,
             404: ApiErrorResponseSchema,
             410: ApiErrorResponseSchema,
           },
