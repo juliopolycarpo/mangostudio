@@ -1,0 +1,7 @@
+[
+  { "error": "ECONNREFUSED", "outcome": "refused" },
+  { "error": "ENOENT", "outcome": "refused" },
+  { "error": "EACCES", "outcome": "inconclusive" },
+  { "error": "EAGAIN", "outcome": "inconclusive" },
+  { "error": "ETIMEDOUT", "outcome": "inconclusive" }
+]

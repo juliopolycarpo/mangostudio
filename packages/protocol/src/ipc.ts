@@ -9,6 +9,7 @@ export {
   connectIpc,
   type IpcOptions,
   type IpcServer,
+  type IpcCloseOutcome,
   ipcPath,
   listenIpc,
 } from './transports/ipc';

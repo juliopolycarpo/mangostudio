@@ -12,10 +12,13 @@ frame limit enforced per line, refused line ends the session with `4400`.
 
 - POSIX: a filesystem path. Applications choose it; a runtime directory scoped to the user
   (`$XDG_RUNTIME_DIR`, `~/.mango/run/`) is the reference location. The listener creates the
-  socket with owner-only permissions (`0600`). A socket file at the address is _stale_ when a
-  connection to it is refused: the listener removes a stale file before binding, and refuses to
-  bind — the address is in use — when a connection to it succeeds or cannot be judged. Anything
-  at the address that is not a socket is never removed.
+  socket with owner-only permissions (`0600`). Dial observations distinguish **connected**,
+  **refused** (including a path that disappeared), and **inconclusive** (timeout, permissions,
+  resource exhaustion or another undecidable error). An inconclusive result MUST NOT claim
+  that a live listener was observed. All occupied paths are preserved by these SDKs: a refused
+  connection is not authority to unlink a pathname later. Binding refuses with `EADDRINUSE` /
+  `AddrInUse` and an observation-specific diagnostic. Nothing at the address is overwritten or
+  removed; filesystems without no-replace socket publication fail closed.
 - Windows: `\\.\pipe\<name>`, spelled with backslashes. Forward slashes are not equivalent.
   The listener creates the pipe in byte mode. A named pipe admits every local user unless the
   listener attaches a security descriptor, so a listener SHOULD create the pipe with a DACL
@@ -60,3 +63,40 @@ whose owner dropped it simply ends as a `4000` release when the socket does.
 - One session per connection. A client that needs two sessions opens two connections.
 - A listener that is superseded by another process at the same path is an application concern:
   the protocol only says the old sessions end with `4409` if the listener chooses to say so.
+
+## Public-path cleanup contract revision
+
+The earlier portable stale-unlink policy is withdrawn. Neither inode/device equality nor
+another stat, timestamp, sidecar convention or a final liveness probe closes the final
+check/use window against an independently replaced public path. These SDKs therefore never
+unlink the public POSIX address, including at listener shutdown. Close returns an explicit
+`path-preserved` / `IpcCloseOutcome::PathPreserved` disposition. Applications must coordinate
+exclusive cleanup outside the listener, or choose a fresh endpoint and publish its address by
+an application-owned mechanism. A blind `unlink` retry is not that coordination. This stricter
+lifecycle behavior requires caller migration; it does not change protocol wire version 1.
+
+The TypeScript SDK binds within a fresh `0700` sibling directory and hard-links the socket to
+the public name without replacement. Node/libuv's automatic close unlink affects only its
+private bound name, so a late close cannot delete the public successor. Rust likewise publishes
+with a non-replacing hard link and never falls back to replacing rename. Private staging names
+are reserved for that SDK instance and must not be repurposed by the application.
+
+## Probe and pre-handshake ownership
+
+A successful dial probe enqueues a real transport connection on the listener. Accept callbacks,
+peer credentials and transport counters are **not** authentication or application activity.
+An acceptor MUST NOT grant authority, write an authenticated audit event, or start expensive
+application work before the Session handshake and any application authentication complete.
+The reference Session refuses pre-hello requests without invoking their handlers. Always drive
+accepted ports with a Session immediately; retaining an undriven Rust port also retains its
+caller-owned reservation and descriptor.
+
+Both acceptors cap tracked connections at 64 (including established sessions), and ports enforce
+a 15-second first-hello deadline independent of Session's configured handshake deadline.
+TypeScript closes idle sockets directly; Rust enforces the deadline while its receive half is
+driven and closes its writer on timeout (with the existing two-second close-flush grace). Decoding remains bounded by the configured frame limit
+(default 16 MiB), with at most 64 such connections. An invalid or partial hello never grants
+application authority. Probe EOF and Session teardown release their accepted resources.
+Windows named pipes use their kernel/ACL lifecycle, return no-filesystem-path on close, and have
+no POSIX public path or inode-cleanup rule. The Rust first-instance and owner DACL remain;
+TypeScript applications still authenticate pipes whose Node API cannot restrict their ACL.

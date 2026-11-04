@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { statSync } from 'node:fs';
-import { rename, stat } from 'node:fs/promises';
+import { rename, stat, unlink } from 'node:fs/promises';
 import {
   connect as connectSocket,
   createServer,
@@ -305,7 +305,7 @@ describe('local socket transport', () => {
   });
 
   // POSIX only: a named pipe has no filesystem entry to leave behind.
-  it.skipIf(WINDOWS)('replaces the socket file a crashed listener left behind', async () => {
+  it.skipIf(WINDOWS)('preserves the socket file a crashed listener left behind', async () => {
     const bound = nextPath();
     const stale = nextPath();
     const squatter = createServer();
@@ -320,15 +320,12 @@ describe('local socket transport', () => {
     });
     expect(statSync(stale).isSocket()).toBe(true);
 
-    const { accepted, accept } = acceptOne();
-    const server = await listenIpc(stale, accept);
     try {
-      const client = await connectIpc(stale);
-      const port = await accepted;
-      expect(port.maxFrameBytes).toBe(16 * 1024 * 1024);
-      client.close(CLOSE_CODES.RELEASED);
+      const rejection = await rejectionOf(listenIpc(stale, () => undefined));
+      expect(rejection).toMatchObject({ code: 'EADDRINUSE', probeOutcome: 'refused' });
+      expect((await stat(stale)).isSocket()).toBe(true);
     } finally {
-      await server.close();
+      await unlink(stale);
     }
   });
 

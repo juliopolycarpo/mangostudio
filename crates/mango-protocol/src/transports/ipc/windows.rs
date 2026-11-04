@@ -137,12 +137,22 @@ impl IpcListener {
         };
         let connected = std::mem::replace(&mut self.idle, next);
 
+        self.accepted.retain(PortCloser::is_open);
+        if self.accepted.len() >= super::MAX_IPC_CONNECTIONS {
+            drop(connected);
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "local socket connection capacity 64 is full",
+            ));
+        }
         let identity = PeerIdentity {
             process_id: security::client_process_id(&connected),
             user: None,
         };
         let (reader, writer) = tokio::io::split(connected);
-        let port = self.framed(reader, writer);
+        let port = self
+            .framed(reader, writer)
+            .with_first_hello_timeout(super::FIRST_HELLO_TIMEOUT);
         // Connections that have since ended are forgotten here rather than
         // accumulating for the life of a long-running listener.
         self.accepted.retain(PortCloser::is_open);
@@ -157,9 +167,10 @@ impl IpcListener {
     /// session first." The ports moved to whoever called
     /// [`IpcListener::accept`], so this writes the farewell through the handle
     /// kept for each of them.
-    pub async fn close(self) {
+    pub async fn close(self) -> super::IpcCloseOutcome {
         super::tell_accepted(self.accepted, close_codes::RELEASED, "listener closing").await;
         drop(self.idle);
+        super::IpcCloseOutcome::NoFilesystemPath
     }
 
     fn framed(

@@ -72,6 +72,7 @@ pub struct NdjsonPort<R, W> {
     reader: R,
     writer: SharedWriter<W>,
     max_frame_bytes: usize,
+    first_hello_deadline: Option<tokio::time::Instant>,
 }
 
 impl<R, W> NdjsonPort<R, W>
@@ -103,6 +104,7 @@ where
             reader,
             writer: SharedWriter::new(writer),
             max_frame_bytes: DEFAULT_MAX_FRAME_BYTES,
+            first_hello_deadline: None,
         }
     }
 
@@ -139,6 +141,12 @@ impl<R, W> NdjsonPort<R, W>
 where
     W: AsyncWrite + Unpin + Send + 'static,
 {
+    /// Sets a transport-owned first-hello deadline for accepted local connections.
+    pub(crate) fn with_first_hello_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.first_hello_deadline = Some(tokio::time::Instant::now() + timeout);
+        self
+    }
+
     /// A handle that can end this port from somewhere that does not own it.
     ///
     /// A listener needs one: `spec/transports/local-socket.md` has it send
@@ -278,6 +286,7 @@ where
             writer: self.writer,
             max_frame_bytes: self.max_frame_bytes,
             terminal: false,
+            first_hello_deadline: self.first_hello_deadline,
         };
         (tx, rx)
     }
@@ -321,6 +330,7 @@ pub struct NdjsonRx<R, W> {
     writer: SharedWriter<W>,
     max_frame_bytes: usize,
     terminal: bool,
+    first_hello_deadline: Option<tokio::time::Instant>,
 }
 
 impl<R, W> PortRx for NdjsonRx<R, W>
@@ -330,7 +340,17 @@ where
 {
     async fn recv(&mut self) -> Option<Inbound> {
         loop {
+            if self
+                .first_hello_deadline
+                .is_some_and(|deadline| tokio::time::Instant::now() >= deadline)
+            {
+                self.expire_first_hello().await;
+                continue;
+            }
             if let Some(frame) = self.pending.pop_front() {
+                if matches!(frame, Frame::Hello(_)) {
+                    self.first_hello_deadline = None;
+                }
                 return Some(Inbound::Frame(frame));
             }
             if let Some(closure) = self.closure.take() {
@@ -344,7 +364,18 @@ where
             // `AsyncReadExt::read` is cancel-safe: a call dropped because
             // another `select!` branch won the race read nothing, so no byte
             // this decoder has not already seen is lost.
-            match self.reader.read(&mut self.chunk).await {
+            let read = if let Some(deadline) = self.first_hello_deadline {
+                match tokio::time::timeout_at(deadline, self.reader.read(&mut self.chunk)).await {
+                    Ok(result) => result,
+                    Err(_) => {
+                        self.expire_first_hello().await;
+                        continue;
+                    }
+                }
+            } else {
+                self.reader.read(&mut self.chunk).await
+            };
+            match read {
                 Ok(0) => self.on_eof().await,
                 Ok(count) => self.decode_chunk(count).await,
                 Err(error) => self.on_failure(&error).await,
@@ -358,6 +389,23 @@ where
     R: AsyncRead + Unpin + Send + 'static,
     W: AsyncWrite + Unpin + Send + 'static,
 {
+    async fn expire_first_hello(&mut self) {
+        self.first_hello_deadline = None;
+        self.pending.clear();
+        // Persist before yielding so cancellation cannot lose the closure notification.
+        self.closure = Some(PortClosure::Closed {
+            code: Some(crate::close::close_codes::PROTOCOL_ERROR),
+            reason: Some("local socket hello deadline exceeded".into()),
+        });
+        self.writer
+            .end(
+                crate::close::close_codes::PROTOCOL_ERROR,
+                Some("local socket hello deadline exceeded".into()),
+                self.max_frame_bytes,
+            )
+            .await;
+    }
+
     /// Decodes the first `count` bytes of the read buffer. A refused record
     /// ends the stream: the peer is told with the code the refusal maps to,
     /// because a line nobody could read cannot be resynchronised (stdio.md,
@@ -885,6 +933,31 @@ mod tests {
         }
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn a_first_hello_timeout_survives_cancellation_during_farewell() {
+        let (_peer_writer, port_reader) = duplex(1024);
+        let (port_writer, _unread) = duplex(8);
+        let (_tx, mut rx) = NdjsonPort::new(port_reader, port_writer)
+            .with_first_hello_timeout(Duration::from_millis(10))
+            .split();
+        let cancelled = tokio::time::timeout(Duration::from_millis(20), rx.recv()).await;
+        assert!(
+            cancelled.is_err(),
+            "the farewell must be in flight when recv is cancelled"
+        );
+        let reported = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap();
+        assert!(matches!(
+            reported,
+            Some(Inbound::Closed(PortClosure::Closed {
+                code: Some(4400),
+                ..
+            }))
+        ));
+        assert_eq!(rx.recv().await, None);
+    }
+
     #[test]
     fn a_reason_past_the_schema_limit_is_cut_on_a_character_boundary() {
         let long = "é".repeat(MAX_REASON_CHARS + 10);
@@ -1097,5 +1170,57 @@ mod tests {
             "{\"type\":\"close\",\"code\":4400}\n",
             "the farewell keeps its code and loses only the reason"
         );
+    }
+}
+
+#[cfg(test)]
+mod local_hello_tests {
+    use super::NdjsonPort;
+    use crate::port::{Inbound, Port, PortClosure, PortRx};
+    use std::time::Duration;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test(start_paused = true)]
+    async fn idle_or_nonhello_activity_cannot_renew_the_first_hello_bound() {
+        let (mut peer, stream) = tokio::io::duplex(1024);
+        let (reader, writer) = tokio::io::split(stream);
+        let port =
+            NdjsonPort::new(reader, writer).with_first_hello_timeout(Duration::from_secs(15));
+        let (_tx, mut rx) = port.split();
+        peer.write_all(b"{\"type\":\"ping\"}\n").await.unwrap();
+        assert!(matches!(
+            rx.recv().await,
+            Some(Inbound::Frame(crate::Frame::Ping))
+        ));
+        let start = tokio::time::Instant::now();
+        assert!(matches!(
+            rx.recv().await,
+            Some(Inbound::Closed(PortClosure::Closed {
+                code: Some(4400),
+                ..
+            }))
+        ));
+        assert_eq!(start.elapsed(), Duration::from_secs(15));
+        assert_eq!(rx.recv().await, None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_decoded_hello_disarms_the_transport_deadline_but_is_not_authentication() {
+        let (mut peer, stream) = tokio::io::duplex(1024);
+        let (reader, writer) = tokio::io::split(stream);
+        let port =
+            NdjsonPort::new(reader, writer).with_first_hello_timeout(Duration::from_secs(15));
+        let (_tx, mut rx) = port.split();
+        peer.write_all(b"{\"type\":\"hello\",\"protocol\":{\"major\":1,\"minor\":0},\"peer\":{\"name\":\"raw\",\"version\":\"0\",\"role\":\"tool\"},\"capabilities\":{}}\n").await.unwrap();
+        assert!(matches!(
+            rx.recv().await,
+            Some(Inbound::Frame(crate::Frame::Hello(_)))
+        ));
+        tokio::time::advance(Duration::from_secs(16)).await;
+        peer.write_all(b"{\"type\":\"ping\"}\n").await.unwrap();
+        assert!(matches!(
+            rx.recv().await,
+            Some(Inbound::Frame(crate::Frame::Ping))
+        ));
     }
 }

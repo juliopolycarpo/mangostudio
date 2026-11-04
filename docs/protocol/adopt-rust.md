@@ -268,14 +268,21 @@ let deadline = ConnectDeadline::default().with_timeout(Duration::from_secs(5));
 let port = connect_ipc(ipc_path("mango-hub")?, &deadline).await?;
 ```
 
-On POSIX, `listen_ipc` treats a socket file at the address as _stale_ — and replaces it — only
-when a connection to it is refused; a connection that succeeds, or one the dial cannot judge
-either way, leaves the address in use and `listen_ipc` refuses to bind. `IpcListener::close` only
-ever removes the address when it is still this listener's own: the inode recorded when it
-published is checked against what sits at the path, so a listener that crashed and was replaced
-does not delete its replacement's address by closing a handle late. Windows has no equivalent
-staleness question — `CreateNamedPipe`'s first-instance flag already refuses a duplicate name
-outright.
+On POSIX the socket is owner-only, published with a non-replacing hard link from
+private staging. Existing public socket paths are preserved even after a refused
+dial or listener close: inode equality cannot authorize an atomic conditional
+unlink. Close reports the preserved-path disposition. Callers must coordinate
+exclusive cleanup or choose a fresh endpoint; automatically retrying an unlink
+would restore the race. Unsupported no-replace publication fails closed.
+
+Probe diagnostics distinguish connected, refused and inconclusive results. A
+probe can enqueue a real connection; accept counters and peer identity are not
+application authentication. Start a Session immediately and wait for its handshake
+and application authentication before authority or expensive work. Both SDKs cap
+tracked connections at 64 and bound first hello to 15 seconds; Rust enforces that
+deadline while the receive half is driven. The configured frame limit still
+bounds decoding. See [the revised local socket contract](../../spec/transports/local-socket.md)
+for cleanup migration, resource ownership and Windows named-pipe differences.
 
 The WebSocket transport dials with the `mango.v1` subprotocol and the reference bearer
 credential, and accepts an upgrade either through its own helper or from whatever HTTP stack you

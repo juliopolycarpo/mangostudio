@@ -108,21 +108,21 @@ stopped answering — stays in flight for as long as the process lives. A deadli
 destroys what the dial opened and rejects with a `TimeoutError`; an abort rejects with the
 reason the caller gave.
 
-On POSIX the socket is owner-only from the moment it exists. A socket file at the address is
-_stale_ when a connection to it is refused — the listener that made it is gone — and `listenIpc`
-removes a stale file before binding; a file a connection succeeds against, or one the dial
-cannot judge either way, is a live listener's address, and `listenIpc` refuses to bind over it
-with `EADDRINUSE` instead of silently taking it over. On Windows the named pipe is **not**
-restricted — Node cannot set a pipe's security descriptor, so any local user may connect. Check
-the peer's credentials and close with `4401` before `hello` if the address alone is not enough
-trust there.
+On POSIX the socket is owner-only, published with a non-replacing hard link from
+private staging. Existing public socket paths are preserved even after a refused
+dial or listener close: inode equality cannot authorize an atomic conditional
+unlink. Close reports the preserved-path disposition. Callers must coordinate
+exclusive cleanup or choose a fresh endpoint; automatically retrying an unlink
+would restore the race. Unsupported no-replace publication fails closed.
 
-One residual race is outside what a probe can close: libuv's `uv__pipe_close` unlinks a Unix
-socket path unconditionally on `close()`, with no way from JavaScript to make it check first. A
-listener that crashes, gets replaced at the same address, and _then_ runs its delayed `close()`
-will unlink the replacement's socket file out from under it — the replacement keeps running on
-an inode nothing can reach. The probe above closes the far more common case, a stale file with
-no process behind it at all; this one needs a crash landing inside that exact window.
+Probe diagnostics distinguish connected, refused and inconclusive results. A
+probe can enqueue a real connection; accept counters and peer identity are not
+application authentication. Start a Session immediately and wait for its handshake
+and application authentication before authority or expensive work. Both SDKs cap
+tracked connections at 64 and bound first hello to 15 seconds; Rust enforces that
+deadline while the receive half is driven. The configured frame limit still
+bounds decoding. See [the revised local socket contract](../../spec/transports/local-socket.md)
+for cleanup migration, resource ownership and Windows named-pipe differences.
 
 **WebSocket.** Binary chunked messages under subprotocol `mango.v1`; the SDK never sends text
 frames. Authentication is a bearer token on the upgrade request, checked by the HTTP layer

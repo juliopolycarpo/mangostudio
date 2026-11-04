@@ -48,6 +48,18 @@ use windows as platform;
 
 pub use platform::{IpcListener, IpcPort, IpcServerPort, connect_ipc, listen_ipc};
 
+pub(super) const MAX_IPC_CONNECTIONS: usize = 64;
+pub(super) const FIRST_HELLO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Filesystem cleanup disposition after listener shutdown.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IpcCloseOutcome {
+    /// POSIX public path remains; cleanup requires external exclusive coordination.
+    PathPreserved(PathBuf),
+    /// Windows named pipes have no filesystem path to unlink.
+    NoFilesystemPath,
+}
+
 /// A name that could not become a local socket address.
 ///
 /// # Example
