@@ -592,6 +592,9 @@ identities and the supported schema; qualification requires compatible producer
 workflow definitions. A checkout does not change OIDC/provenance source claims.
 The builder attestation proves application origin; publisher attestations prove
 the execution that approved or published those bytes.
+The jobs that audit both channels use scoped `contents: write` capability so
+unfinished release drafts are visible; their audit commands only read. The
+GitHub publisher owns release mutations, and checkout credentials are not persisted.
 
 Both channels use the same version, `<root-version>-canary.<sha7>` (e.g.
 `0.1.0-canary.1234abc`), where `<sha7>` is the 7-char short commit SHA: npm

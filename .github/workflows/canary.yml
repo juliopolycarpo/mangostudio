@@ -100,11 +100,10 @@ jobs:
     timeout-minutes: 30
     permissions:
       actions: read # recover immutable source and approval artifacts
-      contents: read
+      contents: write # include push-capable visibility of unfinished release drafts
       attestations: write # verify prior provenance and attest frozen publication evidence
       id-token: write # mint provenance and npm Trusted Publishing tokens
     env:
-      GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
       SOURCE_OUTPUTS_JSON: ${{ toJSON(needs.source.outputs) }}
       OUTPUT_DIR: .canary-approval
@@ -149,6 +148,8 @@ jobs:
 
       - id: approved
         name: Recover original approval or qualify retained CI distribution
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: bun ./scripts/ci/prepare-canary-approval.ts
 
       - id: audit
@@ -157,6 +158,7 @@ jobs:
           MANIFEST_PATH: .canary-approval/distribution-manifest.json
           EXPECTED_RELEASE: .canary-approval/expected-release.json
           AUDIT_PATH: .canary-approval/audit.json
+          GH_TOKEN: ${{ github.token }}
         run: bun ./scripts/release/audit-canary-publication.ts .canary-approval/distribution-manifest.json .canary-approval/expected-release.json .canary-approval/audit.json
 
       - name: Attest frozen approval and expected release checksums
@@ -191,11 +193,10 @@ jobs:
     timeout-minutes: 30
     permissions:
       actions: read # recover immutable source and approval artifacts
-      contents: read
+      contents: write # include push-capable visibility of unfinished release drafts
       attestations: read # verify original builder and approval provenance
       id-token: write # mint provenance and npm Trusted Publishing tokens
     env:
-      GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
       SOURCE_OUTPUTS_JSON: ${{ toJSON(needs.source.outputs) }}
       OUTPUT_DIR: .canary-approval
@@ -217,6 +218,7 @@ jobs:
         name: Recover and pin the original successful approval
         env:
           EXPECTED_APPROVAL_SHA256: ${{ needs.approve.outputs.approval_sha256 }}
+          GH_TOKEN: ${{ github.token }}
         run: bun ./scripts/ci/prepare-canary-approval.ts
 
       # Failed-job reruns reuse successful dependency outputs. This read must
@@ -227,6 +229,7 @@ jobs:
           MANIFEST_PATH: .canary-approval/distribution-manifest.json
           EXPECTED_RELEASE: .canary-approval/expected-release.json
           AUDIT_PATH: .canary-approval/audit.json
+          GH_TOKEN: ${{ github.token }}
         run: bun ./scripts/release/audit-canary-publication.ts .canary-approval/distribution-manifest.json .canary-approval/expected-release.json .canary-approval/audit.json
 
       - name: Download original approved npm distribution
@@ -262,6 +265,7 @@ jobs:
       - name: Verify all package bytes and recover canary dist-tags
         if: steps.guard.outputs.npm_needed == 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
           MANIFEST_PATH: .canary-approval/distribution-manifest.json
         run: bun ./scripts/release/promote-canary-tags.ts .canary-approval/distribution-manifest.json
 
@@ -277,7 +281,6 @@ jobs:
       attestations: write # verify prior provenance and attest frozen publication evidence
       id-token: write # mint provenance and npm Trusted Publishing tokens
     env:
-      GH_TOKEN: ${{ github.token }}
       REPO: ${{ github.repository }}
       SOURCE_OUTPUTS_JSON: ${{ toJSON(needs.source.outputs) }}
       OUTPUT_DIR: .canary-approval
@@ -295,6 +298,7 @@ jobs:
         name: Recover and pin the original successful approval
         env:
           EXPECTED_APPROVAL_SHA256: ${{ needs.approve.outputs.approval_sha256 }}
+          GH_TOKEN: ${{ github.token }}
         run: bun ./scripts/ci/prepare-canary-approval.ts
 
       # Failed-job reruns reuse successful dependency outputs. This read must
@@ -305,6 +309,7 @@ jobs:
           MANIFEST_PATH: .canary-approval/distribution-manifest.json
           EXPECTED_RELEASE: .canary-approval/expected-release.json
           AUDIT_PATH: .canary-approval/audit.json
+          GH_TOKEN: ${{ github.token }}
         run: bun ./scripts/release/audit-canary-publication.ts .canary-approval/distribution-manifest.json .canary-approval/expected-release.json .canary-approval/audit.json
 
       - name: Download original approved assets distribution
@@ -350,11 +355,14 @@ jobs:
           EXPECTED_RELEASE: .canary-approval/expected-release.json
           EXPECTED_RELEASE_SHA256: ${{ needs.approve.outputs.expected_release_sha256 }}
           ASSET_DIR: github-canary-assets
+          GH_TOKEN: ${{ github.token }}
         run: bun ./scripts/release/publish-canary.ts
 
       - name: Prune superseded canary releases
         if: steps.guard.outputs.github_needed == 'true'
         continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: bun ./scripts/release/prune-canary-releases.ts
 
   canary-summary:

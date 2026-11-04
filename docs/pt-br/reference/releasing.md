@@ -283,7 +283,10 @@ O código publicador executa na revisão confiável do workflow; os bytes da
 aplicação vêm do CI selecionado. O recibo registra as duas revisões, manifesto,
 horário original de build e qualificação. Checkout não muda claims de OIDC ou
 proveniência. A política exige definições produtoras compatíveis; veja a
-[qualificação em inglês](../../reference/canary-validation.md).
+[qualificação em inglês](../../reference/canary-validation.md). Os jobs que
+auditam os dois canais recebem `contents: write` no escopo do job para incluir
+visibilidade dos drafts; os comandos de auditoria só leem. Apenas o publicador
+GitHub altera releases, sem persistir credenciais de checkout.
 
 Este repositório tem **releases imutáveis** habilitadas, então o canary não é
 mais uma pre-release rolling: ele corta **uma release por commit verde**,
