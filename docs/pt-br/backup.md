@@ -73,7 +73,11 @@ nível 6. Nomes reservados do Windows, caracteres proibidos, pontos/espaços fin
 de caixa/Unicode são recusados. O staging fica ao lado do destino, com diretório 0700 e
 arquivos 0600 em POSIX. No Windows, whoami resolve o SID do usuário e icacls remove grants herdados e concede acesso
 somente a esse usuário antes de copiar dados. Se isso falhar, a captura é recusada. Use também
-um diretório de destino privado. Cancelamentos
+um diretório de destino privado. Tamanho, permissões e sincronização do arquivo usam o mesmo
+descritor aberto. Quando O_NOFOLLOW é suportado, um link simbólico substituído é recusado.
+O hard link final ainda usa um nome dentro do staging privado: a proteção impede alterações
+por outras contas sem privilégios, não por um processo hostil executado como o mesmo usuário.
+Cancelamentos
 são observados entre operações limitadas; uma operação SQLite/compressão em curso termina
 antes da observação do cancelamento.
 

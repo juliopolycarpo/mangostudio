@@ -486,3 +486,31 @@ it('refuses an oversized serialized image before deserializing it', async () => 
     oversizedSerializer.mockRestore();
   }
 });
+
+it.skipIf(process.platform === 'win32')(
+  'refuses a substituted archive symlink without changing its target permissions',
+  async () => {
+    const { root, config, output } = await fixture();
+    const target = join(root, 'outside-staging.txt');
+    await writeFile(target, 'this is not an archive', { mode: 0o644 });
+    const originalMode = (await lstat(target)).mode & 0o777;
+    const writeArchive = Bun.Archive.write;
+    const substituteArchive = spyOn(Bun.Archive, 'write').mockImplementationOnce(
+      async (path, data, options) => {
+        await writeArchive(path, data, options);
+        await rm(path);
+        await symlink(target, path);
+      }
+    );
+    try {
+      await expect(
+        captureBackup(config, { output, checkpoints: true, includeSecrets: false }, 'test')
+      ).rejects.toThrow(/symbolic link|ELOOP/iu);
+      expect(substituteArchive).toHaveBeenCalledTimes(1);
+      expect(await Bun.file(output).exists()).toBe(false);
+      expect((await lstat(target)).mode & 0o777).toBe(originalMode);
+    } finally {
+      substituteArchive.mockRestore();
+    }
+  }
+);
