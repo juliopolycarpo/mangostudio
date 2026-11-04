@@ -25,3 +25,14 @@ pub fn compact_json(source: &str) -> String {
         })
         .collect()
 }
+
+/// Write changed compact bytes only, preserving the mtime of unchanged output.
+pub fn write_compact_catalog(destination: &std::path::Path, source: &str) -> std::io::Result<()> {
+    let compact = compact_json(source);
+    match std::fs::read(destination) {
+        Ok(existing) if existing == compact.as_bytes() => return Ok(()),
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error),
+        _ => {}
+    }
+    std::fs::write(destination, compact)
+}
