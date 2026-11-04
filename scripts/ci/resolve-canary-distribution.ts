@@ -10,12 +10,18 @@ import { requiredEnv } from '../lib/runner';
 const githubApi: CanaryPromotionApi = {
   get(path) {
     const result = Bun.spawnSync(['gh', 'api', path]);
-    if (result.exitCode !== 0) throw new Error(`GitHub API ${path} failed: ${result.stderr}`);
+    if (result.exitCode !== 0)
+      throw new Error(
+        `GitHub API ${path}: expected successful gh exit 0; received ${result.exitCode}`
+      );
     return JSON.parse(result.stdout.toString());
   },
   list(path, key) {
     const result = Bun.spawnSync(['gh', 'api', '--paginate', '--slurp', path]);
-    if (result.exitCode !== 0) throw new Error(`GitHub API ${path} failed: ${result.stderr}`);
+    if (result.exitCode !== 0)
+      throw new Error(
+        `GitHub API ${path}: expected successful gh exit 0; received ${result.exitCode}`
+      );
     const pages: unknown = JSON.parse(result.stdout.toString());
     if (!Array.isArray(pages) || pages.length === 0) {
       throw new Error(`GitHub API ${path}: expected nonempty paginated array`);

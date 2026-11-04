@@ -289,6 +289,11 @@ const fakePromotionGitHubCli = `#!/usr/bin/env bun
 const args = process.argv.slice(2);
 const mode = process.env.FAKE_API_MODE;
 if (mode === 'api-failure') { console.error('fixture denied API read'); process.exit(1); }
+if ((mode === 'signed-get-failure' && !args.includes('--paginate')) ||
+    (mode === 'signed-list-failure' && args.includes('--paginate'))) {
+  console.error('fixture-signed-url-marker https://example.invalid/artifact.zip?sig=fixture-canary-credential');
+  process.exit(7);
+}
 const path = args.at(-1).replace('repos/owner/repo/actions/', '');
 const values = JSON.parse(await Bun.file(process.env.FAKE_API_VALUES).text());
 if (!(path in values)) { console.error('Unexpected API request: ' + path); process.exit(2); }
@@ -311,13 +316,15 @@ else {
 test.each([
   'success',
   'api-failure',
+  'signed-get-failure',
+  'signed-list-failure',
   'empty-pages',
   'malformed-page',
   'missing-count',
   'incomplete-pages',
   'changing-count',
 ])('promotion metadata CLI: %s', (mode) => {
-  const directory = mkdtempSync(join(tmpdir(), 'fix-canary-promotion-source-cli-'));
+  const directory = mkdtempSync(join(tmpdir(), 'fix-canary-metadata-boundaries-cli-'));
   try {
     const valuesPath = join(directory, 'values.json');
     writeFileSync(valuesPath, JSON.stringify(Object.fromEntries(new FakePromotionApi().values)));
@@ -354,9 +361,21 @@ test.each([
     } else {
       expect(existsSync(planPath)).toBe(false);
       expect(existsSync(outputs)).toBe(false);
+      if (mode === 'signed-get-failure' || mode === 'signed-list-failure') {
+        const stderr = result.stderr.toString();
+        expect(stderr).not.toContain('fixture-signed-url-marker');
+        expect(stderr).not.toContain('https://example.invalid/artifact.zip');
+        expect(stderr).not.toContain('fixture-canary-credential');
+        const path =
+          mode === 'signed-get-failure'
+            ? 'repos/owner/repo/actions/workflows/ci.yml'
+            : `repos/owner/repo/actions/runs/${source.runId}/jobs?filter=all&per_page=100`;
+        expect(stderr).toContain(`GitHub API ${path}: expected successful gh exit 0; received 7`);
+        return;
+      }
       const message =
         mode === 'api-failure'
-          ? 'fixture denied API read'
+          ? 'GitHub API repos/owner/repo/actions/workflows/ci.yml: expected successful gh exit 0; received 1'
           : mode === 'empty-pages'
             ? 'expected nonempty paginated array'
             : mode === 'malformed-page'
