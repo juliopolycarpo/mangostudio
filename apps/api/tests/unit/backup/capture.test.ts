@@ -395,3 +395,27 @@ for (const suffix of ['/', '/.']) {
     }
   );
 }
+
+it.skipIf(process.platform === 'win32')(
+  'refuses parent traversal across an intermediate symlink rather than capturing another root',
+  async () => {
+    const { root, config, output } = await fixture();
+    const lexicalParent = join(root, 'a');
+    const physicalParent = join(root, 'b');
+    await mkdir(join(lexicalParent, 'images'), { recursive: true });
+    await mkdir(join(physicalParent, 'child'), { recursive: true });
+    await mkdir(join(physicalParent, 'images'));
+    await symlink(join(physicalParent, 'child'), join(lexicalParent, 'link'), 'dir');
+    await writeFile(join(physicalParent, 'images', 'sentinel.txt'), 'application reads this root');
+    await writeFile(join(lexicalParent, 'images', 'sentinel.txt'), 'wrong lexical root');
+    // Keep the parent traversal literal: path.join would erase the scenario.
+    config.images.dir = `${lexicalParent}/link/../images`;
+    expect(await readFile(`${config.images.dir}/sentinel.txt`, 'utf8')).toBe(
+      'application reads this root'
+    );
+    await expect(
+      captureBackup(config, { output, checkpoints: true, includeSecrets: false }, 'test')
+    ).rejects.toThrow('parent traversal');
+    expect(await Bun.file(output).exists()).toBe(false);
+  }
+);

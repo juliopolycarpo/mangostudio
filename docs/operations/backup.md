@@ -17,6 +17,9 @@ omitted. Profile/app settings and user history live in the database. Missing opt
 are recorded in the manifest. A present unreadable root, unsupported filename, case collision,
 symlink (including a configured root itself, even if dangling) or special file fails the entire capture. The output must be outside the source
 roots, on a filesystem supporting hard links; existing destinations are never replaced.
+Directory roots containing a `..` component are refused; configure the actual explicit
+directory path without parent traversal. Collapsing `..` after an intermediate symlink
+can select a different directory from the one the application reads.
 
 ## Consistency boundary
 

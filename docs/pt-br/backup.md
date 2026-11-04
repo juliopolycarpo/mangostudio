@@ -16,6 +16,9 @@ ausentes são registradas; locais ilegíveis, links, arquivos especiais, nomes n
 ou colisões de nomes interrompem a captura inteira. Links na própria raiz configurada são
 recusados, mesmo quando o destino não existe. O destino deve ficar fora das raízes
 e suportar hard links. Arquivos de destino existentes nunca são substituídos.
+Raízes de diretório com componentes `..` são recusadas. Configure o caminho explícito do
+diretório, sem navegação para o pai: remover `..` após um link intermediário pode selecionar
+outro diretório, diferente daquele que a aplicação lê.
 
 ## Consistência e privacidade
 
