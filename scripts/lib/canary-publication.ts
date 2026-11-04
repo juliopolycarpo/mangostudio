@@ -308,7 +308,21 @@ function assertRegularTar(tar: Buffer, name: string): void {
       }
       return;
     }
-    const checksumField = header.subarray(148, 156).toString('ascii').replace(/\0.*$/s, '').trim();
+    // ASCII decoding masks bit7. Validate the complete raw numeric fields,
+    // including padding, before interpreting their octal values.
+    for (const [field, start, end] of [
+      ['checksum', 148, 156],
+      ['size', 124, 136],
+      ['mode', 100, 108],
+    ] as const) {
+      const bytes = header.subarray(start, end);
+      if (bytes.some((byte) => byte !== 0 && byte !== 32 && (byte < 48 || byte > 55))) {
+        throw new Error(
+          `Invalid npm tar ${field} field for ${name}: expected raw octal digits with NUL/space padding; received ${bytes.toString('hex')}`
+        );
+      }
+    }
+    const checksumField = header.subarray(148, 156).toString('latin1').replace(/\0.*$/s, '').trim();
     const recordedChecksum = /^[0-7]+$/.test(checksumField)
       ? Number.parseInt(checksumField, 8)
       : Number.NaN;
@@ -322,9 +336,9 @@ function assertRegularTar(tar: Buffer, name: string): void {
       );
     const path = header.subarray(0, 100).toString('utf8').replace(/\0.*$/s, '');
     const prefix = header.subarray(345, 500).toString('utf8').replace(/\0.*$/s, '');
-    const sizeField = header.subarray(124, 136).toString('ascii').replace(/\0.*$/s, '').trim();
+    const sizeField = header.subarray(124, 136).toString('latin1').replace(/\0.*$/s, '').trim();
     const size = /^[0-7]+$/.test(sizeField) ? Number.parseInt(sizeField, 8) : Number.NaN;
-    const modeField = header.subarray(100, 108).toString('ascii').replace(/\0.*$/s, '').trim();
+    const modeField = header.subarray(100, 108).toString('latin1').replace(/\0.*$/s, '').trim();
     const mode = /^[0-7]+$/.test(modeField) ? Number.parseInt(modeField, 8) : Number.NaN;
     if (!Number.isSafeInteger(mode) || mode < 0 || mode > 0o777) {
       throw new Error(

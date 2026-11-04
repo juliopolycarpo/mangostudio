@@ -507,44 +507,52 @@ test.each(['0000644', '0000641'])(
   }
 );
 
-test('rejects an extra member even when its corrupt header hides it from the native listing', async () => {
-  const { manifest, registry, contents } = await fixture();
-  await replaceArchive(registry, MAIN_PACKAGE, {
-    ...contents.get(MAIN_PACKAGE),
-    'package/unapproved.txt': 'unapproved payload',
-  });
-  await expect(verifyCanaryNpmPublication(manifest, registry)).rejects.toThrow(
-    'Registry archive paths mismatch'
-  );
-  const bytes = registry.archives.get(tarballUrl(MAIN_PACKAGE))?.body;
-  if (!bytes) throw new Error('Expected wrapper archive fixture');
-  const tar = gunzipSync(bytes);
-  let offset = 0,
-    checksumOffset = -1;
-  while (offset + 512 <= tar.length) {
-    const header = tar.subarray(offset, offset + 512);
-    const path = header.subarray(0, 100).toString().replace(/\0.*$/s, '');
-    const size = Number.parseInt(
-      header.subarray(124, 136).toString().replace(/\0.*$/s, '').trim(),
-      8
+test.each(['changed octal digit', 'high-bit checksum'] as const)(
+  'rejects an extra member hidden by %s',
+  async (corruption) => {
+    const { manifest, registry, contents } = await fixture();
+    await replaceArchive(registry, MAIN_PACKAGE, {
+      ...contents.get(MAIN_PACKAGE),
+      'package/unapproved.txt': 'unapproved payload',
+    });
+    await expect(verifyCanaryNpmPublication(manifest, registry)).rejects.toThrow(
+      'Registry archive paths mismatch'
     );
-    if (path === 'package/unapproved.txt') {
-      checksumOffset = offset + 148;
-      break;
+    const bytes = registry.archives.get(tarballUrl(MAIN_PACKAGE))?.body;
+    if (!bytes) throw new Error('Expected wrapper archive fixture');
+    const tar = gunzipSync(bytes);
+    let offset = 0,
+      checksumOffset = -1;
+    while (offset + 512 <= tar.length) {
+      const header = tar.subarray(offset, offset + 512);
+      const path = header.subarray(0, 100).toString().replace(/\0.*$/s, '');
+      const size = Number.parseInt(
+        header.subarray(124, 136).toString().replace(/\0.*$/s, '').trim(),
+        8
+      );
+      if (path === 'package/unapproved.txt') {
+        checksumOffset = offset + 148;
+        break;
+      }
+      offset += 512 + Math.ceil(size / 512) * 512;
     }
-    offset += 512 + Math.ceil(size / 512) * 512;
+    expect(checksumOffset).toBeGreaterThan(0);
+    const corrupted = Buffer.from(tar);
+    const originalByte = corrupted[checksumOffset];
+    if (originalByte === undefined) throw new Error('Expected checksum fixture byte');
+    corrupted[checksumOffset] =
+      corruption === 'high-bit checksum' ? originalByte | 0x80 : originalByte === 48 ? 49 : 48;
+    expect([...tar.keys()].filter((index) => tar[index] !== corrupted[index])).toEqual([
+      checksumOffset,
+    ]);
+    setArchiveBytes(registry, MAIN_PACKAGE, gzipSync(corrupted));
+    await expect(verifyCanaryNpmPublication(manifest, registry)).rejects.toThrow(
+      corruption === 'high-bit checksum'
+        ? 'Invalid npm tar checksum field for mangostudio: expected raw octal digits with NUL/space padding'
+        : 'expected valid tar header checksum'
+    );
   }
-  expect(checksumOffset).toBeGreaterThan(0);
-  const corrupted = Buffer.from(tar);
-  corrupted[checksumOffset] = corrupted[checksumOffset] === 48 ? 49 : 48;
-  expect([...tar.keys()].filter((index) => tar[index] !== corrupted[index])).toEqual([
-    checksumOffset,
-  ]);
-  setArchiveBytes(registry, MAIN_PACKAGE, gzipSync(corrupted));
-  await expect(verifyCanaryNpmPublication(manifest, registry)).rejects.toThrow(
-    'expected valid tar header checksum'
-  );
-});
+);
 
 test('names the package and expected JSON shape when approved package.json is corrupt', async () => {
   const { manifest, registry, contents } = await fixture();
@@ -561,4 +569,76 @@ test('names the package and expected JSON shape when approved package.json is co
   await expect(verifyCanaryNpmPublication({ ...manifest, files }, registry)).rejects.toThrow(
     `Invalid packaged manifest for ${MAIN_PACKAGE}@${VERSION}: expected JSON object in package/package.json`
   );
+});
+
+test.each([
+  ['checksum', 148, 8, 'digit'],
+  ['checksum', 148, 8, 'padding'],
+  ['size', 124, 12, 'digit'],
+  ['size', 124, 12, 'padding'],
+  ['mode', 100, 8, 'digit'],
+  ['mode', 100, 8, 'padding'],
+] as const)(
+  'names invalid raw %s field bytes at %i width %i (%s)',
+  async (field, start, width, location) => {
+    const { manifest, registry } = await fixture();
+    const bytes = registry.archives.get(tarballUrl(MAIN_PACKAGE))?.body;
+    if (!bytes) throw new Error('Expected wrapper archive fixture');
+    const tar = gunzipSync(bytes);
+    const header = tar.subarray(0, 512);
+    const digit = header
+      .subarray(start, start + width)
+      .reduce((last, byte, index) => (byte >= 48 && byte <= 55 ? index : last), -1);
+    if (digit < 0) throw new Error(`Expected octal digits in ${field} fixture`);
+    const index = location === 'padding' ? start + width - 1 : start + digit;
+    const original = header[index];
+    if (original === undefined) throw new Error(`Expected ${field} fixture byte ${index}`);
+    if (location === 'digit') expect(original >= 48 && original <= 55).toBe(true);
+    else expect(original === 0 || original === 32).toBe(true);
+    header[index] = original | 0x80;
+    if (field !== 'checksum') {
+      // Keep the outer checksum valid so the raw mode/size value is the failure.
+      header.fill(32, 148, 156);
+      const checksum = header
+        .reduce((sum, byte) => sum + byte, 0)
+        .toString(8)
+        .padStart(6, '0');
+      header.write(`${checksum}\0 `, 148, 8, 'ascii');
+    }
+    setArchiveBytes(registry, MAIN_PACKAGE, gzipSync(tar));
+    await expect(verifyCanaryNpmPublication(manifest, registry)).rejects.toThrow(
+      `Invalid npm tar ${field} field for mangostudio: expected raw octal digits with NUL/space padding`
+    );
+  }
+);
+
+test.each([
+  ['checksum', 148, 8],
+  ['size', 124, 12],
+  ['mode', 100, 8],
+] as const)('accepts standard raw %s octal padding at %i width %i', async (field, start, width) => {
+  const { manifest, registry } = await fixture();
+  const bytes = registry.archives.get(tarballUrl(MAIN_PACKAGE))?.body;
+  if (!bytes) throw new Error('Expected wrapper archive fixture');
+  const tar = gunzipSync(bytes);
+  const header = tar.subarray(0, 512);
+  const value = Number.parseInt(
+    header
+      .subarray(start, start + width)
+      .toString('latin1')
+      .replace(/\0.*$/s, '')
+      .trim(),
+    8
+  );
+  header.write(`${value.toString(8).padStart(width - 1, ' ')}\0`, start, width, 'ascii');
+  if (field !== 'checksum') {
+    header.fill(32, 148, 156);
+    const checksum = header
+      .reduce((sum, byte) => sum + byte, 0)
+      .toString(8)
+      .padStart(6, '0');
+    header.write(`${checksum}\0 `, 148, 8, 'ascii');
+  }
+  setArchiveBytes(registry, MAIN_PACKAGE, gzipSync(tar));
+  expect((await verifyCanaryNpmPublication(manifest, registry)).present).toHaveLength(7);
 });
