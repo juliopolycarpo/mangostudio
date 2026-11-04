@@ -7,8 +7,8 @@ repository rules.
 
 Each gated workflow reports a legacy job named `Gate` and an additive job with a unique
 name. Both declare every mandatory lane in `needs`, run with `if: always()` and evaluate
-dependency results through `scripts/ci/evaluate-gate.ts`. Canary still depends on CI's legacy
-job. Workflow names, job IDs, step labels and API check contexts are different identifiers:
+dependency results through `scripts/ci/evaluate-gate.ts`. Daily Canary selects a successful
+main-push CI run, which includes these gates. Workflow names, job IDs, step labels and API check contexts are different identifiers:
 
 | Workflow                                                | Legacy job ID / API context on PRs | Additive API context on PRs              | Accepted skips                                                                                                                                                                                                                     |
 | ------------------------------------------------------- | ---------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -108,9 +108,10 @@ verify source, version, channel and checksums through `download-distribution`,
 and stage their light-profile runtimes for the existing hub build and packaging checks.
 They use the distribution's PR version throughout installer, health, checksum,
 manifest rendering and lifecycle assertions. Both release dry-run gates accept
-the skipped clean runtime producer on this reuse path. On main pushes, Canary
-and the light runtime cache seed explicitly require successful direct producers
-after Gate accepts the skipped PR-only dry run.
+the skipped clean runtime producer on this reuse path. On main pushes, the
+light runtime cache seed explicitly requires successful direct producers after
+Gate accepts the skipped PR-only dry run. Daily Canary selects the latest
+successful main-push CI run and builds that commit in `canary.yml`.
 
 Weekly and manual dry runs keep separate clean, uncached shipping-profile
 runtime builds and the `0.0.0-dryrun` version. The Linux packaging/Docker checks,
@@ -219,14 +220,14 @@ runs are predictable and `main` never loses a green publish path:
   forks. Those runs use `cancel-in-progress: true` unless the workflow also
   serves pushes to `main` (see below).
 - **Pushes to `main`.** Runs on `refs/heads/main` are never cancelled in
-  progress, so every green commit can reach Canary and downstream publish steps.
+  progress, so each run can finish and qualify as a source for daily Canary.
 - **Publish workflows.** `release.yml` never cancels mid-publish
   (`cancel-in-progress: false`). `canary.yml` is the exception: it cancels
   in-flight canary publishes so only the newest green commit owns the npm
   `canary` dist-tag; per-commit versions are unique, and canary now cuts one
   immutable GitHub release per commit, so superseding does not leave a
   half-published conflict.
-- **Scheduled workflows.** Cron-driven runs never cancel in progress.
+- **Scheduled workflows.** Cron-driven runs other than Canary never cancel in progress.
 
 Reusable workflows do not inherit a `concurrency` group from their caller, but
 cancelling the caller cancels the jobs it invoked, so `ci.yml`'s group already

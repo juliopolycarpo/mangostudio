@@ -553,14 +553,13 @@ Those steps stay in `.github/workflows/release.yml`.
 
 ## Canary channel
 
-Every commit that lands green on `main` is published as a **canary**. The canary
-job in `.github/workflows/ci.yml` depends on its aggregate job `gate`, named
-`Gate` (API context `Gate`) — the single definition of a green commit, which fails on any
-mandatory job failure,
-cancellation, or unexpected skip — and on a push to `main`, so the commit that
-just went green is the canary source — there is no separate trigger or SHA
-re-resolution. It calls the reusable
-`.github/workflows/canary.yml`, whose jobs share the build and fan out per channel.
+`.github/workflows/canary.yml` runs daily at 06:17 UTC and supports manual
+`workflow_dispatch` on `main`. Its `source` job selects the latest successful
+`ci.yml` push run on `main`, validates its commit SHA, and resolves the canary
+version from that commit. The `build` job builds that SHA once through
+`distribution-build.yml`; both publishing channels consume its artifacts.
+CI's aggregate `Gate` rejects mandatory job failures, cancellations and
+unexpected skips before a main push run can qualify as successful.
 
 Both channels use the same version, `<root-version>-canary.<sha7>` (e.g.
 `0.1.0-canary.1234abc`), where `<sha7>` is the 7-char short commit SHA: npm
@@ -1074,8 +1073,8 @@ The [One-shot contract](#one-shot-contract) table lists every secret. In short:
   with publish rights to `mangostudio` and the `@mangostudio/cli-*` platform
   packages, used only when a maintainer sets `allow_legacy_npm_token=true` on
   `workflow_dispatch`. Stable releases use Trusted Publishing OIDC
-  (`release.yml`, environment `release`); canaries use OIDC through caller
-  `ci.yml`, environment `canary`. Register both publisher rows on npmjs.com
+  (`release.yml`, environment `release`); canaries use OIDC through
+  `canary.yml`, environment `canary`. Register both publisher rows on npmjs.com
   using the [one-time setup checklist](#one-time-setup-checklist).
 - **`DIST_REPOS_TOKEN`** — `release` environment secret: fine-grained PAT with
   contents read/write on `juliopolycarpo/homebrew-tap` (see
