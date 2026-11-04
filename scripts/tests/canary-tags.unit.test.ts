@@ -2,13 +2,18 @@ import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { gunzipSync, gzipSync } from 'node:zlib';
 
-import type { RegistryClient, RegistryResponse } from '../lib/canary-publication';
+import {
+  type RegistryClient,
+  type RegistryResponse,
+  verifyCanaryNpmPublication,
+} from '../lib/canary-publication';
 import {
   CANARY_TAG_NPM_VERSION,
   type CanaryTagAncestry,
   type CanaryTagDependencies,
   canaryTagEnvironment,
   type CanaryTagRunner,
+  planCanaryTagUpdates,
   promoteCanaryTags,
 } from '../lib/canary-tags';
 import type { DistributionManifest } from '../lib/distribution-manifest';
@@ -348,6 +353,14 @@ describe('canary OIDC tag recovery', () => {
     );
     expect(runner.writes).toEqual([]);
   });
+  test('rejects a different version alias for the identical full source before writes', async () => {
+    const { manifest, registry, runner, dependencies } = await fixture();
+    for (const name of NAMES) registry.owners.set(name, '1.2.2-canary.aaaaaaa');
+    await expect(promoteCanaryTags(manifest, dependencies)).rejects.toThrow(
+      'expected identical source owner version 1.2.3-canary.aaaaaaa'
+    );
+    expect(runner.writes).toEqual([]);
+  });
   test('a missing wrapper package blocks every tag write', async () => {
     const { manifest, registry, runner, dependencies } = await fixture();
     registry.versions.set(versionUrl(MAIN_PACKAGE), { status: 404, body: {} });
@@ -424,6 +437,124 @@ describe('canary OIDC tag recovery', () => {
       'Node runtime probe: expected exit0; received 1'
     );
     expect(registry.events).toEqual([]);
+  });
+});
+
+function ownerMap(version: string | null = OLD_VERSION): Readonly<Record<string, string | null>> {
+  return Object.fromEntries(NAMES.map((name) => [name, version]));
+}
+
+describe('read-only canary owner planning before publication', () => {
+  test('accepts a verified ancestor owner map while every selected package is still missing', async () => {
+    const { manifest, registry, runner, ancestry } = await fixture();
+    for (const name of NAMES) registry.versions.set(versionUrl(name), { status: 404, body: {} });
+    const publication = await verifyCanaryNpmPublication(manifest, registry);
+    expect(publication.missing).toEqual(NAMES);
+    expect(await planCanaryTagUpdates(manifest, publication.canary, ancestry)).toEqual({
+      updates: NAMES,
+      unchanged: [],
+    });
+    expect(runner.commands).toEqual([]);
+  });
+  test('fresh owner reads reject an older failed-job retry after a newer source takes the wrapper tag', async () => {
+    const { manifest, registry, ancestry, runner } = await fixture();
+    for (const name of NAMES) registry.versions.set(versionUrl(name), { status: 404, body: {} });
+    const prepared = await verifyCanaryNpmPublication(manifest, registry);
+    expect((await planCanaryTagUpdates(manifest, prepared.canary, ancestry)).updates).toEqual(
+      NAMES
+    );
+    registry.owners.set(MAIN_PACKAGE, '1.2.3-canary.ccccccc');
+    ancestry.commits.set('ccccccc', 'c'.repeat(40));
+    ancestry.relations.set('c'.repeat(40), 'behind');
+    const fresh = await verifyCanaryNpmPublication(manifest, registry);
+    await expect(planCanaryTagUpdates(manifest, fresh.canary, ancestry)).rejects.toThrow(
+      'expected selected source ahead of owner'
+    );
+    expect(runner.commands).toEqual([]);
+  });
+  test('requires exactly the seven own owner keys before ancestry reads', async () => {
+    const { manifest, ancestry } = await fixture();
+    const missing = { ...ownerMap() };
+    delete missing.mangostudio;
+    for (const owners of [
+      missing,
+      { ...ownerMap(), unexpected: null },
+      Object.assign(Object.create({ mangostudio: OLD_VERSION }), missing),
+    ]) {
+      await expect(planCanaryTagUpdates(manifest, owners, ancestry)).rejects.toThrow(
+        'expected exactly'
+      );
+    }
+    expect(ancestry.calls).toEqual([]);
+  });
+  test.each([undefined, 42, true, {}].map((owner) => [owner]))(
+    'refuses unproven owner value %j before ancestry reads',
+    async (owner) => {
+      const { manifest, ancestry } = await fixture();
+      const owners = { ...ownerMap(), mangostudio: owner } as unknown as Readonly<
+        Record<string, string | null>
+      >;
+      await expect(planCanaryTagUpdates(manifest, owners, ancestry)).rejects.toThrow(
+        'expected version or explicit absent tag'
+      );
+      expect(ancestry.calls).toEqual([]);
+    }
+  );
+  test('absent owners remain explicit and require no OIDC or ancestry requests', async () => {
+    const { manifest, ancestry, runner } = await fixture();
+    expect(await planCanaryTagUpdates(manifest, ownerMap(null), ancestry)).toEqual({
+      updates: NAMES,
+      unchanged: [],
+    });
+    expect(ancestry.calls).toEqual([]);
+    expect(runner.commands).toEqual([]);
+  });
+  test('identical selected source/version is unchanged after full-prefix resolution', async () => {
+    const { manifest, ancestry } = await fixture();
+    expect(await planCanaryTagUpdates(manifest, ownerMap(VERSION), ancestry)).toEqual({
+      updates: [],
+      unchanged: NAMES,
+    });
+    expect(ancestry.calls).toEqual(['resolve:aaaaaaa']);
+  });
+  test('a full source mismatch cannot be hidden behind a shared short owner prefix', async () => {
+    const { manifest, ancestry } = await fixture();
+    ancestry.commits.set('bbbbbbb', 'd'.repeat(40));
+    await expect(planCanaryTagUpdates(manifest, ownerMap(), ancestry)).rejects.toThrow(
+      'expected full SHA with prefix bbbbbbb'
+    );
+  });
+  test('equal source with a different package-version alias fails closed', async () => {
+    const { manifest, ancestry } = await fixture();
+    await expect(
+      planCanaryTagUpdates(manifest, ownerMap('1.2.2-canary.aaaaaaa'), ancestry)
+    ).rejects.toThrow('expected identical source owner version');
+  });
+  test('noncanonical numeric owner identifiers cannot be treated as source proofs', async () => {
+    const { manifest, ancestry } = await fixture();
+    await expect(
+      planCanaryTagUpdates(manifest, ownerMap('1.2.3-canary.0000000'), ancestry)
+    ).rejects.toThrow('expected SHA-stamped canary version');
+    expect(ancestry.calls).toEqual([]);
+  });
+  test.each([
+    { sourceSha: 'aaaaaaa' },
+    { sourceSha: SOURCE.toUpperCase() },
+    { packageVersion: 'v1.2.3-canary.aaaaaaa' },
+    { packageVersion: '1.2.3-canary.bbbbbbb' },
+    { runtimeProfile: 'light' },
+    { dirty: true },
+    { channel: 'pr' },
+  ])('rejects malformed selected manifest %j before ancestry reads', async (mutation) => {
+    const { manifest, ancestry } = await fixture();
+    await expect(
+      planCanaryTagUpdates(
+        { ...manifest, ...mutation } as DistributionManifest,
+        ownerMap(),
+        ancestry
+      )
+    ).rejects.toThrow('expected clean shipping canary');
+    expect(ancestry.calls).toEqual([]);
   });
 });
 

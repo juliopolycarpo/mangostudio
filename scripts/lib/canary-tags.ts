@@ -2,6 +2,7 @@ import { type RegistryClient, verifyCanaryNpmPublication } from './canary-public
 import type { DistributionManifest } from './distribution-manifest';
 import { MAIN_PACKAGE, NPM_PLATFORMS, platformPackageName } from './npm-pack';
 import type { NpmCommandResult } from './npm-publish';
+import { isValidSemver, normalizeVersion } from './release-version';
 
 // https://docs.npmjs.com/trusted-publishers/#managing-dist-tags-with-trusted-publishing
 // https://github.com/npm/cli/releases/tag/v11.21.0
@@ -25,6 +26,11 @@ export interface CanaryTagDependencies {
   readonly runner: CanaryTagRunner;
   readonly ancestry: CanaryTagAncestry;
   readonly env: NodeJS.ProcessEnv;
+}
+
+interface CanaryTagPlan {
+  readonly updates: readonly string[];
+  readonly unchanged: readonly string[];
 }
 
 export interface CanaryTagPromotion {
@@ -122,45 +128,12 @@ export async function promoteCanaryTags(
       `Canary tag promotion requires all seven verified packages; missing ${publication.missing.join(', ')}`
     );
   }
+  const { updates, unchanged } = await planCanaryTagUpdates(
+    manifest,
+    publication.canary,
+    dependencies.ancestry
+  );
   const names = [...NPM_PLATFORMS.map(platformPackageName), MAIN_PACKAGE];
-  const updates: string[] = [];
-  const unchanged: string[] = [];
-  const resolved = new Map<string, string>();
-  for (const name of names) {
-    const version = publication.canary[name];
-    if (version === null) {
-      updates.push(name);
-      continue;
-    }
-    if (typeof version !== 'string')
-      throw new Error(`Unproven canary owner for ${name}: expected version or explicit absent tag`);
-    const prefix = sourcePrefix(version, name);
-    let owner = resolved.get(prefix);
-    if (!owner) {
-      owner = await dependencies.ancestry.resolveCommit(prefix);
-      if (!/^[0-9a-f]{40}$/.test(owner) || !owner.startsWith(prefix)) {
-        throw new Error(
-          `Invalid canary owner commit for ${name}@${version}: expected full SHA with prefix ${prefix}; received ${JSON.stringify(owner)}`
-        );
-      }
-      resolved.set(prefix, owner);
-    }
-    if (version === manifest.packageVersion && owner !== manifest.sourceSha) {
-      throw new Error(
-        `Ambiguous canary version ${version}: expected full selected source ${manifest.sourceSha}; received owner ${owner}`
-      );
-    }
-    if (owner !== manifest.sourceSha) {
-      const relation = await dependencies.ancestry.compare(owner, manifest.sourceSha);
-      if (relation !== 'ahead') {
-        throw new Error(
-          `Canary tag ${name}@${version} cannot move to ${manifest.sourceSha}: expected selected source ahead of owner ${owner}; received ${relation}`
-        );
-      }
-    }
-    if (version === manifest.packageVersion) unchanged.push(name);
-    else updates.push(name);
-  }
   for (const name of updates) {
     const result = await dependencies.runner.run([
       'bunx',
@@ -199,10 +172,109 @@ export async function promoteCanaryTags(
   };
 }
 
+/**
+ * Check fresh channel owners before any publisher can move a canary tag.
+ * All seven explicit owner keys are required, even while selected packages are
+ * still missing. This read-only plan proves source ordering without publishing
+ * packages or requiring OIDC. The caller authenticates the shipping manifest.
+ * @example const plan = await planCanaryTagUpdates(manifest, publication.canary, ancestry);
+ */
+export async function planCanaryTagUpdates(
+  manifest: DistributionManifest,
+  canaryOwners: Readonly<Record<string, string | null>>,
+  ancestry: CanaryTagAncestry
+): Promise<CanaryTagPlan> {
+  const source = manifest.sourceSha;
+  const short = typeof source === 'string' ? source.slice(0, 7) : '';
+  const identifier = /^0\d+$/.test(short) ? `g${short}` : short;
+  if (
+    typeof source !== 'string' ||
+    !/^[0-9a-f]{40}$/.test(source) ||
+    typeof manifest.packageVersion !== 'string' ||
+    !isValidSemver(manifest.packageVersion) ||
+    normalizeVersion(manifest.packageVersion) !== manifest.packageVersion ||
+    !manifest.packageVersion.endsWith(`-canary.${identifier}`) ||
+    manifest.channel !== 'canary' ||
+    manifest.runtimeProfile !== 'shipping' ||
+    manifest.dirty !== false
+  ) {
+    throw new Error(
+      `Invalid canary tag manifest: expected clean shipping canary with full lowercase source SHA and matching canonical version; received ${JSON.stringify({ sourceSha: source, packageVersion: manifest.packageVersion, channel: manifest.channel, runtimeProfile: manifest.runtimeProfile, dirty: manifest.dirty })}`
+    );
+  }
+  const expectedNames = [...NPM_PLATFORMS.map(platformPackageName), MAIN_PACKAGE];
+  if (
+    canaryOwners === null ||
+    typeof canaryOwners !== 'object' ||
+    Array.isArray(canaryOwners) ||
+    Object.keys(canaryOwners).length !== expectedNames.length ||
+    Object.keys(canaryOwners).some((name) => !expectedNames.includes(name)) ||
+    expectedNames.some((name) => !Object.hasOwn(canaryOwners, name))
+  ) {
+    throw new Error(
+      `Unproven canary owner keys: expected exactly ${expectedNames.join(', ')}; received ${JSON.stringify(canaryOwners)}`
+    );
+  }
+  for (const name of expectedNames) {
+    const version = canaryOwners[name];
+    if (version !== null && typeof version !== 'string') {
+      throw new Error(
+        `Unproven canary owner for ${name}: expected version or explicit absent tag; received ${JSON.stringify(version)}`
+      );
+    }
+    if (typeof version === 'string') sourcePrefix(version, name);
+  }
+  const names = [...NPM_PLATFORMS.map(platformPackageName), MAIN_PACKAGE];
+  const updates: string[] = [];
+  const unchanged: string[] = [];
+  const resolved = new Map<string, string>();
+  for (const name of names) {
+    const version = canaryOwners[name];
+    if (version === null) {
+      updates.push(name);
+      continue;
+    }
+    if (typeof version !== 'string')
+      throw new Error(`Unproven canary owner for ${name}: expected version or explicit absent tag`);
+    const prefix = sourcePrefix(version, name);
+    let owner = resolved.get(prefix);
+    if (!owner) {
+      owner = await ancestry.resolveCommit(prefix);
+      if (!/^[0-9a-f]{40}$/.test(owner) || !owner.startsWith(prefix)) {
+        throw new Error(
+          `Invalid canary owner commit for ${name}@${version}: expected full SHA with prefix ${prefix}; received ${JSON.stringify(owner)}`
+        );
+      }
+      resolved.set(prefix, owner);
+    }
+    if (version === manifest.packageVersion && owner !== manifest.sourceSha) {
+      throw new Error(
+        `Ambiguous canary version ${version}: expected full selected source ${manifest.sourceSha}; received owner ${owner}`
+      );
+    }
+    if (owner === manifest.sourceSha && version !== manifest.packageVersion) {
+      throw new Error(
+        `Invalid canary source version alias for ${name}: expected identical source owner version ${manifest.packageVersion}; received ${version} at ${owner}`
+      );
+    }
+    if (owner !== manifest.sourceSha) {
+      const relation = await ancestry.compare(owner, manifest.sourceSha);
+      if (relation !== 'ahead') {
+        throw new Error(
+          `Canary tag ${name}@${version} cannot move to ${manifest.sourceSha}: expected selected source ahead of owner ${owner}; received ${relation}`
+        );
+      }
+    }
+    if (version === manifest.packageVersion) unchanged.push(name);
+    else updates.push(name);
+  }
+  return { updates, unchanged };
+}
+
 function sourcePrefix(version: string, name: string): string {
   const match =
     /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-canary\.(g0\d{6}|[0-9a-f]{7})$/.exec(version);
-  if (!match?.[1]) {
+  if (!isValidSemver(version) || normalizeVersion(version) !== version || !match?.[1]) {
     throw new Error(
       `Invalid canary owner for ${name}: expected SHA-stamped canary version; received ${JSON.stringify(version)}`
     );
