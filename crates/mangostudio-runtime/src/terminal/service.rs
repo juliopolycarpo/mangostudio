@@ -206,11 +206,12 @@ impl Service {
         let mut reservation = Reservation::new(Arc::clone(self), id.clone(), reservation_id);
         let host = (self.host)();
         let prepared = run_blocking(move || prepare(params, host)).await?;
-        let flow = Arc::new(Mutex::new(
-            TerminalFlow::new(prepared.scrollback_bytes).map_err(|message| {
-                invalid_argument(&message, "a positive scrollback byte count")
-            })?,
-        ));
+        let mut initial_flow = TerminalFlow::new(prepared.scrollback_bytes)
+            .map_err(|message| invalid_argument(&message, "a positive scrollback byte count"))?;
+        if prepared.login {
+            initial_flow.enable_login();
+        }
+        let flow = Arc::new(Mutex::new(initial_flow));
         let on_data = {
             let flow = Arc::clone(&flow);
             let session = session.clone();
@@ -527,6 +528,32 @@ impl Service {
         }
     }
 
+    async fn expire_logins(&self) {
+        let entries: Vec<_> = self
+            .sessions
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .values()
+            .filter_map(|slot| match slot {
+                Slot::Live(entry) => Some(Arc::clone(entry)),
+                Slot::Opening(_) => None,
+            })
+            .collect();
+        for entry in entries {
+            let expired = entry
+                .flow
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .login_expired();
+            if expired {
+                // Retain the handle if close fails so cleanup stays reachable.
+                if self.close_entry(&entry).await.is_ok() {
+                    self.remove_live(&entry);
+                }
+            }
+        }
+    }
+
     fn start_watcher(self: &Arc<Self>, session: Session) {
         if self.watcher_started.swap(true, Ordering::AcqRel) {
             return;
@@ -579,6 +606,7 @@ async fn watch_consent(service: Weak<Service>, session: Session) {
             }
             _ = ticks.tick() => {
                 let Some(service) = service.upgrade() else { return; };
+                service.expire_logins().await;
                 service.poll_consent().await;
             }
         }
@@ -665,6 +693,7 @@ impl LaunchCheck for FreshLaunch {
 struct OpenParams {
     session_id: String,
     shell: Option<RuntimeShellKind>,
+    login_target: Option<String>,
     cwd: Option<String>,
     cols: f64,
     rows: f64,
@@ -709,6 +738,7 @@ struct Prepared {
     cwd: String,
     size: (u16, u16),
     scrollback_bytes: usize,
+    login: bool,
 }
 
 fn prepare(params: OpenParams, host: PathEnv) -> Result<Prepared, RemoteError> {
@@ -725,7 +755,15 @@ fn prepare(params: OpenParams, host: PathEnv) -> Result<Prepared, RemoteError> {
         ));
     }
     let shell = params.shell.unwrap_or_else(|| default_shell(&host));
-    let program = shell_program(shell, &host)?;
+    let login = params.login_target.is_some();
+    if login
+        && (params.shell.is_some() || params.env.is_some() || !params.env_policy.allow.is_empty())
+    {
+        return Err(invalid_argument(
+            "login overrides",
+            "a login target without shell or environment overrides",
+        ));
+    }
     let home = PathBuf::from(&host.home_dir);
     let cwd = resolve_cwd(params.cwd.as_deref(), &home);
     let env = toolchain::build(
@@ -743,7 +781,34 @@ fn prepare(params: OpenParams, host: PathEnv) -> Result<Prepared, RemoteError> {
         _ if host.platform == "darwin" => &["-l"],
         _ => &[],
     };
-    let mut request = PtyRequest::new(program, args.iter().copied(), cols, rows);
+    let (program, args) = if let Some(target) = params.login_target {
+        let descriptors = super::login::descriptors();
+        let descriptor = descriptors
+            .get(&target)
+            .ok_or_else(|| invalid_argument("login target", "a supported vendor"))?;
+        let path = env.get("PATH").map(String::as_str).unwrap_or("");
+        let program =
+            crate::health::which_in(&descriptor.program, OsStr::new(path)).ok_or_else(|| {
+                RemoteError::new(codes::UNAVAILABLE, "Login executable is unavailable.")
+            })?;
+        // Batch files require a command interpreter; that would violate literal argv execution.
+        if program
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"))
+        {
+            return Err(RemoteError::new(
+                codes::UNAVAILABLE,
+                "Login requires a native executable; copy the command instead.",
+            ));
+        }
+        (program, descriptor.args.clone())
+    } else {
+        (
+            shell_program(shell, &host)?,
+            args.iter().map(|value| (*value).to_owned()).collect(),
+        )
+    };
+    let mut request = PtyRequest::new(program, args, cols, rows);
     request.cwd = Some(cwd.clone());
     request.env = Some(
         env.into_iter()
@@ -756,6 +821,7 @@ fn prepare(params: OpenParams, host: PathEnv) -> Result<Prepared, RemoteError> {
         cwd: cwd.to_string_lossy().into_owned(),
         size: (cols, rows),
         scrollback_bytes,
+        login,
     })
 }
 

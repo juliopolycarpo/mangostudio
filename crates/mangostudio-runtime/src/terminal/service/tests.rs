@@ -63,6 +63,7 @@ impl PtySpawner for FakePtySpawner {
 #[derive(Default)]
 struct RecordingPtyState {
     closes: usize,
+    launches: Vec<(PathBuf, Vec<std::ffi::OsString>)>,
     writes: Vec<Vec<u8>>,
     sizes: Vec<(u16, u16)>,
     on_data: Option<PtyOutput>,
@@ -97,7 +98,7 @@ struct RecordingPtySpawner(Arc<Mutex<RecordingPtyState>>);
 impl PtySpawner for RecordingPtySpawner {
     fn spawn(
         &self,
-        _request: crate::terminal::pty::PtyRequest,
+        request: crate::terminal::pty::PtyRequest,
         check: Arc<dyn crate::subprocess::LaunchCheck>,
         on_data: PtyOutput,
         on_exit: Arc<dyn Fn(crate::terminal::pty::PtyExit) + Send + Sync>,
@@ -109,6 +110,7 @@ impl PtySpawner for RecordingPtySpawner {
                 .map_err(crate::terminal::pty::PtyError::LaunchDenied)?;
             {
                 let mut state = state.lock().unwrap();
+                state.launches.push((request.program, request.args));
                 state.on_data = Some(on_data);
                 state.on_exit = Some(on_exit);
             }
@@ -173,6 +175,7 @@ fn open_params() -> OpenParams {
     OpenParams {
         session_id: "terminal-1".into(),
         shell: Some(RuntimeShellKind::Bash),
+        login_target: None,
         cwd: None,
         cols: 80.0,
         rows: 24.0,
@@ -739,4 +742,56 @@ fn darwin_launches_a_login_shell_and_other_platforms_do_not() {
             "expected bash args {expected:?} on {platform} | received {args:?}"
         );
     }
+}
+
+#[tokio::test]
+async fn descriptor_login_reaches_fake_pty_without_a_shell_or_credentials() {
+    let (scratch, service, state) = prepared_service_with(|service| {
+        service.shell_read = Arc::new(|| true);
+    });
+    let program = scratch.join(if cfg!(windows) { "codex.exe" } else { "codex" });
+    std::fs::copy(
+        scratch.join(if cfg!(windows) { "bash.exe" } else { "bash" }),
+        &program,
+    )
+    .unwrap();
+    let mut params = open_params();
+    params.shell = None;
+    params.login_target = Some("codex".into());
+    // The freshness check reads the real consent fixture, exactly as a shell launch does.
+    let session = fake_session();
+    service
+        .open(params, session.clone(), CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        state.lock().unwrap().launches,
+        vec![(program, vec![std::ffi::OsString::from("login")])]
+    );
+    let on_data = state.lock().unwrap().on_data.clone().unwrap();
+    on_data(b"first prompt");
+    let attached = service
+        .attach(SessionParams {
+            session_id: "terminal-1".into(),
+        })
+        .unwrap();
+    assert_eq!(attached["scrollback"], "Zmlyc3QgcHJvbXB0");
+    service
+        .close(SessionParams {
+            session_id: "terminal-1".into(),
+        })
+        .await
+        .unwrap();
+}
+
+#[test]
+fn login_refuses_shell_or_environment_overrides_and_unknown_targets() {
+    let (_scratch, host) = host_with_shells("login-refusals", "linux", &["bash"]);
+    let mut params = open_params();
+    params.login_target = Some("codex".into());
+    assert!(prepare(params, host.clone()).is_err());
+    let mut params = open_params();
+    params.shell = None;
+    params.login_target = Some("codex; touch marker".into());
+    assert!(prepare(params, host).is_err());
 }

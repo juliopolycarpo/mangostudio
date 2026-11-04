@@ -265,6 +265,7 @@ pub(crate) async fn build_capability_manifest(
             registry.classify(method) == crate::registry::Classification::Implemented
         });
     manifest.terminal_close_after_revocation = terminal_implementation.then_some(true);
+    manifest.terminal_login_argv = terminal_implementation.then_some(true);
     manifest.terminal = Some(allow.shell && !manifest.shells.is_empty() && terminal_implementation);
     manifest.gh = Some(gh_probe.unwrap_or_else(|_| unavailable_git()));
     manifest.profile = Some(resolved.profile);

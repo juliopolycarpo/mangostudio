@@ -444,6 +444,12 @@ export function createTerminalSessionService(
         reservation.client = client;
         ensureCloseHandler(client);
         requireTerminalCapable(client, body.environmentId);
+        if (body.loginTarget && client.manifest.terminalLoginArgv !== true) {
+          throw new TerminalUnavailableError(
+            'runtime-update-required',
+            'This runtime requires an update for login terminals; use the copy-command fallback.'
+          );
+        }
         requireIsolatedIfLocal(userId, body.environmentId);
 
         const sessionId = d.randomId();
@@ -514,9 +520,10 @@ export function createTerminalSessionService(
               cols,
               rows,
               scrollbackBytes: config.scrollbackKib * 1024,
+              ...(body.loginTarget ? { loginTarget: body.loginTarget } : {}),
               ...(body.shell ? { shell: body.shell } : {}),
               ...(cwd ? { cwd } : {}),
-              ...(chatId ? { env: { MANGOSTUDIO_CHAT_ID: chatId } } : {}),
+              ...(chatId && !body.loginTarget ? { env: { MANGOSTUDIO_CHAT_ID: chatId } } : {}),
               ...toolchain,
             },
             { timeoutMs: TERMINAL_OPEN_TIMEOUT_MS }

@@ -1,0 +1,5 @@
+{
+  "codex": { "program": "codex", "args": ["login"] },
+  "cursor": { "program": "cursor-agent", "args": ["login"] },
+  "claude": { "program": "claude", "args": ["auth", "login"] }
+}

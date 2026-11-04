@@ -1288,3 +1288,29 @@ offer on some machines — has two more legs, and forgetting either ships green:
 Neither version moves for an additive method. `RUNTIME_CONTRACT_VERSION` is announced, not
 compared, and the wire version only changes when the frame format does; an older runtime
 answers `METHOD_UNSUPPORTED`, which is a normal decodeable outcome.
+
+### Vendor login PTYs
+
+A runtime positively advertises `terminalLoginArgv` when `terminal.open` accepts
+`loginTarget`. The target selects literal executable and argument fields from
+`apps/shared/src/external-agents/login.json`; display hints are derived from that
+same descriptor. It never becomes a shell command. Unknown targets, shell/env
+overrides and Windows batch launchers are refused. The existing environment,
+workspace ownership, isolation and shell consent checks still apply. Missing
+capability keeps the copy-command fallback; the hub sends no extension to an old
+peer. This contract does not add a login button or treat process exit as proof of
+an authenticated account.
+
+Login output lives only in memory. Up to 64 KiB is held until the first viewer,
+then consumed and erased; subsequent attachments have no transcript replay.
+Overflow closes the process instead of silently discarding the first prompt. A
+viewer has 30 seconds to attach, and every login has a ten-minute total lifetime.
+The existing 100 ms consent watcher also enforces these deadlines, subject to
+scheduler delay. There are at most 16 runtime sessions and 16 owned PTY children.
+The live-viewer pending queue is also 64 KiB, with existing credit flow. Timeout
+and overflow erase buffers before process cleanup; failed closes retain their
+owned handle for retry. Cancellation, disconnect and consent withdrawal use the
+existing terminal cleanup. No transcript, credentials or login output is written
+to audit or persistent storage. No real vendor login was required for the fake
+launch and lifecycle tests. Native executables are required on Windows until a
+literal-argv batch-launch contract is available.

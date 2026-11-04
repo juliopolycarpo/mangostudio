@@ -36,9 +36,6 @@ use crate::tool_argument::tool_argument;
 /// The only ACP profile the product drives.
 const CURSOR_PROFILE: &str = "cursor";
 
-/// Cursor's own login command, as the TypeScript adapter always offered it.
-const CURSOR_LOGIN_COMMAND: &str = "cursor-agent login";
-
 /// `EXTERNAL_NATIVE_SESSION_PAGE_LIMIT` in `apps/shared/src/external-agents/schemas.ts`.
 const NATIVE_SESSION_PAGE_LIMIT: usize = 50;
 
@@ -559,11 +556,7 @@ fn account_label(target: TargetId, mode: &sdk::AuthMode) -> &'static str {
 
 /// The vendor's own login command.
 fn login_command(target: TargetId) -> &'static str {
-    match target {
-        TargetId::Claude => mango_agent_claude::pinned::LOGIN_COMMAND,
-        TargetId::Codex => mango_agent_codex::harness::CODEX_LOGIN_HINT,
-        TargetId::Cursor => CURSOR_LOGIN_COMMAND,
-    }
+    crate::terminal::login::command(target.as_str())
 }
 
 fn remedy(kind: wire::RemedyKind, command: Option<String>) -> wire::Remedy {

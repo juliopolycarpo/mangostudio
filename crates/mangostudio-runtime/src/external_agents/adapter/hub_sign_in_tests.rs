@@ -7,10 +7,6 @@ const HUB_REMEDIES: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../apps/shared/src/external-agents/remedies.ts"
 );
-const HUB_ADAPTER_DESCRIPTORS: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../apps/api/src/modules/external-agents/domain/adapter-descriptors.ts"
-);
 
 fn read(path: &str) -> String {
     std::fs::read_to_string(path).unwrap_or_else(|error| {
@@ -68,13 +64,7 @@ fn the_hubs_signed_out_code_is_the_one_the_sdk_ends_a_refused_prompt_with() {
 fn the_hubs_cursor_sign_in_command_is_the_one_the_sdk_profile_tells_a_person_to_run() {
     let profile =
         mango_agent_acp::builtin_profile("cursor").expect("the SDK ships the cursor profile");
-    let source = read(HUB_ADAPTER_DESCRIPTORS);
-    let cursor = source
-        .find("targetId: 'cursor',")
-        .map(|start| &source[start..])
-        .unwrap_or_else(|| panic!("expected a cursor entry in {HUB_ADAPTER_DESCRIPTORS}"));
-    let received = literal_after(cursor, "loginCommand: ")
-        .unwrap_or_else(|message| panic!("{message} | in {HUB_ADAPTER_DESCRIPTORS}"));
+    let received = crate::terminal::login::command("cursor");
     assert_eq!(
         received,
         profile.login_text(),

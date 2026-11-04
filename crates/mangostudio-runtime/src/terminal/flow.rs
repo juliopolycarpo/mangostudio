@@ -172,6 +172,13 @@ pub struct TerminalFlow {
     inflight: usize,
     attached: bool,
     exit: Option<ExitInfo>,
+    login: Option<LoginOutput>,
+}
+
+struct LoginOutput {
+    started: std::time::Instant,
+    viewed: bool,
+    overflow: bool,
 }
 
 impl TerminalFlow {
@@ -192,14 +199,45 @@ impl TerminalFlow {
             inflight: 0,
             attached: false,
             exit: None,
+            login: None,
         })
+    }
+
+    /// Uses 64 KiB of ephemeral first-viewer replay; never keeps a reconnect transcript.
+    pub(crate) fn enable_login(&mut self) {
+        self.scrollback = ByteRing::new(64 * 1024).expect("positive login bound");
+        self.pending = ByteRing::new(64 * 1024).expect("positive login bound");
+        self.login = Some(LoginOutput {
+            started: std::time::Instant::now(),
+            viewed: false,
+            overflow: false,
+        });
+    }
+
+    pub(crate) fn login_expired(&mut self) -> bool {
+        let expired = self.login.as_ref().is_some_and(|login| {
+            login.overflow
+                || login.started.elapsed() >= std::time::Duration::from_secs(600)
+                || (!login.viewed && login.started.elapsed() >= std::time::Duration::from_secs(30))
+        });
+        if expired {
+            self.login.as_mut().expect("login exists").overflow = true;
+            self.scrollback.clear();
+            self.pending.clear();
+        }
+        expired
     }
 
     /// Replays the retained tail and charges it to a fresh viewer's window.
     pub fn attach(&mut self) -> AttachState {
         self.pending.clear();
         self.attached = true;
+        self.login_expired();
         let scrollback = self.scrollback.snapshot();
+        if let Some(login) = &mut self.login {
+            login.viewed = true;
+            self.scrollback.clear();
+        }
         self.inflight = scrollback.len();
         AttachState {
             scrollback,
@@ -216,7 +254,25 @@ impl TerminalFlow {
 
     /// Retains PTY bytes and emits only what the viewer's credit permits.
     pub fn on_data(&mut self, bytes: &[u8], emit: &mut impl FnMut(OutputFrame) -> bool) {
-        self.scrollback.push(bytes);
+        if self.login_expired() {
+            return;
+        }
+        if let Some(login) = &mut self.login {
+            if !login.viewed {
+                if self.scrollback.len().saturating_add(bytes.len()) > 64 * 1024 {
+                    login.overflow = true;
+                    self.scrollback.clear();
+                    return;
+                }
+                self.scrollback.push(bytes);
+            } else if self.pending.len().saturating_add(bytes.len()) > 64 * 1024 {
+                login.overflow = true;
+                self.pending.clear();
+                return;
+            }
+        } else {
+            self.scrollback.push(bytes);
+        }
         if self.exit.is_some() || !self.attached {
             return;
         }
@@ -506,5 +562,41 @@ mod tests {
         assert_eq!(frames.len(), 1);
         assert_eq!(frames[0].payload["reason"], "consent-revoked");
         assert!(frames[0].end);
+    }
+}
+
+#[cfg(test)]
+mod login_tests {
+    use super::TerminalFlow;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn first_prompt_is_consumed_once_and_later_output_is_not_replayed() {
+        let mut flow = TerminalFlow::new(1).unwrap();
+        flow.enable_login();
+        flow.on_data(b"login prompt", &mut |_| panic!("no viewer"));
+        assert_eq!(flow.attach().scrollback, b"login prompt");
+        flow.on_data(b"private response", &mut |_| true);
+        flow.detach();
+        assert!(flow.attach().scrollback.is_empty());
+    }
+
+    #[test]
+    fn no_viewer_timeout_overflow_and_total_lifetime_erase_replay() {
+        for (viewed, seconds) in [(false, 30), (true, 600)] {
+            let mut flow = TerminalFlow::new(1).unwrap();
+            flow.enable_login();
+            flow.on_data(b"private prompt", &mut |_| true);
+            flow.login.as_mut().unwrap().viewed = viewed;
+            flow.login.as_mut().unwrap().started = Instant::now() - Duration::from_secs(seconds);
+            assert!(flow.login_expired());
+            assert!(flow.attach().scrollback.is_empty());
+            flow.on_data(b"late secret", &mut |_| panic!("expired"));
+        }
+        let mut flow = TerminalFlow::new(1).unwrap();
+        flow.enable_login();
+        flow.on_data(&vec![b'x'; 64 * 1024 + 1], &mut |_| panic!("no viewer"));
+        assert!(flow.login_expired());
+        assert!(flow.attach().scrollback.is_empty());
     }
 }

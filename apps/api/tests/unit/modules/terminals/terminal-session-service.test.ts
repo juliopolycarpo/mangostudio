@@ -1036,3 +1036,30 @@ describe('terminalSessionService viewer handoff', () => {
     expect(service.isCurrentViewer('no-such-session', second)).toBe(false);
   });
 });
+
+test('login requests require positive capability before sending extension fields', async () => {
+  const { service, client } = createHarness();
+  try {
+    await expect(
+      service.open(USER_ID, { environmentId: ENVIRONMENT_ID, loginTarget: 'codex' })
+    ).rejects.toBeInstanceOf(TerminalUnavailableError);
+    expect(client.calls.open).toHaveLength(0);
+  } finally {
+    await service.closeAll();
+  }
+});
+
+test('capable login launch preserves terminal authority and sends only the selected target', async () => {
+  const client = new FakeTerminalRuntimeClient({
+    manifest: { ...FAKE_TERMINAL_MANIFEST, terminalLoginArgv: true },
+  });
+  const { service } = createHarness({ client });
+  try {
+    await service.open(USER_ID, { environmentId: ENVIRONMENT_ID, loginTarget: 'cursor' });
+    expect(client.calls.open[0]?.loginTarget).toBe('cursor');
+    expect(client.calls.open[0]?.env).toBeUndefined();
+    await service.close(USER_ID, 'session-1');
+  } finally {
+    await service.closeAll();
+  }
+});
