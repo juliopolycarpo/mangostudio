@@ -39,6 +39,7 @@ test('every publishing job rechecks registry state after acquiring its approval 
     const job = workflow().jobs[name];
     expect(job.needs, name).toEqual(['source', 'approve']);
     expect(job.permissions?.actions, name).toBe('read');
+    expect(job.permissions?.contents, name).toBe('write');
     const steps = job.steps ?? [];
     const load = steps.findIndex((step) => step.id === 'approved');
     const guard = steps.findIndex((step) => step.id === 'guard');
@@ -50,6 +51,9 @@ test('every publishing job rechecks registry state after acquiring its approval 
       `${'$'}{{ needs.approve.outputs.approval_sha256 }}`
     );
     expect(steps[guard].run, name).toContain('audit-canary-publication.ts');
+    expect(steps[guard].env?.APPROVAL_ORIGIN, name).toBe(
+      `${'$'}{{ steps.approved.outputs.approval_origin }}`
+    );
     expect(steps[write].if, name).toContain('steps.guard.outputs.');
   }
 });

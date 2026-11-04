@@ -34,7 +34,15 @@ export function renderCanaryPromotionSummary(
           : 'External state may be partial or changed; rerun verification before retrying. Cancellation and failure do not roll back writes.';
     rows.push(`| ${jobName} | ${String(result)} | ${state} |`);
   }
-  const evidence = JSON.stringify({ selected, approval: approved }, null, 2);
+  const evidence = JSON.stringify(
+    {
+      selected,
+      approval: approved,
+      channels: { npm: jobs['npm-canary'], github: jobs['github-release-canary'] },
+    },
+    null,
+    2
+  );
   if (evidence.length > 100_000)
     throw new Error(
       `Invalid summary evidence size ${evidence.length}: expected at most 100000 characters`

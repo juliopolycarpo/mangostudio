@@ -36,6 +36,7 @@ test('a failed or cancelled publisher reports possible partial external state', 
   expect(summary).toContain('do not roll back writes');
   expect(summary).toContain('"run_attempt": "2"');
   expect(summary).toContain('"approval_sha256"');
+  expect(summary).toContain('"channels"');
 });
 test('only a successful verified preflight explains a skipped channel as complete', () => {
   expect(renderCanaryPromotionSummary(needs('success', 'skipped'), revision, url)).toContain(

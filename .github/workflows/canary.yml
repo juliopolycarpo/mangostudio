@@ -158,6 +158,9 @@ jobs:
           MANIFEST_PATH: .canary-approval/distribution-manifest.json
           EXPECTED_RELEASE: .canary-approval/expected-release.json
           AUDIT_PATH: .canary-approval/audit.json
+          APPROVAL_ORIGIN: ${{ steps.approved.outputs.approval_origin }}
+          EXPECTED_MANIFEST_SHA256: ${{ steps.approved.outputs.manifest_sha256 }}
+          EXPECTED_RELEASE_SHA256: ${{ steps.approved.outputs.expected_release_sha256 }}
           GH_TOKEN: ${{ github.token }}
         run: bun ./scripts/release/audit-canary-publication.ts .canary-approval/distribution-manifest.json .canary-approval/expected-release.json .canary-approval/audit.json
 
@@ -229,6 +232,9 @@ jobs:
           MANIFEST_PATH: .canary-approval/distribution-manifest.json
           EXPECTED_RELEASE: .canary-approval/expected-release.json
           AUDIT_PATH: .canary-approval/audit.json
+          APPROVAL_ORIGIN: ${{ steps.approved.outputs.approval_origin }}
+          EXPECTED_MANIFEST_SHA256: ${{ steps.approved.outputs.manifest_sha256 }}
+          EXPECTED_RELEASE_SHA256: ${{ steps.approved.outputs.expected_release_sha256 }}
           GH_TOKEN: ${{ github.token }}
         run: bun ./scripts/release/audit-canary-publication.ts .canary-approval/distribution-manifest.json .canary-approval/expected-release.json .canary-approval/audit.json
 
@@ -309,6 +315,9 @@ jobs:
           MANIFEST_PATH: .canary-approval/distribution-manifest.json
           EXPECTED_RELEASE: .canary-approval/expected-release.json
           AUDIT_PATH: .canary-approval/audit.json
+          APPROVAL_ORIGIN: ${{ steps.approved.outputs.approval_origin }}
+          EXPECTED_MANIFEST_SHA256: ${{ steps.approved.outputs.manifest_sha256 }}
+          EXPECTED_RELEASE_SHA256: ${{ steps.approved.outputs.expected_release_sha256 }}
           GH_TOKEN: ${{ github.token }}
         run: bun ./scripts/release/audit-canary-publication.ts .canary-approval/distribution-manifest.json .canary-approval/expected-release.json .canary-approval/audit.json
 
