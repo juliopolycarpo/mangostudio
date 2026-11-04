@@ -213,7 +213,7 @@ async function fixture(): Promise<Fixture> {
           tarball,
           integrity: `sha512-${createHash('sha512').update(bytes).digest('base64')}`,
           attestations: {
-            url: `https://registry.npmjs.org/-/npm/v1/attestations/${pkg.name.replace('/', '%2f')}@${VERSION}`,
+            url: `https://registry.npmjs.org/-/npm/v1/attestations/${pkg.name.replaceAll('/', '%2f')}@${VERSION}`,
             provenance: { predicateType: 'https://slsa.dev/provenance/v1' },
           },
         },
