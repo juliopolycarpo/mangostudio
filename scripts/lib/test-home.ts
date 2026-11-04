@@ -12,7 +12,7 @@
  * Moving `HOME` also hides what the toolchain finds there, so `CARGO_HOME`,
  * `RUSTUP_HOME`, `BUN_INSTALL`, Bun's install cache
  * are pinned to the real ones. `MANGOSTUDIO_RUNTIME_BINARY` and every other
- * inherited variable pass through untouched.
+ * inherited variable except the standard home/storage roots pass through untouched.
  */
 
 import { constants } from 'node:os';
@@ -21,7 +21,7 @@ import { join } from 'node:path';
 import {
   createTemporaryHome,
   currentHost,
-  homeEnv,
+  fixtureHomeEnv,
   removeTemporaryHome,
   type TemporaryHomeHost,
   type TemporaryHomeKind,
@@ -76,7 +76,7 @@ export function testHomeEnv(
 ): Record<string, string> {
   const bunInstall = ambient.BUN_INSTALL?.trim() || join(host.realHome, '.bun');
   return {
-    ...homeEnv(root),
+    ...fixtureHomeEnv(root),
     // `$HOME/.gitconfig` and `$XDG_CONFIG_HOME/git/config` both resolve from
     // variables the developer may have exported, so name the global config
     // outright. The file does not exist, which Git reads as empty: no signing

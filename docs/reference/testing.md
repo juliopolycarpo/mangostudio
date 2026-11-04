@@ -1311,12 +1311,30 @@ launcher, so each worker has a home of its own. That covers `bun run test`, the 
 orchestrator and a direct `bun run test:unit` from `apps/api`; the nightly randomized-order
 workflow wraps its `bun test` the same way.
 
+`fixtureHomeEnv()` also pins `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` and
+`XDG_CACHE_HOME` below the temporary home, and uses that private home itself for
+`XDG_RUNTIME_DIR`. `XDG_CONFIG_DIRS` and `XDG_DATA_DIRS` each contain one private
+search root. `APPDATA` and `LOCALAPPDATA` point to private `AppData/Roaming` and
+`AppData/Local` directories for Windows consumers. The managed `__serve` fixtures
+use this same helper after copying the parent environment.
+
+Linux tools can use the XDG roots directly. macOS tools may use XDG overrides or
+`HOME/Library`; both stay private. On Windows, `USERPROFILE` redirects `homedir()`
+and the explicit AppData roots cover environment-based native consumers. These
+are environment overrides, not a filesystem sandbox for arbitrary tools or OS
+known-folder APIs. Toolchain locations remain explicitly shared as listed below.
+The subprocess regression in `scripts/tests/temporary-home-env.unit.test.ts`
+supplies only disposable inherited roots, writes through each effective root and
+checks that the external directory stays empty on the native host. It does not
+invoke `gh` or establish a cause for the earlier macOS incident; process ownership
+and cleanup remain separate requirements.
+
 What the launcher sets, besides the home:
 
 - `CARGO_HOME`, `RUSTUP_HOME`, `BUN_INSTALL` and `BUN_INSTALL_CACHE_DIR` keep their real
   values (an exported one wins), so a moved home does not hide the toolchain or make Bun
-  re-download its cache. `MANGOSTUDIO_RUNTIME_BINARY` and every other inherited variable pass
-  through untouched.
+  re-download its cache. `MANGOSTUDIO_RUNTIME_BINARY` and other inherited variables outside the standard
+  home/storage roots pass through untouched.
 - `GIT_CONFIG_GLOBAL` names a global Git config that does not exist, so the developer's
   signing policy, identity and `core.hooksPath` never reach the fixture repositories the tests
   build. A fixture that builds its own `env` for `git` must forward it
