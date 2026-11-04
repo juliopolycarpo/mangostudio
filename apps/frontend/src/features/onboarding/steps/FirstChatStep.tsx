@@ -115,7 +115,12 @@ export function FirstChatStep({
           chatId = current.chatId ?? chatId;
           pendingOperationId = turn.operationId;
           pendingCreationId = creation.operationId;
-          return { ...current, createChatOperation: creation, turnOperation: turn };
+          return {
+            ...current,
+            requiresTurnReceipt: true,
+            createChatOperation: creation,
+            turnOperation: turn,
+          };
         });
         if (!chatId) {
           const chat = await createChat.mutateAsync(creation);
@@ -163,6 +168,7 @@ export function FirstChatStep({
       await onChange((current) => ({
         ...current,
         turnOperation: undefined,
+        requiresTurnReceipt: true,
         ...(!current.chatId ? { createChatOperation: undefined } : {}),
       }));
     } catch {

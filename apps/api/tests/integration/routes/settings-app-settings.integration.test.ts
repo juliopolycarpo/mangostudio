@@ -70,6 +70,32 @@ afterEach(() => {
 });
 
 describe('settings app settings routes', () => {
+  it('round-trips first-chat operation identities through real PUT, storage and GET normalization', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(testUser, settingsRoutes);
+    restoreAuth = restore;
+    const onboarding = {
+      ...DEFAULT_ONBOARDING_STATE,
+      chatId: 'first-chat',
+      createChatOperation: { operationId: 'create-once', title: ' Original title ' },
+      turnOperation: { operationId: 'turn-once', prompt: '  Original input\n' },
+    };
+    const response = await app.handle(
+      new Request('http://localhost/settings/app', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ profileSettings: { default: { onboarding } } }),
+      })
+    );
+    expect(response.status).toBe(200);
+    const written = (await response.json()) as AppSettings;
+    expect(onboardingFor(written)).toMatchObject(onboarding);
+    const stored = await getSavedAppSettings(getDb(), testUser.id);
+    expect(onboardingFor(stored)).toMatchObject(onboarding);
+    const read = await app.handle(new Request('http://localhost/settings/app'));
+    expect(read.status).toBe(200);
+    expect(onboardingFor((await read.json()) as AppSettings)).toMatchObject(onboarding);
+  });
+
   it('returns defaults for a new user', async () => {
     const { app, restore } = createAuthenticatedApiTestApp(testUser, settingsRoutes);
     restoreAuth = restore;

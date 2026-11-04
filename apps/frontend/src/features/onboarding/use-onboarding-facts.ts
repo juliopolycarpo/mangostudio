@@ -95,20 +95,24 @@ export function useOnboardingFacts(state: OnboardingState): OnboardingMachineFac
 
   const service = serviceFact(machine);
 
+  const requiresTurnReceipt =
+    state.requiresTurnReceipt === true ||
+    state.turnOperation !== undefined ||
+    state.createChatOperation !== undefined;
   const chat = factOf(
     state.chatId !== undefined &&
       (messages.isPending || Boolean(state.turnOperation && operation.isPending)),
     messages.isError || Boolean(state.turnOperation && operation.isError),
     () =>
       state.chatId !== undefined &&
-      (!state.turnOperation || operation.data?.state === 'completed') &&
+      (!requiresTurnReceipt || operation.data?.state === 'completed') &&
       (messages.data?.pages ?? []).some((page) =>
         page.messages.some(
           (message) =>
             message.role === 'ai' &&
             !message.isGenerating &&
             message.text.length > 0 &&
-            (!state.turnOperation || message.id === operation.data?.messageId)
+            (!requiresTurnReceipt || message.id === operation.data?.messageId)
         )
       )
   );

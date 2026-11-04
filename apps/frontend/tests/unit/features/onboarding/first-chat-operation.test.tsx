@@ -2,19 +2,24 @@ import { afterEach, describe, expect, it } from 'bun:test';
 
 import { en } from '@mangostudio/shared/i18n';
 import type { OnboardingState } from '@mangostudio/shared/onboarding';
-import { DEFAULT_ONBOARDING_STATE } from '@mangostudio/shared/onboarding';
+import { DEFAULT_ONBOARDING_STATE, normalizeOnboardingState } from '@mangostudio/shared/onboarding';
 import type { OperationReceipt, OperationState } from '@mangostudio/shared/operations';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 
 import { FirstChatStep } from '@/features/onboarding/steps/FirstChatStep';
+import { useOnboardingFacts } from '@/features/onboarding/use-onboarding-facts';
 
 import { render } from '../../../support/harness/render';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
 
 const scenario = createFetchScenario();
-afterEach(() => scenario.restore());
+const respondFromScenario = scenario.fetchMock.getMockImplementation();
+afterEach(() => {
+  if (respondFromScenario) scenario.fetchMock.mockImplementation(respondFromScenario);
+  scenario.restore();
+});
 const base: OnboardingState = {
   ...DEFAULT_ONBOARDING_STATE,
   workdir: '/project',
@@ -56,11 +61,151 @@ function Harness({
     />
   );
 }
+function FactsHarness({
+  initial,
+  save,
+}: {
+  initial: OnboardingState;
+  save: (state: OnboardingState) => void;
+}) {
+  const [state, setState] = useState(initial);
+  const facts = useOnboardingFacts(state);
+  return (
+    <>
+      <output data-testid="chat-fact">{facts.chat}</output>
+      <FirstChatStep
+        environmentId="local"
+        state={state}
+        answered={facts.chat === 'satisfied'}
+        onChange={(update) => {
+          const next = update(state);
+          save(next);
+          setState(next);
+          return Promise.resolve();
+        }}
+        onOpenChat={() => Promise.resolve()}
+        onWritingChange={() => undefined}
+        onGoToFolder={() => undefined}
+      />
+    </>
+  );
+}
+function factsWithOldReply() {
+  scenario
+    .respondWithJson('GET', '/api/environments', { body: [{ id: 'local', name: 'Local' }] })
+    .respondWithJson('GET', '/api/environments/runtimes?environmentId=local', { body: [] })
+    .respondWithJson('GET', '/api/external-agents?environmentId=local', { body: { agents: [] } })
+    .respondWithJson('GET', '/api/machine/status', {
+      body: {
+        hub: { pid: 1 },
+        service: { installed: false },
+        actions: { installService: { available: false, reason: 'unsupported' } },
+      },
+    })
+    .respondWithJson('GET', '/api/chats/first-chat/messages?limit=50&order=desc', {
+      body: {
+        messages: [{ id: 'old-reply', role: 'ai', text: 'Previous answer', isGenerating: false }],
+        nextCursor: null,
+        hasMore: false,
+      },
+    });
+}
 function posts() {
   return scenario.fetchMock.mock.calls.filter(([, init]) => init?.method === 'POST');
 }
 
 describe('first-chat operation recovery', () => {
+  it.each(['failed', 'unresolved'] as const)(
+    'keeps a new request unsatisfied after %s despite an older reply, including reload',
+    async (status) => {
+      factsWithOldReply();
+      scenario
+        .respondWithJson('GET', '/api/operations/persisted-turn', { body: existing(status) })
+        .respondWithJson('PUT', '/api/chats/first-chat', { body: { success: true } })
+        .install();
+      if (!respondFromScenario) throw new Error('scenario responder is missing');
+      const respond = respondFromScenario;
+      const dispatched: string[] = [];
+      scenario.fetchMock.mockImplementation((input, init) => {
+        const url = new URL(
+          typeof input === 'string' ? input : input instanceof Request ? input.url : input.href,
+          'http://localhost'
+        );
+        if (url.pathname === '/api/respond/stream' && init?.method === 'POST') {
+          const body = JSON.parse(typeof init.body === 'string' ? init.body : '') as {
+            operationId: string;
+          };
+          dispatched.push(body.operationId);
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                ...existing('completed'),
+                operationId: body.operationId,
+                messageId: 'new-answer',
+              }),
+              { headers: { 'Content-Type': 'application/json' } }
+            )
+          );
+        }
+        if (
+          url.pathname.startsWith('/api/operations/') &&
+          url.pathname !== '/api/operations/persisted-turn'
+        ) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ error: 'not found' }), {
+              status: 404,
+              headers: { 'Content-Type': 'application/json' },
+            })
+          );
+        }
+        return respond(input, init);
+      });
+      let saved: OnboardingState = {
+        ...base,
+        turnOperation: { operationId: 'persisted-turn', prompt: 'Repeat me' },
+      };
+      const view = render(
+        <FactsHarness
+          initial={saved}
+          save={(next) => {
+            saved = next;
+          }}
+        />
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId('onboarding-new-operation')).toBeInTheDocument()
+      );
+      await waitFor(() => expect(screen.getByTestId('chat-fact')).toHaveTextContent('unsatisfied'));
+      await userEvent.click(screen.getByTestId('onboarding-new-operation'));
+      await waitFor(() => expect(screen.getByTestId('chat-fact')).toHaveTextContent('unsatisfied'));
+      expect(screen.getByTestId('onboarding-send-prompt')).toBeEnabled();
+      expect(posts()).toHaveLength(0);
+      view.unmount();
+      render(
+        <FactsHarness
+          initial={normalizeOnboardingState(JSON.parse(JSON.stringify(saved)))}
+          save={(next) => {
+            saved = next;
+          }}
+        />
+      );
+      await waitFor(() => expect(screen.getByTestId('chat-fact')).toHaveTextContent('unsatisfied'));
+      expect(screen.getByTestId('onboarding-send-prompt')).toBeEnabled();
+      await userEvent.click(screen.getByTestId('onboarding-send-prompt'));
+      await waitFor(() => expect(saved.turnOperation?.operationId).toBeTruthy());
+      expect(saved.turnOperation?.operationId).not.toBe('persisted-turn');
+      const operationId = saved.turnOperation?.operationId;
+      if (!operationId) throw new Error('new request identity was not persisted');
+      await waitFor(() => expect(dispatched).toEqual([operationId]));
+    }
+  );
+  it('keeps transcript completion for genuinely legacy records', async () => {
+    factsWithOldReply();
+    scenario.install();
+    render(<FactsHarness initial={base} save={() => undefined} />);
+    await waitFor(() => expect(screen.getByTestId('chat-fact')).toHaveTextContent('satisfied'));
+    expect(screen.getByTestId('onboarding-send-prompt')).toBeDisabled();
+  });
   it('stores operation identity and exact prompt before any chat/turn request', async () => {
     scenario.install();
     let saved: OnboardingState | undefined;
