@@ -1,3 +1,4 @@
+import { Database as SQLiteDatabase } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -147,7 +148,8 @@ describe('startServer via __serve', () => {
   /** Starts the server and waits until it is healthy and has written its state file. */
   async function startServing(
     running: ManagedProcessFixture,
-    preload?: string
+    preload?: string,
+    databasePath = ':memory:'
   ): Promise<{ pid: number | undefined; pidFile: string }> {
     const { port, tempDir: home } = running;
     const pidFile = join(home, '.mango', 'run', 'server.json');
@@ -156,6 +158,7 @@ describe('startServer via __serve', () => {
       cmd: ['bun', ...(preload ? ['--preload', preload] : []), ENTRY, '__serve', String(port)],
       env: {
         ...serverEnv(home, port),
+        DATABASE_PATH: databasePath,
         BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
       },
     });
@@ -302,6 +305,30 @@ describe('startServer via __serve', () => {
       expect(existsSync(pidFile)).toBe(false);
       expect(fixture.diagnostics()).toContain('fixture runtime teardown failed');
       expect(fixture.diagnostics()).toContain('Runtime connection teardown failed during shutdown');
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'reports a failed HTTP drain, removes state and releases ownership at process exit',
+    async () => {
+      if (!fixture) throw new Error('Expected a managed process fixture.');
+      const preload = fileURLToPath(
+        new URL('../../support/fixtures/failing-http-shutdown.ts', import.meta.url)
+      );
+      const database = join(fixture.tempDir, 'drain-failure.sqlite');
+      const { pidFile } = await startServing(fixture, preload, database);
+      expect(await fixture.stop('SIGTERM')).toBe(1);
+      expect(fixture.diagnostics()).toContain('fixture HTTP drain failed');
+      expect(existsSync(pidFile)).toBe(false);
+      const release = await acquireCaptureLock(database);
+      await release();
+      const reopened = new SQLiteDatabase(database, { readonly: true });
+      try {
+        expect(reopened.query('PRAGMA integrity_check').get()).toEqual({ integrity_check: 'ok' });
+      } finally {
+        reopened.close();
+      }
     },
     TEST_TIMEOUT_MS
   );

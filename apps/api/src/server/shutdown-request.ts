@@ -20,8 +20,9 @@ export function registerShutdownHandler(next: ShutdownHandler): void {
 }
 
 /**
- * Run the registered stop once and exit 0. A second call while the first is
- * in flight is ignored, so SIGINT plus a `stop` SIGTERM cannot run the stop
+ * Run the registered stop once; report cleanup failures with a nonzero exit.
+ * A second call while the first is in flight is ignored, so SIGINT plus a
+ * `stop` SIGTERM cannot run the stop
  * twice and close the database twice.
  * // Usage: requestShutdown()
  */
@@ -36,7 +37,13 @@ export function requestShutdown(budgetMs: number = SHUTDOWN_BUDGET_MS): void {
     const timer = setTimeout(resolve, budgetMs);
     timer.unref?.();
   });
-  void Promise.race([work, budget]).finally(() => process.exit(0));
+  void Promise.race([work, budget]).then(
+    () => process.exit(0),
+    (error: unknown) => {
+      console.warn('[api] Shutdown failed:', error);
+      process.exit(1);
+    }
+  );
 }
 
 /** Test seam: forget the handler and the in-flight flag. */

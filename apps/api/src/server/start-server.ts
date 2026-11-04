@@ -247,8 +247,10 @@ async function gracefulStop(): Promise<void> {
   stopRuntimeScopeReaps?.();
   stopRuntimeScopeReaps = null;
   const httpStopError = await httpStopped;
-  if (httpStopError) throw httpStopError;
   await removeState();
+  // A failed drain does not prove writers settled. Retain the database and
+  // capture ownership until the process exits, rather than unlock live data.
+  if (httpStopError) throw httpStopError;
   await closeDb();
   await releaseCaptureLock?.();
   releaseCaptureLock = undefined;
