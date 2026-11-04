@@ -266,3 +266,10 @@ describe('cross-run artifact download CLI', () => {
     }
   });
 });
+
+test.each(['npm.tar.gz\n \n', ' \nnpm.tar.gz\n', 'npm.tar.gz \n', 'npm.tar.gz\n\n'])(
+  'rejects whitespace members or whitespace in bundle name %j',
+  (listing) => {
+    expect(() => distributionBundleMember(listing)).toThrow('expected one flat');
+  }
+);

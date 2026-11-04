@@ -133,7 +133,7 @@ export function validateArtifactEvidence(
  * Usage: distributionBundleMember('npm.tar.gz\n') === 'npm.tar.gz'.
  */
 export function distributionBundleMember(listing: string): string {
-  const members = listing.trim().split('\n');
+  const members = listing.replace(/\r?\n$/, '').split('\n');
   const member = members[0] ?? '';
   if (members.length !== 1 || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*\.tar(?:\.gz)?$/.test(member)) {
     throw new Error(
