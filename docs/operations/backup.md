@@ -75,8 +75,10 @@ database), 128 MiB total expanded data, 140 MiB compressed output and depth 32. 
 is fixed to gzip level 6; input bounds also bound expansion and memory use. It refuses
 Windows-reserved names, forbidden characters, trailing dots/spaces and case/Unicode collisions.
 Staging is adjacent to the destination, private (0700 directory / 0600 files on POSIX),
-and removed on success, cancellation or failure. Windows uses the destination parent's ACL;
-choose a private destination directory. Cancellation is checked between bounded operations;
+and removed on success, cancellation or failure. On Windows, the current user SID is resolved
+with whoami and icacls removes inherited grants and grants that user full access before
+any data is staged. Failure to establish this ACL refuses capture. Choose a private destination
+directory as well. Cancellation is checked between bounded operations;
 a single SQLite/compression operation finishes before cancellation is observed.
 
 The archive is flushed and published through an exclusive atomic hard link, so success

@@ -13,7 +13,7 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 import {
   BACKUP_LIMITS,
@@ -25,6 +25,7 @@ import Value from 'typebox/value';
 import type { MangoConfig } from '../lib/config';
 import { acquireCaptureLock } from './capture-lock';
 import { BACKUP_EXCLUSIONS, redactBackupDatabase } from './privacy';
+import { protectStaging } from './private-staging';
 
 export const CAPTURE_LIMITS = BACKUP_LIMITS;
 
@@ -122,7 +123,14 @@ export async function captureBackup(
 ): Promise<BackupManifest> {
   check(options.signal);
   if (config.database.path === ':memory:') throw new Error('Backup requires a persisted database.');
-  const output = resolve(options.output);
+  const requestedOutput = resolve(options.output);
+  const output = join(await realpath(dirname(requestedOutput)), basename(requestedOutput));
+  let configurationPath = resolve(config.configFilePath);
+  try {
+    configurationPath = await realpath(configurationPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
   const roots = backupRoots(config, options.checkpoints);
   const databasePath = await realpath(config.database.path);
   const resolvedRoots = await Promise.all(
@@ -140,7 +148,7 @@ export async function captureBackup(
     if (
       inside(root.source, output) ||
       inside(root.source, databasePath) ||
-      inside(root.source, config.configFilePath)
+      inside(root.source, configurationPath)
     ) {
       throw new Error(
         'A data root overlaps the archive, database or configuration; relocate the output or use non-overlapping roots.'
@@ -155,7 +163,7 @@ export async function captureBackup(
   try {
     check(options.signal);
     staging = await mkdtemp(join(dirname(output), '.mango-backup-'));
-    await chmod(staging, 0o700);
+    await protectStaging(staging);
     if ((await stat(databasePath)).size > CAPTURE_LIMITS.fileBytes)
       throw new Error('Backup database exceeds the file byte limit.');
     source = new Database(databasePath, { create: false });
@@ -286,7 +294,10 @@ export async function captureBackup(
       }
     };
     for (const root of resolvedRoots) {
-      if (root.present) await walk(root.source, root.source, root.id, 0);
+      if (!root.present) continue;
+      if (!(await stat(root.source)).isDirectory())
+        throw new Error('Configured backup roots must be directories.');
+      await walk(root.source, root.source, root.id, 0);
     }
     await hooks.afterFilesStaged?.();
     for (const root of resolvedRoots.filter((root) => !root.present)) {

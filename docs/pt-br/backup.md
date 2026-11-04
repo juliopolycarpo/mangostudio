@@ -67,7 +67,9 @@ Limites: 10.000 entradas lidas, 10.000 membros de dados, 32 MiB por arquivo (inc
 128 MiB de dados expandidos, 140 MiB comprimidos e profundidade 32. A compressão usa gzip
 nível 6. Nomes reservados do Windows, caracteres proibidos, pontos/espaços finais e colisões
 de caixa/Unicode são recusados. O staging fica ao lado do destino, com diretório 0700 e
-arquivos 0600 em POSIX. No Windows, use uma pasta privada com ACL apropriada. Cancelamentos
+arquivos 0600 em POSIX. No Windows, whoami resolve o SID do usuário e icacls remove grants herdados e concede acesso
+somente a esse usuário antes de copiar dados. Se isso falhar, a captura é recusada. Use também
+um diretório de destino privado. Cancelamentos
 são observados entre operações limitadas; uma operação SQLite/compressão em curso termina
 antes da observação do cancelamento.
 
