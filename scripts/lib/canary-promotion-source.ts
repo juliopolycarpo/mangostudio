@@ -27,6 +27,20 @@ function integer(value: unknown, label: string): number {
   return value;
 }
 
+function timestamp(value: unknown, label: string): number {
+  if (
+    typeof value === 'string' &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value)
+  ) {
+    const parsed = Date.parse(value);
+    const canonical = value.length === 20 ? `${value.slice(0, -1)}.000Z` : value;
+    if (Number.isFinite(parsed) && new Date(parsed).toISOString() === canonical) return parsed;
+  }
+  throw new Error(
+    `Distribution producer ${label}: expected UTC ISO timestamp; received ${JSON.stringify(value)}`
+  );
+}
+
 /**
  * Resolve the retained publication scopes from the frozen CI attempt without building.
  * Example: resolveCanaryPromotionSource({ repository: 'owner/repo', runId: 1, runAttempt: 2, sourceSha }, version, api).
@@ -104,17 +118,16 @@ export function resolveCanaryPromotionSource(
       `Distribution producer: expected one latest builder through frozen attempt ${source.runAttempt}; received ${JSON.stringify(eligible)}`
     );
   }
-  if (
-    producer.status !== 'completed' ||
-    producer.conclusion !== 'success' ||
-    typeof producer.started_at !== 'string' ||
-    typeof producer.completed_at !== 'string' ||
-    !Number.isFinite(Date.parse(producer.started_at)) ||
-    !Number.isFinite(Date.parse(producer.completed_at)) ||
-    Date.parse(producer.completed_at) < Date.parse(producer.started_at)
-  ) {
+  if (producer.status !== 'completed' || producer.conclusion !== 'success') {
     throw new Error(
-      `Distribution producer: expected completed successful builder with ordered timestamps; received ${JSON.stringify(producer)}`
+      `Distribution producer: expected completed successful builder; received ${JSON.stringify(producer)}`
+    );
+  }
+  const started = timestamp(producer.started_at, 'started_at');
+  const completed = timestamp(producer.completed_at, 'completed_at');
+  if (completed < started) {
+    throw new Error(
+      `Distribution producer: expected ordered timestamps; received ${JSON.stringify(producer)}`
     );
   }
   const artifacts = api.list(`${base}/runs/${source.runId}/artifacts?per_page=100`, 'artifacts');

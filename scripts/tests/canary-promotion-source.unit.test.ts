@@ -230,6 +230,28 @@ describe('canary distribution metadata resolver', () => {
       jobs[0] === null ? 'CI job: expected object' : 'Distribution producer'
     );
   });
+  test('retains canonical UTC timestamps with millisecond precision', () => {
+    const api = new FakePromotionApi();
+    api.values.set(jobsPath, [
+      builder(1, {
+        started_at: '2026-11-04T10:00:00.123Z',
+        completed_at: '2026-11-04T10:05:00.123Z',
+      }),
+    ]);
+    expect(resolveCanaryPromotionSource(source, version, api).builtAt).toBe(
+      '2026-11-04T10:05:00.123Z'
+    );
+  });
+  test.each([
+    'Wed Nov 04 2026 10:05:00 GMT+0000 (ignored\ninjected=value)',
+    '2026-11-31T10:05:00Z',
+  ])('rejects a malformed build timestamp before writing outputs: %j', (completedAt) => {
+    const api = new FakePromotionApi();
+    api.values.set(jobsPath, [builder(1, { completed_at: completedAt })]);
+    expect(() => resolveCanaryPromotionSource(source, version, api)).toThrow(
+      'expected UTC ISO timestamp'
+    );
+  });
   test('rejects malformed artifact records and invalid version', () => {
     const api = new FakePromotionApi();
     api.values.set(artifactsPath, [{ name: 42 }]);
