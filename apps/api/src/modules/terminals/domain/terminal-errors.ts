@@ -9,6 +9,16 @@
 
 import type { TerminalRefusalReason } from '@mangostudio/shared/terminal';
 
+/** Conflicting terminal launch modes; refused by the Hub before reserving a session. */
+export class TerminalInvalidOpenError extends Error {
+  constructor() {
+    super(
+      'loginTarget cannot be combined with shell; select a vendor login or an interactive shell.'
+    );
+    this.name = 'TerminalInvalidOpenError';
+  }
+}
+
 export class TerminalDisabledError extends Error {
   constructor() {
     super('Live terminals are disabled on this hub.');

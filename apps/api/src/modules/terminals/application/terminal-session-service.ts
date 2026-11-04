@@ -42,6 +42,7 @@ import {
 } from '../../environments/application/toolchain-service';
 import {
   TerminalDisabledError,
+  TerminalInvalidOpenError,
   TerminalLimitError,
   TerminalNotIsolatedError,
   TerminalSessionNotFoundError,
@@ -384,6 +385,9 @@ export function createTerminalSessionService(
     async open(userId, body, signal) {
       const config = d.getConfig();
       if (!config.enabled) throw new TerminalDisabledError();
+      if (body.loginTarget !== undefined && body.shell !== undefined) {
+        throw new TerminalInvalidOpenError();
+      }
       if (shuttingDown) {
         throw new TerminalUnavailableError('disconnected', 'Terminal service is shutting down.');
       }

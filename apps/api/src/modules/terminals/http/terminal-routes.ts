@@ -22,6 +22,7 @@ import {
 } from '../application/terminal-session-service';
 import {
   TerminalDisabledError,
+  TerminalInvalidOpenError,
   TerminalLimitError,
   TerminalNotIsolatedError,
   TerminalSessionNotFoundError,
@@ -30,6 +31,10 @@ import {
 
 /** The pattern every other module error mapper follows: `mapMachineError` is the reference. */
 function mapTerminalError(error: unknown, set: { status?: number | string }): ApiErrorResponse {
+  if (error instanceof TerminalInvalidOpenError) {
+    set.status = 400;
+    return { error: error.message, code: ERROR_CODES.VALIDATION };
+  }
   if (error instanceof TerminalDisabledError) {
     set.status = 403;
     return { error: error.message, code: ERROR_CODES.TERMINAL_DISABLED };
@@ -93,6 +98,7 @@ export function createTerminalRoutes(service: TerminalSessionService = terminalS
         body: TerminalOpenBodySchema,
         response: {
           201: TerminalSessionResponseSchema,
+          400: ApiErrorResponseSchema,
           403: ApiErrorResponseSchema,
           404: ApiErrorResponseSchema,
           409: ApiErrorResponseSchema,

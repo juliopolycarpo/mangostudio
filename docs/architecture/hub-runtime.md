@@ -1298,7 +1298,10 @@ same descriptor. It never becomes a shell command. Unknown targets, shell/env
 overrides and Windows batch launchers are refused. The existing environment,
 workspace ownership, isolation and shell consent checks still apply. Missing
 capability keeps the copy-command fallback; the hub sends no extension to an old
-peer. This contract does not add a login button or treat process exit as proof of
+peer. Selecting both `loginTarget` and `shell` returns the existing
+`ApiErrorResponse` shape with HTTP 400 and code `VALIDATION`, before Hub reservation,
+chat lookup or runtime RPC. Ordinary shell requests and login-only requests retain
+their existing wire fields. This contract does not add a login button or treat process exit as proof of
 an authenticated account.
 
 Login output lives only in memory. Up to 64 KiB is held until the first viewer,

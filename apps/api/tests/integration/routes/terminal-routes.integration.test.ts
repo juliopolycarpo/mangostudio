@@ -129,6 +129,45 @@ describe('terminal HTTP routes with a fake runtime', () => {
     routes = createTerminalRoutes(service);
   });
 
+  it('rejects mixed login and shell selection with a Hub validation error before RPC', async () => {
+    loadConfigForTest({
+      auth: { secret: 'test-secret-at-least-32-characters-long', url: 'http://localhost:3001' },
+    });
+    const user = await insertTestUser();
+    client = new FakeTerminalRuntimeClient({
+      manifest: { ...FAKE_TERMINAL_MANIFEST, terminalLoginArgv: true },
+    });
+    const app = authedApp(routes, user);
+    const rejected = await app.handle(
+      jsonRequest('/terminals', 'POST', {
+        environmentId: LOCAL_ENVIRONMENT_ID,
+        loginTarget: 'cursor',
+        shell: 'bash',
+      })
+    );
+    expect(rejected.status).toBe(400);
+    const error = await rejected.json();
+    expect(Value.Check(ApiErrorResponseSchema, error)).toBe(true);
+    expect(error).toMatchObject({
+      code: ERROR_CODES.VALIDATION,
+      error: expect.stringContaining('loginTarget cannot be combined with shell'),
+    });
+    expect(client.calls.open).toHaveLength(0);
+    expect(client.calls.close).toHaveLength(0);
+    expect(service.list(user.id)).toHaveLength(0);
+    const accepted = await app.handle(
+      jsonRequest('/terminals', 'POST', {
+        environmentId: LOCAL_ENVIRONMENT_ID,
+        loginTarget: 'cursor',
+      })
+    );
+    expect(accepted.status).toBe(201);
+    expect(client.calls.open).toHaveLength(1);
+    expect(client.calls.open[0]).toMatchObject({ loginTarget: 'cursor' });
+    expect(client.calls.open[0]?.shell).toBeUndefined();
+    expect(client.calls.open[0]?.env).toBeUndefined();
+  });
+
   it('returns 409 for an older peer without revocation-safe close, while a current peer opens', async () => {
     const user = await insertTestUser();
     const app = authedApp(routes, user);

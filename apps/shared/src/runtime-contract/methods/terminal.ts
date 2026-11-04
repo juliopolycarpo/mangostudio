@@ -51,7 +51,7 @@ export type RuntimeTerminalSessionStatus = Static<typeof RuntimeTerminalSessionS
 export const RuntimeTerminalOpenParamsSchema = Type.Object({
   /** Hub-minted session id. It is the stream key, so it is part of the contract. */
   sessionId: Type.String(),
-  /** Only send when terminalLoginArgv is positively attested. Runs the descriptor argv directly. */
+  /** Only send when terminalLoginArgv is attested. Runs descriptor argv; shell/env overrides are refused. */
   loginTarget: Type.Optional(ExternalAgentTargetIdSchema),
   /** Omitted: the login shell when it is one this runtime offers, else the first available. */
   shell: Type.Optional(RuntimeShellKindSchema),
