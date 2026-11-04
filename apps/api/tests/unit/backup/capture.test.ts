@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { afterEach, expect, it } from 'bun:test';
+import { afterEach, expect, it, spyOn } from 'bun:test';
 import {
   lstat,
   mkdir,
@@ -465,3 +465,24 @@ it.skipIf(process.platform === 'win32')(
     expect(await Bun.file(join(lexicalParent, 'archive.tar.gz')).exists()).toBe(false);
   }
 );
+
+it('refuses an oversized serialized image before deserializing it', async () => {
+  const { config, output } = await fixture();
+  const serialize = Database.prototype.serialize;
+  const oversizedSerializer = spyOn(Database.prototype, 'serialize').mockImplementationOnce(
+    function (this: Database, name?: string) {
+      const image = serialize.call(this, name);
+      const oversized = Buffer.alloc(CAPTURE_LIMITS.fileBytes + 1);
+      image.copy(oversized);
+      return oversized;
+    }
+  );
+  try {
+    await expect(
+      captureBackup(config, { output, checkpoints: true, includeSecrets: false }, 'test')
+    ).rejects.toThrow('serialized image');
+    expect(await Bun.file(output).exists()).toBe(false);
+  } finally {
+    oversizedSerializer.mockRestore();
+  }
+});
