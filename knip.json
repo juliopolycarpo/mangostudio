@@ -16,6 +16,7 @@
         "scripts/ci/{distribution-identity,evaluate-gate,frontend-bundle-report,native-bun-qualification,verify-cross-runtimes}.ts",
         "scripts/ci/qualify-canary-source.ts",
         "scripts/ci/resolve-canary-distribution.ts",
+        "scripts/release/publish-canary.ts",
         "scripts/examples/external-api-smoke.ts",
         "scripts/protocol/*.test.ts",
         "scripts/protocol/fixtures/generate-*.ts",
