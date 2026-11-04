@@ -101,7 +101,18 @@ async function copyBounded(
         total += bytesRead;
         if (total > maxBytes)
           throw new Error('Backup source exceeds its byte limit during capture.');
-        await output.writeFile(buffer.subarray(0, bytesRead));
+        let written = 0;
+        while (written < bytesRead) {
+          check(signal);
+          const { bytesWritten } = await output.write(
+            buffer,
+            written,
+            bytesRead - written,
+            total - bytesRead + written
+          );
+          if (bytesWritten <= 0) throw new Error('Backup file write made no progress.');
+          written += bytesWritten;
+        }
       }
     } finally {
       await output.close();
@@ -196,6 +207,9 @@ export async function captureBackup(
     // serialize() includes the committed WAL state while the write reservation
     // prevents a concurrent DB writer from changing referenced media rows.
     const serialized = source.serialize();
+    if (serialized.byteLength > CAPTURE_LIMITS.fileBytes) {
+      throw new Error('Backup database serialized image exceeds the file byte limit.');
+    }
     // sqlite3_deserialize cannot reopen an in-memory WAL database. The bytes
     // already contain committed WAL pages; reset only this private image's
     // read/write format header to rollback mode (SQLite deserialize contract).
