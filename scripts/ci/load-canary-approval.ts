@@ -82,7 +82,10 @@ async function main(): Promise<void> {
       const listing = run(['unzip', '-Z1', file]);
       if (listing.exitCode !== 0)
         throw new Error('Invalid approval ZIP: expected readable archive');
-      const names = listing.stdout.toString().trimEnd().split(/\r?\n/);
+      const names = listing.stdout
+        .toString()
+        .replace(/\r?\n$/, '')
+        .split(/\r?\n/);
       if (names.length !== 1 || names[0] !== 'approval.tar.gz')
         throw new Error('Invalid approval ZIP: expected sole flat approval.tar.gz');
       const unpacked = run(['unzip', '-p', file, 'approval.tar.gz']);

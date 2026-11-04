@@ -838,3 +838,90 @@ test('recovery retains the exact original promotion JSON serialization', async (
   addApproval(deps, payload);
   expect((await loadCanaryApproval(source, VERSION, EXECUTION, deps)).promotionRaw).toBe(raw);
 });
+
+test('approval CLI rejects an extra whitespace-only ZIP member', async () => {
+  const { chmodSync, mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const directory = mkdtempSync(join(tmpdir(), 'fix-canary-approval-acquisition-extra-member-'));
+  try {
+    const { deps, payload, builderBundle } = await fixture();
+    addApproval(deps, payload);
+    const responses: Record<string, { exitCode: number; stdout: string }> = {};
+    const respond = (args: string[], status: number, body: Uint8Array, include = true) => {
+      responses[JSON.stringify(args)] = {
+        exitCode: status >= 400 ? 1 : 0,
+        stdout: Buffer.concat([
+          include ? Buffer.from(`HTTP/2.0 ${status} Status\r\n\r\n`) : new Uint8Array(),
+          body,
+        ]).toString('base64'),
+      };
+    };
+    respond(
+      ['api', '--include', `${BASE}/releases/tags/v${VERSION}`],
+      404,
+      json({ message: 'Not Found' })
+    );
+    for (const [path, response] of deps.github.values)
+      respond(['api', '--include', path], response.status, json(response.body));
+    for (const [pageKey, values] of deps.github.pages) {
+      const separator = pageKey.lastIndexOf('|');
+      const path = pageKey.slice(0, separator);
+      const key = pageKey.slice(separator + 1);
+      respond(
+        ['api', '--paginate', '--slurp', path],
+        200,
+        json([{ total_count: values.length, [key]: values }]),
+        false
+      );
+    }
+    for (const [path, response] of deps.github.binaries)
+      respond(['api', '--include', path], response.status, response.body);
+    const fixtureFile = join(directory, 'fake-gh.json');
+    writeFileSync(
+      fixtureFile,
+      JSON.stringify({
+        repository: REPO,
+        responses,
+        attestations: {
+          [hash(payload)]: { workflow: 'canary.yml', sha: EXECUTION },
+          [hash(builderBundle)]: { workflow: 'distribution-build.yml', sha: SHA },
+        },
+      })
+    );
+    writeFileSync(join(directory, 'gh'), fakeGhApprovalExecutable);
+    chmodSync(join(directory, 'gh'), 0o755);
+    const payloadPath = join(directory, 'original-payload');
+    writeFileSync(payloadPath, payload);
+    writeFileSync(
+      join(directory, 'unzip'),
+      `#!/usr/bin/env bun\nconst args=process.argv.slice(2);if(args[0]==='-Z1')process.stdout.write('approval.tar.gz\\n \\n');else if(args[0]==='-p'&&args[2]==='approval.tar.gz')process.stdout.write(await Bun.file(process.env.FAKE_APPROVAL_PAYLOAD).bytes());else process.exit(99);\n`
+    );
+    chmodSync(join(directory, 'unzip'), 0o755);
+    const result = Bun.spawnSync(['bun', './scripts/ci/load-canary-approval.ts'], {
+      env: {
+        ...process.env,
+        PATH: `${directory}:${process.env.PATH}`,
+        REPO,
+        SOURCE_SHA: SHA,
+        SOURCE_RUN_ID: String(source.runId),
+        SOURCE_RUN_ATTEMPT: String(source.runAttempt),
+        SOURCE_RUN_NUMBER: String(source.runNumber),
+        SOURCE_RUN_URL: source.runUrl,
+        WORKFLOW_ID: String(source.workflowId),
+        WORKFLOW_PATH: source.workflowPath,
+        VERSION,
+        GITHUB_SHA: EXECUTION,
+        OUTPUT_DIR: join(directory, 'output'),
+        GITHUB_OUTPUT: join(directory, 'outputs'),
+        FAKE_GH_TRACE: join(directory, 'trace'),
+        FAKE_GH_FIXTURE: fixtureFile,
+        FAKE_APPROVAL_PAYLOAD: payloadPath,
+      },
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain('expected sole flat approval.tar.gz');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
