@@ -43,6 +43,13 @@ function fixture() {
   });
   const receipt: CanaryPromotionReceipt = {
     schemaVersion: 1,
+    selectedRun: {
+      ...source,
+      runNumber: 20,
+      workflowId: 42,
+      workflowPath: '.github/workflows/ci.yml',
+      runUrl: 'https://github.com/owner/repo/actions/runs/10',
+    },
     workflowRevision: 'e'.repeat(40),
     manifestSha256: createHash('sha256').update(raw).digest('hex'),
     distribution: {
@@ -183,5 +190,18 @@ test('validates full job and sibling receipt structures without authenticating t
   Object.assign(receipt.qualification, { ciJobs: [{ id: 0, name: 'CI Gate', attempt: 4 }] });
   expect(() => parseCanaryPromotionReceipt(JSON.stringify(receipt), 'owner/repo', sha)).toThrow(
     'expected positive safe integer'
+  );
+});
+
+test('retains frozen workflow and run identity separately from publisher revision', () => {
+  const { raw, receipt, sha } = fixture();
+  expect(
+    createCanaryPublicationEvidence(raw, receipt, new Uint8Array([1])).generated.has(
+      'promotion.json'
+    )
+  ).toBe(true);
+  Object.assign(receipt.selectedRun, { workflowId: 0 });
+  expect(() => parseCanaryPromotionReceipt(JSON.stringify(receipt), 'owner/repo', sha)).toThrow(
+    'selected run workflowId'
   );
 });

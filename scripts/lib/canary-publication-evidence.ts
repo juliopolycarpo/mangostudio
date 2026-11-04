@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { createCanaryManifestFromDigests } from '../release/stage-canary-assets';
 import type { CanaryDistribution } from './canary-promotion';
+import type { CanarySource } from './canary-source';
 import type { CanaryValidationReceipt } from './canary-validation';
 import type { ApprovedArtifact } from './distribution-artifact';
 import { parseDistributionManifest } from './distribution-manifest';
@@ -11,6 +12,7 @@ import { isValidSemver, normalizeVersion } from './release-version';
 /** Durable publication identity; the publisher attests its SHA256SUMS separately from the original builder bundle. */
 export interface CanaryPromotionReceipt {
   readonly schemaVersion: 1;
+  readonly selectedRun: CanarySource;
   readonly workflowRevision: string;
   readonly manifestSha256: string;
   readonly distribution: CanaryDistribution;
@@ -135,6 +137,7 @@ export function parseCanaryPromotionReceipt(
   const qualification = object(receipt.qualification, 'qualification receipt');
   const source = object(qualification.source, 'qualified source');
   const distribution = object(receipt.distribution, 'approved distribution');
+  const selected = object(receipt.selectedRun, 'frozen selected run');
   if (
     receipt.schemaVersion !== 1 ||
     typeof receipt.workflowRevision !== 'string' ||
@@ -151,6 +154,20 @@ export function parseCanaryPromotionReceipt(
     );
   }
   for (const field of ['runId', 'runAttempt']) positive(source[field], `qualified source ${field}`);
+  for (const field of ['runId', 'runAttempt', 'runNumber', 'workflowId'])
+    positive(selected[field], `selected run ${field}`);
+  if (
+    selected.repository !== repository ||
+    selected.sourceSha !== sourceSha ||
+    selected.runId !== source.runId ||
+    selected.runAttempt !== source.runAttempt ||
+    selected.workflowPath !== '.github/workflows/ci.yml' ||
+    selected.runUrl !== `https://github.com/${repository}/actions/runs/${selected.runId}`
+  )
+    throw new Error(
+      'Invalid frozen selected run: expected qualified repository/source/run/attempt, CI workflow and run URL'
+    );
+
   positive(qualification.builderAttempt, 'builder attempt');
   if (Number(qualification.builderAttempt) > Number(source.runAttempt))
     throw new Error('Invalid builder attempt: expected no later than qualified source attempt');
@@ -220,6 +237,7 @@ export function parseCanaryPromotionReceipt(
       artifact.runAttempt !== source.runAttempt ||
       artifact.producerAttempt !== qualification.builderAttempt ||
       typeof artifact.artifactName !== 'string' ||
+      /[\r\n\0]/.test(artifact.artifactName) ||
       !artifact.artifactName.startsWith(`distribution-${scope}-${sourceSha.slice(0, 12)}-`) ||
       typeof artifact.digest !== 'string' ||
       !/^sha256:[a-f0-9]{64}$/.test(artifact.digest)
