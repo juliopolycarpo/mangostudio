@@ -36,7 +36,7 @@ export interface NdjsonPortOptions {
   readonly maxFrameBytes?: number;
 }
 
-/** The port plus the three inputs a transport drives it with. */
+/** The port plus the inputs a transport drives it with. */
 export interface NdjsonPortHandle {
   readonly port: Port;
   /** Feeds the next piece of the incoming byte stream. */
@@ -45,6 +45,8 @@ export interface NdjsonPortHandle {
   eof(): void;
   /** The transport itself broke: a socket error, a broken pipe, a failed spawn. */
   failed(error: Error): void;
+  /** The transport ends this port with a code and notifies its Session owner. */
+  terminate(code: number, reason?: string): void;
 }
 
 /** What the port is doing, and what a refused `send` names in its message. */
@@ -67,6 +69,7 @@ export function createNdjsonPort(options: NdjsonPortOptions): NdjsonPortHandle {
     feed: (bytes) => port.feed(bytes),
     eof: () => port.eof(),
     failed: (error) => port.failed(error),
+    terminate: (code, reason) => port.terminate(code, reason),
   };
 }
 
@@ -111,6 +114,16 @@ class NdjsonPort implements Port {
     this.#endSink();
     this.#frames.clear();
     this.#closed.clear();
+  }
+
+  /** Unlike owner-requested close, transport termination must notify that owner. */
+  terminate(code: number, reason?: string): void {
+    if (this.#state !== 'open') return;
+    this.#state = 'ended';
+    this.#why = reason ?? `the transport ended with ${code}`;
+    this.#writeClose(code, reason);
+    this.#endSink();
+    this.#report({ kind: 'closed', code, ...(reason !== undefined ? { reason } : {}) });
   }
 
   /** Decodes what arrived, delivers whole frames, and ends the stream on a refusal. */

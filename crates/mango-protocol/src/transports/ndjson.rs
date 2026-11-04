@@ -397,13 +397,22 @@ where
             code: Some(crate::close::close_codes::PROTOCOL_ERROR),
             reason: Some("local socket hello deadline exceeded".into()),
         });
-        self.writer
-            .end(
-                crate::close::close_codes::PROTOCOL_ERROR,
-                Some("local socket hello deadline exceeded".into()),
-                self.max_frame_bytes,
-            )
-            .await;
+        // Disable sends before yielding. The cleanup owns its writer independently of
+        // this recv future, so cancelling a stalled farewell cannot abandon shutdown.
+        self.writer.0.ending.send_replace(true);
+        let writer = self.writer.clone();
+        let max_frame_bytes = self.max_frame_bytes;
+        let cleanup = tokio::spawn(async move {
+            writer
+                .end(
+                    crate::close::close_codes::PROTOCOL_ERROR,
+                    Some("local socket hello deadline exceeded".into()),
+                    max_frame_bytes,
+                )
+                .await;
+        });
+        // Dropping this JoinHandle on cancellation detaches the bounded cleanup.
+        let _ = cleanup.await;
     }
 
     /// Decodes the first `count` bytes of the read buffer. A refused record
@@ -936,8 +945,8 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn a_first_hello_timeout_survives_cancellation_during_farewell() {
         let (_peer_writer, port_reader) = duplex(1024);
-        let (port_writer, _unread) = duplex(8);
-        let (_tx, mut rx) = NdjsonPort::new(port_reader, port_writer)
+        let (port_writer, mut peer_reader) = duplex(8);
+        let (mut tx, mut rx) = NdjsonPort::new(port_reader, port_writer)
             .with_first_hello_timeout(Duration::from_millis(10))
             .split();
         let cancelled = tokio::time::timeout(Duration::from_millis(20), rx.recv()).await;
@@ -956,6 +965,19 @@ mod tests {
             }))
         ));
         assert_eq!(rx.recv().await, None);
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), tx.send(Frame::Ping)).await,
+            Ok(SendOutcome::Closed),
+            "timeout cleanup must disable sends even while the caller retains Tx"
+        );
+        let mut farewell = Vec::new();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            peer_reader.read_to_end(&mut farewell),
+        )
+        .await
+        .expect("cleanup must close the writer despite receive cancellation and retained Tx")
+        .unwrap();
     }
 
     #[test]

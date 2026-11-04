@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdtemp, rename, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, rename, rm, stat } from 'node:fs/promises';
 import { connect, createServer, Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -145,4 +145,109 @@ test.skipIf(!unix)(
     }
   },
   20_000
+);
+
+test.skipIf(!unix)(
+  'listener hello timeout settles the owning Session before its longer handshake timeout',
+  async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ipc-owner-timeout-'));
+    let host: Session | undefined;
+    let readyResult: Promise<string> | undefined;
+    let closedCount = 0;
+    const server = await listenIpc(join(dir, 's'), (port) => {
+      host = new Session(port, {
+        peer: { name: 'timeout-fixture', version: '0', role: 'hub' },
+        handshakeTimeoutMs: 60_000,
+        livenessIntervalMs: false,
+      });
+      readyResult = host.ready.then(
+        () => 'resolved',
+        () => 'rejected'
+      );
+      host.onClose(() => {
+        closedCount++;
+      });
+    });
+    const socket = connect(server.path);
+    socket.resume();
+    socket.on('error', () => undefined);
+    const socketClosed = new Promise<void>((resolve) => socket.once('close', () => resolve()));
+    try {
+      await socketClosed;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const result = await Promise.race([
+        readyResult,
+        new Promise<string>((resolve) => {
+          timer = setTimeout(() => resolve('still pending after transport closed'), 250);
+        }),
+      ]);
+      if (timer) clearTimeout(timer);
+      expect(result).toBe('rejected');
+      expect(host?.state).toBe('closed');
+      expect(closedCount).toBe(1);
+    } finally {
+      socket.destroy();
+      await host?.close();
+      await server.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  },
+  20_000
+);
+
+test.skipIf(!unix)(
+  'private staging supports a public pathname at the native Unix boundary',
+  async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ipc-path-bound-'));
+    const limit = process.platform === 'linux' ? 107 : 103;
+    const parent = join(dir, 'x'.repeat(limit - Buffer.byteLength(dir) - 3));
+    const path = join(parent, 's');
+    await mkdir(parent);
+    const raw = createServer();
+    let server: Awaited<ReturnType<typeof listenIpc>> | undefined;
+    try {
+      // Establish that this exact public pathname is accepted by the native listener.
+      await new Promise<void>((resolve, reject) => {
+        raw.once('error', reject);
+        raw.listen(path, resolve);
+      });
+      await new Promise<void>((resolve) => raw.close(() => resolve()));
+      server = await listenIpc(path, () => undefined);
+      expect((await stat(path)).isSocket()).toBe(true);
+    } finally {
+      await new Promise<void>((resolve) => raw.close(() => resolve()));
+      await server?.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+);
+
+test.skipIf(!unix || Bun.which('node') === null)(
+  'native Node preserves the valid Unix pathname boundary',
+  async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'ipc-node-fixture-'));
+    try {
+      const result = await Bun.build({
+        entrypoints: [new URL('./fixtures/ipc-boundary-node.ts', import.meta.url).pathname],
+        target: 'node',
+        format: 'esm',
+        outdir: directory,
+        naming: 'fixture.mjs',
+      });
+      expect(result.success).toBe(true);
+      const child = Bun.spawn([Bun.which('node') ?? 'node', join(directory, 'fixture.mjs')], {
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [exitCode, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: '' });
+      expect(stdout).toContain('passed: native Node Unix boundary public path');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
 );

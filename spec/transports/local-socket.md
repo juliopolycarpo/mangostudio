@@ -75,8 +75,10 @@ exclusive cleanup outside the listener, or choose a fresh endpoint and publish i
 an application-owned mechanism. A blind `unlink` retry is not that coordination. This stricter
 lifecycle behavior requires caller migration; it does not change protocol wire version 1.
 
-The TypeScript SDK binds within a fresh `0700` sibling directory and hard-links the socket to
-the public name without replacement. Node/libuv's automatic close unlink affects only its
+The TypeScript SDK binds within a fresh `0700` directory on the destination filesystem and
+hard-links the socket to the public name without replacement. Staging may move to an ancestor
+directory so its pathname also fits the native Unix socket limit; when no suitable private
+staging location is available, publication fails closed. Node/libuv's automatic close unlink affects only its
 private bound name, so a late close cannot delete the public successor. Rust likewise publishes
 with a non-replacing hard link and never falls back to replacing rename. Private staging names
 are reserved for that SDK instance and must not be repurposed by the application.
@@ -94,7 +96,10 @@ caller-owned reservation and descriptor.
 Both acceptors cap tracked connections at 64 (including established sessions), and ports enforce
 a 15-second first-hello deadline independent of Session's configured handshake deadline.
 TypeScript closes idle sockets directly; Rust enforces the deadline while its receive half is
-driven and closes its writer on timeout (with the existing two-second close-flush grace). Decoding remains bounded by the configured frame limit
+driven and closes its writer on timeout. Cleanup owns the writer independently of receive
+cancellation, immediately disables sends, and retains the existing two-second bounds on
+farewell write and writer shutdown. TypeScript transport termination notifies its Session owner
+even when that owner configured a longer handshake timeout. Decoding remains bounded by the configured frame limit
 (default 16 MiB), with at most 64 such connections. An invalid or partial hello never grants
 application authority. Probe EOF and Session teardown release their accepted resources.
 Windows named pipes use their kernel/ACL lifecycle, return no-filesystem-path on close, and have

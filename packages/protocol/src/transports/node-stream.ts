@@ -72,7 +72,11 @@ export function createStreamPort(
   if (!isSameStream(readable, writable)) reportStreamErrors(writable, handle, deliver);
   // A failure the transport reports itself (a launcher's child `error`) waits
   // behind those reads too, and lands at once when there are none.
-  return { ...handle, failed: (error) => deliver.after(() => handle.failed(error)) };
+  return {
+    ...handle,
+    failed: (error) => deliver.after(() => handle.failed(error)),
+    terminate: (code, reason) => deliver.after(() => handle.terminate(code, reason)),
+  };
 }
 
 /** True when both halves are one duplex object, as a socket's are. */

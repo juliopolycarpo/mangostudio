@@ -6,7 +6,7 @@
  */
 
 import type { Stats } from 'node:fs';
-import { chmod, link, lstat, mkdtemp, rmdir } from 'node:fs/promises';
+import { chmod, link, lstat, mkdtemp, rmdir, stat } from 'node:fs/promises';
 import { connect as connectSocket, createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -101,11 +101,12 @@ export async function listenIpc(
       return;
     }
     sockets.add(socket);
-    const port = ipcSocketPort(socket, options);
+    const handle = ipcSocketHandle(socket, options);
+    const port = handle.port;
     ports.add(port);
     // An accept is transport activity, never authentication. The application must await ready.
     const deadline = setTimeout(() => {
-      port.close(CLOSE_CODES.PROTOCOL_ERROR, 'local socket hello deadline exceeded');
+      handle.terminate(CLOSE_CODES.PROTOCOL_ERROR, 'local socket hello deadline exceeded');
       socket.destroy();
     }, FIRST_HELLO_TIMEOUT_MS);
     deadline.unref();
@@ -144,7 +145,7 @@ export async function listenIpc(
     await clearStaleSocket(path);
     // Node/libuv removes its *bound* pathname on close. Bind privately and publish
     // with no-replace hard-link semantics so closing cannot unlink a successor.
-    stagingDirectory = await mkdtemp(join(dirname(path), '.mango-'));
+    stagingDirectory = await createStagingDirectory(path);
     const staged = join(stagingDirectory, 's');
     try {
       await chmod(stagingDirectory, 0o700);
@@ -172,6 +173,43 @@ export async function listenIpc(
       return WINDOWS ? 'no-filesystem-path' : 'path-preserved';
     },
   };
+}
+
+/** Finds a short private staging path on the destination filesystem. */
+async function createStagingDirectory(path: string): Promise<string> {
+  const parent = dirname(path);
+  const device = (await stat(parent)).dev;
+  // Linux sun_path is 108 bytes including NUL; Darwin/BSD use 104.
+  const maximum = process.platform === 'linux' ? 107 : 103;
+  let candidate = parent;
+  let lastError: Error | undefined;
+  for (;;) {
+    const prefix = join(candidate, '.mango-');
+    // mkdtemp appends six random characters; also reserve "/s" for the socket.
+    if (Buffer.byteLength(prefix) + 8 <= maximum && (await stat(candidate)).dev === device) {
+      try {
+        const directory = await mkdtemp(prefix);
+        // Check the actual generated name too, rather than relying on its suffix length.
+        if (Buffer.byteLength(join(directory, 's')) <= maximum) return directory;
+        await rmdir(directory);
+      } catch (cause) {
+        const error = asError(cause);
+        if (!['EACCES', 'EPERM', 'EROFS'].includes((error as NodeJS.ErrnoException).code ?? ''))
+          throw error;
+        lastError = error;
+      }
+    }
+    const ancestor = dirname(candidate);
+    if (ancestor === candidate) break;
+    candidate = ancestor;
+  }
+  throw Object.assign(
+    new Error(
+      `${path}: cannot create private same-filesystem staging within the Unix socket pathname limit; public path preserved`,
+      { cause: lastError }
+    ),
+    { code: (lastError as NodeJS.ErrnoException | undefined)?.code ?? 'ENAMETOOLONG', path }
+  );
 }
 
 /**
@@ -265,10 +303,14 @@ function discard(socket: Socket): void {
  * const port = ipcSocketPort(await rawConnect(path), {});
  */
 export function ipcSocketPort(socket: Socket, options: IpcOptions): Port {
+  return ipcSocketHandle(socket, options).port;
+}
+
+function ipcSocketHandle(socket: Socket, options: IpcOptions): ReturnType<typeof createStreamPort> {
   return createStreamPort(socket, socket, {
     ...(options.maxFrameBytes !== undefined ? { maxFrameBytes: options.maxFrameBytes } : {}),
     onRelease: () => releaseSocket(socket),
-  }).port;
+  });
 }
 
 /**
