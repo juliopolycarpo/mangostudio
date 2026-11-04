@@ -167,7 +167,8 @@ impl SessionOptions {
     /// # Panics
     ///
     /// Panics when `max_frame_bytes` is below
-    /// [`crate::codec::ndjson::MIN_MAX_FRAME_BYTES`], naming both.
+    /// [`crate::codec::ndjson::MIN_MAX_FRAME_BYTES`] or above
+    /// [`crate::validate::MAX_ANNOUNCED_FRAME_BYTES`], naming the violated bound.
     #[must_use]
     pub fn with_max_frame_bytes(mut self, max_frame_bytes: usize) -> Self {
         self.max_frame_bytes = Some(crate::codec::limits::check_max_frame_bytes(max_frame_bytes));

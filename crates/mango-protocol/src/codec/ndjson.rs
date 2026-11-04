@@ -64,8 +64,9 @@ fn is_blank(line: &[u8]) -> bool {
 /// Encodes one frame as compact UTF-8 JSON, without a terminator.
 ///
 /// The frame is validated first: a peer must never send a frame that violates
-/// the schema. `max_frame_bytes` below [`MIN_MAX_FRAME_BYTES`] is refused the
-/// same way, naming both — this function already returns a `Result`, so it
+/// the schema. `max_frame_bytes` below [`MIN_MAX_FRAME_BYTES`] or above
+/// [`crate::validate::MAX_ANNOUNCED_FRAME_BYTES`] is refused the same way,
+/// naming the violated bound — this function already returns a `Result`, so it
 /// refuses rather than panics, unlike the builders that carry this same rule.
 ///
 /// # Example
@@ -121,7 +122,8 @@ pub fn encode_line(frame: &Frame, max_frame_bytes: usize) -> Result<Vec<u8>, Cod
 /// [`CodecErrorKind::InvalidJson`]; JSON that is not a valid frame, or a frame
 /// whose members break a length, grammar or range rule, is
 /// [`CodecErrorKind::Schema`]. `max_frame_bytes` below [`MIN_MAX_FRAME_BYTES`]
-/// is refused the same way, naming both.
+/// or above [`crate::validate::MAX_ANNOUNCED_FRAME_BYTES`] is refused the same
+/// way, naming the violated bound.
 ///
 /// # Example
 ///
@@ -245,8 +247,8 @@ impl LineDecoder {
     ///
     /// # Panics
     ///
-    /// Panics when `max_frame_bytes` is below [`MIN_MAX_FRAME_BYTES`], naming
-    /// both.
+    /// Panics when `max_frame_bytes` is below [`MIN_MAX_FRAME_BYTES`] or above
+    /// [`crate::validate::MAX_ANNOUNCED_FRAME_BYTES`], naming the violated bound.
     ///
     /// # Example
     ///

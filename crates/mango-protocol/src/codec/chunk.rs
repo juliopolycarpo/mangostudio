@@ -133,9 +133,10 @@ impl ChunkReassembler {
     ///
     /// # Panics
     ///
-    /// Panics when `max_message_bytes` is below [`MIN_MAX_MESSAGE_BYTES`] or
-    /// `max_frame_bytes` is below [`crate::codec::ndjson::MIN_MAX_FRAME_BYTES`],
-    /// naming both.
+    /// Panics when `max_message_bytes` is below [`MIN_MAX_MESSAGE_BYTES`], or
+    /// `max_frame_bytes` is below [`crate::codec::ndjson::MIN_MAX_FRAME_BYTES`]
+    /// or above [`crate::validate::MAX_ANNOUNCED_FRAME_BYTES`], naming the
+    /// option and the violated bound.
     ///
     /// # Example
     ///
