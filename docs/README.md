@@ -15,7 +15,7 @@ right depth quickly instead of scanning a flat list of files.
 | `reference/`    | Contributors, agents         | API surface, testing rules, and file-map navigation               |
 | `guides/`       | New contributors             | Task-oriented onboarding and contributor workflows                |
 | `operations/`   | Deployers, operators         | Deployment and security guidance                                  |
-| `pt-br/`        | Portuguese readers           | Full Portuguese mirror of this documentation tree                 |
+| `pt-br/`        | Portuguese readers           | Partial Portuguese coverage; explicit English fallbacks           |
 
 ## Recommended Reading
 
@@ -74,4 +74,36 @@ right depth quickly instead of scanning a flat list of files.
 ## Notes
 
 - Root-level docs should stay limited to top-level entry points such as `README.md`, `.github/CONTRIBUTING.md`, and `AGENTS.md`.
-- `docs/pt-br/` mirrors the same documentation structure in Brazilian Portuguese.
+- `docs/pt-br/` follows the same folders where translations exist. Update existing English and Portuguese counterparts together. The fallback table below covers pages available only in English.
+
+## Portuguese coverage and English fallbacks
+
+On 2026-11-06, 37 of the 59 tracked Markdown, MDX, and MDC pages outside
+`pt-br/` had a Portuguese counterpart at the same path. The
+[Portuguese entry point](./pt-br/README.md#documentação) links to this table of the
+22 pages available only in English.
+
+| English page (no Portuguese counterpart)                                                           | Topic                           |
+| -------------------------------------------------------------------------------------------------- | ------------------------------- |
+| [`architecture/environment-installs.md`](./architecture/environment-installs.md)                   | Environment install lifecycle   |
+| [`architecture/external-agents.md`](./architecture/external-agents.md)                             | External agent ownership        |
+| [`architecture/frontend-build.md`](./architecture/frontend-build.md)                               | Frontend build and test harness |
+| [`architecture/hub-runtime.md`](./architecture/hub-runtime.md)                                     | Hub/runtime boundary            |
+| [`architecture/runtime-contract.md`](./architecture/runtime-contract.md)                           | Runtime contract                |
+| [`architecture/runtime-dispatcher.md`](./architecture/runtime-dispatcher.md)                       | Runtime dispatcher              |
+| [`architecture/typescript-runtime-retirement.md`](./architecture/typescript-runtime-retirement.md) | TypeScript runtime retirement   |
+| [`operations/remote-runtimes.md`](./operations/remote-runtimes.md)                                 | Remote runtimes                 |
+| [`protocol/README.md`](./protocol/README.md)                                                       | Protocol guide index            |
+| [`protocol/adopt-rust.md`](./protocol/adopt-rust.md)                                               | Rust protocol adoption          |
+| [`protocol/adopt-typescript.md`](./protocol/adopt-typescript.md)                                   | TypeScript protocol adoption    |
+| [`protocol/build-a-contract.md`](./protocol/build-a-contract.md)                                   | Build a protocol contract       |
+| [`protocol/conformance.md`](./protocol/conformance.md)                                             | Protocol conformance            |
+| [`protocol/releasing.md`](./protocol/releasing.md)                                                 | Protocol releases               |
+| [`protocol/versioning.md`](./protocol/versioning.md)                                               | Protocol versioning             |
+| [`providers/cursor.md`](./providers/cursor.md)                                                     | Cursor provider                 |
+| [`reference/bun-tooling.md`](./reference/bun-tooling.md)                                           | Bun tooling                     |
+| [`reference/canary-validation.md`](./reference/canary-validation.md)                               | Canary source qualification     |
+| [`reference/ci-gates.md`](./reference/ci-gates.md)                                                 | CI gates                        |
+| [`reference/ci-optimization-evidence.md`](./reference/ci-optimization-evidence.md)                 | CI simplification evidence      |
+| [`reference/mcp.md`](./reference/mcp.md)                                                           | MCP servers                     |
+| [`reference/skills.md`](./reference/skills.md)                                                     | Skills                          |

@@ -104,9 +104,16 @@ What matters for this page:
   (`~/.bun`) and proves a `bin/bun` is inside it first; `$BUN_INSTALL` is deliberately not expanded,
   because it is a prefix rather than the Bun directory and a machine pointing it at a shared
   location would turn the step into a delete of that whole tree. Tracked in #1011.
-- **Chains**: "Install Node" on a POSIX machine without nvm runs nvm first, then Node, then sets
-  the default, with one confirmation listing every step and one console per step. On Windows the
-  default chain is one step; the fnm alternative is three.
+- **First install**: "Install Node" on POSIX without nvm runs `nvm.install`, then
+  `nvm.node.install`; with nvm present it runs only the Node step. First install has no
+  `set-default` follow-up. On Windows the winget default is one step; the fnm alternative
+  is two when fnm is absent (`fnm.install`, then `fnm.node.install`), or only the Node step
+  when fnm is already installed. One confirmation lists the chain, with one console per step.
+- **Node update**: an outdated effective nvm/fnm Node runs that manager's `node.install`
+  followed by `node.set-default`, so the new LTS becomes effective. Winget uses only
+  `winget.node.update`; installations managed elsewhere keep their own update instructions.
+  See `apps/frontend/src/features/environments/format.ts` and the first-install/update cases in
+  `apps/frontend/tests/unit/features/environments/setup-checklist.test.ts`.
 
 ## CLI mirror
 

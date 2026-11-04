@@ -45,10 +45,12 @@ bun run dev --frontend
 
 ## Mapa da Documentação
 
-- [`../README.md`](../README.md) — ponto de entrada da árvore de documentação
-- [`../guides/contributor-quickstart.md`](../guides/contributor-quickstart.md) — caminho mais curto para começar a contribuir
-- [`../reference/testing.md`](../reference/testing.md) — taxonomia de testes, runners e regras de suporte
-- [`../reference/agent-playbooks.md`](../reference/agent-playbooks.md) — mapa de arquivos por feature para trabalho direcionado
+- [`../README.md`](../README.md) — índice completo e [fallbacks em inglês](../README.md#portuguese-coverage-and-english-fallbacks)
+- [`guides/contributor-quickstart.md`](guides/contributor-quickstart.md) — caminho mais curto para começar a contribuir
+- [`reference/testing.md`](reference/testing.md) — taxonomia de testes, runners e regras de suporte
+- [`reference/agent-playbooks.md`](reference/agent-playbooks.md) — mapa de arquivos por feature e áreas com fallback
+- [Build do frontend](../architecture/frontend-build.md) e [Mango Protocol](../protocol/README.md) — inglês
+- [Automação de segurança](../../.github/CONTRIBUTING.md#security-automation) — inglês; CodeQL, Dependency Review e Dependency Audit
 
 ## Padrões de Código
 

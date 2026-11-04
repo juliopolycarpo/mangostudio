@@ -10,6 +10,21 @@ O MangoStudio segue uma arquitetura modular inspirada em DDD distribuída em tr�
 | `apps/frontend` | SPA do navegador                 | React 19, TanStack Router/Query, Tailwind CSS v4, bundle via `Bun.build()` |
 | `apps/shared`   | Contratos agnósticos a framework | Tipos TypeScript, schemas TypeBox, dicionários i18n                        |
 
+### Protocolo e componentes Rust
+
+O Mango Protocol tem versionamento próprio e a linha de releases `protocol-v*`, separada
+da aplicação. `spec/` contém a especificação, schemas e fixtures; `packages/protocol/`
+publica `@mangostudio/protocol` no npm; `crates/mango-protocol/` publica `mango-protocol`
+no crates.io. O guia de contribuição é `packages/protocol/AGENTS.md`; os
+[guias de adoção e conformance](../../protocol/README.md) usam fallback em inglês.
+
+`crates/mangostudio-runtime/` é o host de execução e `crates/mangostudio-launcher/`
+é o launcher `mangostudio` publicado no crates.io; ambos seguem a versão da aplicação.
+`crates/mangostudio-runtime-contract/` contém o contrato interno gerado, com a versão
+do protocolo do workspace, sem uma linha pública de releases independente. Os crates estáveis
+compartilham o workspace Cargo da raiz, lockfile, edição, toolchain e política de lint.
+`crates/mango-protocol/fuzz` é um workspace nightly excluído, com lockfile próprio.
+
 ## Arquitetura Dos Módulos Da API
 
 A API é organizada em módulos de domínio dentro de `apps/api/src/modules/`. Cada módulo segue uma estrutura inspirada em DDD:
@@ -39,7 +54,7 @@ modules/<domain>/
 
 **`infrastructure/`** — Implementações de repositório com Kysely que abstraem queries SQL atrás de interfaces tipadas. Um repositório por aggregate root.
 
-### Módulos
+### Módulos selecionados
 
 | Módulo              | Camadas | Responsabilidades                                                                  |
 | ------------------- | ------- | ---------------------------------------------------------------------------------- |
@@ -53,7 +68,7 @@ modules/<domain>/
 | `prompt-rules`      | A/H     | Composição de prompts de sistema e resolução de arquivos de regra                  |
 | `attachments`       | A/I     | Upload de arquivos, validação, storage e entrega ao provedor                       |
 | `realtime`          | H       | Invalidação de cache por cookie e limitada ao usuário                              |
-| `activity`          | A/D/H/I | O log de "o que mudou" da conta; sete módulos escrevem, um lê                      |
+| `activity`          | A/D/H/I | O log de "o que mudou" da conta; vários módulos escrevem, um lê                    |
 
 A = Application, D = Domain, H = HTTP, I = Infrastructure
 
@@ -194,12 +209,21 @@ Veja [`continuation.md`](./continuation.md) para a arquitetura completa de conti
 routes/                → páginas file-based do TanStack Router
   _authenticated/      → rotas protegidas por autenticação
     index.tsx           → Chat (padrão)
+    home.tsx            → Painel inicial
     gallery.tsx         → Galeria de imagens
     settings.tsx        → Layout de configurações
     studio.tsx          → Workspace de imagem
+    terminal.tsx        → Terminal ao vivo
+    environments.tsx    → Layout de ambientes
+    environments/       → Toolchains, agentes, saúde, máquina e runtimes
+      library.tsx       → Layout da Library (abas de segundo nível)
+      library/          → Cobertura, backups e detalhe de recurso
+    library/            → Redirecionamentos de bookmarks antigos /library/*
 
 features/              → módulos de feature por domínio
   chat/                → UI, componentes, hooks e serviços de chat
+  environments/        → Ambientes, saúde e ações de instalação
+  library/             → Cobertura, divergência e propagação
   gallery/             → página da galeria + queries
   generation/          → hooks e tipos de geração de texto/imagem
   settings/            → submódulos de settings (app, connectors, providers, tools, prompts)
@@ -258,7 +282,8 @@ verifica os exports de compatibilidade e as escolhas derivadas dos schemas.
 
 ## Banco De Dados
 
-SQLite via Kysely com 18 migrações cobrindo:
+SQLite via Kysely. O registro ordenado em `apps/api/src/db/migrations/index.ts`
+é a fonte de verdade das migrações. As famílias de tabelas incluem:
 
 - Tabelas centrais: `chats`, `messages`, `generated_images`, `chat_attachments`
 - Tabelas de auth: schema padrão do Better Auth (5 tabelas)
