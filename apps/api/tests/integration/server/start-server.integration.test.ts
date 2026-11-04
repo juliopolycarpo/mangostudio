@@ -6,6 +6,7 @@ import { isAbsolute, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { fixtureHomeEnv } from '../../../../../scripts/lib/temp-home';
+import { acquireCaptureLock } from '../../../src/backup/capture-lock';
 import {
   createManagedProcessFixture,
   type ManagedProcessFixture,
@@ -75,6 +76,63 @@ async function waitForState(pidFile: string, timeoutMs = START_TIMEOUT_MS): Prom
 }
 
 describe('startServer via __serve', () => {
+  it(
+    'holds persisted data ownership until the Hub exits',
+    async () => {
+      const running = await createManagedProcessFixture({ tempPrefix: 'mango-data-ownership-' });
+      const database = join(running.tempDir, 'database.sqlite');
+      try {
+        running.spawn({
+          cmd: ['bun', ENTRY, '__serve', String(running.port)],
+          env: {
+            ...serverEnv(running.tempDir, running.port),
+            DATABASE_PATH: database,
+            BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
+          },
+        });
+        await running.waitUntilReady(() => probeHealthOnce('127.0.0.1', running.port), {
+          label: 'persisted Hub health',
+          timeoutMs: START_TIMEOUT_MS,
+        });
+        await expect(acquireCaptureLock(database)).rejects.toThrow('already in use');
+        await running.stop(process.platform === 'win32' ? 'SIGKILL' : 'SIGTERM');
+        const release = await acquireCaptureLock(database);
+        await release();
+      } finally {
+        await running.cleanup();
+        await running.assertReleased();
+      }
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  it(
+    'refuses to start while backup owns the configured database',
+    async () => {
+      const running = await createManagedProcessFixture({ tempPrefix: 'mango-backup-lock-' });
+      const database = join(running.tempDir, 'database.sqlite');
+      const release = await acquireCaptureLock(database);
+      try {
+        running.spawn({
+          cmd: ['bun', ENTRY, '__serve', String(running.port)],
+          env: {
+            ...serverEnv(running.tempDir, running.port),
+            DATABASE_PATH: database,
+            BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
+          },
+        });
+        expect(await running.waitForExit()).toBe(1);
+        expect(running.diagnostics()).toContain('capture lock cannot be acquired');
+        expect(await probeHealthOnce('127.0.0.1', running.port)).toBe(false);
+      } finally {
+        await release();
+        await running.cleanup();
+        await running.assertReleased();
+      }
+    },
+    TEST_TIMEOUT_MS
+  );
+
   let fixture: ManagedProcessFixture | null = null;
 
   beforeEach(async () => {
