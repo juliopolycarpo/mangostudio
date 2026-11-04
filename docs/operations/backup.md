@@ -15,7 +15,7 @@ The command resolves the configured database, uploads, generated images, tool av
 agent definitions, skills and checkpoints. Checkpoints are included unless explicitly
 omitted. Profile/app settings and user history live in the database. Missing optional roots
 are recorded in the manifest. A present unreadable root, unsupported filename, case collision,
-symlink or special file fails the entire capture. The output must be outside the source
+symlink (including a configured root itself, even if dangling) or special file fails the entire capture. The output must be outside the source
 roots, on a filesystem supporting hard links; existing destinations are never replaced.
 
 ## Consistency boundary
