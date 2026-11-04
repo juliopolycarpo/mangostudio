@@ -16,6 +16,8 @@ import {
   type Frame,
   type HelloFrame,
   type Limits,
+  MAX_ANNOUNCED_FRAME_BYTES,
+  MAX_ANNOUNCED_IN_FLIGHT,
   MIN_ANNOUNCED_IN_FLIGHT,
   type PeerInfo,
   type RequestFrame,
@@ -197,14 +199,16 @@ function localFrameCeiling(requested: number | undefined, portCeiling: number | 
           'port maxFrameBytes',
           portCeiling,
           DEFAULT_MAX_FRAME_BYTES,
-          MIN_MAX_FRAME_BYTES
+          MIN_MAX_FRAME_BYTES,
+          MAX_ANNOUNCED_FRAME_BYTES
         );
   if (requested === undefined) return ceiling ?? DEFAULT_MAX_FRAME_BYTES;
   const floored = resolveIntegerAtLeast(
     'maxFrameBytes',
     requested,
     DEFAULT_MAX_FRAME_BYTES,
-    MIN_MAX_FRAME_BYTES
+    MIN_MAX_FRAME_BYTES,
+    MAX_ANNOUNCED_FRAME_BYTES
   );
   return Math.min(floored, ceiling ?? floored);
 }
@@ -271,7 +275,8 @@ export class Session {
       'maxInFlight',
       options.maxInFlight,
       DEFAULT_MAX_IN_FLIGHT,
-      MIN_ANNOUNCED_IN_FLIGHT
+      MIN_ANNOUNCED_IN_FLIGHT,
+      MAX_ANNOUNCED_IN_FLIGHT
     );
     this.#maxStreamKeys = resolveIntegerAtLeast(
       'maxStreamKeys',

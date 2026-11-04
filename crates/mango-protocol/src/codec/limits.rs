@@ -1,5 +1,6 @@
 //! One rule, shared by every builder and codec entry point that takes a
-//! byte or count ceiling: refuse anything below the spec's floor for it.
+//! byte or count ceiling: preserve its floor, and enforce the wire maximum
+//! for announced limits. Local-only budgets retain their floor alone.
 //!
 //! [`check_at_least`] is for an infallible builder — it panics, naming the
 //! floor it broke, the way `SessionOptions::with_max_frame_bytes` and its
@@ -42,7 +43,8 @@ pub fn check_at_least(name: &str, value: usize, floor: usize) -> usize {
 /// # Panics
 ///
 /// Panics when `max_frame_bytes` is below
-/// [`crate::codec::ndjson::MIN_MAX_FRAME_BYTES`], naming both.
+/// [`crate::codec::ndjson::MIN_MAX_FRAME_BYTES`] or above
+/// [`crate::validate::MAX_ANNOUNCED_FRAME_BYTES`], naming the violated bound.
 ///
 /// # Example
 ///
@@ -53,11 +55,43 @@ pub fn check_at_least(name: &str, value: usize, floor: usize) -> usize {
 /// ```
 #[must_use]
 pub fn check_max_frame_bytes(max_frame_bytes: usize) -> usize {
-    check_at_least(
+    check_announced(
         "max_frame_bytes",
         max_frame_bytes,
         crate::codec::ndjson::MIN_MAX_FRAME_BYTES,
+        crate::validate::MAX_ANNOUNCED_FRAME_BYTES as usize,
     )
+}
+
+/// Checks an announced limit against the same bounds used by the wire schema.
+///
+/// # Panics
+///
+/// Panics with the option name when either bound is violated.
+#[must_use]
+pub(crate) fn check_announced(name: &str, value: usize, floor: usize, maximum: usize) -> usize {
+    let value = check_at_least(name, value, floor);
+    assert!(
+        value <= maximum,
+        "{name} is {value}; expected at most {maximum}"
+    );
+    value
+}
+
+/// Fallible frame-limit validation for codec entry points.
+pub(crate) fn checked_max_frame_bytes(value: usize) -> Result<usize, String> {
+    let value = checked_at_least(
+        "max_frame_bytes",
+        value,
+        crate::codec::ndjson::MIN_MAX_FRAME_BYTES,
+    )?;
+    let maximum = crate::validate::MAX_ANNOUNCED_FRAME_BYTES as usize;
+    if value > maximum {
+        return Err(format!(
+            "max_frame_bytes is {value}; expected at most {maximum}"
+        ));
+    }
+    Ok(value)
 }
 
 /// [`check_at_least`]'s rule for a caller that must return a `Result`

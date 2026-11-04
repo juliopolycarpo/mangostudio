@@ -185,6 +185,12 @@ value and the floor it broke, the way the TypeScript SDK raises a `RangeError` f
 build a `hello.limits.maxInFlight` the schema refuses, or make the very first `emit` answer
 `UNAVAILABLE`.
 
+Frame limits also refuse values above `2147483647`, as does `max_in_flight`.
+These bounds are the same constants the wire validator and schema use. `Session::open`
+checks directly assigned options and application-defined port ceilings before splitting
+its port or emitting `hello`. Fallible NDJSON codec calls return a schema error rather
+than panic for an invalid frame limit. `max_stream_keys` has no wire maximum.
+
 **Upgrading from `0.1`:** that check costs six constructors their `const fn`. The message names
 the value received and the floor it broke, which means building a `String`, and a formatted panic
 cannot appear in a `const fn`. The six are `LineDecoder::new`, `ChunkReassembler::new`,

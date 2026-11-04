@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
-use crate::codec::limits::{check_at_least, check_max_frame_bytes};
+use crate::codec::limits::{check_announced, check_at_least, check_max_frame_bytes};
 use crate::codec::ndjson::{DEFAULT_MAX_FRAME_BYTES, MIN_MAX_FRAME_BYTES};
 use crate::port::Port;
 
@@ -69,37 +69,46 @@ impl Session {
     /// directly. Likewise for `options.max_in_flight` or
     /// `options.max_stream_keys` at `0`. `SessionOptions`'s builders already
     /// refuse these on the builder path, but every field involved is `pub`,
-    /// so this is the check for a caller that assigned one directly.
+    /// so this is the check for a caller that assigned one directly. Frame
+    /// limits and `max_in_flight` also panic above their wire maximums in
+    /// [`crate::validate`], before the port is split.
     #[must_use]
     pub fn open<P: Port>(
         port: P,
         options: SessionOptions,
     ) -> (Session, SessionDriver<P::Tx, P::Rx>) {
         let port_max_frame_bytes = port.max_frame_bytes();
-        let (tx, rx) = port.split();
         // A session option *narrows* the port's ceiling, it never replaces
         // it: the port is what actually decodes and encodes, so announcing
         // more than it accepts would make the peer send frames this side
         // then refuses. Unset defers to the port, then to the default —
         // unchanged, and never clamped down to the default on its own.
         let session_ceiling = options.max_frame_bytes.map(check_max_frame_bytes);
-        let port_ceiling = port_max_frame_bytes
-            .map(|ceiling| check_at_least("port max_frame_bytes", ceiling, MIN_MAX_FRAME_BYTES));
+        let port_ceiling = port_max_frame_bytes.map(|ceiling| {
+            check_announced(
+                "port max_frame_bytes",
+                ceiling,
+                MIN_MAX_FRAME_BYTES,
+                crate::validate::MAX_ANNOUNCED_FRAME_BYTES as usize,
+            )
+        });
         let local_max_frame_bytes = match (session_ceiling, port_ceiling) {
             (Some(session), Some(port)) => session.min(port),
             (Some(only), None) | (None, Some(only)) => only,
             (None, None) => DEFAULT_MAX_FRAME_BYTES,
         };
-        let max_in_flight = check_at_least(
+        let max_in_flight = check_announced(
             "max_in_flight",
             options.max_in_flight,
             MIN_ANNOUNCED_IN_FLIGHT,
+            crate::validate::MAX_ANNOUNCED_IN_FLIGHT as usize,
         );
         let max_stream_keys = check_at_least(
             "max_stream_keys",
             options.max_stream_keys,
             MIN_OPEN_STREAM_KEYS,
         );
+        let (tx, rx) = port.split();
         let (ready, _) = watch::channel(None);
         let (closure, _) = watch::channel(None);
         let (commands_tx, commands_rx) = mpsc::unbounded_channel();

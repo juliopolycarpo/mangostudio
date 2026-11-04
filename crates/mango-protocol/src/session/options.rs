@@ -178,7 +178,8 @@ impl SessionOptions {
     ///
     /// # Panics
     ///
-    /// Panics when `max_in_flight` is `0`, naming both.
+    /// Panics when `max_in_flight` is `0` or exceeds
+    /// [`crate::validate::MAX_ANNOUNCED_IN_FLIGHT`], naming the violated bound.
     ///
     /// # Example
     ///
@@ -192,10 +193,11 @@ impl SessionOptions {
     /// ```
     #[must_use]
     pub fn with_max_in_flight(mut self, max_in_flight: usize) -> Self {
-        self.max_in_flight = crate::codec::limits::check_at_least(
+        self.max_in_flight = crate::codec::limits::check_announced(
             "max_in_flight",
             max_in_flight,
             MIN_ANNOUNCED_IN_FLIGHT,
+            crate::validate::MAX_ANNOUNCED_IN_FLIGHT as usize,
         );
         self
     }

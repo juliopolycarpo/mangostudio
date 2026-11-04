@@ -34,10 +34,13 @@ differ, and with `UNAVAILABLE` when the peer never says hello (15 seconds by def
 handshake timeout closes the transport with code `4400` and reason `handshake timeout`;
 `TIMEOUT` is the code for a local request deadline, not this handshake failure.
 
-A limit below the floor §11 sets is a `RangeError` from the call that sets it — the
-constructor, or the transport's own options — not a `hello` the peer's schema refuses. The
-schema's _maximum_ is not checked yet; a ceiling above `2147483647` still builds a `hello` the
-peer refuses.
+A `maxFrameBytes` outside `4096..2147483647` or `maxInFlight` outside
+`1..2147483647` is a `RangeError` at configuration, naming the option and the
+violated bound. Noninteger and nonnumeric runtime values are refused too; only
+`undefined` selects the default. Sessions validate both their requested frame ceiling
+and the port's reported ceiling before subscribing or sending `hello`, then use the
+lower valid value. `maxStreamKeys` remains a local integer budget with a floor of `1`
+and no wire maximum.
 
 Options worth knowing:
 
