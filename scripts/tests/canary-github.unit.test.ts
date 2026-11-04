@@ -55,11 +55,115 @@ test.each(['\n', '\r\n'])('retains actual release HTTP status using %j headers',
   runner.json(`${BASE}/releases/tags/v1.0.0`, { id: 1 }, 200, eol);
   expect(await client.getRelease('v1.0.0')).toEqual({ status: 200, body: { id: 1 } });
   runner.json(`${BASE}/releases/tags/absent`, { message: 'Not Found' }, 404, eol);
+  runner.pages(`${BASE}/releases?per_page=100`, [[]]);
   expect(await client.getRelease('absent')).toEqual({
     status: 404,
     body: { message: 'Not Found' },
   });
 });
+test('finds an interrupted tagless draft on later release pages after a published lookup404', async () => {
+  const { runner, client } = fixture();
+  const draft = { id: 33, tag_name: 'v1.0.0', draft: true, target_commitish: SHA };
+  runner.json(`${BASE}/releases/tags/v1.0.0`, { message: 'Not Found' }, 404);
+  runner.pages(`${BASE}/releases?per_page=100`, [
+    [{ id: 1, tag_name: 'v0.9.0', draft: false }],
+    [draft],
+  ]);
+  expect(await client.getRelease('v1.0.0')).toEqual({ status: 200, body: draft });
+  expect(runner.calls).toEqual([
+    ['api', '--include', `${BASE}/releases/tags/v1.0.0`],
+    ['api', '--paginate', '--slurp', `${BASE}/releases?per_page=100`],
+  ]);
+});
+
+test('does not choose an arbitrary release when pending tags are duplicated', async () => {
+  const { runner, client } = fixture();
+  runner.json(`${BASE}/releases/tags/v1.0.0`, { message: 'Not Found' }, 404);
+  runner.pages(`${BASE}/releases?per_page=100`, [
+    [{ id: 1, tag_name: 'v1.0.0', draft: true }],
+    [{ id: 2, tag_name: 'v1.0.0', draft: true }],
+  ]);
+  await expect(client.getRelease('v1.0.0')).rejects.toThrow('Ambiguous GitHub release tag');
+});
+
+test('retains positive published metadata from the list instead of inventing absence', async () => {
+  const { runner, client } = fixture();
+  const release = { id: 33, tag_name: 'v1.0.0', draft: false };
+  runner.json(`${BASE}/releases/tags/v1.0.0`, { message: 'Not Found' }, 404);
+  runner.pages(`${BASE}/releases?per_page=100`, [[release]]);
+  expect(await client.getRelease('v1.0.0')).toEqual({ status: 200, body: release });
+});
+
+test.each([200, 401, 403, 429, 500, 503])(
+  'only an actual404 triggers draft lookup; HTTP%i',
+  async (status) => {
+    const { runner, client } = fixture();
+    const body = status === 200 ? { id: 33 } : { message: 'fixture denied read' };
+    runner.json(`${BASE}/releases/tags/v1.0.0`, body, status);
+    expect(await client.getRelease('v1.0.0')).toEqual({ status, body });
+    expect(runner.calls).toEqual([['api', '--include', `${BASE}/releases/tags/v1.0.0`]]);
+  }
+);
+
+test.each([
+  { pages: [], message: 'expected nonempty array of pages' },
+  { pages: [{}], message: 'expected complete array collection' },
+  { pages: [[null]], message: 'GitHub release listing entry: expected object' },
+  { pages: [[{ id: 1, draft: true }]], message: 'expected tag_name string and draft boolean' },
+  {
+    pages: [[{ id: 1, tag_name: 'other' }]],
+    message: 'expected tag_name string and draft boolean',
+  },
+  {
+    pages: [[{ id: 1, tag_name: 42, draft: true }]],
+    message: 'expected tag_name string and draft boolean',
+  },
+  {
+    pages: [[{ id: 1, tag_name: '', draft: false }]],
+    message: 'expected tag_name string and draft boolean',
+  },
+  {
+    pages: [[{ id: 1, tag_name: 'other', draft: 'true' }]],
+    message: 'expected tag_name string and draft boolean',
+  },
+  {
+    pages: [[{ tag_name: 'other', draft: false }]],
+    message: 'Invalid release listing ID: expected positive safe integer',
+  },
+  {
+    pages: [[{ id: 0, tag_name: 'other', draft: false }]],
+    message: 'Invalid paginated entry ID: expected positive safe integer',
+  },
+  {
+    pages: [
+      [{ id: 1, tag_name: 'other', draft: false }],
+      [{ id: 1, tag_name: 'v1.0.0', draft: true }],
+    ],
+    message: 'Duplicate GitHub paginated entry ID',
+  },
+])(
+  'malformed or repeated release pages cannot establish absence: %j',
+  async ({ pages, message }) => {
+    const { runner, client } = fixture();
+    runner.json(`${BASE}/releases/tags/v1.0.0`, { message: 'Not Found' }, 404);
+    runner.pages(`${BASE}/releases?per_page=100`, pages);
+    await expect(client.getRelease('v1.0.0')).rejects.toThrow(message);
+  }
+);
+
+test('a failed draft listing cannot become successful absence', async () => {
+  const { runner, client } = fixture();
+  runner.json(`${BASE}/releases/tags/v1.0.0`, { message: 'Not Found' }, 404);
+  runner.respond(['api', '--paginate', '--slurp', `${BASE}/releases?per_page=100`], {
+    exitCode: 1,
+    stdout: Buffer.from('[]'),
+    stderr: 'fixture denied draft visibility',
+  });
+  await expect(client.getRelease('v1.0.0')).rejects.toThrow(
+    'GitHub paginated read: expected successful gh exit'
+  );
+});
+
 test('supports gh mixed LF status and CRLF headers observed in hosted reads', async () => {
   const { runner, client } = fixture();
   const result = http(200, '{}');

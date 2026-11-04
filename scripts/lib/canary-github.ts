@@ -44,9 +44,38 @@ export class CanaryGitHub {
     this.base = `repos/${repository}`;
   }
 
-  /** Read release metadata while preserving actual HTTP absence. Example: await client.getRelease('v1.2.3-canary.abcdef0'). */
+  /**
+   * Read a published release or a draft with this pending tag. GitHub's tag
+   * endpoint only finds published releases; complete absence requires credentials
+   * with push access so the paginated fallback also includes drafts.
+   * Example: await client.getRelease('v1.2.3-canary.abcdef0').
+   */
   async getRelease(tag: string): Promise<GitHubResponse<unknown>> {
-    return this.getJson(`${this.base}/releases/tags/${encodeURIComponent(tag)}`);
+    const published = await this.getJson(`${this.base}/releases/tags/${encodeURIComponent(tag)}`);
+    if (published.status !== 404) return published;
+    const releases = await this.list(`${this.base}/releases?per_page=100`);
+    const matches: Record<string, unknown>[] = [];
+    for (const entry of releases) {
+      const release = object(entry, 'release listing entry');
+      positiveId(release.id, 'release listing ID');
+      if (
+        typeof release.tag_name !== 'string' ||
+        release.tag_name.length === 0 ||
+        typeof release.draft !== 'boolean'
+      ) {
+        throw new Error(
+          `GitHub release listing: expected tag_name string and draft boolean; received tag_name=${JSON.stringify(release.tag_name)} draft=${JSON.stringify(release.draft)}`
+        );
+      }
+      if (release.tag_name === tag) matches.push(release);
+    }
+    if (matches.length > 1) {
+      throw new Error(
+        `Ambiguous GitHub release tag ${JSON.stringify(tag)}: expected at most one release; received ${matches.length}`
+      );
+    }
+    const release = matches[0];
+    return release ? { status: 200, body: release } : published;
   }
 
   /** Peel a tag to its full commit SHA; only a genuinely absent ref returns404. Example: await client.resolveTag('v1.2.3'). */

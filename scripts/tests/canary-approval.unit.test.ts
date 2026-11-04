@@ -862,6 +862,12 @@ test('approval CLI rejects an extra whitespace-only ZIP member', async () => {
       404,
       json({ message: 'Not Found' })
     );
+    respond(
+      ['api', '--paginate', '--slurp', `${BASE}/releases?per_page=100`],
+      200,
+      json([[]]),
+      false
+    );
     for (const [path, response] of deps.github.values)
       respond(['api', '--include', path], response.status, json(response.body));
     for (const [pageKey, values] of deps.github.pages) {
