@@ -1,10 +1,11 @@
-import { isAbsolute, relative, resolve } from 'node:path';
+import { relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
   candidatePaths,
   extractHookCwd,
   extractTouchedFilePath,
+  isInsideRepo,
 } from '../../.codex/hooks/auto-fix.mjs';
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), '..', '..', '..');
@@ -73,10 +74,14 @@ export function runProtectGeneratedHook(input, root = repoRoot) {
   };
 }
 
-function toRepoPath(filePath, root) {
+/**
+ * Return a contained path with portable separators for generated-file matching.
+ * // Usage: toRepoPath('/repo/..notes/sample.rs', '/repo'); // '..notes/sample.rs'
+ */
+export function toRepoPath(filePath, root) {
   const relativePath = relative(root, filePath).replaceAll('\\', '/');
 
-  if (!relativePath || relativePath.startsWith('..') || isAbsolute(relativePath)) {
+  if (!isInsideRepo(filePath, root)) {
     return undefined;
   }
 
