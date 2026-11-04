@@ -6,15 +6,12 @@ use std::sync::OnceLock;
 use mango_protocol::Catalog;
 use mango_protocol::catalog::{CatalogEvent, CatalogMethod};
 
-/// `catalog.json`, exactly as `bun run contracts:emit` wrote it.
+/// Build-derived catalog with JSON whitespace removed outside strings.
 ///
-/// The one and only copy: nothing under `crates/` restates this text. See
-/// the crate's ownership doc for why the Rust side embeds it rather than
-/// generating its own.
-const CATALOG_JSON: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../apps/shared/src/runtime-contract/generated/catalog.json"
-));
+/// The readable canonical artifact remains under `apps/shared`. The build
+/// transformation preserves every token, including number lexemes and string
+/// escapes; it does not parse and reserialize the contract.
+const CATALOG_JSON: &str = include_str!(concat!(env!("OUT_DIR"), "/catalog.compact.json"));
 
 static CATALOG: OnceLock<Catalog> = OnceLock::new();
 

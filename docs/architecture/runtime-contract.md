@@ -28,8 +28,12 @@ seven files drifts from what the TypeBox definitions would produce. That is what
 crate below safe to embed them.
 
 `crates/mangostudio-runtime-contract` is the Rust half. It owns nothing about the contract's
-_shape_ — it embeds the seven artifacts above with `include_str!` and never copies their JSON
-into `crates/`. What it does own: parsing `catalog.json` into `mango_protocol::Catalog`,
+_shape_ — it embeds the artifacts above with `include_str!` and never restates their JSON
+into `crates/`. The readable `catalog.json` remains canonical. At build time a dependency-free
+lexical transform writes `catalog.compact.json` to Cargo's `OUT_DIR`, removing only JSON
+whitespace outside strings. It preserves member order, number lexemes and exact string
+escapes. The embedded catalog still follows the same parse and validation path; tests check
+its equality with the canonical source. What the crate does own: parsing `catalog.json` into `mango_protocol::Catalog`,
 compiling a `jsonschema` validator for every method, event, and standalone document, and
 giving the dispatcher in `crates/mangostudio-runtime` a typed, documented home for the
 manifest and the error and runtime-home constants so it does not hand-type them from
