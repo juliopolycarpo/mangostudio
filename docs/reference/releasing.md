@@ -556,7 +556,17 @@ Those steps stay in `.github/workflows/release.yml`.
 `.github/workflows/canary.yml` runs daily at 06:17 UTC and supports manual
 `workflow_dispatch` on `main`. Its `source` job selects the latest successful
 `ci.yml` push run on `main`, validates its commit SHA, and resolves the canary
-version from that commit. The `build` job builds that SHA once through
+version from that commit. "Latest" means the greatest original CI run number,
+not the latest rerun completion time: rerunning an older push cannot supersede
+a newer successful push. The selector checks the active workflow ID and path,
+repository and head repository, event, branch, completed/successful verdict,
+full SHA and run URL. It freezes the run ID, successful attempt, run number,
+workflow identity and source SHA as job outputs before resolving the version.
+A missing or inconsistent result fails without substituting the scheduler's
+SHA or the current main tip. Selection code executes from the workflow revision;
+version resolution executes from the selected application source.
+
+The `build` job builds that SHA once through
 `distribution-build.yml`; both publishing channels consume its artifacts.
 CI's aggregate `Gate` rejects mandatory job failures, cancellations and
 unexpected skips before a main push run can qualify as successful.
