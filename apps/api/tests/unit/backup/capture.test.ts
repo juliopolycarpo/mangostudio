@@ -374,3 +374,24 @@ it.skipIf(process.platform === 'win32')(
     ).rejects.toThrow('symlink');
   }
 );
+
+for (const suffix of ['/', '/.']) {
+  it.skipIf(process.platform === 'win32')(
+    `refuses configured-root symlinks with a ${JSON.stringify(suffix)} suffix`,
+    async () => {
+      const { root, config, output } = await fixture();
+      const linkedRoot = join(root, 'linked-images');
+      await symlink(config.uploads.dir, linkedRoot, 'dir');
+      config.images.dir = `${linkedRoot}${suffix}`;
+      await expect(
+        captureBackup(config, { output, checkpoints: true, includeSecrets: false }, 'test')
+      ).rejects.toThrow('symlink');
+      expect(await Bun.file(output).exists()).toBe(false);
+      await rm(linkedRoot);
+      await symlink(join(root, 'absent-directory'), linkedRoot, 'dir');
+      await expect(
+        captureBackup(config, { output, checkpoints: true, includeSecrets: false }, 'test')
+      ).rejects.toThrow('symlink');
+    }
+  );
+}
