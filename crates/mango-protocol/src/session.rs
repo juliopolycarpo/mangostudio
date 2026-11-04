@@ -71,7 +71,7 @@ impl Session {
     /// refuse these on the builder path, but every field involved is `pub`,
     /// so this is the check for a caller that assigned one directly. Frame
     /// limits and `max_in_flight` also panic above their wire maximums in
-    /// [`crate::validate`], before the port is split.
+    /// [`mod@crate::validate`], before the port is split.
     #[must_use]
     pub fn open<P: Port>(
         port: P,
