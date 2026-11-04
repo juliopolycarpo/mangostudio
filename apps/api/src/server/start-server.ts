@@ -4,7 +4,11 @@
  * Shared by the foreground `serve` and the detached `__serve` startup paths.
  */
 
+import { realpath } from 'node:fs/promises';
+import { resolve } from 'node:path';
+
 import { app } from '../app';
+import { acquireCaptureLock } from '../backup/capture-lock';
 import { closeDb, getDb } from '../db/database';
 import { getBuildInfo } from '../lib/build-info';
 import {
@@ -62,6 +66,8 @@ export interface StartOptions {
   writeStateFile?: boolean;
 }
 
+let releaseCaptureLock: (() => Promise<void>) | undefined;
+
 let staleTurnReconcileSweep: StaleTurnReconcileSweep | null = null;
 let stopTerminalIdleReaper: (() => void) | null = null;
 let stopUpdateChecks: (() => void) | null = null;
@@ -69,6 +75,30 @@ let stopRuntimeScopeReaps: (() => void) | null = null;
 
 /** Start the API server and return a handle. // Usage: await startServer({ writeStateFile: true }) */
 export async function startServer(options: StartOptions = {}): Promise<ServerHandle> {
+  const path = getConfig().database.path;
+  if (path !== ':memory:') {
+    let canonical = resolve(path);
+    try {
+      canonical = await realpath(path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    releaseCaptureLock = await acquireCaptureLock(canonical);
+  }
+  try {
+    return await startServerWithLock(options);
+  } catch (error) {
+    // Once listening began, in-flight writes may still be settling. Keep the
+    // OS-owned lock until exit on a failed startup rather than permit capture.
+    if (!app.server) {
+      await releaseCaptureLock?.();
+      releaseCaptureLock = undefined;
+    }
+    throw error;
+  }
+}
+
+async function startServerWithLock(options: StartOptions): Promise<ServerHandle> {
   // Load connector secrets from ~/.mango/.env into process.env. The detach spawn
   // allowlist withholds them from the child's initial env, so the server must
   // self-load them here for environment-source connectors to resolve.
@@ -188,6 +218,8 @@ function logRunning(host: string, port: number, devFrontend: boolean): void {
  * file, and close the database.
  */
 async function gracefulStop(): Promise<void> {
+  // Drain HTTP writers before closing the DB and releasing capture ownership.
+  if (app.server) await app.stop();
   await staleTurnReconcileSweep?.stop();
   staleTurnReconcileSweep = null;
   stopTerminalIdleReaper?.();
@@ -213,6 +245,8 @@ async function gracefulStop(): Promise<void> {
   stopRuntimeScopeReaps = null;
   await removeState();
   await closeDb();
+  await releaseCaptureLock?.();
+  releaseCaptureLock = undefined;
 }
 
 function registerShutdown(): void {

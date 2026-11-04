@@ -149,6 +149,11 @@ async function route(
     case '--help':
       printHelp();
       return;
+    case 'backup': {
+      const { parseBackupArgs, runBackup } = await import('./commands/backup');
+      await runBackup(parseBackupArgs(rest));
+      return;
+    }
     case 'setup': {
       const setupArgs = parseSetupArgs(rest);
       const { runSetup } = await modules.setup();
