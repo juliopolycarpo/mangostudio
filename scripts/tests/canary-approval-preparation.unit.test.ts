@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 
 import type { CanaryApprovalAcquisition } from '../lib/canary-approval';
+import { canaryApprovalChildFailure } from '../lib/canary-approval-diagnostics';
 import {
   type CanaryApprovalPreparationServices,
   parseCanaryApprovalSelection,
@@ -431,7 +432,12 @@ test.each(['manifest', 'payload', 'expected', 'final-bytes'])(
 class FakeApprovalChildCommands {
   constructor(
     readonly directory: string,
-    readonly acquisition: CanaryApprovalAcquisition
+    readonly acquisition: CanaryApprovalAcquisition,
+    readonly failure?: {
+      script: 'load-canary-approval' | 'qualify-canary-source';
+      stdout: string;
+      stderr: string;
+    }
   ) {}
   install(): void {
     mkdirSync(join(this.directory, 'scripts/ci'), { recursive: true });
@@ -481,6 +487,11 @@ class FakeApprovalChildCommands {
       writeFileSync(e.QUALIFICATION_RECEIPT!,JSON.stringify({source:{repository:e.REPO,sourceSha:e.SOURCE_SHA,runId:Number(e.SOURCE_RUN_ID),runAttempt:Number(e.SOURCE_RUN_ATTEMPT),...(e.VERIFIED_PUSH_BEFORE_SHA?{pushBeforeSha:e.VERIFIED_PUSH_BEFORE_SHA}:{})},builderAttempt:1,ciJobs:[],siblings:[],relevance:{cargo:true,protocol:true,reason:'FakeQualification'}}));
     `
     );
+    if (this.failure)
+      writeFileSync(
+        join(this.directory, `scripts/ci/${this.failure.script}.ts`),
+        `process.stdout.write(${JSON.stringify(this.failure.stdout)}); process.stderr.write(${JSON.stringify(this.failure.stderr)}); process.exitCode = 1;`
+      );
   }
 }
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -641,4 +652,116 @@ test('acquisition authentication failure stops before qualification', async () =
   );
   await expect(prepareCanaryApproval(f.input, services)).rejects.toThrow('received 401');
   expect(services.calls).toHaveLength(0);
+});
+
+test.each([
+  {
+    script: 'load-canary-approval' as const,
+    reason:
+      'Original CI checksums unavailable or invalid: recover approved artifact bytes; rebuilding a partial version is forbidden',
+    expected: 'Original CI checksums unavailable or invalid',
+  },
+  {
+    script: 'qualify-canary-source' as const,
+    reason:
+      'ci.yml: source validation contract differs from qualification revision; expected identical reviewed workflow bytes, select a compatible successful source',
+    expected: 'ci.yml: source validation contract differs from qualification revision',
+  },
+  {
+    script: 'load-canary-approval' as const,
+    reason: 'Approval release: expected HTTP200; received HTTP401',
+    expected: 'GitHub authentication refused (HTTP401)',
+  },
+])(
+  'default prepare CLI preserves safe $script refusal: $expected',
+  ({ script, reason, expected }) => {
+    const f = fixture();
+    const directory = mkdtempSync(join(tmpdir(), 'fix-canary-approval-acquisition-child-reason-'));
+    const token = 'ghp_supersecretDoNotExpose012345678901234567';
+    try {
+      new FakeApprovalChildCommands(directory, f.acquisition, {
+        script,
+        stdout: `Authorization: Bearer ${token}\n`,
+        stderr: `${reason}\nraw transport Authorization: Bearer ${token}\n`,
+      }).install();
+      const run = Bun.spawnSync({
+        cmd: [process.execPath, prepareCli],
+        cwd: directory,
+        env: {
+          ...process.env,
+          PATH: `${join(directory, 'bin')}:${process.env.PATH ?? ''}`,
+          REPO: f.source.repository,
+          VERSION: f.version,
+          GITHUB_SHA: f.input.executionRevision,
+          GITHUB_RUN_ATTEMPT: '2',
+          OUTPUT_DIR: join(directory, 'output'),
+          GITHUB_OUTPUT: join(directory, 'gha'),
+          SELECTION_JSON: JSON.stringify({ source: f.source }),
+          EXPECTED_APPROVAL_SHA256: undefined,
+        },
+      });
+      expect(run.exitCode).toBe(1);
+      expect(run.stderr.toString()).toContain(expected);
+      expect(run.stderr.toString()).not.toContain(token);
+      expect(run.stdout.toString()).not.toContain(token);
+      expect(run.stderr.toString()).not.toContain('raw transport');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+);
+
+test.each([
+  ['HTTP 403: Bearer secret', 'GitHub access refused (HTTP403)'],
+  [
+    'Original CI distribution unavailable: immutable metadata resolution failed',
+    'Original CI distribution unavailable',
+  ],
+  [
+    'Original canary approval unavailable: all exact-payload copies are expired or deleted',
+    'Original approval unavailable',
+  ],
+  [
+    'Ambiguous approved canary payloads for the same source/version: refuse replacement bytes',
+    'Conflicting approval payloads',
+  ],
+  [
+    'Approval provenance refused: expected canary.yml from refs/heads/main@secret',
+    'Approval provenance refused',
+  ],
+  [
+    'Corrupt approval ZIP: expected immutable API size and SHA256 digest',
+    'Approval integrity verification failed',
+  ],
+  ['Frozen CI attempt metadata mismatch: expected original run', 'Frozen CI identity mismatch'],
+  ['GitHub page: expected complete array collection', 'Incomplete GitHub metadata'],
+  [
+    'cargo-shim.yml: expected same-SHA main push validation; received no run',
+    'Qualification producer refused',
+  ],
+  ['GitHub response: expected complete HTTP header separator', 'GitHub read failed'],
+  ['secret raw transport failure', 'not a recognized safe diagnostic'],
+])('maps only safe reason from child diagnostics: %s', (diagnostic, expected) => {
+  const message = canaryApprovalChildFailure(
+    'qualification',
+    1,
+    Buffer.from(diagnostic ?? ''),
+    Buffer.from('Authorization: Bearer unstructured-secret-value')
+  );
+  expect(message).toContain(expected ?? 'missing test expectation');
+  expect(message).not.toContain('unstructured-secret-value');
+  expect(message).not.toContain('@secret');
+  expect(message.length).toBeLessThan(300);
+});
+test('bounds child diagnostic scanning and withholds unknown credential-bearing output', () => {
+  const message = canaryApprovalChildFailure(
+    'acquisition',
+    Number.NaN,
+    Buffer.from(`${'x'.repeat(8192)}Original CI distribution unavailable`),
+    Buffer.from('token=unknown-credential')
+  );
+  expect(message).toContain('exit unknown');
+  expect(message).toContain('not a recognized safe diagnostic');
+  expect(message).not.toContain('unknown-credential');
+  expect(message).not.toContain('Original CI distribution unavailable');
 });

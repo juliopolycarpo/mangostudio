@@ -3,6 +3,7 @@ import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from '
 import { join, resolve } from 'node:path';
 
 import type { CanaryApprovalAcquisition } from '../lib/canary-approval';
+import { canaryApprovalChildFailure } from '../lib/canary-approval-diagnostics';
 import {
   parseCanaryApprovalSelection,
   prepareCanaryApproval,
@@ -43,7 +44,14 @@ async function main(): Promise<void> {
       maxBuffer: 65 * 1024 * 1024,
     });
     if (result.exitCode !== 0)
-      throw new Error(`Canary approval ${script} failed; acquisition or qualification refused`);
+      throw new Error(
+        canaryApprovalChildFailure(
+          script.endsWith('/load-canary-approval.ts') ? 'acquisition' : 'qualification',
+          result.exitCode,
+          result.stdout,
+          result.stderr
+        )
+      );
   };
   const sourceEnv = (selected: CanarySource) => ({
     REPO: selected.repository,
