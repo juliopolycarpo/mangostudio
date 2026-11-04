@@ -324,3 +324,29 @@ it('refuses excessive nesting before publishing a partial archive', async () => 
   ).rejects.toThrow('depth limit');
   expect(await Bun.file(output).exists()).toBe(false);
 });
+
+it.skipIf(process.platform === 'win32')(
+  'checks canonical output and config paths against data roots',
+  async () => {
+    const { root, config, output } = await fixture();
+    await mkdir(join(config.uploads.dir, 'destination'));
+    await symlink(join(config.uploads.dir, 'destination'), join(root, 'output-alias'));
+    await expect(
+      captureBackup(
+        config,
+        {
+          output: join(root, 'output-alias', 'archive.tar.gz'),
+          checkpoints: true,
+          includeSecrets: false,
+        },
+        'test'
+      )
+    ).rejects.toThrow('overlaps');
+    await writeFile(join(config.uploads.dir, 'raw-config.toml'), 'auth-sensitive-fixture');
+    await symlink(join(config.uploads.dir, 'raw-config.toml'), join(root, 'config-alias'));
+    config.configFilePath = join(root, 'config-alias');
+    await expect(
+      captureBackup(config, { output, checkpoints: true, includeSecrets: false }, 'test')
+    ).rejects.toThrow('overlaps');
+  }
+);
