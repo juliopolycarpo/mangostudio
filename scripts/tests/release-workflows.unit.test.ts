@@ -1400,6 +1400,25 @@ describe('release workflow binary gate', () => {
     }
   });
 
+  test('only publication scopes receive the main shipping recovery retention', () => {
+    const workflow = readText('.github/workflows/distribution-build.yml');
+    const ci = extractJobBlock(readText('.github/workflows/ci.yml'), 'distribution');
+    expect(ci).toContain('retention_days: 7');
+    expect(ci).toContain(
+      `publication_retention_days: ${'$'}{{ github.event_name == 'push' && 30 || 7 }}`
+    );
+    const steps = extractStepBlocks(workflow);
+    for (const name of ['checksums', 'assets', 'npm']) {
+      const step = steps.find((value) => value.includes(`name: Upload ${name} distribution`));
+      expect(step).toContain(
+        `retention-days: ${'$'}{{ inputs.publication_retention_days || inputs.retention_days }}`
+      );
+    }
+    const target = steps.find((value) => value.includes('name: Upload linux-x64 target'));
+    expect(target).toContain(`retention-days: ${'$'}{{ inputs.retention_days }}`);
+    expect(target).not.toContain('inputs.publication_retention_days');
+  });
+
   test('the checksums scope stays small enough to be worth splitting out', () => {
     expect(checksumsBundleMembers(true)).toEqual([
       'distribution-manifest.json',

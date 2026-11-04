@@ -19,6 +19,10 @@ on:
         description: Actions artifact retention in days.
         type: number
         required: true
+      publication_retention_days:
+        description: Override retention for checksums, assets and npm recovery bundles only.
+        type: number
+        default: 0
       cache:
         description: Let the runtime build restore the cargo cache; see runtime-build.yml.
         type: boolean
@@ -277,7 +281,7 @@ jobs:
         with:
           name: ${{ steps.bundle.outputs.checksums_artifact }}
           path: .distribution-bundles/checksums.tar.gz
-          retention-days: ${{ inputs.retention_days }}
+          retention-days: ${{ inputs.publication_retention_days || inputs.retention_days }}
           overwrite: false
           # bundle-distribution.ts already made this payload's one compression
           # decision: gzip 1 for the scoped bundles, stored for the target
@@ -294,7 +298,7 @@ jobs:
         with:
           name: ${{ steps.bundle.outputs.assets_artifact }}
           path: .distribution-bundles/assets.tar.gz
-          retention-days: ${{ inputs.retention_days }}
+          retention-days: ${{ inputs.publication_retention_days || inputs.retention_days }}
           overwrite: false
           compression-level: 0
 
@@ -303,7 +307,7 @@ jobs:
         with:
           name: ${{ steps.bundle.outputs.npm_artifact }}
           path: .distribution-bundles/npm.tar.gz
-          retention-days: ${{ inputs.retention_days }}
+          retention-days: ${{ inputs.publication_retention_days || inputs.retention_days }}
           overwrite: false
           compression-level: 0
 
