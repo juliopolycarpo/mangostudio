@@ -135,6 +135,15 @@ export async function captureBackup(
   const databasePath = await realpath(config.database.path);
   const resolvedRoots = await Promise.all(
     roots.map(async (root) => {
+      // Collapsing '..' across an earlier symlink can select a different
+      // directory from the one the application reads. Refuse that ambiguity.
+      const components =
+        process.platform === 'win32' ? root.source.split(/[\\/]/u) : root.source.split('/');
+      if (components.includes('..')) {
+        throw new Error(
+          "Backup refuses configured roots containing parent traversal ('..'). Use an explicit directory path without '..' components."
+        );
+      }
       // Remove lexical trailing separators/dot components before lstat: both
       // "link/" and "link/." otherwise follow the final symlink on POSIX.
       const source = resolve(root.source);
