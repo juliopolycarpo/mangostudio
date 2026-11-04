@@ -22,8 +22,12 @@ export interface CanaryReleaseResponse {
 
 /** Project-owned read boundary, configured for the expected repository by the caller. */
 export interface CanaryReleaseClient {
+  /** Search this configured repository's public releases and drafts with push-capable visibility.
+   * A 404 is valid only after complete draft-capable discovery finds no matching tag;
+   * forwarding GET /releases/tags/{tag}'s published-only 404 is insufficient.
+   */
   getRelease(tag: string): Promise<CanaryReleaseResponse>;
-  /** Peel annotated tags; a successful body is the full commit SHA string. */
+  /** Peel annotated tags in that same configured repository; success contains the full commit SHA. */
   resolveTag(tag: string): Promise<CanaryReleaseResponse>;
   /** Return every page, rejecting missing or malformed pages instead of returning a prefix. */
   listAssets(releaseId: number): Promise<readonly unknown[]>;
