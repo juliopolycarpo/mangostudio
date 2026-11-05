@@ -127,6 +127,9 @@ jobs:
       channel: ${{ needs.distribution-identity.outputs.channel }}
       retention_days: 7
       publication_retention_days: ${{ github.event_name == 'push' && 30 || 7 }}
+      # PR smoke and dry runs consume target bundles. Main aggregates are the
+      # immutable inputs daily Canary promotes, so retain those uploads there.
+      publication_bundles: ${{ github.event_name != 'pull_request' }}
       runtime_profile: ${{ github.event_name == 'pull_request' && 'light' || 'shipping' }}
       cache: true
 

@@ -23,6 +23,10 @@ on:
         description: Override retention for checksums, assets and npm recovery bundles only.
         type: number
         default: 0
+      publication_bundles:
+        description: Upload aggregate checksums, assets and npm bundles for publication consumers.
+        type: boolean
+        default: true
       cache:
         description: Let the runtime build restore the cargo cache; see runtime-build.yml.
         type: boolean
@@ -197,10 +201,10 @@ jobs:
       id-token: write # mint provenance for immutable distribution bundles
       attestations: write # attach provenance to the bundle digests
     outputs:
-      packaged_artifact: ${{ steps.bundle.outputs.packaged_artifact }}
-      checksums_artifact: ${{ steps.bundle.outputs.checksums_artifact }}
-      assets_artifact: ${{ steps.bundle.outputs.assets_artifact }}
-      npm_artifact: ${{ steps.bundle.outputs.npm_artifact }}
+      packaged_artifact: ${{ inputs.publication_bundles && steps.bundle.outputs.packaged_artifact || '' }}
+      checksums_artifact: ${{ inputs.publication_bundles && steps.bundle.outputs.checksums_artifact || '' }}
+      assets_artifact: ${{ inputs.publication_bundles && steps.bundle.outputs.assets_artifact || '' }}
+      npm_artifact: ${{ inputs.publication_bundles && steps.bundle.outputs.npm_artifact || '' }}
       target_artifacts: ${{ steps.bundle.outputs.target_artifacts }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -277,6 +281,7 @@ jobs:
         run: bun ./scripts/release/bundle-distribution.ts
 
       - name: Upload checksums distribution
+        if: ${{ inputs.publication_bundles }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ steps.bundle.outputs.checksums_artifact }}
@@ -294,6 +299,7 @@ jobs:
           compression-level: 0
 
       - name: Upload assets distribution
+        if: ${{ inputs.publication_bundles }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ steps.bundle.outputs.assets_artifact }}
@@ -303,6 +309,7 @@ jobs:
           compression-level: 0
 
       - name: Upload npm distribution
+        if: ${{ inputs.publication_bundles }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ steps.bundle.outputs.npm_artifact }}
