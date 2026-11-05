@@ -2,6 +2,18 @@ name: Build
 
 on:
   workflow_call:
+    inputs:
+      source_sha:
+        description: Exact source shared with distribution and browser consumers.
+        type: string
+        required: true
+    outputs:
+      artifact:
+        description: Verified production frontend from the existing build job.
+        value: ${{ jobs.build.outputs.artifact }}
+      bun_revision:
+        description: Exact Bun commit that produced the frontend.
+        value: ${{ jobs.build.outputs.bun_revision }}
 
 permissions:
   contents: read
@@ -11,6 +23,9 @@ jobs:
     name: Build (frontend + API)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      artifact: ${{ steps.upload.outputs.artifact-id && format('frontend-{0}-{1}', inputs.source_sha, github.run_attempt) || '' }}
+      bun_revision: ${{ steps.identity.outputs.bun_revision }}
     env:
       # Bounds the snapshot this job restores and saves back. Each save carries
       # everything restored plus the new outputs, so without a bound the chain
@@ -23,6 +38,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.source_sha }}
 
       - id: setup
         uses: ./.github/actions/setup-mango
@@ -55,8 +71,37 @@ jobs:
           rotate: "true"
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
-      - name: Build frontend and API
-        run: bun run build --all
+      # Clear before Turbo restores outputs: cache hits must not retain stale chunks.
+      - id: frontend
+        name: Build clean production frontend
+        run: |
+          bun ./scripts/ci/frontend-artifact.ts clean
+          bun run build --frontend
+          bun ./scripts/ci/frontend-artifact.ts record
+
+      - id: identity
+        name: Record producer Bun revision
+        run: bun -e 'console.log("bun_revision=" + Bun.revision)' >> "$GITHUB_OUTPUT"
+
+      # Publish before the independent API build so its failure retains these
+      # bytes for diagnostics. Consumers require successful Build, rather than
+      # assuming a failed reusable workflow delivers usable outputs.
+      - id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: frontend-${{ inputs.source_sha }}-${{ github.run_attempt }}
+          path: |
+            apps/frontend/dist
+            apps/frontend/dist-metafile.json
+            .mango/frontend-artifact.json
+          include-hidden-files: true
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 7
+
+      - name: Build API ESM bundle
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bun run build --api
 
       # Saves only when the build wrote cache entries the restored snapshot did
       # not hold, under a key that extends the stable restore prefix.
@@ -71,12 +116,3 @@ jobs:
           rotate: "true"
           payload-glob: "*.tar.zst"
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
-
-      # Handoff to the qa-metrics job in the same run; nothing consumes it
-      # afterwards, so the shortest retention GitHub allows is enough.
-      - name: Upload frontend dist for QA metrics
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: frontend-dist
-          path: apps/frontend/dist
-          retention-days: 1

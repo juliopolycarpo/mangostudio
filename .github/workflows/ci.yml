@@ -114,7 +114,7 @@ jobs:
 
   distribution:
     name: Distribution
-    needs: [distribution-identity, changes]
+    needs: [distribution-identity, changes, build]
     if: ${{ needs.changes.outputs.distribution == 'true' }}
     permissions:
       contents: read
@@ -132,6 +132,8 @@ jobs:
       publication_bundles: ${{ github.event_name != 'pull_request' }}
       runtime_profile: ${{ github.event_name == 'pull_request' && 'light' || 'shipping' }}
       cache: true
+      frontend_artifact: ${{ needs.build.outputs.artifact }}
+      frontend_bun_revision: ${{ needs.build.outputs.bun_revision }}
 
   cross-runtimes:
     name: Cross-runtime download
@@ -187,14 +189,19 @@ jobs:
 
   build:
     name: Build
+    needs: [distribution-identity]
     uses: ./.github/workflows/build.yml
+    with:
+      source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
 
   browser-smoke:
     name: Smoke — Browser
-    needs: [local-runtime]
+    needs: [local-runtime, build]
     uses: ./.github/workflows/browser-smoke.yml
     with:
       runtime_artifact: ${{ needs.local-runtime.outputs.artifact }}
+      frontend_artifact: ${{ needs.build.outputs.artifact }}
+      frontend_bun_revision: ${{ needs.build.outputs.bun_revision }}
 
   rust-coverage:
     # The Ubuntu Rust test run, instrumented for per-crate coverage; Cargo
@@ -224,6 +231,8 @@ jobs:
       test_result: ${{ needs.test.result }}
       check_invocation_id: ${{ needs.check.outputs.invocation_id }}
       check_producer_attempt: ${{ needs.check.outputs.producer_attempt }}
+      frontend_artifact: ${{ needs.build.result == 'success' && needs.build.outputs.artifact || '' }}
+      frontend_bun_revision: ${{ needs.build.result == 'success' && needs.build.outputs.bun_revision || '' }}
       # A skipped Rust job is "not run on purpose" only when the changes job
       # proved no Rust path changed; any other skip is a missing artifact.
       rust_relevant: ${{ needs.changes.outputs.rust }}

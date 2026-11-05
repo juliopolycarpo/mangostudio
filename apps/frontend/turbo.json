@@ -4,7 +4,7 @@
   "tasks": {
     "build": {
       "outputs": ["dist/**", "dist-metafile.json"],
-      "env": ["MANGO_API_URL", "VITE_*"],
+      "env": ["MANGO_API_URL", "VITE_*", "MANGOSTUDIO_FRONTEND_BUN_REVISION"],
       "inputs": [
         "$TURBO_DEFAULT$",
         "src/**",

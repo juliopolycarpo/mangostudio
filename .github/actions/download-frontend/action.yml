@@ -1,0 +1,24 @@
+name: Download verified production frontend
+description: Replace frontend outputs with the same-source, same-toolchain build from this run.
+inputs:
+  artifact:
+    description: Immutable frontend artifact produced in this workflow run.
+    required: true
+  bun-revision:
+    description: Exact Bun commit from the producing job output.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Clear previous frontend outputs
+      shell: bash
+      run: bun ./scripts/ci/frontend-artifact.ts clean
+    - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        name: ${{ inputs.artifact }}
+        path: .
+    - name: Verify production frontend identity and exact output
+      shell: bash
+      env:
+        PRODUCER_BUN_REVISION: ${{ inputs.bun-revision }}
+      run: bun ./scripts/ci/frontend-artifact.ts verify --bun-revision "$PRODUCER_BUN_REVISION"

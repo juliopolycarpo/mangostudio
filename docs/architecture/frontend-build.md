@@ -378,3 +378,36 @@ order, and a shared file evaluates `@testing-library/dom` before `document` exis
 Module aliasing (`@/…`, `motion/react`) is resolver-level — `tsconfig.json` `paths` — not
 `mock.module`. A module mock is not undone by `mock.restore()` and leaks across files in the
 shared module graph.
+
+## CI production frontend handoff
+
+The existing CI Build job produces one clean production frontend for Build, distribution packaging, QA
+and production browser smoke. The immutable artifact includes `dist/`, its
+metafile, and a versioned file inventory. Consumers verify the checked-out
+source, lockfile digest, build URL inputs, clean production build stamp and
+all output digests before using those bytes. QA verifies before downloading
+its metric inputs so unrelated input directories do not masquerade as dirty
+application source.
+
+The producer exports its full Bun commit separately from the artifact. Each
+consumer supplies that expected commit to verification; a missing or different
+commit fails. This identifies the compiler that produced the frontend. A hub
+host may embed those browser assets with another Bun compiler, whose identity
+remains recorded separately in its hub build record. No consumer substitutes
+its own current Bun revision for the frontend producer's revision.
+
+Standalone distribution and browser dispatch paths retain their fresh build
+route when no shared artifact is supplied. Reuse refuses mismatched or
+incomplete output instead of rebuilding silently.
+
+The frontend upload precedes the API ESM build. An API build failure retains
+frontend bytes for inspection, but blocks downstream consumers: they require a
+successful reusable Build workflow and do not assume failed-workflow outputs
+remain available. CI Gate also fails. No separate frontend setup job is added.
+
+Frontend Turbo build keys include `MANGOSTUDIO_FRONTEND_BUN_REVISION`. Both
+maintained build entrypoints set this value from the executing `Bun.revision`
+before Turbo lookup, overriding inherited values. A moving Bun channel cannot
+restore outputs compiled by another Bun commit and relabel them with a new
+producer identity. Existing cache entries without this input also miss.
+Direct workspace builds bypass Turbo and compile afresh.

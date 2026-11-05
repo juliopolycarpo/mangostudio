@@ -16,6 +16,12 @@ const child = Bun.spawn(
     ...frontendBuildCacheArguments(ROOT_DIR),
     ...forwarded.slice(boundary),
   ],
-  { cwd: ROOT_DIR, stdin: 'inherit', stdout: 'inherit', stderr: 'inherit' }
+  {
+    cwd: ROOT_DIR,
+    env: { ...process.env, MANGOSTUDIO_FRONTEND_BUN_REVISION: Bun.revision },
+    stdin: 'inherit',
+    stdout: 'inherit',
+    stderr: 'inherit',
+  }
 );
 process.exit(await child.exited);

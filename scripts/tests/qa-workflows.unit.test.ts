@@ -133,9 +133,13 @@ describe('unprivileged collection side', () => {
     const qaMetrics = readText('.github/workflows/qa-metrics.yml');
     const ci = readText('.github/workflows/ci.yml');
 
-    expect(build).toContain('name: frontend-dist');
+    expect(build).toContain(
+      `name: frontend-${'$'}{{ inputs.source_sha }}-${'$'}{{ github.run_attempt }}`
+    );
     expect(qaMetrics).toContain('name: frontend-dist');
-    expect(qaMetrics).toContain('QA_FRONTEND_DIST: ./frontend-dist');
+    expect(qaMetrics).toContain(
+      "steps.frontend.outcome == 'success' && './apps/frontend/dist' || './frontend-unavailable'"
+    );
     expect(qaMetrics).not.toContain('bun run build');
     expect(ci).toContain('needs: [test, build, changes, rust-coverage, check]');
   });

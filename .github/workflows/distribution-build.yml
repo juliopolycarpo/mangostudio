@@ -3,6 +3,14 @@ name: Distribution Build
 on:
   workflow_call:
     inputs:
+      frontend_bun_revision:
+        description: Exact Bun commit from the frontend producing job.
+        type: string
+        default: ""
+      frontend_artifact:
+        description: Verified production frontend from this run; empty prepares a fresh one.
+        type: string
+        default: ""
       version:
         description: Exact version embedded into every distribution target.
         type: string
@@ -87,9 +95,15 @@ jobs:
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
       - name: Build frontend once
+        if: inputs.frontend_artifact == ''
         env:
           VERSION: ${{ inputs.version }}
         run: bun run build --frontend
+      - uses: ./.github/actions/download-frontend
+        if: inputs.frontend_artifact != ''
+        with:
+          artifact: ${{ inputs.frontend_artifact }}
+          bun-revision: ${{ inputs.frontend_bun_revision }}
       - name: Bundle binary smoke harness
         run: bun ./scripts/release/bundle-binary-smoke.ts
       - name: Upload prepared build inputs
@@ -98,6 +112,8 @@ jobs:
           name: hub-inputs-${{ inputs.source_sha }}
           path: |
             apps/frontend/dist
+            apps/frontend/dist-metafile.json
+            .mango/frontend-artifact.json
             .mango/smoke
           include-hidden-files: true
           retention-days: ${{ inputs.retention_days }}
@@ -153,6 +169,11 @@ jobs:
         with:
           name: runtime-${{ inputs.source_sha }}-${{ matrix.platform }}
           path: .mango/runtime-prebuilt
+      - name: Verify shared frontend before native compilation
+        if: ${{ !matrix.musl && inputs.frontend_artifact != '' }}
+        env:
+          PRODUCER_BUN_REVISION: ${{ inputs.frontend_bun_revision }}
+        run: bun ./scripts/ci/frontend-artifact.ts verify --bun-revision "$PRODUCER_BUN_REVISION"
       - name: Build native hub
         if: ${{ !matrix.musl }}
         env:
@@ -166,17 +187,22 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
           VERSION: ${{ inputs.version }}
           GITHUB_TOKEN: ${{ github.token }}
+          FRONTEND_ARTIFACT: ${{ inputs.frontend_artifact }}
+          PRODUCER_BUN_REVISION: ${{ inputs.frontend_bun_revision }}
         # No glibc install runs in these legs. Bun and the frozen dependency
         # install both run in Alpine on the matching host architecture.
         run: |
           set -euo pipefail
           BUN_CHANNEL="$(tr -d '\r\n' < .bun-version)"
           docker run --rm -v "$PWD:/workspace" -w /workspace \
-            -e VERSION -e PLATFORM -e GITHUB_TOKEN \
+            -e VERSION -e PLATFORM -e GITHUB_TOKEN -e FRONTEND_ARTIFACT -e PRODUCER_BUN_REVISION \
             "oven/bun:${BUN_CHANNEL}-alpine" sh -ec '
               apk add --no-cache git bash libstdc++ libgcc
               git config --global --add safe.directory /workspace
               bun install --frozen-lockfile
+              if [ -n "$FRONTEND_ARTIFACT" ]; then
+                bun ./scripts/ci/frontend-artifact.ts verify --bun-revision "$PRODUCER_BUN_REVISION"
+              fi
               bun run build --binary --platform "$PLATFORM" --runtime-dir .mango/runtime-prebuilt --reuse-frontend
             '
       - name: Upload native hub and runtime pair
@@ -239,6 +265,12 @@ jobs:
           pattern: native-hub-${{ inputs.source_sha }}-*
           merge-multiple: true
           path: .mango
+
+      - name: Verify shared frontend before packaging
+        if: inputs.frontend_artifact != ''
+        env:
+          PRODUCER_BUN_REVISION: ${{ inputs.frontend_bun_revision }}
+        run: bun ./scripts/ci/frontend-artifact.ts verify --bun-revision "$PRODUCER_BUN_REVISION"
 
       - name: Assemble verified native hubs
         env:

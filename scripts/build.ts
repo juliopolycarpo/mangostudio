@@ -121,6 +121,7 @@ async function buildFrontendSidecar(dryRun: boolean): Promise<void> {
     createTurboBuildCommand(['frontend'], frontendBuildCacheArguments(ROOT_DIR)),
     {
       cwd: ROOT_DIR,
+      env: { MANGOSTUDIO_FRONTEND_BUN_REVISION: Bun.revision },
     }
   );
   if (result.exitCode !== 0) {
@@ -726,6 +727,7 @@ const result = await runCommand(
   createTurboBuildCommand(buildTargets, frontendBuildCacheArguments(ROOT_DIR)),
   {
     cwd: ROOT_DIR,
+    env: { MANGOSTUDIO_FRONTEND_BUN_REVISION: Bun.revision },
   }
 );
 
