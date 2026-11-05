@@ -1375,6 +1375,59 @@ describe('release workflow binary gate', () => {
     expect(target).not.toContain('inputs.publication_retention_days');
   });
 
+  test('PR validation uploads target bundles while publication consumers retain aggregates', () => {
+    const workflow = readText('.github/workflows/distribution-build.yml');
+    const build = extractJobBlock(workflow, 'build');
+    const steps = extractStepBlocks(build);
+    const input = '$' + '{{ inputs.publication_bundles }}';
+    const definition = Bun.YAML.parse(workflow) as {
+      on: { workflow_call: { inputs: Record<string, { type: string; default: boolean }> } };
+    };
+    expect(
+      definition.on.workflow_call.inputs.publication_bundles,
+      'expected a boolean publication_bundles input; received no publication scope'
+    ).toBeDefined();
+    expect(definition.on.workflow_call.inputs.publication_bundles).toMatchObject({
+      type: 'boolean',
+      default: true,
+    });
+    const ci = extractJobBlock(readText('.github/workflows/ci.yml'), 'distribution');
+    expect(ci).toContain(`publication_bundles: ${'$'}{{ github.event_name != 'pull_request' }}`);
+    for (const scope of ['checksums', 'assets', 'npm']) {
+      const upload = steps.find((step) => step.includes(`name: Upload ${scope} distribution`));
+      expect(upload, `${scope} upload must have an explicit publication scope`).toContain(
+        `if: ${input}`
+      );
+      expect(build).toContain(
+        `${scope}_artifact: ${'$'}{{ inputs.publication_bundles && steps.bundle.outputs.${scope}_artifact || '' }}`
+      );
+    }
+    for (const { arch } of ALL_BINARY_TARGETS) {
+      const upload = steps.find((step) => step.includes(`name: Upload ${arch} target`));
+      expect(upload, `${arch} smoke bundle must remain available on PRs`).toBeDefined();
+      expect(upload).not.toMatch(/^ {8}if:/m);
+    }
+    // Scope only the uploads: packaging, archives and manifests still validate
+    // the complete distribution on PRs before any target can be consumed.
+    for (const name of [
+      'Assemble npm distribution',
+      'Archive release assets',
+      'Create and verify distribution manifest',
+      'Create content-addressed bundles',
+    ]) {
+      const step = steps.find((entry) => entry.includes(`name: ${name}`));
+      expect(step, name).toBeDefined();
+      expect(step, name).not.toMatch(/^ {8}if:/m);
+    }
+    for (const job of ['smoke', 'smoke-container', 'release-dry-run']) {
+      const consumer = extractJobBlock(readText('.github/workflows/ci.yml'), job);
+      expect(consumer).toContain('needs.distribution.outputs.target_artifacts');
+      expect(consumer).not.toMatch(/needs\.distribution\.outputs\.(checksums|assets|npm)_artifact/);
+    }
+    const release = extractJobBlock(readText('.github/workflows/release.yml'), 'build');
+    expect(release).not.toContain('publication_bundles: false');
+  });
+
   test('the checksums scope stays small enough to be worth splitting out', () => {
     expect(checksumsBundleMembers(true)).toEqual([
       'distribution-manifest.json',
