@@ -136,7 +136,7 @@ workflow producers and unique aggregate names.
 ## Verification boundary
 
 `gate-compatibility.unit.test.ts` uses explicit relevance fixtures from `gate-cases.json`
-and reads both producers' actual skip expressions. It checks complete direct needs,
+and reads each remaining `gate-unique` producer's actual skip expressions. It checks complete direct needs,
 success, failure, cancellation, unexpected skips, malformed results, missing lane contracts,
 and missing relevance outputs. It also protects PR event visibility, Canary's verified producer
 identity, and the existing security and label contexts.
