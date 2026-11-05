@@ -8,6 +8,7 @@ import {
   type CanaryReleasePublication,
   verifyCanaryReleasePublication,
 } from './canary-release';
+import { type CanaryVisibilityOptions, CanaryVisibilityWindow } from './canary-visibility';
 
 /** Local approved assets; reads and upload paths refer to the same staged files. */
 export interface CanaryReleaseAssetStore {
@@ -33,6 +34,7 @@ interface CanaryReleasePublishResult {
  * this function checks local and remote identity before every external phase.
  * Public complete releases are no-ops. Matching draft assets are retained,
  * missing assets are uploaded without clobber, then the exact draft is published.
+ * Post-write audits share at most 60 seconds of retry delays for visibility.
  * A failed command may have external effects: rerun with the same approved bytes.
  *
  * @example
@@ -41,8 +43,10 @@ interface CanaryReleasePublishResult {
 export async function publishVerifiedCanaryRelease(
   expected: CanaryReleaseExpectation,
   store: CanaryReleaseAssetStore,
-  client: CanaryReleasePublisherClient
+  client: CanaryReleasePublisherClient,
+  visibilityOptions: CanaryVisibilityOptions = {}
 ): Promise<CanaryReleasePublishResult> {
+  const visibility = new CanaryVisibilityWindow(visibilityOptions);
   let publication = await verifyCanaryReleasePublication(expected, client);
   const uploaded: string[] = [];
   let createdDraft = false;
@@ -82,13 +86,16 @@ export async function publishVerifiedCanaryRelease(
       'draft creation'
     );
     createdDraft = true;
-    publication = await verifyCanaryReleasePublication(expected, client);
+    publication = await visibility.read(
+      () => verifyCanaryReleasePublication(expected, client),
+      (observed) => observed.state !== 'absent'
+    );
     if (publication.state === 'complete') return result();
     requireDraft(publication, 'after draft creation');
   }
 
-  // The audit after each upload must see it. A stale read fails instead of
-  // uploading the same name again or treating eventual consistency as success.
+  // Confirm each write before another mutation. All post-write audits share a
+  // bounded wait; exhaustion fails instead of duplicating an upload.
   while (publication.missing.length > 0) {
     requireDraft(publication, 'before asset upload');
     const asset = publication.missing[0];
@@ -105,7 +112,12 @@ export async function publishVerifiedCanaryRelease(
       `asset upload ${asset.name}`
     );
     uploaded.push(asset.name);
-    publication = await verifyCanaryReleasePublication(expected, client);
+    publication = await visibility.read(
+      () => verifyCanaryReleasePublication(expected, client),
+      (observed) =>
+        observed.state !== 'absent' &&
+        !observed.missing.some((missing) => missing.name === asset.name)
+    );
     if (publication.state === 'complete') return result();
   }
 
@@ -115,7 +127,10 @@ export async function publishVerifiedCanaryRelease(
     ['release', 'edit', tag, '--draft=false', '--prerelease', '--latest=false', ...repoArgs],
     'publication'
   );
-  publication = await verifyCanaryReleasePublication(expected, client);
+  publication = await visibility.read(
+    () => verifyCanaryReleasePublication(expected, client),
+    (observed) => observed.state === 'complete'
+  );
   if (publication.state !== 'complete') {
     throw new Error(
       `Canary publication not confirmed: expected immutable complete release; received ${publication.state}. External effects may exist, rerun with original approved bytes`

@@ -483,7 +483,7 @@ test('source writer rejects malformed restoration and unexpected restored data o
 
 const fakeSnapshotGh = `#!/usr/bin/env bun
 import{appendFileSync}from'node:fs';const args=process.argv.slice(2);appendFileSync(process.env.FAKE_TRACE,JSON.stringify(args)+'\\n');const responses=await Bun.file(process.env.FAKE_RESPONSES).json();const response=responses[JSON.stringify(args)];if(!response){console.error('Unexpected fake snapshot gh command');process.exit(99);}process.stdout.write(response);`;
-test('CLI resolves before app checkout and writes source.json after identity without extra network reads', () => {
+test.each([false, true])('CLI recovery=%s freezes source before checkout', (recovery) => {
   const directory = mkdtempSync(join(tmpdir(), 'fix-canary-approval-acquisition-snapshot-cli-'));
   try {
     const responses: Record<string, string> = {};
@@ -502,7 +502,9 @@ test('CLI resolves before app checkout and writes source.json after identity wit
       path: '.github/workflows/ci.yml',
       state: 'active',
     });
-    response(`${BASE}/actions/runs/200/attempts/1`, canaryRun(1));
+    const attempt = recovery ? 3 : 1;
+    response(`${BASE}/actions/runs/200/attempts/${attempt}`, canaryRun(attempt));
+    response(`${BASE}/actions/runs/10/attempts/1`, ciRun());
     responses[
       JSON.stringify([
         'api',
@@ -532,7 +534,10 @@ test('CLI resolves before app checkout and writes source.json after identity wit
       PATH: `${directory}:${process.env.PATH}`,
       REPO,
       GITHUB_RUN_ID: '200',
-      GITHUB_RUN_ATTEMPT: '1',
+      GITHUB_RUN_ATTEMPT: String(attempt),
+      RECOVER_SOURCE_RUN_ID: recovery ? '10' : '',
+      RECOVER_SOURCE_ATTEMPT: recovery ? '1' : '',
+      RECOVER_APPROVAL_SHA256: recovery ? '4'.repeat(64) : '',
       GITHUB_SHA: EXECUTION,
       SELECTION_PATH: selectionPath,
       SNAPSHOT_PATH: snapshotPath,
@@ -548,6 +553,12 @@ test('CLI resolves before app checkout and writes source.json after identity wit
     expect(existsSync(snapshotPath)).toBe(false);
     expect(JSON.parse(readFileSync(selectionPath, 'utf8')).source).toEqual(selected);
     const callsBefore = readFileSync(trace, 'utf8');
+    if (recovery) {
+      expect(callsBefore).not.toContain('/jobs?');
+      expect(callsBefore).not.toContain('/artifacts?');
+      expect(callsBefore).not.toContain('/runs?');
+      expect(readFileSync(outputs, 'utf8')).toContain(`expected_approval_sha256=${'4'.repeat(64)}`);
+    }
     const written = Bun.spawnSync(['bun', './scripts/ci/freeze-canary-source.ts', 'write'], {
       env: { ...env, SOURCE_SHA: SHA, VERSION, CHANNEL: 'canary' },
     });
@@ -637,3 +648,168 @@ test('restored selection keeps its frozen CI workflow ID when current workflow r
   });
   expect((await resolveCanarySourceSnapshot(context, deps)).source.workflowId).toBe(5);
 });
+
+test('explicit pinned recovery selects the exact source after original snapshots disappear', async () => {
+  const { deps, context } = restoredFixture({ missing: true });
+  const recovered = await resolveCanarySourceSnapshot(context, deps, {
+    runId: '10',
+    runAttempt: '1',
+    approvalSha256: '4'.repeat(64),
+  });
+  expect(recovered.source).toEqual(selected);
+  expect(recovered.expectedApprovalSha256).toBe('4'.repeat(64));
+  expect(queriedLatest(deps)).toBe(false);
+  expect(deps.calls.some((path) => path.includes('/artifacts?'))).toBe(false);
+});
+
+test.each([1, 3])(
+  'explicit recovery attempt %s stays pinned without source job or artifact history',
+  async (attempt) => {
+    const deps = new FakeSnapshotDependencies(attempt);
+    deps.pages.clear();
+    const resolved = await resolveCanarySourceSnapshot(
+      { ...execution, runAttempt: attempt },
+      deps,
+      {
+        runId: '10',
+        runAttempt: '1',
+        approvalSha256: '4'.repeat(64),
+      }
+    );
+    expect(resolved.source).toEqual(selected);
+    expect(resolved.expectedApprovalSha256).toBe('4'.repeat(64));
+    expect(queriedLatest(deps)).toBe(false);
+    expect(deps.calls).toEqual([
+      BASE,
+      `${BASE}/actions/workflows/canary.yml`,
+      `${BASE}/actions/runs/200/attempts/${attempt}`,
+      `${BASE}/actions/workflows/ci.yml`,
+      `${BASE}/actions/runs/10/attempts/1`,
+    ]);
+    expect(
+      writeCanarySourceSnapshot(resolved, {
+        sourceSha: SHA,
+        version: VERSION,
+        channel: 'canary',
+        executionRevision: EXECUTION,
+      }).snapshot.source
+    ).toEqual(selected);
+  }
+);
+
+test.each([
+  { runId: '10' },
+  { runAttempt: '1' },
+  { approvalSha256: '4'.repeat(64) },
+  { runId: '10', runAttempt: '1' },
+  { runId: '10', approvalSha256: '4'.repeat(64) },
+  { runAttempt: '1', approvalSha256: '4'.repeat(64) },
+])('incomplete recovery %j rejects before network reads', async (input) => {
+  const deps = new FakeSnapshotDependencies();
+  await expect(resolveCanarySourceSnapshot(execution, deps, input)).rejects.toThrow(
+    'Incomplete canary recovery'
+  );
+  expect(deps.calls).toEqual([]);
+});
+
+test.each(['0', '-1', '1.5', '1e2', '01', ' 1', '9007199254740992'])(
+  'invalid recovery integer %s rejects both run and attempt before network reads',
+  async (value) => {
+    for (const field of ['runId', 'runAttempt']) {
+      const deps = new FakeSnapshotDependencies();
+      await expect(
+        resolveCanarySourceSnapshot(execution, deps, {
+          runId: '10',
+          runAttempt: '1',
+          approvalSha256: '4'.repeat(64),
+          [field]: value,
+        })
+      ).rejects.toThrow('expected positive safe integer');
+      expect(deps.calls).toEqual([]);
+    }
+  }
+);
+
+test.each(['BAD', 'A'.repeat(64), '4'.repeat(63), ` ${'4'.repeat(64)}`])(
+  'invalid recovery approval hash %s rejects before network reads',
+  async (approvalSha256) => {
+    const deps = new FakeSnapshotDependencies();
+    await expect(
+      resolveCanarySourceSnapshot(execution, deps, {
+        runId: '10',
+        runAttempt: '1',
+        approvalSha256,
+      })
+    ).rejects.toThrow('expected lowercase 64-character SHA256');
+    expect(deps.calls).toEqual([]);
+  }
+);
+
+test.each([
+  [{ id: 11, html_url: `https://github.com/${REPO}/actions/runs/11` }, 'expected run 10 attempt 1'],
+  [{ run_attempt: 2 }, 'expected run 10 attempt 1'],
+  [{ workflow_id: 6 }, 'Inconsistent CI run'],
+  [{ path: '.github/workflows/other.yml' }, 'Inconsistent CI run'],
+  [{ event: 'pull_request' }, 'Inconsistent CI run'],
+  [{ head_branch: 'other' }, 'Inconsistent CI run'],
+  [{ html_url: 'https://example.com' }, 'Inconsistent CI run'],
+  [{ head_sha: 'A'.repeat(40) }, 'Invalid head_sha'],
+  [{ status: 'in_progress' }, 'No eligible completed successful'],
+  [{ conclusion: 'failure' }, 'No eligible completed successful'],
+  [{ repository: { id: 2, full_name: REPO } }, 'Invalid selected CI repository'],
+  [{ head_repository: { id: 2, full_name: REPO } }, 'Invalid selected CI repository'],
+  [{ repository: { id: 1, full_name: 'other/repo' } }, 'Invalid selected CI repository'],
+  [{ head_repository: { id: 1, full_name: 'other/repo' } }, 'Invalid selected CI repository'],
+] as const)('explicit recovery rejects CI metadata %j', async (overrides, error) => {
+  const deps = new FakeSnapshotDependencies();
+  deps.values.set(`${BASE}/actions/runs/10/attempts/1`, { status: 200, body: ciRun(overrides) });
+  await expect(
+    resolveCanarySourceSnapshot(execution, deps, {
+      runId: '10',
+      runAttempt: '1',
+      approvalSha256: '4'.repeat(64),
+    })
+  ).rejects.toThrow(error);
+  expect(queriedLatest(deps)).toBe(false);
+});
+
+test('scheduled execution cannot acquire explicit recovery privileges', async () => {
+  const deps = new FakeSnapshotDependencies();
+  deps.values.set(`${BASE}/actions/runs/200/attempts/1`, {
+    status: 200,
+    body: { ...canaryRun(1), event: 'schedule' },
+  });
+  await expect(
+    resolveCanarySourceSnapshot(execution, deps, {
+      runId: '10',
+      runAttempt: '1',
+      approvalSha256: '4'.repeat(64),
+    })
+  ).rejects.toThrow('expected workflow_dispatch; received schedule');
+});
+
+test.each(['inactive', 'wrong-path', 'missing-attempt'])(
+  'recovery rejects unavailable CI workflow or attempt %s',
+  async (kind) => {
+    const deps = new FakeSnapshotDependencies();
+    if (kind === 'missing-attempt')
+      deps.values.set(`${BASE}/actions/runs/10/attempts/1`, { status: 404, body: {} });
+    else
+      deps.values.set(`${BASE}/actions/workflows/ci.yml`, {
+        status: 200,
+        body: {
+          id: 5,
+          path: kind === 'wrong-path' ? 'other.yml' : '.github/workflows/ci.yml',
+          state: kind === 'inactive' ? 'disabled_manually' : 'active',
+        },
+      });
+    await expect(
+      resolveCanarySourceSnapshot(execution, deps, {
+        runId: '10',
+        runAttempt: '1',
+        approvalSha256: '4'.repeat(64),
+      })
+    ).rejects.toThrow(kind === 'missing-attempt' ? 'expected HTTP200' : 'expected active ci.yml');
+    expect(queriedLatest(deps)).toBe(false);
+  }
+);

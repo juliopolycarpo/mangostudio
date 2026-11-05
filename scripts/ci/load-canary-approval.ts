@@ -178,7 +178,8 @@ async function main(): Promise<void> {
       source,
       requiredEnv('VERSION'),
       requiredEnv('GITHUB_SHA'),
-      deps
+      deps,
+      process.env.EXPECTED_APPROVAL_SHA256 || undefined
     );
     for (const name of [
       'promotion.json',

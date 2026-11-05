@@ -18,7 +18,8 @@ export interface CanaryApprovalPreparationServices {
   acquire(
     source: CanarySource,
     version: string,
-    executionRevision: string
+    executionRevision: string,
+    expectedApprovalSha256?: string
   ): Promise<CanaryApprovalAcquisition>;
   qualify(source: CanarySource, verifiedPushBeforeSha?: string): Promise<CanaryValidationReceipt>;
 }
@@ -103,7 +104,7 @@ export async function prepareCanaryApproval(
   const pin = input.expectedApprovalSha256;
   if (pin !== undefined && !/^[a-f0-9]{64}$/.test(pin))
     throw new Error(`Invalid EXPECTED_APPROVAL_SHA256: expected full SHA256; received ${pin}`);
-  const acquisition = await services.acquire(source, input.version, input.executionRevision);
+  const acquisition = await services.acquire(source, input.version, input.executionRevision, pin);
   const recovered = acquisition.receipt !== undefined;
   if (
     recovered !== (acquisition.approvalPayload !== undefined) ||
@@ -115,7 +116,10 @@ export async function prepareCanaryApproval(
     );
   if (
     pin !== undefined &&
-    (!recovered || !acquisition.approvalPayload || hash(acquisition.approvalPayload) !== pin)
+    (!['release', 'actions'].includes(acquisition.origin) ||
+      !recovered ||
+      !acquisition.approvalPayload ||
+      hash(acquisition.approvalPayload) !== pin)
   )
     throw new Error(
       `Approved payload unavailable: expected existing approval SHA256 ${pin}; refusing new approval`

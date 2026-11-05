@@ -1,4 +1,5 @@
 import { type RegistryClient, verifyCanaryNpmPublication } from './canary-publication';
+import { type CanaryVisibilityOptions, CanaryVisibilityWindow } from './canary-visibility';
 import type { DistributionManifest } from './distribution-manifest';
 import { MAIN_PACKAGE, NPM_PLATFORMS, platformPackageName } from './npm-pack';
 import type { NpmCommandResult } from './npm-publish';
@@ -26,6 +27,7 @@ export interface CanaryTagDependencies {
   readonly runner: CanaryTagRunner;
   readonly ancestry: CanaryTagAncestry;
   readonly env: NodeJS.ProcessEnv;
+  readonly visibility?: CanaryVisibilityOptions;
 }
 
 interface CanaryTagPlan {
@@ -122,7 +124,11 @@ export async function promoteCanaryTags(
       `Invalid npm CLI for canary OIDC: expected ${CANARY_TAG_NPM_VERSION}; received ${JSON.stringify(npm.stdout.trim())}`
     );
   }
-  const publication = await verifyCanaryNpmPublication(manifest, dependencies.registry);
+  const publication = await verifyCanaryNpmPublication(
+    manifest,
+    dependencies.registry,
+    new CanaryVisibilityWindow(dependencies.visibility)
+  );
   if (publication.missing.length > 0) {
     throw new Error(
       `Canary tag promotion requires all seven verified packages; missing ${publication.missing.join(', ')}`

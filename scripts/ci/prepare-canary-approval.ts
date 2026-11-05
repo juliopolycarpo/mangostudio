@@ -69,15 +69,16 @@ async function main(): Promise<void> {
       version,
       executionRevision: revision,
       producerAttempt: Number(requiredEnv('GITHUB_RUN_ATTEMPT')),
-      expectedApprovalSha256: process.env.EXPECTED_APPROVAL_SHA256,
+      expectedApprovalSha256: process.env.EXPECTED_APPROVAL_SHA256 || undefined,
     },
     {
-      async acquire(selected, selectedVersion, executionRevision) {
+      async acquire(selected, selectedVersion, executionRevision, expectedApprovalSha256) {
         const acquiredDir = join(output, 'acquired');
         run('./scripts/ci/load-canary-approval.ts', {
           ...sourceEnv(selected),
           VERSION: selectedVersion,
           GITHUB_SHA: executionRevision,
+          EXPECTED_APPROVAL_SHA256: expectedApprovalSha256,
           OUTPUT_DIR: acquiredDir,
         });
         const metadata = JSON.parse(readFileSync(join(acquiredDir, 'acquisition.json'), 'utf8'));

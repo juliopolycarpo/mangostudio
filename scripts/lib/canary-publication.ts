@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
 
+import type { CanaryVisibilityWindow } from './canary-visibility';
 import { type DistributionManifest, parseDistributionManifest } from './distribution-manifest';
 import { MAIN_PACKAGE, NPM_PLATFORMS, platformPackageName } from './npm-pack';
 import { isValidSemver, normalizeVersion } from './release-version';
@@ -48,6 +49,8 @@ interface ExpectedPackage {
  * The caller must authenticate that manifest's builder provenance. Registry provenance
  * metadata is required here; its cryptographic attestation is not verified by this helper.
  * No package or channel is changed. Only an HTTP 404 proves a version absent.
+ * Post-publish callers may supply a shared visibility window for individual
+ * version/archive 404 reads; initial absence audits omit it and remain immediate.
  *
  * @example
  * const publication = await verifyCanaryNpmPublication(approvedManifest, registry);
@@ -55,7 +58,8 @@ interface ExpectedPackage {
  */
 export async function verifyCanaryNpmPublication(
   approvedManifest: DistributionManifest,
-  registry: RegistryClient
+  registry: RegistryClient,
+  visibility?: CanaryVisibilityWindow
 ): Promise<CanaryNpmPublication> {
   const manifest = parseDistributionManifest(JSON.stringify(approvedManifest));
   const packages = expectedPackages(manifest);
@@ -65,7 +69,12 @@ export async function verifyCanaryNpmPublication(
   for (const expected of packages) {
     const encodedName = encodeURIComponent(expected.name);
     const versionUrl = `${REGISTRY}/${encodedName}/${encodeURIComponent(manifest.packageVersion)}`;
-    const versionResponse = await registry.getJson(versionUrl);
+    const versionResponse = visibility
+      ? await visibility.read(
+          () => registry.getJson(versionUrl),
+          (response) => response.status !== 404
+        )
+      : await registry.getJson(versionUrl);
     if (versionResponse.status === 404) {
       missing.push(expected.name);
     } else {
@@ -75,7 +84,12 @@ export async function verifyCanaryNpmPublication(
         expected.name,
         manifest.packageVersion
       );
-      const archiveResponse = await registry.getBytes(publication.tarball);
+      const archiveResponse = visibility
+        ? await visibility.read(
+            () => registry.getBytes(publication.tarball),
+            (response) => response.status !== 404
+          )
+        : await registry.getBytes(publication.tarball);
       requireSuccess(archiveResponse.status, publication.tarball);
       await verifyPackageArchive(
         archiveResponse.body,

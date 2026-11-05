@@ -53,15 +53,35 @@ class FakeGitHub implements CanaryReleasePublisherClient {
   leaveDraftAfterPublish = false;
   disappearAfterCreate = false;
   hideUploaded = false;
+  hiddenReadsAfterCreate = 0;
+  hiddenReadsAfterUpload = 0;
+  hiddenReadsAfterPublish = 0;
+  createdReleaseStatus?: number;
+  createdSource = SOURCE;
+  private pendingHiddenReads = 0;
+  private pendingAssetReads = 0;
+  private pendingPublicationReads = 0;
+  private lastUploadedName?: string;
   nextAssetId = 10;
   constructor(readonly store: FakeAssetStore) {}
   getRelease(tag: string): Promise<CanaryReleaseResponse> {
     this.reads.push(`release:${tag}`);
     if (this.readFailure) throw this.readFailure;
-    const status = this.releaseStatus ?? (this.exists ? 200 : 404);
+    const hidden = this.pendingHiddenReads > 0;
+    if (hidden) this.pendingHiddenReads--;
+    const status =
+      this.releaseStatus ?? (this.exists && !hidden ? (this.createdReleaseStatus ?? 200) : 404);
+    const observedDraft = this.pendingPublicationReads > 0 || this.draft;
+    if (this.pendingPublicationReads > 0) this.pendingPublicationReads--;
     return Promise.resolve({
       status,
-      body: status === 200 ? releaseRecord(this.draft, this.immutable) : { message: 'Not Found' },
+      body:
+        status === 200
+          ? {
+              ...releaseRecord(observedDraft, this.immutable),
+              target_commitish: this.createdSource,
+            }
+          : { message: 'Not Found' },
     });
   }
   resolveTag(tag: string): Promise<CanaryReleaseResponse> {
@@ -73,7 +93,15 @@ class FakeGitHub implements CanaryReleasePublisherClient {
   }
   listAssets(id: number): Promise<readonly unknown[]> {
     this.reads.push(`assets:${id}`);
-    return Promise.resolve(this.hideUploaded ? [] : [...this.assets.values()]);
+    const hideLatest = this.pendingAssetReads > 0;
+    if (hideLatest) this.pendingAssetReads--;
+    return Promise.resolve(
+      this.hideUploaded
+        ? []
+        : [...this.assets.values()].filter(
+            (asset) => !hideLatest || asset.name !== this.lastUploadedName
+          )
+    );
   }
   seed(name: string): void {
     const bytes = this.store.bytes.get(name);
@@ -100,16 +128,20 @@ class FakeGitHub implements CanaryReleasePublisherClient {
       if (args[1] === 'create') {
         this.exists = !this.disappearAfterCreate;
         this.draft = true;
+        this.pendingHiddenReads = this.hiddenReadsAfterCreate;
       } else if (args[1] === 'upload') {
         const path = args[3];
         if (!path) throw new Error('Expected fake upload path');
         const name = basename(path);
         if (this.assets.has(name)) throw new Error(`Fake upload would overwrite ${name}`);
         this.seed(name);
+        this.lastUploadedName = name;
+        this.pendingAssetReads = this.hiddenReadsAfterUpload;
       } else if (args[1] === 'edit') {
         if (!this.leaveDraftAfterPublish) {
           this.draft = false;
           this.tagStatus = 200;
+          this.pendingPublicationReads = this.hiddenReadsAfterPublish;
         }
       } else throw new Error('Unexpected fake release operation');
     }
@@ -344,25 +376,25 @@ test.each([1, 2, 4])('nonzero command at write%i stops all later phases', async 
 test('missing draft after successful creation is failure before upload', async () => {
   const { store, github, expected } = fixture();
   github.disappearAfterCreate = true;
-  await expect(publishVerifiedCanaryRelease(expected, store, github)).rejects.toThrow(
-    'expected audited draft; received absent'
-  );
+  await expect(
+    publishVerifiedCanaryRelease(expected, store, github, { retryDelaysMs: [] })
+  ).rejects.toThrow('expected audited draft; received absent');
   expect(github.writes.map((args) => args[1])).toEqual(['create']);
 });
 test('invisible successful upload fails without duplicate upload attempts', async () => {
   const { store, github, expected } = fixture();
   github.hideUploaded = true;
-  await expect(publishVerifiedCanaryRelease(expected, store, github)).rejects.toThrow(
-    'expected uploaded asset in fresh audit'
-  );
+  await expect(
+    publishVerifiedCanaryRelease(expected, store, github, { retryDelaysMs: [] })
+  ).rejects.toThrow('expected uploaded asset in fresh audit');
   expect(github.writes.map((args) => args[1])).toEqual(['create', 'upload']);
 });
 test('a final draft never becomes a claimed complete publication', async () => {
   const { store, github, expected } = fixture();
   github.leaveDraftAfterPublish = true;
-  await expect(publishVerifiedCanaryRelease(expected, store, github)).rejects.toThrow(
-    'expected immutable complete release; received draft'
-  );
+  await expect(
+    publishVerifiedCanaryRelease(expected, store, github, { retryDelaysMs: [] })
+  ).rejects.toThrow('expected immutable complete release; received draft');
   expect(github.draft).toBe(true);
 });
 test('a public release without immutability fails final audit', async () => {
@@ -458,4 +490,71 @@ test.each([true, false])('CLI pins same-run plan digest before gh reads; valid=%
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+class FakeVisibilitySleeper {
+  readonly delays: number[] = [];
+  sleep(delay: number): Promise<void> {
+    this.delays.push(delay);
+    return Promise.resolve();
+  }
+}
+
+test('waits for a newly created draft without creating or uploading twice', async () => {
+  const { store, github, expected } = fixture();
+  const clock = new FakeVisibilitySleeper();
+  github.hiddenReadsAfterCreate = 2;
+  const result = await publishVerifiedCanaryRelease(expected, store, github, {
+    retryDelaysMs: [1, 2],
+    sleep: clock.sleep.bind(clock),
+  });
+  expect(result.outcome).toBe('published');
+  expect(clock.delays).toEqual([1, 2]);
+  expect(github.writes.map((args) => args[1])).toEqual(['create', 'upload', 'upload', 'edit']);
+});
+
+test('post-upload and publication visibility waits retain each audited asset without duplicate writes', async () => {
+  const { store, github, expected } = fixture();
+  const clock = new FakeVisibilitySleeper();
+  github.hiddenReadsAfterCreate = 1;
+  github.hiddenReadsAfterUpload = 1;
+  github.hiddenReadsAfterPublish = 1;
+  const result = await publishVerifiedCanaryRelease(expected, store, github, {
+    retryDelaysMs: [1, 2, 3, 4],
+    sleep: clock.sleep.bind(clock),
+  });
+  expect(result.outcome).toBe('published');
+  expect(clock.delays).toEqual([1, 1, 1, 1]);
+  expect(github.writes.map((args) => args[1])).toEqual(['create', 'upload', 'upload', 'edit']);
+});
+
+test.each([401, 403, 429, 500])(
+  'post-create HTTP%i fails immediately without upload or a visibility delay',
+  async (status) => {
+    const { store, github, expected } = fixture();
+    const clock = new FakeVisibilitySleeper();
+    github.createdReleaseStatus = status;
+    await expect(
+      publishVerifiedCanaryRelease(expected, store, github, {
+        retryDelaysMs: [1],
+        sleep: clock.sleep.bind(clock),
+      })
+    ).rejects.toThrow(`received ${status}`);
+    expect(github.writes.map((args) => args[1])).toEqual(['create']);
+    expect(clock.delays).toEqual([]);
+  }
+);
+
+test('a conflicting post-create source is never treated as a visibility delay', async () => {
+  const { store, github, expected } = fixture();
+  const clock = new FakeVisibilitySleeper();
+  github.createdSource = 'b'.repeat(40);
+  await expect(
+    publishVerifiedCanaryRelease(expected, store, github, {
+      retryDelaysMs: [1],
+      sleep: clock.sleep.bind(clock),
+    })
+  ).rejects.toThrow('expected exact full source');
+  expect(github.writes.map((args) => args[1])).toEqual(['create']);
+  expect(clock.delays).toEqual([]);
 });

@@ -931,3 +931,43 @@ test('approval CLI rejects an extra whitespace-only ZIP member', async () => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test('explicit approval pin refuses missing evidence before fresh CI resolution', async () => {
+  const { deps } = await fixture();
+  await expect(
+    loadCanaryApproval(source, VERSION, EXECUTION, deps, '4'.repeat(64))
+  ).rejects.toThrow('Approved payload unavailable: expected existing approval SHA256');
+  expect(deps.resolveCalls).toBe(0);
+  expect(deps.ciDownloads).toBe(0);
+});
+
+test.each(['release', 'actions'] as const)(
+  'explicit approval pin authenticates original %s evidence across workflow revisions',
+  async (origin) => {
+    const { deps, payload, promotion, builderBundle } = await fixture();
+    if (origin === 'release') durable(deps, payload, promotion, builderBundle);
+    else addApproval(deps, payload);
+    const result = await loadCanaryApproval(source, VERSION, EXECUTION, deps, hash(payload));
+    expect(result.origin).toBe(origin);
+    expect(result.approvalPayload).toEqual(payload);
+    expect(result.receipt?.workflowRevision).toBe(ORIGIN);
+    expect(deps.verifications.length).toBeGreaterThan(0);
+    expect(deps.resolveCalls).toBe(0);
+    expect(deps.ciDownloads).toBe(0);
+    await expect(
+      loadCanaryApproval(source, VERSION, EXECUTION, deps, '0'.repeat(64))
+    ).rejects.toThrow('Approved payload unavailable: expected existing approval SHA256');
+    expect(deps.resolveCalls).toBe(0);
+  }
+);
+
+test.each(['bad', 'A'.repeat(64)])(
+  'malformed explicit approval pin %s fails before acquisition',
+  async (pin) => {
+    const { deps } = await fixture();
+    await expect(loadCanaryApproval(source, VERSION, EXECUTION, deps, pin)).rejects.toThrow(
+      'expected full lowercase SHA256'
+    );
+    expect(deps.github.calls).toEqual([]);
+  }
+);
