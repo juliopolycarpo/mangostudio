@@ -40,10 +40,10 @@ const EXPR = '$' + '{{';
 
 describe('Integration branch coverage', () => {
   test.each([...INTEGRATION_PR_WORKFLOWS])(
-    '%s runs for PRs that target main and no retired integration branch',
+    '%s runs for PRs that target main or the reserved stack namespace',
     (path) => {
       const onBlock = extractOnBlock(readText(path));
-      expect(onBlock).toContain('pull_request:\n    branches: [main]');
+      expect(onBlock).toContain('pull_request:\n    branches: [main, "stack/**"]');
     }
   );
 });
@@ -158,10 +158,10 @@ describe('ci.yml trigger and concurrency policy', () => {
     const onBlock = extractOnBlock(workflow);
 
     expect(sectionKeys(onBlock)).toEqual(['pull_request', 'push', 'workflow_dispatch']);
-    expect(onBlock).toContain('pull_request:\n    branches: [main]');
+    expect(onBlock).toContain('pull_request:\n    branches: [main, "stack/**"]');
     expect(onBlock).toContain('push:\n    branches: [main]');
-    // No branch-prefix allowlist: development branches get CI via their PR.
-    expect(onBlock).not.toContain('/**');
+    // Development pushes remain excluded, including the stack namespace.
+    expect(onBlock.split('  push:')[1]?.split('  workflow_dispatch:')[0]).not.toContain('/**');
   });
 
   test('one authoritative run per PR: keyed by PR number, never by SHA', () => {
@@ -276,7 +276,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     expect(sectionKeys(onBlock)).toEqual(['pull_request', 'push', 'workflow_dispatch']);
     // pull_request must not be path-filtered, or the Gate check would hang as
     // "expected" on non-Rust PRs.
-    expect(onBlock).toContain('pull_request:\n    branches: [main]\n  push:');
+    expect(onBlock).toContain('pull_request:\n    branches: [main, "stack/**"]\n  push:');
     expect(onBlock).toContain('- "crates/**"');
     expect(onBlock).toContain('- "Cargo.toml"');
     expect(onBlock).toContain('- "Cargo.lock"');

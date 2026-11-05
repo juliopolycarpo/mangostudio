@@ -391,15 +391,14 @@ remains restricted to tags and pushes to `main`.
 
 ### Temporary integration branches
 
-The gated workflows filter `pull_request` by base branch, and the list is `[main]`. A pull
-request that targets any other branch starts none of them. A temporary integration branch turns
-them on by adding its own name to those lists in a commit on that branch, together with the
-assertions in `scripts/tests/ci-gate.unit.test.ts` and
-`scripts/tests/security-workflows.unit.test.ts` that pin the lists. Such a pull request must run
-checks without gaining a publish path.
+Use a base branch under `stack/**` for dependent pull requests. CI, Cargo Shim,
+Protocol CI, CodeQL and Dependency Review accept both `main` and `stack/**` on
+`pull_request`; their push triggers stay restricted to `main`. A stack PR receives
+validation without gaining a publication path or a duplicate feature-branch push run.
 
-Remove the entry when the branch is retired. `main` should not name a branch that no longer
-exists.
+Keep one-off branch names out of the workflow filters and their test assertions.
+Follow the [stacked pull request procedure](./ci-gates.md#stacked-pull-requests)
+for restacking, retargeting and the validation required before landing on `main`.
 
 ## Related
 

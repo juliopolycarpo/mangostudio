@@ -264,7 +264,7 @@ describe('compatibility checks preserve enforcement producers', () => {
         isReusableDryRun(workflow)
       ) {
         const ci = readText('.github/workflows/ci.yml');
-        expect(extractOnBlock(ci)).toContain('pull_request:\n    branches: [main]\n  ');
+        expect(extractOnBlock(ci)).toContain('pull_request:\n    branches: [main, "stack/**"]\n  ');
         const caller = extractJobBlock(ci, 'release-dry-run');
         expect(caller).toContain(
           `if: ${EXPR} !cancelled() && github.event_name == 'pull_request' }}`
@@ -273,7 +273,7 @@ describe('compatibility checks preserve enforcement producers', () => {
         expect(triggers).toContain('  workflow_call:');
         expect(triggers).not.toContain('  pull_request:');
       } else {
-        expect(triggers).toContain('pull_request:\n    branches: [main]\n  ');
+        expect(triggers).toContain('pull_request:\n    branches: [main, "stack/**"]\n  ');
       }
       const names = extractJobBlocks(workflow).flatMap(({ block }) =>
         [...block.matchAll(/^ {4}name: (.+)$/gm)].map((match) => match[1])
@@ -289,10 +289,10 @@ describe('compatibility checks preserve enforcement producers', () => {
 
   test('security and label contexts keep their event visibility and permissions', () => {
     const dependency = readText('.github/workflows/dependency-review.yml');
-    expect(extractOnBlock(dependency)).toContain('pull_request:\n    branches: [main]');
+    expect(extractOnBlock(dependency)).toContain('pull_request:\n    branches: [main, "stack/**"]');
     expect(extractJobBlock(dependency, 'dependency-review')).toContain('name: Dependency Review');
     const codeql = readText('.github/workflows/codeql.yml');
-    expect(extractOnBlock(codeql)).toContain('pull_request:\n    branches: [main]');
+    expect(extractOnBlock(codeql)).toContain('pull_request:\n    branches: [main, "stack/**"]');
     expect(extractJobBlock(codeql, 'analyze')).toContain('security-events: write');
     const labeler = readText('.github/workflows/labeler.yml');
     expect(extractOnBlock(labeler)).toContain('pull_request_target:');

@@ -152,3 +152,15 @@ changes and application `15368` alongside the retained legacy and security conte
 reusable workflow's leaf job name alone does not establish its required-check context. An
 additive PR that has only run its own workflow-changing case has not completed that hosted
 case matrix.
+
+## Stacked pull requests
+
+Use `stack/**` branches as bases for dependent pull requests. CI, Cargo Shim,
+Protocol CI, CodeQL and Dependency Review validate PRs targeting that namespace
+as well as `main`. Push validation stays limited to `main`, so each stack
+commit receives one authoritative PR run. Release Dry Run remains a reusable
+CI consumer, and the label workflow retains its unfiltered PR-target event.
+
+A green child PR qualifies its diff against its current parent. Retargeting or
+restacking requires fresh validation before landing on `main`; it does not
+establish that the earlier parent was merged.
