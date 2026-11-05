@@ -94,3 +94,30 @@ test('source snapshots are written from trusted execution code after reading sel
   expect(steps[write].run).toContain('freeze-canary-source.ts write');
   expect(steps.at(-1)?.uses).toContain('actions/upload-artifact@');
 });
+
+test('manual recovery carries all three explicit inputs into source validation and pins approval acquisition', () => {
+  const parsed = Bun.YAML.parse(readText('.github/workflows/canary.yml')) as {
+    on: { workflow_dispatch: { inputs: Record<string, { type: string; required: boolean }> } };
+    jobs: Record<string, Job & { outputs: Record<string, string> }>;
+  };
+  expect(Object.keys(parsed.on.workflow_dispatch.inputs)).toEqual([
+    'recover_source_run_id',
+    'recover_source_attempt',
+    'recover_approval_sha256',
+  ]);
+  for (const input of Object.values(parsed.on.workflow_dispatch.inputs)) {
+    expect(input.type).toBe('string');
+    expect(input.required).toBe(false);
+  }
+  const source = parsed.jobs.source;
+  const resolve = source.steps?.find((step) => step.id === 'source');
+  expect(resolve?.env?.RECOVER_SOURCE_RUN_ID).toBe(`${'$'}{{ inputs.recover_source_run_id }}`);
+  expect(resolve?.env?.RECOVER_SOURCE_ATTEMPT).toBe(`${'$'}{{ inputs.recover_source_attempt }}`);
+  expect(resolve?.env?.RECOVER_APPROVAL_SHA256).toBe(`${'$'}{{ inputs.recover_approval_sha256 }}`);
+  expect(source.outputs.expected_approval_sha256).toBe(
+    `${'$'}{{ steps.source.outputs.expected_approval_sha256 }}`
+  );
+  expect(
+    parsed.jobs.approve.steps?.find((step) => step.id === 'approved')?.env?.EXPECTED_APPROVAL_SHA256
+  ).toBe(`${'$'}{{ needs.source.outputs.expected_approval_sha256 }}`);
+});

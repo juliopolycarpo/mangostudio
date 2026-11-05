@@ -75,19 +75,29 @@ const LIMIT = 64 * 1024 * 1024;
  * Durable signed release evidence wins; otherwise the earliest successful version
  * reservation fixes one payload hash, including expired/deleted reservations.
  * Integrity rejection never falls back to a rebuild or a later different payload.
+ * An explicit payload pin requires recovered evidence before reading fresh CI bytes.
  * Example: await loadCanaryApproval(selectedRun, version, executionSha, dependencies).
  */
 export async function loadCanaryApproval(
   source: CanarySource,
   version: string,
   workflowRevision: string,
-  deps: CanaryApprovalDependencies
+  deps: CanaryApprovalDependencies,
+  expectedApprovalSha256?: string
 ): Promise<CanaryApprovalAcquisition> {
   validateSelection(source, version, workflowRevision);
+  if (expectedApprovalSha256 !== undefined && !/^[a-f0-9]{64}$/.test(expectedApprovalSha256))
+    throw new Error(
+      `Invalid EXPECTED_APPROVAL_SHA256: expected full lowercase SHA256; received ${expectedApprovalSha256}`
+    );
   const durable = await recoverRelease(source, version, deps);
-  if (durable) return durable;
+  if (durable) return pinnedApproval(durable, expectedApprovalSha256);
   const historical = await recoverActions(source, version, deps);
-  if (historical) return historical;
+  if (historical) return pinnedApproval(historical, expectedApprovalSha256);
+  if (expectedApprovalSha256 !== undefined)
+    throw new Error(
+      `Approved payload unavailable: expected existing approval SHA256 ${expectedApprovalSha256}; refusing new approval`
+    );
   const distribution = await deps.resolveDistribution(source, version);
   for (const scope of ['checksums', 'assets', 'npm'] as const) {
     const item = distribution[scope];
@@ -104,6 +114,20 @@ export async function loadCanaryApproval(
   const bundle = await deps.downloadCiChecksums(distribution);
   const verified = await verifyBuilderBundle(bundle, source, version, deps);
   return { origin: 'ci', distribution, checksumsBundle: bundle, ...verified };
+}
+
+function pinnedApproval(
+  acquisition: CanaryApprovalAcquisition,
+  expectedSha256: string | undefined
+): CanaryApprovalAcquisition {
+  if (
+    expectedSha256 !== undefined &&
+    (!acquisition.approvalPayload || hash(acquisition.approvalPayload) !== expectedSha256)
+  )
+    throw new Error(
+      `Approved payload unavailable: expected existing approval SHA256 ${expectedSha256}; refusing new approval`
+    );
+  return acquisition;
 }
 
 async function recoverRelease(

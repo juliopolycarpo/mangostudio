@@ -97,6 +97,11 @@ async function main(): Promise<void> {
             throw new Error('Invalid source snapshot ZIP: expected bounded readable source.json');
           return await Promise.resolve(new Map([['source.json', extracted.stdout]]));
         },
+      },
+      {
+        runId: process.env.RECOVER_SOURCE_RUN_ID,
+        runAttempt: process.env.RECOVER_SOURCE_ATTEMPT,
+        approvalSha256: process.env.RECOVER_APPROVAL_SHA256,
       }
     );
     writeFileSync(selectionPath, `${JSON.stringify(result, null, 2)}\n`);
@@ -119,6 +124,8 @@ async function main(): Promise<void> {
       const snapshot = JSON.parse(result.snapshotRaw) as { version: string; channel: string };
       outputs.push(`version=${snapshot.version}`, `channel=${snapshot.channel}`);
     }
+    if (result.expectedApprovalSha256 !== undefined)
+      outputs.push(`expected_approval_sha256=${result.expectedApprovalSha256}`);
     if (result.originalAttempt !== undefined)
       outputs.push(`original_source_attempt=${result.originalAttempt}`);
     appendFileSync(requiredEnv('GITHUB_OUTPUT'), `${outputs.join('\n')}\n`);

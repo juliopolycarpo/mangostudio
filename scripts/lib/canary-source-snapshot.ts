@@ -24,8 +24,15 @@ export interface CanarySourceResolution {
   readonly source: CanarySource;
   readonly executionRevision: string;
   readonly restored: boolean;
+  readonly expectedApprovalSha256?: string;
   readonly originalAttempt?: number;
   readonly snapshotRaw?: string;
+}
+/** Explicit dispatch inputs remain unchanged across reruns of the recovery execution. */
+export interface CanarySourceRecoveryInput {
+  readonly runId?: string;
+  readonly runAttempt?: string;
+  readonly approvalSha256?: string;
 }
 /** Transport keeps real status, complete pages, and every ZIP member; duplicate ZIP names must reject. */
 export interface CanarySourceSnapshotDependencies {
@@ -39,13 +46,16 @@ const LIMIT = 1024 * 1024;
  * Restore the earliest successful source job in the same canary run, or select
  * latest eligible CI only when no earlier source job succeeded. A missing or
  * expired snapshot blocks the rerun instead of silently selecting a new source.
+ * Explicit recovery validates the requested CI attempt and pins an existing approval.
  * Example: await resolveCanarySourceSnapshot(execution, dependencies).
  */
 export async function resolveCanarySourceSnapshot(
   execution: CanarySourceExecution,
-  deps: CanarySourceSnapshotDependencies
+  deps: CanarySourceSnapshotDependencies,
+  recoveryInput: CanarySourceRecoveryInput = {}
 ): Promise<CanarySourceResolution> {
   validateExecution(execution);
+  const recovery = parseRecovery(recoveryInput);
   const base = `repos/${execution.repository}`;
   const repository = record(await get(deps, base), 'repository');
   const repositoryId = positive(repository.id, 'repository ID');
@@ -59,6 +69,29 @@ export async function resolveCanarySourceSnapshot(
     canaryWorkflow,
     execution.runAttempt
   );
+  if (recovery) {
+    if (current.event !== 'workflow_dispatch')
+      throw new Error(
+        `Invalid recovery event: expected workflow_dispatch; received ${String(current.event)}`
+      );
+    const ciWorkflow = await workflow(deps, base, 'ci.yml');
+    const raw = await get(
+      deps,
+      `${base}/actions/runs/${recovery.runId}/attempts/${recovery.runAttempt}`
+    );
+    assertCiRepositories(raw, execution.repository, repositoryId);
+    const source = selectCanarySource([raw], execution.repository, ciWorkflow);
+    if (source.runId !== recovery.runId || source.runAttempt !== recovery.runAttempt)
+      throw new Error(
+        `Invalid recovered CI identity: expected run ${recovery.runId} attempt ${recovery.runAttempt}; received run ${source.runId} attempt ${source.runAttempt}`
+      );
+    return {
+      source,
+      executionRevision: execution.executionRevision,
+      restored: false,
+      expectedApprovalSha256: recovery.approvalSha256,
+    };
+  }
   const allJobs = (
     await deps.github.list(
       `${base}/actions/runs/${execution.runId}/jobs?filter=all&per_page=100`,
@@ -245,6 +278,29 @@ export function writeCanarySourceSnapshot(
     executionRevision: identity.executionRevision,
   };
   return { raw: `${JSON.stringify(snapshot, null, 2)}\n`, snapshot };
+}
+
+function parseRecovery(input: CanarySourceRecoveryInput) {
+  const values = [input.runId, input.runAttempt, input.approvalSha256];
+  if (values.every((value) => value === undefined || value === '')) return undefined;
+  if (values.some((value) => value === undefined || value === ''))
+    throw new Error(
+      `Incomplete canary recovery: expected recover_source_run_id, recover_source_attempt and recover_approval_sha256 together; received ${JSON.stringify(input)}`
+    );
+  const integer = (value: string | undefined, field: string) => {
+    if (typeof value !== 'string' || !/^[1-9][0-9]*$/.test(value))
+      throw new Error(
+        `Invalid ${field}: expected positive safe integer; received ${JSON.stringify(value)}`
+      );
+    return positive(Number(value), field);
+  };
+  const runId = integer(input.runId, 'recover_source_run_id');
+  const runAttempt = integer(input.runAttempt, 'recover_source_attempt');
+  if (typeof input.approvalSha256 !== 'string' || !/^[a-f0-9]{64}$/.test(input.approvalSha256))
+    throw new Error(
+      `Invalid recover_approval_sha256: expected lowercase 64-character SHA256; received ${JSON.stringify(input.approvalSha256)}`
+    );
+  return { runId, runAttempt, approvalSha256: input.approvalSha256 };
 }
 
 function parseSnapshot(raw: string, repository: string, revision: string): CanarySourceSnapshot {

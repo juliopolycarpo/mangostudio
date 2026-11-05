@@ -586,6 +586,27 @@ only its three publication bundles for 30 days; transient inputs and target
 smoke bundles keep seven days. The window starts when each artifact is produced,
 not when a later recovery is requested.
 
+If a full rerun's original source snapshot is unavailable, the ordinary rerun
+fails closed. To recover an already approved version, dispatch the current
+`canary.yml` on `main` with all three optional inputs together.
+
+- `recover_source_run_id` is the original source **CI** run ID.
+- `recover_source_attempt` is its exact completed, successful push attempt.
+- `recover_approval_sha256` is the lowercase SHA256 of the original authenticated
+  approval payload (`promotion-approval.tar.gz`), including its original bytes.
+
+Obtain these values from the retained approval receipt and authenticated payload.
+The source selector reads only that exact CI attempt and applies the usual
+repository, active CI workflow, push/main, success, SHA and URL checks. Version
+resolution still reads the selected application commit. Approval must recover
+signed release evidence or an authenticated Actions approval with the supplied
+payload hash. Missing or different approval bytes fail before fresh CI acquisition.
+Qualification and both channel audits still run. A complete existing version is a
+verified no-op; an incomplete version follows the usual partial-publication rules.
+The recovery inputs persist on full reruns, so recovery remains pinned even when
+that execution's source snapshot is unavailable. The original execution continues
+to use its original workflow revision.
+
 Publisher code executes at the trusted workflow execution revision, while
 application bytes come from the selected CI artifacts. The receipt records both
 identities and the supported schema; qualification requires compatible producer

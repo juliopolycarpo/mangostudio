@@ -96,12 +96,19 @@ function fixture() {
 class FakeApprovalServices implements CanaryApprovalPreparationServices {
   readonly calls: { source: CanarySource; before?: string }[] = [];
   acquired = 0;
+  readonly pins: (string | undefined)[] = [];
   acquisitionError?: Error;
   qualificationError?: Error;
   qualificationOverride?: (source: CanarySource, before?: string) => CanaryValidationReceipt;
   constructor(readonly acquisition: CanaryApprovalAcquisition) {}
-  async acquire(): Promise<CanaryApprovalAcquisition> {
+  async acquire(
+    _source: CanarySource,
+    _version: string,
+    _executionRevision: string,
+    expectedApprovalSha256?: string
+  ): Promise<CanaryApprovalAcquisition> {
     this.acquired++;
+    this.pins.push(expectedApprovalSha256);
     if (this.acquisitionError) throw this.acquisitionError;
     return await Promise.resolve(this.acquisition);
   }
@@ -764,4 +771,24 @@ test('bounds child diagnostic scanning and withholds unknown credential-bearing 
   expect(message).toContain('not a recognized safe diagnostic');
   expect(message).not.toContain('unknown-credential');
   expect(message).not.toContain('Original CI distribution unavailable');
+});
+
+test('pinned preparation refuses a CI origin even with matching recovered bytes', async () => {
+  const f = await recovered();
+  const service = new FakeApprovalServices({ ...f.acquisition, origin: 'ci' });
+  await expect(
+    prepareCanaryApproval({ ...f.input, expectedApprovalSha256: hash(f.payload) }, service)
+  ).rejects.toThrow('refusing new approval');
+  expect(service.calls).toHaveLength(0);
+});
+
+test('recovery preparation forwards its payload pin into acquisition', async () => {
+  const f = await recovered();
+  const service = new FakeApprovalServices(f.acquisition);
+  const prepared = await prepareCanaryApproval(
+    { ...f.input, expectedApprovalSha256: hash(f.payload) },
+    service
+  );
+  expect(service.pins).toEqual([hash(f.payload)]);
+  expect(prepared.approvalPayload).toBe(f.payload);
 });

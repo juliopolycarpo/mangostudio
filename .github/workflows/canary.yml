@@ -6,6 +6,19 @@ on:
   schedule:
     - cron: "17 6 * * *"
   workflow_dispatch:
+    inputs:
+      recover_source_run_id:
+        description: "Existing approved source CI run ID (requires attempt and approval hash)"
+        required: false
+        type: string
+      recover_source_attempt:
+        description: "Exact successful source CI attempt"
+        required: false
+        type: string
+      recover_approval_sha256:
+        description: "Original authenticated approval payload SHA256"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -33,6 +46,7 @@ jobs:
       repository: ${{ steps.source.outputs.repository }}
       workflow_path: ${{ steps.source.outputs.workflow_path }}
       source_restored: ${{ steps.source.outputs.source_restored }}
+      expected_approval_sha256: ${{ steps.source.outputs.expected_approval_sha256 }}
       version: ${{ steps.snapshot.outputs.version }}
       channel: ${{ steps.snapshot.outputs.channel }}
     steps:
@@ -50,6 +64,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          RECOVER_SOURCE_RUN_ID: ${{ inputs.recover_source_run_id }}
+          RECOVER_SOURCE_ATTEMPT: ${{ inputs.recover_source_attempt }}
+          RECOVER_APPROVAL_SHA256: ${{ inputs.recover_approval_sha256 }}
           SELECTION_PATH: ${{ runner.temp }}/canary-selection.json
           SNAPSHOT_PATH: ${{ runner.temp }}/canary-source/source.json
         run: bun ./scripts/ci/freeze-canary-source.ts resolve
@@ -149,6 +166,7 @@ jobs:
       - id: approved
         name: Recover original approval or qualify retained CI distribution
         env:
+          EXPECTED_APPROVAL_SHA256: ${{ needs.source.outputs.expected_approval_sha256 }}
           GH_TOKEN: ${{ github.token }}
         run: bun ./scripts/ci/prepare-canary-approval.ts
 
