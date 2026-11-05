@@ -81,6 +81,7 @@
     "./machine/limits": "./src/machine/limits.ts",
     "./machine/service": "./src/machine/user-service.ts",
     "./updates": "./src/updates/index.ts",
+    "./backup": "./src/backup/index.ts",
     "./terminal": "./src/terminal/index.ts"
   },
   "devDependencies": {

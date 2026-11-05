@@ -1,3 +1,4 @@
+import { Database as SQLiteDatabase } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -5,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { acquireCaptureLock } from '../../../src/backup/capture-lock';
 import {
   createManagedProcessFixture,
   type ManagedProcessFixture,
@@ -73,6 +75,63 @@ async function waitForState(pidFile: string, timeoutMs = START_TIMEOUT_MS): Prom
 }
 
 describe('startServer via __serve', () => {
+  it(
+    'holds persisted data ownership until the Hub exits',
+    async () => {
+      const running = await createManagedProcessFixture({ tempPrefix: 'mango-data-ownership-' });
+      const database = join(running.tempDir, 'database.sqlite');
+      try {
+        running.spawn({
+          cmd: ['bun', ENTRY, '__serve', String(running.port)],
+          env: {
+            ...serverEnv(running.tempDir, running.port),
+            DATABASE_PATH: database,
+            BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
+          },
+        });
+        await running.waitUntilReady(() => probeHealthOnce('127.0.0.1', running.port), {
+          label: 'persisted Hub health',
+          timeoutMs: START_TIMEOUT_MS,
+        });
+        await expect(acquireCaptureLock(database)).rejects.toThrow('already in use');
+        await running.stop(process.platform === 'win32' ? 'SIGKILL' : 'SIGTERM');
+        const release = await acquireCaptureLock(database);
+        await release();
+      } finally {
+        await running.cleanup();
+        await running.assertReleased();
+      }
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  it(
+    'refuses to start while backup owns the configured database',
+    async () => {
+      const running = await createManagedProcessFixture({ tempPrefix: 'mango-backup-lock-' });
+      const database = join(running.tempDir, 'database.sqlite');
+      const release = await acquireCaptureLock(database);
+      try {
+        running.spawn({
+          cmd: ['bun', ENTRY, '__serve', String(running.port)],
+          env: {
+            ...serverEnv(running.tempDir, running.port),
+            DATABASE_PATH: database,
+            BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
+          },
+        });
+        expect(await running.waitForExit()).toBe(1);
+        expect(running.diagnostics()).toContain('capture lock cannot be acquired');
+        expect(await probeHealthOnce('127.0.0.1', running.port)).toBe(false);
+      } finally {
+        await release();
+        await running.cleanup();
+        await running.assertReleased();
+      }
+    },
+    TEST_TIMEOUT_MS
+  );
+
   let fixture: ManagedProcessFixture | null = null;
 
   beforeEach(async () => {
@@ -89,7 +148,8 @@ describe('startServer via __serve', () => {
   /** Starts the server and waits until it is healthy and has written its state file. */
   async function startServing(
     running: ManagedProcessFixture,
-    preload?: string
+    preload?: string,
+    databasePath = ':memory:'
   ): Promise<{ pid: number | undefined; pidFile: string }> {
     const { port, tempDir: home } = running;
     const pidFile = join(home, '.mango', 'run', 'server.json');
@@ -98,6 +158,7 @@ describe('startServer via __serve', () => {
       cmd: ['bun', ...(preload ? ['--preload', preload] : []), ENTRY, '__serve', String(port)],
       env: {
         ...serverEnv(home, port),
+        DATABASE_PATH: databasePath,
         BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
       },
     });
@@ -171,6 +232,53 @@ describe('startServer via __serve', () => {
 
   // Windows has no SIGTERM: a kill there terminates the process, so no handler runs.
   it.skipIf(process.platform === 'win32')(
+    'cleans sessions, terminals and runtimes before awaiting active HTTP drain',
+    async () => {
+      if (!fixture) throw new Error('Expected a managed process fixture.');
+      const preload = fileURLToPath(
+        new URL('../../support/fixtures/shutdown-dependent-stream.ts', import.meta.url)
+      );
+      const { pid, pidFile } = await startServing(fixture, preload);
+      if (!pid) throw new Error('Expected the fixture server PID.');
+      const response = await fetch(`http://127.0.0.1:${fixture.port}/__shutdown-stream`);
+      expect(response.status).toBe(200);
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('Expected a live shutdown-dependent response body.');
+      expect(new TextDecoder().decode((await reader.read()).value)).toContain('stream-ready');
+      const socket = new WebSocket(`ws://127.0.0.1:${fixture.port}/__shutdown-socket`);
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(
+            () => reject(new Error('Fixture WebSocket did not become ready.')),
+            5000
+          );
+          socket.onmessage = () => {
+            clearTimeout(timer);
+            resolve();
+          };
+          socket.onerror = () => {
+            clearTimeout(timer);
+            reject(new Error('Fixture WebSocket failed to connect.'));
+          };
+        });
+        expect(socket.readyState).toBe(WebSocket.OPEN);
+        process.kill(pid, 'SIGTERM');
+        expect(await fixture.waitForExit(15_000)).toBe(0);
+        const diagnostics = fixture.diagnostics();
+        expect(diagnostics).toContain('shutdown-fixture:external-reaped');
+        expect(diagnostics).toContain('shutdown-fixture:terminals-closed');
+        expect(diagnostics).toContain('shutdown-fixture:runtime-closed');
+        expect(existsSync(pidFile)).toBe(false);
+      } finally {
+        socket.close();
+        await reader.cancel().catch(() => undefined);
+        reader.releaseLock();
+      }
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  it.skipIf(process.platform === 'win32')(
     'exits cleanly and removes its state on SIGTERM',
     async () => {
       if (!fixture) throw new Error('Expected a managed process fixture.');
@@ -197,6 +305,30 @@ describe('startServer via __serve', () => {
       expect(existsSync(pidFile)).toBe(false);
       expect(fixture.diagnostics()).toContain('fixture runtime teardown failed');
       expect(fixture.diagnostics()).toContain('Runtime connection teardown failed during shutdown');
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'reports a failed HTTP drain, removes state and releases ownership at process exit',
+    async () => {
+      if (!fixture) throw new Error('Expected a managed process fixture.');
+      const preload = fileURLToPath(
+        new URL('../../support/fixtures/failing-http-shutdown.ts', import.meta.url)
+      );
+      const database = join(fixture.tempDir, 'drain-failure.sqlite');
+      const { pidFile } = await startServing(fixture, preload, database);
+      expect(await fixture.stop('SIGTERM')).toBe(1);
+      expect(fixture.diagnostics()).toContain('fixture HTTP drain failed');
+      expect(existsSync(pidFile)).toBe(false);
+      const release = await acquireCaptureLock(database);
+      await release();
+      const reopened = new SQLiteDatabase(database, { readonly: true });
+      try {
+        expect(reopened.query('PRAGMA integrity_check').get()).toEqual({ integrity_check: 'ok' });
+      } finally {
+        reopened.close();
+      }
     },
     TEST_TIMEOUT_MS
   );
