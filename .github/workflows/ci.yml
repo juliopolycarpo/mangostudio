@@ -1,401 +1,60 @@
-name: CI
-
-# The pull_request event is the authoritative CI signal for development
-# branches: one commit on an open PR produces exactly one run, and that run
-# produces the PR's checks and artifacts. Pushes to main establish green
-# commits for the daily Canary workflow. Pre-PR validation is local (`bun run check && bun run test`) or a manual
-# workflow_dispatch of this workflow.
+name: CI output transport probe
 
 on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# One authoritative run per PR — keyed by PR number so a new push supersedes
-# (cancels) the previous run even across branch renames or forks, and never by
-# SHA, which would let stale runs survive. Runs on main are never cancelled so
-# every push can establish a green baseline.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: check-output-probe-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  changes:
-    name: Detect distribution-relevant changes
+  ordinary:
+    name: Ordinary failed job
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 3
     outputs:
-      distribution: ${{ steps.changed.outputs.distribution }}
-      rust: ${{ steps.rust.outputs.rust }}
+      invocation_id: ${{ steps.identity.outputs.invocation_id }}
+      producer_attempt: ${{ steps.identity.outputs.producer_attempt }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-
-      - id: changed
-        name: Check for changes outside the documentation surface
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          EVENT_NAME: ${{ github.event_name }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        # Allowlist, not denylist: a path is irrelevant only if it provably
-        # cannot reach a binary. Anything unrecognised triggers the lane.
-        # `--no-renames` lists both sides of a rename, so moving a source file
-        # under an irrelevant path cannot hide the source-side deletion.
-        run: |
-          if [ "$EVENT_NAME" != "pull_request" ]; then
-            echo "distribution=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          bun ./scripts/ci/changed-paths.ts collect "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/changed-files"
-          bun ./scripts/ci/changed-paths.ts distribution "$RUNNER_TEMP/changed-files" >> "$GITHUB_OUTPUT"
-
-      - id: rust
-        name: Classify Rust-relevant paths
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-        # The same predicate Cargo Shim's own `changes` job applies, from the
-        # same manifest (scripts/lib/rust-lanes.ts), so the instrumented Rust
-        # test run and the Rust lanes agree on what a Rust change is. It reads
-        # the validated NUL path file the step above wrote. Every
-        # push and manual run measures: main-push envelopes are the baselines a
-        # later Rust change is compared with, so they cannot skip.
-        # Dependency-free script; runs without `bun install`.
-        run: |
-          if [ "$EVENT_NAME" != "pull_request" ]; then
-            echo "rust=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          bun ./scripts/ci/rust-lanes.ts relevance "$RUNNER_TEMP/changed-files" > "$RUNNER_TEMP/rust-lanes"
-          grep '^rust=' "$RUNNER_TEMP/rust-lanes" >> "$GITHUB_OUTPUT"
-          cat "$RUNNER_TEMP/rust-lanes"
-
-  distribution-identity:
-    name: Resolve distribution identity
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      version: ${{ steps.identity.outputs.version }}
-      channel: ${{ steps.identity.outputs.channel }}
-      cargo_version: ${{ steps.identity.outputs.cargo_version }}
-      source_sha: ${{ steps.source.outputs.sha }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-
-      - id: source
-        name: Resolve checked out source SHA
-        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
       - id: identity
-        name: Resolve distribution version and channel
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          SOURCE_SHA: ${{ steps.source.outputs.sha }}
-        run: bun ./scripts/ci/distribution-identity.ts >> "$GITHUB_OUTPUT"
+        run: |
+          echo 'invocation_id=check-output-probe' >> "$GITHUB_OUTPUT"
+          echo "producer_attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+      - run: exit 7
 
-  distribution:
-    name: Distribution
-    needs: [distribution-identity, changes]
-    if: ${{ needs.changes.outputs.distribution == 'true' }}
-    permissions:
-      contents: read
-      id-token: write # mint the reusable builder's provenance attestation token
-      attestations: write # persist provenance for main-push distribution bundles
-    uses: ./.github/workflows/distribution-build.yml
+  failed_one:
+    uses: ./.github/workflows/probe-check-output-one.yml
     with:
-      version: ${{ needs.distribution-identity.outputs.version }}
-      source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
-      channel: ${{ needs.distribution-identity.outputs.channel }}
-      retention_days: 7
-      publication_retention_days: ${{ github.event_name == 'push' && 30 || 7 }}
-      runtime_profile: ${{ github.event_name == 'pull_request' && 'light' || 'shipping' }}
-      cache: true
+      fail: true
 
-  cross-runtimes:
-    name: Cross-runtime download
+  failed_two:
+    uses: ./.github/workflows/probe-check-output-two.yml
+
+  successful:
+    uses: ./.github/workflows/probe-check-output-one.yml
+    with:
+      fail: false
+
+  inspect:
+    name: Inspect caller-visible outputs
+    if: always()
+    needs: [ordinary, failed_one, failed_two, successful]
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 3
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-      - name: Resolve every target runtime from a cold cache
+      - name: Record caller-visible results
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: bun ./scripts/ci/verify-cross-runtimes.ts
-
-  check:
-    name: Check
-    uses: ./.github/workflows/lint.yml
-
-  dependency-audit:
-    # Unconditional: advisories against an unchanged lockfile still block CI.
-    # Read-only reusable scan; no secrets or dependency installation.
-    name: Dependency Audit
-    uses: ./.github/workflows/dependency-audit.yml
-
-  release-dry-run:
-    # Always call on PRs, even when distribution was intentionally skipped.
-    # Internal relevance guards then report Gate without compiling or waiting
-    # on a sibling workflow. A failed relevant distribution cannot supply bytes.
-    name: Release Dry Run
-    needs: [distribution-identity, distribution]
-    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
-    uses: ./.github/workflows/release-dry-run.yml
-    with:
-      reuse_distribution: true
-      version: ${{ needs.distribution-identity.outputs.version }}
-      source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
-      channel: ${{ needs.distribution-identity.outputs.channel }}
-      target_artifacts: ${{ needs.distribution.outputs.target_artifacts || '{}' }}
-
-  local-runtime:
-    name: Local Runtime
-    uses: ./.github/workflows/local-runtime.yml
-
-  test:
-    name: Test
-    needs: [local-runtime]
-    uses: ./.github/workflows/test.yml
-    with:
-      runtime_artifact: ${{ needs.local-runtime.outputs.artifact }}
-
-  build:
-    name: Build
-    uses: ./.github/workflows/build.yml
-
-  browser-smoke:
-    name: Smoke — Browser
-    needs: [local-runtime]
-    uses: ./.github/workflows/browser-smoke.yml
-    with:
-      runtime_artifact: ${{ needs.local-runtime.outputs.artifact }}
-
-  rust-coverage:
-    # The Ubuntu Rust test run, instrumented for per-crate coverage; Cargo
-    # Shim keeps the macOS and Windows runs. Runs only when the changes job saw
-    # a Rust-relevant path (always on pushes), and the gate accepts its skip
-    # only under that same proof. The QA collector reads its artifact from this
-    # run; see the header of rust-coverage.yml.
-    name: Rust Coverage
-    needs: [changes]
-    if: ${{ needs.changes.outputs.rust == 'true' }}
-    uses: ./.github/workflows/rust-coverage.yml
-
-  qa-metrics:
-    # Report-only metrics envelope for the PR QA comment: PR runs produce the
-    # head side, main pushes produce the exact-SHA baselines. Runs after Test,
-    # Build and Rust Coverage to consume their artifacts (test fragment,
-    # frontend dist, llvm-cov export), and still runs when one fails so the
-    # report can show what failed. Publishing happens in the separate
-    # privileged pr-qa-report.yml (workflow_run), never here.
-    name: QA Metrics
-    needs: [test, build, changes, rust-coverage]
-    if: ${{ !cancelled() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
-    uses: ./.github/workflows/qa-metrics.yml
-    with:
-      # Lets the collector tell a canceled or failed Test job from a fragment
-      # that never arrived, instead of reporting both as missing.
-      test_result: ${{ needs.test.result }}
-      # A skipped Rust job is "not run on purpose" only when the changes job
-      # proved no Rust path changed; any other skip is a missing artifact.
-      rust_relevant: ${{ needs.changes.outputs.rust }}
-      rust_result: ${{ needs.rust-coverage.result }}
-
-  smoke:
-    # Boots the exact target artifacts produced once by distribution, then
-    # stages those same Linux bytes into both Docker variants. The reusable
-    # smoke workflow retains a manual rebuild fallback for one transition cycle.
-    name: Smoke — Binary
-    needs: [distribution-identity, distribution, changes]
-    if: ${{ needs.changes.outputs.distribution == 'true' }}
-    uses: ./.github/workflows/smoke-binary.yml
-    with:
-      version: ${{ needs.distribution-identity.outputs.version }}
-      source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
-      channel: ${{ needs.distribution-identity.outputs.channel }}
-      target_artifacts: ${{ needs.distribution.outputs.target_artifacts }}
-
-  smoke-container:
-    # Proves the container transport against a real engine, using the Linux
-    # runtime binaries distribution already built. Gated on the same changes
-    # filter as the other distribution-consuming lanes.
-    name: Smoke — Container
-    needs: [distribution-identity, distribution, changes]
-    if: ${{ needs.changes.outputs.distribution == 'true' }}
-    uses: ./.github/workflows/smoke-container.yml
-    with:
-      version: ${{ needs.distribution-identity.outputs.version }}
-      source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
-      channel: ${{ needs.distribution-identity.outputs.channel }}
-      target_artifacts: ${{ needs.distribution.outputs.target_artifacts }}
-
-  gate:
-    # The stable Gate job aggregates every mandatory job and reports the bare
-    # API context "Gate". Branch protection retains this shared context and
-    # Canary depends on this workflow's job instead of internal matrix shapes.
-    # Every job except this one and jobs that already need this gate, and the
-    # compatibility check, must be in
-    # `needs`; the ci-gate unit tests derive that set dynamically so a new
-    # mandatory lane cannot bypass it.
-    # qa-metrics only runs for PRs and main pushes, so its skip is accepted
-    # solely on workflow_dispatch; distribution and smoke skips are accepted
-    # only when the changes job proved no distribution-relevant path changed,
-    # and the Rust coverage skip only when it proved no Rust-relevant path did.
-    name: Gate
-    needs:
-      [
-        distribution-identity,
-        changes,
-        distribution,
-        cross-runtimes,
-        release-dry-run,
-        check,
-        dependency-audit,
-        local-runtime,
-        test,
-        build,
-        rust-coverage,
-        browser-smoke,
-        qa-metrics,
-        smoke,
-        smoke-container,
-      ]
-    if: ${{ always() }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      actions: read # read the repository's Actions cache usage for the summary
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-
-      - name: Evaluate mandatory job results
-        env:
-          NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ format('{0} {1} {2} {3} {4} {5}',
-            github.event_name != 'pull_request' && 'release-dry-run' || '',
-            github.event_name == 'workflow_dispatch' && 'qa-metrics' || '',
-            needs.changes.outputs.distribution == 'false' && 'distribution' || '',
-            needs.changes.outputs.distribution == 'false' && 'smoke' || '',
-            needs.changes.outputs.distribution == 'false' && 'smoke-container' || '',
-            needs.changes.outputs.rust == 'false' && 'rust-coverage' || '') }}
-        # Dependency-free script; runs without `bun install`.
-        run: bun ./scripts/ci/evaluate-gate.ts
-
-      # Advisory work follows the verdict and still runs after a failed verdict.
-      # The script bounds each request to 3s and the whole report to 15s; this
-      # step timeout also bounds a stuck process without spending Gate's 5m.
-      - name: Report Actions cache usage
-        if: ${{ always() }}
-        continue-on-error: true
-        timeout-minutes: 1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # Read-only and dependency-free; an unavailable storage limit stays unknown.
-        run: bun ./scripts/ci/report-cache-usage.ts
-
-  gate-unique:
-    # Additive compatibility check for the future ruleset cutover. Keep the
-    # legacy Gate and evaluate the same direct needs and allowed skips here.
-    name: CI Gate
-    needs:
-      [
-        distribution-identity,
-        changes,
-        distribution,
-        cross-runtimes,
-        release-dry-run,
-        check,
-        dependency-audit,
-        local-runtime,
-        test,
-        build,
-        rust-coverage,
-        browser-smoke,
-        qa-metrics,
-        smoke,
-        smoke-container,
-      ]
-    if: ${{ always() }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-
-      - name: Evaluate mandatory job results
-        env:
-          NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ format('{0} {1} {2} {3} {4} {5}',
-            github.event_name != 'pull_request' && 'release-dry-run' || '',
-            github.event_name == 'workflow_dispatch' && 'qa-metrics' || '',
-            needs.changes.outputs.distribution == 'false' && 'distribution' || '',
-            needs.changes.outputs.distribution == 'false' && 'smoke' || '',
-            needs.changes.outputs.distribution == 'false' && 'smoke-container' || '',
-            needs.changes.outputs.rust == 'false' && 'rust-coverage' || '') }}
-        # Dependency-free script; runs without `bun install`.
-        run: bun ./scripts/ci/evaluate-gate.ts
-
-  runtime-cache-seed:
-    # Saves the light-profile cargo cache entry that pull request distribution
-    # builds restore, so they stop compiling every dependency cold. Cache only:
-    # runtime-build.yml's cache-seed mode has no artifact route, and its guard
-    # refuses anything but a main push with the cache on. It needs the gate so
-    # it neither gates nor delays a mandatory lane and only runs for a green
-    # commit; it is excluded from the gate's own `needs` because it needs it.
-    # A seed re-runs only on an entry miss (a Cargo.lock, Cargo.toml or
-    # toolchain change); on a hit each platform exits after the lookup.
-    name: Runtime light cache seed
-    needs: [gate, distribution-identity]
-    # Gate accepts the skipped PR-only dry run; require successful direct needs.
-    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.gate.result == 'success' && needs['distribution-identity'].result == 'success' }}
-    # Serialized with itself and never cancelled mid-save; a newer pending
-    # seed replaces an older pending one.
-    concurrency:
-      group: light-runtime-cache-seed
-      cancel-in-progress: false
-    permissions:
-      contents: read
-    uses: ./.github/workflows/runtime-build.yml
-    with:
-      version: ${{ needs.distribution-identity.outputs.version }}
-      source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
-      profile: light
-      mode: cache-seed
-      cache: true
+          PROBE_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PROBE'
+          import json, os
+          data = json.loads(os.environ['PROBE_RESULTS'])
+          print(json.dumps(data, indent=2, sort_keys=True))
+          assert data['successful']['result'] == 'success', data
+          assert data['successful']['outputs']['invocation_id'] == 'check-output-probe', data
+          for case in ['ordinary', 'failed_one', 'failed_two']:
+              assert data[case]['result'] == 'failure', (case, data)
+          PROBE

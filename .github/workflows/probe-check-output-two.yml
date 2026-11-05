@@ -1,0 +1,46 @@
+name: Probe separate verdict
+
+on:
+  workflow_call:
+    outputs:
+      invocation_id:
+        value: ${{ jobs.check.outputs.invocation_id }}
+      producer_attempt:
+        value: ${{ jobs.check.outputs.producer_attempt }}
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Green producer
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      invocation_id: ${{ steps.identity.outputs.invocation_id }}
+      producer_attempt: ${{ steps.identity.outputs.producer_attempt }}
+      outcome: ${{ steps.outcome.outputs.outcome }}
+    steps:
+      - id: identity
+        run: |
+          echo 'invocation_id=check-output-probe' >> "$GITHUB_OUTPUT"
+          echo "producer_attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+      - id: run
+        continue-on-error: true
+        run: exit 7
+      - id: outcome
+        if: always()
+        env:
+          CHECK_OUTCOME: ${{ steps.run.outcome }}
+        run: echo "outcome=$CHECK_OUTCOME" >> "$GITHUB_OUTPUT"
+
+  verdict:
+    name: Failed verdict
+    needs: [check]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - env:
+          CHECK_OUTCOME: ${{ needs.check.outputs.outcome }}
+        run: test "$CHECK_OUTCOME" = success

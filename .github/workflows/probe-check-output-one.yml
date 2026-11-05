@@ -1,0 +1,32 @@
+name: Probe one producer
+
+on:
+  workflow_call:
+    inputs:
+      fail:
+        type: boolean
+        required: true
+    outputs:
+      invocation_id:
+        value: ${{ jobs.check.outputs.invocation_id }}
+      producer_attempt:
+        value: ${{ jobs.check.outputs.producer_attempt }}
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: One producer
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    outputs:
+      invocation_id: ${{ steps.identity.outputs.invocation_id }}
+      producer_attempt: ${{ steps.identity.outputs.producer_attempt }}
+    steps:
+      - id: identity
+        run: |
+          echo 'invocation_id=check-output-probe' >> "$GITHUB_OUTPUT"
+          echo "producer_attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+      - if: inputs.fail
+        run: exit 7
