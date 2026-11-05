@@ -11,7 +11,10 @@ establish a startup, memory, throughput, build-time or other-platform improvemen
 
 - Baseline: `69a5d9d30c8d6bf22526d5f2c346b4a946273f16`.
 - Measured implementation: `fc5199ebe9216513431f51a0392a8195c34369f1`.
-  Subsequent evidence/documentation changes do not change the measured Rust source.
+  Subsequent receipt edits do not change the measured Rust source.
+  `83bdb647` changes the build script's write path: identical compact bytes are
+  left untouched. It does not change `compact_json` output or the embedded
+  payload, and this receipt does not remeasure that commit.
 - Identical Cargo.lock SHA-256:
   `5a005cc53823f64e53bb33d573175231eba0819f5ad408f7230798212e82b25d`.
 - Linux 6.18.57 x86_64, host glibc 2.41, overlayfs, five available CPUs,
@@ -89,8 +92,10 @@ published runtime was not substituted for a local baseline build.
 
 ## Correctness and limits
 
-The runtime-contract tests passed: 46 unit tests, two new lexical/determinism/
-semantic-equality tests, four conformance tests and 17 doctests. All-target scoped
+At `83bdb647`, the runtime-contract tests passed: 46 unit tests, three
+`compact_catalog` tests covering lexical preservation, determinism, semantic
+equality and unchanged-output timestamps, four conformance tests and 17 doctests.
+All-target scoped
 Clippy with warnings denied, workspace rustfmt and the affected repository check
 passed. Exact number lexemes, string escapes, member order, non-ASCII data,
 idempotence, parsed Catalog equality and existing validation are covered.
@@ -104,6 +109,6 @@ This digest describes the parsed served catalog, not its original JSON lexemes.
 
 **Disposition: adopt for review based on this Linux artifact result.**
 Native Windows/macOS, complete workspace gates and hosted CI remain unqualified.
-The draft publication keeps build/test CI intentionally suspended as requested;
-a later review cycle must enable and pass the required checks before landing.
+The initial draft publication intentionally suspended build/test CI; subsequent
+review must enable and pass the required checks before landing.
 No merge, deployment or release is established by this receipt.
