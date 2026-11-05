@@ -164,3 +164,19 @@ CI consumer, and the label workflow retains its unfiltered PR-target event.
 A green child PR qualifies its diff against its current parent. Retargeting or
 restacking requires fresh validation before landing on `main`; it does not
 establish that the earlier parent was merged.
+
+## Protocol compilation and advisory diagnostics
+
+Protocol CI keeps its push path filter and starts for every pull request. Its
+changes job exempts only the seven existing Markdown guides under
+`docs/protocol/` from the compiled matrix; spec files, contribution instructions,
+new guide names, fixtures and other unknown protocol inputs remain relevant.
+Root Check still validates documentation, and protocol ownership and local
+contribution checks keep their broader path predicate. Manual Protocol CI
+qualification always executes the complete matrix, including the TypeScript
+check already performed by CI Check on PRs and main pushes.
+
+The per-change `cargo-semver-checks` job is advisory, including setup failures.
+It runs outside Protocol Gate's dependencies so diagnostics do not delay the
+mandatory path. A failed advisory job remains visible in Actions; every other
+Protocol CI lane retains fail-closed aggregate evaluation.

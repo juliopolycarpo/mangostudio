@@ -45,6 +45,7 @@ function scenarioProjection(path: string, workflow: string, scenario: Scenario):
     removed.add('fuzz-workspace');
   }
   if (path === '.github/workflows/protocol-ci.yml') {
+    removed.add('semver-checks');
     if (!extractJobBlock(workflow, 'package')) {
       const packageStep = extractStepBlocks(extractJobBlock(workflow, 'typescript')).find((step) =>
         step.includes('run: bun ./scripts/protocol/verify-package.ts')

@@ -92,6 +92,9 @@ function expectedGate(name: string, source: string, original: { needs: string[];
     expected.skips = expected.skips.replace(' runtime-home-fixture-freshness', '');
   }
   if (name === 'protocol-ci') {
+    // Semver diagnostics stay per-change but no longer delay the mandatory gate.
+    expected.needs = expected.needs.filter((job) => job !== 'semver-checks');
+    expected.skips = expected.skips.replace(' semver-checks', '');
     for (const job of ['package', 'transports']) {
       if (!extractJobBlock(source, job)) {
         expected.needs = expected.needs.filter((need) => need !== job);

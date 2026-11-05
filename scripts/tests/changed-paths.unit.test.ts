@@ -243,14 +243,22 @@ describe('relevance policy parity', () => {
   });
 
   test.each(['ci', 'cargo-shim', 'protocol-ci', 'release-dry-run'])(
-    '%s collects only PR diffs and preserves non-PR behavior',
+    '%s collects relevant diffs and preserves full qualification dispatch',
     (name) => {
       const changes = extractJobBlock(readText(`.github/workflows/${name}.yml`), 'changes');
       const step = extractStepBlocks(changes).find((block) =>
         block.includes('changed-paths.ts collect')
       );
       expect(step).toBeDefined();
-      expect(step).toContain('if [ "$EVENT_NAME" != "pull_request" ]; then');
+      if (name === 'protocol-ci') {
+        expect(step).toContain('github.event.pull_request.base.sha || github.event.before');
+        expect(step).toContain('github.event.pull_request.head.sha || github.sha');
+        expect(step).toContain(
+          'if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then'
+        );
+      } else {
+        expect(step).toContain('if [ "$EVENT_NAME" != "pull_request" ]; then');
+      }
       expect(step).toContain('exit 0');
       expect(step).not.toContain('git diff');
       expect(step).not.toContain('grep -Eq');

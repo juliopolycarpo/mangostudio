@@ -72,17 +72,19 @@ jobs:
       - id: changed
         name: Check protocol paths
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
           EVENT_NAME: ${{ github.event_name }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         # The path set is `PROTOCOL_PATHS` + `PROTOCOL_TRIGGER_FILES` in
         # scripts/lib/protocol.ts; protocol-lanes.unit.test.ts holds the two in
         # step. That module lists itself, so an edit to the rules deciding this
-        # skip cannot be judged by the rules it replaced. `--no-renames` lists
+        # skip cannot be judged by the rules it replaced. Known prose guides
+        # keep root document validation but skip this compiled matrix on PRs
+        # and ordinary main pushes; dispatch always qualifies every lane. `--no-renames` lists
         # both sides of a rename, so moving a protocol source under an unrelated
         # path cannot hide the deletion.
         run: |
-          if [ "$EVENT_NAME" != "pull_request" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ] || [ "$BASE_SHA" = "0000000000000000000000000000000000000000" ]; then
             echo "protocol=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -107,8 +109,9 @@ jobs:
         run: bun install --frozen-lockfile
       # `--ts-only` so this job never picks up the Rust toolchain GitHub's Linux
       # images ship; the `rust` job below owns that half with a cache.
+      # CI Check already runs this check for PRs and main pushes.
       - run: bun run protocol:check --ts-only
-        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.install.outcome == 'success' && github.event_name == 'workflow_dispatch' }}
       - run: bun run protocol:test --ts-only
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
       # The workspace resolves this package from `src/`, so its published
@@ -230,15 +233,12 @@ jobs:
   # package-version table treats a pre-1.0 SDK signature change as `minor`, not `major` — gating
   # here would fail pull requests on changes our own versioning policy calls non-breaking.
   #
-  # `continue-on-error` on the check step rather than leaving the job out of the gate: every job in
-  # a workflow belongs to its aggregate gate (ci-gate.unit.test.ts derives that set from the file,
-  # so a job cannot bypass it by omission), and a failed step carrying that flag leaves the job's
-  # conclusion `success` — so the job stays in the gate while being unable to fail it. Deliberately
-  # on the step and not the job: `continue-on-error` at job level changes what `needs.<job>.result`
-  # reports, which is the value evaluate-gate.ts reads, and the step form needs no such claim.
-  # Drop the flag once the crate reaches 1.0.
+  # Keep per-change diagnostics outside the mandatory critical path. Job-level
+  # continue-on-error also makes setup failures advisory to the workflow result,
+  # which Canary source qualification requires to be successful.
   semver-checks:
     name: cargo-semver-checks (informational)
+    continue-on-error: true
     needs: [changes]
     if: needs.changes.outputs.protocol == 'true'
     runs-on: ubuntu-latest
@@ -290,7 +290,7 @@ jobs:
     # instead of tracking job names and matrix shapes. Every lane skip is
     # accepted only when the `changes` job proved no protocol path changed.
     name: Gate
-    needs: [changes, typescript, rust, interop, deny, semver-checks, schema-equality]
+    needs: [changes, typescript, rust, interop, deny, schema-equality]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -308,7 +308,7 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ needs.changes.outputs.protocol == 'false' && 'typescript rust interop deny semver-checks schema-equality' || '' }}
+          ALLOWED_SKIPS: ${{ needs.changes.outputs.protocol == 'false' && 'typescript rust interop deny schema-equality' || '' }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts
 
@@ -316,7 +316,7 @@ jobs:
     # Additive compatibility check for the future ruleset cutover. Keep the
     # legacy Gate and evaluate the same direct needs and allowed skips here.
     name: Protocol Gate
-    needs: [changes, typescript, rust, interop, deny, semver-checks, schema-equality]
+    needs: [changes, typescript, rust, interop, deny, schema-equality]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -334,6 +334,6 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ needs.changes.outputs.protocol == 'false' && 'typescript rust interop deny semver-checks schema-equality' || '' }}
+          ALLOWED_SKIPS: ${{ needs.changes.outputs.protocol == 'false' && 'typescript rust interop deny schema-equality' || '' }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts

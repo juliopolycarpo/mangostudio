@@ -161,3 +161,26 @@ export function protocolTag(version: string): string {
 export function protocolVersion(tag: string): string | null {
   return tag.startsWith(PROTOCOL_TAG_PREFIX) ? tag.slice(PROTOCOL_TAG_PREFIX.length) : null;
 }
+
+/** Known prose guides exempted from compiled CI; new paths require classification.
+ * @example PROTOCOL_PROSE_GUIDES.includes('docs/protocol/README.md');
+ */
+export const PROTOCOL_PROSE_GUIDES: readonly string[] = [
+  'docs/protocol/README.md',
+  'docs/protocol/adopt-rust.md',
+  'docs/protocol/adopt-typescript.md',
+  'docs/protocol/build-a-contract.md',
+  'docs/protocol/conformance.md',
+  'docs/protocol/releasing.md',
+  'docs/protocol/versioning.md',
+];
+
+/**
+ * Whether protocol changes need the compiled CI matrix; local contribution
+ * checks and changelog ownership still use touchesProtocolSurface.
+ * @example needsCompiledProtocolValidation(['docs/protocol/adopt-rust.md']); // false
+ */
+export function needsCompiledProtocolValidation(files: readonly string[]): boolean {
+  const proseGuides = new Set<string>(PROTOCOL_PROSE_GUIDES);
+  return touchesProtocolSurface(files.filter((file) => !proseGuides.has(file)));
+}
