@@ -371,7 +371,7 @@ describe('protocol lane selection', () => {
       extractJobBlock(protocol, 'msrv'),
       'protocol-ci must not own a second minimum-Rust job; cargo-shim workspace covers the crate'
     ).toBe('');
-    const gate = extractJobBlock(protocol, 'gate');
+    const gate = extractJobBlock(protocol, 'gate-unique');
     expect(gate, 'protocol-ci Gate still waits on the removed msrv job').not.toMatch(/\bmsrv\b/);
     expect(extractJobBlock(readText('.github/workflows/cargo-shim.yml'), 'workspace')).toContain(
       'cargo clippy --workspace --all-targets --all-features --locked -- -D warnings'

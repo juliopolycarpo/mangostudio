@@ -166,7 +166,7 @@ export function parseNeedsList(jobBlock: string): string[] {
 
 /**
  * Jobs that must appear in an aggregate gate's `needs`: every job except the
- * gate producers and any job that directly lists the legacy gate in its needs.
+ * gate producers and any job that directly lists a gate in its needs.
  * That second clause excludes canary-style publishers without naming them.
  */
 export function expectedGateNeeds(workflow: string): string[] {
@@ -180,7 +180,7 @@ export function expectedGateNeeds(workflow: string): string[] {
           /^ {4}name: cargo-semver-checks \(informational\)$/m.test(block) &&
           /^ {4}continue-on-error: true$/m.test(block)
         ) &&
-        !parseNeedsList(block).includes('gate')
+        !parseNeedsList(block).some((need) => need === 'gate' || need === 'gate-unique')
     )
     .map(({ job }) => job)
     .sort();

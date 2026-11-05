@@ -67,7 +67,7 @@ describe('mandatory dependency audit', () => {
     );
   });
 
-  for (const gate of ['gate', 'gate-unique']) {
+  for (const gate of ['gate-unique']) {
     test(`${gate} rejects failed, cancelled and skipped audits through the real evaluator`, () => {
       const job = extractJobBlock(ci, gate);
       const dependencies = parseNeedsList(job);

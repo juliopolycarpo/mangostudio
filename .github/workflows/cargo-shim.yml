@@ -1,7 +1,7 @@
 name: Cargo Shim
 
-# The Gate job keeps its name because repository rules require the shared
-# bare "Gate" API context. This workflow owns the complete root Cargo
+# Cargo Shim Gate reports this workflow’s uniquely named verdict.
+# This workflow owns the complete root Cargo
 # workspace: all members build and test on the three supported runner OSes, and the
 # minimum supported Rust matches the development pin for every stable crate.
 # Native jobs retain the default-feature build and all-feature workspace Clippy,
@@ -409,35 +409,8 @@ jobs:
           MANGOSTUDIO_DIAGNOSTIC_LOGS: "0"
         run: bun ./scripts/ci/rust-lanes.ts qualify --suite unit
 
-  gate:
-    # Stable Gate job (bare API context "Gate"): each Rust lane may skip only
-    # after the changes job proves its relevance predicate false for this run.
-    name: Gate
-    needs: [changes, workspace, workspace-windows-arm64, musl-clippy, real-binary-qualification]
-    if: ${{ always() }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-
-      - name: Evaluate mandatory job results
-        env:
-          NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace workspace-windows-arm64 musl-clippy' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}
-        # Dependency-free script; runs without `bun install`.
-        run: bun ./scripts/ci/evaluate-gate.ts
-
   gate-unique:
-    # Additive compatibility check for the future ruleset cutover. Keep the
-    # legacy Gate and evaluate the same direct needs and allowed skips here.
+    # Authoritative uniquely named aggregate for repository enforcement.
     name: Cargo Shim Gate
     needs: [changes, workspace, workspace-windows-arm64, musl-clippy, real-binary-qualification]
     if: ${{ always() }}

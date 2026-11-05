@@ -20,7 +20,6 @@ describe('hosted production browser regressions', () => {
       jobs: Record<string, { needs?: string[]; uses?: string }>;
     };
     expect(ci.jobs['browser-smoke']?.uses).toBe('./.github/workflows/browser-smoke.yml');
-    expect(ci.jobs.gate?.needs).toContain('browser-smoke');
     expect(ci.jobs['gate-unique']?.needs).toContain('browser-smoke');
   });
 

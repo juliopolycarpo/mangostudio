@@ -13,7 +13,7 @@ import {
 } from './support/workflow-blocks';
 
 const EXPR = '$' + '{{';
-const PRODUCERS = ['gate', 'gate-unique'] as const;
+const PRODUCERS = ['gate-unique'] as const;
 
 interface Scenario {
   name: string;
@@ -132,10 +132,9 @@ function skipsForCase(block: string, scenario: Scenario): Set<string> {
 for (const fixture of fixtures) {
   describe(`${fixture.name} compatibility contract`, () => {
     const workflow = readText(fixture.workflow);
-    const legacy = extractJobBlock(workflow, 'gate');
     const unique = extractJobBlock(workflow, 'gate-unique');
 
-    test('both gates directly need every mandatory lane and retain the same skip rules', () => {
+    test('the unique gate directly needs every mandatory lane and declares skip rules', () => {
       for (const producer of PRODUCERS) {
         const block = extractJobBlock(workflow, producer);
         expect(parseNeedsList(block).sort()).toEqual(expectedGateNeeds(workflow));
@@ -149,12 +148,10 @@ for (const fixture of fixtures) {
         expect(evaluation[0]).toContain(`NEEDS: ${EXPR} toJSON(needs) }}`);
         expect(evaluation[0]).not.toContain('continue-on-error');
       }
-      expect(legacy).toContain('    name: Gate\n');
       expect(unique).toContain(`    name: ${fixture.name}\n`);
-      expect(skipExpression(unique)).toBe(skipExpression(legacy));
     });
 
-    test('a missing mandatory lane is rejected by both producer contracts', () => {
+    test('a missing mandatory lane is rejected by the producer contract', () => {
       const mandatory = expectedGateNeeds(workflow);
       for (const producer of PRODUCERS) {
         const declared = parseNeedsList(extractJobBlock(workflow, producer));
@@ -191,7 +188,7 @@ for (const fixture of fixtures) {
       }
     }
     for (const scenario of scenarios) {
-      test(`${scenario.name}: same verdict, only proven skips, failures and cancellations fail`, () => {
+      test(`${scenario.name}: only proven skips, failures and cancellations fail`, () => {
         const required = expectedGateNeeds(workflow);
         for (const producer of PRODUCERS) {
           const skips = skipsForCase(extractJobBlock(workflow, producer), scenario);
@@ -254,7 +251,7 @@ for (const fixture of fixtures) {
   });
 }
 
-describe('compatibility checks preserve enforcement producers', () => {
+describe('unique checks preserve enforcement producers', () => {
   test('the four new check names are distinct and PR triggers have no path filters', () => {
     expect(new Set(fixtures.map((fixture) => fixture.name)).size).toBe(4);
     for (const fixture of fixtures) {
@@ -280,12 +277,12 @@ describe('compatibility checks preserve enforcement producers', () => {
         [...block.matchAll(/^ {4}name: (.+)$/gm)].map((match) => match[1])
       );
       expect(names.filter((name) => name === fixture.name)).toHaveLength(1);
-      expect(names.filter((name) => name === 'Gate')).toHaveLength(1);
+      expect(names.filter((name) => name === 'Gate')).toHaveLength(0);
     }
     const ci = readText('.github/workflows/ci.yml');
     expect(extractJobBlock(ci, 'canary')).toBe('');
-    expect(extractJobBlock(ci, 'gate-unique')).not.toContain('actions: read');
-    expect(extractJobBlock(ci, 'gate-unique')).not.toContain('report-cache-usage.ts');
+    expect(extractJobBlock(ci, 'gate-unique')).toContain('actions: read');
+    expect(extractJobBlock(ci, 'gate-unique')).toContain('report-cache-usage.ts');
   });
 
   test('security and label contexts keep their event visibility and permissions', () => {

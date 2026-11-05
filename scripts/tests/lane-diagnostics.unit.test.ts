@@ -194,7 +194,7 @@ describe('Rust and protocol workflow coverage', () => {
     '%s preserves Gate needs and allowed skips',
     (name, gate) => {
       const source = readText(`.github/workflows/${name}.yml`);
-      const block = extractJobBlock(source, 'gate');
+      const block = extractJobBlock(source, 'gate-unique');
       const expected = expectedGate(name, source, gate);
       expect(parseNeedsList(block)).toEqual(expected.needs);
       const skips = /ALLOWED_SKIPS: ([\s\S]*?)(?=\n {8}#)/.exec(block)?.[1].trim();

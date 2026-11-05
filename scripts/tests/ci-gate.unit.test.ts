@@ -177,10 +177,10 @@ describe('ci.yml trigger and concurrency policy', () => {
 
 describe('CI / Gate aggregate', () => {
   const workflow = readText('.github/workflows/ci.yml');
-  const gateBlock = extractJobBlock(workflow, 'gate');
+  const gateBlock = extractJobBlock(workflow, 'gate-unique');
 
   test('needs every mandatory job, so new jobs cannot bypass it', () => {
-    expect(extractJobBlocks(workflow).map(({ job }) => job)).toContain('gate');
+    expect(extractJobBlocks(workflow).map(({ job }) => job)).toContain('gate-unique');
     expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
   });
 
@@ -243,7 +243,7 @@ describe('CI / Gate aggregate', () => {
     const job = extractJobBlock(workflow, 'cross-runtimes');
     expect(job).toContain('timeout-minutes: 5');
     expect(job).toContain('bun ./scripts/ci/verify-cross-runtimes.ts');
-    expect(parseNeedsList(extractJobBlock(workflow, 'gate'))).toContain('cross-runtimes');
+    expect(parseNeedsList(extractJobBlock(workflow, 'gate-unique'))).toContain('cross-runtimes');
     expect(parseNeedsList(extractJobBlock(workflow, 'gate-unique'))).toContain('cross-runtimes');
   });
 
@@ -372,14 +372,16 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
       'cargo nextest run -p mangostudio-runtime --all-targets --all-features --locked --retries 0'
     );
     expect(block).not.toContain('name: Gate');
-    expect(parseNeedsList(extractJobBlock(workflow, 'gate'))).toContain('workspace-windows-arm64');
+    expect(parseNeedsList(extractJobBlock(workflow, 'gate-unique'))).toContain(
+      'workspace-windows-arm64'
+    );
     expect(classifyChangedPaths(['crates/mangostudio-runtime/src/filesystem/io.rs']).rust).toBe(
       true
     );
   });
 
   test('split compiler jobs disappear only after their coverage moves to native workspace jobs', () => {
-    const gate = extractJobBlock(workflow, 'gate');
+    const gate = extractJobBlock(workflow, 'gate-unique');
     for (const job of ['workspace-msrv', 'target-msrv', 'launcher-msrv']) {
       expect(extractJobBlock(workflow, job), `${job} is redundant at the unified baseline`).toBe(
         ''
@@ -416,7 +418,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
       .filter(({ block }) => block.includes("if: needs.changes.outputs.rust == 'true'"))
       .map(({ job }) => job);
     const skipExpression = /needs\.changes\.outputs\.rust == 'false' && '([^']*)'/.exec(
-      extractJobBlock(workflow, 'gate')
+      extractJobBlock(workflow, 'gate-unique')
     )?.[1];
 
     expect(skipExpression, 'rust==false ALLOWED_SKIPS entry').toBeDefined();
@@ -475,7 +477,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
   });
 
   test('gate needs every mandatory job and accepts the Rust skip only when irrelevant', () => {
-    const gateBlock = extractJobBlock(workflow, 'gate');
+    const gateBlock = extractJobBlock(workflow, 'gate-unique');
 
     expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
     expect(gateBlock).toContain(
@@ -583,7 +585,7 @@ describe('release-dry-run.yml always-reporting gate', () => {
   });
 
   test('gate needs every mandatory job and accepts each lane skip only when irrelevant', () => {
-    const gateBlock = extractJobBlock(workflow, 'gate');
+    const gateBlock = extractJobBlock(workflow, 'gate-unique');
 
     expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
     expect(gateBlock).toContain(
@@ -595,14 +597,14 @@ describe('release-dry-run.yml always-reporting gate', () => {
 describe('shared gate job contract', () => {
   test.each([...GATED_WORKFLOWS])('%s gate always runs the tested evaluator', (path) => {
     const workflow = readText(path);
-    const gateBlock = extractJobBlock(workflow, 'gate');
+    const gateBlock = extractJobBlock(workflow, 'gate-unique');
     expect(gateBlock, `gate job not found in ${path}`).not.toBe('');
 
     // Runs regardless of dependency outcomes, else a failure would skip the
     // check instead of failing it; evaluation happens in the unit-tested
     // script, not a YAML expression.
     expect(gateBlock).toContain(`if: ${EXPR} always() }}`);
-    expect(gateBlock).toContain('name: Gate');
+    expect(gateBlock).toMatch(/name: (?:CI|Cargo Shim|Protocol|Release Dry Run) Gate/);
     expect(gateBlock).toContain('permissions:\n      contents: read');
     expect(gateBlock).toContain(`NEEDS: ${EXPR} toJSON(needs) }}`);
     expect(gateBlock).toContain('run: bun ./scripts/ci/evaluate-gate.ts');
@@ -620,7 +622,7 @@ describe('shared gate job contract', () => {
       // Skip predicates read outputs from `changes`; dangling ALLOWED_SKIPS
       // would silently accept the wrong lanes if it dropped out of needs.
       expect(expectedGateNeeds(workflow)).toContain('changes');
-      expect(parseNeedsList(extractJobBlock(workflow, 'gate'))).toContain('changes');
+      expect(parseNeedsList(extractJobBlock(workflow, 'gate-unique'))).toContain('changes');
     }
   );
 
@@ -629,7 +631,7 @@ describe('shared gate job contract', () => {
     const withOrphan = `${base}\n  orphan-lane:\n    runs-on: ubuntu-latest\n    steps:\n      - run: 'true'\n`;
 
     expect(expectedGateNeeds(withOrphan)).toContain('orphan-lane');
-    expect(parseNeedsList(extractJobBlock(withOrphan, 'gate')).sort()).not.toEqual(
+    expect(parseNeedsList(extractJobBlock(withOrphan, 'gate-unique')).sort()).not.toEqual(
       expectedGateNeeds(withOrphan)
     );
   });
@@ -637,6 +639,6 @@ describe('shared gate job contract', () => {
   test('expectedGateNeeds excludes jobs that already depend on the gate', () => {
     const base = readText('.github/workflows/ci.yml');
     expect(expectedGateNeeds(base)).not.toContain('canary');
-    expect(expectedGateNeeds(base)).not.toContain('gate');
+    expect(expectedGateNeeds(base)).not.toContain('gate-unique');
   });
 });
