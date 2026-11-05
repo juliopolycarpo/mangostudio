@@ -39,32 +39,38 @@ jobs:
       contents: read
     outputs:
       source_sha: ${{ steps.source.outputs.sha }}
+      run_id: ${{ steps.source.outputs.run_id }}
+      run_attempt: ${{ steps.source.outputs.run_attempt }}
+      run_number: ${{ steps.source.outputs.run_number }}
+      run_url: ${{ steps.source.outputs.run_url }}
+      workflow_id: ${{ steps.source.outputs.workflow_id }}
+      repository: ${{ steps.source.outputs.repository }}
+      workflow_path: ${{ steps.source.outputs.workflow_path }}
       version: ${{ steps.identity.outputs.version }}
       channel: ${{ steps.identity.outputs.channel }}
     steps:
-      - id: source
-        name: Select latest successful main push
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          sha="$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=1" \
-            --jq '.workflow_runs[0].head_sha // empty')"
-          if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::Expected a successful main push CI commit SHA, received: $sha"
-            exit 1
-          fi
-          echo "sha=$sha" >> "$GITHUB_OUTPUT"
-
+      # Selection runs from the workflow execution revision; application
+      # identity is read only after checking out the frozen selected source.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ steps.source.outputs.sha }}
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
+
+      - id: source
+        name: Freeze successful main push CI run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: bun ./scripts/ci/select-canary-source.ts
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.source.outputs.sha }}
+          persist-credentials: false
 
       - id: identity
         name: Resolve canary identity from selected source

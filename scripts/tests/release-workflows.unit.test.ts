@@ -1258,7 +1258,18 @@ describe('release workflow binary gate', () => {
     const source = extractJobBlock(workflow, 'source');
     expect(source).toContain("if: github.ref == 'refs/heads/main'");
     expect(source).toContain('actions: read');
-    expect(source).toContain('ci.yml/runs?branch=main&event=push&status=success&per_page=1');
+    expect(source).toContain('bun ./scripts/ci/select-canary-source.ts');
+    for (const field of [
+      'run_id',
+      'run_attempt',
+      'run_number',
+      'run_url',
+      'workflow_id',
+      'repository',
+      'workflow_path',
+    ]) {
+      expect(source).toContain(`${field}: ${'$'}{{ steps.source.outputs.${field} }}`);
+    }
     expect(source).toContain(`ref: ${'$'}{{ steps.source.outputs.sha }}`);
     expect(source).toContain('EVENT_NAME: push');
     expectJobNeeds(workflow, 'build', String.raw`\[source\]`);
@@ -1274,30 +1285,6 @@ describe('release workflow binary gate', () => {
       expect(block).toContain('needs.build.outputs.');
     }
     expect(extractJobBlock(workflow, 'npm-canary')).toContain('environment: canary');
-  });
-
-  test.each([
-    ['a'.repeat(40), true],
-    ['', false],
-    ['main', false],
-  ])('canary source resolution validates API result %j', (sha, valid) => {
-    const source = extractJobBlock(readText('.github/workflows/canary.yml'), 'source');
-    const selection = extractStepBlocks(source).find((step) => step.includes('id: source'));
-    expect(selection).toBeDefined();
-    const script = selection
-      ?.split('run: |\n')[1]
-      ?.replace(/^ {10}/gm, '')
-      .replace('>> "$GITHUB_OUTPUT"', '');
-    expect(script).toBeDefined();
-    // Named fake for the GitHub API, avoiding network I/O.
-    const fakeGitHubApi = 'gh() { printf "%s" "$FAKE_SOURCE_SHA"; }';
-    const result = Bun.spawnSync(['bash', '-c', `${fakeGitHubApi}\n${script}`], {
-      env: { ...process.env, FAKE_SOURCE_SHA: sha, REPO: 'owner/repo' },
-    });
-    expect(result.exitCode).toBe(valid ? 0 : 1);
-    expect(result.stdout.toString()).toContain(
-      valid ? `sha=${sha}` : `Expected a successful main push CI commit SHA, received: ${sha}`
-    );
   });
 
   test('canary publishes npm and GitHub release assets as isolated jobs', () => {
