@@ -399,6 +399,21 @@ Two mitigations are in place until it closes:
   errors reported before the hang still fail the invocation after a clean
   retry, even when crash retries are disabled.
 
+**Numbered-shard bound, 2026-11-05.** [CI 41961144859 on `442ccd0b`](https://github.com/juliopolycarpo/mangostudio/actions/runs/41961144859/job/127030686924)
+killed a still-progressing attempt at 240s. Its healthy retry completed the
+coverage command in 238s. The old bound left almost no allowance for runner
+variation. The numbered shards now allow 480 wall-clock seconds per attempt,
+roughly twice that observed healthy step. Two attempts plus a 120s reserve for
+setup, cleanup and reporting fit the 18-minute job limit. Output does not reset
+this timer. A wedged attempt can therefore take four minutes longer to detect
+than under the former 240s bound; healthy commands and the shard/worker topology
+are unchanged. Requalify this bound when the healthy workload grows.
+
+That run also exposed a receipt fixture forwarding a synthetic failed-test
+line into the enclosing Bun log. An outer timeout then retained the fixture's
+finding after a clean retry. Receipt fixtures now capture their child output;
+their own logs and failure receipts still exercise retained findings.
+
 **Why "re-run failed jobs" used to re-hang while "re-run all jobs" passed:**
 the hang follows specific files, and the file-to-shard partition is a function
 of the resolved timings baseline. Rerunning only failed jobs reuses the
@@ -564,9 +579,10 @@ was 314s versus 311s and aggregate runner time was 582s versus 675s.
 The owner explicitly chose adoption despite the report's conservative
 recommendation to retain three shards: one two-shard sample reached 155s,
 exceeding the experiment's preventive 147s criterion. That criterion is not
-a production gate. The real numbered-shard watchdog stays at 240s per attempt,
-with the existing timeout retry and 10-minute job limit. Frontend remains a
-separate whole lane with its existing 210s watchdog. Internal parallelism,
+a production gate. At adoption, the numbered-shard watchdog used 240s per attempt
+with a timeout retry and 10-minute job limit. The current 480s/18-minute bound is
+qualified above. Frontend remains a separate whole lane with its existing 210s
+watchdog. Internal parallelism,
 seeds, assertions, coverage floors and cache/security policies are unchanged.
 
 These are three hosted samples, not a stable tail-latency estimate or proof

@@ -21,9 +21,9 @@ const EXPR = `$${'{{'}`;
 const SHELL = `$${'{'}`;
 const NOT_CANCELLED = `if: ${EXPR} !cancelled() }}`;
 
-// Allowance for everything in the shard job except the test step. Hosted
-// four-shard runs measured at most 45s; see docs/reference/testing.md.
-const OTHER_STEPS_SECONDS = 60;
+// Preserve the setup/report reserve across two bounded attempts; see the
+// dated healthy-step qualification in docs/reference/testing.md.
+const OTHER_STEPS_SECONDS = 120;
 
 describe('reruns replace previous test evidence', () => {
   test.each([
@@ -96,6 +96,17 @@ describe('Test workflow shard matrix', () => {
       jobSeconds,
       `expected shard job timeout: at least ${required}s (2 x ${attemptSeconds}s watchdog attempts + ${OTHER_STEPS_SECONDS}s other steps) | received: ${jobSeconds}s`
     ).toBeGreaterThanOrEqual(required);
+  });
+
+  test('the watchdog allows twice the current healthy numbered-shard step', () => {
+    // The healthy retry in CI 41961144859 took 238s on 2026-11-05.
+    const healthyStepSeconds = 238;
+    const job = extractJobBlock(workflow, 'shard');
+    const attemptSeconds = Number(/--timeout-seconds=(\d+)/.exec(job)?.[1]);
+    expect(
+      attemptSeconds,
+      `expected shard watchdog: at least ${healthyStepSeconds * 2}s for the measured healthy step | received: ${attemptSeconds}s`
+    ).toBeGreaterThanOrEqual(healthyStepSeconds * 2);
   });
 
   test('a failing shard does not cancel the others', () => {
