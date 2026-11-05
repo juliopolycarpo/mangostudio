@@ -16,7 +16,7 @@ export interface CanaryVisibilityOptions {
 export class CanaryVisibilityWindow {
   private readonly delays: readonly number[];
   private readonly sleep: (milliseconds: number) => Promise<void>;
-  private nextDelay = 0;
+  private remainingWaitMs: number;
 
   constructor(options: CanaryVisibilityOptions = {}) {
     const delays = options.retryDelaysMs ?? VISIBILITY_DELAYS_MS;
@@ -31,18 +31,23 @@ export class CanaryVisibilityWindow {
       );
     }
     this.delays = [...delays];
+    this.remainingWaitMs = this.delays.reduce((total, delay) => total + delay, 0);
     this.sleep = options.sleep ?? Bun.sleep;
   }
 
   /**
-   * Re-read only an unconfirmed result, spending this window's remaining delays.
+   * Restart backoff for this lookup while sharing the remaining delay budget.
    * @example await visibility.read(readDraft, (release) => release.state !== 'absent');
    */
   async read<T>(read: () => Promise<T>, visible: (value: T) => boolean): Promise<T> {
     let result = await read();
+    let nextDelay = 0;
     while (!visible(result)) {
-      const delay = this.delays[this.nextDelay++];
-      if (delay === undefined) return result;
+      const configuredDelay = this.delays[nextDelay++];
+      if (configuredDelay === undefined || (configuredDelay > 0 && this.remainingWaitMs === 0))
+        return result;
+      const delay = Math.min(configuredDelay, this.remainingWaitMs);
+      this.remainingWaitMs -= delay;
       await this.sleep(delay);
       result = await read();
     }

@@ -43,9 +43,13 @@ test('one shared delay budget bounds multiple post-write reads', async () => {
   });
   expect(await window.read(first.read.bind(first), confirmed)).toBe(true);
   expect(await window.read(second.read.bind(second), confirmed)).toBe(false);
-  expect(clock.delays).toEqual([1, 2]);
+  expect(clock.delays).toEqual([1, 1, 1]);
   expect(first.calls).toBe(2);
-  expect(second.calls).toBe(2);
+  expect(second.calls).toBe(3);
+  const exhausted = new FakeVisibilityReader([false]);
+  expect(await window.read(exhausted.read.bind(exhausted), confirmed)).toBe(false);
+  expect(exhausted.calls).toBe(1);
+  expect(clock.delays).toEqual([1, 1, 1]);
 });
 test('default retry delays total 60 seconds and return absence on exhaustion', async () => {
   const clock = new FakeVisibilityClock();
@@ -105,4 +109,19 @@ test('copies the validated schedule before a caller changes its array', async ()
   delays[0] = Infinity;
   expect(await window.read(reader.read.bind(reader), confirmed)).toBe(true);
   expect(clock.delays).toEqual([1]);
+});
+
+test('independent delayed writes restart backoff within the shared total wait budget', async () => {
+  const clock = new FakeVisibilityClock();
+  const window = new CanaryVisibilityWindow({ sleep: clock.sleep.bind(clock) });
+  const confirmations: boolean[] = [];
+  for (let index = 0; index < 15; index++) {
+    const write = new FakeVisibilityReader([false, true]);
+    confirmations.push(await window.read(write.read.bind(write), confirmed));
+  }
+  expect(
+    confirmations,
+    'expected every independent write confirmed within 15s of a 60s delay budget'
+  ).toEqual(Array.from({ length: 15 }, () => true));
+  expect(clock.delays).toEqual(Array.from({ length: 15 }, () => 1000));
 });

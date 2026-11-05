@@ -524,7 +524,7 @@ test('post-upload and publication visibility waits retain each audited asset wit
     sleep: clock.sleep.bind(clock),
   });
   expect(result.outcome).toBe('published');
-  expect(clock.delays).toEqual([1, 2, 3, 4]);
+  expect(clock.delays).toEqual([1, 1, 1, 1]);
   expect(github.writes.map((args) => args[1])).toEqual(['create', 'upload', 'upload', 'edit']);
 });
 
