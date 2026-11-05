@@ -1812,8 +1812,8 @@ doctests, so they stay on `cargo test --doc`, and the ignored fixture generator
 
 - Same test set. nextest lists the same libtest binaries, and the workspace job's
   "Check nextest runs the libtest test set" step runs
-  `bun scripts/bench/rust-test-inventory.ts capture`, `capture-nextest` and `compare` on every
-  OS. A case that one runner lists and the other does not, or flags `#[ignore]` differently,
+  `bun scripts/bench/rust-test-inventory.ts capture`, `capture-nextest` and `compare` on
+  macOS and Windows, which execute nextest. Ubuntu executes instrumented libtest directly. A case that one runner lists and the other does not, or flags `#[ignore]` differently,
   fails the job and is printed by its `<package>/<kind>/<binary>::<test>` identity.
 - No retries. `--retries 0` is on every command line, and the workflow tests reject
   `NEXTEST_*` environment overrides and a `.config/nextest.toml` that retries, filters or

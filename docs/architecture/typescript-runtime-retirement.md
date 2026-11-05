@@ -141,12 +141,12 @@ machines. Their generators were deleted with it, so they are frozen rather than 
   readers' answers for a fixed corpus, read by `src/library/ts_compat_tests.rs` and
   `src/library/mutation/ts_backup_compat_tests.rs`.
 
-`cargo-shim.yml`'s `runtime-home-fixture-freshness` job pins each directory's git tree
+`cargo-shim.yml`'s Ubuntu `workspace` job pins each directory's git tree
 (`ts-home` at `814a421cef442f2dd6c24b13a70fcea00e45576b`, `ts-library` at
 `5ecbf15d46a87ac2c2e8c24dc9d14a47a76b209e`) and fails when either changes, so an edit has to
-update the pin on purpose. The same job still regenerates `rust-home` with
-`cargo test -p mangostudio-runtime --test generate_rust_fixture -- --ignored` and fails on any
-diff. The hub reads that fixture through `probeRuntimeSlots` in
+update the pin on purpose. After its other checks, the same job regenerates `rust-home` with
+`cargo test -p mangostudio-runtime --test generate_rust_fixture --locked -- --ignored` and stages
+the fixture before checking the cached diff, detecting changed and newly generated files. The hub reads that fixture through `probeRuntimeSlots` in
 `apps/api/tests/unit/cli/runtime-slot-probe-rust-home.test.ts`.
 
 Two other things left with the TypeScript runtime:

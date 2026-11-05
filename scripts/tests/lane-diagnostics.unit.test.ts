@@ -45,6 +45,19 @@ function expectedCommands(name: string, source: string, original: Record<string,
       Object.entries(expected).filter(([job]) => job !== 'fuzz-workspace')
     );
   }
+  if (name === 'cargo-shim') {
+    expected.workspace = [
+      ...(expected.workspace as string[]).filter(
+        (command) =>
+          ![
+            'cargo check --workspace --locked',
+            'cargo check --workspace --all-targets --all-features --locked',
+          ].includes(command)
+      ),
+      ...(expected['runtime-home-fixture-freshness'] as string[]),
+    ];
+    delete expected['runtime-home-fixture-freshness'];
+  }
   if (name === 'protocol-ci' && !extractJobBlock(source, 'package')) {
     expected.typescript = [...(expected.typescript as string[]), ...(expected.package as string[])];
     expected = Object.fromEntries(Object.entries(expected).filter(([job]) => job !== 'package'));
@@ -73,6 +86,10 @@ function expectedGate(name: string, source: string, original: { needs: string[];
   if (name === 'cargo-shim' && !extractJobBlock(source, 'fuzz-workspace')) {
     expected.needs = expected.needs.filter((job) => job !== 'fuzz-workspace');
     expected.skips = expected.skips.replace(' fuzz-workspace', '');
+  }
+  if (name === 'cargo-shim') {
+    expected.needs = expected.needs.filter((job) => job !== 'runtime-home-fixture-freshness');
+    expected.skips = expected.skips.replace(' runtime-home-fixture-freshness', '');
   }
   if (name === 'protocol-ci') {
     for (const job of ['package', 'transports']) {

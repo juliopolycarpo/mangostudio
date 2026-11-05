@@ -346,7 +346,7 @@ describe('protocol lane selection', () => {
     );
   });
 
-  test('protocol-ci leaves fmt to cargo-shim, which runs it on every OS', () => {
+  test('protocol-ci leaves fmt to cargo-shim, which runs it on Ubuntu', () => {
     const protocolRust = extractJobBlock(readText('.github/workflows/protocol-ci.yml'), 'rust');
     expect(stepRunning(protocolRust, 'cargo fmt --all -- --check')).toBeUndefined();
     const shimJob = extractJobBlock(readText('.github/workflows/cargo-shim.yml'), 'workspace');
@@ -365,7 +365,7 @@ describe('protocol lane selection', () => {
     const gate = extractJobBlock(protocol, 'gate');
     expect(gate, 'protocol-ci Gate still waits on the removed msrv job').not.toMatch(/\bmsrv\b/);
     expect(extractJobBlock(readText('.github/workflows/cargo-shim.yml'), 'workspace')).toContain(
-      'cargo check --workspace --all-targets --all-features --locked'
+      'cargo clippy --workspace --all-targets --all-features --locked -- -D warnings'
     );
     expect(extractJobBlock(protocol, 'interop')).toContain(
       'cargo build --locked --example conformance_peer --features testing,websocket,spawn'

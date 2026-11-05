@@ -304,8 +304,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     expect(workspaceBlock).toContain("if: needs.changes.outputs.rust == 'true'");
     expect(workspaceBlock).toContain('os: [ubuntu-latest, macos-latest, windows-latest]');
     for (const command of [
-      'cargo check --workspace --locked',
-      'cargo check --workspace --all-targets --all-features --locked',
+      'cargo build --workspace --locked',
       'cargo check -p mangostudio --all-targets --locked',
       'cargo clippy --workspace --all-targets --all-features --locked -- -D warnings',
     ]) {
@@ -314,6 +313,23 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
       );
       expect(step, `native workspace checks must retain ${command}`).toBeDefined();
       expect(step, `every native OS must run ${command}`).toContain(`if: ${EXPR} !cancelled() }}`);
+    }
+  });
+
+  test('native compilation is covered by build and Clippy without duplicate checks', () => {
+    const block = extractJobBlock(workflow, 'workspace');
+    expect(block).not.toContain('run: cargo check --workspace');
+    const steps = extractStepBlocks(block);
+    const format = steps.find((step) => step.includes('run: cargo fmt --all -- --check'));
+    expect(format).toContain("matrix.os == 'ubuntu-latest'");
+    const generator = steps.findIndex((step) =>
+      step.includes('cargo test -p mangostudio-runtime --test generate_rust_fixture')
+    );
+    const build = steps.findIndex((step) => step.includes('run: cargo build --workspace --locked'));
+    expect(generator).toBeGreaterThan(build);
+    for (const step of steps.slice(generator)) {
+      expect(step).toContain("!cancelled() && matrix.os == 'ubuntu-latest'");
+      expect(step).not.toContain('continue-on-error');
     }
   });
 
@@ -421,7 +437,8 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
   });
 
   test('the fixture freshness lane regenerates rust-home and pins the frozen TypeScript fixtures', () => {
-    const freshnessBlock = extractJobBlock(workflow, 'runtime-home-fixture-freshness');
+    const freshnessBlock = extractJobBlock(workflow, 'workspace');
+    expect(extractJobBlock(workflow, 'runtime-home-fixture-freshness')).toBe('');
 
     // Regenerate, then stage before diffing against `HEAD` — a plain
     // `git diff --exit-code` against the worktree would miss a brand-new
@@ -462,7 +479,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
 
     expect(parseNeedsList(gateBlock).sort()).toEqual(expectedGateNeeds(workflow));
     expect(gateBlock).toContain(
-      `ALLOWED_SKIPS: ${EXPR} format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace workspace-windows-arm64 musl-clippy runtime-home-fixture-freshness' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}`
+      `ALLOWED_SKIPS: ${EXPR} format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace workspace-windows-arm64 musl-clippy' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}`
     );
   });
 
