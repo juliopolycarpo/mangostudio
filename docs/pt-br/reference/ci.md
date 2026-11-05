@@ -111,6 +111,24 @@ executar os testes de todos os crates nesse alvo. A resolução do workspace de 
 da fixture ignorada e a qualificação do binário real mantêm seus comandos e critérios de
 relevância.
 
+## Dry runs de release
+
+CI chama `release-dry-run.yml` no mesmo run de Distribution Build em PRs,
+mesmo quando os caminhos de release são irrelevantes. Os gates mantêm os skips
+por relevância. PRs relevantes baixam os bundles endereçados por conteúdo de
+Linux x64 e Windows x64 no job que empacota cada alvo. `download-distribution`
+verifica fonte, versão, canal, checksums e o perfil light do runtime. Cada job
+empacota o par de hub/runtime e o README verificados com o frontend preparado
+de `hub-inputs-*`, sem reconstruir o hub. O README do alvo extraído é copiado
+para `.mango/out/README.md` antes da criação do arquivo compactado.
+
+Os jobs usam a versão do PR nas asserções de instalador, health, checksum,
+manifesto e ciclo de vida. O caminho de reutilização aceita o produtor limpo
+do runtime pulado; os dry runs semanais e manuais mantêm builds limpos do
+runtime em perfil shipping e a versão `0.0.0-dryrun`. Os checks de
+empacotamento/Docker no Linux, instaladores PowerShell 5.1 no Windows e
+publicação Cargo em modo dry run mantêm seus comandos.
+
 ## Dependências Rust resolvidas do zero
 
 O `rust-fresh-dependencies.yml` resolve um novo lockfile Cargo da raiz toda terça

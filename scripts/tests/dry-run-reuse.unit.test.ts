@@ -411,56 +411,55 @@ describe('same-run release dry-run runtime reuse', () => {
     }
   });
 
-  test('verifies both target bundles before staging their runtime bytes for the existing build commands', async () => {
-    const linux = extractJobBlock(WORKFLOW, 'dry-run-linux');
-    for (const [name, target] of [
-      ['Download immutable Linux distribution', 'linux-x64'],
-      ['Download immutable Windows distribution', 'windows-x64'],
+  test('verifies each native target and stages packaging metadata without replacing its binaries', async () => {
+    for (const [job, target, artifact, name] of [
+      ['dry-run-linux', 'linux-x64', 'linux_artifact', 'Download immutable Linux distribution'],
+      [
+        'dry-run-windows',
+        'windows-x64',
+        'windows_artifact',
+        'Download immutable Windows distribution',
+      ],
     ]) {
-      const step = stepNamed('dry-run-linux', name);
-      expect(step).toContain('uses: ./.github/actions/download-distribution');
-      expect(step).toContain(
-        `artifact-name: ${EXPR} needs.changes.outputs.${target === 'linux-x64' ? 'linux_artifact' : 'windows_artifact'} }}`
-      );
+      const block = extractJobBlock(WORKFLOW, job);
+      const download = stepNamed(job, name);
+      expect(download).toContain('uses: ./.github/actions/download-distribution');
+      expect(download).toContain(`artifact-name: ${EXPR} needs.changes.outputs.${artifact} }}`);
       for (const [key, input] of [
         ['source-sha', 'source_sha'],
         ['version', 'version'],
         ['channel', 'channel'],
-      ]) {
-        expect(step).toContain(`${key}: ${EXPR} inputs.${input} }}`);
-      }
-      expect(step).toContain(`target: ${target}`);
-    }
-    expect(linux.indexOf('Download immutable Linux distribution')).toBeLessThan(
-      linux.indexOf('Clear distribution download staging')
-    );
-    expect(linux.indexOf('Clear distribution download staging')).toBeLessThan(
-      linux.indexOf('Download immutable Windows distribution')
-    );
-    expect(linux.indexOf('Download immutable Windows distribution')).toBeLessThan(
-      linux.indexOf('Stage verified distribution runtimes')
-    );
-    expect(linux.indexOf('Stage verified distribution runtimes')).toBeLessThan(
-      linux.indexOf('Build Linux x64 binary')
-    );
-    const cwd = await mkdtemp(join(tmpdir(), 'dry-run-runtime-stage-'));
-    try {
-      const fixtures = [
-        ['linux-x64', 'mangostudio-runtime', 'literal Linux runtime bytes'],
-        ['windows-x64', 'mangostudio-runtime.exe', 'literal Windows runtime bytes'],
-      ];
-      for (const [platform, name, content] of fixtures)
-        await Bun.write(join(cwd, '.mango/out', platform, name), content);
-      const script = scriptOf(stepNamed('dry-run-linux', 'Stage verified distribution runtimes'));
-      expect((await runScript(script, cwd)).exitCode).toBe(0);
-      for (const [platform, name, content] of fixtures)
-        expect(await Bun.file(join(cwd, '.mango/runtime-prebuilt', platform, name)).text()).toBe(
-          content
+      ])
+        expect(download).toContain(`${key}: ${EXPR} inputs.${input} }}`);
+      expect(download).toContain(`target: ${target}`);
+      expect(download, `${target} must verify the distribution runtime profile`).toContain(
+        `runtime-profile: ${EXPR} github.event_name == 'pull_request' && 'light' || 'shipping' }}`
+      );
+      expect(block.indexOf(name)).toBeLessThan(block.indexOf('Stage verified standalone README'));
+      const cwd = await mkdtemp(join(tmpdir(), 'dry-run-pair-stage-'));
+      try {
+        const fixtures = [
+          ['mangostudio', 'hub bytes'],
+          ['mangostudio-runtime', 'runtime bytes'],
+          ['README.md', 'standalone instructions'],
+        ];
+        for (const [file, content] of fixtures)
+          await Bun.write(join(cwd, '.mango/out', target, file), content);
+        const step = stepNamed(job, 'Stage verified standalone README');
+        const script = step.split('        run: ')[1].trim();
+        expect((await runScript(script, cwd)).exitCode).toBe(0);
+        expect(await Bun.file(join(cwd, '.mango/out/README.md')).text()).toBe(
+          'standalone instructions'
         );
-      await rm(join(cwd, '.mango/out/windows-x64/mangostudio-runtime.exe'));
-      expect((await runScript(script, cwd)).exitCode).not.toBe(0);
-    } finally {
-      await rm(cwd, { recursive: true, force: true });
+        for (const [file, content] of fixtures)
+          expect(await Bun.file(join(cwd, '.mango/out', target, file)).text()).toBe(content);
+        await rm(join(cwd, '.mango/out', target, 'README.md'));
+        const missing = await runScript(script, cwd);
+        expect(missing.exitCode).not.toBe(0);
+        expect(missing.stderr).toContain(`${target}/README.md`);
+      } finally {
+        await rm(cwd, { recursive: true, force: true });
+      }
     }
   });
 });

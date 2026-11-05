@@ -105,9 +105,12 @@ and real-binary qualification retain their commands and relevance predicates.
 PR CI calls `release-dry-run.yml` in the same run as Distribution Build, even
 when release paths are irrelevant. Its internal Gate retains relevance-based
 skips and both CI gates include the reusable workflow result. Relevant PR dry runs
-download the Linux x64 and Windows x64 content-addressed target bundles,
-verify source, version, channel and checksums through `download-distribution`,
-and stage their light-profile runtimes for the existing hub build and packaging checks.
+download the Linux x64 and Windows x64 content-addressed target bundles on the
+job that packages that target. `download-distribution` verifies source, version,
+channel, checksums and the light runtime profile. Each job packages the verified
+hub/runtime pair and README with the prepared `hub-inputs-*` frontend, without
+rebuilding the hub. The standalone README is copied from the extracted target
+to `.mango/out/README.md` before archiving.
 They use the distribution's PR version throughout installer, health, checksum,
 manifest rendering and lifecycle assertions. Both release dry-run gates accept
 the skipped clean runtime producer on this reuse path. On main pushes, the

@@ -962,6 +962,36 @@ describe('release workflow binary gate', () => {
     expect(windows).toContain('$report.installedVia.manager');
   });
 
+  test('reuse dry runs preserve verified hubs and packaging inputs without rebuilding', () => {
+    const workflow = readText('.github/workflows/release-dry-run.yml');
+    for (const [job, platform] of [
+      ['dry-run-linux', 'linux-x64'],
+      ['dry-run-windows', 'windows-x64'],
+    ]) {
+      const steps = extractStepBlocks(extractJobBlock(workflow, job));
+      const build = steps.find((step) => step.includes(`build --binary --platform ${platform}`));
+      expect(build, `${platform} builds only on the independent clean route`).toContain(
+        'if: $' + '{{ !inputs.reuse_distribution }}'
+      );
+      const frontend = steps.find((step) =>
+        step.includes('name: Download prepared packaging inputs')
+      );
+      expect(frontend).toContain('if: inputs.reuse_distribution');
+      expect(frontend).toContain('name: hub-inputs-$' + '{{ inputs.source_sha }}');
+      const stage = steps.find((step) => step.includes('name: Stage verified standalone README'));
+      expect(stage).toContain(`cp .mango/out/${platform}/README.md .mango/out/README.md`);
+      const archive = steps.find((step) =>
+        step.includes(`archive-assets.ts --platform ${platform}`)
+      );
+      expect(archive).not.toMatch(/^ {8}if:/m);
+    }
+    const windows = extractJobBlock(workflow, 'dry-run-windows');
+    expect(windows).toContain('name: Download immutable Windows distribution');
+    expect(windows).toContain(
+      'runtime-profile: $' + "{{ github.event_name == 'pull_request' && 'light' || 'shipping' }}"
+    );
+  });
+
   test('release dry run builds and archives windows-x64 on its native Windows runner', () => {
     const workflow = readText('.github/workflows/release-dry-run.yml');
     const linux = extractJobBlock(workflow, 'dry-run-linux');
