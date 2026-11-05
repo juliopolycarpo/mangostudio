@@ -1,0 +1,15 @@
+#!/usr/bin/env bun
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+// Named external-I/O fake. Unexpected requests fail rather than hitting GitHub.
+const directory = process.env.APPROVED_ARTIFACT_FIXTURE;
+if (!directory) throw new Error('Expected APPROVED_ARTIFACT_FIXTURE directory');
+const endpoint = process.argv.at(-1) ?? '';
+let file;
+if (endpoint.endsWith('/artifacts/99/zip')) file = 'artifact.zip';
+else if (endpoint.endsWith('/artifacts/99')) file = 'artifact.json';
+else if (endpoint.endsWith('/runs/42/attempts/2')) file = 'run.json';
+else if (endpoint.endsWith('/runs/42/attempts/1/jobs?per_page=100')) file = 'jobs.json';
+else throw new Error(`Unexpected fake GitHub endpoint: ${endpoint}`);
+process.stdout.write(readFileSync(join(directory, file)));

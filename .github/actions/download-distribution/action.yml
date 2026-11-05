@@ -5,6 +5,26 @@ inputs:
   artifact-name:
     description: Content-addressed Actions artifact name.
     required: true
+  run-id:
+    description: Approved successful main CI run ID; cross-run inputs must be supplied together.
+    required: false
+    default: ""
+  run-attempt:
+    description: Frozen successful CI run attempt.
+    required: false
+    default: ""
+  producer-attempt:
+    description: Successful distribution upload attempt, which may precede the selected partial rerun.
+    required: false
+    default: ""
+  artifact-id:
+    description: Immutable Actions artifact ID from the approved run.
+    required: false
+    default: ""
+  artifact-digest:
+    description: Expected sha256 digest of the immutable Actions ZIP archive.
+    required: false
+    default: ""
   source-sha:
     description: Expected source commit SHA.
     required: true
@@ -42,7 +62,42 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Validate cross-run input completeness
+      shell: bash
+      env:
+        RUN_ID: ${{ inputs.run-id }}
+        RUN_ATTEMPT: ${{ inputs.run-attempt }}
+        PRODUCER_ATTEMPT: ${{ inputs.producer-attempt }}
+        ARTIFACT_ID: ${{ inputs.artifact-id }}
+        ARTIFACT_DIGEST: ${{ inputs.artifact-digest }}
+      run: |
+        if [ -n "$RUN_ID$RUN_ATTEMPT$PRODUCER_ATTEMPT$ARTIFACT_ID$ARTIFACT_DIGEST" ]; then
+          if [ -z "$RUN_ID" ] || [ -z "$RUN_ATTEMPT" ] || [ -z "$PRODUCER_ATTEMPT" ] || [ -z "$ARTIFACT_ID" ] || [ -z "$ARTIFACT_DIGEST" ]; then
+            echo 'Cross-run distribution: expected run-id, run-attempt, producer-attempt, artifact-id and artifact-digest together.' >&2
+            exit 1
+          fi
+        fi
+
+    - name: Download approved cross-run distribution
+      if: inputs.run-id != ''
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        SOURCE_SHA: ${{ inputs.source-sha }}
+        APPROVED_RUN_ID: ${{ inputs.run-id }}
+        APPROVED_RUN_ATTEMPT: ${{ inputs.run-attempt }}
+        PRODUCER_ATTEMPT: ${{ inputs.producer-attempt }}
+        ARTIFACT_ID: ${{ inputs.artifact-id }}
+        ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        ARTIFACT_DIGEST: ${{ inputs.artifact-digest }}
+        RUNTIME_PROFILE: ${{ inputs.runtime-profile }}
+        VERIFY_ATTESTATION: ${{ inputs.verify-attestation }}
+        DOWNLOAD_DIR: ${{ runner.temp }}/mango-distribution
+      # Requires actions: read in the calling job. No write permission is needed.
+      run: bun --no-install ./scripts/ci/download-approved-distribution.ts
+
     - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      if: inputs.run-id == ''
       with:
         name: ${{ inputs.artifact-name }}
         path: ${{ runner.temp }}/mango-distribution
@@ -73,10 +128,17 @@ runs:
       env:
         GH_TOKEN: ${{ github.token }}
         REPO: ${{ github.repository }}
+        SOURCE_SHA: ${{ inputs.source-sha }}
+        APPROVED_RUN_ID: ${{ inputs.run-id }}
       run: |
         set -euo pipefail
+        source_args=()
+        if [ -n "$APPROVED_RUN_ID" ]; then
+          source_args+=(--source-digest "$SOURCE_SHA")
+        fi
         gh attestation verify "$DISTRIBUTION_BUNDLE" --repo "$REPO" \
-          --signer-workflow "$REPO/.github/workflows/distribution-build.yml"
+          --signer-workflow "$REPO/.github/workflows/distribution-build.yml" \
+          "${source_args[@]}"
 
     - name: Extract distribution bundle safely
       shell: bash
