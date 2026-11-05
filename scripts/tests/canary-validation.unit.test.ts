@@ -64,6 +64,14 @@ class FakeQualificationApi implements CanaryValidationApi {
   readonly values = new Map<string, unknown>();
   constructor() {
     this.values.set('actions/workflows/ci.yml', { id: 42 });
+    this.values.set(`git/commits/${source.sourceSha}`, {
+      sha: source.sourceSha,
+      tree: { sha: 'c'.repeat(40) },
+    });
+    this.values.set(`git/commits/${source.pushBeforeSha}`, {
+      sha: source.pushBeforeSha,
+      tree: { sha: 'd'.repeat(40) },
+    });
     this.values.set('actions/runs/100/attempts/2', run(100, 'ci.yml', 42));
     this.values.set('actions/runs/100/jobs?filter=all&per_page=100', jobs(100, ciNames));
     this.values.set(`compare/${'b'.repeat(40)}...${source.sourceSha}`, {
@@ -205,6 +213,49 @@ describe('canary required validation producers', () => {
     ]);
     expect(receipt.relevance).toMatchObject({ cargo: false, protocol: false });
   });
+  test('accepts absent filtered siblings after an attested equal-tree history rewrite', () => {
+    const api = new FakeQualificationApi();
+    api.absent(43);
+    api.absent(44);
+    api.values.set(`compare/${source.pushBeforeSha}...${source.sourceSha}`, { status: 'diverged' });
+    api.values.set(`git/commits/${source.pushBeforeSha}`, {
+      sha: source.pushBeforeSha,
+      tree: { sha: 'c'.repeat(40) },
+    });
+    const receipt = qualifyCanarySource(source, api);
+    expect(receipt.relevance).toMatchObject({ cargo: false, protocol: false });
+    expect(receipt.relevance.reason).toContain('identical root trees');
+  });
+
+  test.each([
+    { sha: 'e'.repeat(40), tree: { sha: 'c'.repeat(40) } },
+    { sha: source.sourceSha, tree: { sha: 'not-a-tree' } },
+    { sha: source.sourceSha, tree: { sha: 'C'.repeat(40) } },
+  ])('refuses unbound commit/tree evidence %j', (commit) => {
+    const api = new FakeQualificationApi();
+    api.values.set(`compare/${source.pushBeforeSha}...${source.sourceSha}`, { status: 'diverged' });
+    api.values.set(`git/commits/${source.sourceSha}`, commit);
+    expect(() => qualifyCanarySource(source, api)).toThrow('expected commit');
+  });
+
+  test.each(['failure', 'cancelled'])(
+    'equal trees never waive an existing %s sibling',
+    (conclusion) => {
+      const api = new FakeQualificationApi();
+      api.values.set(`compare/${source.pushBeforeSha}...${source.sourceSha}`, {
+        status: 'diverged',
+      });
+      api.values.set(`git/commits/${source.pushBeforeSha}`, {
+        sha: source.pushBeforeSha,
+        tree: { sha: 'c'.repeat(40) },
+      });
+      api.updateRun(43, { conclusion });
+      expect(() => qualifyCanarySource(source, api)).toThrow(
+        'cargo-shim.yml: expected completed successful'
+      );
+    }
+  );
+
   test('requires every platform in the binary smoke producer matrix', () => {
     const receipt = qualifyCanarySource(source, new FakeQualificationApi());
     const block = extractJobBlock(

@@ -178,6 +178,31 @@ function relevance(
     api.get(`repos/${source.repository}/compare/${source.pushBeforeSha}...${source.sourceSha}`),
     'push comparison'
   );
+  // A history rewrite may preserve the entire tree while losing ancestry.
+  // The compare endpoint lists merge-base changes in that case, so only exact
+  // commit-bound root-tree identity can prove the push changed no inputs.
+  if (comparison.status === 'diverged') {
+    const trees = [source.pushBeforeSha, source.sourceSha].map((sha) => {
+      const commit = object(
+        api.get(`repos/${source.repository}/git/commits/${sha}`),
+        `push commit ${sha}`
+      );
+      const tree = object(commit.tree, `push commit ${sha} tree`).sha;
+      if (commit.sha !== sha || typeof tree !== 'string' || !/^[a-f0-9]{40}$/.test(tree)) {
+        throw new Error(
+          `push tree proof: expected commit ${sha} and full root tree SHA; received ${JSON.stringify(commit)}`
+        );
+      }
+      return tree;
+    });
+    if (trees[0] === trees[1]) {
+      return {
+        cargo: false,
+        protocol: false,
+        reason: `verified push ${source.pushBeforeSha}...${source.sourceSha}: identical root trees ${trees[0]}`,
+      };
+    }
+  }
   if (
     (comparison.truncated !== undefined && comparison.truncated !== false) ||
     !['ahead', 'identical'].includes(String(comparison.status)) ||
