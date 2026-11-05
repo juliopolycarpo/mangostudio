@@ -16,9 +16,10 @@ permissions:
 
 # Two numbered shards with the api unit lane at `--parallel=4`, plus the
 # separate frontend lane. The pinned 3/2/1 comparison found similar Test
-# latency and lower aggregate runner time at two; adoption retains the 240s
-# watchdog despite one sample exceeding the experiment's preventive 147s
-# criterion. See docs/reference/testing.md for evidence and limits.
+# latency and lower aggregate runner time at two. Numbered shards allow 480s
+# per watchdog attempt after a healthy step reached 238s; the experiment's
+# preventive 147s criterion is historical. See docs/reference/testing.md for
+# evidence and limits.
 # Changing it is a three-line change: this value, the matrix list, and the shard
 # job's name — `env` is not one of the contexts available to `jobs.<id>.name`,
 # so that last one cannot interpolate this value.
@@ -105,7 +106,7 @@ jobs:
     name: Tests (shard ${{ matrix.shard }}/2)
     needs: [resolve-timings]
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 18
     strategy:
       # Every shard reports, so one red shard still leaves the other counts
       # for the QA report instead of a run that stopped mid-fan-out.
@@ -202,21 +203,19 @@ jobs:
       #
       # The watchdog owns the log file, the shard-meta.json the merge job
       # reads, and the exit code; a hung Bun isolate runner (oven-sh/bun#39709)
-      # is killed after 240s and retried once with the restored timings
-      # baseline put back first. The bound is twice the slowest healthy test
-      # step measured at four shards with the unit lane on one worker (120s;
-      # see docs/reference/testing.md), so a loaded runner that doubles the
-      # step is not read as a hung one. The two-shard adoption keeps this
-      # production bound; the experiment's 147s criterion is not a timeout.
-      # Both attempts have to fit this job's
-      # `timeout-minutes` or the retry is cut short: 2 x 240s leaves 120s for
-      # the other steps, which took at most 45s in those runs.
+      # is killed after 480s and retried once with the restored timings
+      # baseline put back first. A healthy two-shard retry took 238s on
+      # 2026-11-05; the former 240s bound killed its still-progressing first
+      # attempt. Keep roughly twice that observed healthy duration, with
+      # 120s reserved for setup, cleanup and reporting across both attempts:
+      # 2 x 480s + 120s = this job's 18-minute limit. This is a wall-clock
+      # ceiling, not an inactivity timer. See docs/reference/testing.md.
       - name: Run tests with coverage
         id: coverage
         env:
           SHARD: ${{ matrix.shard }}
         run: |
-          bun ./scripts/ci/run-tests-watchdog.ts --label="${SHARD}" --timeout-seconds=240 \
+          bun ./scripts/ci/run-tests-watchdog.ts --label="${SHARD}" --timeout-seconds=480 \
             -- bun run test --coverage --shard="${SHARD}/${SHARD_COUNT}"
 
       # Saves only when this shard's run wrote cache entries the restored
