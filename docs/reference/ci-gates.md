@@ -1,15 +1,22 @@
 # CI gate producers and ruleset handoff
 
-Each workflow reports its existing `Gate` check and an additive check with a unique name. Both
-jobs run with `always()`, directly need every mandatory lane, and invoke
-`scripts/ci/evaluate-gate.ts` with the same `ALLOWED_SKIPS` expression. Neither gate treats a
-failure or cancellation as an allowed skip. Conditional skips require the relevant `changes`
-output to be exactly `false`; missing outputs fail closed. CI also permits the report-only
-`qa-metrics` lane to skip on manual dispatch.
+The authoritative aggregate jobs are `gate-unique`, named `CI Gate`,
+`Cargo Shim Gate`, `Protocol Gate` and `Release Dry Run Gate`. CI calls Release
+Dry Run, whose PR context is `Release Dry Run / Release Dry Run Gate`.
+Each aggregate directly evaluates mandatory producer results with `always()`;
+failure, cancellation, missing results and unexpected skips fail closed.
+Only explicitly proven irrelevant lanes may skip. CI permits QA metrics to
+skip on manual dispatch. The main-only light cache seed waits for `CI Gate`.
 
-The CI compatibility job does not repeat the legacy job's report-only cache API request and
-needs only `contents: read`. Canary continues to depend on the legacy gate. Repository
-enforcement and the security/label producers remain unchanged during this phase.
+Canary independently verifies successful CI and relevant sibling workflow
+producers and their unique gate names. It does not depend on bare `Gate`.
+
+The main ruleset `14350640` was migrated on 2026-11-04 after verifying the
+seven required contexts at PR #1862 head `aa86dd856d774f2ec43602bb6017433787bedb5c`
+and docs-only PR #1838 head `d47ad9a3`. The read-back requires all four unique
+aggregate contexts and retains Dependency Review, CodeQL and path-based labels.
+Application IDs, strict-status policy, conditions, bypass actors and every
+other rule remain unchanged. The snapshots below retain the earlier history.
 
 ## Read-only refresh, 2026-10-23
 
@@ -103,16 +110,11 @@ gh api repos/juliopolycarpo/mangostudio/actions/runs/38379796748
 gh api repos/juliopolycarpo/mangostudio/actions/runs/38379796623
 ```
 
-## Proposed later cutover
+## Required-context migration
 
-After hosted cases verify all four unique producers, the separate cutover replaces only the
-`Gate` entry in `rules[type=required_status_checks].parameters.required_status_checks`.
-
-The candidate below uses the current reusable PR topology. The 2026-10-23 refresh verifies
-`Release Dry Run / Release Dry Run Gate` as its PR check context. Standalone scheduled and
-manual runs retain the leaf name `Release Dry Run Gate`; that name is not a PR enforcement
-target. Observing the PR producer does not complete the hosted case matrix or authorize an
-enforcement change.
+The 2026-11-04 read-back confirms the following required contexts. Reusable
+Release Dry Run reports its prefixed name on PRs; standalone scheduled/manual
+runs report the leaf name and are not PR enforcement targets.
 
 ```json
 [
@@ -126,18 +128,18 @@ enforcement change.
 ]
 ```
 
-Reverify these PR contexts and application IDs before applying any settings change. All
-other ruleset parameters, conditions, and bypass actors stay as captured. That future change
-is a proposal only. Keep the legacy aliases until the cutover owner verifies the required
-contexts and moves Canary to the verified CI producer.
+The cutover replaced only bare `Gate` with the four unique aggregates. Future
+topology changes must verify actual PR context names and application IDs before
+changing these settings. Canary independently verifies its expected successful
+workflow producers and unique aggregate names.
 
 ## Verification boundary
 
 `gate-compatibility.unit.test.ts` uses explicit relevance fixtures from `gate-cases.json`
 and reads both producers' actual skip expressions. It checks complete direct needs,
 success, failure, cancellation, unexpected skips, malformed results, missing lane contracts,
-and missing relevance outputs. It also protects PR event visibility, Canary's legacy
-dependency, and the existing security and label contexts.
+and missing relevance outputs. It also protects PR event visibility, Canary's verified producer
+identity, and the existing security and label contexts.
 
 Result artifacts, failure logs, and QA envelopes replace earlier uploads with the same name
 on a job rerun. This prevents the merger or report publisher from selecting a previous

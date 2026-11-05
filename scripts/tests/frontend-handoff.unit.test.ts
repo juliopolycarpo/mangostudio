@@ -100,6 +100,9 @@ describe('canonical production frontend handoff', () => {
       qa.indexOf('name: Download verified canonical frontend'),
       'verify clean source before untracked QA input directories are downloaded'
     ).toBeLessThan(qa.indexOf('name: Download test metrics fragment'));
+    expect(qa.indexOf('name: Download verified canonical frontend')).toBeLessThan(
+      qa.indexOf('name: Download canonical Check evidence')
+    );
     expect(qa).toContain(
       "steps.frontend.outcome == 'success' && './apps/frontend/dist' || './frontend-unavailable'"
     );

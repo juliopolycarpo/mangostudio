@@ -146,7 +146,7 @@ describe('short-job fold command and failure coverage', () => {
         ['workspace', 'workspace-windows-arm64', 'musl-clippy'],
       ],
     ] as const) {
-      const gate = extractJobBlock(workflow, 'gate');
+      const gate = extractJobBlock(workflow, 'gate-unique');
       for (const job of removed) {
         expect(extractJobBlocks(workflow).map((entry) => entry.job)).not.toContain(job);
         expect(parseNeedsList(gate)).not.toContain(job);

@@ -160,7 +160,7 @@ describe('light runtime cache seed after the PR-only dry run was added', () => {
     expect(jobRuns(CI, 'runtime-cache-seed', mainPush)).toBe(true);
   });
 
-  test.each(['gate', 'distribution-identity'])(
+  test.each(['gate-unique', 'distribution-identity'])(
     'refuses an unsuccessful or missing prerequisite (%s)',
     (producer) => {
       for (const result of ['failure', 'cancelled', 'skipped', undefined]) {
@@ -266,7 +266,7 @@ describe('same-run release dry-run runtime reuse', () => {
   });
 
   test('a missing Windows execution still fails the mandatory gate on a relevant reused PR', () => {
-    const gate = extractJobBlock(WORKFLOW, 'gate');
+    const gate = extractJobBlock(WORKFLOW, 'gate-unique');
     expect(parseNeedsList(gate)).toContain('dry-run-windows');
     expect(gate).toContain("needs.changes.outputs.release == 'false' && 'dry-run-windows' || ''");
     expect(
@@ -367,7 +367,7 @@ describe('same-run release dry-run runtime reuse', () => {
     expect(caller).toContain(
       `target_artifacts: ${EXPR} needs.distribution.outputs.target_artifacts || '{}' }}`
     );
-    expect(parseNeedsList(extractJobBlock(ci, 'gate'))).toContain('release-dry-run');
+    expect(parseNeedsList(extractJobBlock(ci, 'gate-unique'))).toContain('release-dry-run');
     expect(extractJobBlock(WORKFLOW, 'runtime')).toContain('!inputs.reuse_distribution');
     expect(extractJobBlock(WORKFLOW, 'runtime')).toContain('cache: false');
   });
