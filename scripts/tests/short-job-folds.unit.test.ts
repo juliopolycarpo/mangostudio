@@ -21,7 +21,13 @@ function commandStep(workflow: string, job: string, command: string): string {
   return step ?? '';
 }
 
-function simulate(block: string, os: string, failure?: string, cancelled = false) {
+function simulate(
+  block: string,
+  os: string,
+  failure?: string,
+  cancelled = false,
+  event = 'pull_request'
+) {
   const outcomes: Record<string, string> = {};
   const commands: string[] = [];
   let failed = false;
@@ -34,6 +40,8 @@ function simulate(block: string, os: string, failure?: string, cancelled = false
       const condition = expression.replace(/^\$\{\{\s*|\s*\}\}$/g, '');
       runs = condition.split(' && ').every((atom) => {
         if (atom === '!cancelled()') return !cancelled;
+        const eventCondition = /^github\.event_name == '([^']+)'$/.exec(atom);
+        if (eventCondition) return event === eventCondition[1];
         const outcome = /^steps\.([\w-]+)\.outcome == 'success'$/.exec(atom);
         if (outcome) return outcomes[outcome[1] as string] === 'success';
         const host = /^matrix\.os (!=|==) '([^']+)'$/.exec(atom);
@@ -74,7 +82,13 @@ describe('short-job fold command and failure coverage', () => {
       'bun ./scripts/protocol/verify-package.ts',
     ]) {
       const step = commandStep(protocol, 'typescript', command);
-      expect(step).toContain(`if: ${EXPR} !cancelled() && steps.install.outcome == 'success' }}`);
+      const standalone =
+        command === 'bun run protocol:check --ts-only'
+          ? " && github.event_name == 'workflow_dispatch'"
+          : '';
+      expect(step).toContain(
+        `if: ${EXPR} !cancelled() && steps.install.outcome == 'success'${standalone} }}`
+      );
       expect(step).not.toContain('continue-on-error');
     }
     expect(extractJobBlock(protocol, 'package')).toBe('');
@@ -125,11 +139,7 @@ describe('short-job fold command and failure coverage', () => {
 
   test('folded jobs leave the fan-ins and the mandatory surviving owners remain', () => {
     for (const [workflow, removed, required] of [
-      [
-        protocol,
-        ['package', 'transports'],
-        ['typescript', 'interop', 'deny', 'semver-checks', 'schema-equality'],
-      ],
+      [protocol, ['package', 'transports'], ['typescript', 'interop', 'deny', 'schema-equality']],
       [
         cargo,
         ['fuzz-workspace', 'runtime-home-fixture-freshness'],
@@ -168,12 +178,30 @@ describe('short-job fold command and failure coverage', () => {
     const run = simulate(
       extractJobBlock(protocol, 'typescript'),
       'ubuntu-latest',
-      'bun run protocol:check --ts-only'
+      'bun run protocol:check --ts-only',
+      false,
+      'workflow_dispatch'
     );
     expect(run.commands).toContain('bun run protocol:test --ts-only');
     expect(run.commands).toContain('bun ./scripts/protocol/verify-package.ts');
     expect(evaluateGate({ typescript: run.result }, new Set()).ok).toBe(false);
   });
+
+  test.each(['pull_request', 'push'])(
+    'CI Check owns the duplicate TypeScript check on %s',
+    (event) => {
+      const run = simulate(
+        extractJobBlock(protocol, 'typescript'),
+        'ubuntu-latest',
+        undefined,
+        false,
+        event
+      );
+      expect(run.commands).not.toContain('bun run protocol:check --ts-only');
+      expect(run.commands).toContain('bun run protocol:test --ts-only');
+      expect(run.commands).toContain('bun ./scripts/protocol/verify-package.ts');
+    }
+  );
 
   test.each(['macos-latest', 'windows-latest'])(
     'failed peer builds retain transport diagnostics on %s',

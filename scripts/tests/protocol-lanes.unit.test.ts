@@ -1,14 +1,23 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
 import {
+  needsCompiledProtocolValidation,
   PROTOCOL_CHANGELOG,
   PROTOCOL_CLIFF_CONFIG,
   PROTOCOL_IMPORT_TIP,
   PROTOCOL_PATHS,
+  PROTOCOL_PROSE_GUIDES,
   PROTOCOL_TAG_PREFIX,
   PROTOCOL_TRIGGER_FILES,
   protocolTag,
@@ -501,7 +510,7 @@ describe('the CI path filter reads the same list as everything else', () => {
     expect(changes).not.toContain('relevant=');
     expect(changes).not.toContain('grep -Eq');
     expect(readText('scripts/ci/protocol-lanes.ts')).toContain(
-      'touchesProtocolSurface(readChangedPaths(file))'
+      'needsCompiledProtocolValidation(readChangedPaths(file))'
     );
   });
 
@@ -515,14 +524,16 @@ describe('the CI path filter reads the same list as everything else', () => {
     ]);
   });
 
-  const relevance = () => ({ test: (file: string) => touchesProtocolSurface([file]) });
   test.each([...PROTOCOL_PATHS, ...PROTOCOL_TRIGGER_FILES])(
     'the changes job claims %s',
     (entry) => {
       // Failing open here is silent: no lane runs, the Gate accepts the skip, and
       // the pull request goes green with the Rust half never compiled.
       const probe = entry.endsWith('/') ? `${entry}some/file.rs` : entry;
-      expect(relevance().test(probe), `${probe} does not match the changes-job regex`).toBe(true);
+      expect(
+        needsCompiledProtocolValidation([probe]),
+        `${probe} must select compiled validation`
+      ).toBe(true);
     }
   );
 
@@ -535,20 +546,20 @@ describe('the CI path filter reads the same list as everything else', () => {
   });
 
   test('the workflow files itself, so editing the filter reruns the lanes', () => {
-    expect(relevance().test('.github/workflows/protocol-ci.yml')).toBe(true);
+    expect(needsCompiledProtocolValidation(['.github/workflows/protocol-ci.yml'])).toBe(true);
   });
 
   test('the module defining the path set files itself too', () => {
     // Otherwise the detector judges an edit to its own rules by the rules that
     // edit replaced: a pull request narrowing PROTOCOL_PATHS would skip every
     // lane, and the Gate would accept the skip it just authorised.
-    expect(relevance().test('scripts/lib/protocol.ts')).toBe(true);
+    expect(needsCompiledProtocolValidation(['scripts/lib/protocol.ts'])).toBe(true);
     expect(touchesProtocolSurface(['scripts/lib/protocol.ts'])).toBe(true);
   });
 
   test('a change outside the protocol does not trigger the lanes', () => {
     for (const file of ['apps/api/src/index.ts', 'packages/cli/bin/mangostudio.js', 'README.md']) {
-      expect(relevance().test(file), file).toBe(false);
+      expect(needsCompiledProtocolValidation([file]), file).toBe(false);
     }
   });
 });
@@ -1029,5 +1040,72 @@ describe('the fuzz workspace lockfile', () => {
       /'--manifest-path',\s*FUZZ_MANIFEST/
     );
     expect(script).toContain("'crates/mango-protocol/fuzz/Cargo.toml'");
+  });
+});
+
+describe('Protocol CI avoids duplicate and advisory work in its mandatory path', () => {
+  test('TypeScript check is retained only for standalone dispatch', () => {
+    const steps = extractStepBlocks(
+      extractJobBlock(readText('.github/workflows/protocol-ci.yml'), 'typescript')
+    );
+    const check = steps.find((step) => step.includes('run: bun run protocol:check --ts-only'));
+    expect(check).toContain("github.event_name == 'workflow_dispatch'");
+    for (const command of [
+      'bun run protocol:test --ts-only',
+      'bun ./scripts/protocol/verify-package.ts',
+    ]) {
+      expect(steps.find((step) => step.includes(command))).not.toContain(
+        "github.event_name == 'workflow_dispatch'"
+      );
+    }
+  });
+
+  test('semver setup and diagnostics are advisory without delaying mandatory gates', () => {
+    const workflow = readText('.github/workflows/protocol-ci.yml');
+    const advisory = extractJobBlock(workflow, 'semver-checks');
+    expect(advisory).toMatch(/^ {4}continue-on-error: true$/m);
+    expect(advisory).toContain("if: needs.changes.outputs.protocol == 'true'");
+    expect(advisory).toContain('cargo semver-checks check-release --all-features');
+    for (const gate of ['gate', 'gate-unique']) {
+      expect(extractJobBlock(workflow, gate)).not.toContain('semver-checks');
+    }
+  });
+});
+
+describe('compiled protocol relevance', () => {
+  test('the prose allowlist matches the classified Markdown guides on disk', () => {
+    const guides = readdirSync(join(ROOT_DIR, 'docs/protocol'))
+      .filter((name) => name.endsWith('.md'))
+      .map((name) => `docs/protocol/${name}`);
+    expect([...PROTOCOL_PROSE_GUIDES].sort()).toEqual(guides.sort());
+  });
+
+  test.each([
+    'README.md',
+    'adopt-rust.md',
+    'adopt-typescript.md',
+    'build-a-contract.md',
+    'conformance.md',
+    'releasing.md',
+    'versioning.md',
+  ])('prose guide %s retains ownership without compiled lanes', (name) => {
+    const file = `docs/protocol/${name}`;
+    expect(touchesProtocolSurface([file])).toBe(true);
+    expect(needsCompiledProtocolValidation([file])).toBe(false);
+    expect(needsCompiledProtocolValidation([file, 'spec/versioning.md'])).toBe(true);
+  });
+  test.each([
+    'docs/protocol/new-guide.md',
+    'docs/protocol/AGENTS.md',
+    'docs/protocol/example.ts',
+    'docs/protocol/fixtures/example.json',
+    'spec/versioning.md',
+    'packages/protocol/README.md',
+  ])('unknown or functional path %s keeps compilation', (file) => {
+    expect(needsCompiledProtocolValidation([file])).toBe(true);
+  });
+  test('unrelated and empty paths remain irrelevant', () => {
+    expect(needsCompiledProtocolValidation(['apps/frontend/src/main.tsx'])).toBe(false);
+    expect(needsCompiledProtocolValidation([])).toBe(false);
   });
 });

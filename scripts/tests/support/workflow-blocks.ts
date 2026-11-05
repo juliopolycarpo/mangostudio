@@ -173,7 +173,14 @@ export function expectedGateNeeds(workflow: string): string[] {
   return extractJobBlocks(workflow)
     .filter(
       ({ job, block }) =>
-        job !== 'gate' && job !== 'gate-unique' && !parseNeedsList(block).includes('gate')
+        job !== 'gate' &&
+        job !== 'gate-unique' &&
+        !(
+          job === 'semver-checks' &&
+          /^ {4}name: cargo-semver-checks \(informational\)$/m.test(block) &&
+          /^ {4}continue-on-error: true$/m.test(block)
+        ) &&
+        !parseNeedsList(block).includes('gate')
     )
     .map(({ job }) => job)
     .sort();
