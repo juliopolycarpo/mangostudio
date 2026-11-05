@@ -621,6 +621,12 @@ mangostudio upgrade --canary 1234abc
 | GitHub Releases | `github-release-canary` | A `v<version>` pre-release per green main commit, with its assets and `SHA256SUMS`. Older ones are pruned to a keep-window. |
 | npm             | `npm-canary`            | `mangostudio@<version>` under the `canary` dist-tag, so `npm i -g mangostudio` (latest) never resolves to a canary.         |
 
+Post-write GitHub audits share up to 60 seconds of retry delays for delayed
+visibility. A newly created draft, uploaded asset or completed publication must
+be confirmed before another mutation. Initial absence audits remain immediate.
+Identity, integrity, authorization and other HTTP failures still stop publication.
+Exhausted visibility waits fail and retain the original-byte recovery procedure.
+
 The channels publish independently after approval. Before a no-op, both channels
 must pass integrity verification: all six platform npm packages and the wrapper
 are downloaded and checked against the approved manifest, and the GitHub release
