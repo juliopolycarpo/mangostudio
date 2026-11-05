@@ -42,6 +42,9 @@ class FakeCanaryRegistry implements RegistryClient {
   readonly failures = new Map<string, Error>();
   readonly events: string[];
   writesStarted = false;
+  readonly hiddenVersionReads = new Map<string, number>();
+  readonly hiddenArchiveReads = new Map<string, number>();
+  readonly servedArchives: string[] = [];
   postWriteResponse?: RegistryResponse<unknown>;
   constructor(events: string[]) {
     this.events = events;
@@ -63,6 +66,11 @@ class FakeCanaryRegistry implements RegistryClient {
         body: { latest: '1.2.2', ...(owner ? { canary: owner } : {}) },
       });
     }
+    const hidden = this.hiddenVersionReads.get(url) ?? 0;
+    if (hidden > 0) {
+      this.hiddenVersionReads.set(url, hidden - 1);
+      return Promise.resolve({ status: 404, body: null });
+    }
     const result = this.versions.get(url);
     if (!result) throw new Error(`Unexpected fake registry version URL ${url}`);
     return Promise.resolve(result);
@@ -71,8 +79,14 @@ class FakeCanaryRegistry implements RegistryClient {
     this.events.push(`archive:${url}`);
     const failure = this.failures.get(url);
     if (failure) throw failure;
+    const hidden = this.hiddenArchiveReads.get(url) ?? 0;
+    if (hidden > 0) {
+      this.hiddenArchiveReads.set(url, hidden - 1);
+      return Promise.resolve({ status: 404, body: new Uint8Array() });
+    }
     const result = this.archives.get(url);
     if (!result) throw new Error(`Unexpected fake registry archive URL ${url}`);
+    if (result.status === 200) this.servedArchives.push(url);
     return Promise.resolve(result);
   }
 }
@@ -213,7 +227,7 @@ async function fixture(): Promise<Fixture> {
     registry,
     runner,
     ancestry,
-    dependencies: { registry, runner, ancestry, env: OIDC_ENV },
+    dependencies: { registry, runner, ancestry, env: OIDC_ENV, visibility: { retryDelaysMs: [] } },
     events,
   };
 }
@@ -617,4 +631,83 @@ describe('OIDC-only canary environment', () => {
       'expected absolute HTTPS OIDC endpoint'
     );
   });
+});
+
+class FakeTagVisibilitySleeper {
+  readonly delays: number[] = [];
+  sleep(delay: number): Promise<void> {
+    this.delays.push(delay);
+    return Promise.resolve();
+  }
+}
+
+test('waits for just-published versions before one byte audit and any tag write', async () => {
+  const { manifest, registry, runner, dependencies, events } = await fixture();
+  const clock = new FakeTagVisibilitySleeper();
+  registry.hiddenVersionReads.set(versionUrl(NAMES[0] ?? MAIN_PACKAGE), 2);
+  const result = await promoteCanaryTags(manifest, {
+    ...dependencies,
+    visibility: { retryDelaysMs: [1, 2], sleep: clock.sleep.bind(clock) },
+  });
+  expect(result.updated).toEqual(NAMES);
+  expect(clock.delays).toEqual([1, 2]);
+  expect(events.filter((event) => event.startsWith('archive:'))).toHaveLength(7);
+  expect(runner.writes).toHaveLength(7);
+});
+
+test('visibility exhaustion still refuses tag writes and audits each visible archive only once', async () => {
+  const { manifest, registry, runner, dependencies, events } = await fixture();
+  const clock = new FakeTagVisibilitySleeper();
+  registry.versions.set(versionUrl(NAMES[0] ?? MAIN_PACKAGE), { status: 404, body: null });
+  await expect(
+    promoteCanaryTags(manifest, {
+      ...dependencies,
+      visibility: { retryDelaysMs: [1, 2], sleep: clock.sleep.bind(clock) },
+    })
+  ).rejects.toThrow(`missing ${NAMES[0]}`);
+  expect(clock.delays).toEqual([1, 2]);
+  expect(runner.writes).toEqual([]);
+  expect(events.filter((event) => event.startsWith('archive:'))).toHaveLength(6);
+});
+
+test('initial package absence audit remains immediate without a post-publication window', async () => {
+  const { manifest, registry } = await fixture();
+  registry.hiddenVersionReads.set(versionUrl(NAMES[0] ?? MAIN_PACKAGE), 2);
+  expect((await verifyCanaryNpmPublication(manifest, registry)).missing).toEqual([
+    NAMES[0] ?? MAIN_PACKAGE,
+  ]);
+  expect(registry.hiddenVersionReads.get(versionUrl(NAMES[0] ?? MAIN_PACKAGE))).toBe(1);
+});
+
+test.each([401, 403, 429, 500])(
+  'HTTP%i never spends the visibility wait budget or writes tags',
+  async (status) => {
+    const { manifest, registry, runner, dependencies } = await fixture();
+    const clock = new FakeTagVisibilitySleeper();
+    registry.versions.set(versionUrl(NAMES[0] ?? MAIN_PACKAGE), { status, body: null });
+    await expect(
+      promoteCanaryTags(manifest, {
+        ...dependencies,
+        visibility: { retryDelaysMs: [1], sleep: clock.sleep.bind(clock) },
+      })
+    ).rejects.toThrow(`received ${status}`);
+    expect(clock.delays).toEqual([]);
+    expect(runner.writes).toEqual([]);
+  }
+);
+
+test('waits for one just-published tarball without downloading earlier verified archives again', async () => {
+  const { manifest, registry, runner, dependencies } = await fixture();
+  const clock = new FakeTagVisibilitySleeper();
+  const archives = [...registry.archives.keys()];
+  const delayed = archives[1];
+  if (!delayed) throw new Error('fixture: expected at least two package archives');
+  registry.hiddenArchiveReads.set(delayed, 2);
+  await promoteCanaryTags(manifest, {
+    ...dependencies,
+    visibility: { retryDelaysMs: [1, 2], sleep: clock.sleep.bind(clock) },
+  });
+  expect(clock.delays).toEqual([1, 2]);
+  expect(registry.servedArchives).toEqual(archives);
+  expect(runner.writes).toHaveLength(7);
 });

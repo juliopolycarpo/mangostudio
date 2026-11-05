@@ -627,6 +627,12 @@ be confirmed before another mutation. Initial absence audits remain immediate.
 Identity, integrity, authorization and other HTTP failures still stop publication.
 Exhausted visibility waits fail and retain the original-byte recovery procedure.
 
+Npm tag promotion also shares up to 60 seconds of retry delays across individual
+exact-version and tarball HTTP 404 reads. Successful archives are downloaded and
+verified once, and all seven packages must pass the full audit before tag writes.
+The initial absence audit stays immediate; other HTTP failures and invalid
+identity, integrity or provenance still fail without a retry.
+
 The channels publish independently after approval. Before a no-op, both channels
 must pass integrity verification: all six platform npm packages and the wrapper
 are downloaded and checked against the approved manifest, and the GitHub release

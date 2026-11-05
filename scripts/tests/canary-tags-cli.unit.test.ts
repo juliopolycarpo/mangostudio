@@ -409,7 +409,7 @@ describe('canary tag CLI identity', () => {
         runPromoteCanaryTagsCli(
           [path],
           { ...OIDC, REPO: 'owner/repo', SOURCE_SHA: SOURCE, VERSION },
-          { registry, runner, ancestry: new UnusedAncestry() }
+          { registry, runner, ancestry: new UnusedAncestry(), visibility: { retryDelaysMs: [] } }
         )
       ).rejects.toThrow('requires all seven verified packages');
       expect(registry.reads).toBe(14);

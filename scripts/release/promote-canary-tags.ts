@@ -7,6 +7,7 @@ import type { RegistryClient, RegistryResponse } from '../lib/canary-publication
 import {
   CANARY_TAG_NPM_VERSION,
   type CanaryTagAncestry,
+  type CanaryTagDependencies,
   canaryTagEnvironment,
   type CanaryTagPromotion,
   type CanaryTagRunner,
@@ -196,11 +197,7 @@ export class GitHubCanaryTagAncestry implements CanaryTagAncestry {
   }
 }
 
-interface CliDependencies {
-  readonly registry: RegistryClient;
-  readonly runner: CanaryTagRunner;
-  readonly ancestry: CanaryTagAncestry;
-}
+type CliDependencies = Omit<CanaryTagDependencies, 'env'>;
 
 /**
  * Promote the authenticated manifest's canary tags using a frozen source identity.
