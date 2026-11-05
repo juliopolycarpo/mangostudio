@@ -41,13 +41,25 @@ describe('release provenance for checksums and install scripts', () => {
     expect(job).toContain('github-canary-assets/install.ps1');
     expect(job).toContain('attestations: write');
     expect(job).toContain('id-token: write');
-    expect(job.indexOf('stage-canary-assets.ts')).toBeLessThan(job.indexOf(ATTEST_ACTION));
-    expect(job.indexOf(ATTEST_ACTION)).toBeLessThan(job.indexOf('publish_release'));
+    const stage = job.indexOf('stage-approved-canary.ts');
+    const attest = job.indexOf(ATTEST_ACTION);
+    const publish = job.indexOf('publish-canary.ts');
+    for (const index of [stage, attest, publish]) expect(index).toBeGreaterThan(-1);
+    expect(stage).toBeLessThan(attest);
+    expect(attest).toBeLessThan(publish);
   });
 
-  test("canary.yml's build caller grants distribution provenance permissions", () => {
-    const job = jobBlock(readWorkflow('canary.yml'), 'build');
+  test('canary approval attests the original archive before reserving its version', () => {
+    const job = jobBlock(readWorkflow('canary.yml'), 'approve');
     expect(job).toContain('attestations: write');
     expect(job).toContain('id-token: write');
+    expect(job).toContain('.canary-approval/approval.tar.gz');
+    expect(job).toContain('.canary-approval/assets/SHA256SUMS');
+    const prepare = job.indexOf('prepare-canary-approval.ts');
+    const attest = job.indexOf(ATTEST_ACTION);
+    const reserve = job.indexOf('id: reservation');
+    for (const index of [prepare, attest, reserve]) expect(index).toBeGreaterThan(-1);
+    expect(prepare).toBeLessThan(attest);
+    expect(attest).toBeLessThan(reserve);
   });
 });

@@ -1,18 +1,7 @@
 name: Canary
 
-# Publish daily from the latest successful push CI run on main. Resolve the
-# source once, then build and publish that exact commit.
-#
-# Channels are independent fan-out jobs off a single build. Each is idempotent and
-# individually re-runnable, so one failing never blocks the others and a maintainer
-# can re-run just the failed job (see the canary-summary job):
-#   - npm: mangostudio@<root>-canary.<sha7> under the `canary` dist-tag, so
-#     `latest` never moves. Install with `npm i -g mangostudio@canary`.
-#   - GitHub Releases: one `v<version>` pre-release per selected main commit, with
-#     platform archives and checksums. Never a rolling tag: this repository has
-#     immutable releases enabled, so a published release's assets can never be
-#     replaced and a tag that carried one can never be reused.
-
+# Promote one frozen successful main CI run. Each channel can recover original
+# approved bytes independently; cancellation never rolls back external writes.
 on:
   schedule:
     - cron: "17 6 * * *"
@@ -21,21 +10,18 @@ on:
 permissions:
   contents: read
 
-# Only the newest green commit should own the npm `canary` dist-tag, so supersede
-# in-flight canary publishes. Per-commit versions are unique, so a cancelled run
-# never leaves a conflicting half-publish.
 concurrency:
   group: canary-publish
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   source:
     name: Resolve latest green main commit
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
-      actions: read # find successful main push CI runs
+      actions: read # recover immutable source and approval artifacts
       contents: read
     outputs:
       source_sha: ${{ steps.source.outputs.sha }}
@@ -46,11 +32,10 @@ jobs:
       workflow_id: ${{ steps.source.outputs.workflow_id }}
       repository: ${{ steps.source.outputs.repository }}
       workflow_path: ${{ steps.source.outputs.workflow_path }}
-      version: ${{ steps.identity.outputs.version }}
-      channel: ${{ steps.identity.outputs.channel }}
+      source_restored: ${{ steps.source.outputs.source_restored }}
+      version: ${{ steps.snapshot.outputs.version }}
+      channel: ${{ steps.snapshot.outputs.channel }}
     steps:
-      # Selection runs from the workflow execution revision; application
-      # identity is read only after checking out the frozen selected source.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
@@ -61,11 +46,13 @@ jobs:
           bun-version-file: .bun-version
 
       - id: source
-        name: Freeze successful main push CI run
+        name: Freeze or restore successful main push CI run
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-        run: bun ./scripts/ci/select-canary-source.ts
+          SELECTION_PATH: ${{ runner.temp }}/canary-selection.json
+          SNAPSHOT_PATH: ${{ runner.temp }}/canary-source/source.json
+        run: bun ./scripts/ci/freeze-canary-source.ts resolve
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -73,58 +60,194 @@ jobs:
           persist-credentials: false
 
       - id: identity
-        name: Resolve canary identity from selected source
+        name: Read canary identity from frozen application source
         env:
           EVENT_NAME: push
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
-        run: bun ./scripts/ci/distribution-identity.ts >> "$GITHUB_OUTPUT"
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          bun ./scripts/ci/distribution-identity.ts >> "$GITHUB_OUTPUT"
 
-  build:
-    name: Build daily canary
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - id: snapshot
+        name: Write original source snapshot using trusted execution code
+        env:
+          SELECTION_PATH: ${{ runner.temp }}/canary-selection.json
+          SNAPSHOT_PATH: ${{ runner.temp }}/canary-source/source.json
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          VERSION: ${{ steps.identity.outputs.version }}
+          CHANNEL: ${{ steps.identity.outputs.channel }}
+        run: bun ./scripts/ci/freeze-canary-source.ts write
+
+      - name: Retain source selection for full workflow reruns
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: canary-source-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/canary-source/source.json
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 30
+
+  approve:
+    name: "Approve canary ${{ needs.source.outputs.version }} from ${{ needs.source.outputs.source_sha }}"
     needs: [source]
-    permissions:
-      contents: read
-      id-token: write # mint distribution build provenance token
-      attestations: write # persist distribution build provenance
-    uses: ./.github/workflows/distribution-build.yml
-    with:
-      source_sha: ${{ needs.source.outputs.source_sha }}
-      version: ${{ needs.source.outputs.version }}
-      channel: ${{ needs.source.outputs.channel }}
-      retention_days: 7
-      cache: true
-
-  npm-canary:
-    name: Publish npm (canary dist-tag)
-    needs: [source, build]
-    environment: canary
     runs-on: ubuntu-latest
-    # Seven sequential publishes reached the old 10-minute job limit after setup.
-    timeout-minutes: 15
-    outputs:
-      auth: ${{ steps.publish.outputs.auth }}
-      provenance: ${{ steps.publish.outputs.provenance }}
+    timeout-minutes: 30
     permissions:
-      attestations: read # fetch build provenance for gh attestation verify
-      contents: read # checkout only; publish goes to npm, not the repo
-      id-token: write # npm Trusted Publishing OIDC and provenance for the canary publish
+      actions: read # recover immutable source and approval artifacts
+      contents: write # include push-capable visibility of unfinished release drafts
+      attestations: write # verify prior provenance and attest frozen publication evidence
+      id-token: write # mint provenance and npm Trusted Publishing tokens
+    env:
+      REPO: ${{ github.repository }}
+      SOURCE_OUTPUTS_JSON: ${{ toJSON(needs.source.outputs) }}
+      OUTPUT_DIR: .canary-approval
+      VERSION: ${{ needs.source.outputs.version }}
+    outputs:
+      approval_sha256: ${{ steps.approved.outputs.approval_payload_sha256 }}
+      expected_release_sha256: ${{ steps.approved.outputs.expected_release_sha256 }}
+      npm_needed: ${{ steps.audit.outputs.npm_needed }}
+      github_needed: ${{ steps.audit.outputs.github_needed }}
+      reason: ${{ steps.audit.outputs.reason }}
+      approval_origin: ${{ steps.approved.outputs.approval_origin }}
+      approval_execution_revision: ${{ steps.approved.outputs.approval_execution_revision }}
+      manifest_sha256: ${{ steps.approved.outputs.manifest_sha256 }}
+      approved_run_id: ${{ steps.approved.outputs.approved_run_id }}
+      approved_run_attempt: ${{ steps.approved.outputs.approved_run_attempt }}
+      approved_run_number: ${{ steps.approved.outputs.approved_run_number }}
+      approved_run_url: ${{ steps.approved.outputs.approved_run_url }}
+      approved_workflow_id: ${{ steps.approved.outputs.approved_workflow_id }}
+      approved_workflow_path: ${{ steps.approved.outputs.approved_workflow_path }}
+      builder_attempt: ${{ steps.approved.outputs.builder_attempt }}
+      built_at: ${{ steps.approved.outputs.built_at }}
+      checksums_id: ${{ steps.approved.outputs.checksums_id }}
+      checksums_name: ${{ steps.approved.outputs.checksums_name }}
+      checksums_digest: ${{ steps.approved.outputs.checksums_digest }}
+      assets_id: ${{ steps.approved.outputs.assets_id }}
+      assets_name: ${{ steps.approved.outputs.assets_name }}
+      assets_digest: ${{ steps.approved.outputs.assets_digest }}
+      npm_id: ${{ steps.approved.outputs.npm_id }}
+      npm_name: ${{ steps.approved.outputs.npm_name }}
+      npm_digest: ${{ steps.approved.outputs.npm_digest }}
+      qualification_json: ${{ steps.approved.outputs.qualification_json }}
+      artifact_id: ${{ steps.reservation.outputs.artifact-id }}
+      artifact_digest: ${{ steps.reservation.outputs.artifact-digest }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
-
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "22.14.0"
-          package-manager-cache: false
-
       - uses: ./.github/actions/setup-mango
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
-      - uses: ./.github/actions/download-distribution
+      - id: approved
+        name: Recover original approval or qualify retained CI distribution
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun ./scripts/ci/prepare-canary-approval.ts
+
+      - id: audit
+        name: Verify both published channels before deciding completion
+        env:
+          MANIFEST_PATH: .canary-approval/distribution-manifest.json
+          EXPECTED_RELEASE: .canary-approval/expected-release.json
+          AUDIT_PATH: .canary-approval/audit.json
+          APPROVAL_ORIGIN: ${{ steps.approved.outputs.approval_origin }}
+          EXPECTED_MANIFEST_SHA256: ${{ steps.approved.outputs.manifest_sha256 }}
+          EXPECTED_RELEASE_SHA256: ${{ steps.approved.outputs.expected_release_sha256 }}
+          GH_TOKEN: ${{ github.token }}
+        run: bun ./scripts/release/audit-canary-publication.ts .canary-approval/distribution-manifest.json .canary-approval/expected-release.json .canary-approval/audit.json
+
+      - name: Attest frozen approval and expected release checksums
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          artifact-name: ${{ needs.build.outputs.npm_artifact }}
+          subject-path: |
+            .canary-approval/approval.tar.gz
+            .canary-approval/assets/SHA256SUMS
+
+      # Keep this last, including verified no-ops: a successful approval job is
+      # the durable per-version reservation index used after a partial publish.
+      - id: reservation
+        name: Reserve original approved bytes for this version
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.approved.outputs.approval_artifact_name }}
+          path: .canary-approval/approval.tar.gz
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 30
+          compression-level: 0
+
+  npm-canary:
+    name: Publish npm canary
+    needs: [source, approve]
+    if: needs.approve.outputs.npm_needed == 'true'
+    environment: canary
+    outputs:
+      auth: ${{ steps.publish.outputs.auth }}
+      provenance: ${{ steps.publish.outputs.provenance }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      actions: read # recover immutable source and approval artifacts
+      contents: write # include push-capable visibility of unfinished release drafts
+      attestations: read # verify original builder and approval provenance
+      id-token: write # mint provenance and npm Trusted Publishing tokens
+    env:
+      REPO: ${{ github.repository }}
+      SOURCE_OUTPUTS_JSON: ${{ toJSON(needs.source.outputs) }}
+      OUTPUT_DIR: .canary-approval
+      VERSION: ${{ needs.source.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22.14.0"
+          package-manager-cache: false
+      - uses: ./.github/actions/setup-mango
+        with:
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+
+      - id: approved
+        name: Recover and pin the original successful approval
+        env:
+          EXPECTED_APPROVAL_SHA256: ${{ needs.approve.outputs.approval_sha256 }}
+          GH_TOKEN: ${{ github.token }}
+        run: bun ./scripts/ci/prepare-canary-approval.ts
+
+      # Failed-job reruns reuse successful dependency outputs. This read must
+      # stay inside each publisher, before package/tag/release mutations.
+      - id: guard
+        name: Recheck external bytes and current channel ordering before writes
+        env:
+          MANIFEST_PATH: .canary-approval/distribution-manifest.json
+          EXPECTED_RELEASE: .canary-approval/expected-release.json
+          AUDIT_PATH: .canary-approval/audit.json
+          APPROVAL_ORIGIN: ${{ steps.approved.outputs.approval_origin }}
+          EXPECTED_MANIFEST_SHA256: ${{ steps.approved.outputs.manifest_sha256 }}
+          EXPECTED_RELEASE_SHA256: ${{ steps.approved.outputs.expected_release_sha256 }}
+          GH_TOKEN: ${{ github.token }}
+        run: bun ./scripts/release/audit-canary-publication.ts .canary-approval/distribution-manifest.json .canary-approval/expected-release.json .canary-approval/audit.json
+
+      - name: Download original approved npm distribution
+        if: steps.guard.outputs.packages_needed == 'true'
+        uses: ./.github/actions/download-distribution
+        with:
+          artifact-name: ${{ steps.approved.outputs.npm_name }}
+          artifact-id: ${{ steps.approved.outputs.npm_id }}
+          artifact-digest: ${{ steps.approved.outputs.npm_digest }}
+          run-id: ${{ steps.approved.outputs.approved_run_id }}
+          run-attempt: ${{ steps.approved.outputs.approved_run_attempt }}
+          producer-attempt: ${{ steps.approved.outputs.builder_attempt }}
           source-sha: ${{ needs.source.outputs.source_sha }}
           version: ${{ needs.source.outputs.version }}
           channel: ${{ needs.source.outputs.channel }}
@@ -132,35 +255,82 @@ jobs:
           runtime-profile: shipping
           verify-attestation: "true"
 
+      - name: Verify downloaded manifest against frozen approval
+        if: steps.guard.outputs.packages_needed == 'true'
+        run: cmp distribution-manifest.json .canary-approval/distribution-manifest.json
+
       - id: publish
-        name: Publish to npm under the canary dist-tag
+        name: Fill only missing platform packages, then wrapper
+        if: steps.guard.outputs.packages_needed == 'true'
         uses: ./.github/actions/publish-npm-distribution
         with:
           allow-legacy-token: "false"
           dist-tag: canary
           node-version: "22.14.0"
 
+      - name: Verify all package bytes and recover canary dist-tags
+        if: steps.guard.outputs.npm_needed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANIFEST_PATH: .canary-approval/distribution-manifest.json
+        run: bun ./scripts/release/promote-canary-tags.ts .canary-approval/distribution-manifest.json
+
   github-release-canary:
-    name: Publish GitHub pre-release assets
-    needs: [source, build]
+    name: Publish immutable GitHub canary
+    needs: [source, approve]
+    if: needs.approve.outputs.github_needed == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     permissions:
-      attestations: write # verify build provenance, then attest this build's checksums
-      contents: write # create the canary pre-release and its tag
-      id-token: write # sign the SHA256SUMS and install-script attestation
+      actions: read # recover immutable source and approval artifacts
+      contents: write # resume the approved canary draft and prune old prereleases
+      attestations: write # verify prior provenance and attest frozen publication evidence
+      id-token: write # mint provenance and npm Trusted Publishing tokens
+    env:
+      REPO: ${{ github.repository }}
+      SOURCE_OUTPUTS_JSON: ${{ toJSON(needs.source.outputs) }}
+      OUTPUT_DIR: .canary-approval
+      VERSION: ${{ needs.source.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
-
       - uses: ./.github/actions/setup-mango
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
-      - uses: ./.github/actions/download-distribution
+      - id: approved
+        name: Recover and pin the original successful approval
+        env:
+          EXPECTED_APPROVAL_SHA256: ${{ needs.approve.outputs.approval_sha256 }}
+          GH_TOKEN: ${{ github.token }}
+        run: bun ./scripts/ci/prepare-canary-approval.ts
+
+      # Failed-job reruns reuse successful dependency outputs. This read must
+      # stay inside each publisher, before package/tag/release mutations.
+      - id: guard
+        name: Recheck external bytes and current channel ordering before writes
+        env:
+          MANIFEST_PATH: .canary-approval/distribution-manifest.json
+          EXPECTED_RELEASE: .canary-approval/expected-release.json
+          AUDIT_PATH: .canary-approval/audit.json
+          APPROVAL_ORIGIN: ${{ steps.approved.outputs.approval_origin }}
+          EXPECTED_MANIFEST_SHA256: ${{ steps.approved.outputs.manifest_sha256 }}
+          EXPECTED_RELEASE_SHA256: ${{ steps.approved.outputs.expected_release_sha256 }}
+          GH_TOKEN: ${{ github.token }}
+        run: bun ./scripts/release/audit-canary-publication.ts .canary-approval/distribution-manifest.json .canary-approval/expected-release.json .canary-approval/audit.json
+
+      - name: Download original approved assets distribution
+        if: steps.guard.outputs.github_needed == 'true'
+        uses: ./.github/actions/download-distribution
         with:
-          artifact-name: ${{ needs.build.outputs.assets_artifact }}
+          artifact-name: ${{ steps.approved.outputs.assets_name }}
+          artifact-id: ${{ steps.approved.outputs.assets_id }}
+          artifact-digest: ${{ steps.approved.outputs.assets_digest }}
+          run-id: ${{ steps.approved.outputs.approved_run_id }}
+          run-attempt: ${{ steps.approved.outputs.approved_run_attempt }}
+          producer-attempt: ${{ steps.approved.outputs.builder_attempt }}
           source-sha: ${{ needs.source.outputs.source_sha }}
           version: ${{ needs.source.outputs.version }}
           channel: ${{ needs.source.outputs.channel }}
@@ -168,24 +338,18 @@ jobs:
           runtime-profile: shipping
           verify-attestation: "true"
 
-      - name: Stage canary release assets
+      - name: Stage original approved assets and frozen publication evidence
+        if: steps.guard.outputs.github_needed == 'true'
         env:
-          VERSION: ${{ needs.source.outputs.version }}
+          APPROVAL_DIR: .canary-approval
+          MANIFEST_PATH: distribution-manifest.json
           SOURCE_SHA: ${{ needs.source.outputs.source_sha }}
-        # Named selection, not a glob. `release-assets/mangostudio-<version>-*`
-        # absorbed the eight raw hub binaries the moment raw assets shipped while
-        # never matching a raw runtime binary, so canary paid ~760 MB per green
-        # commit for assets nothing could use. The script publishes every platform
-        # archive (the Cargo launcher resolves one for its own host) plus raw
-        # hub+runtime pairs for the curated canary platforms, and writes
-        # canary-manifest.json, which is what names the source commit.
-        run: bun ./scripts/release/stage-canary-assets.ts
+          EXPECTED_APPROVAL_SHA256: ${{ needs.approve.outputs.approval_sha256 }}
+          EXPECTED_RELEASE_SHA256: ${{ needs.approve.outputs.expected_release_sha256 }}
+        run: bun ./scripts/ci/stage-approved-canary.ts
 
-      # Same subjects as the stable release: SHA256SUMS covers every staged
-      # archive and pair transitively, and the install scripts stand on their
-      # own. The subject digest changes on every green commit, so each canary
-      # build leaves its own record.
       - name: Attest canary checksums and install scripts
+        if: steps.guard.outputs.github_needed == 'true'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
@@ -193,35 +357,18 @@ jobs:
             github-canary-assets/install.sh
             github-canary-assets/install.ps1
 
-      - name: Publish this commit's pre-release
-        # One tag per green commit, named for the sha-stamped version the assets
-        # themselves carry, so the tag, the file names and canary-manifest.json
-        # all name the same build. `--target` pins the tag to the commit that
-        # went green rather than whatever `main` points at by the time this runs.
-        #
-        # Consumers resolve the newest `-canary` pre-release from the release
-        # list (install.sh, install.ps1 and the hub's own upgrade check); none of
-        # them reconstructs a tag from a version, because there is no longer one
-        # rolling tag to reconstruct.
+      - id: publish
+        name: Resume missing assets in matching draft and publish complete release
+        if: steps.guard.outputs.github_needed == 'true'
         env:
+          EXPECTED_RELEASE: .canary-approval/expected-release.json
+          EXPECTED_RELEASE_SHA256: ${{ needs.approve.outputs.expected_release_sha256 }}
+          ASSET_DIR: github-canary-assets
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.source.outputs.version }}
-          SOURCE_SHA: ${{ needs.source.outputs.source_sha }}
-        run: |
-          source scripts/release/publish-release.sh
-          tag="v${VERSION}"
-          notes="Canary build from ${SOURCE_SHA}."
-          publish_release "$tag" github-canary-assets/* -- \
-            --prerelease \
-            --latest=false \
-            --target "$SOURCE_SHA" \
-            --title "$tag" \
-            --notes "$notes"
+        run: bun ./scripts/release/publish-canary.ts
 
       - name: Prune superseded canary releases
-        # Non-fatal: the build above is published either way, and a transient
-        # listing failure must not fail publication. Storage grows until the next
-        # daily run prunes again.
+        if: steps.guard.outputs.github_needed == 'true'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
@@ -229,7 +376,7 @@ jobs:
 
   canary-summary:
     name: Canary publish summary
-    needs: [source, npm-canary, github-release-canary]
+    needs: [source, approve, npm-canary, github-release-canary]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -238,17 +385,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
-
-      - name: Write canary publish summary
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - name: Record frozen selection, approval and independent channel outcomes
         env:
-          TITLE: Canary ${{ needs.source.outputs.version }}
-          NPM_RESULT: ${{ needs.npm-canary.result }}
-          RELEASE_RESULT: ${{ needs.github-release-canary.result }}
-          NPM_PUBLISH_AUTH: ${{ needs.npm-canary.outputs.auth }}
-          NPM_PUBLISH_PROVENANCE: ${{ needs.npm-canary.outputs.provenance }}
-          NPM_CHANNEL_NAME: npm-canary
-        run: |
-          bash scripts/release/publish-summary.sh \
-            "npm-canary=${NPM_RESULT}" \
-            "github-release-canary=${RELEASE_RESULT}"
+          CANARY_NEEDS_JSON: ${{ toJSON(needs) }}
+          WORKFLOW_REVISION: ${{ github.sha }}
+          CANARY_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bun ./scripts/ci/summarize-canary-promotion.ts

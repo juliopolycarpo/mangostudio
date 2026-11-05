@@ -566,10 +566,35 @@ A missing or inconsistent result fails without substituting the scheduler's
 SHA or the current main tip. Selection code executes from the workflow revision;
 version resolution executes from the selected application source.
 
-The `build` job builds that SHA once through
-`distribution-build.yml`; both publishing channels consume its artifacts.
-CI's aggregate `Gate` rejects mandatory job failures, cancellations and
-unexpected skips before a main push run can qualify as successful.
+The `approve` job promotes the existing shipping distribution from that CI
+run; Canary never compiles it again. It qualifies the CI Gate, shipping builder,
+six native binary smoke jobs, container smoke, same-source CodeQL analyses and
+relevant Cargo Shim/Protocol workflows. The main runtime cache seed remains
+mandatory through the successful whole-CI verdict. See
+[the qualification policy](canary-validation.md) for exact job identities.
+
+Approval binds immutable artifact IDs and ZIP digests to a successful producer
+attempt, verifies builder provenance and fixes the original manifest and build
+time. Light-profile and PR artifacts cannot be promoted. Missing, expired,
+ambiguous or conflicting evidence fails without a rebuild fallback.
+
+A full workflow rerun restores its original `source.json` snapshot. A failed-job
+rerun reuses successful dependency outputs, so each publisher independently
+rechecks external bytes and current channel owners before its first write.
+The source snapshot and approval archive retain for 30 days. Main CI retains
+only its three publication bundles for 30 days; transient inputs and target
+smoke bundles keep seven days. The window starts when each artifact is produced,
+not when a later recovery is requested.
+
+Publisher code executes at the trusted workflow execution revision, while
+application bytes come from the selected CI artifacts. The receipt records both
+identities and the supported schema; qualification requires compatible producer
+workflow definitions. A checkout does not change OIDC/provenance source claims.
+The builder attestation proves application origin; publisher attestations prove
+the execution that approved or published those bytes.
+The jobs that audit both channels use scoped `contents: write` capability so
+unfinished release drafts are visible; their audit commands only read. The
+GitHub publisher owns release mutations, and checkout credentials are not persisted.
 
 Both channels use the same version, `<root-version>-canary.<sha7>` (e.g.
 `0.1.0-canary.1234abc`), where `<sha7>` is the 7-char short commit SHA: npm
@@ -596,19 +621,44 @@ mangostudio upgrade --canary 1234abc
 | GitHub Releases | `github-release-canary` | A `v<version>` pre-release per green main commit, with its assets and `SHA256SUMS`. Older ones are pruned to a keep-window. |
 | npm             | `npm-canary`            | `mangostudio@<version>` under the `canary` dist-tag, so `npm i -g mangostudio` (latest) never resolves to a canary.         |
 
-Each channel is independent and idempotent, exactly like the tag release: a
-GitHub release upload failure never blocks npm, and **Re-run failed jobs**
-re-runs only the failed channel (the `canary-summary` job writes a per-channel
-✅/❌ table naming the job to re-run). The `canary-publish` concurrency group
-cancels superseded in-flight runs so the npm dist-tag always tracks the newest
-green commit; per-commit npm versions are unique, so a
-cancelled run never leaves a conflicting half-publish.
+The channels publish independently after approval. Before a no-op, both channels
+must pass integrity verification: all six platform npm packages and the wrapper
+are downloaded and checked against the approved manifest, and the GitHub release
+must have the exact source tag and complete immutable asset set. Registry/API
+errors are failures; only a real 404 proves absence.
+
+Recovery publishes missing platform versions before the wrapper, then verifies
+all seven packages and repairs only their `canary` dist-tags. A matching GitHub
+draft receives only missing assets and becomes public after its complete asset
+set verifies. Existing conflicting versions/assets/tags fail without overwrite
+or deletion. `latest` is unchanged. Every npm Trusted Publisher must allow
+`canary.yml`, environment `canary`, and **Allow npm dist-tag** for tag repair.
+
+The `canary-publish` group serializes manual and scheduled executions with
+`cancel-in-progress: false`. Fresh guards refuse older or divergent source writes.
+A complete older version can be a verified superseded no-op when all seven
+channel tags consistently point to a newer descendant. Failure or cancellation
+can leave partial external publication; the summary records job outcomes and
+frozen evidence without claiming rollback. Use **Re-run failed jobs** to resume
+its original approval.
+
+Each successful approval job reserves its version with an attested immutable
+archive, including verified no-ops and recovered executions. Published releases
+also retain `promotion.json`, the original builder checksums bundle and original
+approval archive, all bound by the publisher-attested `SHA256SUMS`. This allows
+complete-version verification after Actions artifacts expire. Partial publication
+still needs its original missing payloads: if those are expired or manually
+deleted, fail and publish a new source version. A deleted reservation is never
+silently replaced with a later build. Superseded releases removed by the existing
+keep-window are not recreated by stale retries. Frozen `v<root>-canary` rolling aliases
+are excluded from per-SHA channel ordering; source-stamped history still requires
+immutable releases and proven source ancestry.
 
 ### Distribution bundle compression
 
-Distribution bundles never leave the workflow run: they are `upload-artifact`
-payloads a later job in the same run consumes. Nothing published depends on how
-they are compressed — `SHA256SUMS` is computed over the release archives, not
+Distribution bundles are `upload-artifact` payloads consumed by CI smoke jobs
+and, for main shipping publication scopes, by a later Canary run. Published
+application files do not depend on how they are compressed — `SHA256SUMS` is computed over the release archives, not
 over bundles — so the only question is what buys the most wall clock.
 
 The answer is not uniform, because the payloads are not alike. Measured against
