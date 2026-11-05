@@ -32,7 +32,7 @@ describe('mandatory dependency audit', () => {
     expect(callers.map(({ job }) => job)).toEqual(['dependency-audit']);
     expect(callers[0].block).not.toMatch(/^ {4}(if|needs|continue-on-error):/m);
     const on = extractOnBlock(ci);
-    expect(on).toContain('pull_request:\n    branches: [main]');
+    expect(on).toContain('pull_request:\n    branches: [main, "stack/**"]');
     expect(on).not.toMatch(/paths|pull_request_target/);
   });
 
