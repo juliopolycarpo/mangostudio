@@ -41,6 +41,13 @@ const RUST_CACHE_SAVE_IF = `save-if: ${EXPRESSION_START} github.ref == 'refs/hea
 // manifest, so the root manifest's profiles never apply to it. It is exempt
 // from the prefix-key policy only; it still saves only from main.
 const RUST_PREFIX_KEY_EXEMPT_FILES = new Set(['.github/workflows/protocol-fuzz.yml']);
+// Keep existing physical entries recognizable to lifecycle accounting until
+// their post-merge disposition is verified; these families have no writer.
+const RETIRED_RUST_CACHE_FAMILIES = new Set([
+  'runtime-home-fixture-freshness',
+  'semver-checks',
+  'schema-equality',
+]);
 
 interface TurboLane {
   readonly file: string;
@@ -211,7 +218,7 @@ describe('CI cache policy', () => {
     expect(
       [...observed].sort(),
       'expected every registered family to have a cache producer'
-    ).toEqual([...families].sort());
+    ).toEqual([...families].filter((family) => !RETIRED_RUST_CACHE_FAMILIES.has(family)).sort());
   });
 
   test('keeps every cache family behind one composite and one immutable pin', () => {
@@ -410,10 +417,58 @@ describe('CI cache policy', () => {
     const steps = rustCacheSteps();
     expect(steps.length).toBeGreaterThan(0);
     for (const step of steps) {
-      expect(step.block, `${step.file}: rust-cache step that saves outside main`).toContain(
-        RUST_CACHE_SAVE_IF
+      // The fixture is an explicitly named reader of the workspace family;
+      // never allow a second writer to race the workspace producer.
+      const fixtureReader =
+        step.file === '.github/workflows/cargo-shim.yml' &&
+        step.job === 'runtime-home-fixture-freshness';
+      const expected = fixtureReader ? 'save-if: false' : RUST_CACHE_SAVE_IF;
+      expect(step.block, `${step.file}:${step.job}: unexpected rust-cache save-if`).toContain(
+        expected
       );
     }
+  });
+
+  test('restores the fixture from workspace without saving or skipping its checks', () => {
+    const workflow = readText('.github/workflows/cargo-shim.yml');
+    const fixture = extractJobBlock(workflow, 'runtime-home-fixture-freshness');
+    const workspace = extractJobBlock(workflow, 'workspace');
+    const cacheSteps = rustCacheSteps().filter(
+      (step) => step.file === '.github/workflows/cargo-shim.yml'
+    );
+    const reader = cacheSteps.find((step) => step.job === 'runtime-home-fixture-freshness');
+    const writer = cacheSteps.find((step) => step.job === 'workspace');
+    expect(reader?.block).toContain('shared-key: workspace');
+    expect(reader?.block).toContain('save-if: false');
+    expect(reader?.block).toContain(RUST_CACHE_PREFIX_KEY);
+    expect(writer?.block).toContain(RUST_CACHE_PREFIX_KEY);
+    expect(writer?.block).toContain(RUST_CACHE_SAVE_IF);
+    expect(writer?.block).not.toContain('shared-key:');
+    // No per-job environment/toolchain overrides may split the shared key.
+    expect(fixture).not.toMatch(/^ {4}env:/m);
+    expect(workspace).not.toMatch(/^ {4}env:/m);
+    expect(fixture).toContain('run: rustup show active-toolchain');
+    expect(workspace).toContain('run: rustup show active-toolchain');
+    const checks = extractStepBlocksAtIndent(fixture, 6).filter((step) =>
+      /cargo test|git diff|TS_HOME_TREE/.test(step)
+    );
+    expect(checks).toHaveLength(3);
+    for (const step of checks) expect(step).not.toMatch(/^ {8}if:/m);
+    expect(fixture).toContain(
+      'cargo test -p mangostudio-runtime --test generate_rust_fixture --locked -- --ignored'
+    );
+  });
+
+  test('demotes only the measured Ubuntu candidates and retains other platform caches', () => {
+    const protocol = readText('.github/workflows/protocol-ci.yml');
+    for (const job of ['semver-checks', 'schema-equality']) {
+      expect(extractJobBlock(protocol, job), job).not.toContain('Swatinem/rust-cache@');
+    }
+    const interopCache = rustCacheSteps().filter(
+      (step) => step.file === '.github/workflows/protocol-ci.yml' && step.job === 'interop'
+    );
+    expect(interopCache).toHaveLength(1);
+    expect(interopCache[0].block).toContain("if: matrix.os != 'ubuntu-latest'");
   });
 
   // Real-binary qualification builds exactly what the local-runtime action
