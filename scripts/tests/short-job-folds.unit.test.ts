@@ -132,8 +132,8 @@ describe('short-job fold command and failure coverage', () => {
       ],
       [
         cargo,
-        ['fuzz-workspace'],
-        ['workspace', 'workspace-windows-arm64', 'musl-clippy', 'runtime-home-fixture-freshness'],
+        ['fuzz-workspace', 'runtime-home-fixture-freshness'],
+        ['workspace', 'workspace-windows-arm64', 'musl-clippy'],
       ],
     ] as const) {
       const gate = extractJobBlock(workflow, 'gate');
@@ -153,7 +153,9 @@ describe('short-job fold command and failure coverage', () => {
       expect(workspace.commands.filter((command) => command === FUZZ_METADATA)).toHaveLength(
         os === 'ubuntu-latest' ? 1 : 0
       );
-      expect(workspace.commands).toContain('cargo fmt --all -- --check');
+      expect(
+        workspace.commands.filter((command) => command === 'cargo fmt --all -- --check')
+      ).toHaveLength(os === 'ubuntu-latest' ? 1 : 0);
       const interop = simulate(extractJobBlock(protocol, 'interop'), os);
       expect(
         interop.commands.filter((command) => command === 'bun run protocol:test --ts-only')
@@ -188,7 +190,7 @@ describe('short-job fold command and failure coverage', () => {
       const run = simulate(extractJobBlock(cargo, 'workspace'), 'ubuntu-latest', failure);
       expect(run.commands).toContain('cargo fmt --all -- --check');
       expect(run.commands).toContain(FUZZ_METADATA);
-      expect(run.commands).toContain('cargo check --workspace --locked');
+      expect(run.commands).toContain('cargo build --workspace --locked');
       expect(run.commands).toContain('cargo doc --no-deps --workspace --all-features --locked');
       expect(evaluateGate({ workspace: run.result }, new Set()).ok).toBe(false);
     }

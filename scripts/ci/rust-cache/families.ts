@@ -4,7 +4,6 @@
 export const RUST_CACHE_FAMILIES = [
   'workspace',
   'musl-clippy',
-  'runtime-home-fixture-freshness',
   'local-runtime',
   'rust-coverage',
   'rust',

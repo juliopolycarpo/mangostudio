@@ -74,9 +74,9 @@ describe('workspace tests run under nextest in Cargo Shim', () => {
     ).toBeLessThan(firstUse);
     expect(
       install,
-      'expected the install on every OS, even after another validation fails'
+      'expected the install on nextest hosts after another validation fails'
     ).toContain('!cancelled()');
-    expect(install).not.toContain('matrix.os');
+    expect(install).toContain("matrix.os != 'ubuntu-latest'");
   });
 
   test('keeps the doctests on cargo test --doc, on Ubuntu', () => {
@@ -87,7 +87,7 @@ describe('workspace tests run under nextest in Cargo Shim', () => {
     expect(step).toContain("!cancelled() && matrix.os == 'ubuntu-latest'");
   });
 
-  test('compares libtest and nextest test identities on every OS and fails on a mismatch', () => {
+  test('compares libtest and nextest test identities on nextest hosts and fails on a mismatch', () => {
     const step = stepNamed(workspaceJob, 'Check nextest runs the libtest test set');
     const received = step ?? 'no such step';
 
@@ -97,7 +97,7 @@ describe('workspace tests run under nextest in Cargo Shim', () => {
         `expected inventory command: ${INVENTORY} ${command} | received: ${received}`
       ).toContain(`${INVENTORY} ${command}`);
     }
-    expect(step, 'expected the comparison to run on every OS').not.toContain('matrix.os');
+    expect(step).toContain("matrix.os != 'ubuntu-latest'");
     expect(step, 'expected the comparison after another validation fails').toContain(
       '!cancelled()'
     );
@@ -118,10 +118,7 @@ describe('workspace tests run under nextest in Cargo Shim', () => {
   });
 
   test('keeps the fixture generator on libtest --ignored', () => {
-    const step = stepRunning(
-      extractJobBlock(shim, 'runtime-home-fixture-freshness'),
-      FIXTURE_GENERATOR
-    );
+    const step = stepRunning(workspaceJob, FIXTURE_GENERATOR);
 
     expect(
       step,

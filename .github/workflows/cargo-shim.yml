@@ -4,7 +4,7 @@ name: Cargo Shim
 # bare "Gate" API context. This workflow owns the complete root Cargo
 # workspace: all members build and test on the three supported runner OSes, and the
 # minimum supported Rust matches the development pin for every stable crate.
-# Native jobs retain the default-feature and all-feature workspace checks,
+# Native jobs retain the default-feature build and all-feature workspace Clippy,
 # isolated launcher checks and Windows ARM64 compilation formerly split across
 # minimum-version jobs. The fuzz crate stays excluded and uses its own lock.
 #
@@ -143,6 +143,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - run: cargo fmt --all -- --check
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
 
       # Resolving is the point: `--no-deps` skips the resolve, so a lock left
       # stale by a shared-dependency bump in the main workspace still passed.
@@ -152,14 +153,8 @@ jobs:
         if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' && steps.toolchain.outcome == 'success' }}
         run: cargo metadata --manifest-path crates/mango-protocol/fuzz/Cargo.toml --locked --all-features --format-version 1 > /dev/null
 
-      # The development pin is also the shared minimum. Keep both dependency
-      # graphs: default library/binary features and every target/feature.
-      - run: cargo check --workspace --locked
-        if: ${{ !cancelled() }}
-
-      - run: cargo check --workspace --all-targets --all-features --locked
-        if: ${{ !cancelled() }}
-
+      # The default-feature workspace build and all-target/all-feature Clippy
+      # below cover both graphs without repeating cargo check first.
       # Package selection prevents other members from enabling dependency
       # features that could hide a launcher-only compilation or lint failure.
       - run: cargo check -p mangostudio --all-targets --locked
@@ -189,7 +184,7 @@ jobs:
       - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2.88.1
         with:
           tool: cargo-nextest@0.9.144
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && matrix.os != 'ubuntu-latest' }}
 
       # Ubuntu's copy of this run is `cargo llvm-cov` in rust-coverage.yml,
       # called from ci.yml: same flags, same libtest runner, same test set,
@@ -205,10 +200,10 @@ jobs:
 
       # What the runner swap must preserve is the test set, not the timing: the
       # same cases and the same `#[ignore]` flags as libtest lists. It runs on
-      # every OS, Ubuntu included, whose own run is the instrumented libtest
-      # one above. A mismatch prints each differing case and fails the job.
+      # the nextest hosts only; Ubuntu executes instrumented libtest directly.
+      # A mismatch prints each differing case and fails the job.
       - name: Check nextest runs the libtest test set
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && matrix.os != 'ubuntu-latest' }}
         shell: bash
         run: |
           bun scripts/bench/rust-test-inventory.ts capture "$RUNNER_TEMP/libtest.json"
@@ -234,6 +229,39 @@ jobs:
 
       - run: cargo build --workspace --locked
         if: ${{ !cancelled() }}
+
+      # Regenerate after compilation so the ignored generator reuses the
+      # workspace build. Stage before diffing to detect newly emitted files.
+      # TypeScript fixtures are frozen compatibility inputs with explicit pins.
+      - name: Regenerate the committed Rust runtime-home fixture
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
+        run: cargo test -p mangostudio-runtime --test generate_rust_fixture --locked -- --ignored
+
+      - name: Fail if regenerating changed the committed rust-home fixture
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
+        shell: bash
+        run: |
+          git add -A -- crates/mangostudio-runtime/tests/fixtures/rust-home
+          git diff --cached --exit-code -- crates/mangostudio-runtime/tests/fixtures/rust-home
+
+      - name: Fail if a frozen TypeScript-runtime fixture changed
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
+        shell: bash
+        env:
+          TS_HOME_TREE: 814a421cef442f2dd6c24b13a70fcea00e45576b
+          TS_LIBRARY_TREE: 5ecbf15d46a87ac2c2e8c24dc9d14a47a76b209e
+        run: |
+          status=0
+          for pinned in "ts-home:$TS_HOME_TREE" "ts-library:$TS_LIBRARY_TREE"; do
+            name="${pinned%%:*}"
+            expected="${pinned#*:}"
+            actual="$(git rev-parse "HEAD:crates/mangostudio-runtime/tests/fixtures/$name")"
+            if [ "$actual" != "$expected" ]; then
+              echo "::error::frozen fixture $name changed: expected tree $expected | received $actual" >&2
+              status=1
+            fi
+          done
+          exit "$status"
 
   workspace-windows-arm64:
     # Nothing else runs `cargo test` on Windows ARM64: distribution only
@@ -314,67 +342,6 @@ jobs:
 
       - run: cargo-zigbuild clippy --locked -p mangostudio-runtime --all-targets --target aarch64-unknown-linux-musl -- -D warnings
 
-  runtime-home-fixture-freshness:
-    # `tests/fixtures/rust-home` is committed output, not built at test time:
-    # `generate_rust_fixture.rs`'s own `#[ignore]`d regenerator writes it and
-    # the hub's slot probe test
-    # (`apps/api/tests/unit/cli/runtime-slot-probe-rust-home.test.ts`) reads
-    # it. Nothing else regenerates it, so if the Rust write shape ever
-    # changes, both keep passing against a stale fixture. This job is the
-    # only place the regenerator actually runs. It stages the fixture
-    # directory before diffing the index against `HEAD`, not a plain
-    # `git diff --exit-code` against the worktree: staging is what makes a
-    # brand-new file the regenerator starts emitting show up as a failure
-    # too, not only a changed byte in a file that already existed.
-    #
-    # `tests/fixtures/ts-home` and `tests/fixtures/ts-library` are frozen.
-    # They record what the TypeScript runtime wrote and answered before it was
-    # deleted, and `ts_compat.rs` / `src/library/ts_compat_tests.rs` replay
-    # them so a Rust runtime keeps reading homes and backup sets that runtime
-    # left on operators' machines. Their generators went with it, so there is
-    # nothing to regenerate; instead the job pins each directory's git tree,
-    # and a change to either has to update the pin here on purpose.
-    name: Runtime-home fixture freshness
-    needs: [changes]
-    if: needs.changes.outputs.rust == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - run: rustup show active-toolchain
-
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - run: cargo test -p mangostudio-runtime --test generate_rust_fixture --locked -- --ignored
-
-      - name: Fail if regenerating changed the committed rust-home fixture
-        run: |
-          git add -A -- crates/mangostudio-runtime/tests/fixtures/rust-home
-          git diff --cached --exit-code -- crates/mangostudio-runtime/tests/fixtures/rust-home
-
-      - name: Fail if a frozen TypeScript-runtime fixture changed
-        env:
-          TS_HOME_TREE: 814a421cef442f2dd6c24b13a70fcea00e45576b
-          TS_LIBRARY_TREE: 5ecbf15d46a87ac2c2e8c24dc9d14a47a76b209e
-        run: |
-          status=0
-          for pinned in "ts-home:$TS_HOME_TREE" "ts-library:$TS_LIBRARY_TREE"; do
-            name="${pinned%%:*}"
-            expected="${pinned#*:}"
-            actual="$(git rev-parse "HEAD:crates/mangostudio-runtime/tests/fixtures/$name")"
-            if [ "$actual" != "$expected" ]; then
-              echo "::error::frozen fixture $name changed: expected tree $expected | received $actual" >&2
-              status=1
-            fi
-          done
-          exit "$status"
-
   real-binary-qualification:
     # Proves the hub's own real code actually talks to the real compiled
     # mangostudio-runtime binary over its three transports (stdio, direct-URL
@@ -446,15 +413,7 @@ jobs:
     # Stable Gate job (bare API context "Gate"): each Rust lane may skip only
     # after the changes job proves its relevance predicate false for this run.
     name: Gate
-    needs:
-      [
-        changes,
-        workspace,
-        workspace-windows-arm64,
-        musl-clippy,
-        runtime-home-fixture-freshness,
-        real-binary-qualification,
-      ]
+    needs: [changes, workspace, workspace-windows-arm64, musl-clippy, real-binary-qualification]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -472,7 +431,7 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace workspace-windows-arm64 musl-clippy runtime-home-fixture-freshness' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}
+          ALLOWED_SKIPS: ${{ format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace workspace-windows-arm64 musl-clippy' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts
 
@@ -480,15 +439,7 @@ jobs:
     # Additive compatibility check for the future ruleset cutover. Keep the
     # legacy Gate and evaluate the same direct needs and allowed skips here.
     name: Cargo Shim Gate
-    needs:
-      [
-        changes,
-        workspace,
-        workspace-windows-arm64,
-        musl-clippy,
-        runtime-home-fixture-freshness,
-        real-binary-qualification,
-      ]
+    needs: [changes, workspace, workspace-windows-arm64, musl-clippy, real-binary-qualification]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -506,6 +457,6 @@ jobs:
       - name: Evaluate mandatory job results
         env:
           NEEDS: ${{ toJSON(needs) }}
-          ALLOWED_SKIPS: ${{ format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace workspace-windows-arm64 musl-clippy runtime-home-fixture-freshness' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}
+          ALLOWED_SKIPS: ${{ format('{0} {1}', needs.changes.outputs.rust == 'false' && 'workspace workspace-windows-arm64 musl-clippy' || '', needs.changes.outputs.qualification == 'false' && 'real-binary-qualification' || '') }}
         # Dependency-free script; runs without `bun install`.
         run: bun ./scripts/ci/evaluate-gate.ts
