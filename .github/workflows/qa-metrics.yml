@@ -12,6 +12,14 @@ name: QA Metrics
 on:
   workflow_call:
     inputs:
+      check_producer_attempt:
+        description: Producing Check attempt, including a reused earlier successful job.
+        type: string
+        default: ""
+      check_invocation_id:
+        description: Caller-generated identity from the canonical Check producer.
+        type: string
+        default: ""
       test_result:
         description: Result of the Test job (success, failure, cancelled, skipped) that produced the test fragment.
         type: string
@@ -36,8 +44,6 @@ jobs:
     name: Collect
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    env:
-      TURBO_CACHE_MAX_SIZE: 16MB
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -48,31 +54,12 @@ jobs:
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
-      - id: toolchain
-        name: Resolve check cache toolchains
-        run: |
-          set -euo pipefail
-          turbo="$(bun run turbo:version | tail -n 1)"
-          if [ -z "${turbo}" ]; then
-            echo "::error::empty toolchain version (turbo='${turbo}')"
-            exit 1
-          fi
-          {
-            echo "turbo=${turbo}"
-          } >> "$GITHUB_OUTPUT"
-
-      # Reuse a prior Check snapshot without waiting for or saving this run's
-      # cache. A miss leaves the collector's normal check execution intact.
-      - name: Restore check cache
-        uses: ./.github/actions/cache-scoped
+      - name: Download canonical Check evidence
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          family: turbo
-          path: .turbo/cache
-          validity: check-bun-${{ steps.setup.outputs.bun-version }}-turbo-${{ steps.toolchain.outputs.turbo }}-${{ hashFiles('turbo.jsonc', 'bun.lock', 'package.json', 'apps/*/package.json', 'apps/*/turbo.json', 'packages/*/package.json', 'packages/*/turbo.json') }}
-          restore-prefix: check-
-          mode: restore
-          rotate: "true"
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+          name: qa-check-evidence-${{ inputs.check_invocation_id }}
+          path: ./qa-check-evidence
 
       - name: Download test metrics fragment
         # continue-on-error: without the fragment the collector still emits an
@@ -106,6 +93,9 @@ jobs:
       - name: Collect QA metrics envelope
         env:
           QA_FRONTEND_DIST: ./frontend-dist
+          QA_CHECK_PRODUCER_ATTEMPT: ${{ inputs.check_producer_attempt }}
+          QA_CHECK_REPORT: ./qa-check-evidence/check-evidence.json
+          QA_CHECK_INVOCATION_ID: ${{ inputs.check_invocation_id }}
           QA_PR_NUMBER: ${{ github.event.pull_request.number || '' }}
           QA_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
           QA_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}

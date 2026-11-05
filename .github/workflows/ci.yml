@@ -215,13 +215,15 @@ jobs:
     # report can show what failed. Publishing happens in the separate
     # privileged pr-qa-report.yml (workflow_run), never here.
     name: QA Metrics
-    needs: [test, build, changes, rust-coverage]
+    needs: [test, build, changes, rust-coverage, check]
     if: ${{ !cancelled() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
     uses: ./.github/workflows/qa-metrics.yml
     with:
       # Lets the collector tell a canceled or failed Test job from a fragment
       # that never arrived, instead of reporting both as missing.
       test_result: ${{ needs.test.result }}
+      check_invocation_id: ${{ needs.check.outputs.invocation_id }}
+      check_producer_attempt: ${{ needs.check.outputs.producer_attempt }}
       # A skipped Rust job is "not run on purpose" only when the changes job
       # proved no Rust path changed; any other skip is a missing artifact.
       rust_relevant: ${{ needs.changes.outputs.rust }}

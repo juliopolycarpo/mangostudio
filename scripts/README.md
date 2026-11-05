@@ -349,15 +349,23 @@ unprivileged inside CI (`ci.yml`); publishing runs in the trusted
 
 ### Check result report
 
-Check's local subprocess adapter replaces console-label parsing for tooling
-metrics. `bun run check --all --report-file <path> --report-id <UUID>` preserves
-the console summary and exit code, and writes an internal JSON document to the
-chosen file. `collect/tooling.ts` creates a fresh temporary directory and UUID
-for each invocation, validates the document and observed process exit, and
-removes the temporary directory afterward. It continues to execute Check
-locally; this document does not enable cross-job artifact reuse. Per-component
-TypeScript error counts still come from direct `bun check --no-script` executions in
-`collect/typescript.ts`.
+CI Check runs once with `--all --ci-report --report-file <path> --report-id <UUID>`.
+That mode captures each discovered TypeScript component's diagnostics directly,
+replacing the corresponding Turbo typechecks while retaining lint, cycles and
+all other checks. Its `mangostudio.ci-check-evidence` version 1 envelope contains
+the local Check result and per-component completed or unavailable diagnostics.
+Repository, checkout SHA, Actions run, producing attempt and caller invocation
+bind it to the QA consumer. Each invocation uploads its own immutable artifact;
+QA can reuse a successful earlier attempt during a partial workflow rerun.
+
+QA awaits Check and consumes this artifact without executing Check or its own
+TypeScript checks. Missing, interrupted, invalid or mismatched evidence makes
+the affected metrics unavailable. Other QA metrics continue independently.
+A checker crash without diagnostics is unavailable rather than zero errors.
+
+Local `bun run check --all --report-file <path> --report-id <UUID>` retains the
+local report below. Local QA still executes Check and component TypeScript
+collectors when it is outside GitHub Actions.
 
 The document's `kind` is `mangostudio.check-result` and `schemaVersion` is `1`.
 `invocationId` identifies the caller; `args` records its exact Check arguments

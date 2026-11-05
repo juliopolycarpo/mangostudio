@@ -9,7 +9,7 @@ import {
   QA_METRICS_MAX_BYTES,
 } from '../qa-gate/metrics-envelope';
 import { readText } from './support/read-text';
-import { extractJobBlock, extractStepBlocks, parseNeedsList } from './support/workflow-blocks';
+import { extractJobBlock, extractStepBlocks } from './support/workflow-blocks';
 
 // Trust-boundary policy for the PR QA pipeline: workflows that execute
 // pull-request code must stay read-only, and the write-capable publisher must
@@ -44,24 +44,18 @@ describe('unprivileged collection side', () => {
     expect(extractJobBlock(workflow, 'collect')).not.toMatch(/^\s+permissions:/m);
   });
 
-  test('qa-metrics restores the check cache before collecting, without saving or waiting for Check', () => {
+  test('qa-metrics consumes canonical Check evidence without restoring a duplicate check cache', () => {
     const workflow = readText('.github/workflows/qa-metrics.yml');
     const collect = extractJobBlock(workflow, 'collect');
     const cacheSteps = extractStepBlocks(collect).filter((step) =>
       step.includes('uses: ./.github/actions/cache-scoped')
     );
-
-    expect(cacheSteps, 'expected one QA cache restore | received cache steps').toHaveLength(1);
-    expect(cacheSteps[0], 'expected QA cache mode: restore | received cache step').toMatch(
-      /^\s+mode: restore$/m
+    expect(cacheSteps).toHaveLength(0);
+    expect(collect).toContain('name: Download canonical Check evidence');
+    expect(collect).toContain('QA_CHECK_INVOCATION_ID:');
+    expect(extractJobBlock(readText('.github/workflows/ci.yml'), 'qa-metrics')).toContain(
+      'needs.check.outputs.invocation_id'
     );
-    expect(collect.indexOf(cacheSteps[0])).toBeLessThan(
-      collect.indexOf('name: Collect QA metrics envelope')
-    );
-    expect(collect).not.toMatch(/^\s+needs:/m);
-    expect(
-      parseNeedsList(extractJobBlock(readText('.github/workflows/ci.yml'), 'qa-metrics'))
-    ).not.toContain('check');
   });
 
   test('test.yml hands the fragment off with 1-day retention and failure-only coverage', () => {
@@ -114,7 +108,7 @@ describe('unprivileged collection side', () => {
 
     expect(workflow).toContain('uses: ./.github/workflows/qa-metrics.yml');
     expect(workflow).toMatch(
-      /qa-metrics:\n(.*\n)*?\s+needs: \[test, build, changes, rust-coverage\]/
+      /qa-metrics:\n(.*\n)*?\s+needs: \[test, build, changes, rust-coverage, check\]/
     );
     expect(workflow).toContain(
       "!cancelled() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))"
@@ -143,7 +137,7 @@ describe('unprivileged collection side', () => {
     expect(qaMetrics).toContain('name: frontend-dist');
     expect(qaMetrics).toContain('QA_FRONTEND_DIST: ./frontend-dist');
     expect(qaMetrics).not.toContain('bun run build');
-    expect(ci).toContain('needs: [test, build, changes, rust-coverage]');
+    expect(ci).toContain('needs: [test, build, changes, rust-coverage, check]');
   });
 
   test('qa-metrics still runs when Rust Coverage is skipped: its condition holds a status-check function', () => {
@@ -152,7 +146,7 @@ describe('unprivileged collection side', () => {
     // docs-only PR would get no envelope, and CI / Gate would fail on the skip.
     const block = extractJobBlock(readText('.github/workflows/ci.yml'), 'qa-metrics');
 
-    expect(block).toContain('needs: [test, build, changes, rust-coverage]');
+    expect(block).toContain('needs: [test, build, changes, rust-coverage, check]');
     expect(block).toMatch(/if: \$\{\{ !cancelled\(\) && /);
   });
 

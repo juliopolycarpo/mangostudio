@@ -36,7 +36,7 @@ describe('check script', () => {
     const checkScript = readText('scripts/check.ts');
 
     expect(checkScript).toContain('createTurboCheckCommand');
-    expect(checkScript).toContain("commandTask('workspaces:check'");
+    expect(checkScript).toMatch(/commandTask\(\s*'workspaces:check'/);
     expect(checkScript).not.toContain('runWorkspaceScript');
     expect(checkScript).not.toContain('root:madge');
   });

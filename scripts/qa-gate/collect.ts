@@ -24,6 +24,7 @@ import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
 import { collectFrontendBundle } from './collect/bundle';
+import { deliveredCheckCollectors } from './collect/check-evidence';
 import { circularRoots, countCircularDeps } from './collect/circular';
 import { collectComponents } from './collect/components';
 import { collectDependencyStats } from './collect/dependencies';
@@ -111,6 +112,20 @@ const buildMetrics = async (
       readBoundedText
     )
   );
+  const checkCollectors =
+    process.env.GITHUB_ACTIONS === 'true'
+      ? deliveredCheckCollectors(
+          process.env.QA_CHECK_REPORT ?? './qa-check-evidence/check-evidence.json',
+          {
+            repository: process.env.GITHUB_REPOSITORY ?? '',
+            sourceSha,
+            runId: Number(process.env.GITHUB_RUN_ID),
+            runAttempt: Number(process.env.QA_CHECK_PRODUCER_ATTEMPT),
+            invocationId: process.env.QA_CHECK_INVOCATION_ID ?? '',
+          },
+          specs.filter((spec) => spec.hasTsconfig).map((spec) => spec.root)
+        )
+      : { countTsErrors, collectToolingStats };
   const components = await time('components', () =>
     collectComponents(specs, {
       trackedFiles,
@@ -119,7 +134,7 @@ const buildMetrics = async (
       deliveredLanes: testMetrics.deliveredLanes,
       deliveredRustCoverage: rustCoverage,
       readCoverage: readWorkspaceCoverageSummary,
-      countTsErrors,
+      countTsErrors: checkCollectors.countTsErrors,
       time,
     })
   );
@@ -137,7 +152,7 @@ const buildMetrics = async (
     ),
     dependencies: await measure('dependencies', () => time('dependencies', collectDependencyStats)),
     tests: testMetrics.tests,
-    tooling: await measure('tooling', () => time('tooling', collectToolingStats)),
+    tooling: await measure('tooling', () => time('tooling', checkCollectors.collectToolingStats)),
   };
 };
 
