@@ -9,10 +9,26 @@ export const TYPECHECK_TASK = 'typecheck:with-deps';
 
 export const TURBO_CHECK_TASKS = ['check:quick', 'check:cycles', TYPECHECK_TASK] as const;
 
+/**
+ * Select the supervised protocol companion; CI reports already capture its component typecheck.
+ * @example createProtocolCheckCommand(true); // internal companion for canonical CI diagnostics
+ */
+export function createProtocolCheckCommand(ciReport = false): string[] {
+  return ciReport
+    ? ['bun', './scripts/protocol/check-ci-report.ts']
+    : ['bun', './scripts/protocol/check.ts', '--ts-only'];
+}
+
 /** Build a filtered Turbo validation command. // Usage: createTurboCheckCommand(['api']); */
-export function createTurboCheckCommand(workspaces: WorkspaceName[]): string[] {
+export function createTurboCheckCommand(workspaces: WorkspaceName[], typecheck = true): string[] {
   const filters = workspaces.map((workspace) => `--filter=${WORKSPACES[workspace].packageName}`);
-  return ['turbo', 'run', ...TURBO_CHECK_TASKS, '--ui=stream', ...filters];
+  return [
+    'turbo',
+    'run',
+    ...TURBO_CHECK_TASKS.filter((task) => typecheck || task !== TYPECHECK_TASK),
+    '--ui=stream',
+    ...filters,
+  ];
 }
 /** Build a selected workspace format check from the shared root policy.
  * @example createWorkspaceFormatCommand('api');

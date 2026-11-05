@@ -1,11 +1,25 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import {
   ACTIONS_LINT_LABELS,
   createActionsLintTasks,
   touchesActionsLintSurface,
 } from './lib/actions-lint/run';
-import { createTurboCheckCommand, createWorkspaceFormatCommand } from './lib/check';
+import {
+  createProtocolCheckCommand,
+  createTurboCheckCommand,
+  createWorkspaceFormatCommand,
+} from './lib/check';
 import { checkReportIdentity, checkReportTarget, writeCheckReport } from './lib/check-report';
 import type { CheckResult, CheckTaskResult } from './lib/check-result';
+import {
+  type CheckDiagnostic,
+  type CiCheckIdentity,
+  parseCheckerReceipt,
+} from './lib/ci-check-evidence';
 import { touchesCodeHealthSurface } from './lib/code-health';
 import { ROOT_DIR, ROOT_LINT_PATHS, ROOT_TOOLING_PATHS, type WorkspaceName } from './lib/config';
 import { touchesContractArtifactSurface } from './lib/contract-artifacts';
@@ -61,6 +75,7 @@ Mode flags:
   --skip-format  Skip root Bun lint and fmt
   --report-file <path>  Write an internal JSON result (requires --report-id)
   --report-id <UUID>    Caller identity for --report-file
+  --ci-report          Emit source/run-bound diagnostics (requires --all and report flags)
   --help`);
   process.exit(0);
 }
@@ -82,9 +97,13 @@ const localTask = (label: string, fn: () => void | Promise<void>): CheckTask => 
 });
 
 function createWorkspaceTasks(workspaces: ReadonlyArray<WorkspaceName>): CheckTask[] {
-  const turboChecks = commandTask('workspaces:check', createTurboCheckCommand([...workspaces]), {
-    cwd: ROOT_DIR,
-  });
+  const turboChecks = commandTask(
+    'workspaces:check',
+    createTurboCheckCommand([...workspaces], !ciReportMode),
+    {
+      cwd: ROOT_DIR,
+    }
+  );
   return [
     turboChecks,
     ...workspaces.map((workspace) =>
@@ -124,11 +143,11 @@ function createRootTasks(skipFormat: boolean): CheckTask[] {
     );
   }
 
-  return tasks;
+  return ciReportMode ? tasks.filter((task) => task.label !== 'root:typecheck-scripts') : tasks;
 }
 
 const { workspaces, includeRoot, flags, values, positional } = parseArgs({
-  booleanFlags: ['--staged', '--changed', '--skip-format'],
+  booleanFlags: ['--staged', '--changed', '--skip-format', '--ci-report'],
   valueFlags: ['--base', '--report-file', '--report-id'],
 });
 
@@ -137,6 +156,57 @@ if (flags['--help']) {
 }
 
 const reportTarget = checkReportTarget(process.argv.slice(2), values);
+const ciReportMode = flags['--ci-report'];
+if (
+  ciReportMode &&
+  (!reportTarget || JSON.stringify(reportTarget.args) !== JSON.stringify(['--all', '--ci-report']))
+) {
+  throw new Error(
+    '--ci-report requires --all --ci-report and caller-bound --report-file/--report-id'
+  );
+}
+let diagnosticRoots: string[] = [];
+const diagnostics = new Map<string, CheckDiagnostic>();
+const ciIdentity: CiCheckIdentity | null = ciReportMode
+  ? {
+      repository: process.env.GITHUB_REPOSITORY ?? '',
+      sourceSha: execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: ROOT_DIR,
+        encoding: 'utf8',
+      }).trim(),
+      runId: Number(process.env.GITHUB_RUN_ID),
+      runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+      invocationId: reportTarget?.invocationId ?? '',
+    }
+  : null;
+if (ciIdentity && ciIdentity.sourceSha !== process.env.GITHUB_SHA)
+  throw new Error(
+    `CI Check source: expected ${process.env.GITHUB_SHA}; received ${ciIdentity.sourceSha}`
+  );
+const publishReport = (result: CheckResult): void => {
+  if (!reportTarget) return;
+  if (!ciIdentity) return writeCheckReport(reportTarget, result);
+  const temporary = `${reportTarget.path}.${process.pid}.tmp`;
+  writeFileSync(
+    temporary,
+    JSON.stringify({
+      kind: 'mangostudio.ci-check-evidence',
+      schemaVersion: 1,
+      identity: ciIdentity,
+      result,
+      diagnostics: diagnosticRoots.map(
+        (root) =>
+          diagnostics.get(root) ?? {
+            root,
+            state: 'unavailable',
+            reason: 'TypeScript checker did not complete',
+          }
+      ),
+    }),
+    { mode: 0o600 }
+  );
+  renameSync(temporary, reportTarget.path);
+};
 const tasks: CheckTask[] = [];
 const observed = new Map<string, CheckTaskResult>();
 let latestReport: CheckResult | null = null;
@@ -159,7 +229,7 @@ const writeReport = (results: CheckTaskResult[], setupError: string | null): voi
     plannedTasks: tasks.map((task) => task.label),
     tasks: results,
   };
-  writeCheckReport(reportTarget, report);
+  publishReport(report);
   latestReport = report;
 };
 
@@ -224,7 +294,7 @@ process.on('exit', (exitCode) => {
   )
     return;
   try {
-    writeCheckReport(reportTarget, { ...latestReport, exitCode });
+    publishReport({ ...latestReport, exitCode });
   } catch (caught) {
     console.error(`Could not finalize Check report: ${reasonText(caught)}`);
   }
@@ -284,6 +354,54 @@ async function check(): Promise<never> {
     includeProtocol = touchesProtocolSurface(files);
   }
 
+  if (ciReportMode) {
+    const { discoverComponents } = await import('./qa-gate/collect/registry');
+    const files = execFileSync('git', ['ls-files', '-z'], { cwd: ROOT_DIR, encoding: 'utf8' });
+    if (!files.endsWith('\0'))
+      throw new Error('CI Check: expected nonempty complete tracked path inventory');
+    const specs = await discoverComponents({
+      trackedFiles: files.slice(0, -1).split('\0'),
+      readText: (path) => Bun.file(`${ROOT_DIR}/${path}`).text(),
+    });
+    diagnosticRoots = specs.filter((spec) => spec.hasTsconfig).map((spec) => spec.root);
+    for (const root of diagnosticRoots) {
+      const label = `typescript:${root.replaceAll('/', ':')}`;
+      tasks.push({
+        label,
+        run: async () => {
+          const directory = mkdtempSync(join(tmpdir(), 'mango-check-typescript-'));
+          const path = join(directory, 'receipt.json');
+          const invocationId = reportTarget?.invocationId ?? '';
+          try {
+            const result = await runCommand(
+              label,
+              ['bun', './scripts/check-typescript.ts', root, path, invocationId],
+              { cwd: ROOT_DIR }
+            );
+            const diagnostic = parseCheckerReceipt(
+              readFileSync(path, 'utf8'),
+              root,
+              invocationId,
+              result.exitCode
+            );
+            diagnostics.set(root, diagnostic);
+            return {
+              ...result,
+              ...(diagnostic.state === 'unavailable'
+                ? { unavailableReason: diagnostic.reason }
+                : {}),
+            };
+          } catch (caught) {
+            const reason = reasonText(caught);
+            diagnostics.set(root, { root, state: 'unavailable', reason });
+            return { label, exitCode: 1, duration: 0, unavailableReason: reason };
+          } finally {
+            rmSync(directory, { recursive: true, force: true });
+          }
+        },
+      });
+    }
+  }
   if (effectiveWorkspaces.length > 0) {
     info('\nWorkspaces');
     tasks.push(...createWorkspaceTasks(effectiveWorkspaces));
@@ -309,7 +427,7 @@ async function check(): Promise<never> {
     // cache. `.github/workflows/protocol-ci.yml` owns that half, path-filtered.
     // Run `bun run protocol:check` for the full gate before a protocol change.
     tasks.push(
-      commandTask('root:protocol', ['bun', './scripts/protocol/check.ts', '--ts-only'], {
+      commandTask('root:protocol', createProtocolCheckCommand(ciReportMode), {
         cwd: ROOT_DIR,
       })
     );

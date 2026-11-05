@@ -2,6 +2,13 @@ name: Check
 
 on:
   workflow_call:
+    outputs:
+      invocation_id:
+        description: Caller-generated identity of the canonical Check invocation.
+        value: ${{ jobs.check.outputs.invocation_id }}
+      producer_attempt:
+        description: Attempt that produced the canonical Check evidence.
+        value: ${{ jobs.check.outputs.producer_attempt }}
 
 permissions:
   contents: read
@@ -11,6 +18,9 @@ jobs:
     name: Check (tooling + typecheck)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      invocation_id: ${{ steps.identity.outputs.invocation_id }}
+      producer_attempt: ${{ steps.identity.outputs.producer_attempt }}
     env:
       # Bounds the snapshot this job restores and saves back. Each save carries
       # everything restored plus the new outputs, so without a bound the chain
@@ -66,8 +76,26 @@ jobs:
           exact-restore: "true"
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
+      - id: identity
+        name: Allocate canonical Check invocation
+        run: |
+          echo "invocation_id=$(bun -e 'console.log(crypto.randomUUID())')" >> "$GITHUB_OUTPUT"
+          echo "producer_attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+
       - name: Run check
-        run: bun run check
+        env:
+          CHECK_INVOCATION_ID: ${{ steps.identity.outputs.invocation_id }}
+        run: bun run check --all --ci-report --report-file check-evidence.json --report-id "$CHECK_INVOCATION_ID"
+
+      - name: Upload canonical Check evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: qa-check-evidence-${{ steps.identity.outputs.invocation_id }}
+          path: check-evidence.json
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: false
 
       # Saves only when the check wrote cache entries the restored snapshot did
       # not hold, under a key that extends the stable restore prefix.

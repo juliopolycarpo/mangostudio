@@ -100,14 +100,20 @@ const CARGO_CLIPPY = [
   'warnings',
 ];
 
-function typescriptCheckTasks(tsOnly: boolean, cargo: boolean): ProtocolTask[] {
+function typescriptCheckTasks(tsOnly: boolean, cargo: boolean, typecheck = true): ProtocolTask[] {
   return [
     {
       // Cache normal lint separately from the always-run cycle scan, including
       // generated files and top-level build helpers.
       // Standalone/scoped protocol checks enforce the repository's same rules.
       label: 'protocol:workspace',
-      cmd: ['turbo', 'run', ...TURBO_CHECK_TASKS, '--ui=stream', '--filter=@mangostudio/protocol'],
+      cmd: [
+        'turbo',
+        'run',
+        ...TURBO_CHECK_TASKS.filter((task) => typecheck || task !== 'typecheck:with-deps'),
+        '--ui=stream',
+        '--filter=@mangostudio/protocol',
+      ],
     },
     { label: 'protocol:versions', cmd: ['bun', './scripts/protocol/check-versions.ts'] },
     { label: 'protocol:verify-spec', cmd: ['bun', './scripts/protocol/verify-spec.ts'] },
@@ -199,6 +205,8 @@ function rustCheckTasks(format: boolean, cargoHack: boolean, targetRoot: string)
  * `targetRoot` is where the feature-powerset partitions put their own Cargo
  * target directories; it defaults to the checkout's (`CARGO_TARGET_DIR` or
  * `target/`).
+ * `options.typecheck = false` is reserved for the canonical Check companion,
+ * whose component workers already capture the TypeScript diagnostics.
  *
  * @example
  * protocolCheckTasks([]).map((task) => task.label);
@@ -206,13 +214,14 @@ function rustCheckTasks(format: boolean, cargoHack: boolean, targetRoot: string)
 export function protocolCheckTasks(
   args: readonly string[],
   probe: ToolchainProbe = probeToolchain(),
-  targetRoot: string = cargoTargetDir(ROOT_DIR, process.env)
+  targetRoot: string = cargoTargetDir(ROOT_DIR, process.env),
+  options: { readonly typecheck?: boolean } = {}
 ): ProtocolTask[] {
   const { typescript, rust, format } = selectLanes(args);
   const { cargo, cargoHack } = probe;
   const tasks: ProtocolTask[] = [];
 
-  if (typescript) tasks.push(...typescriptCheckTasks(!rust, cargo));
+  if (typescript) tasks.push(...typescriptCheckTasks(!rust, cargo, options.typecheck !== false));
 
   if (!rust) return tasks;
   assertRustToolchain(typescript, cargo);
