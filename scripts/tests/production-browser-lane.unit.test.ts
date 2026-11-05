@@ -79,6 +79,37 @@ class FakeBrowserCommands {
 }
 
 describe('supervised production browser phases', () => {
+  test('shared frontend rejects an absent expected producer before launching commands', async () => {
+    const fake = new FakeBrowserCommands([]);
+    await expect(runProductionBrowserSmoke([], fake.execute, true)).rejects.toThrow(
+      'expected explicit 40-character producer Bun revision'
+    );
+    expect(fake.calls).toEqual([]);
+  });
+  test('a shared frontend is verified before browser execution without rebuilding', async () => {
+    const fake = new FakeBrowserCommands([0, 0]);
+    await runProductionBrowserSmoke(['--workers=1'], fake.execute, true, 'b'.repeat(40));
+    expect(fake.calls.map((call) => call.label)).toEqual([
+      'production:verify-frontend',
+      'production:browser',
+    ]);
+    expect(fake.calls[0]?.command).toEqual([
+      'bun',
+      './scripts/ci/frontend-artifact.ts',
+      'verify',
+      '--bun-revision',
+      'b'.repeat(40),
+    ]);
+    expect(fake.calls[1]?.command.at(-1)).toBe('--workers=1');
+  });
+
+  test('a rejected shared frontend prevents browser launch', async () => {
+    const fake = new FakeBrowserCommands([1]);
+    const results = await runProductionBrowserSmoke([], fake.execute, true, 'b'.repeat(40));
+    expect(fake.calls).toHaveLength(1);
+    expect(results).toEqual([{ label: 'production:verify-frontend', exitCode: 1, duration: 0 }]);
+  });
+
   test('a failed build prevents browser launch and retains the failure receipt', async () => {
     const fake = new FakeBrowserCommands([23, 0]);
     const results = await runProductionBrowserSmoke([], fake.execute);

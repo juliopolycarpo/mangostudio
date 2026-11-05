@@ -50,7 +50,7 @@ interface TurboLane {
 }
 
 const TURBO_LANES: readonly TurboLane[] = [
-  { file: '.github/workflows/build.yml', job: 'build', command: 'bun run build --all' },
+  { file: '.github/workflows/build.yml', job: 'build', command: 'bun run build --frontend' },
   { file: '.github/workflows/lint.yml', job: 'check', command: 'bun run check' },
   { file: '.github/workflows/test.yml', job: 'shard', command: 'bun run test --coverage' },
 ];

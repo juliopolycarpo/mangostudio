@@ -3,6 +3,14 @@ name: Smoke — Browser
 on:
   workflow_call:
     inputs:
+      frontend_bun_revision:
+        description: Exact Bun commit from the frontend producing job.
+        type: string
+        default: ""
+      frontend_artifact:
+        description: Verified production frontend from this run; empty builds it locally.
+        type: string
+        default: ""
       runtime_artifact:
         description: >
           Artifact holding the mangostudio-runtime binary the hub launches for
@@ -115,15 +123,25 @@ jobs:
         env:
           CI: true
 
+      - uses: ./.github/actions/download-frontend
+        if: matrix.mode == 'production' && inputs.frontend_artifact != ''
+        with:
+          artifact: ${{ inputs.frontend_artifact }}
+          bun-revision: ${{ inputs.frontend_bun_revision }}
+
       - name: Run production frontend regressions
         if: matrix.mode == 'production'
         timeout-minutes: 10
         # Build and browser share the same deadline and supervised step tree.
         run: |
           set -o pipefail
-          bun run test:e2e:production 2>&1 | tee smoke-run.log
+          args=()
+          [ -n "$FRONTEND_ARTIFACT" ] && args+=(--reuse-frontend --frontend-bun-revision "$PRODUCER_BUN_REVISION")
+          bun run test:e2e:production "${args[@]}" 2>&1 | tee smoke-run.log
         env:
           CI: true
+          FRONTEND_ARTIFACT: ${{ inputs.frontend_artifact || '' }}
+          PRODUCER_BUN_REVISION: ${{ inputs.frontend_bun_revision || '' }}
 
       # Green runs leave their outcome in the step summary instead of an
       # artifact nobody downloads; failures get the full diagnostics below.
