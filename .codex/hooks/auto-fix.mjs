@@ -159,7 +159,7 @@ export async function runAutoFixHook(input) {
   const hookInput = input ?? (await readStdin());
   const touchedPath = await resolveTouchedPath(hookInput);
 
-  if (!touchedPath || !isInsideRepo(touchedPath) || shouldSkipFile(touchedPath)) {
+  if (!touchedPath) {
     return;
   }
 

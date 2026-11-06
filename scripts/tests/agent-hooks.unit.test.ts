@@ -527,6 +527,37 @@ describe('agent auto-fix hooks', () => {
     }, hook.cleanup);
   });
 
+  it
+    .skipIf(process.platform === 'win32' || !installedRustfmt.path)
+    .each(['alias/../../../../sample.rs', 'node_modules/../sample.rs'])(
+    'formats the resolved Rust file reached by %s',
+    async (touched) => {
+      const fixtureRoot = join(repoRoot, '.mango');
+      await mkdir(fixtureRoot, { recursive: true });
+      const dir = await mkdtemp(join(fixtureRoot, 'agent-hook-lookup-'));
+      tempDirs.push(dir);
+      const nested = join(dir, 'a', 'b', 'c', 'd');
+      await mkdir(nested, { recursive: true });
+      await mkdir(join(dir, 'node_modules'));
+      await symlink(nested, join(dir, 'alias'), 'dir');
+      const target = join(dir, 'sample.rs');
+      await writeFile(target, 'fn  main( ){let x=1;}\n');
+
+      const lookup = `${dir}/${touched}`;
+      expect(await realpath(lookup)).toBe(await realpath(target));
+      if (!installedRustfmt.path) throw new Error('expected an installed real rustfmt');
+      const hook = ownRealFormatterHook(
+        JSON.stringify({ path: lookup }),
+        realRustfmtEnvironment(installedRustfmt.path, process.env)
+      );
+      await withOwnedFormatterCleanup(async () => {
+        await withinHookDeadline(hook.running, 8000);
+        expect(await readFile(target, 'utf8')).toBe('fn main() {\n    let x = 1;\n}\n');
+        expect(hook.child()?.exitCode).toBe(0);
+      }, hook.cleanup);
+    }
+  );
+
   it('preserves the fixture failure when formatter cleanup also fails', async () => {
     const primary = new Error('named fixture failure');
     const cleanupFailure = new Error('named cleanup failure');
