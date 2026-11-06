@@ -1,7 +1,9 @@
-import { relative, resolve } from 'node:path';
+import { readlinkSync, realpathSync } from 'node:fs';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  absolutePathForLookup,
   candidatePaths,
   extractHookCwd,
   extractTouchedFilePath,
@@ -59,9 +61,10 @@ export function findProtectedFile(filePath, root = repoRoot) {
  */
 export function runProtectGeneratedHook(input, root = repoRoot) {
   const filePath = extractTouchedFilePath(input) || extractNotebookPath(input);
-  const match = candidatePaths(filePath, extractHookCwd(input, root), root)
-    .map((candidate) => findProtectedFile(candidate, root))
-    .find(Boolean);
+  const candidates = candidatePaths(filePath, extractHookCwd(input, root), root);
+  const match =
+    candidates.map((candidate) => findProtectedFile(candidate, root)).find(Boolean) ??
+    findProtectedTarget(candidates, root);
 
   if (!match) {
     return { blocked: false, message: '' };
@@ -73,6 +76,47 @@ export function runProtectGeneratedHook(input, root = repoRoot) {
       `Blocked edit to generated file: ${match.path}. ` +
       `Expected: regenerate it with \`${match.regenerate}\` instead of editing it by hand.`,
   };
+}
+
+function findProtectedTarget(candidates, root) {
+  if (candidates.length === 0) return undefined;
+  const resolvedRoot = resolveEditTarget(root);
+  if (!resolvedRoot) return undefined;
+
+  for (const candidate of candidates) {
+    const target = resolveEditTarget(candidate);
+    const match = target && findProtectedFile(target, resolvedRoot);
+    if (match) return match;
+  }
+  return undefined;
+}
+
+// An edit may create a file, including through a dangling symlink or a linked parent.
+function resolveEditTarget(filePath, links = 0) {
+  try {
+    return realpathSync.native(filePath);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') return undefined;
+  }
+
+  const parent = dirname(filePath);
+  if (parent === filePath) return undefined;
+
+  let link;
+  try {
+    link = readlinkSync(filePath);
+  } catch (error) {
+    if (error?.code !== 'ENOENT' && error?.code !== 'EINVAL') return undefined;
+  }
+
+  if (link !== undefined) {
+    return links < 40
+      ? resolveEditTarget(absolutePathForLookup(link, parent), links + 1)
+      : undefined;
+  }
+
+  const resolvedParent = resolveEditTarget(parent, links);
+  return resolvedParent && join(resolvedParent, basename(filePath));
 }
 
 /**
