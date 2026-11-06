@@ -10,6 +10,46 @@ function event(data: Record<string, unknown>): InteractionSSEEvent {
 }
 
 describe('createGeminiInteractionAccumulator', () => {
+  it.each([
+    [
+      { code: 'RESOURCE_EXHAUSTED', message: 'Quota exceeded' },
+      'RESOURCE_EXHAUSTED: Quota exceeded',
+    ],
+    [{ message: 'Safety block' }, 'Safety block'],
+    [{ code: 'INTERNAL' }, 'INTERNAL'],
+    [{}, 'Gemini interaction failed.'],
+    [undefined, 'Gemini interaction failed.'],
+    [{ code: '', message: '' }, 'Gemini interaction failed.'],
+  ])('retains a terminal error with payload %j', (error, reason) => {
+    const accumulator = createGeminiInteractionAccumulator();
+
+    expect(accumulator.mapEvent({ event_type: 'error', error })).toEqual([]);
+    expect(accumulator.abandonedReason).toBe(reason);
+
+    accumulator.mapEvent(
+      event({
+        event_type: 'interaction.created',
+        interaction: { id: 'int_late', status: 'in_progress' },
+      })
+    );
+    accumulator.mapEvent(
+      event({
+        event_type: 'interaction.status_update',
+        interaction_id: 'int_late',
+        status: 'failed',
+      })
+    );
+    accumulator.mapEvent(
+      event({
+        event_type: 'interaction.completed',
+        interaction: { id: 'int_late', status: 'completed' },
+      })
+    );
+    accumulator.mapEvent({ event_type: 'error', error: { message: 'Secondary error' } });
+
+    expect(accumulator.abandonedReason).toBe(reason);
+  });
+
   it('reassembles arguments streamed as JSON fragments across step deltas', () => {
     const accumulator = createGeminiInteractionAccumulator();
 
