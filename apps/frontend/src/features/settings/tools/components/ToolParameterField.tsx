@@ -238,6 +238,55 @@ function PathListField({
   );
 }
 
+/** Keep incomplete numbers out of the row's autosave state. */
+function NumberParameterInput({
+  id,
+  descriptor,
+  value,
+  onChange,
+  disabled,
+}: ToolParameterFieldProps & { id: string }) {
+  const effectiveValue = value ?? descriptor.defaultValue ?? '';
+  const [draft, setDraft] = useState<string | undefined>();
+
+  const commit = () => {
+    setDraft(undefined);
+    // Empty input is an unfinished edit, not zero or a request to reset the
+    // parameter. Omitting a parameter from an update does not delete it.
+    if (disabled || draft === undefined || draft.trim() === '') return;
+    const number = Number(draft);
+    if (!Number.isFinite(number)) return;
+    if (descriptor.min !== undefined && number < descriptor.min) return;
+    if (descriptor.max !== undefined && number > descriptor.max) return;
+    if (number !== Number(effectiveValue) || effectiveValue === '') onChange(number);
+  };
+
+  return (
+    <Input
+      id={id}
+      type="number"
+      min={descriptor.min}
+      max={descriptor.max}
+      step={1}
+      value={draft ?? (effectiveValue === '' ? '' : Number(effectiveValue))}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          commit();
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          setDraft(undefined);
+        }
+      }}
+      disabled={disabled}
+      className="w-32 text-center"
+    />
+  );
+}
+
 export function ToolParameterField({
   descriptor,
   value,
@@ -351,16 +400,12 @@ export function ToolParameterField({
     case 'number': {
       return (
         <SettingsRow label={label} hint={description} htmlFor={`${fieldId}-number`} className="p-0">
-          <Input
+          <NumberParameterInput
             id={`${fieldId}-number`}
-            type="number"
-            min={descriptor.min}
-            max={descriptor.max}
-            step={1}
-            value={descriptorValue === '' ? '' : Number(descriptorValue)}
-            onChange={(e) => onChange(e.target.value ? Number(e.target.value) : undefined)}
+            descriptor={descriptor}
+            value={value}
+            onChange={onChange}
             disabled={disabled}
-            className="w-32 text-center"
           />
         </SettingsRow>
       );

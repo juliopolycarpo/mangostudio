@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 import userEvent from '@testing-library/user-event';
 
 import { ToolSettingsPage } from '../../../src/features/settings/tools/components/ToolSettingsPage';
-import { render, screen, waitFor } from '../../support/harness/render';
+import { act, fireEvent, render, screen, waitFor } from '../../support/harness/render';
+import { advanceTimersByTimeAsync, useFakeTimers } from '../../support/harness/timers';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 const TOOLS_RESPONSE = {
@@ -54,6 +55,81 @@ describe('ToolSettingsPage integration', () => {
   afterEach(() => {
     fetchScenario.restore();
   });
+
+  for (const status of [200, 500]) {
+    it(`keeps a new numeric draft when an older save settles with ${status}`, async () => {
+      const descriptor = {
+        ...TOOLS_RESPONSE.tools[0],
+        parameters: { timeout: 60 },
+        parameterDescriptors: [
+          {
+            name: 'timeout',
+            label: 'Timeout',
+            type: 'number',
+            required: false,
+            defaultValue: 60,
+            min: 5,
+            max: 600,
+          },
+        ],
+      };
+      fetchScenario.respondWithJson('GET', '/api/settings/tools', {
+        body: { tools: [descriptor] },
+      });
+      const response = Promise.withResolvers<Response>();
+      const originalFetch = fetchScenario.fetchMock.getMockImplementation();
+      if (!originalFetch) throw new Error('Expected a registered fetch scenario');
+      let writes = 0;
+      fetchScenario.fetchMock.mockImplementation((input, init) => {
+        const method = input instanceof Request ? input.method : init?.method;
+        if (method === 'PUT') {
+          writes++;
+          if (writes === 1) return response.promise;
+          return Promise.resolve(Response.json({ ...descriptor, parameters: { timeout: 200 } }));
+        }
+        return originalFetch(input, init);
+      });
+      render(
+        <ToolSettingsPage maxToolIterations={10} setMaxToolIterations={setMaxToolIterations} />
+      );
+      const input = await screen.findByRole('spinbutton', { name: 'Timeout' });
+      useFakeTimers();
+      fireEvent.change(input, { target: { value: '100' } });
+      fireEvent.blur(input);
+      await act(async () => {
+        await advanceTimersByTimeAsync(400);
+      });
+      expect(writes).toBe(1);
+      fireEvent.change(input, { target: { value: '2' } });
+      await act(async () => {
+        response.resolve(
+          Response.json(
+            status === 200
+              ? { ...descriptor, parameters: { timeout: 100 } }
+              : { message: 'Save failed' },
+            { status }
+          )
+        );
+        await response.promise;
+      });
+      // Deliver React Query's notification before advancing the autosave clock.
+      await act(async () => {
+        await advanceTimersByTimeAsync(0);
+      });
+      await act(async () => {
+        await advanceTimersByTimeAsync(400);
+      });
+      expect(input).toHaveValue(2);
+      expect(writes).toBe(1);
+      fireEvent.change(input, { target: { value: '200' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      await act(async () => {
+        await advanceTimersByTimeAsync(400);
+      });
+      expect(writes).toBe(2);
+      expect(input).toHaveValue(200);
+    });
+  }
 
   it('loads and displays tool descriptors grouped by category', async () => {
     fetchScenario.respondWithJson('GET', '/api/settings/tools', {
