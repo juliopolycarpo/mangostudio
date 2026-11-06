@@ -779,7 +779,7 @@ test.each([408, 429, 500, 503])(
     expect(logs.join('\n')).toContain(`HTTP ${status}`);
     expect(logs.join('\n')).toContain('attempt=1');
     expect(logs.join('\n')).toContain('waiting=1ms');
-    expect(logs.join('\n')).toContain('confirmed');
+    expect(logs.join('\n')).toContain('settled');
     expect(runner.writes).toHaveLength(7);
     expect(registry.servedArchives).toHaveLength(7);
   }
@@ -854,3 +854,62 @@ test('expiry during a tag command preserves that side effect and never starts th
   expect(registry.owners.get(NAMES[0] ?? MAIN_PACKAGE)).toBe(VERSION);
   expect(registry.owners.get(MAIN_PACKAGE)).toBe(OLD_VERSION);
 });
+
+test.each([401, 403])(
+  'a metadata retry settling on HTTP%i reports the refusal without claiming confirmation',
+  async (status) => {
+    const { manifest, registry, runner, dependencies } = await fixture();
+    const url = versionUrl(NAMES[0] ?? MAIN_PACKAGE);
+    const logs: string[] = [];
+    registry.hiddenVersionReads.set(url, 1);
+    registry.versions.set(url, { status, body: null });
+    await expect(
+      promoteCanaryTags(manifest, {
+        ...dependencies,
+        visibility: {
+          retryDelaysMs: [1],
+          sleep: () => Promise.resolve(),
+          log: (message) => logs.push(message),
+        },
+      })
+    ).rejects.toThrow(`expected HTTP 200, received ${status}`);
+    expect(logs.join('\n')).not.toContain('visibility confirmed');
+    const settled = logs.filter((message) => message.includes('visibility settled'));
+    expect(settled).toHaveLength(1);
+    expect(settled[0]).toContain(`HTTP ${status}`);
+    expect(settled[0]).toContain('attempt=2');
+    expect(runner.writes).toEqual([]);
+  }
+);
+
+test.each([
+  { label: 'malformed', body: [] },
+  { label: 'non-semver', body: { canary: 'not-semver' } },
+])(
+  'a final tag retry settling on $label metadata reports the observation and preserves the audit failure',
+  async ({ body }) => {
+    const { manifest, registry, runner, dependencies } = await fixture();
+    const logs: string[] = [];
+    registry.postWriteResponse = { status: 404, body: null };
+    await expect(
+      promoteCanaryTags(manifest, {
+        ...dependencies,
+        visibility: {
+          retryDelaysMs: [1],
+          sleep: () => {
+            registry.postWriteResponse = { status: 200, body };
+            return Promise.resolve();
+          },
+          log: (message) => logs.push(message),
+        },
+      })
+    ).rejects.toThrow('Canary tag verification');
+    expect(logs.join('\n')).not.toContain('visibility confirmed');
+    const settled = logs.filter((message) => message.includes('visibility settled'));
+    expect(settled).toHaveLength(1);
+    expect(settled[0]).toContain('HTTP 200; canary=absent or invalid');
+    expect(settled[0]).toContain('attempt=2');
+    expect(runner.writes).toHaveLength(7);
+    expect(registry.servedArchives).toHaveLength(7);
+  }
+);
