@@ -1,4 +1,8 @@
-import { type RegistryClient, verifyCanaryNpmPublication } from './canary-publication';
+import {
+  isRetryableRegistryStatus,
+  type RegistryClient,
+  verifyCanaryNpmPublication,
+} from './canary-publication';
 import { type CanaryVisibilityOptions, CanaryVisibilityWindow } from './canary-visibility';
 import type { DistributionManifest } from './distribution-manifest';
 import { MAIN_PACKAGE, NPM_PLATFORMS, platformPackageName } from './npm-pack';
@@ -13,13 +17,17 @@ export const CANARY_TAG_NPM_VERSION = '11.21.0';
 
 /** Project-owned command boundary; failed subprocesses retain their exit code. */
 export interface CanaryTagRunner {
-  run(command: readonly string[]): Promise<NpmCommandResult>;
+  run(command: readonly string[], signal?: AbortSignal): Promise<NpmCommandResult>;
 }
 
 /** Resolve owners in the expected repository and establish commit ancestry. */
 export interface CanaryTagAncestry {
-  resolveCommit(prefix: string): Promise<string>;
-  compare(base: string, head: string): Promise<'ahead' | 'identical' | 'behind' | 'diverged'>;
+  resolveCommit(prefix: string, signal?: AbortSignal): Promise<string>;
+  compare(
+    base: string,
+    head: string,
+    signal?: AbortSignal
+  ): Promise<'ahead' | 'identical' | 'behind' | 'diverged'>;
 }
 
 export interface CanaryTagDependencies {
@@ -99,8 +107,31 @@ export async function promoteCanaryTags(
   manifest: DistributionManifest,
   dependencies: CanaryTagDependencies
 ): Promise<CanaryTagPromotion> {
+  const visibility = new CanaryVisibilityWindow({
+    retryDelaysMs: [
+      1000, 2000, 4000, 8000, 15000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000,
+    ],
+    log: (message) => console.warn(message),
+    ...dependencies.visibility,
+    ttlMs: dependencies.visibility?.ttlMs ?? 300_000,
+  });
+  return visibility.run(
+    (signal) => promoteVerifiedCanaryTags(manifest, dependencies, visibility, signal),
+    `npm canary verification and promotion ${manifest.packageVersion}`
+  );
+}
+
+async function promoteVerifiedCanaryTags(
+  manifest: DistributionManifest,
+  dependencies: CanaryTagDependencies,
+  visibility: CanaryVisibilityWindow,
+  signal: AbortSignal
+): Promise<CanaryTagPromotion> {
   canaryTagEnvironment(dependencies.env);
-  const node = await dependencies.runner.run(['node', '--version']);
+  const node = await visibility.run(
+    (signal) => dependencies.runner.run(['node', '--version'], signal),
+    'Node runtime probe'
+  );
   requireCommand(node, 'Node runtime probe');
   const runtime = /^v(\d+)\.(\d+)\.(\d+)$/.exec(node.stdout.trim());
   if (
@@ -111,52 +142,82 @@ export async function promoteCanaryTags(
       `Invalid Node runtime for canary OIDC: expected stable Node >=22.14.0; received ${JSON.stringify(node.stdout.trim())}`
     );
   }
-  const npm = await dependencies.runner.run([
-    'bunx',
-    '--package',
-    `npm@${CANARY_TAG_NPM_VERSION}`,
-    'npm',
-    '--version',
-  ]);
+  const npm = await visibility.run(
+    (signal) =>
+      dependencies.runner.run(
+        ['bunx', '--package', `npm@${CANARY_TAG_NPM_VERSION}`, 'npm', '--version'],
+        signal
+      ),
+    'Pinned npm version probe'
+  );
   requireCommand(npm, 'Pinned npm version probe');
   if (npm.stdout.trim() !== CANARY_TAG_NPM_VERSION) {
     throw new Error(
       `Invalid npm CLI for canary OIDC: expected ${CANARY_TAG_NPM_VERSION}; received ${JSON.stringify(npm.stdout.trim())}`
     );
   }
-  const publication = await verifyCanaryNpmPublication(
-    manifest,
-    dependencies.registry,
-    new CanaryVisibilityWindow(dependencies.visibility)
-  );
+  const publication = await verifyCanaryNpmPublication(manifest, dependencies.registry, visibility);
   if (publication.missing.length > 0) {
     throw new Error(
       `Canary tag promotion requires all seven verified packages; missing ${publication.missing.join(', ')}`
     );
   }
-  const { updates, unchanged } = await planCanaryTagUpdates(
-    manifest,
-    publication.canary,
-    dependencies.ancestry
+  const { updates, unchanged } = await visibility.run(
+    (signal) => planCanaryTagUpdates(manifest, publication.canary, dependencies.ancestry, signal),
+    'Canary source ordering verification'
   );
   const names = [...NPM_PLATFORMS.map(platformPackageName), MAIN_PACKAGE];
   for (const name of updates) {
-    const result = await dependencies.runner.run([
-      'bunx',
-      '--package',
-      `npm@${CANARY_TAG_NPM_VERSION}`,
-      'npm',
-      'dist-tag',
-      'add',
-      `${name}@${manifest.packageVersion}`,
-      'canary',
-      '--registry=https://registry.npmjs.org',
-    ]);
+    signal.throwIfAborted();
+    const result = await visibility.run(
+      (signal) =>
+        dependencies.runner.run(
+          [
+            'bunx',
+            '--package',
+            `npm@${CANARY_TAG_NPM_VERSION}`,
+            'npm',
+            'dist-tag',
+            'add',
+            `${name}@${manifest.packageVersion}`,
+            'canary',
+            '--registry=https://registry.npmjs.org',
+          ],
+          signal
+        ),
+      `Canary tag promotion ${name}@${manifest.packageVersion}`
+    );
     requireCommand(result, `Canary tag promotion ${name}@${manifest.packageVersion}`, true);
   }
   for (const name of names) {
     const url = `https://registry.npmjs.org/-/package/${encodeURIComponent(name)}/dist-tags`;
-    const response = await dependencies.registry.getJson(url);
+    const response = await visibility.read(
+      (signal) => dependencies.registry.getJson(url, signal),
+      (observed) => {
+        if (isRetryableRegistryStatus(observed.status)) return false;
+        if (observed.status !== 200) return true;
+        const tags = observed.body;
+        // Malformed metadata fails immediately; only a valid stale owner is polled.
+        if (tags === null || typeof tags !== 'object' || Array.isArray(tags)) return true;
+        const owner = (tags as Record<string, unknown>).canary;
+        return (
+          owner === manifest.packageVersion ||
+          (owner !== undefined &&
+            (typeof owner !== 'string' ||
+              !isValidSemver(owner) ||
+              normalizeVersion(owner) !== owner))
+        );
+      },
+      `npm canary dist-tag ${name} expected=${manifest.packageVersion} ${url}`,
+      (observed) => {
+        const tags = observed.body;
+        const owner =
+          tags !== null && typeof tags === 'object' && !Array.isArray(tags)
+            ? (tags as Record<string, unknown>).canary
+            : undefined;
+        return `HTTP ${observed.status}; canary=${typeof owner === 'string' && isValidSemver(owner) ? owner : 'absent or invalid'}`;
+      }
+    );
     const body = response.body;
     if (
       response.status !== 200 ||
@@ -188,7 +249,8 @@ export async function promoteCanaryTags(
 export async function planCanaryTagUpdates(
   manifest: DistributionManifest,
   canaryOwners: Readonly<Record<string, string | null>>,
-  ancestry: CanaryTagAncestry
+  ancestry: CanaryTagAncestry,
+  signal?: AbortSignal
 ): Promise<CanaryTagPlan> {
   const source = manifest.sourceSha;
   const short = typeof source === 'string' ? source.slice(0, 7) : '';
@@ -245,7 +307,7 @@ export async function planCanaryTagUpdates(
     const prefix = sourcePrefix(version, name);
     let owner = resolved.get(prefix);
     if (!owner) {
-      owner = await ancestry.resolveCommit(prefix);
+      owner = await ancestry.resolveCommit(prefix, signal);
       if (!/^[0-9a-f]{40}$/.test(owner) || !owner.startsWith(prefix)) {
         throw new Error(
           `Invalid canary owner commit for ${name}@${version}: expected full SHA with prefix ${prefix}; received ${JSON.stringify(owner)}`
@@ -264,7 +326,7 @@ export async function planCanaryTagUpdates(
       );
     }
     if (owner !== manifest.sourceSha) {
-      const relation = await ancestry.compare(owner, manifest.sourceSha);
+      const relation = await ancestry.compare(owner, manifest.sourceSha, signal);
       if (relation !== 'ahead') {
         throw new Error(
           `Canary tag ${name}@${version} cannot move to ${manifest.sourceSha}: expected selected source ahead of owner ${owner}; received ${relation}`

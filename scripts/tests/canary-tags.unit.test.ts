@@ -679,7 +679,7 @@ test('initial package absence audit remains immediate without a post-publication
   expect(registry.hiddenVersionReads.get(versionUrl(NAMES[0] ?? MAIN_PACKAGE))).toBe(1);
 });
 
-test.each([401, 403, 429, 500])(
+test.each([400, 401, 403])(
   'HTTP%i never spends the visibility wait budget or writes tags',
   async (status) => {
     const { manifest, registry, runner, dependencies } = await fixture();
@@ -710,4 +710,147 @@ test('waits for one just-published tarball without downloading earlier verified 
   expect(clock.delays).toEqual([1, 2]);
   expect(registry.servedArchives).toEqual(archives);
   expect(runner.writes).toHaveLength(7);
+});
+
+test('default npm visibility recovers after more than the old sixty-second wait', async () => {
+  const { manifest, registry, dependencies, runner } = await fixture();
+  let now = 0;
+  const delays: number[] = [];
+  registry.hiddenVersionReads.set(versionUrl(NAMES[0] ?? MAIN_PACKAGE), 8);
+  const result = await promoteCanaryTags(manifest, {
+    ...dependencies,
+    visibility: {
+      now: () => now,
+      sleep: (delay) => {
+        delays.push(delay);
+        now += delay;
+        return Promise.resolve();
+      },
+    },
+  });
+  expect(result.updated).toEqual(NAMES);
+  expect(now).toBeGreaterThan(60_000);
+  expect(now).toBeLessThan(300_000);
+  expect(runner.writes).toHaveLength(7);
+  expect(registry.servedArchives).toHaveLength(7);
+});
+
+test('waits for stale final dist-tags after writing without repeating mutations or archives', async () => {
+  const { manifest, registry, runner, dependencies } = await fixture();
+  const delays: number[] = [];
+  registry.postWriteResponse = { status: 200, body: { canary: OLD_VERSION } };
+  const result = await promoteCanaryTags(manifest, {
+    ...dependencies,
+    visibility: {
+      retryDelaysMs: [1],
+      sleep: (delay) => {
+        delays.push(delay);
+        registry.postWriteResponse = undefined;
+        return Promise.resolve();
+      },
+    },
+  });
+  expect(result.updated).toEqual(NAMES);
+  expect(delays).toEqual([1]);
+  expect(runner.writes).toHaveLength(7);
+  expect(registry.servedArchives).toHaveLength(7);
+});
+
+test.each([408, 429, 500, 503])(
+  'temporary HTTP%i can recover without repeating a tag write or verified archive',
+  async (status) => {
+    const { manifest, registry, runner, dependencies } = await fixture();
+    const url = versionUrl(NAMES[1] ?? MAIN_PACKAGE);
+    const valid = registry.versions.get(url);
+    if (!valid) throw new Error('Expected fixture metadata');
+    const logs: string[] = [];
+    registry.versions.set(url, { status, body: null });
+    await promoteCanaryTags(manifest, {
+      ...dependencies,
+      visibility: {
+        retryDelaysMs: [1],
+        sleep: () => {
+          registry.versions.set(url, valid);
+          return Promise.resolve();
+        },
+        log: (message) => logs.push(message),
+      },
+    });
+    expect(logs.join('\n')).toContain(`HTTP ${status}`);
+    expect(logs.join('\n')).toContain('attempt=1');
+    expect(logs.join('\n')).toContain('waiting=1ms');
+    expect(logs.join('\n')).toContain('confirmed');
+    expect(runner.writes).toHaveLength(7);
+    expect(registry.servedArchives).toHaveLength(7);
+  }
+);
+
+test('one TTL includes planning and stops before the first dist-tag mutation', async () => {
+  const { manifest, dependencies, runner, ancestry } = await fixture();
+  let now = 0;
+  await expect(
+    promoteCanaryTags(manifest, {
+      ...dependencies,
+      ancestry: {
+        resolveCommit: async (prefix) => {
+          now += 51;
+          return ancestry.resolveCommit(prefix);
+        },
+        compare: (base, head) => ancestry.compare(base, head),
+      },
+      visibility: { ttlMs: 50, retryDelaysMs: [], now: () => now },
+    })
+  ).rejects.toThrow('TTL expired');
+  expect(runner.writes).toEqual([]);
+});
+
+test('permanent absence expires with the package and last HTTP status without any tag write', async () => {
+  const { manifest, registry, dependencies, runner } = await fixture();
+  let now = 0;
+  const logs: string[] = [];
+  registry.versions.set(versionUrl(NAMES[0] ?? MAIN_PACKAGE), { status: 404, body: null });
+  await expect(
+    promoteCanaryTags(manifest, {
+      ...dependencies,
+      visibility: {
+        ttlMs: 100,
+        retryDelaysMs: [30, 30, 50],
+        now: () => now,
+        sleep: (delay) => {
+          now += delay;
+          return Promise.resolve();
+        },
+        log: (message) => logs.push(message),
+      },
+    })
+  ).rejects.toThrow('TTL expired');
+  expect(now).toBe(100);
+  expect(logs.join('\n')).toContain('HTTP 404');
+  expect(logs.join('\n')).toContain(NAMES[0] ?? MAIN_PACKAGE);
+  expect(logs.join('\n')).toContain('TTL expired');
+  expect(runner.writes).toEqual([]);
+});
+
+test('expiry during a tag command preserves that side effect and never starts the next mutation', async () => {
+  const { manifest, dependencies, runner, registry } = await fixture();
+  let now = 0;
+  await expect(
+    promoteCanaryTags(manifest, {
+      ...dependencies,
+      runner: {
+        run: async (command, signal) => {
+          const result = await runner.run(command);
+          if (command[4] === 'dist-tag') {
+            now += 51;
+            expect(signal?.aborted).toBe(false);
+          }
+          return result;
+        },
+      },
+      visibility: { ttlMs: 50, retryDelaysMs: [], now: () => now },
+    })
+  ).rejects.toThrow('TTL expired');
+  expect(runner.writes).toHaveLength(1);
+  expect(registry.owners.get(NAMES[0] ?? MAIN_PACKAGE)).toBe(VERSION);
+  expect(registry.owners.get(MAIN_PACKAGE)).toBe(OLD_VERSION);
 });
