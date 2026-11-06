@@ -1,35 +1,13 @@
 //! Checking a handler's result against the contract's `result` schema before
 //! it is serialised onto the wire.
 //!
-//! ## Why not `ServeOptions::validate_results`
+//! ## Validation and audit order
 //!
-//! `mango_protocol::contract::ServeOptions` has a `validate_results` flag,
-//! but `Contract::serve`'s own pipeline (`contract/serve.rs::answer`) runs it
-//! *after* the registered handler has already settled — which, once
-//! [`crate::ports::audit`] wraps a handler to write its outcome, means an
-//! `outcome: ok` line could already be recorded before the result check ever
-//! runs. A malformed result would then answer the hub `INTERNAL` while the
-//! runtime's own audit trail says the call succeeded — exactly the ordering
-//! bug `apps/runtime/src/result-check.ts` was written to avoid in the
-//! TypeScript runtime, by running its own result check *inside* the
-//! audit-recording wrapper (`gateHandlers(checkResults(handlers), deps)`)
-//! rather than through the SDK's own post-handler option.
-//!
-//! [`crate::registry::Registry::implement`] applies [`check_result`] the same
-//! way: inside the closure it registers, before the audit port ever records
-//! `ok`, and this crate never sets `ServeOptions::validate_results`.
-//!
-//! ## Why this crate always validates, unlike the TypeScript runtime
-//!
-//! `apps/runtime/src/config.ts` turns this check off in production, on the
-//! reasoning that a shape the schema refuses is still better delivered to a
-//! user than turned into a 500. This crate makes the opposite, deliberate
-//! choice: it validates unconditionally, in every build. The check exists to
-//! catch a handler drifting from the contract *before* a peer built from the
-//! same catalog in another language copies the mistake, and a peer written in
-//! Rust is exactly that other language today. Silently allowing a Rust
-//! handler to drift from its own declared schema would defeat the reason this
-//! crate embeds the schema at all.
+//! `Contract::serve` runs `ServeOptions::validate_results` after the registered
+//! handler settles. The runtime validates in every build, inside the handler
+//! registered by [`crate::registry::Registry::implement`], so a malformed
+//! result returns `INTERNAL` and the audit port records the same failure.
+//! This checks each handler against the catalog before a peer consumes its result.
 //!
 //! ## Why `reason` never echoes the checked value
 //!
@@ -94,28 +72,14 @@ pub(crate) fn cached_result_validator(method: &str, schema: &Value) -> Arc<Valid
 /// Checks `result` against `validator`, `method`'s compiled `result` schema.
 ///
 /// # Errors
-/// `INTERNAL` naming the failing instance path and reason, exactly mirroring
-/// `apps/runtime/src/result-check.ts`'s wire shape:
+/// `INTERNAL` includes the failing path and a reason that masks result values.
 /// - message: `Result of "{method}" does not match the contract at {path}: {reason}.`
 /// - details: `{ "method": method, "path": path, "reason": reason }`
 ///
-/// `path` is the instance-path JSON pointer the violation occurred at, with
-/// `/{property}` appended when the failing keyword is `required` or
-/// `additionalProperties` (the pointer alone stops one level short for a
-/// property that either never appears in the document at all, or that the
-/// document was not supposed to carry), defaulting to `/` for a
-/// document-root violation.
-///
-/// This mirrors `apps/runtime/src/result-check.ts`'s wire shape, but not by
-/// mirroring its code: `result-check.ts` special-cases only `required`
-/// because TypeBox's own `instancePath` already points at an unexpected
-/// property directly — there is nothing left for it to append. `jsonschema`
-/// does not do that: an `additionalProperties` violation's `instance_path()`
-/// points at the *container*, not the offending key, so this crate has to
-/// append it itself to land on the same wire `path` TypeScript would report.
-/// The special case matches
-/// `mango_protocol::contract::params::first_violation`'s for exactly that
-/// reason, not by coincidence.
+/// The path is an RFC 6901 JSON Pointer. For `required` and
+/// `additionalProperties`, jsonschema reports the containing object, so the
+/// runtime appends the escaped property token. A document-root violation
+/// uses `/` as its diagnostic path.
 ///
 /// # Example
 ///
@@ -154,11 +118,11 @@ pub fn check_result(
         }
         _ => None,
     };
-    let instance_path = error.instance_path().as_str();
+    let base = error.instance_path();
     let path = match property {
-        Some(property) => format!("{instance_path}/{property}"),
-        None if instance_path.is_empty() => "/".to_string(),
-        None => instance_path.to_string(),
+        Some(property) => base.join(property).to_string(),
+        None if base.as_str().is_empty() => "/".to_string(),
+        None => base.to_string(),
     };
     let reason = error.masked().to_string();
     Err(RemoteError::new(
@@ -236,6 +200,76 @@ mod tests {
             error.message,
             "Result of \"terminal.list\" does not match the contract at /sessionCount: Additional properties are not allowed ('sessionCount' was unexpected)."
         );
+    }
+
+    #[test]
+    fn required_property_paths_escape_json_pointer_tokens() {
+        for (property, token) in [
+            ("a/b", "a~1b"),
+            ("a~b", "a~0b"),
+            ("a~/b", "a~0~1b"),
+            ("a~1b", "a~01b"),
+            ("", ""),
+        ] {
+            for nested in [false, true] {
+                let mut schema = json!({ "type": "object", "required": [property] });
+                let mut result = json!({});
+                let prefix = if nested {
+                    schema = json!({
+                        "properties": { "outer/~": { "type": "array", "items": schema } }
+                    });
+                    result = json!({ "outer/~": [result] });
+                    "/outer~1~0/0"
+                } else {
+                    ""
+                };
+                let validator = compile_result_schema(&schema);
+                let error = check_result("test.result", &validator, &result)
+                    .expect_err("missing required property");
+                let path = format!("{prefix}/{token}");
+                assert_eq!(error.code, codes::INTERNAL);
+                assert_eq!(error.details.as_ref().unwrap()["path"], json!(path));
+                assert!(error.message.contains(&format!(" at {path}: ")));
+            }
+        }
+    }
+
+    #[test]
+    fn additional_property_paths_escape_json_pointer_tokens() {
+        for (property, token) in [
+            ("a/b", "a~1b"),
+            ("a~b", "a~0b"),
+            ("a~/b", "a~0~1b"),
+            ("a~1b", "a~01b"),
+            ("", ""),
+        ] {
+            for nested in [false, true] {
+                let mut schema = json!({
+                    "type": "object",
+                    "properties": { "known": {} },
+                    "additionalProperties": false,
+                });
+                let mut result = json!({ (property): "CANARY-SECRET-9f3a" });
+                let prefix = if nested {
+                    schema = json!({
+                        "properties": { "outer/~": { "type": "array", "items": schema } }
+                    });
+                    result = json!({ "outer/~": [result] });
+                    "/outer~1~0/0"
+                } else {
+                    ""
+                };
+                let validator = compile_result_schema(&schema);
+                let error = check_result("test.result", &validator, &result)
+                    .expect_err("unexpected property");
+                let path = format!("{prefix}/{token}");
+                assert_eq!(error.code, codes::INTERNAL);
+                assert_eq!(error.details.as_ref().unwrap()["path"], json!(path));
+                assert!(error.message.contains(&format!(" at {path}: ")));
+                assert_eq!(result.pointer(&path), Some(&json!("CANARY-SECRET-9f3a")));
+                assert!(!error.message.contains("CANARY-SECRET-9f3a"));
+            }
+        }
     }
 
     #[test]
