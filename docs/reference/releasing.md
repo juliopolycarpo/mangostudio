@@ -669,8 +669,8 @@ Post-publication reads retry HTTP 404, 408, 429 and 5xx with backoff from one se
 to 30 seconds, sharing the deadline across all seven packages and final tag
 confirmations. Valid stale or absent canary tags are polled after successful writes;
 mutations are never retried by this polling loop. Logs identify the package or URL,
-attempt, HTTP status, elapsed/remaining time and next delay, then report recovery
-or exhaustion. Expiry aborts outstanding reads/commands and fails with recovery
+attempt, HTTP status, elapsed/remaining time and next delay, then report a settled
+read or exhaustion. Expiry aborts outstanding reads/commands and fails with recovery
 instructions; it never counts an unverified publication as successful.
 Successful archives are downloaded and verified once, and all seven packages must
 pass the full audit before tag writes. The initial absence audit stays immediate.
