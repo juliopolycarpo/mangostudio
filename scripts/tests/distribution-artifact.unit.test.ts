@@ -307,7 +307,7 @@ const args = mode === '-Z1' && archive && !member ? ['-tf', archive]
   : mode === '-p' && archive && member ? ['-xOf', archive, member] : undefined;
 if (!args) throw new Error('Unexpected unzip request: ' + JSON.stringify(process.argv.slice(2)));
 const result = Bun.spawnSync([tar, ...args], { stdout: 'inherit', stderr: 'inherit' });
-process.exit(result.exitCode);
+process.exit(result.exitCode ?? 1);
 `;
 
 function writeArtifactZip(archive: string, staging: string, bundle: string): void {

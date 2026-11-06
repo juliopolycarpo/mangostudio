@@ -2,22 +2,29 @@ import { copyFileSync, linkSync, mkdtempSync, rmSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 
-let windowsLauncher: string | undefined;
+let compiledLauncher: string | undefined;
+const executableSuffix = process.platform === 'win32' ? '.exe' : '';
 
 /**
  * Install a named Bun fixture that a subprocess can find through native PATH lookup.
  * @example installFakeCli(directory, 'gh', 'console.log(JSON.stringify({ id: 42 }));');
  */
 export function installFakeCli(directory: string, name: string, source: string): void {
-  const path = join(directory, name);
-  if (process.platform !== 'win32') {
-    const script = source.startsWith('#!') ? source : `#!/usr/bin/env bun\n${source}`;
-    writeFileSync(path, script, { mode: 0o755 });
+  if (process.platform === 'win32') {
+    installCompiledFakeCli(directory, name, source);
     return;
   }
+  const script = source.startsWith('#!') ? source : `#!/usr/bin/env bun\n${source}`;
+  writeFileSync(join(directory, name), script, { mode: 0o755 });
+}
 
-  const executable = `${path}.exe`;
-  const launcher = (windowsLauncher ??= compileWindowsLauncher());
+/**
+ * Install the compiled fixture launcher and the script it runs.
+ * @example installCompiledFakeCli(directory, 'gh', 'console.log("fixture");');
+ */
+export function installCompiledFakeCli(directory: string, name: string, source: string): void {
+  const executable = join(directory, `${name}${executableSuffix}`);
+  const launcher = (compiledLauncher ??= compileLauncher());
   writeFileSync(`${executable}.ts`, source);
   try {
     linkSync(launcher, executable);
@@ -45,16 +52,16 @@ export function fakeCliEnvironment(
   return environment;
 }
 
-function compileWindowsLauncher(): string {
+function compileLauncher(): string {
   const directory = mkdtempSync(join(tmpdir(), 'mango-fake-cli-'));
   const entrypoint = join(directory, 'launcher.ts');
-  const executable = join(directory, 'launcher.exe');
+  const executable = join(directory, `launcher${executableSuffix}`);
   writeFileSync(
     entrypoint,
     `const result = Bun.spawnSync([${JSON.stringify(process.execPath)}, process.execPath + '.ts', ...process.argv.slice(2)], {
       stdin: 'inherit', stdout: 'inherit', stderr: 'inherit',
     });
-    process.exit(result.exitCode);
+    process.exit(result.exitCode ?? 1);
     `
   );
   const result = Bun.spawnSync([

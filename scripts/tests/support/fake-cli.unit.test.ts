@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 
-import { fakeCliEnvironment, installFakeCli } from './fake-cli';
+import { fakeCliEnvironment, installCompiledFakeCli, installFakeCli } from './fake-cli';
 
 test('runs the named CLI fixture through native PATH and preserves argv, bytes and exit', () => {
   const directory = mkdtempSync(join(tmpdir(), 'mango fake cli-'));
@@ -22,7 +22,7 @@ test('runs the named CLI fixture through native PATH and preserves argv, bytes a
         process.execPath,
         '-e',
         `const child = Bun.spawnSync(['mango-fixture', 'has spaces', 'key=value&second=two'], { stdout: 'inherit', stderr: 'inherit' });
-      process.exit(child.exitCode);`,
+      process.exit(child.exitCode ?? 1);`,
       ],
       {
         env: { ...fakeCliEnvironment(directory), FAKE_MARKER: 'fixture stderr' },
@@ -43,4 +43,15 @@ test('uses one PATH key and the native delimiter when an ambient host provides P
     OTHER: 'keep',
   });
   expect(ambient).toEqual({ Path: 'tools', OTHER: 'keep' });
+});
+
+test.skipIf(process.platform !== 'linux')('reports a signaled launcher child as failure', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mango killed cli-'));
+  try {
+    installCompiledFakeCli(directory, 'mango-fixture', 'process.kill(process.pid, "SIGTERM");');
+    const command = Bun.spawnSync([join(directory, 'mango-fixture')]);
+    expect(command.exitCode, command.stderr.toString()).toBe(1);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
