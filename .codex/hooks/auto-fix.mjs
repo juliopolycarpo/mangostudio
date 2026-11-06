@@ -1,6 +1,6 @@
 import { stat } from 'node:fs/promises';
 import { constants } from 'node:os';
-import { extname, isAbsolute, relative, resolve } from 'node:path';
+import { extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), '..', '..', '..');
@@ -87,7 +87,12 @@ async function resolveTouchedPath(input) {
  */
 export function isInsideRepo(filePath, root = repoRoot) {
   const relativePath = relative(root, filePath);
-  return relativePath !== '' && !relativePath.startsWith('..') && !isAbsolute(relativePath);
+  return (
+    relativePath !== '' &&
+    relativePath !== '..' &&
+    !relativePath.startsWith(`..${sep}`) &&
+    !isAbsolute(relativePath)
+  );
 }
 
 /**

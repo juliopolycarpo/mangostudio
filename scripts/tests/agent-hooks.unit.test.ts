@@ -15,6 +15,7 @@ import { delimiter, join, relative, resolve } from 'node:path';
 import {
   findProtectedFile,
   runProtectGeneratedHook,
+  toRepoPath,
 } from '../../.claude/hooks/protect-generated.mjs';
 import {
   createPathExportLine,
@@ -390,6 +391,47 @@ describe('agent auto-fix hooks', () => {
 
     expect(isInsideRepo(join(root, 'README.md'), root)).toBe(true);
     expect(isInsideRepo(join('workspace', 'other', 'README.md'), root)).toBe(false);
+  });
+
+  it('accepts dot-prefixed descendants without admitting parent traversal', () => {
+    // These call the real host functions: Windows runners exercise native drive
+    // and separator handling, rather than a POSIX simulation of Windows paths.
+    const root = resolve('workspace', 'mangostudio');
+    for (const name of ['..notes', '...notes', '.notes']) {
+      expect(isInsideRepo(join(root, name, 'sample.rs'), root)).toBe(true);
+      expect(toRepoPath(join(root, name, 'sample.rs'), root)).toBe(`${name}/sample.rs`);
+    }
+    for (const outside of [
+      root,
+      resolve(root, '..'),
+      resolve(root, '..', 'outside'),
+      join(resolve(root, '..'), 'mangostudio-other', 'sample.rs'),
+    ]) {
+      expect(isInsideRepo(outside, root)).toBe(false);
+      expect(toRepoPath(outside, root)).toBeUndefined();
+    }
+    if (process.platform === 'win32') {
+      expect(isInsideRepo(`${root[0] === 'C' ? 'D' : 'C'}:\\outside\\sample.rs`, root)).toBe(false);
+      expect(isInsideRepo(`${root}/../outside/sample.rs`, root)).toBe(false);
+    }
+  });
+
+  it('keeps repo-relative generated-file fallback from a dot-prefixed cwd', () => {
+    const root = resolve('workspace', 'mangostudio');
+    const cwd = join(root, '..notes');
+    expect(candidatePaths('bun.lock', cwd, root)).toEqual([
+      join(cwd, 'bun.lock'),
+      join(root, 'bun.lock'),
+    ]);
+    expect(runProtectGeneratedHook(JSON.stringify({ cwd, path: 'bun.lock' }), root).blocked).toBe(
+      true
+    );
+    expect(
+      runProtectGeneratedHook(
+        JSON.stringify({ cwd: resolve(root, '..', 'outside'), path: 'bun.lock' }),
+        root
+      ).blocked
+    ).toBe(false);
   });
 
   it('skips generated and dependency files', () => {
