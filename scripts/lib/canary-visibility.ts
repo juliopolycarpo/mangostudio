@@ -86,7 +86,7 @@ export class CanaryVisibilityWindow {
       if (visible(result)) {
         if (nextDelay > 0)
           this.log?.(
-            `Canary visibility confirmed: ${label}; attempt=${nextDelay + 1}; ${this.timing()}`
+            `Canary visibility settled: ${label}; attempt=${nextDelay + 1}; ${describe(result)}; ${this.timing()}`
           );
         return result;
       }
