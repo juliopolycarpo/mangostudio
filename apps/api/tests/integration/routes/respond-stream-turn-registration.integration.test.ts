@@ -1,9 +1,8 @@
-import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeAll, describe, expect, it, spyOn } from 'bun:test';
 
+import * as database from '../../../src/db/database';
 import { isActiveTurn } from '../../../src/modules/generation/application/active-turn-registry';
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
-import type { PersistTextTurnStartInput } from '../../../src/modules/generation/infrastructure/conversation-persistence';
-import * as realConversationPersistenceNs from '../../../src/modules/generation/infrastructure/conversation-persistence';
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import {
@@ -15,10 +14,9 @@ import {
   restoreAllMocks,
 } from './_respond-stream-helpers';
 
-const realConversationPersistence = { ...realConversationPersistenceNs };
-
 let testUser!: UserFixture;
 let restoreAuth: (() => void) | null = null;
+let getDbSpy: ReturnType<typeof spyOn<typeof database, 'getDb'>> | undefined;
 
 beforeAll(async () => {
   testUser = await insertTestUser();
@@ -27,16 +25,25 @@ beforeAll(async () => {
 afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
-  await mock.module(
-    '../../../src/modules/generation/infrastructure/conversation-persistence',
-    () => realConversationPersistence
-  );
+  getDbSpy?.mockRestore();
+  getDbSpy = undefined;
   await restoreAllMocks();
 });
 
-async function createRegistrationHarness(
-  persistTextTurnStart: (input: PersistTextTurnStartInput) => Promise<unknown>
-) {
+async function createRegistrationHarness(insertError?: Error) {
+  const generatingRows: Array<{ id: string; active: boolean }> = [];
+
+  function captureGeneratingInsert(table: string, values: Record<string, unknown>): void {
+    if (table !== 'messages' || values.role !== 'ai' || values.isGenerating !== 1) return;
+    if (typeof values.id !== 'string') {
+      throw new Error(
+        `generating assistant row: expected a string id | received: ${String(values.id)}`
+      );
+    }
+    generatingRows.push({ id: values.id, active: isActiveTurn(values.id) });
+    if (insertError) throw insertError;
+  }
+
   await mockVerifiedChatOwnership();
   await mockNoopTools();
   await mockProviderRegistry(async function* streamTurn() {
@@ -44,27 +51,22 @@ async function createRegistrationHarness(
     yield { type: 'assistant_text_delta', text: 'done' };
     yield { type: 'turn_completed', providerState: null };
   });
-  await mock.module('../../../src/db/database', () => ({
-    getDb: () => createTestStreamDb({ userId: testUser.id }),
-  }));
-  await mock.module(
-    '../../../src/modules/generation/infrastructure/conversation-persistence',
-    () => ({ ...realConversationPersistence, persistTextTurnStart })
+  const streamDb = createTestStreamDb({
+    userId: testUser.id,
+    onInsert: captureGeneratingInsert,
+  });
+  getDbSpy = spyOn(database, 'getDb').mockReturnValue(
+    streamDb as unknown as ReturnType<typeof database.getDb>
   );
 
   const { app, restore } = createAuthenticatedApiTestApp(testUser, respondStreamRoutes);
   restoreAuth = restore;
-  return app;
+  return { app, generatingRows };
 }
 
 describe('POST /respond/stream — active turn registration', () => {
   it('registers the assistant turn before persisting its generating row', async () => {
-    let assistantMessageId: string | null = null;
-    const app = await createRegistrationHarness((input) => {
-      assistantMessageId = input.assistantMessageId;
-      expect(isActiveTurn(input.assistantMessageId)).toBe(true);
-      return Promise.resolve([]);
-    });
+    const { app, generatingRows } = await createRegistrationHarness();
 
     const response = await app.handle(
       buildRespondStreamRequest({
@@ -73,19 +75,16 @@ describe('POST /respond/stream — active turn registration', () => {
         model: 'test-model',
       })
     );
-    await response.text();
+    expect(await response.text()).toContain('"type":"done"');
 
-    expect(assistantMessageId).not.toBeNull();
-    expect(isActiveTurn(assistantMessageId ?? '')).toBe(false);
+    expect(generatingRows).toEqual([{ id: expect.any(String), active: true }]);
+    expect(generatingRows.map(({ id }) => isActiveTurn(id))).toEqual([false]);
   });
 
   it('unregisters the assistant turn when preparation fails', async () => {
-    let assistantMessageId: string | null = null;
-    const app = await createRegistrationHarness((input) => {
-      assistantMessageId = input.assistantMessageId;
-      expect(isActiveTurn(input.assistantMessageId)).toBe(true);
-      return Promise.reject(new Error('injected persistence failure'));
-    });
+    const { app, generatingRows } = await createRegistrationHarness(
+      new Error('injected persistence failure')
+    );
 
     const response = await app.handle(
       buildRespondStreamRequest({ chatId: 'failure-chat', prompt: 'Hello', model: 'test-model' })
@@ -93,7 +92,7 @@ describe('POST /respond/stream — active turn registration', () => {
     const body = await response.text();
 
     expect(body).toContain('injected persistence failure');
-    expect(assistantMessageId).not.toBeNull();
-    expect(isActiveTurn(assistantMessageId ?? '')).toBe(false);
+    expect(generatingRows).toEqual([{ id: expect.any(String), active: true }]);
+    expect(generatingRows.map(({ id }) => isActiveTurn(id))).toEqual([false]);
   });
 });
