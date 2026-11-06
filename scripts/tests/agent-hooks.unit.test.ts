@@ -440,6 +440,15 @@ describe('agent auto-fix hooks', () => {
     expect(shouldSkipFile(join('repo', 'apps', 'api', 'src', 'app.ts'))).toBe(false);
   });
 
+  it.skipIf(process.platform === 'win32')(
+    'keeps POSIX filenames with literal backslashes eligible for formatting',
+    () => {
+      const filePath = join('repo', 'work\\node_modules\\sample.ts');
+
+      expect(shouldSkipFile(filePath)).toBe(false);
+    }
+  );
+
   it('chooses the formatter from the touched file name', () => {
     expect(chooseFormatter('src/app.ts')).toBe('bun');
     expect(chooseFormatter('src/app.json')).toBe('fmt');
@@ -1108,6 +1117,13 @@ describe('Claude protect-generated hook', () => {
     const match = findProtectedFile(join(root, '.claude', 'worktrees', 'wt', 'bun.lock'), root);
 
     expect(match?.path).toBe('bun.lock');
+  });
+
+  it.skipIf(process.platform === 'win32')('allows literal backslashes in POSIX filenames', () => {
+    const filePath = join(root, 'apps\\frontend\\src\\routeTree.gen.ts');
+    const result = runProtectGeneratedHook(JSON.stringify({ path: filePath }), root);
+
+    expect(result).toEqual({ blocked: false, message: '' });
   });
 
   it('allows hand-written files and files outside the repo', () => {

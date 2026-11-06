@@ -6,6 +6,7 @@ import {
   extractHookCwd,
   extractTouchedFilePath,
   isInsideRepo,
+  toSlashPath,
 } from '../../.codex/hooks/auto-fix.mjs';
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), '..', '..', '..');
@@ -79,12 +80,11 @@ export function runProtectGeneratedHook(input, root = repoRoot) {
  * // Usage: toRepoPath('/repo/..notes/sample.rs', '/repo'); // '..notes/sample.rs'
  */
 export function toRepoPath(filePath, root) {
-  const relativePath = relative(root, filePath).replaceAll('\\', '/');
-
   if (!isInsideRepo(filePath, root)) {
     return undefined;
   }
 
+  const relativePath = toSlashPath(relative(root, filePath));
   return relativePath.replace(nestedWorktreePrefix, '');
 }
 
