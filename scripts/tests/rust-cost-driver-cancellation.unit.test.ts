@@ -91,27 +91,45 @@ class FakeRustCostCommands {
     const reader = `import { OwnedCargoConfigFiles } from '../tests/support/owned-cargo-config-files';
 const OWNED_CONFIG_FILES = new OwnedCargoConfigFiles(${JSON.stringify(this.directory)});
 `;
-    await Bun.write(
-      driver,
-      driverSource
-        .replace('#!/usr/bin/env bun\n', `#!/usr/bin/env bun\n${reader}`)
-        .replace(
-          configCall,
-          'inspectRustCostCargoConfigs(ROOT, process.env, names, OWNED_CONFIG_FILES)'
-        )
-    );
+    let fixtureDriver = driverSource
+      .replace('#!/usr/bin/env bun\n', `#!/usr/bin/env bun\n${reader}`)
+      .replace(
+        configCall,
+        'inspectRustCostCargoConfigs(ROOT, process.env, names, OWNED_CONFIG_FILES)'
+      );
     if (this.completedBuildMutation) {
+      const sample =
+        'resourceState.tracker?.observe({ atMs: performance.now() - clock, processes: rows });';
+      if (fixtureDriver.split(sample).length !== 2)
+        throw new Error('Named resource fake: expected one resource sample boundary');
+      const marker = JSON.stringify(join(this.directory, 'sample-observed'));
+      fixtureDriver = fixtureDriver.replace(
+        sample,
+        `${sample}
+          if (root && !(await Bun.file(${marker}).exists()))
+            await Bun.write(${marker}, 'sampled');`
+      );
+      if (this.completedBuildMutation === 'invalid-utf8') {
+        // The sampler can finish a census before its diagnostic journal is available.
+        const monitor = join(this.sourceRoot, 'scripts/lib/native-bun-qualification-process.ts');
+        const source = await readFile(monitor, 'utf8');
+        const journal = 'join(options.out, `terminal-';
+        if (source.split(journal).length !== 2)
+          throw new Error('Named resource fake: expected one terminal journal path');
+        await Bun.write(monitor, source.replace(journal, 'join(options.out, `fixture-terminal-'));
+      }
       const resourceHost = join(this.sourceRoot, 'scripts/lib/process-resource-host.ts');
       const source = await readFile(resourceHost, 'utf8');
       const anchor = "names: () => readdir('/proc'),";
       if (source.split(anchor).length !== 2)
         throw new Error('Named resource fake: expected one procfs names boundary');
       const names = `names: async () => {
-        try { return JSON.parse(await readFile(${JSON.stringify(join(this.directory, 'build-resource-pids'))}, 'utf8')); }
+        try { return JSON.parse(await readFile(${JSON.stringify(join(this.directory, 'build-resource-pids'))}, 'utf8')).pids; }
         catch (error) { if (error.code === 'ENOENT') return []; throw error; }
       },`;
       await Bun.write(resourceHost, source.replace(anchor, names));
     }
+    await Bun.write(driver, fixtureDriver);
     const bin = join(this.directory, 'bin');
     await mkdir(bin);
     const sources: Record<string, string> = {
@@ -119,6 +137,7 @@ const OWNED_CONFIG_FILES = new OwnedCargoConfigFiles(${JSON.stringify(this.direc
       git: `const args = process.argv.slice(2); if (args[0] === 'rev-parse') console.log('0000000000000000000000000000000000000000'); else if (args[0] === 'ls-files') console.log('Cargo.toml\\nCargo.lock\\nrust-toolchain.toml\\n.cargo/config.toml\\ncrates/mangostudio-runtime/src/main.rs'); else if (args[0] !== 'status') throw new Error('Unexpected fake git command: '+args);`,
       rustc: `console.log('rustc 1.99.0 (fixture)\\nhost: x86_64-unknown-linux-gnu');`,
       cargo: `
+import { publishFixtureJson } from ${JSON.stringify(join(this.sourceRoot, 'scripts/tests/support/atomic-fixture-json.ts'))};
 const args = process.argv.slice(2);
 if (args.includes('--worker')) { setInterval(() => {}, 1000); await new Promise(() => {}); }
 else if (args[0] === '-V') console.log('cargo fixture');
@@ -126,20 +145,9 @@ else if (args[0] === 'metadata') { if (${this.stopAtMetadata}) { await Bun.write
 else if (args[0] === 'tree') console.log('fixture locked dependency graph');
 else if (args[0] === 'build') {
   if (${Boolean(this.completedBuildMutation)}) {
-    await Bun.write(${JSON.stringify(join(this.directory, 'build-resource-pids'))}, JSON.stringify([String(process.ppid), String(process.pid)]));
-    const terminal = ${JSON.stringify(join(this.directory, 'study/runtime-empty-1/terminal-runtime-empty-1.jsonl'))};
-    const deadline = Date.now() + 5000;
-    let sampled = false;
-    while (Date.now() < deadline) {
-      const text = await Bun.file(terminal).text().catch(() => '');
-      sampled = text.trim().split('\\n').filter(Boolean).some((line) => {
-        try { return JSON.parse(line).processes.some((row) => row.pid === process.ppid && row.command === 'time'); } catch { return false; }
-      });
-      if (sampled) break;
-      await Bun.sleep(5);
-    }
-    if (!sampled) throw new Error('Named build fake: expected sampled GNU time root before mutation');
-    await Bun.write(${JSON.stringify(join(this.directory, 'sample-observed'))}, 'sampled');
+    publishFixtureJson(${JSON.stringify(join(this.directory, 'build-resource-pids'))}, { pids: [String(process.ppid), String(process.pid)] });
+    // The supervising test owns the deadline and settles this process group.
+    while (!(await Bun.file(${JSON.stringify(join(this.directory, 'sample-observed'))}).exists())) await Bun.sleep(5);
     await Bun.write(${JSON.stringify(join(this.directory, 'cargo-home/config.toml'))}, ${this.completedBuildMutation === 'invalid-utf8' ? 'new Uint8Array([35, 32, 128, 10])' : JSON.stringify(this.completedBuildMutation === 'include' ? 'include = ["included.toml"]\n' : '[http]\nproxy = "POST_BUILD_CONFIG_SECRET')});
     process.exit(0);
   }
@@ -369,11 +377,13 @@ describe.skipIf(process.platform !== 'linux' || process.arch !== 'x64')(
           timeoutSeconds: 20,
           stream: new DiscardedDriverOutput(),
         });
-        const receipt = JSON.parse(await readFile(join(out, 'receipt.json'), 'utf8'));
-        expect(result.timedOut).toBe(false);
+        expect(result.timedOut, 'expected the sampler to acknowledge the GNU time root').toBe(
+          false
+        );
         expect(result.exitCode).toBe(1);
         expect(result.settlement.empty).toBe(true);
-        expect(existsSync(join(root, 'sample-observed'))).toBe(true);
+        expect(await readFile(join(root, 'sample-observed'), 'utf8')).toBe('sampled');
+        const receipt = JSON.parse(await readFile(join(out, 'receipt.json'), 'utf8'));
         expect(receipt.complete).toBe(false);
         expect(receipt.attempts).toHaveLength(1);
         const attempt = receipt.attempts[0];
