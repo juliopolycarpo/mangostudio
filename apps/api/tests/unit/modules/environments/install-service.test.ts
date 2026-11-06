@@ -33,6 +33,9 @@ import type {
 
 /** Always answers the default selection; no run in this file exercises a stored override. */
 class FakeToolchainService implements ToolchainService {
+  listByUser(): Promise<Map<string, ToolchainSelection>> {
+    throw new Error('Unexpected batch toolchain read during an individual install');
+  }
   resolve(): Promise<ToolchainSelection> {
     return Promise.resolve(DEFAULT_TOOLCHAIN_SELECTION);
   }

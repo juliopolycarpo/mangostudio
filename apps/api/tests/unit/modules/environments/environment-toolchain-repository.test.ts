@@ -18,6 +18,30 @@ afterEach(async () => {
 });
 
 describe('environment toolchain repository', () => {
+  it('lists only the user selections, including Local, keyed by environment id', async () => {
+    const repository = createEnvironmentToolchainRepository();
+    const userId = 'toolchain-list-user';
+    const otherUserId = 'toolchain-list-other';
+    keys.push(
+      { userId, environmentId: 'local' },
+      { userId, environmentId: 'dev-box' },
+      { userId: otherUserId, environmentId: 'local' },
+      { userId: otherUserId, environmentId: 'other-only' }
+    );
+    await repository.upsert(userId, 'local', { bun: '/local/bun' }, 1);
+    await repository.upsert(userId, 'dev-box', { node: '/remote/node' }, 1);
+    await repository.upsert(otherUserId, 'local', { bun: '/other/bun' }, 1);
+    await repository.upsert(otherUserId, 'other-only', { node: '/other/node' }, 1);
+
+    expect(await repository.listByUser(userId)).toEqual(
+      new Map([
+        ['local', { node: 'auto', bun: '/local/bun' }],
+        ['dev-box', { node: '/remote/node', bun: 'auto' }],
+      ])
+    );
+    expect(await repository.listByUser('toolchain-list-empty')).toEqual(new Map());
+  });
+
   it('reads null before any row is stored', async () => {
     const repository = createEnvironmentToolchainRepository();
     keys.push({ userId: 'toolchain-repo-user-1', environmentId: 'dev-box' });
