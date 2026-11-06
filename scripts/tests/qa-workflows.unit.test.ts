@@ -166,9 +166,9 @@ describe('unprivileged collection side', () => {
     expect(qaMetrics).toContain('QA_RUST_RELEVANT: ${{ inputs.rust_relevant }}');
     // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.
     expect(qaMetrics).toContain('QA_RUST_RESULT: ${{ inputs.rust_result }}');
-    // Only the env mappings interpolate them: never a script body (zizmor template-injection).
-    expect(qaMetrics.split('inputs.rust_relevant').length - 1).toBe(1);
-    expect(qaMetrics.split('inputs.rust_result').length - 1).toBe(1);
+    // The download condition and the env mappings are the two uses of each input.
+    expect(qaMetrics.split('inputs.rust_relevant').length - 1).toBe(2);
+    expect(qaMetrics.split('inputs.rust_result').length - 1).toBe(2);
   });
 
   test('qa-metrics reads the Rust coverage artifact of its own run, downloaded as data', () => {
@@ -180,6 +180,18 @@ describe('unprivileged collection side', () => {
     // Same-run download: no `run-id`, so it can never read another run's bytes.
     expect(qaMetrics).not.toContain('run-id:');
     expect(qaMetrics).toContain('--rust-coverage ./qa-rust-coverage');
+  });
+
+  test('skips the Rust coverage download only when CI proved the skip intentional', () => {
+    const job = extractJobBlock(readText('.github/workflows/qa-metrics.yml'), 'collect');
+    const download = extractStepBlocks(job).find((step) =>
+      step.includes('name: Download Rust coverage')
+    );
+
+    expect(download).toContain(
+      "if: inputs.rust_relevant != 'false' || inputs.rust_result != 'skipped'"
+    );
+    expect(download).toContain('continue-on-error: true');
   });
 });
 
