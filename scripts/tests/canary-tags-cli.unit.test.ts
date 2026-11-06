@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import type { RegistryClient, RegistryResponse } from '../lib/canary-publication';
 import type { CanaryTagAncestry, CanaryTagRunner } from '../lib/canary-tags';
+import { CanaryVisibilityWindow } from '../lib/canary-visibility';
 import { NPM_PLATFORMS } from '../lib/npm-pack';
 import type { NpmCommandResult } from '../lib/npm-publish';
 import {
@@ -418,4 +419,125 @@ describe('canary tag CLI identity', () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+});
+
+class StalledRegistryFetch {
+  signal?: AbortSignal;
+  aborted = false;
+  constructor(private readonly stage: 'headers' | 'body') {}
+  fetch(_input: Parameters<typeof fetch>[0], options?: RequestInit): Promise<Response> {
+    const signal = options?.signal;
+    if (!signal) throw new Error('Fixture requires a propagated deadline signal');
+    this.signal = signal;
+    if (this.stage === 'headers')
+      return new Promise((_, reject) => {
+        signal.addEventListener(
+          'abort',
+          () => {
+            this.aborted = true;
+            reject(signal.reason);
+          },
+          { once: true }
+        );
+      });
+    const body = new ReadableStream<Uint8Array>({
+      start: (controller) => {
+        controller.enqueue(new TextEncoder().encode('{"partial":'));
+        signal.addEventListener(
+          'abort',
+          () => {
+            this.aborted = true;
+            controller.error(signal.reason);
+          },
+          { once: true }
+        );
+      },
+    });
+    return Promise.resolve(new Response(body));
+  }
+}
+
+test.each(['headers', 'body'] as const)(
+  'TTL cancels actual registry %s I/O, including response consumption',
+  async (stage) => {
+    const http = new StalledRegistryFetch(stage);
+    const registry = new HttpCanaryRegistry(http.fetch.bind(http) as typeof fetch);
+    for (const method of ['getJson', 'getBytes'] as const) {
+      const window = new CanaryVisibilityWindow({ ttlMs: 25, retryDelaysMs: [] });
+      const outcome = await Promise.race([
+        window
+          .read(
+            (signal) => registry[method]('https://registry.npmjs.org/fixture', signal),
+            () => true
+          )
+          .then(
+            () => 'unexpected success',
+            (cause: Error) => cause.message
+          ),
+        Bun.sleep(500).then(() => 'watchdog: registry did not settle'),
+      ]);
+      expect(outcome).toContain('TTL expired');
+      expect(http.signal?.aborted).toBe(true);
+      expect(http.aborted).toBe(true);
+    }
+  }
+);
+
+test('TTL kills and reaps an active command instead of leaving it running', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'canary-deadline-command-'));
+  const marker = join(directory, 'pid');
+  const controller = new AbortController();
+  const command = new BunCanaryTagProcess();
+  const completion = command.run(
+    [
+      process.execPath,
+      '-e',
+      `await Bun.write(${JSON.stringify(marker)}, String(process.pid)); setInterval(() => {}, 1000)`,
+    ],
+    { cwd: directory, env: process.env, signal: controller.signal }
+  );
+  try {
+    let pid = 0;
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if (await Bun.file(marker).exists()) {
+        pid = Number(readFileSync(marker, 'utf8'));
+        break;
+      }
+      await Bun.sleep(10);
+    }
+    expect(pid).toBeGreaterThan(0);
+    controller.abort(new Error('fixture TTL expired'));
+    const result = await Promise.race([completion, Bun.sleep(500).then(() => null)]);
+    expect(result).not.toBe(null);
+    expect(result?.exitCode).not.toBe(0);
+    expect(() => process.kill(pid, 0)).toThrow();
+  } finally {
+    controller.abort();
+    await completion;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+class UnconsumedErrorRegistryFetch {
+  cancelled = 0;
+  fetch(_input: Parameters<typeof fetch>[0], _options?: RequestInit): Promise<Response> {
+    return Promise.resolve(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          cancel: () => {
+            this.cancelled++;
+          },
+        }),
+        { status: 503 }
+      )
+    );
+  }
+}
+
+test('temporary HTTP responses release their unused bodies before the next retry', async () => {
+  const http = new UnconsumedErrorRegistryFetch();
+  const registry = new HttpCanaryRegistry(http.fetch.bind(http) as typeof fetch);
+  expect((await registry.getJson('https://registry.npmjs.org/fixture')).status).toBe(503);
+  expect((await registry.getBytes('https://registry.npmjs.org/fixture')).status).toBe(503);
+  expect(http.cancelled).toBe(2);
 });
