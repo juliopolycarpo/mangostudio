@@ -1,4 +1,4 @@
-import { stat } from 'node:fs/promises';
+import { realpath, stat } from 'node:fs/promises';
 import { constants } from 'node:os';
 import { extname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -61,12 +61,24 @@ export function candidatePaths(filePath, cwd, root = repoRoot) {
     return [];
   }
 
+  const fromCwd = absolutePathForLookup(filePath, cwd);
   if (isAbsolute(filePath)) {
-    return [resolve(filePath)];
+    return [fromCwd];
   }
 
-  const fromCwd = resolve(cwd, filePath);
-  return isInsideRepo(cwd, root) ? [fromCwd, resolve(root, filePath)] : [fromCwd];
+  return isInsideRepo(cwd, root) ? [fromCwd, absolutePathForLookup(filePath, root)] : [fromCwd];
+}
+
+/**
+ * Anchor a path for filesystem lookup, preserving parent segments on POSIX.
+ * // Usage: absolutePathForLookup('src/file.ts', resolve('repo'));
+ */
+export function absolutePathForLookup(filePath, cwd) {
+  if (isAbsolute(filePath)) return sep === '/' ? filePath : resolve(filePath);
+  if (sep !== '/') return resolve(cwd, filePath);
+
+  // The filesystem must follow a symlink before processing a subsequent '..'.
+  return cwd.endsWith(sep) ? cwd + filePath : cwd + sep + filePath;
 }
 
 async function resolveTouchedPath(input) {
@@ -145,9 +157,17 @@ export function chooseFormatter(filePath) {
  */
 export async function runAutoFixHook(input) {
   const hookInput = input ?? (await readStdin());
-  const filePath = await resolveTouchedPath(hookInput);
+  const touchedPath = await resolveTouchedPath(hookInput);
 
-  if (!filePath || !isInsideRepo(filePath) || shouldSkipFile(filePath)) {
+  if (!touchedPath) {
+    return;
+  }
+
+  const [filePath, root] = await Promise.all([
+    realpath(touchedPath).catch(() => undefined),
+    realpath(repoRoot).catch(() => undefined),
+  ]);
+  if (!filePath || !root || !isInsideRepo(filePath, root) || shouldSkipFile(filePath)) {
     return;
   }
 
@@ -197,7 +217,7 @@ async function runBunFormat(filePath) {
 
 // rustfmt reads the edition and style from the nearest rustfmt.toml.
 async function runRustfmt(filePath) {
-  await runFormatter(['rustfmt', filePath]);
+  await runFormatter(['rustfmt', '--config', 'skip_children=true', filePath]);
 }
 
 const formatterTimeoutMs = 5000;

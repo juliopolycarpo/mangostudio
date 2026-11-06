@@ -8,7 +8,7 @@ import {
   onTestFinished,
   spyOn,
 } from 'bun:test';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, join, relative, resolve } from 'node:path';
 
@@ -464,8 +464,11 @@ describe('agent auto-fix hooks', () => {
     tempDirs.push(dir);
     await mkdir(dir, { recursive: true });
     const filePath = join(dir, 'sample.rs');
-    const original = 'fn  main( ){let x=1;}\n';
+    const childPath = join(dir, 'child.rs');
+    const original = 'mod child;\nfn  main( ){let x=1;}\n';
+    const childSource = 'pub fn f( ){let _x=1;}\n';
     await writeFile(filePath, original, 'utf8');
+    await writeFile(childPath, childSource, 'utf8');
 
     if (!installedRustfmt.path) throw new Error('expected an installed real rustfmt');
     const shadowMarker = join(dir, 'ambient-formatter.json');
@@ -494,10 +497,66 @@ describe('agent auto-fix hooks', () => {
       });
       expect(hook.child(), diagnostic).toBeDefined();
       expect(hook.child()?.exitCode, diagnostic).toBe(0);
-      expect(received, diagnostic).toBe('fn main() {\n    let x = 1;\n}\n');
+      expect(received, diagnostic).toBe('mod child;\nfn main() {\n    let x = 1;\n}\n');
+      expect(await readFile(childPath, 'utf8')).toBe(childSource);
       expect(shadowSelected, diagnostic).toBe(false);
     }, hook.cleanup);
   });
+
+  it.skipIf(!installedRustfmt.path)('skips a Rust file linked from outside the repo', async () => {
+    const outside = await makeTempDir();
+    const fixtureRoot = join(repoRoot, '.mango');
+    await mkdir(fixtureRoot, { recursive: true });
+    const dir = await mkdtemp(join(fixtureRoot, 'agent-hook-link-'));
+    tempDirs.push(dir);
+    const original = 'fn  main( ){let x=1;}\n';
+    const target = join(outside, 'sample.rs');
+    await writeFile(target, original);
+    const alias = join(dir, 'alias');
+    await symlink(outside, alias, 'junction');
+
+    if (!installedRustfmt.path) throw new Error('expected an installed real rustfmt');
+    const hook = ownRealFormatterHook(
+      JSON.stringify({ path: join(alias, 'sample.rs') }),
+      realRustfmtEnvironment(installedRustfmt.path, process.env)
+    );
+    await withOwnedFormatterCleanup(async () => {
+      await withinHookDeadline(hook.running, 8000);
+      expect(await readFile(target, 'utf8')).toBe(original);
+      expect(hook.child()).toBeUndefined();
+    }, hook.cleanup);
+  });
+
+  it
+    .skipIf(process.platform === 'win32' || !installedRustfmt.path)
+    .each(['alias/../../../../sample.rs', 'node_modules/../sample.rs'])(
+    'formats the resolved Rust file reached by %s',
+    async (touched) => {
+      const fixtureRoot = join(repoRoot, '.mango');
+      await mkdir(fixtureRoot, { recursive: true });
+      const dir = await mkdtemp(join(fixtureRoot, 'agent-hook-lookup-'));
+      tempDirs.push(dir);
+      const nested = join(dir, 'a', 'b', 'c', 'd');
+      await mkdir(nested, { recursive: true });
+      await mkdir(join(dir, 'node_modules'));
+      await symlink(nested, join(dir, 'alias'), 'dir');
+      const target = join(dir, 'sample.rs');
+      await writeFile(target, 'fn  main( ){let x=1;}\n');
+
+      const lookup = `${dir}/${touched}`;
+      expect(await realpath(lookup)).toBe(await realpath(target));
+      if (!installedRustfmt.path) throw new Error('expected an installed real rustfmt');
+      const hook = ownRealFormatterHook(
+        JSON.stringify({ path: lookup }),
+        realRustfmtEnvironment(installedRustfmt.path, process.env)
+      );
+      await withOwnedFormatterCleanup(async () => {
+        await withinHookDeadline(hook.running, 8000);
+        expect(await readFile(target, 'utf8')).toBe('fn main() {\n    let x = 1;\n}\n');
+        expect(hook.child()?.exitCode).toBe(0);
+      }, hook.cleanup);
+    }
+  );
 
   it('preserves the fixture failure when formatter cleanup also fails', async () => {
     const primary = new Error('named fixture failure');
@@ -728,7 +787,11 @@ describe('agent auto-fix hooks', () => {
         if (nativeOwned) await waitForFormatterSettlement(nativeOwned);
         for (const [fakeMarker, who] of fakes) {
           const started = await readMarker(fakeMarker, who);
-          expect(started.args).toEqual([filePath]);
+          expect(started.args).toEqual([
+            '--config',
+            'skip_children=true',
+            await realpath(filePath),
+          ]);
           expect(started.cwd).toBe(repoRoot);
           if (!nativeOwned && (await stillBeating(fakeMarker))) leaked.push(started.pid);
           const lastBeat = JSON.parse(await readFile(heartbeatPath(fakeMarker), 'utf8')) as {
@@ -1057,7 +1120,11 @@ describe('agent auto-fix hooks', () => {
 
       expect(await proc.exited).toBe(0);
       const recorded = await readMarker(marker, 'fake rustfmt');
-      expect(recorded.args).toEqual([join(dir, 'sample.rs')]);
+      expect(recorded.args).toEqual([
+        '--config',
+        'skip_children=true',
+        await realpath(join(dir, 'sample.rs')),
+      ]);
       expect(recorded.cwd).toBe(repoRoot);
     },
     10000
@@ -1117,6 +1184,53 @@ describe('Claude protect-generated hook', () => {
     const match = findProtectedFile(join(root, '.claude', 'worktrees', 'wt', 'bun.lock'), root);
 
     expect(match?.path).toBe('bun.lock');
+  });
+
+  it('protects generated paths through directory aliases, including new files', async () => {
+    const physicalRoot = await makeTempDir();
+    const generated = join(physicalRoot, 'apps', 'shared', 'src', 'runtime-contract', 'generated');
+    const alias = join(physicalRoot, 'alias');
+    await mkdir(generated, { recursive: true });
+    await symlink(generated, alias, 'junction');
+    await writeFile(join(generated, 'existing.json'), '{}');
+
+    for (const name of ['existing.json', 'new.json']) {
+      const input = JSON.stringify({ path: join(alias, name) });
+      const result = runProtectGeneratedHook(input, physicalRoot);
+      expect(result.blocked).toBe(true);
+      expect(result.message).toContain(`apps/shared/src/runtime-contract/generated/${name}`);
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'protects a lockfile through a symbolic link',
+    async () => {
+      const physicalRoot = await makeTempDir();
+      const alias = join(physicalRoot, 'alias.lock');
+      await symlink('bun.lock', alias);
+
+      for (const exists of [false, true]) {
+        if (exists) await writeFile(join(physicalRoot, 'bun.lock'), 'lockfile fixture');
+        const result = runProtectGeneratedHook(JSON.stringify({ path: alias }), physicalRoot);
+        expect(result.blocked).toBe(true);
+        expect(result.message).toContain('bun.lock');
+      }
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')('resolves symlinks before parent segments', async () => {
+    const physicalRoot = await makeTempDir();
+    const generated = join(physicalRoot, 'apps', 'shared', 'src', 'runtime-contract', 'generated');
+    const nested = join(generated, 'nested');
+    await mkdir(nested, { recursive: true });
+    await writeFile(join(generated, 'catalog.json'), '{}');
+    await symlink(nested, join(physicalRoot, 'alias'), 'dir');
+
+    for (const path of [`${physicalRoot}/alias/../catalog.json`, 'alias/../catalog.json']) {
+      const result = runProtectGeneratedHook(JSON.stringify({ path }), physicalRoot);
+      expect(result.blocked).toBe(true);
+      expect(result.message).toContain('apps/shared/src/runtime-contract/generated/catalog.json');
+    }
   });
 
   it.skipIf(process.platform === 'win32')('allows literal backslashes in POSIX filenames', () => {
