@@ -13,6 +13,7 @@ import type { CanaryDistribution } from '../lib/canary-promotion';
 import type { CanaryPromotionReceipt } from '../lib/canary-publication-evidence';
 import type { CanarySource } from '../lib/canary-source';
 import type { DistributionManifest } from '../lib/distribution-manifest';
+import { fakeCliEnvironment, installFakeCli } from './support/fake-cli';
 
 const REPO = 'owner/repo';
 const SHA = 'a'.repeat(40);
@@ -734,7 +735,7 @@ if(args[0]==='attestation'&&args[1]==='verify'){
 const response=fixture.responses[JSON.stringify(args)];if(!response){console.error('Unexpected fake gh command');process.exit(99);}process.stdout.write(Buffer.from(response.stdout,'base64'));process.exit(response.exitCode);
 `;
 test('CLI recovers exact durable payload and manifests with explicit provenance policy and no Actions fallback', async () => {
-  const { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = await import('node:fs');
+  const { mkdtempSync, readFileSync, rmSync, writeFileSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
   const directory = mkdtempSync(join(tmpdir(), 'fix-canary-approval-acquisition-cli-'));
@@ -789,15 +790,13 @@ test('CLI recovers exact durable payload and manifests with explicit provenance 
     };
     const fixtureFile = join(directory, 'fake-gh.json');
     writeFileSync(fixtureFile, JSON.stringify({ repository: REPO, responses, attestations }));
-    writeFileSync(join(directory, 'gh'), fakeGhApprovalExecutable);
-    chmodSync(join(directory, 'gh'), 0o755);
+    installFakeCli(directory, 'gh', fakeGhApprovalExecutable);
     const output = join(directory, 'output');
     const trace = join(directory, 'trace');
     const outputs = join(directory, 'github-output');
     const proc = Bun.spawnSync(['bun', './scripts/ci/load-canary-approval.ts'], {
       env: {
-        ...process.env,
-        PATH: `${directory}:${process.env.PATH}`,
+        ...fakeCliEnvironment(directory),
         REPO,
         SOURCE_SHA: SHA,
         SOURCE_RUN_ID: String(source.runId),
@@ -840,7 +839,7 @@ test('recovery retains the exact original promotion JSON serialization', async (
 });
 
 test('approval CLI rejects an extra whitespace-only ZIP member', async () => {
-  const { chmodSync, mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+  const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
   const directory = mkdtempSync(join(tmpdir(), 'fix-canary-approval-acquisition-extra-member-'));
@@ -895,19 +894,17 @@ test('approval CLI rejects an extra whitespace-only ZIP member', async () => {
         },
       })
     );
-    writeFileSync(join(directory, 'gh'), fakeGhApprovalExecutable);
-    chmodSync(join(directory, 'gh'), 0o755);
+    installFakeCli(directory, 'gh', fakeGhApprovalExecutable);
     const payloadPath = join(directory, 'original-payload');
     writeFileSync(payloadPath, payload);
-    writeFileSync(
-      join(directory, 'unzip'),
+    installFakeCli(
+      directory,
+      'unzip',
       `#!/usr/bin/env bun\nconst args=process.argv.slice(2);if(args[0]==='-Z1')process.stdout.write('approval.tar.gz\\n \\n');else if(args[0]==='-p'&&args[2]==='approval.tar.gz')process.stdout.write(await Bun.file(process.env.FAKE_APPROVAL_PAYLOAD).bytes());else process.exit(99);\n`
     );
-    chmodSync(join(directory, 'unzip'), 0o755);
     const result = Bun.spawnSync(['bun', './scripts/ci/load-canary-approval.ts'], {
       env: {
-        ...process.env,
-        PATH: `${directory}:${process.env.PATH}`,
+        ...fakeCliEnvironment(directory),
         REPO,
         SOURCE_SHA: SHA,
         SOURCE_RUN_ID: String(source.runId),

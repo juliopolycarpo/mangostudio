@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -12,6 +12,7 @@ import {
   resolveCanarySourceSnapshot,
   writeCanarySourceSnapshot,
 } from '../lib/canary-source-snapshot';
+import { fakeCliEnvironment, installFakeCli } from './support/fake-cli';
 
 const REPO = 'owner/repo';
 const BASE = `repos/${REPO}`;
@@ -523,15 +524,13 @@ test.each([false, true])('CLI recovery=%s freezes source before checkout', (reco
     ] = JSON.stringify([{ total_count: 1, workflow_runs: [ciRun()] }]);
     const responsesPath = join(directory, 'responses.json');
     writeFileSync(responsesPath, JSON.stringify(responses));
-    writeFileSync(join(directory, 'gh'), fakeSnapshotGh);
-    chmodSync(join(directory, 'gh'), 0o755);
+    installFakeCli(directory, 'gh', fakeSnapshotGh);
     const trace = join(directory, 'trace');
     const selectionPath = join(directory, 'selection.json');
     const snapshotPath = join(directory, 'snapshot', 'source.json');
     const outputs = join(directory, 'outputs');
     const env = {
-      ...process.env,
-      PATH: `${directory}:${process.env.PATH}`,
+      ...fakeCliEnvironment(directory),
       REPO,
       GITHUB_RUN_ID: '200',
       GITHUB_RUN_ATTEMPT: String(attempt),
@@ -609,17 +608,15 @@ test('CLI rejects an extra whitespace-only ZIP member instead of trimming it awa
         `HTTP/2.0 ${response.status} Status\r\n\r\n${Buffer.from(response.body).toString()}`;
     const responsePath = join(directory, 'responses.json');
     writeFileSync(responsePath, JSON.stringify(responses));
-    writeFileSync(join(directory, 'gh'), fakeSnapshotGh);
-    chmodSync(join(directory, 'gh'), 0o755);
-    writeFileSync(
-      join(directory, 'unzip'),
+    installFakeCli(directory, 'gh', fakeSnapshotGh);
+    installFakeCli(
+      directory,
+      'unzip',
       `#!/usr/bin/env bun\nconst args=process.argv.slice(2);if(args[0]==='-Z1')process.stdout.write('source.json\\n \\n');else if(args[0]==='-p'&&args[2]==='source.json')process.stdout.write(process.env.FAKE_SNAPSHOT_RAW);else process.exit(99);\n`
     );
-    chmodSync(join(directory, 'unzip'), 0o755);
     const result = Bun.spawnSync(['bun', './scripts/ci/freeze-canary-source.ts', 'resolve'], {
       env: {
-        ...process.env,
-        PATH: `${directory}:${process.env.PATH}`,
+        ...fakeCliEnvironment(directory),
         REPO,
         GITHUB_RUN_ID: '200',
         GITHUB_RUN_ATTEMPT: '3',

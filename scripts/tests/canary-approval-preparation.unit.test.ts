@@ -17,6 +17,7 @@ import type { CanarySource } from '../lib/canary-source';
 import type { CanaryValidationReceipt } from '../lib/canary-validation';
 import type { DistributionManifest } from '../lib/distribution-manifest';
 import { createReleaseAssetPlan, selectCanaryAssets } from '../lib/release-assets';
+import { fakeCliEnvironment, installFakeCli } from './support/fake-cli';
 
 const hash = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 function fixture() {
@@ -449,9 +450,9 @@ class FakeApprovalChildCommands {
   install(): void {
     mkdirSync(join(this.directory, 'scripts/ci'), { recursive: true });
     mkdirSync(join(this.directory, 'bin'));
-    const fakeGh = join(this.directory, 'bin/gh');
-    writeFileSync(
-      fakeGh,
+    installFakeCli(
+      join(this.directory, 'bin'),
+      'gh',
       `#!/usr/bin/env bun
       import {readFileSync} from 'node:fs';
       const a=JSON.parse(readFileSync('fake-acquisition.json','utf8'));
@@ -460,7 +461,6 @@ class FakeApprovalChildCommands {
       console.log('HTTP/2.0 200 OK\\nContent-Type: application/json\\n\\n'+JSON.stringify(run));
     `
     );
-    chmodSync(fakeGh, 0o755);
     writeFileSync(
       join(this.directory, 'fake-acquisition.json'),
       JSON.stringify({
@@ -501,7 +501,7 @@ class FakeApprovalChildCommands {
       );
   }
 }
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -519,8 +519,7 @@ test('default prepare CLI maps source outputs, invokes named child fakes and emi
       cmd: [process.execPath, prepareCli],
       cwd: directory,
       env: {
-        ...process.env,
-        PATH: `${join(directory, 'bin')}:${process.env.PATH ?? ''}`,
+        ...fakeCliEnvironment(join(directory, 'bin')),
         REPO: f.source.repository,
         VERSION: f.version,
         GITHUB_SHA: f.input.executionRevision,
@@ -558,8 +557,7 @@ test('default prepare CLI maps source outputs, invokes named child fakes and emi
       cmd: [process.execPath, prepareCli],
       cwd: directory,
       env: {
-        ...process.env,
-        PATH: `${join(directory, 'bin')}:${process.env.PATH ?? ''}`,
+        ...fakeCliEnvironment(join(directory, 'bin')),
         REPO: f.source.repository,
         VERSION: f.version,
         GITHUB_SHA: f.input.executionRevision,
@@ -586,8 +584,7 @@ test('default prepare CLI publisher pin refuses a fresh CI origin and produces n
       cmd: [process.execPath, prepareCli],
       cwd: directory,
       env: {
-        ...process.env,
-        PATH: `${join(directory, 'bin')}:${process.env.PATH ?? ''}`,
+        ...fakeCliEnvironment(join(directory, 'bin')),
         REPO: f.source.repository,
         VERSION: f.version,
         GITHUB_SHA: f.input.executionRevision,
@@ -695,8 +692,7 @@ test.each([
         cmd: [process.execPath, prepareCli],
         cwd: directory,
         env: {
-          ...process.env,
-          PATH: `${join(directory, 'bin')}:${process.env.PATH ?? ''}`,
+          ...fakeCliEnvironment(join(directory, 'bin')),
           REPO: f.source.repository,
           VERSION: f.version,
           GITHUB_SHA: f.input.executionRevision,

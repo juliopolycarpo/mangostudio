@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
@@ -11,6 +11,7 @@ import {
   type CanaryReleasePublisherClient,
   publishVerifiedCanaryRelease,
 } from '../lib/canary-release-publisher';
+import { fakeCliEnvironment, installFakeCli } from './support/fake-cli';
 
 const REPOSITORY = 'owner/repo';
 const SOURCE = 'a'.repeat(40);
@@ -433,9 +434,7 @@ test.each([true, false])('CLI pins same-run plan digest before gh reads; valid=%
     const raw = JSON.stringify(expected);
     const planPath = join(directory, 'expected.json');
     writeFileSync(planPath, raw);
-    const ghPath = join(directory, 'gh');
-    writeFileSync(ghPath, fakeGhExecutable);
-    chmodSync(ghPath, 0o755);
+    installFakeCli(directory, 'gh', fakeGhExecutable);
     const responses: Record<string, { exitCode: number; stdout: string }> = {};
     responses[JSON.stringify(['api', '--include', `repos/${REPOSITORY}/releases/tags/${TAG}`])] = {
       exitCode: 0,
@@ -469,8 +468,7 @@ test.each([true, false])('CLI pins same-run plan digest before gh reads; valid=%
     const trace = join(directory, 'trace');
     const proc = Bun.spawnSync(['bun', './scripts/release/publish-canary.ts'], {
       env: {
-        ...process.env,
-        PATH: `${directory}:${process.env.PATH}`,
+        ...fakeCliEnvironment(directory),
         EXPECTED_RELEASE: planPath,
         EXPECTED_RELEASE_SHA256: valid ? sha256(Buffer.from(raw)) : 'f'.repeat(64),
         ASSET_DIR: join(directory, 'intentionally-absent-assets'),

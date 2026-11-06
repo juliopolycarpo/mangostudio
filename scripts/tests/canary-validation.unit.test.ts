@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -8,6 +8,7 @@ import {
   type CanaryValidationSource,
   qualifyCanarySource,
 } from '../lib/canary-validation';
+import { fakeCliEnvironment, installFakeCli } from './support/fake-cli';
 import { extractJobBlock } from './support/workflow-blocks';
 
 const source: CanaryValidationSource = {
@@ -448,14 +449,12 @@ test.each([
     const api = new FakeQualificationApi();
     const apiValues = join(directory, 'api.json');
     writeFileSync(apiValues, JSON.stringify(Object.fromEntries(api.values)));
-    writeFileSync(join(directory, 'gh'), fakeQualificationGitHubCli);
-    chmodSync(join(directory, 'gh'), 0o755);
+    installFakeCli(directory, 'gh', fakeQualificationGitHubCli);
     const output = join(directory, 'output');
     const receiptPath = join(directory, 'receipt.json');
     const result = Bun.spawnSync(['bun', './scripts/ci/qualify-canary-source.ts'], {
       env: {
-        ...process.env,
-        PATH: `${directory}:${process.env.PATH}`,
+        ...fakeCliEnvironment(directory),
         REPO: source.repository,
         SOURCE_RUN_ID: String(source.runId),
         SOURCE_RUN_ATTEMPT: String(source.runAttempt),
