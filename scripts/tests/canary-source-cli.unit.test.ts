@@ -1,23 +1,27 @@
 import { expect, test } from 'bun:test';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { fakeCliEnvironment, installFakeCli } from './support/fake-cli';
+
 // Named fake preserves the two GitHub API request shapes, including pagination.
-const fakeGitHubApi = `#!/bin/bash
-set -euo pipefail
-case "$*" in
-  "api repos/owner/repo/actions/workflows/ci.yml") cat "$FAKE_WORKFLOW_FILE" ;;
-  "api --paginate --slurp repos/owner/repo/actions/workflows/42/runs?branch=main&event=push&status=success&per_page=100") cat "$FAKE_RUNS_FILE" ;;
-  *) echo "Unexpected GitHub API request: $*" >&2; exit 2 ;;
-esac
+const fakeGitHubApi = `
+import { readFileSync } from 'node:fs';
+const request = process.argv.slice(2).join(' ');
+const files = {
+  'api repos/owner/repo/actions/workflows/ci.yml': process.env.FAKE_WORKFLOW_FILE,
+  'api --paginate --slurp repos/owner/repo/actions/workflows/42/runs?branch=main&event=push&status=success&per_page=100': process.env.FAKE_RUNS_FILE,
+};
+const file = files[request];
+if (!file) throw new Error('Unexpected GitHub API request: ' + request);
+process.stdout.write(readFileSync(file));
 `;
 
 test.each([true, false])('source CLI freezes API metadata; eligible=%s', (eligible) => {
   const directory = mkdtempSync(join(tmpdir(), 'canary-source-cli-'));
   try {
-    writeFileSync(join(directory, 'gh'), fakeGitHubApi);
-    chmodSync(join(directory, 'gh'), 0o755);
+    installFakeCli(directory, 'gh', fakeGitHubApi);
     const workflowFile = join(directory, 'workflow.json');
     const runsFile = join(directory, 'runs.json');
     const outputFile = join(directory, 'output');
@@ -53,8 +57,7 @@ test.each([true, false])('source CLI freezes API metadata; eligible=%s', (eligib
     );
     const result = Bun.spawnSync(['bun', './scripts/ci/select-canary-source.ts'], {
       env: {
-        ...process.env,
-        PATH: `${directory}:${process.env.PATH}`,
+        ...fakeCliEnvironment(directory),
         REPO: 'owner/repo',
         FAKE_WORKFLOW_FILE: workflowFile,
         FAKE_RUNS_FILE: runsFile,

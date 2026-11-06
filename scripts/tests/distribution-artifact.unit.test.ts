@@ -1,15 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { chmodSync, copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+import { zipCreationCommand } from '../lib/archive-creation';
 import {
   type ApprovedArtifact,
   type ArtifactEvidence,
   distributionBundleMember,
   validateArtifactEvidence,
 } from '../lib/distribution-artifact';
+import { fakeCliEnvironment, installFakeCli } from './support/fake-cli';
 
 const approval: ApprovedArtifact = {
   repository: 'owner/repo',
@@ -295,6 +297,27 @@ describe('approved distribution artifact', () => {
   });
 });
 
+// The production consumer runs on Ubuntu. Give its native Windows test the
+// same two unzip operations through the runner's ZIP-capable bsdtar.
+const fakeNativeUnzip = `
+import { join } from 'node:path';
+const [mode, archive, member] = process.argv.slice(2);
+const tar = join(process.env.SystemRoot ?? 'C:/Windows', 'System32', 'tar.exe');
+const args = mode === '-Z1' && archive && !member ? ['-tf', archive]
+  : mode === '-p' && archive && member ? ['-xOf', archive, member] : undefined;
+if (!args) throw new Error('Unexpected unzip request: ' + JSON.stringify(process.argv.slice(2)));
+const result = Bun.spawnSync([tar, ...args], { stdout: 'inherit', stderr: 'inherit' });
+process.exit(result.exitCode ?? 1);
+`;
+
+function writeArtifactZip(archive: string, staging: string, bundle: string): void {
+  writeFileSync(join(staging, 'npm.tar.gz'), bundle);
+  rmSync(archive, { force: true });
+  const { command, cwd } = zipCreationCommand(archive, staging);
+  const result = Bun.spawnSync([...command], { cwd });
+  expect(result.exitCode, result.stderr.toString()).toBe(0);
+}
+
 describe('cross-run artifact download CLI', () => {
   test('extracts the verified ZIP and refuses corrupted bytes before extraction', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'fix-canary-artifact-download-'));
@@ -302,21 +325,23 @@ describe('cross-run artifact download CLI', () => {
       const current = evidence();
       writeFileSync(join(directory, 'run.json'), JSON.stringify(current.run));
       writeFileSync(join(directory, 'jobs.json'), JSON.stringify([{ jobs: current.jobs }]));
-      writeFileSync(join(directory, 'npm.tar.gz'), 'approved bundle bytes');
-      const zip = Bun.spawnSync(['zip', '-q', 'artifact.zip', 'npm.tar.gz'], { cwd: directory });
-      expect(zip.exitCode).toBe(0);
-      const digest = `sha256:${createHash('sha256')
-        .update(readFileSync(join(directory, 'artifact.zip')))
-        .digest('hex')}`;
+      const staging = join(directory, 'bundle');
+      const archive = join(directory, 'artifact.zip');
+      mkdirSync(staging);
+      writeArtifactZip(archive, staging, 'approved bundle bytes');
+      const digest = `sha256:${createHash('sha256').update(readFileSync(archive)).digest('hex')}`;
       writeFileSync(
         join(directory, 'artifact.json'),
         JSON.stringify({ ...current.artifact, digest })
       );
-      copyFileSync('scripts/tests/fixtures/approved-artifact/gh.fixture', join(directory, 'gh'));
-      chmodSync(join(directory, 'gh'), 0o755);
+      installFakeCli(
+        directory,
+        'gh',
+        readFileSync('scripts/tests/fixtures/approved-artifact/gh.fixture', 'utf8')
+      );
+      if (process.platform === 'win32') installFakeCli(directory, 'unzip', fakeNativeUnzip);
       const env = {
-        ...process.env,
-        PATH: `${directory}:${process.env.PATH}`,
+        ...fakeCliEnvironment(directory),
         APPROVED_ARTIFACT_FIXTURE: directory,
         GITHUB_REPOSITORY: approval.repository,
         SOURCE_SHA: approval.sourceSha,
@@ -341,11 +366,7 @@ describe('cross-run artifact download CLI', () => {
         'approved bundle bytes'
       );
       expect(readFileSync(join(directory, 'summary'), 'utf8')).toContain('producer attempt 1');
-      writeFileSync(join(directory, 'npm.tar.gz'), 'different unapproved bundle bytes');
-      const replacementZip = Bun.spawnSync(['zip', '-q', '-FS', 'artifact.zip', 'npm.tar.gz'], {
-        cwd: directory,
-      });
-      expect(replacementZip.exitCode).toBe(0);
+      writeArtifactZip(archive, staging, 'different unapproved bundle bytes');
       const corrupt = Bun.spawn(['bun', resolve('scripts/ci/download-approved-distribution.ts')], {
         env: { ...env, DOWNLOAD_DIR: join(directory, 'invalid') },
         stdout: 'pipe',

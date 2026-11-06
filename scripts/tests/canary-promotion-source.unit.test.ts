@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -7,6 +7,7 @@ import {
   type CanaryPromotionApi,
   resolveCanaryPromotionSource,
 } from '../lib/canary-promotion-source';
+import { fakeCliEnvironment, installFakeCli } from './support/fake-cli';
 
 const source = { repository: 'owner/repo', runId: 100, runAttempt: 3, sourceSha: 'a'.repeat(40) };
 const version = '1.0.0-canary.aaaaaaa';
@@ -328,14 +329,12 @@ test.each([
   try {
     const valuesPath = join(directory, 'values.json');
     writeFileSync(valuesPath, JSON.stringify(Object.fromEntries(new FakePromotionApi().values)));
-    writeFileSync(join(directory, 'gh'), fakePromotionGitHubCli);
-    chmodSync(join(directory, 'gh'), 0o755);
+    installFakeCli(directory, 'gh', fakePromotionGitHubCli);
     const planPath = join(directory, 'plan.json');
     const outputs = join(directory, 'outputs');
     const result = Bun.spawnSync(['bun', './scripts/ci/resolve-canary-distribution.ts'], {
       env: {
-        ...process.env,
-        PATH: `${directory}:${process.env.PATH}`,
+        ...fakeCliEnvironment(directory),
         FAKE_API_MODE: mode,
         FAKE_API_VALUES: valuesPath,
         REPO: source.repository,
