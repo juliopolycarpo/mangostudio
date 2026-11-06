@@ -96,11 +96,19 @@ export function isInsideRepo(filePath, root = repoRoot) {
 }
 
 /**
+ * Convert native path separators to slashes for hook path matching.
+ * // Usage: toSlashPath(resolve('src', 'file.ts')).endsWith('/src/file.ts'); // true
+ */
+export function toSlashPath(filePath) {
+  return filePath.replaceAll(sep, '/');
+}
+
+/**
  * Exclude generated, dependency, and build output files from hook formatting.
  * // Usage: if (shouldSkipFile(filePath)) return;
  */
 export function shouldSkipFile(filePath) {
-  const normalizedPath = normalizePath(filePath).toLowerCase();
+  const normalizedPath = toSlashPath(filePath).toLowerCase();
   return (
     ignoredSegments.some((segment) => normalizedPath.includes(segment)) ||
     normalizedPath.endsWith('/.tsbuildinfo') ||
@@ -165,10 +173,6 @@ function parseHookInput(input) {
   } catch {
     return undefined;
   }
-}
-
-function normalizePath(filePath) {
-  return filePath.replaceAll('\\', '/');
 }
 
 async function isExistingFile(filePath) {
