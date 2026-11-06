@@ -95,9 +95,17 @@ A tabela de receitas está descrita em
   MangoStudio executa precisa ter um formato documentado pelo fornecedor; Codex e Cursor não
   documentam desinstalação, então essas duas aparecem como comandos copiar-apenas com o motivo
   ao lado.
-- **Cadeias**: "Instalar Node" em uma máquina POSIX sem nvm roda o nvm primeiro, depois o Node,
-  depois define o padrão, com uma confirmação listando todos os passos e um console por passo. No
-  Windows a cadeia padrão tem um passo; a alternativa com fnm tem três.
+- **Primeira instalação**: "Instalar Node" no POSIX sem nvm executa `nvm.install`, depois
+  `nvm.node.install`; com nvm presente, executa apenas o passo de Node. A primeira instalação
+  não acrescenta `set-default`. No Windows o padrão winget tem um passo; a alternativa fnm
+  tem dois se fnm estiver ausente (`fnm.install`, depois `fnm.node.install`), ou apenas o passo
+  de Node se fnm já estiver instalado. Uma confirmação lista a cadeia, com um console por passo.
+- **Atualização de Node**: um Node efetivo desatualizado gerenciado por nvm/fnm executa
+  `node.install` do gerenciador seguido por `node.set-default`, tornando o novo LTS efetivo.
+  Winget usa apenas `winget.node.update`; instalações gerenciadas por outras ferramentas
+  mantêm suas próprias instruções. Veja `apps/frontend/src/features/environments/format.ts` e
+  os casos de primeira instalação/atualização em
+  `apps/frontend/tests/unit/features/environments/setup-checklist.test.ts`.
 
 ## Espelho na CLI
 

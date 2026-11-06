@@ -10,22 +10,27 @@ MangoStudio follows a modular DDD-inspired architecture across three workspaces.
 | `apps/frontend` | Browser SPA                               | React 19, TanStack Router/Query, Tailwind CSS v4, `Bun.build()` bundle                             |
 | `apps/shared`   | Contracts, and the code both machines run | TypeScript types, TypeBox schemas, i18n dictionaries; host-only code behind its own export subpath |
 
-### Published alongside the application
+### Protocol and Rust components
 
 The repository also hosts the **Mango Protocol** — the wire contract the hub and the runtime
 speak — on its own version line and its own `protocol-v*` release train. It is not one of the
 three application workspaces and does not follow their lifecycle.
 
-| Path                           | Ships as                                  | Stack                                               |
-| ------------------------------ | ----------------------------------------- | --------------------------------------------------- |
-| `spec/`                        | The normative spec, schemas and fixtures  | Markdown, JSON Schema 2020-12                       |
-| `packages/protocol/`           | `@mangostudio/protocol` on npm            | TypeScript, TypeBox                                 |
-| `crates/mango-protocol/`       | `mango-protocol` on crates.io             | Rust, serde, tokio                                  |
-| `crates/mangostudio-launcher/` | `mangostudio` on crates.io (the launcher) | Rust, application version and shared workspace MSRV |
+| Path                                   | Ships as                                  | Stack                                               |
+| -------------------------------------- | ----------------------------------------- | --------------------------------------------------- |
+| `spec/`                                | The normative spec, schemas and fixtures  | Markdown, JSON Schema 2020-12                       |
+| `packages/protocol/`                   | `@mangostudio/protocol` on npm            | TypeScript, TypeBox                                 |
+| `crates/mango-protocol/`               | `mango-protocol` on crates.io             | Rust, serde, tokio                                  |
+| `crates/mangostudio-runtime/`          | Application execution host                | Rust, application version                           |
+| `crates/mangostudio-runtime-contract/` | Internal generated runtime contract       | Rust, workspace protocol version                    |
+| `crates/mangostudio-launcher/`         | `mangostudio` on crates.io (the launcher) | Rust, application version and shared workspace MSRV |
 
-Both stable Rust crates belong to the root Cargo workspace and share its lockfile, edition,
+The stable Rust crates belong to the root Cargo workspace and share its lockfile, edition,
 development toolchain, and lint policy. The protocol and application versions remain independent.
 `crates/mango-protocol/fuzz` is an excluded nightly-only workspace with its own lockfile.
+
+The runtime and launcher follow application releases; the internal runtime-contract crate
+is not a separate public release train.
 
 `packages/protocol/AGENTS.md` is the contributor guide for that tree, including the
 contract-change procedure every wire change follows. `docs/protocol/` holds the adoption guides.
@@ -59,7 +64,7 @@ modules/<domain>/
 
 **`infrastructure/`** — Kysely-based repository implementations that abstract SQL queries behind typed interfaces. One repository per aggregate root.
 
-### Modules
+### Selected modules
 
 | Module              | Layers  | Responsibilities                                                |
 | ------------------- | ------- | --------------------------------------------------------------- |
@@ -237,11 +242,13 @@ See [`continuation.md`](./continuation.md) for the full continuation architectur
 routes/                → TanStack Router file-based pages
   _authenticated/      → Auth-protected routes
     index.tsx           → Chat (default)
+    home.tsx            → Home dashboard
     gallery.tsx         → Image gallery
     settings.tsx        → Settings layout
     studio.tsx          → Image workspace
+    terminal.tsx        → Live terminal
     environments.tsx    → Environments umbrella layout
-    environments/       → Toolchains, agents, health
+    environments/       → Toolchains, agents, health, machine, and runtimes
       library.tsx       → Library section layout (second-level tabs)
       library/          → Coverage matrix, backups, resource detail
     library/            → Redirect stubs for pre-move /library/* bookmarks
@@ -308,7 +315,8 @@ schema-derived choices.
 
 ## Database
 
-SQLite via Kysely with 18 migrations covering:
+SQLite via Kysely. The ordered registry in `apps/api/src/db/migrations/index.ts`
+is the source of truth for migrations. Table families include:
 
 - Core tables: `chats`, `messages`, `generated_images`, `chat_attachments`
 - Auth tables: Better Auth standard schema (5 tables)

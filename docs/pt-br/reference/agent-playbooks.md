@@ -4,6 +4,32 @@ Abra apenas a seção que corresponda à tarefa atual. Este arquivo é intencion
 
 Esta página é um auxílio de navegação para contribuidores e agentes de código. Comece pelo ponto de entrada mais próximo da tarefa e expanda uma camada por vez.
 
+## Navegação e fallbacks em inglês
+
+Este mapa tem cobertura parcial. Para áreas sem seção traduzida, use as seções
+atuais do [mapa em inglês](../../reference/agent-playbooks.md). A
+[lista completa de páginas sem contraparte PT](../../README.md#portuguese-coverage-and-english-fallbacks)
+é o índice de fallback da documentação.
+
+### Library e tarefas por chat
+
+- [Library: cobertura, divergência e propagação](../../reference/agent-playbooks.md#library-coverage-divergence-propagation) (inglês).
+- [Tarefas por chat e ferramentas agentic](../../reference/agent-playbooks.md#tool-calling-and-agentic-flows) (inglês), incluindo `apps/api/src/modules/todos/` e `apps/shared/src/todos/`.
+
+### Ambientes, agentes externos e MCP
+
+- [Ambientes e toolchains](../../reference/agent-playbooks.md#environments-toolchains-version-managers-agent-clis-library) (inglês) e [guia de ambientes](../features/environments.md).
+- [Ambientes fora do processo](../../reference/agent-playbooks.md#out-of-process-environments-stdio-wsl-paired-websocket-direct-url) (inglês).
+- [Agentes externos](../../reference/agent-playbooks.md#external-agents-codex-cursor-claude-code) e sua [arquitetura](../../architecture/external-agents.md) (inglês).
+- [Servidores MCP](../../reference/agent-playbooks.md#mcp-servers) e [referência MCP](../../reference/mcp.md) (inglês).
+
+### Terminal, frontend, protocolo e segurança
+
+- [Mapa do terminal](../../reference/agent-playbooks.md#live-terminal) (inglês) e [guia do terminal](../features/terminal.md).
+- [Build, dev server e harness do frontend](../../reference/agent-playbooks.md#frontend-build-dev-server-and-test-harness) e [guia de build](../../architecture/frontend-build.md) (inglês).
+- [Mango Protocol](../../reference/agent-playbooks.md#mango-protocol-spec-typescript-sdk-rust-crate) e [índice dos guias](../../protocol/README.md) (inglês).
+- [CI](./ci.md), [gates de CI](../../reference/ci-gates.md) e [automação de segurança](../../../.github/CONTRIBUTING.md#security-automation) (os dois últimos em inglês).
+
 ## Auth
 
 Abra estes arquivos primeiro:

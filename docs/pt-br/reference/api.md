@@ -4,6 +4,15 @@ O MangoStudio expõe uma API REST em `/api/` e um endpoint de streaming SSE.
 
 Os contratos de `@mangostudio/shared` são a fonte de verdade para tipos de request e response. Esta página é um mapa voltado a contribuidores da superfície atual, não uma referência OpenAPI gerada.
 
+## Navegação de áreas relacionadas
+
+Para Library, tarefas por chat, ambientes, agentes externos, MCP e terminal,
+consulte os [mapas de arquivos e fallbacks](./agent-playbooks.md#navegação-e-fallbacks-em-inglês).
+Os guias de [MCP](../../reference/mcp.md), [hub/runtime](../../architecture/hub-runtime.md)
+e [Mango Protocol](../../protocol/README.md) estão em inglês. A
+[lista de lacunas de tradução](../../README.md#portuguese-coverage-and-english-fallbacks)
+cobre as demais páginas sem contraparte PT.
+
 ## Base URL
 
 ```

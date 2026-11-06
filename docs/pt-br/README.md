@@ -215,7 +215,7 @@ continuam editáveis, mas não executam mais turnos. Veja
 O provedor **ChatGPT** usa login pelo navegador em vez de chave de API. Ele inicia
 um servidor temporário de callback na porta `1455`, armazena tokens OAuth
 rotativos no OS secret store e usa os modelos disponíveis no plano ChatGPT
-conectado. Veja [docs/providers/chatgpt.md](providers/chatgpt.md) para
+conectado. Veja [providers/chatgpt.md](providers/chatgpt.md) para
 detalhes e notas de port-forwarding em hosts remotos.
 
 ## Estrutura do Projeto
@@ -406,7 +406,7 @@ O tipo `Messages` é inferido diretamente do dicionário `pt-BR.ts` (`as const`)
 
 ## Documentação
 
-- [`./README.md`](./README.md) — hub da documentação em Português
+- [`../README.md`](../README.md) — índice de toda a documentação e [lista completa de fallbacks em inglês](../README.md#portuguese-coverage-and-english-fallbacks)
 - [`./guides/contributor-quickstart.md`](./guides/contributor-quickstart.md) — onboarding rápido para contribuidores
 - [`./architecture/continuation.md`](./architecture/continuation.md) — arquitetura de continuação
 - [`./design/README.md`](./design/README.md) — design system flat: princípios, índice e testes que o fazem valer
@@ -422,19 +422,20 @@ O tipo `Messages` é inferido diretamente do dicionário `pt-BR.ts` (`as const`)
 - [`./operations/security.md`](./operations/security.md) — política e modelo de segurança
 - [`./CONTRIBUTING.md`](./CONTRIBUTING.md) — diretrizes de contribuição em Português
 
-## Estrutura Espelhada
+## Cobertura em Português e fallbacks
 
-`docs/pt-br/` agora espelha a mesma organização de `docs/` com subpastas por responsabilidade:
+Em 2026-11-06, 37 das 59 páginas Markdown, MDX e MDC de `docs/` fora de
+`pt-br/` tinham uma versão em português no mesmo caminho. Consulte a
+[lista das 22 páginas disponíveis apenas em inglês](../README.md#portuguese-coverage-and-english-fallbacks).
+As pastas seguem a organização em inglês onde há traduções. Ao editar uma
+página que já tem tradução, atualize as duas versões na mesma tarefa.
 
-- `architecture/`
-- `features/`
-- `design/`
-- `providers/`
-- `reference/`
-- `guides/`
-- `operations/`
-
-Quando uma alteração relevante for feita em `docs/`, a versão correspondente em `docs/pt-br/` deve ser atualizada na mesma tarefa para manter o espelho consistente.
+- [Library e tarefas por chat](reference/agent-playbooks.md#library-e-tarefas-por-chat) — mapas em inglês.
+- [Ambientes](features/environments.md) e [agentes externos](../architecture/external-agents.md) (inglês).
+- [MCP](../reference/mcp.md) (inglês) e [terminal](features/terminal.md).
+- [Build do frontend](../architecture/frontend-build.md) e [Mango Protocol](../protocol/README.md) (inglês).
+- [CI](reference/ci.md), [gates](../reference/ci-gates.md) (inglês) e
+  [automação de segurança](../../.github/CONTRIBUTING.md#security-automation) (inglês).
 
 ## Notas de Build Standalone
 

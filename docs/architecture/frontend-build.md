@@ -154,10 +154,10 @@ Six things in that build are load-bearing:
 
 Route generation runs in-process through `@tanstack/router-generator`, pinned to the same
 version previously used by the CLI. `build.ts` and the manual
-`bun run --filter @mangostudio/frontend routes` command share `scripts/routes.ts`. The helper
+`bun run --filter @mangostudio/frontend routes` command share `apps/frontend/scripts/routes.ts`. The helper
 resolves `tsr.config.json`, route paths and temporary files from the frontend root. Production
 builds always regenerate. Dev builds skip when the generated tree is newer than the route
-files, their directories, the config and `scripts/routes.ts`. The API's dev startup also
+files, their directories, the config and `apps/frontend/scripts/routes.ts`. The API's dev startup also
 includes that helper when deciding whether to reuse `dist/`; a missing helper invalidates
 both checks. The Tailwind helper and source declaration are also exact required inputs. Other scripts and their directory mtime are ignored, so test and artifact churn
 keeps a clean build current. After an unchanged dev generation, the helper updates the
