@@ -582,6 +582,9 @@ describe('runEnvInstall', () => {
 
 /** Stores one selection per (user, environment); `update` refuses paths not in `known`. */
 class FakeToolchainService {
+  listByUser(): Promise<Map<string, ToolchainSelection>> {
+    throw new Error('Unexpected batch toolchain read during an individual CLI operation');
+  }
   readonly rows = new Map<string, ToolchainSelection>();
   readonly updates: Array<{ userId: string; environmentId: string; body: ToolchainUpdateBody }> =
     [];

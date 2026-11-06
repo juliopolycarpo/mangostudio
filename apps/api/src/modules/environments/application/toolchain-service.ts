@@ -29,6 +29,7 @@ import {
 import { type EnvironmentProbingService, environmentProbingService } from './probing-service';
 
 export interface ToolchainService {
+  listByUser(userId: string): Promise<Map<string, ToolchainSelection>>;
   resolve(userId: string, environmentId: string): Promise<ToolchainSelection>;
   update(
     userId: string,
@@ -107,6 +108,8 @@ export function createToolchainService(
   publish: (userId: string) => void = publishEnvironmentInvalidation
 ): ToolchainService {
   return {
+    listByUser: (userId) => repository.listByUser(userId),
+
     async resolve(userId, environmentId) {
       const stored = await repository.get(userId, environmentId);
       return stored ?? DEFAULT_TOOLCHAIN_SELECTION;

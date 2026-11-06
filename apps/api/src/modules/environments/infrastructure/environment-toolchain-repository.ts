@@ -19,6 +19,7 @@ import type {
 } from '../../../db/types';
 
 export interface EnvironmentToolchainRepository {
+  listByUser(userId: string): Promise<Map<string, ToolchainSelection>>;
   get(userId: string, environmentId: string): Promise<ToolchainSelection | null>;
   /**
    * Writes only the runtimes named in `patch`, leaving every other column as
@@ -56,6 +57,15 @@ export function createEnvironmentToolchainRepository(
   const db = (): Kysely<Database> => injected ?? getDb();
 
   return {
+    async listByUser(userId) {
+      const rows = await db()
+        .selectFrom('environment_toolchains')
+        .selectAll()
+        .where('userId', '=', userId)
+        .execute();
+      return new Map(rows.map((row) => [row.environmentId, toToolchainSelection(row)]));
+    },
+
     async get(userId, environmentId) {
       const row = await db()
         .selectFrom('environment_toolchains')

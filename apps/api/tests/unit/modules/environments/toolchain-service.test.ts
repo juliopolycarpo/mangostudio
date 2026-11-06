@@ -60,6 +60,17 @@ class FakeEnvironmentToolchainRepository implements EnvironmentToolchainReposito
     return `${userId}\u0000${environmentId}`;
   }
 
+  listByUser(userId: string): Promise<Map<string, ToolchainSelection>> {
+    const prefix = `${userId}\u0000`;
+    return Promise.resolve(
+      new Map(
+        [...this.#rows]
+          .filter(([key]) => key.startsWith(prefix))
+          .map(([key, value]) => [key.slice(prefix.length), value])
+      )
+    );
+  }
+
   async get(userId: string, environmentId: string): Promise<ToolchainSelection | null> {
     await this.#readGate;
     return this.#rows.get(this.#key(userId, environmentId)) ?? null;
