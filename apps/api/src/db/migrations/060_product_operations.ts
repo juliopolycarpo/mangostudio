@@ -1,3 +1,4 @@
+import { sql } from 'kysely';
 import type { Migration } from 'kysely/migration';
 
 export const productOperations: Migration = {
@@ -23,6 +24,7 @@ export const productOperations: Migration = {
       .ifNotExists()
       .on('product_operations')
       .column('expiresAt')
+      .where(sql.ref('result'), 'is not', null)
       .execute();
   },
   async down(db): Promise<void> {

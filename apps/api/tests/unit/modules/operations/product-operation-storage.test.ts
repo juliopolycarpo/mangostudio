@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 
-import { type KyselyPlugin, type PluginTransformQueryArgs } from 'kysely';
+import { type CompiledQuery, type KyselyPlugin, type PluginTransformQueryArgs, sql } from 'kysely';
 
 import { getDb } from '../../../../src/db/database';
 import {
   claimOperation,
+  OperationExpiredError,
   readOperation,
   releaseOperation,
 } from '../../../../src/modules/operations/application/product-operation';
@@ -34,6 +35,22 @@ function holdFirstOperationInsert() {
     },
   };
   return { plugin, inserted: inserted.promise, resume: resume.resolve };
+}
+
+function recordUpdates() {
+  const queries: CompiledQuery[] = [];
+  const plugin: KyselyPlugin = {
+    transformQuery(args) {
+      if (args.node.kind === 'UpdateQueryNode') {
+        queries.push(getDb().getExecutor().compileQuery(args.node, args.queryId));
+      }
+      return args.node;
+    },
+    transformResult({ result }) {
+      return Promise.resolve(result);
+    },
+  };
+  return { plugin, queries };
 }
 
 describe('product operation storage', () => {
@@ -68,5 +85,49 @@ describe('product operation storage', () => {
     }
     expect(await duplicate).toEqual({ claimed: true });
     expect(await readOperation(db, user.id, operationId)).toMatchObject({ state: 'accepted' });
+  });
+
+  it('plans admission cleanup through an expiry index restricted to retained snapshots', async () => {
+    const db = getDb();
+    const user = await insertTestUser();
+    const { plugin, queries } = recordUpdates();
+
+    await claimOperation(db.withPlugin(plugin), user.id, 'admission-cleanup', 'submit-turn', input);
+
+    expect(queries).toHaveLength(1);
+    const sweep = queries[0];
+    const plan = await db.executeQuery<{ detail: string }>({
+      ...sweep,
+      sql: `EXPLAIN QUERY PLAN ${sweep.sql}`,
+    });
+    expect(plan.rows.map(({ detail }) => detail)).toEqual([
+      'SEARCH product_operations USING INDEX idx_product_operations_expiresAt (expiresAt<?)',
+    ]);
+    const index = await sql<{ sql: string }>`
+      SELECT sql FROM sqlite_master WHERE name = 'idx_product_operations_expiresAt'
+    `.execute(db);
+    expect(index.rows[0]?.sql).toMatch(/where "result" is not null$/i);
+  });
+
+  it('refuses an expired tombstone without issuing another cleanup update', async () => {
+    const db = getDb();
+    const user = await insertTestUser();
+    const operationId = 'expired-tombstone';
+    await claimOperation(db, user.id, operationId, 'submit-turn', input);
+    await db
+      .updateTable('product_operations')
+      .set({ expiresAt: 0 })
+      .where('userId', '=', user.id)
+      .where('operationId', '=', operationId)
+      .execute();
+    const { plugin, queries } = recordUpdates();
+
+    await expect(readOperation(db.withPlugin(plugin), user.id, operationId)).rejects.toBeInstanceOf(
+      OperationExpiredError
+    );
+    expect(queries.map(({ sql: statement }) => statement)).toEqual([]);
+    await expect(
+      claimOperation(db, user.id, operationId, 'submit-turn', input)
+    ).rejects.toBeInstanceOf(OperationExpiredError);
   });
 });

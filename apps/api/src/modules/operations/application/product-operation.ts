@@ -43,12 +43,15 @@ export async function readOperation(
     .executeTakeFirst();
   if (!row) return undefined;
   if (row.expiresAt <= Date.now()) {
-    await db
-      .updateTable('product_operations')
-      .set({ result: null })
-      .where('userId', '=', userId)
-      .where('operationId', '=', operationId)
-      .execute();
+    if (row.result !== null) {
+      await db
+        .updateTable('product_operations')
+        .set({ result: null })
+        .where('userId', '=', userId)
+        .where('operationId', '=', operationId)
+        .where('result', 'is not', null)
+        .execute();
+    }
     throw new OperationExpiredError('Operation receipt expired; this key cannot be reused.');
   }
   if (row.owner !== processOwner && (row.state === 'accepted' || row.state === 'running')) {
