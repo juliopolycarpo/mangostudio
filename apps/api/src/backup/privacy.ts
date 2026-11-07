@@ -8,6 +8,7 @@ const PORTABLE_TABLES = new Set([
   'generated_images',
   'chat_attachments',
   'user_app_settings',
+  'product_operations',
   'user_skill_settings',
   'chat_todos',
   'file_checkpoints',
@@ -53,6 +54,13 @@ export function redactBackupDatabase(db: Database, checkpoints: boolean): void {
   if (tables.has('chats'))
     db.exec('UPDATE chats SET lastProviderState=NULL, lastContextState=NULL');
   if (tables.has('messages')) db.exec('UPDATE messages SET providerState=NULL');
+  // First-run settings refer to these receipts. Keep their identity and verdict,
+  // but neither retain private result snapshots nor claim old work is still live.
+  if (tables.has('product_operations')) {
+    db.exec(`UPDATE product_operations
+      SET result=NULL,
+          state=CASE WHEN state IN ('accepted', 'running') THEN 'unresolved' ELSE state END`);
+  }
   if (!checkpoints && tables.has('file_checkpoints')) db.exec('DELETE FROM file_checkpoints');
   db.exec('VACUUM');
 }
