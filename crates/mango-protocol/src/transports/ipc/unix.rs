@@ -2,11 +2,11 @@
 //! listener publishes owner-only, and the peer credentials the socket itself
 //! carries.
 
-use std::io;
-use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+use std::{fs, io};
 
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{UnixListener, UnixStream};
@@ -23,6 +23,7 @@ const SOCKET_MODE: u32 = 0o600;
 /// Owner-only and not searchable by anyone else, which is what keeps a socket
 /// staged inside it out of reach before its own mode is set.
 const STAGING_DIRECTORY_MODE: u32 = 0o700;
+const MAX_STAGING_ATTEMPTS: usize = 16;
 
 /// How long [`probe`] waits for a verdict before erring toward "live" — the
 /// same 1 second the TypeScript SDK's `clearStaleSocket` uses.
@@ -189,7 +190,9 @@ pub async fn listen_ipc(path: impl AsRef<Path>) -> io::Result<IpcListener> {
     std::os::unix::net::SocketAddr::from_pathname(&path)?;
     refuse_occupied_socket(&path).await?;
 
-    let (listener, inode) = stage_and_publish(&path).await?;
+    // Creation, publication and handing the listener to the caller share one
+    // poll. Cancellation must not leave a public socket without its listener.
+    let (listener, inode) = stage_and_publish(&path)?;
     let _ = inode;
 
     Ok(IpcListener {
@@ -261,31 +264,45 @@ fn identity_of(stream: &UnixStream) -> PeerIdentity {
 /// Short names, because these are the paths `bind` actually sees and
 /// `sun_path` is 104 bytes on macOS. An address close to that limit would
 /// otherwise fail to bind at a staging name longer than itself.
-fn staging_path(path: &Path) -> Staging {
+fn staging_path(path: &Path) -> StagingPath {
     static NEXT_ATTEMPT: AtomicU64 = AtomicU64::new(0);
     let attempt = NEXT_ATTEMPT.fetch_add(1, Ordering::Relaxed);
     let beside = path.parent().unwrap_or_else(|| Path::new("."));
     let directory = beside.join(format!(".m{}-{attempt}", std::process::id()));
     let socket = directory.join("s");
-    Staging { directory, socket }
+    StagingPath { directory, socket }
 }
 
-/// The two paths one staging attempt owns.
+/// Candidate paths carry no authority until the directory is created.
 #[derive(Debug)]
-struct Staging {
+struct StagingPath {
     directory: PathBuf,
     socket: PathBuf,
+}
+
+/// Owns a directory created exclusively for this attempt.
+#[derive(Debug)]
+struct Staging(StagingPath);
+
+impl Drop for Staging {
+    fn drop(&mut self) {
+        let StagingPath { directory, socket } = &self.0;
+        if fs::symlink_metadata(directory).is_ok_and(|metadata| metadata.is_dir()) {
+            let _ = fs::remove_file(socket);
+            let _ = fs::remove_dir(directory);
+        }
+    }
 }
 
 /// Finds short private staging on the destination device, then publishes without replacement.
 /// A valid public path may have too little room left in its parent for our private suffix.
 /// Try same-device ancestors; a mount boundary never justifies replacing rename.
-async fn stage_and_publish(path: &Path) -> io::Result<(UnixListener, u64)> {
+fn stage_and_publish(path: &Path) -> io::Result<(UnixListener, u64)> {
     let parent = path
         .parent()
         .filter(|value| !value.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    let device = tokio::fs::metadata(parent).await?.dev();
+    let device = fs::metadata(parent)?.dev();
     let mut last_failure: Option<io::Error> = None;
     for ancestor in parent.ancestors() {
         if ancestor.as_os_str().is_empty() && parent == Path::new(".") {
@@ -296,34 +313,34 @@ async fn stage_and_publish(path: &Path) -> io::Result<(UnixListener, u64)> {
         } else {
             ancestor
         };
-        let staging = staging_path(&ancestor.join("endpoint"));
-        if std::os::unix::net::SocketAddr::from_pathname(&staging.socket).is_err()
-            || tokio::fs::metadata(ancestor).await?.dev() != device
-        {
+        if fs::metadata(ancestor)?.dev() != device {
             continue;
         }
-        match stage(&staging).await {
-            Ok(listener) => {
-                let result = async {
-                    // The staged identity is diagnostic/test data, never unlink authority.
-                    let inode = tokio::fs::symlink_metadata(&staging.socket).await?.ino();
-                    publish(&staging.socket, path).await?;
-                    Ok((listener, inode))
-                }
-                .await;
-                discard(&staging).await;
-                return result;
+        for _ in 0..MAX_STAGING_ATTEMPTS {
+            let staging = staging_path(&ancestor.join("endpoint"));
+            if std::os::unix::net::SocketAddr::from_pathname(&staging.socket).is_err() {
+                break;
             }
-            Err(error) => {
-                discard(&staging).await;
-                if matches!(
-                    error.kind(),
-                    io::ErrorKind::PermissionDenied | io::ErrorKind::ReadOnlyFilesystem
-                ) {
-                    last_failure = Some(error);
-                } else {
-                    return Err(error);
+            match stage(staging) {
+                Ok((listener, staging)) => {
+                    // The staged identity is diagnostic/test data, never unlink authority.
+                    let inode = fs::symlink_metadata(&staging.0.socket)?.ino();
+                    publish(&staging.0.socket, path)?;
+                    return Ok((listener, inode));
                 }
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                    last_failure = Some(error);
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::PermissionDenied | io::ErrorKind::ReadOnlyFilesystem
+                    ) =>
+                {
+                    last_failure = Some(error);
+                    break;
+                }
+                Err(error) => return Err(error),
             }
         }
     }
@@ -339,48 +356,15 @@ async fn stage_and_publish(path: &Path) -> io::Result<(UnixListener, u64)> {
     ))
 }
 
-/// Binds the socket somewhere no other user may reach it.
-async fn stage(staging: &Staging) -> io::Result<UnixListener> {
-    // A crash between staging and publishing leaves the directory behind, and
-    // a later process with the same id reaches the same name. Removing it is
-    // never recursive: this only ever clears what a staging attempt of ours
-    // would have left, and a directory somebody else planted at the name is
-    // reported rather than deleted.
-    discard(staging).await;
-    tokio::fs::DirBuilder::new()
+/// Acquires a fresh private directory before binding or acquiring cleanup rights.
+fn stage(path: StagingPath) -> io::Result<(UnixListener, Staging)> {
+    fs::DirBuilder::new()
         .mode(STAGING_DIRECTORY_MODE)
-        .create(&staging.directory)
-        .await?;
-    let listener = UnixListener::bind(&staging.socket)?;
-    restrict(&staging.socket).await?;
-    Ok(listener)
-}
-
-/// Removes what a staging attempt leaves behind, best effort: the socket is
-/// removed after no-replace hard-link publication, and the directory
-/// only goes when it is this attempt's and empty.
-///
-/// Nothing is removed unless a directory in its own right sits at the staging
-/// name. The name is derived from this process's id, and the directory an
-/// address usually sits in can be the world-writable system temporary one, so
-/// a symlink somebody else planted there first would otherwise turn this
-/// cleanup into an unlink inside a directory of their choosing. Anything that
-/// is not a directory is left where it is and reported by the `create` that
-/// follows.
-async fn discard(staging: &Staging) {
-    if !is_directory(&staging.directory).await {
-        return;
-    }
-    let _ = tokio::fs::remove_file(&staging.socket).await;
-    let _ = tokio::fs::remove_dir(&staging.directory).await;
-}
-
-/// True when a directory — never a symlink to one — sits at `path`.
-async fn is_directory(path: &Path) -> bool {
-    matches!(
-        tokio::fs::symlink_metadata(path).await,
-        Ok(metadata) if metadata.file_type().is_dir()
-    )
+        .create(&path.directory)?;
+    let staging = Staging(path);
+    let listener = UnixListener::bind(&staging.0.socket)?;
+    restrict(&staging.0.socket)?;
+    Ok((listener, staging))
 }
 
 /// Moves the bound socket onto the address it is published at.
@@ -394,8 +378,8 @@ async fn is_directory(path: &Path) -> bool {
 ///
 /// A filesystem that cannot hard-link sockets is unsupported; never fall back
 /// to a replacing rename.
-async fn publish(staging: &Path, path: &Path) -> io::Result<()> {
-    match tokio::fs::hard_link(staging, path).await {
+fn publish(staging: &Path, path: &Path) -> io::Result<()> {
+    match fs::hard_link(staging, path) {
         // The link is the address now; the staging name is the caller's to
         // clear, along with the directory holding it.
         Ok(()) => Ok(()),
@@ -418,8 +402,8 @@ async fn publish(staging: &Path, path: &Path) -> io::Result<()> {
 }
 
 /// Makes the socket file readable and writable by its owner alone.
-async fn restrict(path: &Path) -> io::Result<()> {
-    tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(SOCKET_MODE)).await
+fn restrict(path: &Path) -> io::Result<()> {
+    fs::set_permissions(path, fs::Permissions::from_mode(SOCKET_MODE))
 }
 
 /// Observes an occupied address and preserves it without conditional-unlink authority.
@@ -499,7 +483,7 @@ async fn probe(path: &Path) -> ProbeVerdict {
 mod tests {
     use super::{
         ConnectDeadline, IpcListener, SOCKET_MODE, STAGING_DIRECTORY_MODE, UnixListener,
-        connect_ipc, discard, listen_ipc, publish, stage, staging_path,
+        connect_ipc, listen_ipc, publish, stage, staging_path,
     };
     use crate::close::close_codes;
     use crate::frame::Frame;
@@ -662,9 +646,10 @@ mod tests {
         // inside is what refuses them.
         let address = Address::new();
         let staging = staging_path(&address.path());
-        let listener = stage(&staging).await.expect("a staged socket");
+        let (listener, staging) = stage(staging).expect("a staged socket");
 
         let containing = staging
+            .0
             .socket
             .parent()
             .expect("the socket is staged inside a directory of its own");
@@ -681,7 +666,92 @@ mod tests {
         );
 
         drop(listener);
-        discard(&staging).await;
+        drop(staging);
+    }
+
+    #[tokio::test]
+    async fn a_preexisting_staging_directory_keeps_its_contents() {
+        let address = Address::new();
+        let staging = staging_path(&address.path());
+        std::fs::create_dir(&staging.directory).expect("another owner's staging directory");
+        std::fs::write(&staging.socket, b"other owner's file").expect("a file named s");
+
+        let existing_socket = staging.socket.clone();
+        let result = stage(staging);
+        assert_eq!(
+            std::fs::read(existing_socket).ok().as_deref(),
+            Some(b"other owner's file".as_slice()),
+            "a colliding staging attempt must preserve the existing s file"
+        );
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+    }
+
+    fn check_cancellation_at_filesystem_visibility(published: bool) {
+        use std::future::Future;
+        use std::task::{Context, Poll, Waker};
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .max_blocking_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let address = Address::new();
+            let path = address.path();
+            let listener = {
+                let mut pending = std::pin::pin!(listen_ipc(&path));
+                let mut context = Context::from_waker(Waker::noop());
+                let mut result = None;
+                for _ in 0..32 {
+                    if let Poll::Ready(ready) = pending.as_mut().poll(&mut context) {
+                        result = Some(ready.expect("a free address must be bindable"));
+                        break;
+                    }
+                    // A single blocking thread makes this a barrier after the
+                    // filesystem operation queued by the preceding poll.
+                    tokio::task::spawn_blocking(|| {}).await.unwrap();
+                    let visible = if published {
+                        path.exists()
+                    } else {
+                        std::fs::read_dir(&address.0).unwrap().next().is_some()
+                    };
+                    if visible {
+                        break;
+                    }
+                }
+                result
+            };
+
+            if let Some(listener) = listener {
+                assert!(
+                    path.exists(),
+                    "a returned listener must own a published address"
+                );
+                assert_eq!(std::fs::read_dir(&address.0).unwrap().count(), 1);
+                listener.close().await;
+            } else {
+                assert_eq!(
+                    std::fs::read_dir(&address.0).unwrap().count(),
+                    0,
+                    "cancelling an unfinished listen left a filesystem entry"
+                );
+                listen_ipc(&path)
+                    .await
+                    .expect("a cancelled bind must leave the address reusable")
+                    .close()
+                    .await;
+            }
+        });
+    }
+
+    #[test]
+    fn cancelling_listen_cannot_leak_a_private_staging_entry() {
+        check_cancellation_at_filesystem_visibility(false);
+    }
+
+    #[test]
+    fn cancelling_listen_cannot_leave_an_ownerless_public_address() {
+        check_cancellation_at_filesystem_visibility(true);
     }
 
     #[tokio::test]
@@ -700,9 +770,8 @@ mod tests {
         let staging = staging_path(&address.path());
         std::os::unix::fs::symlink(&elsewhere, &staging.directory).expect("the planted symlink");
 
-        let error = stage(&staging)
-            .await
-            .expect_err("a name this attempt did not create is not its to clear");
+        let error =
+            stage(staging).expect_err("a name this attempt did not create is not its to clear");
 
         assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
         assert!(
@@ -798,9 +867,7 @@ mod tests {
         std::fs::write(&staging, b"the socket this listener bound").expect("a staging file");
         std::fs::write(&taken, b"what another listener published").expect("an occupied address");
 
-        let error = publish(&staging, &taken)
-            .await
-            .expect_err("the address is no longer free");
+        let error = publish(&staging, &taken).expect_err("the address is no longer free");
 
         assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
         assert!(
