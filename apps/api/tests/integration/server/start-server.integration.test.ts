@@ -108,10 +108,11 @@ describe('startServer via __serve', () => {
   );
 
   it(
-    'refuses to start while backup owns the configured database',
+    'leaves the uploads root absent when backup owns the configured database',
     async () => {
       const running = await createManagedProcessFixture({ tempPrefix: 'mango-backup-lock-' });
       const database = join(running.tempDir, 'database.sqlite');
+      const uploads = join(running.tempDir, 'absent', 'uploads');
       const release = await acquireCaptureLock(database);
       try {
         running.spawn({
@@ -119,12 +120,14 @@ describe('startServer via __serve', () => {
           env: {
             ...serverEnv(running.tempDir, running.port),
             DATABASE_PATH: database,
+            UPLOADS_DIR: uploads,
             BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
           },
         });
         expect(await running.waitForExit()).toBe(1);
         expect(running.diagnostics()).toContain('capture lock cannot be acquired');
         expect(await probeHealthOnce('127.0.0.1', running.port)).toBe(false);
+        expect(existsSync(uploads)).toBe(false);
       } finally {
         await release();
         await running.cleanup();
