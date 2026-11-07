@@ -12,6 +12,7 @@ import { resolveProviderRuntimeAttachments } from '../../attachments/application
 import { assertChatAttachmentIdsAvailable } from '../../attachments/infrastructure/attachment-repository';
 import { recordTurnCompletedActivity } from '../../chats/application/record-turn-activity';
 import { getOwnedChatOrThrow } from '../../chats/domain/chat-ownership';
+import type { OwnedChatRecord } from '../../chats/infrastructure/chat-repository';
 import { loadHistory } from '../../messages/infrastructure/message-repository';
 import {
   persistAiResponse,
@@ -39,6 +40,8 @@ function assertDirectTextRunner(chatId: string, runner: ChatRunnerConfiguration)
 export interface SendTextMessageInput {
   chatId: string;
   userId: string;
+  /** The owned chat binding recorded by a keyed admission. */
+  admittedChat?: OwnedChatRecord;
   prompt: string;
   attachmentIds?: string[];
   model?: string;
@@ -73,7 +76,7 @@ export async function sendTextMessage(
   input: SendTextMessageInput,
   db: Kysely<Database>
 ): Promise<SendTextMessageResult> {
-  const chat = await getOwnedChatOrThrow(input.chatId, input.userId, db);
+  const chat = input.admittedChat ?? (await getOwnedChatOrThrow(input.chatId, input.userId, db));
   assertDirectTextRunner(input.chatId, chat.runner);
   const attachmentIds = normalizeTextTurnAttachmentIds(input.attachmentIds);
   assertTextTurnHasContent(input.prompt, attachmentIds);

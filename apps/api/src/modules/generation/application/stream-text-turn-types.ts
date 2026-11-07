@@ -16,12 +16,15 @@ import type {
   ContextSeverity,
   ContinuationDisplayMode,
 } from '../../../services/providers/core/context-policy';
+import type { OwnedChatRecord } from '../../chats/infrastructure/chat-repository';
 import type { ResolvedModel } from './resolve-model';
 import type { ToolStreamEvent } from './standard-tool-execution';
 
 export interface StreamTextTurnInput {
   chatId: string;
   userId: string;
+  /** The owned chat binding recorded by a keyed admission. */
+  admittedChat?: OwnedChatRecord;
   prompt: string;
   attachmentIds?: string[];
   model?: string;
@@ -42,6 +45,7 @@ export interface StreamTextTurnInput {
     readonly checkpoint: TurnCheckpointPart;
   };
   onTurnPrepared?: (assistantMessageId: string) => void;
+  onUserCancelled?: () => void;
 }
 
 export type StreamEvent =

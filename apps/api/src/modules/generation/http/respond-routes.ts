@@ -13,6 +13,7 @@ import {
   OperationConflictError,
   OperationExpiredError,
   operationReceipt,
+  releaseOperation,
 } from '../../operations/application/product-operation';
 import { NoModelAvailableError } from '../application/resolve-model';
 import { sendTextMessage, UnsupportedChatRunnerError } from '../application/send-text-message';
@@ -54,17 +55,38 @@ export const respondRoutes = (app: Elysia) =>
               body.chatId
             );
             if (!claimed) return operationReceipt(row);
-            await finishOperation(db, userId, operationId, 'running');
-            void (async () => {
+            try {
+              await finishOperation(db, userId, operationId, 'running');
+            } catch (error) {
+              // Dispatch has not started, so the caller can safely retry the key.
               try {
-                const result = await sendTextMessage({ ...body, userId }, db);
-                await finishOperation(db, userId, operationId, 'completed', result.aiMessage.id);
+                await releaseOperation(db, userId, operationId);
+              } catch (releaseError) {
+                console.error('[respond] Could not release undispatched receipt', releaseError);
+              }
+              throw error;
+            }
+            void (async () => {
+              let result: Awaited<ReturnType<typeof sendTextMessage>>;
+              try {
+                result = await sendTextMessage({ ...body, userId, admittedChat: chat }, db);
               } catch {
                 // No automatic replay; the request was admitted even if execution failed.
                 try {
                   await finishOperation(db, userId, operationId, 'failed');
                 } catch (error) {
                   console.error('[respond] Could not persist operation failure', error);
+                }
+                return;
+              }
+              try {
+                await finishOperation(db, userId, operationId, 'completed', result.aiMessage.id);
+              } catch (error) {
+                console.error('[respond] Could not persist completed receipt', error);
+                try {
+                  await finishOperation(db, userId, operationId, 'unresolved', result.aiMessage.id);
+                } catch (settlementError) {
+                  console.error('[respond] Could not persist unresolved receipt', settlementError);
                 }
               }
             })();

@@ -10,12 +10,14 @@ import {
   externalAgentEventToStreamChunk,
   externalTurnCompletedChunk,
 } from '@mangostudio/shared/streaming';
+import { sql } from 'kysely';
 import Value from 'typebox/value';
 
 import { getDb } from '../../../src/db/database';
 import { chatRoutes } from '../../../src/modules/chats/http/chat-routes';
 import { respondRoutes } from '../../../src/modules/generation/http/respond-routes';
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
+import { turnRecoveryRoutes } from '../../../src/modules/generation/http/turn-recovery-routes';
 import { drainOperationStream } from '../../../src/modules/operations/application/drain-operation-stream';
 import {
   claimOperation,
@@ -30,6 +32,7 @@ import type {
   AgentEvent,
   AgentTurnRequest,
   AIProvider,
+  TextGenerationRequest,
 } from '../../../src/services/providers/types';
 import {
   insertTestChat,
@@ -43,10 +46,12 @@ class ControlledProvider implements AIProvider {
   readonly providerType = 'openai-compatible' as const;
   calls = 0;
   directCalls = 0;
+  directEnvironment: string | undefined;
   fail = false;
   release: (() => void) | undefined;
-  generateText(): ReturnType<AIProvider['generateText']> {
+  generateText(request: TextGenerationRequest): ReturnType<AIProvider['generateText']> {
     this.directCalls++;
+    this.directEnvironment = request.environmentId;
     return Promise.resolve({ text: 'Answer' });
   }
   listModels(): ReturnType<AIProvider['listModels']> {
@@ -115,7 +120,8 @@ beforeEach(async () => {
     user,
     chatRoutes,
     respondStreamRoutes,
-    respondRoutes
+    respondRoutes,
+    turnRecoveryRoutes
   );
   app = harness.app;
   restore = harness.restore;
@@ -195,6 +201,145 @@ describe('durable authorized product operations over real routes/storage', () =>
     await submit('new-operation-same-text');
     await waitFor(() => provider.calls === 2);
     provider.release?.();
+  });
+  it('keeps an external keyed submission on its original runner after a first-run chat edit', async () => {
+    await db
+      .updateTable('chats')
+      .set({ runnerKind: 'external', runnerAgentId: null, runnerTargetId: 'codex' })
+      .where('id', '=', chatId)
+      .execute();
+    await sql`CREATE TRIGGER change_runner_after_claim
+      AFTER INSERT ON product_operations WHEN NEW.operationId = 'runner-at-admission'
+      BEGIN
+        UPDATE chats SET runnerKind = 'mangostudio', runnerAgentId = 'default', runnerTargetId = NULL
+        WHERE id = NEW.chatId;
+      END`.execute(db);
+    try {
+      const response = await submit('runner-at-admission');
+      if (response.ok) {
+        await waitFor(() => provider.calls === 1);
+        provider.release?.();
+      }
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({
+        error: 'Choose a folder for this chat before starting an external agent turn.',
+      });
+      expect(provider.calls).toBe(0);
+    } finally {
+      await sql`DROP TRIGGER change_runner_after_claim`.execute(db);
+    }
+  });
+  it('dispatches a keyed direct turn with the environment bound when its key was claimed', async () => {
+    const operationId = 'binding-at-admission';
+    await sql`CREATE TRIGGER change_environment_after_claim
+      AFTER INSERT ON product_operations WHEN NEW.operationId = 'binding-at-admission'
+      BEGIN
+        UPDATE chats SET environmentId = 'changed-after-admission' WHERE id = NEW.chatId;
+      END`.execute(db);
+    try {
+      const response = await app.handle(
+        request('/respond', { chatId, prompt: 'Hello', model: 'operation-test', operationId })
+      );
+      expect(response.status).toBe(200);
+      await waitFor(() => provider.directCalls === 1);
+      expect(provider.directEnvironment).toBe('local');
+    } finally {
+      await sql`DROP TRIGGER change_environment_after_claim`.execute(db);
+    }
+  });
+  it('drains accepted streaming work when the running receipt write fails', async () => {
+    const operationId = 'stream-running-write-fails';
+    await sql`CREATE TRIGGER reject_stream_running_write
+      BEFORE UPDATE OF state ON product_operations
+      WHEN NEW.operationId = 'stream-running-write-fails' AND NEW.state = 'running'
+      BEGIN SELECT RAISE(ABORT, 'controlled running receipt write failure'); END`.execute(db);
+    try {
+      const response = await submit(operationId);
+      await waitFor(() => provider.calls === 1);
+      provider.release?.();
+      await waitFor(async () =>
+        Boolean(
+          await db
+            .selectFrom('messages')
+            .select('id')
+            .where('chatId', '=', chatId)
+            .where('text', '=', 'Answer')
+            .executeTakeFirst()
+        )
+      );
+      await waitFor(async () => (await receipt(operationId)).state !== 'accepted');
+      expect(await receipt(operationId)).toMatchObject({ state: 'completed' });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ state: 'accepted' });
+    } finally {
+      provider.release?.();
+      await sql`DROP TRIGGER reject_stream_running_write`.execute(db);
+    }
+  });
+  it('allows the same key to retry a direct turn whose running write failed before dispatch', async () => {
+    const operationId = 'direct-running-write-fails';
+    const body = { chatId, prompt: 'Hello', model: 'operation-test', operationId };
+    await sql`CREATE TRIGGER reject_direct_running_write
+      BEFORE UPDATE OF state ON product_operations
+      WHEN NEW.operationId = 'direct-running-write-fails' AND NEW.state = 'running'
+      BEGIN SELECT RAISE(ABORT, 'controlled direct running receipt write failure'); END`.execute(
+      db
+    );
+    try {
+      expect((await app.handle(request('/respond', body))).status).toBe(500);
+      expect(provider.directCalls).toBe(0);
+    } finally {
+      await sql`DROP TRIGGER reject_direct_running_write`.execute(db);
+    }
+    expect((await app.handle(request(`/operations/${operationId}`))).status).toBe(404);
+    expect((await app.handle(request('/respond', body))).status).toBe(200);
+    await waitFor(async () => (await receipt(operationId)).state === 'completed');
+    expect(provider.directCalls).toBe(1);
+  });
+  it('keeps a successful direct turn unresolved when its completed receipt write fails', async () => {
+    const operationId = 'direct-completed-write-fails';
+    await sql`CREATE TRIGGER reject_direct_completed_write
+      BEFORE UPDATE OF state ON product_operations
+      WHEN NEW.operationId = 'direct-completed-write-fails' AND NEW.state = 'completed'
+      BEGIN SELECT RAISE(ABORT, 'controlled completed receipt write failure'); END`.execute(db);
+    try {
+      const body = { chatId, prompt: 'Hello', model: 'operation-test', operationId };
+      expect((await app.handle(request('/respond', body))).status).toBe(200);
+      await waitFor(async () => (await receipt(operationId)).state !== 'running');
+      expect(await receipt(operationId)).toMatchObject({ state: 'unresolved' });
+      expect((await app.handle(request('/respond', body))).status).toBe(200);
+      expect(provider.directCalls).toBe(1);
+      const message = await db
+        .selectFrom('messages')
+        .select('text')
+        .where('chatId', '=', chatId)
+        .where('text', '=', 'Answer')
+        .executeTakeFirst();
+      expect(message?.text).toBe('Answer');
+    } finally {
+      await sql`DROP TRIGGER reject_direct_completed_write`.execute(db);
+    }
+  });
+  it('settles a keyed MangoStudio turn as failed after the user stops it', async () => {
+    const operationId = 'stopped-by-user';
+    expect((await submit(operationId)).status).toBe(200);
+    await waitFor(() => provider.calls === 1);
+    const assistant = await db
+      .selectFrom('messages')
+      .select('id')
+      .where('chatId', '=', chatId)
+      .where('role', '=', 'ai')
+      .executeTakeFirstOrThrow();
+    const response = await app.handle(
+      request(`/chats/${chatId}/messages/${assistant.id}/recovery/cancel`, {})
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ status: 'interrupted' });
+    provider.release?.();
+    await waitFor(async () => (await receipt(operationId)).state !== 'running');
+    expect(await receipt(operationId)).toMatchObject({ state: 'failed', messageId: assistant.id });
+    expect((await submit(operationId)).status).toBe(200);
+    expect(provider.calls).toBe(1);
   });
   it('records accepted failure and permits an explicit new operation', async () => {
     provider.fail = true;

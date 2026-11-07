@@ -20,6 +20,7 @@ import { GENERATE_IMAGE_TOOL_NAME } from '../../../services/tools/builtin/genera
 import type { WorkdirPolicy } from '../../../services/tools/types';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import { getOwnedChatOrThrow } from '../../chats/domain/chat-ownership';
+import type { OwnedChatRecord } from '../../chats/infrastructure/chat-repository';
 import { appendSkillsPromptSection } from '../../skills/application/skills-prompt-section';
 import { appendTodosPromptSection } from '../../todos/application/todos-prompt-section';
 import {
@@ -37,6 +38,8 @@ import { assertTextTurnHasContent, normalizeTextTurnAttachmentIds } from './text
 export interface TurnContextInput {
   chatId: string;
   userId: string;
+  /** The owned chat binding recorded by a keyed admission. */
+  admittedChat?: OwnedChatRecord;
   prompt: string;
   attachmentIds?: string[];
   model?: string;
@@ -81,7 +84,7 @@ export async function resolveTurnContext(
   input: TurnContextInput,
   db: Kysely<Database>
 ): Promise<TurnContext> {
-  const chat = await getOwnedChatOrThrow(input.chatId, input.userId, db);
+  const chat = input.admittedChat ?? (await getOwnedChatOrThrow(input.chatId, input.userId, db));
   const attachmentIds = normalizeTextTurnAttachmentIds(input.attachmentIds);
   assertTextTurnHasContent(input.prompt, attachmentIds);
 

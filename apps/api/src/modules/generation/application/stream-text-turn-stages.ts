@@ -1188,6 +1188,7 @@ export async function finalizeInterruptedTurn(
     db
   );
   if (!finalized) return;
+  if (reasonCode === 'user_cancelled') session.input.onUserCancelled?.();
   await updateChatAfterTurn(chatId, Date.now(), db);
   publishActivityInvalidation(userId);
 }

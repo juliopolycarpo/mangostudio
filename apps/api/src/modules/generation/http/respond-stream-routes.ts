@@ -22,7 +22,7 @@ import {
   assertChatAttachmentIdsAvailable,
   ChatAttachmentNotFoundError,
 } from '../../attachments/infrastructure/attachment-repository';
-import { getOwnedChat } from '../../chats/infrastructure/chat-repository';
+import { getOwnedChat, type OwnedChatRecord } from '../../chats/infrastructure/chat-repository';
 import { streamExternalTurn } from '../../external-agents/application/external-turn-stream';
 import {
   EXTERNAL_PREFLIGHT_CODE,
@@ -286,14 +286,15 @@ function toSsePayload(event: StreamEvent): object {
 async function respondStream(
   body: RespondStreamBody,
   userId: string,
-  set: { status?: number | string }
+  set: { status?: number | string },
+  admission?: { chat: OwnedChatRecord; onUserCancelled: () => void }
 ) {
   const db = getDb();
 
   // Ownership check must be pre-flight to return HTTP 404 before SSE
   // headers flush. The same read supplies the persisted runner, which
   // names the agent when the request does not.
-  const ownedChat = await getOwnedChat(body.chatId, userId, db);
+  const ownedChat = admission?.chat ?? (await getOwnedChat(body.chatId, userId, db));
   if (!ownedChat) {
     set.status = 404;
     return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
@@ -487,6 +488,8 @@ async function respondStream(
           {
             chatId: body.chatId,
             userId,
+            admittedChat: admission?.chat,
+            onUserCancelled: admission?.onUserCancelled,
             prompt: reservedRecovery?.effectivePrompt ?? body.prompt,
             attachmentIds,
             model: resolvedModel.modelId,
@@ -617,13 +620,25 @@ export const respondStreamRoutes = (app: Elysia) =>
           );
           if (!claimed) return operationReceipt(row);
           try {
-            const response = await respondStream(body, userId, set);
+            let userCancelled = false;
+            const response = await respondStream(body, userId, set, {
+              chat,
+              onUserCancelled: () => {
+                userCancelled = true;
+              },
+            });
             if (!(response instanceof Response)) {
               // Preflight proves no execution was accepted. Consent retry may reuse the key.
               await releaseOperation(db, userId, operationId);
               return response;
             }
-            await finishOperation(db, userId, operationId, 'running');
+            let state: 'accepted' | 'running' = 'accepted';
+            try {
+              await finishOperation(db, userId, operationId, 'running');
+              state = 'running';
+            } catch (error) {
+              console.error('[respond/stream] Could not persist running receipt', error);
+            }
             // The hub drains its own runner stream; losing the HTTP acknowledgement
             // does not cancel accepted work or create a second execution.
             void drainOperationStream(
@@ -631,9 +646,10 @@ export const respondStreamRoutes = (app: Elysia) =>
               db,
               userId,
               operationId,
-              chat.runner.kind === 'external'
+              chat.runner.kind === 'external',
+              () => userCancelled
             );
-            return operationReceipt({ ...row, state: 'running' });
+            return operationReceipt({ ...row, state });
           } catch (error) {
             await finishOperation(db, userId, operationId, 'unresolved');
             throw error;

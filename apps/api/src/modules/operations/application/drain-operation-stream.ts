@@ -27,7 +27,8 @@ export async function drainOperationStream(
   db: Kysely<Database>,
   userId: string,
   operationId: string,
-  external = false
+  external = false,
+  wasUserCancelled?: () => boolean
 ): Promise<void> {
   let state: 'completed' | 'failed' | 'unresolved' = 'unresolved';
   let messageId: string | undefined;
@@ -76,6 +77,7 @@ export async function drainOperationStream(
     if (externalTerminalState === 'unresolved') state = 'unresolved';
     else if (hadError) state = 'failed';
     else if (hadDone) state = isExternal ? (externalTerminalState ?? 'unresolved') : 'completed';
+    else if (!isExternal && wasUserCancelled?.()) state = 'failed';
   } catch {
     // Transport loss after dispatch is uncertain, never evidence to dispatch again.
     state = 'unresolved';
