@@ -283,7 +283,7 @@ impl TerminalFlow {
     /// Restores consumed byte credit and resumes pending output.
     pub fn ack(&mut self, bytes: usize, emit: &mut impl FnMut(OutputFrame) -> bool) {
         self.inflight = self.inflight.saturating_sub(bytes);
-        if self.attached && self.exit.is_none() {
+        if self.attached && self.exit.is_none() && !self.login_expired() {
             self.drain(emit);
         }
     }
@@ -299,6 +299,7 @@ impl TerminalFlow {
             return;
         }
         self.exit = Some(exit.clone());
+        self.login_expired();
         if !self.attached {
             return;
         }
@@ -579,6 +580,48 @@ mod login_tests {
         flow.on_data(b"private response", &mut |_| true);
         flow.detach();
         assert!(flow.attach().scrollback.is_empty());
+    }
+
+    #[test]
+    fn login_deadline_prevents_ack_and_exit_from_flushing_pending_output() {
+        use super::{ExitInfo, INFLIGHT_WINDOW_BYTES};
+
+        for ack_first in [true, false] {
+            let mut flow = TerminalFlow::new(1).unwrap();
+            flow.enable_login();
+            flow.attach();
+            flow.inflight = INFLIGHT_WINDOW_BYTES;
+            flow.on_data(b"private prompt", &mut |_| panic!("no credit"));
+            flow.login.as_mut().unwrap().started = Instant::now() - Duration::from_secs(600);
+            let mut frames = Vec::new();
+            if ack_first {
+                flow.ack(INFLIGHT_WINDOW_BYTES, &mut |frame| {
+                    frames.push(frame);
+                    true
+                });
+            } else {
+                flow.inflight = 0;
+            }
+            flow.on_exit(
+                ExitInfo {
+                    exit_code: None,
+                    signal: None,
+                },
+                false,
+                &mut |frame| {
+                    frames.push(frame);
+                    true
+                },
+            );
+            assert_eq!(
+                frames
+                    .iter()
+                    .map(|frame| frame.payload["kind"].as_str().unwrap())
+                    .collect::<Vec<_>>(),
+                ["exit"],
+                "expected exit only when the login deadline has passed (ack first: {ack_first})"
+            );
+        }
     }
 
     #[test]

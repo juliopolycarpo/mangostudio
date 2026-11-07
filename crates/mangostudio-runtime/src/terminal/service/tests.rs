@@ -46,6 +46,33 @@ impl PtyHandle for FakePtyHandle {
     }
 }
 
+struct StalledClosePtyHandle {
+    entered: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+}
+
+impl PtyHandle for StalledClosePtyHandle {
+    fn pid(&self) -> u32 {
+        43
+    }
+
+    fn write(&self, _data: Vec<u8>) -> PtyFuture<'_, std::io::Result<()>> {
+        unreachable!("expired login must not receive writes")
+    }
+
+    fn resize(&self, _cols: u16, _rows: u16) -> PtyFuture<'_, std::io::Result<()>> {
+        unreachable!("expired login must not receive resizes")
+    }
+
+    fn close(&self) -> PtyFuture<'_, std::io::Result<()>> {
+        Box::pin(async {
+            self.entered.notify_one();
+            self.release.notified().await;
+            Ok(())
+        })
+    }
+}
+
 struct FakePtySpawner;
 
 impl PtySpawner for FakePtySpawner {
@@ -63,6 +90,7 @@ impl PtySpawner for FakePtySpawner {
 #[derive(Default)]
 struct RecordingPtyState {
     closes: usize,
+    close_failures: usize,
     launches: Vec<(PathBuf, Vec<std::ffi::OsString>)>,
     writes: Vec<Vec<u8>>,
     sizes: Vec<(u16, u16)>,
@@ -88,8 +116,17 @@ impl PtyHandle for RecordingPtyHandle {
     }
 
     fn close(&self) -> PtyFuture<'_, std::io::Result<()>> {
-        self.0.lock().unwrap().closes += 1;
-        Box::pin(async { Ok(()) })
+        let mut state = self.0.lock().unwrap();
+        state.closes += 1;
+        let result = if state.close_failures > 0 {
+            state.close_failures -= 1;
+            Err(std::io::Error::other(
+                "injected transient PTY close failure",
+            ))
+        } else {
+            Ok(())
+        };
+        Box::pin(async move { result })
     }
 }
 
@@ -196,19 +233,24 @@ fn service_with_live_entry(closes: Arc<Mutex<usize>>) -> Service {
         Arc::new(FakePtySpawner),
         Arc::new(PathEnv::default),
     );
-    let entry = Arc::new(Entry {
-        session_id: "one".into(),
+    let entry = fake_entry("one", Arc::new(FakePtyHandle { closes }));
+    *service.sessions.lock().unwrap() = HashMap::from([("one".into(), Slot::Live(entry))]);
+    service
+}
+
+fn fake_entry(id: &str, handle: Arc<dyn PtyHandle>) -> Arc<Entry> {
+    Arc::new(Entry {
+        session_id: id.into(),
         shell: RuntimeShellKind::Bash,
         cwd: "/tmp".into(),
         size: Mutex::new((80, 24)),
         flow: Arc::new(Mutex::new(TerminalFlow::new(64).unwrap())),
-        handle: Arc::new(FakePtyHandle { closes }),
+        handle,
         operation: tokio::sync::Mutex::new(()),
         closed: std::sync::atomic::AtomicBool::new(false),
+        expiry_closing: std::sync::atomic::AtomicBool::new(false),
         consent_revoked: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-    });
-    *service.sessions.lock().unwrap() = HashMap::from([("one".into(), Slot::Live(entry))]);
-    service
+    })
 }
 
 #[test]
@@ -792,6 +834,213 @@ fn login_refuses_shell_or_environment_overrides_and_unknown_targets() {
     assert!(prepare(params, host.clone()).is_err());
     let mut params = open_params();
     params.shell = None;
+    params.login_target = Some("codex".into());
+    params.env_policy.deny.push("CODEX_HOME".into());
+    let Err(error) = prepare(params, host.clone()) else {
+        panic!("expected login to refuse an environment override");
+    };
+    assert_eq!(
+        error
+            .details
+            .as_ref()
+            .and_then(|details| details["kind"].as_str()),
+        Some("tool_argument"),
+        "expected a login environment override to fail validation | received {error:?}"
+    );
+    assert!(
+        error
+            .message
+            .contains("without shell or environment overrides")
+    );
+    let mut params = open_params();
+    params.shell = None;
     params.login_target = Some("codex; touch marker".into());
     assert!(prepare(params, host).is_err());
+}
+
+#[tokio::test]
+async fn stalled_login_expiry_does_not_block_consent_revocation() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+    use tokio::sync::Notify;
+
+    let closes = Arc::new(Mutex::new(0));
+    let mut service = service_with_live_entry(Arc::clone(&closes));
+    let granted = Arc::new(AtomicBool::new(true));
+    service.shell_read = {
+        let granted = Arc::clone(&granted);
+        Arc::new(move || granted.load(Ordering::Acquire))
+    };
+    let entered = Arc::new(Notify::new());
+    let release = Arc::new(Notify::new());
+    let login = fake_entry(
+        "login",
+        Arc::new(StalledClosePtyHandle {
+            entered: Arc::clone(&entered),
+            release: Arc::clone(&release),
+        }),
+    );
+    {
+        let mut flow = login.flow.lock().unwrap();
+        flow.enable_login();
+        flow.on_data(&vec![b'x'; 64 * 1024 + 1], &mut |_| panic!("no viewer"));
+    }
+    service
+        .sessions
+        .lock()
+        .unwrap()
+        .insert("login".into(), Slot::Live(login));
+    let service = Arc::new(service);
+    let options = |role: &str| {
+        SessionOptions::new(PeerInfo {
+            name: "terminal-watcher-test".into(),
+            version: "0.1.0".into(),
+            role: role.into(),
+        })
+    };
+    let (runtime_port, hub_port) = port_pair();
+    let (runtime, _runtime_driver) = Session::spawn(runtime_port, options("runtime"));
+    let (_hub, _hub_driver) = Session::spawn(hub_port, options("hub"));
+    runtime
+        .ready()
+        .await
+        .expect("terminal watcher test handshake");
+    service.start_watcher(runtime);
+    tokio::time::timeout(Duration::from_secs(2), entered.notified())
+        .await
+        .expect("expected watcher to attempt closing the overflowed login");
+    granted.store(false, Ordering::Release);
+
+    let revoked = tokio::time::timeout(Duration::from_secs(2), async {
+        while *closes.lock().unwrap() == 0 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await;
+    release.notify_waiters();
+    assert!(
+        revoked.is_ok(),
+        "expected consent withdrawal to close the ordinary terminal while login cleanup is stalled | received {} close attempts",
+        *closes.lock().unwrap()
+    );
+}
+
+#[tokio::test]
+async fn login_overflow_refuses_pty_operations_before_the_watcher_closes() {
+    let (scratch, service, state) = prepared_service_with(|service| {
+        service.shell_read = Arc::new(|| true);
+        service
+            .watcher_started
+            .store(true, std::sync::atomic::Ordering::Release);
+    });
+    let suffix = if cfg!(windows) { ".exe" } else { "" };
+    std::fs::copy(
+        scratch.join(format!("bash{suffix}")),
+        scratch.join(format!("codex{suffix}")),
+    )
+    .unwrap();
+    let mut params = open_params();
+    params.shell = None;
+    params.login_target = Some("codex".into());
+    service
+        .open(params, fake_session(), CancellationToken::new())
+        .await
+        .unwrap();
+    let on_data = state.lock().unwrap().on_data.clone().unwrap();
+    on_data(&vec![b'x'; 64 * 1024 + 1]);
+
+    let attached = service.attach(SessionParams {
+        session_id: "terminal-1".into(),
+    });
+    let written = service
+        .write(WriteParams {
+            session_id: "terminal-1".into(),
+            data: "eA==".into(),
+        })
+        .await;
+    let resized = service
+        .resize(ResizeParams {
+            session_id: "terminal-1".into(),
+            cols: 90.0,
+            rows: 25.0,
+        })
+        .await;
+
+    state.lock().unwrap().close_failures = 1;
+    let mut closes = tokio::task::JoinSet::new();
+    service.expire_logins(&mut closes);
+    closes.join_next().await.unwrap().unwrap();
+    assert!(
+        service.sessions.lock().unwrap().contains_key("terminal-1"),
+        "expected expiry to retain the handle after a transient close failure"
+    );
+    assert!(service.require("terminal-1").is_err());
+    service.expire_logins(&mut closes);
+    closes.join_next().await.unwrap().unwrap();
+    for (method, result) in [
+        ("attach", attached),
+        ("write", written),
+        ("resize", resized),
+    ] {
+        let error = result.expect_err(&format!(
+            "expected terminal.{method} to refuse an expired login"
+        ));
+        assert_eq!(error.details.unwrap()["kind"], "terminal_not_found");
+    }
+    let state = state.lock().unwrap();
+    assert_eq!(
+        (state.writes.len(), state.sizes.len(), state.closes),
+        (0, 0, 2)
+    );
+    assert_eq!(service.list().unwrap()["sessions"], serde_json::json!([]));
+}
+
+#[test]
+fn windows_login_resolves_native_executable_with_mixed_case_path() {
+    let (scratch, mut host) = host_with_shells(
+        "terminal-win-login",
+        "win32",
+        &["codex", "codex.cmd", "codex.exe"],
+    );
+    let path = host.env.remove("PATH").unwrap();
+    host.env.insert("Path".into(), path);
+    let mut params = open_params();
+    params.shell = None;
+    params.login_target = Some("codex".into());
+    let launch = prepare(params, host.clone()).expect("expected Path to locate codex.exe");
+    assert_eq!(launch.request.program, scratch.join("codex.exe"));
+
+    std::fs::remove_file(scratch.join("codex.exe")).unwrap();
+    let mut params = open_params();
+    params.shell = None;
+    params.login_target = Some("codex".into());
+    let Err(error) = prepare(params, host) else {
+        panic!("expected login to refuse bare and batch shims on Windows");
+    };
+    assert_eq!(error.code, codes::UNAVAILABLE);
+    assert!(error.message.contains("Copy the command instead."));
+}
+
+#[cfg(unix)]
+#[test]
+fn relative_login_path_is_pinned_before_changing_working_directory() {
+    let (scratch, mut host) = host_with_shells("terminal-relative-login", "linux", &["codex"]);
+    let current = std::env::current_dir().unwrap();
+    let relative: PathBuf = current.components().skip(1).map(|_| "..").collect();
+    let relative = relative.join(scratch.strip_prefix("/").unwrap());
+    host.env
+        .insert("PATH".into(), relative.to_string_lossy().into_owned());
+    let mut params = open_params();
+    params.shell = None;
+    params.login_target = Some("codex".into());
+    let launch = prepare(params, host).expect("expected relative PATH to locate codex");
+    assert!(
+        launch.request.program.is_absolute(),
+        "expected the located executable pinned before chdir | received {:?}",
+        launch.request.program
+    );
+    assert_eq!(
+        launch.request.program.canonicalize().unwrap(),
+        scratch.join("codex").canonicalize().unwrap()
+    );
 }

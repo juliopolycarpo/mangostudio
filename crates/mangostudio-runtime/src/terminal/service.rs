@@ -15,6 +15,7 @@ use mangostudio_runtime_contract::manifest::RuntimeShellKind;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::Mutex as AsyncMutex;
+use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 use super::flow::{ExitInfo, OutputFrame, SCROLLBACK_MAX_BYTES, TerminalFlow};
@@ -84,10 +85,20 @@ struct Entry {
     handle: Arc<dyn PtyHandle>,
     operation: AsyncMutex<()>,
     closed: AtomicBool,
+    expiry_closing: AtomicBool,
     consent_revoked: Arc<AtomicBool>,
 }
 
 impl Entry {
+    fn accepts_effects(&self) -> bool {
+        let expired = self
+            .flow
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .login_expired();
+        !expired && !self.closed.load(Ordering::Acquire)
+    }
+
     fn snapshot(&self) -> Value {
         let size = {
             let guard = self
@@ -285,6 +296,7 @@ impl Service {
             handle: Arc::clone(&handle),
             operation: AsyncMutex::new(()),
             closed: AtomicBool::new(false),
+            expiry_closing: AtomicBool::new(false),
             consent_revoked,
         });
         let admitted = {
@@ -316,11 +328,16 @@ impl Service {
 
     fn attach(&self, params: SessionParams) -> Result<Value, RemoteError> {
         let entry = self.require(&params.session_id)?;
-        let state = entry
-            .flow
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .attach();
+        let state = {
+            let mut flow = entry
+                .flow
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            if entry.closed.load(Ordering::Acquire) || flow.login_expired() {
+                return Err(not_found(&params.session_id));
+            }
+            flow.attach()
+        };
         let size = *entry
             .size
             .lock()
@@ -371,7 +388,7 @@ impl Service {
             return Err(exited(&params.session_id));
         }
         self.recheck(&entry, "terminal.write").await?;
-        if entry.closed.load(Ordering::Acquire) {
+        if !entry.accepts_effects() {
             return Err(not_found(&params.session_id));
         }
         entry.handle.write(data).await.map_err(pty_io)?;
@@ -387,7 +404,7 @@ impl Service {
             return Err(not_found(&params.session_id));
         }
         self.recheck(&entry, "terminal.resize").await?;
-        if entry.closed.load(Ordering::Acquire) {
+        if !entry.accepts_effects() {
             return Err(not_found(&params.session_id));
         }
         entry.handle.resize(cols, rows).await.map_err(pty_io)?;
@@ -528,7 +545,7 @@ impl Service {
         }
     }
 
-    async fn expire_logins(&self) {
+    fn expire_logins(self: &Arc<Self>, closes: &mut JoinSet<()>) {
         let entries: Vec<_> = self
             .sessions
             .lock()
@@ -545,11 +562,15 @@ impl Service {
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
                 .login_expired();
-            if expired {
-                // Retain the handle if close fails so cleanup stays reachable.
-                if self.close_entry(&entry).await.is_ok() {
-                    self.remove_live(&entry);
-                }
+            if expired && !entry.expiry_closing.swap(true, Ordering::AcqRel) {
+                let service = Arc::clone(self);
+                closes.spawn(async move {
+                    // Retain the handle if close fails so cleanup stays reachable.
+                    if service.close_entry(&entry).await.is_ok() {
+                        service.remove_live(&entry);
+                    }
+                    entry.expiry_closing.store(false, Ordering::Release);
+                });
             }
         }
     }
@@ -582,7 +603,7 @@ impl Service {
                 })
                 .collect::<Vec<_>>()
         };
-        let mut closes = tokio::task::JoinSet::new();
+        let mut closes = JoinSet::new();
         for entry in entries {
             closes.spawn(async move {
                 let _ = entry.handle.close().await;
@@ -596,6 +617,7 @@ async fn watch_consent(service: Weak<Service>, session: Session) {
     let mut ticks = tokio::time::interval(CONSENT_POLL);
     ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     ticks.tick().await;
+    let mut closes = JoinSet::new();
     loop {
         tokio::select! {
             _ = session.closed() => {
@@ -606,9 +628,10 @@ async fn watch_consent(service: Weak<Service>, session: Session) {
             }
             _ = ticks.tick() => {
                 let Some(service) = service.upgrade() else { return; };
-                service.expire_logins().await;
+                service.expire_logins(&mut closes);
                 service.poll_consent().await;
             }
+            _ = closes.join_next(), if !closes.is_empty() => {}
         }
     }
 }
@@ -757,7 +780,10 @@ fn prepare(params: OpenParams, host: PathEnv) -> Result<Prepared, RemoteError> {
     let shell = params.shell.unwrap_or_else(|| default_shell(&host));
     let login = params.login_target.is_some();
     if login
-        && (params.shell.is_some() || params.env.is_some() || !params.env_policy.allow.is_empty())
+        && (params.shell.is_some()
+            || params.env.is_some()
+            || !params.env_policy.allow.is_empty()
+            || !params.env_policy.deny.is_empty())
     {
         return Err(invalid_argument(
             "login overrides",
@@ -786,21 +812,30 @@ fn prepare(params: OpenParams, host: PathEnv) -> Result<Prepared, RemoteError> {
         let descriptor = descriptors
             .get(&target)
             .ok_or_else(|| invalid_argument("login target", "a supported vendor"))?;
-        let path = env.get("PATH").map(String::as_str).unwrap_or("");
-        let program =
-            crate::health::which_in(&descriptor.program, OsStr::new(path)).ok_or_else(|| {
-                RemoteError::new(codes::UNAVAILABLE, "Login executable is unavailable.")
+        let windows = host.is_windows();
+        let path = environment::allowlisted_entry(&env, "PATH", windows)
+            .map(|(_, value)| value.as_str())
+            .filter(|value| !value.is_empty());
+        // Native Windows installs use .exe. The bare shim and the batch launcher
+        // installed alongside it cannot be passed literal argv on Windows.
+        let name = if windows {
+            format!("{}.exe", descriptor.program)
+        } else {
+            descriptor.program.clone()
+        };
+        let program = path
+            .and_then(|path| crate::health::which_in(&name, OsStr::new(path)))
+            .ok_or_else(|| {
+                let message = if windows {
+                    "A native login executable is unavailable. Copy the command instead."
+                } else {
+                    "Login executable is unavailable."
+                };
+                RemoteError::new(codes::UNAVAILABLE, message)
             })?;
-        // Batch files require a command interpreter; that would violate literal argv execution.
-        if program
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"))
-        {
-            return Err(RemoteError::new(
-                codes::UNAVAILABLE,
-                "Login requires a native executable; copy the command instead.",
-            ));
-        }
+        // Resolve relative PATH entries against the runtime directory before
+        // the PTY changes to the requested workspace.
+        let program = std::path::absolute(program).map_err(pty_io)?;
         (program, descriptor.args.clone())
     } else {
         (

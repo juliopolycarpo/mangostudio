@@ -1291,29 +1291,26 @@ answers `METHOD_UNSUPPORTED`, which is a normal decodeable outcome.
 
 ### Vendor login PTYs
 
-A runtime positively advertises `terminalLoginArgv` when `terminal.open` accepts
-`loginTarget`. The target selects literal executable and argument fields from
-`apps/shared/src/external-agents/login.json`; display hints are derived from that
-same descriptor. It never becomes a shell command. Unknown targets, shell/env
-overrides and Windows batch launchers are refused. The existing environment,
-workspace ownership, isolation and shell consent checks still apply. Missing
-capability keeps the copy-command fallback; the hub sends no extension to an old
-peer. Selecting both `loginTarget` and `shell` returns the existing
-`ApiErrorResponse` shape with HTTP 400 and code `VALIDATION`, before Hub reservation,
-chat lookup or runtime RPC. Ordinary shell requests and login-only requests retain
-their existing wire fields. This contract does not add a login button or treat process exit as proof of
-an authenticated account.
+A runtime advertises `terminalLoginArgv` when `terminal.open` accepts
+`loginTarget`. Each supported vendor's executable and arguments come from
+`apps/shared/src/external-agents/login.json`, which also supplies the copyable
+command. The runtime resolves the executable against its effective `PATH` before
+changing the working directory. Windows requires the vendor's `.exe`. Unknown
+targets and shell or environment overrides are refused.
 
-Login output lives only in memory. Up to 64 KiB is held until the first viewer,
-then consumed and erased; subsequent attachments have no transcript replay.
-Overflow closes the process instead of silently discarding the first prompt. A
-viewer has 30 seconds to attach, and every login has a ten-minute total lifetime.
-The existing 100 ms consent watcher also enforces these deadlines, subject to
-scheduler delay. There are at most 16 runtime sessions and 16 owned PTY children.
-The live-viewer pending queue is also 64 KiB, with existing credit flow. Timeout
-and overflow erase buffers before process cleanup; failed closes retain their
-owned handle for retry. Cancellation, disconnect and consent withdrawal use the
-existing terminal cleanup. No transcript, credentials or login output is written
-to audit or persistent storage. No real vendor login was required for the fake
-launch and lifecycle tests. Native executables are required on Windows until a
-literal-argv batch-launch contract is available.
+Environment and workspace ownership, isolation, and shell consent checks apply
+to login PTYs. The Hub sends `loginTarget` only to peers that advertise the
+capability. Other peers use the copyable command. If a request pairs
+`loginTarget` with `shell`, the Hub returns HTTP 400 with the `VALIDATION` code
+before reserving a terminal, looking up the chat, or contacting the runtime.
+Process exit reports the end of the PTY. Account verification is separate.
+
+The runtime holds up to 64 KiB of output in memory for the first viewer and
+discards that replay after one attach. Overflow closes the login. The first
+viewer has 30 seconds to attach, and the login can run for up to ten minutes.
+An expired login refuses attach and PTY input and discards pending output.
+The 100 ms watcher starts cleanup independently of consent polling. It retries
+transient close failures. The live viewer's pending queue also holds up to
+64 KiB, with the usual terminal credit flow. At most 16 terminal sessions and
+16 PTY children can be open in the runtime. MangoStudio keeps the login
+transcript out of persistent storage and the audit log.

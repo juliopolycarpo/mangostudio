@@ -643,11 +643,9 @@ async fn detect_shells(path_override: Option<&std::ffi::OsStr>) -> Vec<RuntimeSh
 /// Resolves `name` against an explicit `PATH` value, checking (on Unix)
 /// that it is actually executable rather than merely present — mirrors
 /// `Bun.which`'s own check. On Windows, `<name>.exe` is tried alongside the
-/// bare name. Never reads the real environment itself — both callers
-/// ([`detect_shells`] and [`probe_git`]) resolve `PATH` (or a test's
-/// override) once themselves, which is the seam their own tests use to
-/// point this walk at a temporary directory instead of mutating the real,
-/// process-wide `PATH` every test in this binary shares.
+/// bare name unless the caller supplies the `.exe` suffix. Never reads
+/// the real environment. Tests can supply a temporary search directory
+/// without mutating the process-wide `PATH`.
 ///
 /// Returns `dir.join(name)` as found, never canonicalised: two `PATH`
 /// entries that reach the same real file through a symlink or a `..`
@@ -665,7 +663,7 @@ pub(crate) fn which_in(name: &str, path_var: &std::ffi::OsStr) -> Option<PathBuf
         if is_executable_file(&candidate) {
             return Some(candidate);
         }
-        if cfg!(windows) {
+        if cfg!(windows) && !name.ends_with(".exe") {
             let with_exe = dir.join(format!("{name}.exe"));
             if is_executable_file(&with_exe) {
                 return Some(with_exe);
