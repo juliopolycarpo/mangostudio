@@ -388,6 +388,13 @@ where
                     reason: close.reason,
                 });
             }
+            // A read that won the deadline race can already have decoded frames.
+            if let Some(frame) = self.pending.pop_front() {
+                if matches!(frame, Frame::Hello(_)) {
+                    self.disarm_first_hello();
+                }
+                return Some(Inbound::Frame(frame));
+            }
             if self
                 .first_hello_deadline
                 .as_ref()
@@ -395,12 +402,6 @@ where
             {
                 self.expire_first_hello().await;
                 continue;
-            }
-            if let Some(frame) = self.pending.pop_front() {
-                if matches!(frame, Frame::Hello(_)) {
-                    self.disarm_first_hello();
-                }
-                return Some(Inbound::Frame(frame));
             }
             if let Some(closure) = self.closure.take() {
                 if ipc_close.is_some() {
@@ -465,7 +466,6 @@ where
         if !self.writer.elect_close(IpcClose::Inbound) {
             return;
         }
-        self.pending.clear();
         let close = FirstHelloDeadline::timeout_close();
         // Persist before yielding so cancellation cannot lose the closure notification.
         self.record_closure(PortClosure::Closed {
@@ -1677,6 +1677,41 @@ mod local_hello_tests {
         ));
         assert_eq!(start.elapsed(), Duration::from_secs(15));
         assert_eq!(rx.recv().await, None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_ready_read_at_the_deadline_delivers_its_decoded_hello() {
+        let (mut peer, stream) = tokio::io::duplex(1024);
+        let (reader, writer) = tokio::io::split(stream);
+        let duration = Duration::from_secs(15);
+        let (_tx, mut rx) = NdjsonPort::new(reader, writer)
+            .with_first_hello_timeout(duration)
+            .split();
+
+        let received = {
+            let receiving = rx.recv();
+            tokio::pin!(receiving);
+            tokio::select! {
+                biased;
+                result = &mut receiving => panic!("expected a pending read, got {result:?}"),
+                () = tokio::task::yield_now() => (),
+            }
+            // The read and its timer are both ready the next time recv is polled.
+            tokio::time::advance(duration).await;
+            peer.write_all(b"{\"type\":\"hello\",\"protocol\":{\"major\":1,\"minor\":0},\"peer\":{\"name\":\"raw\",\"version\":\"0\",\"role\":\"tool\"},\"capabilities\":{}}\n{\"type\":\"ping\"}\n")
+                .await
+                .unwrap();
+            receiving.await
+        };
+
+        assert!(
+            matches!(received, Some(Inbound::Frame(crate::Frame::Hello(_)))),
+            "expected the decoded hello from the ready read, got {received:?}"
+        );
+        assert!(matches!(
+            rx.recv().await,
+            Some(Inbound::Frame(crate::Frame::Ping))
+        ));
     }
 
     #[tokio::test(start_paused = true)]
