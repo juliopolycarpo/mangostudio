@@ -9,7 +9,8 @@ export function useFirstChatOperation(operationId?: string) {
     queryFn: () => getOperation(operationId ?? ''),
     retry: false,
     refetchInterval: (query) =>
-      query.state.data?.state === 'accepted' || query.state.data?.state === 'running'
+      query.state.status !== 'error' &&
+      (query.state.data?.state === 'accepted' || query.state.data?.state === 'running')
         ? 1000
         : false,
   });

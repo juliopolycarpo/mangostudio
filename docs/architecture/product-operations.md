@@ -62,8 +62,8 @@ the table and loses its reservations; restoring a pre-migration database also
 loses those guarantees. No migration is run against a live database by this PR.
 
 The receipt/result recovery window is seven days from initial admission, never
-extended by replay. Expired lookup or replay returns typed 410 and never admits
-the key again. Minimal identity/fingerprint tombstones remain until account
+extended by replay. Expired lookup or replay returns 410 with
+`OPERATION_EXPIRED`. The key remains reserved. Minimal identity/fingerprint tombstones remain until account
 deletion. Expired chat-result snapshots are cleared on lookup and opportunistically
 on a new claim; clearing is lazy, not a timed deletion guarantee. Turn text and
 provider secrets are not stored in this table; ordinary transcripts keep their
@@ -82,8 +82,9 @@ operation's own assistant message satisfies the answer fact. Records that have
 never opted into operation identity retain legacy transcript completion
 compatibility.
 
-A failed or unresolved operation offers an explicit new-request action. That
-clears the turn ID while retaining the chat. A running operation cannot be
-replaced through that action. The receipt query polls only accepted/running work
-while the surface is visible. Failed recovery/expiry shows uncertainty and an
-escape to the chat instead of an indefinite waiting claim.
+A failed, unresolved, or expired operation offers an explicit new-request
+action. That clears the turn ID while retaining an existing chat. The receipt
+query polls accepted or running work while the surface is visible. If a status
+check fails, the user can check again with the same ID. If saving a recovered
+chat fails, the user can retry that save without creating another chat. If the
+chat is gone, setup offers to clear its IDs and start a fresh chat.

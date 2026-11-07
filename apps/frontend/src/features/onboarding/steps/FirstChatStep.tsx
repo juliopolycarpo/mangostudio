@@ -1,9 +1,12 @@
 /** Explicit first-chat operations survive reloads; transcript text never admits a turn. */
 
+import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { GENERATION_PROMPT_MAX_LENGTH } from '@mangostudio/shared/generation/values';
 import type { OnboardingState } from '@mangostudio/shared/onboarding';
+import type { OperationReceipt } from '@mangostudio/shared/operations';
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
@@ -18,13 +21,13 @@ import {
 import { sendWithExternalConsent } from '@/features/external-agents/send-with-consent';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
+import { ApiError } from '@/lib/utils';
 import { submitOperation } from '@/services/operation-service';
 
 import { StepFrame } from '../StepFrame';
 import { useFirstChatOperation } from '../use-first-chat-operation';
 
 interface FirstChatStepProps {
-  readonly environmentId: string;
   readonly state: OnboardingState;
   readonly onChange: (updater: (current: OnboardingState) => OnboardingState) => Promise<void>;
   readonly answered: boolean;
@@ -45,7 +48,6 @@ interface FirstChatStepProps {
 }
 
 export function FirstChatStep({
-  environmentId,
   state,
   onChange,
   answered,
@@ -59,24 +61,59 @@ export function FirstChatStep({
   const [prompt, setPrompt] = useState(state.turnOperation?.prompt ?? s.defaultPrompt);
   const [isSending, setSending] = useState(false);
   const [hasFailed, setFailed] = useState(false);
+  const [unavailableChat, setUnavailableChat] = useState<{
+    chatId?: string;
+    creationId?: string;
+  }>();
   const createChat = useCreateChatMutation();
   const updateChat = useUpdateChatMutation();
   const operation = useFirstChatOperation(
     state.chatId ? state.turnOperation?.operationId : state.createChatOperation?.operationId
   );
+  const receipt = operation.data;
+  const creationId = state.createChatOperation?.operationId;
+  const chatUnavailable =
+    unavailableChat !== undefined &&
+    unavailableChat.chatId === state.chatId &&
+    unavailableChat.creationId === creationId;
+  const recoveredChatId =
+    !state.chatId &&
+    receipt?.kind === 'create-chat' &&
+    receipt.state === 'completed' &&
+    receipt.operationId === creationId
+      ? receipt.chatId
+      : null;
   const sending = useRef(false);
+  const attemptedRecovery = useRef<string | undefined>(undefined);
+  const [isRecovering, setRecovering] = useState(false);
+  const [failedRecovery, setFailedRecovery] = useState<string>();
+  const recoverChat = useCallback(async () => {
+    if (!creationId || !recoveredChatId || isRecovering || sending.current) return;
+    attemptedRecovery.current = creationId;
+    setRecovering(true);
+    setFailedRecovery(undefined);
+    onWritingChange(true);
+    try {
+      await onChange((current) =>
+        !current.chatId && current.createChatOperation?.operationId === creationId
+          ? { ...current, chatId: recoveredChatId }
+          : current
+      );
+    } catch {
+      setFailedRecovery(creationId);
+    } finally {
+      setRecovering(false);
+      onWritingChange(false);
+    }
+  }, [creationId, recoveredChatId, isRecovering, onChange, onWritingChange]);
   useEffect(() => {
     if (state.turnOperation) setPrompt(state.turnOperation.prompt);
   }, [state.turnOperation]);
   useEffect(() => {
-    const receipt = operation.data;
-    if (!state.chatId && receipt?.kind === 'create-chat' && receipt.chatId) {
-      onWritingChange(true);
-      void onChange((current) => ({ ...current, chatId: receipt.chatId ?? undefined }))
-        .catch(() => setFailed(true))
-        .finally(() => onWritingChange(false));
+    if (!isSending && recoveredChatId && attemptedRecovery.current !== creationId) {
+      void recoverChat();
     }
-  }, [operation.data, state.chatId, onChange, onWritingChange]);
+  }, [isSending, creationId, recoveredChatId, recoverChat]);
   useEffect(() => {
     if (operation.data?.state === 'completed' && state.chatId) {
       void queryClient.invalidateQueries({ queryKey: messageKeys.list(state.chatId) });
@@ -96,6 +133,8 @@ export function FirstChatStep({
     setFailed(false);
     let pendingOperationId: string | undefined;
     let pendingCreationId: string | undefined;
+    let chatId = state.chatId;
+    let preparingChat = false;
     try {
       // Persist identity and exact input before sending either request. A lost
       // settings acknowledgement stops here; reload reads the committed identity.
@@ -104,15 +143,24 @@ export function FirstChatStep({
         title: prompt.slice(0, 60),
       };
       let turn = state.turnOperation ?? { operationId: crypto.randomUUID(), prompt };
+      const prepared: { destination?: OnboardingState } = {};
       onWritingChange(true);
-      let chatId = state.chatId;
       try {
         await onChange((current) => {
-          // Another tab may have recorded identity since this render. Keep
-          // the confirmed operation instead of replacing it with our candidate.
+          if (
+            !current.workdir ||
+            (state.chatId && current.chatId !== state.chatId) ||
+            (creationId && current.createChatOperation?.operationId !== creationId) ||
+            (state.turnOperation &&
+              current.turnOperation?.operationId !== state.turnOperation.operationId)
+          ) {
+            return current;
+          }
+          // Another tab may have stored the request since this render.
           creation = current.createChatOperation ?? creation;
           turn = current.turnOperation ?? turn;
-          chatId = current.chatId ?? chatId;
+          chatId = current.chatId;
+          prepared.destination = current;
           pendingOperationId = turn.operationId;
           pendingCreationId = creation.operationId;
           return {
@@ -122,23 +170,37 @@ export function FirstChatStep({
             turnOperation: turn,
           };
         });
+        if (!prepared.destination) return;
         if (!chatId) {
+          preparingChat = true;
           const chat = await createChat.mutateAsync(creation);
+          preparingChat = false;
+          let matchesAttempt = false;
+          await onChange((current) => {
+            matchesAttempt =
+              current.createChatOperation?.operationId === creation.operationId &&
+              current.turnOperation?.operationId === turn.operationId &&
+              (!current.chatId || current.chatId === chat.id);
+            return matchesAttempt ? { ...current, chatId: chat.id } : current;
+          });
+          if (!matchesAttempt) return;
           chatId = chat.id;
-          await onChange((current) => ({ ...current, chatId }));
         }
       } finally {
         onWritingChange(false);
       }
 
+      const { workdir, runner, environmentId } = prepared.destination;
+      preparingChat = true;
       await updateChat.mutateAsync({
         id: chatId,
         updates: {
-          environmentId,
-          ...(state.workdir ? { workdir: state.workdir } : {}),
-          ...(state.runner ? { runner: state.runner } : {}),
+          environmentId: environmentId ?? LOCAL_ENVIRONMENT_ID,
+          workdir,
+          ...(runner ? { runner } : {}),
         },
       });
+      preparingChat = false;
       const sendChatId = chatId;
       await sendWithExternalConsent(sendChatId, async () => {
         const receipt = await submitOperation({
@@ -146,10 +208,27 @@ export function FirstChatStep({
           prompt: turn.prompt,
           operationId: turn.operationId,
         });
-        queryClient.setQueryData(['product-operation', turn.operationId], receipt);
+        const queryKey = ['product-operation', turn.operationId];
+        // A lookup sent before admission may still be returning a 404.
+        await queryClient.cancelQueries({ queryKey, exact: true });
+        queryClient.setQueryData<OperationReceipt | null>(queryKey, (current) => {
+          if (current && current.state !== 'accepted' && current.state !== 'running')
+            return current;
+          if (current?.state === 'running' && receipt.state === 'accepted') return current;
+          return receipt;
+        });
       });
-    } catch {
-      setFailed(true);
+    } catch (error) {
+      if (
+        preparingChat &&
+        error instanceof ApiError &&
+        (error.code === ERROR_CODES.NOT_FOUND ||
+          (!chatId && error.code === ERROR_CODES.OPERATION_EXPIRED))
+      ) {
+        setUnavailableChat({ chatId, creationId: pendingCreationId });
+      } else {
+        setFailed(true);
+      }
       if (pendingCreationId)
         await queryClient.invalidateQueries({ queryKey: ['product-operation', pendingCreationId] });
       if (pendingOperationId)
@@ -162,22 +241,45 @@ export function FirstChatStep({
     }
   };
 
-  const receipt = operation.data;
   const busy = receipt?.state === 'accepted' || receipt?.state === 'running';
-  // Completion remains the result of this setup attempt, even while its
-  // transcript is loading. Only an unsuccessful/unknown attempt can be reset.
+  const expired =
+    operation.error instanceof ApiError && operation.error.code === ERROR_CODES.OPERATION_EXPIRED;
   const canStartNewRequest =
-    !answered && receipt?.state !== 'completed' && ((receipt && !busy) || operation.isError);
+    !answered &&
+    (chatUnavailable ||
+      (receipt?.state !== 'completed' &&
+        (expired || receipt?.state === 'failed' || receipt?.state === 'unresolved')));
   const newRequest = async () => {
     if (!canStartNewRequest || sending.current) return;
+    const operationId = state.chatId ? state.turnOperation?.operationId : creationId;
     onWritingChange(true);
     try {
-      await onChange((current) => ({
-        ...current,
-        turnOperation: undefined,
-        requiresTurnReceipt: true,
-        ...(!current.chatId ? { createChatOperation: undefined } : {}),
-      }));
+      await onChange((current) => {
+        const currentId = current.chatId
+          ? current.turnOperation?.operationId
+          : current.createChatOperation?.operationId;
+        if (currentId !== operationId) return current;
+        if (chatUnavailable) {
+          if (
+            current.chatId !== state.chatId ||
+            current.createChatOperation?.operationId !== creationId
+          )
+            return current;
+          return {
+            ...current,
+            chatId: undefined,
+            createChatOperation: undefined,
+            turnOperation: undefined,
+            requiresTurnReceipt: true,
+          };
+        }
+        return {
+          ...current,
+          turnOperation: undefined,
+          requiresTurnReceipt: true,
+          ...(!current.chatId ? { createChatOperation: undefined } : {}),
+        };
+      });
     } catch {
       setFailed(true);
     } finally {
@@ -240,8 +342,10 @@ export function FirstChatStep({
             prompt.trim().length === 0 ||
             answered ||
             Boolean(receipt) ||
+            chatUnavailable ||
             operation.isError ||
-            isSending
+            isSending ||
+            isRecovering
           }
           onClick={() => void send()}
         >
@@ -253,7 +357,7 @@ export function FirstChatStep({
             documented escape from a turn that failed server-side — open the
             chat, edit the prompt — a route that exists. The chat list opens on
             its most recent entry, which is this one. */}
-        {state.chatId ? (
+        {state.chatId && !chatUnavailable ? (
           <Button
             variant="subtle"
             data-testid="onboarding-open-chat"
@@ -270,7 +374,8 @@ export function FirstChatStep({
         </Callout>
       ) : null}
 
-      {receipt ? (
+      {chatUnavailable ? <Callout tone="warning">{s.chatUnavailable}</Callout> : null}
+      {receipt && !expired && !chatUnavailable ? (
         <Callout
           tone={receipt.state === 'failed' || receipt.state === 'unresolved' ? 'warning' : 'info'}
           data-testid="onboarding-operation-state"
@@ -279,7 +384,42 @@ export function FirstChatStep({
           {s.operationStates[receipt.state]}
         </Callout>
       ) : null}
-      {operation.isError ? <Callout tone="warning">{s.operationUnavailable}</Callout> : null}
+      {expired && !chatUnavailable ? <Callout tone="warning">{s.operationExpired}</Callout> : null}
+      {operation.isError && !expired && !chatUnavailable ? (
+        <Callout
+          tone="warning"
+          action={
+            <Button
+              variant="secondary"
+              size="sm"
+              data-testid="onboarding-retry-status"
+              loading={operation.isFetching}
+              onClick={() => void operation.refetch()}
+            >
+              {s.retryStatus}
+            </Button>
+          }
+        >
+          {s.operationUnavailable}
+        </Callout>
+      ) : null}
+      {recoveredChatId && failedRecovery === creationId ? (
+        <Callout
+          tone="warning"
+          action={
+            <Button
+              variant="secondary"
+              size="sm"
+              data-testid="onboarding-retry-recovery"
+              onClick={() => void recoverChat()}
+            >
+              {s.retryRecovery}
+            </Button>
+          }
+        >
+          {s.recoveryFailed}
+        </Callout>
+      ) : null}
       {canStartNewRequest ? (
         <Button
           variant="secondary"

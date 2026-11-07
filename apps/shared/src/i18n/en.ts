@@ -4396,8 +4396,12 @@ export const messages: Messages = {
         unresolved:
           'The result is uncertain. Check the chat before starting a new request; work may already have run.',
       },
-      operationUnavailable:
-        'The request status could not be recovered. Check the chat before starting a new request; work may already have run.',
+      operationUnavailable: 'The request status is unavailable. Try checking again.',
+      operationExpired: 'The request record expired. Check the chat before starting a new request.',
+      retryStatus: 'Check status again',
+      recoveryFailed: 'The chat was created, but setup could not save it. Try saving again.',
+      chatUnavailable: 'This setup chat is no longer available. You can start a new chat.',
+      retryRecovery: 'Save the chat again',
       newRequest: 'Start a new request',
       waiting: 'Waiting for the answer…',
       failed: 'The answer did not arrive. Open the chat and try again there.',
