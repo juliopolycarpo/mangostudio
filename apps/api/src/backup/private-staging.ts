@@ -31,13 +31,14 @@ export async function protectStaging(
     await chmod(path, 0o700);
     return;
   }
-  if (!win32.isAbsolute(windowsDirectory)) {
+  if (!win32.isAbsolute(windowsDirectory) || win32.parse(windowsDirectory).root.length < 2) {
     throw new Error('Could not locate the absolute Windows system directory for backup staging.');
   }
   // Git for Windows can put a Unix whoami ahead of the system utility on PATH.
   const system32 = win32.join(windowsDirectory, 'System32');
   const identity = await run([win32.join(system32, 'whoami.exe'), '/user', '/fo', 'csv', '/nh']);
-  const sid = identity.stdout.match(/\bS-1-(?:\d+-)+\d+\b/u)?.[0];
+  // The first CSV field is the account name and can itself look like a SID.
+  const sid = identity.stdout.trim().match(/^[^\r\n]+, *("?)(S-1-(?:\d+-)+\d+)\1$/u)?.[2];
   if (identity.exitCode !== 0 || !sid)
     throw new Error('Could not determine the current Windows user SID for private backup staging.');
   const permissions = await run([

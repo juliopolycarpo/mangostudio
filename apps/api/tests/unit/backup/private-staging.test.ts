@@ -10,7 +10,10 @@ it('establishes an owner-only inheritable Windows ACL before staging', async () 
   function windowsSecurityCommands(argv: string[]) {
     calls.push(argv);
     if (win32.basename(argv[0] ?? '') === 'whoami.exe')
-      return Promise.resolve({ exitCode: 0, stdout: '"fixture\\user","S-1-5-21-100-200-300-400"' });
+      return Promise.resolve({
+        exitCode: 0,
+        stdout: '"fixture\\S-1-1-0","S-1-5-21-100-200-300-400"',
+      });
     if (win32.basename(argv[0] ?? '') === 'icacls.exe')
       return Promise.resolve({ exitCode: 0, stdout: '' });
     return Promise.reject(new Error('Unexpected security command.'));
@@ -28,16 +31,23 @@ it('establishes an owner-only inheritable Windows ACL before staging', async () 
 
 it('refuses unknown identity and failed ACL configuration', async () => {
   const noIdentity = () => Promise.resolve({ exitCode: 1, stdout: '' });
-  await expect(protectStaging('staging', 'win32', noIdentity, 'relative')).rejects.toThrow(
-    'absolute Windows system directory'
-  );
+  for (const relative of ['relative', '\\Windows']) {
+    await expect(protectStaging('staging', 'win32', noIdentity, relative)).rejects.toThrow(
+      'absolute Windows system directory'
+    );
+  }
   await expect(protectStaging('staging', 'win32', noIdentity)).rejects.toThrow('SID');
   function failedAcl(argv: string[]) {
     return Promise.resolve(
       win32.basename(argv[0] ?? '') === 'whoami.exe'
-        ? { exitCode: 0, stdout: 'S-1-5-21-1' }
+        ? { exitCode: 0, stdout: '"fixture\\user","S-1-5-21-1"\r\n' }
         : { exitCode: 1, stdout: '' }
     );
   }
   await expect(protectStaging('staging', 'win32', failedAcl)).rejects.toThrow('ACL');
+});
+
+it('refuses a CSV account name with a SID shape when the SID field is missing', async () => {
+  const missingSid = () => Promise.resolve({ exitCode: 0, stdout: '"fixture\\S-1-1-0",""\r\n' });
+  await expect(protectStaging('staging', 'win32', missingSid)).rejects.toThrow('SID');
 });
