@@ -221,11 +221,20 @@ impl TerminalFlow {
                 || (!login.viewed && login.started.elapsed() >= std::time::Duration::from_secs(30))
         });
         if expired {
-            self.login.as_mut().expect("login exists").overflow = true;
+            self.stop_login_output();
+        }
+        expired
+    }
+
+    /// Discards login output while native cleanup is pending.
+    ///
+    /// For example, explicit close stops a login's replay before awaiting the PTY.
+    pub(crate) fn stop_login_output(&mut self) {
+        if let Some(login) = &mut self.login {
+            login.overflow = true;
             self.scrollback.clear();
             self.pending.clear();
         }
-        expired
     }
 
     /// Replays the retained tail and charges it to a fresh viewer's window.
@@ -621,6 +630,24 @@ mod login_tests {
                 ["exit"],
                 "expected exit only when the login deadline has passed (ack first: {ack_first})"
             );
+        }
+    }
+
+    #[test]
+    fn explicit_login_close_discards_unviewed_prompt_and_pending_output() {
+        for viewed in [false, true] {
+            let mut flow = TerminalFlow::new(1).unwrap();
+            flow.enable_login();
+            if viewed {
+                flow.attach();
+                flow.inflight = super::INFLIGHT_WINDOW_BYTES;
+            }
+            flow.on_data(b"private prompt", &mut |_| panic!("no output credit"));
+            flow.stop_login_output();
+            assert!(flow.attach().scrollback.is_empty());
+            assert!(flow.pending.is_empty());
+            assert!(flow.login_expired());
+            flow.on_data(b"late output", &mut |_| panic!("closing login"));
         }
     }
 
