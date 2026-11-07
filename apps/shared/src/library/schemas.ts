@@ -508,7 +508,7 @@ export const PropagationPreviewEntrySchema = Type.Object({
   requiresWinnerSelection: Type.Boolean(),
   /** True while the user has accepted this exact set of diverging hashes. */
   acknowledgedDivergence: Type.Boolean(),
-  /** A failed source scan can hide versions of this resource. */
+  /** A failed location or unreadable copy can hide versions of this resource. */
   sourceScanIncomplete: Type.Optional(Type.Literal(true)),
   destinations: Type.Array(PropagationDestinationSchema),
 });

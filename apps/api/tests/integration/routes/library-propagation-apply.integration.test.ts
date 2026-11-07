@@ -778,8 +778,11 @@ describe('propagation apply — decisions', () => {
 const REMOTE_SKILL_KEY = 'skill:remote-only-divergence';
 const REMOTE_SKILL_SLUG = 'remote-only-divergence';
 
-/** What a remote runtime reports for the skill: one readable copy per `[location, hash]`. */
-function remoteScan(copies: readonly (readonly [LibraryLocationId, string])[]): LibraryResource[] {
+/** What a remote runtime reports for the skill, including any unreadable copies. */
+function remoteScan(
+  copies: readonly (readonly [LibraryLocationId, string])[],
+  unreadableLocations: readonly LibraryLocationId[] = []
+): LibraryResource[] {
   return [
     {
       ref: { kind: 'skill', slug: REMOTE_SKILL_SLUG },
@@ -789,9 +792,9 @@ function remoteScan(copies: readonly (readonly [LibraryLocationId, string])[]): 
         path: `/srv/home/${locationId}/${REMOTE_SKILL_SLUG}`,
         modifiedAtMs: 1,
         format: 'markdown-frontmatter' as const,
-        valid: true as const,
-        contentHash,
-        sizeBytes: 4,
+        ...(unreadableLocations.includes(locationId)
+          ? { valid: false as const, invalidReason: 'unreadable' as const }
+          : { valid: true as const, contentHash, sizeBytes: 4 }),
       })),
       coverage: [],
       divergence: 'divergent',
@@ -814,6 +817,7 @@ interface RemoteMachineState {
   readonly hashDomains?: Readonly<Record<string, number>>;
   readonly offline?: readonly string[];
   readonly failedLocations?: Readonly<Record<string, readonly LibraryLocationId[]>>;
+  readonly unreadableLocations?: Readonly<Record<string, readonly LibraryLocationId[]>>;
 }
 
 /** A preview over machines that report their own copies through their own runtimes. */
@@ -835,7 +839,8 @@ function previewRemoteMachines(
         resources: offline
           ? []
           : remoteScan(
-              (REMOTE_MACHINES[environmentId] ?? []).filter(([id]) => !failedLocationIds.has(id))
+              (REMOTE_MACHINES[environmentId] ?? []).filter(([id]) => !failedLocationIds.has(id)),
+              machines.unreadableLocations?.[environmentId]
             ),
         statuses: new Map(
           request.targetLocationIds.map((id) => [id, describeLocation(id, env)] as const)
@@ -931,8 +936,23 @@ describe('propagation apply — keeping a divergence across machines', () => {
     );
 
     expect(second.outcome).toMatch(
-      /cannot keep its divergence while a source location could not be scanned/
+      /cannot keep its divergence while the source scan is incomplete/
     );
+    expect(second.stored).toEqual([
+      { resourceKey: REMOTE_SKILL_KEY, contentHashes: first.reviewed },
+    ]);
+  });
+
+  it('preserves the saved divergence when a listed remote copy is unreadable', async () => {
+    const first = await keepDivergence(['box-a', 'box-b']);
+    expect(first.outcome).toBe('applied');
+    const second = await keepDivergence(
+      ['box-a', 'box-b'],
+      { unreadableLocations: { 'box-b': ['claude-skills'] } },
+      ['agents-skills']
+    );
+
+    expect(second.outcome).toMatch(/cannot keep its divergence/);
     expect(second.stored).toEqual([
       { resourceKey: REMOTE_SKILL_KEY, contentHashes: first.reviewed },
     ]);

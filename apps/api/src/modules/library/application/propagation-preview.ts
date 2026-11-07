@@ -58,7 +58,11 @@ import {
 } from '../domain/format-adapters';
 import { LibraryRequestError } from '../domain/library-request-error';
 import { isAgentStrategyAvailable } from './adapters/agent-strategy';
-import { type AcknowledgedKeysOptions, acknowledgedResourceKeys } from './conflict-resolution';
+import {
+  type AcknowledgedKeysOptions,
+  acknowledgedResourceKeys,
+  hasUnreadableLibraryCopy,
+} from './conflict-resolution';
 import { environmentLibraryService } from './environment-library-service';
 import { compareText, hashJson, hashLibraryState, type LibraryStateSlice } from './preview-state';
 
@@ -387,8 +391,10 @@ function buildPreviewEntry(
   const usesDirectoryHash = DIRECTORY_HASHED_RESOURCE_KINDS.has(ref.kind);
   const sourceDomains = directoryHashDomainsFor(perEnvironment, usesDirectoryHash);
   const mixedDirectoryHashDomains = usesDirectoryHash && sourceDomains.size > 1;
-  const sourceScanIncomplete = snapshots.some((snapshot) =>
-    hasFailedLocationForKind(snapshot, ref.kind)
+  const sourceScanIncomplete = perEnvironment.some(
+    ({ snapshot, resource }) =>
+      hasFailedLocationForKind(snapshot, ref.kind) ||
+      (resource !== undefined && hasUnreadableLibraryCopy(resource))
   );
 
   return {

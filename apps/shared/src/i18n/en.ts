@@ -2389,7 +2389,7 @@ export const messages: Messages = {
       unresolved: '{count} resources still need a decision.',
       adopt: 'Use this version',
       keepPerLocation: {
-        scanIncomplete: 'Rescan the failed location before keeping these versions.',
+        scanIncomplete: 'Preview again once all source copies can be read.',
         title: 'Keep them different',
         description:
           'Sometimes copies should differ. The divergence stops being flagged until one of the contents changes again.',

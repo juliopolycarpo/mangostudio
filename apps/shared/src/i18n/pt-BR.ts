@@ -2399,7 +2399,8 @@ export const messages = {
       unresolved: '{count} recursos ainda precisam de uma decisão.',
       adopt: 'Usar esta versão',
       keepPerLocation: {
-        scanIncomplete: 'Verifique novamente o local com falha antes de manter estas versões.',
+        scanIncomplete:
+          'Gere a prévia novamente quando for possível ler todas as cópias de origem.',
         title: 'Manter diferentes',
         description:
           'Às vezes as cópias devem mesmo divergir. A divergência para de ser sinalizada até que algum dos conteúdos mude.',
