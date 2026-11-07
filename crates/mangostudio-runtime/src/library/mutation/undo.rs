@@ -17,8 +17,9 @@ use super::backup_store::{BackupEntry, BackupStore, StoreError};
 use super::disk::ResourceHasher;
 use super::interrupt::Interrupt;
 use super::paths::{
-    WriteError, WriteFailure, assert_expected_resource_entry, fs_path, is_path_prefix, node_join,
-    node_resolve, require_writable_location, resolve_through_existing_ancestor,
+    ResourceKind, WriteError, WriteFailure, assert_expected_resource_entry, fs_path,
+    is_path_prefix, node_join, node_resolve, require_writable_location,
+    resolve_planned_resource_path, resolve_through_existing_ancestor,
 };
 use crate::probing::detection::path_env::PathEnv;
 use crate::probing::locations::LocationLayout;
@@ -196,9 +197,15 @@ fn resolve_contained_destination(entry: &BackupEntry, env: &PathEnv) -> Result<S
         )
     };
     let platform = &env.platform;
-    let resolved_root = resolve_through_existing_ancestor(&root).ok_or_else(escape)?;
+    let root_kind = if location.layout == LocationLayout::SingleFile {
+        ResourceKind::File
+    } else {
+        ResourceKind::Directory
+    };
+    let resolved_root = resolve_planned_resource_path(&root, root_kind).ok_or_else(escape)?;
     let recorded = node_resolve(platform, &entry.resolved_path);
-    let physical = resolve_through_existing_ancestor(&entry.resolved_path).ok_or_else(escape)?;
+    let physical =
+        resolve_planned_resource_path(&entry.resolved_path, entry.kind).ok_or_else(escape)?;
     if !is_path_prefix(platform, &resolved_root, &recorded)
         || !is_path_prefix(platform, &resolved_root, &physical)
     {

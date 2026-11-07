@@ -490,6 +490,69 @@ fn writes_through_a_symlinked_location_root_without_replacing_the_link() {
 
 #[cfg(unix)]
 #[test]
+fn applies_through_a_dangling_location_root_with_a_trailing_slash() {
+    let home = Home::new("apply-dangling-directory-root");
+    let location = home.path(&[".claude", "skills"]);
+    let real = home.path(&[".claude", "missing-dotfiles"]);
+    std::fs::remove_dir_all(&location).unwrap();
+    let target = "missing-dotfiles/";
+    std::os::unix::fs::symlink(target, &location).unwrap();
+    assert!(!real.exists());
+    let source = home.skill(&home.scratch.join("source"), "body");
+    let hash = home.hash(&source, ResourceKind::Directory);
+
+    let result = run(
+        &home,
+        &[skill_op(
+            &home,
+            "claude-skills",
+            &[".claude", "skills"],
+            &source,
+            &hash,
+        )],
+    );
+
+    assert!(result.failed.is_empty(), "received {result:?}");
+    assert_eq!(std::fs::read_link(&location).unwrap().as_os_str(), target);
+    assert_eq!(
+        std::fs::read(real.join("gh/SKILL.md")).unwrap(),
+        std::fs::read(source.join("SKILL.md")).unwrap()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn applies_through_a_dangling_skill_link_with_a_trailing_slash() {
+    let home = Home::new("apply-dangling-directory-entry");
+    let entry = home.path(&[".claude", "skills", "gh"]);
+    let real = home.path(&[".claude", "skills", "new-gh"]);
+    let target = "new-gh/";
+    std::os::unix::fs::symlink(target, &entry).unwrap();
+    assert!(!real.exists());
+    let source = home.skill(&home.scratch.join("source"), "body");
+    let hash = home.hash(&source, ResourceKind::Directory);
+
+    let result = run(
+        &home,
+        &[skill_op(
+            &home,
+            "claude-skills",
+            &[".claude", "skills"],
+            &source,
+            &hash,
+        )],
+    );
+
+    assert!(result.failed.is_empty(), "received {result:?}");
+    assert_eq!(std::fs::read_link(&entry).unwrap().as_os_str(), target);
+    assert_eq!(
+        std::fs::read(real.join("SKILL.md")).unwrap(),
+        std::fs::read(source.join("SKILL.md")).unwrap()
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn applies_and_undoes_at_the_physical_parent_of_a_symlinked_location() {
     use std::os::unix::fs::symlink;
 

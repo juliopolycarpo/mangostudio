@@ -190,8 +190,18 @@ const MAX_SYMLINK_HOPS: u32 = 32;
 /// cannot be verified: a symlink loop, or a segment this process cannot
 /// inspect.
 pub(crate) fn resolve_through_existing_ancestor(path: &str) -> Option<String> {
-    let platform = crate::health::node_platform();
-    resolve_like_node(platform, path, &|candidate| native_segment(candidate))
+    resolve_planned_resource_path(path, ResourceKind::File)
+}
+
+/// Resolves a mutation target. A directory operation can create a missing
+/// terminal directory required by a trailing slash or dot.
+///
+/// # Example
+/// ```ignore
+/// let root = resolve_planned_resource_path("/home/u/skills", ResourceKind::Directory);
+/// ```
+pub(crate) fn resolve_planned_resource_path(path: &str, kind: ResourceKind) -> Option<String> {
+    resolve_like_node(crate::health::node_platform(), path, kind, &native_segment)
 }
 
 fn native_segment(candidate: &str) -> std::io::Result<SegmentEntry> {
@@ -222,12 +232,13 @@ fn native_segment(candidate: &str) -> std::io::Result<SegmentEntry> {
 ///
 /// ```ignore
 /// // An 8.3 name that is a plain directory keeps its spelling.
-/// let resolved = resolve_like_node("win32", r"C:\Users\RUNNER~1\x", &|_| Ok(SegmentEntry::Plain));
+/// let resolved = resolve_like_node("win32", r"C:\Users\RUNNER~1\x", ResourceKind::File, &|_| Ok(SegmentEntry::Plain));
 /// assert_eq!(resolved.as_deref(), Some(r"C:\Users\RUNNER~1\x"));
 /// ```
 pub(crate) fn resolve_like_node(
     platform: &str,
     path: &str,
+    kind: ResourceKind,
     probe: &dyn Fn(&str) -> std::io::Result<SegmentEntry>,
 ) -> Option<String> {
     // Win32 ordinary paths remove dot segments before the filesystem sees
@@ -251,7 +262,7 @@ pub(crate) fn resolve_like_node(
         match segment.as_str() {
             // A terminal directory constraint cannot become a missing file
             // target. For an intermediate step the writer can create parents.
-            "." if missing_tail && pending.is_empty() => return None,
+            "." if kind == ResourceKind::File && missing_tail && pending.is_empty() => return None,
             "." => continue,
             ".." if missing_tail => return None,
             ".." => {
@@ -349,6 +360,7 @@ pub(crate) fn resolve_contained_resource_path(
     platform: &str,
     root: &str,
     entry_name: &str,
+    kind: ResourceKind,
 ) -> Result<ResolvedDestination, WriteError> {
     if !is_absolute(platform, root) {
         return Err(WriteError::new(
@@ -380,10 +392,10 @@ pub(crate) fn resolve_contained_resource_path(
             format!("Cannot safely resolve library destination \"{logical_path}\"."),
         )
     };
-    let resolved_root =
-        resolve_through_existing_ancestor(&logical_root).ok_or_else(unresolvable)?;
+    let resolved_root = resolve_planned_resource_path(&logical_root, ResourceKind::Directory)
+        .ok_or_else(unresolvable)?;
     let resolved_path =
-        resolve_through_existing_ancestor(&logical_path).ok_or_else(unresolvable)?;
+        resolve_planned_resource_path(&logical_path, kind).ok_or_else(unresolvable)?;
     if !is_path_prefix(platform, &resolved_root, &resolved_path) || resolved_path == resolved_root {
         return Err(WriteError::new(
             WriteFailure::PathEscape,
@@ -518,12 +530,15 @@ pub(crate) fn resolve_resource_destination(
             resolved_path,
         });
     }
-    let entry_name = if location.layout == LocationLayout::DirectoryOfFiles {
-        format!("{slug}{}", format_extension(location.format))
+    let (entry_name, kind) = if location.layout == LocationLayout::DirectoryOfFiles {
+        (
+            format!("{slug}{}", format_extension(location.format)),
+            ResourceKind::File,
+        )
     } else {
-        slug.to_string()
+        (slug.to_string(), ResourceKind::Directory)
     };
-    resolve_contained_resource_path(&env.platform, &root, &entry_name)
+    resolve_contained_resource_path(&env.platform, &root, &entry_name, kind)
 }
 
 /// A string path as a filesystem path.
@@ -669,8 +684,13 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::create_dir_all(&outside).unwrap();
         std::os::unix::fs::symlink(&outside, root.join("gh")).unwrap();
-        let refused =
-            resolve_contained_resource_path("linux", &path_string(&root), "gh").unwrap_err();
+        let refused = resolve_contained_resource_path(
+            "linux",
+            &path_string(&root),
+            "gh",
+            ResourceKind::Directory,
+        )
+        .unwrap_err();
         assert_eq!(
             refused.reason,
             WriteFailure::PathEscape,
@@ -678,8 +698,13 @@ mod tests {
         );
         let linked_root = scratch.join("linked-root");
         std::os::unix::fs::symlink(&root, &linked_root).unwrap();
-        let through =
-            resolve_contained_resource_path("linux", &path_string(&linked_root), "new").unwrap();
+        let through = resolve_contained_resource_path(
+            "linux",
+            &path_string(&linked_root),
+            "new",
+            ResourceKind::Directory,
+        )
+        .unwrap();
         assert_eq!(
             through.resolved_path,
             path_string(&std::fs::canonicalize(&root).unwrap().join("new")),
@@ -700,8 +725,13 @@ mod tests {
         let raw_root = lexical.join("redirect/../assets");
         let expected = std::fs::canonicalize(outside.join("assets/gh")).unwrap();
 
-        let destination =
-            resolve_contained_resource_path("linux", &path_string(&raw_root), "gh").unwrap();
+        let destination = resolve_contained_resource_path(
+            "linux",
+            &path_string(&raw_root),
+            "gh",
+            ResourceKind::Directory,
+        )
+        .unwrap();
         assert_eq!(
             destination.resolved_path,
             path_string(&expected),

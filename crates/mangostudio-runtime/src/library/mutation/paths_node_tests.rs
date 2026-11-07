@@ -7,6 +7,14 @@ use std::collections::HashMap;
 
 use super::*;
 
+fn resolve_like_node(
+    platform: &str,
+    path: &str,
+    probe: &dyn Fn(&str) -> std::io::Result<SegmentEntry>,
+) -> Option<String> {
+    super::resolve_like_node(platform, path, ResourceKind::File, probe)
+}
+
 /// A fake disk: `links` maps a path to its link target; every path under
 /// `existing` is a plain entry; anything else is missing.
 fn probe<'a>(

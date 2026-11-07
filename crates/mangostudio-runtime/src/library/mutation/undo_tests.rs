@@ -77,6 +77,31 @@ fn a_missing_or_malformed_set_is_backup_missing() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn restores_a_removed_skill_under_a_dangling_directory_root() {
+    let home = Home::new("undo-dangling-directory-root");
+    let location = home.path(&[".claude", "skills"]);
+    let real = home.path(&[".claude", "dotfiles"]);
+    std::fs::rename(&location, &real).unwrap();
+    let target = "dotfiles/";
+    std::os::unix::fs::symlink(target, &location).unwrap();
+    let destination = home.skill(&real.join("gh"), "body");
+    let original = std::fs::read(destination.join("SKILL.md")).unwrap();
+    let entry = removal_set(&home, "set", &destination);
+    write(&home, "set", vec![entry]);
+    std::fs::remove_dir_all(&real).unwrap();
+
+    let report = run(&home, "set").unwrap();
+
+    assert_eq!(report.restored.len(), 1, "received {report:?}");
+    assert_eq!(std::fs::read_link(&location).unwrap().as_os_str(), target);
+    assert_eq!(
+        std::fs::read(destination.join("SKILL.md")).unwrap(),
+        original
+    );
+}
+
 #[test]
 fn an_entry_outside_its_location_refuses_the_whole_undo() {
     let home = Home::new("undo-forged");
