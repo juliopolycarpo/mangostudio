@@ -217,7 +217,7 @@ describe('local socket transport', () => {
     }
   });
 
-  it('sends close 4000 to every open session before it stops listening', async () => {
+  it('releases both ends of every open session before it stops listening', async () => {
     const path = nextPath();
     const { accepted, accept } = acceptOne();
     const server = await listenIpc(path, accept);
@@ -229,13 +229,41 @@ describe('local socket transport', () => {
     await Promise.all([client.ready, host.ready]);
 
     const closed = new Promise((resolve) => client.onClose(resolve));
-    await server.close();
+    const localClosures: unknown[] = [];
+    host.onClose((closure) => localClosures.push(closure));
+    const release = { code: CLOSE_CODES.RELEASED, reason: 'listener closing', fatal: false };
+    try {
+      await server.close();
+      expect(await closed).toMatchObject(release);
+      expect(host.state).toBe('closed');
+      expect(localClosures).toEqual([release]);
+    } finally {
+      await host.close();
+    }
+  });
 
-    expect(await closed).toMatchObject({
-      code: CLOSE_CODES.RELEASED,
-      reason: 'listener closing',
-      fatal: false,
+  it('finishes listener shutdown when a local closure callback throws', async () => {
+    const path = nextPath();
+    const { accepted, accept } = acceptOne();
+    const server = await listenIpc(path, accept);
+    const client = new Session(await connectIpc(path), {
+      peer: CONFORMANCE_B,
+      livenessIntervalMs: false,
     });
+    const host = new Session(await accepted, { peer: CONFORMANCE_A, livenessIntervalMs: false });
+    await Promise.all([client.ready, host.ready]);
+
+    const closed = new Promise((resolve) => client.onClose(resolve));
+    host.onClose(() => {
+      throw new Error('controlled owner callback failure');
+    });
+    try {
+      await expect(server.close()).rejects.toThrow('controlled owner callback failure');
+      expect(await closed).toMatchObject({ code: CLOSE_CODES.RELEASED });
+      expect(host.state).toBe('closed');
+    } finally {
+      await server.close();
+    }
   });
 
   it('reports a peer that vanished as a closure and fails what was in flight', async () => {

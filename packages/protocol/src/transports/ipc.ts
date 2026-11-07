@@ -101,7 +101,7 @@ export async function listenIpc(
     );
   }
   const sockets = new Set<Socket>();
-  const ports = new Set<Port>();
+  const handles = new Set<ReturnType<typeof ipcSocketHandle>>();
   const server = createServer((socket) => {
     if (sockets.size >= MAX_IPC_CONNECTIONS) {
       discard(socket);
@@ -110,7 +110,7 @@ export async function listenIpc(
     sockets.add(socket);
     const handle = ipcSocketHandle(socket, options);
     const port = handle.port;
-    ports.add(port);
+    handles.add(handle);
     // An accept is transport activity, never authentication. The application must await ready.
     const deadline = setTimeout(() => {
       handle.terminate(CLOSE_CODES.PROTOCOL_ERROR, 'local socket hello deadline exceeded');
@@ -129,7 +129,7 @@ export async function listenIpc(
       clearTimeout(deadline);
       offHello();
       sockets.delete(socket);
-      ports.delete(port);
+      handles.delete(handle);
     });
     try {
       onConnection(port);
@@ -181,10 +181,20 @@ export async function listenIpc(
     path,
     close: async (): Promise<IpcCloseOutcome> => {
       // The spec is explicit: a listener shutting down tells every session first.
-      for (const port of ports) port.close(CLOSE_CODES.RELEASED, 'listener closing');
-      ports.clear();
+      const closing = [...handles];
+      handles.clear();
+      let failure: Error | undefined;
+      for (const handle of closing) {
+        try {
+          handle.terminate(CLOSE_CODES.RELEASED, 'listener closing');
+        } catch (error) {
+          // A local callback cannot prevent release of other connections.
+          failure ??= asError(error);
+        }
+      }
       await stopListening(server, sockets);
       if (stagingDirectory) await rmdir(stagingDirectory).catch(() => undefined);
+      if (failure) throw failure;
       return WINDOWS ? 'no-filesystem-path' : 'path-preserved';
     },
   };
