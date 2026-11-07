@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { readdir, readFile, realpath, stat } from 'node:fs/promises';
-import { basename, extname, join, relative, sep } from 'node:path';
+import { lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
+import { basename, extname, join, parse, relative, sep } from 'node:path';
 
 import { parseMarkdownFrontmatter } from '../../markdown';
 import { throwIfAborted } from '../../runtime-contract/cancellation';
@@ -13,6 +13,7 @@ import {
   type LibraryHashPathStyle,
   type LibraryInstance,
   type LibraryInvalidReason,
+  type LibraryLocationDiagnostic,
   type LibraryResourceRef,
   type LibraryUnreadableEntry,
   normalizeHashPath,
@@ -64,12 +65,29 @@ export interface LibraryInstanceReaderFs {
   readFile(path: string): Promise<Uint8Array>;
   realPath(path: string): Promise<string>;
   stat(path: string): Promise<FileMetadata>;
+  /** Whether the final directory entry exists, without following its target. */
+  hasEntry?(path: string): Promise<boolean>;
 }
 
 const nodeFs: LibraryInstanceReaderFs = {
   readDirectory: (path) => readdir(path, { withFileTypes: true }),
   readFile,
   realPath: realpath,
+  async hasEntry(path) {
+    // A trailing slash would make lstat follow the final symlink.
+    const rootLength = parse(path).root.length;
+    let end = path.length;
+    while (end > rootLength && (path[end - 1] === sep || (sep === '\\' && path[end - 1] === '/'))) {
+      end -= 1;
+    }
+    try {
+      await lstat(path.slice(0, end));
+      return true;
+    } catch (error) {
+      if (isMissing(error)) return false;
+      throw error;
+    }
+  },
   async stat(path) {
     const value = await stat(path);
     return {
@@ -103,6 +121,7 @@ export interface ReadLibraryInstance {
 export interface ReadLocationInstancesResult {
   readonly instances: readonly ReadLibraryInstance[];
   readonly unreadableEntries: readonly LibraryUnreadableEntry[];
+  readonly locationDiagnostics?: readonly LibraryLocationDiagnostic[];
 }
 
 const EMPTY_RESULT: ReadLocationInstancesResult = { instances: [], unreadableEntries: [] };
@@ -146,22 +165,24 @@ export async function readLocationInstances(
     return readOneEntry(location, slug, locationPath, 'file', options, fs);
   }
 
-  let entries: readonly DirectoryEntry[];
-  let canonicalLocationPath: string;
-  try {
-    [entries, canonicalLocationPath] = await Promise.all([
-      fs.readDirectory(locationPath),
-      fs.realPath(locationPath),
-    ]);
-  } catch (error) {
-    // A location that is absent, unreadable, or not a directory contributes no
-    // resources. Only the unexpected cases are worth a log line — a missing
-    // optional vendor directory is the normal state, not a fault.
-    if (!isMissing(error)) {
-      console.warn(`[library] Skipping unreadable location "${location.id}" at ${locationPath}.`);
+  const [listing, canonical] = await Promise.allSettled([
+    fs.readDirectory(locationPath),
+    fs.realPath(locationPath),
+  ]);
+  if (listing.status === 'rejected') {
+    if (isMissing(listing.reason)) {
+      try {
+        if (!(await fs.hasEntry?.(locationPath))) return EMPTY_RESULT;
+      } catch (error) {
+        return failedListing(location, locationPath, error);
+      }
     }
-    return EMPTY_RESULT;
+    return failedListing(location, locationPath, listing.reason);
   }
+  if (canonical.status === 'rejected')
+    return failedListing(location, locationPath, canonical.reason);
+  const entries = listing.value;
+  const canonicalLocationPath = canonical.value;
 
   const expectedType = location.layout === 'directory-of-dirs' ? 'directory' : 'file';
   const matchingEntries = entries.filter(
@@ -185,6 +206,22 @@ export async function readLocationInstances(
     })
   );
   return mergeResults(described);
+}
+
+function failedListing(
+  location: LocationDefinition,
+  path: string,
+  error: unknown
+): ReadLocationInstancesResult {
+  console.warn(`[library] Skipping unreadable location "${location.id}" at ${path}.`);
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  const reason =
+    code === 'EACCES' || code === 'EPERM'
+      ? 'permission-denied'
+      : code === 'ENOTDIR'
+        ? 'not-directory'
+        : 'unreadable';
+  return { ...EMPTY_RESULT, locationDiagnostics: [{ locationId: location.id, reason }] };
 }
 
 /** Reads a file-backed resource's raw bytes, for copying it to a destination. */

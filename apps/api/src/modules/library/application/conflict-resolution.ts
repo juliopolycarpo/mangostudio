@@ -14,6 +14,7 @@ import {
   type LibraryDivergenceAck,
   type LibraryDivergenceAckRequest,
   type LibraryResource,
+  type LibraryScanResult,
   parseResourceKey,
 } from '@mangostudio/shared/library';
 
@@ -33,7 +34,7 @@ import { discoverLibraryResources } from './library-discovery';
 export interface DivergenceAckDeps {
   repository: DivergenceAckRepository;
   /** Forced, for the same reason preview forces: acking stale state is worse than not acking. */
-  discover(userId: string, resource: LibraryResource['ref']): Promise<LibraryResource[]>;
+  discover(userId: string, resource: LibraryResource['ref']): Promise<LibraryScanResult>;
   now(): number;
 }
 
@@ -43,13 +44,11 @@ function resolveDeps(overrides: Partial<DivergenceAckDeps>): DivergenceAckDeps {
     repository: overrides.repository ?? createDivergenceAckRepository(),
     discover:
       overrides.discover ??
-      (async (userId, ref) => {
-        const scan = await discoverLibraryResources(getDb(), userId, {
+      ((userId, ref) =>
+        discoverLibraryResources(getDb(), userId, {
           force: true,
           kinds: [ref.kind],
-        });
-        return scan.resources;
-      }),
+        })),
     now: overrides.now ?? Date.now,
   };
 }
@@ -79,6 +78,18 @@ export function divergenceKeyFor(contentHashes: readonly string[]): string {
 export function readableContentHashes(resource: LibraryResource): string[] {
   return normalizeHashes(
     resource.instances.flatMap((instance) => (instance.valid ? [instance.contentHash] : []))
+  );
+}
+
+/**
+ * Whether a listed copy could not be read, leaving its version unverified.
+ *
+ * @example
+ * if (hasUnreadableLibraryCopy(resource)) deferAcknowledgement();
+ */
+export function hasUnreadableLibraryCopy(resource: LibraryResource): boolean {
+  return resource.instances.some(
+    (instance) => !instance.valid && instance.invalidReason === 'unreadable'
   );
 }
 
@@ -121,12 +132,25 @@ export async function acknowledgeDivergence(
     throw new LibraryRequestError(422, `Invalid library resource key: "${request.resourceKey}".`);
   }
 
-  const resources = await deps.discover(userId, ref);
+  const { resources, locationDiagnostics } = await deps.discover(userId, ref);
+  if (locationDiagnostics?.length) {
+    const locations = locationDiagnostics.map(({ locationId }) => locationId).join(', ');
+    throw new LibraryRequestError(
+      409,
+      `Cannot acknowledge divergence for "${request.resourceKey}" while these locations could not be scanned: ${locations}. Rescan and try again.`
+    );
+  }
   const resource = resources.find((candidate) => candidate.key === request.resourceKey);
   if (!resource) {
     throw new LibraryRequestError(404, `Library resource "${request.resourceKey}" was not found.`);
   }
 
+  if (hasUnreadableLibraryCopy(resource)) {
+    throw new LibraryRequestError(
+      409,
+      `Cannot acknowledge divergence for "${request.resourceKey}" while a copy is unreadable. Rescan and try again.`
+    );
+  }
   const contentHashes = readableContentHashes(resource);
   if (contentHashes.length < 2) {
     throw new LibraryRequestError(
@@ -240,13 +264,20 @@ export async function forgetDivergenceAck(
 
 /**
  * The distinct readable versions of each resource across every copy handed in.
- * Callers pass one entry per machine holding the resource; the divergence a
- * user accepts is the union of all of them, so a resource listed twice is one
- * resource, not two competing ones.
+ * Callers pass one entry per machine holding the resource. An unreadable
+ * copy excludes that resource's entire hash set from acknowledgement checks
+ * until all its copies can be read.
  */
 function readableHashesByKey(resources: readonly LibraryResource[]): Map<string, string[]> {
   const hashes = new Map<string, string[]>();
+  const incomplete = new Set<string>();
   for (const resource of resources) {
+    if (incomplete.has(resource.key)) continue;
+    if (hasUnreadableLibraryCopy(resource)) {
+      incomplete.add(resource.key);
+      hashes.delete(resource.key);
+      continue;
+    }
     hashes.set(resource.key, [
       ...(hashes.get(resource.key) ?? []),
       ...readableContentHashes(resource),

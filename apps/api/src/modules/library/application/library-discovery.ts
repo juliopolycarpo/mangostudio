@@ -91,6 +91,7 @@ export function discoverLibraryResourcesFromSettings(
       return {
         resources: groupResources(scanned.instances),
         unreadableEntries: [...scanned.unreadableEntries],
+        locationDiagnostics: [...(scanned.locationDiagnostics ?? [])],
       };
     }
   );
