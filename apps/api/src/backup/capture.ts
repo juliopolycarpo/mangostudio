@@ -69,7 +69,7 @@ export function portableBackupName(name: string): boolean {
     !/[\\\\/:*?"<>|]/u.test(name) &&
     Array.from(name).every((char) => char.charCodeAt(0) >= 0x20) &&
     !/[. ]$/u.test(name) &&
-    !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu.test(name) &&
+    !/^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/iu.test(name) &&
     name !== '.' &&
     name !== '..'
   );

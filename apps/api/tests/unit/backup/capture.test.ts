@@ -447,6 +447,14 @@ it.skipIf(process.platform === 'win32')(
   }
 );
 
+it.each(['COM¹', 'lpt².txt', 'COM³.tar.gz'])(
+  'refuses the Windows-reserved superscript device name %s',
+  (name) => {
+    expect(portableBackupName(name)).toBe(false);
+    expect(portableBackupName('notes³.txt')).toBe(true);
+  }
+);
+
 it('refuses an oversized file before copying and preserves an existing destination', async () => {
   const { root, config, output } = await fixture();
   const large = join(config.uploads.dir, 'large.bin');
