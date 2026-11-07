@@ -6,10 +6,10 @@
  */
 
 import type { Stats } from 'node:fs';
-import { chmod, lstat, unlink } from 'node:fs/promises';
+import { chmod, link, lstat, mkdtemp, realpath, rmdir, stat } from 'node:fs/promises';
 import { connect as connectSocket, createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 
 import { CLOSE_CODES } from '../close';
 import type { Port } from '../port';
@@ -19,13 +19,15 @@ import { asError, createStreamPort } from './node-stream';
 /** Owner-only, the permission local-socket.md requires of a POSIX socket file. */
 const SOCKET_MODE = 0o600;
 
-/** The umask that makes `bind` create the socket owner-only in the first place. */
-const SOCKET_UMASK = 0o077;
+const MAX_IPC_CONNECTIONS = 64;
+const FIRST_HELLO_TIMEOUT_MS = 15_000;
 
 /** How long a shutdown waits for a peer to close before destroying its socket. */
 const CLOSE_GRACE_MS = 2000;
 
 const WINDOWS = process.platform === 'win32';
+/** Leave one byte for NUL in the native sockaddr_un pathname. */
+const UNIX_SOCKET_PATH_MAX_BYTES = process.platform === 'linux' ? 107 : 103;
 
 export interface IpcOptions {
   /** Largest line the decoder accepts; the 16 MiB default of §11 when absent. */
@@ -42,8 +44,11 @@ export interface ConnectIpcOptions extends IpcOptions, ConnectDeadlineOptions {
 export interface IpcServer {
   readonly path: string;
   /** Sends `close` 4000 to every open session, then stops listening. */
-  close(): Promise<void>;
+  close(): Promise<IpcCloseOutcome>;
 }
+
+/** Public paths are preserved: portable stat/unlink cannot prove atomic ownership. */
+export type IpcCloseOutcome = 'path-preserved' | 'no-filesystem-path';
 
 /**
  * The reference address for a named local endpoint: a Windows named pipe, or a
@@ -66,10 +71,10 @@ export function ipcPath(name: string): string {
 /**
  * Listens on a local socket and hands one port per accepted connection.
  *
- * On POSIX a stale socket file at the same path is removed before binding, and
- * the socket is owner-only from the instant it exists. A socket file a
- * connection succeeds against — or one this call cannot judge — is a live
- * listener's address, not a stale one, and binding refuses with `EADDRINUSE`
+ * On POSIX an existing socket file is preserved and binding refuses. The
+ * socket is owner-only from the instant it exists. A socket file a
+ * connection succeeds against — or one this call cannot judge — has unknown
+ * ownership, and binding refuses with `EADDRINUSE`
  * rather than take it over.
  *
  * On Windows the same call creates a named pipe, and the address is **not**
@@ -87,17 +92,44 @@ export async function listenIpc(
   onConnection: (port: Port) => void,
   options: IpcOptions = {}
 ): Promise<IpcServer> {
+  if (!WINDOWS && Buffer.byteLength(path) > UNIX_SOCKET_PATH_MAX_BYTES) {
+    throw Object.assign(
+      new Error(
+        `${path}: public Unix socket pathname has ${Buffer.byteLength(path)} bytes; expected at most ${UNIX_SOCKET_PATH_MAX_BYTES}; no endpoint published`
+      ),
+      { code: 'ENAMETOOLONG', path, syscall: 'listen' }
+    );
+  }
   const sockets = new Set<Socket>();
-  const ports = new Set<Port>();
+  const handles = new Set<ReturnType<typeof ipcSocketHandle>>();
   const server = createServer((socket) => {
+    if (sockets.size >= MAX_IPC_CONNECTIONS) {
+      discard(socket);
+      return;
+    }
     sockets.add(socket);
-    const port = ipcSocketPort(socket, options);
-    ports.add(port);
+    const handle = ipcSocketHandle(socket, options);
+    const port = handle.port;
+    handles.add(handle);
+    // An accept is transport activity, never authentication. The application must await ready.
+    const deadline = setTimeout(() => {
+      handle.terminate(CLOSE_CODES.PROTOCOL_ERROR, 'local socket hello deadline exceeded');
+      socket.destroy();
+    }, FIRST_HELLO_TIMEOUT_MS);
+    deadline.unref();
+    const offHello = port.onFrame((frame) => {
+      if (frame.type === 'hello') {
+        clearTimeout(deadline);
+        offHello();
+      }
+    });
     // `onClosed` never fires for a close this side chose, so the socket's own
     // end is what prunes the tables: every path through the port destroys it.
     socket.on('close', () => {
+      clearTimeout(deadline);
+      offHello();
       sockets.delete(socket);
-      ports.delete(port);
+      handles.delete(handle);
     });
     try {
       onConnection(port);
@@ -109,6 +141,7 @@ export async function listenIpc(
     }
   });
 
+  let stagingDirectory: string | undefined;
   if (WINDOWS) {
     // Node exposes no way to set a named pipe's security descriptor, so libuv
     // creates it with a NULL one: on Windows the address admits every local
@@ -116,8 +149,28 @@ export async function listenIpc(
     // credentials and answer `close` 4401 before `hello` (local-socket.md).
     await listening(server, path);
   } else {
-    await clearStaleSocket(path);
-    await bindOwnerOnly(server, path);
+    const cwd = isAbsolute(path) ? undefined : process.cwd();
+    // Concatenate without collapsing '..', which the filesystem resolves after symlinks.
+    const publicPath = cwd === undefined ? path : `${cwd}/${path}`;
+    await refuseOccupiedSocket(path, publicPath, cwd);
+    // libuv removes its bound name on close. An absolute private name stays
+    // in the original directory even if the process changes working directory.
+    stagingDirectory = await createStagingDirectory(publicPath);
+    const staged = join(stagingDirectory, 's');
+    try {
+      await chmod(stagingDirectory, 0o700);
+      await listening(server, staged);
+      // The private directory protects the socket until its final mode is set.
+      await chmod(staged, SOCKET_MODE);
+      await link(staged, publicPath);
+    } catch (cause) {
+      if (server.listening) await stopListening(server, sockets);
+      await rmdir(stagingDirectory).catch(() => undefined);
+      if ((cause as NodeJS.ErrnoException).code === 'EEXIST') {
+        throw occupiedPathError(path, 'address became occupied before publication');
+      }
+      throw asError(cause);
+    }
   }
   server.on('error', () => {
     // Listening already succeeded; a later error is a connection this listener
@@ -126,13 +179,62 @@ export async function listenIpc(
 
   return {
     path,
-    close: async (): Promise<void> => {
+    close: async (): Promise<IpcCloseOutcome> => {
       // The spec is explicit: a listener shutting down tells every session first.
-      for (const port of ports) port.close(CLOSE_CODES.RELEASED, 'listener closing');
-      ports.clear();
+      const closing = [...handles];
+      handles.clear();
+      let failure: Error | undefined;
+      for (const handle of closing) {
+        try {
+          handle.terminate(CLOSE_CODES.RELEASED, 'listener closing');
+        } catch (error) {
+          // A local callback cannot prevent release of other connections.
+          failure ??= asError(error);
+        }
+      }
       await stopListening(server, sockets);
+      if (stagingDirectory) await rmdir(stagingDirectory).catch(() => undefined);
+      if (failure) throw failure;
+      return WINDOWS ? 'no-filesystem-path' : 'path-preserved';
     },
   };
+}
+
+/** Finds a short private staging path on the destination filesystem. */
+async function createStagingDirectory(path: string): Promise<string> {
+  const parent = await realpath(dirname(path));
+  const device = (await stat(parent)).dev;
+  // Linux sun_path is 108 bytes including NUL; Darwin/BSD use 104.
+  const maximum = UNIX_SOCKET_PATH_MAX_BYTES;
+  let candidate = parent;
+  let lastError: Error | undefined;
+  for (;;) {
+    const prefix = join(candidate, '.mango-');
+    // mkdtemp appends six random characters; also reserve "/s" for the socket.
+    if (Buffer.byteLength(prefix) + 8 <= maximum && (await stat(candidate)).dev === device) {
+      try {
+        const directory = await mkdtemp(prefix);
+        // Check the actual generated name too, rather than relying on its suffix length.
+        if (Buffer.byteLength(join(directory, 's')) <= maximum) return directory;
+        await rmdir(directory);
+      } catch (cause) {
+        const error = asError(cause);
+        if (!['EACCES', 'EPERM', 'EROFS'].includes((error as NodeJS.ErrnoException).code ?? ''))
+          throw error;
+        lastError = error;
+      }
+    }
+    const ancestor = dirname(candidate);
+    if (ancestor === candidate) break;
+    candidate = ancestor;
+  }
+  throw Object.assign(
+    new Error(
+      `${path}: cannot create private same-filesystem staging within the Unix socket pathname limit; public path preserved`,
+      { cause: lastError }
+    ),
+    { code: (lastError as NodeJS.ErrnoException | undefined)?.code ?? 'ENAMETOOLONG', path }
+  );
 }
 
 /**
@@ -226,10 +328,14 @@ function discard(socket: Socket): void {
  * const port = ipcSocketPort(await rawConnect(path), {});
  */
 export function ipcSocketPort(socket: Socket, options: IpcOptions): Port {
+  return ipcSocketHandle(socket, options).port;
+}
+
+function ipcSocketHandle(socket: Socket, options: IpcOptions): ReturnType<typeof createStreamPort> {
   return createStreamPort(socket, socket, {
     ...(options.maxFrameBytes !== undefined ? { maxFrameBytes: options.maxFrameBytes } : {}),
     onRelease: () => releaseSocket(socket),
-  }).port;
+  });
 }
 
 /**
@@ -263,121 +369,68 @@ function assertIpcName(name: string): void {
   );
 }
 
-/**
- * Binds so that the socket is owner-only from the instant it exists. `bind`
- * takes its mode from the umask, so a listener under the usual `022` would
- * publish a world-connectable address for as long as the `chmod` takes; the
- * umask is process-wide, which is the price of closing that window.
- */
-async function bindOwnerOnly(server: Server, path: string): Promise<void> {
-  const previous = process.umask(SOCKET_UMASK);
-  let bound: Promise<void>;
-  try {
-    // `listen` binds inside this call on both runtimes, so the umask is back
-    // before the first yield and no unrelated file is created under it.
-    bound = listening(server, path);
-  } finally {
-    process.umask(previous);
-  }
-  await bound;
-  try {
-    // Belt and braces: a platform that ignored the umask still ends up at 0600.
-    await chmod(path, SOCKET_MODE);
-  } catch (cause) {
-    // An address only its owner can reach is the whole authentication story
-    // here, so a listener that cannot promise that must not stay open.
-    server.close();
-    throw asError(cause);
-  }
+function occupiedPathError(path: string, reason: string): NodeJS.ErrnoException {
+  return Object.assign(new Error(`${path}: ${reason}; path preserved; expected a free address`), {
+    code: 'EADDRINUSE',
+    path,
+    syscall: 'listen',
+  });
 }
 
-/**
- * Removes the socket file a previous process left behind, and refuses to bind
- * over one a live listener is still serving. Only a socket is inspected: a
- * regular file at the address is a mistake the later `listen` call reports as
- * `EADDRINUSE` on its own, not something this function judges or deletes.
- *
- * local-socket.md defines stale as "a connection to it is refused": a socket
- * file is removed once `probe` reports `'stale'`, and binding is refused —
- * the address counts as in use — once it reports `'live'`, which includes
- * every address this call could not judge either way.
- */
-async function clearStaleSocket(path: string): Promise<void> {
+/** Refuses occupied paths. A refused dial cannot authorize a later pathname unlink. */
+async function refuseOccupiedSocket(path: string, publicPath: string, cwd?: string): Promise<void> {
   let stats: Stats;
   try {
-    stats = await lstat(path);
-  } catch {
-    // Nothing at the path, which is the ordinary case.
-    return;
-  }
-  if (!stats.isSocket()) return;
-
-  const verdict = await probe(path);
-  if (verdict === 'stale') {
-    await removeSocketFile(path, stats.ino);
-    return;
-  }
-  throw Object.assign(
-    new Error(
-      `${path} is served by a live listener; expected the address to be free or a socket file nothing answers on`
-    ),
-    { code: 'EADDRINUSE', path }
-  );
-}
-
-/**
- * Unlinks a socket file already judged stale, but only while it is still the
- * same file the probe judged: the probe waits up to a second, and a second
- * supervisor restarting against the same address is exactly who can remove
- * and rebind it inside that window — unlinking on the stale verdict alone
- * would then delete the winner's live socket file out from under it.
- * Silently leaving a changed path alone is correct: the later `listen`
- * call's own `EADDRINUSE` is what tells *this* caller the address was
- * taken, the same outcome an unguarded race would have produced for the
- * loser anyway. This narrows the window from the whole probe down to the
- * gap between this check and the unlink; it does not close it — Node offers
- * no unlink-by-inode primitive to close it with (the Rust SDK's
- * `remove_stale_socket` carries the same guard, for the same reason).
- *
- * A file that went away entirely while the probe was dialling it — the same
- * kind of restart, just resolved before this call ran rather than during
- * it — leaves the address free, which is the outcome this was after; only
- * an error other than "gone" or "someone else's now" is the caller's to see.
- */
-async function removeSocketFile(path: string, inode: number): Promise<void> {
-  let current: Stats;
-  try {
-    current = await lstat(path);
+    stats = await lstat(publicPath);
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return;
     throw cause;
   }
-  if (current.ino !== inode) return;
-  try {
-    await unlink(path);
-  } catch (cause) {
-    if ((cause as NodeJS.ErrnoException).code !== 'ENOENT') throw cause;
+  if (!stats.isSocket()) throw occupiedPathError(path, 'address is occupied by a non-socket');
+
+  let verdict: ProbeVerdict;
+  if (Buffer.byteLength(publicPath) <= UNIX_SOCKET_PATH_MAX_BYTES) {
+    verdict = await probe(publicPath);
+  } else if (cwd === process.cwd()) {
+    // The relative pathname may fit even though its absolute form does not.
+    verdict = await probe(path);
+  } else {
+    verdict = { outcome: 'inconclusive', reason: 'working directory changed before probe' };
   }
+  throw Object.assign(occupiedPathError(path, `probe ${verdict.outcome} (${verdict.reason})`), {
+    probeOutcome: verdict.outcome,
+    probeReason: verdict.reason,
+  });
 }
 
-/** Whether a dial to a socket file found a live listener, or found it gone. */
-type ProbeVerdict = 'stale' | 'live';
+/** Observation only: no outcome is cleanup authority. Internal export for controlled fixtures. */
+export interface ProbeVerdict {
+  readonly outcome: 'connected' | 'refused' | 'inconclusive';
+  readonly reason: string;
+}
 
-/** How long a probe dial waits for a verdict before erring toward `'live'`. */
+export function probeError(code: string | undefined): ProbeVerdict {
+  return {
+    outcome: code === 'ECONNREFUSED' || code === 'ENOENT' ? 'refused' : 'inconclusive',
+    reason: code ?? 'unknown error',
+  };
+}
+
 const PROBE_TIMEOUT_MS = 1000;
 
-/**
- * Dials `path` to tell a stale socket file from one a live listener answers
- * on. `ECONNREFUSED` and `ENOENT` are `'stale'`: the listener that made the
- * file is gone, whether the socket still refuses connections or the file was
- * removed under the dial. Everything else — a `'connect'`, the timeout,
- * `EACCES`, `EAGAIN` — is `'live'`. Erring toward `'live'` is deliberate:
- * taking over an address this could not judge is the failure `clearStaleSocket`
- * exists to refuse, so an inconclusive dial must never read as stale.
- */
-function probe(path: string): Promise<ProbeVerdict> {
+/** A positive dial enqueues a real connection; it sends no hello or application data. */
+export function probe(
+  path: string,
+  connect: (path: string) => Socket = connectSocket
+): Promise<ProbeVerdict> {
   return new Promise((resolve) => {
-    const socket = connectSocket(path);
+    let socket: Socket;
+    try {
+      socket = connect(path);
+    } catch (cause) {
+      resolve(probeError((cause as NodeJS.ErrnoException).code));
+      return;
+    }
     let settled = false;
     const finish = (verdict: ProbeVerdict): void => {
       if (settled) return;
@@ -385,17 +438,16 @@ function probe(path: string): Promise<ProbeVerdict> {
       clearTimeout(timer);
       socket.removeListener('connect', onConnect);
       socket.removeListener('error', onError);
-      // The probe's own listeners are gone, so a reset that lands after the
-      // verdict would reach an emitter with no `error` handler; `discard`
-      // owns that, here as it does for an abandoned dial.
       discard(socket);
       resolve(verdict);
     };
-    const onConnect = (): void => finish('live');
-    const onError = (error: NodeJS.ErrnoException): void => {
-      finish(error.code === 'ECONNREFUSED' || error.code === 'ENOENT' ? 'stale' : 'live');
-    };
-    const timer = setTimeout(() => finish('live'), PROBE_TIMEOUT_MS);
+    const onConnect = (): void =>
+      finish({ outcome: 'connected', reason: 'connection established' });
+    const onError = (error: NodeJS.ErrnoException): void => finish(probeError(error.code));
+    const timer = setTimeout(
+      () => finish({ outcome: 'inconclusive', reason: 'timeout' }),
+      PROBE_TIMEOUT_MS
+    );
     timer.unref();
     socket.once('connect', onConnect);
     socket.once('error', onError);

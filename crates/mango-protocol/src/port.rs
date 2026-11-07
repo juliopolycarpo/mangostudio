@@ -63,8 +63,9 @@ pub trait PortRx: Send + 'static {
     /// Waits for the next inbound item.
     ///
     /// `None` once the stream is terminal; [`Inbound::Closed`] is always the
-    /// last item before that point, so a caller that stops at the first
-    /// `Closed` never misses a frame that arrived just before it.
+    /// last item before that point. EOF and decoder refusals preserve
+    /// already decoded frames. A local close on an accepted IPC port discards buffered
+    /// inbound work and ends the port immediately.
     ///
     /// Must be cancel-safe: a session driver polls this inside `tokio::select!`
     /// alongside its command channel and its timers, so a call dropped without

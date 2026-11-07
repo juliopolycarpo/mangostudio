@@ -113,41 +113,49 @@ impl IpcListener {
     }
 
     /// Waits for the next client and hands back its port and the identity the
-    /// pipe carries.
+    /// pipe carries. Excess connections are closed while this call waits
+    /// for an available port.
     ///
     /// # Errors
     ///
     /// Whatever waiting for the client, or creating the instance that will
     /// serve the one after it, failed with.
     pub async fn accept(&mut self) -> io::Result<(IpcServerPort, PeerIdentity)> {
-        self.idle.connect().await?;
-        // The next client needs an instance of its own, created with the same
-        // restriction as the first: a second instance created without one
-        // would publish an address anybody could answer on.
-        let next = match security::create_owner_only_instance(&self.path, false) {
-            Ok(next) => next,
-            Err(error) => {
-                // A client is already connected to the idle instance. Left
-                // alone it would be neither served nor told, and the next
-                // `accept` would hand it out as a fresh arrival, because
-                // `connect` on an already-connected instance succeeds.
-                let _ = self.idle.disconnect();
-                return Err(error);
-            }
-        };
-        let connected = std::mem::replace(&mut self.idle, next);
+        loop {
+            self.idle.connect().await?;
+            // The next client needs an instance of its own, created with the same
+            // restriction as the first: a second instance created without one
+            // would publish an address anybody could answer on.
+            let next = match security::create_owner_only_instance(&self.path, false) {
+                Ok(next) => next,
+                Err(error) => {
+                    // A client is already connected to the idle instance. Left
+                    // alone it would be neither served nor told, and the next
+                    // `accept` would hand it out as a fresh arrival, because
+                    // `connect` on an already-connected instance succeeds.
+                    let _ = self.idle.disconnect();
+                    return Err(error);
+                }
+            };
+            let connected = std::mem::replace(&mut self.idle, next);
 
-        let identity = PeerIdentity {
-            process_id: security::client_process_id(&connected),
-            user: None,
-        };
-        let (reader, writer) = tokio::io::split(connected);
-        let port = self.framed(reader, writer);
-        // Connections that have since ended are forgotten here rather than
-        // accumulating for the life of a long-running listener.
-        self.accepted.retain(PortCloser::is_open);
-        self.accepted.push(port.closer());
-        Ok((port, identity))
+            self.accepted.retain(PortCloser::is_open);
+            if self.accepted.len() >= super::MAX_IPC_CONNECTIONS {
+                drop(connected);
+                tokio::task::yield_now().await;
+                continue;
+            }
+            let identity = PeerIdentity {
+                process_id: security::client_process_id(&connected),
+                user: None,
+            };
+            let (reader, writer) = tokio::io::split(connected);
+            let port = self
+                .framed(reader, writer)
+                .with_first_hello_timeout(super::FIRST_HELLO_TIMEOUT);
+            self.accepted.push(port.closer());
+            return Ok((port, identity));
+        }
     }
 
     /// Tells every session still open on this listener why, then stops
@@ -157,9 +165,10 @@ impl IpcListener {
     /// session first." The ports moved to whoever called
     /// [`IpcListener::accept`], so this writes the farewell through the handle
     /// kept for each of them.
-    pub async fn close(self) {
+    pub async fn close(self) -> super::IpcCloseOutcome {
         super::tell_accepted(self.accepted, close_codes::RELEASED, "listener closing").await;
         drop(self.idle);
+        super::IpcCloseOutcome::NoFilesystemPath
     }
 
     fn framed(
@@ -240,6 +249,7 @@ mod tests {
     use crate::transports::deadline::ConnectError;
     use std::io;
     use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::Duration;
 
     static NEXT_ADDRESS: AtomicU64 = AtomicU64::new(0);
 
@@ -278,6 +288,85 @@ mod tests {
         dialled_tx.send(Frame::Ping).await;
         assert_eq!(accepted_rx.recv().await, Some(Inbound::Frame(Frame::Ping)));
         listener.close().await;
+    }
+
+    #[tokio::test]
+    async fn accept_discards_excess_connections_and_recovers_when_a_port_drops() {
+        let path = address();
+        let mut listener = listen_ipc(&path).await.expect("the address is free");
+        let mut ports = Vec::new();
+        let mut clients = Vec::new();
+        for _ in 0..super::super::MAX_IPC_CONNECTIONS {
+            clients.push(
+                connect_ipc(&path, &ConnectDeadline::default())
+                    .await
+                    .unwrap(),
+            );
+            ports.push(listener.accept().await.unwrap().0);
+        }
+
+        let overflow = connect_ipc(&path, &ConnectDeadline::default())
+            .await
+            .unwrap();
+        let (_overflow_tx, mut overflow_rx) = overflow.split();
+        let (accepted, next) = tokio::time::timeout(Duration::from_secs(5), async {
+            let accepting = listener.accept();
+            tokio::pin!(accepting);
+            tokio::select! {
+                biased;
+                result = &mut accepting => panic!("accept returned at capacity: {result:?}"),
+                inbound = overflow_rx.recv() => {
+                    assert!(matches!(inbound, Some(Inbound::Closed(_))), "{inbound:?}");
+                }
+            }
+
+            drop(ports.pop().expect("one live accepted port to release"));
+            let next = connect_ipc(&path, &ConnectDeadline::default())
+                .await
+                .unwrap();
+            let (accepted, _) = accepting.await.expect("accept continues after overflow");
+            (accepted, next)
+        })
+        .await
+        .expect("the overflow closes and the same accept returns the next available port");
+        drop((accepted, next, ports, clients));
+        listener.close().await;
+    }
+
+    #[tokio::test]
+    async fn listener_release_frees_the_pipe_with_the_terminal_reader_retained() {
+        let path = address();
+        let mut listener = listen_ipc(&path).await.expect("the address is free");
+        let client = connect_ipc(&path, &ConnectDeadline::default())
+            .await
+            .expect("the client connects");
+        let (accepted, _) = listener.accept().await.expect("the listener accepts");
+        let (_accepted_tx, mut accepted_rx) = accepted.split();
+        let (_client_tx, mut client_rx) = client.split();
+
+        let (outcome, local, peer) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(listener.close(), accepted_rx.recv(), client_rx.recv())
+        })
+        .await
+        .expect("both sides receive listener release");
+        assert_eq!(outcome, super::super::IpcCloseOutcome::NoFilesystemPath);
+        assert!(matches!(
+            local,
+            Some(Inbound::Closed(crate::port::PortClosure::Closed {
+                code: Some(crate::close::close_codes::RELEASED),
+                ..
+            }))
+        ));
+        assert!(matches!(
+            peer,
+            Some(Inbound::Frame(Frame::Close(close))) if close.code == crate::close::close_codes::RELEASED
+        ));
+
+        let rebound = listen_ipc(&path)
+            .await
+            .expect("the terminal reader no longer owns the named pipe");
+        assert_eq!(accepted_rx.recv().await, None);
+        rebound.close().await;
     }
 
     #[tokio::test]

@@ -2,11 +2,11 @@
 //! listener publishes owner-only, and the peer credentials the socket itself
 //! carries.
 
-use std::io;
-use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+use std::{fs, io};
 
 use tokio::net::unix::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::net::{UnixListener, UnixStream};
@@ -23,6 +23,7 @@ const SOCKET_MODE: u32 = 0o600;
 /// Owner-only and not searchable by anyone else, which is what keeps a socket
 /// staged inside it out of reach before its own mode is set.
 const STAGING_DIRECTORY_MODE: u32 = 0o700;
+const MAX_STAGING_ATTEMPTS: usize = 16;
 
 /// How long [`probe`] waits for a verdict before erring toward "live" — the
 /// same 1 second the TypeScript SDK's `clearStaleSocket` uses.
@@ -62,11 +63,8 @@ pub(super) fn address_for(name: &str) -> PathBuf {
 pub struct IpcListener {
     listener: UnixListener,
     path: PathBuf,
-    /// The inode of the socket this listener bound, read while it was still
-    /// staged and unreachable, and carried onto `path` by the link or rename
-    /// that published it. `close` unlinks only while this is still what sits
-    /// at `path`, so a listener that crashed and was replaced does not delete
-    /// its replacement's file.
+    /// Historical identity retained for diagnostics/tests only; never cleanup authority.
+    #[cfg(test)]
     inode: u64,
     max_frame_bytes: Option<usize>,
     /// Weak handles to the ports handed out, so shutting down can tell the
@@ -123,7 +121,8 @@ impl IpcListener {
     }
 
     /// Waits for the next connection and hands back its port and the identity
-    /// the socket carries.
+    /// the socket carries. Excess connections are closed while this call
+    /// waits for an available port.
     ///
     /// # Errors
     ///
@@ -131,84 +130,73 @@ impl IpcListener {
     /// one of those: a platform that will not answer leaves the identity
     /// empty rather than refusing a connection that is otherwise fine.
     pub async fn accept(&mut self) -> io::Result<(IpcServerPort, PeerIdentity)> {
-        let (stream, _address) = self.listener.accept().await?;
-        let identity = identity_of(&stream);
-        let port = self.port(stream);
-        // Connections that have since ended are forgotten here rather than
-        // accumulating for the life of a long-running listener.
-        self.accepted.retain(PortCloser::is_open);
-        self.accepted.push(port.closer());
-        Ok((port, identity))
+        loop {
+            let (stream, _address) = self.listener.accept().await?;
+            self.accepted.retain(PortCloser::is_open);
+            if self.accepted.len() >= super::MAX_IPC_CONNECTIONS {
+                drop(stream);
+                tokio::task::yield_now().await;
+                continue;
+            }
+            let identity = identity_of(&stream);
+            let port = self.port(stream);
+            self.accepted.push(port.closer());
+            return Ok((port, identity));
+        }
     }
 
-    /// Tells every session still open on this listener why, stops accepting,
-    /// and removes the socket file — but only while it is still this
-    /// listener's own. A listener that crashed and was replaced, then closed
-    /// late on a handle nobody dropped, must not delete the replacement's
-    /// address; the inode recorded when this listener published is what
-    /// tells the two apart, since both sit at the same `path`.
-    ///
-    /// local-socket.md: "A listener shutting down sends `close` `4000` to every
-    /// session first." The ports moved to whoever called
-    /// [`IpcListener::accept`], so this writes the farewell through the handle
-    /// kept for each of them; a peer then reads an announced release rather
-    /// than inferring one from a socket that vanished.
-    pub async fn close(self) {
+    /// Sends release to owned sessions and stops accepting. The public socket path
+    /// is deliberately preserved: stat/unlink cannot prove atomic ownership, and
+    /// inode reuse or a final-window rebind must never authorize successor removal.
+    /// The returned disposition makes externally coordinated cleanup explicit.
+    pub async fn close(self) -> super::IpcCloseOutcome {
         super::tell_accepted(self.accepted, close_codes::RELEASED, "listener closing").await;
         drop(self.listener);
-        // Best effort, and only this listener's to report on: an address
-        // already gone is nothing to remove, and one a newer listener
-        // replaced after this one stopped is that listener's file now, not
-        // this one's.
-        let Ok(metadata) = tokio::fs::symlink_metadata(&self.path).await else {
-            return;
-        };
-        if metadata.ino() == self.inode {
-            let _ = tokio::fs::remove_file(&self.path).await;
-        }
+        // No portable atomic conditional-unlink exists. Inode equality is not ownership.
+        super::IpcCloseOutcome::PathPreserved(self.path)
     }
 
     fn port(&self, stream: UnixStream) -> IpcServerPort {
         socket_port(stream, self.max_frame_bytes)
+            .with_first_hello_timeout(super::FIRST_HELLO_TIMEOUT)
     }
 }
 
 /// Listens on a local socket, owner-only from the instant the address exists.
 ///
-/// The socket is bound inside an owner-only directory beside `path`,
+/// The socket is bound inside an owner-only directory on the same device as `path`,
 /// restricted to `0600` there, and then published at `path`. `bind` takes its
 /// mode from the umask, so binding straight onto the address would publish a
-/// world-connectable socket for as long as a `chmod` takes; the TypeScript SDK
-/// closes that window by setting the process-wide umask, which a library
-/// cannot do without reaching into every other thread. Staging inside a
-/// directory nobody else may enter closes it without leaving this call.
+/// world-connectable socket for as long as a `chmod` takes. Both SDKs stage
+/// the socket inside a directory other users cannot enter, so setting its
+/// permissions does not require changing the process-wide umask.
 ///
-/// A socket file at the address is *stale* — and removed first — when a
-/// connection to it is refused; binding refuses instead when a connection
-/// succeeds or cannot be judged, because the address counts as in use
-/// (local-socket.md, Addresses). Anything at the address that is not a socket
-/// is refused rather than replaced or judged: a regular file there is a
-/// mistake the caller has to see.
+/// Existing socket paths are always preserved. A dial result is an observation,
+/// never authority for a later unlink. Refused, connected and inconclusive outcomes
+/// carry distinct diagnostics with the compatible `AddrInUse` error kind.
 ///
 /// # Errors
 ///
-/// Whatever binding, restricting or publishing the address failed with;
-/// [`io::ErrorKind::AlreadyExists`] when something that is not a socket
-/// already holds the address, or when another listener took it while this one
-/// was binding; and [`io::ErrorKind::AddrInUse`] when a live listener answers
-/// at the address already.
+/// `InvalidInput` for an invalid native socket pathname, before staging;
+/// binding, restricting or no-replace publication errors; `AlreadyExists` for a
+/// non-socket or competing publisher; `AddrInUse` for an existing socket path.
+/// Filesystems that cannot hard-link sockets fail closed rather than rename over
+/// a possibly live endpoint. Externally coordinate old-path cleanup before reuse.
 pub async fn listen_ipc(path: impl AsRef<Path>) -> io::Result<IpcListener> {
     let path = path.as_ref().to_path_buf();
-    remove_stale_socket(&path).await?;
+    // A short staged bind must not hide an undialable public pathname.
+    std::os::unix::net::SocketAddr::from_pathname(&path)?;
+    refuse_occupied_socket(&path).await?;
 
-    let staging = staging_path(&path);
-    let staged = stage_and_publish(&staging, &path).await;
-    discard(&staging).await;
-    let (listener, inode) = staged?;
+    // Creation, publication and handing the listener to the caller share one
+    // poll. Cancellation must not leave a public socket without its listener.
+    let (listener, inode) = stage_and_publish(&path)?;
+    let _ = inode;
 
     Ok(IpcListener {
         listener,
         path,
+        #[cfg(test)]
         inode,
         max_frame_bytes: None,
         accepted: Vec::new(),
@@ -274,83 +262,107 @@ fn identity_of(stream: &UnixStream) -> PeerIdentity {
 /// Short names, because these are the paths `bind` actually sees and
 /// `sun_path` is 104 bytes on macOS. An address close to that limit would
 /// otherwise fail to bind at a staging name longer than itself.
-fn staging_path(path: &Path) -> Staging {
+fn staging_path(path: &Path) -> StagingPath {
     static NEXT_ATTEMPT: AtomicU64 = AtomicU64::new(0);
     let attempt = NEXT_ATTEMPT.fetch_add(1, Ordering::Relaxed);
     let beside = path.parent().unwrap_or_else(|| Path::new("."));
     let directory = beside.join(format!(".m{}-{attempt}", std::process::id()));
     let socket = directory.join("s");
-    Staging { directory, socket }
+    StagingPath { directory, socket }
 }
 
-/// The two paths one staging attempt owns.
+/// Candidate paths carry no authority until the directory is created.
 #[derive(Debug)]
-struct Staging {
+struct StagingPath {
     directory: PathBuf,
     socket: PathBuf,
 }
 
-/// Binds inside a fresh owner-only directory, restricts the socket, and links
-/// it onto the address. Whatever this fails at, [`discard`] cleans up after.
-///
-/// The inode comes back with the listener, read from the staged socket while
-/// it is still inside a directory nobody else may enter — and so while
-/// nothing can be racing it. Both of [`publish`]'s moves keep the inode the
-/// `bind` created, so it is the number that sits at `path` afterwards.
-/// Reading it from `path` *after* publishing would record a replacement's
-/// inode whenever another listener took the address in between, which is the
-/// one case [`IpcListener::close`]'s guard exists to survive; it would also
-/// leave a bound, published address behind if that read were the call to
-/// fail.
-async fn stage_and_publish(staging: &Staging, path: &Path) -> io::Result<(UnixListener, u64)> {
-    let listener = stage(staging).await?;
-    let inode = tokio::fs::symlink_metadata(&staging.socket).await?.ino();
-    publish(&staging.socket, path).await?;
-    Ok((listener, inode))
-}
+/// Owns a directory created exclusively for this attempt.
+#[derive(Debug)]
+struct Staging(StagingPath);
 
-/// Binds the socket somewhere no other user may reach it.
-async fn stage(staging: &Staging) -> io::Result<UnixListener> {
-    // A crash between staging and publishing leaves the directory behind, and
-    // a later process with the same id reaches the same name. Removing it is
-    // never recursive: this only ever clears what a staging attempt of ours
-    // would have left, and a directory somebody else planted at the name is
-    // reported rather than deleted.
-    discard(staging).await;
-    tokio::fs::DirBuilder::new()
-        .mode(STAGING_DIRECTORY_MODE)
-        .create(&staging.directory)
-        .await?;
-    let listener = UnixListener::bind(&staging.socket)?;
-    restrict(&staging.socket).await?;
-    Ok(listener)
-}
-
-/// Removes what a staging attempt leaves behind, best effort: the socket is
-/// gone already when publishing renamed rather than linked, and the directory
-/// only goes when it is this attempt's and empty.
-///
-/// Nothing is removed unless a directory in its own right sits at the staging
-/// name. The name is derived from this process's id, and the directory an
-/// address usually sits in can be the world-writable system temporary one, so
-/// a symlink somebody else planted there first would otherwise turn this
-/// cleanup into an unlink inside a directory of their choosing. Anything that
-/// is not a directory is left where it is and reported by the `create` that
-/// follows.
-async fn discard(staging: &Staging) {
-    if !is_directory(&staging.directory).await {
-        return;
+impl Drop for Staging {
+    fn drop(&mut self) {
+        let StagingPath { directory, socket } = &self.0;
+        if fs::symlink_metadata(directory).is_ok_and(|metadata| metadata.is_dir()) {
+            let _ = fs::remove_file(socket);
+            let _ = fs::remove_dir(directory);
+        }
     }
-    let _ = tokio::fs::remove_file(&staging.socket).await;
-    let _ = tokio::fs::remove_dir(&staging.directory).await;
 }
 
-/// True when a directory — never a symlink to one — sits at `path`.
-async fn is_directory(path: &Path) -> bool {
-    matches!(
-        tokio::fs::symlink_metadata(path).await,
-        Ok(metadata) if metadata.file_type().is_dir()
-    )
+/// Finds short private staging on the destination device, then publishes without replacement.
+/// A valid public path may have too little room left in its parent for our private suffix.
+/// Try same-device ancestors; a mount boundary never justifies replacing rename.
+fn stage_and_publish(path: &Path) -> io::Result<(UnixListener, u64)> {
+    let parent = path
+        .parent()
+        .filter(|value| !value.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let device = fs::metadata(parent)?.dev();
+    let mut last_failure: Option<io::Error> = None;
+    for ancestor in parent.ancestors() {
+        if ancestor.as_os_str().is_empty() && parent == Path::new(".") {
+            continue;
+        }
+        let ancestor = if ancestor.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            ancestor
+        };
+        if fs::metadata(ancestor)?.dev() != device {
+            continue;
+        }
+        for _ in 0..MAX_STAGING_ATTEMPTS {
+            let staging = staging_path(&ancestor.join("endpoint"));
+            if std::os::unix::net::SocketAddr::from_pathname(&staging.socket).is_err() {
+                break;
+            }
+            match stage(staging) {
+                Ok((listener, staging)) => {
+                    // The staged identity is diagnostic/test data, never unlink authority.
+                    let inode = fs::symlink_metadata(&staging.0.socket)?.ino();
+                    publish(&staging.0.socket, path)?;
+                    return Ok((listener, inode));
+                }
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                    last_failure = Some(error);
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::PermissionDenied | io::ErrorKind::ReadOnlyFilesystem
+                    ) =>
+                {
+                    last_failure = Some(error);
+                    break;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+    let kind = last_failure
+        .as_ref()
+        .map_or(io::ErrorKind::Unsupported, io::Error::kind);
+    Err(io::Error::new(
+        kind,
+        format!(
+            "{} could not be published: expected private same-device staging within the native socket pathname limit; public path preserved; last staging failure: {last_failure:?}",
+            path.display()
+        ),
+    ))
+}
+
+/// Acquires a fresh private directory before binding or acquiring cleanup rights.
+fn stage(path: StagingPath) -> io::Result<(UnixListener, Staging)> {
+    fs::DirBuilder::new()
+        .mode(STAGING_DIRECTORY_MODE)
+        .create(&path.directory)?;
+    let staging = Staging(path);
+    let listener = UnixListener::bind(&staging.0.socket)?;
+    restrict(&staging.0.socket)?;
+    Ok((listener, staging))
 }
 
 /// Moves the bound socket onto the address it is published at.
@@ -362,10 +374,10 @@ async fn is_directory(path: &Path) -> bool {
 /// would silently take the address over and leave that listener bound to an
 /// inode no client can reach.
 ///
-/// A filesystem that will not hard-link a socket falls back to the rename,
-/// which is still atomic and still owner-only — it only loses the refusal.
-async fn publish(staging: &Path, path: &Path) -> io::Result<()> {
-    match tokio::fs::hard_link(staging, path).await {
+/// A filesystem that cannot hard-link sockets is unsupported; never fall back
+/// to a replacing rename.
+fn publish(staging: &Path, path: &Path) -> io::Result<()> {
+    match fs::hard_link(staging, path) {
         // The link is the address now; the staging name is the caller's to
         // clear, along with the directory holding it.
         Ok(()) => Ok(()),
@@ -377,19 +389,23 @@ async fn publish(staging: &Path, path: &Path) -> io::Result<()> {
                 path.display()
             ),
         )),
-        Err(_) => tokio::fs::rename(staging, path).await,
+        Err(error) => Err(io::Error::new(
+            error.kind(),
+            format!(
+                "{} could not be published without replacement; path preserved: {error}",
+                path.display()
+            ),
+        )),
     }
 }
 
 /// Makes the socket file readable and writable by its owner alone.
-async fn restrict(path: &Path) -> io::Result<()> {
-    tokio::fs::set_permissions(path, std::fs::Permissions::from_mode(SOCKET_MODE)).await
+fn restrict(path: &Path) -> io::Result<()> {
+    fs::set_permissions(path, fs::Permissions::from_mode(SOCKET_MODE))
 }
 
-/// Removes the socket file a previous process left behind. Only a socket is
-/// removed: anything else at the address is a mistake to report, not
-/// something to delete.
-async fn remove_stale_socket(path: &Path) -> io::Result<()> {
+/// Observes an occupied address and preserves it without conditional-unlink authority.
+async fn refuse_occupied_socket(path: &Path) -> io::Result<()> {
     let metadata = match tokio::fs::symlink_metadata(path).await {
         Ok(metadata) => metadata,
         // Nothing at the path, which is the ordinary case.
@@ -406,74 +422,58 @@ async fn remove_stale_socket(path: &Path) -> io::Result<()> {
             ),
         ));
     }
-    match probe(path).await {
-        Staleness::Stale => remove_if_still(path, metadata.ino()).await,
-        Staleness::Live => Err(io::Error::new(
-            io::ErrorKind::AddrInUse,
-            format!(
-                "{} is served by a live listener; expected the address to be free or a socket \
-                 file nothing answers on",
-                path.display()
-            ),
-        )),
+    let verdict = probe(path).await;
+    Err(probe_refusal(path, &verdict))
+}
+
+fn probe_refusal(path: &Path, verdict: &ProbeVerdict) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::AddrInUse,
+        format!(
+            "{}: probe {}; path preserved because atomic cleanup ownership is unproven; expected a free address or externally coordinated cleanup",
+            path.display(),
+            verdict.description()
+        ),
+    )
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ProbeVerdict {
+    Connected,
+    Refused(String),
+    Inconclusive(String),
+}
+
+impl ProbeVerdict {
+    fn description(&self) -> String {
+        match self {
+            Self::Connected => "connected (connection established)".into(),
+            Self::Refused(reason) => format!("refused ({reason})"),
+            Self::Inconclusive(reason) => format!("inconclusive ({reason})"),
+        }
     }
 }
 
-/// Unlinks `path`, but only while it is still the same file the probe judged
-/// stale. `probe` waits up to a second, and a second supervisor racing the
-/// same restart against the same address is exactly who can remove and
-/// rebind it inside that window — unlinking on the stale verdict alone would
-/// then delete the winner's live socket file out from under it. Silently
-/// doing nothing when the inode has moved on is correct: [`publish`]'s own
-/// `AlreadyExists` guard is what tells *this* caller the address was taken,
-/// the same outcome a plain, unguarded race would have produced for the
-/// loser anyway. This narrows the window from the whole probe to the gap
-/// between this check and the unlink; it does not close it — there is no
-/// unlink-by-inode primitive on this platform to close it with.
-async fn remove_if_still(path: &Path, inode: u64) -> io::Result<()> {
-    let Ok(metadata) = tokio::fs::symlink_metadata(path).await else {
-        return Ok(());
-    };
-    if metadata.ino() == inode {
-        tokio::fs::remove_file(path).await?;
+fn probe_error(error: &io::Error) -> ProbeVerdict {
+    if matches!(
+        error.kind(),
+        io::ErrorKind::ConnectionRefused | io::ErrorKind::NotFound
+    ) {
+        ProbeVerdict::Refused(error.to_string())
+    } else {
+        ProbeVerdict::Inconclusive(error.to_string())
     }
-    Ok(())
 }
 
-/// Whether a socket file at an address is stale, or a live listener still
-/// answers behind it — local-socket.md's definition: "a socket file at the
-/// address is stale when a connection to it is refused".
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Staleness {
-    Stale,
-    Live,
-}
-
-/// Dials `path` to tell a stale socket file from one a live listener answers
-/// on. [`io::ErrorKind::ConnectionRefused`] and [`io::ErrorKind::NotFound`]
-/// are stale: the listener that made the file is gone, whether the socket
-/// still refuses connections or the file was removed under the dial.
-/// Everything else — a successful connect, the timeout, a permission error —
-/// is live. Erring toward live is deliberate: taking over an address this
-/// could not judge is exactly the failure [`remove_stale_socket`] exists to
-/// refuse, so an inconclusive dial must never read as stale.
-async fn probe(path: &Path) -> Staleness {
+/// A positive dial enqueues a connection, but sends no hello or application frame.
+async fn probe(path: &Path) -> ProbeVerdict {
     match tokio::time::timeout(PROBE_TIMEOUT, UnixStream::connect(path)).await {
         Ok(Ok(stream)) => {
-            // A live listener answered; nothing more to do with the
-            // connection than let the dial itself have proven the point.
             drop(stream);
-            Staleness::Live
+            ProbeVerdict::Connected
         }
-        Ok(Err(error))
-            if matches!(
-                error.kind(),
-                io::ErrorKind::ConnectionRefused | io::ErrorKind::NotFound
-            ) =>
-        {
-            Staleness::Stale
-        }
-        Ok(Err(_)) | Err(_) => Staleness::Live,
+        Ok(Err(error)) => probe_error(&error),
+        Err(_) => ProbeVerdict::Inconclusive("timeout".into()),
     }
 }
 
@@ -481,14 +481,14 @@ async fn probe(path: &Path) -> Staleness {
 mod tests {
     use super::{
         ConnectDeadline, IpcListener, SOCKET_MODE, STAGING_DIRECTORY_MODE, UnixListener,
-        connect_ipc, discard, listen_ipc, publish, remove_if_still, stage, staging_path,
+        connect_ipc, listen_ipc, publish, stage, staging_path,
     };
     use crate::close::close_codes;
     use crate::frame::Frame;
     use crate::port::{Inbound, Port, PortRx, PortTx};
     use crate::transports::deadline::ConnectError;
     use std::io;
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::Duration;
@@ -644,9 +644,10 @@ mod tests {
         // inside is what refuses them.
         let address = Address::new();
         let staging = staging_path(&address.path());
-        let listener = stage(&staging).await.expect("a staged socket");
+        let (listener, staging) = stage(staging).expect("a staged socket");
 
         let containing = staging
+            .0
             .socket
             .parent()
             .expect("the socket is staged inside a directory of its own");
@@ -663,7 +664,92 @@ mod tests {
         );
 
         drop(listener);
-        discard(&staging).await;
+        drop(staging);
+    }
+
+    #[tokio::test]
+    async fn a_preexisting_staging_directory_keeps_its_contents() {
+        let address = Address::new();
+        let staging = staging_path(&address.path());
+        std::fs::create_dir(&staging.directory).expect("another owner's staging directory");
+        std::fs::write(&staging.socket, b"other owner's file").expect("a file named s");
+
+        let existing_socket = staging.socket.clone();
+        let result = stage(staging);
+        assert_eq!(
+            std::fs::read(existing_socket).ok().as_deref(),
+            Some(b"other owner's file".as_slice()),
+            "a colliding staging attempt must preserve the existing s file"
+        );
+        assert_eq!(result.unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+    }
+
+    fn check_cancellation_at_filesystem_visibility(published: bool) {
+        use std::future::Future;
+        use std::task::{Context, Poll, Waker};
+
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .max_blocking_threads(1)
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let address = Address::new();
+            let path = address.path();
+            let listener = {
+                let mut pending = std::pin::pin!(listen_ipc(&path));
+                let mut context = Context::from_waker(Waker::noop());
+                let mut result = None;
+                for _ in 0..32 {
+                    if let Poll::Ready(ready) = pending.as_mut().poll(&mut context) {
+                        result = Some(ready.expect("a free address must be bindable"));
+                        break;
+                    }
+                    // A single blocking thread makes this a barrier after the
+                    // filesystem operation queued by the preceding poll.
+                    tokio::task::spawn_blocking(|| {}).await.unwrap();
+                    let visible = if published {
+                        path.exists()
+                    } else {
+                        std::fs::read_dir(&address.0).unwrap().next().is_some()
+                    };
+                    if visible {
+                        break;
+                    }
+                }
+                result
+            };
+
+            if let Some(listener) = listener {
+                assert!(
+                    path.exists(),
+                    "a returned listener must own a published address"
+                );
+                assert_eq!(std::fs::read_dir(&address.0).unwrap().count(), 1);
+                listener.close().await;
+            } else {
+                assert_eq!(
+                    std::fs::read_dir(&address.0).unwrap().count(),
+                    0,
+                    "cancelling an unfinished listen left a filesystem entry"
+                );
+                listen_ipc(&path)
+                    .await
+                    .expect("a cancelled bind must leave the address reusable")
+                    .close()
+                    .await;
+            }
+        });
+    }
+
+    #[test]
+    fn cancelling_listen_cannot_leak_a_private_staging_entry() {
+        check_cancellation_at_filesystem_visibility(false);
+    }
+
+    #[test]
+    fn cancelling_listen_cannot_leave_an_ownerless_public_address() {
+        check_cancellation_at_filesystem_visibility(true);
     }
 
     #[tokio::test]
@@ -682,9 +768,8 @@ mod tests {
         let staging = staging_path(&address.path());
         std::os::unix::fs::symlink(&elsewhere, &staging.directory).expect("the planted symlink");
 
-        let error = stage(&staging)
-            .await
-            .expect_err("a name this attempt did not create is not its to clear");
+        let error =
+            stage(staging).expect_err("a name this attempt did not create is not its to clear");
 
         assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
         assert!(
@@ -754,17 +839,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn closing_a_listener_takes_its_address_with_it() {
+    async fn closing_a_listener_explicitly_preserves_its_public_path() {
         let address = Address::new();
         let listener = listening(&address).await;
         assert!(address.path().exists());
 
-        listener.close().await;
-
-        assert!(
-            !address.path().exists(),
-            "a closed listener leaves no address behind"
+        let outcome = listener.close().await;
+        assert_eq!(
+            outcome,
+            super::super::IpcCloseOutcome::PathPreserved(address.path())
         );
+        assert!(address.path().exists());
     }
 
     #[tokio::test]
@@ -780,9 +865,7 @@ mod tests {
         std::fs::write(&staging, b"the socket this listener bound").expect("a staging file");
         std::fs::write(&taken, b"what another listener published").expect("an occupied address");
 
-        let error = publish(&staging, &taken)
-            .await
-            .expect_err("the address is no longer free");
+        let error = publish(&staging, &taken).expect_err("the address is no longer free");
 
         assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
         assert!(
@@ -796,15 +879,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_stale_socket_file_is_replaced() {
+    async fn a_stale_socket_file_is_preserved_without_atomic_ownership() {
         let address = Address::new();
         // A listener that vanished without closing leaves its address behind.
         drop(listening(&address).await);
 
-        let second = listen_ipc_past_a_concurrent_forking_test(&address.path())
+        let error = listen_ipc(address.path())
             .await
-            .expect("a stale socket is not an occupied address");
-        second.close().await;
+            .expect_err("stale is not cleanup authority");
+        assert_eq!(error.kind(), io::ErrorKind::AddrInUse);
+        assert!(error.to_string().contains("path preserved"));
+        assert!(address.path().exists());
     }
 
     struct HeldListenerProbe {
@@ -886,50 +971,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_replacement_at_the_same_path_survives_a_stale_removal_judged_before_it_arrived() {
-        let address = Address::new();
-        // Keeps A's inode number out of B's reach once A's file is unlinked;
-        // see `closing_leaves_a_replacement_address_alone` for why the bare
-        // `assert_ne!` below is not self-sufficient.
-        let pin = Address::new();
-        let stale_inode = {
-            let a = listening(&address).await;
-            let inode = a.inode;
-            std::fs::hard_link(address.path(), pin.path()).expect("A's inode to be pinned");
-            drop(a);
-            inode
-        };
-
-        // The window `remove_stale_socket`'s probe leaves open: another
-        // supervisor already removed and rebound the address by the time the
-        // stale verdict this call is acting on is applied.
-        let b = listen_ipc_past_a_concurrent_forking_test(&address.path())
-            .await
-            .expect("a stale socket is not an occupied address");
-        assert_ne!(
-            stale_inode, b.inode,
-            "B must be a different socket for this test to mean anything"
-        );
-
-        remove_if_still(&address.path(), stale_inode)
-            .await
-            .expect("a path B still occupies is not an error to leave alone");
-
-        let survived =
-            std::fs::symlink_metadata(address.path()).expect("B's socket file must still be there");
-        assert_eq!(
-            survived.ino(),
-            b.inode,
-            "expected B's socket file untouched, received a different inode at its path"
-        );
-        connect_ipc(address.path(), &ConnectDeadline::default())
-            .await
-            .expect("B still accepts a connection");
-
-        b.close().await;
-    }
-
-    #[tokio::test]
     async fn a_live_listener_is_not_stale() {
         let address = Address::new();
         let mut first = listening(&address).await;
@@ -983,6 +1024,227 @@ mod tests {
         first.close().await;
     }
 
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[tokio::test]
+    async fn a_long_parent_does_not_make_private_staging_exceed_the_native_limit() {
+        let address = Address::new();
+        let limit = if cfg!(target_os = "linux") { 107 } else { 103 };
+        let parent = address
+            .0
+            .join("p".repeat(limit - address.0.as_os_str().len() - 3));
+        std::fs::create_dir(&parent).unwrap();
+        let path = parent.join("s");
+        assert_eq!(path.as_os_str().len(), limit);
+        drop(
+            std::os::unix::net::UnixListener::bind(&path)
+                .expect("the exact long-parent public path binds natively"),
+        );
+        std::fs::remove_file(&path).expect("exclusive fixture cleanup");
+        let listener = listen_ipc(&path)
+            .await
+            .expect("private staging must fit when the public path is valid");
+        assert_eq!(
+            std::fs::read_dir(&address.0).unwrap().count(),
+            1,
+            "ancestor staging must be removed before returning the listener"
+        );
+        assert_eq!(
+            std::fs::read_dir(&parent).unwrap().count(),
+            1,
+            "the public parent must contain only its socket"
+        );
+        let connected = connect_ipc(&path, &ConnectDeadline::default())
+            .await
+            .expect("the published public address dials");
+        drop(connected);
+        listener.close().await;
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[tokio::test]
+    async fn public_path_at_native_socket_limit_is_dialable() {
+        let address = Address::new();
+        let limit = if cfg!(target_os = "linux") { 107 } else { 103 };
+        let path = address
+            .0
+            .join("x".repeat(limit - address.0.as_os_str().len() - 1));
+        assert_eq!(path.as_os_str().len(), limit);
+        drop(
+            std::os::unix::net::UnixListener::bind(&path)
+                .expect("the exact public boundary is natively bindable"),
+        );
+        std::fs::remove_file(&path)
+            .expect("the exclusive fixture owns the dropped native listener");
+        let listener = listen_ipc(&path)
+            .await
+            .expect("valid public boundary must remain available");
+        let connected = connect_ipc(&path, &ConnectDeadline::default())
+            .await
+            .expect("the published boundary must be dialable");
+        drop(connected);
+        listener.close().await;
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[tokio::test]
+    async fn public_path_above_native_socket_limit_is_not_published() {
+        let address = Address::new();
+        let limit = if cfg!(target_os = "linux") { 107 } else { 103 };
+        let path = address
+            .0
+            .join("x".repeat(limit - address.0.as_os_str().len()));
+        assert_eq!(path.as_os_str().len(), limit + 1);
+        match listen_ipc(&path).await {
+            Ok(listener) => {
+                let dial_error = tokio::net::UnixStream::connect(&path)
+                    .await
+                    .expect_err("native dial must reject this oversized address");
+                listener.close().await;
+                panic!("listen_ipc published an undialable public pathname: {dial_error}");
+            }
+            Err(error) => assert_eq!(error.kind(), io::ErrorKind::InvalidInput),
+        }
+        assert!(
+            !path.exists(),
+            "rejection must not publish an unreachable endpoint"
+        );
+    }
+
+    #[tokio::test]
+    async fn probe_eof_never_dispatches_an_application_handler() {
+        use crate::frame::PeerInfo;
+        use crate::session::{CallContext, Session, SessionOptions};
+        use std::sync::Arc;
+        use std::sync::atomic::AtomicUsize;
+        let address = Address::new();
+        let mut listener = listening(&address).await;
+        let error = listen_ipc(address.path()).await.unwrap_err();
+        assert!(error.to_string().contains("probe connected"));
+        let (port, _identity) = listener.accept().await.unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let handler_calls = Arc::clone(&calls);
+        let options = SessionOptions::new(PeerInfo {
+            name: "probe-fixture".into(),
+            version: "0".into(),
+            role: "hub".into(),
+        })
+        .handle(
+            "expensive",
+            move |_params: serde_json::Value, _context: CallContext| {
+                handler_calls.fetch_add(1, Ordering::SeqCst);
+                async { Ok(serde_json::Value::Null) }
+            },
+        );
+        let (session, driver) = Session::spawn(port, options);
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), session.ready())
+                .await
+                .unwrap()
+                .is_err()
+        );
+        tokio::time::timeout(Duration::from_secs(1), driver)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        listener.close().await;
+    }
+
+    #[test]
+    fn shared_probe_fixture_distinguishes_refusal_from_uncertainty() {
+        let fixtures: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../../spec/fixtures/local-socket-probes.json"
+        ))
+        .unwrap();
+        for fixture in fixtures.as_array().unwrap() {
+            let kind = match fixture["error"].as_str().unwrap() {
+                "ECONNREFUSED" => io::ErrorKind::ConnectionRefused,
+                "ENOENT" => io::ErrorKind::NotFound,
+                "EACCES" => io::ErrorKind::PermissionDenied,
+                "EAGAIN" => io::ErrorKind::WouldBlock,
+                "ETIMEDOUT" => io::ErrorKind::TimedOut,
+                other => panic!("unknown fixture {other}"),
+            };
+            let verdict = super::probe_error(&io::Error::from(kind));
+            let expected = fixture["outcome"].as_str().unwrap();
+            assert!(verdict.description().starts_with(expected));
+            let diagnostic = super::probe_refusal(Path::new("fixture.sock"), &verdict);
+            assert_eq!(diagnostic.kind(), io::ErrorKind::AddrInUse);
+            assert!(!diagnostic.to_string().contains("live listener"));
+            assert!(diagnostic.to_string().contains("path preserved"));
+        }
+        assert!(
+            super::ProbeVerdict::Connected
+                .description()
+                .starts_with("connected")
+        );
+    }
+
+    #[tokio::test]
+    async fn accept_discards_excess_connections_and_recovers_when_a_port_drops() {
+        let address = Address::new();
+        let path = address.path();
+        let mut listener = listening(&address).await;
+        let mut ports = Vec::new();
+        let mut clients = Vec::new();
+        for _ in 0..super::super::MAX_IPC_CONNECTIONS {
+            clients.push(
+                connect_ipc(&path, &ConnectDeadline::default())
+                    .await
+                    .unwrap(),
+            );
+            ports.push(listener.accept().await.unwrap().0);
+        }
+
+        let overflow = connect_ipc(&path, &ConnectDeadline::default())
+            .await
+            .unwrap();
+        let (_overflow_tx, mut overflow_rx) = overflow.split();
+        let (accepted, next) = tokio::time::timeout(Duration::from_secs(5), async {
+            let accepting = listener.accept();
+            tokio::pin!(accepting);
+            tokio::select! {
+                biased;
+                result = &mut accepting => panic!("accept returned at capacity: {result:?}"),
+                inbound = overflow_rx.recv() => {
+                    assert!(matches!(inbound, Some(Inbound::Closed(_))), "{inbound:?}");
+                }
+            }
+
+            drop(ports.pop().expect("one live accepted port to release"));
+            let next = connect_ipc(&path, &ConnectDeadline::default())
+                .await
+                .unwrap();
+            let (accepted, _) = accepting.await.expect("accept continues after overflow");
+            (accepted, next)
+        })
+        .await
+        .expect("the overflow closes and the same accept returns the next available port");
+        drop((accepted, next, ports, clients));
+        listener.close().await;
+    }
+
+    #[tokio::test]
+    async fn recycled_inode_identity_is_not_cleanup_authority() {
+        let address = Address::new();
+        let successor = listening(&address).await;
+        let scratch = Address::new();
+        let late = IpcListener {
+            listener: UnixListener::bind(scratch.path()).unwrap(),
+            path: address.path(),
+            // Deterministically model inode reuse without depending on the filesystem allocator.
+            inode: successor.inode,
+            max_frame_bytes: None,
+            accepted: Vec::new(),
+        };
+        late.close().await;
+        assert!(
+            address.path().exists(),
+            "a recycled identity cannot authorize unlinking the successor"
+        );
+        successor.close().await;
+    }
+
     #[tokio::test]
     async fn closing_leaves_a_replacement_address_alone() {
         let address = Address::new();
@@ -1005,9 +1267,11 @@ mod tests {
             inode
         };
 
-        let b = listen_ipc_past_a_concurrent_forking_test(&address.path())
+        std::fs::remove_file(address.path())
+            .expect("fixture owns all listeners and coordinates replacement");
+        let b = listen_ipc(address.path())
             .await
-            .expect("a stale socket is not an occupied address");
+            .expect("explicitly freed address");
         assert_ne!(
             a_inode, b.inode,
             "B must be a different socket for this test to mean anything"

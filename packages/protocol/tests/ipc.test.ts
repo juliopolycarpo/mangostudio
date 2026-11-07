@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import { statSync } from 'node:fs';
-import { rename, stat } from 'node:fs/promises';
+import { rename, stat, unlink } from 'node:fs/promises';
 import {
   connect as connectSocket,
   createServer,
@@ -217,7 +217,7 @@ describe('local socket transport', () => {
     }
   });
 
-  it('sends close 4000 to every open session before it stops listening', async () => {
+  it('releases both ends of every open session before it stops listening', async () => {
     const path = nextPath();
     const { accepted, accept } = acceptOne();
     const server = await listenIpc(path, accept);
@@ -229,13 +229,43 @@ describe('local socket transport', () => {
     await Promise.all([client.ready, host.ready]);
 
     const closed = new Promise((resolve) => client.onClose(resolve));
-    await server.close();
+    const localClosures: unknown[] = [];
+    host.onClose((closure) => localClosures.push(closure));
+    const release = { code: CLOSE_CODES.RELEASED, reason: 'listener closing', fatal: false };
+    try {
+      await server.close();
+      expect(await closed).toMatchObject(release);
+      expect(host.state).toBe('closed');
+      expect(localClosures).toEqual([release]);
+    } finally {
+      await host.close();
+    }
+  });
 
-    expect(await closed).toMatchObject({
-      code: CLOSE_CODES.RELEASED,
-      reason: 'listener closing',
-      fatal: false,
+  it('notifies each port owner even when an earlier closure observer throws', async () => {
+    const path = nextPath();
+    const { accepted, accept } = acceptOne();
+    const server = await listenIpc(path, accept);
+    const client = new Session(await connectIpc(path), {
+      peer: CONFORMANCE_B,
+      livenessIntervalMs: false,
     });
+    const acceptedPort = await accepted;
+    acceptedPort.onClosed(() => {
+      throw new Error('controlled closure observer failure');
+    });
+    const host = new Session(acceptedPort, { peer: CONFORMANCE_A, livenessIntervalMs: false });
+    await Promise.all([client.ready, host.ready]);
+
+    const closed = new Promise((resolve) => client.onClose(resolve));
+    try {
+      await expect(server.close()).rejects.toThrow('controlled closure observer failure');
+      expect(await closed).toMatchObject({ code: CLOSE_CODES.RELEASED });
+      expect(host.state).toBe('closed');
+    } finally {
+      await host.close();
+      await server.close();
+    }
   });
 
   it('reports a peer that vanished as a closure and fails what was in flight', async () => {
@@ -305,7 +335,7 @@ describe('local socket transport', () => {
   });
 
   // POSIX only: a named pipe has no filesystem entry to leave behind.
-  it.skipIf(WINDOWS)('replaces the socket file a crashed listener left behind', async () => {
+  it.skipIf(WINDOWS)('preserves the socket file a crashed listener left behind', async () => {
     const bound = nextPath();
     const stale = nextPath();
     const squatter = createServer();
@@ -320,15 +350,12 @@ describe('local socket transport', () => {
     });
     expect(statSync(stale).isSocket()).toBe(true);
 
-    const { accepted, accept } = acceptOne();
-    const server = await listenIpc(stale, accept);
     try {
-      const client = await connectIpc(stale);
-      const port = await accepted;
-      expect(port.maxFrameBytes).toBe(16 * 1024 * 1024);
-      client.close(CLOSE_CODES.RELEASED);
+      const rejection = await rejectionOf(listenIpc(stale, () => undefined));
+      expect(rejection).toMatchObject({ code: 'EADDRINUSE', probeOutcome: 'refused' });
+      expect((await stat(stale)).isSocket()).toBe(true);
     } finally {
-      await server.close();
+      await unlink(stale);
     }
   });
 

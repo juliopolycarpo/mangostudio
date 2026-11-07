@@ -29,7 +29,7 @@
 //! ```
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, OnceLock, Weak};
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{Mutex, watch};
@@ -72,6 +72,7 @@ pub struct NdjsonPort<R, W> {
     reader: R,
     writer: SharedWriter<W>,
     max_frame_bytes: usize,
+    first_hello_deadline: Option<FirstHelloDeadline>,
 }
 
 impl<R, W> NdjsonPort<R, W>
@@ -103,6 +104,7 @@ where
             reader,
             writer: SharedWriter::new(writer),
             max_frame_bytes: DEFAULT_MAX_FRAME_BYTES,
+            first_hello_deadline: None,
         }
     }
 
@@ -139,6 +141,19 @@ impl<R, W> NdjsonPort<R, W>
 where
     W: AsyncWrite + Unpin + Send + 'static,
 {
+    /// Sets a transport-owned first-hello deadline for accepted local connections.
+    pub(crate) fn with_first_hello_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.writer
+            .0
+            .ipc_close
+            .get_or_init(|| watch::channel(None).0);
+        self.first_hello_deadline = Some(FirstHelloDeadline {
+            at: tokio::time::Instant::now() + timeout,
+            armed: watch::channel(true).0,
+        });
+        self
+    }
+
     /// A handle that can end this port from somewhere that does not own it.
     ///
     /// A listener needs one: `spec/transports/local-socket.md` has it send
@@ -216,6 +231,7 @@ impl<W: AsyncWrite + Unpin + Send + 'static> PortCloser<W> {
     }
 
     /// Writes the farewell of §10 on that port and ends its writable half.
+    /// For an accepted IPC port it also ends the receive half.
     ///
     /// A port that is already gone is a no-op: the session it belonged to has
     /// ended, and there is nobody left to tell.
@@ -247,7 +263,7 @@ impl<W: AsyncWrite + Unpin + Send + 'static> PortCloser<W> {
             return;
         };
         SharedWriter(writer)
-            .end(code, reason.map(ToOwned::to_owned), self.max_frame_bytes)
+            .close_local(code, reason.map(ToOwned::to_owned), self.max_frame_bytes)
             .await;
     }
 }
@@ -268,9 +284,10 @@ where
         let tx = NdjsonTx {
             writer: self.writer.clone(),
             max_frame_bytes: self.max_frame_bytes,
+            first_hello_deadline: self.first_hello_deadline.clone(),
         };
         let rx = NdjsonRx {
-            reader: self.reader,
+            reader: Some(self.reader),
             decoder: LineDecoder::new(self.max_frame_bytes),
             chunk: vec![0; READ_CHUNK_BYTES].into_boxed_slice(),
             pending: VecDeque::new(),
@@ -278,6 +295,7 @@ where
             writer: self.writer,
             max_frame_bytes: self.max_frame_bytes,
             terminal: false,
+            first_hello_deadline: self.first_hello_deadline,
         };
         (tx, rx)
     }
@@ -288,6 +306,7 @@ where
 pub struct NdjsonTx<W> {
     writer: SharedWriter<W>,
     max_frame_bytes: usize,
+    first_hello_deadline: Option<FirstHelloDeadline>,
 }
 
 impl<W> PortTx for NdjsonTx<W>
@@ -295,20 +314,43 @@ where
     W: AsyncWrite + Unpin + Send + 'static,
 {
     async fn send(&mut self, frame: Frame) -> SendOutcome {
-        self.writer.write_frame(&frame, self.max_frame_bytes).await
+        if self
+            .first_hello_deadline
+            .as_ref()
+            .is_some_and(|deadline| !*deadline.armed.borrow())
+        {
+            self.first_hello_deadline = None;
+        }
+        let write = self.writer.write_frame(&frame, self.max_frame_bytes);
+        let Some(deadline) = &self.first_hello_deadline else {
+            return write.await;
+        };
+        // The session sends its own hello before it polls Rx. The send must
+        // honor the same deadline if the peer leaves its receive buffer full.
+        tokio::select! {
+            biased;
+            () = deadline.expired() => {
+                if self.writer.elect_close(IpcClose::Local(FirstHelloDeadline::timeout_close())) {
+                    // A partially written NDJSON frame cannot be followed by a farewell.
+                    self.writer.clone().finish_close(None, self.max_frame_bytes).await;
+                }
+                SendOutcome::Closed
+            }
+            outcome = write => outcome,
+        }
     }
 
     async fn close(self, code: u16, reason: Option<String>) {
-        // The farewell of §10 first, then the end of the writable half: a peer
-        // reading a stream that simply stops has no way to learn the code.
-        self.writer.end(code, reason, self.max_frame_bytes).await;
+        self.writer
+            .close_local(code, reason, self.max_frame_bytes)
+            .await;
     }
 }
 
 /// The receive half of an [`NdjsonPort`].
 #[derive(Debug)]
 pub struct NdjsonRx<R, W> {
-    reader: R,
+    reader: Option<R>,
     decoder: LineDecoder,
     /// Where one read lands before the decoder sees it.
     chunk: Box<[u8]>,
@@ -321,6 +363,7 @@ pub struct NdjsonRx<R, W> {
     writer: SharedWriter<W>,
     max_frame_bytes: usize,
     terminal: bool,
+    first_hello_deadline: Option<FirstHelloDeadline>,
 }
 
 impl<R, W> PortRx for NdjsonRx<R, W>
@@ -329,22 +372,71 @@ where
     W: AsyncWrite + Unpin + Send + 'static,
 {
     async fn recv(&mut self) -> Option<Inbound> {
+        let mut ipc_close = self.writer.0.ipc_close.get().map(watch::Sender::subscribe);
         loop {
-            if let Some(frame) = self.pending.pop_front() {
-                return Some(Inbound::Frame(frame));
-            }
-            if let Some(closure) = self.closure.take() {
-                self.terminal = true;
-                return Some(Inbound::Closed(closure));
-            }
             if self.terminal {
                 return None;
+            }
+            if self.closure.is_none()
+                && let Some(IpcClose::Local(close)) = ipc_close
+                    .as_mut()
+                    .and_then(|release| release.borrow_and_update().clone())
+            {
+                self.pending.clear();
+                self.record_closure(PortClosure::Closed {
+                    code: Some(close.code),
+                    reason: close.reason,
+                });
+            }
+            // A read that won the deadline race can already have decoded frames.
+            if let Some(frame) = self.pending.pop_front() {
+                if matches!(frame, Frame::Hello(_)) {
+                    self.disarm_first_hello();
+                }
+                return Some(Inbound::Frame(frame));
+            }
+            if self
+                .first_hello_deadline
+                .as_ref()
+                .is_some_and(|deadline| tokio::time::Instant::now() >= deadline.at)
+            {
+                self.expire_first_hello().await;
+                continue;
+            }
+            if let Some(closure) = self.closure.take() {
+                if ipc_close.is_some() {
+                    // A split named pipe lives until both halves have released it.
+                    drop(self.reader.take());
+                }
+                self.terminal = true;
+                return Some(Inbound::Closed(closure));
             }
 
             // `AsyncReadExt::read` is cancel-safe: a call dropped because
             // another `select!` branch won the race read nothing, so no byte
             // this decoder has not already seen is lost.
-            match self.reader.read(&mut self.chunk).await {
+            let reader = self.reader.as_mut().expect("a live port has a reader");
+            let read = async {
+                if let Some(deadline) = &self.first_hello_deadline {
+                    tokio::time::timeout_at(deadline.at, reader.read(&mut self.chunk)).await
+                } else {
+                    Ok(reader.read(&mut self.chunk).await)
+                }
+            };
+            let read = if let Some(release) = &mut ipc_close {
+                tokio::select! {
+                    biased;
+                    _ = release.changed() => continue,
+                    result = read => result,
+                }
+            } else {
+                read.await
+            };
+            let Ok(read) = read else {
+                self.expire_first_hello().await;
+                continue;
+            };
+            match read {
                 Ok(0) => self.on_eof().await,
                 Ok(count) => self.decode_chunk(count).await,
                 Err(error) => self.on_failure(&error).await,
@@ -358,6 +450,34 @@ where
     R: AsyncRead + Unpin + Send + 'static,
     W: AsyncWrite + Unpin + Send + 'static,
 {
+    fn disarm_first_hello(&mut self) {
+        if let Some(deadline) = self.first_hello_deadline.take() {
+            deadline.armed.send_replace(false);
+        }
+    }
+
+    fn record_closure(&mut self, closure: PortClosure) {
+        // The first closure wins even if teardown or a cancelled recv crosses the deadline.
+        self.disarm_first_hello();
+        self.closure = Some(closure);
+    }
+
+    async fn expire_first_hello(&mut self) {
+        if !self.writer.elect_close(IpcClose::Inbound) {
+            return;
+        }
+        let close = FirstHelloDeadline::timeout_close();
+        // Persist before yielding so cancellation cannot lose the closure notification.
+        self.record_closure(PortClosure::Closed {
+            code: Some(close.code),
+            reason: close.reason.clone(),
+        });
+        self.writer
+            .clone()
+            .finish_close(Some(close), self.max_frame_bytes)
+            .await;
+    }
+
     /// Decodes the first `count` bytes of the read buffer. A refused record
     /// ends the stream: the peer is told with the code the refusal maps to,
     /// because a line nobody could read cannot be resynchronised (stdio.md,
@@ -374,34 +494,83 @@ where
     /// a record without its terminator is an incomplete frame, not a refusal
     /// (stdio.md, Streams).
     async fn on_eof(&mut self) {
+        if !self.writer.elect_close(IpcClose::Inbound) {
+            return;
+        }
         // Recorded before the await, never after: `recv` is cancel-safe, and a
         // closure written on the far side of an await is one a caller that
         // lost a `select!` race would never be told about.
-        self.closure = Some(PortClosure::Closed {
+        self.record_closure(PortClosure::Closed {
             code: None,
             reason: None,
         });
-        self.writer.shut_down().await;
+        self.writer
+            .clone()
+            .finish_close(None, self.max_frame_bytes)
+            .await;
     }
 
     /// The transport itself broke. The message is the only thing that tells an
     /// operator a broken pipe apart from a peer that left politely; both are a
     /// `4000` release to the session.
     async fn on_failure(&mut self, error: &std::io::Error) {
-        self.closure = Some(PortClosure::Closed {
+        if !self.writer.elect_close(IpcClose::Inbound) {
+            return;
+        }
+        self.record_closure(PortClosure::Closed {
             code: None,
             reason: Some(error.to_string()),
         });
-        self.writer.shut_down().await;
+        self.writer
+            .clone()
+            .finish_close(None, self.max_frame_bytes)
+            .await;
     }
 
     async fn refuse(&mut self, error: CodecError) {
+        if !self.writer.elect_close(IpcClose::Inbound) {
+            return;
+        }
         let code = close_code_for_codec_error(&error);
         let reason = error.to_string();
-        self.closure = Some(PortClosure::ProtocolError { error, code });
+        self.record_closure(PortClosure::ProtocolError { error, code });
         self.writer
-            .end(code, Some(reason), self.max_frame_bytes)
+            .clone()
+            .finish_close(
+                Some(Close {
+                    code,
+                    reason: Some(reason),
+                }),
+                self.max_frame_bytes,
+            )
             .await;
+    }
+}
+
+#[derive(Clone, Debug)]
+struct FirstHelloDeadline {
+    at: tokio::time::Instant,
+    armed: watch::Sender<bool>,
+}
+
+impl FirstHelloDeadline {
+    fn timeout_close() -> Close {
+        Close {
+            code: crate::close::close_codes::PROTOCOL_ERROR,
+            reason: Some("local socket hello deadline exceeded".into()),
+        }
+    }
+
+    async fn expired(&self) {
+        let mut armed = self.armed.subscribe();
+        let disarmed = async {
+            let _ = armed.wait_for(|armed| !*armed).await;
+        };
+        tokio::select! {
+            biased;
+            () = disarmed => std::future::pending().await,
+            () = tokio::time::sleep_until(self.at) => (),
+        }
     }
 }
 
@@ -428,6 +597,14 @@ struct SharedWriter<W>(Arc<WriterShared<W>>);
 struct WriterShared<W> {
     state: Mutex<WriterState<W>>,
     ending: watch::Sender<bool>,
+    /// The elected close for an accepted IPC port.
+    ipc_close: OnceLock<watch::Sender<Option<IpcClose>>>,
+}
+
+#[derive(Clone, Debug)]
+enum IpcClose {
+    Local(Close),
+    Inbound,
 }
 
 #[derive(Debug)]
@@ -456,7 +633,52 @@ impl<W: AsyncWrite + Unpin + Send> SharedWriter<W> {
                 writable: true,
             }),
             ending: watch::Sender::new(false),
+            ipc_close: OnceLock::new(),
         }))
+    }
+
+    fn elect_close(&self, candidate: IpcClose) -> bool {
+        self.0.ipc_close.get().is_none_or(|elected| {
+            elected.send_if_modified(|close| {
+                if close.is_some() {
+                    return false;
+                }
+                // Stop normal writes before notifying Rx. The farewell can still use the writer.
+                self.0.ending.send_replace(true);
+                *close = Some(candidate);
+                true
+            })
+        })
+    }
+
+    async fn close_local(self, code: u16, reason: Option<String>, max_frame_bytes: usize)
+    where
+        W: 'static,
+    {
+        let close = Close { code, reason };
+        if self.0.ipc_close.get().is_none() || self.elect_close(IpcClose::Local(close.clone())) {
+            self.finish_close(Some(close), max_frame_bytes).await;
+        }
+    }
+
+    async fn finish_close(self, farewell: Option<Close>, max_frame_bytes: usize)
+    where
+        W: 'static,
+    {
+        let ipc = self.0.ipc_close.get().is_some();
+        let cleanup = async move {
+            if let Some(Close { code, reason }) = farewell {
+                self.end(code, reason, max_frame_bytes).await;
+            } else {
+                self.shut_down().await;
+            }
+        };
+        if ipc {
+            // Dropping the caller detaches the bounded farewell and shutdown.
+            let _ = tokio::spawn(cleanup).await;
+        } else {
+            cleanup.await;
+        }
     }
 
     /// Encodes and writes one record. A frame the codec refuses is
@@ -473,7 +695,7 @@ impl<W: AsyncWrite + Unpin + Send> SharedWriter<W> {
             return SendOutcome::Closed;
         }
         let mut state = self.0.state.lock().await;
-        if !state.writable {
+        if *ending.borrow_and_update() || !state.writable {
             return SendOutcome::Closed;
         }
         let Some(writer) = state.writer.as_mut() else {
@@ -484,11 +706,12 @@ impl<W: AsyncWrite + Unpin + Send> SharedWriter<W> {
         // it instead; the half-written line does not matter, because the
         // handle is about to be dropped.
         let written = tokio::select! {
-            written = write_record(writer, &line) => written,
+            biased;
             () = ended(&mut ending) => {
                 state.writable = false;
                 return SendOutcome::Closed;
             }
+            written = write_record(writer, &line) => written,
         };
         match written {
             Ok(()) => SendOutcome::Sent,
@@ -730,6 +953,28 @@ mod tests {
         assert_eq!(rx.recv().await, None);
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn first_hello_deadline_stays_disarmed_after_eof() {
+        let (peer, stream) = duplex(1024);
+        let (reader, writer) = tokio::io::split(stream);
+        let deadline = Duration::from_millis(10);
+        let (_tx, mut rx) = NdjsonPort::new(reader, writer)
+            .with_first_hello_timeout(deadline)
+            .split();
+        drop(peer);
+
+        assert_eq!(
+            rx.recv().await,
+            Some(Inbound::Closed(PortClosure::Closed {
+                code: None,
+                reason: None,
+            }))
+        );
+        assert_eq!(rx.recv().await, None);
+        tokio::time::advance(deadline).await;
+        assert_eq!(rx.recv().await, None, "EOF is the sole closure");
+    }
+
     #[tokio::test]
     async fn a_partial_line_at_end_of_file_is_a_closure_not_a_refusal() {
         let mut raw = raw_peer();
@@ -762,6 +1007,34 @@ mod tests {
                 assert_eq!(error.kind, CodecErrorKind::Schema);
             }
             other => panic!("expected a protocol error, got {other:?}"),
+        }
+        assert_eq!(rx.recv().await, None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn first_hello_deadline_preserves_frames_and_refusal_after_cancelled_farewell() {
+        let (mut peer, reader) = duplex(1024);
+        let (writer, _watch) = StalledSink::new();
+        let (_tx, mut rx) = NdjsonPort::new(reader, writer)
+            .with_first_hello_timeout(Duration::from_millis(10))
+            .split();
+        peer.write_all(b"{\"type\":\"ping\"}\n{\"type\":\"nope\"}\n")
+            .await
+            .unwrap();
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), rx.recv())
+                .await
+                .is_err(),
+            "the farewell is cancelled after the hello deadline"
+        );
+        assert_eq!(rx.recv().await, Some(Inbound::Frame(Frame::Ping)));
+        match rx.recv().await {
+            Some(Inbound::Closed(PortClosure::ProtocolError { error, code })) => {
+                assert_eq!(code, close_codes::PROTOCOL_ERROR);
+                assert_eq!(error.kind, CodecErrorKind::Schema);
+            }
+            other => panic!("expected the original decoder refusal, got {other:?}"),
         }
         assert_eq!(rx.recv().await, None);
     }
@@ -885,6 +1158,111 @@ mod tests {
         }
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn first_hello_deadline_releases_session_with_blocked_local_hello() {
+        use crate::frame::PeerInfo;
+        use crate::session::{Session, SessionOptions};
+
+        // Eight bytes cannot hold even the smallest valid hello.
+        let (mut peer, stream) = duplex(8);
+        let (reader, writer) = tokio::io::split(stream);
+        let port =
+            NdjsonPort::new(reader, writer).with_first_hello_timeout(Duration::from_millis(10));
+        let closer = port.closer();
+        let options = SessionOptions::new(PeerInfo {
+            name: "blocked-hello".into(),
+            version: "0".into(),
+            role: "hub".into(),
+        });
+        let (session, mut driver) = Session::spawn(port, options);
+        let settled = tokio::time::timeout(Duration::from_secs(5), &mut driver).await;
+        if settled.is_err() {
+            driver.abort();
+            let _ = driver.await;
+        }
+        settled
+            .expect("the first-hello deadline must release a session blocked writing hello")
+            .expect("the session driver must finish without panicking");
+        assert!(session.ready().await.is_err());
+        assert!(
+            !closer.is_open(),
+            "the closed session must release its IPC slot"
+        );
+
+        let mut bytes = Vec::new();
+        peer.read_to_end(&mut bytes).await.unwrap();
+        assert_eq!(
+            bytes, b"{\"type\":",
+            "only the partial hello reached the peer"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_valid_hello_disarms_the_deadline_for_a_pending_send() {
+        let (mut peer, reader) = duplex(1024);
+        let (writer, mut watch) = StalledSink::new();
+        let (mut tx, mut rx) = NdjsonPort::new(reader, writer)
+            .with_first_hello_timeout(Duration::from_millis(10))
+            .split();
+        let mut send = tokio::spawn(async move { tx.send(Frame::Ping).await });
+        reached(&mut watch.writing).await;
+        peer.write_all(b"{\"type\":\"hello\",\"protocol\":{\"major\":1,\"minor\":0},\"peer\":{\"name\":\"raw\",\"version\":\"0\",\"role\":\"tool\"},\"capabilities\":{}}\n")
+            .await
+            .unwrap();
+        assert!(matches!(
+            rx.recv().await,
+            Some(Inbound::Frame(Frame::Hello(_)))
+        ));
+
+        let sent = tokio::time::timeout(Duration::from_millis(20), &mut send).await;
+        if sent.is_err() {
+            send.abort();
+            let _ = send.await;
+        }
+        assert!(
+            sent.is_err(),
+            "the disarmed deadline must leave the send pending"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_first_hello_timeout_survives_cancellation_during_farewell() {
+        let (_peer_writer, port_reader) = duplex(1024);
+        let (port_writer, mut peer_reader) = duplex(8);
+        let (mut tx, mut rx) = NdjsonPort::new(port_reader, port_writer)
+            .with_first_hello_timeout(Duration::from_millis(10))
+            .split();
+        let cancelled = tokio::time::timeout(Duration::from_millis(20), rx.recv()).await;
+        assert!(
+            cancelled.is_err(),
+            "the farewell must be in flight when recv is cancelled"
+        );
+        let reported = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .unwrap();
+        assert!(matches!(
+            reported,
+            Some(Inbound::Closed(PortClosure::Closed {
+                code: Some(4400),
+                ..
+            }))
+        ));
+        assert_eq!(rx.recv().await, None);
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), tx.send(Frame::Ping)).await,
+            Ok(SendOutcome::Closed),
+            "timeout cleanup must disable sends even while the caller retains Tx"
+        );
+        let mut farewell = Vec::new();
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            peer_reader.read_to_end(&mut farewell),
+        )
+        .await
+        .expect("cleanup must close the writer despite receive cancellation and retained Tx")
+        .unwrap();
+    }
+
     #[test]
     fn a_reason_past_the_schema_limit_is_cut_on_a_character_boundary() {
         let long = "é".repeat(MAX_REASON_CHARS + 10);
@@ -1006,6 +1384,176 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn listener_release_ends_a_pending_ipc_read_while_peer_stays_open() {
+        let (mut peer, stream) = duplex(1024);
+        let (reader, writer) = tokio::io::split(stream);
+        let port =
+            NdjsonPort::new(reader, writer).with_first_hello_timeout(Duration::from_secs(15));
+        let closer = port.closer();
+        let (tx, mut rx) = port.split();
+        peer.write_all(b"{\"type\":\"hello\",\"protocol\":{\"major\":1,\"minor\":0},\"peer\":{\"name\":\"raw\",\"version\":\"0\",\"role\":\"tool\"},\"capabilities\":{}}\n")
+            .await
+            .unwrap();
+        assert!(matches!(
+            rx.recv().await,
+            Some(Inbound::Frame(Frame::Hello(_)))
+        ));
+
+        {
+            let mut receive = std::pin::pin!(rx.recv());
+            tokio::select! {
+                biased;
+                result = &mut receive => panic!("expected an idle read, got {result:?}"),
+                () = tokio::task::yield_now() => (),
+            }
+            closer
+                .close(close_codes::RELEASED, Some("listener closing"))
+                .await;
+            let release = tokio::time::timeout(Duration::from_secs(1), receive)
+                .await
+                .expect("listener release must wake the idle read while the peer stays open");
+            assert_eq!(
+                release,
+                Some(Inbound::Closed(PortClosure::Closed {
+                    code: Some(close_codes::RELEASED),
+                    reason: Some("listener closing".into()),
+                }))
+            );
+        }
+        assert!(
+            peer.write_all(b"{\"type\":\"ping\"}\n").await.is_err(),
+            "retaining terminal Rx must leave the peer's write side closed"
+        );
+        assert_eq!(rx.recv().await, None);
+        drop((tx, rx));
+        let mut farewell = String::new();
+        peer.read_to_string(&mut farewell).await.unwrap();
+        assert_eq!(
+            farewell,
+            "{\"type\":\"close\",\"code\":4000,\"reason\":\"listener closing\"}\n"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ipc_sender_cannot_replace_an_elected_listener_farewell() {
+        let (mut peer, stream) = duplex(1024);
+        let (reader, writer) = tokio::io::split(stream);
+        let port =
+            NdjsonPort::new(reader, writer).with_first_hello_timeout(Duration::from_secs(15));
+        let closer = port.closer();
+        let (tx, mut rx) = port.split();
+        tokio::select! {
+            biased;
+            () = closer.close(close_codes::RELEASED, Some("listener close")) => {
+                panic!("the spawned listener farewell must still need polling");
+            }
+            () = std::future::ready(()) => (),
+        }
+
+        tx.close(close_codes::PROTOCOL_ERROR, Some("sender close".into()))
+            .await;
+        assert_eq!(
+            rx.recv().await,
+            Some(Inbound::Closed(PortClosure::Closed {
+                code: Some(close_codes::RELEASED),
+                reason: Some("listener close".into()),
+            }))
+        );
+        let mut farewell = String::new();
+        tokio::time::timeout(Duration::from_secs(5), peer.read_to_string(&mut farewell))
+            .await
+            .expect("the elected farewell must close the writer")
+            .unwrap();
+        assert_eq!(
+            farewell,
+            "{\"type\":\"close\",\"code\":4000,\"reason\":\"listener close\"}\n"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ipc_send_timeout_cannot_replace_an_elected_listener_farewell() {
+        let (mut peer, stream) = duplex(1024);
+        let (reader, writer) = tokio::io::split(stream);
+        let deadline = Duration::from_millis(10);
+        let port = NdjsonPort::new(reader, writer).with_first_hello_timeout(deadline);
+        let closer = port.closer();
+        let (mut tx, mut rx) = port.split();
+        tokio::time::advance(deadline).await;
+        tokio::select! {
+            biased;
+            () = closer.close(close_codes::RELEASED, Some("listener close")) => {
+                panic!("the spawned listener farewell must still need polling");
+            }
+            () = std::future::ready(()) => (),
+        }
+
+        assert_eq!(tx.send(Frame::Ping).await, SendOutcome::Closed);
+        assert_eq!(
+            rx.recv().await,
+            Some(Inbound::Closed(PortClosure::Closed {
+                code: Some(close_codes::RELEASED),
+                reason: Some("listener close".into()),
+            }))
+        );
+        let mut farewell = String::new();
+        tokio::time::timeout(Duration::from_secs(5), peer.read_to_string(&mut farewell))
+            .await
+            .expect("the elected farewell must close the writer")
+            .unwrap();
+        assert_eq!(
+            farewell,
+            "{\"type\":\"close\",\"code\":4000,\"reason\":\"listener close\"}\n"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancelled_ipc_release_disables_sends_and_keeps_the_winning_farewell() {
+        let (mut peer, stream) = duplex(8);
+        let (reader, writer) = tokio::io::split(stream);
+        let port =
+            NdjsonPort::new(reader, writer).with_first_hello_timeout(Duration::from_secs(15));
+        let closer = port.closer();
+        let (mut tx, mut rx) = port.split();
+
+        let cancelled = tokio::time::timeout(
+            Duration::from_millis(20),
+            closer.close(close_codes::RELEASED, Some("first close")),
+        )
+        .await;
+        assert!(
+            cancelled.is_err(),
+            "the tiny buffer must stall the farewell"
+        );
+        assert_eq!(
+            tokio::time::timeout(Duration::from_millis(20), tx.send(Frame::Ping)).await,
+            Ok(SendOutcome::Closed),
+            "a cancelled release must leave retained Tx closed"
+        );
+        tokio::time::timeout(
+            Duration::from_millis(20),
+            closer.close(close_codes::PROTOCOL_ERROR, Some("second close")),
+        )
+        .await
+        .expect("the second caller must leave the farewell to the first");
+        assert_eq!(
+            rx.recv().await,
+            Some(Inbound::Closed(PortClosure::Closed {
+                code: Some(close_codes::RELEASED),
+                reason: Some("first close".into()),
+            }))
+        );
+        let mut farewell = String::new();
+        tokio::time::timeout(Duration::from_secs(5), peer.read_to_string(&mut farewell))
+            .await
+            .expect("the detached farewell must finish and close the writer")
+            .unwrap();
+        assert_eq!(
+            farewell,
+            "{\"type\":\"close\",\"code\":4000,\"reason\":\"first close\"}\n"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn a_listener_closing_a_port_is_not_held_by_a_stuck_send() {
         // `IpcListener::close` writes the farewell through one of these. A
         // listener that cannot leave until every accepted peer drains is a
@@ -1097,5 +1645,92 @@ mod tests {
             "{\"type\":\"close\",\"code\":4400}\n",
             "the farewell keeps its code and loses only the reason"
         );
+    }
+}
+
+#[cfg(test)]
+mod local_hello_tests {
+    use super::NdjsonPort;
+    use crate::port::{Inbound, Port, PortClosure, PortRx};
+    use std::time::Duration;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test(start_paused = true)]
+    async fn idle_or_nonhello_activity_cannot_renew_the_first_hello_bound() {
+        let (mut peer, stream) = tokio::io::duplex(1024);
+        let (reader, writer) = tokio::io::split(stream);
+        let port =
+            NdjsonPort::new(reader, writer).with_first_hello_timeout(Duration::from_secs(15));
+        let (_tx, mut rx) = port.split();
+        peer.write_all(b"{\"type\":\"ping\"}\n").await.unwrap();
+        assert!(matches!(
+            rx.recv().await,
+            Some(Inbound::Frame(crate::Frame::Ping))
+        ));
+        let start = tokio::time::Instant::now();
+        assert!(matches!(
+            rx.recv().await,
+            Some(Inbound::Closed(PortClosure::Closed {
+                code: Some(4400),
+                ..
+            }))
+        ));
+        assert_eq!(start.elapsed(), Duration::from_secs(15));
+        assert_eq!(rx.recv().await, None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_ready_read_at_the_deadline_delivers_its_decoded_hello() {
+        let (mut peer, stream) = tokio::io::duplex(1024);
+        let (reader, writer) = tokio::io::split(stream);
+        let duration = Duration::from_secs(15);
+        let (_tx, mut rx) = NdjsonPort::new(reader, writer)
+            .with_first_hello_timeout(duration)
+            .split();
+
+        let received = {
+            let receiving = rx.recv();
+            tokio::pin!(receiving);
+            tokio::select! {
+                biased;
+                result = &mut receiving => panic!("expected a pending read, got {result:?}"),
+                () = tokio::task::yield_now() => (),
+            }
+            // The read and its timer are both ready the next time recv is polled.
+            tokio::time::advance(duration).await;
+            peer.write_all(b"{\"type\":\"hello\",\"protocol\":{\"major\":1,\"minor\":0},\"peer\":{\"name\":\"raw\",\"version\":\"0\",\"role\":\"tool\"},\"capabilities\":{}}\n{\"type\":\"ping\"}\n")
+                .await
+                .unwrap();
+            receiving.await
+        };
+
+        assert!(
+            matches!(received, Some(Inbound::Frame(crate::Frame::Hello(_)))),
+            "expected the decoded hello from the ready read, got {received:?}"
+        );
+        assert!(matches!(
+            rx.recv().await,
+            Some(Inbound::Frame(crate::Frame::Ping))
+        ));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_decoded_hello_disarms_the_transport_deadline_but_is_not_authentication() {
+        let (mut peer, stream) = tokio::io::duplex(1024);
+        let (reader, writer) = tokio::io::split(stream);
+        let port =
+            NdjsonPort::new(reader, writer).with_first_hello_timeout(Duration::from_secs(15));
+        let (_tx, mut rx) = port.split();
+        peer.write_all(b"{\"type\":\"hello\",\"protocol\":{\"major\":1,\"minor\":0},\"peer\":{\"name\":\"raw\",\"version\":\"0\",\"role\":\"tool\"},\"capabilities\":{}}\n").await.unwrap();
+        assert!(matches!(
+            rx.recv().await,
+            Some(Inbound::Frame(crate::Frame::Hello(_)))
+        ));
+        tokio::time::advance(Duration::from_secs(16)).await;
+        peer.write_all(b"{\"type\":\"ping\"}\n").await.unwrap();
+        assert!(matches!(
+            rx.recv().await,
+            Some(Inbound::Frame(crate::Frame::Ping))
+        ));
     }
 }

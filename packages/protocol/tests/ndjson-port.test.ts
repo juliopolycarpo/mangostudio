@@ -213,3 +213,17 @@ describe('NDJSON port', () => {
     ).toThrow(CodecError);
   });
 });
+
+it('transport termination notifies its owner once and keeps the farewell code', () => {
+  const sink = new FakeByteSink();
+  const handle = createNdjsonPort({ sink });
+  const closures: PortClosure[] = [];
+  handle.port.onClosed((closure) => closures.push(closure));
+  handle.terminate(CLOSE_CODES.PROTOCOL_ERROR, 'hello deadline');
+  handle.eof();
+  handle.failed(new Error('late socket close'));
+  handle.terminate(CLOSE_CODES.PROTOCOL_ERROR, 'again');
+  expect(closures).toEqual([{ kind: 'closed', code: 4400, reason: 'hello deadline' }]);
+  expect(sink.lines).toEqual(['{"type":"close","code":4400,"reason":"hello deadline"}']);
+  expect(sink.ended).toBe(true);
+});
