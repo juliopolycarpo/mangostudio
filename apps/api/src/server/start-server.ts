@@ -29,6 +29,7 @@ import {
 import { isActiveTurn } from '../modules/generation/application/active-turn-registry';
 import { reconcileStaleTurns } from '../modules/generation/application/turn-recovery';
 import { HUB_SERVICE_UNIT_ENV } from '../modules/machine/domain/hub-service-identity';
+import { drainProductOperationWork } from '../modules/operations/application/product-operation-work';
 import { terminalSessionService } from '../modules/terminals/application/terminal-session-service';
 import { runPruneRetry } from '../modules/updates/application/prune-retry';
 import { updateChecker } from '../modules/updates/application/update-check';
@@ -238,6 +239,8 @@ async function gracefulStop(): Promise<void> {
   stopRuntimeScopeReaps?.();
   stopRuntimeScopeReaps = null;
   const httpStopError = await httpStopped;
+  // Keyed turns can outlive their HTTP acknowledgements and still write receipts.
+  if (!httpStopError) await drainProductOperationWork();
   await removeState();
   // A failed drain does not prove writers settled. Retain the database and
   // capture ownership until the process exits, rather than unlock live data.

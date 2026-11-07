@@ -459,6 +459,49 @@ describe('startServer via __serve', () => {
     TEST_TIMEOUT_MS
   );
 
+  it.skipIf(process.platform === 'win32')(
+    'keeps the capture lock after HTTP closes until detached product work settles',
+    async () => {
+      if (!fixture) throw new Error('Expected a managed process fixture.');
+      const running = fixture;
+      const preload = fileURLToPath(
+        new URL('../../support/fixtures/gated-product-operation-shutdown.ts', import.meta.url)
+      );
+      const database = join(running.tempDir, 'detached-operation.sqlite');
+      await startServing(running, preload, { databasePath: database });
+      const child = running.child;
+      if (!child) throw new Error('Expected a running Hub child.');
+      const checkpoint = 'shutdown-fixture: waiting for tracked product operation';
+      child.kill('SIGTERM');
+      await running.waitUntilReady(
+        () => child.exitCode !== null || running.diagnostics().includes(checkpoint),
+        { label: 'tracked operation drain or Hub exit', timeoutMs: START_TIMEOUT_MS }
+      );
+      expect(running.diagnostics()).toContain(checkpoint);
+      expect(await probeHealthOnce('127.0.0.1', running.port)).toBe(false);
+      await expect(acquireCaptureLock(database)).rejects.toThrow('already in use');
+
+      child.kill('SIGUSR2');
+      expect(await running.waitForExit()).toBe(0);
+      const release = await acquireCaptureLock(database);
+      await release();
+
+      const reopened = new SQLiteDatabase(database, { readonly: true });
+      try {
+        expect(
+          reopened
+            .query(
+              "SELECT name FROM sqlite_master WHERE name = 'fixture_finished_product_operation'"
+            )
+            .get()
+        ).toEqual({ name: 'fixture_finished_product_operation' });
+      } finally {
+        reopened.close();
+      }
+    },
+    TEST_TIMEOUT_MS
+  );
+
   it(
     'exits before listening when the auth secret is missing',
     async () => {
