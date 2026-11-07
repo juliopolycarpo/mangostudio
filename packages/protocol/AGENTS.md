@@ -150,5 +150,7 @@ bun run protocol:release:prepare 0.2.1   # rewrites them, prepends the new CHANG
 (`packages/protocol/cliff.toml`) and **prepended to, never regenerated** — its 0.1.0 and 0.2.0
 sections were generated upstream, before the tree moved here, and cannot be reproduced from this
 history (the note at the bottom of that file has the measurements). Never edit it by hand.
+Run `bun run changelog:separators` from the repository root to repair missing separators
+between historical release sections.
 
 Commit scopes for this tree: `ts`, `rs`, `spec`, `schema`, `fixtures`, `protocol`.
