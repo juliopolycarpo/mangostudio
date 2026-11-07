@@ -36,11 +36,14 @@ export interface ContainedResourcePath {
 
 /**
  * Resolves a one-segment resource slug under a code-defined location root and
- * checks containment after following symlinks.
+ * checks containment after following symlinks. Pass the expected entry type
+ * when planning a directory destination.
+ * // Usage: resolveContainedResourcePath('/library/skills', 'gh', 'directory')
  */
 export function resolveContainedResourcePath(
   locationRoot: string,
-  slug: string
+  slug: string,
+  expected?: 'directory' | 'file'
 ): ContainedResourcePath {
   if (!isAbsolute(locationRoot)) {
     throw new LibraryWriteError(
@@ -61,8 +64,12 @@ export function resolveContainedResourcePath(
   let resolvedRoot: string;
   let resolvedPath: string;
   try {
-    resolvedRoot = resolvePathThroughExistingAncestor(logicalRoot);
-    resolvedPath = resolvePathThroughExistingAncestor(logicalPath);
+    resolvedRoot = resolvePathThroughExistingAncestor(logicalRoot, {
+      allowMissingDirectory: true,
+    });
+    resolvedPath = resolvePathThroughExistingAncestor(logicalPath, {
+      allowMissingDirectory: expected === 'directory',
+    });
   } catch (error) {
     throw new LibraryWriteError(
       'path-escape',

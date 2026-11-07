@@ -49,3 +49,48 @@ it.skipIf(process.platform === 'win32')(
     }
   }
 );
+
+it.skipIf(process.platform === 'win32').each(['raw', 'symlink'])(
+  'resolves a missing directory root with a trailing slash through a %s path',
+  (kind) => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), 'library-resource-root-')));
+    try {
+      const resolvedRoot = join(dir, 'missing');
+      const link = join(dir, 'linked');
+      symlinkSync('missing/', link, 'dir');
+      const locationRoot = kind === 'raw' ? `${resolvedRoot}/` : link;
+
+      const result = resolveContainedResourcePath(locationRoot, 'skill');
+      expect(result).toEqual({
+        logicalPath: join(locationRoot, 'skill'),
+        resolvedRoot,
+        resolvedPath: join(resolvedRoot, 'skill'),
+      });
+      mkdirSync(result.resolvedRoot);
+      writeFileSync(result.logicalPath, 'new resource');
+      expect(readFileSync(result.resolvedPath, 'utf8')).toBe('new resource');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+);
+
+it.skipIf(process.platform === 'win32')(
+  'resolves a dangling resource symlink with a trailing slash when planning a directory',
+  () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'library-resource-root-')));
+    try {
+      const logicalPath = join(root, 'gh');
+      const resolvedPath = join(root, 'new-gh');
+      symlinkSync('new-gh/', logicalPath, 'dir');
+
+      expect(() => resolveContainedResourcePath(root, 'gh')).toThrow('ENOENT');
+      const result = resolveContainedResourcePath(root, 'gh', 'directory');
+      expect(result).toEqual({ logicalPath, resolvedRoot: root, resolvedPath });
+      mkdirSync(result.resolvedPath);
+      expect(realpathSync(result.logicalPath)).toBe(result.resolvedPath);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+);

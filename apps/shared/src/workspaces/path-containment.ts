@@ -41,11 +41,15 @@ function splitAbsolutePath(path: string, physicalParents: boolean): PathParts {
 /**
  * Resolve a path through its nearest existing ancestor with a bounded symlink walk.
  * POSIX applies parent steps after expanding preceding links. Windows keeps
- * its native path normalization, including drive-relative paths.
- * // Usage: resolvePathThroughExistingAncestor('/workspace/not-yet.txt')
+ * its native path normalization, including drive-relative paths. Callers
+ * planning a directory may allow a missing terminal directory requirement.
+ * // Usage: resolvePathThroughExistingAncestor('/workspace/new/', { allowMissingDirectory: true })
  */
-export function resolvePathThroughExistingAncestor(inputPath: string): string {
-  return resolvePath(inputPath, sep === '/');
+export function resolvePathThroughExistingAncestor(
+  inputPath: string,
+  { allowMissingDirectory = false }: { allowMissingDirectory?: boolean } = {}
+): string {
+  return resolvePath(inputPath, sep === '/', allowMissingDirectory);
 }
 
 /**
@@ -57,7 +61,11 @@ export function resolveLegacyLexicalWritePath(inputPath: string): string {
   return resolvePath(inputPath, false);
 }
 
-function resolvePath(inputPath: string, physicalParents: boolean): string {
+function resolvePath(
+  inputPath: string,
+  physicalParents: boolean,
+  allowMissingDirectory = false
+): string {
   const absolutePath = physicalParents
     ? isAbsolute(inputPath)
       ? inputPath
@@ -85,7 +93,13 @@ function resolvePath(inputPath: string, physicalParents: boolean): string {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       // A parent step can erase a required directory. A terminal dot still
       // requires a directory, which cannot be created by a planned file write.
-      if (physicalParents && (pending.includes('..') || pending.at(-1) === '.')) throw error;
+      const missingDirectory = pending.at(-1) === '.';
+      if (
+        physicalParents &&
+        (pending.includes('..') || (missingDirectory && !allowMissingDirectory))
+      ) {
+        throw error;
+      }
       return resolve(realpathSync(resolvedPath), segment, ...pending);
     }
 
