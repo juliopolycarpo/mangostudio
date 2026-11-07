@@ -148,13 +148,36 @@ export function removeTemporaryHome(
 }
 
 /**
- * The variables that make a process started with them see `root` as its home.
+ * The variables that make a spawned process see `root` as its home.
  *
  * @example
  * homeEnv('/tmp/mangostudio-smoke-a1b2c3').HOME; // => '/tmp/mangostudio-smoke-a1b2c3'
  */
 export function homeEnv(root: string): Record<string, string> {
   return { HOME: root, USERPROFILE: root };
+}
+
+/**
+ * Home and storage overrides for a test process. Apply after the inherited
+ * environment. The fixture creates the private root, including the directory
+ * used by XDG_RUNTIME_DIR.
+ *
+ * @example
+ * fixtureHomeEnv('/tmp/test-home').XDG_STATE_HOME; // => '/tmp/test-home/.local/state' on POSIX
+ */
+export function fixtureHomeEnv(root: string): Record<string, string> {
+  return {
+    ...homeEnv(root),
+    XDG_CONFIG_HOME: join(root, '.config'),
+    XDG_DATA_HOME: join(root, '.local', 'share'),
+    XDG_STATE_HOME: join(root, '.local', 'state'),
+    XDG_CACHE_HOME: join(root, '.cache'),
+    XDG_RUNTIME_DIR: root,
+    XDG_CONFIG_DIRS: join(root, '.config'),
+    XDG_DATA_DIRS: join(root, '.local', 'share'),
+    APPDATA: join(root, 'AppData', 'Roaming'),
+    LOCALAPPDATA: join(root, 'AppData', 'Local'),
+  };
 }
 
 /**

@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { fixtureHomeEnv } from '../../../../../scripts/lib/temp-home';
 import {
   createManagedProcessFixture,
   type ManagedProcessFixture,
@@ -27,14 +28,15 @@ const VALID_AUTH_SECRET = 'test-secret-at-least-32-characters-long';
  * would trip the in-memory config safety net in src/lib/config.ts and ignore
  * the explicit API_PORT / DATABASE_PATH below.
  */
-function serverEnv(home: string, port: number): Record<string, string> {
+function serverEnv(
+  home: string,
+  port: number,
+  ambient: NodeJS.ProcessEnv = process.env
+): Record<string, string> {
   return {
-    ...(process.env as Record<string, string>),
+    ...(ambient as Record<string, string>),
     NODE_ENV: 'production',
-    HOME: home,
-    // `os.homedir()` reads this one on Windows; without it the state file lands in
-    // whatever profile the parent had.
-    USERPROFILE: home,
+    ...fixtureHomeEnv(home),
     API_PORT: String(port),
     API_HOST: '127.0.0.1',
     MANGOSTUDIO_DEFAULT_API_HOST: '',
@@ -89,7 +91,8 @@ describe('startServer via __serve', () => {
   /** Starts the server and waits until it is healthy and has written its state file. */
   async function startServing(
     running: ManagedProcessFixture,
-    preload?: string
+    preload?: string,
+    ambient: NodeJS.ProcessEnv = process.env
   ): Promise<{ pid: number | undefined; pidFile: string }> {
     const { port, tempDir: home } = running;
     const pidFile = join(home, '.mango', 'run', 'server.json');
@@ -97,7 +100,7 @@ describe('startServer via __serve', () => {
     const child = running.spawn({
       cmd: ['bun', ...(preload ? ['--preload', preload] : []), ENTRY, '__serve', String(port)],
       env: {
-        ...serverEnv(home, port),
+        ...serverEnv(home, port, ambient),
         BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
       },
     });
@@ -125,6 +128,54 @@ describe('startServer via __serve', () => {
       expect(state.pid).toBe(pid);
       expect(state.port).toBe(fixture.port);
       expect(state.host).toBe('127.0.0.1');
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  it(
+    'keeps inherited state roots private in the managed server child',
+    async () => {
+      if (!fixture) throw new Error('Expected a managed process fixture.');
+      const external = await mkdtemp(join(tmpdir(), 'mango-serve-external-'));
+      const keys = [
+        'XDG_CONFIG_HOME',
+        'XDG_DATA_HOME',
+        'XDG_STATE_HOME',
+        'XDG_CACHE_HOME',
+        'XDG_RUNTIME_DIR',
+        'XDG_CONFIG_DIRS',
+        'XDG_DATA_DIRS',
+        'APPDATA',
+        'LOCALAPPDATA',
+      ];
+      const preload = join(fixture.tempDir, 'state-root-probe.ts');
+      const reportFile = join(fixture.tempDir, 'state-roots.json');
+      try {
+        await writeFile(
+          preload,
+          `
+        import { mkdirSync, writeFileSync } from 'node:fs';
+        import { join } from 'node:path';
+        const roots = Object.fromEntries(${JSON.stringify(keys)}.map(key => [key, process.env[key]]));
+        for (const [key, root] of Object.entries(roots)) {
+          mkdirSync(join(root, 'fixture'), { recursive: true });
+          writeFileSync(join(root, 'fixture', key), 'private fixture state');
+        }
+        writeFileSync(${JSON.stringify(reportFile)}, JSON.stringify(roots));
+      `
+        );
+        const ambient = { ...process.env };
+        for (const key of keys) ambient[key] = external;
+        await startServing(fixture, preload, ambient);
+        const roots = JSON.parse(await readFile(reportFile, 'utf8'));
+        for (const key of keys) {
+          const path = relative(fixture.tempDir, roots[key]);
+          expect(path === '..' || path.startsWith(`..${sep}`) || isAbsolute(path), key).toBe(false);
+        }
+        expect(await readdir(external)).toEqual([]);
+      } finally {
+        await rm(external, { recursive: true, force: true });
+      }
     },
     TEST_TIMEOUT_MS
   );
