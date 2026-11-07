@@ -59,6 +59,81 @@ describe('ToolSettingsRow', () => {
     fetchScenario.restore();
   });
 
+  it('saves a numeric draft only after blur even when typing pauses beyond autosave', async () => {
+    const descriptor: ToolSettingsDescriptor = {
+      ...DESCRIPTOR,
+      parameters: { timeout: 60 },
+      parameterDescriptors: [
+        {
+          name: 'timeout',
+          label: 'Timeout',
+          type: 'number',
+          required: false,
+          defaultValue: 60,
+          min: 5,
+          max: 600,
+        },
+      ],
+    };
+    fetchScenario.respondWithJson('PUT', TOOL_PATH, {
+      body: { ...descriptor, parameters: { timeout: 100 } },
+    });
+    render(<ToolSettingsRow descriptor={descriptor} />);
+    useFakeTimers();
+    const input = screen.getByRole('spinbutton');
+    for (const value of ['', '1', '10', '100']) {
+      fireEvent.change(input, { target: { value } });
+      await act(async () => {
+        await advanceTimersByTimeAsync(400);
+      });
+      expect(countToolWrites()).toBe(0);
+    }
+    fireEvent.blur(input);
+    await act(async () => {
+      await advanceTimersByTimeAsync(400);
+    });
+    expect(countToolWrites()).toBe(1);
+    const call = fetchScenario.fetchMock.mock.calls.find(
+      ([input, init]) => (input instanceof Request ? input.method : init?.method) === 'PUT'
+    );
+    expect(call).toBeDefined();
+    if (!call) throw new Error('Expected one tool settings update');
+    const [request, init] = call;
+    const body =
+      request instanceof Request
+        ? await request.clone().json()
+        : JSON.parse(typeof init?.body === 'string' ? init.body : '');
+    expect(body).toEqual({ parameters: { timeout: 100 } });
+  });
+
+  it('does not flush an unfinished numeric draft on unmount', async () => {
+    const { unmount } = render(
+      <ToolSettingsRow
+        descriptor={{
+          ...DESCRIPTOR,
+          parameters: { timeout: 60 },
+          parameterDescriptors: [
+            {
+              name: 'timeout',
+              label: 'Timeout',
+              type: 'number',
+              required: false,
+              min: 5,
+              max: 600,
+            },
+          ],
+        }}
+      />
+    );
+    useFakeTimers();
+    fireEvent.change(screen.getByRole('spinbutton'), { target: { value: '1' } });
+    unmount();
+    await act(async () => {
+      await advanceTimersByTimeAsync(400);
+    });
+    expect(countToolWrites()).toBe(0);
+  });
+
   it('adopts a remote parameter change instead of saving the stale one back', async () => {
     const { rerender } = render(<ToolSettingsRow descriptor={DESCRIPTOR} />);
 
