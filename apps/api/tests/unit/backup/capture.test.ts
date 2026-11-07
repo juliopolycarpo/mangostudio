@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, expect, it, spyOn } from 'bun:test';
+import * as fs from 'node:fs/promises';
 import {
   lstat,
   mkdir,
@@ -199,6 +200,23 @@ it('cancels after staging without publishing or retaining temporary files', asyn
   ).rejects.toThrow('fixture capture cancellation');
   expect(await Bun.file(output).exists()).toBe(false);
   expect((await readdir(root)).some((name) => name.startsWith('.mango-backup'))).toBe(false);
+});
+
+it.each(['database', 'config'])('refuses a hard-linked raw %s under uploads', async (source) => {
+  const { root, config, db, output } = await fixture();
+  db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+  await writeFile(config.configFilePath, '[auth]\nsecret="raw-config-sensitive-fixture"');
+  const original = source === 'database' ? config.database.path : config.configFilePath;
+  const alias = join(config.uploads.dir, 'attachment.bin');
+  await fs.link(original, alias);
+  expect((await lstat(alias)).nlink).toBe(2);
+
+  await expect(
+    captureBackup(config, { output, checkpoints: true, includeSecrets: false }, 'test')
+  ).rejects.toThrow('multiply linked source files');
+  expect(await Bun.file(output).exists()).toBe(false);
+  expect((await readdir(root)).some((name) => name.startsWith('.mango-backup-'))).toBe(false);
+  expect((await lstat(original)).nlink).toBe(2);
 });
 
 it('refuses an oversized file before copying and preserves an existing destination', async () => {

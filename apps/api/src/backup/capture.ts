@@ -89,7 +89,9 @@ async function copyBounded(
 ): Promise<void> {
   const input = await open(source, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
-    if (!(await input.stat()).isFile()) throw new Error('Backup source is not a regular file.');
+    const metadata = await input.stat();
+    if (!metadata.isFile()) throw new Error('Backup source is not a regular file.');
+    if (metadata.nlink !== 1) throw new Error('Backup refuses multiply linked source files.');
     const output = await open(destination, 'wx', 0o600);
     try {
       const buffer = Buffer.alloc(64 * 1024);
