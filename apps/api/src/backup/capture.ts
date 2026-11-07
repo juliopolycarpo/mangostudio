@@ -23,7 +23,7 @@ import {
 import Value from 'typebox/value';
 
 import { getConfigEnvFilePath, type MangoConfig } from '../lib/config';
-import { resolvePathThroughExistingAncestor } from '../lib/path-containment';
+import { resolveLegacyAtomicWritePath } from '../lib/path-containment';
 import { acquireCaptureLock } from './capture-lock';
 import { BACKUP_EXCLUSIONS, redactBackupDatabase } from './privacy';
 import { protectStaging } from './private-staging';
@@ -195,9 +195,9 @@ export async function captureBackup(
   const managedPaths = new Set([
     configurationPath,
     ...(await Promise.all(configuredPaths.slice(1).map(physicalBackupLocation))),
-    // The sync atomic writer follows its own missing-target resolver. Older
-    // writes may have put credentials at a different path from filesystem reads.
-    ...configuredPaths.map(resolvePathThroughExistingAncestor),
+    // Older atomic writes may have left credentials at lexically resolved
+    // destinations that differ from the current filesystem paths.
+    ...configuredPaths.map(resolveLegacyAtomicWritePath),
   ]);
   if ([...managedPaths].some((path) => inside(output, path))) {
     throw new Error('Backup destination overlaps a managed configuration or secret path.');

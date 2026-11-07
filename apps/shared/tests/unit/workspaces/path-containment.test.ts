@@ -1,11 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import {
   isInside,
   isPathPrefix,
+  resolveContainmentRoot,
   resolvePathForContainment,
 } from '../../../src/workspaces/path-containment';
 
@@ -79,6 +88,99 @@ describe('isInside', () => {
     const linkPath = join(rootDir, 'nested', 'pending.txt');
     symlinkSync(join(rootDir, 'nested', 'not-yet.txt'), linkPath);
     expect(isInside(rootDir, linkPath)).toBe(true);
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'follows a directory link before applying a parent step in a path or relative link target',
+    () => {
+      mkdirSync(join(outsideDir, 'nested'));
+      const target = join(outsideDir, 'secret.txt');
+      writeFileSync(target, 'outside file');
+      symlinkSync(join(outsideDir, 'nested'), join(rootDir, 'redirect'), 'dir');
+      const link = join(rootDir, '.env');
+      symlinkSync('redirect/../secret.txt', link);
+      const candidate = `${rootDir}/redirect/../secret.txt`;
+      expect(readFileSync(candidate, 'utf8')).toBe('outside file');
+      expect(readFileSync(link, 'utf8')).toBe('outside file');
+
+      expect(resolvePathForContainment(candidate)).toBe(target);
+      expect(resolvePathForContainment(link)).toBe(target);
+      expect(isInside(rootDir, candidate)).toBe(false);
+      expect(isInside(rootDir, link)).toBe(false);
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'rejects parent steps after a missing component, including within the missing suffix',
+    () => {
+      mkdirSync(join(outsideDir, 'nested'));
+      symlinkSync(join(outsideDir, 'nested'), join(rootDir, 'redirect'), 'dir');
+      const planned = `${rootDir}/missing/../redirect/../new/file.txt`;
+
+      expect(() => resolvePathForContainment(planned)).toThrow('ENOENT');
+      expect(() => isInside(rootDir, planned)).toThrow('ENOENT');
+      const partlyMissing = `${rootDir}/missing/child/../file.txt`;
+      expect(() => resolvePathForContainment(partlyMissing)).toThrow('ENOENT');
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'reports ENOTDIR when a parent step attempts to traverse a regular file',
+    () => {
+      const candidate = `${rootDir}/nested/file.txt/../next.txt`;
+      expect(() => resolvePathForContainment(candidate)).toThrow('ENOTDIR');
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'requires a directory at a trailing slash in raw paths and symlink targets',
+    () => {
+      const directory = join(rootDir, 'nested');
+      const file = join(directory, 'file.txt');
+      const missing = join(rootDir, 'missing');
+      const link = join(rootDir, 'link');
+      symlinkSync(`${file}/`, link);
+
+      expect(() => resolvePathForContainment(`${file}/`)).toThrow('ENOTDIR');
+      expect(() => resolvePathForContainment(link)).toThrow('ENOTDIR');
+      expect(() => resolvePathForContainment(`${missing}/`)).toThrow('ENOENT');
+      expect(() => resolvePathForContainment(`${missing}/.`)).toThrow('ENOENT');
+      expect(resolvePathForContainment(`${directory}/`)).toBe(directory);
+
+      const planned = join(rootDir, 'planned');
+      symlinkSync('missing/', planned);
+      expect(() => resolvePathForContainment(planned)).toThrow('ENOENT');
+      expect(resolvePathForContainment(join(planned, 'file.txt'))).toBe(join(missing, 'file.txt'));
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'uses the physical root when a parent step follows a directory link in the root',
+    () => {
+      mkdirSync(join(rootDir, 'assets'));
+      mkdirSync(join(outsideDir, 'assets'));
+      mkdirSync(join(outsideDir, 'nested'));
+      symlinkSync(join(outsideDir, 'nested'), join(rootDir, 'redirect'), 'dir');
+      const configured = `${rootDir}/redirect/../assets`;
+
+      expect(resolveContainmentRoot(configured)).toBe(join(outsideDir, 'assets'));
+      expect(isInside(configured, join(outsideDir, 'assets', 'real.txt'))).toBe(true);
+      expect(isInside(configured, join(rootDir, 'assets', 'lexical.txt'))).toBe(false);
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'requires the physical containment root to exist before applying parent steps',
+    () => {
+      expect(() => resolveContainmentRoot(`${rootDir}/missing/../nested`)).toThrow('ENOENT');
+    }
+  );
+
+  it('expands configured root home aliases', () => {
+    const home = realpathSync(homedir());
+    expect(resolveContainmentRoot('~')).toBe(home);
+    expect(resolveContainmentRoot('~/')).toBe(home);
+    expect(resolveContainmentRoot('~\\')).toBe(home);
   });
 
   it('does not expand ~, so the checked path is the one the filesystem opens', () => {

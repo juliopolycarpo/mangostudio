@@ -6,11 +6,26 @@
  */
 
 import { PathAccessError } from '@mangostudio/shared/runtime-contract';
-import { resolvePathThroughExistingAncestor as resolveThroughExistingAncestor } from '@mangostudio/shared/workspaces/host';
+import {
+  resolveLegacyLexicalWritePath,
+  resolvePathThroughExistingAncestor as resolveThroughExistingAncestor,
+} from '@mangostudio/shared/workspaces/host';
 
 export function resolvePathThroughExistingAncestor(inputPath: string): string {
+  return withErrnoLoop(inputPath, resolveThroughExistingAncestor);
+}
+
+/**
+ * Locate credentials written by the old atomic writer for backup exclusion.
+ * // Usage: const exclude = resolveLegacyAtomicWritePath(configuredEnvPath);
+ */
+export function resolveLegacyAtomicWritePath(inputPath: string): string {
+  return withErrnoLoop(inputPath, resolveLegacyLexicalWritePath);
+}
+
+function withErrnoLoop(inputPath: string, resolve: (path: string) => string): string {
   try {
-    return resolveThroughExistingAncestor(inputPath);
+    return resolve(inputPath);
   } catch (error) {
     if (error instanceof PathAccessError && /too many symbolic links/i.test(error.message)) {
       throw tooManySymlinksError(inputPath);

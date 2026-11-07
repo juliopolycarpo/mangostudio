@@ -289,6 +289,72 @@ describe('writeFileAtomic through symlinks', () => {
     expect(lstatSync(link).isSymbolicLink()).toBe(true);
   });
 
+  it.each(['existing', 'dangling'])(
+    'writes through a relative symlink with a parent step to its %s physical target',
+    (kind) => {
+      if (isWindows) return;
+      const physical = join(dir, 'physical');
+      mkdirSync(join(physical, 'nested'), { recursive: true });
+      symlinkSync(join(physical, 'nested'), join(dir, 'redirect'), 'dir');
+      const target = join(physical, 'custom-uploads', 'written.txt');
+      const legacy = join(dir, 'custom-uploads', 'written.txt');
+      mkdirSync(dirname(legacy));
+      writeFileSync(legacy, 'legacy path occupied');
+      const link = join(dir, '.env');
+      const rawTarget = 'redirect/../custom-uploads/written.txt';
+      symlinkSync(rawTarget, link);
+      if (kind === 'existing') {
+        mkdirSync(dirname(target));
+        writeFileSync(target, 'old credential');
+      }
+
+      writeFileAtomic(link, 'updated credential');
+
+      expect(readFileSync(legacy, 'utf8')).toBe('legacy path occupied');
+      expect(readFileSync(target, 'utf8')).toBe('updated credential');
+      expect(readFileSync(link, 'utf8')).toBe('updated credential');
+      expect(readlinkSync(link)).toBe(rawTarget);
+    }
+  );
+
+  it('refuses to overwrite a physical file through an unreadable parent traversal', () => {
+    if (isWindows) return;
+    const home = join(dir, 'home');
+    mkdirSync(home);
+    const outside = join(dir, 'outside');
+    mkdirSync(join(outside, 'nested'), { recursive: true });
+    symlinkSync(join(outside, 'nested'), join(home, 'deep'), 'dir');
+    const physical = join(outside, 'secret.txt');
+    const lexical = join(home, 'secret.txt');
+    writeFileSync(physical, 'outside sentinel');
+    writeFileSync(lexical, 'lexical sentinel');
+    const link = join(home, '.env');
+    symlinkSync('missing/../deep/../secret.txt', link);
+
+    expect(() => readFileSync(link, 'utf8')).toThrow('ENOENT');
+    try {
+      expect(() => writeFileAtomic(link, 'new secret')).toThrow('ENOENT');
+    } finally {
+      expect(readFileSync(physical, 'utf8')).toBe('outside sentinel');
+      expect(readFileSync(lexical, 'utf8')).toBe('lexical sentinel');
+    }
+  });
+
+  it('preserves a regular file when a symlink target ends in a slash', () => {
+    if (isWindows) return;
+    const target = join(dir, 'secret.txt');
+    writeFileSync(target, 'old secret');
+    const link = join(dir, '.env');
+    symlinkSync('secret.txt/', link);
+
+    expect(() => readFileSync(link, 'utf8')).toThrow('ENOTDIR');
+    try {
+      expect(() => writeFileAtomic(link, 'new secret')).toThrow('ENOTDIR');
+    } finally {
+      expect(readFileSync(target, 'utf8')).toBe('old secret');
+    }
+  });
+
   it('follows a chain of symlinks to the real file', () => {
     if (isWindows) return;
     const target = join(dir, 'real.toml');

@@ -6,12 +6,10 @@
 //!
 //! The manifest is untrusted input: a JSON file under a caller-supplied
 //! root. Every destination is re-contained in the registry location it
-//! names, resolved from this host's own environment, and the whole undo is
-//! refused on the first entry that is not — a set this engine (or the
-//! TypeScript one) wrote can never trip that check, so tripping it means a
-//! corrupt or forged set. A `backupPath` outside the backup root is skipped
-//! as `backup-missing`, and a destination that changed since the apply is
-//! left alone as `changed-since-apply`.
+//! names, resolved from this host's own environment. Undo stops if a
+//! destination has been redirected since apply. A `backupPath` outside the
+//! physical backup root is skipped as `backup-missing`. A destination that
+//! changed since apply is left alone as `changed-since-apply`.
 
 use serde::Serialize;
 
@@ -19,11 +17,12 @@ use super::backup_store::{BackupEntry, BackupStore, StoreError};
 use super::disk::ResourceHasher;
 use super::interrupt::Interrupt;
 use super::paths::{
-    WriteError, WriteFailure, fs_path, is_path_prefix, node_resolve,
-    resolve_through_existing_ancestor,
+    ResourceKind, WriteError, WriteFailure, assert_expected_resource_entry, fs_path,
+    is_path_prefix, node_join, node_resolve, require_writable_location,
+    resolve_planned_resource_path, resolve_through_existing_ancestor,
 };
 use crate::probing::detection::path_env::PathEnv;
-use crate::probing::locations::location_by_id;
+use crate::probing::locations::LocationLayout;
 
 /// `PropagationUndoEntry`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -93,6 +92,9 @@ pub(crate) fn execute_undo(
     };
     let platform = store.platform.as_str();
     let backup_root = node_resolve(platform, &store.root);
+    let backup_set = node_join(platform, &[&backup_root, backup_id]);
+    let physical_backup_set = resolve_through_existing_ancestor(&backup_root)
+        .map(|root| node_join(platform, &[&root, backup_id]));
     let mut report = UndoResult {
         backup_id: backup_id.to_string(),
         restored: Vec::new(),
@@ -103,7 +105,8 @@ pub(crate) fn execute_undo(
         if let Some(interrupt) = interrupted() {
             return Err(UndoError::Interrupted(interrupt, report));
         }
-        assert_contained_in_location(entry, env).map_err(UndoError::Refused)?;
+        let destination = resolve_contained_destination(entry, env).map_err(UndoError::Refused)?;
+        assert_expected_resource_entry(&destination, entry.kind).map_err(UndoError::Refused)?;
         let location = UndoEntry {
             location_id: entry.location_id.clone(),
             destination_path: entry.destination_path.clone(),
@@ -113,44 +116,69 @@ pub(crate) fn execute_undo(
             destination_path: location.destination_path.clone(),
             reason,
         };
-        let current = hasher.hash_at(&entry.resolved_path, entry.kind).ok();
-        if current.is_some_and(|hash| hash != entry.written_content_hash) {
-            report.skipped.push(skip("changed-since-apply"));
-            continue;
+        match hasher.hash_at(&destination, entry.kind) {
+            Ok(hash) if hash != entry.written_content_hash => {
+                report.skipped.push(skip("changed-since-apply"));
+                continue;
+            }
+            Err(error) => {
+                let present = store
+                    .fs
+                    .exists(&fs_path(&destination))
+                    .map_err(|error| UndoError::Failed(error.to_string()))?;
+                if present {
+                    return Err(UndoError::Failed(format!(
+                        r#"Could not verify library undo destination "{destination}": {error}"#
+                    )));
+                }
+            }
+            Ok(_) => {}
         }
         let Some(backup_path) = &entry.backup_path else {
             store
                 .fs
-                .remove_all(&fs_path(&entry.resolved_path))
+                .remove_all(&fs_path(&destination))
                 .map_err(|error| UndoError::Failed(error.to_string()))?;
             report.removed.push(location);
             continue;
         };
-        if !is_path_prefix(platform, &backup_root, &node_resolve(platform, backup_path)) {
+        if !is_path_prefix(platform, &backup_set, &node_resolve(platform, backup_path)) {
             report.skipped.push(skip("backup-missing"));
             continue;
         }
+        let Some(physical_backup) = resolve_through_existing_ancestor(backup_path).filter(|path| {
+            physical_backup_set
+                .as_ref()
+                .is_some_and(|root| root != path && is_path_prefix(platform, root, path))
+        }) else {
+            report.skipped.push(skip("backup-missing"));
+            continue;
+        };
         let present = store
             .fs
-            .exists(&fs_path(backup_path))
+            .exists(&fs_path(&physical_backup))
             .map_err(|error| UndoError::Failed(error.to_string()))?;
         if !present {
             report.skipped.push(skip("backup-missing"));
             continue;
         }
         store
-            .restore_entry(entry)
+            .restore_entry(&BackupEntry {
+                resolved_path: destination,
+                backup_path: Some(physical_backup),
+                ..entry.clone()
+            })
             .map_err(|error| UndoError::Failed(error.to_string()))?;
         report.restored.push(location);
     }
     Ok(report)
 }
 
-/// `assertContainedInLocation`. Equality is allowed: a `single-file`
-/// location is itself the destination.
-fn assert_contained_in_location(entry: &BackupEntry, env: &PathEnv) -> Result<(), WriteError> {
-    let root = location_by_id(&entry.location_id).and_then(|location| (location.resolve_path)(env));
-    let Some(root) = root else {
+/// Check the recorded destination against its current physical path. The
+/// root itself is a valid destination for a single-file location.
+fn resolve_contained_destination(entry: &BackupEntry, env: &PathEnv) -> Result<String, WriteError> {
+    let location = require_writable_location(&entry.location_id, entry.kind)?;
+    let Some(root) = (location.resolve_path)(env) else {
         return Err(WriteError::new(
             WriteFailure::UnsupportedLocation,
             format!(
@@ -168,15 +196,37 @@ fn assert_contained_in_location(entry: &BackupEntry, env: &PathEnv) -> Result<()
             ),
         )
     };
-    let resolved_root = resolve_through_existing_ancestor(&root).ok_or_else(escape)?;
-    if is_path_prefix(
-        &env.platform,
-        &resolved_root,
-        &node_resolve(&env.platform, &entry.resolved_path),
-    ) {
-        return Ok(());
+    let platform = &env.platform;
+    let root_kind = if location.layout == LocationLayout::SingleFile {
+        ResourceKind::File
+    } else {
+        ResourceKind::Directory
+    };
+    let resolved_root = resolve_planned_resource_path(&root, root_kind).ok_or_else(escape)?;
+    let recorded = node_resolve(platform, &entry.resolved_path);
+    let physical =
+        resolve_planned_resource_path(&entry.resolved_path, entry.kind).ok_or_else(escape)?;
+    if !is_path_prefix(platform, &resolved_root, &recorded)
+        || !is_path_prefix(platform, &resolved_root, &physical)
+    {
+        return Err(escape());
     }
-    Err(escape())
+    if physical != recorded {
+        return Err(WriteError::new(
+            WriteFailure::PathEscape,
+            format!(r#"Library backup destination "{recorded}" now resolves to "{physical}"."#),
+        ));
+    }
+    if (physical == resolved_root) != (location.layout == LocationLayout::SingleFile) {
+        return Err(WriteError::new(
+            WriteFailure::PathEscape,
+            format!(
+                r#"Library backup destination "{physical}" is not a resource in location "{}"."#,
+                entry.location_id
+            ),
+        ));
+    }
+    Ok(physical)
 }
 
 #[cfg(test)]

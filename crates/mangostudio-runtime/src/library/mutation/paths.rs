@@ -11,6 +11,7 @@
 //! and prefix checks are the same case-sensitive `startsWith(root + sep)`
 //! that `isPathPrefix` performs.
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
 use super::super::fs::simplify_verbatim_path;
@@ -164,8 +165,10 @@ pub(crate) fn path_string(path: &Path) -> String {
 pub(crate) enum SegmentEntry {
     /// Nothing there (`ENOENT`).
     Missing,
-    /// A file or directory that is not a link.
+    /// A directory that is not a link.
     Plain,
+    /// An existing non-directory entry that is not a link.
+    NonDirectory,
     /// A symlink (or Windows junction), with its raw target text.
     Link(String),
 }
@@ -187,8 +190,18 @@ const MAX_SYMLINK_HOPS: u32 = 32;
 /// cannot be verified: a symlink loop, or a segment this process cannot
 /// inspect.
 pub(crate) fn resolve_through_existing_ancestor(path: &str) -> Option<String> {
-    let platform = crate::health::node_platform();
-    resolve_like_node(platform, path, &|candidate| native_segment(candidate))
+    resolve_planned_resource_path(path, ResourceKind::File)
+}
+
+/// Resolves a mutation target. A directory operation can create a missing
+/// terminal directory required by a trailing slash or dot.
+///
+/// # Example
+/// ```ignore
+/// let root = resolve_planned_resource_path("/home/u/skills", ResourceKind::Directory);
+/// ```
+pub(crate) fn resolve_planned_resource_path(path: &str, kind: ResourceKind) -> Option<String> {
+    resolve_like_node(crate::health::node_platform(), path, kind, &native_segment)
 }
 
 fn native_segment(candidate: &str) -> std::io::Result<SegmentEntry> {
@@ -200,7 +213,11 @@ fn native_segment(candidate: &str) -> std::io::Result<SegmentEntry> {
         Err(error) => return Err(error),
     };
     if !metadata.is_symlink() {
-        return Ok(SegmentEntry::Plain);
+        return Ok(if metadata.is_dir() {
+            SegmentEntry::Plain
+        } else {
+            SegmentEntry::NonDirectory
+        });
     }
     let target = path_string(&std::fs::read_link(candidate)?);
     Ok(SegmentEntry::Link(
@@ -215,36 +232,78 @@ fn native_segment(candidate: &str) -> std::io::Result<SegmentEntry> {
 ///
 /// ```ignore
 /// // An 8.3 name that is a plain directory keeps its spelling.
-/// let resolved = resolve_like_node("win32", r"C:\Users\RUNNER~1\x", &|_| Ok(SegmentEntry::Plain));
+/// let resolved = resolve_like_node("win32", r"C:\Users\RUNNER~1\x", ResourceKind::File, &|_| Ok(SegmentEntry::Plain));
 /// assert_eq!(resolved.as_deref(), Some(r"C:\Users\RUNNER~1\x"));
 /// ```
 pub(crate) fn resolve_like_node(
     platform: &str,
     path: &str,
+    kind: ResourceKind,
     probe: &dyn Fn(&str) -> std::io::Result<SegmentEntry>,
 ) -> Option<String> {
-    let (root, segments) = split_absolute(platform, &node_resolve(platform, path));
-    let mut resolved = root;
-    let mut pending: std::collections::VecDeque<String> = segments.into();
+    // Win32 ordinary paths remove dot segments before the filesystem sees
+    // them. POSIX follows each link before interpreting a later parent step.
+    let win32 = platform == "win32";
+    let (mut resolved, mut pending) = if win32 {
+        let (root, segments) = split_absolute(platform, &node_resolve(platform, path));
+        (root, VecDeque::from(segments))
+    } else {
+        let mut segments = VecDeque::new();
+        if !path.starts_with('/') {
+            let cwd = std::env::current_dir().ok()?;
+            segments.extend(posix_segments(&path_string(&cwd)));
+        }
+        segments.extend(posix_segments(path));
+        ("/".to_string(), segments)
+    };
     let mut hops = 0;
+    let mut missing_tail = false;
     while let Some(segment) = pending.pop_front() {
+        match segment.as_str() {
+            // A terminal directory constraint cannot become a missing file
+            // target. For an intermediate step the writer can create parents.
+            "." if kind == ResourceKind::File && missing_tail && pending.is_empty() => return None,
+            "." => continue,
+            ".." if missing_tail => return None,
+            ".." => {
+                resolved = node_dirname(platform, &resolved);
+                continue;
+            }
+            _ => {}
+        }
+
         let candidate = resolve_path(platform, &resolved, &segment);
+        if missing_tail {
+            resolved = candidate;
+            continue;
+        }
+
         match probe(&candidate).ok()? {
             SegmentEntry::Missing => {
-                let mut parts: Vec<&str> = vec![&resolved, &segment];
-                parts.extend(pending.iter().map(String::as_str));
-                return Some(node_resolve(platform, &node_join(platform, &parts)));
+                // Ordinary missing descendants can be created. A later parent
+                // step cannot cancel a component the kernel could not traverse.
+                missing_tail = true;
+                resolved = candidate;
             }
-            SegmentEntry::Plain => resolved = candidate,
+            SegmentEntry::NonDirectory if !win32 && !pending.is_empty() => return None,
+            SegmentEntry::Plain | SegmentEntry::NonDirectory => resolved = candidate,
             SegmentEntry::Link(target) => {
                 if hops >= MAX_SYMLINK_HOPS {
                     return None;
                 }
                 hops += 1;
-                let parent = node_dirname(platform, &candidate);
-                let (target_root, target_segments) =
-                    split_absolute(platform, &resolve_path(platform, &parent, &target));
-                resolved = target_root;
+                let target_segments = if win32 {
+                    let parent = node_dirname(platform, &candidate);
+                    let (target_root, segments) =
+                        split_absolute(platform, &resolve_path(platform, &parent, &target));
+                    resolved = target_root;
+                    segments
+                } else {
+                    if target.starts_with('/') {
+                        resolved = "/".to_string();
+                    }
+                    posix_segments(&target).collect()
+                };
                 for segment in target_segments.into_iter().rev() {
                     pending.push_front(segment);
                 }
@@ -252,6 +311,14 @@ pub(crate) fn resolve_like_node(
         }
     }
     Some(resolved)
+}
+
+fn posix_segments(path: &str) -> impl DoubleEndedIterator<Item = String> + '_ {
+    path.split('/')
+        .filter(|segment| !segment.is_empty())
+        // A trailing slash, like "/.", requires the preceding entry to be a directory.
+        .chain(path.ends_with('/').then_some("."))
+        .map(str::to_string)
 }
 
 /// `splitAbsolutePath`: an absolute, normalized path's root (`/`, `C:\`,
@@ -293,6 +360,7 @@ pub(crate) fn resolve_contained_resource_path(
     platform: &str,
     root: &str,
     entry_name: &str,
+    kind: ResourceKind,
 ) -> Result<ResolvedDestination, WriteError> {
     if !is_absolute(platform, root) {
         return Err(WriteError::new(
@@ -306,18 +374,28 @@ pub(crate) fn resolve_contained_resource_path(
             format!("Invalid library resource slug: \"{entry_name}\"."),
         ));
     }
-    let logical_root = node_resolve(platform, root);
-    let logical_path = node_join(platform, &[&logical_root, entry_name]);
+    let (logical_root, logical_path) = if platform == "win32" {
+        let logical_root = node_resolve(platform, root);
+        let logical_path = node_join(platform, &[&logical_root, entry_name]);
+        (logical_root, logical_path)
+    } else {
+        // The file writer opens this spelling too, so keep POSIX parent steps
+        // until both containment and the eventual write follow the links.
+        (
+            root.to_string(),
+            format!("{}/{entry_name}", root.trim_end_matches('/')),
+        )
+    };
     let unresolvable = || {
         WriteError::new(
             WriteFailure::PathEscape,
             format!("Cannot safely resolve library destination \"{logical_path}\"."),
         )
     };
-    let resolved_root =
-        resolve_through_existing_ancestor(&logical_root).ok_or_else(unresolvable)?;
+    let resolved_root = resolve_planned_resource_path(&logical_root, ResourceKind::Directory)
+        .ok_or_else(unresolvable)?;
     let resolved_path =
-        resolve_through_existing_ancestor(&logical_path).ok_or_else(unresolvable)?;
+        resolve_planned_resource_path(&logical_path, kind).ok_or_else(unresolvable)?;
     if !is_path_prefix(platform, &resolved_root, &resolved_path) || resolved_path == resolved_root {
         return Err(WriteError::new(
             WriteFailure::PathEscape,
@@ -452,12 +530,15 @@ pub(crate) fn resolve_resource_destination(
             resolved_path,
         });
     }
-    let entry_name = if location.layout == LocationLayout::DirectoryOfFiles {
-        format!("{slug}{}", format_extension(location.format))
+    let (entry_name, kind) = if location.layout == LocationLayout::DirectoryOfFiles {
+        (
+            format!("{slug}{}", format_extension(location.format)),
+            ResourceKind::File,
+        )
     } else {
-        slug.to_string()
+        (slug.to_string(), ResourceKind::Directory)
     };
-    resolve_contained_resource_path(&env.platform, &root, &entry_name)
+    resolve_contained_resource_path(&env.platform, &root, &entry_name, kind)
 }
 
 /// A string path as a filesystem path.
@@ -603,8 +684,13 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         std::fs::create_dir_all(&outside).unwrap();
         std::os::unix::fs::symlink(&outside, root.join("gh")).unwrap();
-        let refused =
-            resolve_contained_resource_path("linux", &path_string(&root), "gh").unwrap_err();
+        let refused = resolve_contained_resource_path(
+            "linux",
+            &path_string(&root),
+            "gh",
+            ResourceKind::Directory,
+        )
+        .unwrap_err();
         assert_eq!(
             refused.reason,
             WriteFailure::PathEscape,
@@ -612,12 +698,50 @@ mod tests {
         );
         let linked_root = scratch.join("linked-root");
         std::os::unix::fs::symlink(&root, &linked_root).unwrap();
-        let through =
-            resolve_contained_resource_path("linux", &path_string(&linked_root), "new").unwrap();
+        let through = resolve_contained_resource_path(
+            "linux",
+            &path_string(&linked_root),
+            "new",
+            ResourceKind::Directory,
+        )
+        .unwrap();
         assert_eq!(
             through.resolved_path,
             path_string(&std::fs::canonicalize(&root).unwrap().join("new")),
             "a symlinked location root resolves to its target"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_raw_posix_location_root_keeps_parent_steps_after_links() {
+        let scratch = crate::test_support::scratch_dir("library-destination-raw-root");
+        let lexical = scratch.join("root");
+        let outside = scratch.join("outside");
+        std::fs::create_dir_all(lexical.join("assets/gh")).unwrap();
+        std::fs::create_dir_all(outside.join("assets/gh")).unwrap();
+        std::fs::create_dir_all(outside.join("nested")).unwrap();
+        std::os::unix::fs::symlink(outside.join("nested"), lexical.join("redirect")).unwrap();
+        let raw_root = lexical.join("redirect/../assets");
+        let expected = std::fs::canonicalize(outside.join("assets/gh")).unwrap();
+
+        let destination = resolve_contained_resource_path(
+            "linux",
+            &path_string(&raw_root),
+            "gh",
+            ResourceKind::Directory,
+        )
+        .unwrap();
+        assert_eq!(
+            destination.resolved_path,
+            path_string(&expected),
+            "the physical destination must use the symlink target's parent"
+        );
+        assert_eq!(destination.logical_path, path_string(&raw_root.join("gh")));
+        assert_eq!(
+            std::fs::canonicalize(destination.logical_path).unwrap(),
+            expected,
+            "the logical destination must open the same path"
         );
     }
 

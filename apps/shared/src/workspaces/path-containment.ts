@@ -1,8 +1,8 @@
 import { lstatSync, readlinkSync, realpathSync } from 'node:fs';
-import { dirname, parse, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, parse, resolve, sep } from 'node:path';
 
 import { PathAccessError } from '../runtime-contract/service-errors';
-import { resolveWorkspacePath } from './path';
+import { expandWorkspacePathHome, resolveWorkspacePath } from './path';
 
 /** Bounds symlink traversal, including chains whose final target exists. */
 const MAX_SYMLINK_HOPS = 32;
@@ -26,25 +26,52 @@ interface PathParts {
   readonly segments: readonly string[];
 }
 
-function splitAbsolutePath(path: string): PathParts {
+function splitSegments(path: string, physicalParents: boolean): string[] {
+  const segments = path.split(sep).filter((segment) => segment.length > 0);
+  // A POSIX trailing slash requires the preceding component to be a directory.
+  if (physicalParents && path.endsWith(sep)) segments.push('.');
+  return segments;
+}
+
+function splitAbsolutePath(path: string, physicalParents: boolean): PathParts {
   const root = parse(path).root;
-  return {
-    root,
-    segments: path
-      .slice(root.length)
-      .split(sep)
-      .filter((segment) => segment.length > 0),
-  };
+  return { root, segments: splitSegments(path.slice(root.length), physicalParents) };
 }
 
 /**
- * Resolves an absolute or cwd-relative path through its nearest existing
- * ancestor. Every symlink is followed explicitly so existing and dangling
- * chains share one deterministic hop cap.
+ * Resolve a path through its nearest existing ancestor with a bounded symlink walk.
+ * POSIX applies parent steps after expanding preceding links. Windows keeps
+ * its native path normalization, including drive-relative paths. Callers
+ * planning a directory may allow a missing terminal directory requirement.
+ * // Usage: resolvePathThroughExistingAncestor('/workspace/new/', { allowMissingDirectory: true })
  */
-export function resolvePathThroughExistingAncestor(inputPath: string): string {
-  const absolutePath = resolve(inputPath);
-  const initial = splitAbsolutePath(absolutePath);
+export function resolvePathThroughExistingAncestor(
+  inputPath: string,
+  { allowMissingDirectory = false }: { allowMissingDirectory?: boolean } = {}
+): string {
+  return resolvePath(inputPath, sep === '/', allowMissingDirectory);
+}
+
+/**
+ * Recover a destination that the old lexical atomic writer could have used.
+ * Use only to identify files written before physical parent traversal.
+ * // Usage: resolveLegacyLexicalWritePath('/home/me/.mango/.env')
+ */
+export function resolveLegacyLexicalWritePath(inputPath: string): string {
+  return resolvePath(inputPath, false);
+}
+
+function resolvePath(
+  inputPath: string,
+  physicalParents: boolean,
+  allowMissingDirectory = false
+): string {
+  const absolutePath = physicalParents
+    ? isAbsolute(inputPath)
+      ? inputPath
+      : `${process.cwd()}${sep}${inputPath}`
+    : resolve(inputPath);
+  const initial = splitAbsolutePath(absolutePath, physicalParents);
   let resolvedPath = initial.root;
   let pending = [...initial.segments];
   let hops = 0;
@@ -52,17 +79,32 @@ export function resolvePathThroughExistingAncestor(inputPath: string): string {
   while (pending.length > 0) {
     const segment = pending.shift();
     if (segment === undefined) break;
-    const candidate = resolve(resolvedPath, segment);
+    const next = resolve(resolvedPath, segment);
+    // Let the filesystem reject a parent or current-directory step through
+    // a regular file before dropping that component from the resolved path.
+    const candidate =
+      physicalParents && (segment === '..' || segment === '.')
+        ? `${resolvedPath}${sep}${segment}`
+        : next;
     let entry: ReturnType<typeof lstatSync>;
     try {
       entry = lstatSync(candidate);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      // A parent step can erase a required directory. A terminal dot still
+      // requires a directory, which cannot be created by a planned file write.
+      const missingDirectory = pending.at(-1) === '.';
+      if (
+        physicalParents &&
+        (pending.includes('..') || (missingDirectory && !allowMissingDirectory))
+      ) {
+        throw error;
+      }
       return resolve(realpathSync(resolvedPath), segment, ...pending);
     }
 
     if (!entry.isSymbolicLink()) {
-      resolvedPath = candidate;
+      resolvedPath = next;
       continue;
     }
 
@@ -71,9 +113,17 @@ export function resolvePathThroughExistingAncestor(inputPath: string): string {
     }
     hops += 1;
 
-    const target = splitAbsolutePath(resolve(dirname(candidate), readlinkSync(candidate)));
-    resolvedPath = target.root;
-    pending = [...target.segments, ...pending];
+    const target = readlinkSync(candidate);
+    if (physicalParents && !isAbsolute(target)) {
+      pending = [...splitSegments(target, physicalParents), ...pending];
+      continue;
+    }
+    const absoluteTarget = splitAbsolutePath(
+      physicalParents ? target : resolve(dirname(candidate), target),
+      physicalParents
+    );
+    resolvedPath = absoluteTarget.root;
+    pending = [...absoluteTarget.segments, ...pending];
   }
 
   return realpathSync(resolvedPath);
@@ -95,9 +145,16 @@ export function resolvePathForContainment(inputPath: string): string {
   return resolvePathThroughExistingAncestor(inputPath);
 }
 
-/** Canonicalizes a containment root once so per-candidate checks can reuse it. */
+/**
+ * Canonicalize an existing root once so per-candidate checks can reuse it.
+ * // Usage: const root = resolveContainmentRoot('~/workspace');
+ */
 export function resolveContainmentRoot(root: string): string {
-  return realpathSync(resolveWorkspacePath(root));
+  // Bun's default realpathSync normalizes parent steps on POSIX before
+  // following links. Use the native operation on the original spelling.
+  return sep === '/'
+    ? realpathSync.native(expandWorkspacePathHome(root))
+    : realpathSync(resolveWorkspacePath(root));
 }
 
 /** Containment check against an already-canonical root, for hot loops. */
