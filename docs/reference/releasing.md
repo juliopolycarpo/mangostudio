@@ -522,12 +522,12 @@ bun run changelog:separators --check
 ```
 
 It inserts only a missing blank line between a final bullet and the next dated release
-heading in the root and protocol changelogs. It preserves existing entries, dates, versions,
-line endings and tag attribution; a second run makes no changes. `--check` is read-only and
-exits nonzero when repair is needed. This command does not invoke git-cliff or inspect tags.
-Do not use `--init` or `--release` to repair old separators: they render through the current
-HEAD and can reattribute post-release commits. The protocol's imported release sections
-remain preserved; normal protocol release preparation continues to prepend new sections.
+heading in the root and protocol changelogs. It checks that both are regular UTF-8 files
+at their repository paths, then replaces each repaired file atomically. Historical entries,
+dates, versions, line endings and tag attribution are preserved.
+`--check` reports missing separators without writing. Running the repair again leaves both
+files identical. Use the normal release commands to generate new sections, including the
+protocol's prepend-only release sections.
 
 Every PR gets a changelog preview in a managed bot comment, published by
 `.github/workflows/pr-qa-report.yml` together with the commit summary; the QA

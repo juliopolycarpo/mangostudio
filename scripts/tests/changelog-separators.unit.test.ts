@@ -1,17 +1,27 @@
 import { describe, expect, test } from 'bun:test';
+import {
+  copyFileSync,
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 
 import { normalizeChangelogSeparators } from '../lib/changelog';
+import { ROOT_DIR } from '../lib/config';
 import { PROTOCOL_CHANGELOG } from '../lib/protocol';
 import { readText } from './support/read-text';
 
 describe('committed historical changelog separators', () => {
   for (const file of ['CHANGELOG.md', PROTOCOL_CHANGELOG]) {
     test(`${file} separates each historical release from the preceding bullet`, () => {
-      expect(
-        [...readText(file).matchAll(/^- .+\r?\n## \[[^\]]+\] - \d{4}-\d{2}-\d{2}$/gm)].map(
-          ([seam]) => seam
-        )
-      ).toEqual([]);
+      const source = readText(file);
+      expect(normalizeChangelogSeparators(source)).toBe(source);
     });
   }
 });
@@ -62,10 +72,152 @@ describe('normalizeChangelogSeparators', () => {
     }
   });
 
-  test('the committed historical files are fixed points', () => {
-    for (const file of ['CHANGELOG.md', PROTOCOL_CHANGELOG]) {
-      const source = readText(file);
-      expect(normalizeChangelogSeparators(source)).toBe(source);
-    }
+  test('does not mistake inline backticks for an opening code fence', () => {
+    const inline = '```foo`bar```\n';
+    const source = `${inline}- Entry\n## [1.0.0] - 2026-01-01\n`;
+
+    expect(normalizeChangelogSeparators(source)).toBe(
+      `${inline}- Entry\n\n## [1.0.0] - 2026-01-01\n`
+    );
+  });
+
+  test('keeps a fence open when a candidate closing line has non-ASCII whitespace', () => {
+    const fenced = '```markdown\n```\u00a0\n- Example\n## [1.0.0] - 2026-01-01\n```\t\n';
+    const source = `${fenced}- Entry\n## [0.1.0] - 2025-01-01\n`;
+
+    expect(normalizeChangelogSeparators(source)).toBe(
+      `${fenced}- Entry\n\n## [0.1.0] - 2025-01-01\n`
+    );
+  });
+  test('parses the first line without dropping a leading byte-order mark', () => {
+    const fenced = '\ufeff~~~markdown\n- Example\n## [1.0.0] - 2026-01-01\n~~~\n';
+    const seam = '- Entry\n## [0.1.0] - 2025-01-01\n';
+    const repaired = seam.replace('\n##', '\n\n##');
+
+    expect(normalizeChangelogSeparators(fenced + seam)).toBe(fenced + repaired);
+    expect(normalizeChangelogSeparators(`\ufeff${seam}`)).toBe(`\ufeff${repaired}`);
+  });
+
+  test('ends a nested code fence when the top-level changelog list item ends', () => {
+    const example = '- Example\n  ~~~markdown\n  Example content\n';
+    const seam = '- Entry\n## [0.1.0] - 2025-01-01\n';
+
+    expect(normalizeChangelogSeparators(example + seam)).toBe(
+      example + seam.replace('\n##', '\n\n##')
+    );
   });
 });
+
+type ChangelogFixture = {
+  root: string;
+  script: string;
+  protocol: string;
+  application: string;
+};
+
+function withChangelogFixture(run: (fixture: ChangelogFixture) => void): void {
+  const root = mkdtempSync(join(tmpdir(), 'changelog-separators-'));
+  try {
+    const script = join(root, 'scripts/changelog-separators.ts');
+    const protocol = join(root, PROTOCOL_CHANGELOG);
+    mkdirSync(dirname(script), { recursive: true });
+    mkdirSync(dirname(protocol), { recursive: true });
+    copyFileSync(join(ROOT_DIR, 'scripts/changelog-separators.ts'), script);
+    cpSync(join(ROOT_DIR, 'scripts/lib'), join(root, 'scripts/lib'), { recursive: true });
+    const application = join(root, 'CHANGELOG.md');
+    run({ root, script, protocol, application });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+test('separator repair rejects malformed UTF-8 and preserves a valid byte-order mark', () => {
+  withChangelogFixture(({ script, protocol, application }) => {
+    const seam = '- Entry\n## [1.0.0] - 2026-01-01\n';
+    const invalid = Buffer.concat([Buffer.from([0xff, 0x0a]), Buffer.from(seam)]);
+    writeFileSync(application, seam);
+    writeFileSync(protocol, invalid);
+
+    const result = Bun.spawnSync([process.execPath, script], { stdout: 'pipe', stderr: 'pipe' });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(`${PROTOCOL_CHANGELOG}: expected valid UTF-8`);
+    expect(readFileSync(application, 'utf8')).toBe(seam);
+    expect(readFileSync(protocol)).toEqual(invalid);
+
+    const prefix = '\ufeff# Changelog\n\n';
+    writeFileSync(protocol, prefix + seam);
+    const repaired = Bun.spawnSync([process.execPath, script], { stdout: 'pipe', stderr: 'pipe' });
+    expect(repaired.exitCode).toBe(0);
+    expect(readFileSync(protocol)).toEqual(Buffer.from(prefix + seam.replace('\n##', '\n\n##')));
+  });
+});
+
+test.skipIf(process.platform !== 'linux')(
+  'an interrupted repair leaves the original changelog intact',
+  () => {
+    withChangelogFixture(({ root, script, protocol, application }) => {
+      const original = `- ${'x'.repeat(4_096)}\n## [1.0.0] - 2026-01-01\n`;
+      writeFileSync(application, original);
+      writeFileSync(protocol, '# Changelog\n');
+
+      const result = Bun.spawnSync(
+        [
+          'bash',
+          '-c',
+          'ulimit -c 0 && ulimit -f 1 && exec "$@"',
+          'limit',
+          process.execPath,
+          script,
+        ],
+        { cwd: root, stdout: 'pipe', stderr: 'pipe' }
+      );
+
+      expect(result.success).toBe(false);
+      expect(readFileSync(application, 'utf8')).toBe(original);
+    });
+  }
+);
+
+test.skipIf(process.platform === 'win32')(
+  'separator repair rejects a changelog symlink before writing either file',
+  () => {
+    withChangelogFixture(({ root, script, protocol, application }) => {
+      const target = join(root, 'symlink-target.md');
+      const seam = '- Entry\n## [1.0.0] - 2026-01-01\n';
+      writeFileSync(application, seam);
+      writeFileSync(target, seam);
+      symlinkSync(target, protocol, 'file');
+
+      const result = Bun.spawnSync([process.execPath, script], { stdout: 'pipe', stderr: 'pipe' });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr.toString()).toContain(`${PROTOCOL_CHANGELOG}: expected a regular file`);
+      expect(readFileSync(application, 'utf8')).toBe(seam);
+      expect(readFileSync(target, 'utf8')).toBe(seam);
+    });
+  }
+);
+
+test.skipIf(process.platform === 'win32')(
+  'separator repair rejects a symlinked parent before writing either file',
+  () => {
+    withChangelogFixture(({ root, script, protocol, application }) => {
+      const targetDir = join(root, 'symlink-target');
+      const target = join(targetDir, 'CHANGELOG.md');
+      const seam = '- Entry\n## [1.0.0] - 2026-01-01\n';
+      mkdirSync(targetDir);
+      writeFileSync(application, seam);
+      writeFileSync(target, seam);
+      rmSync(dirname(protocol), { recursive: true });
+      symlinkSync(targetDir, dirname(protocol), 'dir');
+
+      const result = Bun.spawnSync([process.execPath, script], { stdout: 'pipe', stderr: 'pipe' });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr.toString()).toContain(`${PROTOCOL_CHANGELOG}: expected a regular file`);
+      expect(readFileSync(application, 'utf8')).toBe(seam);
+      expect(readFileSync(target, 'utf8')).toBe(seam);
+    });
+  }
+);
