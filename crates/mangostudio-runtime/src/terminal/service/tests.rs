@@ -37,6 +37,10 @@ impl PtyHandle for FakePtyHandle {
         Box::pin(async { Ok(()) })
     }
 
+    fn close_is_settled(&self) -> bool {
+        false
+    }
+
     fn close(&self) -> PtyFuture<'_, std::io::Result<()>> {
         let closes = Arc::clone(&self.closes);
         Box::pin(async move {
@@ -49,6 +53,8 @@ impl PtyHandle for FakePtyHandle {
 struct StalledClosePtyHandle {
     entered: Arc<tokio::sync::Notify>,
     release: Arc<tokio::sync::Notify>,
+    settled: std::sync::atomic::AtomicBool,
+    fail_on_release: bool,
 }
 
 impl PtyHandle for StalledClosePtyHandle {
@@ -64,11 +70,21 @@ impl PtyHandle for StalledClosePtyHandle {
         unreachable!("expired login must not receive resizes")
     }
 
+    fn close_is_settled(&self) -> bool {
+        self.settled.load(std::sync::atomic::Ordering::Acquire)
+    }
+
     fn close(&self) -> PtyFuture<'_, std::io::Result<()>> {
         Box::pin(async {
             self.entered.notify_one();
             self.release.notified().await;
-            Ok(())
+            self.settled
+                .store(true, std::sync::atomic::Ordering::Release);
+            if self.fail_on_release {
+                Err(std::io::Error::other("injected settled PTY close failure"))
+            } else {
+                Ok(())
+            }
         })
     }
 }
@@ -91,6 +107,7 @@ impl PtySpawner for FakePtySpawner {
 struct RecordingPtyState {
     closes: usize,
     close_failures: usize,
+    settles_on_close_failure: bool,
     launches: Vec<(PathBuf, Vec<std::ffi::OsString>)>,
     writes: Vec<Vec<u8>>,
     sizes: Vec<(u16, u16)>,
@@ -113,6 +130,11 @@ impl PtyHandle for RecordingPtyHandle {
     fn resize(&self, cols: u16, rows: u16) -> PtyFuture<'_, std::io::Result<()>> {
         self.0.lock().unwrap().sizes.push((cols, rows));
         Box::pin(async { Ok(()) })
+    }
+
+    fn close_is_settled(&self) -> bool {
+        let state = self.0.lock().unwrap();
+        state.closes > 0 && state.settles_on_close_failure
     }
 
     fn close(&self) -> PtyFuture<'_, std::io::Result<()>> {
@@ -208,6 +230,18 @@ fn prepared_service_with(
     (scratch, Arc::new(service), state)
 }
 
+async fn finish_close_jobs(service: &Arc<Service>) {
+    let mut jobs = tokio::task::JoinSet::new();
+    service.schedule_closes(&mut jobs);
+    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        while let Some(result) = jobs.join_next().await {
+            result.expect("terminal cleanup task completes");
+        }
+    })
+    .await
+    .expect("expected terminal cleanup to settle within two seconds");
+}
+
 fn open_params() -> OpenParams {
     OpenParams {
         session_id: "terminal-1".into(),
@@ -248,7 +282,8 @@ fn fake_entry(id: &str, handle: Arc<dyn PtyHandle>) -> Arc<Entry> {
         handle,
         operation: tokio::sync::Mutex::new(()),
         closed: std::sync::atomic::AtomicBool::new(false),
-        expiry_closing: std::sync::atomic::AtomicBool::new(false),
+        close_scheduled: std::sync::atomic::AtomicBool::new(false),
+        close_result: tokio::sync::Mutex::new(None),
         consent_revoked: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     })
 }
@@ -352,7 +387,9 @@ async fn closing_a_live_session_is_idempotent_and_removes_it_from_listing() {
 async fn revocation_closes_each_live_session() {
     let closes = Arc::new(Mutex::new(0));
     let service = service_with_live_entry(Arc::clone(&closes));
-    service.revoke_all(true).await;
+    let service = Arc::new(service);
+    service.revoke_entries(true);
+    finish_close_jobs(&service).await;
     assert_eq!(*closes.lock().unwrap(), 1);
     assert!(
         service.list().unwrap()["sessions"]
@@ -369,7 +406,12 @@ async fn slow_consent_store_does_not_close_terminals() {
     service.shell_read = slow_grant();
     service.consent_read_timeout = SHORT_READ_TIMEOUT;
 
-    service.poll_consent().await;
+    let service = Arc::new(service);
+    let mut jobs = tokio::task::JoinSet::new();
+    service.poll_consent(&mut jobs).await;
+    while let Some(result) = jobs.join_next().await {
+        result.unwrap();
+    }
 
     let closed = *closes.lock().unwrap();
     let listed = service.list().unwrap()["sessions"]
@@ -391,7 +433,12 @@ async fn explicit_shell_denial_on_the_watcher_poll_closes_terminals() {
     let entry = service.require("one").unwrap();
     service.shell_read = Arc::new(|| false);
 
-    service.poll_consent().await;
+    let service = Arc::new(service);
+    let mut jobs = tokio::task::JoinSet::new();
+    service.poll_consent(&mut jobs).await;
+    while let Some(result) = jobs.join_next().await {
+        result.unwrap();
+    }
 
     let closed = *closes.lock().unwrap();
     let revoked = entry
@@ -512,10 +559,11 @@ async fn revocation_closes_even_while_a_terminal_operation_is_busy() {
     let entry = service.require("one").unwrap();
     let _busy = entry.operation.lock().await;
 
-    tokio::time::timeout(
-        std::time::Duration::from_millis(100),
-        service.revoke_all(true),
-    )
+    tokio::time::timeout(std::time::Duration::from_millis(100), async {
+        let service = Arc::new(service);
+        service.revoke_entries(true);
+        finish_close_jobs(&service).await;
+    })
     .await
     .expect("revocation must not wait for a blocked terminal write");
     assert_eq!(*closes.lock().unwrap(), 1);
@@ -878,6 +926,8 @@ async fn stalled_login_expiry_does_not_block_consent_revocation() {
         Arc::new(StalledClosePtyHandle {
             entered: Arc::clone(&entered),
             release: Arc::clone(&release),
+            settled: std::sync::atomic::AtomicBool::new(false),
+            fail_on_release: false,
         }),
     );
     {
@@ -968,14 +1018,14 @@ async fn login_overflow_refuses_pty_operations_before_the_watcher_closes() {
 
     state.lock().unwrap().close_failures = 1;
     let mut closes = tokio::task::JoinSet::new();
-    service.expire_logins(&mut closes);
+    service.schedule_closes(&mut closes);
     closes.join_next().await.unwrap().unwrap();
     assert!(
         service.sessions.lock().unwrap().contains_key("terminal-1"),
         "expected expiry to retain the handle after a transient close failure"
     );
     assert!(service.require("terminal-1").is_err());
-    service.expire_logins(&mut closes);
+    service.schedule_closes(&mut closes);
     closes.join_next().await.unwrap().unwrap();
     for (method, result) in [
         ("attach", attached),
@@ -1043,4 +1093,272 @@ fn relative_login_path_is_pinned_before_changing_working_directory() {
         launch.request.program.canonicalize().unwrap(),
         scratch.join("codex").canonicalize().unwrap()
     );
+}
+
+#[tokio::test]
+async fn failed_terminal_close_retries_the_same_handle_and_blocks_input() {
+    let state = Arc::new(Mutex::new(RecordingPtyState {
+        close_failures: 1,
+        ..Default::default()
+    }));
+    let service = service_with_live_entry(Arc::new(Mutex::new(0)));
+    service.sessions.lock().unwrap().insert(
+        "one".into(),
+        Slot::Live(fake_entry(
+            "one",
+            Arc::new(RecordingPtyHandle(Arc::clone(&state))),
+        )),
+    );
+    let params = || SessionParams {
+        session_id: "one".into(),
+    };
+
+    let error = service
+        .close(params())
+        .await
+        .expect_err("first native close fails");
+    assert!(
+        error
+            .message
+            .contains("injected transient PTY close failure")
+    );
+    assert!(
+        service.attach(params()).is_err(),
+        "closing terminal refuses attachment"
+    );
+    assert!(
+        service
+            .write(WriteParams {
+                session_id: "one".into(),
+                data: "eA==".into()
+            })
+            .await
+            .is_err()
+    );
+
+    service
+        .close(params())
+        .await
+        .expect("retry closes the same child");
+    let state = state.lock().unwrap();
+    assert_eq!(
+        state.closes, 2,
+        "expected the close retry to reach the retained PTY handle"
+    );
+    assert!(state.writes.is_empty());
+    assert!(service.sessions.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn failed_consent_revocation_retains_the_handle_for_cleanup() {
+    let state = Arc::new(Mutex::new(RecordingPtyState {
+        close_failures: 1,
+        ..Default::default()
+    }));
+    let service = service_with_live_entry(Arc::new(Mutex::new(0)));
+    service.sessions.lock().unwrap().insert(
+        "one".into(),
+        Slot::Live(fake_entry(
+            "one",
+            Arc::new(RecordingPtyHandle(Arc::clone(&state))),
+        )),
+    );
+
+    let service = Arc::new(service);
+    service.revoke_entries(true);
+    finish_close_jobs(&service).await;
+    assert!(
+        service.require("one").is_err(),
+        "revoked terminal refuses effects"
+    );
+    service
+        .close(SessionParams {
+            session_id: "one".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        state.lock().unwrap().closes,
+        2,
+        "expected a cleanup retry to reach the native handle after consent withdrawal"
+    );
+    assert!(service.sessions.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn concurrent_terminal_closes_wait_for_one_native_settlement() {
+    use futures_util::FutureExt;
+    use std::pin::pin;
+    use tokio::sync::Notify;
+
+    for fail_on_release in [false, true] {
+        let entered = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let service = service_with_live_entry(Arc::new(Mutex::new(0)));
+        service.sessions.lock().unwrap().insert(
+            "one".into(),
+            Slot::Live(fake_entry(
+                "one",
+                Arc::new(StalledClosePtyHandle {
+                    entered: Arc::clone(&entered),
+                    release: Arc::clone(&release),
+                    settled: std::sync::atomic::AtomicBool::new(false),
+                    fail_on_release,
+                }),
+            )),
+        );
+        let params = || SessionParams {
+            session_id: "one".into(),
+        };
+        let mut first = pin!(service.close(params()));
+        assert!(futures_util::poll!(&mut first).is_pending());
+        entered.notified().await;
+        let mut duplicate = pin!(service.close(params()));
+        assert!(
+            futures_util::poll!(&mut duplicate).is_pending(),
+            "expected duplicate close to wait until the retained handle settles"
+        );
+        release.notify_waiters();
+        for result in [first.await, duplicate.await] {
+            assert_eq!(
+                result.is_err(),
+                fail_on_release,
+                "concurrent callers share the native result"
+            );
+            if let Err(error) = result {
+                assert!(error.message.contains("injected settled PTY close failure"));
+            }
+        }
+        assert!(
+            entered.notified().now_or_never().is_none(),
+            "expected one native close"
+        );
+    }
+}
+#[tokio::test]
+async fn cancelled_terminal_open_keeps_a_spawned_handle_when_cleanup_fails() {
+    let cancel = CancellationToken::new();
+    let cancel_in_read = cancel.clone();
+    let (_scratch, service, state) = prepared_service_with(move |service| {
+        service
+            .watcher_started
+            .store(true, std::sync::atomic::Ordering::Release);
+        service.shell_read = Arc::new(move || {
+            cancel_in_read.cancel();
+            true
+        });
+    });
+    state.lock().unwrap().close_failures = 1;
+
+    let refused = service
+        .open(open_params(), fake_session(), cancel)
+        .await
+        .expect_err("open cancelled after the PTY spawned");
+    assert!(
+        refused
+            .message
+            .contains("injected transient PTY close failure")
+    );
+    assert_eq!(service.list().unwrap()["sessions"], serde_json::json!([]));
+
+    service
+        .close(SessionParams {
+            session_id: "terminal-1".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        state.lock().unwrap().closes,
+        2,
+        "expected cleanup retry to reach the spawned but unadmitted terminal"
+    );
+}
+
+#[tokio::test]
+async fn expired_terminal_releases_its_slot_after_a_settled_cleanup_error() {
+    let state = Arc::new(Mutex::new(RecordingPtyState {
+        close_failures: usize::MAX,
+        settles_on_close_failure: true,
+        ..Default::default()
+    }));
+    let service = Arc::new(service_with_live_entry(Arc::new(Mutex::new(0))));
+    let entry = fake_entry("one", Arc::new(RecordingPtyHandle(Arc::clone(&state))));
+    {
+        let mut flow = entry.flow.lock().unwrap();
+        flow.enable_login();
+        flow.on_data(&vec![b'x'; 64 * 1024 + 1], &mut |_| panic!("no viewer"));
+    }
+    service
+        .sessions
+        .lock()
+        .unwrap()
+        .insert("one".into(), Slot::Live(entry));
+    let mut jobs = tokio::task::JoinSet::new();
+
+    service.schedule_closes(&mut jobs);
+    jobs.join_next().await.unwrap().unwrap();
+    assert!(service.sessions.lock().unwrap().is_empty());
+    service.schedule_closes(&mut jobs);
+    assert!(jobs.is_empty());
+    assert_eq!(state.lock().unwrap().closes, 1);
+}
+
+#[tokio::test]
+async fn disconnected_watcher_keeps_retrying_after_transport_drops_the_service() {
+    use std::time::Duration;
+
+    let state = Arc::new(Mutex::new(RecordingPtyState {
+        close_failures: 1,
+        ..Default::default()
+    }));
+    let mut service = service_with_live_entry(Arc::new(Mutex::new(0)));
+    service.shell_read = Arc::new(|| true);
+    let service = Arc::new(service);
+    service.sessions.lock().unwrap().insert(
+        "one".into(),
+        Slot::Live(fake_entry(
+            "one",
+            Arc::new(RecordingPtyHandle(Arc::clone(&state))),
+        )),
+    );
+    let options = |role: &str| {
+        SessionOptions::new(PeerInfo {
+            name: "terminal-disconnect-test".into(),
+            version: "0.1.0".into(),
+            role: role.into(),
+        })
+    };
+    let (runtime_port, hub_port) = port_pair();
+    let (runtime, _runtime_driver) = Session::spawn(runtime_port, options("runtime"));
+    let (hub, _hub_driver) = Session::spawn(hub_port, options("hub"));
+    runtime
+        .ready()
+        .await
+        .expect("terminal watcher test handshake");
+    service.start_watcher(runtime);
+    hub.close_now(1000, Some("test disconnect"));
+    let wait_for_closes = |count| {
+        let state = &state;
+        async move {
+            while state.lock().unwrap().closes < count {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+    };
+
+    tokio::time::timeout(Duration::from_secs(2), wait_for_closes(1))
+        .await
+        .expect("disconnect initiates PTY cleanup");
+    let weak = Arc::downgrade(&service);
+    drop(service);
+    tokio::time::timeout(Duration::from_secs(2), wait_for_closes(2))
+        .await
+        .expect("disconnect cleanup retries after the transport loses its handle");
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while weak.upgrade().is_some() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("cleanup releases the disconnected service after settlement");
 }

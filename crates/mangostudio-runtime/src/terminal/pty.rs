@@ -145,8 +145,12 @@ pub trait PtyHandle: Send + Sync {
     fn write(&self, data: Vec<u8>) -> PtyFuture<'_, io::Result<()>>;
     /// Resizes the terminal and sends the platform's resize notification.
     fn resize(&self, cols: u16, rows: u16) -> PtyFuture<'_, io::Result<()>>;
-    /// Kills the child tree and waits for its cleanup. Repeated closes share one result.
+    /// Kills the child tree and waits for its cleanup. A failed kill can be retried.
     fn close(&self) -> PtyFuture<'_, io::Result<()>>;
+    /// Whether the supervisor has settled, including a final cleanup failure.
+    ///
+    /// After `handle.close().await` returns an error, a settled supervisor cannot retry it.
+    fn close_is_settled(&self) -> bool;
 }
 
 /// Starts a real PTY; tests can implement this port with a named fake.
@@ -285,6 +289,10 @@ impl PtyHandle for RealPtyHandle {
                 .map_err(|_| closed_error())?;
             result.await.map_err(|_| closed_error())?
         })
+    }
+
+    fn close_is_settled(&self) -> bool {
+        self.terminal.borrow().is_some() || self.terminal.has_changed().is_err()
     }
 
     fn close(&self) -> PtyFuture<'_, io::Result<()>> {
@@ -865,6 +873,7 @@ mod tests {
             .expect("cleanup completes")
             .expect_err("cleanup failure is preserved");
         assert!(error.to_string().contains("injected PTY cleanup failure"));
+        assert!(handle.close_is_settled(), "the failed cleanup is final");
         let exit = tokio::time::timeout(Duration::from_secs(5), exit_rx)
             .await
             .expect("cleanup failure publishes exit")
@@ -1103,5 +1112,53 @@ mod windows_tests {
             .await
             .expect("close reports exit")
             .expect("exit callback runs");
+    }
+}
+
+#[cfg(test)]
+mod close_state_tests {
+    use std::io;
+    use std::sync::Arc;
+
+    use super::{PtyHandle, RealPtyHandle};
+    use tokio::sync::{mpsc, watch};
+
+    #[test]
+    fn native_close_state_distinguishes_active_and_settled_supervisors() {
+        for final_error in [false, true] {
+            let (commands, _commands_rx) = mpsc::channel(1);
+            let (input, _input_rx) = mpsc::channel(1);
+            let (terminal_tx, terminal) = watch::channel(None);
+            let handle = RealPtyHandle {
+                pid: 1,
+                commands,
+                input,
+                terminal,
+            };
+            assert!(!handle.close_is_settled());
+
+            let result = if final_error {
+                Err(Arc::new(io::Error::other("final cleanup failure")))
+            } else {
+                Ok(())
+            };
+            terminal_tx.send(Some(result)).unwrap();
+            assert!(handle.close_is_settled());
+        }
+
+        let (commands, _commands_rx) = mpsc::channel(1);
+        let (input, _input_rx) = mpsc::channel(1);
+        let (terminal_tx, terminal) = watch::channel(None);
+        let handle = RealPtyHandle {
+            pid: 1,
+            commands,
+            input,
+            terminal,
+        };
+        drop(terminal_tx);
+        assert!(
+            handle.close_is_settled(),
+            "an exited supervisor cannot retry cleanup"
+        );
     }
 }

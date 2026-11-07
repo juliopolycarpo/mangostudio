@@ -72,8 +72,24 @@ pub(crate) fn register(mut registry: Registry, consent: ConsentSource) -> Regist
 }
 
 enum Slot {
-    Opening(u64),
+    Opening {
+        reservation_id: u64,
+        cancel: CancellationToken,
+    },
+    Starting {
+        reservation_id: u64,
+        entry: Arc<Entry>,
+    },
     Live(Arc<Entry>),
+}
+
+impl Slot {
+    fn entry(&self) -> Option<&Arc<Entry>> {
+        match self {
+            Self::Starting { entry, .. } | Self::Live(entry) => Some(entry),
+            Self::Opening { .. } => None,
+        }
+    }
 }
 
 struct Entry {
@@ -85,7 +101,8 @@ struct Entry {
     handle: Arc<dyn PtyHandle>,
     operation: AsyncMutex<()>,
     closed: AtomicBool,
-    expiry_closing: AtomicBool,
+    close_scheduled: AtomicBool,
+    close_result: AsyncMutex<Option<Result<(), Arc<std::io::Error>>>>,
     consent_revoked: Arc<AtomicBool>,
 }
 
@@ -192,6 +209,7 @@ impl Service {
         cancel: CancellationToken,
     ) -> Result<Value, RemoteError> {
         let id = params.session_id.clone();
+        let cancel = cancel.child_token();
         let reservation_id = self.next_reservation.fetch_add(1, Ordering::Relaxed);
         {
             let mut sessions = self
@@ -212,7 +230,13 @@ impl Service {
                     ),
                 ));
             }
-            sessions.insert(id.clone(), Slot::Opening(reservation_id));
+            sessions.insert(
+                id.clone(),
+                Slot::Opening {
+                    reservation_id,
+                    cancel: cancel.clone(),
+                },
+            );
         }
         let mut reservation = Reservation::new(Arc::clone(self), id.clone(), reservation_id);
         let host = (self.host)();
@@ -262,31 +286,6 @@ impl Service {
                 "Terminal open was cancelled before admission.",
             )),
         };
-        if cancel.is_cancelled() {
-            handle.close().await.map_err(pty_io)?;
-            return Err(RemoteError::new(
-                codes::CANCELLED,
-                "Terminal open was cancelled before admission.",
-            ));
-        }
-        let consent = self.launch_shell_consent().await;
-        if !consent.allows() {
-            handle.close().await.map_err(pty_io)?;
-            return Err(if consent == ConsentRead::Denied {
-                shell_denial("terminal.open", &self.consent)
-            } else {
-                consent_unconfirmed("terminal.open")
-            });
-        }
-        // The consent read can take seconds; a cancel that landed meanwhile
-        // must not admit a shell whose sessionId nobody will receive.
-        if cancel.is_cancelled() {
-            handle.close().await.map_err(pty_io)?;
-            return Err(RemoteError::new(
-                codes::CANCELLED,
-                "Terminal open was cancelled before admission.",
-            ));
-        }
         let entry = Arc::new(Entry {
             session_id: id.clone(),
             shell: prepared.shell,
@@ -296,28 +295,63 @@ impl Service {
             handle: Arc::clone(&handle),
             operation: AsyncMutex::new(()),
             closed: AtomicBool::new(false),
-            expiry_closing: AtomicBool::new(false),
+            close_scheduled: AtomicBool::new(false),
+            close_result: AsyncMutex::new(None),
             consent_revoked,
         });
+        {
+            let mut sessions = self.sessions.lock().unwrap_or_else(|p| p.into_inner());
+            // The live reservation guard is the only owner that can remove
+            // this opening marker. Close and revocation cancel it in place.
+            let slot = sessions.get_mut(&id).expect("terminal opening reservation");
+            *slot = Slot::Starting {
+                reservation_id,
+                entry: Arc::clone(&entry),
+            };
+        }
+        self.start_watcher(session);
+        if cancel.is_cancelled() {
+            self.close_entry(&entry).await.map_err(pty_io)?;
+            return Err(RemoteError::new(
+                codes::CANCELLED,
+                "Terminal open was cancelled before admission.",
+            ));
+        }
+        let consent = self.launch_shell_consent().await;
+        if !consent.allows() {
+            if consent == ConsentRead::Denied {
+                entry.consent_revoked.store(true, Ordering::Release);
+            }
+            self.close_entry(&entry).await.map_err(pty_io)?;
+            return Err(if consent == ConsentRead::Denied {
+                shell_denial("terminal.open", &self.consent)
+            } else {
+                consent_unconfirmed("terminal.open")
+            });
+        }
+        if cancel.is_cancelled() {
+            self.close_entry(&entry).await.map_err(pty_io)?;
+            return Err(RemoteError::new(
+                codes::CANCELLED,
+                "Terminal open was cancelled before admission.",
+            ));
+        }
         let admitted = {
-            let mut sessions = self
-                .sessions
-                .lock()
-                .unwrap_or_else(|poison| poison.into_inner());
-            if matches!(sessions.get(&id), Some(Slot::Opening(current)) if *current == reservation_id)
+            let mut sessions = self.sessions.lock().unwrap_or_else(|p| p.into_inner());
+            if matches!(sessions.get(&id), Some(Slot::Starting { entry: current, .. }) if Arc::ptr_eq(current, &entry))
+                && !entry.closed.load(Ordering::Acquire)
             {
-                sessions.insert(id.clone(), Slot::Live(entry));
+                sessions.insert(id.clone(), Slot::Live(Arc::clone(&entry)));
                 true
             } else {
                 false
             }
         };
         if !admitted {
-            handle.close().await.map_err(pty_io)?;
+            self.close_entry(&entry).await.map_err(pty_io)?;
             return Err(not_found(&id));
         }
         reservation.committed = true;
-        self.start_watcher(session);
         Ok(json!({
             "sessionId": id,
             "shell": prepared.shell,
@@ -429,16 +463,20 @@ impl Service {
 
     async fn close(&self, params: SessionParams) -> Result<Value, RemoteError> {
         let entry = {
-            let mut sessions = self
+            let sessions = self
                 .sessions
                 .lock()
                 .unwrap_or_else(|poison| poison.into_inner());
-            match sessions.remove(&params.session_id) {
-                Some(Slot::Live(entry)) => {
+            match sessions.get(&params.session_id) {
+                Some(Slot::Starting { entry, .. } | Slot::Live(entry)) => {
                     entry.closed.store(true, Ordering::Release);
-                    Some(entry)
+                    Some(Arc::clone(entry))
                 }
-                _ => None,
+                Some(Slot::Opening { cancel, .. }) => {
+                    cancel.cancel();
+                    None
+                }
+                None => None,
             }
         };
         // No `operation` lock: a write to a shell that stopped reading input holds it until the
@@ -459,8 +497,10 @@ impl Service {
             sessions
                 .values()
                 .filter_map(|slot| match slot {
-                    Slot::Live(entry) => Some(Arc::clone(entry)),
-                    Slot::Opening(_) => None,
+                    Slot::Live(entry) if !entry.closed.load(Ordering::Acquire) => {
+                        Some(Arc::clone(entry))
+                    }
+                    _ => None,
                 })
                 .collect::<Vec<_>>()
         };
@@ -480,13 +520,15 @@ impl Service {
         }
     }
 
-    fn remove_live(&self, entry: &Arc<Entry>) {
-        entry.closed.store(true, Ordering::Release);
+    fn remove_settled(&self, entry: &Arc<Entry>) {
         let mut sessions = self
             .sessions
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        if matches!(sessions.get(&entry.session_id), Some(Slot::Live(current)) if Arc::ptr_eq(current, entry))
+        if sessions
+            .get(&entry.session_id)
+            .and_then(Slot::entry)
+            .is_some_and(|current| Arc::ptr_eq(current, entry))
         {
             sessions.remove(&entry.session_id);
         }
@@ -494,7 +536,6 @@ impl Service {
 
     /// Stops a session whose shell consent was withdrawn mid-call and returns the denial.
     async fn revoke(&self, entry: &Arc<Entry>, method: &str) -> RemoteError {
-        self.remove_live(entry);
         entry.consent_revoked.store(true, Ordering::Release);
         match self.close_entry(entry).await {
             Ok(()) => shell_denial(method, &self.consent),
@@ -504,7 +545,28 @@ impl Service {
 
     async fn close_entry(&self, entry: &Arc<Entry>) -> std::io::Result<()> {
         entry.closed.store(true, Ordering::Release);
-        entry.handle.close().await
+        entry
+            .flow
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .stop_login_output();
+        let mut settled = entry.close_result.lock().await;
+        let result = if let Some(result) = &*settled {
+            result.clone()
+        } else {
+            let result = entry.handle.close().await.map_err(Arc::new);
+            if result.is_ok() || entry.handle.close_is_settled() {
+                *settled = Some(result.clone());
+                self.remove_settled(entry);
+                if let Err(error) = &result {
+                    eprintln!(
+                        "[runtime] terminal cleanup failed after supervisor settled: {error}"
+                    );
+                }
+            }
+            result
+        };
+        result.map_err(|error| std::io::Error::new(error.kind(), error.to_string()))
     }
 
     /// The fresh, uncoalesced read immediately before a terminal is admitted. Anything but a
@@ -537,39 +599,35 @@ impl Service {
         }
     }
 
-    /// One watcher poll: closes every live session once shell consent is explicitly withdrawn;
+    /// One watcher poll: schedules cleanup once shell consent is explicitly withdrawn;
     /// an unknown read keeps them open until the next poll.
-    async fn poll_consent(&self) {
+    async fn poll_consent(self: &Arc<Self>, closes: &mut JoinSet<()>) {
         if self.fresh_shell_consent().await.revokes() {
-            self.revoke_all(true).await;
+            self.revoke_entries(true);
+            self.schedule_closes(closes);
         }
     }
 
-    fn expire_logins(self: &Arc<Self>, closes: &mut JoinSet<()>) {
+    fn schedule_closes(self: &Arc<Self>, closes: &mut JoinSet<()>) {
         let entries: Vec<_> = self
             .sessions
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .values()
-            .filter_map(|slot| match slot {
-                Slot::Live(entry) => Some(Arc::clone(entry)),
-                Slot::Opening(_) => None,
-            })
+            .filter_map(|slot| slot.entry().map(Arc::clone))
             .collect();
         for entry in entries {
-            let expired = entry
-                .flow
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .login_expired();
-            if expired && !entry.expiry_closing.swap(true, Ordering::AcqRel) {
+            let pending = entry.closed.load(Ordering::Acquire)
+                || entry
+                    .flow
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .login_expired();
+            if pending && !entry.close_scheduled.swap(true, Ordering::AcqRel) {
                 let service = Arc::clone(self);
                 closes.spawn(async move {
-                    // Retain the handle if close fails so cleanup stays reachable.
-                    if service.close_entry(&entry).await.is_ok() {
-                        service.remove_live(&entry);
-                    }
-                    entry.expiry_closing.store(false, Ordering::Release);
+                    let _ = service.close_entry(&entry).await;
+                    entry.close_scheduled.store(false, Ordering::Release);
                 });
             }
         }
@@ -583,33 +641,22 @@ impl Service {
         tokio::spawn(async move { watch_consent(weak, session).await });
     }
 
-    async fn revoke_all(&self, consent_revoked: bool) {
-        let entries = {
-            let mut sessions = self
-                .sessions
-                .lock()
-                .unwrap_or_else(|poison| poison.into_inner());
-            sessions
-                .drain()
-                .filter_map(|(_, slot)| match slot {
-                    Slot::Live(entry) => {
-                        entry.closed.store(true, Ordering::Release);
-                        entry
-                            .consent_revoked
-                            .store(consent_revoked, Ordering::Release);
-                        Some(entry)
+    fn revoke_entries(&self, consent_revoked: bool) {
+        let sessions = self
+            .sessions
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        for slot in sessions.values() {
+            match slot {
+                Slot::Starting { entry, .. } | Slot::Live(entry) => {
+                    if consent_revoked {
+                        entry.consent_revoked.store(true, Ordering::Release);
                     }
-                    Slot::Opening(_) => None,
-                })
-                .collect::<Vec<_>>()
-        };
-        let mut closes = JoinSet::new();
-        for entry in entries {
-            closes.spawn(async move {
-                let _ = entry.handle.close().await;
-            });
+                    entry.closed.store(true, Ordering::Release);
+                }
+                Slot::Opening { cancel, .. } => cancel.cancel(),
+            }
         }
-        while closes.join_next().await.is_some() {}
     }
 }
 
@@ -618,18 +665,25 @@ async fn watch_consent(service: Weak<Service>, session: Session) {
     ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     ticks.tick().await;
     let mut closes = JoinSet::new();
+    let mut disconnected = None;
     loop {
         tokio::select! {
-            _ = session.closed() => {
-                if let Some(service) = service.upgrade() {
-                    service.revoke_all(false).await;
-                }
-                return;
+            _ = session.closed(), if disconnected.is_none() => {
+                let Some(service) = service.upgrade() else { return; };
+                service.revoke_entries(false);
+                disconnected = Some(service);
             }
             _ = ticks.tick() => {
-                let Some(service) = service.upgrade() else { return; };
-                service.expire_logins(&mut closes);
-                service.poll_consent().await;
+                if let Some(service) = &disconnected {
+                    if service.sessions.lock().unwrap_or_else(|p| p.into_inner()).is_empty() {
+                        return;
+                    }
+                    service.schedule_closes(&mut closes);
+                } else {
+                    let Some(service) = service.upgrade() else { return; };
+                    service.schedule_closes(&mut closes);
+                    service.poll_consent(&mut closes).await;
+                }
             }
             _ = closes.join_next(), if !closes.is_empty() => {}
         }
@@ -664,9 +718,20 @@ impl Drop for Reservation {
             .sessions
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        if matches!(sessions.get(&self.id), Some(Slot::Opening(current)) if *current == self.reservation_id)
-        {
-            sessions.remove(&self.id);
+        match sessions.get(&self.id) {
+            Some(Slot::Opening { reservation_id, .. })
+                if *reservation_id == self.reservation_id =>
+            {
+                sessions.remove(&self.id);
+            }
+            Some(Slot::Starting {
+                reservation_id,
+                entry,
+            }) if *reservation_id == self.reservation_id => {
+                // A failed admission still owns its native child until cleanup settles.
+                entry.closed.store(true, Ordering::Release);
+            }
+            _ => {}
         }
     }
 }
