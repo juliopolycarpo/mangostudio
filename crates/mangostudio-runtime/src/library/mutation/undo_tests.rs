@@ -109,6 +109,80 @@ fn a_backup_path_outside_the_backup_root_is_skipped_as_missing() {
     assert!(!destination.exists(), "the planted tree is never copied in");
 }
 
+fn symlink_directory(target: &std::path::Path, link: &std::path::Path) {
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target, link).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(target, link).unwrap();
+}
+
+#[test]
+fn a_redirected_destination_ancestor_refuses_restore_and_removal() {
+    for had_backup in [true, false] {
+        let home = Home::new("undo-redirected-destination");
+        let ancestor = home.path(&[".claude", "skills", "nested"]);
+        let destination = home.skill(&ancestor.join("gh"), "original");
+        let mut entry = removal_set(&home, "set", &destination);
+        if !had_backup {
+            entry.backup_path = None;
+        }
+        write(&home, "set", vec![entry]);
+
+        // A raw filesystem operation on the recorded path now reaches
+        // outside the registry location, without changing the written hash.
+        let outside = home.scratch.join("outside-location");
+        let outside_skill = home.skill(&outside.join("gh"), "original");
+        let outside_before = std::fs::read(outside_skill.join("SKILL.md")).unwrap();
+        std::fs::remove_dir_all(&ancestor).unwrap();
+        symlink_directory(&outside, &ancestor);
+
+        let outcome = run(&home, "set");
+        assert!(
+            matches!(&outcome, Err(UndoError::Refused(error)) if error.reason == WriteFailure::PathEscape),
+            "expected PathEscape for a redirected destination | received {outcome:?}"
+        );
+        assert_eq!(
+            std::fs::read(outside_skill.join("SKILL.md")).unwrap(),
+            outside_before
+        );
+    }
+}
+
+#[test]
+fn a_redirected_backup_ancestor_is_skipped_as_missing() {
+    use std::path::Path;
+
+    let home = Home::new("undo-redirected-backup");
+    let destination = home.skill(&home.path(&[".claude", "skills", "gh"]), "original");
+    let entry = removal_set(&home, "set", &destination);
+    let member_parent = Path::new(entry.backup_path.as_deref().unwrap())
+        .parent()
+        .unwrap()
+        .to_owned();
+    write(&home, "set", vec![entry]);
+
+    let outside = home.scratch.join("outside-backup");
+    home.skill(&outside.join("gh"), "planted backup content");
+    std::fs::remove_dir_all(&destination).unwrap();
+    std::fs::remove_dir_all(&member_parent).unwrap();
+    symlink_directory(&outside, &member_parent);
+
+    let report = run(&home, "set").unwrap();
+    assert_eq!(
+        report
+            .skipped
+            .iter()
+            .map(|entry| entry.reason)
+            .collect::<Vec<_>>(),
+        ["backup-missing"],
+        "expected the redirected member to be skipped | received {report:?}"
+    );
+    assert!(
+        !destination.exists(),
+        "outside content must never be restored"
+    );
+}
+
 #[test]
 fn a_destination_changed_since_the_apply_is_left_alone() {
     let home = Home::new("undo-changed");
@@ -125,6 +199,37 @@ fn a_destination_changed_since_the_apply_is_left_alone() {
         std::fs::read_to_string(destination.join("SKILL.md")).unwrap(),
         "edited afterwards"
     );
+}
+
+#[test]
+fn an_existing_destination_with_an_unavailable_hash_is_left_alone() {
+    use crate::library::mutation::hashing::HashError;
+
+    for had_backup in [true, false] {
+        let home = Home::new("undo-unverifiable");
+        let destination = home.skill(&home.path(&[".claude", "skills", "gh"]), "original");
+        let mut entry = removal_set(&home, "set", &destination);
+        if !had_backup {
+            entry.backup_path = None;
+        }
+        write(&home, "set", vec![entry]);
+        let current = destination.join("SKILL.md");
+        std::fs::write(&current, "new contents with an unreadable hash").unwrap();
+        home.hasher.answer_once(
+            &destination.to_string_lossy(),
+            Err(HashError::Io("fixture hash read failed".into())),
+        );
+
+        let outcome = run(&home, "set");
+        assert!(
+            matches!(&outcome, Err(UndoError::Failed(error)) if error.contains("fixture hash read failed")),
+            "expected an unverifiable destination to be refused | received {outcome:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(current).unwrap(),
+            "new contents with an unreadable hash"
+        );
+    }
 }
 
 #[test]
