@@ -321,6 +321,7 @@ async function respondStream(
       {
         userId,
         chat: ownedChat,
+        keyed: Boolean(admission),
         chatId: body.chatId,
         prompt: body.prompt,
         attachmentIds,

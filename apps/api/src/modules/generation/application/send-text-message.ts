@@ -106,6 +106,7 @@ export async function sendTextMessage(
     {
       id: userMsgId,
       userId: input.userId,
+      admittedRunnerKind: input.admittedChat?.runner.kind,
       chatId: input.chatId,
       text: input.prompt,
       attachmentIds,

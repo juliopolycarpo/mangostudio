@@ -214,6 +214,7 @@ export async function prepareStreamTextTurn(
     await persistTextTurnStart(
       {
         userId: input.userId,
+        admittedRunnerKind: input.admittedChat?.runner.kind,
         userMessageId: userMsgId,
         assistantMessageId: aiMsgId,
         chatId: input.chatId,

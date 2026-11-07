@@ -229,6 +229,38 @@ describe('durable authorized product operations over real routes/storage', () =>
       await sql`DROP TRIGGER change_runner_after_claim`.execute(db);
     }
   });
+  it.each(['/respond/stream', '/respond'])(
+    'refuses to persist a MangoStudio transcript after the first-run chat switches runners via %s',
+    async (path) => {
+      const operationId = 'mangostudio-runner-at-admission';
+      await sql`CREATE TRIGGER switch_to_external_after_claim
+        AFTER INSERT ON product_operations WHEN NEW.operationId = 'mangostudio-runner-at-admission'
+        BEGIN
+          UPDATE chats SET runnerKind = 'external', runnerAgentId = NULL, runnerTargetId = 'codex'
+          WHERE id = NEW.chatId;
+        END`.execute(db);
+      try {
+        const response = await app.handle(
+          request(path, { chatId, prompt: 'Hello', model: 'operation-test', operationId })
+        );
+        expect(response.status).toBe(200);
+        await waitFor(async () => {
+          if (provider.release) provider.release();
+          return (await receipt(operationId)).state !== 'running';
+        });
+        const messages = await db
+          .selectFrom('messages')
+          .select('role')
+          .where('chatId', '=', chatId)
+          .execute();
+        expect(messages.map(({ role }) => role)).toEqual([]);
+        expect(provider.calls + provider.directCalls).toBe(0);
+        expect(await receipt(operationId)).toMatchObject({ state: 'failed' });
+      } finally {
+        await sql`DROP TRIGGER switch_to_external_after_claim`.execute(db);
+      }
+    }
+  );
   it('dispatches a keyed direct turn with the environment bound when its key was claimed', async () => {
     const operationId = 'binding-at-admission';
     await sql`CREATE TRIGGER change_environment_after_claim

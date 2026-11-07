@@ -60,7 +60,7 @@ import { isRequestNotSent } from '../../../services/runtime-client/request-not-s
 import { getRuntimeConnectionManager } from '../../../services/runtime-client/runtime-connection-manager';
 import { generateId } from '../../../utils/id';
 import { recordTurnCompletedActivity } from '../../chats/application/record-turn-activity';
-import { getOwnedChat } from '../../chats/infrastructure/chat-repository';
+import { getOwnedChat, type OwnedChatRecord } from '../../chats/infrastructure/chat-repository';
 import {
   type ActiveExternalTurn,
   findActiveTurnByChat,
@@ -221,6 +221,7 @@ interface ExternalTurnObserver {
 
 interface StartExternalTurnInput {
   readonly userId: string;
+  readonly admittedChat?: OwnedChatRecord;
   readonly chatId: string;
   readonly prompt: string;
   readonly attachmentIds?: readonly string[];
@@ -535,7 +536,7 @@ export function createExternalTurnController(
     input: StartExternalTurnInput,
     db: Kysely<Database>
   ): Promise<ExternalTurnResult> {
-    const chat = await getOwnedChat(input.chatId, input.userId, db);
+    const chat = input.admittedChat ?? (await getOwnedChat(input.chatId, input.userId, db));
     if (!chat) throw new ExternalTurnRunnerMismatchError(input.chatId, 'chat not found');
     if (chat.runner.kind !== 'external') {
       // D14 the other way round: a MangoStudio chat's transcript must not gain a
@@ -971,6 +972,7 @@ export function createExternalTurnController(
       await persistTextTurnStart(
         {
           userId: input.userId,
+          admittedRunnerKind: input.admittedChat?.runner.kind,
           userMessageId,
           assistantMessageId,
           chatId: input.chatId,
