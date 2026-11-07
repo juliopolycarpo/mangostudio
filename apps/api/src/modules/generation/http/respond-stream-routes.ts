@@ -40,6 +40,7 @@ import {
   releaseOperation,
   settleOperation,
 } from '../../operations/application/product-operation';
+import { trackProductOperationWork } from '../../operations/application/product-operation-work';
 import { registerActiveTurn, unregisterActiveTurn } from '../application/active-turn-registry';
 import {
   NoModelAvailableError,
@@ -643,13 +644,15 @@ export const respondStreamRoutes = (app: Elysia) =>
             }
             // The hub drains its own runner stream; losing the HTTP acknowledgement
             // does not cancel accepted work or create a second execution.
-            void drainOperationStream(
-              response,
-              db,
-              userId,
-              operationId,
-              chat.runner.kind === 'external',
-              () => userCancelled
+            trackProductOperationWork(
+              drainOperationStream(
+                response,
+                db,
+                userId,
+                operationId,
+                chat.runner.kind === 'external',
+                () => userCancelled
+              )
             );
             return operationReceipt({ ...row, state });
           } catch (error) {
