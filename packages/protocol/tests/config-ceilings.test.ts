@@ -104,6 +104,23 @@ describe('configuration ceilings', () => {
     }
   );
 
+  it.each<[string, unknown]>([
+    ['a null-prototype object', Object.create(null)],
+    [
+      'an object with a throwing conversion hook',
+      {
+        [Symbol.toPrimitive]() {
+          throw new Error('invalid configuration must not run conversion hooks');
+        },
+      },
+    ],
+  ])('refuses %s without coercing it', (_label, value) => {
+    const malformed = value as number;
+    refuse(new RecordingPort(), { maxFrameBytes: malformed }, 'maxFrameBytes');
+    refuse(new RecordingPort(malformed), {}, 'port maxFrameBytes');
+    refuse(new RecordingPort(), { maxInFlight: malformed }, 'maxInFlight');
+  });
+
   it.each(
     [null, NaN, Infinity, -Infinity, 4096.5, '4096', true, {}, [], Symbol('limit'), 4096n].map(
       (value) => [value]

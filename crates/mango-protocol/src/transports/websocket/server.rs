@@ -271,6 +271,11 @@ impl std::error::Error for AcceptError {}
 /// [`AcceptError`] for an upgrade that failed, a dialler that did not offer
 /// the subprotocol, an `Origin` outside the allow-list, or a credential
 /// `authorize` refused.
+///
+/// # Panics
+///
+/// Panics when the frame limit is outside the bounds documented by
+/// [`WebSocketOptions::socket_config`].
 #[allow(
     clippy::result_large_err,
     reason = "the handshake callback's error type is tungstenite's own ErrorResponse"

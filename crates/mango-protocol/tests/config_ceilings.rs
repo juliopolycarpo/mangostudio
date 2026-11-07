@@ -13,6 +13,51 @@ fn configuration_frame_ceiling_matches_wire_maximum() {
     assert!(std::panic::catch_unwind(|| LineDecoder::new(max + 1)).is_err());
 }
 
+#[cfg(feature = "websocket")]
+mod websocket {
+    use mango_protocol::{
+        codec::chunk::CHUNK_HEADER_BYTES,
+        transports::websocket::{WebSocketOptions, websocket_port},
+        validate::MAX_ANNOUNCED_FRAME_BYTES,
+    };
+    use tokio_tungstenite::{WebSocketStream, tungstenite::protocol::Role};
+
+    #[test]
+    fn websocket_config_accepts_the_maximum_without_allocating_it() {
+        let max = MAX_ANNOUNCED_FRAME_BYTES as usize;
+        let options = WebSocketOptions {
+            max_frame_bytes: max,
+            ..WebSocketOptions::default()
+        };
+        assert_eq!(
+            options.socket_config().max_message_size,
+            Some(max + CHUNK_HEADER_BYTES)
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "max_frame_bytes is 2147483648; expected at most 2147483647")]
+    fn websocket_config_refuses_an_oversized_direct_frame_limit() {
+        let options = WebSocketOptions {
+            max_frame_bytes: MAX_ANNOUNCED_FRAME_BYTES as usize + 1,
+            ..WebSocketOptions::default()
+        };
+        let _ = options.socket_config();
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "max_frame_bytes is 2147483648; expected at most 2147483647")]
+    async fn websocket_port_refuses_an_oversized_direct_frame_limit() {
+        let (socket, _remote) = tokio::io::duplex(64);
+        let stream = WebSocketStream::from_raw_socket(socket, Role::Client, None).await;
+        let options = WebSocketOptions {
+            max_frame_bytes: MAX_ANNOUNCED_FRAME_BYTES as usize + 1,
+            ..WebSocketOptions::default()
+        };
+        let _ = websocket_port(stream, options);
+    }
+}
+
 #[cfg(feature = "tokio")]
 mod session {
     use mango_protocol::{

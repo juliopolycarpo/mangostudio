@@ -20,9 +20,10 @@ export function resolveIntegerAtLeast(
 ): number {
   const resolved = value === undefined ? fallback : value;
   if (!Number.isInteger(resolved) || resolved < floor) {
-    throw new RangeError(
-      `${name} is ${String(resolved)}; expected an integer of at least ${floor}`
-    );
+    const kind = typeof resolved;
+    const received =
+      (kind === 'object' && resolved !== null) || kind === 'function' ? kind : String(resolved);
+    throw new RangeError(`${name} is ${received}; expected an integer of at least ${floor}`);
   }
   if (maximum !== undefined && resolved > maximum) {
     throw new RangeError(`${name} is ${resolved}; expected an integer of at most ${maximum}`);
