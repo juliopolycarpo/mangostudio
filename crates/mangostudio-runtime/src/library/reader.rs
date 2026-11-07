@@ -132,31 +132,32 @@ pub(crate) fn read_location_instances(
 
     // Collected on purpose: a location listing has no entry cap, and one
     // failing entry must still skip the whole location with a diagnostic.
-    let listed = context
-        .fs
-        .read_dir(Path::new(location_path))
+    let location_root = Path::new(location_path);
+    let entries = match context.fs.read_dir(location_root) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ScanResult::default());
+        }
+        result => result,
+    };
+    let listed = entries
         .and_then(|entries| entries.collect::<std::io::Result<Vec<_>>>())
-        .and_then(|names| Ok((names, context.fs.real_path(Path::new(location_path))?)));
+        .and_then(|names| Ok((names, context.fs.real_path(location_root)?)));
     let (names, canonical_location) = match listed {
         Ok(listed) => listed,
         Err(error) => {
-            if error.kind() != std::io::ErrorKind::NotFound {
-                (context.warn)(&format!(
-                    "[library] Skipping unreadable location \"{}\" at {location_path}.",
-                    location.id
-                ));
-            }
+            (context.warn)(&format!(
+                "[library] Skipping unreadable location \"{}\" at {location_path}.",
+                location.id
+            ));
             let mut result = ScanResult::default();
-            if error.kind() != std::io::ErrorKind::NotFound {
-                result.location_diagnostics.push(LocationDiagnostic {
-                    location_id: location.id,
-                    reason: match error.kind() {
-                        std::io::ErrorKind::PermissionDenied => "permission-denied",
-                        std::io::ErrorKind::NotADirectory => "not-directory",
-                        _ => "unreadable",
-                    },
-                });
-            }
+            result.location_diagnostics.push(LocationDiagnostic {
+                location_id: location.id,
+                reason: match error.kind() {
+                    std::io::ErrorKind::PermissionDenied => "permission-denied",
+                    std::io::ErrorKind::NotADirectory => "not-directory",
+                    _ => "unreadable",
+                },
+            });
             return Ok(result);
         }
     };

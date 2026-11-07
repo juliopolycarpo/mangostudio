@@ -2,6 +2,12 @@ import type { LibraryLocationDiagnostic } from '@mangostudio/shared/library';
 
 import { useI18n } from '@/hooks/use-i18n';
 
+/**
+ * Shows scan failures or explains why the runtime cannot report them.
+ *
+ * @example
+ * <LocationDiagnostics diagnostics={scan.locationDiagnostics} />
+ */
 export function LocationDiagnostics({
   diagnostics,
 }: {

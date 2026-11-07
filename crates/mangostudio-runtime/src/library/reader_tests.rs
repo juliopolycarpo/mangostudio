@@ -52,8 +52,8 @@ mod memory_fs {
     pub(super) struct MemFs {
         nodes: HashMap<PathBuf, Node>,
         unlistable: Vec<PathBuf>,
-        /// Directory -> index at which the listing fails instead of yielding.
-        fail_listing_at: HashMap<PathBuf, usize>,
+        /// Directory -> failing entry index and filesystem error.
+        fail_listing_at: HashMap<PathBuf, (usize, ErrorKind)>,
         /// Cancels once this many entries were yielded across all listings.
         cancel_after: Option<(usize, CancellationToken)>,
         /// Entries yielded by every listing so far.
@@ -85,8 +85,9 @@ mod memory_fs {
             self
         }
 
-        pub(super) fn failing_at(mut self, path: &str, index: usize) -> Self {
-            self.fail_listing_at.insert(PathBuf::from(path), index);
+        pub(super) fn failing_at(mut self, path: &str, index: usize, kind: ErrorKind) -> Self {
+            self.fail_listing_at
+                .insert(PathBuf::from(path), (index, kind));
             self
         }
 
@@ -153,19 +154,21 @@ mod memory_fs {
         names: std::vec::IntoIter<String>,
         remaining_generated: std::ops::Range<usize>,
         index: usize,
-        fail_at: Option<usize>,
+        fail_at: Option<(usize, ErrorKind)>,
     }
 
     impl Iterator for Entries<'_> {
         type Item = std::io::Result<OsString>;
 
         fn next(&mut self) -> Option<Self::Item> {
-            if self.fail_at == Some(self.index) {
+            if let Some((index, kind)) = self.fail_at
+                && index == self.index
+            {
                 self.fail_at = None;
-                return Some(Err(Error::other(format!(
-                    "listing failed at entry {}",
-                    self.index
-                ))));
+                return Some(Err(Error::new(
+                    kind,
+                    format!("listing failed at entry {}", self.index),
+                )));
             }
             let name = self
                 .names
@@ -429,7 +432,7 @@ mod streamed_walk {
             .file("/r/a", b"a")
             .file("/r/b", b"b")
             .file("/r/c", b"c")
-            .failing_at("/r", 2);
+            .failing_at("/r", 2, std::io::ErrorKind::Other);
         let outcome = walk_uncancelled(&fs);
         assert_eq!(
             outcome,
@@ -522,21 +525,37 @@ mod location_scan {
         }
     }
 
-    #[test]
-    fn a_location_listing_that_fails_part_way_is_skipped_with_a_diagnostic() {
+    fn assert_failed_location_listing(kind: std::io::ErrorKind) {
         let fs = MemFs::default()
             .dir("/lib/skills", &["alpha", "beta"])
             .dir("/lib/skills/alpha", &["SKILL.md"])
             .file("/lib/skills/alpha/SKILL.md", b"---\nname: alpha\n---\n")
-            .failing_at("/lib/skills", 1);
+            .failing_at("/lib/skills", 1, kind);
         let warnings = Mutex::new(Vec::new());
         let scanned = scan(&fs, &warnings);
-        assert_eq!(scanned.location_diagnostics[0].reason, "unreadable");
+        assert_eq!(
+            scanned
+                .location_diagnostics
+                .first()
+                .map(|diagnostic| diagnostic.reason),
+            Some("unreadable"),
+            "expected a failed listing diagnostic for {kind:?} | received {scanned:?}"
+        );
         assert_eq!(
             (scanned.entries.len(), warnings.lock().unwrap().len()),
             (0, 1),
             "expected an empty result and one diagnostic | received {scanned:?}"
         );
+    }
+
+    #[test]
+    fn a_location_listing_that_fails_part_way_is_skipped_with_a_diagnostic() {
+        assert_failed_location_listing(std::io::ErrorKind::Other);
+    }
+
+    #[test]
+    fn a_disappearing_listing_is_distinct_from_a_missing_optional_location() {
+        assert_failed_location_listing(std::io::ErrorKind::NotFound);
     }
 
     #[test]
