@@ -181,7 +181,9 @@ export function FirstChatStep({
               current.createChatOperation?.operationId === creation.operationId &&
               current.turnOperation?.operationId === turn.operationId &&
               (!current.chatId || current.chatId === chat.id);
-            return matchesAttempt ? { ...current, chatId: chat.id } : current;
+            if (!matchesAttempt) return current;
+            prepared.destination = current;
+            return current.chatId === chat.id ? current : { ...current, chatId: chat.id };
           });
           if (!matchesAttempt) return;
           chatId = chat.id;
@@ -190,6 +192,7 @@ export function FirstChatStep({
         onWritingChange(false);
       }
 
+      if (!prepared.destination.workdir) return;
       const { workdir, runner, environmentId } = prepared.destination;
       preparingChat = true;
       await updateChat.mutateAsync({

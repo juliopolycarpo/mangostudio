@@ -671,6 +671,54 @@ describe('first-chat operation recovery', () => {
     });
   });
 
+  it.each(['/remote-project', undefined])(
+    'honors a destination change while chat creation was pending (folder %s)',
+    async (workdir) => {
+      scenario
+        .respondWithJson('GET', '/api/operations/persisted-create', { status: 404 })
+        .respondWithJson('GET', '/api/operations/persisted-turn', { status: 404 })
+        .respondWithJson('POST', '/api/chats', { body: { id: 'first-chat' } })
+        .respondWithJson('PUT', '/api/chats/first-chat', { body: { success: true } })
+        .respondWithJson('POST', '/api/respond/stream', { body: existing('running') })
+        .install();
+      const saved: OnboardingState[] = [];
+      render(
+        <Harness
+          initial={{
+            ...base,
+            chatId: undefined,
+            createChatOperation: { operationId: 'persisted-create', title: 'Saved title' },
+            turnOperation: { operationId: 'persisted-turn', prompt: 'Saved input' },
+          }}
+          currentBeforeSave={(current) =>
+            saved.length ? { ...current, environmentId: 'remote', workdir } : current
+          }
+          save={(next) => {
+            saved.push(next);
+            return Promise.resolve();
+          }}
+        />
+      );
+
+      await userEvent.click(screen.getByTestId('onboarding-send-prompt'));
+      await waitFor(() => expect(saved.at(-1)).toMatchObject({ chatId: 'first-chat', workdir }));
+      const send = screen.getByTestId('onboarding-send-prompt');
+      await waitFor(() => expect(send).not.toHaveAttribute('aria-busy', 'true'));
+      const updates = scenario.fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT');
+      if (!workdir) {
+        expect(updates).toHaveLength(0);
+        expect(posts()).toHaveLength(1);
+        return;
+      }
+      expect(updates).toHaveLength(1);
+      const body = updates[0]?.[1]?.body;
+      if (typeof body !== 'string')
+        throw new Error(`Expected chat update JSON | received: ${typeof body}`);
+      expect(JSON.parse(body)).toMatchObject({ environmentId: 'remote', workdir });
+      expect(posts()).toHaveLength(2);
+    }
+  );
+
   it('keeps the submitted receipt when an earlier lookup returns 404 afterward', async () => {
     const lookup = Promise.withResolvers<Response>();
     const lookupStarted = Promise.withResolvers<void>();
