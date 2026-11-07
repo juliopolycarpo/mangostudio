@@ -77,35 +77,41 @@ export async function claimOperation(
   chatId: string | null = null
 ) {
   const fingerprint = operationFingerprint(kind, input);
-  const now = Date.now();
   await db
     .updateTable('product_operations')
     .set({ result: null })
-    .where('expiresAt', '<=', now)
+    .where('expiresAt', '<=', Date.now())
     .where('result', 'is not', null)
     .execute();
-  const inserted = await db
-    .insertInto('product_operations')
-    .values({
-      userId,
-      operationId,
-      kind,
-      fingerprint,
-      owner: processOwner,
-      state: 'accepted',
-      chatId,
-      messageId: null,
-      result: null,
-      createdAt: now,
-      expiresAt: now + OPERATION_RETENTION_MS,
-    })
-    .onConflict((oc) => oc.columns(['userId', 'operationId']).doNothing())
-    .returningAll()
-    .executeTakeFirst();
-  const row = inserted ?? (await readOperation(db, userId, operationId));
-  if (row?.fingerprint !== fingerprint || row.kind !== kind)
-    throw new OperationConflictError('Operation ID already belongs to different input.');
-  return { row, claimed: Boolean(inserted) };
+  for (;;) {
+    const now = Date.now();
+    const inserted = await db
+      .insertInto('product_operations')
+      .values({
+        userId,
+        operationId,
+        kind,
+        fingerprint,
+        owner: processOwner,
+        state: 'accepted',
+        chatId,
+        messageId: null,
+        result: null,
+        createdAt: now,
+        expiresAt: now + OPERATION_RETENTION_MS,
+      })
+      .onConflict((oc) => oc.columns(['userId', 'operationId']).doNothing())
+      .returningAll()
+      .executeTakeFirst();
+    if (inserted) return { row: inserted, claimed: true };
+
+    const row = await readOperation(db, userId, operationId);
+    // A rejected preflight can release its reservation between the insert and read.
+    if (!row) continue;
+    if (row.fingerprint !== fingerprint || row.kind !== kind)
+      throw new OperationConflictError('Operation ID already belongs to different input.');
+    return { row, claimed: false };
+  }
 }
 export async function finishOperation(
   db: Kysely<Database>,
