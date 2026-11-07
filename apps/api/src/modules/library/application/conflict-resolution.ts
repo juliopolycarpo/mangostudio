@@ -11,8 +11,10 @@
 import { createHash } from 'node:crypto';
 
 import {
+  type InvalidLibraryInstance,
   type LibraryDivergenceAck,
   type LibraryDivergenceAckRequest,
+  type LibraryInvalidReason,
   type LibraryResource,
   type LibraryScanResult,
   parseResourceKey,
@@ -81,15 +83,25 @@ export function readableContentHashes(resource: LibraryResource): string[] {
   );
 }
 
+const UNVERIFIED_COPY_REASONS = new Set<LibraryInvalidReason>([
+  'unreadable',
+  'too-large',
+  'path-escape',
+  'unsafe-name',
+]);
+
 /**
- * Whether a listed copy could not be read, leaving its version unverified.
+ * Finds a listed copy whose content hash could not be verified.
  *
  * @example
- * if (hasUnreadableLibraryCopy(resource)) deferAcknowledgement();
+ * if (findUnverifiedLibraryCopy(resource)) deferAcknowledgement();
  */
-export function hasUnreadableLibraryCopy(resource: LibraryResource): boolean {
-  return resource.instances.some(
-    (instance) => !instance.valid && instance.invalidReason === 'unreadable'
+export function findUnverifiedLibraryCopy(
+  resource: LibraryResource
+): InvalidLibraryInstance | undefined {
+  return resource.instances.find(
+    (instance): instance is InvalidLibraryInstance =>
+      !instance.valid && UNVERIFIED_COPY_REASONS.has(instance.invalidReason)
   );
 }
 
@@ -145,10 +157,11 @@ export async function acknowledgeDivergence(
     throw new LibraryRequestError(404, `Library resource "${request.resourceKey}" was not found.`);
   }
 
-  if (hasUnreadableLibraryCopy(resource)) {
+  const unverified = findUnverifiedLibraryCopy(resource);
+  if (unverified) {
     throw new LibraryRequestError(
       409,
-      `Cannot acknowledge divergence for "${request.resourceKey}" while a copy is unreadable. Rescan and try again.`
+      `Cannot acknowledge divergence for "${request.resourceKey}". The copy at "${unverified.locationId}" could not be verified (${unverified.invalidReason}).`
     );
   }
   const contentHashes = readableContentHashes(resource);
@@ -273,7 +286,7 @@ function readableHashesByKey(resources: readonly LibraryResource[]): Map<string,
   const incomplete = new Set<string>();
   for (const resource of resources) {
     if (incomplete.has(resource.key)) continue;
-    if (hasUnreadableLibraryCopy(resource)) {
+    if (findUnverifiedLibraryCopy(resource)) {
       incomplete.add(resource.key);
       hashes.delete(resource.key);
       continue;

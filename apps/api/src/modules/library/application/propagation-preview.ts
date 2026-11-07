@@ -61,7 +61,7 @@ import { isAgentStrategyAvailable } from './adapters/agent-strategy';
 import {
   type AcknowledgedKeysOptions,
   acknowledgedResourceKeys,
-  hasUnreadableLibraryCopy,
+  findUnverifiedLibraryCopy,
 } from './conflict-resolution';
 import { environmentLibraryService } from './environment-library-service';
 import { compareText, hashJson, hashLibraryState, type LibraryStateSlice } from './preview-state';
@@ -394,7 +394,7 @@ function buildPreviewEntry(
   const sourceScanIncomplete = perEnvironment.some(
     ({ snapshot, resource }) =>
       hasFailedLocationForKind(snapshot, ref.kind) ||
-      (resource !== undefined && hasUnreadableLibraryCopy(resource))
+      (resource !== undefined && findUnverifiedLibraryCopy(resource))
   );
 
   return {
