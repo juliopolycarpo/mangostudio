@@ -673,7 +673,8 @@ pub(crate) fn which_in(name: &str, path_var: &std::ffi::OsStr) -> Option<PathBuf
     None
 }
 
-fn is_executable_file(path: &Path) -> bool {
+/// Checks a concrete path before trying to execute it, such as `/usr/bin/git`.
+pub(crate) fn is_executable_file(path: &Path) -> bool {
     let Ok(metadata) = std::fs::metadata(path) else {
         return false;
     };

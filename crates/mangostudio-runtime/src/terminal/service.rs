@@ -243,11 +243,18 @@ impl Service {
         }
         let mut reservation = Reservation::new(Arc::clone(self), id.clone(), reservation_id);
         let host = Arc::clone(&self.host);
-        let prepared = tokio::select! {
+        let mut prepared = tokio::select! {
             biased;
             () = cancel.cancelled() => return Err(open_cancelled()),
             result = run_blocking(move || prepare(params, host())) => result?,
         };
+        let check: Arc<dyn LaunchCheck> = Arc::new(FreshLaunch {
+            consent: Arc::clone(&self.consent),
+            cwd: prepared.request.cwd.clone(),
+        });
+        prepared
+            .resolve_login_alias(Arc::clone(&check), &cancel)
+            .await?;
         let mut initial_flow = TerminalFlow::new(prepared.scrollback_bytes)
             .map_err(|message| invalid_argument(&message, "a positive scrollback byte count"))?;
         if prepared.login {
@@ -282,10 +289,6 @@ impl Service {
                     .on_exit(native, exit_reason.load(Ordering::Acquire), &mut emit);
             })
         };
-        let check: Arc<dyn LaunchCheck> = Arc::new(FreshLaunch {
-            consent: Arc::clone(&self.consent),
-            cwd: prepared.request.cwd.clone(),
-        });
         let handle = self
             .spawner
             .spawn(prepared.request, check, on_data, on_exit, cancel.clone())
@@ -840,6 +843,37 @@ struct Prepared {
     size: (u16, u16),
     scrollback_bytes: usize,
     login: bool,
+    cursor_alias: Option<Vec<PathBuf>>,
+}
+
+impl Prepared {
+    async fn resolve_login_alias(
+        &mut self,
+        check: Arc<dyn LaunchCheck>,
+        cancel: &CancellationToken,
+    ) -> Result<(), RemoteError> {
+        if let Some(candidates) = self.cursor_alias.take() {
+            let env = self
+                .request
+                .env
+                .as_ref()
+                .expect("login uses an explicit environment");
+            let cwd = self
+                .request
+                .cwd
+                .as_deref()
+                .expect("login uses an explicit directory");
+            let program =
+                super::login::resolve_cursor_alias(candidates, env, cwd, check, cancel).await?;
+            if cancel.is_cancelled() {
+                return Err(open_cancelled());
+            }
+            self.request.program = program.ok_or_else(|| {
+                RemoteError::new(codes::UNAVAILABLE, "Login executable is unavailable.")
+            })?;
+        }
+        Ok(())
+    }
 }
 
 fn prepare(params: OpenParams, host: PathEnv) -> Result<Prepared, RemoteError> {
@@ -885,6 +919,7 @@ fn prepare(params: OpenParams, host: PathEnv) -> Result<Prepared, RemoteError> {
         _ if host.platform == "darwin" => &["-l"],
         _ => &[],
     };
+    let mut cursor_alias = None;
     let (program, args) = if let Some(target) = params.login_target {
         let descriptors = super::login::descriptors();
         let descriptor = descriptors
@@ -901,19 +936,24 @@ fn prepare(params: OpenParams, host: PathEnv) -> Result<Prepared, RemoteError> {
         } else {
             descriptor.program.clone()
         };
-        let program = path
-            .and_then(|path| crate::health::which_in(&name, OsStr::new(path)))
-            .ok_or_else(|| {
+        let candidate = path.and_then(|path| crate::health::which_in(&name, OsStr::new(path)));
+        let program = match candidate {
+            // Pin relative PATH entries before changing to the terminal workspace.
+            Some(program) => std::path::absolute(program).map_err(pty_io)?,
+            None if !windows && target == "cursor" => {
+                cursor_alias = Some(super::login::cursor_alias_candidates(path));
+                // resolve_login_alias replaces this before native startup.
+                PathBuf::from(name)
+            }
+            None => {
                 let message = if windows {
                     "A native login executable is unavailable. Copy the command instead."
                 } else {
                     "Login executable is unavailable."
                 };
-                RemoteError::new(codes::UNAVAILABLE, message)
-            })?;
-        // Resolve relative PATH entries against the runtime directory before
-        // the PTY changes to the requested workspace.
-        let program = std::path::absolute(program).map_err(pty_io)?;
+                return Err(RemoteError::new(codes::UNAVAILABLE, message));
+            }
+        };
         (program, descriptor.args.clone())
     } else {
         (
@@ -935,6 +975,7 @@ fn prepare(params: OpenParams, host: PathEnv) -> Result<Prepared, RemoteError> {
         size: (cols, rows),
         scrollback_bytes,
         login,
+        cursor_alias,
     })
 }
 

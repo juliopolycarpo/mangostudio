@@ -313,6 +313,7 @@ mod tests {
             well_known_dirs: |_| Vec::new(),
             include_bare_binary_names: false,
             shared_binary_names: &[],
+            parse_shared_version: None,
             windows_powershell_script_names: &[],
         }
     }
