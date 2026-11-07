@@ -8,6 +8,7 @@
  */
 
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { LibraryResource, PropagationSourceGroup } from '@mangostudio/shared/library';
 import { useQueries } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
@@ -23,6 +24,7 @@ import { useEnvironmentScope } from '@/features/environments/use-environment-sco
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
+import { ApiError } from '@/lib/utils';
 
 import { hashPrefix, libraryKindPath, validInstances } from '../format';
 import { useCandidateLocations } from '../hooks/use-candidate-locations';
@@ -113,6 +115,8 @@ export function ResourceDetail({
 
   if (resourceQuery.isPending) return <LibraryPageState variant="loading" />;
   if (resourceQuery.error || !resource) {
+    const notFound =
+      resourceQuery.error instanceof ApiError && resourceQuery.error.code === ERROR_CODES.NOT_FOUND;
     return scope.environment && !scope.isConnected ? (
       <EnvironmentScopeNotice
         environment={scope.environment}
@@ -122,7 +126,7 @@ export function ResourceDetail({
     ) : (
       <LibraryPageState
         variant="error"
-        title={l.detail.notFound}
+        title={notFound ? l.detail.notFound : l.detail.loadError}
         onRetry={() => void resourceQuery.refetch()}
       />
     );

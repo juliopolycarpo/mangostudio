@@ -66,8 +66,18 @@ export function CoverageList({ resource, locationLabel }: CoverageListProps) {
               that as an implementation detail until someone asks, and this is
               where they asked.
             */}
-            {(cell.effectiveLocationId || cell.shadowedLocationIds.length > 0) && (
+            {(cell.effectiveLocationId ||
+              cell.shadowedLocationIds.length > 0 ||
+              cell.unscannedLocationIds?.length) && (
               <div className="col-span-2 min-w-0 space-y-1.5 text-fg-muted text-xs sm:col-span-1">
+                {cell.unscannedLocationIds && (
+                  <div>
+                    <p>{l.cellHint['scan-incomplete']}</p>
+                    {cell.unscannedLocationIds.map((locationId) => (
+                      <PathLine key={locationId} path={locationLabel(locationId)} />
+                    ))}
+                  </div>
+                )}
                 {cell.effectiveLocationId && (
                   <div>
                     <p>{l.detail.via}</p>

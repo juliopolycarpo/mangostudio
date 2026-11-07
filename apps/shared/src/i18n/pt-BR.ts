@@ -2197,6 +2197,7 @@ export const messages = {
     // Um rótulo por glifo da matriz. Nada aqui chama uma ausência de "faltando":
     // um recurso que o Cursor não tem costuma estar ausente de propósito.
     cellState: {
+      'scan-incomplete': 'Não foi possível verificar a cobertura',
       present: 'Presente',
       absent: 'Ausente',
       shadowed: 'Duplicado, idêntico',
@@ -2205,6 +2206,7 @@ export const messages = {
       incomparable: 'Não dá para comparar',
     },
     cellStateShort: {
+      'scan-incomplete': 'Verificação incompleta',
       present: 'Presente',
       absent: 'Ausente',
       shadowed: 'Duplicado',
@@ -2213,6 +2215,7 @@ export const messages = {
       incomparable: 'Não comparável',
     },
     cellHint: {
+      'scan-incomplete': 'Não foi possível verificar alguns locais que este agente lê.',
       present: 'Este agente lê uma cópia deste recurso.',
       absent: 'Este agente não lê nenhuma cópia — o que muitas vezes é o correto.',
       shadowed: 'Duas cópias em locais diferentes, com o mesmo conteúdo.',
@@ -2348,6 +2351,7 @@ export const messages = {
       propagate: 'Propagar',
       remove: 'Remover',
       notFound: 'Este recurso não existe mais na biblioteca.',
+      loadError: 'Não foi possível verificar este recurso da biblioteca.',
       invalidInstance: 'Cópia ilegível em {location}',
       // 001 não normaliza fim de linha de propósito, então CRLF contra LF é uma
       // divergência real que num diff comum não aparece.

@@ -83,7 +83,10 @@ describe('createEnvironmentLibraryService', () => {
                   },
                 },
               ],
-              locationDiagnostics: [{ locationId: 'claude-commands', reason: 'not-directory' }],
+              locationDiagnostics: [
+                { locationId: 'claude-skills', reason: 'permission-denied' },
+                { locationId: 'claude-commands', reason: 'not-directory' },
+              ],
               unreadableEntries: [],
             });
           },
@@ -121,8 +124,12 @@ describe('createEnvironmentLibraryService', () => {
     });
 
     expect(local.locationDiagnostics).toEqual([
+      { locationId: 'claude-skills', reason: 'permission-denied' },
       { locationId: 'claude-commands', reason: 'not-directory' },
     ]);
+    expect(
+      local.resources[0]?.coverage.find(({ targetId }) => targetId === 'claude')
+    ).toMatchObject({ state: 'absent', unscannedLocationIds: ['claude-skills'] });
     expect(local.resources.map((resource) => resource.ref.slug)).toEqual([LOCAL_ENVIRONMENT_ID]);
     expect(remote.resources.map((resource) => resource.ref.slug)).toEqual(['remote-a']);
     expect(localAgain.resources.map((resource) => resource.ref.slug)).toEqual([

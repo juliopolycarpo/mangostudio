@@ -17,6 +17,36 @@ function instance(locationId: LibraryLocationId): LibraryInstance {
 }
 
 describe('resolveLibraryCoverage', () => {
+  it('marks failed coverage without promoting a lower-precedence copy', () => {
+    const coverage = resolveLibraryCoverage(
+      { kind: 'skill', slug: 'gh' },
+      [instance('agents-skills')],
+      new Set<LibraryLocationId>(['codex-skills', 'claude-skills'])
+    );
+
+    expect(coverage.find(({ targetId }) => targetId === 'codex')).toEqual({
+      targetId: 'codex',
+      state: 'present',
+      unscannedLocationIds: ['codex-skills'],
+      shadowedLocationIds: [],
+    });
+    expect(coverage.find(({ targetId }) => targetId === 'claude')).toEqual({
+      targetId: 'claude',
+      state: 'absent',
+      unscannedLocationIds: ['claude-skills'],
+      shadowedLocationIds: [],
+    });
+    expect(coverage.find(({ targetId }) => targetId === 'mangostudio')).toMatchObject({
+      effectiveLocationId: 'agents-skills',
+      unscannedLocationIds: ['claude-skills'],
+    });
+    expect(coverage.find(({ targetId }) => targetId === 'cursor')).toEqual({
+      targetId: 'cursor',
+      state: 'absent',
+      shadowedLocationIds: [],
+    });
+  });
+
   it('uses each target precedence and reports lower copies as shadowed', () => {
     const coverage = resolveLibraryCoverage({ kind: 'skill', slug: 'gh' }, [
       instance('agents-skills'),

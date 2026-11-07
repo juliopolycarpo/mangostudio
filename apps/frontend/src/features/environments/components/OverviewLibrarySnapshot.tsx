@@ -33,6 +33,16 @@ export function OverviewLibrarySnapshot() {
   });
 
   const hasData = resources.data !== undefined && targets.data !== undefined;
+  const failedLocations = new Set(
+    resources.data?.locationDiagnostics?.map(({ locationId }) => locationId)
+  );
+  const incompleteTargets = new Set(
+    targets.data
+      ?.filter(({ reads }) =>
+        Object.values(reads).some((locations) => locations.some((id) => failedLocations.has(id)))
+      )
+      .map(({ id }) => id)
+  );
   const summaries = summarizeCoverageByTarget(
     resources.data?.resources ?? [],
     (targets.data ?? []).map((target) => target.id)
@@ -75,8 +85,15 @@ export function OverviewLibrarySnapshot() {
                   size="sm"
                 />
                 <span className="min-w-0 flex-1 truncate text-sm text-fg">{identity.name}</span>
+                {incompleteTargets.has(summary.targetId) && (
+                  <span className="text-xs text-warning">
+                    {t.library.cellStateShort['scan-incomplete']}
+                  </span>
+                )}
                 {summary.present === 0 ? (
-                  <span className="text-xs text-fg-muted">{e.overview.libraryNone}</span>
+                  !incompleteTargets.has(summary.targetId) && (
+                    <span className="text-xs text-fg-muted">{e.overview.libraryNone}</span>
+                  )
                 ) : (
                   <span className="flex items-baseline gap-2 text-xs">
                     {summary.divergent > 0 && (

@@ -129,6 +129,25 @@ function createService(
 }
 
 describe('library routes', () => {
+  it.each([
+    ['/library/resources/skill:missing', 503],
+    ['/library/resources/skill:missing/content?location=claude-skills', 503],
+    ['/library/resources/skill:missing/content?location=agents-skills', 404],
+    ['/library/resources/command:missing', 404],
+  ])('distinguishes scan failure from absence for %s', async (path, expectedStatus) => {
+    const { service } = createService([]);
+    service.discover = () =>
+      Promise.resolve({
+        resources: [],
+        unreadableEntries: [],
+        locationDiagnostics: [{ locationId: 'claude-skills', reason: 'permission-denied' }],
+      });
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
+    restoreAuth = restore;
+    const response = await app.handle(new Request(`http://localhost${path}`));
+    expect(response.status).toBe(expectedStatus);
+  });
+
   it('preserves valid rows and filters location diagnostics by scan scope only', async () => {
     const { service } = createService();
     service.discover = () =>

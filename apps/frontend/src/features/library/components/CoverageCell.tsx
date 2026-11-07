@@ -41,6 +41,7 @@ const STATE_ICONS: Readonly<Record<Cell['state'], LucideIcon>> = {
   divergent: TriangleAlert,
   'only-here': Star,
   incomparable: CircleHelp,
+  'scan-incomplete': CircleHelp,
 };
 
 /**
@@ -55,6 +56,7 @@ const STATE_TONES: Readonly<Record<Cell['state'], string>> = {
   divergent: 'text-warning',
   'only-here': 'text-info',
   incomparable: 'text-warning',
+  'scan-incomplete': 'text-warning',
 };
 
 /**
@@ -151,6 +153,12 @@ function cellTitle(
   if (cell.state === 'absent') return l.tooltip.absent;
 
   const lines = [l.cellHint[cell.state]];
+  if (cell.state !== 'scan-incomplete' && cell.unscannedLocationIds?.length) {
+    lines.push(l.cellHint['scan-incomplete']);
+  }
+  for (const id of cell.unscannedLocationIds ?? []) {
+    lines.push(locationPath(locations, id) ?? id);
+  }
   const path = locationPath(locations, cell.effectiveLocationId);
   if (path) lines.push(`${l.tooltip.path}: ${path}`);
   if (cell.contentHash) lines.push(`${l.tooltip.hash}: ${hashPrefix(cell.contentHash)}…`);

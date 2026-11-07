@@ -19,7 +19,7 @@
 
 import type { LibraryResource, LibraryTargetId, ResourceKind } from '@mangostudio/shared/library';
 
-import { coverageCells, presentTargetCount } from '@/features/library/format';
+import { coverageCells, hasSingleTargetCoverage } from '@/features/library/format';
 
 export interface LibraryDivergenceSummary {
   /** The one divergence the card names. Null when nothing disagrees. */
@@ -59,15 +59,26 @@ function byKindAndSlug(left: LibraryResource, right: LibraryResource): number {
 function describeDivergentResource(resource: LibraryResource): DivergentResource | null {
   const outliers: LibraryTargetId[] = [];
   const agreeing: LibraryTargetId[] = [];
-  for (const cell of coverageCells(resource)) {
+  const cells = coverageCells(resource);
+  for (const cell of cells) {
     if (cell.state === 'divergent') outliers.push(cell.targetId);
-    else if (cell.state !== 'absent') agreeing.push(cell.targetId);
+    else if (cell.state !== 'absent' && cell.state !== 'scan-incomplete')
+      agreeing.push(cell.targetId);
   }
   // `divergence: 'divergent'` is the resource-level verdict and the cells are
   // the per-target reading of it. They agree in every case the resolver can
   // produce, but a resource whose cells all came back settled has nothing to
   // name, and naming nothing is worse than staying quiet.
   if (outliers.length === 0) return null;
+  // One named target and an unverified counterpart do not prove that the
+  // named target alone reads different versions.
+  if (
+    outliers.length === 1 &&
+    agreeing.length === 0 &&
+    cells.some(({ state }) => state === 'scan-incomplete')
+  ) {
+    return null;
+  }
   return {
     key: resource.key,
     slug: resource.ref.slug,
@@ -93,6 +104,6 @@ export function summarizeLibraryDivergence(
   return {
     headline: described[0] ?? null,
     divergentCount: described.length,
-    singleTargetCount: resources.filter((resource) => presentTargetCount(resource) === 1).length,
+    singleTargetCount: resources.filter(hasSingleTargetCoverage).length,
   };
 }

@@ -27,6 +27,17 @@ describe('coverageCell', () => {
     readonly expected: CoverageCellState;
   }> = [
     {
+      name: 'a failed location could hide a copy',
+      build: () =>
+        resource({
+          coverage: fullCoverage({
+            claude: { state: 'absent', unscannedLocationIds: ['claude-skills'] },
+          }),
+        }),
+      targetIndex: 1,
+      expected: 'scan-incomplete',
+    },
+    {
       name: 'no copy anywhere the target reads',
       build: () => resource(),
       targetIndex: 1,
