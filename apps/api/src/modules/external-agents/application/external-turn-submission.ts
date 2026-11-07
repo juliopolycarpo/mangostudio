@@ -137,7 +137,7 @@ interface SubmissionContext {
   readonly newId: () => string;
   readonly random: () => number;
   readonly sleep: CancellableSleep;
-  /** The accepted turn arrived after `signal` aborted; the vendor must be told to stop. */
+  /** An accepted turn can no longer be bound to this attempt; ask the vendor to stop it. */
   readonly onLateAcceptance: (handle: ExternalSessionHandle, nativeTurnId: string) => void;
   /**
    * Whether the latest attempt may have reached the runtime: true from the
@@ -397,9 +397,20 @@ async function runAttempt(
         input.db
       );
     } catch (error) {
-      // The vendor is running a turn nothing here will ever observe.
+      // The runtime accepted the turn, but we cannot bind its events to a durable
+      // attempt. Request cancellation and keep the outcome uncertain.
       input.onLateAcceptance(handle, nativeTurnId);
-      throw error;
+      logger.warn('acceptance_write_failed', { attemptId, error: String(error) });
+      await transitionAttempt(
+        attemptId,
+        ['acceptance-unknown'],
+        'unresolved',
+        { at: input.now(), nativeTurnId, terminalReason: 'acceptance-unknown' },
+        input.db
+      ).catch((failure: unknown) => {
+        logger.warn('unresolved_write_failed', { attemptId, error: String(failure) });
+      });
+      return { kind: 'done', outcome: { kind: 'unresolved', attemptId } };
     }
     if (!won) {
       // The turn already ended here; the vendor's copy of it must end too.
