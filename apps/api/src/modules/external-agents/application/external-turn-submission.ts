@@ -311,6 +311,16 @@ async function runAttempt(
       { at: input.now(), ...(reason ? { terminalReason: reason } : {}) },
       input.db
     );
+  const persistUnresolved = (nativeTurnId?: string) =>
+    transitionAttempt(
+      attemptId,
+      ['acceptance-unknown'],
+      'unresolved',
+      { at: input.now(), nativeTurnId, terminalReason: 'acceptance-unknown' },
+      input.db
+    ).catch((error: unknown) => {
+      logger.warn('unresolved_write_failed', { attemptId, error: String(error) });
+    });
   const pending = (value: boolean): void => input.onDispatchPending?.(value);
 
   /** Whether any request of this attempt was handed to the transport. */
@@ -324,7 +334,7 @@ async function runAttempt(
       return { kind: 'done', outcome: { kind: 'stopped' } };
     }
     if (unanswered && !handle.isLive()) {
-      await settle('unresolved', 'acceptance-unknown');
+      await persistUnresolved();
       return { kind: 'done', outcome: { kind: 'unresolved', attemptId } };
     }
     let nativeTurnId: string;
@@ -368,7 +378,7 @@ async function runAttempt(
       unanswered = true;
       if (!reconcilable) {
         if (input.signal.aborted) continue;
-        await settle('unresolved', 'acceptance-unknown');
+        await persistUnresolved();
         return {
           kind: 'done',
           outcome: {
@@ -401,15 +411,7 @@ async function runAttempt(
       // attempt. Request cancellation and keep the outcome uncertain.
       input.onLateAcceptance(handle, nativeTurnId);
       logger.warn('acceptance_write_failed', { attemptId, error: String(error) });
-      await transitionAttempt(
-        attemptId,
-        ['acceptance-unknown'],
-        'unresolved',
-        { at: input.now(), nativeTurnId, terminalReason: 'acceptance-unknown' },
-        input.db
-      ).catch((failure: unknown) => {
-        logger.warn('unresolved_write_failed', { attemptId, error: String(failure) });
-      });
+      await persistUnresolved(nativeTurnId);
       return { kind: 'done', outcome: { kind: 'unresolved', attemptId } };
     }
     if (!won) {

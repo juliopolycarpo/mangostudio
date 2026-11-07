@@ -235,6 +235,30 @@ describe('submitExternalTurn', () => {
     expect(handle.submissions()).toBe(0);
   });
 
+  it('keeps a lost acknowledgement unresolved when updating the attempt also fails', async () => {
+    await sql`CREATE TRIGGER refuse_uncertain_attempt BEFORE UPDATE OF state ON external_turn_attempts WHEN NEW.state = 'unresolved' BEGIN SELECT RAISE(ABORT, 'unresolved write refused'); END`.execute(
+      getDb()
+    );
+    try {
+      const handle = createScriptedSessionHandle();
+      handle.failures.push(
+        () => new RuntimeRequestNoReplyError(new RemoteError('TIMEOUT', 'no reply'), 'deadline'),
+        () => new RuntimeRequestNotSentError('external-agent.turn', undefined)
+      );
+      const result = await submit(handle).outcome.catch((error: unknown) => ({
+        kind: 'rejected',
+        error,
+      }));
+      expect(result).toMatchObject({ kind: 'unresolved' });
+      expect(handle.submissions()).toBe(0);
+      expect(await listAttemptsForMessage(messageId, getDb())).toMatchObject([
+        { state: 'acceptance-unknown' },
+      ]);
+    } finally {
+      await sql`DROP TRIGGER refuse_uncertain_attempt`.execute(getDb());
+    }
+  });
+
   it('requests cancellation and preserves uncertainty when recording native acceptance fails', async () => {
     await sql`CREATE TRIGGER refuse_acceptance BEFORE UPDATE OF state ON external_turn_attempts WHEN NEW.state = 'accepted' BEGIN SELECT RAISE(ABORT, 'acceptance write refused'); END`.execute(
       getDb()
