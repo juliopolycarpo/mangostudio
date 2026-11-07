@@ -22,7 +22,8 @@ import {
 } from '@mangostudio/shared/backup';
 import Value from 'typebox/value';
 
-import type { MangoConfig } from '../lib/config';
+import { getConfigEnvFilePath, type MangoConfig } from '../lib/config';
+import { resolvePathThroughExistingAncestor } from '../lib/path-containment';
 import { acquireCaptureLock } from './capture-lock';
 import { BACKUP_EXCLUSIONS, redactBackupDatabase } from './privacy';
 import { protectStaging } from './private-staging';
@@ -75,6 +76,8 @@ export function portableBackupName(name: string): boolean {
 }
 
 function excludedName(name: string): boolean {
+  // safe-file stages writes beside the destination as .<basename>.<16 hex>.tmp.
+  if (/^\..+\.[0-9a-f]{16}\.tmp$/iu.test(name)) return true;
   return /^(?:\.env(?:\..*)?|\.?credentials(?:\..*)?|tokens?(?:\..*)?|secrets?(?:\..*)?|id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?|auth\.json|.*\.(?:key|pem|p12|pfx)|node_modules|\.git|logs?|cache|audit|run)$/iu.test(
     name
   );
@@ -147,6 +150,13 @@ export async function captureBackup(
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     configurationPath = resolve(configurationPath);
   }
+  const fallbackDir = config.secretStore.unsafeFileFallbackDir.trim();
+  const managedSecretPaths = new Set(
+    [
+      getConfigEnvFilePath(config.configFilePath),
+      ...(fallbackDir ? [join(fallbackDir, 'secrets.json')] : []),
+    ].map(resolvePathThroughExistingAncestor)
+  );
   const roots = backupRoots(config, options.checkpoints);
   const databasePath = await realpath(config.database.path);
   const resolvedRoots = await Promise.all(
@@ -292,8 +302,13 @@ export async function captureBackup(
       const meta = await lstat(path);
       if (!meta.isDirectory() && !meta.isFile())
         throw new Error('Backup refuses symlinks and special files.');
-      if (!inside(root, await realpath(path)))
+      const canonicalPath = await realpath(path);
+      if (!inside(root, canonicalPath))
         throw new Error('Backup source escaped its configured root.');
+      if (meta.isFile() && managedSecretPaths.has(canonicalPath)) {
+        manifest.exclusions.push(prefix);
+        return;
+      }
       fingerprints.set(path, await fingerprint(path));
       if (meta.isFile()) {
         if (

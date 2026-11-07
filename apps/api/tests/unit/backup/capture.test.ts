@@ -26,7 +26,7 @@ import { acquireCaptureLock } from '../../../src/backup/capture-lock';
 import { parseBackupArgs } from '../../../src/cli/commands/backup';
 import { createBunSqliteDialect } from '../../../src/db/bun-sqlite-dialect';
 import { allMigrations } from '../../../src/db/migrations';
-import { getConfig } from '../../../src/lib/config';
+import { getConfig, getConfigEnvFilePath } from '../../../src/lib/config';
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -217,6 +217,49 @@ it.each(['database', 'config'])('refuses a hard-linked raw %s under uploads', as
   expect(await Bun.file(output).exists()).toBe(false);
   expect((await readdir(root)).some((name) => name.startsWith('.mango-backup-'))).toBe(false);
   expect((await lstat(original)).nlink).toBe(2);
+});
+
+it.skipIf(process.platform === 'win32')(
+  'excludes the actual file read through the paired environment symlink',
+  async () => {
+    const { config, output } = await fixture();
+    const target = join(config.uploads.dir, 'user-notes.txt');
+    await writeFile(target, 'GEMINI_API_KEY=paired-env-sensitive-fixture');
+    await symlink(target, getConfigEnvFilePath(config.configFilePath));
+
+    const manifest = await captureBackup(
+      config,
+      { output, checkpoints: true, includeSecrets: false },
+      'test'
+    );
+    const files = await new Bun.Archive(await readFile(output)).files();
+    expect(files.has('uploads/user-notes.txt')).toBe(false);
+    expect(manifest.exclusions).toContain('uploads/user-notes.txt');
+  }
+);
+
+it('excludes the unsafe file store and orphaned atomic secret writes under a captured root', async () => {
+  const { config, output } = await fixture();
+  const store = join(config.uploads.dir, 'fallback');
+  config.secretStore = { unsafeFileFallbackDir: store };
+  await mkdir(store);
+  await writeFile(join(store, 'secrets.json'), '{"mango:connector":"fallback-sensitive-fixture"}');
+  await writeFile(
+    join(store, '.secrets.json.0123456789abcdef.tmp'),
+    '{"mango:connector":"orphaned-sensitive-fixture"}'
+  );
+  await writeFile(join(store, 'ordinary.tmp'), 'a user file');
+
+  const manifest = await captureBackup(
+    config,
+    { output, checkpoints: true, includeSecrets: false },
+    'test'
+  );
+  const files = await new Bun.Archive(await readFile(output)).files();
+  expect(files.has('uploads/fallback/secrets.json')).toBe(false);
+  expect(files.has('uploads/fallback/.secrets.json.0123456789abcdef.tmp')).toBe(false);
+  expect(manifest.exclusions).toContain('uploads/fallback/.secrets.json.0123456789abcdef.tmp');
+  expect(await files.get('uploads/fallback/ordinary.tmp')?.text()).toBe('a user file');
 });
 
 it('refuses an oversized file before copying and preserves an existing destination', async () => {
