@@ -334,6 +334,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn listener_release_frees_the_pipe_with_the_terminal_reader_retained() {
+        let path = address();
+        let mut listener = listen_ipc(&path).await.expect("the address is free");
+        let client = connect_ipc(&path, &ConnectDeadline::default())
+            .await
+            .expect("the client connects");
+        let (accepted, _) = listener.accept().await.expect("the listener accepts");
+        let (_accepted_tx, mut accepted_rx) = accepted.split();
+        let (_client_tx, mut client_rx) = client.split();
+
+        let (outcome, local, peer) = tokio::time::timeout(Duration::from_secs(5), async {
+            tokio::join!(listener.close(), accepted_rx.recv(), client_rx.recv())
+        })
+        .await
+        .expect("both sides receive listener release");
+        assert_eq!(outcome, super::super::IpcCloseOutcome::NoFilesystemPath);
+        assert!(matches!(
+            local,
+            Some(Inbound::Closed(crate::port::PortClosure::Closed {
+                code: Some(crate::close::close_codes::RELEASED),
+                ..
+            }))
+        ));
+        assert!(matches!(
+            peer,
+            Some(Inbound::Frame(Frame::Close(close))) if close.code == crate::close::close_codes::RELEASED
+        ));
+
+        let rebound = listen_ipc(&path)
+            .await
+            .expect("the terminal reader no longer owns the named pipe");
+        assert_eq!(accepted_rx.recv().await, None);
+        rebound.close().await;
+    }
+
+    #[tokio::test]
     async fn a_second_listener_on_the_same_address_is_refused() {
         let path = address();
         let first = listen_ipc(&path).await.expect("the address is free");
