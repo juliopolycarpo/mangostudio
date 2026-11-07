@@ -90,7 +90,11 @@ async function copyBounded(
   maxBytes: number,
   signal?: AbortSignal
 ): Promise<void> {
-  const input = await open(source, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  // A regular file from the walk may be replaced by a FIFO before open.
+  const input = await open(
+    source,
+    constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0)
+  );
   try {
     const metadata = await input.stat();
     if (!metadata.isFile()) throw new Error('Backup source is not a regular file.');

@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, expect, it, spyOn } from 'bun:test';
+import { constants } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import {
   lstat,
@@ -342,6 +343,39 @@ it('reports success and releases capture ownership when cleanup fails after publ
     warning.mockRestore();
   }
 });
+
+it.skipIf(process.platform === 'win32')(
+  'rejects a source swapped for a FIFO before opening without blocking on it',
+  async () => {
+    const { config, output } = await fixture();
+    const media = join(config.uploads.dir, 'media.txt');
+    const open = fs.open;
+    let captureFlags: number | undefined;
+    async function replaceMediaWithFifo(...args: Parameters<typeof open>) {
+      const [path, flags, mode] = args;
+      if (path !== media) return open(path, flags, mode);
+      await rm(media);
+      const fifo = Bun.spawnSync(['mkfifo', media]);
+      expect(fifo.exitCode).toBe(0);
+      expect((await lstat(media)).isFIFO()).toBe(true);
+      captureFlags = Number(flags);
+      // Keep the red run bounded even if capture omitted O_NONBLOCK.
+      return open(path, captureFlags | constants.O_NONBLOCK, mode);
+    }
+
+    const opener = spyOn(fs, 'open').mockImplementation(replaceMediaWithFifo);
+    try {
+      await expect(
+        captureBackup(config, { output, checkpoints: true, includeSecrets: false }, 'test')
+      ).rejects.toThrow('Backup source is not a regular file');
+      expect(captureFlags).toBeDefined();
+      expect(Number(captureFlags) & constants.O_NONBLOCK).toBe(constants.O_NONBLOCK);
+      expect(await Bun.file(output).exists()).toBe(false);
+    } finally {
+      opener.mockRestore();
+    }
+  }
+);
 
 it('refuses an oversized file before copying and preserves an existing destination', async () => {
   const { root, config, output } = await fixture();
