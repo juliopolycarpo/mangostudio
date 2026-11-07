@@ -78,7 +78,7 @@ async function importAppInIsolatedHome(): Promise<ImportResult> {
 
 describe('importing src/app.ts', () => {
   it(
-    'opens no database and creates only the uploads directory',
+    'opens no database and leaves the uploads directory absent',
     async () => {
       const result = await importAppInIsolatedHome();
       try {
@@ -90,11 +90,9 @@ describe('importing src/app.ts', () => {
         // scope connects here, long before the server decides to start.
         expect(result.databaseExists).toBe(false);
 
-        // The other half of the contract, and the reason this is not simply
-        // "importing writes nothing": `app.ts` creates the uploads directory
-        // at import, so upload writes land in a directory that exists. Serving
-        // uploads resolves per request and no longer needs it at startup.
-        expect(result.uploadsExists).toBe(true);
+        // Create the uploads directory on a validated write, after startup
+        // has acquired ownership. Importing the app must leave it absent.
+        expect(result.uploadsExists).toBe(false);
       } finally {
         await rm(result.home, { recursive: true, force: true });
       }
