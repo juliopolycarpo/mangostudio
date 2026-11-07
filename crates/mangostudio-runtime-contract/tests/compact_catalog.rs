@@ -26,6 +26,18 @@ fn compaction_preserves_lexemes_strings_escapes_and_non_json_whitespace() {
 }
 
 #[test]
+fn compaction_preserves_rejection_of_split_tokens() {
+    for source in ["[fa lse]", "[1 2]", "[1 \t e2]", "[-\n1]", "[1.\r2]"] {
+        assert!(serde_json::from_str::<serde_json::Value>(source).is_err());
+        let compact = compact_json::compact_json(source);
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&compact).is_err(),
+            "expected invalid JSON after compacting {source:?}, received {compact:?}"
+        );
+    }
+}
+
+#[test]
 fn embedded_catalog_is_deterministic_idempotent_and_semantically_equal() {
     let compact = compact_json::compact_json(SOURCE);
     assert_eq!(EMBEDDED, compact);
