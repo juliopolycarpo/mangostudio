@@ -389,11 +389,16 @@ where
     R: AsyncRead + Unpin + Send + 'static,
     W: AsyncWrite + Unpin + Send + 'static,
 {
-    async fn expire_first_hello(&mut self) {
+    fn record_closure(&mut self, closure: PortClosure) {
+        // The first closure wins even if teardown or a cancelled recv crosses the deadline.
         self.first_hello_deadline = None;
+        self.closure = Some(closure);
+    }
+
+    async fn expire_first_hello(&mut self) {
         self.pending.clear();
         // Persist before yielding so cancellation cannot lose the closure notification.
-        self.closure = Some(PortClosure::Closed {
+        self.record_closure(PortClosure::Closed {
             code: Some(crate::close::close_codes::PROTOCOL_ERROR),
             reason: Some("local socket hello deadline exceeded".into()),
         });
@@ -434,7 +439,7 @@ where
         // Recorded before the await, never after: `recv` is cancel-safe, and a
         // closure written on the far side of an await is one a caller that
         // lost a `select!` race would never be told about.
-        self.closure = Some(PortClosure::Closed {
+        self.record_closure(PortClosure::Closed {
             code: None,
             reason: None,
         });
@@ -445,7 +450,7 @@ where
     /// operator a broken pipe apart from a peer that left politely; both are a
     /// `4000` release to the session.
     async fn on_failure(&mut self, error: &std::io::Error) {
-        self.closure = Some(PortClosure::Closed {
+        self.record_closure(PortClosure::Closed {
             code: None,
             reason: Some(error.to_string()),
         });
@@ -455,7 +460,7 @@ where
     async fn refuse(&mut self, error: CodecError) {
         let code = close_code_for_codec_error(&error);
         let reason = error.to_string();
-        self.closure = Some(PortClosure::ProtocolError { error, code });
+        self.record_closure(PortClosure::ProtocolError { error, code });
         self.writer
             .end(code, Some(reason), self.max_frame_bytes)
             .await;
@@ -787,6 +792,28 @@ mod tests {
         assert_eq!(rx.recv().await, None);
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn first_hello_deadline_stays_disarmed_after_eof() {
+        let (peer, stream) = duplex(1024);
+        let (reader, writer) = tokio::io::split(stream);
+        let deadline = Duration::from_millis(10);
+        let (_tx, mut rx) = NdjsonPort::new(reader, writer)
+            .with_first_hello_timeout(deadline)
+            .split();
+        drop(peer);
+
+        assert_eq!(
+            rx.recv().await,
+            Some(Inbound::Closed(PortClosure::Closed {
+                code: None,
+                reason: None,
+            }))
+        );
+        assert_eq!(rx.recv().await, None);
+        tokio::time::advance(deadline).await;
+        assert_eq!(rx.recv().await, None, "EOF is the sole closure");
+    }
+
     #[tokio::test]
     async fn a_partial_line_at_end_of_file_is_a_closure_not_a_refusal() {
         let mut raw = raw_peer();
@@ -819,6 +846,34 @@ mod tests {
                 assert_eq!(error.kind, CodecErrorKind::Schema);
             }
             other => panic!("expected a protocol error, got {other:?}"),
+        }
+        assert_eq!(rx.recv().await, None);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn first_hello_deadline_preserves_frames_and_refusal_after_cancelled_farewell() {
+        let (mut peer, reader) = duplex(1024);
+        let (writer, _watch) = StalledSink::new();
+        let (_tx, mut rx) = NdjsonPort::new(reader, writer)
+            .with_first_hello_timeout(Duration::from_millis(10))
+            .split();
+        peer.write_all(b"{\"type\":\"ping\"}\n{\"type\":\"nope\"}\n")
+            .await
+            .unwrap();
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), rx.recv())
+                .await
+                .is_err(),
+            "the farewell is cancelled after the hello deadline"
+        );
+        assert_eq!(rx.recv().await, Some(Inbound::Frame(Frame::Ping)));
+        match rx.recv().await {
+            Some(Inbound::Closed(PortClosure::ProtocolError { error, code })) => {
+                assert_eq!(code, close_codes::PROTOCOL_ERROR);
+                assert_eq!(error.kind, CodecErrorKind::Schema);
+            }
+            other => panic!("expected the original decoder refusal, got {other:?}"),
         }
         assert_eq!(rx.recv().await, None);
     }
