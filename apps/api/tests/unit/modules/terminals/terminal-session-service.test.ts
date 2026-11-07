@@ -993,8 +993,8 @@ describe('terminalSessionService viewer handoff', () => {
     const first = new RecordingViewer();
     const second = new RecordingViewer();
 
-    expect(service.attachViewer(session.id, first).replaced).toBeNull();
-    expect(service.attachViewer(session.id, second).replaced).toBe(first);
+    expect(service.attachViewer(session.id, first)?.replaced).toBeNull();
+    expect(service.attachViewer(session.id, second)?.replaced).toBe(first);
   });
 
   test('detaching a stale viewer is a no-op once it has been replaced', async () => {

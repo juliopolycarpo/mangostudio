@@ -106,11 +106,13 @@ export interface TerminalSessionService {
     userId: string,
     sessionId: string
   ): { readonly session: TerminalSession; readonly client: TerminalRuntimeClient } | null;
-  /** Registers the current viewer, returning the one it replaced, if any. */
+  /** Registers a viewer if the session exists and its first login attach is available. */
   attachViewer(
     sessionId: string,
     viewer: TerminalSessionViewer
-  ): { readonly replaced: TerminalSessionViewer | null };
+  ): { readonly replaced: TerminalSessionViewer | null; readonly firstLoginAttach: boolean } | null;
+  /** Allows takeovers after the first login replay is acknowledged. // Usage: service.completeFirstLoginAttach(id, viewer) */
+  completeFirstLoginAttach(sessionId: string, viewer: TerminalSessionViewer): void;
   /**
    * Whether `viewer` still holds the session. The socket route reads this
    * across an await to decide whether it may still speak for the session: a
@@ -119,10 +121,9 @@ export interface TerminalSessionService {
    */
   isCurrentViewer(sessionId: string, viewer: TerminalSessionViewer): boolean;
   /**
-   * Releases the session's viewer slot. Returns false, and changes nothing,
-   * when `viewer` is no longer the current one: a replaced socket closing late
-   * must not detach the runtime session out from under the viewer that took
-   * it over.
+   * Releases the current viewer's slot. Returns true when the caller should
+   * detach the native stream. An abandoned first login attach schedules
+   * terminal close instead. A stale viewer leaves the current viewer in place.
    */
   detachViewer(sessionId: string, viewer: TerminalSessionViewer): boolean;
   touchActivity(sessionId: string): void;
@@ -130,7 +131,7 @@ export interface TerminalSessionService {
   recordExit(sessionId: string, exit: TerminalExit): void;
   /** Records a client `resize` the runtime accepted. */
   recordResize(sessionId: string, cols: number, rows: number): void;
-  /** Closes idle detached sessions and retries revoked cleanup regardless of idle age. */
+  /** Closes idle detached sessions and retries pending cleanup regardless of idle age. */
   reapIdle(): void;
   /** Starts the unref'd idle-reaper interval; returns a function that stops it. */
   startIdleReaper(intervalMs?: number): () => void;
@@ -143,7 +144,8 @@ interface TerminalSessionEntry {
   ownerUserId: string;
   client: TerminalRuntimeClient;
   viewer: TerminalSessionViewer | null;
-  cleanupPending: boolean;
+  loginAttach: 'waiting' | 'attaching' | null;
+  cleanupPending: 'revoked' | 'abandoned_login' | null;
 }
 
 interface TerminalReservation {
@@ -277,9 +279,9 @@ export function createTerminalSessionService(
       entry.session.status = 'exited';
       entry.session.exit = { exitCode: null, signal: null };
       entry.session.lastActivityAt = d.now();
+      sessions.delete(id);
       entry.viewer?.pushNotice({ kind: 'runtime_disconnected' });
       entry.viewer?.close(TERMINAL_SOCKET_CLOSE_CODES.GONE, 'Runtime disconnected');
-      sessions.delete(id);
     }
   }
 
@@ -340,7 +342,7 @@ export function createTerminalSessionService(
   function closeTrackedSession(
     id: string,
     entry: TerminalSessionEntry,
-    reason: 'idle' | 'revoked'
+    reason: 'idle' | NonNullable<TerminalSessionEntry['cleanupPending']>
   ): void {
     if (reaping.has(id)) return;
     reaping.add(id);
@@ -360,7 +362,7 @@ export function createTerminalSessionService(
         }
         sessions.delete(id);
       } catch (error) {
-        logger.warn(reason === 'revoked' ? 'revoked_close_failed' : 'idle_close_failed', {
+        logger.warn(`${reason}_close_failed`, {
           sessionId: id,
           error: error instanceof Error ? error.message : String(error),
         });
@@ -377,7 +379,7 @@ export function createTerminalSessionService(
       if (!entry.cleanupPending && (entry.viewer || entry.session.lastActivityAt > cutoff)) {
         continue;
       }
-      closeTrackedSession(id, entry, 'idle');
+      closeTrackedSession(id, entry, entry.cleanupPending ?? 'idle');
     }
   }
 
@@ -490,7 +492,8 @@ export function createTerminalSessionService(
             ownerUserId: userId,
             client,
             viewer: null,
-            cleanupPending: status === 'exited',
+            loginAttach: body.loginTarget ? 'waiting' : null,
+            cleanupPending: status === 'exited' ? 'revoked' : null,
           });
           return session;
         };
@@ -596,7 +599,7 @@ export function createTerminalSessionService(
         if (entry.ownerUserId !== userId || entry.session.environmentId !== environmentId) {
           continue;
         }
-        entry.cleanupPending = true;
+        entry.cleanupPending = 'revoked';
         markExited(entry, { exitCode: null, signal: null, reason: 'consent-revoked' });
         if (entry.session.exit) entry.viewer?.endWithExit(entry.session.exit);
         closeTrackedSession(id, entry, 'revoked');
@@ -689,12 +692,21 @@ export function createTerminalSessionService(
 
     attachViewer(sessionId, viewer) {
       const entry = sessions.get(sessionId);
-      if (!entry) return { replaced: null };
+      if (!entry || entry.loginAttach === 'attaching') return null;
       const replaced = entry.viewer;
+      const firstLoginAttach = entry.loginAttach === 'waiting';
       entry.viewer = viewer;
+      if (firstLoginAttach) entry.loginAttach = 'attaching';
       entry.session.attached = true;
       entry.session.lastActivityAt = d.now();
-      return { replaced };
+      return { replaced, firstLoginAttach };
+    },
+
+    completeFirstLoginAttach(sessionId, viewer) {
+      const entry = sessions.get(sessionId);
+      if (entry?.viewer === viewer && entry.loginAttach === 'attaching') {
+        entry.loginAttach = null;
+      }
     },
 
     isCurrentViewer(sessionId, viewer) {
@@ -706,6 +718,16 @@ export function createTerminalSessionService(
       if (entry?.viewer !== viewer) return false;
       entry.viewer = null;
       entry.session.attached = false;
+      if (entry.loginAttach === 'attaching') {
+        entry.loginAttach = null;
+        if (entry.cleanupPending) return false;
+        if (entry.session.status !== 'exited') {
+          entry.cleanupPending = 'abandoned_login';
+          markExited(entry, { exitCode: null, signal: null });
+          closeTrackedSession(sessionId, entry, entry.cleanupPending);
+          return false;
+        }
+      }
       entry.session.lastActivityAt = d.now();
       return true;
     },

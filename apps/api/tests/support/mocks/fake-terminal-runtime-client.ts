@@ -49,6 +49,8 @@ export interface FakeTerminalRuntimeClientOptions {
   readonly manifest?: RuntimeCapabilityManifest;
   readonly openResult?: Partial<RuntimeTerminalOpenResult>;
   readonly attachResult?: Partial<RuntimeTerminalAttachResult>;
+  /** Base64 scrollback consumed by the first attach request, before its reply can settle. */
+  readonly firstAttachScrollback?: string;
   /** Awaited before the *first* `terminal.attach` call resolves; later calls are immediate. */
   readonly gateFirstAttach?: () => Promise<unknown>;
   /** Awaited before the first open resolves, after recording its request. */
@@ -101,6 +103,7 @@ export class FakeTerminalRuntimeClient implements TerminalRuntimeClient {
     readonly method: FakeTerminalCall['method'];
     readonly resolve: () => void;
   }>();
+  #firstAttachScrollback: string | undefined;
   #gateFirstAttach: (() => Promise<unknown>) | undefined;
   #gateFirstOpen: (() => Promise<unknown>) | undefined;
   #failFirstOpen: Error | undefined;
@@ -122,6 +125,7 @@ export class FakeTerminalRuntimeClient implements TerminalRuntimeClient {
     this.manifest = options.manifest ?? FAKE_TERMINAL_MANIFEST;
     this.#openResult = options.openResult ?? {};
     this.#attachResult = options.attachResult ?? {};
+    this.#firstAttachScrollback = options.firstAttachScrollback;
     this.#gateFirstAttach = options.gateFirstAttach;
     this.#gateFirstOpen = options.gateFirstOpen;
     this.#failFirstOpen = options.failFirstOpen;
@@ -189,6 +193,8 @@ export class FakeTerminalRuntimeClient implements TerminalRuntimeClient {
     },
     attach: async (params) => {
       this.#record('attach', params);
+      const firstScrollback = this.#firstAttachScrollback;
+      this.#firstAttachScrollback = undefined;
       const gate = this.#gateFirstAttach;
       this.#gateFirstAttach = undefined;
       if (gate) await gate();
@@ -201,6 +207,7 @@ export class FakeTerminalRuntimeClient implements TerminalRuntimeClient {
         cols: 80,
         rows: 24,
         ...this.#attachResult,
+        ...(firstScrollback === undefined ? {} : { scrollback: firstScrollback }),
       };
 
       const batched = this.#outputWithAttachResponse;

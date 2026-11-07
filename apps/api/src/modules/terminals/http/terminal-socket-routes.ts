@@ -49,6 +49,8 @@ interface TerminalSocketState {
   client: TerminalRuntimeClient | null;
   relay: TerminalSocketRelay | null;
   viewer: TerminalSessionViewer | null;
+  /** First login replay bytes the browser still needs to acknowledge. */
+  loginReplayRemaining: number | null;
   unsubscribeOutput: (() => void) | null;
   socketClosed: boolean;
   /** Serializes async message handlers so client writes cannot reorder. */
@@ -74,6 +76,7 @@ interface TerminalSocket {
 
 export interface TerminalSocketRouteDependencies {
   readonly service?: TerminalSessionService;
+  readonly createRelay?: typeof createTerminalSocketRelay;
   readonly resolveUserId?: (headers: Headers) => Promise<string | null>;
   readonly allowedOrigins?: readonly string[];
 }
@@ -109,9 +112,8 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
       return;
     }
     const { client } = found;
-    state.client = client;
 
-    const relay = createTerminalSocketRelay({
+    const relay = (dependencies.createRelay ?? createTerminalSocketRelay)({
       send: (frame) => socket.raw.send(frame, false),
       getBufferedAmount: () => socket.raw.getBufferedAmount(),
       close: (code, reason) => socket.raw.close(code, reason),
@@ -121,20 +123,12 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
     state.relay = relay;
 
     /**
-     * Records the exit, tells the viewer, and closes. Reached two ways — an
-     * `exit` output frame while attached, and an `attach` that answers with a
-     * session which had already ended — that must not report a shell's end
-     * differently.
+     * Reports the recorded exit after any replay and closes once the relay drains.
      */
     const sendExit = (exit: TerminalExit): void => {
       relay.push(encodeTerminalServerMessage({ type: 'exit', exit }));
       relay.closeAfterDrain(TERMINAL_SOCKET_CLOSE_CODES.GONE, 'Session exited');
     };
-    const endWithExit = (exit: TerminalExit): void => {
-      service.recordExit(state.sessionId, exit);
-      sendExit(exit);
-    };
-
     const viewer: TerminalSessionViewer = {
       pushNotice: (notice) => relay.push(encodeTerminalServerMessage({ type: 'notice', notice })),
       endWithExit: sendExit,
@@ -146,11 +140,14 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
         }
       },
     };
+    const claim = service.attachViewer(state.sessionId, viewer);
+    if (!claim) {
+      socket.close(TERMINAL_SOCKET_CLOSE_CODES.REPLACED, 'First login viewer is receiving output');
+      return;
+    }
     state.viewer = viewer;
-    // A second upgrade for the same session takes over: the previous viewer is
-    // closed, on purpose, with the code that says a client must not reconnect.
-    const { replaced } = service.attachViewer(state.sessionId, viewer);
-    replaced?.close(TERMINAL_SOCKET_CLOSE_CODES.REPLACED, 'Replaced by a new viewer');
+    state.client = client;
+    claim.replaced?.close(TERMINAL_SOCKET_CLOSE_CODES.REPLACED, 'Replaced by a new viewer');
 
     // Quiesce the stream before attaching. A predecessor may still be attached
     // on the runtime — a takeover, or a closed socket whose `terminal.detach`
@@ -197,8 +194,10 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
     // Frames wait in `queued` until the scrollback has been replayed, so live
     // output cannot overtake the replay it continues. Nothing is acknowledged
     // while they wait, so the runtime's in-flight window bounds the queue.
-    let queued: RuntimeTerminalOutputEvent[] | null = [];
-    const handleOutput = (event: RuntimeTerminalOutputEvent): void => {
+    type OutputBeforeExit = Exclude<RuntimeTerminalOutputEvent, { kind: 'exit' }>;
+    let queued: OutputBeforeExit[] | null = [];
+    let replayExit: TerminalExit | undefined;
+    const handleOutput = (event: OutputBeforeExit): void => {
       if (state.socketClosed) return;
       switch (event.kind) {
         case 'data':
@@ -213,16 +212,21 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
               notice: { kind: 'dropped', bytes: event.bytes },
             })
           );
-          return;
-        case 'exit':
-          endWithExit({
-            exitCode: event.exitCode,
-            signal: event.signal,
-            ...(event.reason ? { reason: event.reason } : {}),
-          });
       }
     };
     state.unsubscribeOutput = client.terminal.onOutput(state.sessionId, (event) => {
+      if (state.socketClosed) return;
+      if (event.kind === 'exit') {
+        const exit = {
+          exitCode: event.exitCode,
+          signal: event.signal,
+          ...(event.reason ? { reason: event.reason } : {}),
+        };
+        service.recordExit(state.sessionId, exit);
+        if (queued) replayExit = exit;
+        else sendExit(exit);
+        return;
+      }
       if (queued) {
         queued.push(event);
         return;
@@ -261,22 +265,33 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
       return;
     }
 
+    // A failed replay send can synchronously close the socket. Preserve any
+    // known exit before writing so detach leaves the exited session in place.
+    if (attachResult.status === 'exited') {
+      replayExit = { exitCode: attachResult.exitCode, signal: attachResult.signal };
+      service.recordExit(state.sessionId, replayExit);
+    }
+
     const scrollback = Buffer.from(attachResult.scrollback, 'base64');
     for (const chunk of chunkTerminalBytes(scrollback, TERMINAL_CHUNK_MAX_BYTES)) {
       relay.push(encodeTerminalServerMessage({ type: 'data', data: chunk }));
     }
 
-    if (attachResult.status === 'exited') {
-      // Nothing can have been queued: the runtime emits only while attached,
-      // and this session had already ended before it was.
-      teardown(state);
-      endWithExit({ exitCode: attachResult.exitCode, signal: attachResult.signal });
-      return;
+    if (claim.firstLoginAttach) {
+      if (scrollback.length > 0) {
+        state.loginReplayRemaining = scrollback.length;
+      } else {
+        service.completeFirstLoginAttach(state.sessionId, viewer);
+      }
     }
 
     const replayed = queued;
     queued = null;
     for (const event of replayed) handleOutput(event);
+    if (replayExit) {
+      teardown(state);
+      sendExit(replayExit);
+    }
   }
 
   function teardown(state: TerminalSocketState): void {
@@ -323,6 +338,13 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
           service.recordResize(state.sessionId, decoded.cols, decoded.rows);
           return;
         case 'ack':
+          if (state.loginReplayRemaining !== null && state.viewer) {
+            state.loginReplayRemaining -= decoded.bytes;
+            if (state.loginReplayRemaining <= 0) {
+              state.loginReplayRemaining = null;
+              service.completeFirstLoginAttach(state.sessionId, state.viewer);
+            }
+          }
           await client.terminal.ack({ sessionId: state.sessionId, bytes: decoded.bytes });
           return;
         case 'ping':
@@ -349,6 +371,7 @@ export function createTerminalSocketRoutes(dependencies: TerminalSocketRouteDepe
           client: null,
           relay: null,
           viewer: null,
+          loginReplayRemaining: null,
           unsubscribeOutput: null,
           socketClosed: false,
           messageChain: Promise.resolve(),
