@@ -156,7 +156,9 @@ export async function sendTextMessage(
     db
   );
 
-  await updateChatAfterTurn(input.chatId, aiTimestamp, db);
+  await updateChatAfterTurn(input.chatId, aiTimestamp, db, {
+    bestEffort: Boolean(input.admittedChat),
+  });
   // The same turn the streaming sibling records, on the runner that returns in
   // one response instead of a stream. Without it a `/api/respond` turn moves
   // `updatedAt` and no tab hears about it.

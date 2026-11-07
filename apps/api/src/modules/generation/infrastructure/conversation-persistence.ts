@@ -3,12 +3,15 @@ import type { InteractionMode, MessagePart } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
 
 import type { Database } from '../../../db/types';
+import { createDiagnosticLogger } from '../../../lib/logger';
 import { linkAttachmentsToMessage } from '../../attachments/infrastructure/attachment-repository';
 import { insertGeneratedImageArtifact } from '../../generated-images/infrastructure/generated-image-repository';
 import {
   type CreateMessageData,
   insertMessage,
 } from '../../messages/infrastructure/message-repository';
+
+const logger = createDiagnosticLogger('conversation-persistence');
 
 type RunnerKind = ChatRunnerConfiguration['kind'];
 
@@ -266,17 +269,29 @@ export function finalizeCheckpointedAiResponse(
   });
 }
 
+/**
+ * Move a chat up in recent activity. Use `{ bestEffort: true }` once a keyed turn's
+ * verdict is durable, so a recency write failure cannot replace that verdict.
+ *
+ * @example await updateChatAfterTurn(chatId, finishedAt, db, { bestEffort: true });
+ */
 export async function updateChatAfterTurn(
   chatId: string,
   aiTimestamp: number,
-  db: Kysely<Database>
+  db: Kysely<Database>,
+  { bestEffort = false } = {}
 ): Promise<void> {
-  await db
-    .updateTable('chats')
-    .set({ updatedAt: aiTimestamp })
-    .where('id', '=', chatId)
-    .where('updatedAt', '<=', aiTimestamp)
-    .execute();
+  try {
+    await db
+      .updateTable('chats')
+      .set({ updatedAt: aiTimestamp })
+      .where('id', '=', chatId)
+      .where('updatedAt', '<=', aiTimestamp)
+      .execute();
+  } catch (error) {
+    if (!bestEffort) throw error;
+    logger.warn('chat_recency_update_failed', { chatId, error: String(error) });
+  }
 }
 
 export interface PersistImageMessageInput {

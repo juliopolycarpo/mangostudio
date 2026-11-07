@@ -999,7 +999,9 @@ export async function* finalizeSuccessfulTurn(
   );
   if (!finalized) return;
 
-  await updateChatAfterTurn(chatId, aiTimestamp, db);
+  await updateChatAfterTurn(chatId, aiTimestamp, db, {
+    bestEffort: Boolean(session.input.admittedChat),
+  });
   void recordTurnCompletedActivity(userId, chatId, db);
 
   yield { type: 'done', messageId: aiMsgId, generationTime };
@@ -1190,7 +1192,9 @@ export async function finalizeInterruptedTurn(
   );
   if (!finalized) return;
   if (reasonCode === 'user_cancelled') session.input.onUserCancelled?.();
-  await updateChatAfterTurn(chatId, Date.now(), db);
+  await updateChatAfterTurn(chatId, Date.now(), db, {
+    bestEffort: Boolean(session.input.admittedChat),
+  });
   publishActivityInvalidation(userId);
 }
 

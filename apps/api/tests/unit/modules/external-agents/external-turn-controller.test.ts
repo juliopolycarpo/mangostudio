@@ -14,11 +14,12 @@ import type {
   ExternalTurnPart,
   MessagePart,
 } from '@mangostudio/shared/types';
-import { UpdateQueryBuilder } from 'kysely';
+import { sql, UpdateQueryBuilder } from 'kysely';
 
 import { getDb } from '../../../../src/db/database';
 import {
   getOwnedChat,
+  type OwnedChatRecord,
   updateChat,
 } from '../../../../src/modules/chats/infrastructure/chat-repository';
 import { createExternalApprovalRegistry } from '../../../../src/modules/external-agents/application/external-approval-registry';
@@ -156,9 +157,11 @@ function startTurn(
   controller: ReturnType<typeof harness>['controller'],
   overrides: {
     readonly chatId?: string;
+    readonly admittedChat?: OwnedChatRecord;
     readonly attachments?: readonly ExternalAgentAttachment[];
     readonly observer?: {
       readonly onSteer?: (steer: unknown) => void;
+      readonly onTerminal?: (reason: ExternalTurnResult['reason']) => void;
       readonly onSession?: (session: {
         readonly sessionId: string;
         readonly resumed: boolean;
@@ -171,6 +174,7 @@ function startTurn(
     {
       userId,
       chatId: overrides.chatId ?? chatId,
+      admittedChat: overrides.admittedChat,
       prompt: 'refactor the parser',
       configuration: CONFIGURATION,
       canonicalWorkspacePath: '/work/repo',
@@ -354,6 +358,41 @@ describe('external turn controller', () => {
     expect(
       await db.selectFrom('messages').select('id').where('chatId', '=', chatId).execute()
     ).toEqual([]);
+  });
+
+  it('reports the persisted keyed vendor verdict when updating chat recency fails', async () => {
+    const db = getDb();
+    const admittedChat = await getOwnedChat(chatId, userId, db);
+    expect(admittedChat?.runner.kind).toBe('external');
+    const { runtime, controller } = harness();
+    const terminalReasons: ExternalTurnResult['reason'][] = [];
+    await sql`CREATE TRIGGER reject_external_chat_recency_write
+      BEFORE UPDATE OF updatedAt ON chats WHEN OLD.id = ${sql.lit(chatId)}
+      BEGIN SELECT RAISE(ABORT, 'controlled external chat recency write failure'); END`.execute(db);
+    try {
+      const running = startTurn(controller, {
+        admittedChat,
+        observer: {
+          onTerminal(reason) {
+            terminalReasons.push(reason);
+          },
+        },
+      }).then(
+        (result) => result,
+        (error: unknown) => error
+      );
+      await waitForTurnStart(runtime);
+      runtime.emit({ type: 'text_delta', text: 'done' });
+      runtime.emit({ type: 'completed' });
+      const result = await running;
+      const stored = await readAssistantRow();
+      expect(stored.text).toBe('done');
+      expect(turnPartOf(stored.parts)).toMatchObject({ terminalReason: 'completed' });
+      expect(result).toMatchObject({ reason: 'completed' });
+      expect(terminalReasons).toEqual(['completed']);
+    } finally {
+      await sql`DROP TRIGGER reject_external_chat_recency_write`.execute(db);
+    }
   });
 
   it('runs a turn to completion and finalizes the assistant message', async () => {

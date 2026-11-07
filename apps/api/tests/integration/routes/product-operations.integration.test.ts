@@ -352,6 +352,39 @@ describe('durable authorized product operations over real routes/storage', () =>
       await sql`DROP TRIGGER reject_direct_completed_write`.execute(db);
     }
   });
+  it.each(['/respond/stream', '/respond'])(
+    'keeps the completed receipt when %s cannot update chat recency',
+    async (path) => {
+      const operationId = 'chat-recency-write-fails';
+      await sql`CREATE TRIGGER reject_chat_recency_write
+        BEFORE UPDATE OF updatedAt ON chats
+        WHEN OLD.id IN (SELECT chatId FROM product_operations WHERE operationId = 'chat-recency-write-fails')
+        BEGIN SELECT RAISE(ABORT, 'controlled chat recency write failure'); END`.execute(db);
+      try {
+        const response = await app.handle(
+          request(path, { chatId, prompt: 'Hello', model: 'operation-test', operationId })
+        );
+        expect(response.status).toBe(200);
+        await waitFor(async () => {
+          if (provider.release) provider.release();
+          return (await receipt(operationId)).state !== 'running';
+        });
+        const message = await db
+          .selectFrom('messages')
+          .select(['id', 'text'])
+          .where('chatId', '=', chatId)
+          .where('role', '=', 'ai')
+          .executeTakeFirst();
+        expect(message?.text).toBe('Answer');
+        expect(await receipt(operationId)).toMatchObject({
+          state: 'completed',
+          messageId: message?.id,
+        });
+      } finally {
+        await sql`DROP TRIGGER reject_chat_recency_write`.execute(db);
+      }
+    }
+  );
   it('settles a keyed MangoStudio turn as failed after the user stops it', async () => {
     const operationId = 'stopped-by-user';
     expect((await submit(operationId)).status).toBe(200);

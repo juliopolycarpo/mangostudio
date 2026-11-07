@@ -1231,7 +1231,7 @@ export function createExternalTurnController(
     );
     // Only the timestamp: an external turn has no MangoStudio agent profile, so
     // nothing that derives one from a completed turn applies to it.
-    await updateChatAfterTurn(input.chatId, at, db);
+    await updateChatAfterTurn(input.chatId, at, db, { bestEffort: Boolean(input.admittedChat) });
     // Every terminal reason reaches here; only the one that produced work is
     // worth a feed row. A cancelled or errored turn is already visible in the
     // chat it happened in, but its `updatedAt` still moved — so the sidebar
