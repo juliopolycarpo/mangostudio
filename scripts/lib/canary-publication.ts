@@ -17,8 +17,8 @@ export interface RegistryResponse<T> {
 
 /** External registry I/O; implementations must retain status and reject transport errors. */
 export interface RegistryClient {
-  getJson(url: string): Promise<RegistryResponse<unknown>>;
-  getBytes(url: string): Promise<RegistryResponse<Uint8Array>>;
+  getJson(url: string, signal?: AbortSignal): Promise<RegistryResponse<unknown>>;
+  getBytes(url: string, signal?: AbortSignal): Promise<RegistryResponse<Uint8Array>>;
 }
 
 interface VerifiedCanaryPackage {
@@ -71,8 +71,10 @@ export async function verifyCanaryNpmPublication(
     const versionUrl = `${REGISTRY}/${encodedName}/${encodeURIComponent(manifest.packageVersion)}`;
     const versionResponse = visibility
       ? await visibility.read(
-          () => registry.getJson(versionUrl),
-          (response) => response.status !== 404
+          (signal) => registry.getJson(versionUrl, signal),
+          (response) => !isRetryableRegistryStatus(response.status),
+          `npm metadata ${expected.name}@${manifest.packageVersion} ${versionUrl}`,
+          (response) => `HTTP ${response.status}`
         )
       : await registry.getJson(versionUrl);
     if (versionResponse.status === 404) {
@@ -86,8 +88,10 @@ export async function verifyCanaryNpmPublication(
       );
       const archiveResponse = visibility
         ? await visibility.read(
-            () => registry.getBytes(publication.tarball),
-            (response) => response.status !== 404
+            (signal) => registry.getBytes(publication.tarball, signal),
+            (response) => !isRetryableRegistryStatus(response.status),
+            `npm tarball ${expected.name}@${manifest.packageVersion} ${publication.tarball}`,
+            (response) => `HTTP ${response.status}`
           )
         : await registry.getBytes(publication.tarball);
       requireSuccess(archiveResponse.status, publication.tarball);
@@ -101,7 +105,14 @@ export async function verifyCanaryNpmPublication(
     }
 
     const tagsUrl = `${REGISTRY}/-/package/${encodedName}/dist-tags`;
-    const tagsResponse = await registry.getJson(tagsUrl);
+    const tagsResponse = visibility
+      ? await visibility.read(
+          (signal) => registry.getJson(tagsUrl, signal),
+          (response) => !isRetryableRegistryStatus(response.status),
+          `npm dist-tags ${expected.name} ${tagsUrl}`,
+          (response) => `HTTP ${response.status}`
+        )
+      : await registry.getJson(tagsUrl);
     if (tagsResponse.status === 404 && versionResponse.status === 404) {
       canary[expected.name] = null;
       continue;
@@ -122,6 +133,11 @@ export async function verifyCanaryNpmPublication(
     canary[expected.name] = typeof tags.canary === 'string' ? tags.canary : null;
   }
   return { present, missing, canary };
+}
+
+/** Only absence and temporary HTTP failures may settle after publication. */
+export function isRetryableRegistryStatus(status: number): boolean {
+  return status === 404 || status === 408 || status === 429 || (status >= 500 && status <= 599);
 }
 
 function expectedPackages(manifest: DistributionManifest): readonly ExpectedPackage[] {

@@ -663,11 +663,20 @@ be confirmed before another mutation. Initial absence audits remain immediate.
 Identity, integrity, authorization and other HTTP failures still stop publication.
 Exhausted visibility waits fail and retain the original-byte recovery procedure.
 
-Npm tag promotion also shares up to 60 seconds of retry delays across individual
-exact-version and tarball HTTP 404 reads. Successful archives are downloaded and
-verified once, and all seven packages must pass the full audit before tag writes.
-The initial absence audit stays immediate; other HTTP failures and invalid
-identity, integrity or provenance still fail without a retry.
+Npm verification and tag promotion have one five-minute monotonic wall-clock TTL,
+including HTTP reads, body downloads, source-ordering checks and tag commands.
+Post-publication reads retry HTTP 404, 408, 429 and 5xx with backoff from one second
+to 30 seconds, sharing the deadline across all seven packages and final tag
+confirmations. Valid stale or absent canary tags are polled after successful writes;
+mutations are never retried by this polling loop. Logs identify the package or URL,
+attempt, HTTP status, elapsed/remaining time and next delay, then report a settled
+read or exhaustion. Expiry aborts outstanding reads/commands and fails with recovery
+instructions; it never counts an unverified publication as successful.
+Successful archives are downloaded and verified once, and all seven packages must
+pass the full audit before tag writes. The initial absence audit stays immediate.
+Authorization errors, malformed metadata, transport errors and invalid identity,
+integrity or provenance still fail without a retry. Recover using the original
+approved bytes if external effects already exist.
 
 The channels publish independently after approval. Before a no-op, both channels
 must pass integrity verification: all six platform npm packages and the wrapper
