@@ -101,11 +101,13 @@ describe('readLocationInstances', () => {
   });
 
   it('returns an empty result for a missing location', async () => {
+    const missing = Object.assign(new Error('missing'), { code: 'ENOENT' });
     const missingFs: LibraryInstanceReaderFs = {
-      readDirectory: () => Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' })),
+      readDirectory: () => Promise.reject(missing),
       readFile: () => Promise.reject(new Error('unused')),
-      realPath: (path) => Promise.resolve(path),
+      realPath: () => Promise.reject(missing),
       stat: () => Promise.reject(new Error('unused')),
+      hasEntry: () => Promise.resolve(false),
     };
 
     const result = await readLocationInstances(skillLocation(), '/missing', {
@@ -115,6 +117,24 @@ describe('readLocationInstances', () => {
     });
 
     expect(result).toEqual({ instances: [], unreadableEntries: [] });
+  });
+
+  it('diagnoses an ENOENT listing when the root was resolved', async () => {
+    const interruptedFs: LibraryInstanceReaderFs = {
+      readDirectory: () => Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' })),
+      readFile: () => Promise.reject(new Error('unused')),
+      realPath: (path) => Promise.resolve(path),
+      stat: () => Promise.reject(new Error('unused')),
+    };
+    const result = await readLocationInstances(skillLocation(), root, {
+      cache: new LibraryCache(),
+      force: false,
+      fs: interruptedFs,
+    });
+
+    expect(result.locationDiagnostics ?? []).toEqual([
+      { locationId: 'mango-skills', reason: 'unreadable' },
+    ]);
   });
 
   it('diagnoses a listing that was refused even though the root resolves', async () => {

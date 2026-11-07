@@ -170,9 +170,9 @@ export async function readLocationInstances(
     fs.realPath(locationPath),
   ]);
   if (listing.status === 'rejected') {
-    if (isMissing(listing.reason)) {
+    if (isMissing(listing.reason) && canonical.status === 'rejected') {
       try {
-        if (!(await fs.hasEntry?.(locationPath))) return EMPTY_RESULT;
+        if ((await fs.hasEntry?.(locationPath)) === false) return EMPTY_RESULT;
       } catch (error) {
         return failedListing(location, locationPath, error);
       }
