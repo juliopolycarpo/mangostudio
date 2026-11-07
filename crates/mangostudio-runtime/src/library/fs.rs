@@ -57,6 +57,14 @@ pub(crate) trait LibraryFs: Send + Sync {
     fn read_dir<'a>(&'a self, path: &Path) -> std::io::Result<DirEntries<'a>>;
     /// `realpath`.
     fn real_path(&self, path: &Path) -> std::io::Result<PathBuf>;
+    /// Whether the entry itself exists, even if a symlink target is missing.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// if fs.has_entry(path)? { /* the path was configured but cannot be read */ }
+    /// ```
+    fn has_entry(&self, path: &Path) -> std::io::Result<bool>;
     /// `stat`, following symlinks.
     fn stat(&self, path: &Path) -> std::io::Result<FileMeta>;
     /// Reads at most `max_bytes` from the regular file at `path`, contained
@@ -83,6 +91,19 @@ impl LibraryFs for NativeLibraryFs {
 
     fn real_path(&self, path: &Path) -> std::io::Result<PathBuf> {
         canonicalize(path)
+    }
+
+    fn has_entry(&self, path: &Path) -> std::io::Result<bool> {
+        // A trailing separator makes lstat follow the final link on Unix.
+        let entry = path
+            .parent()
+            .zip(path.file_name())
+            .map(|(parent, name)| parent.join(name));
+        match std::fs::symlink_metadata(entry.as_deref().unwrap_or(path)) {
+            Ok(_) => Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error),
+        }
     }
 
     fn stat(&self, path: &Path) -> std::io::Result<FileMeta> {

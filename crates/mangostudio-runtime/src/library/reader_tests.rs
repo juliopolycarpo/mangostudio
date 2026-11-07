@@ -218,6 +218,10 @@ mod memory_fs {
             Ok(self.resolve(path)?.0)
         }
 
+        fn has_entry(&self, path: &Path) -> std::io::Result<bool> {
+            Ok(self.nodes.contains_key(path))
+        }
+
         fn stat(&self, path: &Path) -> std::io::Result<FileMeta> {
             let (_, node) = self.resolve(path)?;
             let size = match &node {
@@ -504,6 +508,10 @@ mod location_scan {
         let cases = [
             (MemFs::default().dir("/lib/skills", &[]), None),
             (MemFs::default(), None),
+            (
+                MemFs::default().link("/lib/skills", "/lib/missing"),
+                Some("unreadable"),
+            ),
             (
                 MemFs::default()
                     .dir("/lib/skills", &[])

@@ -2237,7 +2237,7 @@ export const messages = {
         'Este runtime não informa falhas de verificação dos locais. Atualize-o para distinguir locais vazios de falhas.',
       reason: {
         'permission-denied': 'Permissão negada. Verifique o acesso a este local.',
-        'not-directory': 'Este local é um arquivo, mas um diretório é necessário.',
+        'not-directory': 'O caminho deste local não aponta para um diretório.',
         unreadable: 'Não foi possível ler este local. Verifique o caminho e tente novamente.',
       },
     },

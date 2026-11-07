@@ -2228,7 +2228,7 @@ export const messages: Messages = {
         'This runtime does not report location scan failures. Update it to distinguish empty locations from failed scans.',
       reason: {
         'permission-denied': 'Permission denied. Check access to this location.',
-        'not-directory': 'This location is a file, but a directory is required.',
+        'not-directory': 'This path does not resolve to a directory.',
         unreadable: 'This location could not be read. Check the path and try again.',
       },
     },

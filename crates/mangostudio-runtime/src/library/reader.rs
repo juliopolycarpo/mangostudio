@@ -135,7 +135,11 @@ pub(crate) fn read_location_instances(
     let location_root = Path::new(location_path);
     let entries = match context.fs.read_dir(location_root) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(ScanResult::default());
+            match context.fs.has_entry(location_root) {
+                Ok(false) => return Ok(ScanResult::default()),
+                Ok(true) => Err(error),
+                Err(metadata_error) => Err(metadata_error),
+            }
         }
         result => result,
     };
