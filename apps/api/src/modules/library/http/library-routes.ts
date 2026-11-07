@@ -88,8 +88,10 @@ function filterLibraryResources(
       const coverage = resource.coverage.find((candidate) => candidate.targetId === filters.target);
       if (!coverage) return false;
       const incomplete = Boolean(coverage.unscannedLocationIds?.length);
+      // Once the resolver finds an effective copy and a shadow, a lower
+      // unscanned location cannot undo either observation.
       return filters.state
-        ? !incomplete && coverage.state === filters.state
+        ? coverage.state === filters.state && (filters.state === 'shadowed' || !incomplete)
         : incomplete || coverage.state !== 'absent';
     }
     return true;

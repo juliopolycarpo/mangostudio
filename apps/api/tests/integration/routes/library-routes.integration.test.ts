@@ -207,6 +207,53 @@ describe('library routes', () => {
     expect(await absent.json()).toEqual({ resources: [], unreadableEntries: [] });
   });
 
+  it('keeps confirmed shadowing when a lower-priority location was unscanned', async () => {
+    const partialPresent: LibraryResource = {
+      ...skillResource,
+      coverage: skillResource.coverage.map((entry) =>
+        entry.targetId === 'mangostudio'
+          ? { ...entry, unscannedLocationIds: ['claude-skills'] }
+          : entry
+      ),
+    };
+    const shadowed: LibraryResource = {
+      ...partialPresent,
+      key: 'skill:shadowed',
+      ref: { kind: 'skill', slug: 'shadowed' },
+      instances: [
+        {
+          ...skillResource.instances[0],
+          locationId: 'mango-skills',
+          path: '/mango/skills/shadowed',
+        },
+        ...skillResource.instances,
+      ],
+      coverage: partialPresent.coverage.map((entry) =>
+        entry.targetId === 'mangostudio'
+          ? {
+              ...entry,
+              state: 'shadowed',
+              effectiveLocationId: 'mango-skills',
+              shadowedLocationIds: ['agents-skills'],
+            }
+          : entry
+      ),
+    };
+    const { service } = createService([shadowed, partialPresent]);
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
+    restoreAuth = restore;
+
+    const shadows = await app.handle(
+      new Request('http://localhost/library/resources?target=mangostudio&state=shadowed')
+    );
+    const present = await app.handle(
+      new Request('http://localhost/library/resources?target=mangostudio&state=present')
+    );
+
+    expect(await shadows.json()).toEqual({ resources: [shadowed], unreadableEntries: [] });
+    expect(await present.json()).toEqual({ resources: [], unreadableEntries: [] });
+  });
+
   it('narrows coverage against the named target rather than any target', async () => {
     const { service } = createService();
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
