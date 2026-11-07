@@ -1,4 +1,5 @@
 import { chmod } from 'node:fs/promises';
+import { win32 } from 'node:path';
 
 import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
 
@@ -23,18 +24,24 @@ async function runCommand(argv: string[]): Promise<CommandResult> {
 export async function protectStaging(
   path: string,
   platform = process.platform,
-  run: Run = runCommand
+  run: Run = runCommand,
+  windowsDirectory = process.env.SystemRoot || 'C:\\Windows'
 ): Promise<void> {
   if (platform !== 'win32') {
     await chmod(path, 0o700);
     return;
   }
-  const identity = await run(['whoami.exe', '/user', '/fo', 'csv', '/nh']);
+  if (!win32.isAbsolute(windowsDirectory)) {
+    throw new Error('Could not locate the absolute Windows system directory for backup staging.');
+  }
+  // Git for Windows can put a Unix whoami ahead of the system utility on PATH.
+  const system32 = win32.join(windowsDirectory, 'System32');
+  const identity = await run([win32.join(system32, 'whoami.exe'), '/user', '/fo', 'csv', '/nh']);
   const sid = identity.stdout.match(/\bS-1-(?:\d+-)+\d+\b/u)?.[0];
   if (identity.exitCode !== 0 || !sid)
     throw new Error('Could not determine the current Windows user SID for private backup staging.');
   const permissions = await run([
-    'icacls.exe',
+    win32.join(system32, 'icacls.exe'),
     path,
     '/inheritance:r',
     '/grant:r',
