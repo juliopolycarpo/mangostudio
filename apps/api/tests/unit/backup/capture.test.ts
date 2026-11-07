@@ -28,6 +28,7 @@ import { parseBackupArgs } from '../../../src/cli/commands/backup';
 import { createBunSqliteDialect } from '../../../src/db/bun-sqlite-dialect';
 import { allMigrations } from '../../../src/db/migrations';
 import { getConfig, getConfigEnvFilePath } from '../../../src/lib/config';
+import { writeFileAtomic } from '../../../src/lib/safe-file';
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -243,6 +244,35 @@ it.skipIf(process.platform === 'win32')(
     const files = await new Bun.Archive(await readFile(output)).files();
     expect(files.has('uploads/user-notes.txt')).toBe(false);
     expect(manifest.exclusions).toContain('uploads/user-notes.txt');
+  }
+);
+
+it.skipIf(process.platform === 'win32')(
+  'excludes the target of an atomic credential write when the read path differs',
+  async () => {
+    const { root, config, output } = await fixture();
+    const directory = basename(config.uploads.dir);
+    const physical = join(root, 'physical');
+    await mkdir(join(physical, 'nested'), { recursive: true });
+    await mkdir(join(physical, directory));
+    await symlink(join(physical, 'nested'), join(root, 'redirect'), 'dir');
+    const envPath = getConfigEnvFilePath(config.configFilePath);
+    await symlink(`redirect/../${directory}/written.txt`, envPath);
+    await writeFile(join(physical, directory, 'written.txt'), 'original read target');
+    writeFileAtomic(envPath, 'GEMINI_API_KEY=written-env-sensitive-fixture');
+    expect(await readFile(envPath, 'utf8')).toBe('original read target');
+    expect(await readFile(join(config.uploads.dir, 'written.txt'), 'utf8')).toBe(
+      'GEMINI_API_KEY=written-env-sensitive-fixture'
+    );
+
+    const manifest = await captureBackup(
+      config,
+      { output, checkpoints: true, includeSecrets: false },
+      'test'
+    );
+    const files = await new Bun.Archive(await readFile(output)).files();
+    expect(files.has('uploads/written.txt')).toBe(false);
+    expect(manifest.exclusions).toContain('uploads/written.txt');
   }
 );
 

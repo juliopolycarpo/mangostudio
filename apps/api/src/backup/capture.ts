@@ -23,6 +23,7 @@ import {
 import Value from 'typebox/value';
 
 import { getConfigEnvFilePath, type MangoConfig } from '../lib/config';
+import { resolvePathThroughExistingAncestor } from '../lib/path-containment';
 import { acquireCaptureLock } from './capture-lock';
 import { BACKUP_EXCLUSIONS, redactBackupDatabase } from './privacy';
 import { protectStaging } from './private-staging';
@@ -183,16 +184,24 @@ export async function captureBackup(
   if (occupied) {
     throw Object.assign(new Error('Backup destination already exists.'), { code: 'EEXIST' });
   }
+  const environmentFile = getConfigEnvFilePath(config.configFilePath);
   const fallbackDir = config.secretStore.unsafeFileFallbackDir.trim();
-  const [configurationPath, ...secretPaths] = await Promise.all([
-    physicalBackupLocation(config.configFilePath),
-    physicalBackupLocation(getConfigEnvFilePath(config.configFilePath)),
-    ...(fallbackDir ? [physicalBackupLocation(join(fallbackDir, 'secrets.json'))] : []),
+  const configuredPaths = [
+    config.configFilePath,
+    environmentFile,
+    ...(fallbackDir ? [join(fallbackDir, 'secrets.json')] : []),
+  ];
+  const configurationPath = await physicalBackupLocation(config.configFilePath);
+  const managedPaths = new Set([
+    configurationPath,
+    ...(await Promise.all(configuredPaths.slice(1).map(physicalBackupLocation))),
+    // The sync atomic writer follows its own missing-target resolver. Older
+    // writes may have put credentials at a different path from filesystem reads.
+    ...configuredPaths.map(resolvePathThroughExistingAncestor),
   ]);
-  if ([configurationPath, ...secretPaths].some((path) => inside(output, path))) {
+  if ([...managedPaths].some((path) => inside(output, path))) {
     throw new Error('Backup destination overlaps a managed configuration or secret path.');
   }
-  const managedSecretPaths = new Set(secretPaths);
   const databasePath = await realpath(config.database.path);
   const configuredRoots = await Promise.all(
     backupRoots(config, true).map(async (root) => {
@@ -356,7 +365,7 @@ export async function captureBackup(
       const canonicalPath = await realpath(path);
       if (!inside(root, canonicalPath))
         throw new Error('Backup source escaped its configured root.');
-      if (meta.isFile() && managedSecretPaths.has(canonicalPath)) {
+      if (meta.isFile() && managedPaths.has(canonicalPath)) {
         manifest.exclusions.push(prefix);
         return;
       }
