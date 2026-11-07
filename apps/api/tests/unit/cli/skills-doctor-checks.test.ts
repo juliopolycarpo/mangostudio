@@ -1,4 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
+import * as fs from 'node:fs';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -99,6 +100,63 @@ describe('collectSkillsDoctorChecks', () => {
       );
     }
   );
+
+  it.skipIf(process.platform === 'win32')(
+    'reports a withheld skill when the higher source has a dangling parent',
+    () => {
+      symlinkSync(join(mangoDir, 'missing'), agentsDir, 'dir');
+      writeSkill(claudeDir, 'fallback', 'name: fallback\ndescription: Claude copy');
+
+      const results = run({
+        sourceToggles: { agents: true, claude: true },
+        thirdPartyDirs: { agents: join(agentsDir, 'nested', 'skills'), claude: claudeDir },
+      });
+      expect(results.find((row) => row.label === 'Skill claude:fallback')?.detail ?? null).toBe(
+        'higher-priority skill location could not be scanned'
+      );
+    }
+  );
+
+  it('keeps fallback available when the higher source is blocked by a file', () => {
+    writeFileSync(agentsDir, 'not a directory');
+    writeSkill(claudeDir, 'fallback', 'name: fallback\ndescription: Claude copy');
+
+    const results = run({
+      sourceToggles: { agents: true, claude: true },
+      thirdPartyDirs: { agents: join(agentsDir, 'skills'), claude: claudeDir },
+    });
+    expect(find(results, 'Skills agents').status).toBe('fail');
+    expect(results.some((row) => row.label === 'Skill claude:fallback')).toBe(false);
+  });
+
+  it('keeps fallback available when an ENOENT probe then finds a file parent', () => {
+    writeFileSync(agentsDir, 'not a directory');
+    writeSkill(claudeDir, 'fallback', 'name: fallback\ndescription: Claude copy');
+    const higherSource = join(agentsDir, 'skills');
+    const readBeforeParentReplacement = new Proxy(fs.readdirSync, {
+      apply(read, receiver, args) {
+        if (args[0] === higherSource) {
+          throw Object.assign(new Error('missing before the parent was replaced'), {
+            code: 'ENOENT',
+          });
+        }
+        return Reflect.apply(read, receiver, args);
+      },
+    });
+    const listing = spyOn(fs, 'readdirSync').mockImplementation(readBeforeParentReplacement);
+    try {
+      const results = run({
+        sourceToggles: { agents: true, claude: true },
+        thirdPartyDirs: { agents: higherSource, claude: claudeDir },
+      });
+      expect(find(results, 'Skills agents').status).toBe('fail');
+      expect(
+        results.find((row) => row.label === 'Skill claude:fallback')?.detail ?? null
+      ).toBeNull();
+    } finally {
+      listing.mockRestore();
+    }
+  });
 
   it('fails an unreadable enabled source', () => {
     writeFileSync(mangoDir, 'not a dir', 'utf8');

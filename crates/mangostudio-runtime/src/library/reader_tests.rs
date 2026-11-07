@@ -488,7 +488,16 @@ mod location_scan {
     use crate::probing::locations::location_by_id;
 
     fn scan(fs: &MemFs, warnings: &Mutex<Vec<String>>) -> ScanResult {
-        let location = location_by_id("mango-skills").expect("mango-skills is registered");
+        scan_at(fs, "mango-skills", "/lib/skills", warnings)
+    }
+
+    fn scan_at(
+        fs: &MemFs,
+        location_id: &str,
+        path: &str,
+        warnings: &Mutex<Vec<String>>,
+    ) -> ScanResult {
+        let location = location_by_id(location_id).expect("the location is registered");
         let cache = LibraryCache::default();
         let cancel = CancellationToken::new();
         let warn = |message: &str| warnings.lock().unwrap().push(message.to_string());
@@ -500,14 +509,14 @@ mod location_scan {
             cancel: &cancel,
             warn: &warn,
         };
-        read_location_instances(location, "/lib/skills", &context).expect("the scan completes")
+        read_location_instances(location, path, &context).expect("the scan completes")
     }
 
     #[test]
     fn location_failures_are_distinct_from_empty_and_missing() {
         let cases = [
             (MemFs::default().dir("/lib/skills", &[]), None),
-            (MemFs::default(), None),
+            (MemFs::default().dir("/lib", &[]), None),
             (
                 MemFs::default().link("/lib/skills", "/lib/missing"),
                 Some("unreadable"),
@@ -531,6 +540,95 @@ mod location_scan {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn a_dangling_single_file_link_is_unreadable_while_a_missing_file_is_empty() {
+        let warnings = Mutex::new(Vec::new());
+        let path = "/lib/CLAUDE.md";
+        let target = "/lib/instructions.md";
+        let fs = MemFs::default().dir("/lib", &[]);
+        let missing = scan_at(&fs, "claude-instructions", path, &warnings);
+        assert_eq!(missing, ScanResult::default());
+
+        let fs = fs.link(path, target);
+        let dangling = scan_at(&fs, "claude-instructions", path, &warnings);
+        assert_eq!(
+            dangling.entries.len(),
+            1,
+            "expected one unreadable configured copy | received {dangling:?}"
+        );
+        let entry = &dangling.entries[0];
+        assert_eq!(entry.resource.slug, "global");
+        assert_eq!(entry.instance.location_id, "claude-instructions");
+        assert!(!entry.instance.valid);
+        assert_eq!(
+            entry.instance.invalid_reason,
+            Some(InvalidReason::Unreadable)
+        );
+
+        let fs = fs.file(target, b"These instructions are now available.\n");
+        let linked = scan_at(&fs, "claude-instructions", path, &warnings);
+        assert_eq!(linked.entries.len(), 1);
+        assert!(linked.entries[0].instance.valid);
+    }
+
+    #[test]
+    fn configured_locations_under_a_dangling_parent_are_unreadable() {
+        let warnings = Mutex::new(Vec::new());
+        let file = "/lib/config/nested/CLAUDE.md";
+        let skills = "/lib/config/nested/skills";
+        let target = "/lib/dotfiles";
+        let fs = MemFs::default().dir("/lib", &[]);
+        let scan_locations = |fs: &MemFs| {
+            (
+                scan_at(fs, "claude-instructions", file, &warnings),
+                scan_at(fs, "mango-skills", skills, &warnings),
+            )
+        };
+
+        assert_eq!(
+            scan_locations(&fs),
+            (ScanResult::default(), ScanResult::default())
+        );
+        let fs = fs.link("/lib/config", target);
+        let (file_scan, skill_scan) = scan_locations(&fs);
+        assert_eq!(
+            (
+                file_scan
+                    .entries
+                    .first()
+                    .and_then(|entry| entry.instance.invalid_reason),
+                skill_scan
+                    .location_diagnostics
+                    .first()
+                    .map(|diagnostic| diagnostic.reason),
+            ),
+            (Some(InvalidReason::Unreadable), Some("unreadable")),
+            "expected both configured locations to report the unresolved parent"
+        );
+
+        let fs = fs.dir(target, &[]);
+        assert_eq!(
+            scan_locations(&fs),
+            (ScanResult::default(), ScanResult::default())
+        );
+    }
+
+    #[test]
+    fn a_file_parent_cannot_confirm_absence_of_a_location() {
+        let warnings = Mutex::new(Vec::new());
+        let fs = MemFs::default().file("/lib/config", b"not a directory");
+        let scanned = scan_at(&fs, "mango-skills", "/lib/config/skills", &warnings);
+
+        assert_eq!(
+            scanned
+                .location_diagnostics
+                .first()
+                .map(|diagnostic| diagnostic.reason),
+            Some("not-directory"),
+            "expected a layout diagnostic when the parent is a file | received {scanned:?}"
+        );
     }
 
     fn assert_failed_location_listing(kind: std::io::ErrorKind) {

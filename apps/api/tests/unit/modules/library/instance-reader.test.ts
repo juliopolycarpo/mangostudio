@@ -106,7 +106,10 @@ describe('readLocationInstances', () => {
       readDirectory: () => Promise.reject(missing),
       readFile: () => Promise.reject(new Error('unused')),
       realPath: () => Promise.reject(missing),
-      stat: () => Promise.reject(new Error('unused')),
+      stat: (path) =>
+        path === '/'
+          ? Promise.resolve({ size: 0, mtimeMs: 0, isDirectory: true, isFile: false })
+          : Promise.reject(missing),
       hasEntry: () => Promise.resolve(false),
     };
 
@@ -182,6 +185,100 @@ describe('readLocationInstances', () => {
       ]);
     }
   );
+
+  it.skipIf(process.platform === 'win32')(
+    'distinguishes a dangling single-file link from an absent optional file',
+    async () => {
+      const location = getLibraryLocation('claude-instructions');
+      if (!location) throw new Error('Missing claude-instructions test fixture.');
+      const path = join(root, 'CLAUDE.md');
+      const target = join(root, 'instructions.md');
+      const options = { cache: new LibraryCache(), force: true };
+
+      expect((await readLocationInstances(location, path, options)).instances).toEqual([]);
+      symlinkSync(target, path, 'file');
+
+      const dangling = await readLocationInstances(location, path, options);
+      expect(dangling.instances).toMatchObject([
+        {
+          ref: { kind: 'instruction', slug: 'global' },
+          instance: {
+            locationId: 'claude-instructions',
+            valid: false,
+            invalidReason: 'unreadable',
+          },
+        },
+      ]);
+
+      writeFileSync(target, 'These instructions are now available.\n');
+      const linked = await readLocationInstances(location, path, options);
+      expect(linked.instances).toMatchObject([
+        { instance: { locationId: 'claude-instructions', valid: true } },
+      ]);
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'distinguishes a dangling configuration directory from an absent location',
+    async () => {
+      const instructions = getLibraryLocation('claude-instructions');
+      if (!instructions) throw new Error('Missing claude-instructions test fixture.');
+      const config = join(root, 'config');
+      const target = join(root, 'dotfiles');
+      const file = join(config, 'nested', 'CLAUDE.md');
+      const skills = join(config, 'nested', 'skills');
+      const options = { cache: new LibraryCache(), force: true };
+
+      expect((await readLocationInstances(instructions, file, options)).instances).toEqual([]);
+      expect(
+        (await readLocationInstances(skillLocation(), skills, options)).locationDiagnostics
+      ).toBeUndefined();
+
+      symlinkSync(target, config, 'dir');
+      const fileScan = await readLocationInstances(instructions, file, options);
+      const skillScan = await readLocationInstances(skillLocation(), skills, options);
+      expect({
+        file: fileScan.instances.map(({ instance }) => ({
+          locationId: instance.locationId,
+          reason: instance.valid ? null : instance.invalidReason,
+        })),
+        skills: skillScan.locationDiagnostics ?? [],
+      }).toEqual({
+        file: [{ locationId: 'claude-instructions', reason: 'unreadable' }],
+        skills: [{ locationId: 'mango-skills', reason: 'unreadable' }],
+      });
+
+      mkdirSync(target);
+      expect((await readLocationInstances(instructions, file, options)).instances).toEqual([]);
+      expect(
+        (await readLocationInstances(skillLocation(), skills, options)).locationDiagnostics
+      ).toBeUndefined();
+    }
+  );
+
+  it('does not confirm absence when a parent is a file', async () => {
+    const missing = Object.assign(new Error('missing'), { code: 'ENOENT' });
+    const parent = join(root, 'parent');
+    const blockedParentFs: LibraryInstanceReaderFs = {
+      readDirectory: () => Promise.reject(missing),
+      readFile: () => Promise.reject(new Error('unused')),
+      realPath: () => Promise.reject(missing),
+      stat: (path) =>
+        path === parent
+          ? Promise.resolve({ size: 1, mtimeMs: 0, isDirectory: false, isFile: true })
+          : Promise.reject(missing),
+      hasEntry: (path) => Promise.resolve(path === parent),
+    };
+    const result = await readLocationInstances(skillLocation(), join(parent, 'skills'), {
+      cache: new LibraryCache(),
+      force: true,
+      fs: blockedParentFs,
+    });
+
+    expect(result.locationDiagnostics ?? []).toEqual([
+      { locationId: 'mango-skills', reason: 'not-directory' },
+    ]);
+  });
 
   it('reports a file where a skill directory was expected', async () => {
     writeFileSync(join(root, 'not-a-directory'), 'content');

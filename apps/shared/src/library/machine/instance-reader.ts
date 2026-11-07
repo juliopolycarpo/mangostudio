@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { lstat, readdir, readFile, realpath, stat } from 'node:fs/promises';
-import { basename, extname, join, parse, relative, sep } from 'node:path';
+import { basename, dirname, extname, join, parse, relative, sep } from 'node:path';
 
 import { parseMarkdownFrontmatter } from '../../markdown';
 import { throwIfAborted } from '../../runtime-contract/cancellation';
@@ -172,7 +172,7 @@ export async function readLocationInstances(
   if (listing.status === 'rejected') {
     if (isMissing(listing.reason) && canonical.status === 'rejected') {
       try {
-        if ((await fs.hasEntry?.(locationPath)) === false) return EMPTY_RESULT;
+        if (await confirmsMissingLocation(locationPath, fs)) return EMPTY_RESULT;
       } catch (error) {
         return failedListing(location, locationPath, error);
       }
@@ -285,7 +285,14 @@ async function readOneEntry(
   try {
     metadata = await fs.stat(path);
   } catch (error) {
-    if (isMissing(error)) return EMPTY_RESULT;
+    if (isMissing(error)) {
+      if (location.layout !== 'single-file') return EMPTY_RESULT;
+      try {
+        if (await confirmsMissingLocation(path, fs)) return EMPTY_RESULT;
+      } catch {
+        // The entry probe could not confirm absence.
+      }
+    }
     return oneInstance(invalidInstance(ref, location, path, 0, 'unreadable'));
   }
 
@@ -606,6 +613,34 @@ function scalarString(value: unknown): string | undefined {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+// A missing child path can also be the result of a dangling ancestor.
+// Find a reachable parent before treating the location as genuinely absent.
+async function confirmsMissingLocation(
+  path: string,
+  fs: LibraryInstanceReaderFs
+): Promise<boolean> {
+  if (!fs.hasEntry || (await fs.hasEntry(path))) return false;
+
+  let parent = dirname(path);
+  while (parent !== path) {
+    try {
+      const metadata = await fs.stat(parent);
+      if (!metadata.isDirectory) {
+        throw Object.assign(new Error(`Expected a directory at "${parent}".`), {
+          code: 'ENOTDIR',
+        });
+      }
+      return true;
+    } catch (error) {
+      if (!isMissing(error)) throw error;
+      if (await fs.hasEntry(parent)) return false;
+    }
+    path = parent;
+    parent = dirname(path);
+  }
+  return false;
 }
 
 function isMissing(error: unknown): boolean {
