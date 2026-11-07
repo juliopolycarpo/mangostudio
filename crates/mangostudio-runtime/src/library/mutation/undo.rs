@@ -17,11 +17,11 @@ use super::backup_store::{BackupEntry, BackupStore, StoreError};
 use super::disk::ResourceHasher;
 use super::interrupt::Interrupt;
 use super::paths::{
-    WriteError, WriteFailure, fs_path, is_path_prefix, node_resolve,
-    resolve_through_existing_ancestor,
+    WriteError, WriteFailure, assert_expected_resource_entry, fs_path, is_path_prefix, node_join,
+    node_resolve, resolve_through_existing_ancestor,
 };
 use crate::probing::detection::path_env::PathEnv;
-use crate::probing::locations::location_by_id;
+use crate::probing::locations::{LocationLayout, location_by_id};
 
 /// `PropagationUndoEntry`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -91,7 +91,9 @@ pub(crate) fn execute_undo(
     };
     let platform = store.platform.as_str();
     let backup_root = node_resolve(platform, &store.root);
-    let physical_backup_root = resolve_through_existing_ancestor(&backup_root);
+    let backup_set = node_join(platform, &[&backup_root, backup_id]);
+    let physical_backup_set = resolve_through_existing_ancestor(&backup_root)
+        .map(|root| node_join(platform, &[&root, backup_id]));
     let mut report = UndoResult {
         backup_id: backup_id.to_string(),
         restored: Vec::new(),
@@ -103,6 +105,7 @@ pub(crate) fn execute_undo(
             return Err(UndoError::Interrupted(interrupt, report));
         }
         let destination = resolve_contained_destination(entry, env).map_err(UndoError::Refused)?;
+        assert_expected_resource_entry(&destination, entry.kind).map_err(UndoError::Refused)?;
         let location = UndoEntry {
             location_id: entry.location_id.clone(),
             destination_path: entry.destination_path.clone(),
@@ -138,14 +141,14 @@ pub(crate) fn execute_undo(
             report.removed.push(location);
             continue;
         };
-        if !is_path_prefix(platform, &backup_root, &node_resolve(platform, backup_path)) {
+        if !is_path_prefix(platform, &backup_set, &node_resolve(platform, backup_path)) {
             report.skipped.push(skip("backup-missing"));
             continue;
         }
         let Some(physical_backup) = resolve_through_existing_ancestor(backup_path).filter(|path| {
-            physical_backup_root
+            physical_backup_set
                 .as_ref()
-                .is_some_and(|root| is_path_prefix(platform, root, path))
+                .is_some_and(|root| root != path && is_path_prefix(platform, root, path))
         }) else {
             report.skipped.push(skip("backup-missing"));
             continue;
@@ -173,8 +176,9 @@ pub(crate) fn execute_undo(
 /// Check the recorded destination against its current physical path. The
 /// root itself is a valid destination for a single-file location.
 fn resolve_contained_destination(entry: &BackupEntry, env: &PathEnv) -> Result<String, WriteError> {
-    let root = location_by_id(&entry.location_id).and_then(|location| (location.resolve_path)(env));
-    let Some(root) = root else {
+    let location = location_by_id(&entry.location_id)
+        .and_then(|location| (location.resolve_path)(env).map(|root| (location, root)));
+    let Some((location, root)) = location else {
         return Err(WriteError::new(
             WriteFailure::UnsupportedLocation,
             format!(
@@ -205,6 +209,15 @@ fn resolve_contained_destination(entry: &BackupEntry, env: &PathEnv) -> Result<S
         return Err(WriteError::new(
             WriteFailure::PathEscape,
             format!(r#"Library backup destination "{recorded}" now resolves to "{physical}"."#),
+        ));
+    }
+    if (physical == resolved_root) != (location.layout == LocationLayout::SingleFile) {
+        return Err(WriteError::new(
+            WriteFailure::PathEscape,
+            format!(
+                r#"Library backup destination "{physical}" is not a resource in location "{}"."#,
+                entry.location_id
+            ),
         ));
     }
     Ok(physical)

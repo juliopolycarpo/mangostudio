@@ -41,7 +41,7 @@ use serde_json::{Map, Value, json};
 
 use super::super::collation::locale_compare;
 use super::disk::{CopyPurpose, EntryType, MutationFs};
-use super::paths::{ResourceKind, fs_path, node_basename, node_dirname, node_join};
+use super::paths::{ResourceKind, fs_path, node_basename, node_dirname, node_join, node_resolve};
 use crate::ports::wall_clock::format_iso8601_millis;
 use crate::probing::locations::location_by_id;
 
@@ -504,14 +504,32 @@ impl BackupStore {
     }
 
     fn read_manifest_at(&self, set: &str) -> Result<Option<BackupManifest>, StoreError> {
-        let raw = match self.fs.read_text(&Path::new(set).join(MANIFEST_NAME)) {
+        let set = Path::new(set);
+        let Some(id) = set.file_name().and_then(|name| name.to_str()) else {
+            return Ok(None);
+        };
+        let path = match std::fs::canonicalize(set.join(MANIFEST_NAME)) {
+            Ok(path) => path,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(io(error)),
+        };
+        // Match the spelling used by set_path and write_manifest before
+        // resolving the physical root. Refuse redirects even to a sibling set.
+        let root = std::fs::canonicalize(node_resolve(&self.platform, &self.root)).map_err(io)?;
+        if path != root.join(id).join(MANIFEST_NAME)
+            || !std::fs::metadata(&path).map_err(io)?.is_file()
+        {
+            return Ok(None);
+        }
+        let raw = match self.fs.read_text(&path) {
             Ok(raw) => raw,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(io(error)),
         };
         Ok(serde_json::from_str::<Value>(&raw)
             .ok()
-            .and_then(|value| BackupManifest::from_json(&value)))
+            .and_then(|value| BackupManifest::from_json(&value))
+            .filter(|manifest| manifest.backup_id == id))
     }
 
     /// `restoreBackupEntry`: the copy is staged beside the destination and
