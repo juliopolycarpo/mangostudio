@@ -16,9 +16,11 @@ frame limit enforced per line, refused line ends the session with `4400`.
   **refused** (including a path that disappeared), and **inconclusive** (timeout, permissions,
   resource exhaustion or another undecidable error). An inconclusive result MUST NOT claim
   that a live listener was observed. All occupied paths are preserved by these SDKs: a refused
-  connection is not authority to unlink a pathname later. Binding refuses with `EADDRINUSE` /
-  `AddrInUse` and an observation-specific diagnostic. Nothing at the address is overwritten or
-  removed; filesystems without no-replace socket publication fail closed.
+  connection is not authority to unlink a pathname later. An observed socket causes
+  `EADDRINUSE` / `AddrInUse` with a diagnostic that names the observation. For a non-socket
+  entry or a competing publisher, TypeScript still reports `EADDRINUSE` and Rust reports
+  `AlreadyExists`. Nothing at the address is overwritten or removed. Filesystems without
+  no-replace socket publication fail closed.
 - Windows: `\\.\pipe\<name>`, spelled with backslashes. Forward slashes are not equivalent.
   The listener creates the pipe in byte mode. A named pipe admits every local user unless the
   listener attaches a security descriptor, so a listener SHOULD create the pipe with a DACL
@@ -75,17 +77,20 @@ exclusive cleanup outside the listener, or choose a fresh endpoint and publish i
 an application-owned mechanism. A blind `unlink` retry is not that coordination. This stricter
 lifecycle behavior requires caller migration; it does not change protocol wire version 1.
 
-Both SDKs bind within a fresh `0700` directory on the destination filesystem and
-hard-links the socket to the public name without replacement. Staging may move to an ancestor
-directory so its pathname also fits the native Unix socket limit; when no suitable private
-staging location is available, publication fails closed. Public pathnames are also validated before
-staging or publication: TypeScript enforces the UTF-8 byte ceiling (107 on Linux, 103 on other
+Both SDKs bind within a fresh `0700` directory on the destination filesystem and hard-link the
+socket to the public name without replacement. Choose a directory where other users cannot
+replace the listener's entries, such as an owner-only runtime directory or a sticky temporary
+directory. Staging may move to a same-filesystem ancestor to fit the native Unix socket limit.
+When no suitable location is available, publication fails closed. Both SDKs validate public
+pathnames before staging or publication: TypeScript enforces the UTF-8 byte ceiling (107 on Linux, 103 on other
 POSIX hosts), and Rust uses the native Unix socket address constructor. A shorter staged bind
 must never make an undialable public pathname appear available. Windows named pipes are exempt
 from these POSIX pathname checks. Node/libuv's automatic close unlink affects only its
-private bound name, so a late close cannot delete the public successor. Rust likewise publishes
-with a non-replacing hard link and never falls back to replacing rename. Private staging names
-are reserved for that SDK instance and must not be repurposed by the application.
+private bound name, so a late close cannot delete the public successor. The private name is
+absolute and uses the physical parent after symlink resolution. This keeps a relative bind's
+cleanup anchored even if the process changes its working directory. Rust completes publication
+and transfers ownership to the listener without a suspension point. Private staging names are
+reserved for the SDK instance and must stay under its control.
 
 ## Probe and pre-handshake ownership
 
@@ -97,14 +102,14 @@ The reference Session refuses pre-hello requests without invoking their handlers
 accepted ports with a Session immediately; retaining an undriven Rust port also retains its
 caller-owned reservation and descriptor.
 
-Both acceptors cap tracked connections at 64 (including established sessions), and ports enforce
-a 15-second first-hello deadline independent of Session's configured handshake deadline.
-TypeScript closes idle sockets directly; Rust enforces the deadline while its receive half is
-driven and closes its writer on timeout. Cleanup owns the writer independently of receive
-cancellation, immediately disables sends, and retains the existing two-second bounds on
-farewell write and writer shutdown. TypeScript transport termination notifies its Session owner
-even when that owner configured a longer handshake timeout. Decoding remains bounded by the configured frame limit
-(default 16 MiB), with at most 64 such connections. An invalid or partial hello never grants
+Both acceptors cap tracked connections at 64, including established sessions. They drop excess
+connections and continue accepting when a slot frees up. Accepted ports enforce a 15-second
+first-hello deadline independent of Session's configured handshake deadline. TypeScript closes
+idle sockets directly. In Rust the deadline applies while reading or writing, including during a
+blocked outbound hello before the Session starts reading. Cleanup owns the writer independently
+of receive cancellation and disables sends immediately. Farewell writing and writer shutdown each
+have a two-second bound. Listener shutdown also tells the local port owner to stop processing
+frames. Decoding stays within the configured frame limit (16 MiB by default). An invalid or partial hello never grants
 application authority. Probe EOF and Session teardown release their accepted resources.
 Windows named pipes use their kernel/ACL lifecycle, return no-filesystem-path on close, and have
 no POSIX public path or inode-cleanup rule. The Rust first-instance and owner DACL remain;

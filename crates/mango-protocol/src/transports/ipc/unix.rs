@@ -167,10 +167,9 @@ impl IpcListener {
 /// The socket is bound inside an owner-only directory on the same device as `path`,
 /// restricted to `0600` there, and then published at `path`. `bind` takes its
 /// mode from the umask, so binding straight onto the address would publish a
-/// world-connectable socket for as long as a `chmod` takes; the TypeScript SDK
-/// closes that window by setting the process-wide umask, which a library
-/// cannot do without reaching into every other thread. Staging inside a
-/// directory nobody else may enter closes it without leaving this call.
+/// world-connectable socket for as long as a `chmod` takes. Both SDKs stage
+/// the socket inside a directory other users cannot enter, so setting its
+/// permissions does not require changing the process-wide umask.
 ///
 /// Existing socket paths are always preserved. A dial result is an observation,
 /// never authority for a later unlink. Refused, connected and inconclusive outcomes

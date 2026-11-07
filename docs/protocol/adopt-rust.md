@@ -279,9 +279,9 @@ Probe diagnostics distinguish connected, refused and inconclusive results. A
 probe can enqueue a real connection; accept counters and peer identity are not
 application authentication. Start a Session immediately and wait for its handshake
 and application authentication before authority or expensive work. Both SDKs cap
-tracked connections at 64 and bound first hello to 15 seconds; Rust enforces that
-deadline while the receive half is driven. The configured frame limit still
-bounds decoding. See [the revised local socket contract](../../spec/transports/local-socket.md)
+tracked connections at 64 and drop excess connections without stopping the listener.
+The first-hello deadline is 15 seconds. Rust enforces it during active reads and
+writes, including a blocked outbound hello. The configured frame limit bounds decoding. See [the revised local socket contract](../../spec/transports/local-socket.md)
 for cleanup migration, resource ownership and Windows named-pipe differences.
 
 The WebSocket transport dials with the `mango.v1` subprotocol and the reference bearer
