@@ -392,6 +392,31 @@ describe('startServer via __serve', () => {
     TEST_TIMEOUT_MS
   );
 
+  it.skipIf(process.platform === 'win32')(
+    'reports a hung HTTP drain as a timed-out failure and retains ownership until exit',
+    async () => {
+      if (!fixture) throw new Error('Expected a managed process fixture.');
+      const running = fixture;
+      const preload = fileURLToPath(
+        new URL('../../support/fixtures/hung-http-shutdown.ts', import.meta.url)
+      );
+      const database = join(running.tempDir, 'hung-drain.sqlite');
+      const { pidFile } = await startServing(running, preload, { databasePath: database });
+      const stopped = running.stop('SIGTERM');
+      await running.waitUntilReady(
+        () => running.diagnostics().includes('shutdown-fixture: HTTP drain will not settle'),
+        { label: 'hung HTTP drain', timeoutMs: START_TIMEOUT_MS }
+      );
+      await expect(acquireCaptureLock(database)).rejects.toThrow('already in use');
+      expect(await stopped).toBe(1);
+      expect(running.diagnostics()).toContain('Shutdown did not complete within 2000ms');
+      expect(existsSync(pidFile)).toBe(true);
+      const release = await acquireCaptureLock(database);
+      await release();
+    },
+    TEST_TIMEOUT_MS
+  );
+
   it(
     'exits before listening when the auth secret is missing',
     async () => {
