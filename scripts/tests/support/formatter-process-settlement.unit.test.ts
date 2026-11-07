@@ -316,6 +316,39 @@ describe('native formatter identity queries', () => {
       'expected native integer parent/group'
     );
   });
+  it.each(['S', 'Z', 'X'])('recognizes reaped Linux lineage with state %s', async (state) => {
+    const queries = new NativeQueryTranscript('linux');
+    queries.stat = linuxStat(state).replace(` ${state} 100 1234 0 `, ` ${state} 0 -1 -1 `);
+    expect(await readNativeFormatterProcess(1234, 300, queries)).toBeUndefined();
+    expect(queries.calls).toEqual([['stat', 1234, 300]]);
+  });
+  it.each(['0 -1 0', '100 -1 -1', '0 -2 -1'])(
+    'refuses other negative Linux lineage: %s',
+    async (lineage) => {
+      const queries = new NativeQueryTranscript('linux');
+      queries.stat = linuxStat().replace(' S 100 1234 0 ', ` S ${lineage} `);
+      await expect(readNativeFormatterProcess(1234, 300, queries)).rejects.toThrow(
+        'expected native integer parent/group'
+      );
+    }
+  );
+  it('refuses reaped lineage with an invalid state, birth or PID', async () => {
+    const queries = new NativeQueryTranscript('linux');
+    queries.stat = linuxStat('?').replace(' ? 100 1234 0 ', ' ? 0 -1 -1 ');
+    await expect(readNativeFormatterProcess(1234, 300, queries)).rejects.toThrow(
+      'expected a process state letter'
+    );
+    queries.stat = linuxStat('S', 'invalid').replace(' S 100 1234 0 ', ' S 0 -1 -1 ');
+    await expect(readNativeFormatterProcess(1234, 300, queries)).rejects.toThrow(
+      'expected decimal digits'
+    );
+    queries.stat = linuxStat()
+      .replace(/^1234 /, '1235 ')
+      .replace(' S 100 1234 0 ', ' S 0 -1 -1 ');
+    await expect(readNativeFormatterProcess(1234, 300, queries)).rejects.toThrow(
+      'expected native integer parent/group'
+    );
+  });
   it('keeps the macOS POSIX path and captures creation time with native state', async () => {
     const queries = new NativeQueryTranscript('darwin');
     queries.result.stdout = '1234 100 1234 S+ Sun Oct 25 10:00:00 2026 rustfmt file.rs';

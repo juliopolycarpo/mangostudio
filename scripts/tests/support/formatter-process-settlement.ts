@@ -78,7 +78,13 @@ export async function readNativeFormatterProcess(
       }
     );
     if (!identity) throw new Error(`formatter ${pid}: expected the captured native birth identity`);
-    const state = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0] ?? '';
+    const [state = '', parent, group, session] = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+    // procfs samples state before locking the signal handler. A reaped task
+    // can still show that earlier state alongside the kernel's default lineage.
+    if (parent === '0' && group === '-1' && session === '-1' && stat.startsWith(`${pid} (`)) {
+      isAlive(pid, () => state);
+      return undefined;
+    }
     return checkedNativeFormatter(identity, state);
   }
 
