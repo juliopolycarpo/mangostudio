@@ -246,30 +246,29 @@ pub(crate) fn resolve_like_node(
         ("/".to_string(), segments)
     };
     let mut hops = 0;
-    let mut missing_depth = 0_usize;
+    let mut missing_tail = false;
     while let Some(segment) = pending.pop_front() {
         match segment.as_str() {
             "." => continue,
+            ".." if missing_tail => return None,
             ".." => {
                 resolved = node_dirname(platform, &resolved);
-                missing_depth = missing_depth.saturating_sub(1);
                 continue;
             }
             _ => {}
         }
 
         let candidate = resolve_path(platform, &resolved, &segment);
-        if missing_depth > 0 {
-            missing_depth += 1;
+        if missing_tail {
             resolved = candidate;
             continue;
         }
 
         match probe(&candidate).ok()? {
             SegmentEntry::Missing => {
-                // Keep a virtual tail for creation, but probe again if parent
-                // steps return to the existing directory.
-                missing_depth = 1;
+                // Ordinary missing descendants can be created. A later parent
+                // step cannot cancel a component the kernel could not traverse.
+                missing_tail = true;
                 resolved = candidate;
             }
             SegmentEntry::NonDirectory if !win32 && !pending.is_empty() => return None,

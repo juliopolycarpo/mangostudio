@@ -98,12 +98,22 @@ fn posix_parent_steps_follow_symlinks_in_input_and_target_text() {
         "/safe/redirect/../entry",
         "/safe/relative",
         "/safe/absolute",
-        "/safe/missing/../redirect/../entry",
     ] {
         assert_eq!(
             resolve_like_node("linux", input, &probe(&existing, &links)).as_deref(),
             Some("/outside/entry"),
             "expected the parent of the symlink target while resolving {input:?}"
+        );
+    }
+    for input in [
+        "/safe/missing/../redirect/../entry",
+        "/safe/missing/child/../entry",
+        "/safe/missing/..",
+    ] {
+        assert_eq!(
+            resolve_like_node("linux", input, &probe(&existing, &links)),
+            None,
+            "expected parent traversal after a missing component to be refused for {input:?}"
         );
     }
 }
@@ -163,4 +173,48 @@ fn a_real_relative_link_target_uses_the_redirects_physical_parent() {
         None,
         "parent traversal cannot pass through a file"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_library_write_cannot_cancel_a_missing_posix_parent() {
+    use crate::library::mutation::disk::write_library_file_atomic;
+    use std::os::unix::fs::symlink;
+
+    let scratch = crate::test_support::scratch_dir("library-write-missing-parent");
+    let safe = scratch.join("safe");
+    let outside = scratch.join("outside");
+    std::fs::create_dir_all(&safe).unwrap();
+    std::fs::create_dir_all(outside.join("nested")).unwrap();
+    let sentinel = outside.join("secret.txt");
+    std::fs::write(&sentinel, "outside sentinel").unwrap();
+    symlink(outside.join("nested"), safe.join("deep")).unwrap();
+    let target = "missing/../deep/../secret.txt";
+    let entry = safe.join("entry");
+    symlink(target, &entry).unwrap();
+
+    for path in [
+        safe.join(target),
+        entry,
+        safe.join("missing/child/../created"),
+    ] {
+        assert_eq!(
+            std::fs::metadata(&path).unwrap_err().kind(),
+            std::io::ErrorKind::NotFound
+        );
+        let write = write_library_file_atomic(&path_string(&path), b"replacement");
+        assert_eq!(
+            std::fs::read_to_string(&sentinel).unwrap(),
+            "outside sentinel",
+            "write through {path:?} changed the outside file: {write:?}"
+        );
+        assert_eq!(
+            write.unwrap_err().kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+        assert!(!safe.join("missing").exists());
+    }
+    let ordinary = safe.join("missing/child/created");
+    write_library_file_atomic(&path_string(&ordinary), b"ordinary write").unwrap();
+    assert_eq!(std::fs::read(&ordinary).unwrap(), b"ordinary write");
 }
