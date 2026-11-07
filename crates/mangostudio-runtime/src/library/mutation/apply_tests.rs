@@ -488,6 +488,70 @@ fn writes_through_a_symlinked_location_root_without_replacing_the_link() {
     assert!(real.join("gh").join("SKILL.md").exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn applies_and_undoes_at_the_physical_parent_of_a_symlinked_location() {
+    use std::os::unix::fs::symlink;
+
+    let home = Home::new("apply-ordered-symlink-root");
+    let outside = home.scratch.join("outside");
+    let physical_root = outside.join("real-skills");
+    let decoy_root = home.path(&[".claude", "real-skills"]);
+    std::fs::create_dir_all(outside.join("nested")).unwrap();
+    std::fs::create_dir_all(&physical_root).unwrap();
+    let decoy = home.skill(&decoy_root.join("existing"), "decoy skill");
+    let location = home.path(&[".claude", "skills"]);
+    std::fs::remove_dir_all(&location).unwrap();
+    symlink(outside.join("nested"), home.path(&[".claude", "redirect"])).unwrap();
+    symlink("redirect/../real-skills", &location).unwrap();
+    let physical_root = std::fs::canonicalize(physical_root).unwrap();
+    assert_eq!(std::fs::canonicalize(&location).unwrap(), physical_root);
+
+    let source = home.skill(&home.scratch.join("source"), "new skill");
+    let hash = home.hash(&source, ResourceKind::Directory);
+    let result = run(
+        &home,
+        &[skill_op(
+            &home,
+            "claude-skills",
+            &[".claude", "skills"],
+            &source,
+            &hash,
+        )],
+    );
+    assert!(result.failed.is_empty(), "received {result:?}");
+    let written = physical_root.join("gh");
+    assert!(
+        written.join("SKILL.md").is_file(),
+        "expected the skill at {written:?}; decoy write present: {}",
+        decoy_root.join("gh").exists()
+    );
+    assert_eq!(
+        std::fs::read_to_string(written.join("SKILL.md")).unwrap(),
+        std::fs::read_to_string(source.join("SKILL.md")).unwrap()
+    );
+    assert!(!decoy_root.join("gh").exists());
+
+    let backup_id = result.backup_id.expect("a successful apply names its set");
+    assert_eq!(
+        home.manifest(&backup_id)["entries"][0]["resolvedPath"].as_str(),
+        written.to_str()
+    );
+    let undone = undo(&home, &backup_id);
+    assert_eq!(undone.removed.len(), 1, "received {undone:?}");
+    assert!(!written.exists());
+    assert!(!decoy_root.join("gh").exists());
+    assert!(
+        std::fs::read_to_string(decoy.join("SKILL.md"))
+            .unwrap()
+            .contains("decoy skill")
+    );
+    assert_eq!(
+        std::fs::read_link(&location).unwrap(),
+        std::path::Path::new("redirect/../real-skills")
+    );
+}
+
 #[test]
 fn prunes_backup_sets_beyond_the_configured_retention_count() {
     let mut home = Home::new("apply-prune");
