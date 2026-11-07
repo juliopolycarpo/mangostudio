@@ -32,7 +32,6 @@ use std::fmt;
 use std::path::PathBuf;
 
 use tokio::io::AsyncWrite;
-use tokio::task::JoinSet;
 
 use crate::transports::ndjson::PortCloser;
 
@@ -173,16 +172,51 @@ async fn tell_accepted<W>(accepted: Vec<PortCloser<W>>, code: u16, reason: &'sta
 where
     W: AsyncWrite + Unpin + Send + 'static,
 {
-    let mut farewells = JoinSet::new();
-    for port in accepted {
-        farewells.spawn(async move { port.close(code, Some(reason)).await });
+    // A cancelled listener close detaches these tasks, even before their first poll.
+    let farewells: Vec<_> = accepted
+        .into_iter()
+        .map(|port| tokio::spawn(async move { port.close(code, Some(reason)).await }))
+        .collect();
+    for farewell in farewells {
+        let _ = farewell.await;
     }
-    farewells.join_all().await;
 }
 
 #[cfg(test)]
 mod tests {
     use super::{PeerIdentity, PeerUser, ipc_path};
+
+    #[tokio::test(start_paused = true)]
+    async fn cancelling_listener_teardown_keeps_unpolled_farewells() {
+        use crate::close::close_codes;
+        use crate::port::{Inbound, Port, PortClosure, PortRx};
+        use crate::transports::ndjson::NdjsonPort;
+        use std::time::Duration;
+
+        let (reader, _peer) = tokio::io::duplex(64);
+        let port = NdjsonPort::new(reader, tokio::io::sink())
+            .with_first_hello_timeout(Duration::from_secs(15));
+        let closer = port.closer();
+        let (_tx, mut rx) = port.split();
+        tokio::select! {
+            biased;
+            () = super::tell_accepted(vec![closer], close_codes::RELEASED, "listener closing") => {
+                panic!("the scheduled farewell must still need polling");
+            }
+            () = std::future::ready(()) => (),
+        }
+
+        let release = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .expect("the detached farewell must run after its caller is cancelled");
+        assert_eq!(
+            release,
+            Some(Inbound::Closed(PortClosure::Closed {
+                code: Some(close_codes::RELEASED),
+                reason: Some("listener closing".into()),
+            }))
+        );
+    }
 
     #[test]
     fn a_name_becomes_an_address_carrying_it() {

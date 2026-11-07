@@ -264,20 +264,33 @@ impl<W: AsyncWrite + Unpin + Send + 'static> PortCloser<W> {
         };
         let reason = reason.map(ToOwned::to_owned);
         if let Some(release) = writer.ipc_release.get() {
-            release.send_if_modified(|close| {
+            let owns_release = release.send_if_modified(|close| {
                 if close.is_some() {
                     return false;
                 }
+                // Stop normal writes before waking Rx. The farewell can still use the writer.
+                writer.ending.send_replace(true);
                 *close = Some(Close {
                     code,
                     reason: reason.clone(),
                 });
                 true
             });
+            if owns_release {
+                let max_frame_bytes = self.max_frame_bytes;
+                let farewell = tokio::spawn(async move {
+                    SharedWriter(writer)
+                        .end(code, reason, max_frame_bytes)
+                        .await;
+                });
+                // Dropping the caller detaches the bounded farewell and shutdown.
+                let _ = farewell.await;
+            }
+        } else {
+            SharedWriter(writer)
+                .end(code, reason, self.max_frame_bytes)
+                .await;
         }
-        SharedWriter(writer)
-            .end(code, reason, self.max_frame_bytes)
-            .await;
     }
 }
 
@@ -300,7 +313,7 @@ where
             first_hello_deadline: self.first_hello_deadline.clone(),
         };
         let rx = NdjsonRx {
-            reader: self.reader,
+            reader: Some(self.reader),
             decoder: LineDecoder::new(self.max_frame_bytes),
             chunk: vec![0; READ_CHUNK_BYTES].into_boxed_slice(),
             pending: VecDeque::new(),
@@ -361,7 +374,7 @@ where
 /// The receive half of an [`NdjsonPort`].
 #[derive(Debug)]
 pub struct NdjsonRx<R, W> {
-    reader: R,
+    reader: Option<R>,
     decoder: LineDecoder,
     /// Where one read lands before the decoder sees it.
     chunk: Box<[u8]>,
@@ -419,6 +432,10 @@ where
                 return Some(Inbound::Frame(frame));
             }
             if let Some(closure) = self.closure.take() {
+                if ipc_release.is_some() {
+                    // A split named pipe lives until both halves have released it.
+                    drop(self.reader.take());
+                }
                 self.terminal = true;
                 return Some(Inbound::Closed(closure));
             }
@@ -426,11 +443,12 @@ where
             // `AsyncReadExt::read` is cancel-safe: a call dropped because
             // another `select!` branch won the race read nothing, so no byte
             // this decoder has not already seen is lost.
+            let reader = self.reader.as_mut().expect("a live port has a reader");
             let read = async {
                 if let Some(deadline) = &self.first_hello_deadline {
-                    tokio::time::timeout_at(deadline.at, self.reader.read(&mut self.chunk)).await
+                    tokio::time::timeout_at(deadline.at, reader.read(&mut self.chunk)).await
                 } else {
-                    Ok(self.reader.read(&mut self.chunk).await)
+                    Ok(reader.read(&mut self.chunk).await)
                 }
             };
             let read = if let Some(release) = &mut ipc_release {
@@ -635,7 +653,7 @@ impl<W: AsyncWrite + Unpin + Send> SharedWriter<W> {
             return SendOutcome::Closed;
         }
         let mut state = self.0.state.lock().await;
-        if !state.writable {
+        if *ending.borrow_and_update() || !state.writable {
             return SendOutcome::Closed;
         }
         let Some(writer) = state.writer.as_mut() else {
@@ -646,11 +664,12 @@ impl<W: AsyncWrite + Unpin + Send> SharedWriter<W> {
         // it instead; the half-written line does not matter, because the
         // handle is about to be dropped.
         let written = tokio::select! {
-            written = write_record(writer, &line) => written,
+            biased;
             () = ended(&mut ending) => {
                 state.writable = false;
                 return SendOutcome::Closed;
             }
+            written = write_record(writer, &line) => written,
         };
         match written {
             Ok(()) => SendOutcome::Sent,
@@ -1359,7 +1378,10 @@ mod tests {
                 }))
             );
         }
-        peer.write_all(b"{\"type\":\"ping\"}\n").await.unwrap();
+        assert!(
+            peer.write_all(b"{\"type\":\"ping\"}\n").await.is_err(),
+            "retaining terminal Rx must leave the peer's write side closed"
+        );
         assert_eq!(rx.recv().await, None);
         drop((tx, rx));
         let mut farewell = String::new();
@@ -1367,6 +1389,53 @@ mod tests {
         assert_eq!(
             farewell,
             "{\"type\":\"close\",\"code\":4000,\"reason\":\"listener closing\"}\n"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn cancelled_ipc_release_disables_sends_and_keeps_the_winning_farewell() {
+        let (mut peer, stream) = duplex(8);
+        let (reader, writer) = tokio::io::split(stream);
+        let port =
+            NdjsonPort::new(reader, writer).with_first_hello_timeout(Duration::from_secs(15));
+        let closer = port.closer();
+        let (mut tx, mut rx) = port.split();
+
+        let cancelled = tokio::time::timeout(
+            Duration::from_millis(20),
+            closer.close(close_codes::RELEASED, Some("first close")),
+        )
+        .await;
+        assert!(
+            cancelled.is_err(),
+            "the tiny buffer must stall the farewell"
+        );
+        assert_eq!(
+            tokio::time::timeout(Duration::from_millis(20), tx.send(Frame::Ping)).await,
+            Ok(SendOutcome::Closed),
+            "a cancelled release must leave retained Tx closed"
+        );
+        tokio::time::timeout(
+            Duration::from_millis(20),
+            closer.close(close_codes::PROTOCOL_ERROR, Some("second close")),
+        )
+        .await
+        .expect("the second caller must leave the farewell to the first");
+        assert_eq!(
+            rx.recv().await,
+            Some(Inbound::Closed(PortClosure::Closed {
+                code: Some(close_codes::RELEASED),
+                reason: Some("first close".into()),
+            }))
+        );
+        let mut farewell = String::new();
+        tokio::time::timeout(Duration::from_secs(5), peer.read_to_string(&mut farewell))
+            .await
+            .expect("the detached farewell must finish and close the writer")
+            .unwrap();
+        assert_eq!(
+            farewell,
+            "{\"type\":\"close\",\"code\":4000,\"reason\":\"first close\"}\n"
         );
     }
 
