@@ -91,7 +91,8 @@ function skillLocationSettings(): typeof DEFAULT_APP_SETTINGS {
 
 function previewSkills(
   targetLocationIds: readonly LibraryLocationId[],
-  userId: string = TEST_USER.id
+  userId: string = TEST_USER.id,
+  failedLocationIds?: readonly LibraryLocationId[]
 ): Promise<PropagationPreview> {
   const pathEnv = libraryPathEnv();
   const cache = new LibraryCache();
@@ -102,6 +103,7 @@ function previewSkills(
     {
       snapshot: async (scanUserId, environmentId, kinds) => ({
         environmentId,
+        ...(failedLocationIds && { failedLocationIds: new Set(failedLocationIds) }),
         resources: (
           await discoverLibraryResources(getDb(), scanUserId, {
             force: true,
@@ -284,6 +286,42 @@ describe('POST /library/propagate/preview', () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(expected);
+  });
+
+  it('returns a failed scan as a blocked destination', async () => {
+    skillAt('mango-skills', 'served');
+    emptyLocation(join(home, '.claude', 'skills'));
+    const app = harness({
+      preview: (userId, body) => previewSkills(body.targetLocationIds, userId, ['claude-skills']),
+    });
+
+    const response = await app.handle(
+      request({ resourceKeys: ['skill:gh'], targetLocationIds: ['claude-skills'] })
+    );
+
+    expect(response.status).toBe(200);
+    const entry = entryOf((await response.json()) as PropagationPreview);
+    expect(entry.sourceScanIncomplete).toBe(true);
+    expect(entry.destinations[0]).toMatchObject({
+      locationId: 'claude-skills',
+      blockedReason: 'location-scan-failed',
+      outcomes: [],
+    });
+  });
+
+  it('returns a conflict when a failed source scan could hide the resource', async () => {
+    const app = harness({
+      preview: (userId, body) => previewSkills(body.targetLocationIds, userId, ['mango-skills']),
+    });
+    const response = await app.handle(
+      request({ resourceKeys: ['skill:gh'], targetLocationIds: ['claude-skills'] })
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      code: 'CONFLICT',
+      error: expect.stringContaining('skill:gh'),
+    });
   });
 
   it('maps a missing resource to 404 and a malformed request to 422', async () => {

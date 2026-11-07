@@ -140,6 +140,7 @@ export function PropagationWizard({
 
   const canContinue =
     hasDestinations &&
+    !wizard.isStale &&
     (step === 'conflict'
       ? unresolved.length === 0
       : step === 'destinations'
@@ -147,7 +148,8 @@ export function PropagationWizard({
         : false);
 
   const nothingToDo = preview ? isNoopApply(preview, wizard.draft) : true;
-  const canApply = pendingAcks.length === 0 && !nothingToDo && !wizard.isApplying;
+  const canApply =
+    pendingAcks.length === 0 && !nothingToDo && !wizard.isApplying && !wizard.isStale;
 
   return (
     <WizardFrame

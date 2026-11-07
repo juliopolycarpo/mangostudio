@@ -68,6 +68,7 @@ function status(
 
 interface PreviewHarness {
   readonly resources?: LibraryResource[];
+  readonly failedLocationIds?: readonly LibraryLocationId[];
   readonly statuses?: Partial<Record<LibraryLocationId, LibraryLocationStatus>>;
   readonly enabledLocationIds?: readonly LibraryLocationId[];
   readonly staleStagedRemovals?: { locationId: string; path: string; modifiedAtMs: number }[];
@@ -112,6 +113,10 @@ function preview(
           environmentId,
           ...(machine.blockedReason && { blockedReason: machine.blockedReason }),
           resources: machine.resources ?? [],
+          ...(environmentId === LOCAL_ENVIRONMENT_ID &&
+            harness.failedLocationIds && {
+              failedLocationIds: new Set(harness.failedLocationIds),
+            }),
           statuses: new Map(
             locationIds.map((id) => [id, machine.statuses?.[id] ?? status(id)] as const)
           ),
@@ -147,6 +152,20 @@ describe('previewLibraryRemoval classification', () => {
     expect(row.operation).toBe('remove');
     expect(row.path).toBe('/home/test/claude-skills/gh');
     expect(row.contentHash).toBe('hash-a');
+  });
+
+  it('blocks a failed location while keeping a verified copy removable', async () => {
+    const result = await preview(['skill:gh'], ['claude-skills', 'mango-skills'], {
+      resources: [resource([instance('claude-skills', 'hash-a')])],
+      failedLocationIds: ['mango-skills'],
+    });
+
+    const entry = firstEntry(result);
+    expect(locationAt(entry, 'mango-skills')).toMatchObject({
+      operation: 'blocked',
+      blockedReason: 'location-scan-failed',
+    });
+    expect(locationAt(entry, 'claude-skills').operation).toBe('remove');
   });
 
   it('shows a location with no copy rather than hiding it', async () => {

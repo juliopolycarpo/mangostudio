@@ -108,6 +108,8 @@ export function usePropagation(request: PropagationPreviewRequest): PropagationC
     // A preview is a snapshot of the disk, never something to serve from cache.
     gcTime: 0,
     staleTime: 0,
+    // A fresh reply must seed a reset draft even when its JSON is unchanged.
+    structuralSharing: false,
     retry: false,
     enabled: canPreview,
     queryFn: () => previewPropagation(request),
@@ -123,6 +125,13 @@ export function usePropagation(request: PropagationPreviewRequest): PropagationC
   }, [preview]);
 
   const effectiveDraft = useMemo<WizardDraft>(() => draft ?? EMPTY_DRAFT, [draft]);
+  // A reconnect can refresh the preview while the wizard holds decisions from
+  // the old scan. A saved keep choice needs a complete view of its sources.
+  const keepNeedsFreshScan = preview?.entries.some(
+    ({ resourceKey, sourceScanIncomplete }) =>
+      sourceScanIncomplete &&
+      effectiveDraft.resolutions[resourceKey]?.resolution === 'keep-per-location'
+  );
 
   // `refetch` ignores `enabled`, so the retry path needs the same gate or it
   // walks straight into the 422 the query option exists to avoid.
@@ -130,6 +139,7 @@ export function usePropagation(request: PropagationPreviewRequest): PropagationC
     if (!canPreview) return;
     setIsStale(false);
     setDraft(null);
+    setStep('conflict');
     void previewQuery.refetch();
   }, [canPreview, previewQuery]);
 
@@ -236,7 +246,7 @@ export function usePropagation(request: PropagationPreviewRequest): PropagationC
     isPreviewing: previewQuery.isFetching,
     previewError: previewQuery.error,
     repreview,
-    isStale,
+    isStale: isStale || keepNeedsFreshScan === true,
     setStep,
     setResolution,
     toggleDestination,

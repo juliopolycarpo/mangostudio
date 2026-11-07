@@ -110,6 +110,7 @@ function ConflictEntry({
           control="radio"
           name={`resolution:${entry.resourceKey}`}
           checked={choice.resolution === 'keep-per-location'}
+          disabled={entry.sourceScanIncomplete}
           onChange={() => onResolve(entry.resourceKey, 'keep-per-location')}
           data-testid="keep-per-location"
         >
@@ -117,7 +118,9 @@ function ConflictEntry({
             {l.conflict.keepPerLocation.title}
           </span>
           <span className="block text-fg-muted text-xs">
-            {l.conflict.keepPerLocation.description}
+            {entry.sourceScanIncomplete
+              ? l.conflict.keepPerLocation.scanIncomplete
+              : l.conflict.keepPerLocation.description}
           </span>
         </ChoiceRow>
 

@@ -28,6 +28,7 @@ import {
   type LibraryLocationStatus,
   type LibraryResource,
   type LibraryResourceRef,
+  type LibraryScanResult,
   parseResourceKey,
   type PropagationBlockedReason,
   type PropagationDestination,
@@ -73,6 +74,8 @@ export interface EnvironmentSnapshot {
   readonly blockedReason?: PropagationBlockedReason;
   /** Empty when the machine could not be scanned at all. */
   readonly resources: readonly LibraryResource[];
+  /** Locations this scan could not list. Their missing rows do not prove absence. */
+  readonly failedLocationIds?: ReadonlySet<LibraryLocationId>;
   readonly statuses: ReadonlyMap<LibraryLocationId, LibraryLocationStatus>;
   /**
    * Directory-hash domain this machine's runtime computes. Absent-on-the-wire
@@ -140,18 +143,16 @@ export async function readEnvironmentSnapshot(
 
   const scope = { userId, environmentId };
   const db = getDb();
-  let resources: LibraryResource[];
+  let scan: LibraryScanResult;
   let locations: LibraryLocationStatus[];
   try {
-    const [scan, discoveredLocations] = await Promise.all([
+    [scan, locations] = await Promise.all([
       // Same connection that supplied `directoryHashDomain` below. Discovering
       // through a second resolve can hash on a reconnected peer while this
       // snapshot still records the previous domain.
       environmentLibraryService.discover(db, scope, { force: true, kinds, client }),
       environmentLibraryService.listLocations(db, scope),
     ]);
-    resources = scan.resources;
-    locations = discoveredLocations;
   } catch {
     return {
       environmentId,
@@ -171,7 +172,10 @@ export async function readEnvironmentSnapshot(
     ...(client.manifest.features.fsWrite === false && {
       blockedReason: 'environment-readonly' as const,
     }),
-    resources,
+    resources: scan.resources,
+    ...(scan.locationDiagnostics?.length && {
+      failedLocationIds: new Set(scan.locationDiagnostics.map(({ locationId }) => locationId)),
+    }),
     statuses: new Map(locations.map((status) => [status.id, status])),
     directoryHashDomain: client.directoryHashDomain,
   };
@@ -231,15 +235,8 @@ export async function previewLibraryPropagation(
   // A resource has to exist *somewhere* in scope. Requiring it on every machine
   // would make "copy this skill to the box that does not have it yet" — the
   // whole point of the feature — a 404.
+  assertResourcesObserved(refs, snapshots);
   const requested = [...refs.keys()];
-  const found = new Set(
-    snapshots.flatMap((snapshot) => snapshot.resources.map((resource) => resource.key))
-  );
-  for (const key of requested) {
-    if (!found.has(key)) {
-      throw new LibraryRequestError(404, `Library resource "${key}" was not found.`);
-    }
-  }
 
   const [acknowledged, agentAvailable] = await Promise.all([
     // Every machine's copies, merged by key: an acknowledgement covers the
@@ -295,13 +292,44 @@ export async function previewLibraryPropagation(
 }
 
 /**
- * False for a machine whose copies are absent because it could not answer right
- * now. An unsupported machine has no library to hold copies at all, and never
- * will until it is upgraded, so it counts as scanned: treating it as a gap would
- * leave every acknowledgement unhonoured for as long as it stays enabled.
+ * An offline machine or a failed location can hide copies from this scan.
+ * An unsupported machine has no library and counts as scanned.
  */
 function wasScanned(snapshot: EnvironmentSnapshot): boolean {
-  return snapshot.blockedReason !== 'environment-offline';
+  return snapshot.blockedReason !== 'environment-offline' && !snapshot.failedLocationIds?.size;
+}
+
+function hasFailedLocationForKind(snapshot: EnvironmentSnapshot, kind: ResourceKind): boolean {
+  return (
+    snapshot.failedLocationIds !== undefined &&
+    [...snapshot.failedLocationIds].some((id) => getLibraryLocation(id)?.kind === kind)
+  );
+}
+
+/**
+ * Requires an observed copy before previewing a mutation. A failed scan of
+ * that kind leaves existence unverified, so a client can retry the preview.
+ *
+ * @example
+ * assertResourcesObserved(requestedRefs, environmentSnapshots);
+ */
+export function assertResourcesObserved(
+  refs: ReadonlyMap<string, LibraryResourceRef>,
+  snapshots: readonly EnvironmentSnapshot[]
+): void {
+  const found = new Set(
+    snapshots.flatMap((snapshot) => snapshot.resources.map((resource) => resource.key))
+  );
+  for (const [key, { kind }] of refs) {
+    if (found.has(key)) continue;
+    if (snapshots.some((snapshot) => hasFailedLocationForKind(snapshot, kind))) {
+      throw new LibraryRequestError(
+        409,
+        `Cannot confirm whether library resource "${key}" exists while a source location could not be scanned. Preview again once it is readable.`
+      );
+    }
+    throw new LibraryRequestError(404, `Library resource "${key}" was not found.`);
+  }
 }
 
 /** Deduplicates while preserving request order, so the response is predictable. */
@@ -359,6 +387,9 @@ function buildPreviewEntry(
   const usesDirectoryHash = DIRECTORY_HASHED_RESOURCE_KINDS.has(ref.kind);
   const sourceDomains = directoryHashDomainsFor(perEnvironment, usesDirectoryHash);
   const mixedDirectoryHashDomains = usesDirectoryHash && sourceDomains.size > 1;
+  const sourceScanIncomplete = snapshots.some((snapshot) =>
+    hasFailedLocationForKind(snapshot, ref.kind)
+  );
 
   return {
     resourceKey,
@@ -373,6 +404,7 @@ function buildPreviewEntry(
     // pick.
     requiresWinnerSelection: sourceGroups.length > 1 && !mixedDirectoryHashDomains,
     acknowledgedDivergence,
+    ...(sourceScanIncomplete && { sourceScanIncomplete: true }),
     destinations: perEnvironment.flatMap(({ snapshot, resource }) => {
       const instanceByLocation = new Map(
         (resource?.instances ?? []).map((instance) => [instance.locationId, instance] as const)
@@ -561,6 +593,7 @@ function destinationBlockedReason(
   if (location.layout === 'single-file' && location.resourceSlug !== ref.slug) {
     return 'slug-mismatch';
   }
+  if (snapshot.failedLocationIds?.has(location.id)) return 'location-scan-failed';
   if (!status.writable) return 'location-unwritable';
   if (current && !current.valid) return 'invalid-destination';
   if (sourceGroups.length === 0) return 'no-source-content';

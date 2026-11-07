@@ -80,6 +80,7 @@ function status(
 
 interface PreviewHarness {
   readonly resources?: LibraryResource[];
+  readonly failedLocationIds?: readonly LibraryLocationId[];
   readonly statuses?: Partial<Record<LibraryLocationId, LibraryLocationStatus>>;
   readonly adapters?: AdapterCatalog;
   readonly acknowledged?: string[];
@@ -124,6 +125,10 @@ function snapshotFor(
     environmentId,
     ...(machine.blockedReason && { blockedReason: machine.blockedReason }),
     resources: machine.resources ?? [],
+    ...(environmentId === LOCAL_ENVIRONMENT_ID &&
+      harness.failedLocationIds && {
+        failedLocationIds: new Set(harness.failedLocationIds),
+      }),
     statuses: new Map(
       targetLocationIds.map((id) => [id, machine.statuses?.[id] ?? status(id)] as const)
     ),
@@ -268,6 +273,20 @@ describe('previewLibraryPropagation — operation classification', () => {
 });
 
 describe('previewLibraryPropagation — blocked destinations', () => {
+  it('blocks a writable destination whose scan failed while keeping other destinations usable', async () => {
+    const result = await preview(['skill:gh'], ['claude-skills', 'agents-skills'], {
+      resources: [resource('skill:gh', 'skill', 'gh', [instance('mango-skills', 'hash-a')])],
+      failedLocationIds: ['claude-skills'],
+    });
+
+    const entry = firstEntry(result);
+    expect(destinationAt(entry, 'claude-skills')).toMatchObject({
+      blockedReason: 'location-scan-failed',
+      outcomes: [],
+    });
+    expect(destinationAt(entry, 'agents-skills').outcomes[0]?.operation).toBe('create');
+  });
+
   const blockedReasonFor = async (
     locationId: LibraryLocationId,
     harness: PreviewHarness
@@ -623,6 +642,17 @@ describe('previewLibraryPropagation across machines', () => {
       resources: [ghOnLocal],
       environmentIds: ['local', 'ssh-box'],
       environments: { 'ssh-box': { blockedReason: 'environment-offline' } },
+      onAcknowledgedKeys: (_resources, options) => seen.push(options),
+    });
+
+    expect(seen).toEqual([{ complete: false }]);
+  });
+
+  it('marks the acknowledgement lookup incomplete when a location failed to scan', async () => {
+    const seen: (AcknowledgedKeysOptions | undefined)[] = [];
+    await preview(['skill:gh'], ['mango-skills'], {
+      resources: [ghOnLocal],
+      failedLocationIds: ['claude-skills'],
       onAcknowledgedKeys: (_resources, options) => seen.push(options),
     });
 

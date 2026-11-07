@@ -737,6 +737,11 @@ function planAcknowledgement(
       `"${entry.resourceKey}" cannot keep its divergence while ${offline.map((id) => `"${id}"`).join(', ')} could not be scanned (environment-offline): expected every selected machine to answer. Preview again once it is reachable.`
     );
   }
+  if (entry.sourceScanIncomplete) {
+    throw validationError(
+      `"${entry.resourceKey}" cannot keep its divergence while a source location could not be scanned. Preview again once it is readable.`
+    );
+  }
   if (decision.destinations.some((target) => target.action === 'apply')) {
     throw validationError(
       `"${entry.resourceKey}" cannot both keep its divergence and write to a destination.`

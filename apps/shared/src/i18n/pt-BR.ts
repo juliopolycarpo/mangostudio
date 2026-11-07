@@ -2395,6 +2395,7 @@ export const messages = {
       unresolved: '{count} recursos ainda precisam de uma decisão.',
       adopt: 'Usar esta versão',
       keepPerLocation: {
+        scanIncomplete: 'Verifique novamente o local com falha antes de manter estas versões.',
         title: 'Manter diferentes',
         description:
           'Às vezes as cópias devem mesmo divergir. A divergência para de ser sinalizada até que algum dos conteúdos mude.',
@@ -2462,6 +2463,8 @@ export const messages = {
       'read-only-location': 'Este local é somente leitura.',
       'unsupported-location': 'Este local não existe nesta plataforma.',
       'location-unwritable': 'O MangoStudio não tem permissão de escrita neste local.',
+      'location-scan-failed':
+        'Não foi possível verificar este local. Confira o acesso e gere a prévia novamente.',
       'slug-mismatch': 'Este local guarda um único recurso, e não é este.',
       'invalid-destination':
         'A cópia que está aqui não pôde ser lida, então sobrescrevê-la não é seguro.',

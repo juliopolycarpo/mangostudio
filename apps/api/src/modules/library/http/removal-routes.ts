@@ -74,6 +74,7 @@ export function createRemovalRoutes(service: RemovalRouteService = defaultRemova
           200: RemovalPreviewSchema,
           400: ApiErrorResponseSchema,
           404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
         },

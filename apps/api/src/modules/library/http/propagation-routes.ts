@@ -104,6 +104,7 @@ export function createPropagationRoutes(
           200: PropagationPreviewSchema,
           400: ApiErrorResponseSchema,
           404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
         },

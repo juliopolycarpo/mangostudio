@@ -391,6 +391,7 @@ export const PropagationBlockedReasonSchema = Type.Union([
   Type.Literal('read-only-location'),
   Type.Literal('unsupported-location'),
   Type.Literal('location-unwritable'),
+  Type.Literal('location-scan-failed'),
   /** A `single-file` destination stores one named resource, and this is not it. */
   Type.Literal('slug-mismatch'),
   /**
@@ -504,6 +505,8 @@ export const PropagationPreviewEntrySchema = Type.Object({
   requiresWinnerSelection: Type.Boolean(),
   /** True while the user has accepted this exact set of diverging hashes. */
   acknowledgedDivergence: Type.Boolean(),
+  /** A failed source scan can hide versions of this resource. */
+  sourceScanIncomplete: Type.Optional(Type.Literal(true)),
   destinations: Type.Array(PropagationDestinationSchema),
 });
 
@@ -906,6 +909,7 @@ export const RemovalBlockedReasonSchema = Type.Union([
   Type.Literal('read-only-location'),
   Type.Literal('unsupported-location'),
   Type.Literal('location-unwritable'),
+  Type.Literal('location-scan-failed'),
   /** Same machine-level reasons propagation reports; see `PropagationBlockedReasonSchema`. */
   Type.Literal('environment-offline'),
   Type.Literal('environment-unsupported'),

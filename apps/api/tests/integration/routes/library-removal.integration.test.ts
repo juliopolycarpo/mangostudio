@@ -80,7 +80,8 @@ function skillLocationSettings(): typeof DEFAULT_APP_SETTINGS {
 
 function previewRemoval(
   locationIds: readonly LibraryLocationId[],
-  userId: string = TEST_USER.id
+  userId: string = TEST_USER.id,
+  failedLocationIds?: readonly LibraryLocationId[]
 ): Promise<RemovalPreview> {
   const pathEnv = libraryPathEnv();
   const cache = new LibraryCache();
@@ -91,6 +92,7 @@ function previewRemoval(
     {
       snapshot: async (scanUserId, environmentId, kinds) => ({
         environmentId,
+        ...(failedLocationIds && { failedLocationIds: new Set(failedLocationIds) }),
         resources: (
           await discoverLibraryResources(getDb(), scanUserId, {
             force: true,
@@ -241,6 +243,44 @@ describe('POST /library/removal/apply', () => {
 });
 
 describe('POST /library/removal/preview', () => {
+  it('returns a blocked row for the location that could not be scanned', async () => {
+    skillAt('mango-skills', 'served');
+    const app = harness({
+      preview: (userId, request) => previewRemoval(request.locationIds, userId, ['claude-skills']),
+    });
+
+    const response = await app.handle(
+      jsonRequest('/library/removal/preview', 'POST', {
+        resourceKeys: ['skill:gh'],
+        locationIds: ['mango-skills', 'claude-skills'],
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as RemovalPreview;
+    expect(
+      entryOf(body).locations.find(({ locationId }) => locationId === 'claude-skills')
+    ).toMatchObject({ operation: 'blocked', blockedReason: 'location-scan-failed' });
+  });
+
+  it('returns a conflict when a failed source scan could hide the resource', async () => {
+    const app = harness({
+      preview: (userId, request) => previewRemoval(request.locationIds, userId, ['mango-skills']),
+    });
+    const response = await app.handle(
+      jsonRequest('/library/removal/preview', 'POST', {
+        resourceKeys: ['skill:gh'],
+        locationIds: ['mango-skills'],
+      })
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      code: 'CONFLICT',
+      error: expect.stringContaining('skill:gh'),
+    });
+  });
+
   it('serves the preview a client needs to decide', async () => {
     skillAt('mango-skills', 'served\n');
     const app = harness({ preview: (_userId, request) => previewRemoval(request.locationIds) });
