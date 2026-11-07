@@ -2,9 +2,14 @@ import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import type {
   CreateEnvironmentBody,
   Environment,
+  ToolchainSelection,
   UpdateEnvironmentBody,
 } from '@mangostudio/shared/environments';
-import { LOCAL_ENVIRONMENT_ID, LOCAL_ENVIRONMENT_NAME } from '@mangostudio/shared/environments';
+import {
+  DEFAULT_TOOLCHAIN_SELECTION,
+  LOCAL_ENVIRONMENT_ID,
+  LOCAL_ENVIRONMENT_NAME,
+} from '@mangostudio/shared/environments';
 
 import { publishEnvironmentInvalidation } from '../../../services/realtime/environment-invalidation';
 import {
@@ -69,7 +74,8 @@ async function toEnvironment(
   record: EnvironmentRecord,
   manager: RuntimeConnectionManager,
   secretStore: SecretStore,
-  toolchain: ToolchainService
+  toolchain: ToolchainService,
+  selection?: ToolchainSelection
 ): Promise<Environment> {
   // Consent is answered on the machine, so nothing here can invalidate the
   // manifest cached at connect. Reading an environment is the moment someone
@@ -88,7 +94,7 @@ async function toEnvironment(
     createdAt: record.id === LOCAL_ENVIRONMENT_ID ? null : record.createdAt,
     updatedAt: record.id === LOCAL_ENVIRONMENT_ID ? null : record.updatedAt,
     status: manager.getStatus(record.userId, record.id),
-    toolchain: await toolchain.resolve(record.userId, record.id),
+    toolchain: selection ?? (await toolchain.resolve(record.userId, record.id)),
     ...(record.transportKind === 'http'
       ? { hasRuntimeToken: await hasRuntimeToken(record.userId, record.id, secretStore) }
       : {}),
@@ -193,9 +199,16 @@ export function createEnvironmentService(
   return {
     async list(userId) {
       const rows = await repository.list(userId);
+      const selections = await toolchain.listByUser(userId);
       return await Promise.all(
         [localRecord(userId), ...rows].map((record) =>
-          toEnvironment(record, manager, secretStore, toolchain)
+          toEnvironment(
+            record,
+            manager,
+            secretStore,
+            toolchain,
+            selections.get(record.id) ?? DEFAULT_TOOLCHAIN_SELECTION
+          )
         )
       );
     },

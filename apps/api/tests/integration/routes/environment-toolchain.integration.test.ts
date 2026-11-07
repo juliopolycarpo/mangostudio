@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test';
+import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 
 import {
   type AgentCliStatus,
@@ -11,6 +11,7 @@ import {
   type VersionManagerStatus,
 } from '@mangostudio/shared/environments';
 import type { LibraryLocationStatus, LibraryTargetId } from '@mangostudio/shared/library';
+import { TableNode } from 'kysely';
 
 import { getDb } from '../../../src/db/database';
 import { createEnvironmentService } from '../../../src/modules/environments/application/environment-service';
@@ -104,14 +105,33 @@ class FakeEnvironmentProbingService implements EnvironmentProbingService {
   }
 }
 
-function createTestApp(installedPaths: Partial<Record<RuntimeId, readonly string[]>> = {}) {
+function createTestApp(
+  installedPaths: Partial<Record<RuntimeId, readonly string[]>> = {},
+  toolchainReads: string[] = []
+) {
+  const toolchainDb = getDb().withPlugin({
+    transformQuery({ node }) {
+      if (
+        node.kind === 'SelectQueryNode' &&
+        node.from?.froms.some(
+          (from) => TableNode.is(from) && from.table.identifier.name === 'environment_toolchains'
+        )
+      ) {
+        toolchainReads.push(JSON.stringify(node));
+      }
+      return node;
+    },
+    transformResult({ result }) {
+      return Promise.resolve(result);
+    },
+  });
   const repository = createEnvironmentRepository(getDb());
   const manager = new RuntimeConnectionManager({
     resolveEnvironment: async (userId, environmentId) => repository.find(userId, environmentId),
     connectors: {},
   });
   const toolchain = createToolchainService(
-    createEnvironmentToolchainRepository(getDb()),
+    createEnvironmentToolchainRepository(toolchainDb),
     new FakeEnvironmentProbingService(installedPaths)
   );
   const service = createEnvironmentService(
@@ -132,7 +152,7 @@ function createTestApp(installedPaths: Partial<Record<RuntimeId, readonly string
     createEnvironmentEntityRoutes(service, undefined, undefined, toolchain)
   );
   restoreAuth = restore;
-  return { app, repository };
+  return { app, repository, service, manager };
 }
 
 function jsonRequest(method: string, body?: unknown): RequestInit {
@@ -144,6 +164,84 @@ function jsonRequest(method: string, body?: unknown): RequestInit {
 }
 
 describe('environment toolchain route', () => {
+  it('reads the toolchain once for a list of eight environments, including Local and defaults', async () => {
+    const reads: string[] = [];
+    const { app, repository } = createTestApp({}, reads);
+    const selections = createEnvironmentToolchainRepository();
+    for (let index = 0; index < 8; index += 1) {
+      await repository.create({
+        id: `box-${index}`,
+        userId: TEST_USER.id,
+        name: `Box ${index}`,
+        transportKind: 'stdio',
+        config: {},
+        enabled: true,
+      });
+    }
+    await selections.upsert(TEST_USER.id, 'local', { bun: '/local/bun' }, 1);
+    await selections.upsert(TEST_USER.id, 'box-0', { node: '/remote/node' }, 1);
+    // Same environment keys belong to another user; neither selection may leak.
+    const otherUser = `${TEST_USER.id}-other`;
+    try {
+      await selections.upsert(otherUser, 'local', { bun: '/other/bun' }, 1);
+      await selections.upsert(otherUser, 'box-1', { node: '/other/node' }, 1);
+      const response = await app.handle(new Request('http://localhost/environments'));
+      expect(response.status).toBe(200);
+      const environments = (await response.json()) as Environment[];
+      expect(environments).toHaveLength(9);
+      expect(environments[0]?.id).toBe(LOCAL_ENVIRONMENT_ID);
+      expect(environments[0]?.toolchain).toEqual({ node: 'auto', bun: '/local/bun' });
+      expect(environments.find(({ id }) => id === 'box-0')?.toolchain).toEqual({
+        node: '/remote/node',
+        bun: 'auto',
+      });
+      for (const environment of environments.filter(({ id }) => id !== 'local' && id !== 'box-0')) {
+        expect(environment.toolchain).toEqual({ node: 'auto', bun: 'auto' });
+      }
+      expect(reads).toHaveLength(1);
+    } finally {
+      await getDb().deleteFrom('environment_toolchains').where('userId', '=', otherUser).execute();
+    }
+  });
+
+  it('returns default Local for a user with no saved environments or selections', async () => {
+    const reads: string[] = [];
+    const { app } = createTestApp({}, reads);
+    const response = await app.handle(new Request('http://localhost/environments'));
+    expect(response.status).toBe(200);
+    const environments = (await response.json()) as Environment[];
+    expect(environments).toHaveLength(1);
+    expect(environments[0]?.id).toBe(LOCAL_ENVIRONMENT_ID);
+    expect(environments[0]?.toolchain).toEqual({ node: 'auto', bun: 'auto' });
+    expect(reads).toHaveLength(1);
+  });
+
+  it('keeps single-environment reads for create, find, update, connect and disconnect', async () => {
+    const reads: string[] = [];
+    const { service, manager } = createTestApp({}, reads);
+    await service.create(TEST_USER.id, {
+      id: 'single-box',
+      name: 'Single box',
+      transportKind: 'stdio',
+      config: {},
+    });
+    await service.find(TEST_USER.id, 'single-box');
+    await service.update(TEST_USER.id, 'single-box', { name: 'Renamed' });
+    // Only connection I/O is stubbed; shaping the response still uses the real service and DB.
+    const connect = spyOn(manager, 'connectInteractive').mockResolvedValue('connected');
+    try {
+      await service.connect(TEST_USER.id, 'single-box');
+    } finally {
+      connect.mockRestore();
+    }
+    await service.disconnect(TEST_USER.id, 'single-box');
+    expect(reads).toHaveLength(5);
+    for (const query of reads) {
+      expect(query).toContain('environmentId');
+      expect(query).toContain('single-box');
+    }
+  });
+
   it('accepts a probed path and the environments list reflects it', async () => {
     const { app, repository } = createTestApp({ node: ['/opt/node/bin/node'] });
     const other: CreateEnvironmentRecord = {
