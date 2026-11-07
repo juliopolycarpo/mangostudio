@@ -218,3 +218,64 @@ fn a_library_write_cannot_cancel_a_missing_posix_parent() {
     write_library_file_atomic(&path_string(&ordinary), b"ordinary write").unwrap();
     assert_eq!(std::fs::read(&ordinary).unwrap(), b"ordinary write");
 }
+
+#[cfg(unix)]
+#[test]
+fn a_library_write_respects_posix_trailing_directory_constraints() {
+    use crate::library::mutation::disk::write_library_file_atomic;
+    use std::os::unix::fs::symlink;
+
+    let scratch = crate::test_support::scratch_dir("library-write-trailing-slash");
+    let sentinel = scratch.join("secret");
+    std::fs::write(&sentinel, "original secret").unwrap();
+    let entry = scratch.join("entry");
+    symlink("secret/", &entry).unwrap();
+
+    for path in [&entry, &scratch.join("secret//"), &scratch.join("secret/.")] {
+        assert_eq!(
+            std::fs::read(path).unwrap_err().kind(),
+            std::io::ErrorKind::NotADirectory
+        );
+        let write = write_library_file_atomic(&path_string(path), b"replacement");
+        assert_eq!(
+            std::fs::read_to_string(&sentinel).unwrap(),
+            "original secret",
+            "write through {path:?} overwrote the file: {write:?}"
+        );
+        assert_eq!(
+            write.unwrap_err().kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+    }
+
+    let dangling = scratch.join("dangling");
+    symlink("missing/", &dangling).unwrap();
+    for path in [
+        &dangling,
+        &scratch.join("missing/"),
+        &scratch.join("missing/."),
+    ] {
+        assert_eq!(
+            write_library_file_atomic(&path_string(path), b"replacement")
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+        assert!(!scratch.join("missing").exists());
+    }
+
+    let directory = scratch.join("directory");
+    std::fs::create_dir(&directory).unwrap();
+    let link = scratch.join("directory-link");
+    symlink("directory//", &link).unwrap();
+    assert_eq!(
+        resolve_through_existing_ancestor(&path_string(&link)),
+        Some(path_string(&std::fs::canonicalize(&directory).unwrap()))
+    );
+    for (link, target) in [(link, directory), (dangling, scratch.join("missing"))] {
+        let child = link.join("child");
+        write_library_file_atomic(&path_string(&child), b"valid write").unwrap();
+        assert_eq!(std::fs::read(&child).unwrap(), b"valid write");
+        assert_eq!(std::fs::read(target.join("child")).unwrap(), b"valid write");
+    }
+}

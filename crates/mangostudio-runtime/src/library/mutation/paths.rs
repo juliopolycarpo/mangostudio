@@ -249,6 +249,9 @@ pub(crate) fn resolve_like_node(
     let mut missing_tail = false;
     while let Some(segment) = pending.pop_front() {
         match segment.as_str() {
+            // A terminal directory constraint cannot become a missing file
+            // target. For an intermediate step the writer can create parents.
+            "." if missing_tail && pending.is_empty() => return None,
             "." => continue,
             ".." if missing_tail => return None,
             ".." => {
@@ -302,6 +305,8 @@ pub(crate) fn resolve_like_node(
 fn posix_segments(path: &str) -> impl DoubleEndedIterator<Item = String> + '_ {
     path.split('/')
         .filter(|segment| !segment.is_empty())
+        // A trailing slash, like "/.", requires the preceding entry to be a directory.
+        .chain(path.ends_with('/').then_some("."))
         .map(str::to_string)
 }
 
