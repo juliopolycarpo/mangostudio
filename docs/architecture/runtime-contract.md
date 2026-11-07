@@ -65,8 +65,8 @@ implementations can both be spec-compliant and still validate a real-world value
 particularly at the edges (recursive `$ref`, `format`, ambiguous `anyOf`). Textual equality is
 the wrong gate for that question; a behavioural one is.
 
-`scripts/runtime-contract/corpus.ts` builds `generated/conformance-corpus.json`, the seventh
-artifact `contracts:emit`/`contracts:check` gates:
+`scripts/runtime-contract/corpus.ts` builds `generated/conformance-corpus.json`, the eighth artifact
+gated by `contracts:emit` and `contracts:check`:
 
 - One valid seed per method `params`, method `result`, and topic `payload`, from
   `Value.Create` on the TypeBox schema. A schema whose only way to satisfy a `pattern` or

@@ -125,10 +125,11 @@ measurement below uses the rebased implementation and current catalog.
   cargo-zigbuild 0.23.4 installed with Cargo, GNU tar 1.35 and gzip 1.14.
 - The four release builds ran serially with eight Cargo jobs, separate source
   and target directories, source paths remapped to `/study` and target paths
-  to `/study/target`. Before each repeat, `cargo clean --release --target
-x86_64-unknown-linux-gnu` cleared only the runtime and runtime-contract
-  packages. Workspace correctness checks also ran on the host during this
-  batch. The comparison uses byte counts and hashes.
+  to `/study/target`. Before each repeat, the build cleared only the runtime and
+  runtime-contract packages using `-p` with
+  `cargo clean --release --target x86_64-unknown-linux-gnu`.
+  Workspace correctness checks also ran on the host during this batch.
+  The comparison uses byte counts and hashes.
 
 | Order | Variant   | Runtime bytes | Complete archive bytes |
 | ----: | --------- | ------------: | ---------------------: |
