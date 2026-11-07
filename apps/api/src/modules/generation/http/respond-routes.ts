@@ -71,8 +71,12 @@ export const respondRoutes = (app: Elysia) =>
             return operationReceipt({ ...row, state: 'running' });
           } catch (error) {
             if (error instanceof OperationConflictError || error instanceof OperationExpiredError) {
-              set.status = error instanceof OperationExpiredError ? 410 : 409;
-              return { error: error.message, code: ERROR_CODES.CONFLICT };
+              const expired = error instanceof OperationExpiredError;
+              set.status = expired ? 410 : 409;
+              return {
+                error: error.message,
+                code: expired ? ERROR_CODES.OPERATION_EXPIRED : ERROR_CODES.CONFLICT,
+              };
             }
             throw error;
           }

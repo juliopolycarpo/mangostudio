@@ -43,6 +43,7 @@ const PUBLISHED: [ErrorCode, string, string][] = [
   ['PERMISSION_DENIED', 'https://mangostudio.dev/problems/permission-denied', 'Permission denied'],
   ['VALIDATION', 'https://mangostudio.dev/problems/validation', 'Invalid request'],
   ['CONFLICT', 'https://mangostudio.dev/problems/conflict', 'Conflict'],
+  ['OPERATION_EXPIRED', 'https://mangostudio.dev/problems/operation-expired', 'Operation expired'],
   ['PROVIDER_ERROR', 'https://mangostudio.dev/problems/provider-error', 'Provider error'],
   ['GENERATION_EMPTY', 'https://mangostudio.dev/problems/generation-empty', 'Empty generation'],
   ['OWNERSHIP', 'https://mangostudio.dev/problems/ownership', 'Not the owner'],

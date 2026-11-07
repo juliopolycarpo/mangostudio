@@ -30,17 +30,35 @@ export function operationFingerprint(kind: OperationReceipt['kind'], input: unkn
     .update(JSON.stringify([kind, canonical(input)]))
     .digest('hex');
 }
+/**
+ * Read a user's reservation, optionally restricting public lookup to accessible chats.
+ * @example await readOperation(db, userId, operationId, { requireOwnedChat: true });
+ */
 export async function readOperation(
   db: Kysely<Database>,
   userId: string,
-  operationId: string
+  operationId: string,
+  { requireOwnedChat = false } = {}
 ): Promise<ProductOperationsTable | undefined> {
-  const row = await db
+  let query = db
     .selectFrom('product_operations')
     .selectAll()
     .where('userId', '=', userId)
-    .where('operationId', '=', operationId)
-    .executeTakeFirst();
+    .where('operationId', '=', operationId);
+  if (requireOwnedChat) {
+    query = query.where(({ eb, exists, or, selectFrom }) =>
+      or([
+        eb('chatId', 'is', null),
+        exists(
+          selectFrom('chats')
+            .select('chats.id')
+            .whereRef('chats.id', '=', 'product_operations.chatId')
+            .whereRef('chats.userId', '=', 'product_operations.userId')
+        ),
+      ])
+    );
+  }
+  const row = await query.executeTakeFirst();
   if (!row) return undefined;
   if (row.expiresAt <= Date.now()) {
     if (row.result !== null) {

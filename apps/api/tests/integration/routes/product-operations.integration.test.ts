@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { Chat } from '@mangostudio/shared/chat';
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { type OperationReceipt, OperationReceiptSchema } from '@mangostudio/shared/operations';
 import {
   externalAgentEventToStreamChunk,
@@ -240,10 +241,14 @@ describe('durable authorized product operations over real routes/storage', () =>
       .where('userId', '=', user.id)
       .where('operationId', '=', 'expired')
       .execute();
-    expect((await app.handle(request('/operations/expired'))).status).toBe(410);
-    expect(
-      (await app.handle(request('/chats', { title: 'Expired', operationId: 'expired' }))).status
-    ).toBe(410);
+    const lookup = await app.handle(request('/operations/expired'));
+    expect(lookup.status).toBe(410);
+    expect(await lookup.json()).toMatchObject({ code: ERROR_CODES.OPERATION_EXPIRED });
+    const replay = await app.handle(
+      request('/chats', { title: 'Expired', operationId: 'expired' })
+    );
+    expect(replay.status).toBe(410);
+    expect(await replay.json()).toMatchObject({ code: ERROR_CODES.OPERATION_EXPIRED });
     expect(
       (
         await db
@@ -254,6 +259,22 @@ describe('durable authorized product operations over real routes/storage', () =>
           .executeTakeFirst()
       )?.result
     ).toBeNull();
+  });
+  it('returns not found for an expired receipt whose chat was deleted', async () => {
+    await claimOperation(db, user.id, 'deleted-chat', 'submit-turn', { prompt: 'Hello' }, chatId);
+    await db
+      .updateTable('product_operations')
+      .set({ expiresAt: Date.now() - 1 })
+      .where('userId', '=', user.id)
+      .where('operationId', '=', 'deleted-chat')
+      .execute();
+    const deleted = await app.handle(
+      new Request(`http://localhost/chats/${chatId}`, { method: 'DELETE' })
+    );
+    expect(deleted.status).toBe(200);
+    const lookup = await app.handle(request('/operations/deleted-chat'));
+    expect(lookup.status).toBe(404);
+    expect(await lookup.json()).toMatchObject({ code: ERROR_CODES.NOT_FOUND });
   });
   it('marks predecessor-owned accepted work unresolved, retaining the admission after restart', async () => {
     await claimOperation(db, user.id, 'restart', 'submit-turn', { prompt: 'Hello' }, chatId);
@@ -385,8 +406,21 @@ describe('durable authorized product operations over real routes/storage', () =>
       .where('userId', '=', user.id)
       .where('operationId', '=', 'expired-turn')
       .execute();
-    expect((await submit('expired-turn')).status).toBe(410);
+    const streamed = await submit('expired-turn');
+    expect(streamed.status).toBe(410);
+    expect(await streamed.json()).toMatchObject({ code: ERROR_CODES.OPERATION_EXPIRED });
+    const direct = await app.handle(
+      request('/respond', {
+        chatId,
+        prompt: 'Hello',
+        model: 'operation-test',
+        operationId: 'expired-turn',
+      })
+    );
+    expect(direct.status).toBe(410);
+    expect(await direct.json()).toMatchObject({ code: ERROR_CODES.OPERATION_EXPIRED });
     expect(provider.calls).toBe(0);
+    expect(provider.directCalls).toBe(0);
   });
   it('leaves preflight refusals retryable and preserves keyless streaming', async () => {
     const refused = await app.handle(

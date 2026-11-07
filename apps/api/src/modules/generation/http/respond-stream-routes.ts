@@ -570,11 +570,10 @@ export const respondStreamRoutes = (app: Elysia) =>
         },
         async ({ params, user, set }) => {
           try {
-            const row = await readOperation(getDb(), user?.id ?? '', params.operationId);
-            if (
-              !row ||
-              (row.chatId && !(await getOwnedChat(row.chatId, user?.id ?? '', getDb())))
-            ) {
+            const row = await readOperation(getDb(), user?.id ?? '', params.operationId, {
+              requireOwnedChat: true,
+            });
+            if (!row) {
               set.status = 404;
               return { error: 'Operation not found', code: ERROR_CODES.NOT_FOUND };
             }
@@ -582,7 +581,7 @@ export const respondStreamRoutes = (app: Elysia) =>
           } catch (error) {
             if (error instanceof OperationExpiredError) {
               set.status = 410;
-              return { error: error.message, code: ERROR_CODES.CONFLICT };
+              return { error: error.message, code: ERROR_CODES.OPERATION_EXPIRED };
             }
             throw error;
           }
@@ -641,8 +640,12 @@ export const respondStreamRoutes = (app: Elysia) =>
           }
         } catch (error) {
           if (error instanceof OperationConflictError || error instanceof OperationExpiredError) {
-            set.status = error instanceof OperationExpiredError ? 410 : 409;
-            return { error: error.message, code: ERROR_CODES.CONFLICT };
+            const expired = error instanceof OperationExpiredError;
+            set.status = expired ? 410 : 409;
+            return {
+              error: error.message,
+              code: expired ? ERROR_CODES.OPERATION_EXPIRED : ERROR_CODES.CONFLICT,
+            };
           }
           throw error;
         }

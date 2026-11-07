@@ -95,8 +95,12 @@ export const chatRoutes = (app: Elysia) =>
             );
           } catch (error) {
             if (error instanceof OperationConflictError || error instanceof OperationExpiredError) {
-              set.status = error instanceof OperationExpiredError ? 410 : 409;
-              return apiError(error.message, ERROR_CODES.CONFLICT);
+              const expired = error instanceof OperationExpiredError;
+              set.status = expired ? 410 : 409;
+              return apiError(
+                error.message,
+                expired ? ERROR_CODES.OPERATION_EXPIRED : ERROR_CODES.CONFLICT
+              );
             }
             if (error instanceof ChatNotFoundError) {
               set.status = 404;
