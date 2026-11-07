@@ -1508,3 +1508,184 @@ async fn close_during_preparation_does_not_wait_for_read_only_host_work() {
     assert!(state.lock().unwrap().launches.is_empty());
     assert!(service.sessions.lock().unwrap().is_empty());
 }
+
+#[test]
+fn cursor_login_prefers_the_vendor_specific_executable() {
+    let (scratch, host) = host_with_shells("terminal-legacy-cursor", "linux", &["cursor-agent"]);
+    let mut params = open_params();
+    params.shell = None;
+    params.login_target = Some("cursor".into());
+    let launch = prepare(params, host).expect("the vendor-specific Cursor executable is available");
+    assert_eq!(launch.request.program, scratch.join("cursor-agent"));
+    assert!(launch.cursor_alias.is_none());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn cursor_login_launches_only_the_verified_agent_alias_in_its_environment() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let grok = ScratchDir::created("terminal-grok-agent");
+    let generic = ScratchDir::created("terminal-semver-agent");
+    let cursor = ScratchDir::created("terminal-cursor-agent");
+    let workspace = ScratchDir::created("terminal-cursor-workspace");
+    let workspace_path = workspace
+        .canonicalize()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let grok_program = grok.join("agent");
+    let cursor_program = cursor.join("agent");
+    let launcher = cursor.join("multicall-launcher");
+    let generic_program = generic.join("agent");
+    std::fs::write(&generic_program, "#!/bin/sh\nprintf '%s\\n' '1.2.3'\n").unwrap();
+    std::fs::write(
+        &grok_program,
+        "#!/bin/sh\nprintf '%s\\n' 'grok 1.0.30 (04b7ffed98c6) [stable]'\n",
+    )
+    .unwrap();
+    std::fs::write(
+        &launcher,
+        concat!(
+            "#!/bin/sh\n",
+            "test \"$1\" = --version || exit 1\n",
+            "test \"${0##*/}\" = agent || exit 1\n",
+            "test \"$LOGIN_PROBE_FIXTURE\" = scoped || exit 1\n",
+            "test \"$(pwd -P)\" = \"$LOGIN_PROBE_CWD\" || exit 1\n",
+            "test -z \"${CURSOR_AUTH_TOKEN+x}\" || exit 1\n",
+            "printf '%s\\n' '2026.09.10-fd3934a'\n",
+        ),
+    )
+    .unwrap();
+    std::os::unix::fs::symlink(&launcher, &cursor_program).unwrap();
+    for path in [&grok_program, &generic_program, &launcher] {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+
+    for (cursor_entry, cursor_installed) in [
+        (None, false),
+        (Some(PathBuf::from(format!(" {}", cursor.display()))), false),
+        (Some(cursor.to_path_buf()), true),
+    ] {
+        let dirs = [&*grok, &*generic]
+            .into_iter()
+            .chain(cursor_entry.as_deref());
+        let path = std::env::join_paths(dirs).unwrap().into_string().unwrap();
+        let (_scratch, service, state) = prepared_service_with(|service| {
+            let normal_host = Arc::clone(&service.host);
+            let workspace_path = workspace_path.clone();
+            service.host = Arc::new(move || {
+                let mut host = normal_host();
+                host.env.insert("PATH".into(), path.clone());
+                host.env
+                    .insert("LOGIN_PROBE_CWD".into(), workspace_path.clone());
+                host.env
+                    .insert("LOGIN_PROBE_FIXTURE".into(), "scoped".into());
+                host.env
+                    .insert("CURSOR_AUTH_TOKEN".into(), "fixture-token".into());
+                host
+            });
+            service.shell_read = Arc::new(|| true);
+        });
+        let mut params = open_params();
+        params.shell = None;
+        params.login_target = Some("cursor".into());
+        params.cwd = Some(workspace_path.clone());
+        let result = service
+            .open(params, fake_session(), CancellationToken::new())
+            .await;
+        if cursor_installed {
+            result.expect("a verified Cursor agent alias can launch a login PTY");
+            assert_eq!(
+                state.lock().unwrap().launches,
+                [(
+                    std::path::absolute(&cursor_program).unwrap(),
+                    vec![std::ffi::OsString::from("login")]
+                )]
+            );
+            service
+                .close(SessionParams {
+                    session_id: "terminal-1".into(),
+                })
+                .await
+                .unwrap();
+        } else {
+            let error = result.expect_err("no verified Cursor executable is on the literal PATH");
+            assert_eq!(error.code, codes::UNAVAILABLE);
+            assert!(state.lock().unwrap().launches.is_empty());
+        }
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn closing_cursor_login_waits_for_version_probe_child_to_settle() {
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::Duration;
+
+    let bin = ScratchDir::created("terminal-cursor-slow-probe");
+    let agent = bin.join("agent");
+    let marker = bin.join("pid");
+    std::fs::write(
+        &agent,
+        "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$PROBE_PID_FILE\"\nexec /bin/sleep 30\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&agent, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let path = bin.to_string_lossy().into_owned();
+    let marker_path = marker.to_string_lossy().into_owned();
+    let (_scratch, service, state) = prepared_service_with(|service| {
+        let normal_host = Arc::clone(&service.host);
+        service.host = Arc::new(move || {
+            let mut host = normal_host();
+            host.env.insert("PATH".into(), path.clone());
+            host.env
+                .insert("PROBE_PID_FILE".into(), marker_path.clone());
+            host
+        });
+        service.shell_read = Arc::new(|| true);
+    });
+    let mut params = open_params();
+    params.shell = None;
+    params.login_target = Some("cursor".into());
+    let open = {
+        let service = Arc::clone(&service);
+        tokio::spawn(async move {
+            service
+                .open(params, fake_session(), CancellationToken::new())
+                .await
+        })
+    };
+    let pid = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if let Ok(text) = std::fs::read_to_string(&marker)
+                && let Ok(pid) = text.trim().parse::<i32>()
+            {
+                break nix::unistd::Pid::from_raw(pid);
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the Cursor version probe reports its PID");
+    tokio::time::timeout(
+        Duration::from_secs(8),
+        service.close(SessionParams {
+            session_id: "terminal-1".into(),
+        }),
+    )
+    .await
+    .expect("terminal.close waits for version probe settlement")
+    .unwrap();
+    assert_eq!(
+        nix::sys::signal::kill(pid, None),
+        Err(nix::errno::Errno::ESRCH),
+        "expected version probe PID {pid} reaped before close returned"
+    );
+    let refused = open
+        .await
+        .unwrap()
+        .expect_err("cancelled probe cannot open a PTY");
+    assert_eq!(refused.code, codes::CANCELLED);
+    assert!(state.lock().unwrap().launches.is_empty());
+}

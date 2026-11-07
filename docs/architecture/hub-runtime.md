@@ -1295,8 +1295,10 @@ A runtime advertises `terminalLoginArgv` when `terminal.open` accepts
 `loginTarget`. Each supported vendor's executable and arguments come from
 `apps/shared/src/external-agents/login.json`, which also supplies the copyable
 command. The runtime resolves the executable against its effective `PATH` before
-changing the working directory. Windows requires the vendor's `.exe`. Unknown
-targets and shell or environment overrides are refused.
+changing the working directory. On Unix, Cursor can use the shared `agent`
+name when its version probe recognizes Cursor. The probe uses the login
+PTY's working directory and filtered environment. Windows requires the vendor's `.exe`.
+Unknown targets and shell or environment overrides are refused.
 
 Environment and workspace ownership, isolation, and shell consent checks apply
 to login PTYs. The Hub sends `loginTarget` only to peers that advertise the
