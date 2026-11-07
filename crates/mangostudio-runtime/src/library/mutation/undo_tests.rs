@@ -121,6 +121,53 @@ fn symlink_directory(target: &std::path::Path, link: &std::path::Path) {
 }
 
 #[test]
+fn undo_checks_the_registry_write_policy_before_removing_resources() {
+    let home = Home::new("undo-location-policy");
+    let settings = home.path(&[".claude", "settings.json"]);
+    std::fs::write(&settings, "{}").unwrap();
+    let command = home.skill(&home.path(&[".claude", "commands", "gh.md"]), "keep");
+    for (location, slug, path, kind, refusal) in [
+        (
+            "claude-settings",
+            "settings",
+            settings,
+            ResourceKind::File,
+            WriteFailure::ReadOnlyLocation,
+        ),
+        (
+            "claude-commands",
+            "gh",
+            command,
+            ResourceKind::Directory,
+            WriteFailure::WrongLayout,
+        ),
+    ] {
+        let destination_path = path.to_string_lossy().into_owned();
+        write(
+            &home,
+            "set",
+            vec![BackupEntry {
+                location_id: location.into(),
+                slug: slug.into(),
+                kind,
+                resolved_path: resolve_through_existing_ancestor(&destination_path).unwrap(),
+                destination_path,
+                backup_path: None,
+                written_content_hash: home.hash(&path, kind),
+                resource_key: None,
+            }],
+        );
+
+        let outcome = run(&home, "set");
+        assert!(
+            matches!(&outcome, Err(UndoError::Refused(error)) if error.reason == refusal),
+            "expected {refusal:?} for location {location} | received {outcome:?}"
+        );
+        assert!(path.exists(), "the resource is untouched");
+    }
+}
+
+#[test]
 fn a_directory_location_itself_is_never_a_resource_destination() {
     let home = Home::new("undo-location-root");
     let location = home.path(&[".claude", "skills"]);
@@ -456,7 +503,7 @@ fn an_interrupted_undo_reports_what_it_already_restored() {
 }
 
 #[test]
-fn an_unreadable_location_is_refused_rather_than_guessed() {
+fn an_unknown_location_is_refused_rather_than_guessed() {
     let home = Home::new("undo-unknown-location");
     let destination = home.skill(&home.path(&[".claude", "skills", "gh"]), "body");
     let mut entry = removal_set(&home, "set", &destination);
@@ -464,6 +511,7 @@ fn an_unreadable_location_is_refused_rather_than_guessed() {
     write(&home, "set", vec![entry]);
     assert!(matches!(
         run(&home, "set"),
-        Err(UndoError::Refused(error)) if error.message.contains("does not resolve on this machine")
+        Err(UndoError::Refused(error)) if error.reason == WriteFailure::UnsupportedLocation
+            && error.message.contains("not-a-location")
     ));
 }

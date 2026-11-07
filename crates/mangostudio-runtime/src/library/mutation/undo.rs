@@ -18,10 +18,10 @@ use super::disk::ResourceHasher;
 use super::interrupt::Interrupt;
 use super::paths::{
     WriteError, WriteFailure, assert_expected_resource_entry, fs_path, is_path_prefix, node_join,
-    node_resolve, resolve_through_existing_ancestor,
+    node_resolve, require_writable_location, resolve_through_existing_ancestor,
 };
 use crate::probing::detection::path_env::PathEnv;
-use crate::probing::locations::{LocationLayout, location_by_id};
+use crate::probing::locations::LocationLayout;
 
 /// `PropagationUndoEntry`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -176,9 +176,8 @@ pub(crate) fn execute_undo(
 /// Check the recorded destination against its current physical path. The
 /// root itself is a valid destination for a single-file location.
 fn resolve_contained_destination(entry: &BackupEntry, env: &PathEnv) -> Result<String, WriteError> {
-    let location = location_by_id(&entry.location_id)
-        .and_then(|location| (location.resolve_path)(env).map(|root| (location, root)));
-    let Some((location, root)) = location else {
+    let location = require_writable_location(&entry.location_id, entry.kind)?;
+    let Some(root) = (location.resolve_path)(env) else {
         return Err(WriteError::new(
             WriteFailure::UnsupportedLocation,
             format!(
