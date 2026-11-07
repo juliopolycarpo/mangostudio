@@ -41,6 +41,8 @@ class FormatterDiscovery {
   readonly environments: (NodeJS.ProcessEnv | undefined)[] = [];
   readonly files: string[] = [];
 
+  constructor(readonly platform: NodeJS.Platform = process.platform) {}
+
   which(command: string): string | null {
     return command === 'rustup' ? (this.hasRustup ? rustup : null) : this.fallback;
   }
@@ -103,7 +105,70 @@ class NativeFormatterProbe {
   };
 }
 
+class HelpTimeoutDiscovery extends FormatterDiscovery {
+  private helpCalls = 0;
+  repeatedTimeout = false;
+
+  override query(command: string[], env?: NodeJS.ProcessEnv) {
+    const result = super.query(command, env);
+    if (command[1] !== '--help') return result;
+    this.helpCalls += 1;
+    if (this.helpCalls > 1 && !this.repeatedTimeout) return result;
+    return {
+      exitCode: null,
+      stdout: '',
+      stderr: '',
+      signalCode: 'SIGTERM' as const,
+      exitedDueToTimeout: true,
+    };
+  }
+}
+
 describe('real formatter discovery', () => {
+  it('recovers a single timed-out Windows help query before resolving rustfmt', () => {
+    const discovery = new HelpTimeoutDiscovery('win32');
+    expect(discoverRealRustfmt(discovery).path).toBe(executable);
+    expect(discovery.commands).toEqual([
+      [rustup, '--help'],
+      [rustup, '--help'],
+      [rustup, 'which', 'rustfmt'],
+    ]);
+    expect(discovery.environments.map((env) => env?.RUSTUP_AUTO_INSTALL)).toEqual(['0', '0', '0']);
+  });
+
+  it('stops Windows help discovery after two timed-out attempts', () => {
+    const discovery = new HelpTimeoutDiscovery('win32');
+    discovery.repeatedTimeout = true;
+    expect(() => discoverRealRustfmt(discovery)).toThrow('"exitedDueToTimeout":true');
+    expect(discovery.commands).toEqual([
+      [rustup, '--help'],
+      [rustup, '--help'],
+    ]);
+  });
+
+  it('retains the first Windows timeout when retry succeeds', () => {
+    const discovery = new HelpTimeoutDiscovery('win32');
+    const warnings: string[] = [];
+    function retainWarning(message: string) {
+      warnings.push(message);
+    }
+    const warn = spyOn(console, 'warn').mockImplementation(retainWarning);
+    try {
+      expect(discoverRealRustfmt(discovery).path).toBe(executable);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('"signalCode":"SIGTERM"');
+      expect(warnings[0]).toContain('"exitedDueToTimeout":true');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('reports the first help timeout directly on Linux', () => {
+    const discovery = new HelpTimeoutDiscovery('linux');
+    expect(() => discoverRealRustfmt(discovery)).toThrow('"exitedDueToTimeout":true');
+    expect(discovery.commands).toEqual([[rustup, '--help']]);
+  });
+
   it('passes the non-installing environment and deadline through the native spawn adapter', () => {
     const directory = mkdtempSync(join(tmpdir(), 'real-rustfmt-native-adapter-'));
     const formatter = join(directory, process.platform === 'win32' ? 'rustfmt.exe' : 'rustfmt');
