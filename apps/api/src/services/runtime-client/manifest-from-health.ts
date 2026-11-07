@@ -100,6 +100,9 @@ export function capabilityManifestFromHealth(
     ...(handshake?.terminalCloseAfterRevocation === undefined
       ? {}
       : { terminalCloseAfterRevocation: handshake.terminalCloseAfterRevocation }),
+    ...(handshake?.terminalLoginArgv === undefined
+      ? {}
+      : { terminalLoginArgv: handshake.terminalLoginArgv }),
     ...(implementation ? { implementation } : {}),
     profile: report.profile,
     allow,
