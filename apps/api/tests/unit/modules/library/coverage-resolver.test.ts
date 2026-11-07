@@ -62,6 +62,22 @@ describe('resolveLibraryCoverage', () => {
     });
   });
 
+  it('keeps the effective and shadowed copies when a lower-priority location fails', () => {
+    const coverage = resolveLibraryCoverage(
+      { kind: 'skill', slug: 'gh' },
+      [instance('mango-skills'), instance('agents-skills')],
+      new Set<LibraryLocationId>(['claude-skills'])
+    );
+
+    expect(coverage.find(({ targetId }) => targetId === 'mangostudio')).toEqual({
+      targetId: 'mangostudio',
+      state: 'shadowed',
+      effectiveLocationId: 'mango-skills',
+      shadowedLocationIds: ['agents-skills'],
+      unscannedLocationIds: ['claude-skills'],
+    });
+  });
+
   it('uses each target precedence and reports lower copies as shadowed', () => {
     const coverage = resolveLibraryCoverage({ kind: 'skill', slug: 'gh' }, [
       instance('agents-skills'),

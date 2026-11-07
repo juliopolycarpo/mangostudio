@@ -19,7 +19,11 @@
 
 import type { LibraryResource, LibraryTargetId, ResourceKind } from '@mangostudio/shared/library';
 
-import { coverageCells, hasSingleTargetCoverage } from '@/features/library/format';
+import {
+  coverageCells,
+  hasSingleTargetCoverage,
+  shadowedCopyComparison,
+} from '@/features/library/format';
 
 export interface LibraryDivergenceSummary {
   /** The one divergence the card names. Null when nothing disagrees. */
@@ -70,12 +74,19 @@ function describeDivergentResource(resource: LibraryResource): DivergentResource
   // produce, but a resource whose cells all came back settled has nothing to
   // name, and naming nothing is worse than staying quiet.
   if (outliers.length === 0) return null;
-  // One named target and an unverified counterpart do not prove that the
-  // named target alone reads different versions.
+  // With other targets unverified, report a lone outlier only when its
+  // effective and shadowed copies disagree.
   if (
     outliers.length === 1 &&
     agreeing.length === 0 &&
-    cells.some(({ state }) => state === 'scan-incomplete')
+    cells.some(({ state }) => state === 'scan-incomplete') &&
+    !cells.some(
+      (cell) =>
+        cell.state === 'divergent' &&
+        cell.shadowedLocationIds.some(
+          (locationId) => shadowedCopyComparison(resource, cell, locationId) === 'differs'
+        )
+    )
   ) {
     return null;
   }

@@ -453,7 +453,7 @@ export const messages = {
       labelDivergentOther: 'Skills — {count} divergências',
       // Quem lê uma versão que os outros não confirmam, e com quem discorda.
       divergenceBody: 'Versão diferente em {outliers} do que em {agreeing}.',
-      divergenceBodyNoMajority: '{targets} leem versões diferentes desta skill.',
+      divergenceBodyNoMajority: 'Cópias diferentes desta skill em {targets}.',
       moreOne: 'Mais {count} skill divergente.',
       moreOther: 'Mais {count} skills divergentes.',
       propagate: 'Propagar',
@@ -470,7 +470,7 @@ export const messages = {
       labelDivergentOne: 'Biblioteca — {count} divergência',
       labelDivergentOther: 'Biblioteca — {count} divergências',
       divergenceBody: 'Versão diferente em {outliers} do que em {agreeing}.',
-      divergenceBodyNoMajority: '{targets} leem versões diferentes deste recurso.',
+      divergenceBodyNoMajority: 'Cópias diferentes deste recurso em {targets}.',
       moreOne: 'Mais {count} recurso divergente.',
       moreOther: 'Mais {count} recursos divergentes.',
       propagate: 'Propagar',

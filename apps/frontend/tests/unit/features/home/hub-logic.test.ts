@@ -188,6 +188,34 @@ describe('summarizeLibraryDivergence', () => {
     expect(summarizeLibraryDivergence([partial]).headline).toBeNull();
   });
 
+  it('reports a conflict inside one target when other scans are incomplete', () => {
+    const divergent = divergentSkill();
+    const partial = {
+      ...divergent,
+      instances: [instance('cursor-skills', 'aaa'), instance('cursor-skills-builtin', 'bbb')],
+      coverage: [
+        {
+          targetId: 'cursor',
+          state: 'shadowed',
+          effectiveLocationId: 'cursor-skills',
+          shadowedLocationIds: ['cursor-skills-builtin'],
+        },
+        { ...coverage('claude'), unscannedLocationIds: ['claude-skills'] },
+        coverage('codex'),
+        { ...coverage('mangostudio'), unscannedLocationIds: ['claude-skills'] },
+      ],
+      contentGroups: [
+        { contentHash: 'aaa', locationIds: ['cursor-skills'], instanceCount: 1 },
+        { contentHash: 'bbb', locationIds: ['cursor-skills-builtin'], instanceCount: 1 },
+      ],
+    } satisfies LibraryResource;
+
+    const summary = summarizeLibraryDivergence([partial]);
+    expect(summary.headline?.outliers ?? null).toEqual(['cursor']);
+    expect(summary.headline?.agreeing).toEqual([]);
+    expect(summary.divergentCount).toBe(1);
+  });
+
   it('names the outlier and who it disagrees with', () => {
     const summary = summarizeLibraryDivergence([divergentSkill()]);
     expect(summary.headline).toEqual({

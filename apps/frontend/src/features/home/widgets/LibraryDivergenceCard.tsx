@@ -143,9 +143,8 @@ function DivergenceBody({
   // call the same harness the same thing.
   const targetName = (targetId: LibraryTargetId) => t.library.targets[targetId];
 
-  // With no agreeing side there is no "different from what" to name — two
-  // copies, two versions, neither the norm. The matrix says the same thing by
-  // marking both cells divergent.
+  // Without an agreeing side, name where the conflicting copies were found.
+  // A single target may have both an effective copy and a shadowed copy.
   const body =
     resource.agreeing.length === 0
       ? formatMessage(labels.divergenceBodyNoMajority, {
