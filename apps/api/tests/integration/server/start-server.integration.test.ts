@@ -460,6 +460,48 @@ describe('startServer via __serve', () => {
   );
 
   it.skipIf(process.platform === 'win32')(
+    'keeps capture ownership while concurrent handle stops wait for the same HTTP drain',
+    async () => {
+      if (!fixture) throw new Error('Expected a managed process fixture.');
+      const running = fixture;
+      const entry = fileURLToPath(
+        new URL('../../support/fixtures/gated-duplicate-server-stop.ts', import.meta.url)
+      );
+      const database = join(running.tempDir, 'duplicate-stop.sqlite');
+      const child = running.spawn({
+        cmd: ['bun', entry],
+        env: {
+          ...serverEnv(running.tempDir, running.port),
+          DATABASE_PATH: database,
+          BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
+        },
+      });
+      const checkpoint = 'shutdown-fixture: duplicate stop while HTTP drain is gated';
+      try {
+        await running.waitUntilReady(
+          () => child.exitCode !== null || running.diagnostics().includes(checkpoint),
+          { label: 'duplicate handle stop during HTTP drain', timeoutMs: START_TIMEOUT_MS }
+        );
+        expect(running.diagnostics()).toContain(checkpoint);
+        const ownership = await acquireCaptureLock(database).then(
+          async (release) => {
+            await release();
+            return 'capture lock was available during HTTP drain';
+          },
+          (error: unknown) => (error instanceof Error ? error.message : String(error))
+        );
+        expect(ownership).toContain('already in use');
+      } finally {
+        child.kill('SIGUSR2');
+      }
+      expect(await running.waitForExit()).toBe(0);
+      const release = await acquireCaptureLock(database);
+      await release();
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  it.skipIf(process.platform === 'win32')(
     'keeps the capture lock after HTTP closes until detached product work settles',
     async () => {
       if (!fixture) throw new Error('Expected a managed process fixture.');

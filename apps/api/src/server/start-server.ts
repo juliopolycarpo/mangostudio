@@ -145,7 +145,9 @@ async function startServerWithLock(options: StartOptions): Promise<ServerHandle>
     void warmUpLibraryLocationDefaults();
   }
 
-  registerShutdown();
+  let stopping: Promise<void> | undefined;
+  const stop = () => (stopping ??= gracefulStop());
+  registerShutdown(stop);
 
   if (options.writeStateFile !== false) {
     await persistState(port, host, frontendDir);
@@ -153,7 +155,7 @@ async function startServerWithLock(options: StartOptions): Promise<ServerHandle>
 
   logRunning(host, port, devFrontendDir !== null);
 
-  return { port, host, stop: gracefulStop };
+  return { port, host, stop };
 }
 
 /** Bind the server port, exiting with a clear message when it is already in use. */
@@ -260,11 +262,10 @@ async function drainHttp(): Promise<Error | undefined> {
   }
 }
 
-function registerShutdown(): void {
-  // `requestShutdown` runs the stop once, so a second signal (e.g. SIGINT + a
-  // `stop` SIGTERM) cannot re-run gracefulStop and close the database twice.
-  // A restart requested over the API ends the process the same way.
-  registerShutdownHandler(gracefulStop);
+function registerShutdown(stop: ServerHandle['stop']): void {
+  // Signals and API restarts share the handle's shutdown, including a drain
+  // already started by a caller of ServerHandle.stop.
+  registerShutdownHandler(stop);
   const shutdown = (signal: 'SIGINT' | 'SIGTERM'): void => {
     if (signal === 'SIGINT') {
       console.warn('\n[api] Shutting down...');
