@@ -2,7 +2,7 @@ import { lstatSync, readlinkSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, parse, resolve, sep } from 'node:path';
 
 import { PathAccessError } from '../runtime-contract/service-errors';
-import { resolveWorkspacePath } from './path';
+import { expandWorkspacePathHome, resolveWorkspacePath } from './path';
 
 /** Bounds symlink traversal, including chains whose final target exists. */
 const MAX_SYMLINK_HOPS = 32;
@@ -136,9 +136,16 @@ export function resolvePathForContainment(inputPath: string): string {
   return resolvePathThroughExistingAncestor(inputPath);
 }
 
-/** Canonicalizes a containment root once so per-candidate checks can reuse it. */
+/**
+ * Canonicalize an existing root once so per-candidate checks can reuse it.
+ * // Usage: const root = resolveContainmentRoot('~/workspace');
+ */
 export function resolveContainmentRoot(root: string): string {
-  return realpathSync(resolveWorkspacePath(root));
+  // Bun's default realpathSync normalizes parent steps on POSIX before
+  // following links. Use the native operation on the original spelling.
+  return sep === '/'
+    ? realpathSync.native(expandWorkspacePathHome(root))
+    : realpathSync(resolveWorkspacePath(root));
 }
 
 /** Containment check against an already-canonical root, for hot loops. */

@@ -1,5 +1,5 @@
 import { statSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute, join, resolve, sep } from 'node:path';
 
 import { RegularFileWriteError } from '../../runtime-contract/service-errors';
 import { isPathPrefix, resolvePathThroughExistingAncestor } from '../../workspaces/host';
@@ -52,8 +52,12 @@ export function resolveContainedResourcePath(
     throw new LibraryWriteError('invalid-slug', `Invalid library resource slug: "${slug}".`);
   }
 
-  const logicalRoot = resolve(locationRoot);
-  const logicalPath = join(logicalRoot, slug);
+  const logicalRoot = sep === '/' ? locationRoot : resolve(locationRoot);
+  // POSIX must see the original parent steps when it opens this path.
+  const logicalPath =
+    sep === '/'
+      ? `${logicalRoot}${logicalRoot.endsWith(sep) ? '' : sep}${slug}`
+      : join(logicalRoot, slug);
   let resolvedRoot: string;
   let resolvedPath: string;
   try {

@@ -8,12 +8,13 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import {
   isInside,
   isPathPrefix,
+  resolveContainmentRoot,
   resolvePathForContainment,
 } from '../../../src/workspaces/path-containment';
 
@@ -128,6 +129,35 @@ describe('isInside', () => {
       expect(() => resolvePathForContainment(candidate)).toThrow('ENOTDIR');
     }
   );
+
+  it.skipIf(process.platform === 'win32')(
+    'uses the physical root when a parent step follows a directory link in the root',
+    () => {
+      mkdirSync(join(rootDir, 'assets'));
+      mkdirSync(join(outsideDir, 'assets'));
+      mkdirSync(join(outsideDir, 'nested'));
+      symlinkSync(join(outsideDir, 'nested'), join(rootDir, 'redirect'), 'dir');
+      const configured = `${rootDir}/redirect/../assets`;
+
+      expect(resolveContainmentRoot(configured)).toBe(join(outsideDir, 'assets'));
+      expect(isInside(configured, join(outsideDir, 'assets', 'real.txt'))).toBe(true);
+      expect(isInside(configured, join(rootDir, 'assets', 'lexical.txt'))).toBe(false);
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'requires the physical containment root to exist before applying parent steps',
+    () => {
+      expect(() => resolveContainmentRoot(`${rootDir}/missing/../nested`)).toThrow('ENOENT');
+    }
+  );
+
+  it('expands configured root home aliases', () => {
+    const home = realpathSync(homedir());
+    expect(resolveContainmentRoot('~')).toBe(home);
+    expect(resolveContainmentRoot('~/')).toBe(home);
+    expect(resolveContainmentRoot('~\\')).toBe(home);
+  });
 
   it('does not expand ~, so the checked path is the one the filesystem opens', () => {
     // Expanding here would approve `~/escape.txt` as `$HOME/escape.txt` while the
