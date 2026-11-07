@@ -111,14 +111,16 @@ describe('isInside', () => {
   );
 
   it.skipIf(process.platform === 'win32')(
-    'probes again after a parent step cancels a missing component of a planned path',
+    'rejects parent steps after a missing component, including within the missing suffix',
     () => {
       mkdirSync(join(outsideDir, 'nested'));
       symlinkSync(join(outsideDir, 'nested'), join(rootDir, 'redirect'), 'dir');
       const planned = `${rootDir}/missing/../redirect/../new/file.txt`;
 
-      expect(resolvePathForContainment(planned)).toBe(join(outsideDir, 'new', 'file.txt'));
-      expect(isInside(rootDir, planned)).toBe(false);
+      expect(() => resolvePathForContainment(planned)).toThrow('ENOENT');
+      expect(() => isInside(rootDir, planned)).toThrow('ENOENT');
+      const partlyMissing = `${rootDir}/missing/child/../file.txt`;
+      expect(() => resolvePathForContainment(partlyMissing)).toThrow('ENOENT');
     }
   );
 

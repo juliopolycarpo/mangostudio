@@ -63,20 +63,11 @@ function resolvePath(inputPath: string, physicalParents: boolean): string {
   const initial = splitAbsolutePath(absolutePath);
   let resolvedPath = initial.root;
   let pending = [...initial.segments];
-  const missing: string[] = [];
   let hops = 0;
 
   while (pending.length > 0) {
     const segment = pending.shift();
     if (segment === undefined) break;
-    if (missing.length > 0) {
-      // A planned directory may not exist yet. A later parent step can
-      // return to a real ancestor where link traversal must resume.
-      if (segment === '..') missing.pop();
-      else if (segment !== '.') missing.push(segment);
-      continue;
-    }
-
     const next = resolve(resolvedPath, segment);
     // Let the filesystem reject a parent or current-directory step through
     // a regular file before dropping that component from the resolved path.
@@ -89,9 +80,10 @@ function resolvePath(inputPath: string, physicalParents: boolean): string {
       entry = lstatSync(candidate);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      if (!physicalParents) return resolve(realpathSync(resolvedPath), segment, ...pending);
-      missing.push(segment);
-      continue;
+      // Removing any missing component with a parent step would make the
+      // planned write reachable even though the original path cannot be opened.
+      if (physicalParents && pending.includes('..')) throw error;
+      return resolve(realpathSync(resolvedPath), segment, ...pending);
     }
 
     if (!entry.isSymbolicLink()) {
@@ -116,8 +108,7 @@ function resolvePath(inputPath: string, physicalParents: boolean): string {
     pending = [...absoluteTarget.segments, ...pending];
   }
 
-  const ancestor = realpathSync(resolvedPath);
-  return missing.length === 0 ? ancestor : resolve(ancestor, ...missing);
+  return realpathSync(resolvedPath);
 }
 
 /**

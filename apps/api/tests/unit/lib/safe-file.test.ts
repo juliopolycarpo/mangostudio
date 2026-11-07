@@ -317,6 +317,29 @@ describe('writeFileAtomic through symlinks', () => {
     }
   );
 
+  it('refuses to overwrite a physical file through an unreadable parent traversal', () => {
+    if (isWindows) return;
+    const home = join(dir, 'home');
+    mkdirSync(home);
+    const outside = join(dir, 'outside');
+    mkdirSync(join(outside, 'nested'), { recursive: true });
+    symlinkSync(join(outside, 'nested'), join(home, 'deep'), 'dir');
+    const physical = join(outside, 'secret.txt');
+    const lexical = join(home, 'secret.txt');
+    writeFileSync(physical, 'outside sentinel');
+    writeFileSync(lexical, 'lexical sentinel');
+    const link = join(home, '.env');
+    symlinkSync('missing/../deep/../secret.txt', link);
+
+    expect(() => readFileSync(link, 'utf8')).toThrow('ENOENT');
+    try {
+      expect(() => writeFileAtomic(link, 'new secret')).toThrow('ENOENT');
+    } finally {
+      expect(readFileSync(physical, 'utf8')).toBe('outside sentinel');
+      expect(readFileSync(lexical, 'utf8')).toBe('lexical sentinel');
+    }
+  });
+
   it('follows a chain of symlinks to the real file', () => {
     if (isWindows) return;
     const target = join(dir, 'real.toml');
