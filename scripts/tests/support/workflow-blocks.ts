@@ -96,8 +96,10 @@ export function runScriptLines(source: string): RunScriptLine[] {
     opener: /^(?<indent>\s*)(?<marker>-\s+)?(?<key>run):(?<value>.*)$/,
     comments: 'content',
     emptyIsBlock: true,
+    trimStyle: true,
     inlineContinuation: true,
-    skip: (_match, previousKey) => previousKey === 'defaults:',
+    content: 'consume',
+    skipAfter: 'defaults:',
   }).flatMap((scalar) => [
     ...(scalar.block || scalar.value.trim() === '' ? [] : [scalar.opener]),
     ...scalar.lines,

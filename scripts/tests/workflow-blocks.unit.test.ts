@@ -62,6 +62,11 @@ describe('workflow scalar projections', () => {
     ]);
   });
 
+  test('run opener keeps the line boundary at an embedded line separator', () => {
+    const source = 'run:\u2028echo unsupported\n  following text\nrun: echo valid';
+    expect(runScriptLines(source)).toEqual([{ line: 3, text: 'run: echo valid' }]);
+  });
+
   test('upload paths ignore comments without absorbing the next sibling key', () => {
     const step = [
       '  with:',
@@ -80,6 +85,21 @@ describe('workflow scalar projections', () => {
       'two',
     ]);
     expect(uploadPaths('    path:\n      one\n    name: stop')).toEqual(['one']);
+  });
+
+  test('upload paths revisit matching lines inside the preceding path block', () => {
+    const step = '    path: |\n      path: nested.zip\n      last.txt\n    name: stop';
+    expect(uploadPaths(step)).toEqual(['path: nested.zip', 'last.txt', 'nested.zip']);
+  });
+
+  test('upload paths leave a pipe after non-ASCII whitespace inline', () => {
+    expect(uploadPaths('    path:\u00a0|\n      content.txt\n    name: stop')).toEqual(['|']);
+  });
+
+  test('flat inputs omit a value containing only non-ASCII whitespace', () => {
+    expect(parseWithInputs('    with:\n      empty:\u00a0\n      mode: restore')).toEqual({
+      mode: 'restore',
+    });
   });
 
   test('with-inputs keep flat values and omit empty, literal and folded scalars', () => {

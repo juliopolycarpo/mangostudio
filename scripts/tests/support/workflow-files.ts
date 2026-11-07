@@ -47,9 +47,9 @@ export function parseWithInputs(step: string): Record<string, string> {
   const body = withMatch[2];
   const inputs: Record<string, string> = {};
   for (const scalar of scanWorkflowScalars(body, {
-    opener: /^(?<indent>[ \t]+)(?<key>[\w-]+):[ \t]*(?<value>.*)$/,
+    opener: /^(?<indent>\s+)(?<key>[\w-]+):\s*(?<value>.*)$/,
     comments: 'ignore',
-    inlineOnly: true,
+    content: 'none',
   })) {
     if (scalar.block || scalar.value === '') continue;
     inputs[scalar.key] = scalar.value.trim().replace(/^['"]|['"]$/g, '');
@@ -108,9 +108,10 @@ export function uploadArtifactSteps(text: string): string[] {
  */
 export function uploadPaths(step: string): string[] {
   return scanWorkflowScalars(step, {
-    opener: /^(?<indent>[ \t]*)(?<key>path):[ \t]*(?<value>.*)$/,
+    opener: /^(?<indent>\s*)(?<key>path):[ \t]*(?<value>.*)$/,
     comments: 'ignore',
     emptyIsBlock: true,
+    content: 'revisit',
   }).flatMap((scalar) =>
     scalar.block ? scalar.lines.map(({ text }) => text.trim()) : [scalar.value.trim()]
   );

@@ -21,62 +21,67 @@ interface ScalarOptions {
   /** Paths ignore YAML comments; shell scripts retain comment source lines. */
   readonly comments: 'ignore' | 'content';
   readonly emptyIsBlock?: boolean;
+  readonly trimStyle?: boolean;
   /** Retain the shell scanner's treatment of indented inline continuations. */
   readonly inlineContinuation?: boolean;
-  /** The flat input reader historically inspects key lines only. */
-  readonly inlineOnly?: boolean;
-  readonly skip?: (match: RegExpExecArray, previousKey: string) => boolean;
+  /** Scripts consume their body, paths revisit it, and flat inputs read key lines only. */
+  readonly content: 'consume' | 'revisit' | 'none';
+  readonly skipAfter?: string;
 }
 
 /**
- * Claim scalar content before looking for another key. Indentation is measured
- * at the key's column, including a list marker, and source line numbers survive.
- * Callers own which keys count and how the resulting scalar is interpreted.
+ * Collect scalar content below the key's column, including a list marker.
+ * Callers decide whether to revisit those lines as potential keys.
+ *
+ * @example
+ * scanWorkflowScalars('  path: |\n    file.txt', {
+ *   opener: /^(?<indent> *)(?<key>path): *(?<value>.*)$/,
+ *   comments: 'ignore',
+ *   content: 'revisit',
+ * });
  */
 export function scanWorkflowScalars(source: string, options: ScalarOptions): WorkflowScalar[] {
   const found: WorkflowScalar[] = [];
-  let active: { indent: number; scalar: WorkflowScalar } | undefined;
+  const lines = source.split('\n');
   let previousKey = '';
+  const ignored = (trimmed: string) =>
+    trimmed === '' || (options.comments === 'ignore' && trimmed.startsWith('#'));
 
-  source.split('\n').forEach((text, index) => {
+  for (let index = 0; index < lines.length; index += 1) {
+    const text = lines[index];
     const trimmed = text.trim();
-    if (trimmed === '') return;
-    const comment = trimmed.startsWith('#');
-    if (comment && options.comments === 'ignore') return;
-
-    if (active) {
-      if (text.search(/\S/) > active.indent) {
-        active.scalar.lines.push({ line: index + 1, text });
-        return;
-      }
-      active = undefined;
-    }
-
+    if (ignored(trimmed)) continue;
     const match = options.opener.exec(text);
-    if (match?.groups) {
-      const { indent, marker, key, value } = match.groups;
-      const skip = options.skip?.(match, previousKey);
-      previousKey = trimmed;
-      if (skip) return;
-      const block =
-        value.trimStart().startsWith('|') ||
-        value.trimStart().startsWith('>') ||
-        (options.emptyIsBlock === true && value.trim() === '');
-      const scalar: WorkflowScalar = {
-        key,
-        value,
-        block,
-        opener: { line: index + 1, text },
-        lines: [],
-      };
-      found.push(scalar);
-      if (!options.inlineOnly && (block || options.inlineContinuation)) {
-        active = { indent: indent.length + (marker?.length ?? 0), scalar };
-      }
-      return;
+    if (!match?.groups) {
+      if (!trimmed.startsWith('#')) previousKey = trimmed;
+      continue;
     }
-    if (!comment) previousKey = trimmed;
-  });
+    const { indent, marker, key, value } = match.groups;
+    const skip = previousKey === options.skipAfter;
+    previousKey = trimmed;
+    if (skip) continue;
 
+    const styleValue = options.trimStyle ? value.trimStart() : value;
+    const block = /^[|>]/.test(styleValue) || (options.emptyIsBlock === true && styleValue === '');
+    const scalar: WorkflowScalar = {
+      key,
+      value,
+      block,
+      opener: { line: index + 1, text },
+      lines: [],
+    };
+    found.push(scalar);
+    if (options.content === 'none' || (!block && !options.inlineContinuation)) continue;
+
+    const keyColumn = indent.length + (marker?.length ?? 0);
+    let next = index + 1;
+    for (; next < lines.length; next += 1) {
+      const body = lines[next];
+      if (ignored(body.trim())) continue;
+      if (body.search(/\S/) <= keyColumn) break;
+      scalar.lines.push({ line: next + 1, text: body });
+    }
+    if (options.content === 'consume') index = next - 1;
+  }
   return found;
 }
