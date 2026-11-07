@@ -358,8 +358,18 @@ pub(crate) fn resolve_contained_resource_path(
             format!("Invalid library resource slug: \"{entry_name}\"."),
         ));
     }
-    let logical_root = node_resolve(platform, root);
-    let logical_path = node_join(platform, &[&logical_root, entry_name]);
+    let (logical_root, logical_path) = if platform == "win32" {
+        let logical_root = node_resolve(platform, root);
+        let logical_path = node_join(platform, &[&logical_root, entry_name]);
+        (logical_root, logical_path)
+    } else {
+        // The file writer opens this spelling too, so keep POSIX parent steps
+        // until both containment and the eventual write follow the links.
+        (
+            root.to_string(),
+            format!("{}/{entry_name}", root.trim_end_matches('/')),
+        )
+    };
     let unresolvable = || {
         WriteError::new(
             WriteFailure::PathEscape,
@@ -670,6 +680,34 @@ mod tests {
             through.resolved_path,
             path_string(&std::fs::canonicalize(&root).unwrap().join("new")),
             "a symlinked location root resolves to its target"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_raw_posix_location_root_keeps_parent_steps_after_links() {
+        let scratch = crate::test_support::scratch_dir("library-destination-raw-root");
+        let lexical = scratch.join("root");
+        let outside = scratch.join("outside");
+        std::fs::create_dir_all(lexical.join("assets/gh")).unwrap();
+        std::fs::create_dir_all(outside.join("assets/gh")).unwrap();
+        std::fs::create_dir_all(outside.join("nested")).unwrap();
+        std::os::unix::fs::symlink(outside.join("nested"), lexical.join("redirect")).unwrap();
+        let raw_root = lexical.join("redirect/../assets");
+        let expected = std::fs::canonicalize(outside.join("assets/gh")).unwrap();
+
+        let destination =
+            resolve_contained_resource_path("linux", &path_string(&raw_root), "gh").unwrap();
+        assert_eq!(
+            destination.resolved_path,
+            path_string(&expected),
+            "the physical destination must use the symlink target's parent"
+        );
+        assert_eq!(destination.logical_path, path_string(&raw_root.join("gh")));
+        assert_eq!(
+            std::fs::canonicalize(destination.logical_path).unwrap(),
+            expected,
+            "the logical destination must open the same path"
         );
     }
 
