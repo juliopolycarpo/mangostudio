@@ -289,6 +289,34 @@ describe('writeFileAtomic through symlinks', () => {
     expect(lstatSync(link).isSymbolicLink()).toBe(true);
   });
 
+  it.each(['existing', 'dangling'])(
+    'writes through a relative symlink with a parent step to its %s physical target',
+    (kind) => {
+      if (isWindows) return;
+      const physical = join(dir, 'physical');
+      mkdirSync(join(physical, 'nested'), { recursive: true });
+      symlinkSync(join(physical, 'nested'), join(dir, 'redirect'), 'dir');
+      const target = join(physical, 'custom-uploads', 'written.txt');
+      const legacy = join(dir, 'custom-uploads', 'written.txt');
+      mkdirSync(dirname(legacy));
+      writeFileSync(legacy, 'legacy path occupied');
+      const link = join(dir, '.env');
+      const rawTarget = 'redirect/../custom-uploads/written.txt';
+      symlinkSync(rawTarget, link);
+      if (kind === 'existing') {
+        mkdirSync(dirname(target));
+        writeFileSync(target, 'old credential');
+      }
+
+      writeFileAtomic(link, 'updated credential');
+
+      expect(readFileSync(legacy, 'utf8')).toBe('legacy path occupied');
+      expect(readFileSync(target, 'utf8')).toBe('updated credential');
+      expect(readFileSync(link, 'utf8')).toBe('updated credential');
+      expect(readlinkSync(link)).toBe(rawTarget);
+    }
+  );
+
   it('follows a chain of symlinks to the real file', () => {
     if (isWindows) return;
     const target = join(dir, 'real.toml');

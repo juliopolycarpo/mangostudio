@@ -1,5 +1,5 @@
 import { lstatSync, readlinkSync, realpathSync } from 'node:fs';
-import { dirname, parse, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, parse, resolve, sep } from 'node:path';
 
 import { PathAccessError } from '../runtime-contract/service-errors';
 import { resolveWorkspacePath } from './path';
@@ -26,43 +26,76 @@ interface PathParts {
   readonly segments: readonly string[];
 }
 
+function splitSegments(path: string): string[] {
+  return path.split(sep).filter((segment) => segment.length > 0);
+}
+
 function splitAbsolutePath(path: string): PathParts {
   const root = parse(path).root;
-  return {
-    root,
-    segments: path
-      .slice(root.length)
-      .split(sep)
-      .filter((segment) => segment.length > 0),
-  };
+  return { root, segments: splitSegments(path.slice(root.length)) };
 }
 
 /**
- * Resolves an absolute or cwd-relative path through its nearest existing
- * ancestor. Every symlink is followed explicitly so existing and dangling
- * chains share one deterministic hop cap.
+ * Resolve a path through its nearest existing ancestor with a bounded symlink walk.
+ * POSIX applies parent steps after expanding preceding links. Windows keeps
+ * its native path normalization, including drive-relative paths.
+ * // Usage: resolvePathThroughExistingAncestor('/workspace/not-yet.txt')
  */
 export function resolvePathThroughExistingAncestor(inputPath: string): string {
-  const absolutePath = resolve(inputPath);
+  return resolvePath(inputPath, sep === '/');
+}
+
+/**
+ * Recover a destination that the old lexical atomic writer could have used.
+ * Use only to identify files written before physical parent traversal.
+ * // Usage: resolveLegacyLexicalWritePath('/home/me/.mango/.env')
+ */
+export function resolveLegacyLexicalWritePath(inputPath: string): string {
+  return resolvePath(inputPath, false);
+}
+
+function resolvePath(inputPath: string, physicalParents: boolean): string {
+  const absolutePath = physicalParents
+    ? isAbsolute(inputPath)
+      ? inputPath
+      : `${process.cwd()}${sep}${inputPath}`
+    : resolve(inputPath);
   const initial = splitAbsolutePath(absolutePath);
   let resolvedPath = initial.root;
   let pending = [...initial.segments];
+  const missing: string[] = [];
   let hops = 0;
 
   while (pending.length > 0) {
     const segment = pending.shift();
     if (segment === undefined) break;
-    const candidate = resolve(resolvedPath, segment);
+    if (missing.length > 0) {
+      // A planned directory may not exist yet. A later parent step can
+      // return to a real ancestor where link traversal must resume.
+      if (segment === '..') missing.pop();
+      else if (segment !== '.') missing.push(segment);
+      continue;
+    }
+
+    const next = resolve(resolvedPath, segment);
+    // Let the filesystem reject a parent or current-directory step through
+    // a regular file before dropping that component from the resolved path.
+    const candidate =
+      physicalParents && (segment === '..' || segment === '.')
+        ? `${resolvedPath}${sep}${segment}`
+        : next;
     let entry: ReturnType<typeof lstatSync>;
     try {
       entry = lstatSync(candidate);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      return resolve(realpathSync(resolvedPath), segment, ...pending);
+      if (!physicalParents) return resolve(realpathSync(resolvedPath), segment, ...pending);
+      missing.push(segment);
+      continue;
     }
 
     if (!entry.isSymbolicLink()) {
-      resolvedPath = candidate;
+      resolvedPath = next;
       continue;
     }
 
@@ -71,12 +104,20 @@ export function resolvePathThroughExistingAncestor(inputPath: string): string {
     }
     hops += 1;
 
-    const target = splitAbsolutePath(resolve(dirname(candidate), readlinkSync(candidate)));
-    resolvedPath = target.root;
-    pending = [...target.segments, ...pending];
+    const target = readlinkSync(candidate);
+    if (physicalParents && !isAbsolute(target)) {
+      pending = [...splitSegments(target), ...pending];
+      continue;
+    }
+    const absoluteTarget = splitAbsolutePath(
+      physicalParents ? target : resolve(dirname(candidate), target)
+    );
+    resolvedPath = absoluteTarget.root;
+    pending = [...absoluteTarget.segments, ...pending];
   }
 
-  return realpathSync(resolvedPath);
+  const ancestor = realpathSync(resolvedPath);
+  return missing.length === 0 ? ancestor : resolve(ancestor, ...missing);
 }
 
 /**

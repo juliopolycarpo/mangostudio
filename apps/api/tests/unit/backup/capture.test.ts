@@ -28,7 +28,6 @@ import { parseBackupArgs } from '../../../src/cli/commands/backup';
 import { createBunSqliteDialect } from '../../../src/db/bun-sqlite-dialect';
 import { allMigrations } from '../../../src/db/migrations';
 import { getConfig, getConfigEnvFilePath } from '../../../src/lib/config';
-import { writeFileAtomic } from '../../../src/lib/safe-file';
 
 const cleanups: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -250,7 +249,7 @@ it.skipIf(process.platform === 'win32')(
 );
 
 it.skipIf(process.platform === 'win32')(
-  'excludes the target of an atomic credential write when the read path differs',
+  'excludes a credential left at the legacy atomic write target',
   async () => {
     const { root, config, output } = await fixture();
     const directory = basename(config.uploads.dir);
@@ -261,11 +260,12 @@ it.skipIf(process.platform === 'win32')(
     const envPath = getConfigEnvFilePath(config.configFilePath);
     await symlink(`redirect/../${directory}/written.txt`, envPath);
     await writeFile(join(physical, directory, 'written.txt'), 'original read target');
-    writeFileAtomic(envPath, 'GEMINI_API_KEY=written-env-sensitive-fixture');
-    expect(await readFile(envPath, 'utf8')).toBe('original read target');
-    expect(await readFile(join(config.uploads.dir, 'written.txt'), 'utf8')).toBe(
-      'GEMINI_API_KEY=written-env-sensitive-fixture'
+    // Older writers dropped the parent step before expanding redirect.
+    await writeFile(
+      join(config.uploads.dir, 'written.txt'),
+      'GEMINI_API_KEY=legacy-env-sensitive-fixture'
     );
+    expect(await readFile(envPath, 'utf8')).toBe('original read target');
 
     const manifest = await captureBackup(
       config,

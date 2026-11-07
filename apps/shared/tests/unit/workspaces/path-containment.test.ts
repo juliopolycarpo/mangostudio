@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -80,6 +88,46 @@ describe('isInside', () => {
     symlinkSync(join(rootDir, 'nested', 'not-yet.txt'), linkPath);
     expect(isInside(rootDir, linkPath)).toBe(true);
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'follows a directory link before applying a parent step in a path or relative link target',
+    () => {
+      mkdirSync(join(outsideDir, 'nested'));
+      const target = join(outsideDir, 'secret.txt');
+      writeFileSync(target, 'outside file');
+      symlinkSync(join(outsideDir, 'nested'), join(rootDir, 'redirect'), 'dir');
+      const link = join(rootDir, '.env');
+      symlinkSync('redirect/../secret.txt', link);
+      const candidate = `${rootDir}/redirect/../secret.txt`;
+      expect(readFileSync(candidate, 'utf8')).toBe('outside file');
+      expect(readFileSync(link, 'utf8')).toBe('outside file');
+
+      expect(resolvePathForContainment(candidate)).toBe(target);
+      expect(resolvePathForContainment(link)).toBe(target);
+      expect(isInside(rootDir, candidate)).toBe(false);
+      expect(isInside(rootDir, link)).toBe(false);
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'probes again after a parent step cancels a missing component of a planned path',
+    () => {
+      mkdirSync(join(outsideDir, 'nested'));
+      symlinkSync(join(outsideDir, 'nested'), join(rootDir, 'redirect'), 'dir');
+      const planned = `${rootDir}/missing/../redirect/../new/file.txt`;
+
+      expect(resolvePathForContainment(planned)).toBe(join(outsideDir, 'new', 'file.txt'));
+      expect(isInside(rootDir, planned)).toBe(false);
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'reports ENOTDIR when a parent step attempts to traverse a regular file',
+    () => {
+      const candidate = `${rootDir}/nested/file.txt/../next.txt`;
+      expect(() => resolvePathForContainment(candidate)).toThrow('ENOTDIR');
+    }
+  );
 
   it('does not expand ~, so the checked path is the one the filesystem opens', () => {
     // Expanding here would approve `~/escape.txt` as `$HOME/escape.txt` while the
