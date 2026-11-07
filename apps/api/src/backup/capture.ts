@@ -201,7 +201,7 @@ export async function captureBackup(
   const release = await acquireCaptureLock(databasePath);
   let staging: string | undefined;
   let source: Database | undefined;
-  let destinationCreated = false;
+  let published = false;
   let entriesSeen = 0;
   try {
     check(options.signal);
@@ -399,24 +399,30 @@ export async function captureBackup(
     } finally {
       await archiveHandle.close();
     }
-    // Same-directory staging guarantees the same filesystem. A hard link is
-    // atomic and exclusive: a crash never publishes a partly written archive.
-    await link(archivePath, output);
-    destinationCreated = true;
+    // Same-directory staging guarantees the same filesystem. Once the
+    // exclusive link succeeds, the archive is complete and belongs to its caller.
     check(options.signal);
+    await link(archivePath, output);
+    published = true;
     return manifest;
-  } catch (error) {
-    if (destinationCreated) await rm(output, { force: true });
-    throw error;
   } finally {
-    try {
-      source?.close();
-    } finally {
+    const cleanup = async () => {
       try {
-        if (staging) await rm(staging, { recursive: true, force: true });
+        source?.close();
       } finally {
-        await release();
+        try {
+          if (staging) await rm(staging, { recursive: true, force: true });
+        } finally {
+          await release();
+        }
       }
+    };
+    if (published) {
+      await cleanup().catch((error: unknown) => {
+        console.warn('Backup archive was published, but capture cleanup failed.', error);
+      });
+    } else {
+      await cleanup();
     }
   }
 }

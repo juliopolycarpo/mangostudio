@@ -13,7 +13,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { BackupManifestSchema } from '@mangostudio/shared/backup';
@@ -260,6 +260,87 @@ it('excludes the unsafe file store and orphaned atomic secret writes under a cap
   expect(files.has('uploads/fallback/.secrets.json.0123456789abcdef.tmp')).toBe(false);
   expect(manifest.exclusions).toContain('uploads/fallback/.secrets.json.0123456789abcdef.tmp');
   expect(await files.get('uploads/fallback/ordinary.tmp')?.text()).toBe('a user file');
+});
+
+it.each(['original archive', 'successor'])(
+  'treats publication as committed when abort follows the hard link and preserves the %s',
+  async (owner) => {
+    const { root, config, output } = await fixture();
+    const controller = new AbortController();
+    const link = fs.link;
+    let publishedDigest = '';
+    async function publishThenAbort(
+      source: Parameters<typeof link>[0],
+      destination: Parameters<typeof link>[1]
+    ) {
+      await link(source, destination);
+      expect(destination).toBe(output);
+      publishedDigest = new Bun.CryptoHasher('sha256').update(await readFile(output)).digest('hex');
+      if (owner === 'successor') {
+        await rm(output);
+        await writeFile(output, 'successor output', { flag: 'wx' });
+      }
+      controller.abort(new Error('fixture abort after publication'));
+    }
+
+    const publisher = spyOn(fs, 'link').mockImplementationOnce(publishThenAbort);
+    try {
+      const result = await captureBackup(
+        config,
+        { output, checkpoints: true, includeSecrets: false, signal: controller.signal },
+        'test'
+      ).catch((error: unknown) => error);
+      expect(publisher).toHaveBeenCalledTimes(1);
+      expect(controller.signal.aborted).toBe(true);
+      if (owner === 'successor') {
+        expect(
+          await Bun.file(output)
+            .text()
+            .catch(() => 'missing output')
+        ).toBe('successor output');
+      } else {
+        expect(await Bun.file(output).exists()).toBe(true);
+        expect(new Bun.CryptoHasher('sha256').update(await readFile(output)).digest('hex')).toBe(
+          publishedDigest
+        );
+      }
+      expect(result).toMatchObject({ format: 'mangostudio-backup' });
+      expect((await readdir(root)).some((name) => name.startsWith('.mango-backup-'))).toBe(false);
+    } finally {
+      publisher.mockRestore();
+    }
+  }
+);
+
+it('reports success and releases capture ownership when cleanup fails after publication', async () => {
+  const { config, output } = await fixture();
+  const remove = fs.rm;
+  async function removeStagingThenFail(...args: Parameters<typeof remove>) {
+    await remove(...args);
+    if (basename(String(args[0])).startsWith('.mango-backup-')) {
+      throw new Error('fixture staging cleanup failure');
+    }
+  }
+  const cleanup = spyOn(fs, 'rm').mockImplementation(removeStagingThenFail);
+  const warning = spyOn(console, 'warn');
+  try {
+    const result = await captureBackup(
+      config,
+      { output, checkpoints: true, includeSecrets: false },
+      'test'
+    ).catch((error: unknown) => error);
+    const release = await acquireCaptureLock(config.database.path);
+    await release();
+    expect(await Bun.file(output).exists()).toBe(true);
+    expect(result).toMatchObject({ format: 'mangostudio-backup' });
+    expect(warning).toHaveBeenCalledWith(
+      'Backup archive was published, but capture cleanup failed.',
+      expect.any(Error)
+    );
+  } finally {
+    cleanup.mockRestore();
+    warning.mockRestore();
+  }
 });
 
 it('refuses an oversized file before copying and preserves an existing destination', async () => {
