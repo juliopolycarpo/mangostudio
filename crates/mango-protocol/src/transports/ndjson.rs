@@ -29,7 +29,7 @@
 //! ```
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Weak};
+use std::sync::{Arc, OnceLock, Weak};
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{Mutex, watch};
@@ -143,6 +143,10 @@ where
 {
     /// Sets a transport-owned first-hello deadline for accepted local connections.
     pub(crate) fn with_first_hello_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.writer
+            .0
+            .ipc_release
+            .get_or_init(|| watch::channel(None).0);
         self.first_hello_deadline = Some(FirstHelloDeadline {
             at: tokio::time::Instant::now() + timeout,
             armed: watch::channel(true).0,
@@ -227,6 +231,7 @@ impl<W: AsyncWrite + Unpin + Send + 'static> PortCloser<W> {
     }
 
     /// Writes the farewell of §10 on that port and ends its writable half.
+    /// For an accepted IPC port it also ends the receive half.
     ///
     /// A port that is already gone is a no-op: the session it belonged to has
     /// ended, and there is nobody left to tell.
@@ -257,8 +262,21 @@ impl<W: AsyncWrite + Unpin + Send + 'static> PortCloser<W> {
         let Some(writer) = self.writer.upgrade() else {
             return;
         };
+        let reason = reason.map(ToOwned::to_owned);
+        if let Some(release) = writer.ipc_release.get() {
+            release.send_if_modified(|close| {
+                if close.is_some() {
+                    return false;
+                }
+                *close = Some(Close {
+                    code,
+                    reason: reason.clone(),
+                });
+                true
+            });
+        }
         SharedWriter(writer)
-            .end(code, reason.map(ToOwned::to_owned), self.max_frame_bytes)
+            .end(code, reason, self.max_frame_bytes)
             .await;
     }
 }
@@ -365,7 +383,27 @@ where
     W: AsyncWrite + Unpin + Send + 'static,
 {
     async fn recv(&mut self) -> Option<Inbound> {
+        let mut ipc_release = self
+            .writer
+            .0
+            .ipc_release
+            .get()
+            .map(watch::Sender::subscribe);
         loop {
+            if self.terminal {
+                return None;
+            }
+            if self.closure.is_none()
+                && let Some(close) = ipc_release
+                    .as_mut()
+                    .and_then(|release| release.borrow_and_update().clone())
+            {
+                self.pending.clear();
+                self.record_closure(PortClosure::Closed {
+                    code: Some(close.code),
+                    reason: close.reason,
+                });
+            }
             if self
                 .first_hello_deadline
                 .as_ref()
@@ -384,24 +422,29 @@ where
                 self.terminal = true;
                 return Some(Inbound::Closed(closure));
             }
-            if self.terminal {
-                return None;
-            }
 
             // `AsyncReadExt::read` is cancel-safe: a call dropped because
             // another `select!` branch won the race read nothing, so no byte
             // this decoder has not already seen is lost.
-            let read = if let Some(deadline) = &self.first_hello_deadline {
-                match tokio::time::timeout_at(deadline.at, self.reader.read(&mut self.chunk)).await
-                {
-                    Ok(result) => result,
-                    Err(_) => {
-                        self.expire_first_hello().await;
-                        continue;
-                    }
+            let read = async {
+                if let Some(deadline) = &self.first_hello_deadline {
+                    tokio::time::timeout_at(deadline.at, self.reader.read(&mut self.chunk)).await
+                } else {
+                    Ok(self.reader.read(&mut self.chunk).await)
+                }
+            };
+            let read = if let Some(release) = &mut ipc_release {
+                tokio::select! {
+                    biased;
+                    _ = release.changed() => continue,
+                    result = read => result,
                 }
             } else {
-                self.reader.read(&mut self.chunk).await
+                read.await
+            };
+            let Ok(read) = read else {
+                self.expire_first_hello().await;
+                continue;
             };
             match read {
                 Ok(0) => self.on_eof().await,
@@ -544,6 +587,8 @@ struct SharedWriter<W>(Arc<WriterShared<W>>);
 struct WriterShared<W> {
     state: Mutex<WriterState<W>>,
     ending: watch::Sender<bool>,
+    /// An accepted IPC listener can end the receive half as well as the writer.
+    ipc_release: OnceLock<watch::Sender<Option<Close>>>,
 }
 
 #[derive(Debug)]
@@ -572,6 +617,7 @@ impl<W: AsyncWrite + Unpin + Send> SharedWriter<W> {
                 writable: true,
             }),
             ending: watch::Sender::new(false),
+            ipc_release: OnceLock::new(),
         }))
     }
 
@@ -1273,6 +1319,54 @@ mod tests {
             stuck.await.expect("the stuck send is evicted, not leaked"),
             SendOutcome::Closed,
             "a send the port ended under is the transport being gone"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn listener_release_ends_a_pending_ipc_read_while_peer_stays_open() {
+        let (mut peer, stream) = duplex(1024);
+        let (reader, writer) = tokio::io::split(stream);
+        let port =
+            NdjsonPort::new(reader, writer).with_first_hello_timeout(Duration::from_secs(15));
+        let closer = port.closer();
+        let (tx, mut rx) = port.split();
+        peer.write_all(b"{\"type\":\"hello\",\"protocol\":{\"major\":1,\"minor\":0},\"peer\":{\"name\":\"raw\",\"version\":\"0\",\"role\":\"tool\"},\"capabilities\":{}}\n")
+            .await
+            .unwrap();
+        assert!(matches!(
+            rx.recv().await,
+            Some(Inbound::Frame(Frame::Hello(_)))
+        ));
+
+        {
+            let mut receive = std::pin::pin!(rx.recv());
+            tokio::select! {
+                biased;
+                result = &mut receive => panic!("expected an idle read, got {result:?}"),
+                () = tokio::task::yield_now() => (),
+            }
+            closer
+                .close(close_codes::RELEASED, Some("listener closing"))
+                .await;
+            let release = tokio::time::timeout(Duration::from_secs(1), receive)
+                .await
+                .expect("listener release must wake the idle read while the peer stays open");
+            assert_eq!(
+                release,
+                Some(Inbound::Closed(PortClosure::Closed {
+                    code: Some(close_codes::RELEASED),
+                    reason: Some("listener closing".into()),
+                }))
+            );
+        }
+        peer.write_all(b"{\"type\":\"ping\"}\n").await.unwrap();
+        assert_eq!(rx.recv().await, None);
+        drop((tx, rx));
+        let mut farewell = String::new();
+        peer.read_to_string(&mut farewell).await.unwrap();
+        assert_eq!(
+            farewell,
+            "{\"type\":\"close\",\"code\":4000,\"reason\":\"listener closing\"}\n"
         );
     }
 
