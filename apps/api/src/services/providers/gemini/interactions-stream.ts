@@ -362,6 +362,9 @@ export async function* processGeminiInteractionStream(
     for (const agentEvent of accumulator.mapEvent(event)) {
       yield agentEvent;
     }
+    // An explicit SSE error is terminal. Close the iterator without consuming
+    // later output or throwing into the cursor-loss retry path.
+    if (event.event_type === 'error') break;
   }
 
   // `interaction.created` captures the id before any output, so an interaction
