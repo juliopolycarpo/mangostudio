@@ -161,7 +161,7 @@ function classifySkill(
 ): SkillDiagnostic {
   const base = { key: skill.key, source: skill.source };
 
-  if (skill.valid && precedenceUnverified) return { ...base, state: 'precedence-unverified' };
+  if (precedenceUnverified) return { ...base, state: 'precedence-unverified' };
   if (winningSource !== skill.source) {
     return { ...base, state: 'shadowed', shadowedBy: winningSource };
   }

@@ -507,6 +507,9 @@ describe('inspectChatCapabilities', () => {
       rmSync(skillsDir, { recursive: true });
       symlinkSync(join(agentsDir, 'missing'), skillsDir, 'dir');
       writeSkill(agentsDir, 'fallback');
+      const invalid = join(agentsDir, 'invalid-copy');
+      mkdirSync(invalid);
+      writeFileSync(join(invalid, 'SKILL.md'), '---\nname: wrong-name\n---\n');
       const settings = await getAppSettings(getDb(), user.id);
       const locations = libraryLocationsFor(settings);
       await updateAppSettings(
@@ -523,6 +526,7 @@ describe('inspectChatCapabilities', () => {
 
       expect(capabilities.skills).toMatchObject([
         { key: 'agents:fallback', state: 'unavailable', reason: 'skill-precedence-unverified' },
+        { key: 'agents:invalid-copy', state: 'unavailable', reason: 'skill-precedence-unverified' },
       ]);
       expect(capabilities.counts.effectiveSkills).toBe(0);
       expect(Value.Check(ChatCapabilitiesResponseSchema, capabilities)).toBe(true);

@@ -88,9 +88,13 @@ describe('collectSkillsDoctorChecks', () => {
     () => {
       symlinkSync(join(mangoDir, 'missing'), agentsDir, 'dir');
       writeSkill(claudeDir, 'fallback', 'name: fallback\ndescription: Claude copy');
+      writeSkill(claudeDir, 'invalid-copy', 'name: wrong-name\ndescription: Invalid copy');
 
       const results = run({ sourceToggles: { agents: true, claude: true } });
       expect(results.find((row) => row.label === 'Skill claude:fallback')?.detail ?? null).toBe(
+        'higher-priority skill location could not be scanned'
+      );
+      expect(find(results, 'Skill claude:invalid-copy').detail).toBe(
         'higher-priority skill location could not be scanned'
       );
     }

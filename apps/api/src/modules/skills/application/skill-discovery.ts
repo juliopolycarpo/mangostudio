@@ -77,6 +77,24 @@ export async function listSkills(
   userId: string,
   now: () => number = Date.now
 ): Promise<SkillDescriptor[]> {
+  const { skills } = await discoverHubSkills(db, userId, now);
+  return skills;
+}
+
+/**
+ * Discovers Hub skills and the names whose precedence a partial scan verified.
+ *
+ * @example
+ * const { skills, verifiedNamesDuringIncompleteScan } = await discoverHubSkills(db, userId);
+ */
+export async function discoverHubSkills(
+  db: Kysely<Database>,
+  userId: string,
+  now: () => number = Date.now
+): Promise<{
+  skills: SkillDescriptor[];
+  verifiedNamesDuringIncompleteScan?: ReadonlySet<string>;
+}> {
   const appSettings = await getAppSettings(db, userId);
   const thirdPartyDirs = getThirdPartySkillDirs();
   const [scan, savedSettings] = await Promise.all([
@@ -93,12 +111,21 @@ export async function listSkills(
     listSavedSkillSettings(db, userId),
   ]);
 
-  return scan.resources
+  const scanIncomplete = scan.locationDiagnostics?.some(
+    ({ locationId, reason }) =>
+      reason !== 'not-directory' && SOURCE_BY_LOCATION_ID[locationId] !== undefined
+  );
+  const verifiedNamesDuringIncompleteScan = scanIncomplete ? new Set<string>() : undefined;
+  const skills = scan.resources
     .filter((resource) => resource.ref.kind === 'skill')
     .flatMap((resource) => {
       const mangoCoverage = resource.coverage.find(
         (coverage) => coverage.targetId === 'mangostudio'
       );
+      // Coverage can verify a name even when the adapter drops a non-skill entry.
+      if (mangoCoverage?.effectiveLocationId !== undefined) {
+        verifiedNamesDuringIncompleteScan?.add(resource.ref.slug);
+      }
       const precedenceUnverified =
         mangoCoverage?.effectiveLocationId === undefined &&
         !!mangoCoverage?.unscannedLocationIds?.length;
@@ -121,6 +148,11 @@ export async function listSkills(
       });
     })
     .sort((left, right) => left.key.localeCompare(right.key));
+
+  return {
+    skills,
+    ...(verifiedNamesDuringIncompleteScan && { verifiedNamesDuringIncompleteScan }),
+  };
 }
 
 export async function listUsableSkills(

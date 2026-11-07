@@ -15,8 +15,8 @@ import type { Kysely } from 'kysely';
 
 import type { Database } from '../../../db/types';
 import { readRegularFileUtf8, RegularFileReadError } from '../../../lib/safe-file';
-import { SkillError } from '../domain/skill';
-import { listSkills, MAX_SKILL_FILE_BYTES, SKILL_FILE_NAME } from './skill-discovery';
+import { isValidSkillSlug, SkillError } from '../domain/skill';
+import { discoverHubSkills, MAX_SKILL_FILE_BYTES, SKILL_FILE_NAME } from './skill-discovery';
 
 const MAX_LISTED_FILES = 100;
 const MAX_LISTING_DEPTH = 3;
@@ -109,22 +109,21 @@ async function findSkillByName(
   userId: string,
   name: string
 ): Promise<SkillDescriptor> {
-  const skills = await listSkills(db, userId);
+  const { skills, verifiedNamesDuringIncompleteScan } = await discoverHubSkills(db, userId);
   const usable = skills.filter(isUsableSkill);
   const skill = usable.find((candidate) => candidate.name === name);
   if (skill) return skill;
 
-  const known = skills.filter(
-    (candidate) => candidate.name === name && candidate.valid && !candidate.shadowed
-  );
-  if (known.some((candidate) => candidate.precedenceUnverified)) {
+  if (isValidSkillSlug(name) && verifiedNamesDuringIncompleteScan?.has(name) === false) {
     throw new SkillError(
-      `Skill "${name}" is unavailable because a higher-priority location could not be scanned.`,
+      `Skill "${name}" could not be verified because a skill location could not be scanned.`,
       503,
       'SKILL_PRECEDENCE_UNVERIFIED'
     );
   }
-  if (known.length > 0) {
+  if (
+    skills.some((candidate) => candidate.name === name && candidate.valid && !candidate.shadowed)
+  ) {
     throw new SkillError(`Skill "${name}" is disabled in settings.`, 403, 'SKILL_DISABLED');
   }
 
