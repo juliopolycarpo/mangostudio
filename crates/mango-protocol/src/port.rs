@@ -64,7 +64,7 @@ pub trait PortRx: Send + 'static {
     ///
     /// `None` once the stream is terminal; [`Inbound::Closed`] is always the
     /// last item before that point. EOF and decoder refusals preserve
-    /// already decoded frames. A local IPC listener release discards buffered
+    /// already decoded frames. A local close on an accepted IPC port discards buffered
     /// inbound work and ends the port immediately.
     ///
     /// Must be cancel-safe: a session driver polls this inside `tokio::select!`

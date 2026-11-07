@@ -145,7 +145,7 @@ where
     pub(crate) fn with_first_hello_timeout(mut self, timeout: std::time::Duration) -> Self {
         self.writer
             .0
-            .ipc_release
+            .ipc_close
             .get_or_init(|| watch::channel(None).0);
         self.first_hello_deadline = Some(FirstHelloDeadline {
             at: tokio::time::Instant::now() + timeout,
@@ -262,35 +262,9 @@ impl<W: AsyncWrite + Unpin + Send + 'static> PortCloser<W> {
         let Some(writer) = self.writer.upgrade() else {
             return;
         };
-        let reason = reason.map(ToOwned::to_owned);
-        if let Some(release) = writer.ipc_release.get() {
-            let owns_release = release.send_if_modified(|close| {
-                if close.is_some() {
-                    return false;
-                }
-                // Stop normal writes before waking Rx. The farewell can still use the writer.
-                writer.ending.send_replace(true);
-                *close = Some(Close {
-                    code,
-                    reason: reason.clone(),
-                });
-                true
-            });
-            if owns_release {
-                let max_frame_bytes = self.max_frame_bytes;
-                let farewell = tokio::spawn(async move {
-                    SharedWriter(writer)
-                        .end(code, reason, max_frame_bytes)
-                        .await;
-                });
-                // Dropping the caller detaches the bounded farewell and shutdown.
-                let _ = farewell.await;
-            }
-        } else {
-            SharedWriter(writer)
-                .end(code, reason, self.max_frame_bytes)
-                .await;
-        }
+        SharedWriter(writer)
+            .close_local(code, reason.map(ToOwned::to_owned), self.max_frame_bytes)
+            .await;
     }
 }
 
@@ -365,9 +339,9 @@ where
     }
 
     async fn close(self, code: u16, reason: Option<String>) {
-        // The farewell of §10 first, then the end of the writable half: a peer
-        // reading a stream that simply stops has no way to learn the code.
-        self.writer.end(code, reason, self.max_frame_bytes).await;
+        self.writer
+            .close_local(code, reason, self.max_frame_bytes)
+            .await;
     }
 }
 
@@ -396,18 +370,13 @@ where
     W: AsyncWrite + Unpin + Send + 'static,
 {
     async fn recv(&mut self) -> Option<Inbound> {
-        let mut ipc_release = self
-            .writer
-            .0
-            .ipc_release
-            .get()
-            .map(watch::Sender::subscribe);
+        let mut ipc_close = self.writer.0.ipc_close.get().map(watch::Sender::subscribe);
         loop {
             if self.terminal {
                 return None;
             }
             if self.closure.is_none()
-                && let Some(close) = ipc_release
+                && let Some(IpcClose::Local(close)) = ipc_close
                     .as_mut()
                     .and_then(|release| release.borrow_and_update().clone())
             {
@@ -432,7 +401,7 @@ where
                 return Some(Inbound::Frame(frame));
             }
             if let Some(closure) = self.closure.take() {
-                if ipc_release.is_some() {
+                if ipc_close.is_some() {
                     // A split named pipe lives until both halves have released it.
                     drop(self.reader.take());
                 }
@@ -451,7 +420,7 @@ where
                     Ok(reader.read(&mut self.chunk).await)
                 }
             };
-            let read = if let Some(release) = &mut ipc_release {
+            let read = if let Some(release) = &mut ipc_close {
                 tokio::select! {
                     biased;
                     _ = release.changed() => continue,
@@ -491,28 +460,23 @@ where
     }
 
     async fn expire_first_hello(&mut self) {
+        if !self.writer.elect_close(IpcClose::Inbound) {
+            return;
+        }
         self.pending.clear();
+        let close = Close {
+            code: crate::close::close_codes::PROTOCOL_ERROR,
+            reason: Some("local socket hello deadline exceeded".into()),
+        };
         // Persist before yielding so cancellation cannot lose the closure notification.
         self.record_closure(PortClosure::Closed {
-            code: Some(crate::close::close_codes::PROTOCOL_ERROR),
-            reason: Some("local socket hello deadline exceeded".into()),
+            code: Some(close.code),
+            reason: close.reason.clone(),
         });
-        // Disable sends before yielding. The cleanup owns its writer independently of
-        // this recv future, so cancelling a stalled farewell cannot abandon shutdown.
-        self.writer.0.ending.send_replace(true);
-        let writer = self.writer.clone();
-        let max_frame_bytes = self.max_frame_bytes;
-        let cleanup = tokio::spawn(async move {
-            writer
-                .end(
-                    crate::close::close_codes::PROTOCOL_ERROR,
-                    Some("local socket hello deadline exceeded".into()),
-                    max_frame_bytes,
-                )
-                .await;
-        });
-        // Dropping this JoinHandle on cancellation detaches the bounded cleanup.
-        let _ = cleanup.await;
+        self.writer
+            .clone()
+            .finish_close(Some(close), self.max_frame_bytes)
+            .await;
     }
 
     /// Decodes the first `count` bytes of the read buffer. A refused record
@@ -531,6 +495,9 @@ where
     /// a record without its terminator is an incomplete frame, not a refusal
     /// (stdio.md, Streams).
     async fn on_eof(&mut self) {
+        if !self.writer.elect_close(IpcClose::Inbound) {
+            return;
+        }
         // Recorded before the await, never after: `recv` is cancel-safe, and a
         // closure written on the far side of an await is one a caller that
         // lost a `select!` race would never be told about.
@@ -538,26 +505,45 @@ where
             code: None,
             reason: None,
         });
-        self.writer.shut_down().await;
+        self.writer
+            .clone()
+            .finish_close(None, self.max_frame_bytes)
+            .await;
     }
 
     /// The transport itself broke. The message is the only thing that tells an
     /// operator a broken pipe apart from a peer that left politely; both are a
     /// `4000` release to the session.
     async fn on_failure(&mut self, error: &std::io::Error) {
+        if !self.writer.elect_close(IpcClose::Inbound) {
+            return;
+        }
         self.record_closure(PortClosure::Closed {
             code: None,
             reason: Some(error.to_string()),
         });
-        self.writer.shut_down().await;
+        self.writer
+            .clone()
+            .finish_close(None, self.max_frame_bytes)
+            .await;
     }
 
     async fn refuse(&mut self, error: CodecError) {
+        if !self.writer.elect_close(IpcClose::Inbound) {
+            return;
+        }
         let code = close_code_for_codec_error(&error);
         let reason = error.to_string();
         self.record_closure(PortClosure::ProtocolError { error, code });
         self.writer
-            .end(code, Some(reason), self.max_frame_bytes)
+            .clone()
+            .finish_close(
+                Some(Close {
+                    code,
+                    reason: Some(reason),
+                }),
+                self.max_frame_bytes,
+            )
             .await;
     }
 }
@@ -605,8 +591,14 @@ struct SharedWriter<W>(Arc<WriterShared<W>>);
 struct WriterShared<W> {
     state: Mutex<WriterState<W>>,
     ending: watch::Sender<bool>,
-    /// An accepted IPC listener can end the receive half as well as the writer.
-    ipc_release: OnceLock<watch::Sender<Option<Close>>>,
+    /// The elected close for an accepted IPC port.
+    ipc_close: OnceLock<watch::Sender<Option<IpcClose>>>,
+}
+
+#[derive(Clone, Debug)]
+enum IpcClose {
+    Local(Close),
+    Inbound,
 }
 
 #[derive(Debug)]
@@ -635,8 +627,52 @@ impl<W: AsyncWrite + Unpin + Send> SharedWriter<W> {
                 writable: true,
             }),
             ending: watch::Sender::new(false),
-            ipc_release: OnceLock::new(),
+            ipc_close: OnceLock::new(),
         }))
+    }
+
+    fn elect_close(&self, candidate: IpcClose) -> bool {
+        self.0.ipc_close.get().is_none_or(|elected| {
+            elected.send_if_modified(|close| {
+                if close.is_some() {
+                    return false;
+                }
+                // Stop normal writes before notifying Rx. The farewell can still use the writer.
+                self.0.ending.send_replace(true);
+                *close = Some(candidate);
+                true
+            })
+        })
+    }
+
+    async fn close_local(self, code: u16, reason: Option<String>, max_frame_bytes: usize)
+    where
+        W: 'static,
+    {
+        let close = Close { code, reason };
+        if self.0.ipc_close.get().is_none() || self.elect_close(IpcClose::Local(close.clone())) {
+            self.finish_close(Some(close), max_frame_bytes).await;
+        }
+    }
+
+    async fn finish_close(self, farewell: Option<Close>, max_frame_bytes: usize)
+    where
+        W: 'static,
+    {
+        let ipc = self.0.ipc_close.get().is_some();
+        let cleanup = async move {
+            if let Some(Close { code, reason }) = farewell {
+                self.end(code, reason, max_frame_bytes).await;
+            } else {
+                self.shut_down().await;
+            }
+        };
+        if ipc {
+            // Dropping the caller detaches the bounded farewell and shutdown.
+            let _ = tokio::spawn(cleanup).await;
+        } else {
+            cleanup.await;
+        }
     }
 
     /// Encodes and writes one record. A frame the codec refuses is
@@ -1389,6 +1425,42 @@ mod tests {
         assert_eq!(
             farewell,
             "{\"type\":\"close\",\"code\":4000,\"reason\":\"listener closing\"}\n"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ipc_sender_cannot_replace_an_elected_listener_farewell() {
+        let (mut peer, stream) = duplex(1024);
+        let (reader, writer) = tokio::io::split(stream);
+        let port =
+            NdjsonPort::new(reader, writer).with_first_hello_timeout(Duration::from_secs(15));
+        let closer = port.closer();
+        let (tx, mut rx) = port.split();
+        tokio::select! {
+            biased;
+            () = closer.close(close_codes::RELEASED, Some("listener close")) => {
+                panic!("the spawned listener farewell must still need polling");
+            }
+            () = std::future::ready(()) => (),
+        }
+
+        tx.close(close_codes::PROTOCOL_ERROR, Some("sender close".into()))
+            .await;
+        assert_eq!(
+            rx.recv().await,
+            Some(Inbound::Closed(PortClosure::Closed {
+                code: Some(close_codes::RELEASED),
+                reason: Some("listener close".into()),
+            }))
+        );
+        let mut farewell = String::new();
+        tokio::time::timeout(Duration::from_secs(5), peer.read_to_string(&mut farewell))
+            .await
+            .expect("the elected farewell must close the writer")
+            .unwrap();
+        assert_eq!(
+            farewell,
+            "{\"type\":\"close\",\"code\":4000,\"reason\":\"listener close\"}\n"
         );
     }
 
