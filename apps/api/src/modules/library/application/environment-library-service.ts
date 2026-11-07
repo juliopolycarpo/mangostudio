@@ -200,7 +200,10 @@ export function createEnvironmentLibraryService(
         { timeoutMs: requestTimeoutMs }
       );
       const scan: LibraryScanResult = {
-        resources: groupLibraryScanEntries(result.entries as RuntimeLibraryScanEntry[]),
+        resources: groupLibraryScanEntries(
+          result.entries as RuntimeLibraryScanEntry[],
+          result.locationDiagnostics
+        ),
         // Additive protocol field. A runtime a release behind still connects —
         // the handshake only pins major/minor — and answers without this key,
         // so spreading it unguarded would turn "no unreadable entries" into a

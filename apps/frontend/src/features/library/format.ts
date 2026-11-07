@@ -33,12 +33,19 @@ import { formatMessage } from '@/lib/i18n-format';
  * look at, and merging them into one warning would hide the difference.
  */
 export type CoverageCellState =
-  'present' | 'absent' | 'shadowed' | 'divergent' | 'only-here' | 'incomparable';
+  | 'present'
+  | 'absent'
+  | 'shadowed'
+  | 'divergent'
+  | 'only-here'
+  | 'incomparable'
+  | 'scan-incomplete';
 
 export interface CoverageCell {
   readonly targetId: LibraryTargetId;
   readonly state: CoverageCellState;
   readonly effectiveLocationId?: LibraryLocationId;
+  readonly unscannedLocationIds?: readonly LibraryLocationId[];
   readonly shadowedLocationIds: readonly LibraryLocationId[];
   /** Hash held at the effective location, absent when that copy is unreadable. */
   readonly contentHash?: string;
@@ -120,12 +127,19 @@ export function coverageCell(resource: LibraryResource, coverage: LibraryCoverag
   const base = {
     targetId: coverage.targetId,
     shadowedLocationIds: coverage.shadowedLocationIds,
+    ...(coverage.unscannedLocationIds && {
+      unscannedLocationIds: coverage.unscannedLocationIds,
+    }),
     ...(coverage.effectiveLocationId !== undefined && {
       effectiveLocationId: coverage.effectiveLocationId,
     }),
     ...(effective?.contentHash !== undefined && { contentHash: effective.contentHash }),
     ...(effective !== undefined && { path: effective.path, modifiedAtMs: effective.modifiedAtMs }),
   };
+
+  if (coverage.unscannedLocationIds?.length && coverage.effectiveLocationId === undefined) {
+    return { ...base, state: 'scan-incomplete' };
+  }
 
   if (coverage.state === 'absent') return { ...base, state: 'absent' };
 
@@ -149,7 +163,7 @@ export function coverageCell(resource: LibraryResource, coverage: LibraryCoverag
     }
   }
 
-  if (presentTargetCount(resource) === 1) return { ...base, state: 'only-here' };
+  if (hasSingleTargetCoverage(resource)) return { ...base, state: 'only-here' };
   if (coverage.state === 'shadowed') return { ...base, state: 'shadowed' };
   return { ...base, state: 'present' };
 }
@@ -157,6 +171,21 @@ export function coverageCell(resource: LibraryResource, coverage: LibraryCoverag
 /** How many targets read at least one copy. One means the resource lives in exactly one world. */
 export function presentTargetCount(resource: LibraryResource): number {
   return resource.coverage.filter((coverage) => coverage.state !== 'absent').length;
+}
+
+/**
+ * Whether one target reads a copy and every other target is confirmed absent.
+ *
+ * @example
+ * if (hasSingleTargetCoverage(resource)) count += 1;
+ */
+export function hasSingleTargetCoverage(resource: LibraryResource): boolean {
+  return (
+    presentTargetCount(resource) === 1 &&
+    !resource.coverage.some(
+      ({ state, unscannedLocationIds }) => state === 'absent' && unscannedLocationIds?.length
+    )
+  );
 }
 
 export function coverageCells(resource: LibraryResource): CoverageCell[] {
@@ -209,8 +238,9 @@ export function summarizeCoverageByTarget(
   const divergent = new Map<LibraryTargetId, number>();
 
   for (const resource of resources) {
-    for (const cell of coverageCells(resource)) {
-      if (cell.state === 'absent') continue;
+    for (const coverage of resource.coverage) {
+      if (coverage.state === 'absent') continue;
+      const cell = coverageCell(resource, coverage);
       present.set(cell.targetId, (present.get(cell.targetId) ?? 0) + 1);
       if (cell.state === 'divergent') {
         divergent.set(cell.targetId, (divergent.get(cell.targetId) ?? 0) + 1);
@@ -318,7 +348,10 @@ function matchesShowFilter(resource: LibraryResource, show: LibraryShowFilter): 
     case 'divergent':
       return resource.divergence === 'divergent';
     case 'single-location':
-      return resource.instances.length === 1;
+      return (
+        resource.instances.length === 1 &&
+        resource.coverage.every((coverage) => !coverage.unscannedLocationIds?.length)
+      );
     case 'shadowed':
       return resource.coverage.some((coverage) => coverage.state === 'shadowed');
     default:
@@ -343,7 +376,9 @@ export function filterResources(
       const coverage = resource.coverage.find(
         (candidate) => candidate.targetId === filters.targetId
       );
-      if (!coverage || coverage.state === 'absent') return false;
+      if (!coverage || (coverage.state === 'absent' && !coverage.unscannedLocationIds?.length)) {
+        return false;
+      }
     }
     return matchesShowFilter(resource, filters.show);
   });

@@ -129,6 +129,25 @@ function createService(
 }
 
 describe('library routes', () => {
+  it.each([
+    ['/library/resources/skill:missing', 503],
+    ['/library/resources/skill:missing/content?location=claude-skills', 503],
+    ['/library/resources/skill:missing/content?location=agents-skills', 404],
+    ['/library/resources/command:missing', 404],
+  ])('distinguishes scan failure from absence for %s', async (path, expectedStatus) => {
+    const { service } = createService([]);
+    service.discover = () =>
+      Promise.resolve({
+        resources: [],
+        unreadableEntries: [],
+        locationDiagnostics: [{ locationId: 'claude-skills', reason: 'permission-denied' }],
+      });
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
+    restoreAuth = restore;
+    const response = await app.handle(new Request(`http://localhost${path}`));
+    expect(response.status).toBe(expectedStatus);
+  });
+
   it('preserves valid rows and filters location diagnostics by scan scope only', async () => {
     const { service } = createService();
     service.discover = () =>
@@ -164,6 +183,75 @@ describe('library routes', () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ resources: [skillResource], unreadableEntries: [] });
+  });
+
+  it('keeps uncertain rows in a target filter without counting them as confirmed absent', async () => {
+    const incomplete: LibraryResource = {
+      ...skillResource,
+      coverage: skillResource.coverage.map((entry) =>
+        entry.targetId === 'claude' ? { ...entry, unscannedLocationIds: ['claude-skills'] } : entry
+      ),
+    };
+    const { service } = createService([incomplete]);
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
+    restoreAuth = restore;
+
+    const target = await app.handle(
+      new Request('http://localhost/library/resources?target=claude')
+    );
+    const absent = await app.handle(
+      new Request('http://localhost/library/resources?target=claude&state=absent')
+    );
+
+    expect(await target.json()).toEqual({ resources: [incomplete], unreadableEntries: [] });
+    expect(await absent.json()).toEqual({ resources: [], unreadableEntries: [] });
+  });
+
+  it('keeps confirmed shadowing when a lower-priority location was unscanned', async () => {
+    const partialPresent: LibraryResource = {
+      ...skillResource,
+      coverage: skillResource.coverage.map((entry) =>
+        entry.targetId === 'mangostudio'
+          ? { ...entry, unscannedLocationIds: ['claude-skills'] }
+          : entry
+      ),
+    };
+    const shadowed: LibraryResource = {
+      ...partialPresent,
+      key: 'skill:shadowed',
+      ref: { kind: 'skill', slug: 'shadowed' },
+      instances: [
+        {
+          ...skillResource.instances[0],
+          locationId: 'mango-skills',
+          path: '/mango/skills/shadowed',
+        },
+        ...skillResource.instances,
+      ],
+      coverage: partialPresent.coverage.map((entry) =>
+        entry.targetId === 'mangostudio'
+          ? {
+              ...entry,
+              state: 'shadowed',
+              effectiveLocationId: 'mango-skills',
+              shadowedLocationIds: ['agents-skills'],
+            }
+          : entry
+      ),
+    };
+    const { service } = createService([shadowed, partialPresent]);
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
+    restoreAuth = restore;
+
+    const shadows = await app.handle(
+      new Request('http://localhost/library/resources?target=mangostudio&state=shadowed')
+    );
+    const present = await app.handle(
+      new Request('http://localhost/library/resources?target=mangostudio&state=present')
+    );
+
+    expect(await shadows.json()).toEqual({ resources: [shadowed], unreadableEntries: [] });
+    expect(await present.json()).toEqual({ resources: [], unreadableEntries: [] });
   });
 
   it('narrows coverage against the named target rather than any target', async () => {

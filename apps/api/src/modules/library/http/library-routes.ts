@@ -87,7 +87,12 @@ function filterLibraryResources(
     if (filters.target) {
       const coverage = resource.coverage.find((candidate) => candidate.targetId === filters.target);
       if (!coverage) return false;
-      return filters.state ? coverage.state === filters.state : coverage.state !== 'absent';
+      const incomplete = Boolean(coverage.unscannedLocationIds?.length);
+      // Once the resolver finds an effective copy and a shadow, a lower
+      // unscanned location cannot undo either observation.
+      return filters.state
+        ? coverage.state === filters.state && (filters.state === 'shadowed' || !incomplete)
+        : incomplete || coverage.state !== 'absent';
     }
     return true;
   });
@@ -139,7 +144,24 @@ function invalidResourceKey(set: { status?: number | string }): ApiErrorResponse
   };
 }
 
-function resourceNotFound(set: { status?: number | string }): ApiErrorResponse {
+function missingResourceResponse(
+  set: { status?: number | string },
+  scan: LibraryScanResult,
+  kind: ResourceKind,
+  location?: LibraryLocationId
+): ApiErrorResponse {
+  if (
+    scan.locationDiagnostics?.some(
+      ({ locationId }) =>
+        LOCATION_KIND_BY_ID.get(locationId) === kind && (!location || locationId === location)
+    )
+  ) {
+    set.status = 503;
+    return {
+      error: 'The library scan could not verify whether this resource is available.',
+      code: ERROR_CODES.PROVIDER_ERROR,
+    };
+  }
   set.status = 404;
   return {
     error: 'Library resource not found.',
@@ -360,7 +382,8 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
           set,
           user,
         }): Promise<LibraryResourceContent | ApiErrorResponse> => {
-          if (!parseResourceKey(params.key)) return invalidResourceKey(set);
+          const ref = parseResourceKey(params.key);
+          if (!ref) return invalidResourceKey(set);
           const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
           if (!workspace.ok) return workspace.body;
           try {
@@ -371,7 +394,7 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
               query.environmentId
             );
             const resource = scan.resources.find((candidate) => candidate.key === params.key);
-            if (!resource) return resourceNotFound(set);
+            if (!resource) return missingResourceResponse(set, scan, ref.kind, query.location);
             return (
               (await service.readContent(
                 user?.id ?? '',
@@ -379,7 +402,7 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
                 query.location,
                 workspace.root,
                 query.environmentId
-              )) ?? resourceNotFound(set)
+              )) ?? missingResourceResponse(set, scan, ref.kind, query.location)
             );
           } catch (error) {
             return handleLibraryError(error, set);
@@ -404,7 +427,8 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
           },
         },
         async ({ params, query, set, user }): Promise<LibraryResource | ApiErrorResponse> => {
-          if (!parseResourceKey(params.key)) return invalidResourceKey(set);
+          const ref = parseResourceKey(params.key);
+          if (!ref) return invalidResourceKey(set);
           const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
           if (!workspace.ok) return workspace.body;
           try {
@@ -416,7 +440,7 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
             );
             return (
               scan.resources.find((candidate) => candidate.key === params.key) ??
-              resourceNotFound(set)
+              missingResourceResponse(set, scan, ref.kind)
             );
           } catch (error) {
             return handleLibraryError(error, set);

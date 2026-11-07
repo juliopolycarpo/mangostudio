@@ -65,6 +65,23 @@ function cellFor(resourceKey: string, targetId: string): HTMLElement {
 }
 
 describe('CoverageMatrix', () => {
+  it('labels failed coverage and withholds the only-here claim from other targets', async () => {
+    await renderMatrix([
+      resource({
+        instances: [instance({ locationId: 'mango-skills' })],
+        coverage: fullCoverage({
+          mangostudio: { state: 'present', effectiveLocationId: 'mango-skills' },
+          claude: { state: 'absent', unscannedLocationIds: ['claude-skills'] },
+        }),
+      }),
+    ]);
+
+    const cell = cellFor('skill:gh', 'claude');
+    expect(cell).toHaveAttribute('data-state', 'scan-incomplete');
+    expect(cell.getAttribute('aria-label')).toContain(en.library.cellState['scan-incomplete']);
+    expect(cellFor('skill:gh', 'mangostudio')).toHaveAttribute('data-state', 'present');
+  });
+
   it('renders one column per target, in registry order', async () => {
     await renderMatrix([resource()]);
 

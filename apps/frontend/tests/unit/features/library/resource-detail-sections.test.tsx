@@ -15,12 +15,15 @@ import type { LibraryResource } from '@mangostudio/shared/library';
 
 import { ContentGroupList } from '../../../../src/features/library/components/ContentGroupList';
 import { CoverageList } from '../../../../src/features/library/components/CoverageList';
+import { ResourceDetail } from '../../../../src/features/library/components/ResourceDetail';
 import {
   libraryKindPath,
   resourceKeyLabel,
   resourceTitle,
 } from '../../../../src/features/library/format';
 import { render, screen, within } from '../../../support/harness/render';
+import { renderWithRouter } from '../../../support/harness/render-with-router';
+import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
 import { fullCoverage, instance, resource, sourceGroup } from './fixtures';
 
 const labelOf = (locationId: string) => `/home/dev/${locationId}`;
@@ -67,7 +70,49 @@ function renderCoverage({
   return { row };
 }
 
+describe('ResourceDetail', () => {
+  it('offers a retry for a failed scan without claiming the resource is absent', async () => {
+    const failure = { status: 503, body: { error: 'incomplete scan', code: 'PROVIDER_ERROR' } };
+    const scenario = createFetchScenario()
+      .respondWithJson('GET', '/api/environments', { body: [] })
+      .respondWithJson('GET', '/api/library/locations', { body: [] })
+      .respondWithJson('GET', '/api/library/targets', { body: [] })
+      .respondWithJson('GET', '/api/library/resources/skill:gh', failure)
+      .respondWithJson('GET', '/api/library/resources/skill%3Agh', failure)
+      .install();
+    try {
+      await renderWithRouter(<ResourceDetail resourceKey="skill:gh" />);
+      const error = await screen.findByTestId('library-error');
+      expect(error).toHaveTextContent(en.library.detail.loadError);
+      expect(within(error).getByRole('button')).toBeEnabled();
+    } finally {
+      scenario.restore();
+    }
+  });
+});
+
 describe('CoverageList', () => {
+  it('shows the failed path without claiming an effective copy', () => {
+    render(
+      <CoverageList
+        locationLabel={labelOf}
+        resource={resource({
+          instances: [instance({ locationId: 'agents-skills' })],
+          coverage: fullCoverage({
+            codex: { state: 'present', unscannedLocationIds: ['codex-skills'] },
+          }),
+        })}
+      />
+    );
+    const row = screen
+      .getAllByTestId('coverage-row')
+      .find((candidate) => candidate.dataset.targetId === 'codex');
+    if (!row) throw new Error('Expected a Codex coverage row');
+    expect(row).toHaveAttribute('data-state', 'scan-incomplete');
+    expect(row).toHaveTextContent(labelOf('codex-skills'));
+    expect(within(row).queryByText(en.library.detail.via)).not.toBeInTheDocument();
+  });
+
   it('draws each state with the matrix glyph and its word, so no two states share a look', () => {
     const { row } = renderCoverage();
 

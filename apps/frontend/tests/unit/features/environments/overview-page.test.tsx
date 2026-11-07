@@ -739,6 +739,33 @@ describe('OverviewPage', () => {
     });
   });
 
+  it('distinguishes a failed library location from a target with no copies', async () => {
+    scenario
+      .respondWithJson('GET', '/api/tool-identities', { body: { identities: {} } })
+      .respondWithJson('GET', '/api/machine/status', { body: MACHINE_STATUS })
+      .respondWithJson('GET', '/api/environments', { body: ENVIRONMENTS })
+      .respondWithJson('GET', '/api/environments/agents', { body: AGENTS })
+      .respondWithJson('GET', '/api/environments/runtimes', { body: RUNTIMES })
+      .respondWithJson('GET', '/api/environments/install/recipes', { body: [] })
+      .respondWithJson('GET', '/api/library/resources', {
+        body: {
+          resources: [],
+          unreadableEntries: [],
+          locationDiagnostics: [{ locationId: 'claude-skills', reason: 'permission-denied' }],
+        },
+      })
+      .respondWithJson('GET', '/api/library/targets', { body: TARGETS })
+      .install();
+
+    await renderWithRouter(<OverviewPage />);
+    const rows = await screen.findAllByTestId('library-coverage-row');
+    const claude = rows.find((row) => row.dataset.targetId === 'claude');
+    const cursor = rows.find((row) => row.dataset.targetId === 'cursor');
+    expect(claude).toHaveTextContent(en.library.cellStateShort['scan-incomplete']);
+    expect(claude).not.toHaveTextContent(en.environments.overview.libraryNone);
+    expect(cursor).toHaveTextContent(en.environments.overview.libraryNone);
+  });
+
   it('costs one section, not the page, when a query fails', async () => {
     // Every request but the library's resource scan, which is left unhandled.
     scenario

@@ -1,6 +1,7 @@
 import type { AppSettings } from '@mangostudio/shared/app-settings';
 import { libraryLocationsFor } from '@mangostudio/shared/app-settings';
 import {
+  type LibraryLocationDiagnostic,
   type LibraryLocationId,
   type LibraryResource,
   type LibraryScanResult,
@@ -95,7 +96,13 @@ export function discoverLibraryResourcesFromSettings(
   );
 }
 
-function groupResources(scanned: readonly ReadLibraryInstance[]): LibraryResource[] {
+function groupResources(
+  scanned: readonly ReadLibraryInstance[],
+  diagnostics?: readonly LibraryLocationDiagnostic[]
+): LibraryResource[] {
+  const failedLocations = diagnostics?.length
+    ? new Set(diagnostics.map(({ locationId }) => locationId))
+    : undefined;
   const byKey = new Map<string, InstanceComparison[]>();
   const refByKey = new Map<string, LibraryResource['ref']>();
 
@@ -118,17 +125,23 @@ function groupResources(scanned: readonly ReadLibraryInstance[]): LibraryResourc
       ref,
       key,
       instances,
-      coverage: resolveLibraryCoverage(ref, instances),
+      coverage: resolveLibraryCoverage(ref, instances, failedLocations),
       ...describeDivergence(ref.kind, comparedInstances),
     };
   }).sort((left, right) => left.key.localeCompare(right.key));
 }
 
-/** Groups a runtime scan result the same way Local discovery does. */
+/**
+ * Groups a runtime scan and carries failed locations into target coverage.
+ *
+ * @example
+ * groupLibraryScanEntries(entries, locationDiagnostics);
+ */
 export function groupLibraryScanEntries(
-  scanned: readonly ReadLibraryInstance[]
+  scanned: readonly ReadLibraryInstance[],
+  diagnostics?: readonly LibraryLocationDiagnostic[]
 ): LibraryResource[] {
-  return groupResources(scanned);
+  return groupResources(scanned, diagnostics);
 }
 
 export function resetLibraryDiscoveryCache(): void {

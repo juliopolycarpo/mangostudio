@@ -452,7 +452,7 @@ export const messages: Messages = {
       labelDivergentOne: 'Skills — {count} divergence',
       labelDivergentOther: 'Skills — {count} divergences',
       divergenceBody: 'Different version in {outliers} than in {agreeing}.',
-      divergenceBodyNoMajority: '{targets} read different versions of this skill.',
+      divergenceBodyNoMajority: 'Different copies of this skill in {targets}.',
       moreOne: '{count} more skill diverges.',
       moreOther: '{count} more skills diverge.',
       propagate: 'Propagate',
@@ -473,7 +473,7 @@ export const messages: Messages = {
       labelDivergentOne: 'Library — {count} divergence',
       labelDivergentOther: 'Library — {count} divergences',
       divergenceBody: 'Different version in {outliers} than in {agreeing}.',
-      divergenceBodyNoMajority: '{targets} read different versions of this resource.',
+      divergenceBodyNoMajority: 'Different copies of this resource in {targets}.',
       moreOne: '{count} more resource diverges.',
       moreOther: '{count} more resources diverge.',
       propagate: 'Propagate',
@@ -2182,6 +2182,7 @@ export const messages: Messages = {
     // One label per matrix glyph. Nothing here calls an absence "missing": a
     // resource Cursor does not have is usually absent on purpose.
     cellState: {
+      'scan-incomplete': 'Coverage could not be verified',
       present: 'Present',
       absent: 'Absent',
       shadowed: 'Shadowed, identical',
@@ -2194,6 +2195,7 @@ export const messages: Messages = {
     // table, so the sentence-length `cellState` would not fit; that one stays on
     // the accessible name, and `cellHint` is the sentence behind the tooltips.
     cellStateShort: {
+      'scan-incomplete': 'Scan incomplete',
       present: 'Present',
       absent: 'Absent',
       shadowed: 'Shadowed',
@@ -2202,6 +2204,7 @@ export const messages: Messages = {
       incomparable: 'Cannot compare',
     },
     cellHint: {
+      'scan-incomplete': 'Some locations this agent reads could not be scanned.',
       present: 'This agent reads one copy of this resource.',
       absent: 'This agent reads no copy — which is often correct.',
       shadowed: 'Two copies in different locations, holding the same content.',
@@ -2339,6 +2342,7 @@ export const messages: Messages = {
       propagate: 'Propagate',
       remove: 'Remove',
       notFound: 'This resource is no longer in the library.',
+      loadError: 'Could not check this library resource.',
       invalidInstance: 'Unreadable copy in {location}',
       // 001 deliberately does not normalize line endings, so a CRLF/LF split is
       // a genuine divergence that looks like nothing in a diff.

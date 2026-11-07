@@ -128,8 +128,11 @@ export const LibraryCoverageStateSchema = Type.Union([
 export const LibraryCoverageSchema = Type.Object({
   targetId: LibraryTargetIdSchema,
   state: LibraryCoverageStateSchema,
+  /** Omitted when an unscanned higher-precedence location may hold a copy. */
   effectiveLocationId: Type.Optional(LibraryLocationIdSchema),
   shadowedLocationIds: Type.Array(LibraryLocationIdSchema),
+  /** Locations this target reads that could not be checked. State describes observed copies. */
+  unscannedLocationIds: Type.Optional(Type.Array(LibraryLocationIdSchema, { minItems: 1 })),
 });
 
 export const LibraryDivergenceSchema = Type.Union([
