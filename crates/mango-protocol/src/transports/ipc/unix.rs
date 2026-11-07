@@ -121,7 +121,8 @@ impl IpcListener {
     }
 
     /// Waits for the next connection and hands back its port and the identity
-    /// the socket carries.
+    /// the socket carries. Excess connections are closed while this call
+    /// waits for an available port.
     ///
     /// # Errors
     ///
@@ -129,21 +130,19 @@ impl IpcListener {
     /// one of those: a platform that will not answer leaves the identity
     /// empty rather than refusing a connection that is otherwise fine.
     pub async fn accept(&mut self) -> io::Result<(IpcServerPort, PeerIdentity)> {
-        let (stream, _address) = self.listener.accept().await?;
-        self.accepted.retain(PortCloser::is_open);
-        if self.accepted.len() >= super::MAX_IPC_CONNECTIONS {
-            return Err(io::Error::new(
-                io::ErrorKind::WouldBlock,
-                "local socket connection capacity 64 is full",
-            ));
+        loop {
+            let (stream, _address) = self.listener.accept().await?;
+            self.accepted.retain(PortCloser::is_open);
+            if self.accepted.len() >= super::MAX_IPC_CONNECTIONS {
+                drop(stream);
+                tokio::task::yield_now().await;
+                continue;
+            }
+            let identity = identity_of(&stream);
+            let port = self.port(stream);
+            self.accepted.push(port.closer());
+            return Ok((port, identity));
         }
-        let identity = identity_of(&stream);
-        let port = self.port(stream);
-        // Connections that have since ended are forgotten here rather than
-        // accumulating for the life of a long-running listener.
-        self.accepted.retain(PortCloser::is_open);
-        self.accepted.push(port.closer());
-        Ok((port, identity))
     }
 
     /// Sends release to owned sessions and stops accepting. The public socket path
@@ -1183,35 +1182,46 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn accepted_port_reservations_are_bounded_and_released_with_their_owner() {
+    async fn accept_discards_excess_connections_and_recovers_when_a_port_drops() {
         let address = Address::new();
+        let path = address.path();
         let mut listener = listening(&address).await;
         let mut ports = Vec::new();
         let mut clients = Vec::new();
         for _ in 0..super::super::MAX_IPC_CONNECTIONS {
             clients.push(
-                connect_ipc(address.path(), &ConnectDeadline::default())
+                connect_ipc(&path, &ConnectDeadline::default())
                     .await
                     .unwrap(),
             );
             ports.push(listener.accept().await.unwrap().0);
         }
-        let extra = connect_ipc(address.path(), &ConnectDeadline::default())
+
+        let overflow = connect_ipc(&path, &ConnectDeadline::default())
             .await
             .unwrap();
-        assert_eq!(
-            listener.accept().await.unwrap_err().kind(),
-            io::ErrorKind::WouldBlock
-        );
-        drop(ports);
-        let next = connect_ipc(address.path(), &ConnectDeadline::default())
-            .await
-            .unwrap();
-        let (accepted, _) = listener
-            .accept()
-            .await
-            .expect("dropped owners release reservations");
-        drop((accepted, next, extra, clients));
+        let (_overflow_tx, mut overflow_rx) = overflow.split();
+        let (accepted, next) = tokio::time::timeout(Duration::from_secs(5), async {
+            let accepting = listener.accept();
+            tokio::pin!(accepting);
+            tokio::select! {
+                biased;
+                result = &mut accepting => panic!("accept returned at capacity: {result:?}"),
+                inbound = overflow_rx.recv() => {
+                    assert!(matches!(inbound, Some(Inbound::Closed(_))), "{inbound:?}");
+                }
+            }
+
+            drop(ports.pop().expect("one live accepted port to release"));
+            let next = connect_ipc(&path, &ConnectDeadline::default())
+                .await
+                .unwrap();
+            let (accepted, _) = accepting.await.expect("accept continues after overflow");
+            (accepted, next)
+        })
+        .await
+        .expect("the overflow closes and the same accept returns the next available port");
+        drop((accepted, next, ports, clients));
         listener.close().await;
     }
 
