@@ -4,9 +4,6 @@
  * Shared by the foreground `serve` and the detached `__serve` startup paths.
  */
 
-import { realpath } from 'node:fs/promises';
-import { resolve } from 'node:path';
-
 import { app } from '../app';
 import { acquireCaptureLock } from '../backup/capture-lock';
 import { closeDb, getDb } from '../db/database';
@@ -77,13 +74,7 @@ let stopRuntimeScopeReaps: (() => void) | null = null;
 export async function startServer(options: StartOptions = {}): Promise<ServerHandle> {
   const path = getConfig().database.path;
   if (path !== ':memory:') {
-    let canonical = resolve(path);
-    try {
-      canonical = await realpath(path);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    }
-    releaseCaptureLock = await acquireCaptureLock(canonical);
+    releaseCaptureLock = await acquireCaptureLock(path);
   }
   try {
     return await startServerWithLock(options);

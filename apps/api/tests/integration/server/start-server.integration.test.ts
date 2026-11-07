@@ -1,7 +1,7 @@
 import { Database as SQLiteDatabase } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -77,6 +77,48 @@ async function waitForState(pidFile: string, timeoutMs = START_TIMEOUT_MS): Prom
 }
 
 describe('startServer via __serve', () => {
+  it.skipIf(process.platform === 'win32')(
+    'uses the held physical lock before creating a database through a parent alias',
+    async () => {
+      const running = await createManagedProcessFixture({ tempPrefix: 'mango-first-db-alias-' });
+      const lexicalParent = join(running.tempDir, 'lexical');
+      const physicalParent = join(running.tempDir, 'physical');
+      const database = join(physicalParent, 'database.sqlite');
+      const alias = `${lexicalParent}/link/../database.sqlite`;
+      await mkdir(lexicalParent);
+      await mkdir(join(physicalParent, 'child'), { recursive: true });
+      await symlink(join(physicalParent, 'child'), join(lexicalParent, 'link'), 'dir');
+      const release = await acquireCaptureLock(database);
+      try {
+        const child = running.spawn({
+          cmd: ['bun', ENTRY, '__serve', String(running.port)],
+          env: {
+            ...serverEnv(running.tempDir, running.port),
+            DATABASE_PATH: alias,
+            BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
+          },
+        });
+        await running.waitUntilReady(
+          async () => child.exitCode !== null || (await probeHealthOnce('127.0.0.1', running.port)),
+          {
+            label: 'Hub exit or successful listen for aliased database',
+            timeoutMs: START_TIMEOUT_MS,
+          }
+        );
+        expect(child.exitCode).toBe(1);
+        await running.waitForExit();
+        expect(running.diagnostics()).toContain('capture lock cannot be acquired');
+        expect(existsSync(database)).toBe(false);
+        expect(existsSync(join(lexicalParent, 'database.sqlite'))).toBe(false);
+      } finally {
+        await release();
+        await running.cleanup();
+        await running.assertReleased();
+      }
+    },
+    TEST_TIMEOUT_MS
+  );
+
   it(
     'holds persisted data ownership until the Hub exits',
     async () => {
