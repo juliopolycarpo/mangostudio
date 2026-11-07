@@ -1308,7 +1308,12 @@ before reserving a terminal, looking up the chat, or contacting the runtime.
 Process exit reports the end of the PTY. Account verification is separate.
 
 The runtime holds up to 64 KiB of output in memory for the first viewer and
-discards that replay after one attach. Overflow closes the login. The first
+discards that replay after one attach. The Hub reserves the first viewer until
+the browser acknowledges the replay bytes. An empty replay completes the handoff
+immediately. If the viewer disconnects or its attach fails before the handoff,
+the Hub closes a running login and retries failed cleanup. A reported native
+exit keeps its recorded status. Overflow
+closes the login. The first
 viewer has 30 seconds to attach, and the login can run for up to ten minutes.
 An expired login refuses attach and PTY input and discards pending output.
 The 100 ms watcher starts cleanup independently of consent polling. It retries

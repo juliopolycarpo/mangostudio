@@ -16,10 +16,17 @@ import {
   createTerminalSessionService,
   type TerminalSessionService,
 } from '../../../src/modules/terminals/application/terminal-session-service';
+import {
+  createTerminalSocketRelay,
+  type TerminalSocketRelayDeps,
+} from '../../../src/modules/terminals/application/terminal-socket-relay';
 import { createTerminalSocketRoutes } from '../../../src/modules/terminals/http/terminal-socket-routes';
 import { insertTestUser } from '../../support/factories';
 import { listenOnEphemeralPort } from '../../support/listen-ephemeral';
-import { FakeTerminalRuntimeClient } from '../../support/mocks/fake-terminal-runtime-client';
+import {
+  FAKE_TERMINAL_MANIFEST,
+  FakeTerminalRuntimeClient,
+} from '../../support/mocks/fake-terminal-runtime-client';
 import { resolveRustRuntimeBinary, skipWithoutRustBinary } from '../../support/rust-runtime-binary';
 import { spawnRustStdioRuntime } from '../../support/rust-stdio-runtime';
 
@@ -37,6 +44,7 @@ afterEach(() => {
 
 interface StartHubOptions {
   readonly service?: TerminalSessionService;
+  readonly createRelay?: typeof createTerminalSocketRelay;
   readonly resolveUserId?: (headers: Headers) => Promise<string | null>;
   readonly allowedOrigins?: readonly string[];
 }
@@ -47,6 +55,7 @@ async function startHub(options: StartHubOptions = {}) {
     group.use(
       createTerminalSocketRoutes({
         service,
+        ...(options.createRelay ? { createRelay: options.createRelay } : {}),
         ...(options.resolveUserId ? { resolveUserId: options.resolveUserId } : {}),
         ...(options.allowedOrigins ? { allowedOrigins: options.allowedOrigins } : {}),
       })
@@ -57,6 +66,16 @@ async function startHub(options: StartHubOptions = {}) {
     void app.server?.stop(true);
   };
   return { service, url: `ws://127.0.0.1:${port}/api/terminal` };
+}
+
+/**
+ * Simulates Bun rejecting a replay send after the socket has opened.
+ *
+ * @example
+ * await startHub({ createRelay: createRelayWithDroppedSend });
+ */
+function createRelayWithDroppedSend(deps: TerminalSocketRelayDeps) {
+  return createTerminalSocketRelay({ ...deps, send: () => 0 });
 }
 
 interface Connected {
@@ -830,6 +849,217 @@ describe('terminal socket relay', () => {
     const live = await second.nextMessage((message) => message.type === 'data');
     expect(live.type === 'data' && Buffer.from(live.data).toString()).toBe('still here');
   });
+
+  it('keeps the first login viewer while its one-time replay is in flight', async () => {
+    const user = await insertTestUser();
+    const gate = Promise.withResolvers<void>();
+    const runtime = new FakeTerminalRuntimeClient({
+      manifest: { ...FAKE_TERMINAL_MANIFEST, terminalLoginArgv: true },
+      gateFirstAttach: () => gate.promise,
+      firstAttachScrollback: Buffer.from('first login prompt').toString('base64'),
+    });
+    const service = relayService(runtime);
+    const session = await service.open(user.id, {
+      environmentId: ENVIRONMENT_ID,
+      loginTarget: 'codex',
+    });
+    const hub = await startHub({ service, resolveUserId: () => Promise.resolve(user.id) });
+    const url = `${hub.url}/${session.id}`;
+    const firstAttach = runtime.waitForCall('attach');
+    const first = connect(url);
+    await firstAttach;
+
+    async function expectFirstViewerReserved() {
+      const unexpectedAttach = runtime.waitForCall('attach');
+      const contender = connect(url);
+      const result = await Promise.race([
+        contender.closed.then((event) => event.code),
+        unexpectedAttach.then(() => 'contender attached to runtime'),
+      ]);
+      expect(result).toBe(TERMINAL_SOCKET_CLOSE_CODES.REPLACED);
+      expect(first.socket.readyState).toBe(WebSocket.OPEN);
+      expect(runtime.calls.attach).toEqual([{ sessionId: session.id }]);
+    }
+
+    try {
+      await expectFirstViewerReserved();
+    } finally {
+      gate.resolve();
+    }
+
+    const prompt = await first.nextMessage((message) => message.type === 'data');
+    expect(dataText([prompt])).toEqual(['first login prompt']);
+    await expectFirstViewerReserved();
+
+    const partialAck = runtime.waitForCall('ack');
+    first.socket.send(encodeTerminalClientMessage({ type: 'ack', bytes: 5 }));
+    await partialAck;
+    await expectFirstViewerReserved();
+
+    const finalAck = runtime.waitForCall('ack');
+    first.socket.send(
+      encodeTerminalClientMessage({
+        type: 'ack',
+        bytes: Buffer.byteLength('first login prompt') - 5,
+      })
+    );
+    await finalAck;
+
+    const successorAttach = runtime.waitForCall('attach');
+    const successor = connect(url);
+    await successorAttach;
+    expect((await first.closed).code).toBe(TERMINAL_SOCKET_CLOSE_CODES.REPLACED);
+    runtime.emitOutput(session.id, {
+      kind: 'data',
+      data: Buffer.from('live output').toString('base64'),
+    });
+    const live = await successor.nextMessage((message) => message.type === 'data');
+    expect(dataText([live])).toEqual(['live output']);
+  });
+
+  it('allows takeover after an empty first login replay', async () => {
+    const user = await insertTestUser();
+    const runtime = new FakeTerminalRuntimeClient({
+      manifest: { ...FAKE_TERMINAL_MANIFEST, terminalLoginArgv: true },
+    });
+    const service = relayService(runtime);
+    const session = await service.open(user.id, {
+      environmentId: ENVIRONMENT_ID,
+      loginTarget: 'codex',
+    });
+    const hub = await startHub({ service, resolveUserId: () => Promise.resolve(user.id) });
+    const url = `${hub.url}/${session.id}`;
+    const attached = runtime.waitForCall('attach');
+    const first = connect(url);
+    await attached;
+    runtime.emitOutput(session.id, {
+      kind: 'data',
+      data: Buffer.from('live login output').toString('base64'),
+    });
+    const data = await first.nextMessage((message) => message.type === 'data');
+    expect(dataText([data])).toEqual(['live login output']);
+
+    const nextAttach = runtime.waitForCall('attach');
+    const next = connect(url);
+    const result = await Promise.race([
+      nextAttach.then(() => 'runtime attached'),
+      next.closed.then((event) => event.code),
+    ]);
+    expect(result).toBe('runtime attached');
+    expect((await first.closed).code).toBe(TERMINAL_SOCKET_CLOSE_CODES.REPLACED);
+    expect(runtime.calls.ack).toEqual([]);
+  });
+
+  it.each([
+    { source: 'attach result', exitedInAttach: true, droppedSend: false },
+    { source: 'queued event', exitedInAttach: false, droppedSend: false },
+    { source: 'attach result', exitedInAttach: true, droppedSend: true },
+    { source: 'queued event', exitedInAttach: false, droppedSend: true },
+  ])(
+    'keeps a login exit from the $source before replay ACK (dropped send: $droppedSend)',
+    async ({ exitedInAttach, droppedSend }) => {
+      const user = await insertTestUser();
+      const gate = Promise.withResolvers<void>();
+      const runtime = new FakeTerminalRuntimeClient({
+        manifest: { ...FAKE_TERMINAL_MANIFEST, terminalLoginArgv: true },
+        gateFirstAttach: () => gate.promise,
+        firstAttachScrollback: Buffer.from('login error').toString('base64'),
+        ...(exitedInAttach
+          ? { attachResult: { status: 'exited', exitCode: 7 } }
+          : { outputWithFirstAttachResponse: [{ kind: 'exit', exitCode: 7, signal: null }] }),
+      });
+      const service = relayService(runtime);
+      const session = await service.open(user.id, {
+        environmentId: ENVIRONMENT_ID,
+        loginTarget: 'codex',
+      });
+      const hub = await startHub({
+        service,
+        resolveUserId: () => Promise.resolve(user.id),
+        ...(droppedSend ? { createRelay: createRelayWithDroppedSend } : {}),
+      });
+      const firstAttach = runtime.waitForCall('attach');
+      const viewer = connect(`${hub.url}/${session.id}`);
+      await firstAttach;
+      const cleanup = Promise.race([
+        runtime.waitForCall('detach').then(() => 'detached'),
+        runtime.waitForCall('close').then(() => 'closed as abandoned'),
+      ]);
+      gate.resolve();
+
+      if (droppedSend) {
+        expect((await viewer.closed).code).toBe(TERMINAL_SOCKET_CLOSE_CODES.INTERNAL_ERROR);
+        expect(viewer.messages).toEqual([]);
+      } else {
+        expect(await viewer.nextMessage()).toMatchObject({ type: 'data' });
+        expect(dataText(viewer.messages)).toEqual(['login error']);
+        expect(await viewer.nextMessage()).toEqual({
+          type: 'exit',
+          exit: { exitCode: 7, signal: null },
+        });
+        expect((await viewer.closed).code).toBe(TERMINAL_SOCKET_CLOSE_CODES.GONE);
+      }
+      expect(await cleanup).toBe('detached');
+      expect(runtime.calls.close).toEqual([]);
+      expect(service.list(user.id)[0]?.exit).toEqual({ exitCode: 7, signal: null });
+    }
+  );
+
+  it.each([
+    { cause: 'viewer disconnect', rejectAttach: false },
+    { cause: 'runtime attach failure', rejectAttach: true },
+  ])(
+    'closes an abandoned first login attach after $cause and retries cleanup',
+    async ({ rejectAttach }) => {
+      const user = await insertTestUser();
+      const gate = Promise.withResolvers<void>();
+      const runtime = new FakeTerminalRuntimeClient({
+        manifest: { ...FAKE_TERMINAL_MANIFEST, terminalLoginArgv: true },
+        gateFirstAttach: () => gate.promise,
+        firstAttachScrollback: Buffer.from('abandoned login prompt').toString('base64'),
+        failFirstClose: new Error('injected login close failure'),
+      });
+      const service = relayService(runtime);
+      const session = await service.open(user.id, {
+        environmentId: ENVIRONMENT_ID,
+        loginTarget: 'codex',
+      });
+      const hub = await startHub({ service, resolveUserId: () => Promise.resolve(user.id) });
+      const url = `${hub.url}/${session.id}`;
+      const firstAttach = runtime.waitForCall('attach');
+      const first = connect(url);
+      await firstAttach;
+
+      try {
+        const firstClose = runtime.waitForCall('close');
+        if (rejectAttach) {
+          gate.reject(new Error('injected login attach failure'));
+        } else {
+          first.socket.close();
+        }
+        const closed = await first.closed;
+        if (rejectAttach) expect(closed.code).toBe(TERMINAL_SOCKET_CLOSE_CODES.GONE);
+        const closeOutcome = await Promise.race([
+          firstClose.then(() => 'close sent'),
+          Bun.sleep(350).then(() => 'close missing'),
+        ]);
+        expect(closeOutcome).toBe('close sent');
+        expect(service.getForAttach(user.id, session.id)).toBeNull();
+
+        const contender = connect(url);
+        expect((await contender.closed).code).toBe(TERMINAL_SOCKET_CLOSE_CODES.NOT_FOUND);
+        expect(runtime.calls.attach).toEqual([{ sessionId: session.id }]);
+
+        const secondClose = runtime.waitForCall('close');
+        service.reapIdle();
+        await secondClose;
+        expect(runtime.calls.close).toEqual([{ sessionId: session.id }, { sessionId: session.id }]);
+        expect(runtime.calls.detach).toEqual([{ sessionId: session.id }]);
+      } finally {
+        gate.resolve();
+      }
+    }
+  );
 
   it('does not detach the runtime when a takeover replaces the viewer while attach() is still in flight', async () => {
     const user = await insertTestUser();
