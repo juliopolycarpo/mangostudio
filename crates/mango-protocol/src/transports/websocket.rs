@@ -94,7 +94,8 @@ impl WebSocketOptions {
     /// # Panics
     ///
     /// Panics when `max_frame_bytes` is below
-    /// [`crate::codec::ndjson::MIN_MAX_FRAME_BYTES`], naming both.
+    /// [`crate::codec::ndjson::MIN_MAX_FRAME_BYTES`] or above
+    /// [`crate::validate::MAX_ANNOUNCED_FRAME_BYTES`], naming the violated bound.
     ///
     /// # Example
     ///
@@ -166,6 +167,12 @@ impl WebSocketOptions {
     /// the reassembler still refuses anything whose payload passes the frame
     /// limit.
     ///
+    /// # Panics
+    ///
+    /// Panics when the frame limit is outside
+    /// [`crate::codec::ndjson::MIN_MAX_FRAME_BYTES`] through
+    /// [`crate::validate::MAX_ANNOUNCED_FRAME_BYTES`].
+    ///
     /// # Example
     ///
     /// ```
@@ -183,7 +190,8 @@ impl WebSocketOptions {
     /// ```
     #[must_use]
     pub fn socket_config(&self) -> WebSocketConfig {
-        let incoming = self.max_frame_bytes.saturating_add(CHUNK_HEADER_BYTES);
+        let frame_limit = crate::codec::limits::check_max_frame_bytes(self.max_frame_bytes);
+        let incoming = frame_limit.saturating_add(CHUNK_HEADER_BYTES);
         WebSocketConfig::default()
             .max_message_size(Some(incoming))
             .max_frame_size(Some(incoming))
@@ -222,6 +230,12 @@ pub struct WebSocketPort<S> {
 /// `hello` the moment the upgrade completes, and nothing reads the socket
 /// until this port does.
 ///
+/// # Panics
+///
+/// Panics when the frame limit is outside
+/// [`crate::codec::ndjson::MIN_MAX_FRAME_BYTES`] through
+/// [`crate::validate::MAX_ANNOUNCED_FRAME_BYTES`].
+///
 /// # Example
 ///
 /// ```no_run
@@ -240,6 +254,7 @@ pub fn websocket_port<S>(stream: WebSocketStream<S>, options: WebSocketOptions) 
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
+    let _ = crate::codec::limits::check_max_frame_bytes(options.max_frame_bytes);
     WebSocketPort { stream, options }
 }
 

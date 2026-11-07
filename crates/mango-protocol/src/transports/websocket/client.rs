@@ -135,6 +135,11 @@ impl WebSocketConnectOptions {
 /// is not one this transport can use, [`ConnectError::Io`] when the socket
 /// itself failed, and [`ConnectError::TimedOut`]/[`ConnectError::Cancelled`]
 /// when `deadline` abandoned the attempt.
+///
+/// # Panics
+///
+/// Panics when the frame limit is outside the bounds documented by
+/// [`WebSocketOptions::socket_config`].
 pub async fn connect_websocket(
     url: &str,
     options: &WebSocketConnectOptions,

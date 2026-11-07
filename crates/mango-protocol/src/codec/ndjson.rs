@@ -6,7 +6,7 @@
 
 use serde_json::error::Category;
 
-use crate::codec::limits::{check_at_least, checked_at_least};
+use crate::codec::limits::{check_max_frame_bytes, checked_max_frame_bytes};
 use crate::error::{CodecError, CodecErrorKind};
 use crate::frame::Frame;
 use crate::validate::validate;
@@ -64,8 +64,9 @@ fn is_blank(line: &[u8]) -> bool {
 /// Encodes one frame as compact UTF-8 JSON, without a terminator.
 ///
 /// The frame is validated first: a peer must never send a frame that violates
-/// the schema. `max_frame_bytes` below [`MIN_MAX_FRAME_BYTES`] is refused the
-/// same way, naming both — this function already returns a `Result`, so it
+/// the schema. `max_frame_bytes` below [`MIN_MAX_FRAME_BYTES`] or above
+/// [`crate::validate::MAX_ANNOUNCED_FRAME_BYTES`] is refused the same way,
+/// naming the violated bound — this function already returns a `Result`, so it
 /// refuses rather than panics, unlike the builders that carry this same rule.
 ///
 /// # Example
@@ -77,7 +78,7 @@ fn is_blank(line: &[u8]) -> bool {
 /// assert_eq!(bytes, br#"{"type":"ping"}"#);
 /// ```
 pub fn encode_frame_bytes(frame: &Frame, max_frame_bytes: usize) -> Result<Vec<u8>, CodecError> {
-    let max_frame_bytes = checked_at_least("max_frame_bytes", max_frame_bytes, MIN_MAX_FRAME_BYTES)
+    let max_frame_bytes = checked_max_frame_bytes(max_frame_bytes)
         .map_err(|message| CodecError::new(CodecErrorKind::Schema, message))?;
     validate(frame).map_err(|error| CodecError::new(CodecErrorKind::Schema, error.to_string()))?;
     let bytes = serde_json::to_vec(frame).map_err(|error| {
@@ -121,7 +122,8 @@ pub fn encode_line(frame: &Frame, max_frame_bytes: usize) -> Result<Vec<u8>, Cod
 /// [`CodecErrorKind::InvalidJson`]; JSON that is not a valid frame, or a frame
 /// whose members break a length, grammar or range rule, is
 /// [`CodecErrorKind::Schema`]. `max_frame_bytes` below [`MIN_MAX_FRAME_BYTES`]
-/// is refused the same way, naming both.
+/// or above [`crate::validate::MAX_ANNOUNCED_FRAME_BYTES`] is refused the same
+/// way, naming the violated bound.
 ///
 /// # Example
 ///
@@ -132,7 +134,7 @@ pub fn encode_line(frame: &Frame, max_frame_bytes: usize) -> Result<Vec<u8>, Cod
 /// assert_eq!(frame, Frame::Ping);
 /// ```
 pub fn decode_line(bytes: &[u8], max_frame_bytes: usize) -> Result<Frame, CodecError> {
-    let max_frame_bytes = checked_at_least("max_frame_bytes", max_frame_bytes, MIN_MAX_FRAME_BYTES)
+    let max_frame_bytes = checked_max_frame_bytes(max_frame_bytes)
         .map_err(|message| CodecError::new(CodecErrorKind::Schema, message))?;
     let line = strip_carriage_return(bytes);
     if line.len() > max_frame_bytes {
@@ -245,8 +247,8 @@ impl LineDecoder {
     ///
     /// # Panics
     ///
-    /// Panics when `max_frame_bytes` is below [`MIN_MAX_FRAME_BYTES`], naming
-    /// both.
+    /// Panics when `max_frame_bytes` is below [`MIN_MAX_FRAME_BYTES`] or above
+    /// [`crate::validate::MAX_ANNOUNCED_FRAME_BYTES`], naming the violated bound.
     ///
     /// # Example
     ///
@@ -258,8 +260,7 @@ impl LineDecoder {
     /// ```
     #[must_use]
     pub fn new(max_frame_bytes: usize) -> Self {
-        let max_frame_bytes =
-            check_at_least("max_frame_bytes", max_frame_bytes, MIN_MAX_FRAME_BYTES);
+        let max_frame_bytes = check_max_frame_bytes(max_frame_bytes);
         Self {
             max_frame_bytes,
             buffer: Vec::new(),

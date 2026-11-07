@@ -7,14 +7,19 @@
  */
 
 import { CodecError } from '../errors';
-import { assertFrame, type Frame } from '../schemas/frames';
+import {
+  assertFrame,
+  type Frame,
+  MAX_ANNOUNCED_FRAME_BYTES,
+  MIN_ANNOUNCED_FRAME_BYTES,
+} from '../schemas/frames';
 import { resolveIntegerAtLeast } from './limits';
 
 /** Frame limit when neither peer announced a lower one (§11). */
 export const DEFAULT_MAX_FRAME_BYTES = 16 * 1024 * 1024;
 
 /** Lowest ceiling a peer may announce in `hello.limits.maxFrameBytes` (§11). */
-export const MIN_MAX_FRAME_BYTES = 4096;
+export const MIN_MAX_FRAME_BYTES = MIN_ANNOUNCED_FRAME_BYTES;
 
 /** How large one encoded frame may be, without its line terminator. */
 export interface FrameLimitOptions {
@@ -41,7 +46,8 @@ const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
 
 /**
  * The frame limit a call works under: the option when it is an integer at or
- * above the floor of §11, the 16 MiB default when it is absent.
+ * above the floor of §11 and within the wire maximum, the 16 MiB default
+ * when it is absent.
  *
  * @example
  * resolveFrameLimit({ maxFrameBytes: 4194304 }); // 4194304
@@ -51,7 +57,8 @@ export function resolveFrameLimit(options?: FrameLimitOptions): number {
     'maxFrameBytes',
     options?.maxFrameBytes,
     DEFAULT_MAX_FRAME_BYTES,
-    MIN_MAX_FRAME_BYTES
+    MIN_MAX_FRAME_BYTES,
+    MAX_ANNOUNCED_FRAME_BYTES
   );
 }
 

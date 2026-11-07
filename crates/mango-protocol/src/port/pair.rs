@@ -118,7 +118,8 @@ pub fn port_pair() -> (MemoryPort, MemoryPort) {
 /// # Panics
 ///
 /// Panics when `options.max_frame_bytes` is `Some` value below
-/// [`crate::codec::ndjson::MIN_MAX_FRAME_BYTES`], naming both.
+/// [`crate::codec::ndjson::MIN_MAX_FRAME_BYTES`] or above
+/// [`crate::validate::MAX_ANNOUNCED_FRAME_BYTES`], naming the violated bound.
 #[must_use]
 pub fn port_pair_with(options: MemoryPortOptions) -> (MemoryPort, MemoryPort) {
     if let Some(max_frame_bytes) = options.max_frame_bytes {

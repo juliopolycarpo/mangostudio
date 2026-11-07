@@ -25,16 +25,16 @@ import {
 } from './common';
 
 /** Smallest frame limit a peer may announce (§11). */
-const MIN_ANNOUNCED_FRAME_BYTES = 4096;
+export const MIN_ANNOUNCED_FRAME_BYTES = 4096;
 
 /** Largest frame limit `hello.limits` can carry, one signed 32-bit integer. */
-const MAX_ANNOUNCED_FRAME_BYTES = 2147483647;
+export const MAX_ANNOUNCED_FRAME_BYTES = 2147483647;
 
 /** Fewest requests a peer may announce it will hold open (§11.2). */
 export const MIN_ANNOUNCED_IN_FLIGHT = 1;
 
 /** Largest in-flight ceiling `hello.limits` can carry, one signed 32-bit integer. */
-const MAX_ANNOUNCED_IN_FLIGHT = 2147483647;
+export const MAX_ANNOUNCED_IN_FLIGHT = 2147483647;
 
 /** `hello.protocol`: the wire version a peer speaks. */
 export const ProtocolVersionSchema = Type.Object({

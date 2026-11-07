@@ -292,7 +292,8 @@ impl SpawnOptions {
     /// # Panics
     ///
     /// Panics when `max_frame_bytes` is below
-    /// [`crate::codec::ndjson::MIN_MAX_FRAME_BYTES`], naming both.
+    /// [`crate::codec::ndjson::MIN_MAX_FRAME_BYTES`] or above
+    /// [`crate::validate::MAX_ANNOUNCED_FRAME_BYTES`], naming the violated bound.
     ///
     /// # Example
     ///
@@ -483,11 +484,12 @@ fn is_secret_shaped(upper: &str) -> bool {
 /// # Panics
 ///
 /// Panics when `options.max_frame_bytes` is `Some` value below
-/// [`crate::codec::ndjson::MIN_MAX_FRAME_BYTES`], naming both.
+/// [`crate::codec::ndjson::MIN_MAX_FRAME_BYTES`] or above
+/// [`crate::validate::MAX_ANNOUNCED_FRAME_BYTES`], naming the violated bound.
 /// [`SpawnOptions::with_max_frame_bytes`] already refuses this on the builder
 /// path, but the field is `pub`, so this is the check for a caller that
 /// assigned it directly — checked before the command is started, not after,
-/// so a sub-floor value never leaves a child running with nothing left to
+/// so an out-of-range value never leaves a child running with nothing left to
 /// signal it.
 pub fn spawn_port(options: SpawnOptions) -> Result<(SpawnPort, LaunchedPeer), SpawnArgvError> {
     if let Some(max_frame_bytes) = options.max_frame_bytes {
