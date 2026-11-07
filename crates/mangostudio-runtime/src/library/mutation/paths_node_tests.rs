@@ -85,3 +85,82 @@ fn an_uninspectable_segment_cannot_be_verified() {
     let denied = |_: &str| Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
     assert_eq!(resolve_like_node("linux", "/locked/x", &denied), None);
 }
+
+#[test]
+fn posix_parent_steps_follow_symlinks_in_input_and_target_text() {
+    let existing = ["/safe", "/outside", "/outside/child"];
+    let links = HashMap::from([
+        ("/safe/redirect", "/outside/child"),
+        ("/safe/relative", "redirect/../entry"),
+        ("/safe/absolute", "/safe/redirect/../entry"),
+    ]);
+    for input in [
+        "/safe/redirect/../entry",
+        "/safe/relative",
+        "/safe/absolute",
+        "/safe/missing/../redirect/../entry",
+    ] {
+        assert_eq!(
+            resolve_like_node("linux", input, &probe(&existing, &links)).as_deref(),
+            Some("/outside/entry"),
+            "expected the parent of the symlink target while resolving {input:?}"
+        );
+    }
+}
+
+#[test]
+fn win32_preserves_lexical_parent_steps_and_unc_spelling() {
+    let existing = [r"\\Host\Share\RUNNER~1"];
+    let links = HashMap::from([(r"\\Host\Share\RUNNER~1\redirect", r"D:\other\child")]);
+    assert_eq!(
+        resolve_like_node(
+            "win32",
+            r"//Host/Share/RUNNER~1/redirect/../entry",
+            &probe(&existing, &links),
+        )
+        .as_deref(),
+        Some(r"\\Host\Share\RUNNER~1\entry")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_real_relative_link_target_uses_the_redirects_physical_parent() {
+    use std::os::unix::fs::symlink;
+
+    let scratch = crate::test_support::scratch_dir("library-ordered-symlink");
+    let safe = scratch.join("safe");
+    let outside = scratch.join("outside");
+    std::fs::create_dir_all(&safe).unwrap();
+    std::fs::create_dir_all(outside.join("child")).unwrap();
+    std::fs::write(outside.join("existing"), "physical resource").unwrap();
+    std::fs::write(safe.join("existing"), "lexical resource").unwrap();
+    symlink(outside.join("child"), safe.join("redirect")).unwrap();
+    symlink("redirect/../existing", safe.join("entry")).unwrap();
+    symlink("redirect/../missing", safe.join("dangling")).unwrap();
+
+    let entry = safe.join("entry");
+    let physical = std::fs::canonicalize(&entry).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&entry).unwrap(),
+        "physical resource"
+    );
+    assert_eq!(
+        resolve_through_existing_ancestor(&path_string(&entry)),
+        Some(path_string(&physical))
+    );
+    assert_eq!(
+        resolve_through_existing_ancestor(&path_string(&safe.join("dangling"))),
+        Some(path_string(&physical.with_file_name("missing")))
+    );
+    let through_file = safe.join("existing").join("..").join("entry");
+    assert_eq!(
+        std::fs::metadata(&through_file).unwrap_err().kind(),
+        std::io::ErrorKind::NotADirectory
+    );
+    assert_eq!(
+        resolve_through_existing_ancestor(&path_string(&through_file)),
+        None,
+        "parent traversal cannot pass through a file"
+    );
+}

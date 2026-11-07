@@ -11,6 +11,7 @@
 //! and prefix checks are the same case-sensitive `startsWith(root + sep)`
 //! that `isPathPrefix` performs.
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
 use super::super::fs::simplify_verbatim_path;
@@ -164,8 +165,10 @@ pub(crate) fn path_string(path: &Path) -> String {
 pub(crate) enum SegmentEntry {
     /// Nothing there (`ENOENT`).
     Missing,
-    /// A file or directory that is not a link.
+    /// A directory that is not a link.
     Plain,
+    /// An existing non-directory entry that is not a link.
+    NonDirectory,
     /// A symlink (or Windows junction), with its raw target text.
     Link(String),
 }
@@ -200,7 +203,11 @@ fn native_segment(candidate: &str) -> std::io::Result<SegmentEntry> {
         Err(error) => return Err(error),
     };
     if !metadata.is_symlink() {
-        return Ok(SegmentEntry::Plain);
+        return Ok(if metadata.is_dir() {
+            SegmentEntry::Plain
+        } else {
+            SegmentEntry::NonDirectory
+        });
     }
     let target = path_string(&std::fs::read_link(candidate)?);
     Ok(SegmentEntry::Link(
@@ -223,28 +230,67 @@ pub(crate) fn resolve_like_node(
     path: &str,
     probe: &dyn Fn(&str) -> std::io::Result<SegmentEntry>,
 ) -> Option<String> {
-    let (root, segments) = split_absolute(platform, &node_resolve(platform, path));
-    let mut resolved = root;
-    let mut pending: std::collections::VecDeque<String> = segments.into();
+    // Win32 ordinary paths remove dot segments before the filesystem sees
+    // them. POSIX follows each link before interpreting a later parent step.
+    let win32 = platform == "win32";
+    let (mut resolved, mut pending) = if win32 {
+        let (root, segments) = split_absolute(platform, &node_resolve(platform, path));
+        (root, VecDeque::from(segments))
+    } else {
+        let mut segments = VecDeque::new();
+        if !path.starts_with('/') {
+            let cwd = std::env::current_dir().ok()?;
+            segments.extend(posix_segments(&path_string(&cwd)));
+        }
+        segments.extend(posix_segments(path));
+        ("/".to_string(), segments)
+    };
     let mut hops = 0;
+    let mut missing_depth = 0_usize;
     while let Some(segment) = pending.pop_front() {
+        match segment.as_str() {
+            "." => continue,
+            ".." => {
+                resolved = node_dirname(platform, &resolved);
+                missing_depth = missing_depth.saturating_sub(1);
+                continue;
+            }
+            _ => {}
+        }
+
         let candidate = resolve_path(platform, &resolved, &segment);
+        if missing_depth > 0 {
+            missing_depth += 1;
+            resolved = candidate;
+            continue;
+        }
+
         match probe(&candidate).ok()? {
             SegmentEntry::Missing => {
-                let mut parts: Vec<&str> = vec![&resolved, &segment];
-                parts.extend(pending.iter().map(String::as_str));
-                return Some(node_resolve(platform, &node_join(platform, &parts)));
+                // Keep a virtual tail for creation, but probe again if parent
+                // steps return to the existing directory.
+                missing_depth = 1;
+                resolved = candidate;
             }
-            SegmentEntry::Plain => resolved = candidate,
+            SegmentEntry::NonDirectory if !win32 && !pending.is_empty() => return None,
+            SegmentEntry::Plain | SegmentEntry::NonDirectory => resolved = candidate,
             SegmentEntry::Link(target) => {
                 if hops >= MAX_SYMLINK_HOPS {
                     return None;
                 }
                 hops += 1;
-                let parent = node_dirname(platform, &candidate);
-                let (target_root, target_segments) =
-                    split_absolute(platform, &resolve_path(platform, &parent, &target));
-                resolved = target_root;
+                let target_segments = if win32 {
+                    let parent = node_dirname(platform, &candidate);
+                    let (target_root, segments) =
+                        split_absolute(platform, &resolve_path(platform, &parent, &target));
+                    resolved = target_root;
+                    segments
+                } else {
+                    if target.starts_with('/') {
+                        resolved = "/".to_string();
+                    }
+                    posix_segments(&target).collect()
+                };
                 for segment in target_segments.into_iter().rev() {
                     pending.push_front(segment);
                 }
@@ -252,6 +298,12 @@ pub(crate) fn resolve_like_node(
         }
     }
     Some(resolved)
+}
+
+fn posix_segments(path: &str) -> impl DoubleEndedIterator<Item = String> + '_ {
+    path.split('/')
+        .filter(|segment| !segment.is_empty())
+        .map(str::to_string)
 }
 
 /// `splitAbsolutePath`: an absolute, normalized path's root (`/`, `C:\`,
