@@ -70,8 +70,10 @@ export function useOnboardingProgress(): OnboardingProgress {
       // can fire twice take `isSaving` and disable while one is open.
       const snapshot = await appSettingsForWrite(queryClient);
       const current = onboardingFor(snapshot);
+      const next = updater(current);
+      if (next === current) return;
       markAppSettingsLocalWrite();
-      await mutateAsync({ next: updater(current), revision: appSettingsRevision(snapshot) });
+      await mutateAsync({ next, revision: appSettingsRevision(snapshot) });
     },
     [mutateAsync, queryClient]
   );

@@ -260,7 +260,6 @@ export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
             {step === 'service' ? <ServiceStep /> : null}
             {step === 'chat' ? (
               <FirstChatStep
-                environmentId={environmentId}
                 state={state}
                 onChange={progress.update}
                 answered={facts.chat === 'satisfied'}

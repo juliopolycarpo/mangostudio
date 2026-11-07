@@ -34,6 +34,40 @@ function stateOf(overrides: Partial<OnboardingState> = {}): OnboardingState {
 }
 
 describe('normalizeOnboardingState', () => {
+  it('preserves first-chat operation identity and exact input through persisted normalization', () => {
+    const state = stateOf({
+      chatId: 'first-chat',
+      createChatOperation: { operationId: 'create-once', title: ' Original title ' },
+      turnOperation: { operationId: 'turn-once', prompt: '  Original prompt\n' },
+    });
+    const saved = normalizeOnboardingState(JSON.parse(JSON.stringify(state)));
+    expect(saved.createChatOperation).toEqual(state.createChatOperation);
+    expect(saved.turnOperation).toEqual(state.turnOperation);
+    expect(normalizeOnboardingState(saved)).toEqual(saved);
+  });
+
+  it('retains the receipt requirement when preparing another request while preserving real legacy records', () => {
+    const modern = normalizeOnboardingState({
+      ...stateOf({ chatId: 'first-chat' }),
+      requiresTurnReceipt: true,
+    });
+    expect(modern).toMatchObject({ chatId: 'first-chat', requiresTurnReceipt: true });
+    expect(normalizeOnboardingState(JSON.parse(JSON.stringify(modern)))).toEqual(modern);
+    const legacy = stateOf({ chatId: 'legacy-chat' });
+    expect(normalizeOnboardingState(legacy)).toEqual(legacy);
+  });
+  it('salvages valid fields without turning malformed operation data into legacy completion', () => {
+    const malformed = normalizeOnboardingState({
+      ...stateOf({ chatId: 'first-chat' }),
+      createChatOperation: { operationId: 'invalid key', title: 'Keep the chat' },
+      turnOperation: { operationId: 'turn-once', prompt: 42 },
+    });
+    expect(malformed).toMatchObject({ chatId: 'first-chat', requiresTurnReceipt: true });
+    expect(malformed.createChatOperation).toBeUndefined();
+    expect(malformed.turnOperation).toBeUndefined();
+    expect(Value.Check(OnboardingStateSchema, malformed)).toBe(true);
+  });
+
   it('returns the untouched default for a missing record', () => {
     expect(normalizeOnboardingState(undefined)).toEqual(DEFAULT_ONBOARDING_STATE);
     expect(normalizeOnboardingState(null)).toEqual(DEFAULT_ONBOARDING_STATE);

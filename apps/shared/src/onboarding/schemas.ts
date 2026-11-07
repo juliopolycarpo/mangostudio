@@ -1,6 +1,8 @@
 import Type, { type Static } from 'typebox';
 
 import { ChatRunnerConfigurationSchema } from '../chat/schemas';
+import { GENERATION_PROMPT_MAX_LENGTH } from '../generation/limits';
+import { OperationIdSchema } from '../operations';
 
 /**
  * The first-run flow, in order. A step is a question the person answers once,
@@ -44,7 +46,20 @@ export const ID_MAX_LENGTH = 128;
  * `welcomeAcknowledged` is the exception that proves the rule — no machine fact
  * can say whether someone has read the welcome step, so it carries its own bit.
  */
+export const OnboardingCreateChatOperationSchema = Type.Object({
+  operationId: OperationIdSchema,
+  title: Type.String({ maxLength: 60 }),
+});
+export const OnboardingTurnOperationSchema = Type.Object({
+  operationId: OperationIdSchema,
+  prompt: Type.String({ maxLength: GENERATION_PROMPT_MAX_LENGTH }),
+});
+
 export const OnboardingStateSchema = Type.Object({
+  /** Sticky after opting in, including while a new request is still being edited. */
+  requiresTurnReceipt: Type.Optional(Type.Literal(true)),
+  createChatOperation: Type.Optional(OnboardingCreateChatOperationSchema),
+  turnOperation: Type.Optional(OnboardingTurnOperationSchema),
   /** Set once the flow is finished or fully skipped. Absent means "not done". */
   completedAt: Type.Optional(Type.Integer({ minimum: 0 })),
   welcomeAcknowledged: Type.Boolean(),

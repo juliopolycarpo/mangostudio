@@ -4,6 +4,7 @@ import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '../agentic-lim
 import { AgentIdSchema } from '../agents/schemas';
 import { ContextSettingsSchema } from '../chat/schemas';
 import { ExternalAgentTargetIdSchema, ExternalVendorIdSchema } from '../external-agents/choices';
+import { OperationIdSchema } from '../operations';
 import { PromptSettingsSchema } from '../prompt-rules/schemas';
 import { ProviderTypeSchema, ReasoningEffortSchema } from '../provider-settings/schemas';
 import { ResumeInterruptedTurnSchema } from '../turn-recovery/schemas';
@@ -61,6 +62,7 @@ export const GenerateImageBodySchema = Type.Object({
 export type GenerateImageBody = Static<typeof GenerateImageBodySchema>;
 
 export const GenerateTextBodySchema = Type.Object({
+  operationId: Type.Optional(OperationIdSchema),
   chatId: ChatIdSchema,
   prompt: PromptSchema,
   attachmentIds: Type.Optional(AttachmentIdsSchema),
@@ -90,6 +92,7 @@ export const ExternalTurnRequestSchema = Type.Object({
 export type ExternalTurnRequest = Static<typeof ExternalTurnRequestSchema>;
 
 export const RespondStreamBodySchema = Type.Object({
+  operationId: Type.Optional(OperationIdSchema),
   chatId: ChatIdSchema,
   externalTurn: Type.Optional(ExternalTurnRequestSchema),
   prompt: PromptSchema,

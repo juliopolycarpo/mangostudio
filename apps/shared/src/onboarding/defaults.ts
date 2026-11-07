@@ -4,8 +4,10 @@ import { type ChatRunnerConfiguration, ChatRunnerConfigurationSchema } from '../
 import {
   ID_MAX_LENGTH,
   ONBOARDING_STEP_IDS,
+  OnboardingCreateChatOperationSchema,
   type OnboardingState,
   type OnboardingStepId,
+  OnboardingTurnOperationSchema,
   WORKDIR_MAX_LENGTH,
 } from './schemas';
 
@@ -61,8 +63,26 @@ export function normalizeOnboardingState(value: unknown): OnboardingState {
   const workdir = boundedString(value.workdir, WORKDIR_MAX_LENGTH);
   const chatId = boundedString(value.chatId, ID_MAX_LENGTH);
   const runner = runnerOf(value.runner);
+  const createChatOperation = Value.Check(
+    OnboardingCreateChatOperationSchema,
+    value.createChatOperation
+  )
+    ? { operationId: value.createChatOperation.operationId, title: value.createChatOperation.title }
+    : undefined;
+  const turnOperation = Value.Check(OnboardingTurnOperationSchema, value.turnOperation)
+    ? { operationId: value.turnOperation.operationId, prompt: value.turnOperation.prompt }
+    : undefined;
+  // A modern record must never become legacy merely because an identity is
+  // cleared for a new request, or a malformed operation needs to be salvaged.
+  const requiresTurnReceipt =
+    value.requiresTurnReceipt === true ||
+    value.createChatOperation !== undefined ||
+    value.turnOperation !== undefined;
 
   return {
+    ...(requiresTurnReceipt ? { requiresTurnReceipt: true as const } : {}),
+    ...(createChatOperation ? { createChatOperation } : {}),
+    ...(turnOperation ? { turnOperation } : {}),
     ...(completedAt === undefined ? {} : { completedAt }),
     welcomeAcknowledged: value.welcomeAcknowledged === true,
     // Filtered through the canonical order rather than the client's, so the

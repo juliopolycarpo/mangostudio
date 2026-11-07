@@ -74,6 +74,7 @@ function sseEvent(data: object): Uint8Array {
 export interface StreamExternalTurnInput {
   readonly userId: string;
   readonly chat: OwnedChatRecord;
+  readonly keyed?: boolean;
   readonly chatId: string;
   readonly prompt: string;
   readonly attachmentIds: readonly string[];
@@ -531,6 +532,7 @@ function openStream(
           {
             userId: input.userId,
             chatId: input.chatId,
+            ...(input.keyed ? { admittedChat: input.chat } : {}),
             prompt: input.prompt,
             ...(input.attachmentIds.length > 0 ? { attachmentIds: [...input.attachmentIds] } : {}),
             ...(attachments.length > 0 ? { attachments } : {}),

@@ -137,7 +137,7 @@ interface SubmissionContext {
   readonly newId: () => string;
   readonly random: () => number;
   readonly sleep: CancellableSleep;
-  /** The accepted turn arrived after `signal` aborted; the vendor must be told to stop. */
+  /** An accepted turn can no longer be bound to this attempt; ask the vendor to stop it. */
   readonly onLateAcceptance: (handle: ExternalSessionHandle, nativeTurnId: string) => void;
   /**
    * Whether the latest attempt may have reached the runtime: true from the
@@ -311,6 +311,16 @@ async function runAttempt(
       { at: input.now(), ...(reason ? { terminalReason: reason } : {}) },
       input.db
     );
+  const persistUnresolved = (nativeTurnId?: string) =>
+    transitionAttempt(
+      attemptId,
+      ['acceptance-unknown'],
+      'unresolved',
+      { at: input.now(), nativeTurnId, terminalReason: 'acceptance-unknown' },
+      input.db
+    ).catch((error: unknown) => {
+      logger.warn('unresolved_write_failed', { attemptId, error: String(error) });
+    });
   const pending = (value: boolean): void => input.onDispatchPending?.(value);
 
   /** Whether any request of this attempt was handed to the transport. */
@@ -324,7 +334,7 @@ async function runAttempt(
       return { kind: 'done', outcome: { kind: 'stopped' } };
     }
     if (unanswered && !handle.isLive()) {
-      await settle('unresolved', 'acceptance-unknown');
+      await persistUnresolved();
       return { kind: 'done', outcome: { kind: 'unresolved', attemptId } };
     }
     let nativeTurnId: string;
@@ -368,7 +378,7 @@ async function runAttempt(
       unanswered = true;
       if (!reconcilable) {
         if (input.signal.aborted) continue;
-        await settle('unresolved', 'acceptance-unknown');
+        await persistUnresolved();
         return {
           kind: 'done',
           outcome: {
@@ -397,9 +407,12 @@ async function runAttempt(
         input.db
       );
     } catch (error) {
-      // The vendor is running a turn nothing here will ever observe.
+      // The runtime accepted the turn, but we cannot bind its events to a durable
+      // attempt. Request cancellation and keep the outcome uncertain.
       input.onLateAcceptance(handle, nativeTurnId);
-      throw error;
+      logger.warn('acceptance_write_failed', { attemptId, error: String(error) });
+      await persistUnresolved(nativeTurnId);
+      return { kind: 'done', outcome: { kind: 'unresolved', attemptId } };
     }
     if (!won) {
       // The turn already ended here; the vendor's copy of it must end too.

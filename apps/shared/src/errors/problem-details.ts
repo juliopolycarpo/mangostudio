@@ -63,6 +63,7 @@ const PROBLEM_TITLES: Record<ErrorCode, string> = {
   PERMISSION_DENIED: 'Permission denied',
   VALIDATION: 'Invalid request',
   CONFLICT: 'Conflict',
+  OPERATION_EXPIRED: 'Operation expired',
   PROVIDER_ERROR: 'Provider error',
   GENERATION_EMPTY: 'Empty generation',
   OWNERSHIP: 'Not the owner',

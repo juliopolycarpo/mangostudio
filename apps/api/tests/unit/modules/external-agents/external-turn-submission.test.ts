@@ -235,19 +235,49 @@ describe('submitExternalTurn', () => {
     expect(handle.submissions()).toBe(0);
   });
 
-  it('cancels the vendor turn when recording its acceptance fails, then fails loudly', async () => {
+  it('keeps a lost acknowledgement unresolved when updating the attempt also fails', async () => {
+    await sql`CREATE TRIGGER refuse_uncertain_attempt BEFORE UPDATE OF state ON external_turn_attempts WHEN NEW.state = 'unresolved' BEGIN SELECT RAISE(ABORT, 'unresolved write refused'); END`.execute(
+      getDb()
+    );
+    try {
+      const handle = createScriptedSessionHandle();
+      handle.failures.push(
+        () => new RuntimeRequestNoReplyError(new RemoteError('TIMEOUT', 'no reply'), 'deadline'),
+        () => new RuntimeRequestNotSentError('external-agent.turn', undefined)
+      );
+      const result = await submit(handle).outcome.catch((error: unknown) => ({
+        kind: 'rejected',
+        error,
+      }));
+      expect(result).toMatchObject({ kind: 'unresolved' });
+      expect(handle.submissions()).toBe(0);
+      expect(await listAttemptsForMessage(messageId, getDb())).toMatchObject([
+        { state: 'acceptance-unknown' },
+      ]);
+    } finally {
+      await sql`DROP TRIGGER refuse_uncertain_attempt`.execute(getDb());
+    }
+  });
+
+  it('requests cancellation and preserves uncertainty when recording native acceptance fails', async () => {
     await sql`CREATE TRIGGER refuse_acceptance BEFORE UPDATE OF state ON external_turn_attempts WHEN NEW.state = 'accepted' BEGIN SELECT RAISE(ABORT, 'acceptance write refused'); END`.execute(
       getDb()
     );
     try {
       const lateAcceptances: string[] = [];
-      const { outcome } = submit(undefined, undefined, lateAcceptances);
-      const error = await outcome.then(
-        () => undefined,
-        (e: unknown) => e
-      );
-      expect(String(error)).toContain('acceptance write refused');
+      const { handle, outcome } = submit(undefined, undefined, lateAcceptances);
+      const result = await outcome.catch((error: unknown) => ({ kind: 'rejected', error }));
       expect(lateAcceptances).toEqual(['native-turn-1']);
+      expect(handle.submissions()).toBe(1);
+      expect(result).toMatchObject({ kind: 'unresolved' });
+      const attempts = await listAttemptsForMessage(messageId, getDb());
+      expect(attempts).toMatchObject([
+        {
+          state: 'unresolved',
+          nativeTurnId: 'native-turn-1',
+          terminalReason: 'acceptance-unknown',
+        },
+      ]);
     } finally {
       await sql`DROP TRIGGER IF EXISTS refuse_acceptance`.execute(getDb());
     }

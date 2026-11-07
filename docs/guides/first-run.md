@@ -113,16 +113,22 @@ The last step creates one chat in the folder you chose, pointed at the runner
 you chose, and sends the message in the box. It is always an explicit click —
 nothing is sent by arriving at the step.
 
-Two things it deliberately will not do:
+Before either request, setup saves the operation ID and exact input in your
+profile. Reloading or losing an acknowledgement keeps that ID. The hub admits
+one request per ID; replaying it recovers its receipt instead of creating
+another chat or turn. A different ID can legitimately send the same text again.
 
-- **Create a second chat.** The chat reference is saved the moment creation
-  returns, before anything is sent. Reloading mid-flight reopens that chat.
-- **Send the same prompt twice.** Before sending, it re-reads the transcript; a
-  prompt that is already there means the send was accepted and only the answer
-  was lost, so it waits rather than asking again.
+The step shows accepted, running, completed, failed or uncertain status. A failed
+accepted turn offers **Start a new request**. For an uncertain outcome, check the
+chat first: external work may already have run. Starting a new request is an
+explicit action; setup never automatically replays uncertain work. Opening the
+chat or skipping the step remains available.
 
-A chat existing is not evidence that anything answered. The step is only done
-once the transcript actually carries a reply — or once you skip it.
+Setup considers the step answered only when the completed operation's message
+is present with a reply. Older setup records without operation IDs continue to
+use their transcript for the completion fact. Receipts can be recovered for
+seven days; expired IDs cannot be reused. See the [operation contract](../architecture/product-operations.md)
+for authorization, restart and retention details.
 
 If the runner is an agent CLI you have not used before, the third-party notice
 appears here, and the workspace-trust question appears the first time a vendor

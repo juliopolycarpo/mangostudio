@@ -136,6 +136,7 @@
   "/api/messages/": ["post"],
   "/api/messages/images": ["get"],
   "/api/messages/{id}": ["put"],
+  "/api/operations/{operationId}": ["get"],
   "/api/respond": ["post"],
   "/api/respond/stream": ["post"],
   "/api/runtime": [],

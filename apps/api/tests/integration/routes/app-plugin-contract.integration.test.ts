@@ -19,6 +19,7 @@ import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
 
 import { ERROR_CODES } from '@mangostudio/shared/errors';
+import { OperationReceiptSchema } from '@mangostudio/shared/operations';
 
 import { app } from '../../../src/app';
 import { getConfig, loadConfigForTest } from '../../../src/lib/config';
@@ -256,6 +257,41 @@ describe('OpenAPI document', () => {
     // publishing — which no other suite can see, because a suite only covers
     // the routes it already knows about.
     expect(routeInventory(document)).toEqual(expected);
+  });
+
+  it('publishes the authorized operation receipt lookup contract', async () => {
+    const document = await openApiDocument();
+    const operation = document.paths['/api/operations/{operationId}']?.get;
+    const unauthorized = await app.handle(
+      new Request('http://localhost/api/operations/unowned-operation')
+    );
+    expect(unauthorized.status).toBe(401);
+    expect(await unauthorized.json()).toMatchObject({ code: ERROR_CODES.UNAUTHORIZED });
+    expect(operation?.parameters).toContainEqual(
+      expect.objectContaining({
+        name: 'operationId',
+        in: 'path',
+        required: true,
+        schema: expect.objectContaining({
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+          pattern: '^[A-Za-z0-9_-]+$',
+        }),
+      })
+    );
+    const receipt = operation?.responses?.['200']?.content?.['application/json']?.schema as
+      { required?: string[]; properties?: Record<string, unknown> } | undefined;
+    expect(receipt?.required).toEqual(OperationReceiptSchema.required);
+    expect(Object.keys(receipt?.properties ?? {})).toEqual(
+      Object.keys(OperationReceiptSchema.properties)
+    );
+    for (const status of ['401', '404', '410']) {
+      const error = operation?.responses?.[status]?.content?.['application/json']?.schema as
+        { required?: string[]; properties?: Record<string, unknown> } | undefined;
+      expect(error?.required).toEqual(['error']);
+      expect(Object.keys(error?.properties ?? {})).toEqual(['error', 'code', 'details']);
+    }
   });
 
   it('describes a path parameter with its constraints', async () => {

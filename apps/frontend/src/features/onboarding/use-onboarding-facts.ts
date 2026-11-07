@@ -12,7 +12,6 @@
  *
  * // Usage: const facts = useOnboardingFacts(state);
  */
-
 import type { RuntimeStatus } from '@mangostudio/shared/environments';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import type {
@@ -32,6 +31,8 @@ import {
   externalAgentSelectable,
   useExternalAgents,
 } from '@/features/external-agents/useExternalAgents';
+
+import { useFirstChatOperation } from './use-first-chat-operation';
 
 /** Runtimes a coding agent needs to run anything in a project. Either one is enough. */
 export const PROJECT_RUNTIME_IDS = ['node', 'bun'] as const;
@@ -64,6 +65,7 @@ export function useOnboardingFacts(state: OnboardingState): OnboardingMachineFac
   const machine = useMachineStatus();
   const agents = useExternalAgents(environmentId);
   const messages = useMessagesQuery(state.chatId ?? null);
+  const operation = useFirstChatOperation(state.turnOperation?.operationId);
 
   const folder = factOf(
     environments.isPending,
@@ -93,14 +95,24 @@ export function useOnboardingFacts(state: OnboardingState): OnboardingMachineFac
 
   const service = serviceFact(machine);
 
+  const requiresTurnReceipt =
+    state.requiresTurnReceipt === true ||
+    state.turnOperation !== undefined ||
+    state.createChatOperation !== undefined;
   const chat = factOf(
-    state.chatId !== undefined && messages.isPending,
-    messages.isError,
+    state.chatId !== undefined &&
+      (messages.isPending || Boolean(state.turnOperation && operation.isPending)),
+    messages.isError || Boolean(state.turnOperation && operation.isError),
     () =>
       state.chatId !== undefined &&
+      (!requiresTurnReceipt || operation.data?.state === 'completed') &&
       (messages.data?.pages ?? []).some((page) =>
         page.messages.some(
-          (message) => message.role === 'ai' && !message.isGenerating && message.text.length > 0
+          (message) =>
+            message.role === 'ai' &&
+            !message.isGenerating &&
+            message.text.length > 0 &&
+            (!requiresTurnReceipt || message.id === operation.data?.messageId)
         )
       )
   );

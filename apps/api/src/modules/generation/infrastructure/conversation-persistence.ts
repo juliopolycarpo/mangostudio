@@ -1,8 +1,9 @@
-import type { ChatAttachment } from '@mangostudio/shared/chat';
+import type { ChatAttachment, ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { InteractionMode, MessagePart } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
 
 import type { Database } from '../../../db/types';
+import { createDiagnosticLogger } from '../../../lib/logger';
 import { linkAttachmentsToMessage } from '../../attachments/infrastructure/attachment-repository';
 import { insertGeneratedImageArtifact } from '../../generated-images/infrastructure/generated-image-repository';
 import {
@@ -10,9 +11,35 @@ import {
   insertMessage,
 } from '../../messages/infrastructure/message-repository';
 
+const logger = createDiagnosticLogger('conversation-persistence');
+
+type RunnerKind = ChatRunnerConfiguration['kind'];
+
+// Keep the kind check in the same SQLite transaction as the first message.
+// A concurrent kind change must either commit first or see the new transcript.
+async function assertCurrentRunnerKind(
+  chatId: string,
+  userId: string,
+  expected: RunnerKind,
+  db: Kysely<Database>
+): Promise<void> {
+  const chat = await db
+    .selectFrom('chats')
+    .select('runnerKind')
+    .where('id', '=', chatId)
+    .where('userId', '=', userId)
+    .executeTakeFirst();
+  if (chat?.runnerKind !== expected) {
+    throw new Error(
+      `Expected chat ${chatId} runner kind ${expected}, received ${chat?.runnerKind ?? 'missing chat'}.`
+    );
+  }
+}
+
 export interface PersistUserMessageInput {
   id: string;
   userId?: string;
+  admittedRunnerKind?: RunnerKind;
   chatId: string;
   text: string;
   attachmentIds?: string[];
@@ -35,22 +62,26 @@ export async function persistUserMessage(
   };
   const attachmentIds = input.attachmentIds ?? [];
 
-  if (attachmentIds.length === 0) {
+  if (attachmentIds.length === 0 && !input.admittedRunnerKind) {
     await insertMessage(message, db);
     return [];
   }
 
   if (!input.userId) {
-    throw new Error('userId is required to attach files to a user message.');
+    throw new Error('userId is required to bind a runner or attach files to a user message.');
   }
-  const attachmentUserId = input.userId;
+  const userId = input.userId;
 
   return db.transaction().execute(async (trx) => {
+    if (input.admittedRunnerKind) {
+      await assertCurrentRunnerKind(input.chatId, userId, input.admittedRunnerKind, trx);
+    }
     await insertMessage(message, trx);
+    if (attachmentIds.length === 0) return [];
     return linkAttachmentsToMessage(
       {
         attachmentIds,
-        userId: attachmentUserId,
+        userId,
         chatId: input.chatId,
         messageId: input.id,
         updatedAt: input.timestamp,
@@ -62,6 +93,7 @@ export async function persistUserMessage(
 
 export interface PersistTextTurnStartInput {
   userId: string;
+  admittedRunnerKind?: RunnerKind;
   userMessageId: string;
   assistantMessageId: string;
   chatId: string;
@@ -79,6 +111,9 @@ export function persistTextTurnStart(
   db: Kysely<Database>
 ): Promise<ChatAttachment[]> {
   return db.transaction().execute(async (trx) => {
+    if (input.admittedRunnerKind) {
+      await assertCurrentRunnerKind(input.chatId, input.userId, input.admittedRunnerKind, trx);
+    }
     await insertMessage(
       {
         id: input.userMessageId,
@@ -234,17 +269,29 @@ export function finalizeCheckpointedAiResponse(
   });
 }
 
+/**
+ * Move a chat up in recent activity. Use `{ bestEffort: true }` once a keyed turn's
+ * verdict is durable, so a recency write failure cannot replace that verdict.
+ *
+ * @example await updateChatAfterTurn(chatId, finishedAt, db, { bestEffort: true });
+ */
 export async function updateChatAfterTurn(
   chatId: string,
   aiTimestamp: number,
-  db: Kysely<Database>
+  db: Kysely<Database>,
+  { bestEffort = false } = {}
 ): Promise<void> {
-  await db
-    .updateTable('chats')
-    .set({ updatedAt: aiTimestamp })
-    .where('id', '=', chatId)
-    .where('updatedAt', '<=', aiTimestamp)
-    .execute();
+  try {
+    await db
+      .updateTable('chats')
+      .set({ updatedAt: aiTimestamp })
+      .where('id', '=', chatId)
+      .where('updatedAt', '<=', aiTimestamp)
+      .execute();
+  } catch (error) {
+    if (!bestEffort) throw error;
+    logger.warn('chat_recency_update_failed', { chatId, error: String(error) });
+  }
 }
 
 export interface PersistImageMessageInput {

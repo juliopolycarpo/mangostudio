@@ -214,6 +214,7 @@ export async function prepareStreamTextTurn(
     await persistTextTurnStart(
       {
         userId: input.userId,
+        admittedRunnerKind: input.admittedChat?.runner.kind,
         userMessageId: userMsgId,
         assistantMessageId: aiMsgId,
         chatId: input.chatId,
@@ -998,7 +999,9 @@ export async function* finalizeSuccessfulTurn(
   );
   if (!finalized) return;
 
-  await updateChatAfterTurn(chatId, aiTimestamp, db);
+  await updateChatAfterTurn(chatId, aiTimestamp, db, {
+    bestEffort: Boolean(session.input.admittedChat),
+  });
   void recordTurnCompletedActivity(userId, chatId, db);
 
   yield { type: 'done', messageId: aiMsgId, generationTime };
@@ -1188,7 +1191,10 @@ export async function finalizeInterruptedTurn(
     db
   );
   if (!finalized) return;
-  await updateChatAfterTurn(chatId, Date.now(), db);
+  if (reasonCode === 'user_cancelled') session.input.onUserCancelled?.();
+  await updateChatAfterTurn(chatId, Date.now(), db, {
+    bestEffort: Boolean(session.input.admittedChat),
+  });
   publishActivityInvalidation(userId);
 }
 
