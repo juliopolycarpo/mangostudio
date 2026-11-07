@@ -3,8 +3,9 @@
 //! `apps/shared/src/runtime-contract/` is the single source of truth: a
 //! TypeBox schema for every method, event, and document the hub and a
 //! runtime exchange. This crate does not restate any of it. It embeds the
-//! eight artifacts `bun run contracts:emit` writes under
+//! artifacts `bun run contracts:emit` writes under
 //! `apps/shared/src/runtime-contract/generated/` with [`include_str!`],
+//! deriving a whitespace-only compact catalog in Cargo's build output,
 //! parses `catalog.json` into [`mango_protocol::Catalog`], compiles a
 //! `jsonschema` validator for every shape it declares, and mirrors the
 //! contract's non-schema constants (error kinds, the manifest's feature
