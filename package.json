@@ -46,6 +46,7 @@
     "verify": "bun ./scripts/verify.ts",
     "clean": "bun ./scripts/clean.ts",
     "changelog": "bun ./scripts/changelog.ts",
+    "changelog:separators": "bun ./scripts/changelog-separators.ts",
     "release:prepare": "bun ./scripts/release/prepare-release.ts",
     "turbo": "turbo",
     "turbo:version": "turbo --version",

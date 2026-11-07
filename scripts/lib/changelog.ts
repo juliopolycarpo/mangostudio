@@ -181,3 +181,47 @@ export function parseChangelogArgs(
 
   return null;
 }
+
+/**
+ * Repair the historical generator's missing blank line between a final bullet
+ * and a dated release heading. Keep all existing bytes, including line endings,
+ * and skip fenced examples. This never renders history or selects release tags.
+ *
+ * @example
+ * normalizeChangelogSeparators('- Change\n## [1.0.0] - 2026-01-01\n');
+ */
+export function normalizeChangelogSeparators(source: string): string {
+  const bom = source.startsWith('\ufeff') ? '\ufeff' : '';
+  let result = bom;
+  let previous = '';
+  let inListItem = false;
+  let fence: { character: string; length: number } | undefined;
+
+  for (const line of source.slice(bom.length).split(/(?<=\n)/)) {
+    const content = line.replace(/\r?\n$/, '');
+    // Generated entries use a top-level dash list. A nonblank dedent ends
+    // its current item and any fence that opened inside that item.
+    if (inListItem && /[^ \t]/.test(content) && !/^(?: {2}| *\t)/.test(content)) {
+      inListItem = false;
+      fence = undefined;
+    }
+    const marker = /^ {0,3}(`{3,}|~{3,})([^\r\n]*)$/.exec(content);
+    if (fence) {
+      if (
+        marker?.[1][0] === fence.character &&
+        marker[1].length >= fence.length &&
+        !/[^ \t]/.test(marker[2])
+      ) {
+        fence = undefined;
+      }
+    } else if (marker && (marker[1][0] !== '`' || !marker[2].includes('`'))) {
+      fence = { character: marker[1][0], length: marker[1].length };
+    } else if (previous.startsWith('- ') && /^## \[[^\]]+\] - \d{4}-\d{2}-\d{2}$/.test(content)) {
+      result += previous.endsWith('\r\n') ? '\r\n' : '\n';
+    }
+    if (!fence && content.startsWith('- ')) inListItem = true;
+    result += line;
+    previous = line;
+  }
+  return result;
+}

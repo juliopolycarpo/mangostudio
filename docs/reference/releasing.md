@@ -514,6 +514,21 @@ gates on it being there; no job writes the changelog back after the fact.
 | `bun run changelog --preview [--base r] [--head r]` | Print this branch's entries (powers the PR preview bot)                 |
 | `bun run changelog --release <version>`             | Regenerate `CHANGELOG.md` including `<version>`                         |
 
+Historical separator repair uses a separate, bounded command:
+
+```sh
+bun run changelog:separators
+bun run changelog:separators --check
+```
+
+It inserts only a missing blank line between a final bullet and the next dated release
+heading in the root and protocol changelogs. It checks that both are regular UTF-8 files
+at their repository paths, then replaces each repaired file atomically. Historical entries,
+dates, versions, line endings and tag attribution are preserved.
+`--check` reports missing separators without writing. Running the repair again leaves both
+files identical. Use the normal release commands to generate new sections, including the
+protocol's prepend-only release sections.
+
 Every PR gets a changelog preview in a managed bot comment, published by
 `.github/workflows/pr-qa-report.yml` together with the commit summary; the QA
 metrics comparison is a second, separate comment. The commit list and the
