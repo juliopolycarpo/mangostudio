@@ -115,6 +115,24 @@ describe('SkillsSettingsPage', () => {
     expect(screen.getByText('SKILL.md not found in the skill directory.')).toBeInTheDocument();
   });
 
+  it('locks a skill with unverified precedence and explains the failed scan', async () => {
+    fetchScenario.respondWithJson('GET', '/api/skills', {
+      body: {
+        ...SKILLS_RESPONSE,
+        skills: [{ ...SKILLS_RESPONSE.skills[1], shadowed: false, precedenceUnverified: true }],
+      },
+    });
+
+    render(<SkillsSettingsPage />);
+
+    const toggle = await screen.findByRole('switch', { name: 'pdf-tools' });
+    expect(toggle).toBeDisabled();
+    expect(toggle).toHaveAccessibleDescription(
+      'This copy is unavailable until a higher-priority skill location can be scanned.'
+    );
+    expect(screen.queryByText('Shadowed')).not.toBeInTheDocument();
+  });
+
   it('shows the empty state when no skills are discovered', async () => {
     fetchScenario.respondWithJson('GET', '/api/skills', {
       body: { skills: [], sources: SKILLS_RESPONSE.sources },

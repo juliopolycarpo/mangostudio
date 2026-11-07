@@ -41,6 +41,7 @@ describe('buildSkillsPromptSection', () => {
     expect(buildSkillsPromptSection([makeSkill({ valid: false })])).toBeUndefined();
     expect(buildSkillsPromptSection([makeSkill({ enabled: false })])).toBeUndefined();
     expect(buildSkillsPromptSection([makeSkill({ shadowed: true })])).toBeUndefined();
+    expect(buildSkillsPromptSection([makeSkill({ precedenceUnverified: true })])).toBeUndefined();
   });
 
   it('lists usable skills alphabetically inside the delimiter block', () => {

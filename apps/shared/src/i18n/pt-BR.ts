@@ -129,6 +129,8 @@ export const messages = {
         'skill-invalid': 'skill inválida',
         'skill-disabled': 'desativada nas configurações de skills',
         'skill-shadowed': 'sombreada por uma fonte de maior precedência',
+        'skill-precedence-unverified':
+          'não foi possível verificar um local de skills de maior prioridade',
         'skill-tool-disabled': 'a ferramenta de skills não está ativa',
       },
       /** Substituted for the hub's own machine, whose API name is not copy. */
@@ -1352,6 +1354,8 @@ export const messages = {
         'Não foi possível atualizar a biblioteca. Os resultados existentes continuam visíveis.',
       invalidBadge: 'Inválida',
       shadowedBadge: 'Sombreada',
+      precedenceUnverifiedHint:
+        'Esta cópia fica indisponível até que um local de skills de maior prioridade possa ser verificado.',
       shadowedHint:
         'Uma fonte de maior prioridade fornece uma skill com o mesmo nome, então esta cópia está inativa.',
       shadowedNotice:

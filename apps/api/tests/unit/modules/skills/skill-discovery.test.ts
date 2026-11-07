@@ -13,6 +13,7 @@ import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { getDb } from '../../../../src/db/database';
 import { loadConfigForTest } from '../../../../src/lib/config';
 import { updateAppSettings } from '../../../../src/modules/app-settings/application/app-settings-service';
+import { loadSkillBody } from '../../../../src/modules/skills/application/skill-content';
 import {
   listSkills,
   listUsableSkills,
@@ -239,7 +240,7 @@ describe('skill discovery third-party sources', () => {
     ]);
   });
 
-  it('keeps a usable fallback when a higher-precedence directory cannot be scanned', async () => {
+  it('keeps a usable fallback when a higher-precedence path is a file', async () => {
     rmSync(agentsDir, { recursive: true });
     writeFileSync(agentsDir, 'not a directory');
     writeSkillIn(claudeDir, 'fallback', 'name: fallback\ndescription: Readable copy');
@@ -250,6 +251,36 @@ describe('skill discovery third-party sources', () => {
       'claude:fallback',
     ]);
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'withholds the fallback when a failed scan could hide a preferred copy',
+    async () => {
+      rmSync(agentsDir, { recursive: true });
+      symlinkSync(join(skillsDir, 'missing-directory'), agentsDir, 'dir');
+      writeSkillIn(claudeDir, 'fallback', 'name: fallback\ndescription: Readable copy');
+      writeSkill('preferred', 'name: preferred\ndescription: Higher-priority copy');
+      const userId = nextUserId();
+      await enableSources(userId, { agents: true, claude: true });
+
+      const fallback = (await listSkills(getDb(), userId)).find(
+        ({ key }) => key === 'claude:fallback'
+      );
+      expect(fallback).toMatchObject({ shadowed: false, precedenceUnverified: true });
+      expect((await listUsableSkills(getDb(), userId)).map(({ key }) => key)).toEqual([
+        'mango:preferred',
+      ]);
+      await expect(loadSkillBody(getDb(), userId, 'fallback')).rejects.toMatchObject({
+        status: 503,
+        code: 'SKILL_PRECEDENCE_UNVERIFIED',
+      });
+
+      await upsertSkillSettings(getDb(), userId, 'claude:fallback', false);
+      await expect(loadSkillBody(getDb(), userId, 'fallback')).rejects.toMatchObject({
+        status: 503,
+        code: 'SKILL_PRECEDENCE_UNVERIFIED',
+      });
+    }
+  );
 
   it('shadows lower-precedence copies of the same slug (mango > agents > claude)', async () => {
     writeSkill('dup', 'name: dup\ndescription: Mango copy');

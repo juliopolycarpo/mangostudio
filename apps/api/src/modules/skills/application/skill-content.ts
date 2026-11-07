@@ -10,18 +10,13 @@ import { join, relative, resolve, sep } from 'node:path';
 
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import { parseMarkdownFrontmatter } from '@mangostudio/shared/markdown';
-import type { SkillDescriptor } from '@mangostudio/shared/skills';
+import { isUsableSkill, type SkillDescriptor } from '@mangostudio/shared/skills';
 import type { Kysely } from 'kysely';
 
 import type { Database } from '../../../db/types';
 import { readRegularFileUtf8, RegularFileReadError } from '../../../lib/safe-file';
 import { SkillError } from '../domain/skill';
-import {
-  listSkills,
-  listUsableSkills,
-  MAX_SKILL_FILE_BYTES,
-  SKILL_FILE_NAME,
-} from './skill-discovery';
+import { listSkills, MAX_SKILL_FILE_BYTES, SKILL_FILE_NAME } from './skill-discovery';
 
 const MAX_LISTED_FILES = 100;
 const MAX_LISTING_DEPTH = 3;
@@ -114,38 +109,36 @@ async function findSkillByName(
   userId: string,
   name: string
 ): Promise<SkillDescriptor> {
-  const skills = await listUsableSkills(db, userId);
-  const skill = skills.find((candidate) => candidate.name === name);
+  const skills = await listSkills(db, userId);
+  const usable = skills.filter(isUsableSkill);
+  const skill = usable.find((candidate) => candidate.name === name);
   if (skill) return skill;
 
-  await assertSkillNotDisabled(db, userId, name);
+  const known = skills.filter(
+    (candidate) => candidate.name === name && candidate.valid && !candidate.shadowed
+  );
+  if (known.some((candidate) => candidate.precedenceUnverified)) {
+    throw new SkillError(
+      `Skill "${name}" is unavailable because a higher-priority location could not be scanned.`,
+      503,
+      'SKILL_PRECEDENCE_UNVERIFIED'
+    );
+  }
+  if (known.length > 0) {
+    throw new SkillError(`Skill "${name}" is disabled in settings.`, 403, 'SKILL_DISABLED');
+  }
 
-  const validNames = skills
+  const validNames = usable
     .slice(0, MAX_NAMES_IN_ERROR)
     .map((candidate) => candidate.name)
     .join(', ');
   throw new SkillError(
     validNames
       ? `Unknown skill "${name}". Available skills: ${validNames}`
-      : `Unknown skill "${name}". No skills are installed.`,
+      : `Unknown skill "${name}". No skills are available.`,
     404,
     'NOT_FOUND'
   );
-}
-
-/** Turns a lookup of a known-but-disabled skill into an explicit error. */
-async function assertSkillNotDisabled(
-  db: Kysely<Database>,
-  userId: string,
-  name: string
-): Promise<void> {
-  const skills = await listSkills(db, userId);
-  const disabled = skills.find(
-    (candidate) => candidate.name === name && candidate.valid && !candidate.shadowed
-  );
-  if (disabled) {
-    throw new SkillError(`Skill "${name}" is disabled in settings.`, 403, 'SKILL_DISABLED');
-  }
 }
 
 /**

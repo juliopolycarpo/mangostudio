@@ -7,8 +7,8 @@
  * filesystem and the injected settings; never mutates and never connects.
  */
 
-import { type Dirent, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { type Dirent, lstatSync, readdirSync } from 'node:fs';
+import { join, parse, sep } from 'node:path';
 
 import type { SkillSource } from '@mangostudio/shared/skills';
 
@@ -31,7 +31,7 @@ export interface SkillSourceDiagnostic {
 }
 
 /** Per-skill classification, one of the mutually exclusive diagnosis states. */
-type SkillState = 'active' | 'disabled' | 'shadowed' | 'invalid';
+type SkillState = 'active' | 'disabled' | 'shadowed' | 'invalid' | 'precedence-unverified';
 
 export interface SkillDiagnostic {
   key: string;
@@ -79,9 +79,11 @@ export interface SkillDiagnosticsInput {
 export function collectSkillsDiagnostics(input: SkillDiagnosticsInput): SkillsDiagnostics {
   const sources: SkillSourceDiagnostic[] = [];
   const inPlay: ScannedSkill[] = [];
+  const withheldSources = new Set<SkillSource>();
+  let higherSourceUnverified = false;
 
   for (const source of input.sources) {
-    const { health, skills } = scanSource(source.source, source.dir);
+    const { health, skills, couldHideCopy } = scanSource(source.source, source.dir);
     sources.push({
       source: source.source,
       dir: source.dir,
@@ -89,12 +91,26 @@ export function collectSkillsDiagnostics(input: SkillDiagnosticsInput): SkillsDi
       health,
       skillCount: skills.length,
     });
-    if (source.enabled) inPlay.push(...skills);
+    if (source.enabled) {
+      if (higherSourceUnverified) withheldSources.add(source.source);
+      higherSourceUnverified ||= couldHideCopy;
+      inPlay.push(...skills);
+    }
   }
 
   const winners = resolveWinnersBySlug(inPlay);
+  const sourceByKey = new Map(inPlay.map((skill) => [skill.key, skill.source]));
   const skills = inPlay
-    .map((skill) => classifySkill(skill, winners, input.disabledKeys, inPlay))
+    .map((skill) => {
+      const winningKey = winners.get(skill.slug) ?? skill.key;
+      const winningSource = sourceByKey.get(winningKey) ?? skill.source;
+      return classifySkill(
+        skill,
+        winningSource,
+        input.disabledKeys,
+        withheldSources.has(winningSource)
+      );
+    })
     .sort((left, right) => left.key.localeCompare(right.key));
 
   return { config: input.config, sources, skills };
@@ -103,35 +119,51 @@ export function collectSkillsDiagnostics(input: SkillDiagnosticsInput): SkillsDi
 function scanSource(
   source: SkillSource,
   dir: string
-): { health: SkillSourceHealth; skills: ScannedSkill[] } {
+): { health: SkillSourceHealth; skills: ScannedSkill[]; couldHideCopy: boolean } {
   let entries: Dirent[];
   try {
     entries = readdirSync(dir, { withFileTypes: true });
   } catch (error) {
-    // A missing dir just means the source is empty; anything else (EACCES,
-    // ENOTDIR) is a real read failure the operator should see.
-    const health = (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 'unreadable';
-    return { health, skills: [] };
+    return { ...sourceReadFailure(dir, error), skills: [] };
   }
 
   const skills = entries
     .filter((entry) => entry.isDirectory())
     .map((entry) => describeSkill(source, entry.name, join(dir, entry.name)));
-  return { health: 'ok', skills };
+  return { health: 'ok', skills, couldHideCopy: false };
+}
+
+function sourceReadFailure(
+  dir: string,
+  error: unknown
+): { health: SkillSourceHealth; couldHideCopy: boolean } {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  if (code === 'ENOTDIR') return { health: 'unreadable', couldHideCopy: false };
+  if (code === 'ENOENT') {
+    try {
+      // Keep the final symlink visible to lstat even when the path ends in a separator.
+      const trimmed = dir.replace(sep === '/' ? /\/+$/u : /[\\/]+$/u, '');
+      lstatSync(trimmed.length >= parse(dir).root.length ? trimmed : dir);
+    } catch (probeError) {
+      if ((probeError as NodeJS.ErrnoException).code === 'ENOENT') {
+        return { health: 'missing', couldHideCopy: false };
+      }
+    }
+  }
+  return { health: 'unreadable', couldHideCopy: true };
 }
 
 function classifySkill(
   skill: ScannedSkill,
-  winners: Map<string, string>,
+  winningSource: SkillSource,
   disabledKeys: ReadonlySet<string>,
-  inPlay: readonly ScannedSkill[]
+  precedenceUnverified: boolean
 ): SkillDiagnostic {
   const base = { key: skill.key, source: skill.source };
 
-  const winnerKey = winners.get(skill.slug);
-  if (winnerKey && winnerKey !== skill.key) {
-    const winner = inPlay.find((candidate) => candidate.key === winnerKey);
-    return { ...base, state: 'shadowed', shadowedBy: winner?.source ?? skill.source };
+  if (skill.valid && precedenceUnverified) return { ...base, state: 'precedence-unverified' };
+  if (winningSource !== skill.source) {
+    return { ...base, state: 'shadowed', shadowedBy: winningSource };
   }
 
   if (!skill.valid) {
