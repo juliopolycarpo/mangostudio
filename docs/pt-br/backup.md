@@ -17,8 +17,10 @@ ou colisões de nomes interrompem a captura inteira, assim como arquivos com mai
 hard link. Links simbólicos na própria raiz configurada são recusados mesmo quando o
 destino não existe. As raízes configuradas não podem se sobrepor, mesmo quando os
 checkpoints são omitidos. O destino deve ficar fora dessas raízes e em um sistema de
-arquivos que aceite hard links. A captura recusa destinos existentes antes de preparar
-os arquivos. Configure caminhos explícitos sem componentes `..`. Remover `..` após
+arquivos que aceite hard links. Antes de preparar os arquivos, a captura recusa destinos
+existentes e caminhos reservados para configuração ou segredos, mesmo quando esses
+arquivos estão ausentes. Corrija links simbólicos sem destino nos caminhos configurados
+antes da captura. Configure caminhos explícitos sem componentes `..`. Remover `..` após
 um link intermediário pode selecionar um diretório diferente do que a aplicação lê.
 
 ## Consistência e privacidade

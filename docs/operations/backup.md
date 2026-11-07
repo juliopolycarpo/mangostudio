@@ -18,8 +18,10 @@ are recorded in the manifest. A present unreadable root, unsupported filename, c
 symlink (including a configured root itself, even if dangling), multiply linked file or
 special file fails the entire capture. All configured roots must be disjoint, including
 checkpoints when omitted. The output must be outside those roots and on a filesystem
-that supports hard links. Capture refuses existing destinations before staging.
-Use explicit directory paths without `..` components. Collapsing `..` after an
+that supports hard links. Capture refuses existing destinations and paths reserved for
+configuration or secrets before staging, even when those managed files are absent.
+Fix dangling symlinks along configured paths before capturing. Use explicit directory
+paths without `..` components. Collapsing `..` after an
 intermediate symlink can select a different directory from the one the application reads.
 
 ## Consistency boundary

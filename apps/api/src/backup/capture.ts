@@ -23,7 +23,6 @@ import {
 import Value from 'typebox/value';
 
 import { getConfigEnvFilePath, type MangoConfig } from '../lib/config';
-import { resolvePathThroughExistingAncestor } from '../lib/path-containment';
 import { acquireCaptureLock } from './capture-lock';
 import { BACKUP_EXCLUSIONS, redactBackupDatabase } from './privacy';
 import { protectStaging } from './private-staging';
@@ -60,6 +59,36 @@ function check(signal?: AbortSignal): void {
 function inside(parent: string, child: string): boolean {
   const path = relative(parent, child);
   return path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path);
+}
+
+async function realpathIfPresent(path: string): Promise<string | undefined> {
+  try {
+    return await realpath(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+}
+
+/** Resolve a present path or walk up to its first physically present ancestor. */
+async function physicalBackupLocation(source: string): Promise<string> {
+  const missing: string[] = [];
+  let ancestor = source;
+  for (;;) {
+    const physical = await realpathIfPresent(ancestor);
+    if (physical) return join(physical, ...missing.reverse());
+
+    const entry = await lstat(ancestor).catch((error: unknown) => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      throw error;
+    });
+    const parent = dirname(ancestor);
+    if (entry || parent === ancestor) {
+      throw new Error('Backup cannot resolve a configured path through its ancestor.');
+    }
+    missing.push(basename(ancestor));
+    ancestor = parent;
+  }
 }
 
 /** Refuse names that cannot round-trip safely on every supported platform. */
@@ -154,20 +183,16 @@ export async function captureBackup(
   if (occupied) {
     throw Object.assign(new Error('Backup destination already exists.'), { code: 'EEXIST' });
   }
-  let configurationPath = config.configFilePath;
-  try {
-    configurationPath = await realpath(configurationPath);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    configurationPath = resolve(configurationPath);
-  }
   const fallbackDir = config.secretStore.unsafeFileFallbackDir.trim();
-  const managedSecretPaths = new Set(
-    [
-      getConfigEnvFilePath(config.configFilePath),
-      ...(fallbackDir ? [join(fallbackDir, 'secrets.json')] : []),
-    ].map(resolvePathThroughExistingAncestor)
-  );
+  const [configurationPath, ...secretPaths] = await Promise.all([
+    physicalBackupLocation(config.configFilePath),
+    physicalBackupLocation(getConfigEnvFilePath(config.configFilePath)),
+    ...(fallbackDir ? [physicalBackupLocation(join(fallbackDir, 'secrets.json'))] : []),
+  ]);
+  if ([configurationPath, ...secretPaths].some((path) => inside(output, path))) {
+    throw new Error('Backup destination overlaps a managed configuration or secret path.');
+  }
+  const managedSecretPaths = new Set(secretPaths);
   const databasePath = await realpath(config.database.path);
   const configuredRoots = await Promise.all(
     backupRoots(config, true).map(async (root) => {
@@ -197,10 +222,12 @@ export async function captureBackup(
       }
     })
   );
-  const locations = configuredRoots.map((root) => ({
-    id: root.id,
-    path: root.present ? root.source : resolvePathThroughExistingAncestor(root.source),
-  }));
+  const locations = await Promise.all(
+    configuredRoots.map(async (root) => ({
+      id: root.id,
+      path: root.present ? root.source : await physicalBackupLocation(root.source),
+    }))
+  );
   for (const [index, root] of locations.entries()) {
     const overlap = locations
       .slice(0, index)
@@ -210,6 +237,7 @@ export async function captureBackup(
     }
     if (
       inside(root.path, output) ||
+      inside(output, root.path) ||
       inside(root.path, databasePath) ||
       inside(root.path, configurationPath)
     ) {

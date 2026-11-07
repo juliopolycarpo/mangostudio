@@ -225,10 +225,15 @@ it.each(['database', 'config'])('refuses a hard-linked raw %s under uploads', as
 it.skipIf(process.platform === 'win32')(
   'excludes the actual file read through the paired environment symlink',
   async () => {
-    const { config, output } = await fixture();
+    const { root, config, output } = await fixture();
     const target = join(config.uploads.dir, 'user-notes.txt');
     await writeFile(target, 'GEMINI_API_KEY=paired-env-sensitive-fixture');
-    await symlink(target, getConfigEnvFilePath(config.configFilePath));
+    const nested = join(config.uploads.dir, 'nested');
+    await mkdir(nested);
+    await symlink(nested, join(root, 'redirect'), 'dir');
+    const envPath = getConfigEnvFilePath(config.configFilePath);
+    await symlink('redirect/../user-notes.txt', envPath);
+    expect(await readFile(envPath, 'utf8')).toBe('GEMINI_API_KEY=paired-env-sensitive-fixture');
 
     const manifest = await captureBackup(
       config,
@@ -409,20 +414,60 @@ it('refuses equal configured roots before writing an archive', async () => {
   expect(await Bun.file(output).exists()).toBe(false);
 });
 
-it.skipIf(process.platform === 'win32')(
-  'refuses to publish over an absent root reached through a directory symlink',
-  async () => {
+it.skipIf(process.platform === 'win32').each(['root', 'ancestor'])(
+  'refuses to publish over the absent %s reached through a directory symlink',
+  async (destination) => {
     const { root, config } = await fixture();
-    const physicalParent = join(root, 'physical');
+    const physical = join(root, 'physical');
+    const nested = join(physical, 'nested');
+    const physicalParent = join(physical, 'container');
     const alias = join(root, 'alias');
+    await mkdir(nested, { recursive: true });
     await mkdir(physicalParent);
-    await symlink(physicalParent, alias, 'dir');
-    config.uploads.dir = join(alias, 'missing-uploads');
-    const output = join(physicalParent, 'missing-uploads');
+    await symlink(nested, join(root, 'redirect'), 'dir');
+    await symlink('redirect/../container', alias, 'dir');
+    const rootTail = destination === 'root' ? ['missing'] : ['missing', 'uploads'];
+    config.uploads.dir = join(alias, ...rootTail);
+    const output = join(physicalParent, 'missing');
 
     await expect(
       captureBackup(config, { output, checkpoints: true, includeSecrets: false }, 'test')
     ).rejects.toThrow('A data root overlaps the archive');
+    expect(await Bun.file(output).exists()).toBe(false);
+  }
+);
+
+it.skipIf(process.platform === 'win32')(
+  'refuses an absent root under a dangling directory symlink',
+  async () => {
+    const { root, config, output } = await fixture();
+    const alias = join(root, 'dangling');
+    await symlink('missing-parent', alias, 'dir');
+    config.uploads.dir = join(alias, 'uploads');
+
+    await expect(
+      captureBackup(config, { output, checkpoints: true, includeSecrets: false }, 'test')
+    ).rejects.toThrow('Backup cannot resolve a configured path through its ancestor');
+    expect(await Bun.file(output).exists()).toBe(false);
+  }
+);
+
+it.each(['config', 'env', 'secrets'] as const)(
+  'refuses publication at the missing managed %s path',
+  async (location) => {
+    const { root, config } = await fixture();
+    const secretDir = join(root, 'file-store');
+    await mkdir(secretDir);
+    config.secretStore = { unsafeFileFallbackDir: secretDir };
+    const outputs = {
+      config: config.configFilePath,
+      env: getConfigEnvFilePath(config.configFilePath),
+      secrets: join(secretDir, 'secrets.json'),
+    };
+    const output = outputs[location];
+    await expect(
+      captureBackup(config, { output, checkpoints: true, includeSecrets: false }, 'test')
+    ).rejects.toThrow('Backup destination overlaps a managed configuration or secret path');
     expect(await Bun.file(output).exists()).toBe(false);
   }
 );
