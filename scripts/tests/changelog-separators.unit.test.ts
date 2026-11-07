@@ -221,3 +221,104 @@ test.skipIf(process.platform === 'win32')(
     });
   }
 );
+
+test.skipIf(process.platform === 'win32')(
+  'separator repair rejects a symlink substituted when a changelog is opened',
+  () => {
+    withChangelogFixture(({ root, script, protocol, application }) => {
+      const target = join(root, 'swap-target.md');
+      const seam = '- Entry\n## [1.0.0] - 2026-01-01\n';
+      writeFileSync(application, seam);
+      writeFileSync(protocol, seam);
+      writeFileSync(target, seam);
+
+      const probe = join(dirname(script), 'open-race.test.ts');
+      writeFileSync(
+        probe,
+        `
+import { mock, test } from 'bun:test';
+import * as fs from 'node:fs';
+import { join } from 'node:path';
+
+test('swap the protocol entry after its canonical path is checked', async () => {
+  const native = { ...fs };
+  const root = native.realpathSync(join(import.meta.dir, '..'));
+  const protocol = join(root, 'packages/protocol/CHANGELOG.md');
+  let swapped = false;
+  const resolveBeforeSwap = new Proxy(native.realpathSync, {
+    apply(resolve, receiver, args) {
+      const result = Reflect.apply(resolve, receiver, args);
+      if (!swapped && args[0] === protocol) {
+        swapped = true;
+        native.renameSync(protocol, protocol + '.original');
+        native.symlinkSync(join(root, 'swap-target.md'), protocol, 'file');
+      }
+      return result;
+    },
+  });
+  mock.module('node:fs', () => ({ ...native, realpathSync: resolveBeforeSwap }));
+  process.argv = [process.execPath, join(import.meta.dir, 'changelog-separators.ts')];
+  await import('./changelog-separators');
+});
+`
+      );
+
+      const result = Bun.spawnSync([process.execPath, 'test', probe], {
+        cwd: root,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stderr.toString()).toContain(`${PROTOCOL_CHANGELOG}: expected a regular file`);
+      expect(readFileSync(application, 'utf8')).toBe(seam);
+      expect(readFileSync(target, 'utf8')).toBe(seam);
+    });
+  }
+);
+
+test('separator repair preserves an edit made while the replacement is staged', () => {
+  withChangelogFixture(({ root, script, protocol, application }) => {
+    const concurrent = '# Changelog\n\nAn edit made during repair.\n';
+    writeFileSync(application, '# Changelog\n');
+    writeFileSync(protocol, '- Entry\n## [1.0.0] - 2026-01-01\n');
+
+    const probe = join(dirname(script), 'write-race.test.ts');
+    writeFileSync(
+      probe,
+      `
+import { mock, test } from 'bun:test';
+import * as fs from 'node:fs';
+import { join } from 'node:path';
+
+test('edit the protocol file after its temporary replacement is written', async () => {
+  const native = { ...fs };
+  const root = native.realpathSync(join(import.meta.dir, '..'));
+  const protocol = join(root, 'packages/protocol/CHANGELOG.md');
+  const writeThenEdit = new Proxy(native.writeFileSync, {
+    apply(write, receiver, args) {
+      const result = Reflect.apply(write, receiver, args);
+      if (typeof args[0] === 'string' && args[0].includes('.changelog-repair-')) {
+        native.writeFileSync(protocol, ${JSON.stringify(concurrent)});
+      }
+      return result;
+    },
+  });
+  mock.module('node:fs', () => ({ ...native, writeFileSync: writeThenEdit }));
+  process.argv = [process.execPath, join(import.meta.dir, 'changelog-separators.ts')];
+  await import('./changelog-separators');
+});
+`
+    );
+
+    const result = Bun.spawnSync([process.execPath, 'test', probe], {
+      cwd: root,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain(`${PROTOCOL_CHANGELOG}: changed during repair`);
+    expect(readFileSync(protocol, 'utf8')).toBe(concurrent);
+  });
+});
