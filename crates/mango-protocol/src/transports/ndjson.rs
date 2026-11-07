@@ -330,8 +330,10 @@ where
         tokio::select! {
             biased;
             () = deadline.expired() => {
-                // A partially written NDJSON frame cannot be followed by a farewell.
-                self.writer.shut_down().await;
+                if self.writer.elect_close(IpcClose::Local(FirstHelloDeadline::timeout_close())) {
+                    // A partially written NDJSON frame cannot be followed by a farewell.
+                    self.writer.clone().finish_close(None, self.max_frame_bytes).await;
+                }
                 SendOutcome::Closed
             }
             outcome = write => outcome,
@@ -464,10 +466,7 @@ where
             return;
         }
         self.pending.clear();
-        let close = Close {
-            code: crate::close::close_codes::PROTOCOL_ERROR,
-            reason: Some("local socket hello deadline exceeded".into()),
-        };
+        let close = FirstHelloDeadline::timeout_close();
         // Persist before yielding so cancellation cannot lose the closure notification.
         self.record_closure(PortClosure::Closed {
             code: Some(close.code),
@@ -555,6 +554,13 @@ struct FirstHelloDeadline {
 }
 
 impl FirstHelloDeadline {
+    fn timeout_close() -> Close {
+        Close {
+            code: crate::close::close_codes::PROTOCOL_ERROR,
+            reason: Some("local socket hello deadline exceeded".into()),
+        }
+    }
+
     async fn expired(&self) {
         let mut armed = self.armed.subscribe();
         let disarmed = async {
@@ -1446,6 +1452,42 @@ mod tests {
 
         tx.close(close_codes::PROTOCOL_ERROR, Some("sender close".into()))
             .await;
+        assert_eq!(
+            rx.recv().await,
+            Some(Inbound::Closed(PortClosure::Closed {
+                code: Some(close_codes::RELEASED),
+                reason: Some("listener close".into()),
+            }))
+        );
+        let mut farewell = String::new();
+        tokio::time::timeout(Duration::from_secs(5), peer.read_to_string(&mut farewell))
+            .await
+            .expect("the elected farewell must close the writer")
+            .unwrap();
+        assert_eq!(
+            farewell,
+            "{\"type\":\"close\",\"code\":4000,\"reason\":\"listener close\"}\n"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ipc_send_timeout_cannot_replace_an_elected_listener_farewell() {
+        let (mut peer, stream) = duplex(1024);
+        let (reader, writer) = tokio::io::split(stream);
+        let deadline = Duration::from_millis(10);
+        let port = NdjsonPort::new(reader, writer).with_first_hello_timeout(deadline);
+        let closer = port.closer();
+        let (mut tx, mut rx) = port.split();
+        tokio::time::advance(deadline).await;
+        tokio::select! {
+            biased;
+            () = closer.close(close_codes::RELEASED, Some("listener close")) => {
+                panic!("the spawned listener farewell must still need polling");
+            }
+            () = std::future::ready(()) => (),
+        }
+
+        assert_eq!(tx.send(Frame::Ping).await, SendOutcome::Closed);
         assert_eq!(
             rx.recv().await,
             Some(Inbound::Closed(PortClosure::Closed {
