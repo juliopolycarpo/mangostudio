@@ -1,3 +1,5 @@
+export { externalAgentLoginAction, externalAgentLoginCommand } from './login';
+
 export {
   type ExternalAccountLimitsFreshness,
   type ExternalAccountLimitsVerdict,

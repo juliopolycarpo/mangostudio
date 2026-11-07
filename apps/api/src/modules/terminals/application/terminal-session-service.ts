@@ -42,6 +42,7 @@ import {
 } from '../../environments/application/toolchain-service';
 import {
   TerminalDisabledError,
+  TerminalInvalidOpenError,
   TerminalLimitError,
   TerminalNotIsolatedError,
   TerminalSessionNotFoundError,
@@ -384,6 +385,9 @@ export function createTerminalSessionService(
     async open(userId, body, signal) {
       const config = d.getConfig();
       if (!config.enabled) throw new TerminalDisabledError();
+      if (body.loginTarget !== undefined && body.shell !== undefined) {
+        throw new TerminalInvalidOpenError();
+      }
       if (shuttingDown) {
         throw new TerminalUnavailableError('disconnected', 'Terminal service is shutting down.');
       }
@@ -444,6 +448,12 @@ export function createTerminalSessionService(
         reservation.client = client;
         ensureCloseHandler(client);
         requireTerminalCapable(client, body.environmentId);
+        if (body.loginTarget && client.manifest.terminalLoginArgv !== true) {
+          throw new TerminalUnavailableError(
+            'runtime-update-required',
+            'This runtime requires an update for login terminals; use the copy-command fallback.'
+          );
+        }
         requireIsolatedIfLocal(userId, body.environmentId);
 
         const sessionId = d.randomId();
@@ -514,9 +524,10 @@ export function createTerminalSessionService(
               cols,
               rows,
               scrollbackBytes: config.scrollbackKib * 1024,
+              ...(body.loginTarget ? { loginTarget: body.loginTarget } : {}),
               ...(body.shell ? { shell: body.shell } : {}),
               ...(cwd ? { cwd } : {}),
-              ...(chatId ? { env: { MANGOSTUDIO_CHAT_ID: chatId } } : {}),
+              ...(chatId && !body.loginTarget ? { env: { MANGOSTUDIO_CHAT_ID: chatId } } : {}),
               ...toolchain,
             },
             { timeoutMs: TERMINAL_OPEN_TIMEOUT_MS }

@@ -1288,3 +1288,29 @@ offer on some machines — has two more legs, and forgetting either ships green:
 Neither version moves for an additive method. `RUNTIME_CONTRACT_VERSION` is announced, not
 compared, and the wire version only changes when the frame format does; an older runtime
 answers `METHOD_UNSUPPORTED`, which is a normal decodeable outcome.
+
+### Vendor login PTYs
+
+A runtime advertises `terminalLoginArgv` when `terminal.open` accepts
+`loginTarget`. Each supported vendor's executable and arguments come from
+`apps/shared/src/external-agents/login.json`, which also supplies the copyable
+command. The runtime resolves the executable against its effective `PATH` before
+changing the working directory. Windows requires the vendor's `.exe`. Unknown
+targets and shell or environment overrides are refused.
+
+Environment and workspace ownership, isolation, and shell consent checks apply
+to login PTYs. The Hub sends `loginTarget` only to peers that advertise the
+capability. Other peers use the copyable command. If a request pairs
+`loginTarget` with `shell`, the Hub returns HTTP 400 with the `VALIDATION` code
+before reserving a terminal, looking up the chat, or contacting the runtime.
+Process exit reports the end of the PTY. Account verification is separate.
+
+The runtime holds up to 64 KiB of output in memory for the first viewer and
+discards that replay after one attach. Overflow closes the login. The first
+viewer has 30 seconds to attach, and the login can run for up to ten minutes.
+An expired login refuses attach and PTY input and discards pending output.
+The 100 ms watcher starts cleanup independently of consent polling. It retries
+transient close failures. The live viewer's pending queue also holds up to
+64 KiB, with the usual terminal credit flow. At most 16 terminal sessions and
+16 PTY children can be open in the runtime. MangoStudio keeps the login
+transcript out of persistent storage and the audit log.

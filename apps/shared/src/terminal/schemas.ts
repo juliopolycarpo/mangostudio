@@ -12,6 +12,7 @@
 import type { Static } from 'typebox';
 import Type from 'typebox';
 
+import { ExternalAgentTargetIdSchema } from '../external-agents/choices';
 import {
   HUB_WEBSOCKET_BACKPRESSURE_LIMIT_BYTES,
   HUB_WEBSOCKET_MAX_PAYLOAD_BYTES,
@@ -160,6 +161,8 @@ export type TerminalSession = Static<typeof TerminalSessionSchema>;
 export const TerminalOpenBodySchema = Type.Object(
   {
     environmentId: Type.String({ minLength: 1 }),
+    /** A vendor login uses descriptor argv and ephemeral output. Pairing with shell is a Hub 400 VALIDATION error. */
+    loginTarget: Type.Optional(ExternalAgentTargetIdSchema),
     chatId: Type.Optional(Type.Union([Type.String({ minLength: 1 }), Type.Null()])),
     /** Omitted: the runtime picks the login shell when it is one it offers. */
     shell: Type.Optional(RuntimeShellKindSchema),

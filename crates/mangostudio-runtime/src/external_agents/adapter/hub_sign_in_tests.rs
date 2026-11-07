@@ -1,15 +1,10 @@
-//! The hub presents a turn the agent refused for authentication as a sign-in prompt, keyed on the
-//! SDK's error code and offering the command the hub keeps per target. Both literals live in
-//! TypeScript, so these tests tie them to what the SDK sends.
+//! Compare product sign-in descriptors and refusal codes with the adopted SDK inside
+//! the private adapter. Terminal product code consumes only the shared descriptor.
 use mango_agent_acp::error::AUTH_REQUIRED_CODE;
 
 const HUB_REMEDIES: &str = concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../apps/shared/src/external-agents/remedies.ts"
-);
-const HUB_ADAPTER_DESCRIPTORS: &str = concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../apps/api/src/modules/external-agents/domain/adapter-descriptors.ts"
 );
 
 fn read(path: &str) -> String {
@@ -68,16 +63,28 @@ fn the_hubs_signed_out_code_is_the_one_the_sdk_ends_a_refused_prompt_with() {
 fn the_hubs_cursor_sign_in_command_is_the_one_the_sdk_profile_tells_a_person_to_run() {
     let profile =
         mango_agent_acp::builtin_profile("cursor").expect("the SDK ships the cursor profile");
-    let source = read(HUB_ADAPTER_DESCRIPTORS);
-    let cursor = source
-        .find("targetId: 'cursor',")
-        .map(|start| &source[start..])
-        .unwrap_or_else(|| panic!("expected a cursor entry in {HUB_ADAPTER_DESCRIPTORS}"));
-    let received = literal_after(cursor, "loginCommand: ")
-        .unwrap_or_else(|message| panic!("{message} | in {HUB_ADAPTER_DESCRIPTORS}"));
+    let received = crate::terminal::login::command("cursor");
     assert_eq!(
         received,
         profile.login_text(),
         "expected the hub's cursor loginCommand to equal the SDK profile's login text | received {received:?}"
+    );
+}
+
+#[test]
+fn descriptor_matches_the_adopted_vendor_login_metadata() {
+    assert_eq!(
+        crate::terminal::login::command("codex"),
+        mango_agent_codex::harness::CODEX_LOGIN_HINT
+    );
+    assert_eq!(
+        crate::terminal::login::command("claude"),
+        mango_agent_claude::pinned::LOGIN_COMMAND
+    );
+    assert_eq!(
+        crate::terminal::login::command("cursor"),
+        mango_agent_acp::builtin_profile("cursor")
+            .unwrap()
+            .login_text()
     );
 }

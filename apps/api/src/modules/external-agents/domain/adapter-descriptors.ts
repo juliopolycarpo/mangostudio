@@ -18,6 +18,7 @@
  * answers, and `external-agent-discovery.ts` renders that answer.
  */
 
+import { externalAgentLoginCommand } from '@mangostudio/shared/external-agents';
 import type {
   ExternalAgentTargetId,
   ExternalPermissionLevel,
@@ -60,19 +61,19 @@ const DESCRIPTORS: readonly ExternalAgentProductDescriptor[] = [
     targetId: 'codex',
     order: 0,
     displayNameKey: 'library.targets.codex',
-    loginCommand: 'codex login',
+    loginCommand: externalAgentLoginCommand('codex'),
   },
   {
     targetId: 'cursor',
     order: 1,
     displayNameKey: 'library.targets.cursor',
-    loginCommand: 'cursor-agent login',
+    loginCommand: externalAgentLoginCommand('cursor'),
   },
   {
     targetId: 'claude',
     order: 2,
     displayNameKey: 'library.targets.claude',
-    loginCommand: 'claude auth login',
+    loginCommand: externalAgentLoginCommand('claude'),
   },
 ];
 

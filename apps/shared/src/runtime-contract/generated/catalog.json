@@ -7429,6 +7429,22 @@
           "sessionId": {
             "type": "string"
           },
+          "loginTarget": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "codex"
+              },
+              {
+                "type": "string",
+                "const": "cursor"
+              },
+              {
+                "type": "string",
+                "const": "claude"
+              }
+            ]
+          },
           "shell": {
             "anyOf": [
               {
@@ -12098,6 +12114,9 @@
         "type": "boolean"
       },
       "terminalCloseAfterRevocation": {
+        "type": "boolean"
+      },
+      "terminalLoginArgv": {
         "type": "boolean"
       },
       "enforcesPathPolicy": {

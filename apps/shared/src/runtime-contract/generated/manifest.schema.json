@@ -217,6 +217,9 @@
     "terminalCloseAfterRevocation": {
       "type": "boolean"
     },
+    "terminalLoginArgv": {
+      "type": "boolean"
+    },
     "enforcesPathPolicy": {
       "type": "boolean"
     },

@@ -271,7 +271,7 @@ fn cursor_launches_cursor_agent_not_the_shared_agent_alias() {
     assert_eq!(version.first().map(String::as_str), Some("cursor-agent"));
     assert_eq!(
         harness.profile().login_hint.as_deref(),
-        Some(CURSOR_LOGIN_COMMAND),
+        Some(login_command(TargetId::Cursor)),
         "expected the product's login constant to be the profile's own hint"
     );
 }

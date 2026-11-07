@@ -108,6 +108,8 @@ export const RuntimeCapabilityManifestSchema = Type.Object({
    * cleanup call after revocation and can leave a shell running indefinitely.
    */
   terminalCloseAfterRevocation: Type.Optional(Type.Boolean()),
+  /** Literal descriptor login argv, bounded ephemeral replay, and login deadlines. Absence means unsupported. */
+  terminalLoginArgv: Type.Optional(Type.Boolean()),
   /**
    * Whether this runtime re-checks the paths the hub names against the
    * {@link RuntimePathFilterSchema} the call carried.

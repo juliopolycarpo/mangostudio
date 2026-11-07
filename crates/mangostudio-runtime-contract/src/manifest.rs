@@ -423,6 +423,9 @@ pub struct RuntimeCapabilityManifest {
     /// current shell consent and shell discovery, so a later regrant needs no reconnect.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub terminal_close_after_revocation: Option<bool>,
+    /// Literal login argv and bounded ephemeral first-viewer output.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub terminal_login_argv: Option<bool>,
     /// Whether this runtime re-checks the paths a hub names against the
     /// path filter a call carried. Absent means `false`.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -537,6 +540,7 @@ impl RuntimeCapabilityManifest {
             identity_isolation: None,
             terminal: None,
             terminal_close_after_revocation: None,
+            terminal_login_argv: None,
             enforces_path_policy: None,
             publishes_windows_slot: None,
             directory_hash_domain: None,
