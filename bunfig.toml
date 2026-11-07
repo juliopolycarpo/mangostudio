@@ -15,6 +15,10 @@
 # `--minimum-release-age=0` for that one command.
 minimumReleaseAge = 259200
 
+[test]
+# Keep the compiled fake CLI launcher available across test files in one worker.
+preload = ["./scripts/tests/support/fake-cli-preload.ts"]
+
 [lint]
 ignorePatterns = [
   "apps/frontend/src/routeTree.gen.ts",
