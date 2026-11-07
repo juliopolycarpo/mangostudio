@@ -26,7 +26,6 @@ import {
   STATE_REQUIRES_TARGET_MESSAGE,
 } from '../../../src/modules/library/http/library-routes';
 import { LibraryCache } from '../../../src/modules/library/infrastructure/library-cache';
-import { createLibraryPathEnv } from '../../../src/modules/library/infrastructure/location-probe';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
 const TEST_USER = {
@@ -551,7 +550,7 @@ describe('library routes over real command locations', () => {
   }
 
   function realCommandRouteService(): LibraryRouteService {
-    const pathEnv = createLibraryPathEnv({ homeDir: home, env: {} });
+    const pathEnv = { platform: process.platform, homeDir: home, env: {} };
     const settings = withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
       home: { 'claude-commands': true, 'codex-prompts': true },
       workspace: {},
