@@ -6,10 +6,10 @@
  */
 
 import type { Stats } from 'node:fs';
-import { chmod, link, lstat, mkdtemp, rmdir, stat } from 'node:fs/promises';
+import { chmod, link, lstat, mkdtemp, realpath, rmdir, stat } from 'node:fs/promises';
 import { connect as connectSocket, createServer, type Server, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 
 import { CLOSE_CODES } from '../close';
 import type { Port } from '../port';
@@ -18,9 +18,6 @@ import { asError, createStreamPort } from './node-stream';
 
 /** Owner-only, the permission local-socket.md requires of a POSIX socket file. */
 const SOCKET_MODE = 0o600;
-
-/** The umask that makes `bind` create the socket owner-only in the first place. */
-const SOCKET_UMASK = 0o077;
 
 const MAX_IPC_CONNECTIONS = 64;
 const FIRST_HELLO_TIMEOUT_MS = 15_000;
@@ -152,18 +149,26 @@ export async function listenIpc(
     // credentials and answer `close` 4401 before `hello` (local-socket.md).
     await listening(server, path);
   } else {
-    await clearStaleSocket(path);
-    // Node/libuv removes its *bound* pathname on close. Bind privately and publish
-    // with no-replace hard-link semantics so closing cannot unlink a successor.
-    stagingDirectory = await createStagingDirectory(path);
+    const cwd = isAbsolute(path) ? undefined : process.cwd();
+    // Concatenate without collapsing '..', which the filesystem resolves after symlinks.
+    const publicPath = cwd === undefined ? path : `${cwd}/${path}`;
+    await refuseOccupiedSocket(path, publicPath, cwd);
+    // libuv removes its bound name on close. An absolute private name stays
+    // in the original directory even if the process changes working directory.
+    stagingDirectory = await createStagingDirectory(publicPath);
     const staged = join(stagingDirectory, 's');
     try {
       await chmod(stagingDirectory, 0o700);
-      await bindOwnerOnly(server, staged);
-      await link(staged, path);
+      await listening(server, staged);
+      // The private directory protects the socket until its final mode is set.
+      await chmod(staged, SOCKET_MODE);
+      await link(staged, publicPath);
     } catch (cause) {
       if (server.listening) await stopListening(server, sockets);
       await rmdir(stagingDirectory).catch(() => undefined);
+      if ((cause as NodeJS.ErrnoException).code === 'EEXIST') {
+        throw occupiedPathError(path, 'address became occupied before publication');
+      }
       throw asError(cause);
     }
   }
@@ -187,7 +192,7 @@ export async function listenIpc(
 
 /** Finds a short private staging path on the destination filesystem. */
 async function createStagingDirectory(path: string): Promise<string> {
-  const parent = dirname(path);
+  const parent = await realpath(dirname(path));
   const device = (await stat(parent)).dev;
   // Linux sun_path is 108 bytes including NUL; Darwin/BSD use 104.
   const maximum = UNIX_SOCKET_PATH_MAX_BYTES;
@@ -354,51 +359,38 @@ function assertIpcName(name: string): void {
   );
 }
 
-/**
- * Binds so that the socket is owner-only from the instant it exists. `bind`
- * takes its mode from the umask, so a listener under the usual `022` would
- * publish a world-connectable address for as long as the `chmod` takes; the
- * umask is process-wide, which is the price of closing that window.
- */
-async function bindOwnerOnly(server: Server, path: string): Promise<void> {
-  const previous = process.umask(SOCKET_UMASK);
-  let bound: Promise<void>;
-  try {
-    // `listen` binds inside this call on both runtimes, so the umask is back
-    // before the first yield and no unrelated file is created under it.
-    bound = listening(server, path);
-  } finally {
-    process.umask(previous);
-  }
-  await bound;
-  try {
-    // Belt and braces: a platform that ignored the umask still ends up at 0600.
-    await chmod(path, SOCKET_MODE);
-  } catch (cause) {
-    // An address only its owner can reach is the whole authentication story
-    // here, so a listener that cannot promise that must not stay open.
-    server.close();
-    throw asError(cause);
-  }
+function occupiedPathError(path: string, reason: string): NodeJS.ErrnoException {
+  return Object.assign(new Error(`${path}: ${reason}; path preserved; expected a free address`), {
+    code: 'EADDRINUSE',
+    path,
+    syscall: 'listen',
+  });
 }
 
 /** Refuses occupied paths. A refused dial cannot authorize a later pathname unlink. */
-async function clearStaleSocket(path: string): Promise<void> {
+async function refuseOccupiedSocket(path: string, publicPath: string, cwd?: string): Promise<void> {
   let stats: Stats;
   try {
-    stats = await lstat(path);
+    stats = await lstat(publicPath);
   } catch (cause) {
     if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return;
     throw cause;
   }
-  if (!stats.isSocket()) return;
-  const verdict = await probe(path);
-  throw Object.assign(
-    new Error(
-      `${path}: probe ${verdict.outcome} (${verdict.reason}); path preserved because atomic cleanup ownership is unproven; expected a free address or externally coordinated cleanup`
-    ),
-    { code: 'EADDRINUSE', path, probeOutcome: verdict.outcome, probeReason: verdict.reason }
-  );
+  if (!stats.isSocket()) throw occupiedPathError(path, 'address is occupied by a non-socket');
+
+  let verdict: ProbeVerdict;
+  if (Buffer.byteLength(publicPath) <= UNIX_SOCKET_PATH_MAX_BYTES) {
+    verdict = await probe(publicPath);
+  } else if (cwd === process.cwd()) {
+    // The relative pathname may fit even though its absolute form does not.
+    verdict = await probe(path);
+  } else {
+    verdict = { outcome: 'inconclusive', reason: 'working directory changed before probe' };
+  }
+  throw Object.assign(occupiedPathError(path, `probe ${verdict.outcome} (${verdict.reason})`), {
+    probeOutcome: verdict.outcome,
+    probeReason: verdict.reason,
+  });
 }
 
 /** Observation only: no outcome is cleanup authority. Internal export for controlled fixtures. */

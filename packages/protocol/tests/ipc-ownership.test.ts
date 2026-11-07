@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rename, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { connect, createServer, Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -27,6 +27,48 @@ test.skipIf(process.platform === 'win32')(
     } finally {
       await original.close();
       await new Promise<void>((resolve) => successor.close(() => resolve()));
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+);
+
+test.skipIf(process.platform === 'win32')(
+  'refuses an occupied non-socket before staging',
+  async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ipc-occupied-'));
+    try {
+      const path = join(dir, 's');
+      await writeFile(path, 'keep');
+      await expect(listenIpc(path, () => undefined)).rejects.toMatchObject({
+        code: 'EADDRINUSE',
+        path,
+      });
+      expect(await readFile(path, 'utf8')).toBe('keep');
+      expect(await readdir(dir)).toEqual(['s']);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+);
+
+test.skipIf(process.platform === 'win32')(
+  'competing publishers preserve the winning socket',
+  async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ipc-compete-'));
+    const path = join(dir, 's');
+    const results = await Promise.allSettled([
+      listenIpc(path, () => undefined),
+      listenIpc(path, () => undefined),
+    ]);
+    try {
+      expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+      const loser = results.find((result) => result.status === 'rejected');
+      expect(loser?.reason).toMatchObject({ code: 'EADDRINUSE', path });
+      expect((await stat(path)).isSocket()).toBe(true);
+    } finally {
+      await Promise.all(
+        results.map((result) => result.status === 'fulfilled' && result.value.close())
+      );
       await rm(dir, { recursive: true, force: true });
     }
   }
