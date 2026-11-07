@@ -7,8 +7,8 @@
  * filesystem and the injected settings; never mutates and never connects.
  */
 
-import { type Dirent, lstatSync, readdirSync } from 'node:fs';
-import { join, parse, sep } from 'node:path';
+import { type Dirent, lstatSync, readdirSync, statSync } from 'node:fs';
+import { dirname, join, parse, sep } from 'node:path';
 
 import type { SkillSource } from '@mangostudio/shared/skills';
 
@@ -137,20 +137,45 @@ function sourceReadFailure(
   dir: string,
   error: unknown
 ): { health: SkillSourceHealth; couldHideCopy: boolean } {
-  const code = (error as NodeJS.ErrnoException | undefined)?.code;
-  if (code === 'ENOTDIR') return { health: 'unreadable', couldHideCopy: false };
+  let code = (error as NodeJS.ErrnoException | undefined)?.code;
   if (code === 'ENOENT') {
     try {
-      // Keep the final symlink visible to lstat even when the path ends in a separator.
-      const trimmed = dir.replace(sep === '/' ? /\/+$/u : /[\\/]+$/u, '');
-      lstatSync(trimmed.length >= parse(dir).root.length ? trimmed : dir);
+      return probeMissingSource(dir);
     } catch (probeError) {
-      if ((probeError as NodeJS.ErrnoException).code === 'ENOENT') {
-        return { health: 'missing', couldHideCopy: false };
-      }
+      code = (probeError as NodeJS.ErrnoException | undefined)?.code;
     }
   }
-  return { health: 'unreadable', couldHideCopy: true };
+  return { health: 'unreadable', couldHideCopy: code !== 'ENOTDIR' };
+}
+
+// A missing child can be caused by a dangling parent. Check the nearest
+// reachable ancestor before calling the source absent.
+function probeMissingSource(dir: string): {
+  health: SkillSourceHealth;
+  couldHideCopy: boolean;
+} {
+  const unreadable = { health: 'unreadable', couldHideCopy: true } as const;
+  const trimmed = dir.replace(sep === '/' ? /\/+$/u : /[\\/]+$/u, '');
+  let path = trimmed.length >= parse(dir).root.length ? trimmed : dir;
+  while (true) {
+    try {
+      lstatSync(path);
+      return unreadable;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    const parent = dirname(path);
+    if (parent === path) return unreadable;
+    try {
+      return {
+        health: statSync(parent).isDirectory() ? 'missing' : 'unreadable',
+        couldHideCopy: false,
+      };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    path = parent;
+  }
 }
 
 function classifySkill(

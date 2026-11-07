@@ -135,9 +135,9 @@ pub(crate) fn read_location_instances(
     let location_root = Path::new(location_path);
     let entries = match context.fs.read_dir(location_root) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            match context.fs.has_entry(location_root) {
-                Ok(false) => return Ok(ScanResult::default()),
-                Ok(true) => Err(error),
+            match confirms_missing_location(context.fs, location_root) {
+                Ok(true) => return Ok(ScanResult::default()),
+                Ok(false) => Err(error),
                 Err(metadata_error) => Err(metadata_error),
             }
         }
@@ -229,6 +229,31 @@ fn invalid_instance(
     })
 }
 
+/// Confirm that a configured path is absent under a reachable parent.
+fn confirms_missing_location(fs: &dyn LibraryFs, path: &Path) -> std::io::Result<bool> {
+    if fs.has_entry(path)? {
+        return Ok(false);
+    }
+    for parent in path.ancestors().skip(1) {
+        let parent = if parent.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            parent
+        };
+        match fs.stat(parent) {
+            Ok(metadata) if metadata.is_dir => return Ok(true),
+            Ok(_) => return Err(std::io::ErrorKind::NotADirectory.into()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if fs.has_entry(parent)? {
+                    return Ok(false);
+                }
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(false)
+}
+
 /// `readOneEntry`. `name` is the raw entry name reported on the
 /// unreadable-entries channel; `containment` is the canonical location
 /// root for directory layouts.
@@ -250,7 +275,11 @@ fn read_one_entry(
     }
     let metadata = match context.fs.stat(Path::new(path)) {
         Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+        Err(error)
+            if error.kind() == std::io::ErrorKind::NotFound
+                && (location.layout != LocationLayout::SingleFile
+                    || confirms_missing_location(context.fs, Path::new(path)).unwrap_or(false)) =>
+        {
             return Ok(ScanResult::default());
         }
         Err(_) => {
