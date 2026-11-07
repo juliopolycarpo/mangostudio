@@ -5,7 +5,12 @@ import type { Database } from '../../../db/types';
 import { recordActivity } from '../../activity/application/record-activity';
 import { claimOperation } from '../../operations/application/product-operation';
 import { ChatNotFoundError } from '../domain/chat-ownership';
-import { createChat, type CreateChatData, getOwnedChat } from '../infrastructure/chat-repository';
+import {
+  createChat,
+  type CreateChatData,
+  getById,
+  getOwnedChat,
+} from '../infrastructure/chat-repository';
 import { toPublicChat } from './public-chat';
 
 export interface CreateChatInput {
@@ -28,9 +33,19 @@ export async function createChatUseCase(
         model: input.model,
       });
       if (!claimed) {
-        if (!row.result || !row.chatId || !(await getOwnedChat(row.chatId, input.userId, tx)))
+        // Portable backups keep the completed receipt but remove its result snapshot.
+        const resultRedacted = row.result === null && row.state === 'completed';
+        if (
+          !row.chatId ||
+          (!row.result && !resultRedacted) ||
+          !(await getOwnedChat(row.chatId, input.userId, tx))
+        ) {
           throw new ChatNotFoundError(row.chatId ?? '');
-        return JSON.parse(row.result) as Chat;
+        }
+        if (row.result) return JSON.parse(row.result) as Chat;
+        const chat = await getById(row.chatId, tx);
+        if (!chat) throw new ChatNotFoundError(row.chatId);
+        return toPublicChat(chat);
       }
       const chat = toPublicChat(
         await createChat({ title: input.title, model: input.model, userId: input.userId }, tx)
