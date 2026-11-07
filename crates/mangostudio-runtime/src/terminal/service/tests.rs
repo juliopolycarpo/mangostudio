@@ -98,6 +98,7 @@ impl PtySpawner for FakePtySpawner {
         _check: Arc<dyn crate::subprocess::LaunchCheck>,
         _on_data: PtyOutput,
         _on_exit: Arc<dyn Fn(crate::terminal::pty::PtyExit) + Send + Sync>,
+        _cancel: CancellationToken,
     ) -> PtyFuture<'_, Result<Arc<dyn PtyHandle>, crate::terminal::pty::PtyError>> {
         Box::pin(async { unreachable!("these tests insert a live fake directly") })
     }
@@ -161,6 +162,7 @@ impl PtySpawner for RecordingPtySpawner {
         check: Arc<dyn crate::subprocess::LaunchCheck>,
         on_data: PtyOutput,
         on_exit: Arc<dyn Fn(crate::terminal::pty::PtyExit) + Send + Sync>,
+        _cancel: CancellationToken,
     ) -> PtyFuture<'_, Result<Arc<dyn PtyHandle>, crate::terminal::pty::PtyError>> {
         let state = Arc::clone(&self.0);
         Box::pin(async move {
@@ -1361,4 +1363,148 @@ async fn disconnected_watcher_keeps_retrying_after_transport_drops_the_service()
     })
     .await
     .expect("cleanup releases the disconnected service after settlement");
+}
+
+struct GatedHandoffPtySpawner {
+    state: Arc<Mutex<RecordingPtyState>>,
+    released_child: bool,
+    entered: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+}
+
+impl PtySpawner for GatedHandoffPtySpawner {
+    fn spawn(
+        &self,
+        _request: crate::terminal::pty::PtyRequest,
+        _check: Arc<dyn crate::subprocess::LaunchCheck>,
+        _on_data: PtyOutput,
+        _on_exit: Arc<dyn Fn(crate::terminal::pty::PtyExit) + Send + Sync>,
+        cancel: CancellationToken,
+    ) -> PtyFuture<'_, Result<Arc<dyn PtyHandle>, crate::terminal::pty::PtyError>> {
+        Box::pin(async move {
+            self.entered.notify_one();
+            if !self.released_child {
+                cancel.cancelled().await;
+                self.release.notified().await;
+                return Err(crate::terminal::pty::PtyError::CancelledBeforeStart);
+            }
+            self.release.notified().await;
+            Ok(Arc::new(RecordingPtyHandle(Arc::clone(&self.state))) as Arc<dyn PtyHandle>)
+        })
+    }
+}
+
+#[tokio::test]
+async fn close_during_spawn_waits_for_startup_settlement_or_closes_the_handed_off_child() {
+    use std::pin::pin;
+    use std::time::Duration;
+    use tokio::sync::Notify;
+
+    for released_child in [false, true] {
+        let entered = Arc::new(Notify::new());
+        let release = Arc::new(Notify::new());
+        let state = Arc::new(Mutex::new(RecordingPtyState::default()));
+        let (_scratch, service, _) = prepared_service_with(|service| {
+            service.spawner = Arc::new(GatedHandoffPtySpawner {
+                entered: Arc::clone(&entered),
+                release: Arc::clone(&release),
+                state: Arc::clone(&state),
+                released_child,
+            });
+        });
+        let open = {
+            let service = Arc::clone(&service);
+            tokio::spawn(async move {
+                service
+                    .open(open_params(), fake_session(), CancellationToken::new())
+                    .await
+            })
+        };
+        tokio::time::timeout(Duration::from_secs(2), entered.notified())
+            .await
+            .expect("the PTY is starting but its handle has not been returned");
+
+        let mut close = pin!(service.close(SessionParams {
+            session_id: "terminal-1".into()
+        }));
+        assert!(
+            futures_util::poll!(&mut close).is_pending(),
+            "expected terminal.close to wait for the native startup handoff"
+        );
+        release.notify_one();
+        tokio::time::timeout(Duration::from_secs(2), close)
+            .await
+            .expect("close settles once the PTY handle is available")
+            .unwrap();
+        let refused = open
+            .await
+            .unwrap()
+            .expect_err("the cancelled open must not admit the child");
+        assert_eq!(refused.code, codes::CANCELLED);
+        assert_eq!(
+            state.lock().unwrap().closes,
+            usize::from(released_child),
+            "close reaches the child once if it was released"
+        );
+        assert!(service.sessions.lock().unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn close_during_preparation_does_not_wait_for_read_only_host_work() {
+    use std::sync::Condvar;
+    use std::time::Duration;
+    use tokio::sync::Notify;
+
+    let entered = Arc::new(Notify::new());
+    let release = Arc::new((Mutex::new(false), Condvar::new()));
+    let (_scratch, service, state) = prepared_service_with(|service| {
+        let normal_host = Arc::clone(&service.host);
+        let entered = Arc::clone(&entered);
+        let release = Arc::clone(&release);
+        let paused_host = move || {
+            entered.notify_one();
+            let (flag, wake) = release.as_ref();
+            drop(
+                wake.wait_while(flag.lock().unwrap(), |released| !*released)
+                    .unwrap(),
+            );
+            normal_host()
+        };
+        service.host = Arc::new(paused_host);
+    });
+    let open = {
+        let service = Arc::clone(&service);
+        tokio::spawn(async move {
+            service
+                .open(open_params(), fake_session(), CancellationToken::new())
+                .await
+        })
+    };
+    if let Err(error) = tokio::time::timeout(Duration::from_secs(2), entered.notified()).await {
+        *release.0.lock().unwrap() = true;
+        release.1.notify_one();
+        panic!("expected terminal preparation to reach the paused host lookup | received {error}");
+    }
+
+    let closed = tokio::time::timeout(
+        Duration::from_millis(300),
+        service.close(SessionParams {
+            session_id: "terminal-1".into(),
+        }),
+    )
+    .await;
+    *release.0.lock().unwrap() = true;
+    release.1.notify_one();
+    closed
+        .expect("terminal.close should settle while read-only preparation is paused")
+        .unwrap();
+
+    let refused = open
+        .await
+        .unwrap()
+        .expect_err("cancelled preparation cannot spawn a PTY");
+    assert_eq!(refused.code, codes::CANCELLED);
+    assert!(state.lock().unwrap().launches.is_empty());
+    assert!(service.sessions.lock().unwrap().is_empty());
 }

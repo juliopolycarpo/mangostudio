@@ -14,7 +14,7 @@ use mango_protocol::session::{CallContext, EventInput, Session};
 use mangostudio_runtime_contract::manifest::RuntimeShellKind;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::{Mutex as AsyncMutex, watch};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
@@ -75,6 +75,7 @@ enum Slot {
     Opening {
         reservation_id: u64,
         cancel: CancellationToken,
+        handoff: watch::Receiver<Option<Arc<Entry>>>,
     },
     Starting {
         reservation_id: u64,
@@ -210,6 +211,7 @@ impl Service {
     ) -> Result<Value, RemoteError> {
         let id = params.session_id.clone();
         let cancel = cancel.child_token();
+        let (spawned, handoff) = watch::channel(None);
         let reservation_id = self.next_reservation.fetch_add(1, Ordering::Relaxed);
         {
             let mut sessions = self
@@ -235,12 +237,17 @@ impl Service {
                 Slot::Opening {
                     reservation_id,
                     cancel: cancel.clone(),
+                    handoff,
                 },
             );
         }
         let mut reservation = Reservation::new(Arc::clone(self), id.clone(), reservation_id);
-        let host = (self.host)();
-        let prepared = run_blocking(move || prepare(params, host)).await?;
+        let host = Arc::clone(&self.host);
+        let prepared = tokio::select! {
+            biased;
+            () = cancel.cancelled() => return Err(open_cancelled()),
+            result = run_blocking(move || prepare(params, host())) => result?,
+        };
         let mut initial_flow = TerminalFlow::new(prepared.scrollback_bytes)
             .map_err(|message| invalid_argument(&message, "a positive scrollback byte count"))?;
         if prepared.login {
@@ -279,13 +286,11 @@ impl Service {
             consent: Arc::clone(&self.consent),
             cwd: prepared.request.cwd.clone(),
         });
-        let handle = tokio::select! {
-            result = self.spawner.spawn(prepared.request, check, on_data, on_exit) => result.map_err(start_error)?,
-            () = cancel.cancelled() => return Err(RemoteError::new(
-                codes::CANCELLED,
-                "Terminal open was cancelled before admission.",
-            )),
-        };
+        let handle = self
+            .spawner
+            .spawn(prepared.request, check, on_data, on_exit, cancel.clone())
+            .await
+            .map_err(start_error)?;
         let entry = Arc::new(Entry {
             session_id: id.clone(),
             shell: prepared.shell,
@@ -309,13 +314,11 @@ impl Service {
                 entry: Arc::clone(&entry),
             };
         }
+        let _ = spawned.send(Some(Arc::clone(&entry)));
         self.start_watcher(session);
         if cancel.is_cancelled() {
             self.close_entry(&entry).await.map_err(pty_io)?;
-            return Err(RemoteError::new(
-                codes::CANCELLED,
-                "Terminal open was cancelled before admission.",
-            ));
+            return Err(open_cancelled());
         }
         let consent = self.launch_shell_consent().await;
         if !consent.allows() {
@@ -331,10 +334,7 @@ impl Service {
         }
         if cancel.is_cancelled() {
             self.close_entry(&entry).await.map_err(pty_io)?;
-            return Err(RemoteError::new(
-                codes::CANCELLED,
-                "Terminal open was cancelled before admission.",
-            ));
+            return Err(open_cancelled());
         }
         let admitted = {
             let mut sessions = self.sessions.lock().unwrap_or_else(|p| p.into_inner());
@@ -462,7 +462,7 @@ impl Service {
     }
 
     async fn close(&self, params: SessionParams) -> Result<Value, RemoteError> {
-        let entry = {
+        let (entry, handoff) = {
             let sessions = self
                 .sessions
                 .lock()
@@ -470,14 +470,27 @@ impl Service {
             match sessions.get(&params.session_id) {
                 Some(Slot::Starting { entry, .. } | Slot::Live(entry)) => {
                     entry.closed.store(true, Ordering::Release);
-                    Some(Arc::clone(entry))
+                    (Some(Arc::clone(entry)), None)
                 }
-                Some(Slot::Opening { cancel, .. }) => {
+                Some(Slot::Opening {
+                    cancel, handoff, ..
+                }) => {
                     cancel.cancel();
-                    None
+                    (None, Some(handoff.clone()))
                 }
-                None => None,
+                None => (None, None),
             }
+        };
+        // Opening holds the sender until startup either hands off a child or
+        // settles without a handle. Both outcomes resolve the pending close.
+        let entry = if let Some(mut handoff) = handoff {
+            handoff
+                .wait_for(Option::is_some)
+                .await
+                .ok()
+                .and_then(|entry| entry.clone())
+        } else {
+            entry
         };
         // No `operation` lock: a write to a shell that stopped reading input holds it until the
         // child dies, and killing the child is exactly what releases it. `closed` is already set,
@@ -1047,6 +1060,13 @@ fn decode<T: for<'de> Deserialize<'de>>(value: Value) -> Result<T, RemoteError> 
             "the terminal method's declared object shape",
         )
     })
+}
+
+fn open_cancelled() -> RemoteError {
+    RemoteError::new(
+        codes::CANCELLED,
+        "Terminal open was cancelled before admission.",
+    )
 }
 
 fn not_found(id: &str) -> RemoteError {

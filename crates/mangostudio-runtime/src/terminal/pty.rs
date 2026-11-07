@@ -156,12 +156,15 @@ pub trait PtyHandle: Send + Sync {
 /// Starts a real PTY; tests can implement this port with a named fake.
 pub trait PtySpawner: Send + Sync {
     /// Calls `on_data` for raw output and `on_exit` once after the tree cleanup attempt.
+    /// Cancellation before launch resolves after startup cleanup. A released child is
+    /// handed back to the caller so it can close the handle.
     fn spawn(
         &self,
         request: PtyRequest,
         check: Arc<dyn LaunchCheck>,
         on_data: PtyOutput,
         on_exit: Arc<dyn Fn(PtyExit) + Send + Sync>,
+        cancel: CancellationToken,
     ) -> PtyFuture<'_, Result<Arc<dyn PtyHandle>, PtyError>>;
 }
 
@@ -176,6 +179,7 @@ impl PtySpawner for DefaultPtySpawner {
         check: Arc<dyn LaunchCheck>,
         on_data: PtyOutput,
         on_exit: Arc<dyn Fn(PtyExit) + Send + Sync>,
+        cancel: CancellationToken,
     ) -> PtyFuture<'_, Result<Arc<dyn PtyHandle>, PtyError>> {
         if request.cols == 0 || request.rows == 0 {
             return Box::pin(async move {
@@ -191,10 +195,14 @@ impl PtySpawner for DefaultPtySpawner {
         };
         Box::pin(async move {
             let (tx, rx) = oneshot::channel();
-            let cancel = CancellationToken::new();
+            let abandoned = CancellationToken::new();
             let mut drop_guard = CancelOnDrop {
-                token: cancel.clone(),
+                token: abandoned.clone(),
                 armed: true,
+            };
+            let cancel = StartupCancellation {
+                requested: cancel,
+                abandoned,
             };
             // Counted before the spawn so a host shutting down never sees this terminal as
             // released before its supervisor has even started.
@@ -212,6 +220,25 @@ impl PtySpawner for DefaultPtySpawner {
             drop_guard.armed = false;
             result
         })
+    }
+}
+
+#[derive(Clone)]
+struct StartupCancellation {
+    requested: CancellationToken,
+    abandoned: CancellationToken,
+}
+
+impl StartupCancellation {
+    fn is_cancelled(&self) -> bool {
+        self.requested.is_cancelled() || self.abandoned.is_cancelled()
+    }
+
+    async fn cancelled(&self) {
+        tokio::select! {
+            () = self.requested.cancelled() => {}
+            () = self.abandoned.cancelled() => {}
+        }
     }
 }
 
@@ -329,7 +356,7 @@ async fn supervise_pty(
     check: Arc<dyn LaunchCheck>,
     on_data: PtyOutput,
     on_exit: Arc<dyn Fn(PtyExit) + Send + Sync>,
-    cancel: CancellationToken,
+    cancel: StartupCancellation,
     ready: oneshot::Sender<Result<Arc<dyn PtyHandle>, PtyError>>,
     _held: (tokio::sync::OwnedSemaphorePermit, crate::release::Owner),
 ) {
@@ -399,7 +426,9 @@ async fn supervise_pty(
         let _ = ready.send(Err(error));
         return;
     }
-    if cancel.is_cancelled() {
+    // Once the target is released, the service needs its handle even if
+    // opening was cancelled. A dropped receiver still owns no handle.
+    if cancel.abandoned.is_cancelled() {
         child.abort_start();
         let _ = child.force();
         let _ = child.wait_target().await;
@@ -453,7 +482,7 @@ async fn supervise_pty(
     let writer = tokio::spawn(write_input(input, input_rx));
     let status = loop {
         tokio::select! {
-            () = cancel.cancelled() => {
+            () = cancel.abandoned.cancelled() => {
                 let _ = child.force();
                 break child.wait_target().await;
             }
@@ -631,36 +660,53 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn abandoned_open_does_not_release_a_ready_unix_target() {
+    async fn cancelled_or_abandoned_open_does_not_release_a_ready_unix_target() {
         let _serial = REAL_PTY_TEST.lock().await;
-        let gate = Arc::new(ReadyGate {
-            reached: tokio::sync::Notify::new(),
-            resume: tokio::sync::Notify::new(),
-            settled: tokio::sync::Notify::new(),
-            released: AtomicBool::new(false),
-        });
-        let mut request = PtyRequest::new("/bin/sh", ["-c", "exit 0"], 80, 24);
-        request.ready_gate = Some(Arc::clone(&gate));
-        let opener = tokio::spawn(async move {
-            DefaultPtySpawner
-                .spawn(
-                    request,
-                    Arc::new(AlwaysAllow),
-                    Arc::new(|_| {}),
-                    Arc::new(|_| {}),
-                )
+        for abandoned in [false, true] {
+            let gate = Arc::new(ReadyGate {
+                reached: tokio::sync::Notify::new(),
+                resume: tokio::sync::Notify::new(),
+                settled: tokio::sync::Notify::new(),
+                released: AtomicBool::new(false),
+            });
+            let mut request = PtyRequest::new("/bin/sh", ["-c", "exit 0"], 80, 24);
+            request.ready_gate = Some(Arc::clone(&gate));
+            let cancel = tokio_util::sync::CancellationToken::new();
+            let launch_cancel = cancel.clone();
+            let opener = tokio::spawn(async move {
+                DefaultPtySpawner
+                    .spawn(
+                        request,
+                        Arc::new(AlwaysAllow),
+                        Arc::new(|_| {}),
+                        Arc::new(|_| {}),
+                        launch_cancel,
+                    )
+                    .await
+            });
+            tokio::time::timeout(Duration::from_secs(5), gate.reached.notified())
                 .await
-        });
-        tokio::time::timeout(Duration::from_secs(5), gate.reached.notified())
-            .await
-            .expect("guardian reports ready");
-        opener.abort();
-        let _ = opener.await;
-        gate.resume.notify_one();
-        tokio::time::timeout(Duration::from_secs(5), gate.settled.notified())
-            .await
-            .expect("cancelled guardian is reaped");
-        assert!(!gate.released.load(Ordering::Acquire));
+                .expect("guardian reports ready");
+            if abandoned {
+                opener.abort();
+                let _ = opener.await;
+                gate.resume.notify_one();
+            } else {
+                cancel.cancel();
+                let finished = opener.is_finished();
+                gate.resume.notify_one();
+                assert!(!finished, "startup is still held by the guardian gate");
+                let result = tokio::time::timeout(Duration::from_secs(5), opener)
+                    .await
+                    .expect("cancelled startup settles")
+                    .expect("opener completes");
+                assert!(matches!(result, Err(PtyError::CancelledBeforeStart)));
+            }
+            tokio::time::timeout(Duration::from_secs(5), gate.settled.notified())
+                .await
+                .expect("cancelled guardian is reaped");
+            assert!(!gate.released.load(Ordering::Acquire));
+        }
     }
 
     impl LaunchCheck for DenyLaunch {
@@ -681,6 +727,7 @@ mod tests {
                 Arc::new(DenyLaunch),
                 Arc::new(|_| {}),
                 Arc::new(|_| {}),
+                tokio_util::sync::CancellationToken::new(),
             )
             .await;
         assert!(matches!(result, Err(PtyError::LaunchDenied(error)) if error.code == "DENIED"));
@@ -695,6 +742,7 @@ mod tests {
                 Arc::new(AlwaysAllow),
                 Arc::new(|_| {}),
                 Arc::new(|_| {}),
+                tokio_util::sync::CancellationToken::new(),
             )
             .await;
         assert!(matches!(
@@ -723,6 +771,7 @@ mod tests {
                 Arc::new(AlwaysAllow),
                 Arc::new(|_| {}),
                 Arc::new(|_| {}),
+                tokio_util::sync::CancellationToken::new(),
             )
             .await
             .expect("terminal starts");
@@ -784,6 +833,7 @@ mod tests {
                         let _ = sender.send(exit);
                     }
                 }),
+                tokio_util::sync::CancellationToken::new(),
             )
             .await
             .expect("PTY starts");
@@ -822,6 +872,7 @@ mod tests {
                 Arc::new(AlwaysAllow),
                 Arc::new(move |chunk| collected.lock().unwrap().extend(chunk)),
                 Arc::new(|_| {}),
+                tokio_util::sync::CancellationToken::new(),
             )
             .await
             .expect("PTY starts");
@@ -865,6 +916,7 @@ mod tests {
                         let _ = sender.send(exit);
                     }
                 }),
+                tokio_util::sync::CancellationToken::new(),
             )
             .await
             .expect("PTY starts");
@@ -908,6 +960,7 @@ mod tests {
                 Arc::new(AlwaysAllow),
                 Arc::new(move |chunk| collected.lock().unwrap().extend(chunk)),
                 Arc::new(|_| {}),
+                tokio_util::sync::CancellationToken::new(),
             )
             .await
             .expect("interactive shell starts");
@@ -1056,6 +1109,7 @@ mod windows_tests {
                         let _ = sender.send(exit);
                     }
                 }),
+                tokio_util::sync::CancellationToken::new(),
             )
             .await
             .expect("ConPTY starts");
@@ -1086,6 +1140,7 @@ mod windows_tests {
                         let _ = sender.send(exit);
                     }
                 }),
+                tokio_util::sync::CancellationToken::new(),
             )
             .await
             .expect("interactive ConPTY starts");

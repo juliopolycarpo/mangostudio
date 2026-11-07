@@ -1311,8 +1311,9 @@ viewer has 30 seconds to attach, and the login can run for up to ten minutes.
 An expired login refuses attach and PTY input and discards pending output.
 The 100 ms watcher starts cleanup independently of consent polling. It retries
 transient close failures. Explicit close, consent withdrawal, and cancelled
-admission retain their handles until cleanup settles. Concurrent close requests
-share the same attempt. After disconnect, the cleanup watcher keeps ownership
+admission retain their handles until cleanup settles. Close during startup waits
+for native cancellation to settle or closes the child handed off by startup.
+Concurrent close requests share the same attempt. After disconnect, the cleanup watcher keeps ownership
 through retries. A final cleanup error releases the session slot and reports the
 failure. The live viewer's pending queue also holds up to
 64 KiB, with the usual terminal credit flow. At most 16 terminal sessions and
