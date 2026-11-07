@@ -4,8 +4,6 @@
  * for proper Eden type inference in the frontend.
  */
 
-import { mkdirSync } from 'node:fs';
-
 import { cors } from '@elysia/cors';
 import { openapi } from '@elysia/openapi';
 import { Elysia, NotFound } from 'elysia';
@@ -64,11 +62,6 @@ registerApplicationServices();
 const UPLOADS_DIR = getConfig().uploads.dir;
 const IMAGES_DIR = getConfig().images.dir;
 const requestLogger = createDiagnosticLogger('request');
-
-// Uploads are written into this directory, so it exists from import on. The
-// upload route module creates it as an import side effect too, which happens
-// to run first today — this does not rely on that ordering holding.
-mkdirSync(UPLOADS_DIR, { recursive: true });
 
 /**
  * Base API instance with /api prefix.

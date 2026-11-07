@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import type { Chat } from '@mangostudio/shared/chat';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
@@ -23,6 +24,7 @@ import {
   claimOperation,
   readOperation,
 } from '../../../src/modules/operations/application/product-operation';
+import { drainProductOperationWork } from '../../../src/modules/operations/application/product-operation-work';
 import {
   getProvider,
   invalidateProviderRoutingCache,
@@ -47,6 +49,7 @@ class ControlledProvider implements AIProvider {
   calls = 0;
   directCalls = 0;
   directFail = false;
+  directGate: Promise<void> | undefined;
   directEnvironment: string | undefined;
   fail = false;
   release: (() => void) | undefined;
@@ -54,7 +57,7 @@ class ControlledProvider implements AIProvider {
     this.directCalls++;
     this.directEnvironment = request.environmentId;
     if (this.directFail) return Promise.reject(new Error('controlled direct turn failure'));
-    return Promise.resolve({ text: 'Answer' });
+    return (this.directGate ?? Promise.resolve()).then(() => ({ text: 'Answer' }));
   }
   listModels(): ReturnType<AIProvider['listModels']> {
     return Promise.resolve([]);
@@ -147,20 +150,30 @@ afterEach(async () => {
 describe('durable authorized product operations over real routes/storage', () => {
   it('recovers the same durable receipt after an actual process restart', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'product-operation-'));
-    const worker = new URL('../../support/fixtures/product-operation-worker.ts', import.meta.url)
-      .pathname;
+    const worker = fileURLToPath(
+      new URL('../../support/fixtures/product-operation-worker.ts', import.meta.url)
+    );
+    const database = join(directory, 'db.sqlite');
+    async function runWorker(mode: 'reserve' | 'recover'): Promise<string> {
+      const child = Bun.spawn([process.execPath, worker, database, mode], {
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [exitCode, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      expect(
+        exitCode,
+        `receipt ${mode} worker exited with ${exitCode} | stderr: ${stderr.trim()}`
+      ).toBe(0);
+      return stdout;
+    }
+
     try {
-      const reserve = Bun.spawn(
-        [process.execPath, worker, join(directory, 'db.sqlite'), 'reserve'],
-        { stdout: 'pipe', stderr: 'pipe' }
-      );
-      expect(await reserve.exited).toBe(0);
-      const recover = Bun.spawn(
-        [process.execPath, worker, join(directory, 'db.sqlite'), 'recover'],
-        { stdout: 'pipe', stderr: 'pipe' }
-      );
-      const result = await new Response(recover.stdout).text();
-      expect(await recover.exited).toBe(0);
+      await runWorker('reserve');
+      const result = await runWorker('recover');
       expect(JSON.parse(result)).toMatchObject({
         receipt: { operationId: 'durable', state: 'unresolved' },
         claimed: false,
@@ -426,6 +439,35 @@ describe('durable authorized product operations over real routes/storage', () =>
     expect((await submit(operationId)).status).toBe(200);
     expect(provider.calls).toBe(1);
   });
+  it.each(['/respond', '/respond/stream'])(
+    'keeps the detached %s turn owned until its receipt settles',
+    async (path) => {
+      const operationId = 'shutdown-owned-turn';
+      const direct = Promise.withResolvers<void>();
+      provider.directGate = direct.promise;
+      const response = await app.handle(
+        request(path, { chatId, prompt: 'Hello', model: 'operation-test', operationId })
+      );
+      expect(response.status).toBe(200);
+      await waitFor(() => provider.directCalls + provider.calls === 1);
+
+      const draining = drainProductOperationWork();
+      try {
+        const settledWhileProviderBlocked = await Promise.race([
+          draining.then(() => true),
+          Bun.sleep(0).then(() => false),
+        ]);
+        expect(settledWhileProviderBlocked).toBe(false);
+      } finally {
+        direct.resolve();
+        provider.release?.();
+        await draining;
+        await waitFor(async () => (await receipt(operationId)).state === 'completed');
+      }
+      expect(await receipt(operationId)).toMatchObject({ state: 'completed' });
+    }
+  );
+
   it('records accepted failure and permits an explicit new operation', async () => {
     provider.fail = true;
     await submit('accepted-failure');

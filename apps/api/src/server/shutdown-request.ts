@@ -20,23 +20,33 @@ export function registerShutdownHandler(next: ShutdownHandler): void {
 }
 
 /**
- * Run the registered stop once and exit 0. A second call while the first is
- * in flight is ignored, so SIGINT plus a `stop` SIGTERM cannot run the stop
+ * Run the registered stop once; report cleanup failures with a nonzero exit.
+ * A second call while the first is in flight is ignored, so SIGINT plus a
+ * `stop` SIGTERM cannot run the stop
  * twice and close the database twice.
  * // Usage: requestShutdown()
  */
 export function requestShutdown(budgetMs: number = SHUTDOWN_BUDGET_MS): void {
   if (requested) return;
   requested = true;
-  const work = handler ? handler() : Promise.resolve();
-  // A stop that hangs (a stuck client close, a wedged database) must not
-  // keep the port forever: a restart's successor waits on this pid and then
-  // fails to bind. Past the budget the process exits anyway.
-  const budget = new Promise<void>((resolve) => {
-    const timer = setTimeout(resolve, budgetMs);
-    timer.unref?.();
-  });
-  void Promise.race([work, budget]).finally(() => process.exit(0));
+  const stop = handler;
+  const work = Promise.resolve().then(() => stop?.());
+  // Keep the watchdog alive while the stop is pending, even if it removed
+  // the last event-loop handle without settling.
+  const budget = Promise.withResolvers<never>();
+  const timer = setTimeout(
+    () => budget.reject(new Error(`Shutdown did not complete within ${budgetMs}ms.`)),
+    budgetMs
+  );
+  void Promise.race([work, budget.promise])
+    .finally(() => clearTimeout(timer))
+    .then(
+      () => process.exit(0),
+      (error: unknown) => {
+        console.warn('[api] Shutdown failed:', error);
+        process.exit(1);
+      }
+    );
 }
 
 /** Test seam: forget the handler and the in-flight flag. */

@@ -16,6 +16,7 @@ import {
   releaseOperation,
   settleOperation,
 } from '../../operations/application/product-operation';
+import { trackProductOperationWork } from '../../operations/application/product-operation-work';
 import { NoModelAvailableError } from '../application/resolve-model';
 import { sendTextMessage, UnsupportedChatRunnerError } from '../application/send-text-message';
 import { EmptyTextTurnError } from '../application/text-turn-content';
@@ -67,17 +68,19 @@ export const respondRoutes = (app: Elysia) =>
               }
               throw error;
             }
-            void (async () => {
-              let result: Awaited<ReturnType<typeof sendTextMessage>>;
-              try {
-                result = await sendTextMessage({ ...body, userId, admittedChat: chat }, db);
-              } catch {
-                // No automatic replay; the request was admitted even if execution failed.
-                await settleOperation(db, userId, operationId, 'failed');
-                return;
-              }
-              await settleOperation(db, userId, operationId, 'completed', result.aiMessage.id);
-            })();
+            trackProductOperationWork(
+              (async () => {
+                let result: Awaited<ReturnType<typeof sendTextMessage>>;
+                try {
+                  result = await sendTextMessage({ ...body, userId, admittedChat: chat }, db);
+                } catch {
+                  // No automatic replay; the request was admitted even if execution failed.
+                  await settleOperation(db, userId, operationId, 'failed');
+                  return;
+                }
+                await settleOperation(db, userId, operationId, 'completed', result.aiMessage.id);
+              })()
+            );
             return operationReceipt({ ...row, state: 'running' });
           } catch (error) {
             if (error instanceof OperationConflictError || error instanceof OperationExpiredError) {

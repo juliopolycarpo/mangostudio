@@ -3,7 +3,6 @@
  * Includes robust file validation using magic bytes detection.
  */
 
-import { mkdirSync } from 'node:fs';
 import { extname, join } from 'node:path';
 
 import { UploadChatAttachmentResponseSchema } from '@mangostudio/shared/chat';
@@ -35,9 +34,6 @@ registerFileTypeDetector();
 
 const UPLOADS_DIR = getConfig().uploads.dir;
 const uploadLogger = createDiagnosticLogger('upload');
-
-// Ensure uploads directory exists at module load
-mkdirSync(UPLOADS_DIR, { recursive: true });
 
 /** Remove the file this request wrote; a failure is logged, never thrown. */
 async function discardUploadedFile(absolutePath: string): Promise<void> {
@@ -120,7 +116,7 @@ export const uploadRoutes = (app: Elysia) =>
             });
           }
 
-          await Bun.write(filePath, buffer);
+          await writeAttachmentFile(filePath, buffer);
 
           const imageUrl = `/uploads/${filename}`;
           return { imageUrl };

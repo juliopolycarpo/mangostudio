@@ -30,13 +30,16 @@ describe('requestShutdown', () => {
     }
   });
 
-  it('exits once the budget runs out on a stop that never finishes', async () => {
-    const exitSpy = spyOn(process, 'exit').mockImplementation(() => undefined as never);
+  it('exits with failure when the budget runs out on a stop that never finishes', async () => {
+    const exited = Promise.withResolvers<Parameters<typeof process.exit>[0]>();
+    const exitSpy = spyOn(process, 'exit').mockImplementation((code) => {
+      exited.resolve(code);
+      return undefined as never;
+    });
     registerShutdownHandler(() => new Promise<void>(() => undefined));
     try {
-      requestShutdown(10);
-      await new Promise((resolve) => setTimeout(resolve, 30));
-      expect(exitSpy).toHaveBeenCalledWith(0);
+      requestShutdown(0);
+      expect(await exited.promise).toBe(1);
     } finally {
       exitSpy.mockRestore();
     }

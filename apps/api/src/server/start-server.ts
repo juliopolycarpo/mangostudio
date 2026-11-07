@@ -5,6 +5,7 @@
  */
 
 import { app } from '../app';
+import { acquireCaptureLock } from '../backup/capture-lock';
 import { closeDb, getDb } from '../db/database';
 import { getBuildInfo } from '../lib/build-info';
 import {
@@ -28,6 +29,7 @@ import {
 import { isActiveTurn } from '../modules/generation/application/active-turn-registry';
 import { reconcileStaleTurns } from '../modules/generation/application/turn-recovery';
 import { HUB_SERVICE_UNIT_ENV } from '../modules/machine/domain/hub-service-identity';
+import { drainProductOperationWork } from '../modules/operations/application/product-operation-work';
 import { terminalSessionService } from '../modules/terminals/application/terminal-session-service';
 import { runPruneRetry } from '../modules/updates/application/prune-retry';
 import { updateChecker } from '../modules/updates/application/update-check';
@@ -62,6 +64,8 @@ export interface StartOptions {
   writeStateFile?: boolean;
 }
 
+let releaseCaptureLock: (() => Promise<void>) | undefined;
+
 let staleTurnReconcileSweep: StaleTurnReconcileSweep | null = null;
 let stopTerminalIdleReaper: (() => void) | null = null;
 let stopUpdateChecks: (() => void) | null = null;
@@ -69,6 +73,24 @@ let stopRuntimeScopeReaps: (() => void) | null = null;
 
 /** Start the API server and return a handle. // Usage: await startServer({ writeStateFile: true }) */
 export async function startServer(options: StartOptions = {}): Promise<ServerHandle> {
+  const path = getConfig().database.path;
+  if (path !== ':memory:') {
+    releaseCaptureLock = await acquireCaptureLock(path);
+  }
+  try {
+    return await startServerWithLock(options);
+  } catch (error) {
+    // Once listening began, in-flight writes may still be settling. Keep the
+    // OS-owned lock until exit on a failed startup rather than permit capture.
+    if (!app.server) {
+      await releaseCaptureLock?.();
+      releaseCaptureLock = undefined;
+    }
+    throw error;
+  }
+}
+
+async function startServerWithLock(options: StartOptions): Promise<ServerHandle> {
   // Load connector secrets from ~/.mango/.env into process.env. The detach spawn
   // allowlist withholds them from the child's initial env, so the server must
   // self-load them here for environment-source connectors to resolve.
@@ -123,7 +145,9 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
     void warmUpLibraryLocationDefaults();
   }
 
-  registerShutdown();
+  let stopping: Promise<void> | undefined;
+  const stop = () => (stopping ??= gracefulStop());
+  registerShutdown(stop);
 
   if (options.writeStateFile !== false) {
     await persistState(port, host, frontendDir);
@@ -131,7 +155,7 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
 
   logRunning(host, port, devFrontendDir !== null);
 
-  return { port, host, stop: gracefulStop };
+  return { port, host, stop };
 }
 
 /** Bind the server port, exiting with a clear message when it is already in use. */
@@ -188,6 +212,11 @@ function logRunning(host: string, port: number, devFrontend: boolean): void {
  * file, and close the database.
  */
 async function gracefulStop(): Promise<void> {
+  // Stop admission immediately, but drain concurrently: active streams and
+  // WebSocket close handlers may depend on the session/runtime cleanup below.
+  // Observe a rejection now and report it after cleanup, without releasing
+  // data ownership before HTTP writers have settled.
+  const httpStopped = drainHttp();
   await staleTurnReconcileSweep?.stop();
   staleTurnReconcileSweep = null;
   stopTerminalIdleReaper?.();
@@ -211,15 +240,32 @@ async function gracefulStop(): Promise<void> {
   // After the connections close, so a scope withdrawn while they closed is still reaped.
   stopRuntimeScopeReaps?.();
   stopRuntimeScopeReaps = null;
+  const httpStopError = await httpStopped;
+  // Keyed turns can outlive their HTTP acknowledgements and still write receipts.
+  if (!httpStopError) await drainProductOperationWork();
   await removeState();
+  // A failed drain does not prove writers settled. Retain the database and
+  // capture ownership until the process exits, rather than unlock live data.
+  if (httpStopError) throw httpStopError;
   await closeDb();
+  await releaseCaptureLock?.();
+  releaseCaptureLock = undefined;
 }
 
-function registerShutdown(): void {
-  // `requestShutdown` runs the stop once, so a second signal (e.g. SIGINT + a
-  // `stop` SIGTERM) cannot re-run gracefulStop and close the database twice.
-  // A restart requested over the API ends the process the same way.
-  registerShutdownHandler(gracefulStop);
+/** Gate new traffic now; keep a drain failure observable after resource cleanup. */
+async function drainHttp(): Promise<Error | undefined> {
+  try {
+    if (app.server) await app.stop();
+    return undefined;
+  } catch (error) {
+    return error instanceof Error ? error : new Error('HTTP shutdown failed.', { cause: error });
+  }
+}
+
+function registerShutdown(stop: ServerHandle['stop']): void {
+  // Signals and API restarts share the handle's shutdown, including a drain
+  // already started by a caller of ServerHandle.stop.
+  registerShutdownHandler(stop);
   const shutdown = (signal: 'SIGINT' | 'SIGTERM'): void => {
     if (signal === 'SIGINT') {
       console.warn('\n[api] Shutting down...');

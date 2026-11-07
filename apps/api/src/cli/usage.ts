@@ -10,6 +10,9 @@ Usage:
   mangostudio <command> [options]
 
 Commands:
+  backup <archive.tar.gz> [--no-checkpoints] [--include-secrets]
+                      Capture configured user data with the Hub stopped.
+                      Secrets are excluded by default. No restore command.
   setup [host|port|host:port] [--service|--no-service] [--no-open]
                       Get a fresh install to a working hub: set the auth
                       secret if it has none, optionally install the
