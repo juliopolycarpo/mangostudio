@@ -398,6 +398,55 @@ it('refuses an output inside a root directory whose name begins with two dots', 
   expect(await Bun.file(output).exists()).toBe(false);
 });
 
+it('refuses equal configured roots before writing an archive', async () => {
+  const { config, output } = await fixture();
+  config.images.dir = config.uploads.dir;
+  await expect(
+    captureBackup(config, { output, checkpoints: true, includeSecrets: false }, 'test')
+  ).rejects.toThrow('Configured backup roots overlap: uploads and images');
+  expect(await Bun.file(output).exists()).toBe(false);
+});
+
+it('refuses checkpoints nested inside uploads even when checkpoints are omitted', async () => {
+  const { config, output } = await fixture();
+  config.checkpoints.dir = join(config.uploads.dir, 'nested-checkpoints');
+  await mkdir(config.checkpoints.dir);
+  await writeFile(join(config.checkpoints.dir, 'private.txt'), 'omitted checkpoint');
+  await expect(
+    captureBackup(config, { output, checkpoints: false, includeSecrets: false }, 'test')
+  ).rejects.toThrow('Configured backup roots overlap: uploads and checkpoints');
+  expect(await Bun.file(output).exists()).toBe(false);
+});
+
+it.skipIf(process.platform === 'win32')(
+  'detects root overlap through an intermediate directory symlink',
+  async () => {
+    const { root, config, output } = await fixture();
+    const alias = join(root, 'uploads-alias');
+    await symlink(config.uploads.dir, alias, 'dir');
+    await mkdir(join(config.uploads.dir, 'nested-images'));
+    config.images.dir = join(alias, 'nested-images');
+    await expect(
+      captureBackup(config, { output, checkpoints: true, includeSecrets: false }, 'test')
+    ).rejects.toThrow('Configured backup roots overlap: uploads and images');
+    expect(await Bun.file(output).exists()).toBe(false);
+  }
+);
+
+it.skipIf(process.platform === 'win32')(
+  'detects a configured overlap when the nested checkpoint root is absent',
+  async () => {
+    const { root, config, output } = await fixture();
+    const alias = join(root, 'uploads-alias');
+    await symlink(config.uploads.dir, alias, 'dir');
+    config.checkpoints.dir = join(alias, 'missing', 'checkpoints');
+    await expect(
+      captureBackup(config, { output, checkpoints: false, includeSecrets: false }, 'test')
+    ).rejects.toThrow('Configured backup roots overlap: uploads and checkpoints');
+    expect(await Bun.file(output).exists()).toBe(false);
+  }
+);
+
 it('refuses an oversized file before copying and preserves an existing destination', async () => {
   const { root, config, output } = await fixture();
   const large = join(config.uploads.dir, 'large.bin');

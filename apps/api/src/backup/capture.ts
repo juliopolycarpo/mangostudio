@@ -161,10 +161,9 @@ export async function captureBackup(
       ...(fallbackDir ? [join(fallbackDir, 'secrets.json')] : []),
     ].map(resolvePathThroughExistingAncestor)
   );
-  const roots = backupRoots(config, options.checkpoints);
   const databasePath = await realpath(config.database.path);
-  const resolvedRoots = await Promise.all(
-    roots.map(async (root) => {
+  const configuredRoots = await Promise.all(
+    backupRoots(config, true).map(async (root) => {
       // Collapsing '..' across an earlier symlink can select a different
       // directory from the one the application reads. Refuse that ambiguity.
       const components =
@@ -190,6 +189,21 @@ export async function captureBackup(
         throw error;
       }
     })
+  );
+  const locations = configuredRoots.map((root) => ({
+    id: root.id,
+    path: root.present ? root.source : resolvePathThroughExistingAncestor(root.source),
+  }));
+  for (const [index, root] of locations.entries()) {
+    const overlap = locations
+      .slice(0, index)
+      .find((other) => inside(root.path, other.path) || inside(other.path, root.path));
+    if (overlap) {
+      throw new Error(`Configured backup roots overlap: ${overlap.id} and ${root.id}.`);
+    }
+  }
+  const resolvedRoots = configuredRoots.filter(
+    (root) => options.checkpoints || root.id !== 'checkpoints'
   );
   for (const root of resolvedRoots) {
     if (
@@ -288,7 +302,7 @@ export async function captureBackup(
       JSON.stringify({
         schemaVersion: 1,
         compression: 'gzip',
-        roots: Object.fromEntries(roots.map((root) => [root.id, root.id])),
+        roots: Object.fromEntries(resolvedRoots.map((root) => [root.id, root.id])),
         ...(options.includeSecrets && { auth: { secret: config.auth.secret } }),
       }),
       { mode: 0o600 }
