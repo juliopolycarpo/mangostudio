@@ -239,6 +239,18 @@ describe('skill discovery third-party sources', () => {
     ]);
   });
 
+  it('keeps a usable fallback when a higher-precedence directory cannot be scanned', async () => {
+    rmSync(agentsDir, { recursive: true });
+    writeFileSync(agentsDir, 'not a directory');
+    writeSkillIn(claudeDir, 'fallback', 'name: fallback\ndescription: Readable copy');
+    const userId = nextUserId();
+    await enableSources(userId, { agents: true, claude: true });
+
+    expect((await listUsableSkills(getDb(), userId)).map(({ key }) => key)).toEqual([
+      'claude:fallback',
+    ]);
+  });
+
   it('shadows lower-precedence copies of the same slug (mango > agents > claude)', async () => {
     writeSkill('dup', 'name: dup\ndescription: Mango copy');
     writeSkillIn(agentsDir, 'dup', 'name: dup\ndescription: Agents copy');

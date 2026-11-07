@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'bun:test';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
+import { DEFAULT_APP_SETTINGS, withLibraryLocations } from '@mangostudio/shared/app-settings';
 import type { LibraryResource } from '@mangostudio/shared/library';
+import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import Value from 'typebox/value';
 
 import { parseLibraryArgs } from '../../../src/cli/args';
@@ -47,13 +52,85 @@ describe('parseLibraryArgs', () => {
 });
 
 describe('runLibrary', () => {
+  it.each([false, true])('reports a failed location in CLI output (JSON: %s)', async (json) => {
+    const home = mkdtempSync(join(tmpdir(), 'library-cli-diagnostics-'));
+    const claudeHome = join(home, '.claude');
+    const previousClaudeHome = process.env.CLAUDE_CONFIG_DIR;
+    const lines: string[] = [];
+    try {
+      mkdirSync(claudeHome);
+      writeFileSync(join(claudeHome, 'skills'), 'not a directory');
+      process.env.CLAUDE_CONFIG_DIR = claudeHome;
+      const settings = withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
+        home: { 'claude-skills': true },
+        workspace: {},
+      });
+      await runLibrary(
+        { subcommand: null, kind: 'skill', divergent: false, json },
+        { getSettings: () => settings, listLocations: () => [], log: (line) => lines.push(line) }
+      );
+    } finally {
+      if (previousClaudeHome === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = previousClaudeHome;
+      rmSync(home, { recursive: true, force: true });
+    }
+    const output = lines.join('\n');
+    if (json) {
+      const payload = JSON.parse(output);
+      expect(Value.Check(CliLibrarySnapshotSchema, payload)).toBe(true);
+      expect(payload.locationDiagnostics).toEqual([
+        { locationId: 'claude-skills', reason: 'not-directory' },
+      ]);
+    } else {
+      expect(output).toContain('claude-skills: scan failed (not-directory)');
+      expect(output).not.toContain('(none)');
+    }
+  });
+
+  it('shows incomplete precedence while retaining the observed fallback', async () => {
+    const resource: LibraryResource = {
+      ...uniformResource,
+      instances: [
+        {
+          locationId: 'claude-skills',
+          path: '/claude/skills/other',
+          modifiedAtMs: 1,
+          format: 'markdown-frontmatter',
+          valid: true,
+          contentHash: 'observed',
+          sizeBytes: 1,
+        },
+      ],
+    };
+    const lines: string[] = [];
+    await runLibrary(
+      { subcommand: null, kind: 'skill', divergent: false, json: false },
+      {
+        discoverScan: () =>
+          Promise.resolve({
+            resources: [resource],
+            unreadableEntries: [],
+            locationDiagnostics: [{ locationId: 'agents-skills', reason: 'permission-denied' }],
+          }),
+        log: (line) => lines.push(line),
+      }
+    );
+
+    const row = lines.find((line) => line.includes('skill/other'));
+    expect(row).toContain('mangostudio:scan-incomplete');
+    expect(row).toContain('claude:present');
+  });
+
   it('lists only divergent resources when --divergent is set', async () => {
     const lines: string[] = [];
     await runLibrary(
       { subcommand: null, kind: undefined, divergent: true, json: false },
       {
-        // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
-        discoverResources: async () => [divergentResource, uniformResource],
+        discoverScan: () =>
+          Promise.resolve({
+            resources: [divergentResource, uniformResource],
+            unreadableEntries: [],
+          }),
         listLocations: () => [],
         log: (line) => lines.push(line),
       }
@@ -69,8 +146,7 @@ describe('runLibrary', () => {
     await runLibrary(
       { subcommand: 'locations', kind: undefined, divergent: false, json: true },
       {
-        // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
-        discoverResources: async () => [],
+        discoverScan: () => Promise.resolve({ resources: [], unreadableEntries: [] }),
         listLocations: () => [
           {
             id: 'mango-skills',
@@ -97,8 +173,8 @@ describe('runLibrary', () => {
     await runLibrary(
       { subcommand: null, kind: undefined, divergent: false, json: true },
       {
-        // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
-        discoverResources: async () => [uniformResource],
+        discoverScan: () =>
+          Promise.resolve({ resources: [uniformResource], unreadableEntries: [] }),
         listLocations: () => [],
         log: (line) => lines.push(line),
       }
@@ -106,5 +182,6 @@ describe('runLibrary', () => {
 
     const payload = JSON.parse(lines.join('\n'));
     expect(Value.Check(CliLibrarySnapshotSchema, payload)).toBe(true);
+    expect(payload).toEqual({ resources: [uniformResource], locations: [] });
   });
 });
