@@ -38,6 +38,7 @@ import {
   operationReceipt,
   readOperation,
   releaseOperation,
+  settleOperation,
 } from '../../operations/application/product-operation';
 import { registerActiveTurn, unregisterActiveTurn } from '../application/active-turn-registry';
 import {
@@ -652,7 +653,7 @@ export const respondStreamRoutes = (app: Elysia) =>
             );
             return operationReceipt({ ...row, state });
           } catch (error) {
-            await finishOperation(db, userId, operationId, 'unresolved');
+            await settleOperation(db, userId, operationId, 'unresolved');
             throw error;
           }
         } catch (error) {

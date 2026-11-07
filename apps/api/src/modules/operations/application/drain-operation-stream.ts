@@ -3,7 +3,7 @@ import type { StreamChunk } from '@mangostudio/shared/streaming';
 import type { Kysely } from 'kysely';
 
 import type { Database } from '../../../db/types';
-import { finishOperation } from './product-operation';
+import { settleOperation } from './product-operation';
 
 // Product receipts distinguish a known unsuccessful close from an outcome the
 // hub cannot establish. The UI activity status intentionally has fewer states.
@@ -38,7 +38,7 @@ export async function drainOperationStream(
   let hadDone = false;
   const reader = response.body?.getReader();
   if (!reader) {
-    await finishOperation(db, userId, operationId, state);
+    await settleOperation(db, userId, operationId, state);
     return;
   }
   const decoder = new TextDecoder();
@@ -83,10 +83,6 @@ export async function drainOperationStream(
     state = 'unresolved';
   } finally {
     reader.releaseLock();
-    try {
-      await finishOperation(db, userId, operationId, state, messageId);
-    } catch (error) {
-      console.error('[operation] Could not persist terminal receipt', error);
-    }
+    await settleOperation(db, userId, operationId, state, messageId);
   }
 }

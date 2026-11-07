@@ -14,6 +14,7 @@ import {
   OperationExpiredError,
   operationReceipt,
   releaseOperation,
+  settleOperation,
 } from '../../operations/application/product-operation';
 import { NoModelAvailableError } from '../application/resolve-model';
 import { sendTextMessage, UnsupportedChatRunnerError } from '../application/send-text-message';
@@ -72,23 +73,10 @@ export const respondRoutes = (app: Elysia) =>
                 result = await sendTextMessage({ ...body, userId, admittedChat: chat }, db);
               } catch {
                 // No automatic replay; the request was admitted even if execution failed.
-                try {
-                  await finishOperation(db, userId, operationId, 'failed');
-                } catch (error) {
-                  console.error('[respond] Could not persist operation failure', error);
-                }
+                await settleOperation(db, userId, operationId, 'failed');
                 return;
               }
-              try {
-                await finishOperation(db, userId, operationId, 'completed', result.aiMessage.id);
-              } catch (error) {
-                console.error('[respond] Could not persist completed receipt', error);
-                try {
-                  await finishOperation(db, userId, operationId, 'unresolved', result.aiMessage.id);
-                } catch (settlementError) {
-                  console.error('[respond] Could not persist unresolved receipt', settlementError);
-                }
-              }
+              await settleOperation(db, userId, operationId, 'completed', result.aiMessage.id);
             })();
             return operationReceipt({ ...row, state: 'running' });
           } catch (error) {

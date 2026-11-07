@@ -11,6 +11,73 @@ import type { Database, ProductOperationsTable } from '../../../db/types';
 
 // A new process cannot prove what its predecessor dispatched. It never replays that work.
 const processOwner = randomUUID();
+type TerminalState = Exclude<OperationState, 'accepted' | 'running'>;
+type TerminalReceipt = { state: TerminalState; messageId?: string };
+type PendingReceipt = TerminalReceipt & { timer: ReturnType<typeof setTimeout> };
+const pendingReceipts = new WeakMap<Kysely<Database>, Map<string, PendingReceipt>>();
+
+function receiptKey(userId: string, operationId: string) {
+  return JSON.stringify([userId, operationId]);
+}
+
+function clearPendingReceipt(
+  receipts: Map<string, PendingReceipt> | undefined,
+  key: string,
+  pending: PendingReceipt | undefined
+) {
+  if (pending && receipts?.get(key) === pending) {
+    clearTimeout(pending.timer);
+    receipts.delete(key);
+  }
+}
+
+function writeTerminalReceipt(
+  db: Kysely<Database>,
+  userId: string,
+  operationId: string,
+  { state, messageId }: TerminalReceipt
+) {
+  return db
+    .updateTable('product_operations')
+    .set({ state, ...(messageId ? { messageId } : {}) })
+    .where('userId', '=', userId)
+    .where('operationId', '=', operationId)
+    .where('owner', '=', processOwner)
+    .where('expiresAt', '>', Date.now())
+    .where('state', 'in', ['accepted', 'running'])
+    .returningAll()
+    .executeTakeFirst();
+}
+
+/**
+ * Persist an admitted operation's terminal verdict, retaining it for lookup if the write fails.
+ * @example await settleOperation(db, userId, operationId, 'completed', messageId);
+ */
+export async function settleOperation(
+  db: Kysely<Database>,
+  userId: string,
+  operationId: string,
+  state: TerminalState,
+  messageId?: string
+): Promise<void> {
+  try {
+    await writeTerminalReceipt(db, userId, operationId, { state, messageId });
+  } catch (error) {
+    console.error('[operation] Could not persist terminal receipt', error);
+    let receipts = pendingReceipts.get(db);
+    if (!receipts) {
+      receipts = new Map();
+      pendingReceipts.set(db, receipts);
+    }
+    const key = receiptKey(userId, operationId);
+    if (!receipts.has(key)) {
+      const timer = setTimeout(() => receipts.delete(key), OPERATION_RETENTION_MS);
+      timer.unref();
+      receipts.set(key, { state, messageId, timer });
+    }
+  }
+}
+
 export class OperationConflictError extends Error {}
 export class OperationExpiredError extends Error {}
 
@@ -60,7 +127,13 @@ export async function readOperation(
   }
   const row = await query.executeTakeFirst();
   if (!row) return undefined;
+
+  // Claim callers may be inside a transaction. Leave recovery to a committed lookup.
+  const receipts = db.isTransaction ? undefined : pendingReceipts.get(db);
+  const key = receiptKey(userId, operationId);
+  const pending = receipts?.get(key);
   if (row.expiresAt <= Date.now()) {
+    clearPendingReceipt(receipts, key, pending);
     if (row.result !== null) {
       await db
         .updateTable('product_operations')
@@ -72,9 +145,22 @@ export async function readOperation(
     }
     throw new OperationExpiredError('Operation receipt expired; this key cannot be reused.');
   }
-  if (row.owner !== processOwner && (row.state === 'accepted' || row.state === 'running')) {
+  if (row.state !== 'accepted' && row.state !== 'running') {
+    clearPendingReceipt(receipts, key, pending);
+  } else if (row.owner !== processOwner) {
+    clearPendingReceipt(receipts, key, pending);
     await finishOperation(db, userId, operationId, 'unresolved');
     row.state = 'unresolved';
+  } else if (pending) {
+    let settled: ProductOperationsTable | undefined;
+    try {
+      settled = await writeTerminalReceipt(db, userId, operationId, pending);
+    } catch {
+      // Leave the verdict available for the next lookup while storage is unavailable.
+      return row;
+    }
+    clearPendingReceipt(receipts, key, pending);
+    return settled ?? readOperation(db, userId, operationId, { requireOwnedChat });
   }
   return row;
 }

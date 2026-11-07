@@ -46,12 +46,14 @@ class ControlledProvider implements AIProvider {
   readonly providerType = 'openai-compatible' as const;
   calls = 0;
   directCalls = 0;
+  directFail = false;
   directEnvironment: string | undefined;
   fail = false;
   release: (() => void) | undefined;
   generateText(request: TextGenerationRequest): ReturnType<AIProvider['generateText']> {
     this.directCalls++;
     this.directEnvironment = request.environmentId;
+    if (this.directFail) return Promise.reject(new Error('controlled direct turn failure'));
     return Promise.resolve({ text: 'Answer' });
   }
   listModels(): ReturnType<AIProvider['listModels']> {
@@ -328,30 +330,48 @@ describe('durable authorized product operations over real routes/storage', () =>
     await waitFor(async () => (await receipt(operationId)).state === 'completed');
     expect(provider.directCalls).toBe(1);
   });
-  it('keeps a successful direct turn unresolved when its completed receipt write fails', async () => {
-    const operationId = 'direct-completed-write-fails';
-    await sql`CREATE TRIGGER reject_direct_completed_write
-      BEFORE UPDATE OF state ON product_operations
-      WHEN NEW.operationId = 'direct-completed-write-fails' AND NEW.state = 'completed'
-      BEGIN SELECT RAISE(ABORT, 'controlled completed receipt write failure'); END`.execute(db);
-    try {
+  it.each(['completed', 'failed'] as const)(
+    'recovers a direct turn after its %s receipt write fails',
+    async (state) => {
+      const operationId = 'direct-terminal-write-fails';
       const body = { chatId, prompt: 'Hello', model: 'operation-test', operationId };
-      expect((await app.handle(request('/respond', body))).status).toBe(200);
-      await waitFor(async () => (await receipt(operationId)).state !== 'running');
-      expect(await receipt(operationId)).toMatchObject({ state: 'unresolved' });
-      expect((await app.handle(request('/respond', body))).status).toBe(200);
-      expect(provider.directCalls).toBe(1);
+      provider.directFail = state === 'failed';
+      await sql`CREATE TEMP TABLE direct_terminal_write_attempts (operationId TEXT)`.execute(db);
+      await sql`CREATE TEMP TRIGGER reject_direct_terminal_write
+        BEFORE UPDATE OF state ON product_operations
+        WHEN NEW.operationId = 'direct-terminal-write-fails' AND NEW.state IN ('completed', 'failed')
+        BEGIN
+          INSERT INTO direct_terminal_write_attempts VALUES (NEW.operationId);
+          SELECT RAISE(FAIL, 'controlled terminal receipt write failure');
+        END`.execute(db);
+      try {
+        expect((await app.handle(request('/respond', body))).status).toBe(200);
+        await waitFor(async () => {
+          const attempts =
+            await sql`SELECT operationId FROM direct_terminal_write_attempts`.execute(db);
+          return attempts.rows.length > 0;
+        });
+      } finally {
+        await sql`DROP TRIGGER reject_direct_terminal_write`.execute(db);
+        await sql`DROP TABLE direct_terminal_write_attempts`.execute(db);
+      }
+
       const message = await db
         .selectFrom('messages')
-        .select('text')
+        .select('id')
         .where('chatId', '=', chatId)
         .where('text', '=', 'Answer')
         .executeTakeFirst();
-      expect(message?.text).toBe('Answer');
-    } finally {
-      await sql`DROP TRIGGER reject_direct_completed_write`.execute(db);
+      if (state === 'completed') expect(message?.id).toBeString();
+      else expect(message).toBeUndefined();
+      const expected = { state, messageId: message?.id ?? null };
+      expect(await receipt(operationId)).toMatchObject(expected);
+      const replay = await app.handle(request('/respond', body));
+      expect(replay.status).toBe(200);
+      expect(await replay.json()).toMatchObject(expected);
+      expect(provider.directCalls).toBe(1);
     }
-  });
+  );
   it.each(['/respond/stream', '/respond'])(
     'keeps the completed receipt when %s cannot update chat recency',
     async (path) => {
