@@ -2222,6 +2222,16 @@ export const messages: Messages = {
     },
     // Entries that could not even be named as a resource (#705) — a name has to
     // pass this pattern before it can be anything more specific.
+    scanDiagnostics: {
+      heading: 'Some library locations could not be scanned',
+      legacy:
+        'This runtime does not report location scan failures. Update it to distinguish empty locations from failed scans.',
+      reason: {
+        'permission-denied': 'Permission denied. Check access to this location.',
+        'not-directory': 'This path does not resolve to a directory.',
+        unreadable: 'This location could not be read. Check the path and try again.',
+      },
+    },
     unreadable: {
       heading: 'Unrecognised entries',
       rule: 'Names may only use letters, numbers, "_", "-", and ".", with no spaces or other characters.',

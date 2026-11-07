@@ -8281,6 +8281,39 @@
               }
             }
           },
+          "locationDiagnostics": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "locationId",
+                "reason"
+              ],
+              "properties": {
+                "locationId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "reason": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "permission-denied"
+                    },
+                    {
+                      "type": "string",
+                      "const": "not-directory"
+                    },
+                    {
+                      "type": "string",
+                      "const": "unreadable"
+                    }
+                  ]
+                }
+              }
+            }
+          },
           "unreadableEntries": {
             "type": "array",
             "items": {

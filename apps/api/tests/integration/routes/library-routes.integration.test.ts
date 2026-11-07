@@ -26,7 +26,6 @@ import {
   STATE_REQUIRES_TARGET_MESSAGE,
 } from '../../../src/modules/library/http/library-routes';
 import { LibraryCache } from '../../../src/modules/library/infrastructure/library-cache';
-import { createLibraryPathEnv } from '../../../src/modules/library/infrastructure/location-probe';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
 const TEST_USER = {
@@ -130,6 +129,28 @@ function createService(
 }
 
 describe('library routes', () => {
+  it('preserves valid rows and filters location diagnostics by scan scope only', async () => {
+    const { service } = createService();
+    service.discover = () =>
+      Promise.resolve({
+        resources: [skillResource],
+        unreadableEntries: [],
+        locationDiagnostics: [
+          { locationId: 'mango-skills', reason: 'permission-denied' },
+          { locationId: 'claude-commands', reason: 'not-directory' },
+        ],
+      });
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
+    restoreAuth = restore;
+    const response = await app.handle(new Request('http://localhost/library/resources?kind=skill'));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      resources: [skillResource],
+      unreadableEntries: [],
+      locationDiagnostics: [{ locationId: 'mango-skills', reason: 'permission-denied' }],
+    });
+  });
+
   it('filters resources by kind, target, location, and coverage state', async () => {
     const { service } = createService();
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
@@ -529,7 +550,7 @@ describe('library routes over real command locations', () => {
   }
 
   function realCommandRouteService(): LibraryRouteService {
-    const pathEnv = createLibraryPathEnv({ homeDir: home, env: {} });
+    const pathEnv = { platform: process.platform, homeDir: home, env: {} };
     const settings = withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
       home: { 'claude-commands': true, 'codex-prompts': true },
       workspace: {},

@@ -6,9 +6,7 @@
 //! a nameable entry that cannot be hashed becomes an invalid instance with a
 //! stable `invalidReason` (never a dropped row), an unnameable one becomes an
 //! `unreadableEntries` row, and only an absent path contributes nothing. The
-//! one silent case is inherited unchanged: a location directory that exists
-//! but cannot be listed contributes no rows and a diagnostic line, because
-//! the contract has no location-level slot to carry it (see `mod.rs`).
+//! location failure has its own diagnostic channel, without dropping other locations.
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
@@ -27,7 +25,10 @@ use super::hash::{
 };
 use super::js::text_decoder_decode;
 use super::names::{file_slug, is_valid_kind_slug, is_valid_resource_slug, matches_format};
-use super::types::{Instance, InvalidReason, ResourceRef, ScanEntry, ScanResult, UnreadableEntry};
+use super::types::{
+    Instance, InvalidReason, LocationDiagnostic, ResourceRef, ScanEntry, ScanResult,
+    UnreadableEntry,
+};
 use crate::probing::detection::path_env::normalize_path;
 use crate::probing::locations::{LocationDefinition, LocationLayout};
 
@@ -131,21 +132,37 @@ pub(crate) fn read_location_instances(
 
     // Collected on purpose: a location listing has no entry cap, and one
     // failing entry must still skip the whole location with a diagnostic.
-    let listed = context
-        .fs
-        .read_dir(Path::new(location_path))
+    let location_root = Path::new(location_path);
+    let entries = match context.fs.read_dir(location_root) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            match context.fs.has_entry(location_root) {
+                Ok(false) => return Ok(ScanResult::default()),
+                Ok(true) => Err(error),
+                Err(metadata_error) => Err(metadata_error),
+            }
+        }
+        result => result,
+    };
+    let listed = entries
         .and_then(|entries| entries.collect::<std::io::Result<Vec<_>>>())
-        .and_then(|names| Ok((names, context.fs.real_path(Path::new(location_path))?)));
+        .and_then(|names| Ok((names, context.fs.real_path(location_root)?)));
     let (names, canonical_location) = match listed {
         Ok(listed) => listed,
         Err(error) => {
-            if error.kind() != std::io::ErrorKind::NotFound {
-                (context.warn)(&format!(
-                    "[library] Skipping unreadable location \"{}\" at {location_path}.",
-                    location.id
-                ));
-            }
-            return Ok(ScanResult::default());
+            (context.warn)(&format!(
+                "[library] Skipping unreadable location \"{}\" at {location_path}.",
+                location.id
+            ));
+            let mut result = ScanResult::default();
+            result.location_diagnostics.push(LocationDiagnostic {
+                location_id: location.id,
+                reason: match error.kind() {
+                    std::io::ErrorKind::PermissionDenied => "permission-denied",
+                    std::io::ErrorKind::NotADirectory => "not-directory",
+                    _ => "unreadable",
+                },
+            });
+            return Ok(result);
         }
     };
 

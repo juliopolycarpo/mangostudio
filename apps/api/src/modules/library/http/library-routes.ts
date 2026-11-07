@@ -121,6 +121,13 @@ function filterLibraryScanResult(
   return {
     resources: filterLibraryResources(scan.resources, filters),
     unreadableEntries: filterUnreadableEntries(scan.unreadableEntries, filters),
+    ...(scan.locationDiagnostics !== undefined && {
+      locationDiagnostics: scan.locationDiagnostics.filter(
+        (entry) =>
+          (!filters.kind || LOCATION_KIND_BY_ID.get(entry.locationId) === filters.kind) &&
+          (!filters.location || entry.locationId === filters.location)
+      ),
+    }),
   };
 }
 

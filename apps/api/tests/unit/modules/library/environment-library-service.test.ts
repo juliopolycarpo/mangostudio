@@ -41,6 +41,22 @@ function makeManifest(
 }
 
 describe('createEnvironmentLibraryService', () => {
+  it('preserves the absence of diagnostics from a legacy runtime', async () => {
+    const service = createEnvironmentLibraryService({
+      resolveClient: () =>
+        Promise.resolve({
+          manifest: makeManifest('legacy'),
+          library: { scan: () => Promise.resolve({ entries: [], unreadableEntries: [] }) },
+        } as unknown as RuntimeClient),
+    });
+    const result = await service.discover(getDb(), {
+      userId: 'legacy-user',
+      environmentId: 'legacy',
+    });
+    expect(result.locationDiagnostics).toBeUndefined();
+    expect(result.resources).toEqual([]);
+  });
+
   it('keeps scan results partitioned by environment id', async () => {
     const userId = 'library-env-cache-user';
     const scans: string[] = [];
@@ -67,6 +83,7 @@ describe('createEnvironmentLibraryService', () => {
                   },
                 },
               ],
+              locationDiagnostics: [{ locationId: 'claude-commands', reason: 'not-directory' }],
               unreadableEntries: [],
             });
           },
@@ -103,6 +120,9 @@ describe('createEnvironmentLibraryService', () => {
       environmentId: LOCAL_ENVIRONMENT_ID,
     });
 
+    expect(local.locationDiagnostics).toEqual([
+      { locationId: 'claude-commands', reason: 'not-directory' },
+    ]);
     expect(local.resources.map((resource) => resource.ref.slug)).toEqual([LOCAL_ENVIRONMENT_ID]);
     expect(remote.resources.map((resource) => resource.ref.slug)).toEqual(['remote-a']);
     expect(localAgain.resources.map((resource) => resource.ref.slug)).toEqual([

@@ -189,13 +189,25 @@ export const LibraryUnreadableEntrySchema = Type.Object({
   reason: LibraryUnreadableEntryReasonSchema,
 });
 
+/** A failed location listing. An omitted scan-result diagnostics field denotes a legacy producer. */
+export const LibraryLocationDiagnosticSchema = Type.Object({
+  locationId: LibraryLocationIdSchema,
+  reason: Type.Union([
+    Type.Literal('permission-denied'),
+    Type.Literal('not-directory'),
+    Type.Literal('unreadable'),
+  ]),
+});
+export type LibraryLocationDiagnostic = Static<typeof LibraryLocationDiagnosticSchema>;
+
 /**
- * A scan's full answer: the resources it could name, plus the entries it could not. Kept as one
- * channel outside `resources` rather than relaxing the ref shape, so a slug is always safe to use
- * as a path segment everywhere one becomes a filesystem path.
+ * A scan's full answer: named resources, unnameable entries, and optional location diagnostics.
+ * Unnameable entries stay outside `resources` rather than relaxing the ref shape, so a slug
+ * remains safe to use as a path segment wherever one becomes a filesystem path.
  */
 export const LibraryScanResultSchema = Type.Object({
   resources: LibraryResourceListSchema,
+  locationDiagnostics: Type.Optional(Type.Array(LibraryLocationDiagnosticSchema)),
   unreadableEntries: Type.Array(LibraryUnreadableEntrySchema),
 });
 

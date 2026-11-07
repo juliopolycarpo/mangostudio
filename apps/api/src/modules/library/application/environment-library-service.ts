@@ -206,6 +206,9 @@ export function createEnvironmentLibraryService(
         // so spreading it unguarded would turn "no unreadable entries" into a
         // TypeError that takes the whole scan down.
         unreadableEntries: [...(result.unreadableEntries ?? [])],
+        ...(result.locationDiagnostics !== undefined && {
+          locationDiagnostics: [...result.locationDiagnostics],
+        }),
       };
       if (
         (scanGeneration.get(signature) ?? 0) === generationAtStart &&

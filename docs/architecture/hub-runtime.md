@@ -1289,6 +1289,21 @@ Neither version moves for an additive method. `RUNTIME_CONTRACT_VERSION` is anno
 compared, and the wire version only changes when the frame format does; an older runtime
 answers `METHOD_UNSUPPORTED`, which is a normal decodeable outcome.
 
+Library scans report location failures separately from invalid resource entries. The additive
+`locationDiagnostics` array carries `permission-denied`, `not-directory`, or `unreadable` with
+its registry location ID. A missing optional directory remains ordinary absence; an empty
+array confirms that no directory listing failed. Valid rows from other locations survive.
+A failed listing can discard that location's incomplete listing, so its absence is never proof
+that a resource can safely be removed. Old runtimes omit the field: the Hub preserves that
+absence and the UI warns that scan failure reporting is unavailable until the runtime is
+updated. Unknown-field tolerant older peers can continue reading the existing channels.
+
+Verificações da biblioteca informam falhas de locais separadamente de entradas inválidas.
+`locationDiagnostics` distingue permissão negada, arquivo em lugar de diretório e falha de
+leitura. Diretórios opcionais ausentes continuam sendo ausência normal; resultados válidos
+de outros locais são preservados. Runtimes antigos omitem esse campo e a interface avisa que
+não é possível distinguir locais vazios de falhas até atualizar o runtime.
+
 ### Vendor login PTYs
 
 A runtime advertises `terminalLoginArgv` when `terminal.open` accepts

@@ -306,6 +306,9 @@ impl LibraryFs for CountingFs {
     fn real_path(&self, path: &Path) -> std::io::Result<PathBuf> {
         NativeLibraryFs.real_path(path)
     }
+    fn has_entry(&self, path: &Path) -> std::io::Result<bool> {
+        NativeLibraryFs.has_entry(path)
+    }
     fn stat(&self, path: &Path) -> std::io::Result<FileMeta> {
         NativeLibraryFs.stat(path)
     }
@@ -409,8 +412,12 @@ async fn corrupt_and_oversized_inputs_are_reported_not_dropped() {
 /// existing location that cannot be listed contributes no rows but always
 /// emits a diagnostic naming it.
 #[tokio::test]
-async fn an_unlistable_location_is_empty_but_diagnosed() {
+async fn an_unlistable_location_preserves_other_results_and_is_diagnosed() {
     let home = scratch_dir("library-unlistable");
+    write(
+        &home.join(".claude/skills/good/SKILL.md"),
+        b"---\nname: good\n---\nGood skill\n",
+    );
     write(
         &home.join(".claude/commands"),
         b"a file where a directory belongs",
@@ -419,7 +426,10 @@ async fn an_unlistable_location_is_empty_but_diagnosed() {
     let scanned = harness
         .service
         .scan(
-            scan_params(&[("home", "claude-commands")], None),
+            scan_params(
+                &[("home", "claude-commands"), ("home", "claude-skills")],
+                None,
+            ),
             CancellationToken::new(),
         )
         .await
@@ -430,6 +440,17 @@ async fn an_unlistable_location_is_empty_but_diagnosed() {
             .iter()
             .all(|entry| entry.instance.location_id != "claude-commands")
     );
+    assert!(
+        scanned
+            .entries
+            .iter()
+            .any(|entry| entry.resource.slug == "good")
+    );
+    assert_eq!(
+        scanned.location_diagnostics[0].location_id,
+        "claude-commands"
+    );
+    assert_eq!(scanned.location_diagnostics[0].reason, "not-directory");
     let warnings = harness.warnings.lock().unwrap();
     assert!(
         warnings
@@ -437,6 +458,35 @@ async fn an_unlistable_location_is_empty_but_diagnosed() {
             .any(|warning| warning.contains("claude-commands")),
         "expected a skipped-location diagnostic | received {warnings:?}"
     );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_dangling_location_link_is_reported_as_unreadable() {
+    let home = scratch_dir("library-dangling-location");
+    let location = home.join(".mango/skills");
+    std::fs::create_dir_all(home.join(".mango")).unwrap();
+    std::os::unix::fs::symlink(home.join("missing"), &location).unwrap();
+    let harness = harness(&home, &[], Arc::new(NativeLibraryFs));
+    for override_path in [None, Some(format!("{}/", location.display()))] {
+        let mut params = scan_params(&[], None);
+        if let Some(path) = &override_path {
+            params.location_path_overrides = Some([("mango-skills".into(), path.clone())].into());
+        }
+        let scanned = harness
+            .service
+            .scan(params, CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(
+            scanned
+                .location_diagnostics
+                .first()
+                .map(|row| (row.location_id, row.reason)),
+            Some(("mango-skills", "unreadable")),
+            "expected a diagnostic for dangling skills path {override_path:?} | received {scanned:?}"
+        );
+    }
 }
 
 fn read_params(path: &Path, location_id: &str) -> ReadParams {
@@ -554,6 +604,9 @@ impl LibraryFs for CancellingFs {
     }
     fn real_path(&self, path: &Path) -> std::io::Result<PathBuf> {
         NativeLibraryFs.real_path(path)
+    }
+    fn has_entry(&self, path: &Path) -> std::io::Result<bool> {
+        NativeLibraryFs.has_entry(path)
     }
     fn stat(&self, path: &Path) -> std::io::Result<FileMeta> {
         NativeLibraryFs.stat(path)
