@@ -447,7 +447,8 @@ export async function captureBackup(
     // Inspect and flush the same opened file, rather than checking a pathname
     // and reopening a potentially different entry. Staging is owner-private;
     // O_NOFOLLOW also refuses a substituted final symlink where supported.
-    const archiveHandle = await open(archivePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    // Windows FlushFileBuffers requires write access on the descriptor.
+    const archiveHandle = await open(archivePath, constants.O_RDWR | (constants.O_NOFOLLOW ?? 0));
     try {
       const archive = await archiveHandle.stat();
       if (!archive.isFile()) throw new Error('Backup archive is not a regular file.');

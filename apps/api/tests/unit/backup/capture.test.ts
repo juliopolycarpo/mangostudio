@@ -352,6 +352,27 @@ it.each(['original archive', 'successor'])(
   }
 );
 
+it('opens the staged archive with write access for the publication flush', async () => {
+  const { config, output } = await fixture();
+  const open = fs.open;
+  const flagsSeen: number[] = [];
+  function recordArchiveOpen(...args: Parameters<typeof open>) {
+    const [path, flags] = args;
+    if (basename(String(path)) === 'archive.tar.gz') flagsSeen.push(Number(flags));
+    return open(...args);
+  }
+
+  const opener = spyOn(fs, 'open').mockImplementation(recordArchiveOpen);
+  try {
+    await captureBackup(config, { output, checkpoints: true, includeSecrets: false }, 'test');
+    expect(flagsSeen).toHaveLength(1);
+    expect((flagsSeen[0] ?? 0) & constants.O_RDWR).toBe(constants.O_RDWR);
+    expect(await Bun.file(output).exists()).toBe(true);
+  } finally {
+    opener.mockRestore();
+  }
+});
+
 it('reports success and releases capture ownership when cleanup fails after publication', async () => {
   const { config, output } = await fixture();
   const remove = fs.rm;
