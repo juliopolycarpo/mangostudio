@@ -36,7 +36,9 @@ afterEach(async () => {
 });
 
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), 'mango-capture-test-'));
+  // Capture resolves paths before I/O. Keep race fixture paths identical
+  // even when the system temporary directory has an alias.
+  const root = await mkdtemp(join(await fs.realpath(tmpdir()), 'mango-capture-test-'));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const config = {
     ...getConfig(),
