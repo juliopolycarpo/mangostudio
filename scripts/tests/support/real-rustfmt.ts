@@ -11,6 +11,7 @@ interface QueryResult {
 }
 
 interface RustfmtDiscovery {
+  readonly platform: NodeJS.Platform;
   which(command: string): string | null;
   query(command: string[], env: NodeJS.ProcessEnv): QueryResult;
   isFile(path: string): boolean;
@@ -27,6 +28,7 @@ interface RustfmtSelection {
 }
 
 const nativeDiscovery: RustfmtDiscovery = {
+  platform: process.platform,
   which: (command) => Bun.which(command),
   query(command, env) {
     const result = Bun.spawnSync(command, { env, stdout: 'pipe', stderr: 'pipe', timeout: 5000 });
@@ -64,6 +66,18 @@ function boundedDiagnostic(value: string): string {
     : `${value.slice(0, limit)}...[truncated, ${value.length} characters]`;
 }
 
+function describeQuery(command: string[], result: QueryResult): string {
+  return JSON.stringify({
+    command: command.map(boundedDiagnostic),
+    exitCode: result.exitCode,
+    signalCode: result.signalCode,
+    exitedDueToTimeout: result.exitedDueToTimeout,
+    exitedDueToMaxBuffer: result.exitedDueToMaxBuffer,
+    stdout: boundedDiagnostic(result.stdout),
+    stderr: boundedDiagnostic(result.stderr),
+  });
+}
+
 function requireNonInstallingRustup(
   discovery: RustfmtDiscovery,
   rustup: string,
@@ -71,7 +85,18 @@ function requireNonInstallingRustup(
 ): void {
   // Unlike --version, --help does not resolve or install the active toolchain.
   const command = [rustup, '--help'];
-  const result = discovery.query(command, env);
+  let result = discovery.query(command, env);
+  if (
+    discovery.platform === 'win32' &&
+    result.exitCode === null &&
+    result.exitedDueToTimeout &&
+    !result.exitedDueToMaxBuffer
+  ) {
+    console.warn(
+      `real rustfmt discovery: retrying timed-out rustup help once | received: ${describeQuery(command, result)}`
+    );
+    result = discovery.query(command, env);
+  }
   const line = result.stdout.split(/\r?\n/, 1)[0];
   const version = /^rustup (\d+)\.(\d+)\.(\d+)(?: \([^\r\n]*\))?$/.exec(line);
   const parts = version?.slice(1).map(Number);
@@ -86,17 +111,7 @@ function requireNonInstallingRustup(
     if (major > 1 || (major === 1 && (minor > 28 || (minor === 28 && patch >= 1)))) return;
   }
   throw new Error(
-    `real rustfmt discovery: expected ${result.exitCode === 0 && !result.signalCode && !result.exitedDueToTimeout && !result.exitedDueToMaxBuffer ? 'rustup 1.28.1 or newer with non-installing lookup' : 'successful rustup help query'} | received: ${JSON.stringify(
-      {
-        command: command.map(boundedDiagnostic),
-        exitCode: result.exitCode,
-        signalCode: result.signalCode,
-        exitedDueToTimeout: result.exitedDueToTimeout,
-        exitedDueToMaxBuffer: result.exitedDueToMaxBuffer,
-        stdout: boundedDiagnostic(result.stdout),
-        stderr: boundedDiagnostic(result.stderr),
-      }
-    )}`
+    `real rustfmt discovery: expected ${result.exitCode === 0 && !result.signalCode && !result.exitedDueToTimeout && !result.exitedDueToMaxBuffer ? 'rustup 1.28.1 or newer with non-installing lookup' : 'successful rustup help query'} | received: ${describeQuery(command, result)}`
   );
 }
 
@@ -155,17 +170,8 @@ export function discoverRealRustfmt(
       if (missingToolchain)
         return { ...selection, unavailable: 'the pinned Rust toolchain is unavailable' };
     }
-    const diagnostic = {
-      command: command.map(boundedDiagnostic),
-      exitCode: result.exitCode,
-      signalCode: result.signalCode,
-      exitedDueToTimeout: result.exitedDueToTimeout,
-      exitedDueToMaxBuffer: result.exitedDueToMaxBuffer,
-      stdout: boundedDiagnostic(result.stdout),
-      stderr: boundedDiagnostic(result.stderr),
-    };
     throw new Error(
-      `real rustfmt discovery: expected a successful rustfmt lookup or confirmed missing component or toolchain | received: ${JSON.stringify(diagnostic)}`
+      `real rustfmt discovery: expected a successful rustfmt lookup or confirmed missing component or toolchain | received: ${describeQuery(command, result)}`
     );
   }
   return { ...selection, path: validateFormatter(result.stdout.trim(), discovery) };
