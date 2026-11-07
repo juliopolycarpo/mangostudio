@@ -1,6 +1,6 @@
 import { copyFileSync, linkSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 
 let compiledLauncher: string | undefined;
 const executableSuffix = process.platform === 'win32' ? '.exe' : '';
@@ -52,34 +52,47 @@ export function fakeCliEnvironment(
   return environment;
 }
 
+/**
+ * Remove the launcher's private cache after the Bun worker finishes its suite.
+ * @example afterAll(disposeCompiledFakeCli);
+ */
+export function disposeCompiledFakeCli(): void {
+  if (!compiledLauncher) return;
+  rmSync(dirname(compiledLauncher), { recursive: true, force: true });
+  compiledLauncher = undefined;
+}
+
 function compileLauncher(): string {
   const directory = mkdtempSync(join(tmpdir(), 'mango-fake-cli-'));
   const entrypoint = join(directory, 'launcher.ts');
   const executable = join(directory, `launcher${executableSuffix}`);
-  writeFileSync(
-    entrypoint,
-    `const result = Bun.spawnSync([${JSON.stringify(process.execPath)}, process.execPath + '.ts', ...process.argv.slice(2)], {
-      stdin: 'inherit', stdout: 'inherit', stderr: 'inherit',
-    });
-    process.exit(result.exitCode ?? 1);
-    `
-  );
-  const result = Bun.spawnSync([
-    process.execPath,
-    'build',
-    '--compile',
-    '--no-compile-autoload-dotenv',
-    '--no-compile-autoload-bunfig',
-    entrypoint,
-    '--outfile',
-    executable,
-  ]);
-  if (result.exitCode !== 0) {
-    rmSync(directory, { recursive: true, force: true });
-    throw new Error(
-      `Expected native CLI fixture compilation exit 0 | received: ${result.exitCode} ${result.stderr.toString()}`
+  try {
+    writeFileSync(
+      entrypoint,
+      `const result = Bun.spawnSync([${JSON.stringify(process.execPath)}, process.execPath + '.ts', ...process.argv.slice(2)], {
+        stdin: 'inherit', stdout: 'inherit', stderr: 'inherit',
+      });
+      process.exit(result.exitCode ?? 1);
+      `
     );
+    const result = Bun.spawnSync([
+      process.execPath,
+      'build',
+      '--compile',
+      '--no-compile-autoload-dotenv',
+      '--no-compile-autoload-bunfig',
+      entrypoint,
+      '--outfile',
+      executable,
+    ]);
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `Expected native CLI fixture compilation exit 0 | received: ${result.exitCode} ${result.stderr.toString()}`
+      );
+    }
+    return executable;
+  } catch (error) {
+    rmSync(directory, { recursive: true, force: true });
+    throw error;
   }
-  process.once('exit', () => rmSync(directory, { recursive: true, force: true }));
-  return executable;
 }

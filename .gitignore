@@ -6,6 +6,9 @@ dist/
 .dist-backup-*/
 .dist-metafile-staging-*
 .dist-metafile-backup-*
+# Bun compile leaves hidden scratch files briefly at the root or in a workspace.
+# Ignore only its exact basename shape so Turbo inputs stay stable.
+.[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]-[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].bun-build
 # The standalone build parks the previous frontend bundle here while it rebuilds
 # (`frontendDistAsidePath` in scripts/lib/build.ts). Turbo hashes every file Git
 # does not ignore, so an unignored copy changes the frontend task hash and turns
