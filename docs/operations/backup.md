@@ -15,17 +15,21 @@ The command resolves the configured database, uploads, generated images, tool av
 agent definitions, skills and checkpoints. Checkpoints are included unless explicitly
 omitted. Profile/app settings and user history live in the database. Missing optional roots
 are recorded in the manifest. A present unreadable root, unsupported filename, case collision,
-symlink (including a configured root itself, even if dangling) or special file fails the entire capture. The output must be outside the source
-roots, on a filesystem supporting hard links; existing destinations are never replaced.
-Directory roots containing a `..` component are refused; configure the actual explicit
-directory path without parent traversal. Collapsing `..` after an intermediate symlink
-can select a different directory from the one the application reads.
+symlink (including a configured root itself, even if dangling), multiply linked file or
+special file fails the entire capture. All configured roots must be disjoint, including
+checkpoints when omitted. The output must be outside those roots and on a filesystem
+that supports hard links. Capture refuses existing destinations before staging.
+Use explicit directory paths without `..` components. Collapsing `..` after an
+intermediate symlink can select a different directory from the one the application reads.
 
 ## Consistency boundary
 
 Hub startup and capture share an exclusive SQLite lock beside the configured database.
 The OS releases ownership if either process crashes; never unlink the lock database while
-processes might use it. A pre-upgrade running Hub is also refused through its state file.
+processes might use it. Both the lock and database must be regular files with one link.
+A pre-upgrade running Hub is also refused through its state file. On shutdown, the Hub
+waits for admitted generation work to settle before releasing ownership. If shutdown
+runs out of time, the Hub exits with a failure and the OS releases the lock on exit.
 Capture holds a SQLite write reservation while reading committed WAL pages and staging
 referenced files. This reservation prevents concurrent database writes; the stopped Hub
 prevents the application's media writes. Directory/file identity, size and timestamps are
@@ -48,10 +52,13 @@ can carry arbitrary credentials. Account credentials/password hashes, sessions, 
 values, API keys, pairing tokens, secret metadata, provider continuation state, audit/logging,
 install state and unrecognized table rows are removed. Redaction and vacuum operate on a
 private copy, never the source database. The retained Kysely migration ledger describes its
-schema; restore must validate migration compatibility before using it.
+schema. A restore must validate migration compatibility before using it. Operation
+receipts keep their IDs and terminal outcomes so settings references remain valid.
+Capture removes private result snapshots and marks accepted or running work unresolved.
 
 The directory walk excludes .env variants, credential/token/secret files by name, private key
 formats, SSH identity filenames, .git, node_modules, caches, logs, audit and run directories.
+It also excludes resolved managed secret paths and temporary files from atomic secret writes.
 All remaining user content is copied verbatim: conversations, uploads, skills and checkpoint
 contents may themselves contain secrets. This policy excludes application-managed credentials;
 it cannot classify secrets embedded in arbitrary user-authored text or binary files. Inspect
@@ -78,7 +85,7 @@ database), 128 MiB total expanded data, 140 MiB compressed output and depth 32. 
 is fixed to gzip level 6; input bounds also bound expansion and memory use. It refuses
 Windows-reserved names, forbidden characters, trailing dots/spaces and case/Unicode collisions.
 Staging is adjacent to the destination, private (0700 directory / 0600 files on POSIX),
-and removed on success, cancellation or failure. On Windows, the current user SID is resolved
+and cleaned up after capture. On Windows, the current user SID is resolved
 with whoami and icacls removes inherited grants and grants that user full access before
 any data is staged. Failure to establish this ACL refuses capture. Choose a private destination
 directory as well. Archive size, permissions and flush operate on one opened descriptor;
@@ -89,11 +96,9 @@ Cancellation is checked between bounded operations;
 a single SQLite/compression operation finishes before cancellation is observed.
 
 The archive is flushed and published through an exclusive atomic hard link, so success
-never names a partly written file. A failed or canceled capture reports an error and removes
-its temporary files; no partial success is returned. A crash can leave private
-`.mango-backup-*` staging, which an operator may remove after confirming the process stopped.
-A crash after publication can leave a complete archive without a success message; validate
-its manifest rather than assuming it failed. Source data and pre-existing output remain intact.
-
-Native macOS/Windows execution, full-suite CI and recovery round trips remain required
-qualification before declaring the backup/restore plan complete.
+never names a partly written file. Failures and cancellation before publication leave no
+output. Once the link succeeds, cancellation leaves the complete archive in place and
+any cleanup failure is reported as a warning. A crash or cleanup failure can leave private
+`.mango-backup-*` staging. Remove it after confirming the process stopped. A crash after
+publication can leave a complete archive without a success message. Verify its manifest
+and member hashes before relying on it.

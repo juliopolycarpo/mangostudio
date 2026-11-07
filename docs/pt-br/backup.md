@@ -13,18 +13,22 @@ arquivo sobre uma instalação em execução. O backup resolve os caminhos confi
 banco, uploads, imagens geradas, avatares, agentes, skills e checkpoints. Checkpoints são
 incluídos por padrão. Perfis, preferências e histórico estão no banco. Raízes opcionais
 ausentes são registradas; locais ilegíveis, links, arquivos especiais, nomes não portáteis
-ou colisões de nomes interrompem a captura inteira. Links na própria raiz configurada são
-recusados, mesmo quando o destino não existe. O destino deve ficar fora das raízes
-e suportar hard links. Arquivos de destino existentes nunca são substituídos.
-Raízes de diretório com componentes `..` são recusadas. Configure o caminho explícito do
-diretório, sem navegação para o pai: remover `..` após um link intermediário pode selecionar
-outro diretório, diferente daquele que a aplicação lê.
+ou colisões de nomes interrompem a captura inteira, assim como arquivos com mais de um
+hard link. Links simbólicos na própria raiz configurada são recusados mesmo quando o
+destino não existe. As raízes configuradas não podem se sobrepor, mesmo quando os
+checkpoints são omitidos. O destino deve ficar fora dessas raízes e em um sistema de
+arquivos que aceite hard links. A captura recusa destinos existentes antes de preparar
+os arquivos. Configure caminhos explícitos sem componentes `..`. Remover `..` após
+um link intermediário pode selecionar um diretório diferente do que a aplicação lê.
 
 ## Consistência e privacidade
 
 A inicialização do Hub e a captura usam a mesma trava SQLite exclusiva ao lado do banco.
 O sistema libera a posse se o processo morrer; nunca remova o banco de trava enquanto
-algum processo puder usá-lo. Um Hub antigo ativo também é recusado pelo arquivo de estado.
+algum processo puder usá-lo. O banco e o arquivo de trava precisam ser arquivos regulares
+com um único link. Um Hub antigo ativo também é recusado pelo arquivo de estado. Ao
+encerrar, o Hub aguarda as gerações aceitas terminarem antes de liberar a trava. Se o
+prazo de encerramento se esgotar, o Hub sai com erro e o sistema libera a trava na saída.
 Durante a cópia, uma reserva de escrita SQLite impede alterações no banco. O snapshot inclui
 as páginas confirmadas do WAL. Com o Hub parado, não há escritas de mídia da aplicação.
 Identidade, tamanho e timestamps dos arquivos e diretórios são comparados antes de publicar;
@@ -42,10 +46,15 @@ agentes são omitidos conservadoramente. Credenciais de contas, hashes de senha,
 verificações, chaves de API, tokens de pareamento, metadados de segredos, continuidade de
 providers, auditoria, instalações e linhas de tabelas desconhecidas são removidos. A
 redaction e o vacuum alteram somente a cópia privada. O ledger de migrações permanece;
-a futura restauração deve validar sua compatibilidade.
+a futura restauração deve validar sua compatibilidade. Os registros de operações mantêm
+seus IDs e resultados finais para preservar as referências das preferências. A captura
+remove as cópias privadas dos resultados e marca operações aceitas ou em execução como
+não resolvidas.
 
 A leitura exclui nomes conhecidos de credenciais, tokens, segredos, variantes .env,
 formatos de chaves privadas, identidades SSH, .git, node_modules, caches, logs, audit e run.
+Também ficam de fora os caminhos resolvidos de segredos gerenciados e os arquivos
+temporários das gravações atômicas de segredos.
 O conteúdo do usuário restante é copiado literalmente: conversas, uploads, skills e
 checkpoints podem conter segredos inseridos pelo usuário. A política exclui credenciais
 gerenciadas pela aplicação; ela não identifica segredos arbitrários em texto ou binários.
@@ -81,11 +90,10 @@ Cancelamentos
 são observados entre operações limitadas; uma operação SQLite/compressão em curso termina
 antes da observação do cancelamento.
 
-O arquivo é sincronizado e publicado por hard link atômico exclusivo. Falhas/cancelamentos
-removem temporários e não retornam sucesso parcial. Um crash pode deixar staging privado
-`.mango-backup-*`; remova-o somente após confirmar que o processo parou. Se o crash ocorrer
-após publicar, pode existir um arquivo completo sem mensagem de sucesso: valide o manifesto.
-O banco de origem e arquivos de destino preexistentes são preservados.
-
-Execução nativa em macOS/Windows, suíte completa e round trips de recuperação continuam
-pendentes antes de concluir o plano de backup/restore.
+O arquivo é sincronizado e publicado por hard link atômico exclusivo. Falhas e
+cancelamentos antes da publicação não deixam arquivo no destino. Após a criação do link,
+um cancelamento preserva o arquivo completo e uma falha na limpeza gera um aviso. Uma
+interrupção ou falha na limpeza pode deixar o staging privado `.mango-backup-*`. Remova-o
+após confirmar que o processo parou. Uma interrupção após a publicação pode deixar um
+arquivo completo sem mensagem de sucesso. Verifique o manifesto e os hashes dos membros
+antes de usar o arquivo.
