@@ -13,10 +13,11 @@
 import { afterEach, describe, expect, it, jest } from 'bun:test';
 
 import { en } from '@mangostudio/shared/i18n';
+import { onlineManager } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 
 import { PropagationWizard } from '../../../../src/features/library/components/PropagationWizard';
-import { screen, within } from '../../../support/harness/render';
+import { act, screen, within } from '../../../support/harness/render';
 import { renderWithRouter } from '../../../support/harness/render-with-router';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
 import { location, preview, previewEntry, sourceGroup } from './fixtures';
@@ -93,6 +94,67 @@ function scenarioFor(answer: ReturnType<typeof preview>) {
 }
 
 describe('PropagationWizard steps', () => {
+  it.each([false, true])(
+    'requires a fresh decision after an incomplete reconnect refresh (retry fails: %s)',
+    async (retryFails) => {
+      const own = scenarioFor(divergent);
+      own.install();
+      const onlineBefore = onlineManager.isOnline();
+      try {
+        await renderWithRouter(
+          <PropagationWizard
+            resourceKeys={['skill:gh']}
+            locationIds={['agents-skills']}
+            onClose={() => undefined}
+          />
+        );
+        await userEvent.setup().click(await screen.findByTestId('keep-per-location'));
+        expect(screen.getByTestId('continue-button')).toBeEnabled();
+
+        const incomplete = {
+          ...divergent,
+          previewToken: 'incomplete',
+          entries: divergent.entries.map((entry) => ({ ...entry, sourceScanIncomplete: true })),
+        };
+        own.respondWithJson('POST', '/api/library/propagate/preview', { body: incomplete });
+        act(() => {
+          onlineManager.setOnline(false);
+          onlineManager.setOnline(true);
+        });
+
+        expect(
+          await screen.findByText(en.library.conflict.keepPerLocation.scanIncomplete)
+        ).toBeInTheDocument();
+        expect(screen.getByTestId('continue-button')).toBeDisabled();
+        expect(screen.getByTestId('stale-preview')).toBeInTheDocument();
+
+        const user = userEvent.setup();
+        if (retryFails) {
+          own.respondWithJson('POST', '/api/library/propagate/preview', {
+            status: 500,
+            body: { error: 'injected preview failure', code: 'INTERNAL' },
+          });
+        }
+        await user.click(screen.getByRole('button', { name: en.library.wizard.restale }));
+        expect(screen.queryByTestId('stale-preview')).not.toBeInTheDocument();
+        if (retryFails) {
+          expect(await screen.findByTestId('library-error')).toBeInTheDocument();
+          own.respondWithJson('POST', '/api/library/propagate/preview', { body: incomplete });
+          act(() => {
+            onlineManager.setOnline(false);
+            onlineManager.setOnline(true);
+          });
+          expect(await screen.findByTestId('conflict-step')).toBeInTheDocument();
+        }
+        await user.click(screen.getAllByTestId('adopt-group')[0]);
+        expect(screen.getByTestId('continue-button')).toBeEnabled();
+      } finally {
+        onlineManager.setOnline(onlineBefore);
+        own.restore();
+      }
+    }
+  );
+
   it('opens on the destinations when every resource has one readable version', async () => {
     const own = scenarioFor(preview());
     own.install();

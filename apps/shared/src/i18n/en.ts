@@ -2385,6 +2385,7 @@ export const messages: Messages = {
       unresolved: '{count} resources still need a decision.',
       adopt: 'Use this version',
       keepPerLocation: {
+        scanIncomplete: 'Rescan the failed location before keeping these versions.',
         title: 'Keep them different',
         description:
           'Sometimes copies should differ. The divergence stops being flagged until one of the contents changes again.',
@@ -2452,6 +2453,7 @@ export const messages: Messages = {
       'read-only-location': 'This location is read-only.',
       'unsupported-location': 'This location does not exist on this platform.',
       'location-unwritable': 'MangoStudio cannot write to this location.',
+      'location-scan-failed': 'This location could not be scanned. Check access and preview again.',
       'slug-mismatch': 'This location stores a single resource, and this is not it.',
       'invalid-destination':
         'The copy already here could not be read, so overwriting it is not safe.',

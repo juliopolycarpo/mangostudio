@@ -121,7 +121,10 @@ function settings(locationIds: readonly LibraryLocationId[]): typeof DEFAULT_APP
   });
 }
 
-function preview(request: PropagationPreviewRequest): Promise<PropagationPreview> {
+function preview(
+  request: PropagationPreviewRequest,
+  failedLocationIds?: readonly LibraryLocationId[]
+): Promise<PropagationPreview> {
   const env = pathEnv();
   const cache = new LibraryCache();
   const enabled = settings([
@@ -134,6 +137,7 @@ function preview(request: PropagationPreviewRequest): Promise<PropagationPreview
   return previewLibraryPropagation(userId(), request, {
     snapshot: async (scanUserId, environmentId, kinds) => ({
       environmentId,
+      ...(failedLocationIds && { failedLocationIds: new Set(failedLocationIds) }),
       resources: (
         await discoverLibraryResources(getDb(), scanUserId, {
           force: true,
@@ -409,6 +413,48 @@ describe('propagation apply — file-backed resources', () => {
  */
 
 describe('propagation apply — request validation', () => {
+  it('requires a fresh preview when the failed source scan hides the only copy', async () => {
+    writeSkill('mango-skills', 'only source');
+    makeDirectories('claude-skills');
+    const request: PropagationPreviewRequest = {
+      resourceKeys: ['skill:gh'],
+      targetLocationIds: ['claude-skills'],
+    };
+    const taken = await preview(request);
+    const entry = onlyEntry(taken);
+    rmSync(skillPath('mango-skills'), { recursive: true });
+
+    await expect(
+      applyLibraryPropagation(
+        userId(),
+        toRequest(taken, request, [adoptAll(entry, winnerFrom(entry, 'mango-skills'))]),
+        applyDeps({ preview: (_userId, freshRequest) => preview(freshRequest, ['mango-skills']) })
+      )
+    ).rejects.toMatchObject({ status: 409 });
+    expect(existsSync(skillPath('claude-skills'))).toBe(false);
+  });
+
+  it('refuses an unchanged destination whose scan fails between preview and apply', async () => {
+    writeSkill('mango-skills', 'source content');
+    makeDirectories('claude-skills');
+    const request: PropagationPreviewRequest = {
+      resourceKeys: ['skill:gh'],
+      targetLocationIds: ['claude-skills'],
+    };
+    const taken = await preview(request);
+    const entry = onlyEntry(taken);
+    expect(entry.destinations[0]?.outcomes[0]?.operation).toBe('create');
+
+    await expect(
+      applyLibraryPropagation(
+        userId(),
+        toRequest(taken, request, [adoptAll(entry, winnerFrom(entry, 'mango-skills'))]),
+        applyDeps({ preview: (_userId, freshRequest) => preview(freshRequest, ['claude-skills']) })
+      )
+    ).rejects.toMatchObject({ status: 409 });
+    expect(existsSync(skillPath('claude-skills'))).toBe(false);
+  });
+
   // A location the scanner skips reports every destination as `create`, so an
   // apply would overwrite real content while the preview claimed there was none.
   it('refuses to preview a location the user has not enabled', async () => {
@@ -767,6 +813,7 @@ const REMOTE_MACHINES: Record<string, readonly (readonly [LibraryLocationId, str
 interface RemoteMachineState {
   readonly hashDomains?: Readonly<Record<string, number>>;
   readonly offline?: readonly string[];
+  readonly failedLocations?: Readonly<Record<string, readonly LibraryLocationId[]>>;
 }
 
 /** A preview over machines that report their own copies through their own runtimes. */
@@ -778,19 +825,24 @@ function previewRemoteMachines(
   const enabled = settings(SKILL_LOCATIONS);
   return previewLibraryPropagation(userId(), request, {
     // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
-    snapshot: async (_userId, environmentId) => ({
-      environmentId,
-      ...(machines.offline?.includes(environmentId) && {
-        blockedReason: 'environment-offline' as const,
-      }),
-      resources: machines.offline?.includes(environmentId)
-        ? []
-        : remoteScan(REMOTE_MACHINES[environmentId] ?? []),
-      statuses: new Map(
-        request.targetLocationIds.map((id) => [id, describeLocation(id, env)] as const)
-      ),
-      directoryHashDomain: machines.hashDomains?.[environmentId] ?? directoryHashDomainVersion(),
-    }),
+    snapshot: async (_userId, environmentId) => {
+      const failedLocationIds = new Set(machines.failedLocations?.[environmentId]);
+      const offline = machines.offline?.includes(environmentId);
+      return {
+        environmentId,
+        ...(offline && { blockedReason: 'environment-offline' as const }),
+        failedLocationIds,
+        resources: offline
+          ? []
+          : remoteScan(
+              (REMOTE_MACHINES[environmentId] ?? []).filter(([id]) => !failedLocationIds.has(id))
+            ),
+        statuses: new Map(
+          request.targetLocationIds.map((id) => [id, describeLocation(id, env)] as const)
+        ),
+        directoryHashDomain: machines.hashDomains?.[environmentId] ?? directoryHashDomainVersion(),
+      };
+    },
     // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
     enabledLocationIds: async () => enabledLibraryLocations(libraryLocationsFor(enabled), 'home'),
   });
@@ -800,11 +852,12 @@ describe('propagation apply — keeping a divergence across machines', () => {
   /** Keeps the divergence over `environmentIds`, with the real acknowledgement path. */
   async function keepDivergence(
     environmentIds: readonly string[],
-    machines: RemoteMachineState = {}
+    machines: RemoteMachineState = {},
+    targetLocationIds: LibraryLocationId[] = ['claude-skills', 'agents-skills']
   ) {
     const request: PropagationPreviewRequest = {
       resourceKeys: [REMOTE_SKILL_KEY],
-      targetLocationIds: ['claude-skills', 'agents-skills'],
+      targetLocationIds,
       environmentIds: [...environmentIds],
     };
     const taken = await previewRemoteMachines(request, machines);
@@ -866,6 +919,23 @@ describe('propagation apply — keeping a divergence across machines', () => {
       outcome: `rejected: "${REMOTE_SKILL_KEY}" cannot keep its divergence while "box-b" could not be scanned (environment-offline): expected every selected machine to answer. Preview again once it is reachable.`,
       stored: [{ resourceKey: REMOTE_SKILL_KEY, contentHashes: first.reviewed }],
     });
+  });
+
+  it('preserves the saved divergence when an unselected source location fails to scan', async () => {
+    const first = await keepDivergence(['box-a', 'box-b']);
+    expect(first.outcome).toBe('applied');
+    const second = await keepDivergence(
+      ['box-a', 'box-b'],
+      { failedLocations: { 'box-b': ['claude-skills'] } },
+      ['agents-skills']
+    );
+
+    expect(second.outcome).toMatch(
+      /cannot keep its divergence while a source location could not be scanned/
+    );
+    expect(second.stored).toEqual([
+      { resourceKey: REMOTE_SKILL_KEY, contentHashes: first.reviewed },
+    ]);
   });
 
   it('refuses to keep hashes that runtimes computed in different directory domains', async () => {

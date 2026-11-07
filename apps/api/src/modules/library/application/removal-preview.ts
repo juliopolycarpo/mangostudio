@@ -47,7 +47,11 @@ import { LibraryRequestError } from '../domain/library-request-error';
 import { createLibraryPathEnv } from '../infrastructure/location-probe';
 import { findStagedRemovalsForLocations } from '../infrastructure/tree-removal';
 import { compareText, hashJson, hashLibraryState } from './preview-state';
-import { type EnvironmentSnapshot, readEnvironmentSnapshot } from './propagation-preview';
+import {
+  assertResourcesObserved,
+  type EnvironmentSnapshot,
+  readEnvironmentSnapshot,
+} from './propagation-preview';
 
 export interface RemovalPreviewDeps {
   /** Always a forced rescan: previewing a deletion against stale state is worse than not previewing. */
@@ -128,15 +132,8 @@ export async function previewLibraryRemoval(
 
   // Present *somewhere* in scope. Requiring it on every machine would make
   // "remove this from the box that still has it" a 404.
+  assertResourcesObserved(refs, snapshots);
   const requested = [...refs.keys()];
-  const found = new Set(
-    snapshots.flatMap((snapshot) => snapshot.resources.map((resource) => resource.key))
-  );
-  for (const key of requested) {
-    if (!found.has(key)) {
-      throw new LibraryRequestError(404, `Library resource "${key}" was not found.`);
-    }
-  }
 
   const leftovers = (
     await Promise.all(
@@ -260,7 +257,9 @@ function buildRemovalEntry(
         // sends the user after the wrong thing.
         blockedReason:
           environmentBlockedReason(snapshot.blockedReason) ??
-          removalBlockedReason(location, snapshot.statuses.get(location.id), instance),
+          (snapshot.failedLocationIds?.has(location.id)
+            ? 'location-scan-failed'
+            : removalBlockedReason(location, snapshot.statuses.get(location.id), instance)),
       };
     });
   });

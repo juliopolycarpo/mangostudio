@@ -39,6 +39,25 @@ const divergentPreview = preview([
 ]);
 
 describe('ConflictStep', () => {
+  it('disables keeping versions while a source scan is incomplete', async () => {
+    const incomplete = preview(
+      divergentPreview.entries.map((entry) => ({ ...entry, sourceScanIncomplete: true }))
+    );
+    const draft = initialDraft(incomplete);
+
+    await renderWithRouter(
+      <ConflictStep
+        preview={incomplete}
+        draft={draft}
+        unresolved={unresolvedEntries(incomplete, draft)}
+        onResolve={() => undefined}
+      />
+    );
+
+    expect(screen.getByTestId('keep-per-location')).toBeDisabled();
+    expect(screen.getByText(en.library.conflict.keepPerLocation.scanIncomplete)).toBeVisible();
+  });
+
   it('offers no default winner and reports the resource as unresolved', async () => {
     const draft = initialDraft(divergentPreview);
 
@@ -147,38 +166,44 @@ describe('DestinationStep', () => {
     );
   });
 
-  it('disables a read-only destination and says why', async () => {
-    const readOnly = preview([
-      previewEntry({
-        destinations: [
-          destination({
-            locationId: 'cursor-skills-builtin',
-            targetIds: ['cursor'],
-            blockedReason: 'read-only-location',
-            outcomes: [],
-          }),
-        ],
-      }),
-    ]);
+  it.each([
+    { blockedReason: 'read-only-location', id: 'cursor-skills-builtin', access: 'read-only' },
+    { blockedReason: 'location-scan-failed', id: 'cursor-skills', access: 'read-write' },
+  ] as const)(
+    'disables a destination blocked by $blockedReason and says why',
+    async ({ blockedReason, id, access }) => {
+      const blocked = preview([
+        previewEntry({
+          destinations: [
+            destination({
+              locationId: id,
+              targetIds: ['cursor'],
+              blockedReason,
+              outcomes: [],
+            }),
+          ],
+        }),
+      ]);
 
-    await renderWithRouter(
-      <DestinationStep
-        environmentName={(id: string) => id}
-        preview={readOnly}
-        draft={initialDraft(readOnly)}
-        locations={[
-          location({ id: 'cursor-skills-builtin', access: 'read-only', targetIds: ['cursor'] }),
-        ]}
-        onToggle={() => undefined}
-      />
-    );
+      await renderWithRouter(
+        <DestinationStep
+          environmentName={(id: string) => id}
+          preview={blocked}
+          draft={initialDraft(blocked)}
+          locations={[
+            location({ id, access, writable: access === 'read-write', targetIds: ['cursor'] }),
+          ]}
+          onToggle={() => undefined}
+        />
+      );
 
-    const row = screen.getByTestId('destination-row');
-    expect(within(row).getByRole('checkbox')).toBeDisabled();
-    expect(within(row).getByTestId('blocked-reason')).toHaveTextContent(
-      en.library.blockedReason['read-only-location']
-    );
-  });
+      const row = screen.getByTestId('destination-row');
+      expect(within(row).getByRole('checkbox')).toBeDisabled();
+      expect(within(row).getByTestId('blocked-reason')).toHaveTextContent(
+        en.library.blockedReason[blockedReason]
+      );
+    }
+  );
 
   it('sends an unwritable destination to the surface that reported the problem', async () => {
     const unwritable = preview([
