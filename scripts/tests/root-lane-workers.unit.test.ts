@@ -328,6 +328,26 @@ describe('the runner over the root tree', () => {
   });
 });
 
+it('ignores only Bun compiler scratch basenames in the root and nested workspaces', () => {
+  const compilerScratch = [
+    '.a01000f001a0c11e-00000000.bun-build',
+    'apps/api/.b01000f001a0c11e-00000001.bun-build',
+    'apps/frontend/src/.0123456789abcdef-12345678.bun-build',
+  ];
+  const userFiles = [
+    'a01000f001a0c11e-00000000.bun-build',
+    'apps/api/.launcher.bun-build',
+    'apps/api/.a01000f001a0c11g-00000000.bun-build',
+    'apps/api/.a01000f001a0c11e-0000000.bun-build',
+  ];
+  const result = Bun.spawnSync(['git', 'check-ignore', '--no-index', '--stdin'], {
+    cwd: ROOT_DIR,
+    stdin: Buffer.from([...compilerScratch, ...userFiles, ''].join('\n')),
+  });
+  expect([0, 1], result.stderr.toString()).toContain(result.exitCode);
+  expect(result.stdout.toString().trim().split(/\r?\n/u).filter(Boolean)).toEqual(compilerScratch);
+});
+
 describe('what Turbo hashes for the plain root lane', () => {
   interface DryRunTask {
     taskId: string;
