@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import type { Chat } from '@mangostudio/shared/chat';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
@@ -149,20 +150,30 @@ afterEach(async () => {
 describe('durable authorized product operations over real routes/storage', () => {
   it('recovers the same durable receipt after an actual process restart', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'product-operation-'));
-    const worker = new URL('../../support/fixtures/product-operation-worker.ts', import.meta.url)
-      .pathname;
+    const worker = fileURLToPath(
+      new URL('../../support/fixtures/product-operation-worker.ts', import.meta.url)
+    );
+    const database = join(directory, 'db.sqlite');
+    async function runWorker(mode: 'reserve' | 'recover'): Promise<string> {
+      const child = Bun.spawn([process.execPath, worker, database, mode], {
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [exitCode, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      expect(
+        exitCode,
+        `receipt ${mode} worker exited with ${exitCode} | stderr: ${stderr.trim()}`
+      ).toBe(0);
+      return stdout;
+    }
+
     try {
-      const reserve = Bun.spawn(
-        [process.execPath, worker, join(directory, 'db.sqlite'), 'reserve'],
-        { stdout: 'pipe', stderr: 'pipe' }
-      );
-      expect(await reserve.exited).toBe(0);
-      const recover = Bun.spawn(
-        [process.execPath, worker, join(directory, 'db.sqlite'), 'recover'],
-        { stdout: 'pipe', stderr: 'pipe' }
-      );
-      const result = await new Response(recover.stdout).text();
-      expect(await recover.exited).toBe(0);
+      await runWorker('reserve');
+      const result = await runWorker('recover');
       expect(JSON.parse(result)).toMatchObject({
         receipt: { operationId: 'durable', state: 'unresolved' },
         claimed: false,
