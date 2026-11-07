@@ -26,13 +26,16 @@ interface PathParts {
   readonly segments: readonly string[];
 }
 
-function splitSegments(path: string): string[] {
-  return path.split(sep).filter((segment) => segment.length > 0);
+function splitSegments(path: string, physicalParents: boolean): string[] {
+  const segments = path.split(sep).filter((segment) => segment.length > 0);
+  // A POSIX trailing slash requires the preceding component to be a directory.
+  if (physicalParents && path.endsWith(sep)) segments.push('.');
+  return segments;
 }
 
-function splitAbsolutePath(path: string): PathParts {
+function splitAbsolutePath(path: string, physicalParents: boolean): PathParts {
   const root = parse(path).root;
-  return { root, segments: splitSegments(path.slice(root.length)) };
+  return { root, segments: splitSegments(path.slice(root.length), physicalParents) };
 }
 
 /**
@@ -60,7 +63,7 @@ function resolvePath(inputPath: string, physicalParents: boolean): string {
       ? inputPath
       : `${process.cwd()}${sep}${inputPath}`
     : resolve(inputPath);
-  const initial = splitAbsolutePath(absolutePath);
+  const initial = splitAbsolutePath(absolutePath, physicalParents);
   let resolvedPath = initial.root;
   let pending = [...initial.segments];
   let hops = 0;
@@ -80,9 +83,9 @@ function resolvePath(inputPath: string, physicalParents: boolean): string {
       entry = lstatSync(candidate);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      // Removing any missing component with a parent step would make the
-      // planned write reachable even though the original path cannot be opened.
-      if (physicalParents && pending.includes('..')) throw error;
+      // A parent step can erase a required directory. A terminal dot still
+      // requires a directory, which cannot be created by a planned file write.
+      if (physicalParents && (pending.includes('..') || pending.at(-1) === '.')) throw error;
       return resolve(realpathSync(resolvedPath), segment, ...pending);
     }
 
@@ -98,11 +101,12 @@ function resolvePath(inputPath: string, physicalParents: boolean): string {
 
     const target = readlinkSync(candidate);
     if (physicalParents && !isAbsolute(target)) {
-      pending = [...splitSegments(target), ...pending];
+      pending = [...splitSegments(target, physicalParents), ...pending];
       continue;
     }
     const absoluteTarget = splitAbsolutePath(
-      physicalParents ? target : resolve(dirname(candidate), target)
+      physicalParents ? target : resolve(dirname(candidate), target),
+      physicalParents
     );
     resolvedPath = absoluteTarget.root;
     pending = [...absoluteTarget.segments, ...pending];

@@ -340,6 +340,21 @@ describe('writeFileAtomic through symlinks', () => {
     }
   });
 
+  it('preserves a regular file when a symlink target ends in a slash', () => {
+    if (isWindows) return;
+    const target = join(dir, 'secret.txt');
+    writeFileSync(target, 'old secret');
+    const link = join(dir, '.env');
+    symlinkSync('secret.txt/', link);
+
+    expect(() => readFileSync(link, 'utf8')).toThrow('ENOTDIR');
+    try {
+      expect(() => writeFileAtomic(link, 'new secret')).toThrow('ENOTDIR');
+    } finally {
+      expect(readFileSync(target, 'utf8')).toBe('old secret');
+    }
+  });
+
   it('follows a chain of symlinks to the real file', () => {
     if (isWindows) return;
     const target = join(dir, 'real.toml');

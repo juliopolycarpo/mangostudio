@@ -133,6 +133,28 @@ describe('isInside', () => {
   );
 
   it.skipIf(process.platform === 'win32')(
+    'requires a directory at a trailing slash in raw paths and symlink targets',
+    () => {
+      const directory = join(rootDir, 'nested');
+      const file = join(directory, 'file.txt');
+      const missing = join(rootDir, 'missing');
+      const link = join(rootDir, 'link');
+      symlinkSync(`${file}/`, link);
+
+      expect(() => resolvePathForContainment(`${file}/`)).toThrow('ENOTDIR');
+      expect(() => resolvePathForContainment(link)).toThrow('ENOTDIR');
+      expect(() => resolvePathForContainment(`${missing}/`)).toThrow('ENOENT');
+      expect(() => resolvePathForContainment(`${missing}/.`)).toThrow('ENOENT');
+      expect(resolvePathForContainment(`${directory}/`)).toBe(directory);
+
+      const planned = join(rootDir, 'planned');
+      symlinkSync('missing/', planned);
+      expect(() => resolvePathForContainment(planned)).toThrow('ENOENT');
+      expect(resolvePathForContainment(join(planned, 'file.txt'))).toBe(join(missing, 'file.txt'));
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')(
     'uses the physical root when a parent step follows a directory link in the root',
     () => {
       mkdirSync(join(rootDir, 'assets'));
