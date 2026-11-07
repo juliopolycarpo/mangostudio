@@ -455,6 +455,39 @@ it.each(['COM¹', 'lpt².txt', 'COM³.tar.gz'])(
   }
 );
 
+it('rejects an already occupied destination before serializing the database', async () => {
+  const { config, output } = await fixture();
+  await writeFile(output, 'existing archive', { flag: 'wx' });
+  const serialize = spyOn(Database.prototype, 'serialize');
+  try {
+    await expect(
+      captureBackup(config, { output, checkpoints: true, includeSecrets: false }, 'test')
+    ).rejects.toThrow('Backup destination already exists');
+    expect(serialize).not.toHaveBeenCalled();
+    expect(await readFile(output, 'utf8')).toBe('existing archive');
+  } finally {
+    serialize.mockRestore();
+  }
+});
+
+it('preserves a destination that appears after the early availability check', async () => {
+  const { config, output } = await fixture();
+  const competingPublisher = {
+    afterFilesStaged() {
+      return writeFile(output, 'competing archive', { flag: 'wx' });
+    },
+  };
+  await expect(
+    captureBackup(
+      config,
+      { output, checkpoints: true, includeSecrets: false },
+      'test',
+      competingPublisher
+    )
+  ).rejects.toMatchObject({ code: 'EEXIST' });
+  expect(await readFile(output, 'utf8')).toBe('competing archive');
+});
+
 it('refuses an oversized file before copying and preserves an existing destination', async () => {
   const { root, config, output } = await fixture();
   const large = join(config.uploads.dir, 'large.bin');

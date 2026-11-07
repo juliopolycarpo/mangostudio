@@ -147,6 +147,13 @@ export async function captureBackup(
   // removal across a symlink can change the output parent or hide a config
   // file actually inside a data root from the overlap/privacy guard.
   const output = join(await realpath(dirname(options.output)), basename(options.output));
+  const occupied = await lstat(output).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  });
+  if (occupied) {
+    throw Object.assign(new Error('Backup destination already exists.'), { code: 'EEXIST' });
+  }
   let configurationPath = config.configFilePath;
   try {
     configurationPath = await realpath(configurationPath);
