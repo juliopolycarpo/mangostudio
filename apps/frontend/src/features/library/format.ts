@@ -348,7 +348,10 @@ function matchesShowFilter(resource: LibraryResource, show: LibraryShowFilter): 
     case 'divergent':
       return resource.divergence === 'divergent';
     case 'single-location':
-      return resource.instances.length === 1;
+      return (
+        resource.instances.length === 1 &&
+        resource.coverage.every((coverage) => !coverage.unscannedLocationIds?.length)
+      );
     case 'shadowed':
       return resource.coverage.some((coverage) => coverage.state === 'shadowed');
     default:
@@ -373,7 +376,9 @@ export function filterResources(
       const coverage = resource.coverage.find(
         (candidate) => candidate.targetId === filters.targetId
       );
-      if (!coverage || coverage.state === 'absent') return false;
+      if (!coverage || (coverage.state === 'absent' && !coverage.unscannedLocationIds?.length)) {
+        return false;
+      }
     }
     return matchesShowFilter(resource, filters.show);
   });

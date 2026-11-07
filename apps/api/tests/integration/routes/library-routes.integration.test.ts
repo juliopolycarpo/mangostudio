@@ -185,6 +185,28 @@ describe('library routes', () => {
     expect(await response.json()).toEqual({ resources: [skillResource], unreadableEntries: [] });
   });
 
+  it('keeps uncertain rows in a target filter without counting them as confirmed absent', async () => {
+    const incomplete: LibraryResource = {
+      ...skillResource,
+      coverage: skillResource.coverage.map((entry) =>
+        entry.targetId === 'claude' ? { ...entry, unscannedLocationIds: ['claude-skills'] } : entry
+      ),
+    };
+    const { service } = createService([incomplete]);
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
+    restoreAuth = restore;
+
+    const target = await app.handle(
+      new Request('http://localhost/library/resources?target=claude')
+    );
+    const absent = await app.handle(
+      new Request('http://localhost/library/resources?target=claude&state=absent')
+    );
+
+    expect(await target.json()).toEqual({ resources: [incomplete], unreadableEntries: [] });
+    expect(await absent.json()).toEqual({ resources: [], unreadableEntries: [] });
+  });
+
   it('narrows coverage against the named target rather than any target', async () => {
     const { service } = createService();
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));

@@ -13,11 +13,48 @@ import {
   coverageCell,
   coverageCells,
   type CoverageCellState,
+  DEFAULT_LIBRARY_FILTERS,
+  filterResources,
   majorityContentHash,
   presentTargetCount,
   summarizeCoverageByTarget,
 } from '../../../../src/features/library/format';
 import { fullCoverage, instance, resource } from './fixtures';
+
+describe('filterResources', () => {
+  it('requires a complete scan to match the single-location filter', () => {
+    const confirmed = resource({ instances: [instance({ locationId: 'mango-skills' })] });
+    const incomplete = {
+      ...confirmed,
+      coverage: fullCoverage({
+        claude: { state: 'absent', unscannedLocationIds: ['claude-skills'] },
+      }),
+    };
+
+    expect(
+      filterResources([incomplete, confirmed], {
+        ...DEFAULT_LIBRARY_FILTERS,
+        show: 'single-location',
+      })
+    ).toEqual([confirmed]);
+  });
+
+  it('keeps unscanned coverage visible for the selected target', () => {
+    const incomplete = resource({
+      coverage: fullCoverage({
+        claude: { state: 'absent', unscannedLocationIds: ['claude-skills'] },
+      }),
+    });
+    const absent = resource();
+
+    expect(
+      filterResources([incomplete, absent], {
+        ...DEFAULT_LIBRARY_FILTERS,
+        targetId: 'claude',
+      })
+    ).toEqual([incomplete]);
+  });
+});
 
 describe('coverageCell', () => {
   const cases: ReadonlyArray<{

@@ -87,8 +87,10 @@ function filterLibraryResources(
     if (filters.target) {
       const coverage = resource.coverage.find((candidate) => candidate.targetId === filters.target);
       if (!coverage) return false;
-      if (filters.state === 'absent' && coverage.unscannedLocationIds?.length) return false;
-      return filters.state ? coverage.state === filters.state : coverage.state !== 'absent';
+      const incomplete = Boolean(coverage.unscannedLocationIds?.length);
+      return filters.state
+        ? !incomplete && coverage.state === filters.state
+        : incomplete || coverage.state !== 'absent';
     }
     return true;
   });

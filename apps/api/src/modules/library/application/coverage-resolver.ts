@@ -43,7 +43,7 @@ export function resolveLibraryCoverage(
         .some((id) => unscanned.includes(id));
     return {
       ...base,
-      state: shadowedLocationIds.length > 0 ? 'shadowed' : 'present',
+      state: !effectiveIsUncertain && shadowedLocationIds.length > 0 ? 'shadowed' : 'present',
       ...(effectiveIsUncertain ? {} : { effectiveLocationId }),
       shadowedLocationIds: effectiveIsUncertain ? [] : shadowedLocationIds,
     };

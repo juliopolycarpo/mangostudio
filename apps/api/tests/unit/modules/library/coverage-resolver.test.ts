@@ -47,6 +47,21 @@ describe('resolveLibraryCoverage', () => {
     });
   });
 
+  it('withholds shadowing when two observed copies have no verified winner', () => {
+    const coverage = resolveLibraryCoverage(
+      { kind: 'skill', slug: 'gh' },
+      [instance('agents-skills'), instance('claude-skills')],
+      new Set<LibraryLocationId>(['mango-skills'])
+    );
+
+    expect(coverage.find(({ targetId }) => targetId === 'mangostudio')).toEqual({
+      targetId: 'mangostudio',
+      state: 'present',
+      unscannedLocationIds: ['mango-skills'],
+      shadowedLocationIds: [],
+    });
+  });
+
   it('uses each target precedence and reports lower copies as shadowed', () => {
     const coverage = resolveLibraryCoverage({ kind: 'skill', slug: 'gh' }, [
       instance('agents-skills'),
