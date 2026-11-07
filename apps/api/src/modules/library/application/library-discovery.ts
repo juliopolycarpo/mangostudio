@@ -88,9 +88,16 @@ export function discoverLibraryResourcesFromSettings(
         locationPathOverrides: options.locationPathOverrides,
         cacheScan: false,
       });
+      const locationDiagnostics = scanned.locationDiagnostics ?? [];
+      // A file where a directory was expected cannot hide a preferred copy.
+      // Other failures leave precedence unresolved for Hub-local skill selection.
+      const uncertainLocations = locationDiagnostics.filter(
+        ({ reason }) => reason !== 'not-directory'
+      );
       return {
-        resources: groupResources(scanned.instances),
+        resources: groupResources(scanned.instances, uncertainLocations),
         unreadableEntries: [...scanned.unreadableEntries],
+        locationDiagnostics: [...locationDiagnostics],
       };
     }
   );

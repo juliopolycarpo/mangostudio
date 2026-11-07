@@ -262,6 +262,9 @@ function toSkillEntry(skill: SkillDescriptor, skillToolEnabled: boolean): Capabi
     source: skill.source,
   };
 
+  if (skill.precedenceUnverified) {
+    return { ...base, state: 'unavailable', reason: 'skill-precedence-unverified' };
+  }
   if (!skill.valid) return { ...base, state: 'unavailable', reason: 'skill-invalid' };
   if (skill.shadowed) return { ...base, state: 'unavailable', reason: 'skill-shadowed' };
   if (!skill.enabled) return { ...base, state: 'disabled', reason: 'skill-disabled' };

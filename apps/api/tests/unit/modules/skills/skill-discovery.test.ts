@@ -13,6 +13,7 @@ import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import { getDb } from '../../../../src/db/database';
 import { loadConfigForTest } from '../../../../src/lib/config';
 import { updateAppSettings } from '../../../../src/modules/app-settings/application/app-settings-service';
+import { loadSkillBody } from '../../../../src/modules/skills/application/skill-content';
 import {
   listSkills,
   listUsableSkills,
@@ -238,6 +239,114 @@ describe('skill discovery third-party sources', () => {
       'claude:claude-skill',
     ]);
   });
+
+  it('keeps a usable fallback when a higher-precedence path is a file', async () => {
+    rmSync(agentsDir, { recursive: true });
+    writeFileSync(agentsDir, 'not a directory');
+    writeSkillIn(claudeDir, 'fallback', 'name: fallback\ndescription: Readable copy');
+    const userId = nextUserId();
+    await enableSources(userId, { agents: true, claude: true });
+
+    expect((await listUsableSkills(getDb(), userId)).map(({ key }) => key)).toEqual([
+      'claude:fallback',
+    ]);
+    await expect(loadSkillBody(getDb(), userId, 'unseen')).rejects.toMatchObject({
+      status: 404,
+      code: 'NOT_FOUND',
+    });
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'withholds the fallback when a failed scan could hide a preferred copy',
+    async () => {
+      rmSync(agentsDir, { recursive: true });
+      symlinkSync(join(skillsDir, 'missing-directory'), agentsDir, 'dir');
+      writeSkillIn(claudeDir, 'fallback', 'name: fallback\ndescription: Readable copy');
+      writeSkill('preferred', 'name: preferred\ndescription: Higher-priority copy');
+      const userId = nextUserId();
+      await enableSources(userId, { agents: true, claude: true });
+
+      const fallback = (await listSkills(getDb(), userId)).find(
+        ({ key }) => key === 'claude:fallback'
+      );
+      expect(fallback).toMatchObject({ shadowed: false, precedenceUnverified: true });
+      expect((await listUsableSkills(getDb(), userId)).map(({ key }) => key)).toEqual([
+        'mango:preferred',
+      ]);
+      await expect(loadSkillBody(getDb(), userId, 'fallback')).rejects.toMatchObject({
+        status: 503,
+        code: 'SKILL_PRECEDENCE_UNVERIFIED',
+      });
+
+      await upsertSkillSettings(getDb(), userId, 'claude:fallback', false);
+      await expect(loadSkillBody(getDb(), userId, 'fallback')).rejects.toMatchObject({
+        status: 503,
+        code: 'SKILL_PRECEDENCE_UNVERIFIED',
+      });
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'reports unverified precedence when the observed fallback is invalid',
+    async () => {
+      rmSync(agentsDir, { recursive: true });
+      symlinkSync(join(skillsDir, 'missing-directory'), agentsDir, 'dir');
+      writeSkillIn(claudeDir, 'fallback', 'name: wrong-name\ndescription: Invalid copy');
+      const userId = nextUserId();
+      await enableSources(userId, { agents: true, claude: true });
+
+      expect(await listSkills(getDb(), userId)).toMatchObject([
+        { key: 'claude:fallback', valid: false, precedenceUnverified: true },
+      ]);
+      await expect(loadSkillBody(getDb(), userId, 'fallback')).rejects.toMatchObject({
+        status: 503,
+        code: 'SKILL_PRECEDENCE_UNVERIFIED',
+      });
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'reports incomplete discovery when no observed skill matches the requested name',
+    async () => {
+      rmSync(agentsDir, { recursive: true });
+      symlinkSync(join(skillsDir, 'missing-directory'), agentsDir, 'dir');
+      const userId = nextUserId();
+      await enableSources(userId, { agents: true });
+
+      expect(await listSkills(getDb(), userId)).toEqual([]);
+      await expect(loadSkillBody(getDb(), userId, 'unseen')).rejects.toMatchObject({
+        status: 503,
+        code: 'SKILL_PRECEDENCE_UNVERIFIED',
+      });
+      await expect(loadSkillBody(getDb(), userId, 'not a skill')).rejects.toMatchObject({
+        status: 404,
+        code: 'NOT_FOUND',
+      });
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'keeps a verified higher-priority entry authoritative when a lower scan fails',
+    async () => {
+      writeFileSync(join(skillsDir, 'blocked'), 'not a skill directory');
+      writeFileSync(join(skillsDir, 'file-only'), 'not a skill directory');
+      writeSkillIn(agentsDir, 'blocked', 'name: blocked\ndescription: Shadowed copy');
+      rmSync(claudeDir, { recursive: true });
+      symlinkSync(join(skillsDir, 'missing-directory'), claudeDir, 'dir');
+      const userId = nextUserId();
+      await enableSources(userId, { agents: true, claude: true });
+
+      expect(await listSkills(getDb(), userId)).toMatchObject([
+        { key: 'agents:blocked', valid: true, shadowed: true },
+      ]);
+      for (const name of ['blocked', 'file-only']) {
+        await expect(loadSkillBody(getDb(), userId, name)).rejects.toMatchObject({
+          status: 404,
+          code: 'NOT_FOUND',
+        });
+      }
+    }
+  );
 
   it('shadows lower-precedence copies of the same slug (mango > agents > claude)', async () => {
     writeSkill('dup', 'name: dup\ndescription: Mango copy');

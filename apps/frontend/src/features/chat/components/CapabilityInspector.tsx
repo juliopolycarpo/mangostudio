@@ -57,6 +57,7 @@ const REASON_LABEL_KEY: Record<CapabilityReasonCode, keyof CapabilityLabels['rea
   'skill-invalid': 'skill-invalid',
   'skill-disabled': 'skill-disabled',
   'skill-shadowed': 'skill-shadowed',
+  'skill-precedence-unverified': 'skill-precedence-unverified',
   'skill-tool-disabled': 'skill-tool-disabled',
 };
 

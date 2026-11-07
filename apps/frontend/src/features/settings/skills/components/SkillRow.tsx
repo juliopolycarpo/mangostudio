@@ -23,7 +23,9 @@ export function SkillRow({ descriptor }: SkillRowProps) {
   const { t } = useI18n();
   const s = t.settings.skills;
   const { mutateAsync } = useUpdateSkillSetting();
-  const shadowedHintId = useId();
+  const unavailableHintId = useId();
+  const shadowed = descriptor.shadowed && !descriptor.precedenceUnverified;
+  const unavailable = shadowed || descriptor.precedenceUnverified;
   const isMountedRef = useRef(true);
   const [enabled, setEnabled] = useState(descriptor.enabled);
 
@@ -54,25 +56,21 @@ export function SkillRow({ descriptor }: SkillRowProps) {
   return (
     <SettingsRow
       as="label"
-      // A shadowed copy never runs, so its switch is locked and the row stops
-      // inviting a click.
-      className={descriptor.shadowed ? 'cursor-default' : undefined}
+      className={unavailable ? 'cursor-default' : undefined}
       label={
         <span className="flex flex-wrap items-center gap-2">
-          <span className={descriptor.shadowed ? 'text-fg-muted' : undefined}>
-            {descriptor.name}
-          </span>
+          <span className={unavailable ? 'text-fg-muted' : undefined}>{descriptor.name}</span>
           <Badge>{s.sourceLabels[descriptor.source]}</Badge>
           {!descriptor.valid && <Badge variant="error">{s.invalidBadge}</Badge>}
           {/* The badge is the flag. Its reason is said once, above the list, for
               touch screens that never show a tooltip; here it is the tooltip. */}
-          {descriptor.shadowed && (
+          {shadowed && (
             <Badge variant="warning" title={s.shadowedHint}>
               {s.shadowedBadge}
             </Badge>
           )}
-          {descriptor.shadowed && (
-            <span id={shadowedHintId} className="sr-only">
+          {shadowed && (
+            <span id={unavailableHintId} className="sr-only">
               {s.shadowedHint}
             </span>
           )}
@@ -86,6 +84,11 @@ export function SkillRow({ descriptor }: SkillRowProps) {
               {descriptor.error}
             </StatusNote>
           )}
+          {descriptor.precedenceUnverified && (
+            <StatusNote as="span" tone="warning" id={unavailableHintId}>
+              {s.precedenceUnverifiedHint}
+            </StatusNote>
+          )}
           <span className="block break-all font-mono text-micro text-fg-subtle">
             {descriptor.path}
           </span>
@@ -97,8 +100,8 @@ export function SkillRow({ descriptor }: SkillRowProps) {
         onChange={() => void handleToggle()}
         // The stored preference stays as it is; only the control is locked,
         // because the copy it would switch is inactive either way.
-        disabled={descriptor.shadowed}
-        aria-describedby={descriptor.shadowed ? shadowedHintId : undefined}
+        disabled={unavailable}
+        aria-describedby={unavailable ? unavailableHintId : undefined}
         aria-label={descriptor.name}
       />
     </SettingsRow>

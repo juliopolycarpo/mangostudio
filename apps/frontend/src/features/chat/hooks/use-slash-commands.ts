@@ -34,6 +34,7 @@ import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { ExternalAgentCommand } from '@mangostudio/shared/external-agents';
 import { externalAgentVendor } from '@mangostudio/shared/external-agents/values';
 import type { LibraryResource } from '@mangostudio/shared/library';
+import { isUsableSkill } from '@mangostudio/shared/skills';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
@@ -259,7 +260,7 @@ export function useSlashCommands({
       targetId !== null || capabilitiesQuery.isLoading
         ? []
         : (skills?.skills ?? [])
-            .filter((skill) => skill.valid && skill.enabled && !skill.shadowed)
+            .filter(isUsableSkill)
             .filter((skill) => advertisedKeys?.has(skill.key) ?? true)
             .sort((left, right) => left.name.localeCompare(right.name))
             .slice(0, MAX_LISTED_SKILLS)

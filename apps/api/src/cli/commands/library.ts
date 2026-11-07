@@ -6,9 +6,11 @@ import type { AppSettings } from '@mangostudio/shared/app-settings';
 import type {
   LibraryLocationStatus,
   LibraryResource,
+  LibraryScanResult,
   ResourceKind,
 } from '@mangostudio/shared/library';
 import {
+  LibraryLocationDiagnosticSchema,
   LibraryLocationStatusListSchema,
   LibraryResourceListSchema,
 } from '@mangostudio/shared/library';
@@ -16,6 +18,7 @@ import { LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
 import Type from 'typebox';
 import Value from 'typebox/value';
 
+import { resolveLibraryCoverage } from '../../modules/library/application/coverage-resolver';
 import { discoverLibraryResourcesFromSettings } from '../../modules/library/application/library-discovery';
 import {
   createLibraryPathEnv,
@@ -30,14 +33,15 @@ export const CliLibraryLocationsSchema = LibraryLocationStatusListSchema;
 export const CliLibrarySnapshotSchema = Type.Object({
   resources: LibraryResourceListSchema,
   locations: LibraryLocationStatusListSchema,
+  locationDiagnostics: Type.Optional(Type.Array(LibraryLocationDiagnosticSchema)),
 });
 
 export interface LibraryDeps {
   readonly getSettings: () => AppSettings;
-  readonly discoverResources: (options: {
+  readonly discoverScan: (options: {
     readonly kinds?: readonly ResourceKind[];
     readonly force?: boolean;
-  }) => Promise<LibraryResource[]>;
+  }) => Promise<LibraryScanResult>;
   readonly listLocations: () => LibraryLocationStatus[];
   readonly log: (line: string) => void;
 }
@@ -54,7 +58,13 @@ function filterResources(resources: LibraryResource[], options: LibraryArgs): Li
 }
 
 function printResourceLine(resource: LibraryResource, log: (line: string) => void): void {
-  const targets = resource.coverage.map((entry) => `${entry.targetId}:${entry.state}`).join(' ');
+  const targets = resource.coverage
+    .map(({ targetId, state, effectiveLocationId, unscannedLocationIds }) => {
+      const coverage =
+        unscannedLocationIds?.length && !effectiveLocationId ? 'scan-incomplete' : state;
+      return `${targetId}:${coverage}`;
+    })
+    .join(' ');
   const divergence =
     resource.divergence === 'divergent'
       ? '  divergent'
@@ -102,13 +112,24 @@ export async function runLibrary(
     return;
   }
 
-  const resources = filterResources(
-    await d.discoverResources({ kinds: options.kind ? [options.kind] : undefined }),
-    options
-  );
+  const scan = await d.discoverScan({ kinds: options.kind ? [options.kind] : undefined });
+  const filtered = filterResources(scan.resources, options);
+  const locationDiagnostics = scan.locationDiagnostics ?? [];
+  const failedLocations = new Set(locationDiagnostics.map(({ locationId }) => locationId));
+  const resources =
+    failedLocations.size === 0
+      ? filtered
+      : filtered.map((resource) => ({
+          ...resource,
+          coverage: resolveLibraryCoverage(resource.ref, resource.instances, failedLocations),
+        }));
 
   if (options.json) {
-    const payload = { resources, locations: d.listLocations() };
+    const payload = {
+      resources,
+      locations: d.listLocations(),
+      ...(locationDiagnostics.length > 0 && { locationDiagnostics }),
+    };
     if (!Value.Check(CliLibrarySnapshotSchema, payload)) {
       throw new Error('Internal error: library snapshot failed schema validation.');
     }
@@ -117,9 +138,11 @@ export async function runLibrary(
   }
 
   d.log('Library resources');
-  if (resources.length === 0) {
+  for (const { locationId, reason } of locationDiagnostics) {
+    d.log(`  ${locationId}: scan failed (${reason})`);
+  }
+  if (resources.length === 0 && locationDiagnostics.length === 0) {
     d.log(options.divergent ? '  No divergent resources.' : '  (none)');
-    return;
   }
   for (const resource of resources) {
     printResourceLine(resource, d.log);
@@ -128,20 +151,15 @@ export async function runLibrary(
 
 function resolveDeps(deps: Partial<LibraryDeps>): LibraryDeps {
   const getSettings = deps.getSettings ?? readCliAppSettings;
-  const defaultDiscover = async (discoverOptions: {
-    kinds?: readonly ResourceKind[];
-    force?: boolean;
-  }) => {
-    const scan = await discoverLibraryResourcesFromSettings(getSettings(), {
+  const defaultDiscover: LibraryDeps['discoverScan'] = (discoverOptions) =>
+    discoverLibraryResourcesFromSettings(getSettings(), {
       kinds: discoverOptions.kinds,
       force: discoverOptions.force,
     });
-    return scan.resources;
-  };
 
   return {
     getSettings,
-    discoverResources: deps.discoverResources ?? defaultDiscover,
+    discoverScan: deps.discoverScan ?? defaultDiscover,
     listLocations:
       deps.listLocations ??
       (() => {

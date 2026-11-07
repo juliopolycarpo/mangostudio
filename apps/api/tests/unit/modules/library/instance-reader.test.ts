@@ -101,11 +101,13 @@ describe('readLocationInstances', () => {
   });
 
   it('returns an empty result for a missing location', async () => {
+    const missing = Object.assign(new Error('missing'), { code: 'ENOENT' });
     const missingFs: LibraryInstanceReaderFs = {
-      readDirectory: () => Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' })),
+      readDirectory: () => Promise.reject(missing),
       readFile: () => Promise.reject(new Error('unused')),
-      realPath: (path) => Promise.resolve(path),
+      realPath: () => Promise.reject(missing),
       stat: () => Promise.reject(new Error('unused')),
+      hasEntry: () => Promise.resolve(false),
     };
 
     const result = await readLocationInstances(skillLocation(), '/missing', {
@@ -116,6 +118,70 @@ describe('readLocationInstances', () => {
 
     expect(result).toEqual({ instances: [], unreadableEntries: [] });
   });
+
+  it('diagnoses an ENOENT listing when the root was resolved', async () => {
+    const interruptedFs: LibraryInstanceReaderFs = {
+      readDirectory: () => Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' })),
+      readFile: () => Promise.reject(new Error('unused')),
+      realPath: (path) => Promise.resolve(path),
+      stat: () => Promise.reject(new Error('unused')),
+    };
+    const result = await readLocationInstances(skillLocation(), root, {
+      cache: new LibraryCache(),
+      force: false,
+      fs: interruptedFs,
+    });
+
+    expect(result.locationDiagnostics ?? []).toEqual([
+      { locationId: 'mango-skills', reason: 'unreadable' },
+    ]);
+  });
+
+  it('diagnoses a listing that was refused even though the root resolves', async () => {
+    const refusedFs: LibraryInstanceReaderFs = {
+      readDirectory: () => Promise.reject(Object.assign(new Error('denied'), { code: 'EACCES' })),
+      readFile: () => Promise.reject(new Error('unused')),
+      realPath: (path) => Promise.resolve(path),
+      stat: () => Promise.reject(new Error('unused')),
+    };
+    const result = await readLocationInstances(skillLocation(), root, {
+      cache: new LibraryCache(),
+      force: false,
+      fs: refusedFs,
+    });
+    expect(result.locationDiagnostics).toEqual([
+      { locationId: 'mango-skills', reason: 'permission-denied' },
+    ]);
+  });
+
+  it('reports a non-directory location instead of returning empty success', async () => {
+    const path = join(root, 'configured-location');
+    writeFileSync(path, 'not a directory');
+    const result = await readLocationInstances(skillLocation(), path, {
+      cache: new LibraryCache(),
+      force: false,
+    });
+
+    expect(result.locationDiagnostics).toEqual([
+      { locationId: 'mango-skills', reason: 'not-directory' },
+    ]);
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'diagnoses a dangling location even with a trailing slash',
+    async () => {
+      const path = join(root, 'configured-location');
+      symlinkSync(join(root, 'missing'), path, 'dir');
+      const result = await readLocationInstances(skillLocation(), `${path}/`, {
+        cache: new LibraryCache(),
+        force: false,
+      });
+
+      expect(result.locationDiagnostics).toEqual([
+        { locationId: 'mango-skills', reason: 'unreadable' },
+      ]);
+    }
+  );
 
   it('reports a file where a skill directory was expected', async () => {
     writeFileSync(join(root, 'not-a-directory'), 'content');

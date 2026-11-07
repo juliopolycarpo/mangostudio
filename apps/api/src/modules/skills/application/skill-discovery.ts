@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import type { LibraryInstance, LibraryLocationId } from '@mangostudio/shared/library';
 import { getLibraryLocation } from '@mangostudio/shared/library/host';
 import { parseMarkdownFrontmatter } from '@mangostudio/shared/markdown';
-import type { SkillDescriptor, SkillSource } from '@mangostudio/shared/skills';
+import { isUsableSkill, type SkillDescriptor, type SkillSource } from '@mangostudio/shared/skills';
 import type { Kysely } from 'kysely';
 
 import type { Database } from '../../../db/types';
@@ -70,13 +70,31 @@ export function setThirdPartySkillDirsForTest(
   thirdPartyDirOverrides = overrides;
 }
 
-export type ScannedSkill = Omit<SkillDescriptor, 'enabled' | 'shadowed'>;
+export type ScannedSkill = Omit<SkillDescriptor, 'enabled' | 'shadowed' | 'precedenceUnverified'>;
 
 export async function listSkills(
   db: Kysely<Database>,
   userId: string,
   now: () => number = Date.now
 ): Promise<SkillDescriptor[]> {
+  const { skills } = await discoverHubSkills(db, userId, now);
+  return skills;
+}
+
+/**
+ * Discovers Hub skills and the names whose precedence a partial scan verified.
+ *
+ * @example
+ * const { skills, verifiedNamesDuringIncompleteScan } = await discoverHubSkills(db, userId);
+ */
+export async function discoverHubSkills(
+  db: Kysely<Database>,
+  userId: string,
+  now: () => number = Date.now
+): Promise<{
+  skills: SkillDescriptor[];
+  verifiedNamesDuringIncompleteScan?: ReadonlySet<string>;
+}> {
   const appSettings = await getAppSettings(db, userId);
   const thirdPartyDirs = getThirdPartySkillDirs();
   const [scan, savedSettings] = await Promise.all([
@@ -93,12 +111,24 @@ export async function listSkills(
     listSavedSkillSettings(db, userId),
   ]);
 
-  return scan.resources
+  const scanIncomplete = scan.locationDiagnostics?.some(
+    ({ locationId, reason }) =>
+      reason !== 'not-directory' && SOURCE_BY_LOCATION_ID[locationId] !== undefined
+  );
+  const verifiedNamesDuringIncompleteScan = scanIncomplete ? new Set<string>() : undefined;
+  const skills = scan.resources
     .filter((resource) => resource.ref.kind === 'skill')
     .flatMap((resource) => {
       const mangoCoverage = resource.coverage.find(
         (coverage) => coverage.targetId === 'mangostudio'
       );
+      // Coverage can verify a name even when the adapter drops a non-skill entry.
+      if (mangoCoverage?.effectiveLocationId !== undefined) {
+        verifiedNamesDuringIncompleteScan?.add(resource.ref.slug);
+      }
+      const precedenceUnverified =
+        mangoCoverage?.effectiveLocationId === undefined &&
+        !!mangoCoverage?.unscannedLocationIds?.length;
       return resource.instances.flatMap((instance) => {
         const source = SOURCE_BY_LOCATION_ID[instance.locationId];
         if (!source || (!instance.valid && instance.invalidReason === 'unexpected-entry-type')) {
@@ -110,12 +140,19 @@ export async function listSkills(
           {
             ...adaptInstance(source, resource.ref.slug, instance),
             enabled: savedSettings.get(key) ?? true,
-            shadowed: mangoCoverage?.effectiveLocationId !== instance.locationId,
+            shadowed:
+              !precedenceUnverified && mangoCoverage?.effectiveLocationId !== instance.locationId,
+            ...(precedenceUnverified && { precedenceUnverified: true as const }),
           },
         ];
       });
     })
     .sort((left, right) => left.key.localeCompare(right.key));
+
+  return {
+    skills,
+    ...(verifiedNamesDuringIncompleteScan && { verifiedNamesDuringIncompleteScan }),
+  };
 }
 
 export async function listUsableSkills(
@@ -124,7 +161,7 @@ export async function listUsableSkills(
   now: () => number = Date.now
 ): Promise<SkillDescriptor[]> {
   const skills = await listSkills(db, userId, now);
-  return skills.filter((skill) => skill.valid && skill.enabled && !skill.shadowed);
+  return skills.filter(isUsableSkill);
 }
 
 /**

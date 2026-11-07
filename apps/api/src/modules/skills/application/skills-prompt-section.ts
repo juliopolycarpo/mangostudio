@@ -5,7 +5,7 @@
  * cost bounded.
  */
 
-import type { SkillDescriptor } from '@mangostudio/shared/skills';
+import { isUsableSkill, type SkillDescriptor } from '@mangostudio/shared/skills';
 import type { Kysely } from 'kysely';
 
 import type { Database } from '../../../db/types';
@@ -30,7 +30,7 @@ const SKILLS_INSTRUCTION =
 export function buildSkillsPromptSection(
   skills: ReadonlyArray<SkillDescriptor>
 ): string | undefined {
-  const usable = skills.filter((skill) => skill.valid && skill.enabled && !skill.shadowed);
+  const usable = skills.filter(isUsableSkill);
   if (usable.length === 0) return undefined;
 
   const lines = [...usable]

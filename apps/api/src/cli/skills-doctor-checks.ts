@@ -37,7 +37,7 @@ export interface SkillsDoctorInput {
 /**
  * Scans the sources and renders the skills checklist: an effective-config row,
  * one row per source directory, and one row per skill that is not silently
- * active (invalid, shadowed, or disabled).
+ * active (invalid, shadowed, disabled, or unverified).
  * // Usage: collectSkillsDoctorChecks(input)
  */
 export function collectSkillsDoctorChecks(input: SkillsDoctorInput): CheckResult[] {
@@ -91,6 +91,8 @@ function renderSkill(skill: SkillDiagnostic): CheckResult | null {
       return warn(label, `shadowed by ${skill.shadowedBy} source (higher precedence)`);
     case 'disabled':
       return ok(label, 'disabled in settings');
+    case 'precedence-unverified':
+      return warn(label, 'higher-priority skill location could not be scanned');
     default:
       // Active skills are already counted in their source row; no separate line.
       return null;

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -82,6 +82,23 @@ describe('collectSkillsDoctorChecks', () => {
     expect(find(results, 'Skill mango:muted').detail).toContain('disabled in settings');
     expect(find(results, 'Skills claude').detail).toContain('(source disabled)');
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'reports a usable-looking copy withheld by a failed higher-priority scan',
+    () => {
+      symlinkSync(join(mangoDir, 'missing'), agentsDir, 'dir');
+      writeSkill(claudeDir, 'fallback', 'name: fallback\ndescription: Claude copy');
+      writeSkill(claudeDir, 'invalid-copy', 'name: wrong-name\ndescription: Invalid copy');
+
+      const results = run({ sourceToggles: { agents: true, claude: true } });
+      expect(results.find((row) => row.label === 'Skill claude:fallback')?.detail ?? null).toBe(
+        'higher-priority skill location could not be scanned'
+      );
+      expect(find(results, 'Skill claude:invalid-copy').detail).toBe(
+        'higher-priority skill location could not be scanned'
+      );
+    }
+  );
 
   it('fails an unreadable enabled source', () => {
     writeFileSync(mangoDir, 'not a dir', 'utf8');

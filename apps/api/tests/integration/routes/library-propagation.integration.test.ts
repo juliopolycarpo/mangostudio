@@ -136,7 +136,7 @@ function ackDeps(): Partial<DivergenceAckDeps> {
         pathEnv: libraryPathEnv(),
         settings: skillLocationSettings(),
       });
-      return scan.resources;
+      return scan;
     },
   };
 }
@@ -400,6 +400,34 @@ describe('library divergence acknowledgements', () => {
 
     expect(afterEdit.acknowledgedDivergence).toBe(false);
     expect(await listDivergenceAcks(userId)).toEqual([]);
+  });
+
+  it('preserves a complete acknowledgement if a local location cannot be scanned', async () => {
+    const userId = nextUser();
+    skillAt('mango-skills', 'local copy');
+    skillAt('agents-skills', 'shared copy');
+    skillAt('claude-skills', 'vendor copy');
+    const entry = entryOf(await previewSkills(SKILL_LOCATIONS, userId));
+    const reviewed = entry.sourceGroups.map(({ contentHash }) => contentHash).sort();
+    expect(reviewed).toHaveLength(3);
+    await acknowledgeDivergence(
+      userId,
+      { resourceKey: 'skill:gh', contentHashes: reviewed },
+      ackDeps()
+    );
+
+    const blockedDirectory = join(home, '.claude', 'skills');
+    rmSync(blockedDirectory, { recursive: true });
+    writeFileSync(blockedDirectory, 'not a directory');
+    const partial = entry.sourceGroups
+      .filter(({ locationIds }) => !locationIds.includes('claude-skills'))
+      .map(({ contentHash }) => contentHash);
+    await expect(
+      acknowledgeDivergence(userId, { resourceKey: 'skill:gh', contentHashes: partial }, ackDeps())
+    ).rejects.toMatchObject({ status: 409, message: expect.stringContaining('claude-skills') });
+    expect(await listDivergenceAcks(userId)).toEqual([
+      { resourceKey: 'skill:gh', contentHashes: reviewed, acknowledgedAtMs: expect.any(Number) },
+    ]);
   });
 
   it('refuses to record hashes that disagree with the rescan', async () => {

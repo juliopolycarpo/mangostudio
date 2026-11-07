@@ -739,7 +739,7 @@ function planAcknowledgement(
   }
   if (entry.sourceScanIncomplete) {
     throw validationError(
-      `"${entry.resourceKey}" cannot keep its divergence while a source location could not be scanned. Preview again once it is readable.`
+      `"${entry.resourceKey}" cannot keep its divergence while the source scan is incomplete. Preview again once all copies can be read.`
     );
   }
   if (decision.destinations.some((target) => target.action === 'apply')) {

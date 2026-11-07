@@ -32,6 +32,8 @@ export const SkillDescriptorSchema = Type.Object({
   enabled: Type.Boolean(),
   /** True when a higher-precedence source (mango > agents > claude) owns the slug. */
   shadowed: Type.Boolean(),
+  /** A failed higher-priority scan leaves this copy's precedence unresolved. */
+  precedenceUnverified: Type.Optional(Type.Literal(true)),
   /** Why the descriptor was flagged invalid, when `valid` is false. */
   error: Type.Optional(Type.String()),
 });

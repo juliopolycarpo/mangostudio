@@ -50,6 +50,8 @@ export const CapabilityReasonCodeSchema = Type.Union([
   Type.Literal('skill-disabled'),
   /** A higher-precedence source owns this skill slug. */
   Type.Literal('skill-shadowed'),
+  /** A higher-priority skill location could not be scanned. */
+  Type.Literal('skill-precedence-unverified'),
   /** The `skill` tool itself is not effective for this turn. */
   Type.Literal('skill-tool-disabled'),
 ]);

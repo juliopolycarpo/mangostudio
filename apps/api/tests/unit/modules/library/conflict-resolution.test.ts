@@ -76,7 +76,11 @@ function deps(
   repository: DivergenceAckRepository,
   resources: LibraryResource[] = []
 ): Partial<DivergenceAckDeps> {
-  return { repository, discover: () => Promise.resolve(resources), now: () => 1_700_000 };
+  return {
+    repository,
+    discover: () => Promise.resolve({ resources, unreadableEntries: [] }),
+    now: () => 1_700_000,
+  };
 }
 
 describe('divergenceKeyFor', () => {
@@ -112,6 +116,44 @@ describe('acknowledgeDivergence', () => {
     instance('mango-skills', 'hash-a'),
     instance('claude-skills', 'hash-b'),
   ]);
+
+  it.each(['unreadable', 'too-large', 'path-escape', 'unsafe-name'] as const)(
+    'preserves a stored acknowledgement when one copy is %s',
+    async (invalidReason) => {
+      const repository = memoryRepository();
+      const contentHashes = ['hash-a', 'hash-b', 'hash-c'];
+      await recordDivergenceAck(
+        'user-1',
+        { resourceKey: 'skill:gh', contentHashes },
+        deps(repository)
+      );
+      const partial = ghSkill([
+        ...divergent.instances,
+        {
+          locationId: 'agents-skills',
+          path: '/home/test/agents-skills/gh',
+          modifiedAtMs: 1,
+          format: 'markdown-frontmatter',
+          valid: false,
+          invalidReason,
+        },
+      ]);
+
+      await expect(
+        acknowledgeDivergence(
+          'user-1',
+          { resourceKey: 'skill:gh', contentHashes: ['hash-a', 'hash-b'] },
+          deps(repository, [partial])
+        )
+      ).rejects.toMatchObject({
+        status: 409,
+        message: expect.stringContaining(
+          `"agents-skills" could not be verified (${invalidReason})`
+        ),
+      });
+      expect(repository.rows.get('skill:gh')?.contentHashes).toEqual(contentHashes);
+    }
+  );
 
   it('records the accepted hash set', async () => {
     const repository = memoryRepository();
@@ -198,7 +240,7 @@ describe('acknowledgeDivergence', () => {
         repository: memoryRepository(),
         discover: () => {
           scanned = true;
-          return Promise.resolve([]);
+          return Promise.resolve({ resources: [], unreadableEntries: [] });
         },
       }
     );
@@ -235,7 +277,7 @@ describe('recordDivergenceAck', () => {
         repository,
         discover: () => {
           scanned = true;
-          return Promise.resolve([]);
+          return Promise.resolve({ resources: [], unreadableEntries: [] });
         },
         now: () => 1_700_000,
       }
@@ -320,6 +362,38 @@ describe('recordDivergenceAck', () => {
 });
 
 describe('acknowledgedResourceKeys', () => {
+  it.each(['unreadable', 'too-large', 'path-escape', 'unsafe-name'] as const)(
+    'does not expire a resource when a copy on another machine is %s',
+    async (invalidReason) => {
+      const repository = memoryRepository();
+      const contentHashes = ['hash-a', 'hash-b', 'hash-c'];
+      await recordDivergenceAck(
+        'user-1',
+        { resourceKey: 'skill:gh', contentHashes },
+        deps(repository)
+      );
+      const readable = ghSkill([
+        instance('mango-skills', 'hash-a'),
+        instance('claude-skills', 'hash-b'),
+      ]);
+      const unreadable = ghSkill([
+        {
+          locationId: 'agents-skills',
+          path: '/home/test/agents-skills/gh',
+          modifiedAtMs: 1,
+          format: 'markdown-frontmatter',
+          valid: false,
+          invalidReason,
+        },
+      ]);
+
+      expect(
+        await acknowledgedResourceKeys('user-1', [readable, unreadable], deps(repository))
+      ).toEqual(new Set());
+      expect(repository.rows.get('skill:gh')?.contentHashes).toEqual(contentHashes);
+    }
+  );
+
   const record: DivergenceAckRecord = {
     resourceKey: 'skill:gh',
     divergenceKey: divergenceKeyFor(['hash-a', 'hash-b']),

@@ -136,6 +136,7 @@ export const messages: Messages = {
         'skill-invalid': 'skill is invalid',
         'skill-disabled': 'disabled in skill settings',
         'skill-shadowed': 'shadowed by a higher-precedence source',
+        'skill-precedence-unverified': 'a higher-priority skill location could not be scanned',
         'skill-tool-disabled': 'the skill tool is not active',
       },
       /** Substituted for the hub's own machine, whose API name is not copy. */
@@ -1337,6 +1338,8 @@ export const messages: Messages = {
       refreshLibraryFailed: 'The library could not be refreshed. Existing results remain visible.',
       invalidBadge: 'Invalid',
       shadowedBadge: 'Shadowed',
+      precedenceUnverifiedHint:
+        'This copy is unavailable until a higher-priority skill location can be scanned.',
       shadowedHint:
         'A higher-priority source provides a skill with the same name, so this copy is inactive.',
       shadowedNotice:
@@ -2389,7 +2392,7 @@ export const messages: Messages = {
       unresolved: '{count} resources still need a decision.',
       adopt: 'Use this version',
       keepPerLocation: {
-        scanIncomplete: 'Rescan the failed location before keeping these versions.',
+        scanIncomplete: 'Preview again once all source copies can be read.',
         title: 'Keep them different',
         description:
           'Sometimes copies should differ. The divergence stops being flagged until one of the contents changes again.',

@@ -1,8 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import {
+  DEFAULT_APP_SETTINGS,
+  libraryLocationsFor,
+  withLibraryLocations,
+} from '@mangostudio/shared/app-settings';
+import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 import {
   SkillDescriptorSchema,
   type SkillListResponse,
@@ -10,7 +16,9 @@ import {
 } from '@mangostudio/shared/skills';
 import Value from 'typebox/value';
 
+import { getDb } from '../../../src/db/database';
 import { loadConfigForTest } from '../../../src/lib/config';
+import { updateAppSettings } from '../../../src/modules/app-settings/application/app-settings-service';
 import {
   resetSkillsCache,
   setThirdPartySkillDirsForTest,
@@ -144,6 +152,45 @@ describe('skills routes', () => {
     expect(malformed.status).toBe(404);
     expect(await malformed.json()).toMatchObject({ code: 'NOT_FOUND' });
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'reports an observed fallback without claiming it is shadowed',
+    async () => {
+      rmSync(skillsDir, { recursive: true });
+      symlinkSync(join(agentsDir, 'missing'), skillsDir, 'dir');
+      const fallback = join(agentsDir, 'fallback');
+      mkdirSync(fallback);
+      writeFileSync(
+        join(fallback, 'SKILL.md'),
+        '---\nname: fallback\ndescription: Fallback copy\n---\n'
+      );
+      const user = {
+        id: 'skills-scan-user',
+        name: 'Skill Scan',
+        email: 'skills-scan@test.invalid',
+      };
+      const locations = libraryLocationsFor(DEFAULT_APP_SETTINGS);
+      await updateAppSettings(
+        getDb(),
+        user.id,
+        withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
+          ...locations,
+          home: { ...locations.home, 'agents-skills': true },
+        })
+      );
+      const { app, restore } = createAuthenticatedApiTestApp(user, skillRoutes);
+      restoreAuth = restore;
+
+      const response = await app.handle(new Request('http://localhost/skills'));
+      const payload = (await response.json()) as SkillListResponse;
+
+      expect(response.status).toBe(200);
+      expect(Value.Check(SkillListResponseSchema, payload)).toBe(true);
+      expect(payload.skills).toMatchObject([
+        { key: 'agents:fallback', shadowed: false, precedenceUnverified: true },
+      ]);
+    }
+  );
 
   it('rejects unauthenticated requests', async () => {
     const app = createApiTestApp(skillRoutes);

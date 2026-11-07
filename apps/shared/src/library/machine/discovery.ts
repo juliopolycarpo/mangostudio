@@ -122,6 +122,7 @@ export function scanLibraryInstances(
     return {
       instances: scanned.flatMap((result) => result.instances),
       unreadableEntries: scanned.flatMap((result) => result.unreadableEntries),
+      locationDiagnostics: scanned.flatMap((result) => result.locationDiagnostics ?? []),
     };
   };
 

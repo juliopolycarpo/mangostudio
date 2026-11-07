@@ -148,6 +148,31 @@ describe('useSlashCommands — skills', () => {
     });
   });
 
+  it('withholds a skill with unverified precedence even without a chat', async () => {
+    scenario.respondWithJson('GET', '/api/skills', {
+      body: {
+        ...SKILLS,
+        skills: [
+          ...SKILLS.skills,
+          {
+            ...SKILLS.skills[0],
+            key: 'claude:fallback',
+            name: 'fallback',
+            slug: 'fallback',
+            source: 'claude',
+            precedenceUnverified: true,
+          },
+        ],
+      } satisfies SkillListResponse,
+    });
+
+    const { result } = renderPalette(null);
+
+    await waitFor(() => {
+      expect(result.current.entries.map((entry) => entry.name)).toEqual(['dataviz']);
+    });
+  });
+
   it('keeps offering skills when the projection fails', async () => {
     scenario.respondWithJson('GET', '/api/chats/chat-1/capabilities', {
       status: 500,

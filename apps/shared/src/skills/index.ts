@@ -1,3 +1,4 @@
+export { isUsableSkill } from './availability';
 export {
   SKILL_SLUG_MAX_LENGTH,
   SKILL_SLUG_PATTERN,

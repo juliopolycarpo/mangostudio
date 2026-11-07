@@ -9,7 +9,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -500,6 +500,38 @@ describe('inspectChatCapabilities', () => {
     expect(bySkillKey.get('agents:notes')?.reason).toBe('skill-shadowed');
     expect(capabilities.counts.effectiveSkills).toBe(1);
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'distinguishes an unverified skill from a known shadowed copy',
+    async () => {
+      rmSync(skillsDir, { recursive: true });
+      symlinkSync(join(agentsDir, 'missing'), skillsDir, 'dir');
+      writeSkill(agentsDir, 'fallback');
+      const invalid = join(agentsDir, 'invalid-copy');
+      mkdirSync(invalid);
+      writeFileSync(join(invalid, 'SKILL.md'), '---\nname: wrong-name\n---\n');
+      const settings = await getAppSettings(getDb(), user.id);
+      const locations = libraryLocationsFor(settings);
+      await updateAppSettings(
+        getDb(),
+        user.id,
+        withLibraryLocations(settings, DEFAULT_PROFILE_ID, {
+          ...locations,
+          home: { ...locations.home, 'agents-skills': true },
+        })
+      );
+      resetSkillsCache();
+
+      const capabilities = await inspect();
+
+      expect(capabilities.skills).toMatchObject([
+        { key: 'agents:fallback', state: 'unavailable', reason: 'skill-precedence-unverified' },
+        { key: 'agents:invalid-copy', state: 'unavailable', reason: 'skill-precedence-unverified' },
+      ]);
+      expect(capabilities.counts.effectiveSkills).toBe(0);
+      expect(Value.Check(ChatCapabilitiesResponseSchema, capabilities)).toBe(true);
+    }
+  );
 
   it('never serializes commands, environment values, or tool schemas', async () => {
     await insertServer('alpha', 1);
