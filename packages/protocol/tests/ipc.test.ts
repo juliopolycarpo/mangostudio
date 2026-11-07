@@ -242,7 +242,7 @@ describe('local socket transport', () => {
     }
   });
 
-  it('finishes listener shutdown when a local closure callback throws', async () => {
+  it('notifies each port owner even when an earlier closure observer throws', async () => {
     const path = nextPath();
     const { accepted, accept } = acceptOne();
     const server = await listenIpc(path, accept);
@@ -250,18 +250,20 @@ describe('local socket transport', () => {
       peer: CONFORMANCE_B,
       livenessIntervalMs: false,
     });
-    const host = new Session(await accepted, { peer: CONFORMANCE_A, livenessIntervalMs: false });
+    const acceptedPort = await accepted;
+    acceptedPort.onClosed(() => {
+      throw new Error('controlled closure observer failure');
+    });
+    const host = new Session(acceptedPort, { peer: CONFORMANCE_A, livenessIntervalMs: false });
     await Promise.all([client.ready, host.ready]);
 
     const closed = new Promise((resolve) => client.onClose(resolve));
-    host.onClose(() => {
-      throw new Error('controlled owner callback failure');
-    });
     try {
-      await expect(server.close()).rejects.toThrow('controlled owner callback failure');
+      await expect(server.close()).rejects.toThrow('controlled closure observer failure');
       expect(await closed).toMatchObject({ code: CLOSE_CODES.RELEASED });
       expect(host.state).toBe('closed');
     } finally {
+      await host.close();
       await server.close();
     }
   });

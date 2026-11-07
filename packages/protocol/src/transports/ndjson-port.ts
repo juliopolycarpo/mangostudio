@@ -171,8 +171,11 @@ class NdjsonPort implements Port {
 
   #report(closure: PortClosure): void {
     this.#frames.clear();
-    this.#closed.emit(closure);
-    this.#closed.clear();
+    try {
+      this.#closed.emitAll(closure);
+    } finally {
+      this.#closed.clear();
+    }
   }
 
   /** True when the line reached the sink; a broken pipe fails the port instead. */

@@ -23,6 +23,25 @@ export class Listeners<T> {
     for (const listener of [...this.#set]) listener(value);
   }
 
+  /**
+   * Notifies all observers before rethrowing the first failure.
+   * @example closureListeners.emitAll(closure);
+   */
+  emitAll(value: T): void {
+    let failure: Error | undefined;
+    for (const listener of [...this.#set]) {
+      try {
+        listener(value);
+      } catch (error) {
+        failure ??=
+          error instanceof Error
+            ? error
+            : new Error('Listener threw a non-Error value', { cause: error });
+      }
+    }
+    if (failure) throw failure;
+  }
+
   clear(): void {
     this.#set.clear();
   }
