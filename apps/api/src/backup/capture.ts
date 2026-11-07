@@ -13,7 +13,7 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import {
   BACKUP_LIMITS,
@@ -59,7 +59,7 @@ function check(signal?: AbortSignal): void {
 }
 function inside(parent: string, child: string): boolean {
   const path = relative(parent, child);
-  return path === '' || (!path.startsWith('..') && !isAbsolute(path));
+  return path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path);
 }
 
 /** Refuse names that cannot round-trip safely on every supported platform. */

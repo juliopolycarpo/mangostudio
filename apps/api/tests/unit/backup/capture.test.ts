@@ -377,6 +377,27 @@ it.skipIf(process.platform === 'win32')(
   }
 );
 
+it('captures a portable descendant whose name begins with two dots', async () => {
+  const { config, output } = await fixture();
+  const directory = join(config.uploads.dir, '..archive');
+  await mkdir(directory);
+  await writeFile(join(directory, '..notes.txt'), 'portable descendant');
+  await captureBackup(config, { output, checkpoints: true, includeSecrets: false }, 'test');
+  const files = await new Bun.Archive(await readFile(output)).files();
+  expect(await files.get('uploads/..archive/..notes.txt')?.text()).toBe('portable descendant');
+});
+
+it('refuses an output inside a root directory whose name begins with two dots', async () => {
+  const { config } = await fixture();
+  const directory = join(config.uploads.dir, '..archive');
+  await mkdir(directory);
+  const output = join(directory, 'output.tar.gz');
+  await expect(
+    captureBackup(config, { output, checkpoints: true, includeSecrets: false }, 'test')
+  ).rejects.toThrow('overlaps');
+  expect(await Bun.file(output).exists()).toBe(false);
+});
+
 it('refuses an oversized file before copying and preserves an existing destination', async () => {
   const { root, config, output } = await fixture();
   const large = join(config.uploads.dir, 'large.bin');
