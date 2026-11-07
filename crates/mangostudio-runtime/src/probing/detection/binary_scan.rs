@@ -81,6 +81,8 @@ pub struct RuntimeDefinition {
     /// binary, so the effective-installation choice also accepts a later
     /// readable installation under the same name.
     pub shared_binary_names: &'static [&'static str],
+    /// A stricter version parser for executable names shared across vendors.
+    pub parse_shared_version: Option<fn(&str) -> Option<SemVer>>,
     /// Names from [`RuntimeDefinition::binary_names`] that are also searched as
     /// `<name>.ps1` on `win32`, after every `PATHEXT` name for that binary
     /// name. For a vendor whose Windows installer ships only a PowerShell
@@ -89,6 +91,16 @@ pub struct RuntimeDefinition {
     /// (see [`RuntimeDefinition::shared_binary_names`]), since probing runs
     /// the script it finds.
     pub windows_powershell_script_names: &'static [&'static str],
+}
+
+impl RuntimeDefinition {
+    /// Identifies an ambiguous executable name, such as Cursor's `/usr/bin/agent`.
+    pub(crate) fn shares_binary_name(&self, path: &str) -> bool {
+        !self.shared_binary_names.is_empty()
+            && self
+                .shared_binary_names
+                .contains(&binary_name(path).as_str())
+    }
 }
 
 /// A candidate that failed to become an installation.
@@ -379,19 +391,27 @@ fn iterate_binary_candidates(
     let path_value = path_env.env_var("PATH").unwrap_or("");
     let mut seen = HashSet::new();
 
-    for (index, directory) in path_value.split(list_separator).map(str::trim).enumerate() {
-        if directory.is_empty() {
-            continue;
+    for (index, raw_directory) in path_value.split(list_separator).enumerate() {
+        let trimmed_directory = raw_directory.trim();
+        for name in &names {
+            let directory = if !path_env.is_windows() && definition.shares_binary_name(name) {
+                raw_directory
+            } else {
+                trimmed_directory
+            };
+            if directory.is_empty() {
+                continue;
+            }
+            append_directory(
+                &mut candidates,
+                &mut seen,
+                std::slice::from_ref(name),
+                &path_env.platform,
+                directory,
+                RuntimeOrigin::Path,
+                Some(index as u32),
+            );
         }
-        append_directory(
-            &mut candidates,
-            &mut seen,
-            &names,
-            &path_env.platform,
-            directory,
-            RuntimeOrigin::Path,
-            Some(index as u32),
-        );
     }
     for directory in (definition.well_known_dirs)(path_env) {
         append_directory(
@@ -626,7 +646,14 @@ async fn probe_one_candidate(
         };
     };
 
-    if (definition.parse_version)(&version).is_none() {
+    let parsed = if definition.shares_binary_name(&candidate.path) {
+        definition
+            .parse_shared_version
+            .and_then(|parse| parse(&version))
+    } else {
+        (definition.parse_version)(&version)
+    };
+    if parsed.is_none() {
         // A definition that opts in trades the raw failure for a known
         // installation with an unreadable version: the binary answered, so
         // "not installed" would be the wrong story. One that does not opt
@@ -882,8 +909,9 @@ pub async fn scan_runtime(
 /// version does read wins instead, if it is under *another* binary name or
 /// the winner's name is one of `shared_names`. For any other name an older
 /// copy under the same name is the same vendor, so a vendor that changed its
-/// version format keeps the install `PATH` picks. `None` when nothing was
-/// found on `PATH`.
+/// version format keeps the install `PATH` picks. An unrecognized shared name
+/// remains in the scan but cannot be effective. If no version was recognized,
+/// a vendor-specific name on `PATH` can still be selected.
 ///
 /// Runtime definitions drop unparsed versions, so for them this is always
 /// `path_winner`.
@@ -906,13 +934,20 @@ pub(crate) fn effective_installation_index(
     }
     let winner_name = binary_name(&winner.raw_path);
     let name_is_shared = shared_names.contains(&winner_name.as_str());
-    installations
-        .iter()
-        .position(|installation| {
-            installation.version.is_some()
-                && (name_is_shared || binary_name(&installation.raw_path) != winner_name)
+    let confirmed = installations.iter().position(|installation| {
+        installation.version.is_some()
+            && (name_is_shared || binary_name(&installation.raw_path) != winner_name)
+    });
+    if name_is_shared {
+        confirmed.or_else(|| {
+            installations.iter().position(|installation| {
+                installation.path_index.is_some()
+                    && !shared_names.contains(&binary_name(&installation.raw_path).as_str())
+            })
         })
-        .or(path_winner)
+    } else {
+        confirmed.or(path_winner)
+    }
 }
 
 /// A candidate's binary name, without a Windows extension and
@@ -957,6 +992,7 @@ mod tests {
             well_known_dirs: |_| Vec::new(),
             include_bare_binary_names: false,
             shared_binary_names: &[],
+            parse_shared_version: None,
             windows_powershell_script_names: &[],
         }
     }
@@ -1210,6 +1246,19 @@ mod tests {
             index,
             Some(0),
             "expected the PATH winner for an unshared name | received: {index:?}"
+        );
+    }
+
+    #[test]
+    fn an_unrecognized_shared_name_can_yield_to_a_vendor_specific_path() {
+        let shared = installation("/grok/bin/agent", None);
+        let mut cursor = installation("/cursor/bin/cursor-agent", None);
+        cursor.path_index = Some(1);
+        let index = effective_installation_index(&[shared, cursor], Some(0), &["agent"]);
+        assert_eq!(
+            index,
+            Some(1),
+            "expected Cursor's own executable despite an unrecognized version | received {index:?}"
         );
     }
 

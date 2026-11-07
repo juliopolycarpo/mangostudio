@@ -558,8 +558,15 @@ async fn resolve_agent_executable_in(
         return None;
     };
     let status = describe_external_agent(cli, &Arc::new(path_env), cancel, false, &None).await;
-    launchable_installation(status.runtime)
-        .map(|installation| std::path::PathBuf::from(installation.path))
+    let installation = launchable_installation(status.runtime)?;
+    if cli.runtime.shares_binary_name(&installation.raw_path) {
+        // Preserve the name the probe ran for launchers that dispatch on argv[0].
+        crate::blocking::run_blocking(move || std::path::absolute(installation.raw_path))
+            .await
+            .ok()
+    } else {
+        Some(installation.path.into())
+    }
 }
 
 /// The installation to launch for a vendor: the one `probing.agent-clis`
@@ -1082,6 +1089,26 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_unrecognized_shared_agent_is_not_a_cursor_launch_candidate() {
+        for version in ["grok 1.0.30 (04b7ffed98c6) [stable]", "1.2.3"] {
+            let dir = scratch_dir("unrecognized-shared-agent");
+            fake_binary_on_path(&dir, "agent", version);
+            let env = params_with_path(&dir);
+            let chosen = resolve_agent_executable_in(
+                AgentTargetId::Cursor,
+                host::build_runtime_path_env(Some(&env)),
+                &CancellationToken::new(),
+            )
+            .await;
+            assert_eq!(
+                chosen, None,
+                "expected no Cursor executable for shared version {version:?}"
+            );
+        }
+    }
+
     /// Cursor installed only as `agent`, after Grok's `agent` on `PATH`: the
     /// report and the launch must both name Cursor's own `agent`.
     #[cfg(unix)]
@@ -1090,8 +1117,20 @@ mod tests {
         let grok = scratch_dir("agent-clis-grok-bin");
         let cursor = scratch_dir("agent-clis-cursor-bin");
         fake_binary_on_path(&grok, "agent", "grok 1.0.30 (04b7ffed98c6) [stable]");
-        fake_binary_on_path(&cursor, "agent", "2026.09.10-fd3934a");
+        fake_binary_on_path(&cursor, "launcher", "2026.09.10-fd3934a");
+        std::os::unix::fs::symlink(cursor.join("launcher"), cursor.join("agent")).unwrap();
         let mut env = params_with_path(&cursor);
+        env.insert("PATH".into(), format!(" {}", cursor.display()));
+        let outside_path = resolve_agent_executable_in(
+            AgentTargetId::Cursor,
+            host::build_runtime_path_env(Some(&env)),
+            &CancellationToken::new(),
+        )
+        .await;
+        assert_eq!(
+            outside_path, None,
+            "expected literal PATH to exclude the alias"
+        );
         env.insert(
             "PATH".to_string(),
             format!("{}:{}", grok.to_string_lossy(), cursor.to_string_lossy()),
@@ -1123,9 +1162,8 @@ mod tests {
             Some(expected.as_path()),
             "expected Cursor's effective installation: {expected:?} | received: {reported:?}"
         );
-        // The launch runs the resolved path (`/private/var/...` on macOS),
-        // while the report's `rawPath` is the PATH candidate as found.
-        let expected_launch = std::fs::canonicalize(&expected).unwrap();
+        // The probe and launch use the same alias spelling for argv[0].
+        let expected_launch = std::path::absolute(&expected).unwrap();
         assert_eq!(
             launched.as_deref(),
             Some(expected_launch.as_path()),

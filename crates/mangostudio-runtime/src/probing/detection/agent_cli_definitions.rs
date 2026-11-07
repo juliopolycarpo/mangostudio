@@ -126,6 +126,17 @@ pub fn parse_cursor_agent_version(raw: &str) -> Option<SemVer> {
     SemVer::parse_trimmed(raw, &CURSOR_AGENT_VERSION_PATTERN)
 }
 
+/// Recognizes Cursor's date-based release version for a shared `agent`.
+///
+/// For example, `2026.09.10-fd3934a` qualifies and `1.2.3` does not.
+pub(crate) fn parse_cursor_shared_agent_version(raw: &str) -> Option<SemVer> {
+    let version = parse_cursor_agent_version(raw)?;
+    ((2024..=9999).contains(&version.major)
+        && (1..=12).contains(&version.minor)
+        && (1..=31).contains(&version.patch))
+    .then_some(version)
+}
+
 fn no_well_known_directories(_env: &PathEnv) -> Vec<String> {
     Vec::new()
 }
@@ -163,6 +174,7 @@ pub const CLAUDE_AGENT_CLI_DEFINITION: ExternalAgentCliDefinition = ExternalAgen
         well_known_dirs: no_well_known_directories,
         include_bare_binary_names: false,
         shared_binary_names: &[],
+        parse_shared_version: None,
         windows_powershell_script_names: &[],
     },
     auth: AgentAuthDefinition::File {
@@ -184,6 +196,7 @@ pub const CODEX_AGENT_CLI_DEFINITION: ExternalAgentCliDefinition = ExternalAgent
         well_known_dirs: no_well_known_directories,
         include_bare_binary_names: false,
         shared_binary_names: &[],
+        parse_shared_version: None,
         windows_powershell_script_names: &[],
     },
     auth: AgentAuthDefinition::File {
@@ -215,6 +228,7 @@ pub const CURSOR_AGENT_CLI_DEFINITION: ExternalAgentCliDefinition = ExternalAgen
         include_bare_binary_names: false,
         // Grok Build also installs `agent`.
         shared_binary_names: &["agent"],
+        parse_shared_version: Some(parse_cursor_shared_agent_version),
         // Only the vendor-specific name: `agent` is shared with other CLIs,
         // so an unrelated `agent.ps1` on PATH must never be probed.
         windows_powershell_script_names: &["cursor-agent"],

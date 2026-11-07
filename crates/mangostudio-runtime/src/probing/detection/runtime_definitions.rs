@@ -183,6 +183,7 @@ pub const NODE_RUNTIME_DEFINITION: RuntimeDefinition = RuntimeDefinition {
     well_known_dirs: well_known_node_directories,
     include_bare_binary_names: false,
     shared_binary_names: &[],
+    parse_shared_version: None,
     windows_powershell_script_names: &[],
 };
 
@@ -196,6 +197,7 @@ pub const BUN_RUNTIME_DEFINITION: RuntimeDefinition = RuntimeDefinition {
     well_known_dirs: well_known_bun_directories,
     include_bare_binary_names: false,
     shared_binary_names: &[],
+    parse_shared_version: None,
     windows_powershell_script_names: &[],
 };
 
@@ -210,6 +212,7 @@ pub const FNM_RUNTIME_DEFINITION: RuntimeDefinition = RuntimeDefinition {
     well_known_dirs: well_known_fnm_directories,
     include_bare_binary_names: false,
     shared_binary_names: &[],
+    parse_shared_version: None,
     windows_powershell_script_names: &[],
 };
 
@@ -224,6 +227,7 @@ pub const GIT_RUNTIME_DEFINITION: RuntimeDefinition = RuntimeDefinition {
     well_known_dirs: well_known_git_directories,
     include_bare_binary_names: false,
     shared_binary_names: &[],
+    parse_shared_version: None,
     windows_powershell_script_names: &[],
 };
 
@@ -238,6 +242,7 @@ pub const WINGET_RUNTIME_DEFINITION: RuntimeDefinition = RuntimeDefinition {
     well_known_dirs: well_known_winget_directories,
     include_bare_binary_names: false,
     shared_binary_names: &[],
+    parse_shared_version: None,
     windows_powershell_script_names: &[],
 };
 
