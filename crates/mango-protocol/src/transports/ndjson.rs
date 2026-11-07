@@ -72,7 +72,7 @@ pub struct NdjsonPort<R, W> {
     reader: R,
     writer: SharedWriter<W>,
     max_frame_bytes: usize,
-    first_hello_deadline: Option<tokio::time::Instant>,
+    first_hello_deadline: Option<FirstHelloDeadline>,
 }
 
 impl<R, W> NdjsonPort<R, W>
@@ -143,7 +143,10 @@ where
 {
     /// Sets a transport-owned first-hello deadline for accepted local connections.
     pub(crate) fn with_first_hello_timeout(mut self, timeout: std::time::Duration) -> Self {
-        self.first_hello_deadline = Some(tokio::time::Instant::now() + timeout);
+        self.first_hello_deadline = Some(FirstHelloDeadline {
+            at: tokio::time::Instant::now() + timeout,
+            armed: watch::channel(true).0,
+        });
         self
     }
 
@@ -276,6 +279,7 @@ where
         let tx = NdjsonTx {
             writer: self.writer.clone(),
             max_frame_bytes: self.max_frame_bytes,
+            first_hello_deadline: self.first_hello_deadline.clone(),
         };
         let rx = NdjsonRx {
             reader: self.reader,
@@ -297,6 +301,7 @@ where
 pub struct NdjsonTx<W> {
     writer: SharedWriter<W>,
     max_frame_bytes: usize,
+    first_hello_deadline: Option<FirstHelloDeadline>,
 }
 
 impl<W> PortTx for NdjsonTx<W>
@@ -304,7 +309,28 @@ where
     W: AsyncWrite + Unpin + Send + 'static,
 {
     async fn send(&mut self, frame: Frame) -> SendOutcome {
-        self.writer.write_frame(&frame, self.max_frame_bytes).await
+        if self
+            .first_hello_deadline
+            .as_ref()
+            .is_some_and(|deadline| !*deadline.armed.borrow())
+        {
+            self.first_hello_deadline = None;
+        }
+        let write = self.writer.write_frame(&frame, self.max_frame_bytes);
+        let Some(deadline) = &self.first_hello_deadline else {
+            return write.await;
+        };
+        // The session sends its own hello before it polls Rx. The send must
+        // honor the same deadline if the peer leaves its receive buffer full.
+        tokio::select! {
+            biased;
+            () = deadline.expired() => {
+                // A partially written NDJSON frame cannot be followed by a farewell.
+                self.writer.shut_down().await;
+                SendOutcome::Closed
+            }
+            outcome = write => outcome,
+        }
     }
 
     async fn close(self, code: u16, reason: Option<String>) {
@@ -330,7 +356,7 @@ pub struct NdjsonRx<R, W> {
     writer: SharedWriter<W>,
     max_frame_bytes: usize,
     terminal: bool,
-    first_hello_deadline: Option<tokio::time::Instant>,
+    first_hello_deadline: Option<FirstHelloDeadline>,
 }
 
 impl<R, W> PortRx for NdjsonRx<R, W>
@@ -342,14 +368,15 @@ where
         loop {
             if self
                 .first_hello_deadline
-                .is_some_and(|deadline| tokio::time::Instant::now() >= deadline)
+                .as_ref()
+                .is_some_and(|deadline| tokio::time::Instant::now() >= deadline.at)
             {
                 self.expire_first_hello().await;
                 continue;
             }
             if let Some(frame) = self.pending.pop_front() {
                 if matches!(frame, Frame::Hello(_)) {
-                    self.first_hello_deadline = None;
+                    self.disarm_first_hello();
                 }
                 return Some(Inbound::Frame(frame));
             }
@@ -364,8 +391,9 @@ where
             // `AsyncReadExt::read` is cancel-safe: a call dropped because
             // another `select!` branch won the race read nothing, so no byte
             // this decoder has not already seen is lost.
-            let read = if let Some(deadline) = self.first_hello_deadline {
-                match tokio::time::timeout_at(deadline, self.reader.read(&mut self.chunk)).await {
+            let read = if let Some(deadline) = &self.first_hello_deadline {
+                match tokio::time::timeout_at(deadline.at, self.reader.read(&mut self.chunk)).await
+                {
                     Ok(result) => result,
                     Err(_) => {
                         self.expire_first_hello().await;
@@ -389,9 +417,15 @@ where
     R: AsyncRead + Unpin + Send + 'static,
     W: AsyncWrite + Unpin + Send + 'static,
 {
+    fn disarm_first_hello(&mut self) {
+        if let Some(deadline) = self.first_hello_deadline.take() {
+            deadline.armed.send_replace(false);
+        }
+    }
+
     fn record_closure(&mut self, closure: PortClosure) {
         // The first closure wins even if teardown or a cancelled recv crosses the deadline.
-        self.first_hello_deadline = None;
+        self.disarm_first_hello();
         self.closure = Some(closure);
     }
 
@@ -464,6 +498,26 @@ where
         self.writer
             .end(code, Some(reason), self.max_frame_bytes)
             .await;
+    }
+}
+
+#[derive(Clone, Debug)]
+struct FirstHelloDeadline {
+    at: tokio::time::Instant,
+    armed: watch::Sender<bool>,
+}
+
+impl FirstHelloDeadline {
+    async fn expired(&self) {
+        let mut armed = self.armed.subscribe();
+        let disarmed = async {
+            let _ = armed.wait_for(|armed| !*armed).await;
+        };
+        tokio::select! {
+            biased;
+            () = disarmed => std::future::pending().await,
+            () = tokio::time::sleep_until(self.at) => (),
+        }
     }
 }
 
@@ -995,6 +1049,73 @@ mod tests {
             }
             other => panic!("expected the refusal, got {other:?}"),
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn first_hello_deadline_releases_session_with_blocked_local_hello() {
+        use crate::frame::PeerInfo;
+        use crate::session::{Session, SessionOptions};
+
+        // Eight bytes cannot hold even the smallest valid hello.
+        let (mut peer, stream) = duplex(8);
+        let (reader, writer) = tokio::io::split(stream);
+        let port =
+            NdjsonPort::new(reader, writer).with_first_hello_timeout(Duration::from_millis(10));
+        let closer = port.closer();
+        let options = SessionOptions::new(PeerInfo {
+            name: "blocked-hello".into(),
+            version: "0".into(),
+            role: "hub".into(),
+        });
+        let (session, mut driver) = Session::spawn(port, options);
+        let settled = tokio::time::timeout(Duration::from_secs(5), &mut driver).await;
+        if settled.is_err() {
+            driver.abort();
+            let _ = driver.await;
+        }
+        settled
+            .expect("the first-hello deadline must release a session blocked writing hello")
+            .expect("the session driver must finish without panicking");
+        assert!(session.ready().await.is_err());
+        assert!(
+            !closer.is_open(),
+            "the closed session must release its IPC slot"
+        );
+
+        let mut bytes = Vec::new();
+        peer.read_to_end(&mut bytes).await.unwrap();
+        assert_eq!(
+            bytes, b"{\"type\":",
+            "only the partial hello reached the peer"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_valid_hello_disarms_the_deadline_for_a_pending_send() {
+        let (mut peer, reader) = duplex(1024);
+        let (writer, mut watch) = StalledSink::new();
+        let (mut tx, mut rx) = NdjsonPort::new(reader, writer)
+            .with_first_hello_timeout(Duration::from_millis(10))
+            .split();
+        let mut send = tokio::spawn(async move { tx.send(Frame::Ping).await });
+        reached(&mut watch.writing).await;
+        peer.write_all(b"{\"type\":\"hello\",\"protocol\":{\"major\":1,\"minor\":0},\"peer\":{\"name\":\"raw\",\"version\":\"0\",\"role\":\"tool\"},\"capabilities\":{}}\n")
+            .await
+            .unwrap();
+        assert!(matches!(
+            rx.recv().await,
+            Some(Inbound::Frame(Frame::Hello(_)))
+        ));
+
+        let sent = tokio::time::timeout(Duration::from_millis(20), &mut send).await;
+        if sent.is_err() {
+            send.abort();
+            let _ = send.await;
+        }
+        assert!(
+            sent.is_err(),
+            "the disarmed deadline must leave the send pending"
+        );
     }
 
     #[tokio::test(start_paused = true)]
