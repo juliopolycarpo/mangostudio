@@ -214,7 +214,9 @@ it.each(['database', 'config'])('refuses a hard-linked raw %s under uploads', as
 
   await expect(
     captureBackup(config, { output, checkpoints: true, includeSecrets: false }, 'test')
-  ).rejects.toThrow('multiply linked source files');
+  ).rejects.toThrow(
+    source === 'database' ? 'single-link regular database file' : 'multiply linked source files'
+  );
   expect(await Bun.file(output).exists()).toBe(false);
   expect((await readdir(root)).some((name) => name.startsWith('.mango-backup-'))).toBe(false);
   expect((await lstat(original)).nlink).toBe(2);
@@ -406,6 +408,24 @@ it('refuses equal configured roots before writing an archive', async () => {
   ).rejects.toThrow('Configured backup roots overlap: uploads and images');
   expect(await Bun.file(output).exists()).toBe(false);
 });
+
+it.skipIf(process.platform === 'win32')(
+  'refuses to publish over an absent root reached through a directory symlink',
+  async () => {
+    const { root, config } = await fixture();
+    const physicalParent = join(root, 'physical');
+    const alias = join(root, 'alias');
+    await mkdir(physicalParent);
+    await symlink(physicalParent, alias, 'dir');
+    config.uploads.dir = join(alias, 'missing-uploads');
+    const output = join(physicalParent, 'missing-uploads');
+
+    await expect(
+      captureBackup(config, { output, checkpoints: true, includeSecrets: false }, 'test')
+    ).rejects.toThrow('A data root overlaps the archive');
+    expect(await Bun.file(output).exists()).toBe(false);
+  }
+);
 
 it('refuses checkpoints nested inside uploads even when checkpoints are omitted', async () => {
   const { config, output } = await fixture();

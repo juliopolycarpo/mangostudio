@@ -208,21 +208,19 @@ export async function captureBackup(
     if (overlap) {
       throw new Error(`Configured backup roots overlap: ${overlap.id} and ${root.id}.`);
     }
-  }
-  const resolvedRoots = configuredRoots.filter(
-    (root) => options.checkpoints || root.id !== 'checkpoints'
-  );
-  for (const root of resolvedRoots) {
     if (
-      inside(root.source, output) ||
-      inside(root.source, databasePath) ||
-      inside(root.source, configurationPath)
+      inside(root.path, output) ||
+      inside(root.path, databasePath) ||
+      inside(root.path, configurationPath)
     ) {
       throw new Error(
         'A data root overlaps the archive, database or configuration; relocate the output or use non-overlapping roots.'
       );
     }
   }
+  const resolvedRoots = configuredRoots.filter(
+    (root) => options.checkpoints || root.id !== 'checkpoints'
+  );
   const release = await acquireCaptureLock(databasePath);
   let staging: string | undefined;
   let source: Database | undefined;
