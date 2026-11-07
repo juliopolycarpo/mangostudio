@@ -232,8 +232,12 @@ describe('rust-coverage.yml (instrumented ubuntu Rust tests, PR code)', () => {
   });
 
   test('cargo-shim keeps the plain run on macOS and Windows only', () => {
-    expect(shim).toMatch(
-      /- name: Run tests\n\s+if: \$\{\{ !cancelled\(\) && matrix\.os != 'ubuntu-latest' \}\}\n\s+run: cargo nextest run --workspace --all-targets --all-features --locked --retries 0/
+    const run = extractStepBlocks(extractJobBlock(shim, 'workspace')).find((step) =>
+      step.includes('name: Run tests')
+    );
+    expect(run).toContain("!cancelled() && matrix.os != 'ubuntu-latest'");
+    expect(run).toContain(
+      'run: cargo nextest run --workspace --all-targets --all-features --locked --retries 0'
     );
     expect(shim.match(/cargo nextest run --workspace --all-targets/g)).toHaveLength(1);
     expect(shim.match(/cargo test --workspace --all-targets/g)).toBeNull();

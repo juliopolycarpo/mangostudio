@@ -380,6 +380,40 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     );
   });
 
+  test.each<[string, string[]]>([
+    [
+      'workspace',
+      [
+        'cargo nextest run --workspace --all-targets --all-features --locked --retries 0',
+        'Check nextest runs the libtest test set',
+      ],
+    ],
+    [
+      'workspace-windows-arm64',
+      [
+        'cargo nextest run -p mangostudio-runtime --all-targets --all-features --locked --retries 0',
+      ],
+    ],
+  ])('%s requires successful Bun and nextest setup for dependent tests', (job, commands) => {
+    const steps = extractStepBlocks(extractJobBlock(workflow, job));
+    const bun = steps.findIndex((step) => step.includes('uses: oven-sh/setup-bun@'));
+    const nextest = steps.findIndex((step) => step.includes('tool: cargo-nextest@'));
+    for (const command of commands) {
+      const target = steps.findIndex((step) => step.includes(command));
+      expect(target, `${job} must retain ${command}`).toBeGreaterThan(Math.max(bun, nextest));
+      expect(steps[target], `${job}: ${command} requires successful Bun setup`).toContain(
+        "steps.setup-bun.outcome == 'success'"
+      );
+      expect(steps[target], `${job}: ${command} requires successful nextest setup`).toContain(
+        "steps.setup-nextest.outcome == 'success'"
+      );
+    }
+    expect(steps[bun]).toContain('id: setup-bun');
+    expect(steps[nextest]).toContain('id: setup-nextest');
+    expect(steps[bun]).not.toContain('continue-on-error:');
+    expect(steps[nextest]).not.toContain('continue-on-error:');
+  });
+
   test('split compiler jobs disappear only after their coverage moves to native workspace jobs', () => {
     const gate = extractJobBlock(workflow, 'gate-unique');
     for (const job of ['workspace-msrv', 'target-msrv', 'launcher-msrv']) {
