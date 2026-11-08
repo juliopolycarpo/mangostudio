@@ -41,11 +41,8 @@ export interface GeminiInteractionAccumulator {
   /** Provider-reported input tokens captured from `interaction.completed`. */
   readonly providerReportedInputTokens: number | undefined;
   /**
-   * Why the turn must not be reported as a success, when the last status the
-   * stream reported was one the interaction cannot be continued from.
-   *
-   * This is the surface a mapped `error` event should feed too (#1032), rather
-   * than growing a second path to the same decision.
+   * Why the turn must not succeed: an explicit SSE error (terminal), or a final
+   * status the interaction cannot be continued from.
    */
   readonly abandonedReason: string | undefined;
 }
@@ -57,6 +54,7 @@ export function createGeminiInteractionAccumulator(): GeminiInteractionAccumulat
   let interactionId: string | undefined;
   let providerReportedInputTokens: number | undefined;
   let abandonedReason: string | undefined;
+  let streamError: string | undefined;
 
   // Last status wins: every lifecycle event carries the interaction's status,
   // so the one the stream ends on is the one that decides the turn.
@@ -81,7 +79,16 @@ export function createGeminiInteractionAccumulator(): GeminiInteractionAccumulat
 
   return {
     mapEvent(event) {
+      if (streamError) return [];
+
       switch (event.event_type) {
+        case 'error': {
+          const code = event.error?.code;
+          const message = event.error?.message;
+          streamError = [code, message].filter(Boolean).join(': ') || 'Gemini interaction failed.';
+          geminiInteractionsLogger.error('interaction_error', { code, message });
+          return [];
+        }
         case 'step.start':
           return mapStepStart(event, activeCalls);
         case 'step.delta':
@@ -110,7 +117,7 @@ export function createGeminiInteractionAccumulator(): GeminiInteractionAccumulat
       return providerReportedInputTokens;
     },
     get abandonedReason() {
-      return abandonedReason;
+      return streamError ?? abandonedReason;
     },
   };
 }

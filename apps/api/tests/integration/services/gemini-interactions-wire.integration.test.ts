@@ -171,6 +171,25 @@ function baseRequest(overrides: Partial<AgentTurnRequest> = {}): AgentTurnReques
 }
 
 describe('Gemini Interactions wire contract', () => {
+  it.each([false, true])(
+    'surfaces an SSE error through the SDK with an existing id: %s',
+    async (withId) => {
+      const server = startServer([
+        ...(withId ? ABANDONED_EVENT_FRAMES.slice(0, 3) : []),
+        { event_type: 'error', error: { code: 'RESOURCE_EXHAUSTED', message: 'Quota exceeded' } },
+        ...V2_EVENT_FRAMES,
+      ]);
+
+      const events = await collectAgentEvents(streamGeminiAgentTurn(baseRequest(), server.client));
+
+      expect(events).toEqual([
+        ...(withId ? [{ type: 'assistant_text_delta' as const, text: 'Half an ans' }] : []),
+        { type: 'turn_error', error: 'RESOURCE_EXHAUSTED: Quota exceeded' },
+      ]);
+      expect(server.requestBodies).toHaveLength(1);
+    }
+  );
+
   it('does not dispatch an application turn whose signal already aborted', async () => {
     const server = startServer();
     const controller = new AbortController();

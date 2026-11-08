@@ -128,3 +128,12 @@ export async function* chainEvents(
     }
   }
 }
+
+/** Yields the typed server error event without throwing a transport error. */
+export async function* interactionErrorEvent(): AsyncIterable<InteractionSSEEvent> {
+  await Promise.resolve();
+  yield {
+    event_type: 'error',
+    error: { code: 'RESOURCE_EXHAUSTED', message: 'Quota exceeded' },
+  };
+}

@@ -27,6 +27,7 @@ import {
   functionCallDeltaEvent,
   functionCallStartEvent,
   functionCallStopEvent,
+  interactionErrorEvent,
   interactionStatusEvent,
   textDeltaEvent,
   thoughtSummaryEvent,
@@ -544,6 +545,78 @@ describe('streamGeminiAgentTurn — event emission', () => {
 // ---------------------------------------------------------------------------
 
 describe('processGeminiInteractionStream', () => {
+  it.each([false, true])('reports an SSE error with an existing id: %s', async (withId) => {
+    let requests = 0;
+    let closed = false;
+    let readAfterError = false;
+    const client = createFakeGeminiInteractionsClient(() => {
+      requests += 1;
+      expect(requests).toBe(1);
+      return Promise.resolve(failingStream());
+    });
+    async function* failingStream() {
+      try {
+        if (withId) {
+          yield* createdInteractionEvent('int_failed');
+          yield* textDeltaEvent('Partial');
+        }
+        yield* interactionErrorEvent();
+        readAfterError = true;
+        if (withId) yield* completedInteractionEvent('int_failed');
+      } finally {
+        closed = true;
+      }
+    }
+
+    const events = await collectAgentEvents(streamGeminiAgentTurn(baseRequest(), client as never));
+
+    expect(events).toEqual([
+      ...(withId ? [{ type: 'assistant_text_delta' as const, text: 'Partial' }] : []),
+      { type: 'turn_error', error: 'RESOURCE_EXHAUSTED: Quota exceeded' },
+    ]);
+    expect(requests).toBe(1);
+    expect(closed).toBe(true);
+    expect(readAfterError).toBe(false);
+  });
+
+  it.each([false, true])(
+    'does not replay a cursor-like SSE error after partial output, with close failure: %s',
+    async (closeFails) => {
+      const req = baseRequest();
+      req.providerState = buildEnvelope(req);
+      let requests = 0;
+      const client = createFakeGeminiInteractionsClient(() => {
+        requests += 1;
+        if (requests > 1) return Promise.resolve(completedInteractionEvent('unexpected_replay'));
+        const stream = cursorErrorStream();
+        if (closeFails) {
+          const close = stream.return.bind(stream);
+          stream.return = async (value) => {
+            await close(value);
+            throw new Error('NOT_FOUND while closing the response stream');
+          };
+        }
+        return Promise.resolve(stream);
+      });
+      async function* cursorErrorStream() {
+        yield* createdInteractionEvent('int_failed');
+        yield* textDeltaEvent('Partial');
+        yield {
+          event_type: 'error' as const,
+          error: { code: 'INVALID_ARGUMENT', message: 'Invalid interaction' },
+        };
+      }
+
+      const events = await collectAgentEvents(streamGeminiAgentTurn(req, client as never));
+
+      expect(events).toEqual([
+        { type: 'assistant_text_delta', text: 'Partial' },
+        { type: 'turn_error', error: 'INVALID_ARGUMENT: Invalid interaction' },
+      ]);
+      expect(requests).toBe(1);
+    }
+  );
+
   it('emits a canonical interactions envelope on completion', async () => {
     const events: AgentEvent[] = [];
 
