@@ -14,7 +14,9 @@ export async function generateChatCompletionText(
     { signal: req.signal }
   );
 
-  const text = completion.choices[0]?.message?.content ?? '';
+  const choice = completion.choices[0];
+  throwOnChatCompletionsFailure(choice?.finish_reason);
+  const text = choice?.message?.content ?? '';
   if (!text) throw new Error(emptyTextMessage);
   return { text };
 }

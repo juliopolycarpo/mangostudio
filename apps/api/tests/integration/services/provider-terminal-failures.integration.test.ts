@@ -10,7 +10,10 @@ import {
 import { streamDeepSeekAgentTurn } from '../../../src/services/providers/deepseek/agent-stream';
 import { streamDeepSeekText } from '../../../src/services/providers/deepseek/text-stream';
 import { streamOAICompatAgentTurn } from '../../../src/services/providers/openai-compatible/chat-completions-stream';
-import { streamChatCompletionText } from '../../../src/services/providers/openai/chat-completions';
+import {
+  generateChatCompletionText,
+  streamChatCompletionText,
+} from '../../../src/services/providers/openai/chat-completions';
 import {
   streamAgentTurnWithResponsesAPI,
   streamWithResponsesAPI,
@@ -29,27 +32,26 @@ const REQUEST = {
   history: [],
 } satisfies AgentTurnRequest;
 
-function createSseFixture(events: readonly unknown[]) {
+function createWireFixture(body: string, contentType: string) {
   const requests: string[] = [];
-  function respondWithSse(request: Request | URL | string): Promise<Response> {
+  function respondWithBody(request: Request | URL | string): Promise<Response> {
     requests.push(request instanceof Request ? request.url : String(request));
-    const body = [
-      ...events.map((event) => `data: ${JSON.stringify(event)}\n\n`),
-      'data: [DONE]\n\n',
-    ];
-    return Promise.resolve(
-      new Response(body.join(''), { headers: { 'content-type': 'text/event-stream' } })
-    );
+    return Promise.resolve(new Response(body, { headers: { 'content-type': contentType } }));
   }
   return {
     client: new OpenAI({
       apiKey: 'fixture-key',
       baseURL: 'https://provider-fixture.invalid/v1',
       maxRetries: 0,
-      fetch: respondWithSse,
+      fetch: respondWithBody,
     }),
     requests,
   };
+}
+
+function createSseFixture(events: readonly unknown[]) {
+  const body = [...events.map((event) => `data: ${JSON.stringify(event)}\n\n`), 'data: [DONE]\n\n'];
+  return createWireFixture(body.join(''), 'text/event-stream');
 }
 
 async function collectText(
@@ -144,7 +146,7 @@ describe('Chat Completions terminal failure wire events', () => {
         { choices: [{ delta: { content: 'Unexpected after failure' }, finish_reason: 'stop' }] },
       ]);
       const req = { ...REQUEST, modelName: 'deepseek-v4-flash' };
-      const message = `Chat Completions stream failed: ${reason}`;
+      const message = `Chat Completions generation failed: ${reason}`;
       for (const stream of [
         streamDeepSeekAgentTurn(client, req),
         streamOAICompatAgentTurn(client, req),
@@ -168,6 +170,21 @@ describe('Chat Completions terminal failure wire events', () => {
         message
       );
       expect(compatible).toEqual([{ type: 'text', text: 'Partial', done: false }]);
+    }
+  );
+});
+
+describe('non-streaming Chat Completions failures', () => {
+  it.each(['insufficient_system_resource', 'aborted'])(
+    'fails on %s with partial content',
+    async (reason) => {
+      const { client } = createWireFixture(
+        JSON.stringify({ choices: [{ message: { content: 'Partial' }, finish_reason: reason }] }),
+        'application/json'
+      );
+      await expect(generateChatCompletionText(client, REQUEST, 'No text')).rejects.toThrow(
+        `Chat Completions generation failed: ${reason}`
+      );
     }
   );
 });
