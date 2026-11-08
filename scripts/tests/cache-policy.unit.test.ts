@@ -183,6 +183,12 @@ describe('CI cache policy', () => {
 
   test('registers exact Rust family identities and keeps the pinned key grammar', () => {
     const families = new Set<string>(RUST_CACHE_FAMILIES);
+    for (const family of RETIRED_RUST_CACHE_FAMILIES) {
+      expect(
+        families.has(family),
+        `expected retired Rust cache family ${family} to remain recognizable`
+      ).toBe(true);
+    }
     const observed = new Set<string>();
     for (const step of rustCacheSteps()) {
       if (RUST_PREFIX_KEY_EXEMPT_FILES.has(step.file)) continue;
