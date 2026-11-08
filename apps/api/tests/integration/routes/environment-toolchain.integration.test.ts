@@ -48,16 +48,20 @@ afterEach(async () => {
 
 /** Answers `getRuntimeStatus` with a configurable installation list; every other member throws. */
 class FakeEnvironmentProbingService implements EnvironmentProbingService {
-  constructor(private readonly installedPaths: Partial<Record<RuntimeId, readonly string[]>>) {}
+  constructor(
+    private readonly installedPaths: Partial<Record<RuntimeId, readonly string[]>>,
+    private readonly beforeStatus?: () => Promise<void>
+  ) {}
 
-  getRuntimeStatus(
+  async getRuntimeStatus(
     _scope: ProbeScope,
     id: RuntimeId,
     _options?: ProbeOptions
   ): Promise<RuntimeStatus | null> {
+    await this.beforeStatus?.();
     const paths = this.installedPaths[id];
-    if (!paths) return Promise.resolve(null);
-    return Promise.resolve({
+    if (!paths) return null;
+    return {
       id,
       health: 'ok',
       installations: paths.map((path) => ({
@@ -70,7 +74,7 @@ class FakeEnvironmentProbingService implements EnvironmentProbingService {
       findings: [],
       installable: true,
       probedAtMs: 1_700_000_000_000,
-    });
+    };
   }
 
   listRuntimeStatuses(): Promise<RuntimeStatus[]> {
@@ -107,7 +111,8 @@ class FakeEnvironmentProbingService implements EnvironmentProbingService {
 
 function createTestApp(
   installedPaths: Partial<Record<RuntimeId, readonly string[]>> = {},
-  toolchainReads: string[] = []
+  toolchainReads: string[] = [],
+  beforeStatus?: () => Promise<void>
 ) {
   const toolchainDb = getDb().withPlugin({
     transformQuery({ node }) {
@@ -132,7 +137,7 @@ function createTestApp(
   });
   const toolchain = createToolchainService(
     createEnvironmentToolchainRepository(toolchainDb),
-    new FakeEnvironmentProbingService(installedPaths)
+    new FakeEnvironmentProbingService(installedPaths, beforeStatus)
   );
   const service = createEnvironmentService(
     repository,
@@ -180,10 +185,18 @@ describe('environment toolchain route', () => {
     }
     await selections.upsert(TEST_USER.id, 'local', { bun: '/local/bun' }, 1);
     await selections.upsert(TEST_USER.id, 'box-0', { node: '/remote/node' }, 1);
-    // Same environment keys belong to another user; neither selection may leak.
+    // The same IDs belong to two users. Neither selection may leak.
     const otherUser = `${TEST_USER.id}-other`;
     try {
       await selections.upsert(otherUser, 'local', { bun: '/other/bun' }, 1);
+      await repository.create({
+        id: 'box-1',
+        userId: otherUser,
+        name: 'Other box',
+        transportKind: 'stdio',
+        config: {},
+        enabled: true,
+      });
       await selections.upsert(otherUser, 'box-1', { node: '/other/node' }, 1);
       const response = await app.handle(new Request('http://localhost/environments'));
       expect(response.status).toBe(200);
@@ -201,6 +214,7 @@ describe('environment toolchain route', () => {
       expect(reads).toHaveLength(1);
     } finally {
       await getDb().deleteFrom('environment_toolchains').where('userId', '=', otherUser).execute();
+      await getDb().deleteFrom('environments').where('userId', '=', otherUser).execute();
     }
   });
 
@@ -240,6 +254,59 @@ describe('environment toolchain route', () => {
       expect(query).toContain('environmentId');
       expect(query).toContain('single-box');
     }
+  });
+
+  it('rejects an auto selection for an unknown environment without persisting a row', async () => {
+    const { app } = createTestApp();
+    const response = await app.handle(
+      new Request(
+        'http://localhost/environments/unknown-box/toolchain',
+        jsonRequest('PUT', { node: 'auto' })
+      )
+    );
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({
+      error: 'Environment "unknown-box" was not found.',
+    });
+    expect(
+      await createEnvironmentToolchainRepository().get(TEST_USER.id, 'unknown-box')
+    ).toBeNull();
+  });
+
+  it('rejects a pinned selection if the environment is deleted during the probe', async () => {
+    const probeStarted = Promise.withResolvers<void>();
+    const releaseProbe = Promise.withResolvers<void>();
+    const { app, repository } = createTestApp({ node: ['/opt/node/bin/node'] }, [], () => {
+      probeStarted.resolve();
+      return releaseProbe.promise;
+    });
+    await repository.create({
+      id: 'deleted-box',
+      userId: TEST_USER.id,
+      name: 'Deleted box',
+      transportKind: 'stdio',
+      config: {},
+      enabled: true,
+    });
+    const update = app.handle(
+      new Request(
+        'http://localhost/environments/deleted-box/toolchain',
+        jsonRequest('PUT', { node: '/opt/node/bin/node' })
+      )
+    );
+    try {
+      await probeStarted.promise;
+      const removal = await app.handle(
+        new Request('http://localhost/environments/deleted-box', { method: 'DELETE' })
+      );
+      expect(removal.status).toBe(200);
+    } finally {
+      releaseProbe.resolve();
+    }
+    expect((await update).status).toBe(404);
+    expect(
+      await createEnvironmentToolchainRepository().get(TEST_USER.id, 'deleted-box')
+    ).toBeNull();
   });
 
   it('accepts a probed path and the environments list reflects it', async () => {

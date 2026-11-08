@@ -29,6 +29,10 @@ import {
 import { type EnvironmentProbingService, environmentProbingService } from './probing-service';
 
 export interface ToolchainService {
+  /**
+   * Loads stored selections for a user's environment list in one read.
+   * @example const selections = await toolchainService.listByUser(userId)
+   */
   listByUser(userId: string): Promise<Map<string, ToolchainSelection>>;
   resolve(userId: string, environmentId: string): Promise<ToolchainSelection>;
   update(
@@ -131,6 +135,9 @@ export function createToolchainService(
       // a concurrent update of the other runtime revert this one, since the
       // Node and Bun cards autosave through independent mutations.
       const selection = await repository.upsert(userId, environmentId, body, now());
+      if (!selection) {
+        throw new EnvironmentServiceError(`Environment "${environmentId}" was not found.`, 404);
+      }
       // The selection is a field of `Environment`, so every other session
       // holding the environments list is now showing a stale pin. Same signal
       // `environment-service` publishes for any other change to that shape.
