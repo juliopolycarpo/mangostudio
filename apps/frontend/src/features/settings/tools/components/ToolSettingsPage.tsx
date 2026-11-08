@@ -2,6 +2,7 @@
  * Tools settings page: global tool configuration grouped by category.
  */
 
+import { clampMaxToolIterations } from '@mangostudio/shared/app-settings';
 import type { ToolSettingsCategory } from '@mangostudio/shared/tool-settings';
 import { Wrench } from 'lucide-react';
 import { useMemo } from 'react';
@@ -12,12 +13,12 @@ import { SettingsSection } from '@/components/settings/SettingsSection';
 import { SettingsLoadError, SettingsLoading } from '@/components/settings/SettingsStates';
 import { Card } from '@/components/ui/Card';
 import { EmptyState } from '@/components/ui/EmptyState';
-import { Input } from '@/components/ui/Input';
 import { MAX_TOOL_ITERATIONS_MAX, MAX_TOOL_ITERATIONS_MIN } from '@/hooks/use-global-settings';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_LG } from '@/lib/icon-sizes';
 
 import { useToolSettings } from '../hooks/use-tool-settings';
+import { CommitNumberInput } from './CommitNumberInput';
 import { ToolSettingsRow } from './ToolSettingsRow';
 
 interface ToolSettingsPageProps {
@@ -62,16 +63,13 @@ export function ToolSettingsPage({
               hint={s.maxToolIterationsDescription}
               htmlFor="tool-max-iterations"
             >
-              <Input
+              <CommitNumberInput
                 id="tool-max-iterations"
-                type="number"
                 min={MAX_TOOL_ITERATIONS_MIN}
                 max={MAX_TOOL_ITERATIONS_MAX}
-                step={1}
                 value={maxToolIterations}
-                onChange={(event) => setMaxToolIterations(Number(event.target.value))}
-                onBlur={(event) => setMaxToolIterations(Number(event.target.value))}
-                className="w-32 text-center"
+                onCommit={setMaxToolIterations}
+                normalize={clampMaxToolIterations}
               />
             </SettingsRow>
           </SettingsSection>

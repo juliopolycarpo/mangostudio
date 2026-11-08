@@ -160,6 +160,24 @@ describe('ToolSettingsPage', () => {
     expect(screen.getAllByLabelText(/max tool iterations/i).length).toBeGreaterThanOrEqual(1);
   });
 
+  it('commits max tool iterations once after the user finishes editing', async () => {
+    fetchScenario.respondWithJson('GET', '/api/settings/tools', { body: TOOLS_RESPONSE });
+    const commitIterations = jest.fn();
+    render(<ToolSettingsPage maxToolIterations={10} setMaxToolIterations={commitIterations} />);
+
+    const input = await screen.findByRole('spinbutton', { name: /max tool iterations/i });
+    fireEvent.change(input, { target: { value: '7' } });
+    expect(commitIterations).not.toHaveBeenCalled();
+    fireEvent.change(input, { target: { value: '75' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.blur(input);
+    expect(commitIterations.mock.calls).toEqual([[75]]);
+
+    fireEvent.change(input, { target: { value: '1100' } });
+    fireEvent.blur(input);
+    expect(commitIterations.mock.calls).toEqual([[75], [1000]]);
+  });
+
   it('renders string parameter field with default value', async () => {
     fetchScenario.respondWithJson('GET', '/api/settings/tools', {
       body: TOOLS_RESPONSE,
@@ -171,24 +189,6 @@ describe('ToolSettingsPage', () => {
 
     const timezoneInput = screen.getByDisplayValue('UTC');
     expect(timezoneInput).toBeInTheDocument();
-  });
-
-  it('calls setMaxToolIterations when the number field changes', async () => {
-    const user = userEvent.setup();
-
-    fetchScenario.respondWithJson('GET', '/api/settings/tools', {
-      body: TOOLS_RESPONSE,
-    });
-
-    render(<ToolSettingsPage maxToolIterations={10} setMaxToolIterations={setMaxToolIterations} />);
-
-    await screen.findByText('Current date and time');
-
-    const numberInput = screen.getByLabelText(/max tool iterations/i);
-    await user.clear(numberInput);
-    await user.type(numberInput, '15');
-
-    expect(setMaxToolIterations).toHaveBeenCalled();
   });
 
   it('calls PUT endpoint when toggling a tool', async () => {

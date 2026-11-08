@@ -19,6 +19,8 @@ import { useModelCatalog } from '@/hooks/use-model-catalog';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
 
+import { CommitNumberInput } from './CommitNumberInput';
+
 interface ToolParameterFieldProps {
   descriptor: ToolParameterDescriptor;
   value: unknown;
@@ -351,16 +353,13 @@ export function ToolParameterField({
     case 'number': {
       return (
         <SettingsRow label={label} hint={description} htmlFor={`${fieldId}-number`} className="p-0">
-          <Input
+          <CommitNumberInput
             id={`${fieldId}-number`}
-            type="number"
+            value={descriptorValue === '' ? '' : Number(descriptorValue)}
             min={descriptor.min}
             max={descriptor.max}
-            step={1}
-            value={descriptorValue === '' ? '' : Number(descriptorValue)}
-            onChange={(e) => onChange(e.target.value ? Number(e.target.value) : undefined)}
+            onCommit={onChange}
             disabled={disabled}
-            className="w-32 text-center"
           />
         </SettingsRow>
       );
