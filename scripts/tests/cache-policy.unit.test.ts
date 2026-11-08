@@ -41,6 +41,9 @@ const RUST_CACHE_SAVE_IF = `save-if: ${EXPRESSION_START} github.ref == 'refs/hea
 // manifest, so the root manifest's profiles never apply to it. It is exempt
 // from the prefix-key policy only; it still saves only from main.
 const RUST_PREFIX_KEY_EXEMPT_FILES = new Set(['.github/workflows/protocol-fuzz.yml']);
+// Keep existing physical entries recognizable to lifecycle accounting until
+// their post-merge disposition is verified; these families have no writer.
+const RETIRED_RUST_CACHE_FAMILIES = new Set(['semver-checks', 'schema-equality']);
 
 interface TurboLane {
   readonly file: string;
@@ -180,6 +183,12 @@ describe('CI cache policy', () => {
 
   test('registers exact Rust family identities and keeps the pinned key grammar', () => {
     const families = new Set<string>(RUST_CACHE_FAMILIES);
+    for (const family of RETIRED_RUST_CACHE_FAMILIES) {
+      expect(
+        families.has(family),
+        `expected retired Rust cache family ${family} to remain recognizable`
+      ).toBe(true);
+    }
     const observed = new Set<string>();
     for (const step of rustCacheSteps()) {
       if (RUST_PREFIX_KEY_EXEMPT_FILES.has(step.file)) continue;
@@ -211,7 +220,7 @@ describe('CI cache policy', () => {
     expect(
       [...observed].sort(),
       'expected every registered family to have a cache producer'
-    ).toEqual([...families].sort());
+    ).toEqual([...families].filter((family) => !RETIRED_RUST_CACHE_FAMILIES.has(family)).sort());
   });
 
   test('keeps every cache family behind one composite and one immutable pin', () => {
@@ -411,6 +420,18 @@ describe('CI cache policy', () => {
         RUST_CACHE_SAVE_IF
       );
     }
+  });
+
+  test('demotes only the measured Ubuntu candidates and retains other platform caches', () => {
+    const protocol = readText('.github/workflows/protocol-ci.yml');
+    for (const job of ['semver-checks', 'schema-equality']) {
+      expect(extractJobBlock(protocol, job), job).not.toContain('Swatinem/rust-cache@');
+    }
+    const interopCache = rustCacheSteps().filter(
+      (step) => step.file === '.github/workflows/protocol-ci.yml' && step.job === 'interop'
+    );
+    expect(interopCache).toHaveLength(1);
+    expect(interopCache[0].block).toContain("if: matrix.os != 'ubuntu-latest'");
   });
 
   // Real-binary qualification builds exactly what the local-runtime action
