@@ -25,7 +25,7 @@ use mango_protocol::session::{
 };
 use mango_protocol::transports::websocket::WebSocketOptions;
 use mango_protocol::transports::websocket::server::{
-    AcceptOptions, REFUSAL_DRAIN_GRACE, accept_websocket,
+    REFUSAL_DRAIN_GRACE, accept_websocket_with_optional_subprotocol,
 };
 use mangostudio_runtime_contract::strings::binding;
 use tokio::net::{TcpListener, TcpStream};
@@ -47,7 +47,7 @@ use crate::transport::{UpdateRestart, build_host_with_restart, runtime_peer, tok
 const SHUTDOWN_DRAIN_GRACE: Duration = Duration::from_secs(5);
 
 /// Bounds one TCP peer's entire WebSocket upgrade — the handshake itself,
-/// `accept_websocket`'s subprotocol/origin checks, and this transport's own
+/// the origin check, and this transport's own
 /// bearer check — from the moment its connection is accepted. Named
 /// separately from every other deadline in this crate: `mango_protocol`'s
 /// upgrade has no read timeout of its own (a peer that opens the TCP
@@ -64,7 +64,7 @@ const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(50);
 
 /// How many TCP peers may be *mid-upgrade* at once — from the instant
 /// `listener.accept()` hands one to this transport to the instant its
-/// [`accept_websocket`] call (bounded by [`UPGRADE_TIMEOUT`]) settles one way
+/// WebSocket upgrade (bounded by [`UPGRADE_TIMEOUT`]) settles one way
 /// or the other. Enforced by acquiring a permit atomically in the accept
 /// loop itself, before a connection task is ever spawned — a peer beyond
 /// this bound is refused (its raw socket dropped) before `OwnedTasks` grows
@@ -486,7 +486,7 @@ async fn release_active(previous: ActiveGeneration, code: u16, reason: &str) {
 ///
 /// `permit` reserves this connection's [`MAX_PENDING_HANDSHAKES`] slot for
 /// exactly the upgrade below — bounded by [`UPGRADE_TIMEOUT`], since
-/// `accept_websocket` has no read timeout of its own and a peer that opens
+/// the WebSocket upgrade has no read timeout of its own and a peer that opens
 /// the socket and never speaks would otherwise hold it, and this task's
 /// `OwnedTasks` slot, forever.
 async fn handle_connection(
@@ -499,7 +499,7 @@ async fn handle_connection(
     let runtime_version = context.runtime_version.clone();
     // The health-check peek and the upgrade itself share this one timeout,
     // not two separate ones: `TcpStream::peek` waits for bytes exactly the
-    // way `accept_websocket` does, so a peer that opens the socket and
+    // way the WebSocket upgrade does, so a peer that opens the socket and
     // never sends anything at all — not even a health check — must not be
     // able to hold this slot any longer by arriving before the part of
     // this function that used to be the only bounded step.
@@ -509,17 +509,17 @@ async fn handle_connection(
             return None;
         }
         // Recorded as the upgrade reads it: the binding key rides in the
-        // upgrade request beside the bearer, and `accept_websocket` hands
-        // its callback only the bearer and the origin.
+        // upgrade request beside the bearer. The acceptor hands its callback
+        // only the bearer and the origin.
         let (stream, head) = RecordingStream::new(stream);
-        let accepted = accept_websocket(
+        let accepted = accept_websocket_with_optional_subprotocol(
             stream,
             // A hub built before `mango.v1` was mandatory still gets
             // its socket: letting it through unlabelled is what lets
             // its session answer `hello` with a real close code
             // instead of a bare HTTP refusal it has no vocabulary for
             // — mirrors `serve.ts`'s own compatibility policy exactly.
-            AcceptOptions::from(WebSocketOptions::default()).with_subprotocol_optional(),
+            WebSocketOptions::default(),
             |upgrade| match upgrade.bearer() {
                 Some(presented) if tokens_equal(presented.as_bytes(), token.as_bytes()) => Ok(()),
                 _ => Err(close_codes::UNAUTHORIZED),
@@ -535,8 +535,8 @@ async fn handle_connection(
         // `MAX_PENDING_HANDSHAKES` in `serve.ts` either.
         Ok(None) => return,
         Ok(Some(Ok(accepted))) => accepted,
-        // Refused (bad credential, bad subprotocol, …) or the peer vanished
-        // mid-upgrade: `accept_websocket` already told it why. Either way
+        // The WebSocket acceptor may refuse an origin or credential, or the
+        // peer may disconnect during the upgrade. Either way
         // `permit` drops here, at this `return`, releasing the slot.
         Ok(Some(Err(_))) => return,
         // The peer opened the socket and never finished a upgrade within
@@ -566,7 +566,7 @@ async fn serve_upgraded<P: Port>(
 ) {
     // Every refusal from here to admission goes out as a close frame over
     // the upgraded socket before this side's `hello` — the same shape
-    // `accept_websocket` gives a refused credential. A malformed binding
+    // the WebSocket acceptor uses for a refused credential. A malformed binding
     // header is refused outright, never read as "no key": a hub that sent
     // one meant this connection to be bound.
     let binding = match binding_header {
@@ -793,7 +793,7 @@ async fn refuse_already_bound<P: Port>(port: P, context: &ConnectionContext) {
 ///
 /// Then reads the port until the peer's own close arrives (bounded by
 /// [`REFUSAL_DRAIN_GRACE`], the protocol crate's own bound for the refusals
-/// [`accept_websocket`] sends) instead of dropping it at once: by now the hub
+/// the WebSocket acceptor sends) instead of dropping it at once: by now the hub
 /// has usually sent its `hello`, and a socket dropped with those bytes still
 /// unread is reset rather than closed on Windows (and on BSD-derived
 /// stacks — see [`drain_request_headers`]), which throws away the close
@@ -814,7 +814,7 @@ async fn close_port<P: Port>(port: P, code: u16, reason: &str) {
 /// The exact bytes a plain `GET /health` request line starts with, checked
 /// via [`TcpStream::peek`] — which does not remove anything from the
 /// socket's read queue, so a stream that turns out *not* to be a health
-/// check is handed to [`accept_websocket`] completely untouched.
+/// check is handed to the WebSocket acceptor untouched.
 const HEALTH_CHECK_PREFIX: &[u8] = b"GET /health ";
 
 /// True when `stream`'s first bytes are a `GET /health` request line.
@@ -822,7 +822,7 @@ const HEALTH_CHECK_PREFIX: &[u8] = b"GET /health ";
 /// `serve.ts` serves this over the same listener a hub upgrades on; the
 /// Rust accept loop had no equivalent, so a plain health check (or a
 /// Direct URL user opening the address in a browser) fell straight into
-/// `accept_websocket`, which has no vocabulary for anything but a
+/// the WebSocket acceptor, which has no vocabulary for anything but a
 /// WebSocket upgrade and would reject it as a failed handshake.
 async fn is_health_check(stream: &TcpStream) -> bool {
     let mut buffer = [0u8; HEALTH_CHECK_PREFIX.len()];
