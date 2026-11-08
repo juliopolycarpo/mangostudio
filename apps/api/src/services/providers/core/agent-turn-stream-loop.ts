@@ -4,6 +4,7 @@ import {
   type ChatCompletionsDelta,
   createChatCompletionsAccumulator,
 } from './chat-completions-accumulator';
+import { throwOnChatCompletionsFailure } from './chat-completions-errors';
 
 export interface AgentTurnStreamOpenResult<TChunk> {
   readonly stream?: AsyncIterable<TChunk>;
@@ -143,6 +144,7 @@ function mapChatCompletionsAgentStreamChunk(
 
   const choice = chunk.choices?.[0];
   if (!choice) return [];
+  throwOnChatCompletionsFailure(choice.finish_reason);
 
   const events = [...accumulator.addDelta(choice.delta as ChatCompletionsDelta)];
   if (choice.finish_reason) {

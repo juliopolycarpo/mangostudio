@@ -1,5 +1,6 @@
 import type OpenAI from 'openai';
 
+import { throwOnChatCompletionsFailure } from '../core/chat-completions-errors';
 import { extractReasoningChunks } from '../openai/normalizers';
 import type { StreamingChunk, TextGenerationRequest, TextGenerationResult } from '../types';
 import { buildDeepSeekRequestBody } from './message-mapper';
@@ -44,6 +45,7 @@ export async function* streamDeepSeekText(
     );
     for await (const chunk of stream) {
       if (req.signal?.aborted) break;
+      throwOnChatCompletionsFailure(chunk.choices[0]?.finish_reason);
       yield* toStreamingChunks(chunk);
     }
   } catch (error) {
