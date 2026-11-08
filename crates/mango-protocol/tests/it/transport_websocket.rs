@@ -18,7 +18,8 @@ use mango_protocol::testing::{ConformancePair, Fixture, RawConnection, run_confo
 use mango_protocol::transports::deadline::{ConnectDeadline, ConnectError};
 use mango_protocol::transports::websocket::client::{WebSocketConnectOptions, connect_websocket};
 use mango_protocol::transports::websocket::server::{
-    AcceptError, AcceptOptions, accept_websocket, is_origin_allowed,
+    AcceptError, AcceptOptions, accept_websocket, accept_websocket_with_optional_subprotocol,
+    is_origin_allowed,
 };
 use mango_protocol::transports::websocket::{WebSocketOptions, WebSocketPort};
 use tokio::net::{TcpListener, TcpStream};
@@ -330,8 +331,12 @@ async fn a_dialler_that_does_not_offer_the_subprotocol_is_closed_with_4400() {
         tokio_tungstenite::connect_async(format!("ws://{address}/conformance")).await
     });
 
-    let refusal = acceptor
-        .accept()
+    let (socket, _peer) = acceptor.listener.accept().await.expect("a dialler arrives");
+    let options = AcceptOptions {
+        socket: WebSocketOptions::default(),
+        allowed_origins: Vec::new(),
+    };
+    let refusal = accept_websocket(socket, options, |_upgrade| Ok(()))
         .await
         .expect_err("a connection without mango.v1 is not a session");
     assert!(matches!(refusal, AcceptError::Subprotocol), "{refusal}");
@@ -352,12 +357,8 @@ async fn a_dialler_that_does_not_offer_the_subprotocol_is_closed_with_4400() {
     assert_eq!(code, Some(close_codes::PROTOCOL_ERROR));
 }
 
-/// `with_subprotocol_optional` is the one way to let a dialler like the one
-/// above through instead of refusing it — for an acceptor serving a peer
-/// built before `mango.v1` was mandatory (`serve.ts`'s own documented
-/// compatibility case).
 #[tokio::test]
-async fn with_subprotocol_optional_admits_a_dialler_that_offered_none() {
+async fn optional_subprotocol_admits_a_dialler_that_offered_none() {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("a loopback port");
@@ -367,10 +368,9 @@ async fn with_subprotocol_optional_admits_a_dialler_that_offered_none() {
     });
 
     let (socket, _peer) = listener.accept().await.expect("a dialler arrives");
-    let options = AcceptOptions::from(WebSocketOptions::default()).with_subprotocol_optional();
-    accept_websocket(socket, options, |_upgrade| Ok(()))
+    accept_websocket_with_optional_subprotocol(socket, AcceptOptions::default(), |_upgrade| Ok(()))
         .await
-        .expect("subprotocol_optional must admit a peer that offered none at all");
+        .expect("the optional acceptor admits a peer that offered no subprotocol");
 
     dialling
         .await
