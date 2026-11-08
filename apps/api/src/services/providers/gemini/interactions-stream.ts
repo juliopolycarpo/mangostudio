@@ -5,6 +5,7 @@
  * Degrades to full replay on safe cursor loss and aborts unsafe tool loops.
  */
 
+import { logDiagnostic } from '../../../lib/logger';
 import {
   attachmentToBase64,
   getAttachmentSupportKind,
@@ -357,14 +358,25 @@ export async function* processGeminiInteractionStream(
   req: AgentTurnRequest
 ): AsyncIterable<AgentEvent> {
   const accumulator = createGeminiInteractionAccumulator();
+  let sawExplicitError = false;
 
-  for await (const event of stream) {
-    for (const agentEvent of accumulator.mapEvent(event)) {
-      yield agentEvent;
+  try {
+    for await (const event of stream) {
+      for (const agentEvent of accumulator.mapEvent(event)) {
+        yield agentEvent;
+      }
+      if (event.event_type === 'error') {
+        sawExplicitError = true;
+        break;
+      }
     }
-    // An explicit SSE error is terminal. Close the iterator without consuming
-    // later output or throwing into the cursor-loss retry path.
-    if (event.event_type === 'error') break;
+  } catch (error) {
+    // Breaking awaits the SDK's iterator cleanup. A cleanup failure must
+    // never replace an explicit provider error or send the turn into replay.
+    if (!sawExplicitError) throw error;
+    logDiagnostic('warn', 'gemini-interactions', 'stream_close_failed', {
+      message: error instanceof Error ? error.message : String(error),
+    });
   }
 
   // `interaction.created` captures the id before any output, so an interaction

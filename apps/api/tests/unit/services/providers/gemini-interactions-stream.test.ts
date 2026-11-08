@@ -579,32 +579,43 @@ describe('processGeminiInteractionStream', () => {
     expect(readAfterError).toBe(false);
   });
 
-  it('does not replay a cursor-like SSE error after partial output', async () => {
-    const req = baseRequest();
-    req.providerState = buildEnvelope(req);
-    let requests = 0;
-    const client = createFakeGeminiInteractionsClient(() => {
-      requests += 1;
+  it.each([false, true])(
+    'does not replay a cursor-like SSE error after partial output, with close failure: %s',
+    async (closeFails) => {
+      const req = baseRequest();
+      req.providerState = buildEnvelope(req);
+      let requests = 0;
+      const client = createFakeGeminiInteractionsClient(() => {
+        requests += 1;
+        if (requests > 1) return Promise.resolve(completedInteractionEvent('unexpected_replay'));
+        const stream = cursorErrorStream();
+        if (closeFails) {
+          const close = stream.return.bind(stream);
+          stream.return = async (value) => {
+            await close(value);
+            throw new Error('NOT_FOUND while closing the response stream');
+          };
+        }
+        return Promise.resolve(stream);
+      });
+      async function* cursorErrorStream() {
+        yield* createdInteractionEvent('int_failed');
+        yield* textDeltaEvent('Partial');
+        yield {
+          event_type: 'error' as const,
+          error: { code: 'INVALID_ARGUMENT', message: 'Invalid interaction' },
+        };
+      }
+
+      const events = await collectAgentEvents(streamGeminiAgentTurn(req, client as never));
+
+      expect(events).toEqual([
+        { type: 'assistant_text_delta', text: 'Partial' },
+        { type: 'turn_error', error: 'INVALID_ARGUMENT: Invalid interaction' },
+      ]);
       expect(requests).toBe(1);
-      return Promise.resolve(cursorErrorStream());
-    });
-    async function* cursorErrorStream() {
-      yield* createdInteractionEvent('int_failed');
-      yield* textDeltaEvent('Partial');
-      yield {
-        event_type: 'error' as const,
-        error: { code: 'INVALID_ARGUMENT', message: 'Invalid interaction' },
-      };
     }
-
-    const events = await collectAgentEvents(streamGeminiAgentTurn(req, client as never));
-
-    expect(events).toEqual([
-      { type: 'assistant_text_delta', text: 'Partial' },
-      { type: 'turn_error', error: 'INVALID_ARGUMENT: Invalid interaction' },
-    ]);
-    expect(requests).toBe(1);
-  });
+  );
 
   it('emits a canonical interactions envelope on completion', async () => {
     const events: AgentEvent[] = [];
