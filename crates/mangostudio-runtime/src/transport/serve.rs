@@ -535,8 +535,8 @@ async fn handle_connection(
         // `MAX_PENDING_HANDSHAKES` in `serve.ts` either.
         Ok(None) => return,
         Ok(Some(Ok(accepted))) => accepted,
-        // Refused (bad credential, bad subprotocol, …) or the peer vanished
-        // mid-upgrade: the WebSocket acceptor already told it why. Either way
+        // The WebSocket acceptor may refuse an origin or credential, or the
+        // peer may disconnect during the upgrade. Either way
         // `permit` drops here, at this `return`, releasing the slot.
         Ok(Some(Err(_))) => return,
         // The peer opened the socket and never finished a upgrade within
