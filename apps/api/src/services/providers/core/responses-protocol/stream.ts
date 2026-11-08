@@ -43,6 +43,16 @@ import {
   type ResponsesRequestPolicy,
 } from './request-builder';
 
+class ResponsesStreamFailure extends Error {}
+
+function throwOnResponsesFailure(event: ResponseStreamEvent): void {
+  if (event.type !== 'response.failed' && event.type !== 'error') return;
+
+  const details = event.type === 'response.failed' ? event.response?.error : event;
+  const message = [details?.code, details?.message].filter(Boolean).join(': ');
+  throw new ResponsesStreamFailure(message || 'Responses stream failed.');
+}
+
 // ---------------------------------------------------------------------------
 // Text streaming (reasoning models via Responses protocol)
 // ---------------------------------------------------------------------------
@@ -84,6 +94,7 @@ export async function* streamResponses(
 
   for await (const ev of stream) {
     if (req.signal?.aborted) break;
+    throwOnResponsesFailure(ev);
 
     const reasoningText = reasoning.consumeStreamEvent(ev);
     if (reasoningText !== null) {
@@ -262,7 +273,14 @@ export async function* streamAgentTurnWithResponses(
     openStream,
     createAccumulator: createResponsesAgentAccumulator,
     createContext: () => undefined,
-    mapChunk: ({ chunk, accumulator }) => accumulator.mapEvent(chunk),
+    mapChunk: ({ chunk, accumulator }) => {
+      throwOnResponsesFailure(chunk);
+      return accumulator.mapEvent(chunk);
+    },
+    onError: (error) =>
+      error instanceof ResponsesStreamFailure
+        ? [{ type: 'turn_error', error: error.message }]
+        : undefined,
     complete: ({ accumulator }) => {
       if (policy.continuation !== 'previous-response-id') {
         // Stateless replay: carry this turn's items (current input + model
