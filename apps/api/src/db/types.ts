@@ -38,6 +38,7 @@ interface EnvironmentsTable {
   name: string;
   transportKind: string;
   configJson: string;
+  toolchainRevision: Generated<string>;
   enabled: number;
   /** Whether install recipes may run on this machine. Off until someone says so. */
   allowInstalls: number;

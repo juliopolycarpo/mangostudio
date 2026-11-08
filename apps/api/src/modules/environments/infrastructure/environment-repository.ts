@@ -121,6 +121,7 @@ export function createEnvironmentRepository(injected?: Kysely<Database>): Enviro
         name: input.name,
         transportKind: input.transportKind,
         configJson: JSON.stringify(input.config),
+        toolchainRevision: crypto.randomUUID(),
         enabled: input.enabled ? 1 : 0,
         allowInstalls: 0,
         createdAt: now,
@@ -148,7 +149,12 @@ export function createEnvironmentRepository(injected?: Kysely<Database>): Enviro
       const update: EnvironmentUpdate = {
         updatedAt: Date.now(),
         ...(input.name !== undefined ? { name: input.name } : {}),
-        ...(input.config !== undefined ? { configJson: JSON.stringify(input.config) } : {}),
+        ...(input.config !== undefined
+          ? {
+              configJson: JSON.stringify(input.config),
+              toolchainRevision: crypto.randomUUID(),
+            }
+          : {}),
         ...(input.enabled !== undefined ? { enabled: input.enabled ? 1 : 0 } : {}),
         ...(input.allowInstalls !== undefined
           ? { allowInstalls: input.allowInstalls ? 1 : 0 }

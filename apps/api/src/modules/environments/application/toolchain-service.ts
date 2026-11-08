@@ -16,6 +16,7 @@ import type {
 } from '@mangostudio/shared/environments';
 import {
   DEFAULT_TOOLCHAIN_SELECTION,
+  LOCAL_ENVIRONMENT_ID,
   TOOLCHAIN_RUNTIME_IDS,
 } from '@mangostudio/shared/environments';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
@@ -35,10 +36,16 @@ export interface ToolchainService {
    */
   listByUser(userId: string): Promise<Map<string, ToolchainSelection>>;
   resolve(userId: string, environmentId: string): Promise<ToolchainSelection>;
+  /**
+   * Validates and stores a toolchain patch, checking the caller's probe guard
+   * after reading the remote environment revision.
+   * @example await toolchainService.update(userId, 'local', { node: 'auto' })
+   */
   update(
     userId: string,
     environmentId: string,
-    body: ToolchainUpdateBody
+    body: ToolchainUpdateBody,
+    assertProbeAllowed?: () => void
   ): Promise<ToolchainSelection>;
 }
 
@@ -119,7 +126,21 @@ export function createToolchainService(
       return stored ?? DEFAULT_TOOLCHAIN_SELECTION;
     },
 
-    async update(userId, environmentId, body) {
+    async update(userId, environmentId, body, assertProbeAllowed) {
+      const missing = `Environment "${environmentId}" was not found.`;
+      let revision: string | undefined;
+      if (
+        environmentId !== LOCAL_ENVIRONMENT_ID &&
+        TOOLCHAIN_RUNTIME_IDS.some((id) => body[id] !== undefined && body[id] !== 'auto')
+      ) {
+        const storedRevision = await repository.getRevision(userId, environmentId);
+        if (storedRevision === null) throw new EnvironmentServiceError(missing, 404);
+        revision = storedRevision;
+        // The revision read may have waited behind a definition edit whose old
+        // connection is still live until token storage completes.
+        assertProbeAllowed?.();
+      }
+
       // Keyed off the selection's own runtimes, so a third pinnable one is
       // validated here the moment the schema names it.
       for (const runtimeId of TOOLCHAIN_RUNTIME_IDS) {
@@ -134,9 +155,18 @@ export function createToolchainService(
       // that here instead — read, merge, write the whole selection — would let
       // a concurrent update of the other runtime revert this one, since the
       // Node and Bun cards autosave through independent mutations.
-      const selection = await repository.upsert(userId, environmentId, body, now());
+      const selection = await repository.upsert(userId, environmentId, body, now(), revision);
       if (!selection) {
-        throw new EnvironmentServiceError(`Environment "${environmentId}" was not found.`, 404);
+        if (
+          revision !== undefined &&
+          (await repository.getRevision(userId, environmentId)) !== null
+        ) {
+          throw new EnvironmentServiceError(
+            `Environment "${environmentId}" changed while its toolchain path was being verified.`,
+            409
+          );
+        }
+        throw new EnvironmentServiceError(missing, 404);
       }
       // The selection is a field of `Environment`, so every other session
       // holding the environments list is now showing a stale pin. Same signal
