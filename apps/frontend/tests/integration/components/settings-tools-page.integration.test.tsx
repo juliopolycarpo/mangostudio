@@ -46,6 +46,9 @@ const TOOLS_RESPONSE = {
 
 describe('ToolSettingsPage integration', () => {
   const fetchScenario = createFetchScenario();
+  const scenarioImplementation = fetchScenario.fetchMock.getMockImplementation();
+  if (!scenarioImplementation) throw new Error('Expected the fetch scenario implementation');
+  const defaultFetch = scenarioImplementation;
   const setMaxToolIterations = jest.fn();
 
   beforeEach(() => {
@@ -53,6 +56,7 @@ describe('ToolSettingsPage integration', () => {
   });
 
   afterEach(() => {
+    fetchScenario.fetchMock.mockImplementation(defaultFetch);
     fetchScenario.restore();
   });
 
@@ -77,18 +81,21 @@ describe('ToolSettingsPage integration', () => {
         body: { tools: [descriptor] },
       });
       const response = Promise.withResolvers<Response>();
-      const originalFetch = fetchScenario.fetchMock.getMockImplementation();
-      if (!originalFetch) throw new Error('Expected a registered fetch scenario');
       let writes = 0;
-      fetchScenario.fetchMock.mockImplementation((input, init) => {
+      function respondToToolSave(input: RequestInfo | URL, init?: RequestInit) {
         const method = input instanceof Request ? input.method : init?.method;
-        if (method === 'PUT') {
+        const url = input instanceof Request ? input.url : String(input);
+        if (
+          method === 'PUT' &&
+          new URL(url, 'http://localhost').pathname === '/api/settings/tools/get_current_datetime'
+        ) {
           writes++;
           if (writes === 1) return response.promise;
           return Promise.resolve(Response.json({ ...descriptor, parameters: { timeout: 200 } }));
         }
-        return originalFetch(input, init);
-      });
+        return defaultFetch(input, init);
+      }
+      fetchScenario.fetchMock.mockImplementation(respondToToolSave);
       render(
         <ToolSettingsPage maxToolIterations={10} setMaxToolIterations={setMaxToolIterations} />
       );
@@ -155,15 +162,13 @@ describe('ToolSettingsPage integration', () => {
 
     await screen.findByText('Current date and time');
 
-    // Change the timezone parameter
+    fetchScenario.respondWithJson('PUT', '/api/settings/tools/get_current_datetime', {
+      body: { ...TOOLS_RESPONSE.tools[0], parameters: { timezone: 'Europe/Lisbon' } },
+    });
+
     const timezoneInput = screen.getByDisplayValue('UTC');
     await user.clear(timezoneInput);
     await user.type(timezoneInput, 'America/New_York');
-
-    // Register PUT response for autosave
-    fetchScenario.respondWithJson('PUT', '/api/settings/tools/get_current_datetime', {
-      body: {},
-    });
 
     await waitFor(() => {
       const putCalls = fetchScenario.fetchMock.mock.calls.filter((call: unknown[]) => {
@@ -177,6 +182,7 @@ describe('ToolSettingsPage integration', () => {
         );
       });
       expect(putCalls.length).toBeGreaterThanOrEqual(1);
+      expect(timezoneInput).toHaveValue('Europe/Lisbon');
     });
   });
 });
