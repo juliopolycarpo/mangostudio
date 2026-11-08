@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 
 import { getDb } from '../../../../src/db/database';
+import { createEnvironmentRepository } from '../../../../src/modules/environments/infrastructure/environment-repository';
 import { createEnvironmentToolchainRepository } from '../../../../src/modules/environments/infrastructure/environment-toolchain-repository';
 
 const keys: Array<{ userId: string; environmentId: string }> = [];
@@ -14,10 +15,52 @@ afterEach(async () => {
       .where('userId', '=', key.userId)
       .where('environmentId', '=', key.environmentId)
       .execute();
+    await db
+      .deleteFrom('environments')
+      .where('userId', '=', key.userId)
+      .where('id', '=', key.environmentId)
+      .execute();
   }
 });
 
+async function createRemote(userId: string, id: string): Promise<void> {
+  await createEnvironmentRepository().create({
+    id,
+    userId,
+    name: id,
+    transportKind: 'stdio',
+    config: {},
+    enabled: true,
+  });
+}
+
 describe('environment toolchain repository', () => {
+  it('lists only the user selections, including Local, keyed by environment id', async () => {
+    const repository = createEnvironmentToolchainRepository();
+    const userId = 'toolchain-list-user';
+    const otherUserId = 'toolchain-list-other';
+    keys.push(
+      { userId, environmentId: 'local' },
+      { userId, environmentId: 'dev-box' },
+      { userId: otherUserId, environmentId: 'local' },
+      { userId: otherUserId, environmentId: 'other-only' }
+    );
+    await createRemote(userId, 'dev-box');
+    await createRemote(otherUserId, 'other-only');
+    await repository.upsert(userId, 'local', { bun: '/local/bun' }, 1);
+    await repository.upsert(userId, 'dev-box', { node: '/remote/node' }, 1);
+    await repository.upsert(otherUserId, 'local', { bun: '/other/bun' }, 1);
+    await repository.upsert(otherUserId, 'other-only', { node: '/other/node' }, 1);
+
+    expect(await repository.listByUser(userId)).toEqual(
+      new Map([
+        ['local', { node: 'auto', bun: '/local/bun' }],
+        ['dev-box', { node: '/remote/node', bun: 'auto' }],
+      ])
+    );
+    expect(await repository.listByUser('toolchain-list-empty')).toEqual(new Map());
+  });
+
   it('reads null before any row is stored', async () => {
     const repository = createEnvironmentToolchainRepository();
     keys.push({ userId: 'toolchain-repo-user-1', environmentId: 'dev-box' });
@@ -29,6 +72,7 @@ describe('environment toolchain repository', () => {
     const repository = createEnvironmentToolchainRepository();
     keys.push({ userId: 'toolchain-repo-user-2', environmentId: 'dev-box' });
 
+    await createRemote('toolchain-repo-user-2', 'dev-box');
     await repository.upsert(
       'toolchain-repo-user-2',
       'dev-box',
@@ -46,6 +90,7 @@ describe('environment toolchain repository', () => {
     const repository = createEnvironmentToolchainRepository();
     keys.push({ userId: 'toolchain-repo-user-3', environmentId: 'dev-box' });
 
+    await createRemote('toolchain-repo-user-3', 'dev-box');
     await repository.upsert(
       'toolchain-repo-user-3',
       'dev-box',
@@ -73,6 +118,7 @@ describe('environment toolchain repository', () => {
       { userId: 'toolchain-repo-user-5', environmentId: 'dev-box' }
     );
 
+    await createRemote('toolchain-repo-user-4', 'dev-box');
     await repository.upsert(
       'toolchain-repo-user-4',
       'dev-box',
@@ -82,6 +128,17 @@ describe('environment toolchain repository', () => {
 
     expect(await repository.get('toolchain-repo-user-4', 'cache-box')).toBeNull();
     expect(await repository.get('toolchain-repo-user-5', 'dev-box')).toBeNull();
+  });
+
+  it('does not store a selection for an environment owned by someone else', async () => {
+    const repository = createEnvironmentToolchainRepository();
+    const owner = 'toolchain-repo-owner';
+    const other = 'toolchain-repo-not-owner';
+    const id = 'dev-box';
+    keys.push({ userId: owner, environmentId: id }, { userId: other, environmentId: id });
+    await createRemote(owner, id);
+    expect(await repository.upsert(other, id, { bun: 'auto' }, 1)).toBeNull();
+    expect(await repository.get(other, id)).toBeNull();
   });
 
   it('accepts the local sentinel environment id with no foreign key to environments', async () => {
@@ -105,6 +162,7 @@ describe('environment toolchain repository', () => {
     const repository = createEnvironmentToolchainRepository();
     keys.push({ userId: 'toolchain-repo-user-9', environmentId: 'dev-box' });
 
+    await createRemote('toolchain-repo-user-9', 'dev-box');
     await repository.upsert(
       'toolchain-repo-user-9',
       'dev-box',
@@ -131,6 +189,7 @@ describe('environment toolchain repository', () => {
     const repository = createEnvironmentToolchainRepository();
     keys.push({ userId: 'toolchain-repo-user-10', environmentId: 'dev-box' });
 
+    await createRemote('toolchain-repo-user-10', 'dev-box');
     const committed = await repository.upsert(
       'toolchain-repo-user-10',
       'dev-box',
@@ -145,6 +204,7 @@ describe('environment toolchain repository', () => {
     const repository = createEnvironmentToolchainRepository();
     keys.push({ userId: 'toolchain-repo-user-7', environmentId: 'dev-box' });
 
+    await createRemote('toolchain-repo-user-7', 'dev-box');
     await repository.upsert(
       'toolchain-repo-user-7',
       'dev-box',

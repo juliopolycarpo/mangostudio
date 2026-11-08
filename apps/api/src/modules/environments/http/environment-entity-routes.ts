@@ -171,6 +171,7 @@ export function createEnvironmentEntityRoutes(
           response: {
             200: ToolchainSelectionSchema,
             400: ApiErrorResponseSchema,
+            404: ApiErrorResponseSchema,
             422: ApiErrorResponseSchema,
             503: ApiErrorResponseSchema,
           },

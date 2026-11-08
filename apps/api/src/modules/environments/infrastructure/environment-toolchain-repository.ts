@@ -7,7 +7,10 @@
  */
 
 import type { ToolchainSelection } from '@mangostudio/shared/environments';
-import { DEFAULT_TOOLCHAIN_SELECTION } from '@mangostudio/shared/environments';
+import {
+  DEFAULT_TOOLCHAIN_SELECTION,
+  LOCAL_ENVIRONMENT_ID,
+} from '@mangostudio/shared/environments';
 import type { Kysely } from 'kysely';
 
 import { getDb } from '../../../db/database';
@@ -19,10 +22,16 @@ import type {
 } from '../../../db/types';
 
 export interface EnvironmentToolchainRepository {
+  /**
+   * Reads the user's stored selections keyed by environment ID, including Local.
+   * @example const selections = await repository.listByUser(userId)
+   */
+  listByUser(userId: string): Promise<Map<string, ToolchainSelection>>;
   get(userId: string, environmentId: string): Promise<ToolchainSelection | null>;
   /**
    * Writes only the runtimes named in `patch`, leaving every other column as
-   * it was found, and answers with the row as committed.
+   * it was found, and answers with the committed row. Returns null if a
+   * non-Local environment does not exist for this user at write time.
    *
    * The merge belongs here rather than in a caller because the Node and Bun
    * cards autosave independently: a read-modify-write above this line lets two
@@ -36,7 +45,7 @@ export interface EnvironmentToolchainRepository {
     environmentId: string,
     patch: Partial<ToolchainSelection>,
     updatedAt: number
-  ): Promise<ToolchainSelection>;
+  ): Promise<ToolchainSelection | null>;
   remove(userId: string, environmentId: string): Promise<void>;
 }
 
@@ -56,6 +65,15 @@ export function createEnvironmentToolchainRepository(
   const db = (): Kysely<Database> => injected ?? getDb();
 
   return {
+    async listByUser(userId) {
+      const rows = await db()
+        .selectFrom('environment_toolchains')
+        .selectAll()
+        .where('userId', '=', userId)
+        .execute();
+      return new Map(rows.map((row) => [row.environmentId, toToolchainSelection(row)]));
+    },
+
     async get(userId, environmentId) {
       const row = await db()
         .selectFrom('environment_toolchains')
@@ -85,13 +103,36 @@ export function createEnvironmentToolchainRepository(
         ...(patch.bun !== undefined && { bunSelection: patch.bun }),
         updatedAt,
       };
-      const row = await db()
+      const database = db();
+      // Check ownership in the write so deletion cannot slip between the
+      // check and the upsert. Local has no environments row.
+      const source = database
+        .selectNoFrom(({ val }) => [
+          val(values.userId).as('userId'),
+          val(values.environmentId).as('environmentId'),
+          val(values.nodeSelection).as('nodeSelection'),
+          val(values.bunSelection).as('bunSelection'),
+          val(values.updatedAt).as('updatedAt'),
+        ])
+        .where(({ eb, exists, or, selectFrom, val }) =>
+          or([
+            eb(val(environmentId), '=', LOCAL_ENVIRONMENT_ID),
+            exists(
+              selectFrom('environments')
+                .select('id')
+                .where('userId', '=', userId)
+                .where('id', '=', environmentId)
+            ),
+          ])
+        );
+      const row = await database
         .insertInto('environment_toolchains')
-        .values(values)
+        .columns(['userId', 'environmentId', 'nodeSelection', 'bunSelection', 'updatedAt'])
+        .expression(source)
         .onConflict((oc) => oc.columns(['userId', 'environmentId']).doUpdateSet(update))
         .returningAll()
-        .executeTakeFirstOrThrow();
-      return toToolchainSelection(row);
+        .executeTakeFirst();
+      return row ? toToolchainSelection(row) : null;
     },
 
     async remove(userId, environmentId) {
