@@ -153,6 +153,27 @@ describe('ToolSettingsRow', () => {
     expect(countToolWrites()).toBe(0);
   });
 
+  it('adopts a new descriptor matching the previously rendered value after a save', async () => {
+    fetchScenario.respondWithJson('PUT', TOOL_PATH, { body: withTimezone('Europe/Lisbon') });
+    const { rerender } = render(<ToolSettingsRow descriptor={DESCRIPTOR} />);
+    useFakeTimers();
+    fireEvent.change(screen.getByDisplayValue('UTC'), { target: { value: 'Europe/Lisbon' } });
+    await act(async () => {
+      await advanceTimersByTimeAsync(400);
+    });
+    expect(screen.getByDisplayValue('Europe/Lisbon')).toBeInTheDocument();
+    expect(countToolWrites()).toBe(1);
+
+    // The response settled before the parent rendered its descriptor. The
+    // next snapshot restores UTC, which was also the previous prop value.
+    rerender(<ToolSettingsRow descriptor={withTimezone('UTC')} />);
+    await act(async () => {
+      await advanceTimersByTimeAsync(400);
+    });
+    expect(screen.getByDisplayValue('UTC')).toBeInTheDocument();
+    expect(countToolWrites()).toBe(1);
+  });
+
   it('keeps a local edit when the descriptor changes underneath it', async () => {
     fetchScenario.respondWithJson('PUT', TOOL_PATH, {
       body: withTimezone('America/Sao_Paulo'),

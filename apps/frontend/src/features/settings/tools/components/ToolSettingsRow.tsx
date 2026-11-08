@@ -4,7 +4,11 @@
  */
 
 import type { Messages } from '@mangostudio/shared/i18n';
-import type { ToolSettingsDescriptor } from '@mangostudio/shared/tool-settings';
+import type {
+  ToolSettingsDescriptor,
+  ToolSettingsListResponse,
+} from '@mangostudio/shared/tool-settings';
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { SettingsRow } from '@/components/settings/SettingsRow';
@@ -12,6 +16,7 @@ import { ToggleSwitch } from '@/components/ui/Toggle';
 import { useI18n } from '@/hooks/use-i18n';
 
 import { useUpdateToolSetting } from '../hooks/use-tool-settings';
+import { toolSettingsKeys } from '../queries';
 import { ToolParameterField } from './ToolParameterField';
 
 const TOOL_PARAMETERS_AUTOSAVE_MS = 300;
@@ -57,13 +62,21 @@ function getTranslatedToolText(
 export function ToolSettingsRow({ descriptor }: ToolSettingsRowProps) {
   const { t } = useI18n();
   const s = t.settings.tools;
-  const { mutateAsync, isPending } = useUpdateToolSetting();
+  const queryClient = useQueryClient();
+  const { mutateAsync, isPending: isMutationPending } = useUpdateToolSetting();
   const translated = getTranslatedToolText(descriptor, t);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMountedRef = useRef(true);
+  const activeParameterSaveRef = useRef<Record<string, unknown> | null>(null);
 
+  const [isParameterSavePending, setParameterSavePending] = useState(false);
+  const isPending = isMutationPending || isParameterSavePending;
   const [enabled, setEnabled] = useState(descriptor.enabled);
-  const [params, setParams] = useState<Record<string, unknown>>({ ...descriptor.parameters });
+  const [parameterState, setParameterState] = useState(() => ({
+    value: descriptor.parameters,
+    saved: descriptor.parameters,
+  }));
+  const params = parameterState.value;
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -78,8 +91,8 @@ export function ToolSettingsRow({ descriptor }: ToolSettingsRowProps) {
   // value as a local edit and autosaves the stale params straight back over it,
   // which the other tab then sees as *its* remote change: two tabs on this page
   // would trade writes forever. Adopt a remote change only where the user has
-  // not edited, since state still matching the descriptor this card was last
-  // showing has no local edit to lose.
+  // not edited. An explicit return to the saved value while a request is
+  // pending is still a local edit, even when the two objects have equal values.
   const shownDescriptorRef = useRef(descriptor);
 
   useEffect(() => {
@@ -93,13 +106,16 @@ export function ToolSettingsRow({ descriptor }: ToolSettingsRowProps) {
       );
     }
 
-    if (!areToolParametersEqual(shownDescriptor.parameters, descriptor.parameters)) {
-      setParams((currentParams) =>
-        areToolParametersEqual(currentParams, shownDescriptor.parameters)
-          ? { ...descriptor.parameters }
-          : currentParams
-      );
-    }
+    const request = activeParameterSaveRef.current;
+    const saved = descriptor.parameters;
+    setParameterState((current) => {
+      if (areToolParametersEqual(current.saved, saved)) return current;
+      const hasNewerEdit = request !== null && current.value !== request;
+      const adopt =
+        current.value === current.saved ||
+        (!hasNewerEdit && areToolParametersEqual(current.value, saved));
+      return { value: adopt ? saved : current.value, saved };
+    });
   }, [descriptor]);
 
   const handleToggle = useCallback(async () => {
@@ -119,39 +135,60 @@ export function ToolSettingsRow({ descriptor }: ToolSettingsRowProps) {
   }, [enabled, mutateAsync, descriptor.name, descriptor.enabled]);
 
   const handleParamChange = useCallback((name: string, value: unknown) => {
-    setParams((prev) => ({ ...prev, [name]: value }));
+    const saving = activeParameterSaveRef.current !== null;
+    setParameterState((current) => {
+      const next = { ...current.value, [name]: value };
+      return {
+        ...current,
+        value: !saving && areToolParametersEqual(next, current.saved) ? current.saved : next,
+      };
+    });
   }, []);
 
   const persistParameters = useCallback(async () => {
+    if (activeParameterSaveRef.current !== null) return;
     const requestedParams = params;
+    activeParameterSaveRef.current = requestedParams;
+    if (isMountedRef.current) setParameterSavePending(true);
 
     try {
       const nextDescriptor = await mutateAsync({
         toolName: descriptor.name,
         body: { parameters: requestedParams },
       });
-      const nextParameters =
-        nextDescriptor.parameters && typeof nextDescriptor.parameters === 'object'
-          ? { ...nextDescriptor.parameters }
-          : requestedParams;
       if (!isMountedRef.current) return;
-      setParams((currentParams) =>
-        areToolParametersEqual(currentParams, requestedParams) ? nextParameters : currentParams
-      );
+      // The mutation updates the list before awaiting capability invalidation.
+      // A later list update may have superseded its response in that interval.
+      const saved =
+        queryClient
+          .getQueryData<ToolSettingsListResponse>(toolSettingsKeys.list())
+          ?.tools.find((tool) => tool.name === descriptor.name)?.parameters ??
+        nextDescriptor.parameters ??
+        requestedParams;
+      setParameterState((current) => ({
+        value:
+          current.value === requestedParams || areToolParametersEqual(current.value, saved)
+            ? saved
+            : current.value,
+        saved,
+      }));
     } catch {
       if (!isMountedRef.current) return;
-      setParams((currentParams) =>
-        areToolParametersEqual(currentParams, requestedParams)
-          ? { ...descriptor.parameters }
-          : currentParams
+      setParameterState((current) =>
+        current.value === requestedParams || areToolParametersEqual(current.value, current.saved)
+          ? { ...current, value: current.saved }
+          : current
       );
+    } finally {
+      activeParameterSaveRef.current = null;
+      if (isMountedRef.current) setParameterSavePending(false);
     }
-  }, [mutateAsync, descriptor.name, descriptor.parameters, params]);
+  }, [mutateAsync, descriptor.name, params, queryClient]);
 
   const hasParameters = descriptor.parameterDescriptors.length > 0;
   const hasUnsavedParams = useMemo(
-    () => enabled && hasParameters && !areToolParametersEqual(params, descriptor.parameters),
-    [descriptor.parameters, enabled, hasParameters, params]
+    () => enabled && hasParameters && !areToolParametersEqual(params, parameterState.saved),
+    [enabled, hasParameters, parameterState.saved, params]
   );
 
   useEffect(() => {
