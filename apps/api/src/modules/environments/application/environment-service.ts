@@ -11,6 +11,8 @@ import {
   LOCAL_ENVIRONMENT_NAME,
 } from '@mangostudio/shared/environments';
 
+import { acquireToolchainCredentialLock } from '../../../backup/capture-lock';
+import { getConfig } from '../../../lib/config';
 import { publishEnvironmentInvalidation } from '../../../services/realtime/environment-invalidation';
 import {
   getRuntimeConnectionManager,
@@ -183,7 +185,8 @@ export function createEnvironmentService(
   secretStore: SecretStore = bunSecretStore,
   runtimeEffects: EnvironmentRuntimeEffects = defaultEnvironmentRuntimeEffects,
   toolchain: ToolchainService = toolchainService,
-  withdrawn: EnvironmentWithdrawnListener = notifyEnvironmentWithdrawn
+  withdrawn: EnvironmentWithdrawnListener = notifyEnvironmentWithdrawn,
+  credentialDatabasePath: () => string = () => getConfig().database.path
 ): EnvironmentService {
   async function findRecord(userId: string, id: string): Promise<EnvironmentRecord | null> {
     if (id === LOCAL_ENVIRONMENT_ID) return localRecord(userId);
@@ -194,6 +197,17 @@ export function createEnvironmentService(
     const record = await findRecord(userId, id);
     if (!record) throw new EnvironmentServiceError(`Environment "${id}" was not found.`, 404);
     return record;
+  }
+
+  async function lockTokenEdit(userId: string, id: string): Promise<() => Promise<void>> {
+    try {
+      return await acquireToolchainCredentialLock(credentialDatabasePath(), userId, id, 'edit');
+    } catch (error) {
+      throw new EnvironmentServiceError(
+        error instanceof Error ? error.message : String(error),
+        409
+      );
+    }
   }
 
   return {
@@ -239,32 +253,37 @@ export function createEnvironmentService(
         );
       }
 
-      const record = await repository.create({
-        id: input.id,
-        name: input.name,
-        transportKind: input.transportKind,
-        config: input.config,
-        userId,
-        enabled: input.enabled ?? true,
-      });
-      if (!record) {
-        throw new EnvironmentServiceError(`Environment "${input.id}" already exists.`, 409);
-      }
-
-      if (token) {
-        try {
-          await persistRuntimeToken(userId, record.id, token, secretStore);
-        } catch (error) {
-          await repository.remove(userId, record.id);
-          throw new EnvironmentServiceError(
-            error instanceof Error ? error.message : String(error),
-            statusForTokenPersistFailure(error)
-          );
+      const release = token ? await lockTokenEdit(userId, input.id) : undefined;
+      try {
+        const record = await repository.create({
+          id: input.id,
+          name: input.name,
+          transportKind: input.transportKind,
+          config: input.config,
+          userId,
+          enabled: input.enabled ?? true,
+        });
+        if (!record) {
+          throw new EnvironmentServiceError(`Environment "${input.id}" already exists.`, 409);
         }
-      }
 
-      publish(userId);
-      return await toEnvironment(record, manager, secretStore, toolchain);
+        if (token) {
+          try {
+            await persistRuntimeToken(userId, record.id, token, secretStore);
+          } catch (error) {
+            await repository.remove(userId, record.id);
+            throw new EnvironmentServiceError(
+              error instanceof Error ? error.message : String(error),
+              statusForTokenPersistFailure(error)
+            );
+          }
+        }
+
+        publish(userId);
+        return await toEnvironment(record, manager, secretStore, toolchain);
+      } finally {
+        await release?.();
+      }
     },
 
     async update(userId, id, input) {
@@ -298,57 +317,62 @@ export function createEnvironmentService(
       }
 
       const { token, ...rowUpdate } = input;
-      const definitionUpdate =
-        token === undefined ? rowUpdate : { ...rowUpdate, rotatesToken: true };
-      const updated =
-        Object.keys(definitionUpdate).length > 0
-          ? await repository.update(userId, id, definitionUpdate)
-          : current;
-      if (!updated) {
-        throw new EnvironmentServiceError(`Environment "${id}" was not found.`, 404);
-      }
+      const release = token !== undefined ? await lockTokenEdit(userId, id) : undefined;
+      try {
+        const definitionUpdate =
+          token === undefined ? rowUpdate : { ...rowUpdate, rotatesToken: true };
+        const updated =
+          Object.keys(definitionUpdate).length > 0
+            ? await repository.update(userId, id, definitionUpdate)
+            : current;
+        if (!updated) {
+          throw new EnvironmentServiceError(`Environment "${id}" was not found.`, 404);
+        }
 
-      if (token !== undefined) {
-        try {
-          await persistRuntimeToken(userId, id, token, secretStore);
-        } catch (error) {
-          // Row fields already moved; put them back so a keychain outage does
-          // not leave the environment pointing at a half-applied edit.
-          if (Object.keys(rowUpdate).length > 0) {
-            await repository.update(userId, id, {
-              name: current.name,
-              config: current.config,
-              enabled: current.enabled,
-              allowInstalls: current.allowInstalls,
-            });
+        if (token !== undefined) {
+          try {
+            await persistRuntimeToken(userId, id, token, secretStore);
+          } catch (error) {
+            // Row fields already moved; put them back so a keychain outage does
+            // not leave the environment pointing at a half-applied edit.
+            if (Object.keys(rowUpdate).length > 0) {
+              await repository.update(userId, id, {
+                name: current.name,
+                config: current.config,
+                enabled: current.enabled,
+                allowInstalls: current.allowInstalls,
+              });
+            }
+            throw new EnvironmentServiceError(
+              error instanceof Error ? error.message : String(error),
+              statusForTokenPersistFailure(error)
+            );
           }
-          throw new EnvironmentServiceError(
-            error instanceof Error ? error.message : String(error),
-            statusForTokenPersistFailure(error)
-          );
         }
-      }
 
-      // A live connection was opened from the definition as it stood before this
-      // write. Disabling the environment, repointing its transport, or rotating
-      // the token must drop it, or the reported status keeps describing the
-      // persisted config while every tool call keeps reaching the old endpoint.
-      if (input.enabled === false || input.config !== undefined || token !== undefined) {
-        withdrawn(userId, id);
-        manager.disconnect(userId, id);
-        // Disconnect keeps health for transient drops; a config repoint must
-        // not leave the card showing the previous host's version/digest.
-        if (input.config !== undefined) {
-          manager.clearHealth(userId, id);
+        // A live connection was opened from the definition as it stood before this
+        // write. Disabling the environment, repointing its transport, or rotating
+        // the token must drop it, or the reported status keeps describing the
+        // persisted config while every tool call keeps reaching the old endpoint.
+        if (input.enabled === false || input.config !== undefined || token !== undefined) {
+          withdrawn(userId, id);
+          manager.disconnect(userId, id);
+          // Disconnect keeps health for transient drops; a config repoint must
+          // not leave the card showing the previous host's version/digest.
+          if (input.config !== undefined) {
+            manager.clearHealth(userId, id);
+          }
+        } else if (input.enabled === true) {
+          // Calls that reached it while it was disabled each recorded a failure,
+          // which can already have latched the backoff. Re-enabling is the answer
+          // to that, so clear it here rather than making the user press Connect.
+          manager.clearBackoff(userId, id);
         }
-      } else if (input.enabled === true) {
-        // Calls that reached it while it was disabled each recorded a failure,
-        // which can already have latched the backoff. Re-enabling is the answer
-        // to that, so clear it here rather than making the user press Connect.
-        manager.clearBackoff(userId, id);
+        publish(userId);
+        return await toEnvironment(updated, manager, secretStore, toolchain);
+      } finally {
+        await release?.();
       }
-      publish(userId);
-      return await toEnvironment(updated, manager, secretStore, toolchain);
     },
 
     async remove(userId, id, options = {}) {

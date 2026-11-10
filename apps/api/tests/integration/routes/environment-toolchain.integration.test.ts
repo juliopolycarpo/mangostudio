@@ -1,4 +1,8 @@
 import { afterEach, describe, expect, it, spyOn } from 'bun:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   type AgentCliStatus,
@@ -13,6 +17,8 @@ import {
 import type { LibraryLocationStatus, LibraryTargetId } from '@mangostudio/shared/library';
 import { TableNode } from 'kysely';
 
+import { acquireToolchainCredentialLock } from '../../../src/backup/capture-lock';
+import { runEnvToolchain } from '../../../src/cli/commands/env';
 import { getDb } from '../../../src/db/database';
 import { createEnvironmentService } from '../../../src/modules/environments/application/environment-service';
 import type {
@@ -136,7 +142,8 @@ function createTestApp(
   installedPaths: Partial<Record<RuntimeId, readonly string[]>> = {},
   toolchainReads: string[] = [],
   beforeStatus?: () => Promise<void>,
-  secretStore?: SecretStore
+  secretStore?: SecretStore,
+  credentialDatabasePath?: () => string
 ) {
   const toolchainDb = getDb().withPlugin({
     transformQuery({ node }) {
@@ -175,7 +182,9 @@ function createTestApp(
       // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
       removeRuntimeBytes: async () => undefined,
     },
-    toolchain
+    toolchain,
+    undefined,
+    credentialDatabasePath
   );
   const { app, restore } = createAuthenticatedApiTestApp(
     TEST_USER,
@@ -446,6 +455,143 @@ describe('environment toolchain route', () => {
     } finally {
       store.release.resolve();
       expect((await edit).status).toBe(200);
+    }
+  });
+
+  it('refuses a CLI pin during a pending Direct URL token write and allows it after release', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'toolchain-credential-'));
+    const credentialDatabasePath = () => join(root, 'hub.sqlite');
+    const store = new HeldTokenStore();
+    const { app, repository, toolchainRepository } = createTestApp(
+      {},
+      [],
+      undefined,
+      store,
+      credentialDatabasePath
+    );
+    const id = 'cli-direct-box';
+    function resolveFixtureUser() {
+      return Promise.resolve(TEST_USER.id);
+    }
+    function alreadyMigrated() {
+      return Promise.resolve();
+    }
+    function discardOutput() {}
+    const service = createToolchainService(
+      toolchainRepository,
+      new FakeEnvironmentProbingService({ node: ['/runtime/node'] })
+    );
+    const pin = () =>
+      runEnvToolchain(
+        {
+          subcommand: 'toolchain',
+          runtime: 'node',
+          choice: '/runtime/node',
+          environmentId: id,
+          json: true,
+        },
+        {
+          service,
+          prepareDatabase: alreadyMigrated,
+          credentialDatabasePath,
+          resolveUserId: resolveFixtureUser,
+          log: discardOutput,
+        }
+      );
+    async function tryCredentialEditFromChild() {
+      const lockModule = fileURLToPath(
+        new URL('../../../src/backup/capture-lock.ts', import.meta.url)
+      );
+      const parameters = [credentialDatabasePath(), TEST_USER.id, id]
+        .map((value) => JSON.stringify(value))
+        .join(', ');
+      const child = Bun.spawn(
+        [
+          process.execPath,
+          '--eval',
+          `import { acquireToolchainCredentialLock } from ${JSON.stringify(lockModule)};
+          try {
+            const release = await acquireToolchainCredentialLock(${parameters}, 'edit');
+            await release();
+            console.log('acquired');
+          } catch (error) {
+            console.error(error.message);
+            process.exitCode = 1;
+          }`,
+        ],
+        { stdout: 'pipe', stderr: 'pipe', timeout: 5000 }
+      );
+      const [code, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      return { code, stdout: stdout.trim(), stderr: stderr.trim() };
+    }
+    try {
+      await repository.create({
+        id,
+        userId: TEST_USER.id,
+        name: 'CLI direct box',
+        transportKind: 'http',
+        config: { baseUrl: 'http://direct.example' },
+        enabled: true,
+      });
+      const edit = app.handle(
+        new Request(
+          `http://localhost/environments/${id}`,
+          jsonRequest('PUT', { token: 'replacement-token' })
+        )
+      );
+      try {
+        await store.writing.promise;
+        await expect(pin()).rejects.toThrow('token edit in progress');
+        expect(await toolchainRepository.get(TEST_USER.id, id)).toBeNull();
+      } finally {
+        store.release.resolve();
+        expect((await edit).status).toBe(200);
+      }
+
+      const release = await acquireToolchainCredentialLock(
+        credentialDatabasePath(),
+        TEST_USER.id,
+        id,
+        'probe'
+      );
+      try {
+        await pin();
+        expect(await toolchainRepository.get(TEST_USER.id, id)).toEqual({
+          node: '/runtime/node',
+          bun: 'auto',
+        });
+        const conflictingEdit = await app.handle(
+          new Request(
+            `http://localhost/environments/${id}`,
+            jsonRequest('PUT', { token: 'another-token' })
+          )
+        );
+        expect(conflictingEdit.status).toBe(409);
+        expect(await tryCredentialEditFromChild()).toMatchObject({
+          code: 1,
+          stderr: expect.stringContaining('token edit in progress'),
+        });
+      } finally {
+        await release();
+      }
+      expect(await tryCredentialEditFromChild()).toEqual({
+        code: 0,
+        stdout: 'acquired',
+        stderr: '',
+      });
+      const laterEdit = await app.handle(
+        new Request(
+          `http://localhost/environments/${id}`,
+          jsonRequest('PUT', { token: 'another-token' })
+        )
+      );
+      expect(laterEdit.status).toBe(200);
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 
