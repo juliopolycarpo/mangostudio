@@ -39,8 +39,8 @@
     "exact-mirror": "1.2.7",
     "file-type": "^22.3.0",
     "kysely": "^0.29.8",
-    "openai": "^7.52.0",
-    "typebox": "1.4.4"
+    "openai": "^7.53.0",
+    "typebox": "1.4.5"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
