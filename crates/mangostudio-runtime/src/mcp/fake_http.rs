@@ -21,6 +21,7 @@ pub(crate) enum Mode {
     LegacySse {
         post_status: u16,
         cross_origin: bool,
+        large_error: bool,
     },
     /// Every POST answers this status; nothing else is served.
     Status(u16),
@@ -146,15 +147,21 @@ async fn serve(
         (Mode::Status(status), _, _) => {
             respond(&mut socket, status, "text/plain", "", "nope").await
         }
-        (Mode::LegacySse { post_status, .. }, "POST", "/mcp") => {
-            respond(
-                &mut socket,
+        (
+            Mode::LegacySse {
                 post_status,
-                "text/plain",
-                "",
-                "Cannot POST /mcp",
-            )
-            .await
+                large_error,
+                ..
+            },
+            "POST",
+            "/mcp",
+        ) => {
+            let body = if large_error {
+                "x".repeat(64 * 1024 + 1)
+            } else {
+                "Cannot POST /mcp".to_owned()
+            };
+            respond(&mut socket, post_status, "text/plain", "", &body).await
         }
         (Mode::LegacySse { cross_origin, .. }, "GET", "/mcp") => {
             let (sender, mut receiver) = mpsc::unbounded_channel();
@@ -228,4 +235,111 @@ async fn respond(
     socket.write_all(head.as_bytes()).await?;
     socket.write_all(body.as_bytes()).await?;
     socket.shutdown().await
+}
+
+/// A single scripted response, with explicit framing and no implicit content length.
+/// Dropping the fake cancels its connection as well as its listener.
+pub(crate) struct FakeHttpResponse {
+    pub url: String,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for FakeHttpResponse {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+impl FakeHttpResponse {
+    pub async fn start(status: u16, content_type: &str, body: Vec<u8>, chunked: bool) -> Self {
+        Self::scripted(status, content_type, body, chunked, false).await
+    }
+
+    pub async fn unfinished(status: u16, content_type: &str, body: Vec<u8>, chunked: bool) -> Self {
+        Self::scripted(status, content_type, body, chunked, true).await
+    }
+
+    async fn scripted(
+        status: u16,
+        content_type: &str,
+        body: Vec<u8>,
+        chunked: bool,
+        unfinished: bool,
+    ) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind fake");
+        let address = listener.local_addr().expect("fake address");
+        let content_type = content_type.to_owned();
+        let task = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.expect("accept request");
+            let mut reader = BufReader::new(socket);
+            let mut line = String::new();
+            reader.read_line(&mut line).await.expect("request line");
+            assert!(line.starts_with("POST /mcp "), "unexpected request: {line}");
+            let mut length = 0;
+            loop {
+                line.clear();
+                reader.read_line(&mut line).await.expect("request header");
+                if line == "\r\n" {
+                    break;
+                }
+                if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    length = value.trim().parse().expect("request length");
+                }
+            }
+            let mut request = vec![0; length];
+            reader.read_exact(&mut request).await.expect("request body");
+            let mut socket = reader.into_inner();
+            let framing = if chunked {
+                "transfer-encoding: chunked\r\n"
+            } else {
+                ""
+            };
+            let head = format!(
+                "HTTP/1.1 {status} X\r\ncontent-type: {content_type}\r\n{framing}connection: close\r\n\r\n"
+            );
+            if socket.write_all(head.as_bytes()).await.is_err() {
+                return;
+            }
+            for chunk in body.chunks(8192) {
+                if chunked
+                    && socket
+                        .write_all(format!("{:x}\r\n", chunk.len()).as_bytes())
+                        .await
+                        .is_err()
+                {
+                    return;
+                }
+                if socket.write_all(chunk).await.is_err() {
+                    return;
+                }
+                if chunked && socket.write_all(b"\r\n").await.is_err() {
+                    return;
+                }
+            }
+            if unfinished {
+                // No final chunk or connection close: the client must refuse before EOF.
+                let mut probe = [0];
+                let received = socket.read(&mut probe).await;
+                assert!(
+                    matches!(received, Ok(0) | Err(_)),
+                    "expected the refused response connection to close"
+                );
+                return;
+            }
+            if chunked {
+                let _ = socket.write_all(b"0\r\n\r\n").await;
+            }
+            let _ = socket.shutdown().await;
+        });
+        Self {
+            url: format!("http://{address}/mcp"),
+            task,
+        }
+    }
+
+    pub async fn finish(mut self) {
+        (&mut self.task)
+            .await
+            .expect("fake completed without unexpected requests");
+    }
 }

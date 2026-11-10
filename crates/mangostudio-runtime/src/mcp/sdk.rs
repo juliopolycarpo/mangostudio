@@ -1490,10 +1490,18 @@ mod tests {
 
     #[tokio::test]
     async fn a_4xx_initialize_falls_back_to_legacy_sse() {
-        for post_status in [400, 401, 403, 404, 405] {
+        for (post_status, large_error) in [
+            (400, false),
+            (401, false),
+            (403, false),
+            (404, false),
+            (405, false),
+            (400, true),
+        ] {
             let server = FakeHttpMcpServer::start(Mode::LegacySse {
                 post_status,
                 cross_origin: false,
+                large_error,
             })
             .await;
             let client = connect_http(&http_config(&server.url))
@@ -1574,6 +1582,7 @@ mod tests {
         let server = FakeHttpMcpServer::start(Mode::LegacySse {
             post_status: 404,
             cross_origin: true,
+            large_error: false,
         })
         .await;
         let failure = connect_http(&http_config(&server.url))
