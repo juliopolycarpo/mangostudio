@@ -1208,7 +1208,7 @@ the release-prep commit before the tag exists, so the release workflow never
 writes to the repository.
 
 The npm publish jobs grant `id-token: write`, install Node ≥22.14
-without a token-templated `registry-url`, publish via pinned `npx npm@11.5.1`, and
+without a token-templated `registry-url`, publish via pinned `npx npm@11.21.2`, and
 require `--provenance`. Release `npm-publish` uses Trusted Publishing OIDC when
 configured on npmjs.com; the release summary reports `auth=oidc` or
 `legacy-explicit` alongside crates.io.

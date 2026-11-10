@@ -10,10 +10,10 @@ import type { NpmCommandResult } from './npm-publish';
 import { isValidSemver, normalizeVersion } from './release-version';
 
 // https://docs.npmjs.com/trusted-publishers/#managing-dist-tags-with-trusted-publishing
-// https://github.com/npm/cli/releases/tag/v11.21.0
-// npm11.21 added OIDC dist-tag operations. Its 2026-09-30 publication clears
-// bunfig.toml's three-day minimum age. No release-age exception is required.
-export const CANARY_TAG_NPM_VERSION = '11.21.0';
+// https://github.com/npm/cli/releases/tag/v11.21.2
+// npm 11.21 added OIDC dist-tag operations. The pinned patch release cleared
+// the three-day minimum age before adoption.
+export const CANARY_TAG_NPM_VERSION = '11.21.2';
 
 /** Project-owned command boundary; failed subprocesses retain their exit code. */
 export interface CanaryTagRunner {

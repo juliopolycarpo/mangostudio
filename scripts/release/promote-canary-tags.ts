@@ -77,7 +77,7 @@ export class IsolatedCanaryTagRunner implements CanaryTagRunner {
     writeFileSync(join(directory, 'global.npmrc'), '');
   }
 
-  /** @example await runner.run(['bunx', '--package', 'npm@11.21.0', 'npm', '--version']); */
+  /** @example await runner.run(['bunx', '--package', 'npm@11.21.2', 'npm', '--version']); */
   run(command: readonly string[], signal?: AbortSignal): Promise<NpmCommandResult> {
     let isolated = [...command];
     if (command[0] === 'bunx') {

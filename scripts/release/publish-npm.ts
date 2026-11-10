@@ -37,7 +37,7 @@ class RegistryRunner implements NpmRunner {
     const cmd =
       args[0] === 'view'
         ? ['bun', 'pm', ...args]
-        : ['npx', '--yes', 'npm@11.5.1', '--loglevel=verbose', ...args];
+        : ['npx', '--yes', 'npm@11.21.2', '--loglevel=verbose', ...args];
     const proc = Bun.spawn({
       cmd,
       cwd: options.cwd,

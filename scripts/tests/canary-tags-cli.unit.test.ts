@@ -91,8 +91,8 @@ class ProbeOnlyRunner implements CanaryTagRunner {
     this.calls.push([...command]);
     if (command.join(' ') === 'node --version')
       return Promise.resolve({ exitCode: 0, stdout: 'v22.14.0', stderr: '' });
-    if (command.join(' ') === 'bunx --package npm@11.21.0 npm --version')
-      return Promise.resolve({ exitCode: 0, stdout: '11.21.0', stderr: '' });
+    if (command.join(' ') === 'bunx --package npm@11.21.2 npm --version')
+      return Promise.resolve({ exitCode: 0, stdout: '11.21.2', stderr: '' });
     throw new Error(`Unexpected write from probe-only fixture ${command.join(' ')}`);
   }
 }
@@ -169,7 +169,7 @@ describe('canary command adapters', () => {
       await runner.run([
         'bunx',
         '--package',
-        'npm@11.21.0',
+        'npm@11.21.2',
         'npm',
         'dist-tag',
         'add',
@@ -181,7 +181,7 @@ describe('canary command adapters', () => {
         command: [
           'bunx',
           '--package',
-          'npm@11.21.0',
+          'npm@11.21.2',
           'npm',
           '--userconfig',
           join(directory, 'user.npmrc'),
@@ -225,7 +225,7 @@ describe('canary command adapters', () => {
       const process = new RecordingTagProcess();
       const runner = new IsolatedCanaryTagRunner(directory, OIDC, process);
       expect(() => runner.run(['bunx', '--package', 'npm@11.5.1', 'npm', '--version'])).toThrow(
-        'expected bunx --package npm@11.21.0 npm'
+        'expected bunx --package npm@11.21.2 npm'
       );
       expect(process.calls).toEqual([]);
     } finally {

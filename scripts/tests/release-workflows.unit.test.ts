@@ -214,7 +214,7 @@ describe('release workflow binary gate', () => {
 
     for (const block of [release, canary]) {
       expect(block).toContain('uses: ./.github/actions/publish-npm-distribution');
-      expect(block).toContain('node-version: "22.14.0"');
+      expect(block).toContain('node-version: "22.23.4"');
       // setup-node's registry-url writes an npmrc templating
       // `_authToken=${NODE_AUTH_TOKEN}`, and the publish step overrides
       // NPM_CONFIG_USERCONFIG away from it — so it is inert at best, and a
