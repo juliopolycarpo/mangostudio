@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import {
   type AgentCliStatus,
@@ -497,6 +498,36 @@ describe('environment toolchain route', () => {
           log: discardOutput,
         }
       );
+    async function tryCredentialEditFromChild() {
+      const lockModule = fileURLToPath(
+        new URL('../../../src/backup/capture-lock.ts', import.meta.url)
+      );
+      const parameters = [credentialDatabasePath(), TEST_USER.id, id]
+        .map((value) => JSON.stringify(value))
+        .join(', ');
+      const child = Bun.spawn(
+        [
+          process.execPath,
+          '--eval',
+          `import { acquireToolchainCredentialLock } from ${JSON.stringify(lockModule)};
+          try {
+            const release = await acquireToolchainCredentialLock(${parameters}, 'edit');
+            await release();
+            console.log('acquired');
+          } catch (error) {
+            console.error(error.message);
+            process.exitCode = 1;
+          }`,
+        ],
+        { stdout: 'pipe', stderr: 'pipe', timeout: 5000 }
+      );
+      const [code, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      return { code, stdout: stdout.trim(), stderr: stderr.trim() };
+    }
     try {
       await repository.create({
         id,
@@ -540,9 +571,18 @@ describe('environment toolchain route', () => {
           )
         );
         expect(conflictingEdit.status).toBe(409);
+        expect(await tryCredentialEditFromChild()).toMatchObject({
+          code: 1,
+          stderr: expect.stringContaining('token edit in progress'),
+        });
       } finally {
         await release();
       }
+      expect(await tryCredentialEditFromChild()).toEqual({
+        code: 0,
+        stdout: 'acquired',
+        stderr: '',
+      });
       const laterEdit = await app.handle(
         new Request(
           `http://localhost/environments/${id}`,
