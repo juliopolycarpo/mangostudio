@@ -79,6 +79,26 @@ function expectedAssertionCondition(id: string): string {
   throw new Error(`expected a binary/, docker/ or container/ assertion id | received: ${id}`);
 }
 
+describe('binary smoke Bun setup', () => {
+  test('retries setup once and fails the job if the retry fails', () => {
+    const steps = readWorkflows().binary.jobs.binary.steps ?? [];
+    const attempts = steps.filter((step) => step.uses?.startsWith('oven-sh/setup-bun@'));
+    expect(
+      attempts.map((step) => step.id),
+      'binary smoke Bun setup attempts'
+    ).toEqual(['setup_bun', 'retry_bun']);
+    const [first, retry] = attempts;
+    expect(first['continue-on-error'], 'first setup failure permits retry').toBe(true);
+    expect(retry.if, 'retry runs only on the first setup failure').toBe(
+      `${DOLLAR}{{ steps.setup_bun.outcome == 'failure' }}`
+    );
+    expect(retry['continue-on-error'], 'retry failure fails the job').toBeUndefined();
+    expect(retry.uses).toBe(first.uses);
+    expect(retry.with).toEqual({ 'bun-version-file': '.bun-version' });
+    expect(first.with).toEqual(retry.with);
+  });
+});
+
 describe('smoke workflow assertion inventory', () => {
   test('preserves all fourteen original platform, Docker variant and engine/libc assertions', () => {
     assertSmokeInventory(smokeAssertions(readWorkflows()), ORIGINAL_SMOKE_ASSERTIONS);
