@@ -686,9 +686,10 @@ mod tests {
                 };
                 assert_eq!(status, 400);
                 assert!(
-                    body.len() <= ERROR_LIMIT + 128 && body.contains("exceeded"),
-                    "expected bounded diagnostic with limit marker, received {} bytes",
-                    body.len()
+                    body.len() <= ERROR_LIMIT + 128 && body.contains("exceeded 65536 bytes"),
+                    "expected a short diagnostic naming the 64 KiB limit | received {} bytes: {:?}",
+                    body.len(),
+                    body.chars().take(128).collect::<String>()
                 );
             }
         }
