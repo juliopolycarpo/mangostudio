@@ -125,3 +125,96 @@ test('independent delayed writes restart backoff within the shared total wait bu
   ).toEqual(Array.from({ length: 15 }, () => true));
   expect(clock.delays).toEqual(Array.from({ length: 15 }, () => 1000));
 });
+
+test('wall-clock TTL includes time spent inside a successful registry read', async () => {
+  let now = 0;
+  const window = new CanaryVisibilityWindow({ ttlMs: 50, now: () => now });
+  await expect(
+    window.read(
+      () => {
+        now += 51;
+        return Promise.resolve(true);
+      },
+      confirmed,
+      'slow registry metadata'
+    )
+  ).rejects.toThrow('TTL expired');
+});
+
+test('one wall-clock deadline is shared across independent reads', async () => {
+  let now = 0;
+  const window = new CanaryVisibilityWindow({ ttlMs: 50, now: () => now });
+  expect(
+    await window.read(() => {
+      now += 30;
+      return Promise.resolve(true);
+    }, confirmed)
+  ).toBe(true);
+  await expect(
+    window.read(() => {
+      now += 21;
+      return Promise.resolve(true);
+    }, confirmed)
+  ).rejects.toThrow('TTL expired');
+});
+
+test.each([0, -1, NaN, Infinity, 300_001])('rejects invalid TTL %s', (ttlMs) => {
+  expect(() => new CanaryVisibilityWindow({ ttlMs })).toThrow('Invalid canary visibility TTL');
+});
+
+test('clamps a wait to the remaining wall-clock TTL and stops before the next read', async () => {
+  let now = 0;
+  const delays: number[] = [];
+  const reader = new FakeVisibilityReader([false, true]);
+  const logs: string[] = [];
+  const window = new CanaryVisibilityWindow({
+    ttlMs: 10,
+    retryDelaysMs: [20],
+    now: () => now,
+    sleep: (delay) => {
+      delays.push(delay);
+      now += delay;
+      return Promise.resolve();
+    },
+    log: (message) => logs.push(message),
+  });
+  await expect(window.read(reader.read.bind(reader), confirmed, 'bounded package')).rejects.toThrow(
+    'TTL expired'
+  );
+  expect(delays).toEqual([10]);
+  expect(reader.calls).toBe(1);
+  expect(logs.join('\n')).toContain('remaining=10ms');
+  expect(logs.join('\n')).toContain('TTL expired');
+  expect(logs.join('\n')).toContain('bounded package');
+});
+
+class StalledVisibilityReader {
+  signal?: AbortSignal;
+  calls = 0;
+  read(signal: AbortSignal): Promise<boolean> {
+    this.signal = signal;
+    this.calls++;
+    return new Promise((_, reject) =>
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+    );
+  }
+}
+
+test('aborts stalled I/O at the real deadline and never starts another read after expiry', async () => {
+  const reader = new StalledVisibilityReader();
+  const window = new CanaryVisibilityWindow({ ttlMs: 25, retryDelaysMs: [] });
+  const started = performance.now();
+  const result = await Promise.race([
+    window.read(reader.read.bind(reader), confirmed, 'stalled metadata').then(
+      () => 'unexpected success',
+      (cause: Error) => cause.message
+    ),
+    Bun.sleep(500).then(() => 'watchdog: visibility did not settle'),
+  ]);
+  expect(result).toContain('TTL expired');
+  expect(result).toContain('stalled metadata');
+  expect(performance.now() - started).toBeGreaterThanOrEqual(20);
+  expect(reader.signal?.aborted).toBe(true);
+  await expect(window.read(reader.read.bind(reader), confirmed)).rejects.toThrow('TTL expired');
+  expect(reader.calls).toBe(1);
+});

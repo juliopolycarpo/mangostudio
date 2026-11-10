@@ -20,7 +20,11 @@ import type { NpmCommandResult } from '../lib/npm-publish';
 export interface CanaryTagProcess {
   run(
     command: readonly string[],
-    options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv }
+    options: {
+      readonly cwd: string;
+      readonly env: NodeJS.ProcessEnv;
+      readonly signal?: AbortSignal;
+    }
   ): Promise<NpmCommandResult>;
 }
 
@@ -29,12 +33,18 @@ export class BunCanaryTagProcess implements CanaryTagProcess {
   /** @example await process.run(['node', '--version'], { cwd, env }); */
   async run(
     command: readonly string[],
-    options: { readonly cwd: string; readonly env: NodeJS.ProcessEnv }
+    options: {
+      readonly cwd: string;
+      readonly env: NodeJS.ProcessEnv;
+      readonly signal?: AbortSignal;
+    }
   ): Promise<NpmCommandResult> {
     const child = Bun.spawn({
       cmd: [...command],
       cwd: options.cwd,
       env: options.env,
+      signal: options.signal,
+      killSignal: 'SIGKILL',
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'pipe',
@@ -68,7 +78,7 @@ export class IsolatedCanaryTagRunner implements CanaryTagRunner {
   }
 
   /** @example await runner.run(['bunx', '--package', 'npm@11.21.0', 'npm', '--version']); */
-  run(command: readonly string[]): Promise<NpmCommandResult> {
+  run(command: readonly string[], signal?: AbortSignal): Promise<NpmCommandResult> {
     let isolated = [...command];
     if (command[0] === 'bunx') {
       if (
@@ -89,7 +99,11 @@ export class IsolatedCanaryTagRunner implements CanaryTagRunner {
         ...command.slice(4),
       ];
     }
-    return this.process.run(isolated, { cwd: this.directory, env: this.env });
+    return this.process.run(isolated, {
+      cwd: this.directory,
+      env: this.env,
+      ...(signal ? { signal } : {}),
+    });
   }
 }
 
@@ -98,9 +112,12 @@ export class HttpCanaryRegistry implements RegistryClient {
   constructor(private readonly fetcher: typeof fetch = fetch) {}
 
   /** @example const response = await registry.getJson(versionUrl); */
-  async getJson(url: string): Promise<RegistryResponse<unknown>> {
-    const response = await this.read(url);
-    if (response.status !== 200) return { status: response.status, body: null };
+  async getJson(url: string, signal?: AbortSignal): Promise<RegistryResponse<unknown>> {
+    const response = await this.read(url, signal);
+    if (response.status !== 200) {
+      await response.body?.cancel();
+      return { status: response.status, body: null };
+    }
     try {
       return { status: response.status, body: await response.json() };
     } catch (cause) {
@@ -108,18 +125,18 @@ export class HttpCanaryRegistry implements RegistryClient {
     }
   }
   /** @example const archive = await registry.getBytes(tarballUrl); */
-  async getBytes(url: string): Promise<RegistryResponse<Uint8Array>> {
-    const response = await this.read(url);
-    return {
-      status: response.status,
-      body:
-        response.status === 200 ? new Uint8Array(await response.arrayBuffer()) : new Uint8Array(),
-    };
+  async getBytes(url: string, signal?: AbortSignal): Promise<RegistryResponse<Uint8Array>> {
+    const response = await this.read(url, signal);
+    if (response.status !== 200) {
+      await response.body?.cancel();
+      return { status: response.status, body: new Uint8Array() };
+    }
+    return { status: response.status, body: new Uint8Array(await response.arrayBuffer()) };
   }
-  private read(url: string): Promise<Response> {
+  private read(url: string, signal?: AbortSignal): Promise<Response> {
     if (!url.startsWith('https://registry.npmjs.org/'))
       throw new Error(`Invalid public npm URL: ${url}; expected https://registry.npmjs.org/`);
-    return this.fetcher(url, { redirect: 'error' });
+    return this.fetcher(url, { redirect: 'error', signal });
   }
 }
 
@@ -133,12 +150,12 @@ export class GitHubCanaryTagAncestry implements CanaryTagAncestry {
   }
 
   /** @example const sha = await ancestry.resolveCommit('abc1234'); */
-  async resolveCommit(prefix: string): Promise<string> {
+  async resolveCommit(prefix: string, signal?: AbortSignal): Promise<string> {
     if (!/^[0-9a-f]{7}$/.test(prefix))
       throw new Error(
         `Invalid canary SHA prefix: ${prefix}; expected seven lowercase hex characters`
       );
-    const commit = await this.get(`repos/${this.repository}/commits/${prefix}`);
+    const commit = await this.get(`repos/${this.repository}/commits/${prefix}`, signal);
     if (
       typeof commit.sha !== 'string' ||
       !/^[0-9a-f]{40}$/.test(commit.sha) ||
@@ -154,14 +171,15 @@ export class GitHubCanaryTagAncestry implements CanaryTagAncestry {
   /** @example const relation = await ancestry.compare(currentSource, selectedSource); */
   async compare(
     base: string,
-    head: string
+    head: string,
+    signal?: AbortSignal
   ): Promise<'ahead' | 'identical' | 'behind' | 'diverged'> {
     if (!/^[0-9a-f]{40}$/.test(base) || !/^[0-9a-f]{40}$/.test(head)) {
       throw new Error(
         `Invalid canary comparison: expected full base/head SHA; received ${base}...${head}`
       );
     }
-    const comparison = await this.get(`repos/${this.repository}/compare/${base}...${head}`);
+    const comparison = await this.get(`repos/${this.repository}/compare/${base}...${head}`, signal);
     const baseCommit = record(comparison.base_commit, 'compare base');
     const mergeBase = record(comparison.merge_base_commit, 'compare merge base');
     const status = comparison.status;
@@ -181,8 +199,8 @@ export class GitHubCanaryTagAncestry implements CanaryTagAncestry {
     return status as 'ahead' | 'identical' | 'behind' | 'diverged';
   }
 
-  private async get(path: string): Promise<Record<string, unknown>> {
-    const response = await this.runner.run(['gh', 'api', path]);
+  private async get(path: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    const response = await this.runner.run(['gh', 'api', path], signal);
     if (response.exitCode !== 0)
       throw new Error(
         `GitHub canary ancestry ${path}: expected exit0; received ${response.exitCode}`
