@@ -24,7 +24,7 @@ use rmcp::transport::streamable_http_client::SseError;
 use sse_stream::Sse;
 
 use super::elicitation_order::SchemaOrder;
-use super::http::{MAX_SSE_EVENT_BYTES, bounded_sse, new_http_client};
+use super::http::{MAX_SSE_EVENT_BYTES, bounded_sse, error_body, new_http_client};
 
 type Events = BoxStream<'static, Result<Sse, SseError>>;
 
@@ -209,7 +209,7 @@ impl Transport<RoleClient> for LegacySse {
             if status.is_success() {
                 return Ok(());
             }
-            let text = response.text().await.unwrap_or_default();
+            let text = error_body(response).await;
             Err(SseTransportError(format!(
                 "Error POSTing to endpoint (HTTP {}): {text}",
                 status.as_u16()
@@ -249,6 +249,35 @@ impl Transport<RoleClient> for LegacySse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn oversized_legacy_post_error_is_bounded_without_content_length() {
+        use crate::mcp::fake_http::FakeHttpResponse;
+        for chunked in [false, true] {
+            let fake =
+                FakeHttpResponse::start(500, "text/plain", vec![b'x'; 64 * 1024 + 1], chunked)
+                    .await;
+            let mut transport = LegacySse {
+                client: super::super::http::http_client().unwrap(),
+                endpoint: reqwest::Url::parse(&fake.url).unwrap(),
+                headers: HashMap::new(),
+                protocol: Arc::default(),
+                buffered: VecDeque::new(),
+                events: None,
+                order: Arc::default(),
+            };
+            let message =
+                serde_json::from_str(r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#).unwrap();
+            let error = transport.send(message).await.unwrap_err().to_string();
+            assert!(
+                error.contains("HTTP 500")
+                    && error.contains("exceeded")
+                    && error.len() <= 64 * 1024 + 128,
+                "expected bounded legacy diagnostic with HTTP status, received {} bytes",
+                error.len()
+            );
+        }
+    }
 
     fn base() -> reqwest::Url {
         reqwest::Url::parse("http://127.0.0.1:4000/sse").expect("valid base")
