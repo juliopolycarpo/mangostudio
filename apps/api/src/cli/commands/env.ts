@@ -301,6 +301,8 @@ export async function runEnvInstall(
 
 export interface EnvToolchainDeps {
   readonly service: ToolchainService;
+  /** Brings the database schema up to date before validating a remote path. */
+  readonly prepareDatabase: () => Promise<void>;
   /** The account whose selection is read or written; by email, or the sole account. */
   readonly resolveUserId: (email: string | undefined) => Promise<string>;
   readonly log: (line: string) => void;
@@ -342,6 +344,12 @@ async function resolveCliUserId(
 function resolveToolchainDeps(deps: Partial<EnvToolchainDeps>): EnvToolchainDeps {
   return {
     service: deps.service ?? toolchainService,
+    prepareDatabase:
+      deps.prepareDatabase ??
+      (async () => {
+        const { prepareToolchainDatabase } = await import('../../server/migrations');
+        await prepareToolchainDatabase();
+      }),
     resolveUserId: deps.resolveUserId ?? ((email) => resolveCliUserId(email)),
     log: deps.log ?? writeLine,
   };
@@ -363,8 +371,20 @@ export async function runEnvToolchain(
     throw new CliError(`runEnvToolchain called with subcommand "${String(args.subcommand)}".`);
   }
   const d = resolveToolchainDeps(deps);
-  const userId = await d.resolveUserId(args.user);
   const environmentId = args.environmentId ?? LOCAL_ENVIRONMENT_ID;
+  if (
+    environmentId !== LOCAL_ENVIRONMENT_ID &&
+    args.choice !== undefined &&
+    args.choice !== 'auto'
+  ) {
+    try {
+      await d.prepareDatabase();
+    } catch (error) {
+      if (error instanceof Error) throw new CliError(error.message);
+      throw new CliError(String(error));
+    }
+  }
+  const userId = await d.resolveUserId(args.user);
 
   let selection: ToolchainSelection;
   if (args.runtime !== undefined && args.choice !== undefined) {

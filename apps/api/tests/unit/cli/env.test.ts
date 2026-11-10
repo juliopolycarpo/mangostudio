@@ -619,6 +619,7 @@ class FakeToolchainService {
 describe('runEnvToolchain', () => {
   const deps = (service: FakeToolchainService, lines: string[]): Partial<EnvToolchainDeps> => ({
     service,
+    prepareDatabase: () => Promise.resolve(),
     resolveUserId: () => Promise.resolve('user-1'),
     log: (line) => lines.push(line),
   });
@@ -654,6 +655,32 @@ describe('runEnvToolchain', () => {
       environmentId: 'dev-box',
       toolchain: { node: '/opt/node/bin/node', bun: 'auto' },
     });
+  });
+
+  it('prepares the schema before resolving the account for a remote path pin', async () => {
+    const service = new FakeToolchainService(['/opt/node/bin/node']);
+    let prepared = false;
+    await runEnvToolchain(
+      {
+        subcommand: 'toolchain',
+        runtime: 'node',
+        choice: '/opt/node/bin/node',
+        environmentId: 'dev-box',
+        json: true,
+      },
+      {
+        ...deps(service, []),
+        prepareDatabase: () => {
+          prepared = true;
+          return Promise.resolve();
+        },
+        resolveUserId: () => {
+          expect(prepared).toBe(true);
+          return Promise.resolve('user-1');
+        },
+      }
+    );
+    expect(service.updates).toHaveLength(1);
   });
 
   it('turns the service refusal of an unknown path into a CLI error naming both sides', async () => {

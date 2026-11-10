@@ -71,6 +71,10 @@ class FakeEnvironmentToolchainRepository implements EnvironmentToolchainReposito
     );
   }
 
+  getRevision(): Promise<string | null> {
+    return Promise.resolve('test-environment-revision');
+  }
+
   async get(userId: string, environmentId: string): Promise<ToolchainSelection | null> {
     await this.#readGate;
     return this.#rows.get(this.#key(userId, environmentId)) ?? null;

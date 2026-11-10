@@ -28,6 +28,7 @@ import {
 } from '../../../src/modules/environments/infrastructure/environment-repository';
 import { createEnvironmentToolchainRepository } from '../../../src/modules/environments/infrastructure/environment-toolchain-repository';
 import { RuntimeConnectionManager } from '../../../src/services/runtime-client/runtime-connection-manager';
+import type { SecretStore } from '../../../src/services/secret-store/store';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
 const TEST_USER = {
@@ -109,10 +110,33 @@ class FakeEnvironmentProbingService implements EnvironmentProbingService {
   }
 }
 
+class HeldTokenStore implements SecretStore {
+  readonly writing = Promise.withResolvers<void>();
+  readonly release = Promise.withResolvers<void>();
+
+  isAvailable(): Promise<boolean> {
+    return Promise.resolve(true);
+  }
+
+  getSecret(): Promise<string | null> {
+    return Promise.resolve(null);
+  }
+
+  async setSecret(): Promise<void> {
+    this.writing.resolve();
+    await this.release.promise;
+  }
+
+  deleteSecret(): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+}
+
 function createTestApp(
   installedPaths: Partial<Record<RuntimeId, readonly string[]>> = {},
   toolchainReads: string[] = [],
-  beforeStatus?: () => Promise<void>
+  beforeStatus?: () => Promise<void>,
+  secretStore?: SecretStore
 ) {
   const toolchainDb = getDb().withPlugin({
     transformQuery({ node }) {
@@ -135,15 +159,16 @@ function createTestApp(
     resolveEnvironment: async (userId, environmentId) => repository.find(userId, environmentId),
     connectors: {},
   });
+  const toolchainRepository = createEnvironmentToolchainRepository(toolchainDb);
   const toolchain = createToolchainService(
-    createEnvironmentToolchainRepository(toolchainDb),
+    toolchainRepository,
     new FakeEnvironmentProbingService(installedPaths, beforeStatus)
   );
   const service = createEnvironmentService(
     repository,
     manager,
     undefined,
-    undefined,
+    secretStore,
     {
       hasActiveInstall: () => false,
       cancelActiveRun: () => false,
@@ -157,7 +182,7 @@ function createTestApp(
     createEnvironmentEntityRoutes(service, undefined, undefined, toolchain)
   );
   restoreAuth = restore;
-  return { app, repository, service, manager };
+  return { app, repository, service, manager, toolchainRepository };
 }
 
 function jsonRequest(method: string, body?: unknown): RequestInit {
@@ -307,6 +332,180 @@ describe('environment toolchain route', () => {
     expect(
       await createEnvironmentToolchainRepository().get(TEST_USER.id, 'deleted-box')
     ).toBeNull();
+  });
+
+  it.each(['recreated', 'reconfigured', 'token rotation'] as const)(
+    'rejects a pinned selection when the environment change during the probe is %s',
+    async (change) => {
+      const probeStarted = Promise.withResolvers<void>();
+      const releaseProbe = Promise.withResolvers<void>();
+      const store = new HeldTokenStore();
+      store.release.resolve();
+      const { app, repository } = createTestApp(
+        { node: ['/opt/node/bin/node'] },
+        [],
+        () => {
+          probeStarted.resolve();
+          return releaseProbe.promise;
+        },
+        store
+      );
+      const input = {
+        id: 'changed-box',
+        userId: TEST_USER.id,
+        name: 'Changed box',
+        transportKind: 'http' as const,
+        config: { baseUrl: 'http://original.example' },
+        enabled: true,
+      };
+      await repository.create(input);
+      const update = app.handle(
+        new Request(
+          'http://localhost/environments/changed-box/toolchain',
+          jsonRequest('PUT', { node: '/opt/node/bin/node' })
+        )
+      );
+      try {
+        await probeStarted.promise;
+        if (change === 'recreated') {
+          const removal = await app.handle(
+            new Request('http://localhost/environments/changed-box', { method: 'DELETE' })
+          );
+          expect(removal.status).toBe(200);
+          expect(await repository.create(input)).not.toBeNull();
+        } else if (change === 'reconfigured') {
+          expect(
+            await repository.update(TEST_USER.id, input.id, {
+              config: { baseUrl: 'http://replacement.example' },
+            })
+          ).not.toBeNull();
+        } else {
+          const rotation = await app.handle(
+            new Request(
+              'http://localhost/environments/changed-box',
+              jsonRequest('PUT', { token: 'replacement-token' })
+            )
+          );
+          expect(rotation.status).toBe(200);
+        }
+      } finally {
+        releaseProbe.resolve();
+      }
+      const response = await update;
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        error: 'Environment "changed-box" changed while its toolchain path was being verified.',
+      });
+      expect(await createEnvironmentToolchainRepository().get(TEST_USER.id, input.id)).toBeNull();
+    }
+  );
+
+  it('blocks a pin while a repoint is saving its token and the old probe is still available', async () => {
+    const store = new HeldTokenStore();
+    const { app, repository } = createTestApp({ node: ['/old/node'] }, [], undefined, store);
+    const id = 'direct-box';
+    await repository.create({
+      id,
+      userId: TEST_USER.id,
+      name: 'Direct box',
+      transportKind: 'http',
+      config: { baseUrl: 'http://old.example' },
+      enabled: true,
+    });
+    const edit = app.handle(
+      new Request(
+        `http://localhost/environments/${id}`,
+        jsonRequest('PUT', { config: { baseUrl: 'http://new.example' }, token: 'test-token' })
+      )
+    );
+    try {
+      await store.writing.promise;
+      expect((await repository.find(TEST_USER.id, id))?.config).toEqual({
+        baseUrl: 'http://new.example',
+      });
+      const response = await app.handle(
+        new Request(
+          `http://localhost/environments/${id}/toolchain`,
+          jsonRequest('PUT', { node: '/old/node' })
+        )
+      );
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        error: 'Environment "direct-box" is being reconfigured.',
+      });
+      const selections = createEnvironmentToolchainRepository();
+      expect(await selections.get(TEST_USER.id, id)).toBeNull();
+      const reset = await app.handle(
+        new Request(
+          `http://localhost/environments/${id}/toolchain`,
+          jsonRequest('PUT', { node: 'auto' })
+        )
+      );
+      expect(reset.status).toBe(200);
+      expect(await reset.json()).toEqual({ node: 'auto', bun: 'auto' });
+    } finally {
+      store.release.resolve();
+      expect((await edit).status).toBe(200);
+    }
+  });
+
+  it('blocks a pin whose revision read resumes after an edit writes the new definition', async () => {
+    const store = new HeldTokenStore();
+    const { app, repository, toolchainRepository } = createTestApp(
+      { node: ['/old/node'] },
+      [],
+      undefined,
+      store
+    );
+    const id = 'waiting-box';
+    await repository.create({
+      id,
+      userId: TEST_USER.id,
+      name: 'Waiting box',
+      transportKind: 'http',
+      config: { baseUrl: 'http://old.example' },
+      enabled: true,
+    });
+    const reading = Promise.withResolvers<void>();
+    const releaseRead = Promise.withResolvers<void>();
+    const getRevision = toolchainRepository.getRevision.bind(toolchainRepository);
+    const pausedRead = spyOn(toolchainRepository, 'getRevision').mockImplementationOnce(
+      async (userId, environmentId) => {
+        reading.resolve();
+        await releaseRead.promise;
+        return await getRevision(userId, environmentId);
+      }
+    );
+
+    const pin = app.handle(
+      new Request(
+        `http://localhost/environments/${id}/toolchain`,
+        jsonRequest('PUT', { node: '/old/node' })
+      )
+    );
+    let edit: Promise<Response> | undefined;
+    try {
+      await reading.promise;
+      edit = app.handle(
+        new Request(
+          `http://localhost/environments/${id}`,
+          jsonRequest('PUT', { config: { baseUrl: 'http://new.example' }, token: 'test-token' })
+        )
+      );
+      await store.writing.promise;
+      releaseRead.resolve();
+      const response = await pin;
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({
+        error: 'Environment "waiting-box" is being reconfigured.',
+      });
+      expect(await toolchainRepository.get(TEST_USER.id, id)).toBeNull();
+    } finally {
+      releaseRead.resolve();
+      store.release.resolve();
+      pausedRead.mockRestore();
+      if (edit) expect((await edit).status).toBe(200);
+    }
   });
 
   it('accepts a probed path and the environments list reflects it', async () => {

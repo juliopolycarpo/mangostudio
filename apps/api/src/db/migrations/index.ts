@@ -59,6 +59,7 @@ import { messagesGeneratingIndex } from './058_messages_generating_index';
 import { externalContinuationUnresumable } from './059_external_continuation_unresumable';
 import { productOperations } from './060_product_operations';
 import { removeOrphanEnvironmentToolchains } from './061_remove_orphan_environment_toolchains';
+import { environmentToolchainRevision } from './062_environment_toolchain_revision';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -122,4 +123,5 @@ export const allMigrations = {
   '059_external_continuation_unresumable': externalContinuationUnresumable,
   '060_product_operations': productOperations,
   '061_remove_orphan_environment_toolchains': removeOrphanEnvironmentToolchains,
+  '062_environment_toolchain_revision': environmentToolchainRevision,
 };

@@ -91,6 +91,9 @@ export function createEnvironmentEntityRoutes(
   lifecycle: RuntimeLifecycleService = runtimeLifecycleService,
   toolchain: ToolchainService = toolchainService
 ) {
+  // A Direct URL edit can commit its row before saving the token and dropping
+  // the old connection. Do not start toolchain validation in that window.
+  const pendingDefinitionEdits = new Map<string, number>();
   return (
     new Elysia()
       .use(requireAuth)
@@ -154,10 +157,22 @@ export function createEnvironmentEntityRoutes(
           },
         },
         async ({ params, body, user, set }) => {
+          const userId = user?.id ?? '';
+          const key = JSON.stringify([userId, params.id]);
+          const changesDefinition = body.config !== undefined || body.token !== undefined;
+          if (changesDefinition) {
+            pendingDefinitionEdits.set(key, (pendingDefinitionEdits.get(key) ?? 0) + 1);
+          }
           try {
-            return await service.update(user?.id ?? '', params.id, body);
+            return await service.update(userId, params.id, body);
           } catch (error) {
             return environmentError(error, set);
+          } finally {
+            if (changesDefinition) {
+              const remaining = (pendingDefinitionEdits.get(key) ?? 1) - 1;
+              if (remaining === 0) pendingDefinitionEdits.delete(key);
+              else pendingDefinitionEdits.set(key, remaining);
+            }
           }
         }
       )
@@ -172,13 +187,22 @@ export function createEnvironmentEntityRoutes(
             200: ToolchainSelectionSchema,
             400: ApiErrorResponseSchema,
             404: ApiErrorResponseSchema,
+            409: ApiErrorResponseSchema,
             422: ApiErrorResponseSchema,
             503: ApiErrorResponseSchema,
           },
         },
         async ({ params, body, user, set }) => {
+          const userId = user?.id ?? '';
           try {
-            return await toolchain.update(user?.id ?? '', params.id, body);
+            return await toolchain.update(userId, params.id, body, () => {
+              if (pendingDefinitionEdits.has(JSON.stringify([userId, params.id]))) {
+                throw new EnvironmentServiceError(
+                  `Environment "${params.id}" is being reconfigured.`,
+                  409
+                );
+              }
+            });
           } catch (error) {
             return environmentError(error, set);
           }

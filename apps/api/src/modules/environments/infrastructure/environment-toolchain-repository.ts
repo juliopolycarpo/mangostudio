@@ -29,9 +29,15 @@ export interface EnvironmentToolchainRepository {
   listByUser(userId: string): Promise<Map<string, ToolchainSelection>>;
   get(userId: string, environmentId: string): Promise<ToolchainSelection | null>;
   /**
+   * Captures the saved environment revision before validating a path.
+   * @example const revision = await repository.getRevision(userId, environmentId)
+   */
+  getRevision(userId: string, environmentId: string): Promise<string | null>;
+  /**
    * Writes only the runtimes named in `patch`, leaving every other column as
    * it was found, and answers with the committed row. Returns null if a
-   * non-Local environment does not exist for this user at write time.
+   * non-Local environment does not exist for this user at write time or no
+   * longer matches the revision provided by the caller.
    *
    * The merge belongs here rather than in a caller because the Node and Bun
    * cards autosave independently: a read-modify-write above this line lets two
@@ -44,7 +50,8 @@ export interface EnvironmentToolchainRepository {
     userId: string,
     environmentId: string,
     patch: Partial<ToolchainSelection>,
-    updatedAt: number
+    updatedAt: number,
+    expectedRevision?: string
   ): Promise<ToolchainSelection | null>;
   remove(userId: string, environmentId: string): Promise<void>;
 }
@@ -84,7 +91,17 @@ export function createEnvironmentToolchainRepository(
       return row ? toToolchainSelection(row) : null;
     },
 
-    async upsert(userId, environmentId, patch, updatedAt) {
+    async getRevision(userId, environmentId) {
+      const row = await db()
+        .selectFrom('environments')
+        .select('toolchainRevision')
+        .where('userId', '=', userId)
+        .where('id', '=', environmentId)
+        .executeTakeFirst();
+      return row?.toolchainRevision ?? null;
+    },
+
+    async upsert(userId, environmentId, patch, updatedAt, expectedRevision) {
       // A row that does not exist yet has no other field to preserve, so the
       // insert fills the absent runtimes with the same default `resolve`
       // reports for a missing row.
@@ -104,8 +121,17 @@ export function createEnvironmentToolchainRepository(
         updatedAt,
       };
       const database = db();
-      // Check ownership in the write so deletion cannot slip between the
-      // check and the upsert. Local has no environments row.
+      // Bind ownership and any validated revision to the write. Local has
+      // no environments row.
+      const environment = database
+        .selectFrom('environments')
+        .select('id')
+        .where('userId', '=', userId)
+        .where('id', '=', environmentId);
+      const target =
+        expectedRevision === undefined
+          ? environment
+          : environment.where('toolchainRevision', '=', expectedRevision);
       const source = database
         .selectNoFrom(({ val }) => [
           val(values.userId).as('userId'),
@@ -114,16 +140,8 @@ export function createEnvironmentToolchainRepository(
           val(values.bunSelection).as('bunSelection'),
           val(values.updatedAt).as('updatedAt'),
         ])
-        .where(({ eb, exists, or, selectFrom, val }) =>
-          or([
-            eb(val(environmentId), '=', LOCAL_ENVIRONMENT_ID),
-            exists(
-              selectFrom('environments')
-                .select('id')
-                .where('userId', '=', userId)
-                .where('id', '=', environmentId)
-            ),
-          ])
+        .where(({ eb, exists, or, val }) =>
+          or([eb(val(environmentId), '=', LOCAL_ENVIRONMENT_ID), exists(target)])
         );
       const row = await database
         .insertInto('environment_toolchains')
