@@ -39,17 +39,22 @@ afterEach(() => {
 });
 
 describe('hub git CLI facade', () => {
-  it.skipIf(!hasGit)('maps non-zero exits to a structured GitCliError', async () => {
-    const error = await runGit(['not-a-real-git-subcommand'], { cwd: process.cwd() }).catch(
-      (cause: unknown) => cause
+  it('maps non-zero exits to a structured GitCliError', async () => {
+    const args = ['not-a-real-git-subcommand'];
+    useFailingRuntime(
+      new RemoteError('INTERNAL', 'Git command failed.', {
+        kind: 'git_execution',
+        exitCode: 1,
+        stdout: '',
+        stderr: 'git: unknown command\n',
+        args,
+      })
     );
 
+    const error = await runGit(args, { cwd: '/remote/repo' }).catch((cause: unknown) => cause);
+
     expect(error).toBeInstanceOf(GitCliError);
-    expect(error).toMatchObject({
-      exitCode: 1,
-      args: ['not-a-real-git-subcommand'],
-    });
-    expect((error as GitCliError).stderr).not.toEndWith('\n');
+    expect(error).toMatchObject({ exitCode: 1, args, stderr: 'git: unknown command' });
   });
 
   it('executes against the explicitly selected environment runtime', async () => {
