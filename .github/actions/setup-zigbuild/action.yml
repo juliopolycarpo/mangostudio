@@ -25,4 +25,4 @@ runs:
     - name: Install cargo-zigbuild
       uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.90.0
       with:
-        tool: cargo-zigbuild@0.23.4
+        tool: cargo-zigbuild@0.24.1

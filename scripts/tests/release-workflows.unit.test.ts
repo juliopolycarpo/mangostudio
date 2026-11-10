@@ -515,7 +515,7 @@ describe('release workflow binary gate', () => {
     const zigbuild = readText('.github/actions/setup-zigbuild/action.yml');
     expect(zigbuild).toMatch(/ZIG_SHA256: [0-9a-f]{64}\n/);
     expect(zigbuild).toContain('sha256sum --check --strict');
-    expect(zigbuild).toContain('tool: cargo-zigbuild@0.23.4');
+    expect(zigbuild).toContain('tool: cargo-zigbuild@0.24.1');
   });
 
   test('published builds never restore the runtime cargo cache, and only main saves it', () => {

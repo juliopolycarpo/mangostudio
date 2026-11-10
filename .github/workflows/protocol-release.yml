@@ -151,7 +151,7 @@ jobs:
       # the two pins together.
       - uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.90.0
         with:
-          tool: cargo-hack@0.6.45
+          tool: cargo-hack@0.6.46
       - run: bun install --frozen-lockfile
       - name: Manifests match the tag
         env:

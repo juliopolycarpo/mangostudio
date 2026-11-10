@@ -1830,7 +1830,7 @@ The Rust workspace tests run under [cargo-nextest](https://nexte.st), locally an
 `cargo-shim.yml`, one process per test:
 
 ```bash
-cargo install cargo-nextest --locked --version 0.9.144
+cargo install cargo-nextest --locked --version 0.9.151
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo nextest run --workspace --all-targets --all-features --locked --retries 0

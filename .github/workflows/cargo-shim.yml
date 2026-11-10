@@ -185,7 +185,7 @@ jobs:
       - id: setup-nextest
         uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.90.0
         with:
-          tool: cargo-nextest@0.9.144
+          tool: cargo-nextest@0.9.151
         if: ${{ !cancelled() && matrix.os != 'ubuntu-latest' }}
 
       # Ubuntu's copy of this run is `cargo llvm-cov` in rust-coverage.yml,
@@ -312,7 +312,7 @@ jobs:
       - id: setup-nextest
         uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.90.0
         with:
-          tool: cargo-nextest@0.9.144
+          tool: cargo-nextest@0.9.151
         if: ${{ !cancelled() }}
 
       - run: cargo nextest run -p mangostudio-runtime --all-targets --all-features --locked --retries 0
