@@ -298,9 +298,11 @@ export function createEnvironmentService(
       }
 
       const { token, ...rowUpdate } = input;
+      const definitionUpdate =
+        token === undefined ? rowUpdate : { ...rowUpdate, rotatesToken: true };
       const updated =
-        Object.keys(rowUpdate).length > 0
-          ? await repository.update(userId, id, rowUpdate)
+        Object.keys(definitionUpdate).length > 0
+          ? await repository.update(userId, id, definitionUpdate)
           : current;
       if (!updated) {
         throw new EnvironmentServiceError(`Environment "${id}" was not found.`, 404);

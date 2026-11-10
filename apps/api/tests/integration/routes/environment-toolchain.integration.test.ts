@@ -334,21 +334,28 @@ describe('environment toolchain route', () => {
     ).toBeNull();
   });
 
-  it.each(['recreated', 'reconfigured'] as const)(
-    'rejects a pinned selection if the environment is %s during the probe',
+  it.each(['recreated', 'reconfigured', 'token rotation'] as const)(
+    'rejects a pinned selection when the environment change during the probe is %s',
     async (change) => {
       const probeStarted = Promise.withResolvers<void>();
       const releaseProbe = Promise.withResolvers<void>();
-      const { app, repository } = createTestApp({ node: ['/opt/node/bin/node'] }, [], () => {
-        probeStarted.resolve();
-        return releaseProbe.promise;
-      });
+      const store = new HeldTokenStore();
+      store.release.resolve();
+      const { app, repository } = createTestApp(
+        { node: ['/opt/node/bin/node'] },
+        [],
+        () => {
+          probeStarted.resolve();
+          return releaseProbe.promise;
+        },
+        store
+      );
       const input = {
         id: 'changed-box',
         userId: TEST_USER.id,
         name: 'Changed box',
-        transportKind: 'stdio' as const,
-        config: {},
+        transportKind: 'http' as const,
+        config: { baseUrl: 'http://original.example' },
         enabled: true,
       };
       await repository.create(input);
@@ -366,10 +373,20 @@ describe('environment toolchain route', () => {
           );
           expect(removal.status).toBe(200);
           expect(await repository.create(input)).not.toBeNull();
-        } else {
+        } else if (change === 'reconfigured') {
           expect(
-            await repository.update(TEST_USER.id, input.id, { config: { binaryPath: '/other' } })
+            await repository.update(TEST_USER.id, input.id, {
+              config: { baseUrl: 'http://replacement.example' },
+            })
           ).not.toBeNull();
+        } else {
+          const rotation = await app.handle(
+            new Request(
+              'http://localhost/environments/changed-box',
+              jsonRequest('PUT', { token: 'replacement-token' })
+            )
+          );
+          expect(rotation.status).toBe(200);
         }
       } finally {
         releaseProbe.resolve();
