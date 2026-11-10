@@ -12,7 +12,8 @@ import { SqliteDialect } from 'kysely';
 export function createBunSqliteDialect(sqlite: Database): SqliteDialect {
   return new SqliteDialect({
     database: {
-      close: () => sqlite.close(),
+      // Finalize prepared statements so the database file is released on destroy.
+      close: () => sqlite.close(true),
       prepare(sql) {
         const statement = sqlite.prepare(sql);
         return {
