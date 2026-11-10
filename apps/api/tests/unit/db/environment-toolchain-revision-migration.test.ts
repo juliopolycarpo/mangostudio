@@ -1,6 +1,6 @@
 import { Database as SQLiteDatabase } from 'bun:sqlite';
 import { expect, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -75,11 +75,8 @@ it.each(['fresh', 'interrupted'] as const)(
   }
 );
 
-// The full on-disk migration can exceed 15 seconds on a loaded Windows runner.
-it('leaves schema 061 in place while the Hub owns the database and upgrades after release', async () => {
-  const directory = await mkdtemp(join(tmpdir(), 'mango-toolchain-db-'));
-  const path = join(directory, 'hub.sqlite');
-  const sqlite = new SQLiteDatabase(path);
+async function schema061Snapshot() {
+  const sqlite = new SQLiteDatabase(':memory:');
   const db = new Kysely<Database>({ dialect: createBunSqliteDialect(sqlite) });
   try {
     const migrator = new Migrator({
@@ -89,32 +86,54 @@ it('leaves schema 061 in place while the Hub owns the database and upgrades afte
     expect(
       (await migrator.migrateTo('061_remove_orphan_environment_toolchains')).error
     ).toBeUndefined();
-    const release = await acquireCaptureLock(path);
-    try {
-      await expect(prepareToolchainDatabase(db, path)).rejects.toThrow(
-        /^The database needs an upgrade\. Stop the Hub.*User data is already in use/
-      );
-      const tables = await db.introspection.getTables();
-      const columns = tables.find(({ name }) => name === 'environments')?.columns;
-      expect(columns?.some(({ name }) => name === 'toolchainRevision')).toBe(false);
-    } finally {
-      await release();
-    }
-
-    await prepareToolchainDatabase(db, path);
-    const migrations = await migrator.getMigrations();
-    expect(
-      migrations.find(({ name }) => name === '062_environment_toolchain_revision')?.executedAt
-    ).toBeInstanceOf(Date);
-
-    const releaseUpgraded = await acquireCaptureLock(path);
-    try {
-      await expect(prepareToolchainDatabase(db, path)).resolves.toBeUndefined();
-    } finally {
-      await releaseUpgraded();
-    }
+    return sqlite.serialize();
   } finally {
     await db.destroy();
+  }
+}
+
+it('leaves schema 061 in place while the Hub owns the database and upgrades after release', async () => {
+  // Only the upgrade under test needs disk I/O. Keep the real schema and migration receipts.
+  const snapshot = await schema061Snapshot();
+  const directory = await mkdtemp(join(tmpdir(), 'mango-toolchain-db-'));
+  const path = join(directory, 'hub.sqlite');
+  try {
+    await writeFile(path, snapshot);
+    const sqlite = new SQLiteDatabase(path);
+    const db = new Kysely<Database>({ dialect: createBunSqliteDialect(sqlite) });
+    try {
+      const release = await acquireCaptureLock(path);
+      try {
+        await expect(prepareToolchainDatabase(db, path)).rejects.toThrow(
+          /^The database needs an upgrade\. Stop the Hub.*User data is already in use/
+        );
+        const tables = await db.introspection.getTables();
+        const columns = tables.find(({ name }) => name === 'environments')?.columns;
+        expect(columns?.some(({ name }) => name === 'toolchainRevision')).toBe(false);
+      } finally {
+        await release();
+      }
+
+      await prepareToolchainDatabase(db, path);
+      const migrator = new Migrator({
+        db,
+        provider: { getMigrations: () => Promise.resolve(allMigrations) },
+      });
+      const migrations = await migrator.getMigrations();
+      expect(
+        migrations.find(({ name }) => name === '062_environment_toolchain_revision')?.executedAt
+      ).toBeInstanceOf(Date);
+
+      const releaseUpgraded = await acquireCaptureLock(path);
+      try {
+        await expect(prepareToolchainDatabase(db, path)).resolves.toBeUndefined();
+      } finally {
+        await releaseUpgraded();
+      }
+    } finally {
+      await db.destroy();
+    }
+  } finally {
     await rm(directory, { recursive: true, force: true });
   }
 }, 30_000);
