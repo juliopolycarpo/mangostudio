@@ -488,14 +488,18 @@ test('TTL kills and reaps an active command instead of leaving it running', asyn
   const marker = join(directory, 'pid');
   const controller = new AbortController();
   const command = new BunCanaryTagProcess();
-  const completion = command.run(
-    [
-      process.execPath,
-      '-e',
-      `await Bun.write(${JSON.stringify(marker)}, String(process.pid)); setInterval(() => {}, 1000)`,
-    ],
-    { cwd: directory, env: process.env, signal: controller.signal }
-  );
+  const publishPidAndWait = `
+    import { rename } from 'node:fs/promises';
+    const marker = ${JSON.stringify(marker)};
+    await Bun.write(marker + '.tmp', String(process.pid));
+    await rename(marker + '.tmp', marker);
+    setInterval(() => {}, 1000);
+  `;
+  const completion = command.run([process.execPath, '-e', publishPidAndWait], {
+    cwd: directory,
+    env: process.env,
+    signal: controller.signal,
+  });
   try {
     let pid = 0;
     for (let attempt = 0; attempt < 100; attempt++) {
