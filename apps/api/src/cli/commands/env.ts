@@ -38,6 +38,7 @@ import {
 import Type from 'typebox';
 import Value from 'typebox/value';
 
+import { acquireToolchainCredentialLock } from '../../backup/capture-lock';
 import { getDb } from '../../db/database';
 import { getConfig } from '../../lib/config';
 import {
@@ -303,6 +304,7 @@ export interface EnvToolchainDeps {
   readonly service: ToolchainService;
   /** Brings the database schema up to date before validating a remote path. */
   readonly prepareDatabase: () => Promise<void>;
+  readonly credentialDatabasePath: () => string;
   /** The account whose selection is read or written; by email, or the sole account. */
   readonly resolveUserId: (email: string | undefined) => Promise<string>;
   readonly log: (line: string) => void;
@@ -344,6 +346,7 @@ async function resolveCliUserId(
 function resolveToolchainDeps(deps: Partial<EnvToolchainDeps>): EnvToolchainDeps {
   return {
     service: deps.service ?? toolchainService,
+    credentialDatabasePath: deps.credentialDatabasePath ?? (() => getConfig().database.path),
     prepareDatabase:
       deps.prepareDatabase ??
       (async () => {
@@ -372,11 +375,9 @@ export async function runEnvToolchain(
   }
   const d = resolveToolchainDeps(deps);
   const environmentId = args.environmentId ?? LOCAL_ENVIRONMENT_ID;
-  if (
-    environmentId !== LOCAL_ENVIRONMENT_ID &&
-    args.choice !== undefined &&
-    args.choice !== 'auto'
-  ) {
+  const remotePin =
+    environmentId !== LOCAL_ENVIRONMENT_ID && args.choice !== undefined && args.choice !== 'auto';
+  if (remotePin) {
     try {
       await d.prepareDatabase();
     } catch (error) {
@@ -388,11 +389,26 @@ export async function runEnvToolchain(
 
   let selection: ToolchainSelection;
   if (args.runtime !== undefined && args.choice !== undefined) {
+    let release: (() => Promise<void>) | undefined;
+    if (remotePin) {
+      try {
+        release = await acquireToolchainCredentialLock(
+          d.credentialDatabasePath(),
+          userId,
+          environmentId,
+          'probe'
+        );
+      } catch (error) {
+        throw new CliError(error instanceof Error ? error.message : String(error));
+      }
+    }
     try {
       selection = await d.service.update(userId, environmentId, { [args.runtime]: args.choice });
     } catch (error) {
       if (error instanceof EnvironmentServiceError) throw new CliError(error.message);
       throw error;
+    } finally {
+      await release?.();
     }
   } else {
     selection = await d.service.resolve(userId, environmentId);

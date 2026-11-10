@@ -342,6 +342,9 @@ only when that environment's probe reported an installation at exactly that
 path. The selection is per account and a terminal has no session, so the
 account is the hub's only one, or the one `--user <email>` names.
 
+A remote path pin can run while the Hub is up. If a token change for the
+same environment is in progress, wait for the edit to finish and retry.
+
 ```bash
 mangostudio env toolchain
 mangostudio env toolchain node /home/me/.nvm/versions/node/v22.13.0/bin/node
