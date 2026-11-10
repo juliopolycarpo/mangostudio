@@ -34,7 +34,7 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-async function fixture() {
+async function capturePaths() {
   // Capture resolves paths before I/O. Keep race fixture paths identical
   // even when the system temporary directory has an alias.
   const root = await mkdtemp(join(await fs.realpath(tmpdir()), 'mango-capture-test-'));
@@ -51,6 +51,17 @@ async function fixture() {
     skills: { dir: join(root, 'skills') },
     checkpoints: { dir: join(root, 'checkpoints') },
   };
+  await mkdir(config.uploads.dir);
+  await mkdir(config.checkpoints.dir);
+  await writeFile(join(config.uploads.dir, 'media.txt'), 'media fixture');
+  await writeFile(join(config.uploads.dir, '.env'), 'file-sensitive-fixture');
+  await writeFile(join(config.checkpoints.dir, 'checkpoint.txt'), 'checkpoint fixture');
+  return { root, config, output: join(root, 'backup.tar.gz') };
+}
+
+async function fixture() {
+  const paths = await capturePaths();
+  const { config } = paths;
   const db = new Database(config.database.path);
   cleanups.push(() => {
     db.close();
@@ -79,12 +90,7 @@ async function fixture() {
     INSERT INTO environments VALUES('e','environment-sensitive-fixture',1);
     INSERT INTO file_checkpoints VALUES('checkpoint');
   `);
-  await mkdir(config.uploads.dir);
-  await mkdir(config.checkpoints.dir);
-  await writeFile(join(config.uploads.dir, 'media.txt'), 'media fixture');
-  await writeFile(join(config.uploads.dir, '.env'), 'file-sensitive-fixture');
-  await writeFile(join(config.checkpoints.dir, 'checkpoint.txt'), 'checkpoint fixture');
-  return { root, db, config, output: join(root, 'backup.tar.gz') };
+  return { ...paths, db };
 }
 
 it('captures configured data, hashes, WAL contents and a redacted intact database', async () => {
@@ -694,8 +700,7 @@ it('releases process ownership automatically after a crashed lock holder', async
 });
 
 it('captures the complete current migrated schema with valid foreign keys', async () => {
-  const { root, config, output } = await fixture();
-  config.database.path = join(root, 'migrated.sqlite');
+  const { config, output } = await capturePaths();
   const sqlite = new Database(config.database.path);
   const db = new Kysely({ dialect: createBunSqliteDialect(sqlite) });
   try {
@@ -706,19 +711,23 @@ it('captures the complete current migrated schema with valid foreign keys', asyn
     if (error) throw error instanceof Error ? error : new Error('Fixture migrations failed.');
     sqlite.exec(`INSERT INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES('fixture-user','Fixture','backup-fixture@example.test',0,'2026-01-01','2026-01-01');
       INSERT INTO chats(id,title,createdAt,updatedAt,userId) VALUES('fixture-chat','Retained chat',1,1,'fixture-user');`);
-    await captureBackup(config, { output, checkpoints: true, includeSecrets: false }, 'test');
-    const files = await new Bun.Archive(await readFile(output)).files();
-    const snapshot = Database.deserialize(
-      (await files.get('database.sqlite')?.arrayBuffer()) as ArrayBuffer
-    );
-    try {
-      expect(snapshot.query('PRAGMA foreign_key_check').all()).toEqual([]);
-      expect(snapshot.query('PRAGMA integrity_check').get()).toEqual({ integrity_check: 'ok' });
-    } finally {
-      snapshot.close();
-    }
   } finally {
+    // Capture runs with the Hub stopped, so close the fixture writer first.
     await db.destroy();
+  }
+  await captureBackup(config, { output, checkpoints: true, includeSecrets: false }, 'test');
+  const files = await new Bun.Archive(await readFile(output)).files();
+  const snapshot = Database.deserialize(
+    (await files.get('database.sqlite')?.arrayBuffer()) as ArrayBuffer
+  );
+  try {
+    expect(snapshot.query('SELECT id, title FROM chats').all()).toEqual([
+      { id: 'fixture-chat', title: 'Retained chat' },
+    ]);
+    expect(snapshot.query('PRAGMA foreign_key_check').all()).toEqual([]);
+    expect(snapshot.query('PRAGMA integrity_check').get()).toEqual({ integrity_check: 'ok' });
+  } finally {
+    snapshot.close();
   }
 });
 
