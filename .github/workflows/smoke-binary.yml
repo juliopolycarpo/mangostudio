@@ -63,8 +63,8 @@ jobs:
     # default, consuming distribution artifacts); never after it failed.
     if: ${{ !cancelled() && (needs.runtime.result == 'success' || (needs.runtime.result == 'skipped' && !inputs.rebuild)) }}
     runs-on: ${{ matrix.runner }}
-    # Linux step deadlines total 31 minutes for artifacts, 33 for manual rebuilds.
-    timeout-minutes: 35
+    # Linux step deadlines total up to 33 minutes for artifacts, 35 for manual rebuilds.
+    timeout-minutes: 37
     strategy:
       fail-fast: false
       matrix:
@@ -107,7 +107,18 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.source_sha || github.sha }}
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - name: Set up Bun
+        id: setup_bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        timeout-minutes: 2
+        continue-on-error: true
+        with:
+          bun-version-file: .bun-version
+
+      - name: Retry Bun setup
+        id: retry_bun
+        if: ${{ steps.setup_bun.outcome == 'failure' }}
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         timeout-minutes: 2
         with:
           bun-version-file: .bun-version
