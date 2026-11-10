@@ -168,7 +168,13 @@ describe('Bun SQLite dialect', () => {
     expect((await sql<{ value: number }>`select 42 as value`.execute(db)).rows).toEqual([
       { value: 42 },
     ]);
-    await db.destroy();
-    expect(() => sqlite.prepare('select 1')).toThrow('closed');
+    const outstandingStatement = sqlite.prepare('select 1 as value');
+    try {
+      await db.destroy();
+      expect(() => outstandingStatement.get()).toThrow('closed');
+      expect(() => sqlite.prepare('select 1')).toThrow('closed');
+    } finally {
+      outstandingStatement.finalize();
+    }
   });
 });

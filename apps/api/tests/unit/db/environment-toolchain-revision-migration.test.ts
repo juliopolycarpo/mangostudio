@@ -75,6 +75,7 @@ it.each(['fresh', 'interrupted'] as const)(
   }
 );
 
+// The full on-disk migration can exceed 15 seconds on a loaded Windows runner.
 it('leaves schema 061 in place while the Hub owns the database and upgrades after release', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'mango-toolchain-db-'));
   const path = join(directory, 'hub.sqlite');
@@ -116,4 +117,4 @@ it('leaves schema 061 in place while the Hub owns the database and upgrades afte
     await db.destroy();
     await rm(directory, { recursive: true, force: true });
   }
-});
+}, 30_000);
