@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { runInNewContext } from 'node:vm';
 
 import { readText } from './support/read-text';
 
@@ -24,6 +25,60 @@ describe('auto-assignment workflow', () => {
     // No hand-maintained per-label routing config or hardcoded owner.
     expect(workflow).not.toContain('getContent');
     expect(workflow).not.toContain('juliopolycarpo');
+  });
+
+  test.each([
+    { failures: [500, 500], calls: 3, delays: [1000, 2000], error: undefined },
+    { failures: [500, 500, 500], calls: 3, delays: [1000, 2000], error: 'GitHub HTTP 500' },
+    { failures: [404], calls: 1, delays: [], error: 'GitHub HTTP 404' },
+  ])('retries only a bounded transient PR-files read ($failures)', async (scenario) => {
+    const workflow = Bun.YAML.parse(readText('.github/workflows/auto-assign.yml')) as {
+      jobs: { assign: { steps: { with: { script: string } }[] } };
+    };
+    const script = workflow.jobs.assign.steps[0]?.with.script;
+    expect(script).toBeString();
+    const delays: number[] = [];
+    let calls = 0;
+    function fakeListFiles() {
+      const status = scenario.failures[calls++];
+      if (status)
+        return Promise.reject(Object.assign(new Error(`GitHub HTTP ${status}`), { status }));
+      return Promise.resolve({ data: [] });
+    }
+    function fakeGetPull() {
+      return Promise.resolve({ data: {} });
+    }
+    function fakeListReviews() {
+      return Promise.resolve([]);
+    }
+    function fakeDelay(callback: () => void, milliseconds: number) {
+      delays.push(milliseconds);
+      callback();
+    }
+    const github = {
+      rest: { pulls: { listFiles: fakeListFiles, get: fakeGetPull } },
+      paginate: fakeListReviews,
+    };
+    const context = {
+      repo: { owner: 'mango', repo: 'studio' },
+      payload: { pull_request: { number: 42 } },
+    };
+    function discardLog() {}
+    // Execute only the trusted repository's workflow text against named API fakes.
+    const execution = runInNewContext(`(async () => {${script}})()`, {
+      github,
+      context,
+      core: { info: discardLog },
+      setTimeout: fakeDelay,
+    }) as Promise<void>;
+    const result = await execution.catch((error: unknown) =>
+      error instanceof Error ? error.message : String(error)
+    );
+    expect({ calls, delays, error: result }).toEqual({
+      calls: scenario.calls,
+      delays: [...scenario.delays],
+      error: scenario.error,
+    });
   });
 
   test('assigns the author and requests reviewers without the author or bots', () => {
