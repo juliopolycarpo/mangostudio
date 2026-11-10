@@ -233,15 +233,17 @@ fn apply(
     request
 }
 
+fn check_declared_length(length: Option<u64>, max: usize) -> Result<(), HttpError> {
+    if length.is_some_and(|length| length > max as u64) {
+        return Err(HttpError::BodyTooLarge(max));
+    }
+    Ok(())
+}
+
 /// Buffers at most `max` bytes, counting received chunks rather than trusting headers.
 /// The response is dropped immediately on overflow, including for chunked/EOF framing.
 async fn bounded_body(mut response: reqwest::Response, max: usize) -> Result<Vec<u8>, HttpError> {
-    if response
-        .content_length()
-        .is_some_and(|length| length > max as u64)
-    {
-        return Err(HttpError::BodyTooLarge(max));
-    }
+    check_declared_length(response.content_length(), max)?;
     let mut body = Vec::new();
     while let Some(chunk) = response.chunk().await? {
         if chunk.len() > max - body.len() {
@@ -252,18 +254,11 @@ async fn bounded_body(mut response: reqwest::Response, max: usize) -> Result<Vec
     Ok(body)
 }
 
-fn diagnostic(bytes: &[u8]) -> String {
-    if bytes.len() > MAX_ERROR_BODY_BYTES {
-        return HttpError::BodyTooLarge(MAX_ERROR_BODY_BYTES).to_string();
-    }
-    String::from_utf8_lossy(bytes).into_owned()
-}
-
 /// Reads a bounded diagnostic while retaining the HTTP status at the call site.
 /// In particular, overflow must not prevent a pre-session 4xx from selecting SSE.
 pub(crate) async fn error_body(response: reqwest::Response) -> String {
     match bounded_body(response, MAX_ERROR_BODY_BYTES).await {
-        Ok(bytes) => diagnostic(&bytes),
+        Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
         Err(HttpError::BodyTooLarge(max)) => HttpError::BodyTooLarge(max).to_string(),
         Err(_) => String::new(),
     }
@@ -359,7 +354,7 @@ impl StreamableHttpClient for McpHttp {
             if !is_json {
                 return Err(status_error(response).await);
             }
-            let bytes = match bounded_body(response, MAX_JSON_BODY_BYTES).await {
+            let bytes = match bounded_body(response, MAX_ERROR_BODY_BYTES).await {
                 Ok(bytes) => bytes,
                 Err(error) => {
                     return Err(StreamableHttpError::Client(HttpError::Status {
@@ -377,7 +372,7 @@ impl StreamableHttpClient for McpHttp {
                 }
                 _ => Err(StreamableHttpError::Client(HttpError::Status {
                     status: status.as_u16(),
-                    body: diagnostic(&bytes),
+                    body: String::from_utf8_lossy(&bytes).into_owned(),
                 })),
             };
         }
@@ -607,6 +602,16 @@ mod tests {
     const JSON_LIMIT: usize = 16 * 1024 * 1024;
     const ERROR_LIMIT: usize = 64 * 1024;
 
+    #[test]
+    fn declared_length_check_accepts_unknown_and_exact_lengths() {
+        assert!(check_declared_length(None, 8).is_ok());
+        assert!(check_declared_length(Some(8), 8).is_ok());
+        assert!(matches!(
+            check_declared_length(Some(9), 8),
+            Err(HttpError::BodyTooLarge(8))
+        ));
+    }
+
     fn ping() -> ClientJsonRpcMessage {
         serde_json::from_str(r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#).unwrap()
     }
@@ -692,7 +697,7 @@ mod tests {
     #[tokio::test]
     async fn http_json_at_limit_and_session_rpc_errors_are_preserved() {
         for chunked in [false, true] {
-            for (status, session, size) in [(200, false, JSON_LIMIT), (400, true, JSON_LIMIT)] {
+            for (status, session, size) in [(200, false, JSON_LIMIT), (400, true, ERROR_LIMIT)] {
                 let mut body =
                     br#"{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"test"}}"#
                         .to_vec();
