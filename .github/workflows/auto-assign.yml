@@ -54,12 +54,27 @@ jobs:
             // trusted commits and picks up new contributors without config changes.
             // A single page bounded to MAX_FILES is enough to derive owners;
             // paginating every changed file would waste API quota on large PRs.
-            const { data: files } = await github.rest.pulls.listFiles({
-              owner,
-              repo,
-              pull_number: pr.number,
-              per_page: MAX_FILES,
-            });
+            async function listChangedFiles() {
+              const delays = [1000, 2000];
+              for (let attempt = 0; ; attempt++) {
+                try {
+                  const { data } = await github.rest.pulls.listFiles({
+                    owner,
+                    repo,
+                    pull_number: pr.number,
+                    per_page: MAX_FILES,
+                  });
+                  return data;
+                } catch (error) {
+                  const delay = delays[attempt];
+                  if (error?.status !== 500 || delay === undefined) throw error;
+                  core.info(`PR files temporarily unavailable. Retrying in ${delay} ms.`);
+                  await new Promise((resolve) => setTimeout(resolve, delay));
+                }
+              }
+            }
+
+            const files = await listChangedFiles();
             const paths = [
               ...new Set(
                 files
