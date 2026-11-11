@@ -416,9 +416,14 @@ describe('CI cache policy', () => {
     const steps = rustCacheSteps();
     expect(steps.length).toBeGreaterThan(0);
     for (const step of steps) {
-      expect(step.block, `${step.file}: rust-cache step that saves outside main`).toContain(
-        RUST_CACHE_SAVE_IF
+      const conditions = step.block.match(/^ +save-if: .+$/gm) ?? [];
+      expect(conditions, `${step.file}: rust-cache must declare one save condition`).toHaveLength(
+        1
       );
+      expect(
+        [RUST_CACHE_SAVE_IF, 'save-if: false'],
+        `${step.file}: rust-cache must save only from main or disable saving`
+      ).toContain(conditions[0]?.trim() ?? '<missing>');
     }
   });
 

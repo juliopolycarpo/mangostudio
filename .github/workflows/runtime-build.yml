@@ -157,15 +157,28 @@ jobs:
 
       - uses: ./.github/actions/distribution-source # zizmor: ignore[self-repository] load the action from the selected source checkout
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-
       # Installs the toolchain rust-toolchain.toml pins.
       - run: rustup show active-toolchain
 
+      # A warm seed needs only the key. A miss still installs tools before
+      # the saving action so it excludes those binaries from the cache.
+      - name: Check light runtime cache
+        id: seed-cache
+        if: inputs.mode == 'cache-seed'
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
+          shared-key: runtime-build-${{ matrix.platform }}
+          save-if: false
+          lookup-only: true
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        if: steps.seed-cache.outputs.cache-hit != 'true'
+        with:
+          bun-version-file: .bun-version
+
       - name: Install zig and cargo-zigbuild
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && steps.seed-cache.outputs.cache-hit != 'true'
         uses: ./.github/actions/setup-zigbuild # zizmor: ignore[self-repository] load the action from the selected source checkout
 
       # One cache per platform and profile, shared by callers that opt in.
@@ -174,13 +187,13 @@ jobs:
       # `lookup-only` checks for the entry, and a miss may save this clean
       # generation. Light PRs never restore the shipping entry. The light
       # entry is written by cache-seed mode through this same step, so its
-      # key is the one a PR light build restores: nothing here, in the job
-      # `env`, or in the steps before it may depend on the run mode.
+      # key is the one a PR light build restores. The read-only lookup uses
+      # the same toolchain, profile environment, and key inputs.
       # prefix-key hashes the root manifest because rust-cache's own key
       # ignores [profile.*].
       - name: Restore the cargo cache
         id: rust-cache
-        if: inputs.cache
+        if: inputs.cache && steps.seed-cache.outputs.cache-hit != 'true'
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
@@ -192,7 +205,7 @@ jobs:
       # exists. A miss builds exactly what a PR light build does, then
       # rust-cache's post-job step saves the new entry.
       - name: Build runtime
-        if: inputs.mode == 'artifact' || steps.rust-cache.outputs.cache-hit != 'true'
+        if: steps.seed-cache.outputs.cache-hit != 'true' && (inputs.mode == 'artifact' || steps.rust-cache.outputs.cache-hit != 'true')
         shell: bash
         env:
           PLATFORM: ${{ matrix.platform }}

@@ -45,7 +45,7 @@ function hashFilesOf(path: string): string {
 
 function cacheStep(): string {
   const runtime = extractJobBlock(readText(RUNTIME_WORKFLOW), 'runtime');
-  const steps = extractStepBlocks(runtime).filter((step) => step.includes('Swatinem/rust-cache@'));
+  const steps = extractStepBlocks(runtime).filter((step) => /^ {8}id: rust-cache$/m.test(step));
   if (steps.length !== 1) {
     throw new Error(
       `expected exactly one rust-cache step in ${RUNTIME_WORKFLOW} | received: ${steps.length}`
@@ -372,7 +372,7 @@ describe('runtime profile callers and cache isolation', () => {
     expect(jobProfileEnv('shipping')).toEqual({});
     const build = extractStepBlocks(runtime).find((step) => step.includes('name: Build runtime'));
     expect(build).not.toContain('CARGO_PROFILE_RELEASE_');
-    const cache = extractStepBlocks(runtime).find((step) => step.includes('Swatinem/rust-cache@'));
+    const cache = cacheStep();
     expect(cache).toContain('shared-key: runtime-build-');
     expect(cache).toContain(`save-if: ${EXPR} github.ref == 'refs/heads/main' }}`);
     expect(cache).toContain(`lookup-only: ${EXPR} github.ref == 'refs/heads/main' }}`);
@@ -424,9 +424,12 @@ describe('runtime profile callers and cache isolation', () => {
     const step = cacheStep();
     expect(step).not.toMatch(/inputs\.mode|github\.event_name/);
     expect(step).not.toContain('env:');
-    // Every step before the cache step is shared by both modes, with no mode condition.
+    // On a miss, both modes install the same tools before the shared cache action.
     const steps = extractStepBlocks(runtime);
-    for (const before of steps.slice(0, steps.indexOf(step)).slice(1)) {
+    const sharedSetup = steps
+      .slice(1, steps.indexOf(step))
+      .filter((before) => !/^ {8}id: seed-cache$/m.test(before));
+    for (const before of sharedSetup) {
       expect(
         before,
         'a setup step differs per mode and could change the environment hash'
@@ -441,6 +444,45 @@ describe('runtime profile callers and cache isolation', () => {
     expect(cacheInput(step, 'lookup-only')).toBe(`${EXPR} github.ref == 'refs/heads/main' }}`);
   });
 
+  test('a warm light seed checks the exact cache before installing build tools', () => {
+    const runtime = extractJobBlock(readText(RUNTIME_WORKFLOW), 'runtime');
+    const steps = extractStepBlocks(runtime);
+    const lookup = steps.find((step) => step.includes('id: seed-cache'));
+    if (!lookup) throw new Error('runtime seed: expected a seed-cache step | received: undefined');
+
+    const restore = cacheStep();
+    expect(lookup).toContain("if: inputs.mode == 'cache-seed'");
+    expect(lookup).toContain('lookup-only: true');
+    expect(lookup).toContain('save-if: false');
+    expect(lookup.match(/uses: Swatinem\/rust-cache@[^ ]+/)?.[0]).toBe(
+      restore.match(/uses: Swatinem\/rust-cache@[^ ]+/)?.[0]
+    );
+    expect(lookup).not.toContain('env:');
+    for (const input of ['prefix-key', 'shared-key']) {
+      expect(cacheInput(lookup, input), input).toBe(cacheInput(restore, input));
+    }
+    const rust = steps.findIndex((step) => step.includes('rustup show active-toolchain'));
+    const lookupIndex = steps.indexOf(lookup);
+    expect(rust, 'the early cache key needs the selected Rust toolchain').toBeGreaterThanOrEqual(0);
+    expect(lookupIndex).toBeGreaterThan(rust);
+
+    const coldSeedOrArtifact = "steps.seed-cache.outputs.cache-hit != 'true'";
+    const guardedSteps = [
+      ['uses: oven-sh/setup-bun@', coldSeedOrArtifact],
+      ['name: Install zig and cargo-zigbuild', `runner.os == 'Linux' && ${coldSeedOrArtifact}`],
+      ['id: rust-cache', `inputs.cache && ${coldSeedOrArtifact}`],
+      [
+        'name: Build runtime',
+        `${coldSeedOrArtifact} && (inputs.mode == 'artifact' || steps.rust-cache.outputs.cache-hit != 'true')`,
+      ],
+    ] as const;
+    for (const [needle, condition] of guardedSteps) {
+      const index = steps.findIndex((step) => step.includes(needle));
+      expect(index, needle).toBeGreaterThan(lookupIndex);
+      expect(steps[index]?.split('\n'), needle).toContain(`        if: ${condition}`);
+    }
+  });
+
   test('the seed has no artifact route and skips its build on an exact cache hit', () => {
     const runtime = extractJobBlock(readText(RUNTIME_WORKFLOW), 'runtime');
     const steps = extractStepBlocks(runtime);
@@ -453,7 +495,7 @@ describe('runtime profile callers and cache isolation', () => {
     expect(cache).toMatch(/^ {8}id: rust-cache$/m);
     const build = steps.find((step) => step.includes('name: Build runtime'));
     expect(build).toContain(
-      "if: inputs.mode == 'artifact' || steps.rust-cache.outputs.cache-hit != 'true'"
+      "(inputs.mode == 'artifact' || steps.rust-cache.outputs.cache-hit != 'true')"
     );
   });
 
@@ -561,7 +603,13 @@ describe('runtime profile callers and cache isolation', () => {
     const workflow = readText(RUNTIME_WORKFLOW);
     for (const target of ALL_BINARY_TARGETS) expect(workflow).toContain(`"${target.arch}"`);
     expect(extractJobBlocks(workflow).map(({ job }) => job)).toEqual(['runtime']);
-    expect(workflow.match(/uses: Swatinem\/rust-cache@/g)).toHaveLength(1);
+    const cacheSteps = extractStepBlocks(extractJobBlock(workflow, 'runtime')).filter((step) =>
+      step.includes('uses: Swatinem/rust-cache@')
+    );
+    expect(cacheSteps).toHaveLength(2);
+    expect(cacheSteps.filter((step) => cacheInput(step, 'save-if') !== 'false')).toEqual([
+      cacheStep(),
+    ]);
     expect(workflow).not.toContain('actions/cache/save');
     const cargo = readText('Cargo.toml');
     expect(cargo).toContain('lto = "fat"\ncodegen-units = 1');
