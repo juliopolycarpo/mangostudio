@@ -4,12 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { fixtureChildEnvironment } from '../../tests/support/child-supervision';
+import { isAlive, readProcessState } from '../../tests/support/process-liveness';
 import {
   ECHO_STDERR,
   ECHO_STDOUT,
   forceKill,
   forceKillGroup,
-  isAlive,
   readGrandchildPid,
   readReadyPids,
   SIGNALS_LOG,
@@ -76,14 +76,44 @@ async function ready(paths = childDirs): Promise<number[]> {
   });
 }
 
-async function expectGone(pids: number[]) {
+async function expectNoLiveProcesses(pids: number[]) {
   await waitFor(() => pids.every((pid) => !isAlive(pid)), 1_000);
-  expect(pids.filter(isAlive), 'expected no surviving captured children or descendants').toEqual(
-    []
-  );
+  const survivors = pids
+    .filter((pid) => isAlive(pid))
+    .map((pid) => ({ pid, state: readProcessState(pid) ?? 'absent' }));
+  expect(survivors, 'expected no live captured children or descendants').toEqual([]);
 }
 
 describe('QA captured subprocess ownership', () => {
+  test.skipIf(IS_WINDOWS)(
+    'counts only live processes when a captured child is waiting to be reaped',
+    async () => {
+      start('tree');
+      const [child, grandchild] = await ready();
+      if (child === undefined || grandchild === undefined) {
+        throw new Error(
+          `expected captured child and grandchild PIDs | received: ${JSON.stringify([child, grandchild])}`
+        );
+      }
+      process.kill(child, 'SIGSTOP');
+      try {
+        await waitFor(() => readProcessState(child) === 'T', 10_000);
+        expect(readProcessState(child), `state of stopped child ${child}`).toBe('T');
+        // The stopped parent cannot reap the grandchild while the census runs.
+        process.kill(grandchild, 'SIGKILL');
+        await waitFor(() => readProcessState(grandchild) === 'Z', 10_000);
+        expect(readProcessState(grandchild), `state of captured grandchild ${grandchild}`).toBe(
+          'Z'
+        );
+        await expectNoLiveProcesses([grandchild]);
+        expect(isAlive(child), `expected stopped parent ${child} to remain live`).toBe(true);
+      } finally {
+        process.kill(child, 'SIGCONT');
+      }
+    },
+    PROCESS_TEST_TIMEOUT_MS
+  );
+
   test('retains stdout, stderr and a successful exit without printing a command', async () => {
     const runner = start('echo');
     expect(await runner.exited).toBe(0);
@@ -125,7 +155,7 @@ describe('QA captured subprocess ownership', () => {
         const pids = await ready();
         runner.kill('SIGTERM');
         const code = await runner.exited;
-        await expectGone(pids);
+        await expectNoLiveProcesses(pids);
         if (!IS_WINDOWS) expect(code).toBe(143);
         expect(await new Response(runner.stdout).text()).toBe('');
       },
@@ -146,7 +176,7 @@ describe('QA captured subprocess ownership', () => {
       try {
         expect(await runner.exited).toBe(143);
         expect(timedOut).toBe(true);
-        await expectGone(pids);
+        await expectNoLiveProcesses(pids);
         expect(await new Response(runner.stdout).text()).toBe('');
       } finally {
         clearTimeout(timer);
@@ -167,7 +197,7 @@ describe('QA captured subprocess ownership', () => {
       expect(await waitFor(() => !isAlive(leader), 10_000)).toBe(true);
       runner.kill('SIGTERM');
       expect(await runner.exited).toBe(143);
-      await expectGone([grandchild]);
+      await expectNoLiveProcesses([grandchild]);
     },
     PROCESS_TEST_TIMEOUT_MS
   );
@@ -179,7 +209,7 @@ describe('QA captured subprocess ownership', () => {
       const pids = await ready();
       runner.kill('SIGINT');
       expect(await runner.exited).toBe(130);
-      await expectGone(pids);
+      await expectNoLiveProcesses(pids);
       expect(
         readFileSync(join(dir, '0', SIGNALS_LOG), 'utf8')
           .trim()
