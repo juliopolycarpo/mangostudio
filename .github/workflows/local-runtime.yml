@@ -9,6 +9,11 @@ name: Local Runtime
 
 on:
   workflow_call:
+    inputs:
+      source:
+        description: Immutable source checkout for both trial variants
+        type: string
+        required: true
     outputs:
       artifact:
         description: Name of the artifact holding `mangostudio-runtime`.
@@ -27,6 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.source }}
           persist-credentials: false
 
       - uses: ./.github/actions/local-runtime

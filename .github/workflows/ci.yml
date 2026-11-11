@@ -179,6 +179,8 @@ jobs:
   local-runtime:
     name: Local Runtime
     uses: ./.github/workflows/local-runtime.yml
+    with:
+      source: ${{ github.sha }}
 
   test:
     name: Test
@@ -186,6 +188,8 @@ jobs:
     uses: ./.github/workflows/test.yml
     with:
       runtime_artifact: ${{ needs.local-runtime.outputs.artifact }}
+      source: ${{ github.sha }}
+      split: timings
 
   build:
     name: Build

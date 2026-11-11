@@ -3,6 +3,14 @@ name: Test
 on:
   workflow_call:
     inputs:
+      source:
+        description: Immutable source checkout for both trial variants
+        type: string
+        required: true
+      split:
+        description: Root test partition
+        type: string
+        required: true
       runtime_artifact:
         description: >
           Artifact holding the mangostudio-runtime binary the hub launches for
@@ -60,23 +68,20 @@ jobs:
         with:
           persist-credentials: false
 
-      - id: timings
-        name: Restore main test timings
-        uses: ./.github/actions/cache-scoped
-        with:
-          family: timings
-          path: .mango/artifacts/timings
-          validity: test-shard-${{ env.SHARD_COUNT }}
-          restore-prefix: test-
-          mode: restore
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
-
-      - name: Record the restored timing key or cold fallback
+      - name: Stage pinned timing inputs
         env:
-          TIMINGS_KEY: ${{ steps.timings.outputs.matched-key }}
+          SPLIT: ${{ inputs.split }}
         run: |
+          set -euo pipefail
+          (cd .github/experiments/root-shard-timings && sha256sum --check SHA256SUMS)
           mkdir -p .mango/artifacts/timings
-          printf '%s\n' "${TIMINGS_KEY:-cold}" > .mango/artifacts/timings/source-key.txt
+          cp .github/experiments/root-shard-timings/{api-unit,frontend,shared}.json .mango/artifacts/timings/
+          case "$SPLIT" in
+            round-robin) ;;
+            timings) cp .github/experiments/root-shard-timings/root.seed .mango/artifacts/timings/root.json ;;
+            *) printf 'Unknown split: %s\n' "$SPLIT" >&2; exit 1 ;;
+          esac
+          printf '%s\n' "$SPLIT" > .mango/artifacts/timings/source-key.txt
 
       - name: Upload the shared timings snapshot
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -85,7 +90,7 @@ jobs:
           path: .mango/artifacts/timings
           include-hidden-files: true
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
 
   shard:
     # Sharding got the suite off one serial process while a collision between
@@ -127,38 +132,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.source }}
           persist-credentials: false
 
       - id: setup
         uses: ./.github/actions/setup-mango
         with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
-
-      - id: toolchain
-        name: Resolve test cache toolchains
-        # An empty version silently poisons the cache key, so fail here rather
-        # than inside cache-scoped's validity guard.
-        run: |
-          set -euo pipefail
-          turbo="$(bun run turbo:version | tail -n 1)"
-          if [ -z "${turbo}" ]; then
-            echo "::error::turbo version probe returned an empty value"
-            exit 1
-          fi
-          echo "turbo=${turbo}" >> "$GITHUB_OUTPUT"
-
-      # Every shard restores; only the first one saves, after its tests. All
-      # shards would save under keys that differ only by the run, uploading
-      # duplicate copies of one snapshot.
-      - id: turbo-cache
-        uses: ./.github/actions/cache-scoped
-        with:
-          family: turbo
-          path: .turbo/cache
-          validity: test-bun-${{ steps.setup.outputs.bun-version }}-turbo-${{ steps.toolchain.outputs.turbo }}-${{ hashFiles('turbo.jsonc', 'bun.lock', 'package.json', 'apps/*/package.json', 'apps/*/turbo.json', 'packages/*/package.json', 'packages/*/turbo.json') }}
-          restore-prefix: test-
-          mode: restore
-          rotate: "true"
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       # Each shard consumes the same artifact before Bun updates its slice.
@@ -191,6 +170,22 @@ jobs:
       # 120s reserved for setup, cleanup and reporting across both attempts:
       # 2 x 480s + 120s = this job's 18-minute limit. This is a wall-clock
       # ceiling, not an inactivity timer. See docs/reference/testing.md.
+      - name: Record source, toolchain, and timing inputs
+        env:
+          SOURCE: ${{ inputs.source }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE"
+          {
+            printf 'source=%s\nrunner=%s\nimage=%s\n' "$SOURCE" "${ImageOS:-unknown}" "${ImageVersion:-unknown}"
+            printf 'bun=%s\n' "$(bun --revision)"
+            sha256sum bun.lock .mango/artifacts/timings/*.json
+            cat .mango/artifacts/timings/source-key.txt
+            if [ -n "${MANGOSTUDIO_RUNTIME_BINARY:-}" ]; then
+              sha256sum "$MANGOSTUDIO_RUNTIME_BINARY" "$MANGOSTUDIO_FAKE_CURSOR_AGENT"
+            fi
+          } | tee benchmark-inputs.txt
+
       - name: Run tests with coverage
         id: coverage
         env:
@@ -198,21 +193,6 @@ jobs:
         run: |
           bun ./scripts/ci/run-tests-watchdog.ts --label="${SHARD}" --timeout-seconds=480 \
             -- bun run test --coverage --shard="${SHARD}/${SHARD_COUNT}"
-
-      # Saves only when this shard's run wrote cache entries the restored
-      # snapshot did not hold, under a key that extends the stable restore
-      # prefix.
-      - name: Save new Turbo outputs
-        if: success() && matrix.shard == 1
-        uses: ./.github/actions/cache-scoped
-        with:
-          family: turbo
-          path: .turbo/cache
-          validity: ${{ steps.turbo-cache.outputs.validity }}
-          mode: save
-          rotate: "true"
-          payload-glob: "*.tar.zst"
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       # Unhandled errors never reach the JUnit report: Bun's "# Unhandled error
       # between tests" block leaves failures="0" with no failing case while the
@@ -241,9 +221,10 @@ jobs:
             .mango/artifacts/junit/
             .mango/artifacts/coverage/
             .mango/artifacts/timings/
+            benchmark-inputs.txt
             shard-meta.json
             unhandled-errors.json
-          retention-days: 1
+          retention-days: 7
 
       - name: Upload shard log
         if: failure()
@@ -274,6 +255,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.source }}
           persist-credentials: false
 
       - id: setup
@@ -297,6 +279,22 @@ jobs:
       # Same watchdog as the shard job: this lane runs `--parallel=4
       # --isolate`, which is squarely in oven-sh/bun#39709's habitat even
       # though it has not hung here yet.
+      - name: Record source, toolchain, and timing inputs
+        env:
+          SOURCE: ${{ inputs.source }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE"
+          {
+            printf 'source=%s\nrunner=%s\nimage=%s\n' "$SOURCE" "${ImageOS:-unknown}" "${ImageVersion:-unknown}"
+            printf 'bun=%s\n' "$(bun --revision)"
+            sha256sum bun.lock .mango/artifacts/timings/*.json
+            cat .mango/artifacts/timings/source-key.txt
+            if [ -n "${MANGOSTUDIO_RUNTIME_BINARY:-}" ]; then
+              sha256sum "$MANGOSTUDIO_RUNTIME_BINARY" "$MANGOSTUDIO_FAKE_CURSOR_AGENT"
+            fi
+          } | tee benchmark-inputs.txt
+
       - name: Run frontend tests with coverage
         id: coverage
         run: |
@@ -320,9 +318,10 @@ jobs:
             .mango/artifacts/junit/
             .mango/artifacts/coverage/
             .mango/artifacts/timings/
+            benchmark-inputs.txt
             shard-meta.json
             unhandled-errors.json
-          retention-days: 1
+          retention-days: 7
 
       - name: Upload frontend log
         if: failure()
@@ -346,6 +345,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.source }}
           persist-credentials: false
 
       - uses: ./.github/actions/setup-mango
@@ -379,25 +379,6 @@ jobs:
         id: timings
         run: bun ./scripts/ci/merge-timings-shards.ts shards .mango/artifacts/timings
 
-      # Save only successful trusted-main baselines. The resolver's PR primary
-      # omits the saved run suffix and every loose fallback is main-scoped, so
-      # a PR save has no future reader. Shards consume the resolver's artifact
-      # when first run and on reruns of failed jobs.
-      # Each main run needs a unique key because actions/cache is immutable.
-      # This job also runs after failed dependencies to collect diagnostics;
-      # success() here covers only this job, so require both test jobs too.
-      - name: Save test timings
-        if: >-
-          ${{ success() && needs.shard.result == 'success' && needs.frontend.result == 'success'
-          && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-        uses: ./.github/actions/cache-scoped
-        with:
-          family: timings
-          path: .mango/artifacts/timings
-          validity: test-shard-${{ env.SHARD_COUNT }}-${{ github.run_id }}
-          mode: save
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
-
       # Emitted even when a job failed, so the QA report can show the failing
       # exit code rather than a placeholder. The frontend coverage floors need
       # no separate outcome plumbing here: they fail the frontend job's own
@@ -416,7 +397,7 @@ jobs:
           name: qa-test-metrics
           overwrite: true
           path: test-metrics.json
-          retention-days: 1
+          retention-days: 7
 
       # Merged coverage output is a failure-diagnostics artifact: green runs are
       # summarized in the step summary and the qa-metrics envelope instead.

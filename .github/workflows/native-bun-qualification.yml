@@ -1,4 +1,5 @@
-name: Native Bun qualification
+name: Root shard timing comparison
+run-name: Root shards ${{ inputs.split }} sample ${{ inputs.sample }}
 
 # Full native suites are an explicit qualification, not a second suite on
 # every PR. Changes to this producer or its workflow tools qualify both the
@@ -19,6 +20,15 @@ on:
       - scripts/tests/zip-archive.unit.test.ts
   workflow_dispatch:
     inputs:
+      split:
+        description: Root test partition
+        type: choice
+        options: [round-robin, timings]
+        required: true
+      sample:
+        description: Matched pair number
+        type: string
+        required: true
       baseline_sha:
         description: Optional full source SHA to record as an unrepaired baseline
         type: string
@@ -32,7 +42,23 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  local-runtime:
+    name: Local runtime
+    uses: ./.github/workflows/local-runtime.yml
+    with:
+      source: 22cefc7cf8b3460bd3bc27f19d59a52683797caf
+
+  test:
+    name: Test
+    needs: [local-runtime]
+    uses: ./.github/workflows/test.yml
+    with:
+      runtime_artifact: ${{ needs.local-runtime.outputs.artifact }}
+      source: 22cefc7cf8b3460bd3bc27f19d59a52683797caf
+      split: ${{ inputs.split }}
+
   sources:
+    if: ${{ inputs.split == '' }}
     name: Resolve immutable qualification sources
     runs-on: ubuntu-latest
     timeout-minutes: 5
