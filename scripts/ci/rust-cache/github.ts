@@ -27,6 +27,8 @@ const ACTIVE_STATUSES = ['requested', 'pending', 'waiting', 'queued', 'in_progre
 const PAGE_SIZE = 100;
 const MAX_PAGES = 100;
 
+class IncompleteListing extends Error {}
+
 /**
  * Recognize trusted main cache writers, including reusable-workflow callers.
  * @example isMainCacheWriter(run, 'owner/repo');
@@ -152,7 +154,7 @@ export class GithubRustCacheApi implements RustCacheApi {
       entries.push(...batch.map(parse));
       if (entries.length === total) return entries;
       if (entries.length > total || batch.length < PAGE_SIZE)
-        throw new Error(
+        throw new IncompleteListing(
           `Incomplete ${field} listing ${entries.length}/${total}; expected every entry`
         );
     }
@@ -192,10 +194,21 @@ export class GithubRustCacheApi implements RustCacheApi {
   }
 
   /**
-   * Audit all active main writers, while ignoring readers such as PR QA Report.
+   * Audit active main writers and ignore readers such as PR QA Report.
+   * Restart the audit once if GitHub returns an incomplete listing.
    * @example await api.activeWriters();
    */
   async activeWriters(): Promise<CacheWriterRun[]> {
+    try {
+      return await this.readActiveWriters();
+    } catch (error) {
+      if (!(error instanceof IncompleteListing)) throw error;
+      // A writer can change status between requests, so discard the partial audit.
+      return this.readActiveWriters();
+    }
+  }
+
+  private async readActiveWriters(): Promise<CacheWriterRun[]> {
     const runs = new Map<number, CacheWriterRun>();
     for (const status of ACTIVE_STATUSES) {
       const query = new URLSearchParams({ branch: 'main', status, exclude_pull_requests: 'true' });

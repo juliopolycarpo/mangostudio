@@ -402,6 +402,56 @@ describe('GitHub cache adapter', () => {
     expect(http.writer.status).toBe('in_progress');
   });
 
+  test('restarts the whole writer audit after an incomplete workflow listing', async () => {
+    const http = new FakeGithubHttp();
+    const firstWriter = { ...MAIN_RUN, id: 43, status: 'requested' };
+    const queuedWriter = { ...MAIN_RUN, id: 44, status: 'queued' };
+    const runningWriter = { ...MAIN_RUN, id: 45, status: 'in_progress' };
+    const empty = { status: 200, body: { total_count: 0, workflow_runs: [] } };
+    http.replies = [
+      { status: 200, body: { total_count: 1, workflow_runs: [firstWriter] } },
+      empty,
+      empty,
+      { status: 200, body: { total_count: 2, workflow_runs: [queuedWriter] } },
+      empty,
+      empty,
+      empty,
+      empty,
+      { status: 200, body: { total_count: 1, workflow_runs: [runningWriter] } },
+    ];
+    expect(await http.api().activeWriters()).toEqual([runningWriter]);
+    expect(http.calls.map(({ url }) => url.searchParams.get('status'))).toEqual([
+      'requested',
+      'pending',
+      'waiting',
+      'queued',
+      'requested',
+      'pending',
+      'waiting',
+      'queued',
+      'in_progress',
+    ]);
+  });
+
+  test('does not delete when the fresh writer audit is also incomplete', async () => {
+    const http = new FakeGithubHttp();
+    const run = { ...MAIN_RUN, status: 'requested' };
+    http.replies = [
+      { status: 200, body: MAIN_RUN },
+      { status: 200, body: { total_count: 2, actions_caches: [NEW, OLD] } },
+      { status: 200, body: { total_count: 2, workflow_runs: [run] } },
+      { status: 200, body: { total_count: 3, workflow_runs: [run] } },
+    ];
+    await expect(
+      cleanupRustCaches(http.api(), { repository: REPOSITORY, runId: MAIN_RUN.id, apply: true })
+    ).rejects.toThrow('Incomplete workflow_runs listing 1/3');
+    expect(http.calls.slice(2).map(({ url }) => url.searchParams.get('status'))).toEqual([
+      'requested',
+      'requested',
+    ]);
+    expect(http.calls.map(({ init }) => init.method)).toEqual(['GET', 'GET', 'GET', 'GET']);
+  });
+
   test('rejects duplicate workflow run IDs across pages of one status', async () => {
     const http = new FakeGithubHttp();
     const first = Array.from({ length: 100 }, (_, index) => ({
@@ -419,6 +469,7 @@ describe('GitHub cache adapter', () => {
       })),
     ];
     await expect(http.api().activeWriters()).rejects.toThrow('Duplicate workflow run IDs');
+    expect(http.calls).toHaveLength(2);
   });
 
   test('allows the same writer to appear in separate status snapshots', async () => {
