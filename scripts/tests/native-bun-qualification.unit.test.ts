@@ -40,6 +40,7 @@ import {
   sealNativeSource,
 } from '../lib/native-bun-qualification-source';
 import { readText } from './support/read-text';
+import { walkRuntimeImports } from './support/runtime-imports';
 import { extractJobBlock } from './support/workflow-blocks';
 
 const temporary: string[] = [];
@@ -538,9 +539,24 @@ describe('qualification inputs and seals', () => {
   });
 });
 
-describe('qualification workflow budget', () => {
-  // Checkouts, the tooling install and the evidence upload carry no step bound of their own.
+describe('qualification workflow', () => {
+  // Checkouts and the evidence upload carry no step bound of their own.
   const UNBOUNDED_STEP_MINUTES = 10;
+
+  test('uses no external packages in the producer source graph', () => {
+    const { externalSpecifiers } = walkRuntimeImports('scripts/ci/native-bun-qualification.ts');
+    expect([...externalSpecifiers]).toEqual([]);
+  });
+
+  test('runs the producer with Bun auto-install disabled and no tooling install', () => {
+    const job = extractJobBlock(
+      readText('.github/workflows/native-bun-qualification.yml'),
+      'qualify'
+    );
+
+    expect(job).toContain('run: bun --no-install tooling/scripts/ci/native-bun-qualification.ts');
+    expect(job).not.toMatch(/\bbun install\b/);
+  });
 
   test('gives the job its bounded pre-steps and unbounded steps beyond the producer budget', () => {
     const job = extractJobBlock(

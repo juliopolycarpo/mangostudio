@@ -4,13 +4,13 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
+import { parseJunitXml } from '../lib/junit-report';
 import {
   collectNativeTestEvidence,
   nativeTestInventory,
   type NativeTestLane,
   parseNativeTestLog,
 } from '../lib/native-bun-qualification-results';
-import { parseJunitXml } from '../qa-gate/junit-results';
 
 const inventory: NativeTestLane[] = [
   {

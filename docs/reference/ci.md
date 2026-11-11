@@ -316,11 +316,10 @@ fake-vendor builds, binary hashes, setup/check/test results, case outcomes and
 scoped terminal process observations. Each native job owns its source checkout
 and two Cargo targets; it restores no test-result or Cargo-target cache.
 
-The tooling and source checkouts each run a frozen Bun install and share
-package downloads on the runner. Cargo downloads also stay on the runner.
-Median dependency setup was faster with an empty cache on Linux x64, macOS
-arm64, and Windows x64. See the [Bun package trials][native-bun-cache-trials]
-and the [Cargo registry trial][native-cargo-cache-trial].
+The tooling checkout starts the producer with `bun --no-install`. The producer
+runs a frozen install in the source checkout and keeps Bun and Cargo downloads
+on that runner. The [Bun package trials][native-bun-cache-trials] and
+[Cargo registry trial][native-cargo-cache-trial] cover the archive transfer costs.
 
 [native-bun-cache-trials]: https://github.com/juliopolycarpo/mangostudio/issues/2025
 [native-cargo-cache-trial]: https://github.com/juliopolycarpo/mangostudio/actions/runs/42932117093

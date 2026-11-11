@@ -1,7 +1,7 @@
 import { cp, mkdir, readdir, readFile } from 'node:fs/promises';
 import { join, posix } from 'node:path';
 
-import { type JunitCounts, parseJunitXml } from '../qa-gate/junit-results';
+import { type JunitCounts, parseJunitXml } from './junit-report';
 
 export interface NativeTestLane {
   readonly id: string;
