@@ -91,6 +91,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ inputs.source_sha }}
+      - uses: ./.github/actions/distribution-source # zizmor: ignore[self-repository] load the action from the selected source checkout
       - uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
@@ -155,6 +156,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ inputs.source_sha }}
+      - uses: ./.github/actions/distribution-source # zizmor: ignore[self-repository] load the action from the selected source checkout
       - uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
         if: ${{ !matrix.musl }}
         with:
@@ -238,6 +240,8 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ inputs.source_sha }}
+
+      - uses: ./.github/actions/distribution-source # zizmor: ignore[self-repository] load the action from the selected source checkout
 
       - uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
         with:

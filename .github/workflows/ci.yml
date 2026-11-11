@@ -43,7 +43,7 @@ jobs:
           bun-version-file: .bun-version
 
       - id: changed
-        name: Check for changes outside the documentation surface
+        name: Classify documentation, standalone tests, and distribution inputs
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EVENT_NAME: ${{ github.event_name }}

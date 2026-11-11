@@ -1,5 +1,13 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -43,6 +51,7 @@ git('config', 'core.quotePath', 'true');
 write('README.md');
 write('crates/mangostudio-runtime/src/rename.rs');
 write('docs/protocol/rename.md');
+write('scripts/moved.ts');
 git('add', '--all');
 git('commit', '--quiet', '-m', 'fixture base');
 const base = git('rev-parse', 'HEAD').trim();
@@ -67,6 +76,8 @@ for (const path of fixtureNames) write(path);
 renameSync(join(root, 'crates/mangostudio-runtime/src/rename.rs'), join(root, 'docs/renamed.md'));
 write('crates/mango-protocol/renamed.rs');
 renameSync(join(root, 'docs/protocol/rename.md'), join(root, 'crates/mango-protocol/renamed.rs'));
+mkdirSync(join(root, 'scripts/tests'), { recursive: true });
+renameSync(join(root, 'scripts/moved.ts'), join(root, 'scripts/tests/moved.unit.test.ts'));
 git('add', '--all');
 git('commit', '--quiet', '-m', 'fixture unusual paths and renames');
 const head = git('rev-parse', 'HEAD').trim();
@@ -95,6 +106,8 @@ describe('literal Git path transport', () => {
         'docs/renamed.md',
         'docs/protocol/rename.md',
         'crates/mango-protocol/renamed.rs',
+        'scripts/moved.ts',
+        'scripts/tests/moved.unit.test.ts',
       ].sort()
     );
     expect(cli('rust-lanes.ts', 'relevance', pathsFile).stdout.toString()).toBe(
@@ -181,6 +194,119 @@ describe('literal Git path transport', () => {
 });
 
 describe('relevance policy parity', () => {
+  test('omits distribution for a standalone root test-only diff', () => {
+    expect(distributionRelevant(['scripts/tests/benchmark-runtime-version.unit.test.ts'])).toBe(
+      false
+    );
+  });
+
+  test.each([
+    'scripts/tests/install-ps1-layout.unit.test.ts',
+    'scripts/tests/verify-release-tag.unit.test.ts',
+    'scripts/tests/support/root.unit.test.ts',
+    'scripts/tests/.unit.test.ts',
+    'scripts/tests/root.unit.test.ts\n',
+    'scripts/tests/unknown name.unit.test.ts',
+    'scripts/tests/source-fixture.json',
+    'apps/api/src/index.ts',
+    'docs/README.md',
+  ])('a root unit test mixed with %j selects distribution', (path) => {
+    expect(distributionRelevant(['scripts/tests/root.unit.test.ts', path])).toBe(true);
+  });
+
+  test('a source-to-test rename retains the source-side deletion in the distribution decision', () => {
+    const changed = git('diff', '--no-renames', '--name-only', '-z', base, head, '--', 'scripts');
+    const paths = decodeChangedPaths(new TextEncoder().encode(changed));
+    expect(paths).toEqual(['scripts/moved.ts', 'scripts/tests/moved.unit.test.ts']);
+    expect(distributionRelevant(paths)).toBe(true);
+  });
+
+  test('a sparse distribution checkout omits exactly the supported standalone test files', () => {
+    const fixture = mkdtempSync(join(tmpdir(), 'distribution-source-'));
+    const paths = [
+      'scripts/tests/root.unit.test.ts',
+      'scripts/tests/root_2.unit.test.ts',
+      'scripts/tests/install-ps1-layout.unit.test.ts',
+      'scripts/tests/verify-release-tag.unit.test.ts',
+      'scripts/tests/support/child.unit.test.ts',
+      'scripts/tests/café.unit.test.ts',
+      'scripts/tests/Uppercase.unit.test.ts',
+      'scripts/tests/.unit.test.ts',
+      'scripts/tests/unknown name.unit.test.ts',
+      'scripts/tests/source.unit.test.ts/kept.ts',
+      'scripts/tests/source-fixture.json',
+      'apps/api/src/index.ts',
+    ];
+    try {
+      git('-C', fixture, 'init', '--quiet');
+      for (const path of paths) {
+        const target = join(fixture, path);
+        mkdirSync(dirname(target), { recursive: true });
+        writeFileSync(target, 'fixture\n');
+      }
+      git('-C', fixture, 'add', '--all');
+      git(
+        '-C',
+        fixture,
+        '-c',
+        'user.email=ci-path-test@example.invalid',
+        '-c',
+        'user.name=CI path test',
+        '-c',
+        'commit.gpgsign=false',
+        'commit',
+        '--quiet',
+        '-m',
+        'distribution fixture'
+      );
+      const action = readText('.github/actions/distribution-source/action.yml');
+      expect(action).toContain(
+        'git -c core.ignoreCase=false sparse-checkout set --no-cone --stdin'
+      );
+      const scope = Bun.spawnSync(
+        ['git', '-c', 'core.ignoreCase=false', 'sparse-checkout', 'set', '--no-cone', '--stdin'],
+        {
+          cwd: fixture,
+          stdin: readFileSync(join(ROOT_DIR, '.github/actions/distribution-source/patterns')),
+          stdout: 'pipe',
+          stderr: 'pipe',
+        }
+      );
+      expect(scope.exitCode, scope.stderr.toString()).toBe(0);
+      expect(git('-C', fixture, 'status', '--porcelain')).toBe('');
+      for (const path of paths) {
+        expect(existsSync(join(fixture, path)), path).toBe(distributionRelevant([path]));
+      }
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    ['build', 'build'],
+    ['distribution-build', 'prepare'],
+    ['distribution-build', 'hub'],
+    ['distribution-build', 'build'],
+    ['runtime-build', 'runtime'],
+    ['smoke-binary', 'binary'],
+    ['smoke-container', 'container'],
+    ['release-dry-run', 'dry-run-linux'],
+    ['release-dry-run', 'dry-run-windows'],
+    ['release-dry-run', 'dry-run-cargo'],
+  ])('%s / %s scopes source immediately after checkout', (workflow, job) => {
+    const steps = extractStepBlocks(
+      extractJobBlock(readText(`.github/workflows/${workflow}.yml`), job)
+    );
+    const checkout = steps.findIndex((step) => step.includes('uses: actions/checkout@'));
+    expect(checkout, `expected a source checkout in ${workflow} / ${job}`).toBeGreaterThanOrEqual(
+      0
+    );
+    expect(
+      steps[checkout + 1]?.trim().split(' # ', 1)[0],
+      `expected a scoped checkout in ${workflow} / ${job}`
+    ).toBe('- uses: ./.github/actions/distribution-source');
+  });
+
   test.each(['tsconfig.json', 'tsconfig.native-build.json'])(
     'a change to standalone compiler config %j selects the release dry run',
     (path) => {
@@ -193,8 +319,12 @@ describe('relevance policy parity', () => {
     const tracked = Bun.spawnSync(['git', 'ls-files', '-z'], { cwd: ROOT_DIR, stdout: 'pipe' });
     expect(tracked.exitCode).toBe(0);
     for (const path of decodeChangedPaths(tracked.stdout)) {
+      const standaloneRootTest =
+        /^scripts\/tests\/[a-z0-9_-]+\.unit\.test\.ts$/.test(path) &&
+        path !== 'scripts/tests/install-ps1-layout.unit.test.ts' &&
+        path !== 'scripts/tests/verify-release-tag.unit.test.ts';
       expect(distributionRelevant([path]), path).toBe(
-        !new RegExp(baseline.policies.distribution).test(path)
+        !standaloneRootTest && !new RegExp(baseline.policies.distribution).test(path)
       );
       const sharedDetectorInputs = [
         'scripts/lib/changed-paths.ts',
