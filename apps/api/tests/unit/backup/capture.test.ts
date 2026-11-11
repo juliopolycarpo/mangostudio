@@ -701,7 +701,8 @@ it('releases process ownership automatically after a crashed lock holder', async
 
 it('captures the complete current migrated schema with valid foreign keys', async () => {
   const { config, output } = await capturePaths();
-  const sqlite = new Database(config.database.path);
+  // Only capture needs a file. Seed it with one snapshot of the real migrated schema.
+  const sqlite = new Database(':memory:');
   const db = new Kysely({ dialect: createBunSqliteDialect(sqlite) });
   try {
     const { error } = await new Migrator({
@@ -711,19 +712,28 @@ it('captures the complete current migrated schema with valid foreign keys', asyn
     if (error) throw error instanceof Error ? error : new Error('Fixture migrations failed.');
     sqlite.exec(`INSERT INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES('fixture-user','Fixture','backup-fixture@example.test',0,'2026-01-01','2026-01-01');
       INSERT INTO chats(id,title,createdAt,updatedAt,userId) VALUES('fixture-chat','Retained chat',1,1,'fixture-user');`);
+    await writeFile(config.database.path, sqlite.serialize());
   } finally {
-    // Capture runs with the Hub stopped, so close the fixture writer first.
     await db.destroy();
   }
   await captureBackup(config, { output, checkpoints: true, includeSecrets: false }, 'test');
   const files = await new Bun.Archive(await readFile(output)).files();
-  const snapshot = Database.deserialize(
-    (await files.get('database.sqlite')?.arrayBuffer()) as ArrayBuffer
-  );
+  const databaseEntry = files.get('database.sqlite');
+  if (!databaseEntry) {
+    throw new Error(
+      `backup archive: expected database.sqlite | received entries: ${[...files.keys()].join(', ')}`
+    );
+  }
+  const snapshot = Database.deserialize(await databaseEntry.arrayBuffer());
   try {
     expect(snapshot.query('SELECT id, title FROM chats').all()).toEqual([
       { id: 'fixture-chat', title: 'Retained chat' },
     ]);
+    expect(snapshot.query('SELECT name FROM kysely_migration ORDER BY name').all()).toEqual(
+      Object.keys(allMigrations)
+        .sort()
+        .map((name) => ({ name }))
+    );
     expect(snapshot.query('PRAGMA foreign_key_check').all()).toEqual([]);
     expect(snapshot.query('PRAGMA integrity_check').get()).toEqual({ integrity_check: 'ok' });
   } finally {
