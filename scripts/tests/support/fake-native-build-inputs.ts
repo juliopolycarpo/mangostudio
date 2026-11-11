@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -35,6 +35,10 @@ export class FakeNativeBuildInputs {
       JSON.stringify({
         compilerOptions: { baseUrl: '.', paths: { '#build-value': ['./root-value.ts'] } },
       })
+    );
+    this.write(
+      'tsconfig.native-build.json',
+      readFileSync(join(ROOT_DIR, 'tsconfig.native-build.json'), 'utf8')
     );
     this.write('root-value.ts', "export const value = 'root-config';\n");
     this.write(

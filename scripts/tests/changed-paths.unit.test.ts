@@ -181,6 +181,14 @@ describe('literal Git path transport', () => {
 });
 
 describe('relevance policy parity', () => {
+  test.each(['tsconfig.json', 'tsconfig.native-build.json'])(
+    'a change to standalone compiler config %j selects the release dry run',
+    (path) => {
+      expect(distributionRelevant([path]), path).toBe(true);
+      expect(releaseRelevance([path]), path).toEqual({ release: true, launcher: false });
+    }
+  );
+
   test('all tracked paths retain every lane verdict with exact detector and reuse inputs', () => {
     const tracked = Bun.spawnSync(['git', 'ls-files', '-z'], { cwd: ROOT_DIR, stdout: 'pipe' });
     expect(tracked.exitCode).toBe(0);
@@ -198,6 +206,8 @@ describe('relevance policy parity', () => {
           new RegExp(baseline.policies.release).test(path) ||
           path === 'scripts/ci/changed-paths.ts' ||
           path === 'scripts/ci/dry-run-artifacts.ts' ||
+          path === 'tsconfig.json' ||
+          path === 'tsconfig.native-build.json' ||
           path.startsWith('.github/actions/download-distribution/'),
         launcher:
           new RegExp(baseline.policies.launcher).test(path) || sharedDetectorInputs.includes(path),
