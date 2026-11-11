@@ -41,14 +41,11 @@ runs:
       shell: bash
       run: echo '### Cache policy' >> "$GITHUB_STEP_SUMMARY"
 
-    # A cold frozen install beat the exact archive on these runner classes.
-    # See https://github.com/juliopolycarpo/mangostudio/issues/2025.
+    # Frozen installs with an empty cache were faster on the Linux, macOS, and
+    # Windows x64 and ARM64 runners in the hosted comparisons (#2025, #2057).
     - id: cache
       name: Restore Bun install cache
-      if: >-
-        (runner.os != 'Linux' || runner.arch != 'X64') &&
-        (runner.os != 'macOS' || runner.arch != 'ARM64') &&
-        (runner.os != 'Windows' || runner.arch != 'X64')
+      if: runner.arch != 'X64' && runner.arch != 'ARM64'
       uses: ./.github/actions/cache-scoped # zizmor: ignore[self-repository] use cache policy from the selected source checkout
       with:
         mode: restore
