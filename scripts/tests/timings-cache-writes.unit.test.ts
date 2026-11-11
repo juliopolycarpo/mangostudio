@@ -36,24 +36,17 @@ test('the complete reader inventory cannot restore an old PR timing snapshot', (
     callers.length
   );
   expect(callers.map(({ path, job }) => `${path}:${job}`).sort()).toEqual(
-    ['resolve-timings', 'shard', 'frontend', 'merge']
-      .map((job) => `.github/workflows/test.yml:${job}`)
-      .sort()
+    ['resolve-timings', 'merge'].map((job) => `.github/workflows/test.yml:${job}`).sort()
   );
   const readers = callers.filter(({ step }) => !step.includes('mode: save'));
-  expect(readers).toHaveLength(3);
-  for (const { step } of readers) {
-    expect(step).toContain(`validity: test-shard-${EXPR} env.SHARD_COUNT }}`);
-    expect(step).not.toContain('rotate:');
-    expect(step).not.toContain('github.run_id');
-  }
-  const resolver = readers.find(({ job }) => job === 'resolve-timings')?.step;
+  expect(readers.map(({ job }) => job)).toEqual(['resolve-timings']);
+  const resolver = readers[0]?.step;
+  expect(resolver).toContain(`validity: test-shard-${EXPR} env.SHARD_COUNT }}`);
   expect(resolver).toContain('restore-prefix: test-');
-  expect(resolver).toContain('lookup-only: "true"');
-  for (const { job, step } of readers.filter(({ job }) => job !== 'resolve-timings')) {
-    expect(step, job).toContain('mode: restore-exact');
-    expect(step).toContain(`exact-key: ${EXPR} needs.resolve-timings.outputs.key }}`);
-  }
+  expect(resolver).toContain('mode: restore');
+  expect(resolver).not.toContain('lookup-only:');
+  expect(resolver).not.toContain('rotate:');
+  expect(resolver).not.toContain('github.run_id');
   // The resolver's primary lacks the saved run suffix; every fallback is main-scoped.
   const action = readText('.github/actions/cache-scoped/action.yml');
   // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.

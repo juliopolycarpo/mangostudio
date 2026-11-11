@@ -137,13 +137,18 @@
     // shard 2 restores shard 1's entry and runs nothing. And its own JUnit
     // report — one file, no overlap with any other task — has to be restored
     // on a hit, or the shard contributes zero root tests and still looks green.
+    // The ignored timings snapshot changes the partition. Hash its input
+    // bytes and restore the resulting timings slice alongside the report.
     // `$TURBO_DEFAULT$` is required too: an explicit `inputs` list replaces
     // Turbo's tracked-file set, and the root tests read `.github/**` and
     // other files outside `scripts/**`. Without it a workflow-only change
     // restores a stale `root.xml`.
     "//#test:scripts": {
-      "inputs": ["$TURBO_DEFAULT$", "scripts/**"],
-      "outputs": ["$TURBO_ROOT$/.mango/artifacts/junit/root.xml"],
+      "inputs": ["$TURBO_DEFAULT$", "scripts/**", ".mango/artifacts/timings/root.json"],
+      "outputs": [
+        "$TURBO_ROOT$/.mango/artifacts/junit/root.xml",
+        "$TURBO_ROOT$/.mango/artifacts/timings/root.json",
+      ],
       "env": ["CI", "MANGOSTUDIO_*"],
     },
     // The same tests as `//#test:scripts`, split across worker processes by
