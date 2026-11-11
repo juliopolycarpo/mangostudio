@@ -382,7 +382,19 @@ describe.skipIf(process.platform !== 'linux' || process.arch !== 'x64')(
         );
         expect(result.exitCode).toBe(1);
         expect(result.settlement.empty).toBe(true);
-        expect(await readFile(join(root, 'sample-observed'), 'utf8')).toBe('sampled');
+        const sampled = await readFile(join(root, 'sample-observed'), 'utf8').catch(
+          (error: NodeJS.ErrnoException) => {
+            if (error.code === 'ENOENT') return 'missing sample marker';
+            throw error;
+          }
+        );
+        if (sampled !== 'sampled') {
+          const stderr = await readFile(
+            join(root, 'logs/driver-post-input-rejected.stderr.log'),
+            'utf8'
+          );
+          expect(sampled, stderr || 'driver stderr was empty').toBe('sampled');
+        }
         const receipt = JSON.parse(await readFile(join(out, 'receipt.json'), 'utf8'));
         expect(receipt.complete).toBe(false);
         expect(receipt.attempts).toHaveLength(1);
