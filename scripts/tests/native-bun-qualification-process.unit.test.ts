@@ -701,6 +701,46 @@ describe('native process census budget', () => {
 });
 
 describe('single command receipt', () => {
+  test('lets a settled command supervisor exit with long wait budgets', async () => {
+    const dir = await temporaryDirectory();
+    const moduleUrl = new URL('../lib/native-bun-qualification-process.ts', import.meta.url);
+    const supervisor = Bun.spawn(
+      [
+        process.execPath,
+        '-e',
+        `
+          import { runNativeCommand } from ${JSON.stringify(moduleUrl.href)};
+          async function emptyFixtureCensus() { return []; }
+          const root = process.argv[1];
+          const receipt = await runNativeCommand({
+            label: 'fast-child',
+            command: [process.execPath, '-e', 'process.exit(0)'],
+            root,
+            out: root,
+            env: process.env,
+            timeoutSeconds: 5,
+            pollIntervalMs: 60_000,
+            settleMs: 60_000,
+            snapshot: emptyFixtureCensus,
+          });
+          console.log(JSON.stringify({
+            exitCode: receipt.exitCode,
+            terminalEmpty: receipt.settlement.empty,
+          }));
+        `,
+        dir,
+      ],
+      { stdout: 'pipe', stderr: 'pipe', timeout: 8_000 }
+    );
+    const [exitCode, stdout, stderr] = await Promise.all([
+      supervisor.exited,
+      new Response(supervisor.stdout).text(),
+      new Response(supervisor.stderr).text(),
+    ]);
+    expect(stdout.trim(), stderr).toBe('{"exitCode":0,"terminalEmpty":true}');
+    expect(exitCode, `supervisor exit after a settled receipt, stderr: ${stderr}`).toBe(0);
+  }, 15_000);
+
   test('waits for a nonempty fixture PID publication before reporting readiness', async () => {
     const dir = await temporaryDirectory();
     const path = join(dir, 'pid');

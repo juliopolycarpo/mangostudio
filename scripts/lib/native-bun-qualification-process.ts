@@ -387,6 +387,18 @@ function pause(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function waitForCommandEvent(event: Promise<void>, timeoutMs: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), timeoutMs);
+  });
+  try {
+    return await Promise.race([event.then(() => true), deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Stream one attempt, retain raw output and owned identities, then require terminal settlement.
  * Timeouts terminate only this command's verified scope; no command is retried.
@@ -622,19 +634,13 @@ export async function runNativeCommand(
   const monitor = async (): Promise<void> => {
     while (!exited) {
       await census();
-      await Promise.race([execution, pause(pollIntervalMs)]);
+      await waitForCommandEvent(execution, pollIntervalMs);
     }
   };
   await Promise.all([execution, monitor()]);
   clearTimeout(timeout);
   if (timeoutCleanup) await timeoutCleanup;
-  let streamsClosed = false;
-  await Promise.race([
-    closed.then(() => {
-      streamsClosed = true;
-    }),
-    pause(options.settleMs ?? 5_000),
-  ]);
+  const streamsClosed = await waitForCommandEvent(closed, options.settleMs ?? 5_000);
   if (!streamsClosed) {
     errors.push('Owned process output pipes did not close after command exit');
     child.stdout.destroy();
