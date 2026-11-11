@@ -1901,14 +1901,15 @@ All dependency and intermediate-state caches are owned by composites under
 step-summary diagnostics for every family. Callers supply `family`, `path`, and
 a `validity` string (toolchain versions plus content hashes). `setup-mango`
 wraps the Bun install family; every other family is invoked from the workflow
-that produces or consumes it.
+that produces or consumes it. Every `setup-mango` job runs a frozen install.
+Linux x64, macOS arm64, and Windows x64 skip all Bun package-cache transfers.
 
-| Family              | Producer / consumer            | Path                      | Invalidators                                             | Restore behavior                  |
-| ------------------- | ------------------------------ | ------------------------- | -------------------------------------------------------- | --------------------------------- |
-| Bun install         | every job using `setup-mango`  | `~/.bun/install/cache`    | OS, arch, Bun revision, lockfile                         | loose trusted-`main` prefix       |
-| Turbo task output   | check, test, build, QA metrics | `.turbo/cache`            | OS, arch, Bun, Turbo, lane, lockfile, manifests, configs | lane-scoped trusted-`main` prefix |
-| Workflow lint tools | check                          | `.mango/artifacts/tools/` | pinned tool manifest                                     | exact trusted restore only        |
-| Playwright browser  | browser smoke                  | `~/.cache/ms-playwright`  | OS, arch, Playwright version                             | exact trusted restore only        |
+| Family              | Producer / consumer              | Path                      | Invalidators                                             | Restore behavior                                     |
+| ------------------- | -------------------------------- | ------------------------- | -------------------------------------------------------- | ---------------------------------------------------- |
+| Bun install         | cache-enabled `setup-mango` jobs | `~/.bun/install/cache`    | OS, arch, Bun revision, lockfile                         | loose trusted-`main` prefix on cache-enabled runners |
+| Turbo task output   | check, test, build, QA metrics   | `.turbo/cache`            | OS, arch, Bun, Turbo, lane, lockfile, manifests, configs | lane-scoped trusted-`main` prefix                    |
+| Workflow lint tools | check                            | `.mango/artifacts/tools/` | pinned tool manifest                                     | exact trusted restore only                           |
+| Playwright browser  | browser smoke                    | `~/.cache/ms-playwright`  | OS, arch, Playwright version                             | exact trusted restore only                           |
 
 Inside the Turbo task output family each task is keyed by Turbo's own hash. The cached
 API unit task includes the SHA-256 of the runtime binary in it (see [API](#api)); without
@@ -1928,12 +1929,11 @@ mode that reports a trusted-`main` match; `restore-save` sees a primary-key hit
 only. `cache-restored` is therefore only safe to gate an install step when the
 call site opts into both exact restore and `mode: restore` (today: Playwright).
 
-`setup-mango` also rechecks the exact Bun key with a metadata-only lookup
-(`lookup-only`, `exact-restore`) after the frozen install and before its inline save on
-`main` pushes. A completed exact hit skips compression, since another caller already saved
-the immutable key. A failed lookup or a miss keeps the normal save, so no writer is
-excluded and no install waits. Callers that miss at the same moment can still race at
-reserve.
+On a cache-enabled runner, `setup-mango` can save the Bun cache after a frozen
+install on a push to `main`. If the exact restore key misses, a metadata-only
+lookup (`lookup-only`, `exact-restore`) checks whether another caller already
+saved the key. An exact hit skips compression. A failed lookup or a miss keeps the normal
+save. Callers that miss at the same moment can still race to reserve the key.
 
 ### Turbo snapshot rotation
 
@@ -2178,10 +2178,10 @@ The binary and Docker smoke matrix (`smoke-binary.yml`) restores no caches: it
 only pins Bun and runs dependency-free release scripts. Manual `rebuild` dispatches
 still use `setup-mango` because they compile inside the job. The QA metrics job
 consumes the frontend dist artifact and restores Check's Turbo snapshot in
-restore-only mode, alongside the Bun install cache that `setup-mango` brings
-with it. It uses Check's key inputs and 16 MB bound, never saves a Turbo
-snapshot, and does not wait for the same run's Check job. A cache miss runs the
-normal checks; a hit reuses typecheck results while quick checks still execute.
+restore-only mode. The collector uses Check's key inputs and 16 MB bound. It
+never saves a Turbo snapshot and does not wait for the same run's Check job. A
+cache miss runs the normal checks. A hit reuses typecheck results while quick
+checks still execute.
 
 `CI_CACHE_EPOCH` is the repository-wide emergency invalidation lever. It is an
 Actions repository variable with a documented `v1` fallback, passed explicitly
