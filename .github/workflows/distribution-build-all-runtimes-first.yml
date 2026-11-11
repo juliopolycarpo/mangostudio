@@ -1,0 +1,443 @@
+name: Distribution Build with all runtimes first
+
+on:
+  workflow_call:
+    inputs:
+      frontend_bun_revision:
+        description: Exact Bun commit from the frontend producing job.
+        type: string
+        default: ""
+      frontend_artifact:
+        description: Verified production frontend from this run; empty prepares a fresh one.
+        type: string
+        default: ""
+      version:
+        description: Exact version embedded into every distribution target.
+        type: string
+        required: true
+      source_sha:
+        description: Exact source commit to build.
+        type: string
+        required: true
+      channel:
+        description: Distribution channel recorded in the manifest.
+        type: string
+        required: true
+      retention_days:
+        description: Actions artifact retention in days.
+        type: number
+        required: true
+      publication_retention_days:
+        description: Override retention for checksums, assets and npm recovery bundles only.
+        type: number
+        default: 0
+      publication_bundles:
+        description: Upload aggregate checksums, assets and npm bundles for publication consumers.
+        type: boolean
+        default: true
+      cache:
+        description: Let the runtime build restore the cargo cache; see runtime-build.yml.
+        type: boolean
+        default: false
+      runtime_profile:
+        description: Runtime artifact profile; light is accepted only on pull_request.
+        type: string
+        default: shipping
+    outputs:
+      version:
+        description: Version embedded into the distribution.
+        value: ${{ inputs.version }}
+      source_sha:
+        description: Source commit embedded into the distribution.
+        value: ${{ inputs.source_sha }}
+      packaged_artifact:
+        description: Transitional alias of assets_artifact; remove after one transition cycle.
+        value: ${{ jobs.build.outputs.packaged_artifact }}
+      checksums_artifact:
+        description: Content-addressed checksums-only distribution artifact.
+        value: ${{ jobs.build.outputs.checksums_artifact }}
+      assets_artifact:
+        description: Content-addressed release assets distribution artifact.
+        value: ${{ jobs.build.outputs.assets_artifact }}
+      npm_artifact:
+        description: Content-addressed npm distribution artifact.
+        value: ${{ jobs.build.outputs.npm_artifact }}
+      target_artifacts:
+        description: JSON map of target IDs to content-addressed artifact names.
+        value: ${{ jobs.build.outputs.target_artifacts }}
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    # The cargo runtime for every target, built on the OS family that can link
+    # it; the packaging job below stages these bytes beside each Bun-compiled hub.
+    name: Runtime
+    uses: $/.github/workflows/runtime-build.yml
+    with:
+      version: ${{ inputs.version }}
+      source_sha: ${{ inputs.source_sha }}
+      artifact_prefix: runtime-${{ inputs.source_sha }}
+      profile: ${{ inputs.runtime_profile }}
+      cache: ${{ inputs.cache }}
+
+  prepare:
+    name: Prepare frontend and binary smoke harness
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.source_sha }}
+      - uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
+        with:
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+      - name: Build frontend once
+        if: inputs.frontend_artifact == ''
+        env:
+          VERSION: ${{ inputs.version }}
+        run: bun run build --frontend
+      - uses: ./.github/actions/download-frontend # zizmor: ignore[self-repository] load the action from the selected source checkout
+        if: inputs.frontend_artifact != ''
+        with:
+          artifact: ${{ inputs.frontend_artifact }}
+          bun-revision: ${{ inputs.frontend_bun_revision }}
+      - name: Bundle binary smoke harness
+        run: bun ./scripts/release/bundle-binary-smoke.ts
+      - name: Upload prepared build inputs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: hub-inputs-${{ inputs.source_sha }}
+          path: |
+            apps/frontend/dist
+            apps/frontend/dist-metafile.json
+            .mango/frontend-artifact.json
+            .mango/smoke
+          include-hidden-files: true
+          retention-days: ${{ inputs.retention_days }}
+          overwrite: false
+          compression-level: 0
+
+  hub:
+    name: Native hub ${{ matrix.platform }}
+    needs: [prepare, runtime]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: ubuntu-latest
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+          - platform: darwin-x64
+            runner: macos-15-intel
+          - platform: darwin-arm64
+            runner: macos-latest
+          - platform: windows-x64
+            runner: windows-latest
+          - platform: windows-arm64
+            runner: windows-11-arm
+          - platform: linux-x64-musl
+            runner: ubuntu-latest
+            musl: true
+          - platform: linux-arm64-musl
+            runner: ubuntu-24.04-arm
+            musl: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.source_sha }}
+      - uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
+        if: ${{ !matrix.musl }}
+        with:
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+      - name: Download prepared frontend
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: hub-inputs-${{ inputs.source_sha }}
+          path: .
+      - name: Download matching cargo runtime
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: runtime-${{ inputs.source_sha }}-${{ matrix.platform }}
+          path: .mango/runtime-prebuilt
+      - name: Verify shared frontend before native compilation
+        if: ${{ !matrix.musl && inputs.frontend_artifact != '' }}
+        env:
+          PRODUCER_BUN_REVISION: ${{ inputs.frontend_bun_revision }}
+        run: bun ./scripts/ci/frontend-artifact.ts verify --bun-revision "$PRODUCER_BUN_REVISION"
+      - name: Build native hub
+        if: ${{ !matrix.musl }}
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          VERSION: ${{ inputs.version }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bun run build --binary --platform "$PLATFORM" --runtime-dir .mango/runtime-prebuilt --reuse-frontend
+      - name: Build native musl hub in Alpine
+        if: ${{ matrix.musl }}
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          VERSION: ${{ inputs.version }}
+          GITHUB_TOKEN: ${{ github.token }}
+          FRONTEND_ARTIFACT: ${{ inputs.frontend_artifact }}
+          PRODUCER_BUN_REVISION: ${{ inputs.frontend_bun_revision }}
+        # No glibc install runs in these legs. Bun and the frozen dependency
+        # install both run in Alpine on the matching host architecture.
+        run: |
+          set -euo pipefail
+          BUN_CHANNEL="$(tr -d '\r\n' < .bun-version)"
+          docker run --rm -v "$PWD:/workspace" -w /workspace \
+            -e VERSION -e PLATFORM -e GITHUB_TOKEN -e FRONTEND_ARTIFACT -e PRODUCER_BUN_REVISION \
+            "oven/bun:${BUN_CHANNEL}-alpine" sh -ec '
+              apk add --no-cache git bash libstdc++ libgcc
+              git config --global --add safe.directory /workspace
+              bun install --frozen-lockfile
+              if [ -n "$FRONTEND_ARTIFACT" ]; then
+                bun ./scripts/ci/frontend-artifact.ts verify --bun-revision "$PRODUCER_BUN_REVISION"
+              fi
+              bun run build --binary --platform "$PLATFORM" --runtime-dir .mango/runtime-prebuilt --reuse-frontend
+            '
+      - name: Upload native hub and runtime pair
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: native-hub-${{ inputs.source_sha }}-${{ matrix.platform }}
+          path: |
+            .mango/out/${{ matrix.platform }}
+            .mango/hub-builds/${{ matrix.platform }}.json
+          include-hidden-files: true
+          retention-days: ${{ inputs.retention_days }}
+          overwrite: false
+          compression-level: 0
+
+  build:
+    name: Build immutable distribution
+    needs: [hub]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      id-token: write # mint provenance for immutable distribution bundles
+      attestations: write # attach provenance to the bundle digests
+    outputs:
+      packaged_artifact: ${{ inputs.publication_bundles && steps.bundle.outputs.packaged_artifact || '' }}
+      checksums_artifact: ${{ inputs.publication_bundles && steps.bundle.outputs.checksums_artifact || '' }}
+      assets_artifact: ${{ inputs.publication_bundles && steps.bundle.outputs.assets_artifact || '' }}
+      npm_artifact: ${{ inputs.publication_bundles && steps.bundle.outputs.npm_artifact || '' }}
+      target_artifacts: ${{ steps.bundle.outputs.target_artifacts }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.source_sha }}
+
+      - uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
+        with:
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+
+      - name: Verify checked out source identity
+        env:
+          EXPECTED_SHA: ${{ inputs.source_sha }}
+        run: |
+          actual="$(git rev-parse HEAD)"
+          if [ "$actual" != "$EXPECTED_SHA" ]; then
+            echo "Expected source SHA $EXPECTED_SHA, got $actual"
+            exit 1
+          fi
+
+      - name: Download prepared frontend
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: hub-inputs-${{ inputs.source_sha }}
+          path: .
+
+      - name: Download native hub pairs and compiler records
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: native-hub-${{ inputs.source_sha }}-*
+          merge-multiple: true
+          path: .mango
+
+      - name: Verify shared frontend before packaging
+        if: inputs.frontend_artifact != ''
+        env:
+          PRODUCER_BUN_REVISION: ${{ inputs.frontend_bun_revision }}
+        run: bun ./scripts/ci/frontend-artifact.ts verify --bun-revision "$PRODUCER_BUN_REVISION"
+
+      - name: Assemble verified native hubs
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          bun -e '
+            import { ROOT_DIR } from "./scripts/lib/config";
+            import { assembleNativeHubs } from "./scripts/lib/native-hub-assembly";
+            import { resolveReleaseVersion } from "./scripts/lib/release-version";
+            const sourceSha = process.env.SOURCE_SHA;
+            if (!/^[a-f0-9]{40}$/.test(sourceSha ?? "")) throw new Error("Invalid source SHA " + sourceSha);
+            const version = resolveReleaseVersion();
+            const records = assembleNativeHubs(ROOT_DIR, { sourceSha, version });
+            console.log("Verified " + records.length + " native hub/runtime pairs for " + sourceSha + " v" + version + ".");
+          '
+
+      - name: Assemble npm distribution
+        env:
+          VERSION: ${{ inputs.version }}
+        run: bun ./scripts/release/pack-npm.ts
+
+      - name: Archive release assets
+        env:
+          VERSION: ${{ inputs.version }}
+        run: bun ./scripts/release/archive-assets.ts
+
+      - name: Create and verify distribution manifest
+        env:
+          DISTRIBUTION_CHANNEL: ${{ inputs.channel }}
+          RUNTIME_PROFILE: ${{ inputs.runtime_profile }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          bun ./scripts/release/distribution-manifest.ts
+          bun ./scripts/release/distribution-manifest.ts --validate distribution-manifest.json --expect built
+
+      - name: Record original push boundary for promotion
+        env:
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_REF: ${{ github.ref }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.event.after || github.sha }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: bun ./scripts/ci/write-push-context.ts
+
+      - id: bundle
+        name: Create content-addressed bundles
+        run: bun ./scripts/release/bundle-distribution.ts
+
+      - name: Upload checksums distribution
+        if: ${{ inputs.publication_bundles }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.bundle.outputs.checksums_artifact }}
+          path: .distribution-bundles/checksums.tar.gz
+          retention-days: ${{ inputs.publication_retention_days || inputs.retention_days }}
+          overwrite: false
+          # bundle-distribution.ts already made this payload's one compression
+          # decision: gzip 1 for the scoped bundles, stored for the target
+          # bundles whose archive member is gzip already. Letting the artifact
+          # zip Deflate on top re-spends a full single-threaded CPU pass —
+          # measured at 57s across the nine uploads of the pre-split layout —
+          # and for a stored target bundle it would simply relocate the gzip
+          # that step was removed to avoid. Every upload below is level 0 for
+          # the same reason.
+          compression-level: 0
+
+      - name: Upload assets distribution
+        if: ${{ inputs.publication_bundles }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.bundle.outputs.assets_artifact }}
+          path: .distribution-bundles/assets.tar.gz
+          retention-days: ${{ inputs.publication_retention_days || inputs.retention_days }}
+          overwrite: false
+          compression-level: 0
+
+      - name: Upload npm distribution
+        if: ${{ inputs.publication_bundles }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.bundle.outputs.npm_artifact }}
+          path: .distribution-bundles/npm.tar.gz
+          retention-days: ${{ inputs.publication_retention_days || inputs.retention_days }}
+          overwrite: false
+          compression-level: 0
+
+      - name: Upload linux-x64 target
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ fromJSON(steps.bundle.outputs.target_artifacts)['linux-x64'] }}
+          path: .distribution-bundles/linux-x64.tar
+          retention-days: ${{ inputs.retention_days }}
+          overwrite: false
+          compression-level: 0
+
+      - name: Upload linux-arm64 target
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ fromJSON(steps.bundle.outputs.target_artifacts)['linux-arm64'] }}
+          path: .distribution-bundles/linux-arm64.tar
+          retention-days: ${{ inputs.retention_days }}
+          overwrite: false
+          compression-level: 0
+
+      - name: Upload linux-x64-musl target
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ fromJSON(steps.bundle.outputs.target_artifacts)['linux-x64-musl'] }}
+          path: .distribution-bundles/linux-x64-musl.tar
+          retention-days: ${{ inputs.retention_days }}
+          overwrite: false
+          compression-level: 0
+
+      - name: Upload linux-arm64-musl target
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ fromJSON(steps.bundle.outputs.target_artifacts)['linux-arm64-musl'] }}
+          path: .distribution-bundles/linux-arm64-musl.tar
+          retention-days: ${{ inputs.retention_days }}
+          overwrite: false
+          compression-level: 0
+
+      - name: Upload darwin-x64 target
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ fromJSON(steps.bundle.outputs.target_artifacts)['darwin-x64'] }}
+          path: .distribution-bundles/darwin-x64.tar
+          retention-days: ${{ inputs.retention_days }}
+          overwrite: false
+          compression-level: 0
+
+      - name: Upload darwin-arm64 target
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ fromJSON(steps.bundle.outputs.target_artifacts)['darwin-arm64'] }}
+          path: .distribution-bundles/darwin-arm64.tar
+          retention-days: ${{ inputs.retention_days }}
+          overwrite: false
+          compression-level: 0
+
+      - name: Upload windows-x64 target
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ fromJSON(steps.bundle.outputs.target_artifacts)['windows-x64'] }}
+          path: .distribution-bundles/windows-x64.tar
+          retention-days: ${{ inputs.retention_days }}
+          overwrite: false
+          compression-level: 0
+
+      - name: Upload windows-arm64 target
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ fromJSON(steps.bundle.outputs.target_artifacts)['windows-arm64'] }}
+          path: .distribution-bundles/windows-arm64.tar
+          retention-days: ${{ inputs.retention_days }}
+          overwrite: false
+          compression-level: 0
+
+      - name: Attest distribution bundles
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          # Target bundles are stored tars and scoped bundles are gzipped, so
+          # both shapes have to be named or half the set would ship unattested.
+          subject-path: |
+            .distribution-bundles/*.tar
+            .distribution-bundles/*.tar.gz
