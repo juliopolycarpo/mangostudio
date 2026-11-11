@@ -209,6 +209,7 @@ describe.skipIf(process.platform === 'win32')('startup benchmark receipts', () =
   it('settles descendants that retain startup output after the hub exits', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'mango-startup-held-output-'));
     const binary = await new FakeHeldOutputHub(directory).create();
+    const phaseTimeoutMs = 4_000;
     const cleanup = new AbortController();
     const pending = runNativeCommand({
       label: 'startup-held-output',
@@ -216,7 +217,8 @@ describe.skipIf(process.platform === 'win32')('startup benchmark receipts', () =
       root: ROOT,
       out: directory,
       env: fixtureChildEnvironment({ ...process.env, BENCHMARK_FIXTURE_ROOT: directory }),
-      timeoutSeconds: 15,
+      // Allow separate fixture phases and the final settlement window.
+      timeoutSeconds: 20,
       pollIntervalMs: 20,
       settleMs: 500,
       signal: cleanup.signal,
@@ -224,8 +226,9 @@ describe.skipIf(process.platform === 'win32')('startup benchmark receipts', () =
     });
     try {
       const leafMarker = join(directory, 'leaf-pid');
-      const deadline = Date.now() + 4_000;
-      while (Date.now() < deadline && !(await Bun.file(leafMarker).exists())) await Bun.sleep(5);
+      const publicationDeadline = Date.now() + phaseTimeoutMs;
+      while (Date.now() < publicationDeadline && !(await Bun.file(leafMarker).exists()))
+        await Bun.sleep(5);
       expect(await Bun.file(leafMarker).exists()).toBe(true);
       const pid = Number(await Bun.file(leafMarker).text());
       const owned = (await snapshotNativeProcesses()).find((row) => row.pid === pid);
@@ -233,8 +236,10 @@ describe.skipIf(process.platform === 'win32')('startup benchmark receipts', () =
       if (!owned) throw new Error(`expected owned leaf ${pid} | received: absent`);
       escapedFixtures.push(owned);
       const terminal = join(directory, 'terminal-startup-held-output.jsonl');
+      // The supervisor needs a census after the fixture publishes its leaf.
+      const observationDeadline = Date.now() + phaseTimeoutMs;
       while (
-        Date.now() < deadline &&
+        Date.now() < observationDeadline &&
         !(
           await Bun.file(terminal)
             .text()
@@ -245,7 +250,7 @@ describe.skipIf(process.platform === 'win32')('startup benchmark receipts', () =
       expect(await Bun.file(terminal).text()).toContain(owned.identity);
       await Bun.write(join(directory, 'allow-ready'), 'start readiness');
       const stopMarker = Bun.file(join(directory, 'hub-stopped'));
-      const stopDeadline = Date.now() + 4_000;
+      const stopDeadline = Date.now() + phaseTimeoutMs;
       while (Date.now() < stopDeadline && !(await stopMarker.exists())) await Bun.sleep(5);
       expect(await stopMarker.exists()).toBe(true);
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -270,7 +275,7 @@ describe.skipIf(process.platform === 'win32')('startup benchmark receipts', () =
       expect(settled?.settlement.empty).toBe(true);
       expect(settled?.settlement.rootObserved).toBe(true);
     }
-  }, 20_000);
+  }, 30_000);
 
   it('keeps executable source independent of fixture paths and settings', async () => {
     const first = await mkdtemp(join(tmpdir(), 'benchmark-program-first-'));
