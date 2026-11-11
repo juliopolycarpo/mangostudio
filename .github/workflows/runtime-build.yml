@@ -151,7 +151,21 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.source_sha }}
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - id: setup-bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        continue-on-error: true
+        with:
+          bun-version-file: .bun-version
+
+      # Bun replaces canary assets in place. A download can land during upload.
+      - name: Wait before retrying Bun setup
+        if: steps.setup-bun.outcome == 'failure'
+        shell: bash
+        run: sleep 10
+
+      - name: Retry Bun setup
+        if: steps.setup-bun.outcome == 'failure'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
 
