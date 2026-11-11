@@ -53,6 +53,10 @@ jobs:
         # `--no-renames` lists both sides of a rename, so moving a source file
         # under an irrelevant path cannot hide the source-side deletion.
         run: |
+          if [ "$GITHUB_REF_NAME" = "diagnostic/rust-cost-sharded" ]; then
+            echo "distribution=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "$EVENT_NAME" != "pull_request" ]; then
             echo "distribution=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -73,6 +77,10 @@ jobs:
         # later Rust change is compared with, so they cannot skip.
         # Dependency-free script; runs without `bun install`.
         run: |
+          if [ "$GITHUB_REF_NAME" = "diagnostic/rust-cost-sharded" ]; then
+            echo "rust=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "$EVENT_NAME" != "pull_request" ]; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
             exit 0

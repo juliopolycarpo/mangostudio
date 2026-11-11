@@ -7,6 +7,7 @@ import { Writable } from 'node:stream';
 
 import { nativeQualificationEnvironment } from '../lib/native-bun-qualification';
 import {
+  type NativeCommandReceipt,
   type NativeProcess,
   runNativeCommand,
   snapshotNativeProcesses,
@@ -47,6 +48,27 @@ class DiscardedDriverOutput extends Writable {
   override _write(_chunk: Buffer, _encoding: BufferEncoding, done: () => void): void {
     done();
   }
+}
+
+async function requireSampledRustCostBuild(
+  root: string,
+  result: NativeCommandReceipt
+): Promise<void> {
+  const marker = join(root, 'sample-observed');
+  const sampled = await readFile(marker, 'utf8').catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+  const { exitCode, timedOut, settlement } = result;
+  if (sampled === 'sampled' && exitCode === 1 && !timedOut && settlement.empty) return;
+
+  const received = { sampled, exitCode, timedOut, empty: settlement.empty };
+  const diagnostic = `Rust cost fixture (${marker}): expected sample "sampled", exit 1 and empty terminal scope within the deadline | received ${JSON.stringify(received)}`;
+  const stderrPath = join(root, 'logs', `${result.label}.stderr.log`);
+  const stderr = await readFile(stderrPath, 'utf8').catch((cause: unknown) => {
+    throw new Error(`${diagnostic}\ncould not read driver stderr at ${stderrPath}`, { cause });
+  });
+  throw new Error(`${diagnostic}\n${stderr.trim() || 'driver stderr was empty'}`);
 }
 
 /** No Rust compilation: a named Cargo fake stops inside the first declared build. */
@@ -173,6 +195,7 @@ else if (args[0] === 'build') {
 describe.skipIf(process.platform !== 'linux' || process.arch !== 'x64')(
   'Rust cost driver cancellation',
   () => {
+    // Let the ten-second driver finish pipe and process cleanup before Bun ends the case.
     it('reaches named metadata despite an unsupported outside-owned ancestor config', async () => {
       const container = await mkdtemp(join(tmpdir(), 'rust-cost-driver-ancestor-test-'));
       const root = join(container, 'owned');
@@ -196,17 +219,38 @@ describe.skipIf(process.platform !== 'linux' || process.arch !== 'x64')(
         timeoutSeconds: 10,
         stream: new DiscardedDriverOutput(),
       });
-      const stderr = await readFile(
-        join(root, 'logs/driver-owned-config-boundary.stderr.log'),
-        'utf8'
-      );
+      const stderrPath = join(root, 'logs/driver-owned-config-boundary.stderr.log');
+      const stderr = await readFile(stderrPath, 'utf8');
       expect(result.exitCode).toBe(1);
       expect(result.timedOut).toBe(false);
       expect(result.settlement.empty).toBe(true);
       expect(existsSync(join(root, 'metadata-reached')), stderr).toBe(true);
       expect(stderr).toContain('metadata-default: expected successful command');
       expect(stderr).not.toContain(`Rust baseline Cargo config ${outside}`);
-    });
+      const missingSample = await requireSampledRustCostBuild(root, result).catch(
+        (error: unknown) => error
+      );
+      const marker = join(root, 'sample-observed');
+      const expectedState = '{"sampled":null,"exitCode":1,"timedOut":false,"empty":true}';
+      expect(missingSample).toBeInstanceOf(Error);
+      expect((missingSample as Error).message).toContain(`Rust cost fixture (${marker})`);
+      expect((missingSample as Error).message).toContain(expectedState);
+      expect((missingSample as Error).message).toContain(
+        'metadata-default: expected successful command'
+      );
+
+      await rm(stderrPath);
+      const unreadableStderr = await requireSampledRustCostBuild(root, result).catch(
+        (error: unknown) => error
+      );
+      expect(unreadableStderr).toBeInstanceOf(Error);
+      expect((unreadableStderr as Error).message).toContain(`Rust cost fixture (${marker})`);
+      expect((unreadableStderr as Error).message).toContain(expectedState);
+      expect((unreadableStderr as Error).message).toContain(
+        `could not read driver stderr at ${stderrPath}`
+      );
+      expect((unreadableStderr as Error).cause).toMatchObject({ code: 'ENOENT' });
+    }, 30_000);
     it('preserves the production guard against an inherited Cargo target', async () => {
       const root = await mkdtemp(join(tmpdir(), 'rust-cost-driver-guard-test-'));
       scratch.push(root);
@@ -377,12 +421,28 @@ describe.skipIf(process.platform !== 'linux' || process.arch !== 'x64')(
           timeoutSeconds: 20,
           stream: new DiscardedDriverOutput(),
         });
-        expect(result.timedOut, 'expected the sampler to acknowledge the GNU time root').toBe(
-          false
-        );
-        expect(result.exitCode).toBe(1);
-        expect(result.settlement.empty).toBe(true);
-        expect(await readFile(join(root, 'sample-observed'), 'utf8')).toBe('sampled');
+        try {
+          await requireSampledRustCostBuild(root, result);
+        } catch (error) {
+          const attempt = join(out, 'runtime-empty-1');
+          const evidence = await Promise.all(
+            [
+              join(out, 'attempts.jsonl'),
+              join(attempt, 'logs/runtime-empty-1.stderr.log'),
+              join(attempt, 'terminal-runtime-empty-1.jsonl'),
+              join(attempt, 'fixture-terminal-runtime-empty-1.jsonl'),
+            ].map(async (path) => {
+              const contents = await readFile(path, 'utf8').catch((cause: unknown) =>
+                String(cause)
+              );
+              return { path, tail: contents.slice(-4000) };
+            })
+          );
+          throw new Error(
+            `Rust cost fixture run ${mutation} failed with driver receipt evidence ${JSON.stringify(evidence)}`,
+            { cause: error }
+          );
+        }
         const receipt = JSON.parse(await readFile(join(out, 'receipt.json'), 'utf8'));
         expect(receipt.complete).toBe(false);
         expect(receipt.attempts).toHaveLength(1);
