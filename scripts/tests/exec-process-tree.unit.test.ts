@@ -5,13 +5,13 @@ import { delimiter, join } from 'node:path';
 
 import { runCommand, runParallel } from '../lib/exec';
 import { fixtureChildEnvironment } from './support/child-supervision';
+import { isAlive, readProcessState } from './support/process-liveness';
 import {
   ECHO_STDERR,
   ECHO_STDOUT,
   fixtureCommand,
   forceKill,
   forceKillGroup,
-  isAlive,
   processGroupOf,
   readGrandchildPid,
   readReadyPids,
@@ -30,9 +30,8 @@ import {
 
 const IS_WINDOWS = process.platform === 'win32';
 const READY_TIMEOUT_MS = 10_000;
-// Slack for init to reap a killed process, which `kill(pid, 0)` still sees until it
-// does. Everything a runner started must be gone by the time the runner is, so
-// this is deliberately shorter than the 3 s the slow grandchild takes to stop.
+// Allow a descendant's state to settle after cancellation. This is shorter
+// than the 3 s the slow grandchild takes to stop.
 const SETTLE_TIMEOUT_MS = 1_000;
 
 type RunnerProcess = ReturnType<typeof Bun.spawn>;
@@ -159,10 +158,10 @@ async function readyPids(): Promise<ReadyPids> {
   return pids;
 }
 
-/** Waits for the pids to exit and returns the ones that did not. */
+/** Waits for the pids to stop executing and reports live processes. */
 async function stillAlive(pids: number[]): Promise<number[]> {
   await waitFor(() => pids.every((pid) => !isAlive(pid)), SETTLE_TIMEOUT_MS);
-  return pids.filter(isAlive);
+  return pids.filter((pid) => isAlive(pid));
 }
 
 /**
@@ -171,17 +170,16 @@ async function stillAlive(pids: number[]): Promise<number[]> {
  * direct child never reaches. The fake child is the direct child.
  */
 async function expectNothingLeft(pids: ReadyPids): Promise<void> {
-  const descendants = await stillAlive([pids.grandchild]);
-  if (descendants.length > 0) {
-    throw new Error(
-      `expected live descendants: 0 | received: ${descendants.length} (grandchild pid ${descendants.join(', ')})`
-    );
-  }
-  const children = await stillAlive([pids.child]);
-  if (children.length > 0) {
-    throw new Error(
-      `expected live children: 0 | received: ${children.length} (child pid ${children.join(', ')})`
-    );
+  for (const [label, role, pid] of [
+    ['descendants', 'grandchild', pids.grandchild],
+    ['children', 'child', pids.child],
+  ] as const) {
+    if ((await stillAlive([pid])).length > 0) {
+      const state = readProcessState(pid) ?? 'absent';
+      throw new Error(
+        `expected live ${label}: 0 | received: 1 (${role} pid ${pid}, last state ${state}, signals ${signalDeliveries()})`
+      );
+    }
   }
 }
 
@@ -215,6 +213,27 @@ function signalDeliveries(): string {
 }
 
 describe('cancelling a runner', () => {
+  test.skipIf(IS_WINDOWS)('counts a stopped parent and excludes its unreaped zombie', async () => {
+    startRunner();
+    const { child, grandchild } = await readyPids();
+    process.kill(child, 'SIGSTOP');
+    try {
+      await waitFor(() => readProcessState(child) === 'T', READY_TIMEOUT_MS);
+      expectValue(`state of stopped child ${child}`, 'T', readProcessState(child));
+
+      // Hold the parent stopped so the kernel retains the exited child's state.
+      process.kill(grandchild, 'SIGKILL');
+      await waitFor(() => readProcessState(grandchild) === 'Z', READY_TIMEOUT_MS);
+      expectValue(`state of unreaped grandchild ${grandchild}`, 'Z', readProcessState(grandchild));
+
+      const liveGrandchildren = await stillAlive([grandchild]);
+      expectValue('live fixture grandchild PIDs', '', liveGrandchildren.join(','));
+      expectValue(`stopped fixture parent ${child} is alive`, true, isAlive(child));
+    } finally {
+      process.kill(child, 'SIGCONT');
+    }
+  });
+
   test.skipIf(IS_WINDOWS).each(['build', 'browser'])(
     'production %s cancellation settles owned descendants and never admits a later phase',
     async (phase) => {

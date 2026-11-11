@@ -69,16 +69,6 @@ export function fixtureCommand(role: string, dir: string, ...args: string[]): st
   return [process.execPath, FIXTURE, role, dir, ...args];
 }
 
-/** True while `pid` names a live process (signal 0 only checks it exists). */
-export function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
  * The process group `pid` belongs to (POSIX only), read through `ps` because
  * neither Bun nor Node expose `getpgid`.
