@@ -11,7 +11,7 @@ const platform = hostReleasePlatform();
 // This fixture uses POSIX command wrappers and a Bun-backed fake runtime.
 // Windows and static-musl runtimes need their real artifact smoke gates.
 test.skipIf(!platform || platform.startsWith('windows') || platform.endsWith('-musl'))(
-  'native packaging uses the running compiler and root tsconfig for its emitted hub',
+  'native packaging uses the running compiler and inherits root project settings',
   async () => {
     if (!platform) throw new Error('expected supported native fixture host');
     const fake = new FakeNativeBuildInputs(platform);

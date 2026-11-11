@@ -33,7 +33,11 @@ export function releaseRelevance(paths: readonly string[]): {
   validateChangedPaths(paths);
   return {
     release: paths.some(
-      (path) => RELEASE_PATTERN.test(path) || path === 'scripts/ci/changed-paths.ts'
+      (path) =>
+        RELEASE_PATTERN.test(path) ||
+        path === 'scripts/ci/changed-paths.ts' ||
+        path === 'tsconfig.json' ||
+        path === 'tsconfig.native-build.json'
     ),
     launcher: paths.some(
       (path) =>

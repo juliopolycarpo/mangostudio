@@ -18,6 +18,7 @@ import {
   binaryCompileDefines,
   binaryCompileFlags,
   type BinaryCompilerMode,
+  binaryCompileTsconfig,
   createTurboBuildCommand,
   discardStandaloneReadme,
   frontendDistAsidePath,
@@ -191,10 +192,10 @@ async function compileBinary(
 ): Promise<boolean> {
   const args = [
     'build',
-    // The generated entry lives outside the API tree. Native AOT currently
-    // needs an explicit config to compile that graph without a linker panic.
+    // Native AOT needs an explicit project for the generated entry outside the
+    // API tree. Its ambient roots exclude the root test suite.
     '--tsconfig-override',
-    join(ROOT_DIR, 'tsconfig.json'),
+    binaryCompileTsconfig(options.compiler),
     entry,
     '--compile',
     '--target',

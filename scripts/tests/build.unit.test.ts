@@ -3,10 +3,13 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, relative, sep } from 'node:path';
 
+import ts from '@typescript/typescript6';
+
 import {
   binaryBuildTargets,
   binaryCompileDefines,
   binaryCompileFlags,
+  binaryCompileTsconfig,
   createTurboBuildCommand,
   discardStandaloneReadme,
   frontendDistAsidePath,
@@ -204,6 +207,26 @@ describe('build script', () => {
       '--format=esm',
       '--sourcemap=external',
     ]);
+  });
+
+  test('native compilation discovers hub sources without ambient root tests', () => {
+    const config = binaryCompileTsconfig('native');
+    const read = ts.readConfigFile(config, ts.sys.readFile);
+    expect(read.error, config).toBeUndefined();
+    const parsed = ts.parseJsonConfigFileContent(read.config, ts.sys, ROOT_DIR, undefined, config);
+    expect(parsed.errors, config).toEqual([]);
+
+    const roots = new Set(parsed.fileNames.map((path) => relative(ROOT_DIR, path)));
+    const hub = join('apps', 'api', 'src', 'index.ts');
+    const standaloneTest = join('scripts', 'tests', 'benchmark-runtime-version.unit.test.ts');
+    expect(roots.has(hub), `expected native project to include ${hub}`).toBe(true);
+    expect(roots.has(standaloneTest), `expected native project to exclude ${standaloneTest}`).toBe(
+      false
+    );
+  });
+
+  test('bytecode compilation uses the repository TypeScript config', () => {
+    expect(binaryCompileTsconfig('bytecode')).toBe(join(ROOT_DIR, 'tsconfig.json'));
   });
 
   test('keeps broad trimmed ESM bytecode as an explicit fallback', () => {
