@@ -464,7 +464,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
 
     expect(parseNeedsList(muslBlock)).toEqual(['changes']);
     expect(muslBlock).toContain("if: needs.changes.outputs.rust == 'true'");
-    expect(muslBlock).toContain('uses: ./.github/actions/setup-zigbuild');
+    expect(muslBlock).toContain('uses: $/.github/actions/setup-zigbuild');
     for (const triple of ['x86_64-unknown-linux-musl', 'aarch64-unknown-linux-musl']) {
       expect(muslBlock).toContain(
         `cargo-zigbuild clippy --locked -p mangostudio-runtime --all-targets --target ${triple} -- -D warnings`
@@ -579,7 +579,7 @@ describe('release-dry-run.yml always-reporting gate', () => {
     expect(sectionKeys(onBlock)).toEqual(['workflow_call', 'workflow_dispatch', 'schedule']);
     const caller = extractJobBlock(readText('.github/workflows/ci.yml'), 'release-dry-run');
     expect(caller).toContain(`if: ${EXPR} !cancelled() && github.event_name == 'pull_request' }}`);
-    expect(caller).toContain('uses: ./.github/workflows/release-dry-run.yml');
+    expect(caller).toContain('uses: $/.github/workflows/release-dry-run.yml');
     expect(caller).not.toContain('outputs.distribution ==');
   });
 

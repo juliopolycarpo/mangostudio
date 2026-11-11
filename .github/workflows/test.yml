@@ -75,7 +75,7 @@ jobs:
 
       - id: timings
         name: Resolve test timings cache key
-        uses: ./.github/actions/cache-scoped
+        uses: $/.github/actions/cache-scoped
         with:
           family: timings
           path: .mango/artifacts/timings
@@ -128,7 +128,7 @@ jobs:
           persist-credentials: false
 
       - id: setup
-        uses: ./.github/actions/setup-mango
+        uses: $/.github/actions/setup-mango
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
@@ -149,7 +149,7 @@ jobs:
       # shards would save under keys that differ only by the run, uploading
       # duplicate copies of one snapshot.
       - id: turbo-cache
-        uses: ./.github/actions/cache-scoped
+        uses: $/.github/actions/cache-scoped
         with:
           family: turbo
           path: .turbo/cache
@@ -178,7 +178,7 @@ jobs:
       # is absent, which is exactly the behaviour this workflow had before.
       - name: Restore test timings
         if: needs.resolve-timings.outputs.key != ''
-        uses: ./.github/actions/cache-scoped
+        uses: $/.github/actions/cache-scoped
         with:
           family: timings
           path: .mango/artifacts/timings
@@ -193,7 +193,7 @@ jobs:
       # Local is the Rust runtime the hub spawns, so every shard needs the
       # binary. Built once for the run by local-runtime.yml rather than here:
       # building it in every shard would duplicate that work.
-      - uses: ./.github/actions/local-runtime
+      - uses: $/.github/actions/local-runtime
         with:
           artifact: ${{ inputs.runtime_artifact }}
 
@@ -223,7 +223,7 @@ jobs:
       # prefix.
       - name: Save new Turbo outputs
         if: success() && matrix.shard == 1
-        uses: ./.github/actions/cache-scoped
+        uses: $/.github/actions/cache-scoped
         with:
           family: turbo
           path: .turbo/cache
@@ -296,7 +296,7 @@ jobs:
           persist-credentials: false
 
       - id: setup
-        uses: ./.github/actions/setup-mango
+        uses: $/.github/actions/setup-mango
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
@@ -311,7 +311,7 @@ jobs:
       # in-process `--parallel` workers by measured wall time.
       - name: Restore test timings
         if: needs.resolve-timings.outputs.key != ''
-        uses: ./.github/actions/cache-scoped
+        uses: $/.github/actions/cache-scoped
         with:
           family: timings
           path: .mango/artifacts/timings
@@ -374,7 +374,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/setup-mango
+      - uses: $/.github/actions/setup-mango
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
@@ -416,7 +416,7 @@ jobs:
         if: >-
           ${{ success() && needs.shard.result == 'success' && needs.frontend.result == 'success'
           && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-        uses: ./.github/actions/cache-scoped
+        uses: $/.github/actions/cache-scoped
         with:
           family: timings
           path: .mango/artifacts/timings

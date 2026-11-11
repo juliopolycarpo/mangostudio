@@ -41,7 +41,7 @@ jobs:
           ref: ${{ inputs.source_sha }}
 
       - id: setup
-        uses: ./.github/actions/setup-mango
+        uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
@@ -61,7 +61,7 @@ jobs:
       # Restore here, save after the build: a combined restore-save would skip
       # its save on an exact hit and lose every output the build then computed.
       - id: turbo-cache
-        uses: ./.github/actions/cache-scoped
+        uses: ./.github/actions/cache-scoped # zizmor: ignore[self-repository] load the action from the selected source checkout
         with:
           family: turbo
           path: .turbo/cache
@@ -107,7 +107,7 @@ jobs:
       # not hold, under a key that extends the stable restore prefix.
       - name: Save new Turbo outputs
         if: success()
-        uses: ./.github/actions/cache-scoped
+        uses: ./.github/actions/cache-scoped # zizmor: ignore[self-repository] load the action from the selected source checkout
         with:
           family: turbo
           path: .turbo/cache

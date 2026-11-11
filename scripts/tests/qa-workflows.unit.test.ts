@@ -48,7 +48,7 @@ describe('unprivileged collection side', () => {
     const workflow = readText('.github/workflows/qa-metrics.yml');
     const collect = extractJobBlock(workflow, 'collect');
     const cacheSteps = extractStepBlocks(collect).filter((step) =>
-      step.includes('uses: ./.github/actions/cache-scoped')
+      /uses: [.$]\/\.github\/actions\/cache-scoped\b/.test(step)
     );
     expect(cacheSteps).toHaveLength(0);
     expect(collect).toContain('name: Download canonical Check evidence');
@@ -106,7 +106,7 @@ describe('unprivileged collection side', () => {
   test('ci.yml collects metrics only for PRs and main pushes, after test and build', () => {
     const workflow = readText('.github/workflows/ci.yml');
 
-    expect(workflow).toContain('uses: ./.github/workflows/qa-metrics.yml');
+    expect(workflow).toContain('uses: $/.github/workflows/qa-metrics.yml');
     expect(workflow).toMatch(
       /qa-metrics:\n(.*\n)*?\s+needs: \[test, build, changes, rust-coverage, check\]/
     );

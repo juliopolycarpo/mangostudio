@@ -31,58 +31,58 @@ export interface ToolManifestEntry {
 export const TOOL_MANIFEST: Readonly<Record<ToolName, ToolManifestEntry>> = {
   actionlint: {
     name: 'actionlint',
-    version: '1.7.12',
-    baseUrl: 'https://github.com/rhysd/actionlint/releases/download/v1.7.12',
+    version: '1.17.0',
+    baseUrl: 'https://github.com/kjanat/actionlint/releases/download/v1.17.0',
     binaryPath: 'actionlint',
     assets: {
       'linux-x64': {
-        assetName: 'actionlint_1.7.12_linux_amd64.tar.gz',
-        sha256: '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8',
+        assetName: 'actionlint_1.17.0_linux_amd64.tar.gz',
+        sha256: '620abd485a12b6ab1125b844a876414e1d5bd2af8a3125b27f82b01d0d9d6e5a',
       },
       'linux-arm64': {
-        assetName: 'actionlint_1.7.12_linux_arm64.tar.gz',
-        sha256: '325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6',
+        assetName: 'actionlint_1.17.0_linux_arm64.tar.gz',
+        sha256: '9be067d6b6e2f455fd0144850520b4b1114a0a792ca6e003302c939792589345',
       },
       'darwin-x64': {
-        assetName: 'actionlint_1.7.12_darwin_amd64.tar.gz',
-        sha256: '5b44c3bc2255115c9b69e30efc0fecdf498fdb63c5d58e17084fd5f16324c644',
+        assetName: 'actionlint_1.17.0_darwin_amd64.tar.gz',
+        sha256: 'e5fa505c0236666f2b1f36a2852db5fad6e186e9125babee017538a4049e3afb',
       },
       'darwin-arm64': {
-        assetName: 'actionlint_1.7.12_darwin_arm64.tar.gz',
-        sha256: 'aba9ced2dee8d27fecca3dc7feb1a7f9a52caefa1eb46f3271ea66b6e0e6953f',
+        assetName: 'actionlint_1.17.0_darwin_arm64.tar.gz',
+        sha256: 'f123b7ad57a0fe376dcc85e81b7e04e85eb39219184803fc25f989b255f569b4',
       },
       'win32-x64': {
-        assetName: 'actionlint_1.7.12_windows_amd64.zip',
-        sha256: '6e7241b51e6817ea6a047693d8e6fed13b31819c9a0dd6c5a726e1592d22f6e9',
+        assetName: 'actionlint_1.17.0_windows_amd64.zip',
+        sha256: '503a7649a97c5afb07aa51703b94066c9f63b5eabc25c55a6860eabd5298d559',
         binaryPath: 'actionlint.exe',
       },
     },
   },
   zizmor: {
     name: 'zizmor',
-    version: '1.29.0',
-    baseUrl: 'https://github.com/zizmorcore/zizmor/releases/download/v1.29.0',
+    version: '1.32.0',
+    baseUrl: 'https://github.com/zizmorcore/zizmor/releases/download/v1.32.0',
     binaryPath: 'zizmor',
     assets: {
       'linux-x64': {
         assetName: 'zizmor-x86_64-unknown-linux-gnu.tar.gz',
-        sha256: 'dd96df044a6e8538d5f423790f453bdd03d49e5b2bcc38214acc41a2f1297839',
+        sha256: 'bb110cc765eca9cd7efb2e284a956be5974c60027b0970f16397d86208a9957b',
       },
       'linux-arm64': {
         assetName: 'zizmor-aarch64-unknown-linux-gnu.tar.gz',
-        sha256: '415eaa7c0a06479a701b8e44a3e812c1047decc848ec4bede7bd6bbf49f22d20',
+        sha256: 'cb152b207f815116d7fa1c1ee4614f61578803351395052908095e79adfd9fd0',
       },
       'darwin-x64': {
         assetName: 'zizmor-x86_64-apple-darwin.tar.gz',
-        sha256: '648b72ab9941a7f2a8d65d7b68a8e76cef789538c8df3a3950384d38423375b0',
+        sha256: '6983143c719ada6845a69cc4dd2bacc215f971662fecd8bbd2678388e5ce5969',
       },
       'darwin-arm64': {
         assetName: 'zizmor-aarch64-apple-darwin.tar.gz',
-        sha256: '720322fade9e83a9c7953944c438f2ba942636b86b96a8f0e6b15ce94c8a6b6f',
+        sha256: '6efed18c4539a663fd3c851a2be9533fd8456c4e646d9416206da059154a0d3c',
       },
       'win32-x64': {
         assetName: 'zizmor-x86_64-pc-windows-msvc.zip',
-        sha256: '68a6bc6888f10bf0d53658c75885e7c1b7a0588d4c1fbc3f0ca280ad7324bf06',
+        sha256: 'd284a16e09d9df4ce2c000357e7b59bd531be093bea5718a1ce225b449b59d49',
         binaryPath: 'zizmor.exe',
       },
     },

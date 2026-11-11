@@ -17,8 +17,8 @@ const EXPRESSION_OPEN = '$' + '{{';
 // A job that calls a reusable workflow inherits the called workflow's own job
 // timeouts, and GitHub rejects `timeout-minutes` on it outright. Anchored at
 // indent 4 so a composite-action step's `uses:` cannot satisfy the match; the
-// optional quote covers the equally valid `uses: './.github/workflows/x.yml'`.
-const CALLS_REUSABLE_WORKFLOW = /^ {4}uses: ['"]?\.\/\.github\/workflows\//m;
+// optional quote handles quoted YAML values.
+const CALLS_REUSABLE_WORKFLOW = /^ {4}uses: ['"]?[.$]\/\.github\/workflows\//m;
 
 // Anchored at indent 4 for the same reason: only a job-level key bounds the
 // job. A step's `timeout-minutes` (indent 8) caps one step while the job keeps
@@ -79,6 +79,47 @@ describe('workflow hygiene', () => {
       }
     }
     expect(callers.length).toBeGreaterThan(0);
+  });
+
+  test('same-repository reusable workflow calls resolve from the workflow revision', () => {
+    for (const file of workflowFiles()) {
+      for (const { job, block } of extractJobBlocks(readText(file))) {
+        if (!CALLS_REUSABLE_WORKFLOW.test(block)) continue;
+        expect(block, `${file} → ${job}`).toMatch(/^ {4}uses: ['"]?\$\/\.github\/workflows\//m);
+      }
+    }
+  });
+
+  test('jobs that check out a selected source load its local actions', () => {
+    type Step = { uses?: string; with?: { ref?: string } };
+    const filesWithSelectedSourceActions = new Set<string>();
+    const selectedRef = `${EXPRESSION_OPEN} inputs.source_sha `;
+    for (const file of workflowFiles()) {
+      const workflow = Bun.YAML.parse(readText(file)) as {
+        jobs: Record<string, { steps?: Step[] }>;
+      };
+      for (const [job, { steps = [] }] of Object.entries(workflow.jobs)) {
+        let checkoutRef: string | undefined;
+        for (const step of steps) {
+          if (step.uses?.startsWith('actions/checkout@')) checkoutRef = step.with?.ref;
+          if (
+            !checkoutRef?.startsWith(selectedRef) ||
+            !step.uses?.match(/^[.$]\/\.github\/actions\//)
+          )
+            continue;
+          filesWithSelectedSourceActions.add(file);
+          expect(step.uses, `${file} → ${job}`).toStartWith('./.github/actions/');
+        }
+      }
+    }
+    expect([...filesWithSelectedSourceActions].sort()).toEqual([
+      '.github/workflows/build.yml',
+      '.github/workflows/distribution-build.yml',
+      '.github/workflows/release-dry-run.yml',
+      '.github/workflows/runtime-build.yml',
+      '.github/workflows/smoke-binary.yml',
+      '.github/workflows/smoke-container.yml',
+    ]);
   });
 
   test('checkouts drop the Actions token unless the job does git network work', () => {

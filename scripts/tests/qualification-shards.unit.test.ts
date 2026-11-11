@@ -102,7 +102,7 @@ function expectRuntimeOnEveryShard(source: string): void {
     'expected required string runtime_artifact input for every shard'
   ).toMatchObject({ type: 'string', required: true });
   const runtime =
-    workflow.jobs.shard?.steps?.filter((step) => step.uses === './.github/actions/local-runtime') ??
+    workflow.jobs.shard?.steps?.filter((step) => step.uses === '$/.github/actions/local-runtime') ??
     [];
   expect(runtime, 'expected exactly one local-runtime action in the shard job').toHaveLength(1);
   const step = runtime[0];
@@ -200,44 +200,44 @@ describe('qualification runtime artifact handoff', () => {
     ],
     [
       'missing action',
-      'uses: ./.github/actions/local-runtime',
-      'uses: ./.github/actions/setup-mango',
+      'uses: $/.github/actions/local-runtime',
+      'uses: $/.github/actions/setup-mango',
       'expected exactly one local-runtime action in the shard job',
     ],
     [
       'only one shard',
-      'uses: ./.github/actions/local-runtime',
-      `uses: ./.github/actions/local-runtime\n        if: ${EXPR} matrix.shard == 1 }}`,
+      'uses: $/.github/actions/local-runtime',
+      `uses: $/.github/actions/local-runtime\n        if: ${EXPR} matrix.shard == 1 }}`,
       'expected local-runtime action to run on every shard',
     ],
     [
       'ignored failure',
-      'uses: ./.github/actions/local-runtime',
-      'uses: ./.github/actions/local-runtime\n        continue-on-error: true',
+      'uses: $/.github/actions/local-runtime',
+      'uses: $/.github/actions/local-runtime\n        continue-on-error: true',
       'expected a missing shard runtime to fail its job',
     ],
     [
       'ignored failure expression',
-      'uses: ./.github/actions/local-runtime',
-      `uses: ./.github/actions/local-runtime\n        continue-on-error: ${EXPR} true }}`,
+      'uses: $/.github/actions/local-runtime',
+      `uses: $/.github/actions/local-runtime\n        continue-on-error: ${EXPR} true }}`,
       'expected a missing shard runtime to fail its job',
     ],
     [
       'false expression',
-      'uses: ./.github/actions/local-runtime',
-      `uses: ./.github/actions/local-runtime\n        continue-on-error: ${EXPR} false }}`,
+      'uses: $/.github/actions/local-runtime',
+      `uses: $/.github/actions/local-runtime\n        continue-on-error: ${EXPR} false }}`,
       'expected a missing shard runtime to fail its job',
     ],
     [
       'quoted failure policy',
-      'uses: ./.github/actions/local-runtime',
-      'uses: ./.github/actions/local-runtime\n        continue-on-error: "false"',
+      'uses: $/.github/actions/local-runtime',
+      'uses: $/.github/actions/local-runtime\n        continue-on-error: "false"',
       'expected a missing shard runtime to fail its job',
     ],
     [
       'null failure policy',
-      'uses: ./.github/actions/local-runtime',
-      'uses: ./.github/actions/local-runtime\n        continue-on-error: null',
+      'uses: $/.github/actions/local-runtime',
+      'uses: $/.github/actions/local-runtime\n        continue-on-error: null',
       'expected a missing shard runtime to fail its job',
     ],
     [
@@ -263,7 +263,7 @@ describe('qualification runtime artifact handoff', () => {
     expect(() => expectRuntimeOnEveryShard(source.replace(oldText, newText))).toThrow(diagnostic);
   });
 
-  test.each(['uses: ./.github/actions/local-runtime', 'id: coverage'])(
+  test.each(['uses: $/.github/actions/local-runtime', 'id: coverage'])(
     'accepts literal false failure continuation for %s',
     (marker) => {
       expectRuntimeOnEveryShard(
@@ -278,9 +278,9 @@ describe('qualification runtime artifact handoff', () => {
       extractJobBlock(workflow, 'local-runtime')
     ) as Workflow['jobs'][string];
     const consumer = Bun.YAML.parse(extractJobBlock(workflow, 'test')) as Workflow['jobs'][string];
-    expect(producer.uses).toBe('./.github/workflows/local-runtime.yml');
+    expect(producer.uses).toBe('$/.github/workflows/local-runtime.yml');
     expect(consumer.needs).toContain('local-runtime');
-    expect(consumer.uses).toBe('./.github/workflows/test.yml');
+    expect(consumer.uses).toBe('$/.github/workflows/test.yml');
     expect(consumer.with?.runtime_artifact).toBe(`${EXPR} needs.local-runtime.outputs.artifact }}`);
   });
 

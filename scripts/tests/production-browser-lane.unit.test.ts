@@ -19,7 +19,7 @@ describe('hosted production browser regressions', () => {
     const ci = Bun.YAML.parse(readText('.github/workflows/ci.yml')) as {
       jobs: Record<string, { needs?: string[]; uses?: string }>;
     };
-    expect(ci.jobs['browser-smoke']?.uses).toBe('./.github/workflows/browser-smoke.yml');
+    expect(ci.jobs['browser-smoke']?.uses).toBe('$/.github/workflows/browser-smoke.yml');
     expect(ci.jobs['gate-unique']?.needs).toContain('browser-smoke');
   });
 
@@ -53,7 +53,7 @@ describe('hosted production browser regressions', () => {
       expect(upload.with?.name).toContain('matrix.mode');
       expect(upload.with?.name).toContain('production');
     }
-    const caches = steps.filter((step) => step.uses === './.github/actions/cache-scoped');
+    const caches = steps.filter((step) => step.uses === '$/.github/actions/cache-scoped');
     expect(caches).toHaveLength(2);
     for (const cache of caches) {
       expect(cache.with?.family).toBe('playwright');

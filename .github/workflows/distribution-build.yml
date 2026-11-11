@@ -74,7 +74,7 @@ jobs:
     # The cargo runtime for every target, built on the OS family that can link
     # it; the packaging job below stages these bytes beside each Bun-compiled hub.
     name: Runtime
-    uses: ./.github/workflows/runtime-build.yml
+    uses: $/.github/workflows/runtime-build.yml
     with:
       version: ${{ inputs.version }}
       source_sha: ${{ inputs.source_sha }}
@@ -91,7 +91,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ inputs.source_sha }}
-      - uses: ./.github/actions/setup-mango
+      - uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
       - name: Build frontend once
@@ -99,7 +99,7 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
         run: bun run build --frontend
-      - uses: ./.github/actions/download-frontend
+      - uses: ./.github/actions/download-frontend # zizmor: ignore[self-repository] load the action from the selected source checkout
         if: inputs.frontend_artifact != ''
         with:
           artifact: ${{ inputs.frontend_artifact }}
@@ -155,7 +155,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ inputs.source_sha }}
-      - uses: ./.github/actions/setup-mango
+      - uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
         if: ${{ !matrix.musl }}
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
@@ -239,7 +239,7 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.source_sha }}
 
-      - uses: ./.github/actions/setup-mango
+      - uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 

@@ -160,7 +160,7 @@ jobs:
 
       - name: Install zig and cargo-zigbuild
         if: runner.os == 'Linux'
-        uses: ./.github/actions/setup-zigbuild
+        uses: ./.github/actions/setup-zigbuild # zizmor: ignore[self-repository] load the action from the selected source checkout
 
       # One cache per platform and profile, shared by callers that opt in.
       # Pull requests restore only their profile but never save one.

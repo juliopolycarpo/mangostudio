@@ -8,7 +8,7 @@ describe('canonical production frontend handoff', () => {
     const ci = readText('.github/workflows/ci.yml');
     expect(extractJobBlock(ci, 'frontend')).toBe('');
     const producer = extractJobBlock(ci, 'build');
-    expect(producer).toContain('uses: ./.github/workflows/build.yml');
+    expect(producer).toContain('uses: $/.github/workflows/build.yml');
     expect(producer).toContain(
       `source_sha: ${'$'}{{ needs.distribution-identity.outputs.source_sha }}`
     );

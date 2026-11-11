@@ -27,7 +27,7 @@ const audit = Bun.YAML.parse(readText('.github/workflows/dependency-audit.yml'))
 describe('mandatory dependency audit', () => {
   test('CI calls the audit once without path, result, or fork conditions', () => {
     const callers = extractJobBlocks(ci).filter(({ block }) =>
-      block.includes('uses: ./.github/workflows/dependency-audit.yml')
+      block.includes('uses: $/.github/workflows/dependency-audit.yml')
     );
     expect(callers.map(({ job }) => job)).toEqual(['dependency-audit']);
     expect(callers[0].block).not.toMatch(/^ {4}(if|needs|continue-on-error):/m);

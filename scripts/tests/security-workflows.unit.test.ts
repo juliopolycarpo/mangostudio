@@ -76,7 +76,7 @@ describe('security workflows', () => {
   test('publish-path distribution downloads require the shipping runtime profile', () => {
     for (const file of ['.github/workflows/release.yml', '.github/workflows/canary.yml']) {
       const downloads = workflowSteps(readText(file)).filter((step) =>
-        step.includes('uses: ./.github/actions/download-distribution')
+        /uses: [.$]\/\.github\/actions\/download-distribution\b/.test(step)
       );
       expect(downloads.length, file).toBeGreaterThan(0);
       for (const step of downloads) {
@@ -93,7 +93,7 @@ describe('security workflows', () => {
       // straddles neighbouring steps, so a call missing the flag could be
       // satisfied by the next call's text.
       const downloads = workflowSteps(readText(file)).filter((step) =>
-        step.includes('uses: ./.github/actions/download-distribution')
+        /uses: [.$]\/\.github\/actions\/download-distribution\b/.test(step)
       );
       expect(downloads.length, file).toBeGreaterThan(0);
       for (const step of downloads) {

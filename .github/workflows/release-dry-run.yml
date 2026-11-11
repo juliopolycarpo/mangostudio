@@ -125,7 +125,7 @@ jobs:
     name: Runtime
     needs: [changes]
     if: needs.changes.outputs.release == 'true' && !inputs.reuse_distribution
-    uses: ./.github/workflows/runtime-build.yml
+    uses: $/.github/workflows/runtime-build.yml
     with:
       version: ${{ needs.changes.outputs.dry_run_version }}
       source_sha: ${{ inputs.source_sha || github.sha }}
@@ -147,7 +147,7 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.source_sha || github.sha }}
 
-      - uses: ./.github/actions/setup-mango
+      - uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
@@ -164,7 +164,7 @@ jobs:
 
       - name: Download immutable Linux distribution
         if: inputs.reuse_distribution
-        uses: ./.github/actions/download-distribution
+        uses: ./.github/actions/download-distribution # zizmor: ignore[self-repository] load the action from the selected source checkout
         with:
           artifact-name: ${{ needs.changes.outputs.linux_artifact }}
           source-sha: ${{ inputs.source_sha }}
@@ -385,7 +385,7 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.source_sha || github.sha }}
 
-      - uses: ./.github/actions/setup-mango
+      - uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
@@ -398,7 +398,7 @@ jobs:
 
       - name: Download immutable Windows distribution
         if: inputs.reuse_distribution
-        uses: ./.github/actions/download-distribution
+        uses: ./.github/actions/download-distribution # zizmor: ignore[self-repository] load the action from the selected source checkout
         with:
           artifact-name: ${{ needs.changes.outputs.windows_artifact }}
           source-sha: ${{ inputs.source_sha }}

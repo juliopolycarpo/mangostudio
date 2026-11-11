@@ -460,7 +460,7 @@ describe('runtime profile callers and cache isolation', () => {
   test('every PR artifact runtime caller explicitly selects the PR profile', () => {
     const callers = workflowFiles().flatMap((path) =>
       extractJobBlocks(readText(path))
-        .filter(({ block }) => block.includes(`uses: ./${RUNTIME_WORKFLOW}`))
+        .filter(({ block }) => block.includes(`uses: $/${RUNTIME_WORKFLOW}`))
         .map(({ job }) => `${path}:${job}`)
     );
     expect(callers.sort(), 'update the profile policy for every new runtime-build caller').toEqual([
@@ -506,7 +506,7 @@ describe('runtime profile callers and cache isolation', () => {
 
   test('publication retains the shipping default and main still needs runtime plus smoke', () => {
     const release = extractJobBlock(readText('.github/workflows/release.yml'), 'build');
-    expect(release).toContain(`uses: ./${DISTRIBUTION_WORKFLOW}`);
+    expect(release).toContain(`uses: $/${DISTRIBUTION_WORKFLOW}`);
     expect(release).not.toContain('runtime_profile:');
     for (const path of [
       '.github/workflows/canary.yml',
@@ -530,7 +530,7 @@ describe('runtime profile callers and cache isolation', () => {
     expect(seed).toContain(
       `if: ${EXPR} !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs['gate-unique'].result == 'success' && needs['distribution-identity'].result == 'success' }}`
     );
-    expect(seed).toContain(`uses: ./${RUNTIME_WORKFLOW}`);
+    expect(seed).toContain(`uses: $/${RUNTIME_WORKFLOW}`);
     for (const input of ['profile: light', 'mode: cache-seed', 'cache: true']) {
       expect(seed, input).toMatch(new RegExp(`^ {6}${input}$`, 'm'));
     }

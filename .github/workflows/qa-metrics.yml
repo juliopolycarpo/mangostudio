@@ -58,7 +58,7 @@ jobs:
           persist-credentials: false
 
       - id: setup
-        uses: ./.github/actions/setup-mango
+        uses: $/.github/actions/setup-mango
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
@@ -66,7 +66,7 @@ jobs:
         name: Download verified canonical frontend
         if: inputs.frontend_artifact != ''
         continue-on-error: true
-        uses: ./.github/actions/download-frontend
+        uses: $/.github/actions/download-frontend
         with:
           artifact: ${{ inputs.frontend_artifact }}
           bun-revision: ${{ inputs.frontend_bun_revision }}
