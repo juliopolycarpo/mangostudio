@@ -59,6 +59,9 @@ jobs:
     runs-on: ubuntu-26.04
     container:
       image: mcr.microsoft.com/playwright:v1.65.0-resolute@sha256:4d70b558dbaff71611b2f3e7a32aa2b4d42cfc892078ad368cb7ea229c2ffd1f
+      # setup-bun extracts its archive with the matching Ubuntu runner's unzip.
+      volumes:
+        - /usr/bin/unzip:/usr/local/bin/unzip:ro
     defaults:
       run:
         shell: bash
