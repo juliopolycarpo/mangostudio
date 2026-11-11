@@ -183,7 +183,7 @@ jobs:
       # its own process and does not run doctests, which stay on `cargo test
       # --doc` below.
       - id: setup-nextest
-        uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.90.0
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: cargo-nextest@0.9.151
         if: ${{ !cancelled() && matrix.os != 'ubuntu-latest' }}
@@ -310,7 +310,7 @@ jobs:
       # Pinned like the workspace job's install: the exact version through the
       # SHA-pinned action, which verifies the release checksum.
       - id: setup-nextest
-        uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.90.0
+        uses: taiki-e/install-action@c509219cf42fba86913069efd0ade2458c59337b # v2.90.1
         with:
           tool: cargo-nextest@0.9.151
         if: ${{ !cancelled() }}
