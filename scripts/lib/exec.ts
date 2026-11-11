@@ -71,10 +71,18 @@ function runsNested(): boolean {
   return nestedRunner;
 }
 
+interface RunCommandOptions {
+  cwd?: string;
+  env?: Record<string, string>;
+  stdin?: 'inherit' | 'ignore';
+  logCommand?: boolean;
+}
+
 /**
  * Spawn a command and resolve once it exits, capturing label/exit code/duration.
  * Pass `stdin: 'inherit'` for interactive children (e.g. Turbo's TUI); it stays
  * 'ignore' by default so parallel fan-out never fights over the terminal.
+ * Set `logCommand: false` when arguments are forwarded verbatim or stdout is structured.
  *
  * At most `MANGO_RUNNER_CONCURRENCY` (default 16) children run at once per
  * process, however many `runParallel` calls are nested; the rest wait for a
@@ -85,7 +93,7 @@ function runsNested(): boolean {
 export async function runCommand(
   label: string,
   cmd: string[],
-  opts?: { cwd?: string; env?: Record<string, string>; stdin?: 'inherit' | 'ignore' }
+  opts?: RunCommandOptions
 ): Promise<RunResult> {
   childSlots ??= new SlotPool(childLimit());
   const releaseSlot = await childSlots.acquire();
@@ -112,13 +120,13 @@ function exitIsComing(): Promise<never> {
 async function spawnAndWait(
   label: string,
   cmd: string[],
-  opts?: { cwd?: string; env?: Record<string, string>; stdin?: 'inherit' | 'ignore' }
+  opts?: RunCommandOptions
 ): Promise<RunResult> {
   if (supervisor.cancelling) await exitIsComing();
   await bindDescendantsToRunner();
 
   const start = performance.now();
-  dim(`  $ ${cmd.join(' ')}`);
+  if (opts?.logCommand !== false) dim(`  $ ${cmd.join(' ')}`);
 
   const mode = supervisionMode(opts?.stdin, process.platform, runsNested());
   const proc = Bun.spawn({

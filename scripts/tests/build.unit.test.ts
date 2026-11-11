@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, relative, sep } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import ts from '@typescript/typescript6';
 
@@ -138,6 +139,109 @@ describe('build script', () => {
     }
   });
 
+  test.each([
+    ['default', [], 'frontend', true],
+    ['directory selector', ['--filter=./apps/frontend', '--json'], 'frontend', true],
+    ['API only', ['--filter=@mangostudio/api'], 'api', false],
+    ['nested cwd', ['--cwd', 'apps', '--filter=@mangostudio/frontend'], 'frontend', true],
+    ['external cwd', ['--cwd=..', '--filter=@mangostudio/frontend'], 'external', false],
+    ['dry run', ['--dry=json', '--filter=@mangostudio/frontend'], 'dry', false],
+    ['graph', ['--graph', '--filter=@mangostudio/frontend'], 'dry', false],
+    ['invalid plan', ['--filter=./does-not-exist'], 'plan-error', false],
+    ['uncacheable checkout', ['--filter=@mangostudio/frontend'], 'uncacheable', false],
+  ] as const)(
+    'only parks frontend outputs for a real cacheable build (%s)',
+    (_, args, scenario, clears) => {
+      const root = mkdtempSync(join(tmpdir(), 'mango-turbo-replay-'));
+      try {
+        const dist = join(root, 'apps/frontend/dist');
+        const metafile = join(root, 'apps/frontend/dist-metafile.json');
+        mkdirSync(dist, { recursive: true });
+        writeFileSync(join(dist, 'stale.js'), 'old');
+        writeFileSync(metafile, 'old');
+        const config = pathToFileURL(join(ROOT_DIR, 'scripts/lib/config.ts')).href;
+        const probe = join(root, 'fake-turbo.ts');
+        writeFileSync(
+          probe,
+          `
+        import { mock } from 'bun:test';
+        import { writeFileSync } from 'node:fs';
+        import { join } from 'node:path';
+        const config = ${JSON.stringify(config)};
+        const originalConfig = await import(config);
+        const root = ${JSON.stringify(root)};
+        const dist = ${JSON.stringify(dist)};
+        const metafile = ${JSON.stringify(metafile)};
+        const scenario = ${JSON.stringify(scenario)};
+        function fakeCheckoutConfig() { return { ...originalConfig, ROOT_DIR: root }; }
+        function fakeFrontendCachePolicy() {
+          return { frontendBuildCacheArguments: () => scenario === 'uncacheable' ? ['--cache=local:,remote:'] : [] };
+        }
+        function runFakeTurbo(input) {
+          const command = Array.isArray(input) ? input : input.cmd;
+          if (command[0] !== 'turbo') throw new Error('expected a Turbo command');
+          const plan = !Array.isArray(input) && input.stdout === 'pipe';
+          if (plan) {
+            writeFileSync(join(root, 'planned'), JSON.stringify(command));
+            if (scenario === 'plan-error') {
+              const diagnostic = 'expected a workspace | received missing directory';
+              return { stdout: new Response('').body, stderr: new Response(diagnostic).body, exited: Promise.resolve(17) };
+            }
+            const packageName = scenario === 'api' ? 'api' : 'frontend';
+            const summary = JSON.stringify({ tasks: [{ taskId: '@mangostudio/' + packageName + '#build', directory: 'apps/' + packageName }] });
+            return { stdout: new Response(summary).body, stderr: new Response('').body, exited: Promise.resolve(0) };
+          }
+          writeFileSync(join(root, 'executed'), JSON.stringify(command));
+          if (scenario === 'frontend') {
+            writeFileSync(join(dist, 'index.html'), 'cached bundle');
+            writeFileSync(metafile, 'cached metadata');
+          }
+          return { pid: 100, exited: Promise.resolve(0), kill() {} };
+        }
+        mock.module(config, fakeCheckoutConfig);
+        mock.module('@mangostudio/shared/frontend-build/host', fakeFrontendCachePolicy);
+        const nativeSpawn = Bun.spawn;
+        Bun.spawn = (input, options) => {
+          const command = Array.isArray(input) ? input : input.cmd;
+          return command[0] === 'turbo' ? runFakeTurbo(input) : nativeSpawn(input, options);
+        };
+      `
+        );
+        const result = Bun.spawnSync(
+          [process.execPath, '--preload', probe, join(ROOT_DIR, 'scripts/build-turbo.ts'), ...args],
+          { cwd: root, stdout: 'pipe', stderr: 'pipe' }
+        );
+        if (scenario === 'plan-error') {
+          expect(result.exitCode, result.stderr.toString()).toBe(17);
+          expect(result.stderr.toString()).toContain('received missing directory');
+          expect(existsSync(join(root, 'executed'))).toBe(false);
+          expect(readFileSync(join(dist, 'stale.js'), 'utf8')).toBe('old');
+          expect(readFileSync(metafile, 'utf8')).toBe('old');
+          return;
+        }
+        expect(result.exitCode, result.stderr.toString()).toBe(0);
+        expect(
+          existsSync(join(dist, 'stale.js')),
+          'expected stale chunk presence after Turbo'
+        ).toBe(!clears);
+        expect(existsSync(join(root, 'planned'))).toBe(
+          scenario === 'frontend' || scenario === 'api'
+        );
+        expect(JSON.parse(readFileSync(join(root, 'executed'), 'utf8'))).toEqual([
+          'turbo',
+          'run',
+          'build',
+          ...args,
+          ...(scenario === 'uncacheable' ? ['--cache=local:,remote:'] : []),
+        ]);
+        expect(readFileSync(metafile, 'utf8')).toBe(clears ? 'cached metadata' : 'old');
+        expect(result.stdout.toString()).toBe('');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    }
+  );
+
   test('exposes explicit root build scripts for turbo and binary packaging', () => {
     const manifest = JSON.parse(readText('package.json')) as {
       scripts?: Record<string, string>;
@@ -170,6 +274,9 @@ describe('build script', () => {
     expect(buildScript).toContain('createTurboBuildCommand');
     expect(buildScript).toMatch(/runCommand\(\s*'build'/);
     expect(buildScript).not.toContain('runParallel(');
+    expect(buildScript).toMatch(
+      /buildsFrontend && cacheArguments.length === 0\s*\? await buildWithCleanFrontendOutputs\(ROOT_DIR, buildWorkspaces\)/
+    );
   });
 
   test('keeps root formatting checks aware of Turbo configuration files', () => {
