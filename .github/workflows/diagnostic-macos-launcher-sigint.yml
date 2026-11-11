@@ -1,0 +1,77 @@
+name: macOS launcher SIGINT diagnostic
+
+on:
+  push:
+    branches: [diagnostic/macos-launcher-sigint]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-launcher-sigint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sample:
+    name: Repeat the launcher signal test with trap and target evidence
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build the locked runtime test binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          diagnostic="$RUNNER_TEMP/launcher-sigint"
+          mkdir -p "$diagnostic"
+          test "$(uname -m)" = arm64
+          {
+            git rev-parse HEAD
+            sw_vers
+            uname -m
+            rustc -Vv
+          } > "$diagnostic/source.txt"
+          cat "$diagnostic/source.txt"
+          cargo test --locked -p mangostudio-runtime --lib --no-run --message-format=json > "$diagnostic/build.jsonl"
+          jq -ers '[.[] | select(.reason=="compiler-artifact" and .target.name=="mangostudio_runtime" and .profile.test and .executable!=null) | .executable] | if length==1 then .[0] else error("expected one runtime lib test binary") end' "$diagnostic/build.jsonl" > "$diagnostic/binary-path"
+
+      - name: Run fresh direct and inherited-ignore test processes
+        shell: bash
+        run: |
+          set -euo pipefail
+          diagnostic="$RUNNER_TEMP/launcher-sigint"
+          binary=$(cat "$diagnostic/binary-path")
+          export diagnostic binary
+          cat > "$diagnostic/sample.sh" <<'SAMPLE'
+          set -u
+          prefix=external_agents::adapter::launcher::tests::unix
+          if test "$1" -le 60; then
+            case_name=interrupt_delivers_sigint_to_a_running_child
+          else
+            case_name=interrupt_reaches_a_child_when_the_runtime_ignores_sigint
+          fi
+          log="$diagnostic/attempt-$1.log"
+          status=0
+          "$binary" --exact "$prefix::$case_name" --nocapture > "$log" 2>&1 || status=$?
+          if test "$status" -eq 0 && ! grep -Fq '1 passed' "$log"; then
+            status=1
+          fi
+          if test "$status" -ne 0; then
+            cat "$log" >&2
+          fi
+          printf '%s %s %s\n' "$1" "$case_name" "$status"
+          SAMPLE
+          seq 1 120 | xargs -P 4 -I '{}' bash "$diagnostic/sample.sh" '{}' | tee "$diagnostic/status.tsv"
+          awk '$3 != 0 { failed++ } END { print NR " attempts, " (failed+0) " failed"; exit !(NR==120 && failed==0) }' "$diagnostic/status.tsv"
+
+      - name: Upload launcher evidence
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: macos-launcher-sigint-diagnostic
+          path: ${{ runner.temp }}/launcher-sigint/
+          if-no-files-found: error
+          retention-days: 3

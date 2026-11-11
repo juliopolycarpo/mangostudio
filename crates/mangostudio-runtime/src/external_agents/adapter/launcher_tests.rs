@@ -357,8 +357,9 @@ mod unix {
     async fn interrupt_delivers_sigint_to_a_running_child() {
         let directory = scratch_dir("agent-launcher-interrupt");
         let ready = directory.join("ready");
+        let trapped = directory.join("trapped");
         let body = format!(
-            "trap 'exit 42' INT\ntouch {}\nwhile :; do sleep 0.05; done",
+            "trap 'echo $$ > ./trapped; exit 42' INT\ntouch {}\nwhile :; do sleep 0.05; done",
             ready.display()
         );
         let program = script(&directory, &body);
@@ -368,12 +369,41 @@ mod unix {
         )
         .await;
         wait_for(&ready).await;
+        let target = process
+            .control
+            .pid()
+            .expect("expected target pid after readiness");
+        let target_pid = nix::unistd::Pid::from_raw(i32::try_from(target).expect("pid fits i32"));
+        let group = nix::unistd::getpgid(Some(target_pid));
         let outcome = process.control.interrupt(CancelReason::Requested).await;
         assert!(
             matches!(outcome, Ok(InterruptOutcome::Delivered)),
             "expected InterruptOutcome::Delivered | received {outcome:?}"
         );
-        let status = wait(&process).await;
+        let status = match tokio::time::timeout(BOUND, process.control.wait()).await {
+            Ok(Ok(status)) => status,
+            received => {
+                let trap_pid = std::fs::read_to_string(&trapped);
+                let census = std::process::Command::new("/bin/ps")
+                    .args(["-o", "pid=,ppid=,pgid=,stat=", "-p", &target.to_string()])
+                    .output()
+                    .map(|output| {
+                        (
+                            output.status,
+                            String::from_utf8_lossy(&output.stdout).into_owned(),
+                        )
+                    });
+                panic!(
+                    "expected launcher exit for target {target}, group {group:?} | received {received:?}; trap marker {trap_pid:?}; native target census {census:?}"
+                );
+            }
+        };
+        let trap_pid = std::fs::read_to_string(&trapped).expect("expected SIGINT trap marker");
+        assert_eq!(trap_pid.trim(), target.to_string());
+        eprintln!(
+            "launcher target {target}, group {group:?}, trap pid {}",
+            trap_pid.trim()
+        );
         assert_eq!(
             status.code,
             Some(42),
