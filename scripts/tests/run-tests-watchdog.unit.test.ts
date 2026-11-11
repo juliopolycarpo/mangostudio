@@ -6,6 +6,8 @@ import { Writable } from 'node:stream';
 
 import { runTestsWithWatchdog, type WatchdogOptions } from '../ci/run-tests-watchdog';
 import { BUN_ORPHAN_POLICY_ENV, fixtureChildEnvironment } from './support/child-supervision';
+import { readWatchdogStrayPid } from './support/fake-watchdog-crash';
+import { forceKill } from './support/process-tree';
 
 /**
  * A sink that accepts every chunk but never synchronously. `highWaterMark: 1`
@@ -860,51 +862,29 @@ describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
     expect(result.exitCode).not.toBe(0);
   });
 
-  // Regression: a crashed main thread's isolate worker could outlive the
-  // attempt and keep running into the retry. The straggler here inherits the
-  // crashed attempt's process group and would write its marker file 500ms
-  // after being spawned unless the group is reaped before the retry starts.
+  // A crashed main thread's isolate worker can outlive the attempt. The
+  // retry checks the first attempt's stray before it performs any other work.
   it("reaps a crashed attempt's process group before retrying", async () => {
     const dir = await makeTemp();
-    const marker = join(dir, 'first-attempt-ran');
-    // A bare relative name, not a path built from `dir`: the watchdog spawns
-    // the attempt with `cwd: dir`, and the stray inherits that same cwd, so
-    // the script text needs no dynamic value interpolated into it at all.
-    const strayMarkerName = 'stray-wrote';
-    const straySurvivalScript =
-      'require("node:fs").writeFileSync("stray-ready", String(process.pid)); ' +
-      'setTimeout(() => require("node:fs").writeFileSync("stray-wrote", ""), 500)';
     const sink = new CaptureSink();
-    const script = `
-      const fs = require("node:fs");
-      const { spawn } = require("node:child_process");
-      if (fs.existsSync(${JSON.stringify(marker)})) {
-        process.exit(0);
-      }
-      fs.writeFileSync(${JSON.stringify(marker)}, "");
-      spawn("bun", ["-e", ${JSON.stringify(straySurvivalScript)}], { stdio: "ignore" }).unref();
-      while (!fs.existsSync("stray-ready")) await Bun.sleep(1);
-      const stray = Number(fs.readFileSync("stray-ready", "utf8"));
-      process.kill(stray, 0);
-      console.log("stray alive before crash");
-      console.log("panic(main thread): abort()");
-      process.exit(134);
-    `;
-
-    // The named stray must outlive the fake crash until the watchdog reaps
-    // its group. Inherited --no-orphans would make that assertion vacuous.
-    const result = await runTestsWithWatchdog(
-      optionsIn(dir, {
-        command: ['bun', '-e', script],
-        retryOnCrash: true,
-        env: fixtureChildEnvironment(),
-        stdout: sink,
-      })
-    );
-
-    expect(result).toMatchObject({ exitCode: 0, attempts: 2 });
-    expect(sink.text()).toContain('stray alive before crash');
-    await Bun.sleep(800);
-    expect(await Bun.file(join(dir, strayMarkerName)).exists()).toBe(false);
+    try {
+      // Inherited --no-orphans would stop the stray before the watchdog acts.
+      const result = await runTestsWithWatchdog(
+        optionsIn(dir, {
+          command: [process.execPath, join(import.meta.dir, 'support/fake-watchdog-crash.ts')],
+          retryOnCrash: true,
+          env: fixtureChildEnvironment(),
+          stdout: sink,
+        })
+      );
+      const stray = readWatchdogStrayPid(dir);
+      expect(stray, 'expected the first attempt to publish its stray PID').toBeDefined();
+      expect(result, sink.text()).toMatchObject({ exitCode: 0, attempts: 2 });
+      expect(sink.text()).toContain(`stray alive before crash: ${stray}`);
+      expect(sink.text()).toContain(`retry observed stopped stray: ${stray}`);
+    } finally {
+      const stray = readWatchdogStrayPid(dir);
+      if (stray !== undefined) forceKill(stray);
+    }
   });
 });
