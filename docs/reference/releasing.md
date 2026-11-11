@@ -261,19 +261,19 @@ vouches for a build that failed.
 The hub uses Bun native AOT; `mangostudio-runtime` is the cargo binary from
 `crates/mangostudio-runtime`. `distribution-build.yml` prepares the frontend and
 binary smoke harness once and calls `.github/workflows/runtime-build.yml` for
-the eight Rust targets. Each native hub producer downloads its matching runtime
-and the prepared frontend, then runs:
+the eight Rust targets. Each native hub producer starts when the prepared
+frontend is ready and runs:
 
 ```bash
-bun run build:binary --platform <matching-host> --runtime-dir .mango/runtime-prebuilt --reuse-frontend
+bun run build:binary --hub-only --platform <matching-host> --reuse-frontend
 ```
 
 Six producers run directly on matching Linux glibc, macOS and Windows x64/arm64
 runners. Two more run in Alpine on matching Linux x64/arm64 runners for musl.
 Bun uses `--aot --trim --format=esm --sourcemap=external` and production
 `--minify`; Elysia AOT is not enabled. A foreign native target fails before
-frontend or runtime work. Shipping builds require native producer records;
-bytecode is an explicit fallback and is never silently substituted.
+frontend or runtime work. Shipping builds require native compiler records.
+Bytecode remains an explicit fallback for standalone builds.
 
 `--reuse-frontend` accepts `apps/frontend/dist/build-info.json` only when both
 the prepared build and checkout are clean, name the same HEAD and use the same
@@ -283,9 +283,14 @@ the same source and lockfile. Native compilation uses the running Bun and its
 runtime; it downloads no cross-target Bun runtime, and `--refresh-runtimes` has
 no effect. `.bun-version` stays on the floating `canary` channel.
 
-The aggregation job verifies the complete target set, source SHA, clean state,
-release version, build mode, common build time, native compiler identity, pair
-checksums and executable headers before packaging. It restores Unix executable
+Each Rust producer records the source SHA, version, Cargo profile, and
+executable digest. When a producer cross-links a runtime, a separate job on
+the matching host runs that runtime's `--version` and records the result
+against the same digest.
+
+The aggregation job downloads both artifact sets, verifies the complete
+target inventory and both receipts for each pair, and checks the executable
+headers before staging the runtimes beside their hubs. It restores Unix executable
 modes to `0755` after artifact transport and writes one common standalone
 README. The existing npm pack, archive, manifest, bundle and attestation steps
 then consume `.mango/out/<platform>/`; archive names and the two-binary layout

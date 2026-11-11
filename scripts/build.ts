@@ -33,7 +33,7 @@ import {
 } from './lib/bun-cross-runtime';
 import { ROOT_DIR, type WorkspaceName } from './lib/config';
 import { writeEmbedModules } from './lib/embed-frontend';
-import { discardHubBuildRecord, writeHubBuildRecord } from './lib/hub-build';
+import { discardHubBuildRecord, writeHubBuildRecord, writeHubCompileRecord } from './lib/hub-build';
 import { preparedFrontendBuildStamp } from './lib/prepared-frontend';
 import { type BinaryTarget, runtimeBinaryName } from './lib/release-targets';
 import { resolveReleaseVersion } from './lib/release-version';
@@ -60,6 +60,7 @@ import { standaloneRunnerScripts } from './lib/standalone-runners';
 interface BinaryBuildOptions {
   buildType: 'production' | 'development';
   compiler: BinaryCompilerMode;
+  hubOnly: boolean;
   reuseFrontend: boolean;
   dryRun: boolean;
   onlyPlatform?: string;
@@ -95,6 +96,7 @@ Workspace flags:
 Binary flags:
   --binary            Build standalone binaries into .mango/out
   --compiler <mode>   native (default, host target only) or bytecode (cross-compilation fallback)
+  --hub-only          Compile a native hub and write its compiler receipt for later pairing
   --reuse-frontend    Use the current source's prepared frontend and build stamp
   --platform <id>     Limit binary output to one target (example: linux-x64)
   --runtime-dir <dir> Stage prebuilt cargo runtimes from <dir>/<platform-id>/ (env: RUNTIME_DIR);
@@ -292,7 +294,7 @@ async function buildStandaloneTarget(
     buildInfo: BuildStamp;
     outDir: string;
     crossRuntimeChannel: string | null;
-    runtimeSource: RuntimeSource;
+    runtimeSource?: RuntimeSource;
   }
 ): Promise<boolean> {
   const platformOutDir = join(context.outDir, target.arch);
@@ -301,6 +303,7 @@ async function buildStandaloneTarget(
   const binaryPath = join(platformOutDir, target.name);
   const runtimeName = runtimeBinaryName(target.name);
   const runtimePath = join(platformOutDir, runtimeName);
+  const { runtimeSource } = context;
   if (!options.dryRun) discardHubBuildRecord(ROOT_DIR, target.arch);
 
   console.log(`🔨 Building for ${target.arch} (${target.target}) → ${binaryPath}`);
@@ -308,11 +311,13 @@ async function buildStandaloneTarget(
   if (options.dryRun) {
     console.log(`   (dry run) Would compile for ${target.target}`);
     console.log(`✅ Successfully built ${target.name} for ${target.arch} (dry run)`);
-    console.log(
-      context.runtimeSource.kind === 'prebuilt'
-        ? `✅ Would stage ${runtimeName} for ${target.arch} from ${context.runtimeSource.path} (dry run)`
-        : `✅ Would stage ${runtimeName} for ${target.arch} from \`${context.runtimeSource.command.join(' ')}\` (dry run)`
-    );
+    if (runtimeSource) {
+      console.log(
+        runtimeSource.kind === 'prebuilt'
+          ? `✅ Would stage ${runtimeName} for ${target.arch} from ${runtimeSource.path} (dry run)`
+          : `✅ Would stage ${runtimeName} for ${target.arch} from \`${runtimeSource.command.join(' ')}\` (dry run)`
+      );
+    }
     return true;
   }
 
@@ -342,13 +347,14 @@ async function buildStandaloneTarget(
         ...context,
         crossRuntimePath,
       }),
-      stageRuntime(target, context.runtimeSource, runtimePath, options.version),
+      runtimeSource ? stageRuntime(target, runtimeSource, runtimePath, options.version) : true,
     ]);
     if (compiled.some((succeeded) => !succeeded)) {
       return false;
     }
 
-    writeHubBuildRecord(ROOT_DIR, {
+    const writeReceipt = runtimeSource ? writeHubBuildRecord : writeHubCompileRecord;
+    writeReceipt(ROOT_DIR, {
       target: target.arch,
       compilerMode: options.compiler,
       sourceSha: (await captureGitValue(['rev-parse', 'HEAD'])) ?? 'unknown',
@@ -509,7 +515,9 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
 
   // Resolved before anything is built: a target with no runtime to ship
   // fails in seconds, not after the frontend and every hub have compiled.
-  const runtimeSources = resolveRuntimeSources(targets, options.runtimeDir);
+  const runtimeSources = options.hubOnly
+    ? null
+    : resolveRuntimeSources(targets, options.runtimeDir);
 
   const outDir = join(ROOT_DIR, '.mango', 'out');
   let apiSource = join(ROOT_DIR, 'apps/api/src/index.ts');
@@ -596,7 +604,7 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
     );
   }
 
-  await buildHostRuntimes(runtimeSources, options);
+  if (runtimeSources) await buildHostRuntimes(runtimeSources, options);
 
   console.log(`🎯 Building executables for ${targets.length} platform(s)`);
 
@@ -608,7 +616,7 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
         buildInfo,
         outDir,
         crossRuntimeChannel,
-        runtimeSource: runtimeSources.get(target.arch) as RuntimeSource,
+        runtimeSource: runtimeSources?.get(target.arch),
       })
     )
   );
@@ -629,6 +637,7 @@ async function buildStandaloneBinary(options: BinaryBuildOptions): Promise<void>
     process.exit(1);
   }
 
+  if (options.hubOnly) return;
   await writeStandaloneArtifacts(options, targets, buildTime, outDir);
 
   console.log('🎉 Build completed successfully!');
@@ -646,6 +655,7 @@ const { workspaces, flags, values, positional, usedDefaultSelection } = parseArg
     '--dry-run',
     '--refresh-runtimes',
     '--reuse-frontend',
+    '--hub-only',
   ],
   valueFlags: ['--platform', '--runtime-dir', '--compiler'],
 });
@@ -660,6 +670,7 @@ const isBinaryBuild = flags['--binary'] ?? false;
 const isProductionBuild = flags['--production'] ?? false;
 const isDevelopmentBuild = flags['--development'] ?? false;
 const refreshRuntimes = flags['--refresh-runtimes'] ?? false;
+const hubOnly = flags['--hub-only'] ?? false;
 const defaultBuildWorkspaces: WorkspaceName[] = ['frontend'];
 
 if (isProductionBuild && isDevelopmentBuild) {
@@ -671,13 +682,14 @@ if (
   (isProductionBuild ||
     isDevelopmentBuild ||
     refreshRuntimes ||
+    hubOnly ||
     flags['--reuse-frontend'] ||
     values['--platform'] ||
     values['--runtime-dir'] ||
     values['--compiler'])
 ) {
   fatal(
-    '`--platform`, `--runtime-dir`, `--compiler`, `--production`, `--development`, `--refresh-runtimes`, and `--reuse-frontend` require `--binary`.'
+    '`--platform`, `--runtime-dir`, `--compiler`, `--production`, `--development`, `--refresh-runtimes`, `--reuse-frontend`, and `--hub-only` require `--binary`.'
   );
 }
 
@@ -691,9 +703,16 @@ if (isBinaryBuild) {
     fatal(caught instanceof Error ? caught.message : String(caught));
   }
 
+  if (hubOnly && (compiler !== 'native' || values['--runtime-dir'])) {
+    fatal(
+      `expected --hub-only with native compiler and no --runtime-dir | received: compiler=${compiler}, runtime-dir=${values['--runtime-dir'] ?? '(none)'}`
+    );
+  }
+
   await buildStandaloneBinary({
     buildType: isDevelopmentBuild ? 'development' : 'production',
     compiler,
+    hubOnly,
     reuseFrontend: flags['--reuse-frontend'] ?? false,
     dryRun: flags['--dry-run'] ?? process.env.DRY_RUN === '1',
     onlyPlatform: values['--platform'] ?? process.env.ONLY_PLATFORM,

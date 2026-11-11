@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -12,9 +13,11 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { HubBuildRecord } from '../lib/hub-build';
+import { type HubBuildRecord, readHubBuildRecords } from '../lib/hub-build';
 import { assembleNativeHubs } from '../lib/native-hub-assembly';
 import { ALL_BINARY_TARGETS, type BinaryTarget, runtimeBinaryName } from '../lib/release-targets';
+import { type RuntimeArtifactIdentity, writeRuntimeArtifactReceipt } from '../lib/runtime-artifact';
+import { prebuiltRuntimePath } from '../lib/runtime-build';
 import { fakeElf, fakeMachO, fakePe } from './support/executable-fixtures';
 
 let root: string;
@@ -72,6 +75,50 @@ beforeEach(() => {
 
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
+function stageSplitInputs(profile: RuntimeArtifactIdentity['profile']) {
+  const runtimeDir = join(root, '.mango/runtime-prebuilt');
+  const versionReceiptsDir = join(root, '.mango/runtime-versions');
+  const compileDir = join(root, '.mango/hub-compiles');
+  mkdirSync(compileDir, { recursive: true });
+  mkdirSync(versionReceiptsDir, { recursive: true });
+  for (const target of ALL_BINARY_TARGETS) {
+    const paired = join(root, '.mango/hub-builds', `${target.arch}.json`);
+    const { runtimeSha256, runtimeSize, ...compile } = JSON.parse(
+      readFileSync(paired, 'utf8')
+    ) as HubBuildRecord;
+    rmSync(paired);
+    writeFileSync(join(compileDir, `${target.arch}.json`), JSON.stringify(compile));
+    const staged = join(runtimeDir, target.arch);
+    mkdirSync(staged, { recursive: true });
+    renameSync(
+      join(root, '.mango/out', target.arch, runtimeBinaryName(target.name)),
+      prebuiltRuntimePath(runtimeDir, target)
+    );
+    const cross = target.arch === 'windows-arm64';
+    writeRuntimeArtifactReceipt(
+      runtimeDir,
+      target,
+      { ...identity, profile },
+      cross ? null : identity.version
+    );
+    if (cross) {
+      writeFileSync(
+        join(versionReceiptsDir, `${target.arch}.json`),
+        JSON.stringify({
+          schemaVersion: 1,
+          target: target.arch,
+          ...identity,
+          profile,
+          sha256: runtimeSha256,
+          size: runtimeSize,
+          reportedVersion: identity.version,
+        })
+      );
+    }
+  }
+  return { runtimeDir, versionReceiptsDir, profile };
+}
+
 describe('assembleNativeHubs', () => {
   test('restores Unix executable modes after raw artifact transport and writes one complete README', () => {
     const records = assembleNativeHubs(root, identity);
@@ -108,5 +155,51 @@ describe('assembleNativeHubs', () => {
       'expected 8 distinct native hub targets'
     );
     expect(existsSync(readme)).toBe(false);
+  });
+
+  test.each(['shipping', 'light'] as const)(
+    'pairs all compiler and runtime inputs with the expected %s profile',
+    (profile) => {
+      const inputs = stageSplitInputs(profile);
+      const records = assembleNativeHubs(root, identity, inputs);
+      expect(records).toHaveLength(ALL_BINARY_TARGETS.length);
+      expect(readHubBuildRecords(root)).toEqual(records);
+      expect(new Set(records.map(({ compilerRevision }) => compilerRevision)).size).toBe(8);
+      expect(readFileSync(join(root, '.mango/out/README.md'), 'utf8')).toContain(identity.version);
+    }
+  );
+
+  test('refuses missing native version evidence before staging any runtime', () => {
+    const inputs = stageSplitInputs('shipping');
+    rmSync(join(inputs.versionReceiptsDir, 'windows-arm64.json'));
+    const readme = join(root, '.mango/out/README.md');
+    writeFileSync(readme, 'old successful build');
+    expect(() => assembleNativeHubs(root, identity, inputs)).toThrow(
+      'expected windows-arm64 runtime version receipt'
+    );
+    expect(existsSync(readme)).toBe(false);
+    expect(readHubBuildRecords(root)).toEqual([]);
+    expect(existsSync(join(root, '.mango/out/linux-x64/mangostudio-runtime'))).toBe(false);
+  });
+
+  test('rejects a native version receipt for a different binary', () => {
+    const inputs = stageSplitInputs('shipping');
+    const path = join(inputs.versionReceiptsDir, 'windows-arm64.json');
+    const receipt = JSON.parse(readFileSync(path, 'utf8'));
+    writeFileSync(path, JSON.stringify({ ...receipt, sha256: 'c'.repeat(64) }));
+    expect(() => assembleNativeHubs(root, identity, inputs)).toThrow(
+      'expected windows-arm64 runtime:'
+    );
+    expect(readHubBuildRecords(root)).toEqual([]);
+  });
+
+  test('rejects a cross runtime with a receipt that reports no executed version', () => {
+    const inputs = stageSplitInputs('shipping');
+    const path = join(inputs.versionReceiptsDir, 'windows-arm64.json');
+    const receipt = JSON.parse(readFileSync(path, 'utf8'));
+    writeFileSync(path, JSON.stringify({ ...receipt, reportedVersion: null }));
+    expect(() => assembleNativeHubs(root, identity, inputs)).toThrow(
+      'expected windows-arm64 runtime reportedVersion: 1.0.0 | received: null'
+    );
   });
 });

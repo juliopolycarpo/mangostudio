@@ -10,12 +10,14 @@
 import { chmodSync, copyFileSync, mkdirSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
 
-import { assertNoUnexpectedArguments, fatal, parseArgs } from './lib/args';
+import { assertNoUnexpectedArguments, fatal, parseArgs, requiredEnv } from './lib/args';
 import { ROOT_DIR } from './lib/config';
-import { runCommand } from './lib/exec';
+import { parseRuntimeProfile } from './lib/distribution-manifest';
+import { captureCommand, runCommand } from './lib/exec';
 import { header, log, success } from './lib/log';
 import type { BinaryTarget } from './lib/release-targets';
 import { resolveReleaseVersion } from './lib/release-version';
+import { type RuntimeArtifactIdentity, writeRuntimeArtifactReceipt } from './lib/runtime-artifact';
 import {
   cargoRuntimeBuildCommand,
   cargoRuntimeOutputPath,
@@ -41,13 +43,20 @@ Flags:
   --rustup          Install each target's Rust standard library first (rustup target add)
   --dev             Stamp the runtime \`dev\`, the version a source checkout's hub accepts
   --out <dir>       Output directory (default: .mango/runtime)
+  --artifact-profile <profile>  Record a verified artifact for a clean checkout at SOURCE_SHA
   --help            Show this help message`);
   process.exit(0);
 }
 
 async function buildOne(
   target: BinaryTarget,
-  context: { outDir: string; version: string; zig: boolean; rustup: boolean }
+  context: {
+    outDir: string;
+    version: string;
+    zig: boolean;
+    rustup: boolean;
+    artifact?: RuntimeArtifactIdentity;
+  }
 ): Promise<void> {
   const command = cargoRuntimeBuildCommand(target.arch, { zig: context.zig });
   header(`Runtime ${target.arch} (${command.at(-1)})`);
@@ -84,6 +93,9 @@ async function buildOne(
     fatal(`Runtime ${target.arch} failed verification:\n  ${verification.problems.join('\n  ')}`);
   }
   const { header: found, reportedVersion } = verification;
+  if (context.artifact) {
+    writeRuntimeArtifactReceipt(context.outDir, target, context.artifact, reportedVersion);
+  }
   log(
     `  ${staged}: ${found?.format} ${found?.arch}${
       found?.maxGlibc ? `, max GLIBC_${found.maxGlibc}` : ''
@@ -96,16 +108,43 @@ async function buildOne(
 if (import.meta.main) {
   const { flags, values, positional } = parseArgs({
     booleanFlags: ['--zig', '--rustup', '--dev'],
-    valueFlags: ['--platform', '--os', '--out'],
+    valueFlags: ['--platform', '--os', '--out', '--artifact-profile'],
   });
   if (flags['--help']) printHelp();
   assertNoUnexpectedArguments(positional);
 
   let targets: BinaryTarget[];
   let version: string;
+  let artifact: RuntimeArtifactIdentity | undefined;
   try {
     targets = selectRuntimeTargets(values['--platform'], values['--os']);
     version = runtimeBuildVersion({ dev: flags['--dev'] ?? false }, resolveReleaseVersion);
+    const profile = values['--artifact-profile'];
+    if (profile !== undefined) {
+      const sourceSha = requiredEnv('SOURCE_SHA');
+      const checkout = await captureCommand(['git', 'rev-parse', 'HEAD'], { cwd: ROOT_DIR });
+      if (
+        checkout.exitCode !== 0 ||
+        !/^[a-f\d]{40}$/.test(sourceSha) ||
+        checkout.stdout.trim() !== sourceSha
+      ) {
+        throw new Error(
+          `expected runtime checkout: full SOURCE_SHA ${sourceSha} | received: ${checkout.stdout.trim() || checkout.stderr.trim()}`
+        );
+      }
+      const status = await captureCommand(
+        ['git', 'status', '--porcelain', '--untracked-files=normal'],
+        {
+          cwd: ROOT_DIR,
+        }
+      );
+      if (status.exitCode !== 0 || status.stdout.trimEnd()) {
+        throw new Error(
+          `expected clean runtime checkout for SOURCE_SHA ${sourceSha} | received: ${status.stdout.trimEnd() || status.stderr.trim() || `git status exit ${status.exitCode}`}`
+        );
+      }
+      artifact = { sourceSha, version, profile: parseRuntimeProfile(profile) };
+    }
   } catch (caught) {
     fatal(caught instanceof Error ? caught.message : String(caught));
   }
@@ -119,6 +158,7 @@ if (import.meta.main) {
       version,
       zig: flags['--zig'] ?? false,
       rustup: flags['--rustup'] ?? false,
+      artifact,
     });
   }
   success(`Built ${targets.length} runtime(s) at v${version} into ${outDir}`);

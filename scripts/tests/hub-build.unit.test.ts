@@ -9,8 +9,10 @@ import {
   type HubBuildRecord,
   parseHubBuildRecord,
   readHubBuildRecords,
+  readHubCompileRecord,
   validateNativeHubSet,
   writeHubBuildRecord,
+  writeHubCompileRecord,
 } from '../lib/hub-build';
 import { ALL_BINARY_TARGETS, runtimeBinaryName } from '../lib/release-targets';
 import { renderStandaloneReadme } from '../lib/standalone-readme';
@@ -148,4 +150,39 @@ test('common distribution README lists all verified targets and build identity',
   expect(text).toContain('Version 1.0.0');
   expect(text).toContain(`Build time: ${record.builtAt}`);
   expect(text).toContain('Build type: production');
+});
+
+test('compiler receipts bind the native hub before a runtime exists', () => {
+  const target = ALL_BINARY_TARGETS.find((candidate) => candidate.arch === 'linux-x64');
+  if (!target) throw new Error('expected linux-x64 release target');
+  const root = mkdtempSync(join(tmpdir(), 'hub-compile-record-'));
+  try {
+    const directory = join(root, '.mango/out', target.arch);
+    mkdirSync(directory, { recursive: true });
+    const binary = join(directory, target.name);
+    const bytes = fakeElf({
+      arch: 'x64',
+      interpreter: '/lib64/ld-linux-x86-64.so.2',
+      strings: ['GLIBC_2.17'],
+    });
+    writeFileSync(binary, bytes);
+    const compiled = writeHubCompileRecord(root, {
+      target: target.arch,
+      compilerMode: 'native',
+      sourceSha: record.sourceSha,
+      gitDirty: false,
+      version: record.version,
+      buildType: 'production',
+      builtAt: record.builtAt,
+    });
+    expect(readHubCompileRecord(root, target)).toEqual(compiled);
+    expect(compiled).not.toHaveProperty('runtimeSha256');
+    expect(readHubBuildRecords(root)).toEqual([]);
+    writeFileSync(binary, fakeMachO('x64'));
+    expect(() => readHubCompileRecord(root, target)).toThrow('expected linux-x64/mangostudio:');
+    discardHubBuildRecord(root, target.arch);
+    expect(existsSync(join(root, '.mango/hub-compiles/linux-x64.json'))).toBe(false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
