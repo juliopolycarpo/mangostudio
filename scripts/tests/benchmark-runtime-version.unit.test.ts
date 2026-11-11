@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { chmod, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -14,6 +15,7 @@ import {
   snapshotNativeProcesses,
 } from '../lib/native-bun-qualification-process';
 import { fixtureChildEnvironment } from './support/child-supervision';
+import { waitFor } from './support/process-tree';
 
 async function retainedFailure(
   promise: Promise<string>,
@@ -84,6 +86,42 @@ function receipt(): NativeCommandReceipt {
   };
 }
 
+// The isolated home is assigned by the supervisor before the fixture writes its marker.
+async function waitForVersionFixturePid(resolveHome: () => string): Promise<number> {
+  let contents: string | undefined;
+  const ready = await waitFor(() => {
+    const home = resolveHome();
+    if (!home) return false;
+    try {
+      contents = readFileSync(join(home, 'started'), 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      return false;
+    }
+    return /^[1-9]\d*$/.test(contents) && Number.isSafeInteger(Number(contents));
+  }, 3_000);
+  if (!ready)
+    throw new Error(
+      `runtime version start marker: expected a positive PID | received: ${JSON.stringify(contents)}`
+    );
+  return Number(contents);
+}
+
+test('waits for a PID when the version fixture start marker is initially empty', async () => {
+  const fixture = await mkdtemp(join(tmpdir(), 'runtime-version-marker-test-'));
+  const marker = join(fixture, 'started');
+  try {
+    await Bun.write(marker, '');
+    const [pid] = await Promise.all([
+      waitForVersionFixturePid(() => fixture),
+      Bun.write(marker, '42'),
+    ]);
+    expect(pid).toBe(42);
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});
+
 describe('runtime version ownership', () => {
   test.skipIf(process.platform === 'win32')(
     'real fast command returns version after direct exit and empty scope',
@@ -118,14 +156,7 @@ describe('runtime version ownership', () => {
       });
       let failure: RuntimeVersionError | undefined;
       try {
-        const deadline = Date.now() + 3000;
-        while (
-          (!home || !(await Bun.file(join(home, 'started')).exists())) &&
-          Date.now() < deadline
-        )
-          await Bun.sleep(10);
-        expect(home && (await Bun.file(join(home, 'started')).exists())).toBe(true);
-        expect(Number(await Bun.file(join(home, 'started')).text())).toBeGreaterThan(0);
+        await waitForVersionFixturePid(() => home);
         controller.abort(new Error('test cancellation'));
         failure = await retainedFailure(pending);
         expect(failure.safeToRemove).toBe(false);
