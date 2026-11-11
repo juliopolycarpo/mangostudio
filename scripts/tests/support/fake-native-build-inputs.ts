@@ -12,9 +12,11 @@ const SOURCE_SHA = 'abcdef0123456789abcdef0123456789abcdef01';
 export class FakeNativeBuildInputs {
   readonly root = mkdtempSync(join(tmpdir(), 'native-build-command-'));
   readonly command = join(this.root, 'scripts/lib/build.mjs');
+  readonly runtimeCommand = join(this.root, 'scripts/lib/build-runtime.mjs');
   readonly fakeBin = join(this.root, 'fake-bin');
   readonly runtime = join(this.root, 'fake-runtime');
   readonly version = '1.2.3';
+  readonly sourceSha = SOURCE_SHA;
 
   constructor(readonly platform: ReleasePlatformId) {}
 
@@ -64,7 +66,7 @@ export class FakeNativeBuildInputs {
     this.write('fake-bin/bun', '#!/bin/sh\necho "unexpected PATH compiler" >&2\nexit 91\n', true);
     this.write(
       'fake-bin/git',
-      `#!/bin/sh\ncase "$*" in\n  'rev-parse HEAD') echo '${SOURCE_SHA}';;\n  'rev-parse --short=12 HEAD') echo '${SOURCE_SHA.slice(0, 12)}';;\n  'status --porcelain') exit 0;;\n  *) echo "unexpected fake git arguments: $*" >&2; exit 92;;\nesac\n`,
+      `#!/bin/sh\ncase "$*" in\n  'rev-parse HEAD') echo '${SOURCE_SHA}';;\n  'rev-parse --short=12 HEAD') echo '${SOURCE_SHA.slice(0, 12)}';;\n  'status --porcelain') exit 0;;\n  'status --porcelain --untracked-files=normal') printf '%s' "$NATIVE_BUILD_FAKE_GIT_STATUS";;\n  *) echo "unexpected fake git arguments: $*" >&2; exit 92;;\nesac\n`,
       true
     );
     this.write(
@@ -92,43 +94,62 @@ export class FakeNativeBuildInputs {
       throw new Error(
         `expected fake runtime compile exit 0 | received: ${compiled.exitCode} ${compiled.stderr.toString()}`
       );
+    await this.bundleCommand('scripts/build.ts', 'build.mjs');
+  }
+
+  private async bundleCommand(entrypoint: string, name: string): Promise<void> {
     const bundle = await Bun.build({
-      entrypoints: [join(ROOT_DIR, 'scripts/build.ts')],
+      entrypoints: [join(ROOT_DIR, entrypoint)],
       outdir: dirname(this.command),
-      naming: 'build.mjs',
+      naming: name,
       target: 'bun',
       format: 'esm',
       packages: 'bundle',
     });
     if (!bundle.success)
       throw new Error(
-        `expected packaging CLI bundle | received: ${bundle.logs.map((message) => message.message).join('\n')}`
+        `expected ${entrypoint} CLI bundle | received: ${bundle.logs.map((message) => message.message).join('\n')}`
       );
   }
 
-  /** Run packaging with PATH compiler shadowed and all runtime outputs inside the fixture. @example fake.run(); */
-  run() {
+  /** Run packaging with PATH compiler shadowed and all runtime outputs inside the fixture. @example fake.run(['--hub-only']); */
+  run(extraArgs: readonly string[] = []) {
+    return this.invoke(this.command, [
+      '--binary',
+      '--reuse-frontend',
+      '--platform',
+      this.platform,
+      ...extraArgs,
+    ]);
+  }
+
+  /** Run the real runtime CLI against a named checkout status and fake Cargo. @example await fake.runRuntimeBuild(['--artifact-profile', 'shipping']); */
+  async runRuntimeBuild(extraArgs: readonly string[], gitStatus = '') {
+    await this.bundleCommand('scripts/build-runtime.ts', 'build-runtime.mjs');
+    return this.invoke(this.runtimeCommand, ['--platform', this.platform, ...extraArgs], gitStatus);
+  }
+
+  private invoke(command: string, args: readonly string[], gitStatus = '') {
     const target = ALL_BINARY_TARGETS.find((candidate) => candidate.arch === this.platform);
     if (!target) throw new Error(`expected release platform | received: ${this.platform}`);
-    return Bun.spawnSync(
-      [process.execPath, this.command, '--binary', '--reuse-frontend', '--platform', this.platform],
-      {
-        cwd: this.root,
-        stdout: 'pipe',
-        stderr: 'pipe',
-        timeout: 30000,
-        env: {
-          ...process.env,
-          PATH: `${this.fakeBin}:${process.env.PATH ?? ''}`,
-          VERSION: this.version,
-          CARGO_TARGET_DIR: join(this.root, 'target'),
-          RUNTIME_DIR: '',
-          DRY_RUN: '',
-          NATIVE_BUILD_FAKE_RUNTIME: this.runtime,
-          NATIVE_BUILD_FAKE_TARGET: cargoRuntimeOutputPath(join(this.root, 'target'), target),
-        },
-      }
-    );
+    return Bun.spawnSync([process.execPath, command, ...args], {
+      cwd: this.root,
+      stdout: 'pipe',
+      stderr: 'pipe',
+      timeout: 30000,
+      env: {
+        ...process.env,
+        PATH: `${this.fakeBin}:${process.env.PATH ?? ''}`,
+        VERSION: this.version,
+        SOURCE_SHA: this.sourceSha,
+        CARGO_TARGET_DIR: join(this.root, 'target'),
+        RUNTIME_DIR: '',
+        DRY_RUN: '',
+        NATIVE_BUILD_FAKE_RUNTIME: this.runtime,
+        NATIVE_BUILD_FAKE_GIT_STATUS: gitStatus,
+        NATIVE_BUILD_FAKE_TARGET: cargoRuntimeOutputPath(join(this.root, 'target'), target),
+      },
+    });
   }
 
   /** Remove only the fixture's temporary inputs and outputs. @example fake.dispose(); */

@@ -412,6 +412,7 @@ describe('release workflow binary gate', () => {
     const prepare = extractJobBlock(workflow, 'prepare');
     const hub = extractJobBlock(workflow, 'hub');
     const build = extractJobBlock(workflow, 'build');
+    const runtimeVersion = extractJobBlock(workflow, 'runtime-version');
     expect(prepare).toContain('bun run build --frontend');
     expect(prepare).toContain('bun ./scripts/release/bundle-binary-smoke.ts');
     expect(prepare).toContain('include-hidden-files: true');
@@ -432,23 +433,38 @@ describe('release workflow binary gate', () => {
       );
     }
     expect(workflow.match(/bun run build --frontend/g)).toHaveLength(1);
-    for (const job of [prepare, hub, build]) {
+    for (const job of [prepare, hub, build, runtimeVersion]) {
       expect(job).toContain('ref: $' + '{{ inputs.source_sha }}');
     }
-    expect(hub).toContain('needs: [prepare, runtime]');
+    expect(hub).toContain('needs: [prepare]');
     expect(hub).toContain('include-hidden-files: true');
-    expect(hub).toContain('path: .mango/runtime-prebuilt');
-    expect(hub).toContain('.mango/hub-builds/$' + '{{ matrix.platform }}.json');
+    expect(hub).not.toContain('.mango/runtime-prebuilt');
+    expect(hub).toContain('.mango/hub-compiles/$' + '{{ matrix.platform }}.json');
     const install = extractStepBlocks(hub).find((step) => step.includes('actions/setup-mango'));
     expect(install).toContain('if: $' + '{{ !matrix.musl }}');
     expect(hub).toContain('runs-on: $' + '{{ matrix.runner }}');
-    expect(hub).toContain(
-      'name: runtime-$' + '{{ inputs.source_sha }}-$' + '{{ matrix.platform }}'
-    );
+    expect(hub.match(/--hub-only/g)).toHaveLength(2);
     expect(hub).toContain('--reuse-frontend');
     expect(hub).toContain('oven/bun:$' + '{BUN_CHANNEL}-alpine');
     expect(hub).toContain('bun install --frozen-lockfile');
-    expect(build).toContain('needs: [hub]');
+    expect(build).toContain('needs: [hub, runtime, runtime-version]');
+    expect(build).toContain('path: .mango/runtime-prebuilt');
+    expect(build).toContain('path: .mango/runtime-versions');
+    expect(extractJobBlock(workflow, 'runtime')).toContain('record_receipts: true');
+    expect(runtimeVersion).toContain('needs: [runtime]');
+    expect(runtimeVersion).toContain('bun --no-install ./scripts/release/verify-native-runtime.ts');
+    const crossTargets = [
+      'linux-arm64',
+      'linux-arm64-musl',
+      'darwin-x64',
+      'windows-arm64',
+    ] as const;
+    expect(runtimeVersion.match(/- platform:/g)).toHaveLength(crossTargets.length);
+    for (const platform of crossTargets) {
+      expect(runtimeVersion).toContain(
+        `platform: ${platform}\n            runner: ${runners[platform]}`
+      );
+    }
     const preparedInputs = extractStepBlocks(build).find((step) =>
       step.includes('name: Download prepared frontend')
     );
@@ -490,27 +506,39 @@ describe('release workflow binary gate', () => {
     );
   });
 
-  test('native producers stage matching cargo runtimes before one packaging job assembles pairs', () => {
+  test('a matching-host runtime probe can replace its receipt on a job retry', () => {
     const workflow = readText('.github/workflows/distribution-build.yml');
-    const build = extractJobBlock(workflow, 'build');
+    const probe = extractJobBlock(workflow, 'runtime-version');
+    const upload = extractStepBlocks(probe).find((step) =>
+      step.includes('name: Upload the native runtime version receipt')
+    );
+    expect(upload, 'expected the runtime version receipt upload').toBeDefined();
+    expect(upload).toContain('uses: actions/upload-artifact@');
+    expect(upload).toContain(
+      'name: runtime-version-$' + '{{ inputs.source_sha }}-$' + '{{ matrix.platform }}'
+    );
+    expect(upload, 'expected the source-and-platform receipt to be replaceable on retry').toContain(
+      'overwrite: true'
+    );
+  });
+
+  test('the runtime producer records one receipt per target for distribution pairing', () => {
+    const workflow = readText('.github/workflows/distribution-build.yml');
     const runtime = readText('.github/workflows/runtime-build.yml');
 
     expect(extractJobBlock(workflow, 'runtime')).toContain(
       'uses: $/.github/workflows/runtime-build.yml'
     );
-    expect(build).toMatch(/\n {4}needs: \[hub\]\n/);
-    expect(build).toContain('pattern: native-hub-$' + '{{ inputs.source_sha }}-*');
-    expect(build).toContain('bun ./scripts/release/assemble-native-hubs.ts');
-    const hub = extractJobBlock(workflow, 'hub');
-    expect(hub).toContain(
-      'name: runtime-$' + '{{ inputs.source_sha }}-$' + '{{ matrix.platform }}'
-    );
-    expect(hub).toContain('--runtime-dir .mango/runtime-prebuilt --reuse-frontend');
 
     // Every release target is in the default matrix, each leg builds exactly
     // one, and zig is fetched only against a pinned checksum.
     for (const target of ALL_BINARY_TARGETS) expect(runtime).toContain(`"${target.arch}"`);
-    expect(runtime).toContain('bun --no-install ./scripts/build-runtime.ts --platform "$PLATFORM"');
+    expect(runtime).toContain('args=(--platform "$PLATFORM" --zig --rustup');
+    expect(runtime).toContain('args+=(--artifact-profile "$ARTIFACT_PROFILE")');
+    expect(runtime).toContain(
+      "inputs.mode == 'artifact' && inputs.record_receipts && inputs.profile"
+    );
+    expect(runtime).toContain('bun --no-install ./scripts/build-runtime.ts "$' + '{args[@]}"');
     expect(runtime).toContain('uses: ./.github/actions/setup-zigbuild');
     const zigbuild = readText('.github/actions/setup-zigbuild/action.yml');
     expect(zigbuild).toMatch(/ZIG_SHA256: [0-9a-f]{64}\n/);
