@@ -43,7 +43,7 @@ describe('browser smoke setup', () => {
 
     expect(setupIndex).toBeGreaterThan(-1);
     expect(runIndex).toBeGreaterThan(setupIndex);
-    expect(workflow).toContain('runs-on: ubuntu-24.04');
+    expect(workflow).toContain('runs-on: ubuntu-26.04');
     expect(workflow).toContain('bunx playwright install-deps chromium');
     expect(workflow).not.toContain('npx playwright');
   });

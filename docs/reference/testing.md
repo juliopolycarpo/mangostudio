@@ -1190,7 +1190,7 @@ installation and runtime-artifact policies.
 
 Run `bun run test:e2e:setup` once on a new machine or whenever Playwright reports a missing Chromium binary. It wraps `bunx playwright install --with-deps chromium`, so it installs only the browser used by this suite and avoids `npx` commands.
 
-The CI browser-smoke job runs on `ubuntu-24.04` because Playwright 1.60 cannot install Chromium dependencies on Ubuntu 26.04 yet. If you are on Ubuntu 26.04 locally, use an Ubuntu 24.04/22.04 container or VM for the e2e lane until upstream support lands.
+The CI browser smoke jobs run on Ubuntu 26.04 x64. The same setup command installs Chromium and its system dependencies on Ubuntu 26.04 locally.
 
 `playwright.config.ts` at the repo root starts the hub via `webServer` before running tests. In CI it enforces `workers: 1` and uploads traces/screenshots on failure.
 

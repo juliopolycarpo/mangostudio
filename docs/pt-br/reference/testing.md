@@ -114,7 +114,7 @@ cache do navegador, instalação e artefato do runtime permanecem iguais nas dua
 
 Rode `bun run test:e2e:setup` uma vez em uma máquina nova ou quando o Playwright avisar que o binário do Chromium está ausente. O script encapsula `bunx playwright install --with-deps chromium`, então instala apenas o navegador usado por esta suíte e evita comandos `npx`.
 
-O job de browser-smoke em CI roda em `ubuntu-24.04` porque o Playwright 1.60 ainda não consegue instalar dependências do Chromium no Ubuntu 26.04. Se você usa Ubuntu 26.04 localmente, rode a lane e2e em um container ou VM Ubuntu 24.04/22.04 até o suporte upstream chegar.
+Os jobs de smoke test no navegador rodam no Ubuntu 26.04 x64 no CI. O mesmo comando de setup instala o Chromium e suas dependências de sistema no Ubuntu 26.04 local.
 
 `playwright.config.ts` na raiz do repositório inicia ambos os servidores via `webServer` antes de rodar os testes. Em CI, força `workers: 1` e faz upload de traces e screenshots em caso de falha.
 

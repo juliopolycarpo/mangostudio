@@ -47,8 +47,7 @@ jobs:
       fail-fast: false
       matrix:
         mode: [development, production]
-    # ubuntu-24.04: Playwright 1.60 cannot install Chromium system deps on 26.04 yet.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # Bound installation separately from the existing ten-minute smoke allowance;
     # leave job headroom for the remaining setup and failure artifacts.
     timeout-minutes: 25
