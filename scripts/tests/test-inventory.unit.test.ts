@@ -1,9 +1,16 @@
 // A real Bun/Turbo fixture characterizes ignored and untracked files rather
 // than approximating either tool's walk with Git's tracked-file inventory.
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import apiTurboConfig from '../../apps/api/turbo.json';
 import rootPackage from '../../package.json';
@@ -129,5 +136,32 @@ describe('ignored/untracked inventory parity', () => {
   it('hashes ignored files in every cached unit directory explicitly', () => {
     expect(apiTurboConfig.tasks['test:unit'].inputs).toContain('tests/unit/**');
     expect(rootTurboConfig.tasks['test:unit'].inputs).toContain('tests/unit/**');
+  });
+
+  it('includes the ignored root timings snapshot in the root test cache key', () => {
+    const dir = fixture();
+    appendFileSync(join(dir, '.gitignore'), '.mango/\n');
+    const timingsPath = '.mango/artifacts/timings/root.json';
+    const timings = join(dir, timingsPath);
+    mkdirSync(dirname(timings), { recursive: true });
+    writeFileSync(
+      join(dir, 'turbo.json'),
+      JSON.stringify({ tasks: { test: rootTurboConfig.tasks['//#test:scripts'] } })
+    );
+
+    const hashes: string[] = [];
+    for (const duration of [10, 100]) {
+      writeFileSync(timings, JSON.stringify({ version: 1, files: { [files[0]]: duration } }));
+      const plan = turbo(dir, true);
+      expect(plan.exitCode, plan.stderr.toString()).toBe(0);
+      const [task] = (
+        JSON.parse(plan.stdout.toString()) as {
+          tasks: { hash: string; inputs: Record<string, string> }[];
+        }
+      ).tasks;
+      expect(task.inputs[timingsPath], `expected Turbo to hash ${timingsPath}`).toBeDefined();
+      hashes.push(task.hash);
+    }
+    expect(hashes[0]).not.toBe(hashes[1]);
   });
 });

@@ -70,14 +70,15 @@ describe('test script', () => {
     expect(turboConfig.tasks['test:e2e']).toBeUndefined();
   });
 
-  test('the cached root scripts lane keys on the shard and restores its JUnit report', () => {
-    // Both halves are load-bearing and both fail silently. Without
-    // MANGOSTUDIO_* in the key, shard 2 restores shard 1's entry and runs
-    // nothing; without the output, a cache hit leaves no report and the shard
-    // contributes zero root tests to a run that still looks green.
+  test('keys root test results on the shard and timings input and restores both outputs', () => {
+    // The shard and timings bytes determine the partition. A cache hit
+    // restores the JUnit report and timings slice from that partition.
     expect(turboConfig.tasks['//#test:scripts']).toEqual({
-      inputs: ['$TURBO_DEFAULT$', 'scripts/**'],
-      outputs: ['$TURBO_ROOT$/.mango/artifacts/junit/root.xml'],
+      inputs: ['$TURBO_DEFAULT$', 'scripts/**', '.mango/artifacts/timings/root.json'],
+      outputs: [
+        '$TURBO_ROOT$/.mango/artifacts/junit/root.xml',
+        '$TURBO_ROOT$/.mango/artifacts/timings/root.json',
+      ],
       env: ['CI', 'MANGOSTUDIO_*'],
     });
   });
