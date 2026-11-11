@@ -1,9 +1,63 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, type RmOptions, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { fakeCliEnvironment, installFakeCli } from './support/fake-cli';
+
+async function removeCanarySourceFixture(
+  directory: string,
+  remove: (path: string, options: RmOptions) => Promise<void> = rm
+): Promise<void> {
+  const options = { recursive: true, force: true };
+  // Bun accepts rm's retry options but its native removal does not apply them.
+  // Retry only the busy error seen after the fake Windows CLI had exited.
+  for (const delayMs of [50, 100, 200, 400, 800]) {
+    try {
+      await remove(directory, options);
+      return;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EBUSY') throw error;
+      await Bun.sleep(delayMs);
+    }
+  }
+  await remove(directory, options);
+}
+
+function fixtureRemoverFailingOnce(code: string) {
+  let attempts = 0;
+  return {
+    get attempts() {
+      return attempts;
+    },
+    remove(directory: string): Promise<void> {
+      if (++attempts === 1) {
+        return Promise.reject(
+          Object.assign(new Error(`${code} removing ${directory}`), { code, path: directory })
+        );
+      }
+      return Promise.resolve();
+    },
+  };
+}
+
+test('canary source cleanup retries a transient EBUSY after the CLI exits', async () => {
+  const remover = fixtureRemoverFailingOnce('EBUSY');
+  await removeCanarySourceFixture('canary-source-cli-fixture', remover.remove);
+  expect(remover.attempts).toBe(2);
+});
+
+test('canary source cleanup preserves unexpected removal errors', async () => {
+  const remover = fixtureRemoverFailingOnce('EACCES');
+  await expect(
+    removeCanarySourceFixture('canary-source-cli-fixture', remover.remove)
+  ).rejects.toMatchObject({
+    code: 'EACCES',
+    path: 'canary-source-cli-fixture',
+  });
+  expect(remover.attempts).toBe(1);
+});
 
 // Named fake preserves the two GitHub API request shapes, including pagination.
 const fakeGitHubApi = `
@@ -18,7 +72,7 @@ if (!file) throw new Error('Unexpected GitHub API request: ' + request);
 process.stdout.write(readFileSync(file));
 `;
 
-test.each([true, false])('source CLI freezes API metadata; eligible=%s', (eligible) => {
+test.each([true, false])('source CLI freezes API metadata; eligible=%s', async (eligible) => {
   const directory = mkdtempSync(join(tmpdir(), 'canary-source-cli-'));
   try {
     installFakeCli(directory, 'gh', fakeGitHubApi);
@@ -85,6 +139,6 @@ test.each([true, false])('source CLI freezes API metadata; eligible=%s', (eligib
       );
     }
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    await removeCanarySourceFixture(directory);
   }
 });
