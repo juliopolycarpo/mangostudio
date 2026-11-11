@@ -71,7 +71,7 @@ jobs:
             echo "::error::playwright version probe returned an empty value"
             exit 1
           fi
-          echo "playwright=${playwright}" >> "$GITHUB_OUTPUT"
+          echo "playwright=${playwright}-cold-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
 
       - name: Restore Playwright browser cache
         id: pw-cache
@@ -83,6 +83,18 @@ jobs:
           exact-restore: "true"
           mode: restore
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+
+      - name: Record Ubuntu package mirror diagnostics
+        run: |
+          apt-config dump | grep -E '^Acquire::(Retries|http::Timeout|https::Timeout) ' || true
+          cat /etc/apt/apt-mirrors.txt
+          for mirror in azure.archive.ubuntu.com archive.ubuntu.com security.ubuntu.com; do
+            if timeout 5s getent ahostsv4 "$mirror" > /dev/null; then
+              echo "$mirror resolved"
+            else
+              echo "$mirror did not resolve within five seconds"
+            fi
+          done
 
       - name: Install Playwright Chromium
         if: steps.pw-cache.outputs.cache-restored != 'true'
