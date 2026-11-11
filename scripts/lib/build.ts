@@ -1,12 +1,19 @@
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { type WorkspaceName, WORKSPACES } from './config';
+import { ROOT_DIR, type WorkspaceName, WORKSPACES } from './config';
 import { type BinaryTarget, filterBinaryTargets, type ReleasePlatformId } from './release-targets';
 
 const BUILDABLE_WORKSPACES: WorkspaceName[] = ['frontend', 'api'];
 
 export type BinaryCompilerMode = 'native' | 'bytecode';
+
+/** Resolve the TypeScript project used by the standalone compiler.
+ * @example binaryCompileTsconfig('native')
+ */
+export function binaryCompileTsconfig(compiler: BinaryCompilerMode): string {
+  return join(ROOT_DIR, compiler === 'native' ? 'tsconfig.native-build.json' : 'tsconfig.json');
+}
 
 /** Select the standalone compiler, naming invalid values. @example parseBinaryCompilerMode('native') */
 export function parseBinaryCompilerMode(value: unknown = 'native'): BinaryCompilerMode {
