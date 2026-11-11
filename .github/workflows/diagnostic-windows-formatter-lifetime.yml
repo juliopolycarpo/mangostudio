@@ -1,0 +1,65 @@
+name: Windows formatter lifetime diagnostic
+
+on:
+  push:
+    branches: [diagnostic/windows-formatter-lifetime]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-formatter-lifetime-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sample:
+    name: Observe the real hook deadline and Windows tree stop
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - run: bun install --frozen-lockfile
+
+      - name: Repeat the native formatter lifetime case
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $diagnostic = Join-Path $env:RUNNER_TEMP 'formatter-lifetime'
+          New-Item -ItemType Directory -Path $diagnostic -Force | Out-Null
+          @(
+            (git rev-parse HEAD)
+            (bun --revision)
+            [System.Environment]::OSVersion.VersionString
+          ) | Set-Content (Join-Path $diagnostic 'source.txt')
+          $status = foreach ($sample in 1..12) {
+            $env:MANGO_TEST_FORMATTER_TRACE = Join-Path $diagnostic "attempt-$sample.timeline.jsonl"
+            $log = Join-Path $diagnostic "attempt-$sample.log"
+            & bun test scripts/tests/agent-hooks.unit.test.ts --test-name-pattern 'bounds a formatter that never exits' *> $log
+            $exitCode = $LASTEXITCODE
+            Write-Host "Sample $sample returned $exitCode"
+            if ($exitCode -ne 0) {
+              Get-Content $log | Write-Host
+            }
+            [pscustomobject]@{ sample = $sample; exitCode = $exitCode }
+          }
+          $status | ConvertTo-Json | Set-Content (Join-Path $diagnostic 'status.json')
+          if (@($status | Where-Object { $_.exitCode -ne 0 }).Count -gt 0) {
+            exit 1
+          }
+
+      - name: Upload formatter timeline and test logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-formatter-lifetime-diagnostic
+          path: ${{ runner.temp }}/formatter-lifetime/
+          if-no-files-found: error
+          retention-days: 3

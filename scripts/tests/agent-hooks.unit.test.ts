@@ -8,7 +8,16 @@ import {
   onTestFinished,
   spyOn,
 } from 'bun:test';
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  appendFile,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, join, relative, resolve } from 'node:path';
 
@@ -47,6 +56,7 @@ import {
 } from './support/fake-rustfmt-markers';
 import { FORMATTER_CANCEL_CONTROL } from './support/formatter-cancel-control';
 import { requestFormatterStop, withFormatterHookCleanup } from './support/formatter-hook-cleanup';
+import { FORMATTER_LIFETIME_TRACE } from './support/formatter-lifetime-trace';
 import {
   type OwnedFormatterProcess,
   readNativeFormatterProcess,
@@ -760,8 +770,14 @@ describe('agent auto-fix hooks', () => {
     const filePath = join(repoRoot, '.mango', `formatter-timeout-${process.pid}.rs`);
     tempDirs.push(filePath);
     await writeFile(filePath, 'fn main() {}\n');
-    const proc = Bun.spawn([process.execPath, hookEntrypoints[0][1]], {
-      env: formatterEnvironment(marker, '1'),
+    const trace = process.env.MANGO_TEST_FORMATTER_TRACE;
+    const hookArgs = trace ? ['--preload', FORMATTER_LIFETIME_TRACE] : [];
+    const proc = Bun.spawn([process.execPath, ...hookArgs, hookEntrypoints[0][1]], {
+      env: {
+        ...formatterEnvironment(marker, '1'),
+        MANGO_TEST_FORMATTER_TRACE: trace,
+        MANGO_TEST_FORMATTER_TRACE_CHILD: trace ? '1' : undefined,
+      },
       stdin: 'pipe',
       stdout: 'ignore',
       stderr: 'pipe',
@@ -773,42 +789,71 @@ describe('agent auto-fix hooks', () => {
       [grandchildMarker(marker), 'the grandchild of fake rustfmt'],
     ] as const;
     const leaked: number[] = [];
-    await withFormatterHookCleanup(
-      proc,
-      fakes,
-      async () => {
-        await proc.stdin.write(JSON.stringify({ path: filePath }));
-        await proc.stdin.end();
-        const nativeOwned =
-          process.platform === 'win32' ? undefined : await captureOwnedFormatters(proc, fakes);
-        const exitCode = await proc.exited;
-        expect(exitCode).toBe(0);
-        expect(proc.signalCode).toBeNull();
-        if (nativeOwned) await waitForFormatterSettlement(nativeOwned);
-        for (const [fakeMarker, who] of fakes) {
-          const started = await readMarker(fakeMarker, who);
-          expect(started.args).toEqual([
-            '--config',
-            'skip_children=true',
-            await realpath(filePath),
-          ]);
-          expect(started.cwd).toBe(repoRoot);
-          if (!nativeOwned && (await stillBeating(fakeMarker))) leaked.push(started.pid);
-          const lastBeat = JSON.parse(await readFile(heartbeatPath(fakeMarker), 'utf8')) as {
-            at: number;
-          };
-          // Measure the formatter's live interval, excluding cold hook startup. A longer
-          // formatter deadline still fails this bound; both descendants must also stop.
-          expect(
-            lastBeat.at - started.startedAt,
-            `${who}: expected less than 7000ms alive`
-          ).toBeLessThan(7000);
-        }
-        expect(leaked).toEqual([]);
-        expect(await readFile(filePath, 'utf8')).toBe('fn main() {}\n');
-      },
-      { requestStop: requestFormatterStop, stillBeating }
-    );
+    try {
+      await withFormatterHookCleanup(
+        proc,
+        fakes,
+        async () => {
+          await proc.stdin.write(JSON.stringify({ path: filePath }));
+          await proc.stdin.end();
+          const nativeOwned =
+            process.platform === 'win32' ? undefined : await captureOwnedFormatters(proc, fakes);
+          const exitCode = await proc.exited;
+          expect(exitCode).toBe(0);
+          expect(proc.signalCode).toBeNull();
+          if (nativeOwned) await waitForFormatterSettlement(nativeOwned);
+          for (const [fakeMarker, who] of fakes) {
+            const started = await readMarker(fakeMarker, who);
+            expect(started.args).toEqual([
+              '--config',
+              'skip_children=true',
+              await realpath(filePath),
+            ]);
+            expect(started.cwd).toBe(repoRoot);
+            if (!nativeOwned && (await stillBeating(fakeMarker))) leaked.push(started.pid);
+            const lastBeat = JSON.parse(await readFile(heartbeatPath(fakeMarker), 'utf8')) as {
+              at: number;
+            };
+            // Measure the formatter's live interval, excluding cold hook startup. A longer
+            // formatter deadline still fails this bound; both descendants must also stop.
+            expect(
+              lastBeat.at - started.startedAt,
+              `${who}: expected less than 7000ms alive`
+            ).toBeLessThan(7000);
+          }
+          expect(leaked).toEqual([]);
+          expect(await readFile(filePath, 'utf8')).toBe('fn main() {}\n');
+        },
+        { requestStop: requestFormatterStop, stillBeating }
+      );
+    } finally {
+      if (trace) {
+        const readTraceMarker = async (path: string) => {
+          const text = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => {
+            if (error.code === 'ENOENT') return null;
+            throw error;
+          });
+          return text === null ? null : JSON.parse(text);
+        };
+        const fixtures = await Promise.all(
+          fakes.map(async ([fakeMarker, who]) => ({
+            who,
+            start: await readTraceMarker(fakeMarker),
+            last: await readTraceMarker(heartbeatPath(fakeMarker)),
+          }))
+        );
+        await appendFile(
+          trace,
+          `${JSON.stringify({
+            event: 'test-observation',
+            at: performance.timeOrigin + performance.now(),
+            hookExit: proc.exitCode,
+            hookSignal: proc.signalCode,
+            fixtures,
+          })}\n`
+        );
+      }
+    }
   }, 20_000);
 
   // Keep the existing POSIX coverage; Windows has no hook group signal to forward.
