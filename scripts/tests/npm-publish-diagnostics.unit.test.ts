@@ -108,7 +108,7 @@ test.skipIf(process.platform === 'win32').each([false, true])(
       }
       expect(JSON.parse(readFileSync(registry.calls, 'utf8'))).toEqual([
         '--yes',
-        'npm@11.5.1',
+        'npm@11.21.2',
         '--loglevel=verbose',
         'publish',
         '--access',

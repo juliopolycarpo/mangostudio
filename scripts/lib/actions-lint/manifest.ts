@@ -60,29 +60,29 @@ export const TOOL_MANIFEST: Readonly<Record<ToolName, ToolManifestEntry>> = {
   },
   zizmor: {
     name: 'zizmor',
-    version: '1.26.1',
-    baseUrl: 'https://github.com/zizmorcore/zizmor/releases/download/v1.26.1',
+    version: '1.29.0',
+    baseUrl: 'https://github.com/zizmorcore/zizmor/releases/download/v1.29.0',
     binaryPath: 'zizmor',
     assets: {
       'linux-x64': {
         assetName: 'zizmor-x86_64-unknown-linux-gnu.tar.gz',
-        sha256: '8556289a64e7aaf2400cd516f61a471aa91c5902cc56ad96a82fd12f90c2ef73',
+        sha256: 'dd96df044a6e8538d5f423790f453bdd03d49e5b2bcc38214acc41a2f1297839',
       },
       'linux-arm64': {
         assetName: 'zizmor-aarch64-unknown-linux-gnu.tar.gz',
-        sha256: '711f5af366b299128f9a04b1470e37d990b41fbd21f14a1a4148d25004a83762',
+        sha256: '415eaa7c0a06479a701b8e44a3e812c1047decc848ec4bede7bd6bbf49f22d20',
       },
       'darwin-x64': {
         assetName: 'zizmor-x86_64-apple-darwin.tar.gz',
-        sha256: '2967414a561f8c1264121e8f723c3b5abcf3d1bf7ce5063114df99985dd75801',
+        sha256: '648b72ab9941a7f2a8d65d7b68a8e76cef789538c8df3a3950384d38423375b0',
       },
       'darwin-arm64': {
         assetName: 'zizmor-aarch64-apple-darwin.tar.gz',
-        sha256: '68ab2b37836bbd44f6cfffcc102b9ffffbc20c5d67d84293dafb63bd2775a1da',
+        sha256: '720322fade9e83a9c7953944c438f2ba942636b86b96a8f0e6b15ce94c8a6b6f',
       },
       'win32-x64': {
         assetName: 'zizmor-x86_64-pc-windows-msvc.zip',
-        sha256: 'c6cea156935e3b9d36faeca4fd8f622d23f7a7578da26adb34e6456abd9beb9a',
+        sha256: '68a6bc6888f10bf0d53658c75885e7c1b7a0588d4c1fbc3f0ca280ad7324bf06',
         binaryPath: 'zizmor.exe',
       },
     },

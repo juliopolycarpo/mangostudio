@@ -67,7 +67,7 @@ runs:
           echo "Node v${node_version} is below the ${MINIMUM_NODE_VERSION} floor required for npm provenance."
           exit 1
         fi
-        echo "Node v${node_version}; publish uses npx npm@11.5.1"
+        echo "Node v${node_version}; publish uses npx npm@11.21.2"
 
     - id: publish
       name: Publish to npm

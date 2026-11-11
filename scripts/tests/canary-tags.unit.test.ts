@@ -275,7 +275,7 @@ describe('canary OIDC tag recovery', () => {
       expect(command).toEqual([
         'bunx',
         '--package',
-        'npm@11.21.0',
+        'npm@11.21.2',
         'npm',
         'dist-tag',
         'add',
@@ -441,7 +441,7 @@ describe('canary OIDC tag recovery', () => {
   test('refuses an unexpected npm revision even when newer', async () => {
     const { manifest, runner, dependencies } = await fixture();
     runner.npmVersion = '11.22.0';
-    await expect(promoteCanaryTags(manifest, dependencies)).rejects.toThrow('expected 11.21.0');
+    await expect(promoteCanaryTags(manifest, dependencies)).rejects.toThrow('expected 11.21.2');
     expect(runner.writes).toEqual([]);
   });
   test('a failed runtime probe fails before registry reads', async () => {
