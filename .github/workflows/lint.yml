@@ -35,7 +35,7 @@ jobs:
           persist-credentials: false
 
       - id: setup
-        uses: ./.github/actions/setup-mango
+        uses: $/.github/actions/setup-mango
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
@@ -57,7 +57,7 @@ jobs:
       # Restore here, save after the check: a combined restore-save would skip
       # its save on an exact hit and lose every output the check then computed.
       - id: turbo-cache
-        uses: ./.github/actions/cache-scoped
+        uses: $/.github/actions/cache-scoped
         with:
           family: turbo
           path: .turbo/cache
@@ -68,7 +68,7 @@ jobs:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Restore workflow lint tools
-        uses: ./.github/actions/cache-scoped
+        uses: $/.github/actions/cache-scoped
         with:
           family: lint-tools
           path: .mango/artifacts/tools/
@@ -101,7 +101,7 @@ jobs:
       # not hold, under a key that extends the stable restore prefix.
       - name: Save new Turbo outputs
         if: success()
-        uses: ./.github/actions/cache-scoped
+        uses: $/.github/actions/cache-scoped
         with:
           family: turbo
           path: .turbo/cache

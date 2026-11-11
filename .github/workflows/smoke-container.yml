@@ -55,14 +55,14 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.source_sha }}
 
-      - uses: ./.github/actions/setup-mango
+      - uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
         timeout-minutes: 5
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Download glibc runtime target
         timeout-minutes: 3
-        uses: ./.github/actions/download-distribution
+        uses: ./.github/actions/download-distribution # zizmor: ignore[self-repository] load the action from the selected source checkout
         with:
           artifact-name: ${{ fromJSON(inputs.target_artifacts)['linux-x64'] }}
           source-sha: ${{ inputs.source_sha }}
@@ -80,7 +80,7 @@ jobs:
       - name: Download musl runtime target
         if: ${{ !cancelled() }}
         timeout-minutes: 3
-        uses: ./.github/actions/download-distribution
+        uses: ./.github/actions/download-distribution # zizmor: ignore[self-repository] load the action from the selected source checkout
         with:
           artifact-name: ${{ fromJSON(inputs.target_artifacts)['linux-x64-musl'] }}
           source-sha: ${{ inputs.source_sha }}

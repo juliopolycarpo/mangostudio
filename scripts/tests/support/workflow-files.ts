@@ -29,7 +29,8 @@ export function compositeActionFiles(): string[] {
     .map((entry) => actionManifest(entry.name));
 }
 
-const CACHE_SCOPED_USES = /(?:^|\n)\s*(?:-\s+)?uses:\s*\.\/\.github\/actions\/cache-scoped\s*$/m;
+const CACHE_SCOPED_USES =
+  /(?:^|\n)\s*(?:-\s+)?uses:[ \t]*['"]?[.$]\/\.github\/actions\/cache-scoped['"]?[ \t]*(?:#.*)?$/m;
 
 export interface CacheScopedCallSite {
   readonly file: string;

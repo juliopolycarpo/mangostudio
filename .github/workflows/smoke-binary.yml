@@ -48,7 +48,7 @@ jobs:
     # glibc and could not produce the musl runtimes the Alpine legs need.
     name: Runtime
     if: ${{ inputs.rebuild }}
-    uses: ./.github/workflows/runtime-build.yml
+    uses: $/.github/workflows/runtime-build.yml
     with:
       version: ${{ inputs.version || '' }}
       source_sha: ${{ inputs.source_sha || github.sha }}
@@ -126,7 +126,7 @@ jobs:
       - name: Install toolchain (manual rebuild)
         if: ${{ inputs.rebuild }}
         timeout-minutes: 5
-        uses: ./.github/actions/setup-mango
+        uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
@@ -141,7 +141,7 @@ jobs:
       - name: Download prebuilt target
         if: ${{ !inputs.rebuild }}
         timeout-minutes: 3
-        uses: ./.github/actions/download-distribution
+        uses: ./.github/actions/download-distribution # zizmor: ignore[self-repository] load the action from the selected source checkout
         with:
           artifact-name: ${{ matrix.artifact_name }}
           source-sha: ${{ inputs.source_sha }}
@@ -274,7 +274,7 @@ jobs:
         id: musl_target
         if: ${{ !cancelled() && steps.ready.outcome == 'success' && matrix.docker_arch && !inputs.rebuild }}
         timeout-minutes: 3
-        uses: ./.github/actions/download-distribution
+        uses: ./.github/actions/download-distribution # zizmor: ignore[self-repository] load the action from the selected source checkout
         with:
           artifact-name: ${{ matrix.musl_artifact_name }}
           source-sha: ${{ inputs.source_sha }}

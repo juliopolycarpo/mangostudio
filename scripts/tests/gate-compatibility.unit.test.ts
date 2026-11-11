@@ -71,7 +71,7 @@ function scenarioProjection(path: string, workflow: string, scenario: Scenario):
   }
   if (path === '.github/workflows/ci.yml' && extractJobBlock(workflow, 'release-dry-run')) {
     const caller = extractJobBlock(workflow, 'release-dry-run');
-    expect(caller).toContain('uses: ./.github/workflows/release-dry-run.yml');
+    expect(caller).toContain('uses: $/.github/workflows/release-dry-run.yml');
     expect(caller).toContain(`if: ${EXPR} !cancelled() && github.event_name == 'pull_request' }}`);
     if (scenario.event !== 'pull_request') added.add('release-dry-run');
   }

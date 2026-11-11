@@ -268,7 +268,7 @@ describe('release signature gates', () => {
       expect(verification).toBeGreaterThan(-1);
       expect(verification).toBeLessThan(
         block.indexOf(
-          file === 'release.yml' ? 'uses: ./.github/actions/setup-mango' : 'bun install'
+          file === 'release.yml' ? 'uses: $/.github/actions/setup-mango' : 'bun install'
         )
       );
     }

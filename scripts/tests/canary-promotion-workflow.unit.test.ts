@@ -30,7 +30,7 @@ test('canary promotes approved CI bytes without cancelling a partially published
   expect(value.jobs.build).toBeUndefined();
   expect(value.jobs.approve).toBeDefined();
   expect(readText('.github/workflows/canary.yml')).not.toContain(
-    'uses: ./.github/workflows/distribution-build.yml'
+    'uses: $/.github/workflows/distribution-build.yml'
   );
 });
 

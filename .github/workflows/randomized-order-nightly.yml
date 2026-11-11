@@ -111,7 +111,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/setup-mango
+      - uses: $/.github/actions/setup-mango
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
@@ -121,7 +121,7 @@ jobs:
       # The api lanes spawn Local as the Rust runtime; a nightly run builds it
       # itself rather than depending on another workflow's artifact.
       - if: matrix.workspace == 'api'
-        uses: ./.github/actions/local-runtime
+        uses: $/.github/actions/local-runtime
 
       # The lane script's own flags plus randomization, invoked directly rather
       # than through `bun run test`: this is a diagnostic, not the merge gate,

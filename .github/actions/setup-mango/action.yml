@@ -43,7 +43,7 @@ runs:
 
     - id: cache
       name: Restore Bun install cache
-      uses: ./.github/actions/cache-scoped
+      uses: ./.github/actions/cache-scoped # zizmor: ignore[self-repository] use cache policy from the selected source checkout
       with:
         mode: restore
         family: bun
@@ -71,7 +71,7 @@ runs:
       name: Check whether another Bun writer completed this key
       if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'
       continue-on-error: true
-      uses: ./.github/actions/cache-scoped
+      uses: ./.github/actions/cache-scoped # zizmor: ignore[self-repository] use cache policy from the selected source checkout
       with:
         mode: restore
         family: bun
@@ -85,7 +85,7 @@ runs:
     # action's normal collision/upload diagnostics and never serialize installs.
     - name: Save Bun install cache
       if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true' && (steps.bun-save-check.outcome != 'success' || steps.bun-save-check.outputs.cache-hit != 'true')
-      uses: ./.github/actions/cache-scoped
+      uses: ./.github/actions/cache-scoped # zizmor: ignore[self-repository] use cache policy from the selected source checkout
       with:
         mode: save
         family: bun
