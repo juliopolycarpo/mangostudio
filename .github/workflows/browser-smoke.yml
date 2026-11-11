@@ -85,6 +85,27 @@ jobs:
           mode: restore
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
+      - name: Probe Ubuntu package mirrors and prefer the official archive
+        run: |
+          . /etc/os-release
+          for mirror in azure.archive.ubuntu.com archive.ubuntu.com security.ubuntu.com; do
+            if timeout 5s getent ahostsv4 "$mirror" > /dev/null; then
+              echo "$mirror resolved"
+            else
+              echo "$mirror did not resolve within five seconds"
+            fi
+          done
+
+          curl -fsSL --max-time 10 -o /dev/null \
+            "https://archive.ubuntu.com/ubuntu/dists/$VERSION_CODENAME/InRelease" \
+            && echo 'Ubuntu archive served its release index' || true
+          curl -fsSL --max-time 10 -o /dev/null \
+            "https://security.ubuntu.com/ubuntu/dists/$VERSION_CODENAME-security/InRelease" \
+            && echo 'Ubuntu security archive served its release index' || true
+
+          sudo sed -i '\|^http://azure\.archive\.ubuntu\.com/ubuntu/|d' /etc/apt/apt-mirrors.txt
+          cat /etc/apt/apt-mirrors.txt
+
       - name: Install Playwright Chromium
         if: steps.pw-cache.outputs.cache-restored != 'true'
         timeout-minutes: 10
