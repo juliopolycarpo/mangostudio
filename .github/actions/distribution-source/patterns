@@ -1,0 +1,6 @@
+/*
+!/scripts/tests/[a-z0-9_-]*.unit.test.ts
+/scripts/tests/*[!a-z0-9_-]*.unit.test.ts
+/scripts/tests/*.unit.test.ts/
+/scripts/tests/install-ps1-layout.unit.test.ts
+/scripts/tests/verify-release-tag.unit.test.ts

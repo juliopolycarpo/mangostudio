@@ -147,6 +147,8 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.source_sha || github.sha }}
 
+      - uses: ./.github/actions/distribution-source # zizmor: ignore[self-repository] load the action from the selected source checkout
+
       - uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
@@ -385,6 +387,8 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.source_sha || github.sha }}
 
+      - uses: ./.github/actions/distribution-source # zizmor: ignore[self-repository] load the action from the selected source checkout
+
       - uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
@@ -577,6 +581,8 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ inputs.source_sha || github.sha }}
+
+      - uses: ./.github/actions/distribution-source # zizmor: ignore[self-repository] load the action from the selected source checkout
 
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:

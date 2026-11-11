@@ -107,6 +107,8 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ inputs.source_sha }}
+      - uses: ./.github/actions/distribution-source # zizmor: ignore[self-repository] load the action from the selected source checkout
+        timeout-minutes: 1
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version-file: .bun-version
@@ -142,6 +144,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ inputs.source_sha }}
+      - uses: ./.github/actions/distribution-source # zizmor: ignore[self-repository] load the action from the selected source checkout
       - uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
@@ -206,6 +209,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ inputs.source_sha }}
+      - uses: ./.github/actions/distribution-source # zizmor: ignore[self-repository] load the action from the selected source checkout
       - uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
         if: ${{ !matrix.musl }}
         with:
@@ -284,6 +288,8 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ inputs.source_sha }}
+
+      - uses: ./.github/actions/distribution-source # zizmor: ignore[self-repository] load the action from the selected source checkout
 
       - uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
         with:

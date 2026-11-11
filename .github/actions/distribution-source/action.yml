@@ -1,0 +1,17 @@
+name: Scope distribution source
+description: Prepare a clean checkout without standalone root unit tests
+runs:
+  using: composite
+  steps:
+    - name: Exclude standalone root tests from build and smoke inputs
+      shell: bash
+      env:
+        DISTRIBUTION_SOURCE_PATTERNS: ${{ github.action_path }}/patterns
+      run: |
+        set -euo pipefail
+        dirty="$(git status --porcelain)"
+        if [[ -n "$dirty" ]]; then
+          printf 'Expected a clean distribution checkout | received: %s\n' "$dirty" >&2
+          exit 1
+        fi
+        git -c core.ignoreCase=false sparse-checkout set --no-cone --stdin < "$DISTRIBUTION_SOURCE_PATTERNS"

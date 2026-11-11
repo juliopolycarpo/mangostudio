@@ -1225,6 +1225,14 @@ PLATFORM=linux-x64 bun run scripts/test-build.ts
 On Windows hosts, use `PLATFORM=windows-x64`. The CI `Smoke — Binary` workflow runs this
 script across all six native platform runners.
 
+PRs that change only standalone `scripts/tests/*.unit.test.ts` modules still
+run the Test lane and can skip distribution, binary smoke, and container smoke.
+The build and distribution checkouts omit those modules, so the shipped
+artifacts and smoke harness cannot read them from the working tree. Shared test
+support, the installer layout test, and the release-tag test remain available.
+Source changes and mixed diffs select distribution. Main pushes and manual CI
+runs always select it.
+
 The runtime leg signs up a throwaway user, posts a Cursor connector with a fake API key, and
 asserts the binary refuses it with `410` — Cursor is a deprecated provider, and the refusal
 must hold in the shipped executable, not only where a picker hid the option. The response and
