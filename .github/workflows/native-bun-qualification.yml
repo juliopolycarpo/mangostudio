@@ -4,107 +4,89 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: bun-package-cache-linux-experiment
+  group: bun-package-cache-native-experiment
   cancel-in-progress: false
 
 permissions:
   contents: read
 
-env:
-  LEGACY_KEY: Linux-X64-v1-bun-main-1.4.4-canary.1+89452d2ac-532336c8e444591026cacdc87a4cf64dc80ba7546c6fbe2f5195139861d3324b
-  SLIM_KEY: experiment-bun-2025-${{ github.run_id }}
-
 jobs:
-  seed:
-    name: Seed a fresh package cache for the experiment
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: b47582b715c8a29a27965a837e844cb10de7630d
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-      - name: Verify source, Bun, and runner
-        run: |
-          test "$(git rev-parse HEAD)" = b47582b715c8a29a27965a837e844cb10de7630d
-          test "$(bun --revision)" = 1.4.4-canary.1+89452d2ac
-          test "$RUNNER_OS-$RUNNER_ARCH" = Linux-X64
-          sha256sum bun.lock
-          uname -a
-          printf 'Runner image %s %s\n' "$ImageOS" "$ImageVersion"
-      - name: Install into an empty cache
-        run: |
-          rm -rf -- "$HOME/.bun/install/cache"
-          bun install --frozen-lockfile
-          git diff --exit-code
-          du -sb "$HOME/.bun/install/cache"
-          du -sb "$HOME/.bun/install/cache"/* | sort -rn | head -n 20 > "$RUNNER_TEMP/cache-largest-entries"
-          cat "$RUNNER_TEMP/cache-largest-entries"
-      - name: Save the experiment archive
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.bun/install/cache
-          key: ${{ env.SLIM_KEY }}
   compare:
-    name: Compare ${{ matrix.order.label }}
-    needs: seed
-    runs-on: ubuntu-latest
+    name: Compare ${{ matrix.host.os }} ${{ matrix.order.label }}
+    runs-on: ${{ matrix.host.os }}
     timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
-      max-parallel: 3
+      max-parallel: 4
       matrix:
+        host:
+          - os: macos-latest
+            identity: macOS-ARM64
+          - os: windows-latest
+            identity: Windows-X64
         order:
-          - label: cold-legacy-slim
-            modes: [cold, legacy, slim]
-          - label: cold-slim-legacy
-            modes: [cold, slim, legacy]
-          - label: legacy-cold-slim
-            modes: [legacy, cold, slim]
-          - label: legacy-slim-cold
-            modes: [legacy, slim, cold]
-          - label: slim-cold-legacy
-            modes: [slim, cold, legacy]
-          - label: slim-legacy-cold
-            modes: [slim, legacy, cold]
+          - label: cold-cache-1
+            modes: [cold, existing]
+          - label: cache-cold-1
+            modes: [existing, cold]
+          - label: cold-cache-2
+            modes: [cold, existing]
+          - label: cache-cold-2
+            modes: [existing, cold]
+          - label: cold-cache-3
+            modes: [cold, existing]
+          - label: cache-cold-3
+            modes: [existing, cold]
     steps:
+      - name: Preserve tracked source bytes
+        run: git config --global core.autocrlf false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: b47582b715c8a29a27965a837e844cb10de7630d
+          path: source
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: b47582b715c8a29a27965a837e844cb10de7630d
+          path: tooling
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version-file: .bun-version
+          bun-version-file: source/.bun-version
       - name: Verify source, Bun, and runner
+        env:
+          EXPECTED_RUNNER: ${{ matrix.host.identity }}
         run: |
-          test "$(git rev-parse HEAD)" = b47582b715c8a29a27965a837e844cb10de7630d
+          test "$(git -C source rev-parse HEAD)" = b47582b715c8a29a27965a837e844cb10de7630d
           test "$(bun --revision)" = 1.4.4-canary.1+89452d2ac
-          test "$RUNNER_OS-$RUNNER_ARCH" = Linux-X64
-          sha256sum bun.lock
+          test "$RUNNER_OS-$RUNNER_ARCH" = "$EXPECTED_RUNNER"
+          lock_sha=$(bun -e 'console.log(new Bun.CryptoHasher("sha256").update(await Bun.file("source/bun.lock").arrayBuffer()).digest("hex"))')
+          test "$lock_sha" = 71a9778e12686d961b61b3f018d084ddda22810d9bc2af87836223deff7a2fa8
+          git diff --no-index source/bun.lock tooling/bun.lock
+          printf 'Lockfile SHA-256 %s\n' "$lock_sha"
           uname -a
+          git -C tooling rev-parse HEAD
           printf 'Runner image %s %s\n' "$ImageOS" "$ImageVersion"
-      - name: Prepare the second checkout
-        run: git worktree add --detach "$RUNNER_TEMP/tooling" HEAD
       - name: Start mode 1 with clean installations
         env:
           MODE: ${{ matrix.order.modes[0] }}
         run: |
-          git clean -ffdX
-          git -C "$RUNNER_TEMP/tooling" clean -ffdX
+          git -C source clean -ffdX
+          git -C tooling clean -ffdX
           rm -rf -- "$HOME/.bun/install/cache"
           test ! -e "$HOME/.bun/install/cache"
           printf 'Started %s\n' "$MODE"
-          date +%s%N > "$RUNNER_TEMP/trial-start"
+          bun -e 'console.log(Date.now())' > "$RUNNER_TEMP/trial-start"
       - name: Restore exact archive for mode 1
         id: restore-0
         if: matrix.order.modes[0] != 'cold'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.bun/install/cache
-          key: ${{ matrix.order.modes[0] == 'legacy' && env.LEGACY_KEY || env.SLIM_KEY }}
+          key: ${{ matrix.host.identity }}-v1-bun-main-1.4.4-canary.1+89452d2ac-532336c8e444591026cacdc87a4cf64dc80ba7546c6fbe2f5195139861d3324b
           fail-on-cache-miss: true
       - name: Install both checkouts for mode 1
         env:
@@ -113,33 +95,33 @@ jobs:
         run: |
           if [[ "$MODE" != cold ]]; then test "$CACHE_HIT" = true; fi
           start=$(cat "$RUNNER_TEMP/trial-start")
-          before_install=$(date +%s%N)
-          (cd "$RUNNER_TEMP/tooling" && bun install --frozen-lockfile)
-          before_source=$(date +%s%N)
-          bun install --frozen-lockfile
-          end=$(date +%s%N)
-          git diff --exit-code
-          git -C "$RUNNER_TEMP/tooling" diff --exit-code
+          before_install=$(bun -e 'console.log(Date.now())')
+          (cd tooling && bun install --frozen-lockfile)
+          before_source=$(bun -e 'console.log(Date.now())')
+          (cd source && bun install --frozen-lockfile)
+          end=$(bun -e 'console.log(Date.now())')
+          git -C source diff --exit-code
+          git -C tooling diff --exit-code
           printf 'BUN-CACHE-TRIAL mode=%s restore_ms=%d tooling_ms=%d source_ms=%d total_ms=%d\n' \
-            "$MODE" "$(((before_install - start) / 1000000))" "$(((before_source - before_install) / 1000000))" \
-            "$(((end - before_source) / 1000000))" "$(((end - start) / 1000000))"
+            "$MODE" "$((before_install - start))" "$((before_source - before_install))" \
+            "$((end - before_source))" "$((end - start))"
       - name: Start mode 2 with clean installations
         env:
           MODE: ${{ matrix.order.modes[1] }}
         run: |
-          git clean -ffdX
-          git -C "$RUNNER_TEMP/tooling" clean -ffdX
+          git -C source clean -ffdX
+          git -C tooling clean -ffdX
           rm -rf -- "$HOME/.bun/install/cache"
           test ! -e "$HOME/.bun/install/cache"
           printf 'Started %s\n' "$MODE"
-          date +%s%N > "$RUNNER_TEMP/trial-start"
+          bun -e 'console.log(Date.now())' > "$RUNNER_TEMP/trial-start"
       - name: Restore exact archive for mode 2
         id: restore-1
         if: matrix.order.modes[1] != 'cold'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.bun/install/cache
-          key: ${{ matrix.order.modes[1] == 'legacy' && env.LEGACY_KEY || env.SLIM_KEY }}
+          key: ${{ matrix.host.identity }}-v1-bun-main-1.4.4-canary.1+89452d2ac-532336c8e444591026cacdc87a4cf64dc80ba7546c6fbe2f5195139861d3324b
           fail-on-cache-miss: true
       - name: Install both checkouts for mode 2
         env:
@@ -148,48 +130,13 @@ jobs:
         run: |
           if [[ "$MODE" != cold ]]; then test "$CACHE_HIT" = true; fi
           start=$(cat "$RUNNER_TEMP/trial-start")
-          before_install=$(date +%s%N)
-          (cd "$RUNNER_TEMP/tooling" && bun install --frozen-lockfile)
-          before_source=$(date +%s%N)
-          bun install --frozen-lockfile
-          end=$(date +%s%N)
-          git diff --exit-code
-          git -C "$RUNNER_TEMP/tooling" diff --exit-code
+          before_install=$(bun -e 'console.log(Date.now())')
+          (cd tooling && bun install --frozen-lockfile)
+          before_source=$(bun -e 'console.log(Date.now())')
+          (cd source && bun install --frozen-lockfile)
+          end=$(bun -e 'console.log(Date.now())')
+          git -C source diff --exit-code
+          git -C tooling diff --exit-code
           printf 'BUN-CACHE-TRIAL mode=%s restore_ms=%d tooling_ms=%d source_ms=%d total_ms=%d\n' \
-            "$MODE" "$(((before_install - start) / 1000000))" "$(((before_source - before_install) / 1000000))" \
-            "$(((end - before_source) / 1000000))" "$(((end - start) / 1000000))"
-      - name: Start mode 3 with clean installations
-        env:
-          MODE: ${{ matrix.order.modes[2] }}
-        run: |
-          git clean -ffdX
-          git -C "$RUNNER_TEMP/tooling" clean -ffdX
-          rm -rf -- "$HOME/.bun/install/cache"
-          test ! -e "$HOME/.bun/install/cache"
-          printf 'Started %s\n' "$MODE"
-          date +%s%N > "$RUNNER_TEMP/trial-start"
-      - name: Restore exact archive for mode 3
-        id: restore-2
-        if: matrix.order.modes[2] != 'cold'
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.bun/install/cache
-          key: ${{ matrix.order.modes[2] == 'legacy' && env.LEGACY_KEY || env.SLIM_KEY }}
-          fail-on-cache-miss: true
-      - name: Install both checkouts for mode 3
-        env:
-          MODE: ${{ matrix.order.modes[2] }}
-          CACHE_HIT: ${{ steps.restore-2.outputs.cache-hit }}
-        run: |
-          if [[ "$MODE" != cold ]]; then test "$CACHE_HIT" = true; fi
-          start=$(cat "$RUNNER_TEMP/trial-start")
-          before_install=$(date +%s%N)
-          (cd "$RUNNER_TEMP/tooling" && bun install --frozen-lockfile)
-          before_source=$(date +%s%N)
-          bun install --frozen-lockfile
-          end=$(date +%s%N)
-          git diff --exit-code
-          git -C "$RUNNER_TEMP/tooling" diff --exit-code
-          printf 'BUN-CACHE-TRIAL mode=%s restore_ms=%d tooling_ms=%d source_ms=%d total_ms=%d\n' \
-            "$MODE" "$(((before_install - start) / 1000000))" "$(((before_source - before_install) / 1000000))" \
-            "$(((end - before_source) / 1000000))" "$(((end - start) / 1000000))"
+            "$MODE" "$((before_install - start))" "$((before_source - before_install))" \
+            "$((end - before_source))" "$((end - start))"
