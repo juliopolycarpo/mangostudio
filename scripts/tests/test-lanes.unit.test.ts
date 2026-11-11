@@ -81,16 +81,7 @@ describe('test lane declarations', () => {
     }
   );
 
-  // Turbo caches `//#test:scripts` and nothing else in the test lanes. A timings
-  // file is untracked, so it cannot enter that cache key — balancing this lane
-  // would let shard i restore a report built from a different file set. Worth
-  // 0.6s; not worth that. Pinned so re-adding it is a deliberate act.
-  it('the cached root lane opts out of timings', () => {
-    expect(laneById('root').timingsPath).toBeUndefined();
-  });
-
-  // The other opt-out, for the opposite reason. `api-integration` is the only
-  // lane that is both sharded and unisolated, so its files share a module
+  // The unisolated API integration files share a module
   // graph and a shard's companions decide what it inherits. A timings-balanced
   // partition rotates every run (the file is refreshed and cached), which
   // turns any leak into an intermittent failure in a file nobody touched;

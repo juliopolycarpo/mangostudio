@@ -20,6 +20,7 @@ const workflow = readText('.github/workflows/test.yml');
 const EXPR = `$${'{{'}`;
 const SHELL = `$${'{'}`;
 const NOT_CANCELLED = `if: ${EXPR} !cancelled() }}`;
+const TIMINGS_SNAPSHOT = `test-timings-baseline-${EXPR} github.run_attempt }}`;
 
 // Preserve the setup/report reserve across two bounded attempts; see the
 // dated healthy-step qualification in docs/reference/testing.md.
@@ -43,11 +44,35 @@ describe('reruns replace previous test evidence', () => {
   ] as const)('%s replaces artifacts with the same name before uploading', (path, names) => {
     const uploads = extractJobBlocks(readText(path))
       .flatMap(({ block }) => extractStepBlocks(block))
-      .filter((step) => step.includes('uses: actions/upload-artifact@'));
+      .filter(
+        (step) =>
+          step.includes('uses: actions/upload-artifact@') &&
+          !step.includes(`name: ${TIMINGS_SNAPSHOT}`)
+      );
     expect(uploads.map((step) => /^ {10}name: (.+)$/m.exec(step)?.[1])).toEqual([...names]);
     // A failed-job rerun can otherwise leave duplicate names and the merger
     // can download the earlier failed receipt even after the shard passed.
     for (const step of uploads) expect(step).toContain('          overwrite: true\n');
+  });
+});
+
+describe('test artifacts used by targeted reruns', () => {
+  test.each([
+    ['resolve-timings', TIMINGS_SNAPSHOT],
+    ['shard', `test-shard-${EXPR} matrix.shard }}`],
+    ['frontend', 'test-shard-frontend'],
+  ])('%s retains %s for the GitHub rerun window', (job, artifact) => {
+    const upload = extractStepBlocks(extractJobBlock(workflow, job)).find(
+      (step) =>
+        step.includes('uses: actions/upload-artifact@') &&
+        step.includes(`          name: ${artifact}\n`)
+    );
+    expect(upload).toBeDefined();
+    const retentionDays = Number(/^ {10}retention-days: (\d+)$/m.exec(upload ?? '')?.[1]);
+    expect(
+      retentionDays,
+      `expected ${artifact} retention of at least 30 days | received: ${retentionDays}`
+    ).toBeGreaterThanOrEqual(30);
   });
 });
 
@@ -175,13 +200,40 @@ describe('Test workflow frontend job', () => {
     expect(frontend).toContain('unhandled-errors.json');
     expect(frontend).toContain(`${NOT_CANCELLED}`);
   });
+});
 
-  test('restores the same pinned timings key the shards read', () => {
-    // `--timings` balances the in-process `--parallel` workers; reading the
-    // key resolve-timings pinned keeps this job off the live-prefix race the
-    // shards were moved off of.
-    expect(parseNeedsList(frontend)).toEqual(['resolve-timings']);
-    expect(frontend).toContain('mode: restore-exact');
+describe('shared test timings', () => {
+  test('uploads one immutable snapshot on cache hits and cold runs', () => {
+    const resolver = extractJobBlock(workflow, 'resolve-timings');
+    expect(resolver).toContain(`artifact: ${TIMINGS_SNAPSHOT}`);
+    expect(resolver).toContain(
+      `"${SHELL}TIMINGS_KEY:-cold}" > .mango/artifacts/timings/source-key.txt`
+    );
+    const snapshot = extractStepBlocks(resolver).find((step) =>
+      step.includes('uses: actions/upload-artifact@')
+    );
+    expect(snapshot).toContain(`name: ${TIMINGS_SNAPSHOT}`);
+    expect(snapshot).toContain('path: .mango/artifacts/timings');
+    expect(snapshot).toContain('if-no-files-found: error');
+    expect(snapshot).not.toContain('overwrite: true');
+    expect(snapshot).not.toMatch(/^\s+if:/m);
+  });
+
+  test.each(['shard', 'frontend'])('%s downloads the resolver snapshot before tests', (job) => {
+    const block = extractJobBlock(workflow, job);
+    expect(parseNeedsList(block)).toEqual(['resolve-timings']);
+    const steps = extractStepBlocks(block);
+    const download = steps.findIndex((step) =>
+      step.includes(`name: ${EXPR} needs.resolve-timings.outputs.artifact }}`)
+    );
+    const tests = steps.findIndex((step) => step.includes('run-tests-watchdog.ts'));
+    expect(download, `expected a timings download in ${job}`).toBeGreaterThanOrEqual(0);
+    expect(tests, `expected the watchdog after the timings download in ${job}`).toBeGreaterThan(
+      download
+    );
+    expect(steps[download]).toContain('uses: actions/download-artifact@');
+    expect(steps[download]).toContain('path: .mango/artifacts/timings');
+    expect(steps[download]).not.toMatch(/^\s+if:/m);
   });
 });
 

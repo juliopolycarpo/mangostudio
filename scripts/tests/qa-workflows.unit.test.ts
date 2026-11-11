@@ -58,7 +58,7 @@ describe('unprivileged collection side', () => {
     );
   });
 
-  test('test.yml hands the fragment off with 1-day retention and failure-only coverage', () => {
+  test('test.yml keeps the metrics fragment for reruns and uploads coverage on failure', () => {
     const workflow = readText('.github/workflows/test.yml');
 
     const upload = extractStepBlocks(extractJobBlock(workflow, 'merge')).find((step) =>
@@ -66,7 +66,7 @@ describe('unprivileged collection side', () => {
     );
     expect(upload).toBeDefined();
     expect(upload).toMatch(/^ {10}path: test-metrics\.json$/m);
-    expect(upload).toMatch(/^ {10}retention-days: 1$/m);
+    expect(upload).toMatch(/^ {10}retention-days: 30$/m);
     expect(workflow).toContain(
       'bun ./scripts/qa-gate/render-coverage-summary.ts test-metrics.json'
     );

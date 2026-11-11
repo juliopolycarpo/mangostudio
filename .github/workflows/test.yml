@@ -48,33 +48,22 @@ env:
 
 jobs:
   resolve-timings:
-    # A restore inside the matrix asks each shard job to resolve
-    # "the most recent cache matching this prefix" independently. That is fine
-    # while the prefix only ever resolves to one immutable, long-lived entry,
-    # but it stops being fine the moment saves rotate every run (see "Save
-    # test timings" below): a save from a *different*, concurrent run can land
-    # in the minute-wide window while this run's shards are each
-    # resolving it, and shards that ask before versus after see different
-    # bytes — which is exactly the disagreement `merge-timings-shards.ts`
-    # exists to catch. Resolving the key once here and having every shard
-    # restore that literal key instead of a live prefix query removes the
-    # window entirely: whatever this job resolves is what all shards get,
-    # regardless of what any other run saves in the meantime.
-    #
-    # `lookup-only` makes this a metadata call, not a download — the shard
-    # jobs still fetch the actual bytes themselves once they have the key.
+    # Restore once before fan-out. A miss gives every shard the same cold
+    # snapshot, even if another run saves or evicts a cache entry.
+    # Retain the snapshot and downstream inputs for GitHub's 30-day job rerun
+    # window, since a retry reuses artifacts from successful jobs.
     name: Resolve test timings baseline
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      key: ${{ steps.timings.outputs.matched-key }}
+      artifact: test-timings-baseline-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - id: timings
-        name: Resolve test timings cache key
+        name: Restore main test timings
         uses: $/.github/actions/cache-scoped
         with:
           family: timings
@@ -82,8 +71,23 @@ jobs:
           validity: test-shard-${{ env.SHARD_COUNT }}
           restore-prefix: test-
           mode: restore
-          lookup-only: "true"
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+
+      - name: Record the restored timing key or cold fallback
+        env:
+          TIMINGS_KEY: ${{ steps.timings.outputs.matched-key }}
+        run: |
+          mkdir -p .mango/artifacts/timings
+          printf '%s\n' "${TIMINGS_KEY:-cold}" > .mango/artifacts/timings/source-key.txt
+
+      - name: Upload the shared timings snapshot
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-timings-baseline-${{ github.run_attempt }}
+          path: .mango/artifacts/timings
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
 
   shard:
     # Sharding got the suite off one serial process while a collision between
@@ -159,33 +163,12 @@ jobs:
           rotate: "true"
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
-      # Per-file durations from a previous run, used to balance `--shard` by
-      # time instead of by file order. Measured on this repo: the critical
-      # shard goes 69.6s -> 58.6s and the spread across shards halves.
-      #
-      # Restores the exact key `resolve-timings` resolved rather than asking
-      # `cache-scoped` to resolve its own "most recent matching prefix" here —
-      # independent live resolutions can each pick a different entry if
-      # a save from a concurrent run lands mid-fan-out. One key, resolved
-      # once, is what keeps all shards reading the same bytes, which is
-      # a correctness requirement and not just a tidiness one: see
-      # scripts/ci/merge-timings-shards.ts. Only the merge job saves, and only
-      # after every shard has read, so nothing this run writes can be what a
-      # shard of this same run reads back.
-      #
-      # A miss (empty key, or nothing at the resolved key by the time this
-      # runs) is safe. Bun falls back to the round-robin split when the file
-      # is absent, which is exactly the behaviour this workflow had before.
-      - name: Restore test timings
-        if: needs.resolve-timings.outputs.key != ''
-        uses: $/.github/actions/cache-scoped
+      # Each shard consumes the same artifact before Bun updates its slice.
+      - name: Download the shared timings snapshot
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          family: timings
+          name: ${{ needs.resolve-timings.outputs.artifact }}
           path: .mango/artifacts/timings
-          validity: test-shard-${{ env.SHARD_COUNT }}
-          mode: restore-exact
-          exact-key: ${{ needs.resolve-timings.outputs.key }}
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Run database migrations
         run: bun run --filter @mangostudio/api migrate
@@ -262,7 +245,7 @@ jobs:
             .mango/artifacts/timings/
             shard-meta.json
             unhandled-errors.json
-          retention-days: 1
+          retention-days: 30
 
       - name: Upload shard log
         if: failure()
@@ -306,19 +289,12 @@ jobs:
       # run is `cache: false` with no `dependsOn`. Restoring the shards' archive
       # was pure download and extract in front of an uncached run.
 
-      # The same pinned key the shards restore. Here `--timings` is not a
-      # partition input (nothing splits this lane); it balances the four
-      # in-process `--parallel` workers by measured wall time.
-      - name: Restore test timings
-        if: needs.resolve-timings.outputs.key != ''
-        uses: $/.github/actions/cache-scoped
+      # The unsharded frontend uses timings to balance its four workers.
+      - name: Download the shared timings snapshot
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          family: timings
+          name: ${{ needs.resolve-timings.outputs.artifact }}
           path: .mango/artifacts/timings
-          validity: test-shard-${{ env.SHARD_COUNT }}
-          mode: restore-exact
-          exact-key: ${{ needs.resolve-timings.outputs.key }}
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       # Same watchdog as the shard job: this lane runs `--parallel=4
       # --isolate`, which is squarely in oven-sh/bun#39709's habitat even
@@ -348,7 +324,7 @@ jobs:
             .mango/artifacts/timings/
             shard-meta.json
             unhandled-errors.json
-          retention-days: 1
+          retention-days: 30
 
       - name: Upload frontend log
         if: failure()
@@ -407,8 +383,8 @@ jobs:
 
       # Save only successful trusted-main baselines. The resolver's PR primary
       # omits the saved run suffix and every loose fallback is main-scoped, so
-      # a PR save has no future reader. All shards still consume the one exact
-      # baseline key resolved up front, including on reruns of failed jobs.
+      # a PR save has no future reader. Shards consume the resolver's artifact
+      # when first run and on reruns of failed jobs.
       # Each main run needs a unique key because actions/cache is immutable.
       # This job also runs after failed dependencies to collect diagnostics;
       # success() here covers only this job, so require both test jobs too.
@@ -433,8 +409,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: bun ./scripts/qa-gate/collect-test-metrics.ts shard-summary.json shards "$SHARD_COUNT" > test-metrics.json
 
-      # Handoff to the qa-metrics job in the same run; nothing consumes it
-      # afterwards, so the shortest retention GitHub allows is enough.
+      # The QA metrics job can reuse this fragment on a targeted retry.
       - name: Upload test metrics fragment
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -442,7 +417,7 @@ jobs:
           name: qa-test-metrics
           overwrite: true
           path: test-metrics.json
-          retention-days: 1
+          retention-days: 30
 
       # Merged coverage output is a failure-diagnostics artifact: green runs are
       # summarized in the step summary and the qa-metrics envelope instead.

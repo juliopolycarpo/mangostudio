@@ -417,10 +417,9 @@ their own logs and failure receipts still exercise retained findings.
 **Why "re-run failed jobs" used to re-hang while "re-run all jobs" passed:**
 the hang follows specific files, and the file-to-shard partition is a function
 of the resolved timings baseline. Rerunning only failed jobs reuses the
-successful `resolve-timings` job's output — the identical partition, so the
-trigger files land on the same shard again. Rerunning all jobs re-resolves the
-baseline, which usually rotated in the meantime, moving or splitting the
-trigger files.
+snapshot from the successful `resolve-timings` job, so the trigger files
+land on the same shard. Rerunning all jobs can pick up a newer baseline
+that moves those files.
 
 ### Sharding
 
@@ -845,31 +844,28 @@ shards reading different bytes will not cover the file set between them — some
 files run twice, others not at all, and every shard still exits 0. Three things
 hold that down:
 
-- The resolver pins one exact trusted-main cache key for every reader in a run.
+- The resolver restores one trusted-main cache entry and uploads its contents
+  as a same-run artifact. All test jobs download that artifact. On a cold
+  cache, it contains only a source marker, so every shard uses file order.
+  The snapshot, shard results, and test metrics stay available for 30 days
+  so targeted reruns can reuse artifacts from successful jobs.
   Only the merge job on a successful `main` push writes a new baseline, after
-  both test jobs pass and their receipts, coverage and timings merge successfully.
-  PR runs never save timings: their run-suffixed keys have no future reader.
+  the test jobs pass and their receipts, coverage and timings merge.
 - `scripts/ci/merge-timings-shards.ts` fails the run if two shards claim the
   same file, which is the observable symptom of a disagreement.
 - A **missing** file is tolerated by Bun and falls back to round-robin, so a cold
   cache degrades to the old behaviour instead of failing. A **malformed** file is
   a hard error — including `{}` — so nothing writes a placeholder.
 
-The root `//#test:scripts` lane **opts out**. It is the only test task Turbo
-caches, and a timings file is untracked, so it cannot enter that cache key: shard
-`i` would restore a `root.xml` produced when the split put different files on
-shard `i`. Balancing it is worth 0.5s within the lane and 0.6s overall (59.2s vs
-58.6s critical shard), which does not pay for that hazard.
+The root `//#test:scripts` lane uses the same snapshot. Turbo explicitly hashes
+`.mango/artifacts/timings/root.json` along with the shard arguments and restores
+both the JUnit report and the updated timings slice on a cache hit.
 
-#### Why the unisolated lane opts out too
+#### Why API integration keeps file-order sharding
 
-`api-integration` also opts out, for the opposite reason: everything above
-assumes each file starts from a fresh global, and that lane is the one where it
-does not.
-
-It is the only lane that is both **sharded and unisolated**. Its files share one
-module graph, so what a shard runs a file _beside_ decides what that file
-inherits — the in-memory database from `setupTestEnvironment()`, any
+`api-integration` files share one module graph, so the other files in a shard
+decide what each file inherits, including the in-memory database from
+`setupTestEnvironment()`, any
 `mock.module` registration, the memoized `getAuth()`. A timings-balanced
 partition is a function of a file that `--update-timings` refreshes every run and
 CI caches across runs, so it **rotates**: a file's companions change from run to

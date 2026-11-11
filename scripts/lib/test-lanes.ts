@@ -105,17 +105,17 @@ export const workerReportPath = (lane: Pick<TestLane, 'id'>): string =>
 /**
  * Where each lane's `--timings` file lives.
  *
- * For an *isolated* sharded lane these are load-bearing for correctness, not
- * just for speed. Without them `--shard=i/N` is a round-robin over the
- * alphabetical file list, so all N shards derive the same partition
+ * For a sharded lane, a timing snapshot is part of the partition. Without
+ * it, `--shard=i/N` is a round-robin over the alphabetical file list, so
+ * all N shards derive the same partition
  * independently and cannot disagree. With them the partition is a function of
  * a *shared file*, and N shards that read different bytes will not cover the
  * file set between them — some files run twice, others not at all, and every
  * shard still exits 0. The duplicate-claim check in `mergeLaneSlices`
  * (`scripts/ci/merge-timings-shards.ts`) is what turns that into a failure.
  *
- * An *unisolated* sharded lane inverts that trade, which is why
- * `api-integration` opts out — see the lane entry below.
+ * The unisolated `api-integration` lane uses a stable file-order split
+ * because its test files share process state.
  *
  * The unsharded frontend lane keeps one too: `--timings` also balances
  * `--parallel` workers by measured wall time instead of file order.
@@ -128,11 +128,9 @@ export const TEST_LANES: readonly TestLane[] = [
     workspace: 'root',
     sharded: true,
     junitPath: `${JUNIT_DIR}/root.xml`,
-    // Deliberately no timingsPath. `//#test:scripts` is the one *cached* test
-    // task, and a timings file is untracked, so it cannot be part of Turbo's
-    // cache key — shard i would restore a `root.xml` produced when the split
-    // put different files on shard i. Balancing this lane is worth 0.5s of its
-    // own and 0.6s overall (measured), which does not pay for that hazard.
+    // Turbo hashes this input explicitly and restores the updated slice with
+    // the JUnit report. A hit must describe the same partition as a fresh run.
+    timingsPath: `${TIMINGS_DIR}/root.json`,
     // The plain run (`test:scripts:workers`, the unit phase of `bun run test`)
     // is split across worker processes; `test:scripts` stays one `bun test`
     // because it is the coverage phase's and CI's, and writes `junitPath`.
@@ -194,10 +192,9 @@ export const TEST_LANES: readonly TestLane[] = [
     workspace: 'api',
     sharded: true,
     junitPath: `${JUNIT_DIR}/api-integration.xml`,
-    // Deliberately no timingsPath, and the only lane that opts out for this
-    // reason. This is the one lane that is both sharded and unisolated: its
-    // files share a module graph, so what a shard runs beside decides what it
-    // inherits — the in-memory database, `mock.module` registrations, the
+    // These files share an unisolated module graph, so the other files in a
+    // shard decide what each one inherits: the in-memory database,
+    // `mock.module` registrations, the
     // memoized `getAuth()`. A timings-balanced partition is a function of a
     // file that is refreshed every run and cached across runs, so it rotates:
     // a file's companions change from run to run and a leak surfaces as an
