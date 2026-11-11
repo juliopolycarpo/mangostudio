@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { hostReleasePlatform } from '../lib/bun-cross-runtime';
@@ -30,6 +30,39 @@ test.skipIf(!platform || platform.startsWith('windows') || platform.endsWith('-m
         createHash('sha256').update(readFileSync(process.execPath)).digest('hex')
       );
       expect(receipt.hubSha256).toBe(createHash('sha256').update(readFileSync(hub)).digest('hex'));
+    } finally {
+      fake.dispose();
+    }
+  },
+  60000
+);
+
+test.skipIf(!platform || platform.startsWith('windows') || platform.endsWith('-musl'))(
+  'native hub-only build succeeds without Cargo runtime bytes or a pair completion marker',
+  async () => {
+    if (!platform) throw new Error('expected supported native fixture host');
+    const fake = new FakeNativeBuildInputs(platform);
+    try {
+      await fake.prepare();
+      rmSync(fake.runtime);
+      const built = fake.run(['--hub-only']);
+      expect(built.exitCode, `${built.stdout.toString()}\n${built.stderr.toString()}`).toBe(0);
+      const out = join(fake.root, '.mango/out');
+      const receipt = JSON.parse(
+        readFileSync(join(fake.root, '.mango/hub-compiles', `${platform}.json`), 'utf8')
+      );
+      expect(receipt.hubSha256).toBe(
+        createHash('sha256')
+          .update(readFileSync(join(out, platform, 'mangostudio')))
+          .digest('hex')
+      );
+      expect(receipt).not.toHaveProperty('runtimeSha256');
+      expect(existsSync(join(out, platform, 'mangostudio-runtime'))).toBe(false);
+      expect(existsSync(join(out, 'README.md'))).toBe(false);
+      expect(existsSync(join(fake.root, '.mango/hub-builds', `${platform}.json`))).toBe(false);
+      const conflicting = fake.run(['--hub-only', '--compiler', 'bytecode']);
+      expect(conflicting.exitCode).toBe(1);
+      expect(conflicting.stderr.toString()).toContain('received: compiler=bytecode');
     } finally {
       fake.dispose();
     }

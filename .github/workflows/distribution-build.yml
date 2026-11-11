@@ -80,7 +80,56 @@ jobs:
       source_sha: ${{ inputs.source_sha }}
       artifact_prefix: runtime-${{ inputs.source_sha }}
       profile: ${{ inputs.runtime_profile }}
+      record_receipts: true
       cache: ${{ inputs.cache }}
+
+  runtime-version:
+    # The runtime producers cross-link these targets. Execute --version on
+    # their matching hosts and bind the result to the same runtime bytes.
+    name: Verify runtime version ${{ matrix.platform }}
+    needs: [runtime]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+          - platform: linux-arm64-musl
+            runner: ubuntu-24.04-arm
+          - platform: darwin-x64
+            runner: macos-15-intel
+          - platform: windows-arm64
+            runner: windows-11-arm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.source_sha }}
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - name: Download the matching Rust runtime
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: runtime-${{ inputs.source_sha }}-${{ matrix.platform }}
+          path: .mango/runtime-prebuilt
+      - name: Verify the runtime version on the target host
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          VERSION: ${{ inputs.version }}
+          RUNTIME_PROFILE: ${{ inputs.runtime_profile }}
+        run: bun --no-install ./scripts/release/verify-native-runtime.ts
+      - name: Upload the native runtime version receipt
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: runtime-version-${{ inputs.source_sha }}-${{ matrix.platform }}
+          path: .mango/runtime-versions/${{ matrix.platform }}.json
+          include-hidden-files: true
+          retention-days: 1
+          if-no-files-found: error
 
   prepare:
     name: Prepare frontend and binary smoke harness
@@ -122,7 +171,7 @@ jobs:
 
   hub:
     name: Native hub ${{ matrix.platform }}
-    needs: [prepare, runtime]
+    needs: [prepare]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
     defaults:
@@ -164,11 +213,6 @@ jobs:
         with:
           name: hub-inputs-${{ inputs.source_sha }}
           path: .
-      - name: Download matching cargo runtime
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
-        with:
-          name: runtime-${{ inputs.source_sha }}-${{ matrix.platform }}
-          path: .mango/runtime-prebuilt
       - name: Verify shared frontend before native compilation
         if: ${{ !matrix.musl && inputs.frontend_artifact != '' }}
         env:
@@ -180,7 +224,7 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
           VERSION: ${{ inputs.version }}
           GITHUB_TOKEN: ${{ github.token }}
-        run: bun run build --binary --platform "$PLATFORM" --runtime-dir .mango/runtime-prebuilt --reuse-frontend
+        run: bun run build --binary --hub-only --platform "$PLATFORM" --reuse-frontend
       - name: Build native musl hub in Alpine
         if: ${{ matrix.musl }}
         env:
@@ -203,15 +247,15 @@ jobs:
               if [ -n "$FRONTEND_ARTIFACT" ]; then
                 bun ./scripts/ci/frontend-artifact.ts verify --bun-revision "$PRODUCER_BUN_REVISION"
               fi
-              bun run build --binary --platform "$PLATFORM" --runtime-dir .mango/runtime-prebuilt --reuse-frontend
+              bun run build --binary --hub-only --platform "$PLATFORM" --reuse-frontend
             '
-      - name: Upload native hub and runtime pair
+      - name: Upload native hub and compiler receipt
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native-hub-${{ inputs.source_sha }}-${{ matrix.platform }}
           path: |
             .mango/out/${{ matrix.platform }}
-            .mango/hub-builds/${{ matrix.platform }}.json
+            .mango/hub-compiles/${{ matrix.platform }}.json
           include-hidden-files: true
           retention-days: ${{ inputs.retention_days }}
           overwrite: false
@@ -219,7 +263,7 @@ jobs:
 
   build:
     name: Build immutable distribution
-    needs: [hub]
+    needs: [hub, runtime, runtime-version]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -259,12 +303,26 @@ jobs:
           name: hub-inputs-${{ inputs.source_sha }}
           path: .
 
-      - name: Download native hub pairs and compiler records
+      - name: Download native hubs and compiler receipts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: native-hub-${{ inputs.source_sha }}-*
           merge-multiple: true
           path: .mango
+
+      - name: Download built Rust runtimes
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: runtime-${{ inputs.source_sha }}-*
+          merge-multiple: true
+          path: .mango/runtime-prebuilt
+
+      - name: Download native runtime version receipts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: runtime-version-${{ inputs.source_sha }}-*
+          merge-multiple: true
+          path: .mango/runtime-versions
 
       - name: Verify shared frontend before packaging
         if: inputs.frontend_artifact != ''
@@ -276,6 +334,7 @@ jobs:
         env:
           SOURCE_SHA: ${{ inputs.source_sha }}
           VERSION: ${{ inputs.version }}
+          RUNTIME_PROFILE: ${{ inputs.runtime_profile }}
         run: bun ./scripts/release/assemble-native-hubs.ts
 
       - name: Assemble npm distribution

@@ -106,12 +106,20 @@ export class FakeNativeBuildInputs {
       );
   }
 
-  /** Run packaging with PATH compiler shadowed and all runtime outputs inside the fixture. @example fake.run(); */
-  run() {
+  /** Run packaging with PATH compiler shadowed and all runtime outputs inside the fixture. @example fake.run(['--hub-only']); */
+  run(extraArgs: readonly string[] = []) {
     const target = ALL_BINARY_TARGETS.find((candidate) => candidate.arch === this.platform);
     if (!target) throw new Error(`expected release platform | received: ${this.platform}`);
     return Bun.spawnSync(
-      [process.execPath, this.command, '--binary', '--reuse-frontend', '--platform', this.platform],
+      [
+        process.execPath,
+        this.command,
+        '--binary',
+        '--reuse-frontend',
+        '--platform',
+        this.platform,
+        ...extraArgs,
+      ],
       {
         cwd: this.root,
         stdout: 'pipe',

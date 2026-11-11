@@ -41,6 +41,10 @@ on:
           Light artifacts are PR only; light is also what cache-seed mode builds.
         type: string
         default: shipping
+      record_receipts:
+        description: Include source, profile and executable identity for distribution pairing.
+        type: boolean
+        default: false
       mode:
         description: >-
           artifact builds and uploads the runtime. cache-seed builds the light
@@ -191,9 +195,17 @@ jobs:
         env:
           PLATFORM: ${{ matrix.platform }}
           VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          ARTIFACT_PROFILE: ${{ inputs.mode == 'artifact' && inputs.record_receipts && inputs.profile || '' }}
         # `--zig` only changes how Linux targets link; it is inert elsewhere.
         # Dependency-free script; runs without `bun install`.
-        run: bun --no-install ./scripts/build-runtime.ts --platform "$PLATFORM" --zig --rustup --out "${RUNNER_TEMP}/runtime"
+        run: |
+          set -euo pipefail
+          args=(--platform "$PLATFORM" --zig --rustup --out "${RUNNER_TEMP}/runtime")
+          if [ -n "$ARTIFACT_PROFILE" ]; then
+            args+=(--artifact-profile "$ARTIFACT_PROFILE")
+          fi
+          bun --no-install ./scripts/build-runtime.ts "${args[@]}"
 
       # The only artifact route. Cache-seed mode never reaches it.
       - name: Upload runtime
