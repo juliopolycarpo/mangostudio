@@ -14,8 +14,30 @@ import {
   readAllManifests,
   RETIRED_DEPENDENCIES,
 } from '../lib/dependency-policy';
+import { readText } from './support/read-text';
 
 describe('dependency policy', () => {
+  test.each(['@oxc-parser/binding', '@tailwindcss/oxide'])(
+    'the lockfile distinguishes glibc and musl Linux binaries for %s',
+    (family) => {
+      const lock = Bun.JSON5.parse(readText('bun.lock')) as {
+        packages: Record<string, readonly [string, string, { libc?: string }]>;
+      };
+      for (const [suffix, libc] of [
+        ['gnu', 'glibc'],
+        ['musl', 'musl'],
+      ]) {
+        const packages = Object.entries(lock.packages).filter(
+          ([name]) => name.startsWith(`${family}-linux-`) && name.endsWith(`-${suffix}`)
+        );
+        expect(packages.length, `${family} Linux ${suffix} binaries`).toBeGreaterThan(0);
+        for (const [name, [, , platform]] of packages) {
+          expect(platform?.libc, name).toBe(libc);
+        }
+      }
+    }
+  );
+
   test('keeps removed unused packages out of workspace manifests', async () => {
     expect(await findDisallowedWorkspaceDependencies()).toEqual([]);
     await expect(assertNoDisallowedWorkspaceDependencies()).resolves.toBeUndefined();
