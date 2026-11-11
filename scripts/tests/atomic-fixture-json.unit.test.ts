@@ -3,7 +3,11 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import { type FixtureJsonFiles, publishFixtureJson } from './support/atomic-fixture-json';
+import {
+  type FixtureJsonFiles,
+  publishFixtureJson,
+  publishFormatterHeartbeat,
+} from './support/atomic-fixture-json';
 
 /** Keeps exact documents and exposes interruption before publication. */
 class InterruptedFixtureFiles implements FixtureJsonFiles {
@@ -84,5 +88,38 @@ describe('atomic fixture JSON publication', () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+});
+
+describe('formatter heartbeat publication', () => {
+  it('keeps the heartbeat readable through a Windows rename denial and publishes on the next tick', () => {
+    const files = new InterruptedFixtureFiles();
+    files.documents.set(target, JSON.stringify(previous));
+    files.renameFailure = Object.assign(new Error('heartbeat destination is open'), {
+      code: 'EPERM',
+    });
+
+    expect(publishFormatterHeartbeat(target, current, files, 'win32')).toBe(false);
+    expect(JSON.parse(files.read(target))).toEqual(previous);
+
+    files.renameFailure = null;
+    expect(publishFormatterHeartbeat(target, current, files, 'win32')).toBe(true);
+    expect(JSON.parse(files.read(target))).toEqual(current);
+  });
+
+  it.each([
+    ['writeFailure', 'win32', 'EPERM'],
+    ['renameFailure', 'win32', 'ENOSPC'],
+    ['renameFailure', 'linux', 'EPERM'],
+  ] as const)('propagates %s with %s and %s', (operation, platform, code) => {
+    const files = new InterruptedFixtureFiles();
+    const failure = Object.assign(new Error(`controlled ${operation}`), { code });
+    files.documents.set(target, JSON.stringify(previous));
+    files[operation] = failure;
+
+    expect(() => publishFormatterHeartbeat(target, current, files, platform)).toThrow(
+      failure.message
+    );
+    expect(JSON.parse(files.read(target))).toEqual(previous);
   });
 });

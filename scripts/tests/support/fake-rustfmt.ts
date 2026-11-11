@@ -12,7 +12,7 @@
  */
 import { existsSync } from 'node:fs';
 
-import { publishFixtureJson } from './atomic-fixture-json';
+import { publishFixtureJson, publishFormatterHeartbeat } from './atomic-fixture-json';
 import {
   GRANDCHILD_ENV,
   grandchildMarker,
@@ -54,12 +54,17 @@ if (hang && process.env[GRANDCHILD_ENV] !== '1' && !stopRequested()) {
 if (hang) {
   if (stopRequested()) process.exit(0);
   let beat = 0;
+  const heartbeat = heartbeatPath(marker);
   setInterval(() => {
     if (stopRequested()) process.exit(0);
     if (quiet) return;
-    publishFixtureJson(heartbeatPath(marker), {
-      beat: ++beat,
-      at: performance.timeOrigin + performance.now(),
-    });
+    const nextBeat = beat + 1;
+    if (
+      publishFormatterHeartbeat(heartbeat, {
+        beat: nextBeat,
+        at: performance.timeOrigin + performance.now(),
+      })
+    )
+      beat = nextBeat;
   }, HEARTBEAT_MS);
 }
