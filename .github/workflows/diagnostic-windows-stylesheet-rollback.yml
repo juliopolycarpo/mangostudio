@@ -1,0 +1,60 @@
+name: Windows stylesheet rollback diagnostic
+
+on:
+  push:
+    branches: [diagnostic/windows-stylesheet-rollback]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-stylesheet-rollback-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sample:
+    name: Run the real stylesheet rollback under Windows frontend load
+    runs-on: windows-latest
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - run: bun install --frozen-lockfile
+
+      - name: Run the standard frontend unit command with compiler phase traces
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $diagnostic = Join-Path $env:RUNNER_TEMP 'stylesheet-rollback'
+          New-Item -ItemType Directory -Path $diagnostic -Force | Out-Null
+          @(
+            (git rev-parse HEAD)
+            (bun --revision)
+            [System.Environment]::OSVersion.VersionString
+          ) | Set-Content (Join-Path $diagnostic 'source.txt')
+          $env:MANGO_TEST_ROLLBACK_CHILD_TRACE = Join-Path $diagnostic 'compiler-phases.jsonl'
+          $log = Join-Path $diagnostic 'frontend-unit.log'
+          & bun run --filter '@mangostudio/frontend' test:unit *> $log
+          $exitCode = $LASTEXITCODE
+          Write-Host "Frontend unit command returned $exitCode"
+          Select-String -Path $log -Pattern 'keeps the previous dist and metafile|stylesheet compilation failure' | ForEach-Object { Write-Host $_.Line }
+          if (Test-Path $env:MANGO_TEST_ROLLBACK_CHILD_TRACE) {
+            Get-Content $env:MANGO_TEST_ROLLBACK_CHILD_TRACE | Write-Host
+          }
+          exit $exitCode
+
+      - name: Upload frontend test and compiler phase logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: windows-stylesheet-rollback-diagnostic
+          path: ${{ runner.temp }}/stylesheet-rollback/
+          if-no-files-found: error
+          retention-days: 3
