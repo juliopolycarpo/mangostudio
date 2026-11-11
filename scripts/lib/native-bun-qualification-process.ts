@@ -250,6 +250,7 @@ export interface NativeCensusHost {
   readonly platform: NodeJS.Platform;
   readonly findExecutable: (name: string) => string | null;
   readonly capture: (command: readonly string[], timeoutMs: number) => Promise<string>;
+  readonly readLinuxStat?: (path: string, encoding: 'utf8') => Promise<string>;
 }
 
 const LIVE_CENSUS_HOST: NativeCensusHost = {
@@ -285,17 +286,32 @@ export async function snapshotNativeProcesses(
     host.platform
   );
   if (host.platform !== 'linux') return processes;
-  const identities = await Promise.all(processes.map((row) => readLinuxProcessIdentity(row)));
+  const identities = await Promise.all(
+    processes.map((row) => readLinuxProcessIdentity(row, host.readLinuxStat, 'census'))
+  );
   return identities.filter((row): row is NativeProcess => row !== null);
 }
 
 /**
- * Read a Linux process's current parent, group and start ticks, omitting an exited process.
+ * Recognize the stat lineage defaults Linux leaves when a task is reaped.
+ * @example isReapedLinuxProcessLineage('0', '-1', '-1'); // true
+ */
+export function isReapedLinuxProcessLineage(
+  parentPid: string | undefined,
+  processGroup: string | undefined,
+  sessionId: string | undefined
+): boolean {
+  return parentPid === '0' && processGroup === '-1' && sessionId === '-1';
+}
+
+/**
+ * Read Linux parent, group and start ticks. A census also omits reaped stat records.
  * @example const current = await readLinuxProcessIdentity(processRow);
  */
 export async function readLinuxProcessIdentity(
   row: NativeProcess,
-  readStat: (path: string, encoding: 'utf8') => Promise<string> = readFile
+  readStat: (path: string, encoding: 'utf8') => Promise<string> = readFile,
+  mode: 'identity' | 'census' = 'identity'
 ): Promise<NativeProcess | null> {
   try {
     const stat = await readStat(`/proc/${row.pid}/stat`, 'utf8');
@@ -304,6 +320,8 @@ export async function readLinuxProcessIdentity(
       throw new Error(
         `Invalid /proc/${row.pid}/stat start ticks ${JSON.stringify(fields[19])}; expected decimal digits`
       );
+    if (mode === 'census' && isReapedLinuxProcessLineage(fields[1], fields[2], fields[3]))
+      return null;
     return {
       ...row,
       parentPid: Number(fields[1]),
