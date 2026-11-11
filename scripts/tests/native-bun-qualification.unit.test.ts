@@ -9,6 +9,7 @@ import {
   symlink,
   writeFile,
 } from 'node:fs/promises';
+import { isBuiltin } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
@@ -538,9 +539,31 @@ describe('qualification inputs and seals', () => {
   });
 });
 
-describe('qualification workflow budget', () => {
-  // Checkouts, the tooling install and the evidence upload carry no step bound of their own.
+describe('qualification workflow', () => {
+  // Checkouts and the evidence upload carry no step bound of their own.
   const UNBOUNDED_STEP_MINUTES = 10;
+
+  test('uses only built-in modules outside the producer bundle', async () => {
+    const { outputs } = await Bun.build({
+      entrypoints: [join(ROOT_DIR, 'scripts/ci/native-bun-qualification.ts')],
+      target: 'bun',
+      packages: 'external',
+    });
+    expect(outputs).toHaveLength(1);
+
+    const imports = new Bun.Transpiler({ loader: 'js' }).scanImports(await outputs[0].text());
+    expect(imports.map(({ path }) => path).filter((path) => !isBuiltin(path))).toEqual([]);
+  });
+
+  test('runs the producer with Bun auto-install disabled and no tooling install', () => {
+    const job = extractJobBlock(
+      readText('.github/workflows/native-bun-qualification.yml'),
+      'qualify'
+    );
+
+    expect(job).toContain('run: bun --no-install tooling/scripts/ci/native-bun-qualification.ts');
+    expect(job).not.toMatch(/\bbun install\b/);
+  });
 
   test('gives the job its bounded pre-steps and unbounded steps beyond the producer budget', () => {
     const job = extractJobBlock(
