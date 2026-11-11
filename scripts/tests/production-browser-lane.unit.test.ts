@@ -44,7 +44,7 @@ describe('hosted production browser regressions', () => {
     expect(job?.['timeout-minutes']).toBe(25);
   });
 
-  test('keeps per-leg diagnostics distinct without loosening the browser cache', () => {
+  test('keeps per-leg diagnostics distinct', () => {
     const workflow = parseSmokeWorkflow(readText('.github/workflows/browser-smoke.yml'));
     const steps = workflow.jobs['browser-smoke']?.steps ?? [];
     const uploads = steps.filter((step) => step.uses?.startsWith('actions/upload-artifact@'));
@@ -52,13 +52,6 @@ describe('hosted production browser regressions', () => {
     for (const upload of uploads) {
       expect(upload.with?.name).toContain('matrix.mode');
       expect(upload.with?.name).toContain('production');
-    }
-    const caches = steps.filter((step) => step.uses === '$/.github/actions/cache-scoped');
-    expect(caches).toHaveLength(2);
-    for (const cache of caches) {
-      expect(cache.with?.family).toBe('playwright');
-      expect(cache.with?.['exact-restore']).toBe('true');
-      expect(cache.with?.validity).toBe(`\${{ steps.toolchain.outputs.playwright }}`);
     }
   });
 });

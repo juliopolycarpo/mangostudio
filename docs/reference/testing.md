@@ -1185,12 +1185,14 @@ the development stack.
 The hosted browser workflow runs independent development and production legs with
 `fail-fast: false`. Either failure fails the existing browser aggregate and both CI gates.
 Production diagnostics use `playwright-results-production` and `playwright-report-production`,
-while development keeps its existing artifact names. Both legs keep the same browser cache,
-installation and runtime-artifact policies.
+while development keeps its existing artifact names. Both legs use the same Playwright image
+and the Local runtime artifact from the current run.
 
 Run `bun run test:e2e:setup` once on a new machine or whenever Playwright reports a missing Chromium binary. It wraps `bunx playwright install --with-deps chromium`, so it installs only the browser used by this suite and avoids `npx` commands.
 
-The CI browser-smoke job runs on `ubuntu-24.04` because Playwright 1.60 cannot install Chromium dependencies on Ubuntu 26.04 yet. If you are on Ubuntu 26.04 locally, use an Ubuntu 24.04/22.04 container or VM for the e2e lane until upstream support lands.
+CI runs both browser suites in a digest-pinned Playwright image on Ubuntu 26.04 x64. The
+image supplies Chromium and its system dependencies. When the Playwright version changes in
+`bun.lock`, update the image tag and digest in `.github/workflows/browser-smoke.yml`.
 
 `playwright.config.ts` at the repo root starts the hub via `webServer` before running tests. In CI it enforces `workers: 1` and uploads traces/screenshots on failure.
 
@@ -1779,7 +1781,7 @@ ordinary shards instead of skipping.
 
 - `test.yml` takes the artifact name as a required `runtime_artifact` input, and every
   shard runs the action before its tests. The frontend lane does not need it.
-- `browser-smoke.yml` takes the same input; a manual dispatch has none and builds in-job.
+- `browser-smoke.yml` takes the same input. A manual dispatch builds one runtime artifact for both browser jobs.
 - `randomized-order-nightly.yml` builds it in its api lanes.
 - `cargo-shim.yml`'s `real-binary-qualification` builds its own and runs every api test file
   that imports `tests/support/rust-runtime-binary.ts`, directly or through another support
@@ -1916,7 +1918,6 @@ Linux, macOS, and Windows x64 and arm64 runners skip Bun package-cache transfers
 | Bun install         | cache-enabled `setup-mango` jobs | `~/.bun/install/cache`    | OS, arch, Bun revision, lockfile                         | loose trusted-`main` prefix on cache-enabled runners |
 | Turbo task output   | check, test, build, QA metrics   | `.turbo/cache`            | OS, arch, Bun, Turbo, lane, lockfile, manifests, configs | lane-scoped trusted-`main` prefix                    |
 | Workflow lint tools | check                            | `.mango/artifacts/tools/` | pinned tool manifest                                     | exact trusted restore only                           |
-| Playwright browser  | browser smoke                    | `~/.cache/ms-playwright`  | OS, arch, Playwright version                             | exact trusted restore only                           |
 
 Inside the Turbo task output family each task is keyed by Turbo's own hash. The cached
 API unit task includes the SHA-256 of the runtime binary in it (see [API](#api)); without
@@ -1927,14 +1928,12 @@ The Bun lockfile records their paths, so changing only patch bytes otherwise lea
 keys unchanged. Editing a patch invalidates every cached task, including build, typecheck
 and unit lanes, while unchanged patches retain the same keys.
 
-`mode` selects `restore-save` (default), `restore`, or `save`. Exact-restore
-families (`lint-tools`, `playwright`) set `exact-restore: true` so a loose
-prefix hit cannot mark `cache-restored` and skip a required install —
-Playwright browsers and checksum-pinned lint tools are unusable across
-versions. Only `mode: restore` uses `actions/cache/restore`, which is the sole
-mode that reports a trusted-`main` match; `restore-save` sees a primary-key hit
-only. `cache-restored` is therefore only safe to gate an install step when the
-call site opts into both exact restore and `mode: restore` (today: Playwright).
+`mode` selects `restore-save` (default), `restore`, or `save`. The `lint-tools`
+family uses `exact-restore: true` to require a version-exact match for its
+checksum-pinned tools. Only `mode: restore` uses `actions/cache/restore` and
+reports a trusted-`main` match. `restore-save` reports primary-key hits. A call
+site can gate an install on `cache-restored` when it sets both exact restore
+and `mode: restore`.
 
 On a cache-enabled runner, `setup-mango` can save the Bun cache after a frozen
 install on a push to `main`. If the exact restore key misses, a metadata-only

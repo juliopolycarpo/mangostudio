@@ -34,7 +34,8 @@ import {
 const CACHE_ACTION_SHA = '55cc8345863c7cc4c66a329aec7e433d2d1c52a9';
 const EXPRESSION_START = '$' + '{{';
 const CACHE_EPOCH_EXPRESSION = `cache-epoch: ${EXPRESSION_START} vars.CI_CACHE_EPOCH || 'v1' }}`;
-const EXPECTED_FAMILIES = SCOPED_CACHE_FAMILIES;
+// Existing Playwright cache entries remain recognizable until they expire.
+const EXPECTED_FAMILIES = SCOPED_CACHE_FAMILIES.filter((family) => family !== 'playwright');
 const RUST_CACHE_PREFIX_KEY = `prefix-key: v0-rust-${EXPRESSION_START} hashFiles('Cargo.toml') }}`;
 const RUST_CACHE_SAVE_IF = `save-if: ${EXPRESSION_START} github.ref == 'refs/heads/main' }}`;
 // The fuzz workspace is excluded from the root workspace and has its own
@@ -343,17 +344,6 @@ describe('CI cache policy', () => {
       "hashFiles('scripts/lib/actions-lint/manifest.ts')"
     );
     expect(lintTools[0].inputs['exact-restore']).toBe('true');
-
-    const playwright = byFamily('playwright');
-    expect(playwright.length).toBe(2);
-    for (const site of playwright) {
-      expect(site.inputs['exact-restore']).toBe('true');
-      expect(['restore', 'save']).toContain(site.inputs.mode);
-    }
-    expect(readText('.github/workflows/browser-smoke.yml')).toContain('playwright --version');
-    expect(readText('.github/workflows/browser-smoke.yml')).toContain(
-      "steps.pw-cache.outputs.cache-restored == 'true'"
-    );
   });
 
   // Only `mode: restore` runs actions/cache/restore, the one path that can see
