@@ -58,6 +58,15 @@ describe('runtime import walker workspace aliases', () => {
     ]);
   });
 
+  test('reports an unused external binding in a transitively imported file', () => {
+    const importer = 'apps/api/tests/support/chatgpt/index.ts';
+    writeFixture(importer, "import { unused } from 'external-runtime';\n");
+
+    expect([...walkRuntimeImports('scripts/entry.ts', fixtureRoot).externalSpecifiers]).toEqual([
+      ['external-runtime', [importer]],
+    ]);
+  });
+
   test('accepts a relative fixture root while following the same original source', () => {
     const walk = walkRuntimeImports('scripts/entry.ts', relative(process.cwd(), fixtureRoot));
 

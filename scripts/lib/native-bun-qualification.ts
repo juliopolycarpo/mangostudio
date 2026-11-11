@@ -99,7 +99,7 @@ export interface NativeQualificationReceipt {
 
 /**
  * Everything the producer runs, from the first seal to the last census. The workflow job that
- * calls it also checks out twice, installs and probes first, and uploads evidence afterwards, so
+ * calls it also checks out twice, runs Windows probes first, and uploads evidence afterwards, so
  * its own `timeout-minutes` must exceed this; `native-bun-qualification.unit.test.ts` holds the two
  * together.
  * @example const jobMinutes = NATIVE_QUALIFICATION_TIMEOUT_SECONDS / 60 + preStepMinutes;
