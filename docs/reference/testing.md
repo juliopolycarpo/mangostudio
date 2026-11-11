@@ -2016,14 +2016,18 @@ after a green PR and blocks publication.
 CI's `runtime-cache-seed` job fills the light entry. It runs only on a push to
 `main`, after the Gate passes, and calls `runtime-build.yml` with
 `mode: cache-seed`, `profile: light` and `cache: true`. The default mode is
-`artifact`. A seed goes through the same matrix, job `env` and single rust-cache
-step as a PR light build, so it saves under the key a PR restores:
+`artifact`. A seed and a PR light build share the matrix, runner, and job
+environment. Both use the same Cargo cache key,
 `v0-rust-<sha256 of Cargo.toml>-runtime-build-<platform>-<OS>-<arch>-<CARGO env
-hash>-<lockfile hash>`. Nothing in the job `env`, the runner, or the steps
-before the cache step may read the mode, and `runtime-profile.unit.test.ts`
-rebuilds that key for both paths and every target, so a seed cannot drift from
-the key a PR looks up. It reproduces rust-cache v2.9.3's hash, which it cannot
-read from the action at test time.
+hash>-<lockfile hash>`.
+
+After Rust toolchain selection, the seed checks for an exact cache hit before
+installing Bun, Zig, and cargo-zigbuild. This lookup is the only mode-specific
+step before the shared cache step. It uses the same pinned rust-cache action and
+key inputs, with `lookup-only: true` and `save-if: false`. A hit skips setup and
+the build. A miss runs the shared setup and cache step so the cache excludes tools
+installed before the writer runs. `runtime-profile.unit.test.ts` checks the shared
+key inputs and reproduces rust-cache v2.9.3's hash for both paths and every target.
 
 The guard accepts `cache-seed` only for a `push` to `refs/heads/main`, profile
 `light` with thin LTO and 16 units, the cache on, and an empty
@@ -2032,11 +2036,10 @@ The guard accepts `cache-seed` only for a `push` to `refs/heads/main`, profile
 single `actions/upload-artifact` step is conditional on `mode == 'artifact'`,
 and the job holds `contents: read` only. Light bytes that did reach a bundle
 would still stop at publication: the distribution manifest records the runtime
-profile, and Release and Canary require `shipping` (see `releasing.md`). The
-seed builds only on an exact-key
-miss, so a lockfile, root manifest, toolchain or CARGO-environment change seeds
-again and any other main push ends each platform after the lookup. An entry
-evicted by the 12-day retention is re-seeded by the next main push.
+profile, and Release and Canary require `shipping` (see `releasing.md`). A
+lockfile, root manifest, toolchain, or Cargo environment change can produce an
+exact-key miss. The next main push also replaces an entry evicted by the 12-day
+retention.
 
 The job waits on the Gate and nothing waits on it, so it never gates a
 mandatory lane or Canary. It sits outside the Gate's `needs`, which the

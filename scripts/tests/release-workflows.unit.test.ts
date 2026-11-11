@@ -548,11 +548,9 @@ describe('release workflow binary gate', () => {
 
   test('published builds never restore the runtime cargo cache, and only main saves it', () => {
     const runtime = readText('.github/workflows/runtime-build.yml');
-    const cacheStep = extractStepBlocks(runtime).find((step) =>
-      step.includes('Swatinem/rust-cache@')
-    );
+    const cacheStep = extractStepBlocks(runtime).find((step) => step.includes('id: rust-cache'));
 
-    expect(cacheStep, 'runtime-build.yml rust-cache step').toBeDefined();
+    expect(cacheStep, 'runtime-build.yml rust-cache step').toContain('uses: Swatinem/rust-cache@');
     expect(cacheStep).toContain('if: inputs.cache');
     expect(cacheStep).toContain('save-if: $' + "{{ github.ref == 'refs/heads/main' }}");
     // Canary publishes main's CI distribution, so main only looks the entry up
