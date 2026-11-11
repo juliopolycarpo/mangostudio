@@ -73,6 +73,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Trust the checked-out workspace in the container
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - uses: $/.github/actions/setup-mango
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
