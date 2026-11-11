@@ -75,6 +75,25 @@ export class FormatterQueryObservationExpiry extends Error {
 }
 
 /**
+ * A settled result observed after the owned query's private deadline.
+ * @example if (error instanceof FormatterQueryLateResult) console.error(error.result);
+ */
+export class FormatterQueryLateResult extends Error {
+  constructor(
+    readonly pid: number,
+    readonly timeoutMs: number,
+    readonly result: FormatterQueryResult,
+    reason: unknown
+  ) {
+    super(
+      `formatter ${pid}: native query returned after its private deadline | received: ${JSON.stringify(result)}`,
+      { cause: reason }
+    );
+    this.name = 'FormatterQueryLateResult';
+  }
+}
+
+/**
  * Bound one native ps child with a private signal and retain abort/exit ordering.
  * @example const result = await queryOwnedFormatterProcess(marker.pid, remainingMs);
  */
@@ -242,13 +261,7 @@ export async function queryOwnedFormatterProcess(
       throw new FormatterQueryExpiry(pid, timeoutMs, result, signal.reason);
     }
     if (ownedExpiryBeforeExit) {
-      throw Object.assign(
-        new Error(
-          `formatter ${pid}: native query returned after its private deadline | received: ${JSON.stringify(result)}`,
-          { cause: signal.reason }
-        ),
-        { pid, timeoutMs, result }
-      );
+      throw new FormatterQueryLateResult(pid, timeoutMs, result, signal.reason);
     }
     return result;
   } finally {

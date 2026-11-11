@@ -6,6 +6,7 @@ import {
 import { HEARTBEAT_MS } from './fake-rustfmt-markers';
 import {
   FormatterQueryExpiry,
+  FormatterQueryLateResult,
   FormatterQueryObservationExpiry,
   type FormatterQueryResult,
   queryOwnedFormatterProcess,
@@ -88,16 +89,59 @@ export async function readNativeFormatterProcess(
     return checkedNativeFormatter(identity, state);
   }
 
-  const queryStartedAt = performance.now();
-  const result = await queries.query(pid, timeoutMs);
+  const startedAt = performance.now();
+  try {
+    const result = await queries.query(pid, timeoutMs);
+    return decodeFormatterQuery(
+      pid,
+      result,
+      queries.platform,
+      timeoutMs,
+      performance.now() - startedAt
+    );
+  } catch (error) {
+    if (
+      !(error instanceof FormatterQueryLateResult) ||
+      error.pid !== pid ||
+      error.timeoutMs !== timeoutMs ||
+      error.result.exitCode !== 0 ||
+      error.result.signalCode !== null ||
+      error.result.stderr.trim()
+    ) {
+      throw error;
+    }
+    // A normal response delivered after the private deadline is not a sample.
+    // Validate its shape so malformed output still carries the original failure.
+    try {
+      decodeFormatterQuery(
+        pid,
+        error.result,
+        queries.platform,
+        timeoutMs,
+        performance.now() - startedAt
+      );
+    } catch {
+      throw error;
+    }
+    throw new FormatterQueryObservationExpiry(pid, timeoutMs, error);
+  }
+}
+
+function decodeFormatterQuery(
+  pid: number,
+  result: FormatterQueryResult,
+  platform: NodeJS.Platform,
+  timeoutMs: number,
+  elapsedMs: number
+): NativeFormatterProcess | undefined {
   if (result.exitCode === 1 && !result.stdout.trim() && !result.stderr.trim()) return undefined;
   const match = /^(\s*\d+\s+\d+\s+\d+)\s+(\S+)\s+(.+)$/.exec(result.stdout.trim());
   if (result.exitCode !== 0 || !match) {
     throw new Error(
-      `formatter ${pid}: expected native PID/parent/group/state/birth | received: ${JSON.stringify({ ...result, timeoutMs, elapsedMs: performance.now() - queryStartedAt })}`
+      `formatter ${pid}: expected native PID/parent/group/state/birth | received: ${JSON.stringify({ ...result, timeoutMs, elapsedMs: elapsedMs })}`
     );
   }
-  const identity = parseNativeProcesses(`${match[1]} ${match[3]}`, queries.platform)[0];
+  const identity = parseNativeProcesses(`${match[1]} ${match[3]}`, platform)[0];
   if (identity?.pid !== pid) {
     throw new Error(
       `formatter ${pid}: expected its own native identity | received: ${JSON.stringify(identity)}`

@@ -3,12 +3,16 @@ import { describe, expect, it } from 'bun:test';
 import {
   FormatterQueryExpiry,
   type FormatterQueryHost,
+  FormatterQueryLateResult,
   FormatterQueryObservationExpiry,
   queryOwnedFormatterProcess,
 } from './formatter-owned-query';
 import {
   type FormatterNativeQueries,
+  type FormatterSettlementHost,
+  type NativeFormatterProcess,
   readNativeFormatterProcess,
+  waitForFormatterSettlement,
 } from './formatter-process-settlement';
 
 class ControlledQueryChild {
@@ -93,10 +97,14 @@ class ControlledQueryHost implements FormatterQueryHost {
   expire(): void {
     this.controller.abort(this.reason);
   }
-  exit(code = 143, signal: NodeJS.Signals | number | null = 'SIGTERM', error?: Error): void {
+  exit(
+    code = 143,
+    signal: NodeJS.Signals | number | null = 'SIGTERM',
+    { killed = code !== 0 }: { killed?: boolean } = {}
+  ): void {
     this.child.signalCode = signal;
-    this.child.killed = code !== 0;
-    this.onExit(error);
+    this.child.killed = killed;
+    this.onExit();
     this.child.resolve(code);
   }
   close(): void {
@@ -115,6 +123,43 @@ class ControlledNativeAdapter implements FormatterNativeQueries {
   query(pid: number, timeoutMs: number) {
     return queryOwnedFormatterProcess(pid, timeoutMs, this.host);
   }
+}
+
+const quietFormatter: NativeFormatterProcess = {
+  pid: 1234,
+  parentPid: 100,
+  group: 1234,
+  identity: '1234:Tue Oct 27 10:00:00 2026',
+  command: 'formatter',
+  state: 'S',
+};
+
+/** Replay the hosted ordering without using a wall-clock sleep or spawning ps. */
+class LateMacFormatterQuery implements FormatterSettlementHost {
+  readonly adapter = new ControlledNativeAdapter();
+  time = 0;
+  constructor(
+    readonly output: string,
+    readonly firstObservationIsLate = false
+  ) {}
+  now = (): number => this.time;
+  pause = (_ms: number): Promise<void> => {
+    this.time = 287;
+    return Promise.resolve();
+  };
+  read = (pid: number, timeoutMs: number): Promise<NativeFormatterProcess | undefined> => {
+    if (this.time === 0 && !this.firstObservationIsLate) {
+      this.time = 274;
+      return Promise.resolve(quietFormatter);
+    }
+    const observation = readNativeFormatterProcess(pid, timeoutMs, this.adapter);
+    this.adapter.host.expire();
+    this.adapter.host.child.output.enqueue(new TextEncoder().encode(this.output));
+    this.adapter.host.exit(0, null, { killed: true });
+    this.adapter.host.close();
+    this.time = 301;
+    return observation;
+  };
 }
 
 /** Real Bun child used only to verify private abort and onExit ordering on this host. */
@@ -136,6 +181,66 @@ class RealAbortQueryHost implements FormatterQueryHost {
 }
 
 describe('owned formatter native query', () => {
+  it('retains the in-budget quiet formatter witness after a valid macOS result returns late', async () => {
+    const host = new LateMacFormatterQuery(
+      '1234 100 1234 S<   Tue Oct 27 10:00:00 2026     formatter\n'
+    );
+    const refusal = await waitForFormatterSettlement(
+      [{ who: 'quiet formatter', native: quietFormatter }],
+      host
+    ).catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(Error);
+    const failure = refusal as Error;
+    expect(failure.message).toContain('expected live owned processes: 0 within 300ms');
+    expect(failure.message).toContain(
+      JSON.stringify({
+        elapsedMs: 274,
+        live: [{ who: 'quiet formatter', current: quietFormatter }],
+      })
+    );
+    const [expiry] = (failure.cause as AggregateError).errors;
+    expect(expiry).toBeInstanceOf(FormatterQueryObservationExpiry);
+    expect(expiry).toMatchObject({ pid: 1234, timeoutMs: 13 });
+    expect(expiry.cause).toBeInstanceOf(FormatterQueryLateResult);
+    expect(expiry.cause).toMatchObject({
+      result: { stdout: host.output, exitCode: 0, stderr: '', signalCode: null, killed: true },
+      cause: host.adapter.host.reason,
+    });
+  });
+
+  it('cannot use a valid late macOS result without an in-budget observation', async () => {
+    const host = new LateMacFormatterQuery(
+      '1234 100 1234 S Tue Oct 27 10:00:00 2026 formatter',
+      true
+    );
+    const refusal = await waitForFormatterSettlement(
+      [{ who: 'quiet formatter', native: quietFormatter }],
+      host
+    ).catch((error: unknown) => error);
+    expect((refusal as Error).message).toContain('no in-budget observation');
+    const [expiry] = ((refusal as Error).cause as AggregateError).errors;
+    expect(expiry).toBeInstanceOf(FormatterQueryObservationExpiry);
+    expect(expiry.cause).toBeInstanceOf(FormatterQueryLateResult);
+  });
+
+  it.each(['malformed ps output', '1235 100 1234 S Tue Oct 27 10:00:00 2026 other'])(
+    'preserves an invalid late macOS result %j even after a valid in-budget witness',
+    async (output) => {
+      const host = new LateMacFormatterQuery(output);
+      const refusal = await waitForFormatterSettlement(
+        [{ who: 'quiet formatter', native: quietFormatter }],
+        host
+      ).catch((error: unknown) => error);
+      expect(refusal).toBeInstanceOf(AggregateError);
+      const aggregate = refusal as AggregateError;
+      expect(aggregate.message).toContain('native observation failed');
+      expect(aggregate.errors).toHaveLength(1);
+      expect(aggregate.cause).toBe(aggregate.errors[0]);
+      expect(aggregate.cause).toBeInstanceOf(FormatterQueryLateResult);
+      expect(aggregate.cause).toMatchObject({ result: { stdout: output } });
+    }
+  );
+
   it('classifies only its private budget event before an empty SIGTERM exit', async () => {
     const host = new ControlledQueryHost();
     const result = queryOwnedFormatterProcess(1234, 2, host).catch((error: unknown) => error);
