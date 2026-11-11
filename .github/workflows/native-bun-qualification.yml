@@ -4,15 +4,69 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: bun-package-cache-native-experiment
+  group: cargo-download-cache-experiment
   cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
+  seed:
+    name: Seed ${{ matrix.host.os }}
+    runs-on: ${{ matrix.host.os }}
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        host:
+          - os: ubuntu-latest
+            identity: Linux-X64
+          - os: macos-latest
+            identity: macOS-ARM64
+          - os: windows-latest
+            identity: Windows-X64
+    steps:
+      - name: Preserve tracked source bytes
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: 73b63f6d3ca7db6afd229a33a212fe290df33f44
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - name: Verify source, Rust, and runner
+        env:
+          EXPECTED_RUNNER: ${{ matrix.host.identity }}
+        run: |
+          test "$(git rev-parse HEAD)" = 73b63f6d3ca7db6afd229a33a212fe290df33f44
+          test "$RUNNER_OS-$RUNNER_ARCH" = "$EXPECTED_RUNNER"
+          rustc -vV
+          cargo -V
+          cargo_host=$(rustc -vV | sed -n 's/^host: //p')
+          test -n "$cargo_host"
+          echo "CARGO_TRIAL_TARGET=$cargo_host" >> "$GITHUB_ENV"
+          git hash-object Cargo.lock
+          printf 'Runner image %s %s\n' "$ImageOS" "$ImageVersion"
+          bun -e 'import { homedir } from "node:os"; import { resolve } from "node:path"; const expected = resolve(homedir(), ".cargo"); const actual = resolve(process.env.CARGO_HOME || expected); if (actual.toLowerCase() !== expected.toLowerCase()) throw new Error("Expected Cargo cache at " + expected + ", received " + actual)'
+      - name: Populate clean registry downloads
+        run: |
+          rm -rf -- "$HOME/.cargo/registry"
+          cargo fetch --locked
+          du -sk "$HOME/.cargo/registry/cache" "$HOME/.cargo/registry/index"
+      - name: Save the registry snapshot
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+          key: cargo-downloads-experiment-${{ github.run_id }}-${{ matrix.host.identity }}
   compare:
     name: Compare ${{ matrix.host.os }} ${{ matrix.order.label }}
+    needs: seed
     runs-on: ${{ matrix.host.os }}
     timeout-minutes: 10
     defaults:
@@ -23,6 +77,8 @@ jobs:
       max-parallel: 4
       matrix:
         host:
+          - os: ubuntu-latest
+            identity: Linux-X64
           - os: macos-latest
             identity: macOS-ARM64
           - os: windows-latest
@@ -45,98 +101,86 @@ jobs:
         run: git config --global core.autocrlf false
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: b47582b715c8a29a27965a837e844cb10de7630d
-          path: source
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: b47582b715c8a29a27965a837e844cb10de7630d
-          path: tooling
+          ref: 73b63f6d3ca7db6afd229a33a212fe290df33f44
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version-file: source/.bun-version
-      - name: Verify source, Bun, and runner
+          bun-version-file: .bun-version
+      - name: Verify source, Rust, and runner
         env:
           EXPECTED_RUNNER: ${{ matrix.host.identity }}
         run: |
-          test "$(git -C source rev-parse HEAD)" = b47582b715c8a29a27965a837e844cb10de7630d
-          test "$(bun --revision)" = 1.4.4-canary.1+89452d2ac
+          test "$(git rev-parse HEAD)" = 73b63f6d3ca7db6afd229a33a212fe290df33f44
           test "$RUNNER_OS-$RUNNER_ARCH" = "$EXPECTED_RUNNER"
-          lock_sha=$(bun -e 'console.log(new Bun.CryptoHasher("sha256").update(await Bun.file("source/bun.lock").arrayBuffer()).digest("hex"))')
-          test "$lock_sha" = 71a9778e12686d961b61b3f018d084ddda22810d9bc2af87836223deff7a2fa8
-          git diff --no-index source/bun.lock tooling/bun.lock
-          printf 'Lockfile SHA-256 %s\n' "$lock_sha"
-          uname -a
-          git -C tooling rev-parse HEAD
+          rustc -vV
+          cargo -V
+          cargo_host=$(rustc -vV | sed -n 's/^host: //p')
+          test -n "$cargo_host"
+          echo "CARGO_TRIAL_TARGET=$cargo_host" >> "$GITHUB_ENV"
+          git hash-object Cargo.lock
           printf 'Runner image %s %s\n' "$ImageOS" "$ImageVersion"
-      - name: Start mode 1 with clean installations
-        env:
-          MODE: ${{ matrix.order.modes[0] }}
+          bun -e 'import { homedir } from "node:os"; import { resolve } from "node:path"; const expected = resolve(homedir(), ".cargo"); const actual = resolve(process.env.CARGO_HOME || expected); if (actual.toLowerCase() !== expected.toLowerCase()) throw new Error("Expected Cargo cache at " + expected + ", received " + actual)'
+      - name: Start mode 1 with an empty registry
         run: |
-          git -C source clean -ffdX
-          git -C tooling clean -ffdX
-          rm -rf -- "$HOME/.bun/install/cache"
-          test ! -e "$HOME/.bun/install/cache"
-          printf 'Started %s\n' "$MODE"
+          rm -rf -- "$HOME/.cargo/registry"
+          test ! -e "$HOME/.cargo/registry"
           bun -e 'console.log(Date.now())' > "$RUNNER_TEMP/trial-start"
-      - name: Restore exact archive for mode 1
+      - name: Restore exact registry snapshot for mode 1
         id: restore-0
         if: matrix.order.modes[0] != 'cold'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.bun/install/cache
-          key: ${{ matrix.host.identity }}-v1-bun-main-1.4.4-canary.1+89452d2ac-532336c8e444591026cacdc87a4cf64dc80ba7546c6fbe2f5195139861d3324b
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+          key: cargo-downloads-experiment-${{ github.run_id }}-${{ matrix.host.identity }}
           fail-on-cache-miss: true
-      - name: Install both checkouts for mode 1
+      - name: Resolve locked native dependencies for mode 1
         env:
           MODE: ${{ matrix.order.modes[0] }}
           CACHE_HIT: ${{ steps.restore-0.outputs.cache-hit }}
         run: |
           if [[ "$MODE" != cold ]]; then test "$CACHE_HIT" = true; fi
           start=$(cat "$RUNNER_TEMP/trial-start")
-          before_install=$(bun -e 'console.log(Date.now())')
-          (cd tooling && bun install --frozen-lockfile)
-          before_source=$(bun -e 'console.log(Date.now())')
-          (cd source && bun install --frozen-lockfile)
-          end=$(bun -e 'console.log(Date.now())')
-          git -C source diff --exit-code
-          git -C tooling diff --exit-code
-          printf 'BUN-CACHE-TRIAL mode=%s restore_ms=%d tooling_ms=%d source_ms=%d total_ms=%d\n' \
-            "$MODE" "$((before_install - start))" "$((before_source - before_install))" \
-            "$((end - before_source))" "$((end - start))"
-      - name: Start mode 2 with clean installations
-        env:
-          MODE: ${{ matrix.order.modes[1] }}
+          before_tree=$(bun -e 'console.log(Date.now())')
+          cargo tree --locked -p mangostudio-runtime --edges normal --target "$CARGO_TRIAL_TARGET" > "$RUNNER_TEMP/cargo-tree"
+          after_tree=$(bun -e 'console.log(Date.now())')
+          cargo fetch --locked --target "$CARGO_TRIAL_TARGET"
+          after_fetch=$(bun -e 'console.log(Date.now())')
+          cargo fetch --locked --offline --target "$CARGO_TRIAL_TARGET"
+          git diff --exit-code -- Cargo.lock
+          printf 'CARGO-CACHE-TRIAL mode=%s restore_ms=%d tree_ms=%d fetch_ms=%d through_tree_ms=%d total_ms=%d\n' \
+            "$MODE" "$((before_tree - start))" "$((after_tree - before_tree))" "$((after_fetch - after_tree))" \
+            "$((after_tree - start))" "$((after_fetch - start))"
+      - name: Start mode 2 with an empty registry
         run: |
-          git -C source clean -ffdX
-          git -C tooling clean -ffdX
-          rm -rf -- "$HOME/.bun/install/cache"
-          test ! -e "$HOME/.bun/install/cache"
-          printf 'Started %s\n' "$MODE"
+          rm -rf -- "$HOME/.cargo/registry"
+          test ! -e "$HOME/.cargo/registry"
           bun -e 'console.log(Date.now())' > "$RUNNER_TEMP/trial-start"
-      - name: Restore exact archive for mode 2
+      - name: Restore exact registry snapshot for mode 2
         id: restore-1
         if: matrix.order.modes[1] != 'cold'
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.bun/install/cache
-          key: ${{ matrix.host.identity }}-v1-bun-main-1.4.4-canary.1+89452d2ac-532336c8e444591026cacdc87a4cf64dc80ba7546c6fbe2f5195139861d3324b
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+          key: cargo-downloads-experiment-${{ github.run_id }}-${{ matrix.host.identity }}
           fail-on-cache-miss: true
-      - name: Install both checkouts for mode 2
+      - name: Resolve locked native dependencies for mode 2
         env:
           MODE: ${{ matrix.order.modes[1] }}
           CACHE_HIT: ${{ steps.restore-1.outputs.cache-hit }}
         run: |
           if [[ "$MODE" != cold ]]; then test "$CACHE_HIT" = true; fi
           start=$(cat "$RUNNER_TEMP/trial-start")
-          before_install=$(bun -e 'console.log(Date.now())')
-          (cd tooling && bun install --frozen-lockfile)
-          before_source=$(bun -e 'console.log(Date.now())')
-          (cd source && bun install --frozen-lockfile)
-          end=$(bun -e 'console.log(Date.now())')
-          git -C source diff --exit-code
-          git -C tooling diff --exit-code
-          printf 'BUN-CACHE-TRIAL mode=%s restore_ms=%d tooling_ms=%d source_ms=%d total_ms=%d\n' \
-            "$MODE" "$((before_install - start))" "$((before_source - before_install))" \
-            "$((end - before_source))" "$((end - start))"
+          before_tree=$(bun -e 'console.log(Date.now())')
+          cargo tree --locked -p mangostudio-runtime --edges normal --target "$CARGO_TRIAL_TARGET" > "$RUNNER_TEMP/cargo-tree"
+          after_tree=$(bun -e 'console.log(Date.now())')
+          cargo fetch --locked --target "$CARGO_TRIAL_TARGET"
+          after_fetch=$(bun -e 'console.log(Date.now())')
+          cargo fetch --locked --offline --target "$CARGO_TRIAL_TARGET"
+          git diff --exit-code -- Cargo.lock
+          printf 'CARGO-CACHE-TRIAL mode=%s restore_ms=%d tree_ms=%d fetch_ms=%d through_tree_ms=%d total_ms=%d\n' \
+            "$MODE" "$((before_tree - start))" "$((after_tree - before_tree))" "$((after_fetch - after_tree))" \
+            "$((after_tree - start))" "$((after_fetch - start))"
