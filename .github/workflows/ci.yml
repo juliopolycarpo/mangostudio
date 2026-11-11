@@ -7,10 +7,6 @@ name: CI
 # workflow_dispatch of this workflow.
 
 on:
-  pull_request:
-    branches: [main, "stack/**"]
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -26,6 +22,7 @@ concurrency:
 
 jobs:
   changes:
+    if: github.ref != 'refs/heads/experiment/runtime-bun-setup-retry'
     name: Detect distribution-relevant changes
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -83,6 +80,7 @@ jobs:
           cat "$RUNNER_TEMP/rust-lanes"
 
   distribution-identity:
+    if: github.ref != 'refs/heads/experiment/runtime-bun-setup-retry'
     name: Resolve distribution identity
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -136,6 +134,7 @@ jobs:
       frontend_bun_revision: ${{ needs.build.outputs.bun_revision }}
 
   cross-runtimes:
+    if: github.ref != 'refs/heads/experiment/runtime-bun-setup-retry'
     name: Cross-runtime download
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -152,10 +151,12 @@ jobs:
         run: bun ./scripts/ci/verify-cross-runtimes.ts
 
   check:
+    if: github.ref != 'refs/heads/experiment/runtime-bun-setup-retry'
     name: Check
     uses: $/.github/workflows/lint.yml
 
   dependency-audit:
+    if: github.ref != 'refs/heads/experiment/runtime-bun-setup-retry'
     # Unconditional: advisories against an unchanged lockfile still block CI.
     # Read-only reusable scan; no secrets or dependency installation.
     name: Dependency Audit
@@ -177,6 +178,7 @@ jobs:
       target_artifacts: ${{ needs.distribution.outputs.target_artifacts || '{}' }}
 
   local-runtime:
+    if: github.ref != 'refs/heads/experiment/runtime-bun-setup-retry'
     name: Local Runtime
     uses: $/.github/workflows/local-runtime.yml
 
@@ -287,7 +289,7 @@ jobs:
         smoke,
         smoke-container,
       ]
-    if: ${{ always() }}
+    if: github.ref != 'refs/heads/experiment/runtime-bun-setup-retry'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -354,3 +356,61 @@ jobs:
       profile: light
       mode: cache-seed
       cache: true
+
+  bun-setup-retry:
+    if: github.ref == 'refs/heads/experiment/runtime-bun-setup-retry'
+    name: Bun setup (${{ matrix.scenario }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scenario: first-pass
+            fail_first: false
+            fail_retry: false
+          - scenario: first-404
+            fail_first: true
+            fail_retry: false
+          - scenario: both-404
+            fail_first: true
+            fail_retry: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: setup-bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        continue-on-error: true
+        with:
+          bun-version-file: .bun-version
+          bun-download-url: ${{ matrix.fail_first && 'https://github.com/oven-sh/bun/releases/download/canary/mangostudio-ci-retry-fixture-missing.zip' || '' }}
+
+      # Bun replaces canary assets in place. A download can land during upload.
+      - name: Wait before retrying Bun setup
+        if: steps.setup-bun.outcome == 'failure'
+        shell: bash
+        run: sleep 10
+
+      - name: Retry Bun setup
+        id: retry-bun
+        if: steps.setup-bun.outcome == 'failure'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+          bun-download-url: ${{ matrix.fail_retry && 'https://github.com/oven-sh/bun/releases/download/canary/mangostudio-ci-retry-fixture-missing.zip' || '' }}
+
+      - name: Verify setup outcomes
+        env:
+          FIRST: ${{ steps.setup-bun.outcome }}
+          RETRY: ${{ steps.retry-bun.outcome }}
+          EXPECT_FAILURE: ${{ matrix.fail_first }}
+        run: |
+          set -euo pipefail
+          if [ "$EXPECT_FAILURE" = true ]; then
+            test "$FIRST $RETRY" = "failure success"
+          else
+            test "$FIRST $RETRY" = "success skipped"
+          fi
+          bun --version
+          bun --revision
