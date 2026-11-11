@@ -1,10 +1,19 @@
-import { readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import {
+  closeSync,
+  fstatSync,
+  openSync,
+  readdirSync,
+  readSync,
+  realpathSync,
+  statSync,
+} from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import ts from '@typescript/typescript6';
 
 const SOURCE = /\.(?:[cm]?[jt]s|[jt]sx)$/i;
-const OMIT_DIRECTORIES = new Set(['node_modules', '.git']);
+const OMIT_DIRECTORIES = new Set(['node_modules', '.git', 'dist', 'coverage', '.turbo']);
+const MAX_SOURCE_BYTES = 4n * 1024n * 1024n;
 
 /** A closed import path and the location of its first edge. */
 export interface ImportCycle {
@@ -44,7 +53,12 @@ function excluded(path: string, root: string): boolean {
   const segments = relative(root, path).split(sep);
   return (
     segments.some((segment) => OMIT_DIRECTORIES.has(segment)) ||
-    (segments[0] === '.mango' && (segments[1] === 'artifacts' || segments[1] === 'out'))
+    segments[0] === '.mango' ||
+    segments[0] === 'target' ||
+    (segments[0] === 'crates' &&
+      segments[1] === 'mango-protocol' &&
+      segments[2] === 'fuzz' &&
+      segments[3] === 'target')
   );
 }
 
@@ -163,11 +177,57 @@ function importsFrom(file: string, text: string): ImportSpecifier[] {
   return imports;
 }
 
+function readBoundedSource(path: string, root: string): string {
+  const descriptor = openSync(path, 'r');
+  try {
+    const before = fstatSync(descriptor, { bigint: true });
+    const relativePath = () => relative(root, path).split(sep).join('/');
+    if (before.size > MAX_SOURCE_BYTES) {
+      throw new Error(
+        `${relativePath()}: expected at most ${MAX_SOURCE_BYTES} bytes | received ${before.size}`
+      );
+    }
+
+    // Read at most one byte past the initial size to detect growth without
+    // allocating memory for a changing input.
+    const buffer = Buffer.allocUnsafe(Number(before.size) + 1);
+    let offset = 0;
+    while (offset < buffer.length) {
+      const read = readSync(descriptor, buffer, offset, buffer.length - offset, null);
+      if (read === 0) break;
+      offset += read;
+    }
+
+    const after = fstatSync(descriptor, { bigint: true });
+    const bytesRead = BigInt(offset);
+    const observedSize = after.size > bytesRead ? after.size : bytesRead;
+    if (observedSize > MAX_SOURCE_BYTES) {
+      throw new Error(
+        `${relativePath()}: expected at most ${MAX_SOURCE_BYTES} bytes | received ${observedSize}`
+      );
+    }
+    if (bytesRead !== before.size || after.size !== before.size) {
+      const received = bytesRead === before.size ? after.size : bytesRead;
+      throw new Error(
+        `${relativePath()}: expected source to remain at ${before.size} bytes | received ${received} while reading`
+      );
+    }
+    if (after.mtimeNs !== before.mtimeNs || after.ctimeNs !== before.ctimeNs) {
+      throw new Error(
+        `${relativePath()}: expected unchanged source metadata while reading | received mtime ${after.mtimeNs}, ctime ${after.ctimeNs} (previously ${before.mtimeNs}, ${before.ctimeNs})`
+      );
+    }
+    return buffer.toString('utf8', 0, offset);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 function graphFor(files: Set<string>, root: string): Map<string, Edge[]> {
   const graph = new Map<string, Edge[]>();
   const configs = new Map<string, ts.CompilerOptions>();
   for (const file of files) {
-    const source = readFileSync(file, 'utf8');
+    const source = readBoundedSource(file, root);
     const options = configFor(file, configs);
     const targets = new Map<string, Edge>();
     for (const entry of importsFrom(file, source)) {
@@ -196,7 +256,8 @@ function graphFor(files: Set<string>, root: string): Map<string, Edge[]> {
 }
 
 /**
- * Scan all JS and TS files under the roots, including ignored and generated files.
+ * Scan JS and TS sources under the roots, including gitignored generated source.
+ * Exclude build trees and reject oversized inputs before parsing.
  * Type-only, re-export, dynamic and CommonJS edges are included. Each DFS back
  * edge supplies a cycle witness; one witness is enough to reject a cyclic graph.
  * @example scanImportCycles(['apps/api'], process.cwd());

@@ -10,8 +10,10 @@ including type-only imports. `scripts/tests/bun-lint.integration.test.ts` exerci
 boundaries and checks that Bun runs typed promise, hooks, and label rules.
 
 Bun's `import/no-cycle` ignores type-only imports. The separate graph check in `scripts/lib/import-cycles.ts` includes
-those edges and generated or gitignored source files. Both workspace and root checks
-run it. QA counts deterministic DFS back-edge witnesses; overlapping graphs can have a
+those edges and generated or gitignored source files. Workspace and root checks skip
+`dist`, `coverage`, `.turbo`, root `.mango`, and the Cargo target directories.
+Source files over 4 MiB produce an error before parsing.
+QA counts deterministic DFS back-edge witnesses; overlapping graphs can have a
 different count from the former scanner.
 Bun does not read `biome-ignore` comments; each suppression needs review and a Bun/ESLint
 replacement when still necessary.

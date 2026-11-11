@@ -80,10 +80,11 @@ and each workspace's `check` script. The cycle pass uses a TypeScript-resolved
 graph scan, so formatting exclusions and `.gitignore` cannot hide TS/JS cycles.
 It checks TS, TSX, MTS, CTS, JS, JSX, MJS and CJS files, including JavaScript
 dependencies reached from TypeScript roots and independent JavaScript roots.
-It includes declarations and generated/build source files. It force-excludes
-`node_modules`, `.git`, and the repository's `.mango/artifacts` and `.mango/out`
-caches so concurrent tool installation cannot race scanner discovery. The scan
-resolves imports with the TypeScript compiler API and retains type-only edges.
+It includes declarations and generated or gitignored source files. The scanner
+skips `node_modules`, `.git`, `dist`, `coverage`, and `.turbo` at any depth.
+It also skips the repository root's `.mango` and `target` directories and
+`crates/mango-protocol/fuzz/target`. Source files over 4 MiB fail before parsing.
+The scan resolves imports with the TypeScript compiler API and retains type-only edges.
 Turbo always reruns `check:cycles` because ignored files are absent from its VCS
 cache inputs. Dockerfiles are excluded from formatting.
 

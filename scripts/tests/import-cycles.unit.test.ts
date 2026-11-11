@@ -10,9 +10,10 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import { ROOT_DIR } from '../lib/config';
-import { createImportCycleCommand } from '../lib/import-cycles';
+import { createImportCycleCommand, scanImportCycles } from '../lib/import-cycles';
 import { protocolCheckTasks } from '../protocol/tasks';
 import { countCircularDeps } from '../qa-gate/collect/circular';
 import { runCapture } from '../qa-gate/collect/support';
@@ -36,7 +37,7 @@ const TYPE_CYCLE = {
  * One cycle injected into a fixture. Several cases share a fixture and a scan,
  * so every failure message names its case.
  * @example
- * { name: 'dist type cycle', dir: 'dist', files: TYPE_CYCLE, rule: NO_IMPORT_CYCLES }
+ * { name: 'ignored generated type cycle', dir: 'build', files: TYPE_CYCLE, rule: NO_IMPORT_CYCLES }
  */
 interface CycleCase {
   readonly name: string;
@@ -261,14 +262,14 @@ function diagnosticHeaders(output: string): Array<{ file: string; rule: string }
 }
 
 test('keeps a diagnostic header separate from the other output stream', () => {
-  const diagnostic = `apps/frontend/dist/self-js/a.js:1:1 ${NO_SELF_IMPORT}`;
+  const diagnostic = `apps/frontend/build/self-js/a.js:1:1 ${NO_SELF_IMPORT}`;
   const summary = 'Checked 18 files in 7ms. No fixes applied.';
   for (const [stdout, stderr] of [
     [diagnostic, summary],
     [summary, diagnostic],
   ]) {
     expect(diagnosticHeaders(joinOutputStreams(stdout, stderr))).toEqual([
-      { file: 'apps/frontend/dist/self-js/a.js', rule: NO_SELF_IMPORT },
+      { file: 'apps/frontend/build/self-js/a.js', rule: NO_SELF_IMPORT },
     ]);
   }
 });
@@ -333,16 +334,21 @@ function defineBatch<Scan extends { readonly output: string; readonly required?:
 // Cycles under paths the ordinary lint and format checks ignore.
 const IGNORED_CASES: Record<string, CycleCase[]> = {
   'apps/api': [
-    { name: 'dist type cycle', dir: 'dist', files: TYPE_CYCLE, rule: NO_IMPORT_CYCLES },
     {
-      name: 'dist TS cycle larger than the normal Biome one-MiB limit',
-      dir: 'dist/oversized',
+      name: 'ignored generated type cycle',
+      dir: 'build/generated-types',
+      files: TYPE_CYCLE,
+      rule: NO_IMPORT_CYCLES,
+    },
+    {
+      name: 'large ignored generated TypeScript cycle',
+      dir: 'build/oversized',
       files: { ...TYPE_CYCLE, 'a.ts': `/*${'x'.repeat(1024 * 1024)}*/\n${TYPE_CYCLE['a.ts']}` },
       rule: NO_IMPORT_CYCLES,
     },
     {
       name: 'independent JavaScript cycle without a TS importer',
-      dir: 'dist/independent-js',
+      dir: 'build/independent-js',
       files: {
         'self.js':
           "import { self as again } from './self.js';\nexport const self = () => again();\n",
@@ -351,7 +357,12 @@ const IGNORED_CASES: Record<string, CycleCase[]> = {
     },
   ],
   'apps/frontend': [
-    { name: 'dist type cycle', dir: 'dist', files: TYPE_CYCLE, rule: NO_IMPORT_CYCLES },
+    {
+      name: 'ignored generated type cycle',
+      dir: 'build/generated-types',
+      files: TYPE_CYCLE,
+      rule: NO_IMPORT_CYCLES,
+    },
     {
       name: 'generated route tree self-import',
       dir: 'src',
@@ -372,7 +383,12 @@ const IGNORED_CASES: Record<string, CycleCase[]> = {
     },
   ],
   'apps/shared': [
-    { name: 'dist type cycle', dir: 'dist', files: TYPE_CYCLE, rule: NO_IMPORT_CYCLES },
+    {
+      name: 'ignored generated type cycle',
+      dir: 'build/generated-types',
+      files: TYPE_CYCLE,
+      rule: NO_IMPORT_CYCLES,
+    },
     {
       name: 'generated runtime-contract cycle',
       dir: 'src/runtime-contract/generated',
@@ -381,10 +397,15 @@ const IGNORED_CASES: Record<string, CycleCase[]> = {
     },
   ],
   'packages/protocol': [
-    { name: 'dist type cycle', dir: 'dist', files: TYPE_CYCLE, rule: NO_IMPORT_CYCLES },
+    {
+      name: 'ignored generated type cycle',
+      dir: 'build/generated-types',
+      files: TYPE_CYCLE,
+      rule: NO_IMPORT_CYCLES,
+    },
     {
       name: 'declaration cycle',
-      dir: 'dist/declarations',
+      dir: 'build/declarations',
       files: { 'a.d.ts': TYPE_CYCLE['a.ts'], 'b.d.ts': TYPE_CYCLE['b.ts'] },
       rule: NO_IMPORT_CYCLES,
     },
@@ -490,12 +511,12 @@ function scriptCycleFiles(extension: string, kind: 'pair' | 'self'): Record<stri
       };
 }
 
-// Every extension x kind pair gets its own dist directory and TS entry file.
+// Every extension x kind pair gets its own ignored build directory and TS entry file.
 const EXTENSION_CASES: CycleCase[] = ['js', 'jsx', 'mjs', 'cjs', 'mts', 'cts'].flatMap(
   (extension) =>
     (['pair', 'self'] as const).map((kind) => ({
       name: `TS-imported ${extension} ${kind} cycle`,
-      dir: `dist/${kind}-${extension}`,
+      dir: `build/${kind}-${extension}`,
       files: scriptCycleFiles(extension, kind),
       rule: kind === 'self' ? NO_SELF_IMPORT : NO_IMPORT_CYCLES,
     }))
@@ -569,13 +590,13 @@ function scanKinds(cases: readonly CycleCase[]) {
 
 const CONTROLLED_SELF_IMPORT: CycleCase = {
   name: 'controlled JSX self import',
-  dir: 'dist/self-jsx',
+  dir: 'build/self-jsx',
   files: { 'a.jsx': "import { a } from './a.jsx';\nexport { a };\n" },
   rule: NO_SELF_IMPORT,
 };
-const DIRECT_SELF_IMPORT = `apps/frontend/dist/self-jsx/a.jsx:1:1 ${NO_SELF_IMPORT} ━━━━━\n`;
+const DIRECT_SELF_IMPORT = `apps/frontend/build/self-jsx/a.jsx:1:1 ${NO_SELF_IMPORT} ━━━━━\n`;
 const MANGLED_REQUIRED_OUTPUT =
-  'apps/frontend/dist/self-jsx/a.jsx:1:1 lint/nursery/no' +
+  'apps/frontend/build/self-jsx/a.jsx:1:1 lint/nursery/no' +
   'Checked 18 files in 7ms. No fixes applied.\n' +
   'self-import ━━━━━\n';
 
@@ -590,23 +611,23 @@ const CONTROLLED_PRESENTATIONS = [
     name: 'missing MTS header',
     cycle: {
       name: 'controlled MTS self import',
-      dir: 'dist/self-mts',
+      dir: 'build/self-mts',
       files: { 'a.mts': "import { a } from './a.mts';\nexport { a };\n" },
       rule: NO_SELF_IMPORT,
     },
-    requiredOutput: `apps/frontend/dist/self-js/a.js:1:1 ${NO_SELF_IMPORT} ━━━━━\nChecked 18 files in 7ms. No fixes applied.\n`,
-    directOutput: `apps/frontend/dist/self-mts/a.mts:1:1 ${NO_SELF_IMPORT} ━━━━━\n`,
+    requiredOutput: `apps/frontend/build/self-js/a.js:1:1 ${NO_SELF_IMPORT} ━━━━━\nChecked 18 files in 7ms. No fixes applied.\n`,
+    directOutput: `apps/frontend/build/self-mts/a.mts:1:1 ${NO_SELF_IMPORT} ━━━━━\n`,
   },
   {
     name: 'MJS rule joined to summary',
     cycle: {
       name: 'controlled MJS self import',
-      dir: 'dist/self-mjs',
+      dir: 'build/self-mjs',
       files: { 'a.mjs': "import { a } from './a.mjs';\nexport { a };\n" },
       rule: NO_SELF_IMPORT,
     },
-    requiredOutput: `apps/frontend/dist/self-mjs/a.mjs:1:1 ${NO_SELF_IMPORT}Checked 18 files in 7ms. No fixes applied.\n`,
-    directOutput: `apps/frontend/dist/self-mjs/a.mjs:1:1 ${NO_SELF_IMPORT} ━━━━━\n`,
+    requiredOutput: `apps/frontend/build/self-mjs/a.mjs:1:1 ${NO_SELF_IMPORT}Checked 18 files in 7ms. No fixes applied.\n`,
+    directOutput: `apps/frontend/build/self-mjs/a.mjs:1:1 ${NO_SELF_IMPORT} ━━━━━\n`,
   },
 ] satisfies ReadonlyArray<{
   name: string;
@@ -723,14 +744,14 @@ describe('checked cycle evidence', () => {
   test.each([
     ['missing rule', ''],
     ['wrong rule', DIRECT_SELF_IMPORT.replace(NO_SELF_IMPORT, NO_IMPORT_CYCLES)],
-    ['wrong path', DIRECT_SELF_IMPORT.replace('dist/self-jsx', 'dist/unrelated')],
+    ['wrong path', DIRECT_SELF_IMPORT.replace('build/self-jsx', 'build/unrelated')],
   ])('still rejects %s in direct diagnostics', async (_name, output) => {
     const commands = new FakeCycleCommands(1, output);
     const scan = await scanCheckedCycles('/controlled-fixture', 'apps/frontend', commands);
 
     expect(() =>
       expectCaseReported(scan.output, CONTROLLED_SELF_IMPORT, scan.required.output)
-    ).toThrow(`expected ${NO_SELF_IMPORT} reported on one of dist/self-jsx/a.jsx`);
+    ).toThrow(`expected ${NO_SELF_IMPORT} reported on one of build/self-jsx/a.jsx`);
     expect(() =>
       expectCaseReported(scan.output, CONTROLLED_SELF_IMPORT, scan.required.output)
     ).toThrow(`Required check output:\n${MANGLED_REQUIRED_OUTPUT}`);
@@ -813,13 +834,13 @@ describe('import cycle checks', () => {
   test('rejects an ignored cycle introduced after a clean required workspace check', async () => {
     const root = createFixture();
     expectCheck(runCheck(root, 'apps/api'), 'pass', 'apps/api before injecting a cycle');
-    injectCycle(root, 'apps/api/dist', TYPE_CYCLE);
+    injectCycle(root, 'apps/api/build', TYPE_CYCLE);
     const rejected = await scanCheckedCycles(root, 'apps/api');
-    expectCheck(rejected.required, 'fail', 'apps/api after injecting dist/a.ts and dist/b.ts');
+    expectCheck(rejected.required, 'fail', 'apps/api after injecting build/a.ts and build/b.ts');
     expect(rejected.output).toContain(NO_IMPORT_CYCLES);
     expectCaseReported(
       rejected.output,
-      { name: 'new ignored type cycle', dir: 'dist', files: TYPE_CYCLE, rule: NO_IMPORT_CYCLES },
+      { name: 'new ignored type cycle', dir: 'build', files: TYPE_CYCLE, rule: NO_IMPORT_CYCLES },
       rejected.required.output
     );
     expectCycleCount(rejected.circularDeps, 1, 'new ignored type cycle', rejected.required.output);
@@ -829,7 +850,7 @@ describe('import cycle checks', () => {
     'checks %s imports after a large expression',
     async (state) => {
       const root = createFixture();
-      const directory = 'dist/large-expression';
+      const directory = 'build/large-expression';
       // Traverse a large syntax tree before the imports below. The scanner
       // must retain later pair and self-import edges without type inference.
       const heavy = `export const values = {\n${Array.from(
@@ -886,13 +907,116 @@ describe('import cycle checks', () => {
 
   test('counts the same cycle through a directory alias and the workspace gate', async () => {
     const root = createFixture();
-    injectCycle(root, 'apps/api/dist/aliased-cycle', TYPE_CYCLE);
+    injectCycle(root, 'apps/api/build/aliased-cycle', TYPE_CYCLE);
     symlinkSync(join(root, 'apps/api'), join(root, 'api-alias'), 'junction');
     const required = runCheck(root, 'apps/api');
     expectCheck(required, 'fail', 'workspace check with an ignored type cycle');
     const direct = await countCycles(root, ['api-alias']);
     expectCycleCount(direct, 1, 'QA scan through a directory alias', required.output);
   }, 30_000);
+
+  test('excludes generated build trees and resolved imports into them', async () => {
+    const root = createFixture();
+    for (const path of [
+      'apps/api/dist',
+      'apps/api/coverage',
+      'apps/api/.turbo',
+      '.mango/tmp',
+      'target/debug',
+      'crates/mango-protocol/fuzz/target/debug',
+    ]) {
+      injectCycle(root, path, TYPE_CYCLE);
+    }
+    injectCycle(root, 'apps/api/src', { 'entry.ts': "import '../dist/output';\n" });
+    injectCycle(root, 'apps/api/dist', { 'output.ts': "import '../src/entry';\n" });
+
+    const ignored = await scanCycles(root, ['.']);
+    expectCycleCount(ignored.circularDeps, 0, 'generated build output', ignored.output);
+    expectCheck(runCheck(root, 'apps/api'), 'pass', 'workspace with generated build output');
+    injectCycle(root, 'apps/api/src/generated', TYPE_CYCLE);
+    expectCycleCount(await countCycles(root, ['.']), 1, 'source beside generated build output');
+  });
+
+  test('scans a UTF-8 source at the byte limit and keeps its import edges', () => {
+    const root = createFixture();
+    const limit = 4 * 1024 * 1024;
+    const prefix = '/*é';
+    const suffix = `*/\n${TYPE_CYCLE['a.ts']}`;
+    const contents = prefix + 'x'.repeat(limit - Buffer.byteLength(prefix + suffix)) + suffix;
+    injectCycle(root, 'apps/api/src/limit', { ...TYPE_CYCLE, 'a.ts': contents });
+
+    expect(scanImportCycles(['apps/api'], root).map(({ files }) => files)).toEqual([
+      ['apps/api/src/limit/a.ts', 'apps/api/src/limit/b.ts', 'apps/api/src/limit/a.ts'],
+    ]);
+  });
+
+  test.each([
+    ['short read', 'sample.ts: expected source to remain at 11 bytes | received 0 while reading'],
+    ['metadata change', 'sample.ts: expected unchanged source metadata while reading | received'],
+  ])('rejects a %s before parsing the source', (change, diagnostic) => {
+    const root = createFixture();
+    injectCycle(root, '.', { 'sample.ts': 'export {};\n' });
+    const scanner = pathToFileURL(join(ROOT_DIR, 'scripts/lib/import-cycles.ts')).href;
+    const probe = `
+      import { mock } from 'bun:test';
+      import * as fs from 'node:fs';
+      import { join } from 'node:path';
+      const native = { ...fs };
+      const root = ${JSON.stringify(root)};
+      const change = ${JSON.stringify(change)};
+      const source = join(native.realpathSync.native(root), 'sample.ts');
+      let descriptor;
+      let read = false;
+      function trackSourceDescriptor(path, ...args) {
+        const fd = native.openSync(path, ...args);
+        if (path === source) descriptor = fd;
+        return fd;
+      }
+      function simulateSourceRead(fd, ...args) {
+        if (fd === descriptor) {
+          read = true;
+          if (change === 'short read') return 0;
+        }
+        return native.readSync(fd, ...args);
+      }
+      function simulateSourceMetadata(fd, ...args) {
+        const stat = native.fstatSync(fd, ...args);
+        if (fd === descriptor && read && change === 'metadata change') {
+          stat.mtimeNs = stat.mtimeNs + 1n;
+        }
+        return stat;
+      }
+      function fakeSourceFilesystem() {
+        return {
+          ...native,
+          openSync: trackSourceDescriptor,
+          readSync: simulateSourceRead,
+          fstatSync: simulateSourceMetadata,
+        };
+      }
+      mock.module('node:fs', fakeSourceFilesystem);
+      const { scanImportCycles } = await import(${JSON.stringify(scanner)});
+      scanImportCycles(['sample.ts'], root);
+    `;
+    const result = Bun.spawnSync([process.execPath, '-e', probe], {
+      cwd: root,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const stderr = result.stderr.toString();
+    expect(result.exitCode, stderr).toBe(1);
+    expect(stderr).toContain(diagnostic);
+  });
+
+  test('reports an oversized source before parsing it', () => {
+    const root = createFixture();
+    const limit = 4 * 1024 * 1024;
+    const contents = `/*${'x'.repeat(limit)}*/`;
+    injectCycle(root, 'apps/api/src', { 'oversized.ts': contents });
+    expect(() => scanImportCycles(['apps/api'], root)).toThrow(
+      `apps/api/src/oversized.ts: expected at most ${limit} bytes | received ${contents.length}`
+    );
+  });
 
   test('keeps node_modules and git internals outside the TS/JS scan', async () => {
     const root = createFixture();
