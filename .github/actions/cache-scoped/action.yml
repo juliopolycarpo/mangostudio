@@ -134,6 +134,7 @@ runs:
         RESTORE_PREFIX: ${{ inputs.restore-prefix }}
         ROTATE: ${{ inputs.rotate }}
         ROTATION: ${{ github.run_id }}-${{ github.run_attempt }}
+        TRIAL_HEAD: ${{ github.head_ref }}
         VALIDITY: ${{ inputs.validity }}
         WRITE_SCOPE: ${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.ref == 'refs/heads/main' && 'main' || format('run-{0}', github.run_id) }}
       run: |
@@ -208,6 +209,25 @@ runs:
           primary_key="${primary_key}-${ROTATION}"
         fi
 
+        # The two test-only drafts share the same read-only snapshots.
+        trial_key=''
+        case "${TRIAL_HEAD:-}" in
+          experiment/distribution-test-skip-on-pass|experiment/distribution-test-skip-control-pass)
+            case "${FAMILY}:${MODE}:${RESTORE_PREFIX}" in
+              timings:restore:test-) trial_key='Linux-X64-v1-timings-main-test-shard-2-42965049615' ;;
+              turbo:restore:test-) trial_key='Linux-X64-v1-turbo-main-test-bun-1.4.4-canary.1+89452d2ac-turbo-2.11.10-cbae2889d53baf8e0a334eba5cf510a78a9ac877cd84b2a282e55361959c168d-42965049615-1' ;;
+              turbo:restore:build-) trial_key='Linux-X64-v1-turbo-main-build-bun-1.4.4-canary.1+89452d2ac-turbo-2.11.10-cbae2889d53baf8e0a334eba5cf510a78a9ac877cd84b2a282e55361959c168d-42965049615-1' ;;
+              turbo:restore:check-) trial_key='Linux-X64-v1-turbo-main-check-bun-1.4.4-canary.1+89452d2ac-turbo-2.11.10-cbae2889d53baf8e0a334eba5cf510a78a9ac877cd84b2a282e55361959c168d-42933121752-1' ;;
+            esac
+            ;;
+        esac
+        if [ -n "${trial_key}" ]; then
+          primary_key="${trial_key}"
+          restore_key="${trial_key}"
+          own_prefix=''
+          EXACT_RESTORE=true
+        fi
+
         # Report what restore actually considers: exact-restore families never
         # see the loose prefix, so advertising it would misdirect cache-miss
         # debugging.
@@ -219,6 +239,7 @@ runs:
 
         {
           echo "primary-key=${primary_key}"
+          echo "trial-pinned-key=${trial_key}"
           echo "restore-key=${restore_key}"
           echo "restore-prefix=${restore_prefix}"
           echo "validity=${VALIDITY}"
@@ -363,9 +384,15 @@ runs:
         RESTORE_EXACT_HIT: ${{ steps.restore-exact.outputs.cache-hit }}
         RESTORE_HIT: ${{ steps.restore.outputs.cache-hit }}
         RESTORE_MATCHED: ${{ steps.restore.outputs.cache-matched-key }}
+        TRIAL_PINNED_KEY: ${{ steps.keys.outputs.trial-pinned-key }}
         RESTORE_PREFIX: ${{ steps.keys.outputs.restore-prefix }}
       run: |
         set -euo pipefail
+
+        if [ -n "${TRIAL_PINNED_KEY:-}" ] && [ "${RESTORE_MATCHED}" != "${TRIAL_PINNED_KEY}" ]; then
+          printf 'expected pinned trial cache: %s | received: %s\n' "${TRIAL_PINNED_KEY}" "${RESTORE_MATCHED:-<miss>}" >&2
+          exit 1
+        fi
 
         # A lookup-only restore never downloads the cache, so a hit here must
         # not report as restored — only as a key to feed a later exact restore.
