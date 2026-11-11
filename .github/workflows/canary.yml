@@ -159,7 +159,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: ./.github/actions/setup-mango
+      - uses: $/.github/actions/setup-mango
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
@@ -231,7 +231,7 @@ jobs:
         with:
           node-version: "22.23.4"
           package-manager-cache: false
-      - uses: ./.github/actions/setup-mango
+      - uses: $/.github/actions/setup-mango
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
@@ -258,7 +258,7 @@ jobs:
 
       - name: Download original approved npm distribution
         if: steps.guard.outputs.packages_needed == 'true'
-        uses: ./.github/actions/download-distribution
+        uses: $/.github/actions/download-distribution
         with:
           artifact-name: ${{ steps.approved.outputs.npm_name }}
           artifact-id: ${{ steps.approved.outputs.npm_id }}
@@ -280,7 +280,7 @@ jobs:
       - id: publish
         name: Fill only missing platform packages, then wrapper
         if: steps.guard.outputs.packages_needed == 'true'
-        uses: ./.github/actions/publish-npm-distribution
+        uses: $/.github/actions/publish-npm-distribution
         with:
           allow-legacy-token: "false"
           dist-tag: canary
@@ -314,7 +314,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: ./.github/actions/setup-mango
+      - uses: $/.github/actions/setup-mango
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
@@ -341,7 +341,7 @@ jobs:
 
       - name: Download original approved assets distribution
         if: steps.guard.outputs.github_needed == 'true'
-        uses: ./.github/actions/download-distribution
+        uses: $/.github/actions/download-distribution
         with:
           artifact-name: ${{ steps.approved.outputs.assets_name }}
           artifact-id: ${{ steps.approved.outputs.assets_id }}

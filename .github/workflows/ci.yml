@@ -120,7 +120,7 @@ jobs:
       contents: read
       id-token: write # mint the reusable builder's provenance attestation token
       attestations: write # persist provenance for main-push distribution bundles
-    uses: ./.github/workflows/distribution-build.yml
+    uses: $/.github/workflows/distribution-build.yml
     with:
       version: ${{ needs.distribution-identity.outputs.version }}
       source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
@@ -153,13 +153,13 @@ jobs:
 
   check:
     name: Check
-    uses: ./.github/workflows/lint.yml
+    uses: $/.github/workflows/lint.yml
 
   dependency-audit:
     # Unconditional: advisories against an unchanged lockfile still block CI.
     # Read-only reusable scan; no secrets or dependency installation.
     name: Dependency Audit
-    uses: ./.github/workflows/dependency-audit.yml
+    uses: $/.github/workflows/dependency-audit.yml
 
   release-dry-run:
     # Always call on PRs, even when distribution was intentionally skipped.
@@ -168,7 +168,7 @@ jobs:
     name: Release Dry Run
     needs: [distribution-identity, distribution]
     if: ${{ !cancelled() && github.event_name == 'pull_request' }}
-    uses: ./.github/workflows/release-dry-run.yml
+    uses: $/.github/workflows/release-dry-run.yml
     with:
       reuse_distribution: true
       version: ${{ needs.distribution-identity.outputs.version }}
@@ -178,26 +178,26 @@ jobs:
 
   local-runtime:
     name: Local Runtime
-    uses: ./.github/workflows/local-runtime.yml
+    uses: $/.github/workflows/local-runtime.yml
 
   test:
     name: Test
     needs: [local-runtime]
-    uses: ./.github/workflows/test.yml
+    uses: $/.github/workflows/test.yml
     with:
       runtime_artifact: ${{ needs.local-runtime.outputs.artifact }}
 
   build:
     name: Build
     needs: [distribution-identity]
-    uses: ./.github/workflows/build.yml
+    uses: $/.github/workflows/build.yml
     with:
       source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
 
   browser-smoke:
     name: Smoke — Browser
     needs: [local-runtime, build]
-    uses: ./.github/workflows/browser-smoke.yml
+    uses: $/.github/workflows/browser-smoke.yml
     with:
       runtime_artifact: ${{ needs.local-runtime.outputs.artifact }}
       frontend_artifact: ${{ needs.build.outputs.artifact }}
@@ -212,7 +212,7 @@ jobs:
     name: Rust Coverage
     needs: [changes]
     if: ${{ needs.changes.outputs.rust == 'true' }}
-    uses: ./.github/workflows/rust-coverage.yml
+    uses: $/.github/workflows/rust-coverage.yml
 
   qa-metrics:
     # Report-only metrics envelope for the PR QA comment: PR runs produce the
@@ -224,7 +224,7 @@ jobs:
     name: QA Metrics
     needs: [test, build, changes, rust-coverage, check]
     if: ${{ !cancelled() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
-    uses: ./.github/workflows/qa-metrics.yml
+    uses: $/.github/workflows/qa-metrics.yml
     with:
       # Lets the collector tell a canceled or failed Test job from a fragment
       # that never arrived, instead of reporting both as missing.
@@ -245,7 +245,7 @@ jobs:
     name: Smoke — Binary
     needs: [distribution-identity, distribution, changes]
     if: ${{ needs.changes.outputs.distribution == 'true' }}
-    uses: ./.github/workflows/smoke-binary.yml
+    uses: $/.github/workflows/smoke-binary.yml
     with:
       version: ${{ needs.distribution-identity.outputs.version }}
       source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
@@ -259,7 +259,7 @@ jobs:
     name: Smoke — Container
     needs: [distribution-identity, distribution, changes]
     if: ${{ needs.changes.outputs.distribution == 'true' }}
-    uses: ./.github/workflows/smoke-container.yml
+    uses: $/.github/workflows/smoke-container.yml
     with:
       version: ${{ needs.distribution-identity.outputs.version }}
       source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
@@ -347,7 +347,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: read
-    uses: ./.github/workflows/runtime-build.yml
+    uses: $/.github/workflows/runtime-build.yml
     with:
       version: ${{ needs.distribution-identity.outputs.version }}
       source_sha: ${{ needs.distribution-identity.outputs.source_sha }}

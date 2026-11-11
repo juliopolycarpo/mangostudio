@@ -57,7 +57,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/setup-mango
+      - uses: $/.github/actions/setup-mango
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
@@ -76,7 +76,7 @@ jobs:
 
       - name: Restore Playwright browser cache
         id: pw-cache
-        uses: ./.github/actions/cache-scoped
+        uses: $/.github/actions/cache-scoped
         with:
           family: playwright
           path: ~/.cache/ms-playwright
@@ -97,7 +97,7 @@ jobs:
 
       - name: Save Playwright browser cache
         if: steps.pw-cache.outputs.cache-restored != 'true'
-        uses: ./.github/actions/cache-scoped
+        uses: $/.github/actions/cache-scoped
         with:
           family: playwright
           path: ~/.cache/ms-playwright
@@ -110,7 +110,7 @@ jobs:
       # MANGOSTUDIO_RUNTIME_BINARY, `bun run dev` skips its own cargo build,
       # which would otherwise start cold inside the web server's timeout. A
       # manual dispatch has no artifact to download, so it builds here.
-      - uses: ./.github/actions/local-runtime
+      - uses: $/.github/actions/local-runtime
         with:
           artifact: ${{ inputs.runtime_artifact || '' }}
 
@@ -123,7 +123,7 @@ jobs:
         env:
           CI: true
 
-      - uses: ./.github/actions/download-frontend
+      - uses: $/.github/actions/download-frontend
         if: matrix.mode == 'production' && inputs.frontend_artifact != ''
         with:
           artifact: ${{ inputs.frontend_artifact }}

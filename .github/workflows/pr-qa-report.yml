@@ -65,7 +65,7 @@ jobs:
           # scripts/tests/workflow-hygiene.unit.test.ts.
           persist-credentials: true
 
-      - uses: ./.github/actions/setup-mango
+      - uses: $/.github/actions/setup-mango
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 

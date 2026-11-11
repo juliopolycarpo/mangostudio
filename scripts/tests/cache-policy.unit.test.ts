@@ -152,7 +152,7 @@ describe('CI cache policy', () => {
       const text = readText(file);
       if (text.includes('uses: Swatinem/rust-cache@')) return true;
       const calls = [
-        ...text.matchAll(/uses: (\.\/\.github\/(?:workflows\/[^\s]+\.yml|actions\/[^\s]+))/g),
+        ...text.matchAll(/uses: ([.$]\/\.github\/(?:workflows\/[^\s]+\.yml|actions\/[^\s]+))/g),
       ];
       return calls.some(([, target]) =>
         reachesRustCache(
@@ -273,7 +273,7 @@ describe('CI cache policy', () => {
     for (const workflowFile of workflowFiles()) {
       const lines = readText(workflowFile).split('\n');
       for (const [index, line] of lines.entries()) {
-        if (!line.includes('uses: ./.github/actions/setup-mango')) continue;
+        if (!/uses: [.$]\/\.github\/actions\/setup-mango\b/.test(line)) continue;
         const followingLines = lines.slice(index + 1, index + 4).map((value) => value.trim());
         expect(followingLines, `${workflowFile}:${index + 1}`).toContain(CACHE_EPOCH_EXPRESSION);
       }

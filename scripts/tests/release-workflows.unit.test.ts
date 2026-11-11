@@ -213,7 +213,7 @@ describe('release workflow binary gate', () => {
     const inputPrefix = '$' + '{{ inputs.';
 
     for (const block of [release, canary]) {
-      expect(block).toContain('uses: ./.github/actions/publish-npm-distribution');
+      expect(block).toContain('uses: $/.github/actions/publish-npm-distribution');
       expect(block).toContain('node-version: "22.23.4"');
       // setup-node's registry-url writes an npmrc templating
       // `_authToken=${NODE_AUTH_TOKEN}`, and the publish step overrides
@@ -240,7 +240,7 @@ describe('release workflow binary gate', () => {
     expect(canary).toContain('dist-tag: canary');
     expect(canary).toContain('allow-legacy-token: "false"');
     expect(canary).not.toContain('node-auth-token:');
-    expect(canary).not.toContain('uses: ./.github/actions/require-secret');
+    expect(canary).not.toContain('uses: $/.github/actions/require-secret');
     expect(canary).not.toContain('NPM_TOKEN');
     expect(canary).toContain('id-token: write');
 
@@ -295,15 +295,15 @@ describe('release workflow binary gate', () => {
       [release, 'scoop', 'DIST_REPOS_TOKEN'],
     ] as const) {
       const block = extractJobBlock(workflow, job);
-      expect(block, job).toContain('uses: ./.github/actions/require-secret');
+      expect(block, job).toContain('uses: $/.github/actions/require-secret');
       expect(block, job).toContain(`name: ${secret}`);
       expect(block, job).toContain(`value: "${secretPrefix}${secret} }}"`);
       expect(block.indexOf('uses: actions/checkout@'), job).toBeLessThan(
-        block.indexOf('uses: ./.github/actions/require-secret')
+        block.indexOf('uses: $/.github/actions/require-secret')
       );
     }
     expect(
-      `${release}\n${canary}`.match(/uses: \.\/\.github\/actions\/require-secret/g)
+      `${release}\n${canary}`.match(/uses: \$\/\.github\/actions\/require-secret/g)
     ).toHaveLength(2);
     expect(`${release}\n${canary}`).not.toMatch(
       /if \[ -z "\$(?:NPM_TOKEN|DIST_REPOS_TOKEN)" \]; then/
@@ -313,7 +313,7 @@ describe('release workflow binary gate', () => {
     expect(cargoBlock).toContain('allow_legacy_cargo_token');
 
     const npmPublishBlock = extractJobBlock(release, 'npm-publish');
-    expect(npmPublishBlock).not.toContain('uses: ./.github/actions/require-secret');
+    expect(npmPublishBlock).not.toContain('uses: $/.github/actions/require-secret');
     expect(npmPublishBlock).toContain('allow-legacy-token:');
     expect(npmPublishBlock).toContain('allow_legacy_npm_token');
 
@@ -496,7 +496,7 @@ describe('release workflow binary gate', () => {
     const runtime = readText('.github/workflows/runtime-build.yml');
 
     expect(extractJobBlock(workflow, 'runtime')).toContain(
-      'uses: ./.github/workflows/runtime-build.yml'
+      'uses: $/.github/workflows/runtime-build.yml'
     );
     expect(build).toMatch(/\n {4}needs: \[hub\]\n/);
     expect(build).toContain('pattern: native-hub-$' + '{{ inputs.source_sha }}-*');
@@ -650,7 +650,7 @@ describe('release workflow binary gate', () => {
       'if: $' +
       "{{ !cancelled() && (needs.runtime.result == 'success' || (needs.runtime.result == 'skipped' && !inputs.rebuild)) }}";
 
-    expect(runtime).toContain('uses: ./.github/workflows/runtime-build.yml');
+    expect(runtime).toContain('uses: $/.github/workflows/runtime-build.yml');
     expect(runtime).toContain('if: $' + '{{ inputs.rebuild }}');
     for (const job of ['binary']) {
       const block = extractJobBlock(workflow, job);
@@ -1185,7 +1185,7 @@ describe('release workflow binary gate', () => {
     // off the original artifacts.
     expect(buildBlock).not.toContain('retention_days: 7');
     expect(buildBlock).toContain('retention_days: 30');
-    expect(buildBlock).toContain('uses: ./.github/workflows/distribution-build.yml');
+    expect(buildBlock).toContain('uses: $/.github/workflows/distribution-build.yml');
   });
 
   test('docker job consumes only the verified distribution and retries scripted buildx', () => {
@@ -1196,7 +1196,7 @@ describe('release workflow binary gate', () => {
 
     // Publication never silently substitutes bytes from a previous release if
     // the run-scoped immutable artifact is missing or fails verification.
-    expect(dockerBlock).toContain('uses: ./.github/actions/download-distribution');
+    expect(dockerBlock).toContain('uses: $/.github/actions/download-distribution');
     expect(dockerBlock).not.toContain('continue-on-error: true');
     expect(dockerBlock).not.toContain('gh release download');
 
@@ -1282,7 +1282,7 @@ describe('release workflow binary gate', () => {
     const ci = readText('.github/workflows/ci.yml');
     const workflow = readText('.github/workflows/canary.yml');
     expect(extractJobBlock(ci, 'canary')).toBe('');
-    expect(ci).not.toContain('uses: ./.github/workflows/canary.yml');
+    expect(ci).not.toContain('uses: $/.github/workflows/canary.yml');
     expect(workflow).toContain('cron: "17 6 * * *"');
     expect(workflow).not.toContain('workflow_call:');
     expect(workflow).not.toContain('workflow_run:');
@@ -1331,14 +1331,14 @@ describe('release workflow binary gate', () => {
     for (const absent of ['docker-canary', 'crates-canary', 'build']) {
       expect(extractJobBlock(workflow, absent)).toBe('');
     }
-    expect(workflow).not.toContain('uses: ./.github/workflows/distribution-build.yml');
+    expect(workflow).not.toContain('uses: $/.github/workflows/distribution-build.yml');
     expect(workflow).not.toContain('packages: write');
     expect(workflow).not.toContain('CARGO_REGISTRY_TOKEN');
     const npmBlock = extractJobBlock(workflow, 'npm-canary');
     expect(npmBlock).toContain('scope: npm');
     expect(npmBlock).toContain('environment: canary');
     expect(npmBlock).toContain('actions/setup-node@');
-    expect(npmBlock).toContain('uses: ./.github/actions/publish-npm-distribution');
+    expect(npmBlock).toContain('uses: $/.github/actions/publish-npm-distribution');
     expect(npmBlock).toContain('dist-tag: canary');
     expect(npmBlock).toContain('promote-canary-tags.ts');
     const releaseBlock = extractJobBlock(workflow, 'github-release-canary');

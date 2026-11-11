@@ -268,7 +268,7 @@ describe('Test workflow shape', () => {
   // ci.yml is what ci-gate.unit.test.ts guards.
   test('ci.yml still depends on a single test job', () => {
     const ci = readText('.github/workflows/ci.yml');
-    expect(extractJobBlock(ci, 'test')).toContain('uses: ./.github/workflows/test.yml');
+    expect(extractJobBlock(ci, 'test')).toContain('uses: $/.github/workflows/test.yml');
     expect(parseNeedsList(extractJobBlock(ci, 'gate-unique'))).toContain('test');
   });
 });

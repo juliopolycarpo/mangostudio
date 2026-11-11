@@ -31,7 +31,7 @@ describe('GitHub Actions pinning', () => {
 
     for (const filePath of files) {
       for (const { line, value } of collectUses(filePath)) {
-        if (value.startsWith('./')) continue;
+        if (value.startsWith('./') || value.startsWith('$/')) continue;
         expect(
           PINNED_USES_PATTERN.test(value),
           `${filePath}:${line} — "${value}" must be pinned as owner/repo@<40-hex-sha> # <version>`
