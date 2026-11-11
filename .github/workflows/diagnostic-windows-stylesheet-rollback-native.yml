@@ -1,0 +1,130 @@
+name: Native Windows stylesheet rollback diagnostic
+
+on:
+  push:
+    branches: [diagnostic/windows-stylesheet-rollback-native]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sources:
+    name: Resolve immutable qualification sources
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.sources.outputs.matrix }}
+      tooling: ${{ steps.sources.outputs.tooling }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - id: sources
+        name: Select the candidate and optional baseline
+        env:
+          CANDIDATE_SHA: ${{ github.sha }}
+        run: |
+          bun -e '
+            const candidate = process.env.CANDIDATE_SHA;
+            const sources = [{ name: "candidate", sha: candidate, baseline: false }];
+            for (const source of sources) {
+              if (!/^[a-f0-9]{40}$/.test(source.sha ?? "")) {
+                throw new Error("Invalid source SHA " + JSON.stringify(source.sha) + "; expected 40 lowercase hex characters");
+              }
+            }
+            const matrix = { os: ["windows-latest"], source: sources };
+            await Bun.write(process.env.GITHUB_OUTPUT, "matrix=" + JSON.stringify(matrix) + "\ntooling=" + candidate + "\n");
+          '
+
+  qualify:
+    name: Native ${{ matrix.source.name }} (${{ matrix.os }})
+    needs: [sources]
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.sources.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    # The producer bounds itself at 55 minutes. Around it sit the Windows probe (10 at most),
+    # two checkouts and the evidence upload: a job that ends first cancels
+    # the producer before its final seals and census, leaving a receipt that still says running.
+    timeout-minutes: 80
+    # A failing untouched baseline is retained as evidence. Candidate failures
+    # remain blocking; no baseline failure is represented as a passing suite.
+    continue-on-error: ${{ matrix.source.baseline }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Preserve tracked source bytes on every host
+        run: git config --global core.autocrlf false
+
+      - name: Check out the qualification producer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.sources.outputs.tooling }}
+          path: tooling
+          persist-credentials: false
+
+      - name: Check out the source under qualification
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ matrix.source.sha }}
+          path: source
+          persist-credentials: false
+
+      - name: Copy the selected source's Bun pin to the runner workspace
+        run: cp source/.bun-version .bun-version
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Verify native Windows Job ownership and failure controls
+        if: ${{ runner.os == 'Windows' }}
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $probe = Join-Path $env:GITHUB_WORKSPACE 'tooling\scripts\lib\native-windows-job.probe.ps1'
+          $out = Join-Path $env:GITHUB_WORKSPACE 'job-proof'
+          & $probe -OutDirectory $out -BunPath (Get-Command bun.exe).Source
+          if ($LASTEXITCODE -ne 0) { throw "Native Windows Job probes failed with exit $LASTEXITCODE" }
+
+      # Run the producer without package auto-install. It still performs a
+      # frozen install and builds two fresh Cargo targets in the source checkout.
+      - name: Run complete native verification and retain its evidence
+        env:
+          TURBO_TELEMETRY_DISABLED: "1"
+          QUALIFICATION_SOURCE_SHA: ${{ matrix.source.sha }}
+        run: bun --no-install tooling/scripts/ci/native-bun-qualification.ts --root source --out evidence --sha "$QUALIFICATION_SOURCE_SHA"
+
+      - name: Collect compiler child traces outside the sealed source
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          $traceDirectory = Join-Path $env:GITHUB_WORKSPACE 'evidence/stylesheet-rollback'
+          New-Item -ItemType Directory -Path $traceDirectory -Force | Out-Null
+          Get-ChildItem -LiteralPath ([System.IO.Path]::GetTempPath()) -Filter 'mango-rollback-child-*.jsonl' -File |
+            Copy-Item -Destination $traceDirectory
+
+      - name: Upload source, setup, check, test and terminal receipts
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          # Keep each attempt's evidence immutable when a same-run job is retried.
+          name: native-bun-${{ matrix.source.name }}-${{ matrix.os }}-${{ matrix.source.sha }}-attempt-${{ github.run_attempt }}
+          path: |
+            evidence/
+            job-proof/
+            !evidence/targets/**
+          if-no-files-found: error
+          retention-days: 14

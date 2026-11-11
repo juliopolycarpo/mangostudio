@@ -16,6 +16,7 @@ import {
 } from '../../build';
 import { BuildFixtureDiagnostics } from '../support/build-fixture-diagnostics';
 import { BuildFixtureOwner } from '../support/build-fixture-owner';
+import { traceRollbackBuild } from '../support/rollback-child-trace';
 
 describe('resolveApiUrlOverride', () => {
   test('uses MANGO_API_URL ahead of the deprecated alias', () => {
@@ -507,9 +508,16 @@ describe('compiler failure publication', () => {
         writeFile(join(frontend, 'src/index.css'), '@import "./missing-tailwind-stylesheet.css";')
       );
       diagnostics.record('fixture:invalid-stylesheet-written');
-      diagnostics.record('child:spawn-requested');
-      const child = Bun.spawn([process.execPath, './build.ts', '--dev'], {
+      const traceFile = join(tmpdir(), `mango-rollback-child-${process.pid}.jsonl`);
+      const trace =
+        process.platform === 'win32' || process.env.MANGO_TEST_ROLLBACK_CHILD_TRACE === '1';
+      const preload = trace
+        ? ['--preload', await owner.prepare(() => traceRollbackBuild(frontend))]
+        : [];
+      diagnostics.record('child:spawn-requested', trace ? { traceFile } : {});
+      const child = Bun.spawn([process.execPath, ...preload, './build.ts', '--dev'], {
         cwd: frontend,
+        ...(trace ? { env: { ...process.env, MANGO_TEST_ROLLBACK_CHILD_TRACE: traceFile } } : {}),
         stdout: 'pipe',
         stderr: 'pipe',
       });
