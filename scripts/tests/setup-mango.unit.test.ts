@@ -39,6 +39,7 @@ function stepRuns(step: SetupStep, facts: Readonly<Record<string, string>>): boo
 
 /** Named fake of the external immutable cache service; compression precedes reservation. */
 class FakeBunCache {
+  restores = 0;
   lookups = 0;
   compressions = 0;
   saves = 0;
@@ -47,6 +48,10 @@ class FakeBunCache {
     readonly present: boolean,
     readonly lookup: 'true' | 'false' | '' | 'failure' = present ? 'true' : 'false'
   ) {}
+
+  restore(): void {
+    this.restores += 1;
+  }
 
   check(): string {
     this.lookups += 1;
@@ -69,6 +74,9 @@ function runSetup(
     success: 'true',
     'github.event_name': 'push',
     'github.ref': 'refs/heads/main',
+    'runner.os': 'Linux',
+    'runner.arch': 'ARM64',
+    'steps.cache.outcome': 'skipped',
     'steps.cache.outputs.cache-hit': 'false',
     'steps.bun-save-check.outcome': 'skipped',
     'steps.bun-save-check.outputs.cache-hit': '',
@@ -78,6 +86,10 @@ function runSetup(
   for (const step of setupSteps()) {
     if (!stepRuns(step, facts)) continue;
     if (step.run?.includes('bun install --frozen-lockfile')) installs += 1;
+    if (step.id === 'cache') {
+      cache.restore();
+      facts['steps.cache.outcome'] = 'success';
+    }
     if (step.id === 'bun-save-check') {
       try {
         facts['steps.bun-save-check.outputs.cache-hit'] = cache.check();
@@ -94,6 +106,46 @@ function runSetup(
 }
 
 describe('setup-mango Bun cache lifecycle', () => {
+  test.each([
+    ['Linux', 'X64'],
+    ['macOS', 'ARM64'],
+    ['Windows', 'X64'],
+  ])('%s %s installs without cache I/O on pushes and PRs', (os, arch) => {
+    for (const event of ['push', 'pull_request']) {
+      const cache = new FakeBunCache(false);
+      const { installs } = runSetup(cache, {
+        'runner.os': os,
+        'runner.arch': arch,
+        'github.event_name': event,
+        'github.ref': event === 'push' ? 'refs/heads/main' : 'refs/pull/42/merge',
+      });
+      expect(
+        { installs, restores: cache.restores, lookups: cache.lookups, saves: cache.saves },
+        event
+      ).toEqual({ installs: 1, restores: 0, lookups: 0, saves: 0 });
+    }
+  });
+
+  test.each([
+    ['Linux', 'ARM64'],
+    ['macOS', 'X64'],
+    ['Windows', 'ARM64'],
+  ])('%s %s retains the main cache writer', (os, arch) => {
+    const cache = new FakeBunCache(false);
+    const { installs } = runSetup(cache, { 'runner.os': os, 'runner.arch': arch });
+    expect({
+      installs,
+      restores: cache.restores,
+      lookups: cache.lookups,
+      saves: cache.saves,
+    }).toEqual({
+      installs: 1,
+      restores: 1,
+      lookups: 1,
+      saves: 1,
+    });
+  });
+
   test('saves the populated Bun cache inline only after a successful main push miss', () => {
     const manifest = readText('.github/actions/setup-mango/action.yml');
     const steps = extractStepBlocksAtIndent(manifest, 4);

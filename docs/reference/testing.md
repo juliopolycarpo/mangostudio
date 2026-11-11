@@ -2178,8 +2178,9 @@ The binary and Docker smoke matrix (`smoke-binary.yml`) restores no caches: it
 only pins Bun and runs dependency-free release scripts. Manual `rebuild` dispatches
 still use `setup-mango` because they compile inside the job. The QA metrics job
 consumes the frontend dist artifact and restores Check's Turbo snapshot in
-restore-only mode, alongside the Bun install cache that `setup-mango` brings
-with it. It uses Check's key inputs and 16 MB bound, never saves a Turbo
+restore-only mode. On Linux x64, macOS arm64, and Windows x64, `setup-mango` runs a frozen install with no
+Bun package-cache transfer. On other runner classes it restores the Bun install
+cache. The collector uses Check's key inputs and 16 MB bound, never saves a Turbo
 snapshot, and does not wait for the same run's Check job. A cache miss runs the
 normal checks; a hit reuses typecheck results while quick checks still execute.
 

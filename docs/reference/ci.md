@@ -316,6 +316,15 @@ fake-vendor builds, binary hashes, setup/check/test results, case outcomes and
 scoped terminal process observations. Each native job owns its source checkout
 and two Cargo targets; it restores no test-result or Cargo-target cache.
 
+The tooling and source checkouts each run a frozen Bun install and share
+package downloads on the runner. Cargo downloads also stay on the runner.
+Median dependency setup was faster with an empty cache on Linux x64, macOS
+arm64, and Windows x64. See the [Bun package trials][native-bun-cache-trials]
+and the [Cargo registry trial][native-cargo-cache-trial].
+
+[native-bun-cache-trials]: https://github.com/juliopolycarpo/mangostudio/issues/2025
+[native-cargo-cache-trial]: https://github.com/juliopolycarpo/mangostudio/actions/runs/42932117093
+
 Windows commands start atomically inside a private Job. Membership queries and
 retained native handles provide ownership through child exit and captured pipe
 EOF. Ordinary commands must leave the Job naturally empty. The two original
