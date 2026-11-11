@@ -34,6 +34,7 @@ import {
 } from './lib/bun-cross-runtime';
 import { ROOT_DIR, type WorkspaceName } from './lib/config';
 import { writeEmbedModules } from './lib/embed-frontend';
+import { buildWithCleanFrontendOutputs } from './lib/frontend-workspace-outputs';
 import { discardHubBuildRecord, writeHubBuildRecord, writeHubCompileRecord } from './lib/hub-build';
 import { preparedFrontendBuildStamp } from './lib/prepared-frontend';
 import { type BinaryTarget, runtimeBinaryName } from './lib/release-targets';
@@ -742,24 +743,28 @@ if (buildTargets.length === 0) {
 
 header('Build');
 
-const result = await runCommand(
-  'build',
-  createTurboBuildCommand(buildTargets, frontendBuildCacheArguments(ROOT_DIR)),
-  {
+const buildsFrontend = buildTargets.includes('frontend');
+const cacheArguments = frontendBuildCacheArguments(ROOT_DIR);
+const buildWorkspaces = async (): Promise<number> => {
+  const result = await runCommand('build', createTurboBuildCommand(buildTargets, cacheArguments), {
     cwd: ROOT_DIR,
     env: { MANGOSTUDIO_FRONTEND_BUN_REVISION: Bun.revision },
+  });
+  if (result.exitCode === 0 && buildsFrontend) {
+    const buildTime = new Date().toISOString();
+    await writeFrontendBuildInfo(
+      join(ROOT_DIR, 'apps/frontend/dist'),
+      await resolveBuildStamp(buildTime, 'production')
+    );
   }
-);
+  return result.exitCode;
+};
 
-if (result.exitCode === 0 && buildTargets.includes('frontend')) {
-  const buildTime = new Date().toISOString();
-  await writeFrontendBuildInfo(
-    join(ROOT_DIR, 'apps/frontend/dist'),
-    await resolveBuildStamp(buildTime, 'production')
-  );
-}
-
-process.exit(result.exitCode);
+const exitCode =
+  buildsFrontend && cacheArguments.length === 0
+    ? await buildWithCleanFrontendOutputs(ROOT_DIR, buildWorkspaces)
+    : await buildWorkspaces();
+process.exit(exitCode);
 
 function resolveRuntimeDir(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
