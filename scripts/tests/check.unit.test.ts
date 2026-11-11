@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { createTurboCheckCommand, createWorkspaceFormatCommand } from '../lib/check';
+import { ROOT_DIR } from '../lib/config';
 import { createImportCycleCommand } from '../lib/import-cycles';
 import { readText } from './support/read-text';
 
@@ -15,6 +16,25 @@ describe('check script', () => {
     expect(createImportCycleCommand(roots, 'json')).toContain('--json');
     expect(roots).toEqual(['apps/api', 'packages/protocol']);
   });
+
+  test('check help reports the cycle exclusions and source size limit', () => {
+    const result = Bun.spawnSync([process.execPath, './scripts/check.ts', '--help'], {
+      cwd: ROOT_DIR,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    expect(result.exitCode, result.stderr.toString()).toBe(0);
+    const help = result.stdout.toString();
+    for (const policy of [
+      'node_modules, .git, dist, coverage, and .turbo',
+      'root .mango and target',
+      'crates/mango-protocol/fuzz/target',
+      'over 4 MiB fail before parsing',
+    ]) {
+      expect(help, `expected cycle help to report ${policy}`).toContain(policy);
+    }
+  });
+
   test('creates one filtered Turbo invocation for selected workspaces', () => {
     expect(createTurboCheckCommand(['api', 'shared'])).toEqual([
       'turbo',

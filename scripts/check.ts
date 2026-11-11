@@ -58,8 +58,10 @@ lanes (spec, schema equality, fixtures) and workflow static analysis
 (actionlint, zizmor, ShellCheck) in parallel.
 Run bun run protocol:check separately for the full protocol gate, including Rust.
 Default workspace selection: --all
-Workspace cycle scans include generated and gitignored TS/JS source files.
-Repository .mango/artifacts and .mango/out caches are excluded from scanning.
+Cycle scans include generated and gitignored TS/JS source files.
+They skip node_modules, .git, dist, coverage, and .turbo at any depth.
+They also skip root .mango and target, plus crates/mango-protocol/fuzz/target.
+Source files over 4 MiB fail before parsing.
 
 Workspace flags:
   --frontend
