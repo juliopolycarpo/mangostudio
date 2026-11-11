@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      distribution: ${{ steps.changed.outputs.distribution }}
+      distribution: "true" # Hosted experiment control
       rust: ${{ steps.rust.outputs.rust }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -59,7 +59,7 @@ jobs:
           fi
 
           bun ./scripts/ci/changed-paths.ts collect "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/changed-files"
-          echo "distribution=true" >> "$GITHUB_OUTPUT"
+          bun ./scripts/ci/changed-paths.ts distribution "$RUNNER_TEMP/changed-files" >> "$GITHUB_OUTPUT"
 
       - id: rust
         name: Classify Rust-relevant paths
