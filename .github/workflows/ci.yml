@@ -1,4 +1,4 @@
-name: CI
+name: Runtime warm seed lookup trial
 
 # The pull_request event is the authoritative CI signal for development
 # branches: one commit on an open PR produces exactly one run, and that run
@@ -6,12 +6,7 @@ name: CI
 # commits for the daily Canary workflow. Pre-PR validation is local (`bun run check && bun run test`) or a manual
 # workflow_dispatch of this workflow.
 
-on:
-  pull_request:
-    branches: [main, "stack/**"]
-  push:
-    branches: [main]
-  workflow_dispatch:
+on: workflow_dispatch
 
 permissions:
   contents: read
@@ -25,7 +20,93 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  warm-seed:
+    name: Warm seed ${{ matrix.platform }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CARGO_PROFILE_RELEASE_LTO: thin
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux-x64, linux-arm64, linux-x64-musl, linux-arm64-musl]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: 30ab2658f52809f9c262a450c7b759731f003c59
+
+      - run: rustup show active-toolchain
+
+      - name: Check light runtime cache
+        id: seed-cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
+          shared-key: runtime-build-${{ matrix.platform }}
+          save-if: false
+          lookup-only: true
+
+      - name: Require the exact trusted light cache
+        shell: bash
+        env:
+          SEED_HIT: ${{ steps.seed-cache.outputs.cache-hit }}
+        run: |
+          if [[ "$SEED_HIT" != true ]]; then
+            printf 'expected an exact cache hit: true | received: %s\n' "$SEED_HIT" >&2
+            exit 1
+          fi
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        id: candidate-bun
+        if: steps.seed-cache.outputs.cache-hit != 'true'
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install zig and cargo-zigbuild
+        id: candidate-zig
+        if: runner.os == 'Linux' && steps.seed-cache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/setup-zigbuild # zizmor: ignore[self-repository] load the action from the selected source checkout
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        id: baseline-bun
+        with:
+          bun-version-file: .bun-version
+
+      - name: Install baseline Zig and cargo-zigbuild
+        id: baseline-zig
+        uses: ./.github/actions/setup-zigbuild # zizmor: ignore[self-repository] load the action from the selected source checkout
+
+      - name: Check baseline light runtime cache
+        id: baseline-cache
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
+          shared-key: runtime-build-${{ matrix.platform }}
+          save-if: false
+          lookup-only: true
+
+      - name: Verify both lookups hit and the candidate skipped setup
+        shell: bash
+        env:
+          CANDIDATE_HIT: ${{ steps.seed-cache.outputs.cache-hit }}
+          BASELINE_HIT: ${{ steps.baseline-cache.outputs.cache-hit }}
+          CANDIDATE_BUN: ${{ steps.candidate-bun.outcome }}
+          CANDIDATE_ZIG: ${{ steps.candidate-zig.outcome }}
+          BASELINE_BUN: ${{ steps.baseline-bun.outcome }}
+          BASELINE_ZIG: ${{ steps.baseline-zig.outcome }}
+        run: |
+          expected='true/true/skipped/skipped/success/success'
+          actual="$CANDIDATE_HIT/$BASELINE_HIT/$CANDIDATE_BUN/$CANDIDATE_ZIG/$BASELINE_BUN/$BASELINE_ZIG"
+          if [[ "$actual" != "$expected" ]]; then
+            printf 'expected cache hits and setup outcomes: %s | received: %s\n' "$expected" "$actual" >&2
+            exit 1
+          fi
+          printf 'Verified cache hits and setup outcomes: %s\n' "$actual"
+
   changes:
+    if: github.event_name != 'workflow_dispatch'
     name: Detect distribution-relevant changes
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -83,6 +164,7 @@ jobs:
           cat "$RUNNER_TEMP/rust-lanes"
 
   distribution-identity:
+    if: github.event_name != 'workflow_dispatch'
     name: Resolve distribution identity
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -115,7 +197,7 @@ jobs:
   distribution:
     name: Distribution
     needs: [distribution-identity, changes, build]
-    if: ${{ needs.changes.outputs.distribution == 'true' }}
+    if: github.event_name != 'workflow_dispatch'
     permissions:
       contents: read
       id-token: write # mint the reusable builder's provenance attestation token
@@ -136,6 +218,7 @@ jobs:
       frontend_bun_revision: ${{ needs.build.outputs.bun_revision }}
 
   cross-runtimes:
+    if: github.event_name != 'workflow_dispatch'
     name: Cross-runtime download
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -152,10 +235,12 @@ jobs:
         run: bun ./scripts/ci/verify-cross-runtimes.ts
 
   check:
+    if: github.event_name != 'workflow_dispatch'
     name: Check
     uses: $/.github/workflows/lint.yml
 
   dependency-audit:
+    if: github.event_name != 'workflow_dispatch'
     # Unconditional: advisories against an unchanged lockfile still block CI.
     # Read-only reusable scan; no secrets or dependency installation.
     name: Dependency Audit
@@ -167,7 +252,7 @@ jobs:
     # on a sibling workflow. A failed relevant distribution cannot supply bytes.
     name: Release Dry Run
     needs: [distribution-identity, distribution]
-    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    if: github.event_name != 'workflow_dispatch'
     uses: $/.github/workflows/release-dry-run.yml
     with:
       reuse_distribution: true
@@ -177,10 +262,12 @@ jobs:
       target_artifacts: ${{ needs.distribution.outputs.target_artifacts || '{}' }}
 
   local-runtime:
+    if: github.event_name != 'workflow_dispatch'
     name: Local Runtime
     uses: $/.github/workflows/local-runtime.yml
 
   test:
+    if: github.event_name != 'workflow_dispatch'
     name: Test
     needs: [local-runtime]
     uses: $/.github/workflows/test.yml
@@ -188,6 +275,7 @@ jobs:
       runtime_artifact: ${{ needs.local-runtime.outputs.artifact }}
 
   build:
+    if: github.event_name != 'workflow_dispatch'
     name: Build
     needs: [distribution-identity]
     uses: $/.github/workflows/build.yml
@@ -195,6 +283,7 @@ jobs:
       source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
 
   browser-smoke:
+    if: github.event_name != 'workflow_dispatch'
     name: Smoke — Browser
     needs: [local-runtime, build]
     uses: $/.github/workflows/browser-smoke.yml
@@ -211,7 +300,7 @@ jobs:
     # run; see the header of rust-coverage.yml.
     name: Rust Coverage
     needs: [changes]
-    if: ${{ needs.changes.outputs.rust == 'true' }}
+    if: github.event_name != 'workflow_dispatch'
     uses: $/.github/workflows/rust-coverage.yml
 
   qa-metrics:
@@ -223,7 +312,7 @@ jobs:
     # privileged pr-qa-report.yml (workflow_run), never here.
     name: QA Metrics
     needs: [test, build, changes, rust-coverage, check]
-    if: ${{ !cancelled() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main')) }}
+    if: github.event_name != 'workflow_dispatch'
     uses: $/.github/workflows/qa-metrics.yml
     with:
       # Lets the collector tell a canceled or failed Test job from a fragment
@@ -244,7 +333,7 @@ jobs:
     # smoke workflow retains a manual rebuild fallback for one transition cycle.
     name: Smoke — Binary
     needs: [distribution-identity, distribution, changes]
-    if: ${{ needs.changes.outputs.distribution == 'true' }}
+    if: github.event_name != 'workflow_dispatch'
     uses: $/.github/workflows/smoke-binary.yml
     with:
       version: ${{ needs.distribution-identity.outputs.version }}
@@ -258,7 +347,7 @@ jobs:
     # filter as the other distribution-consuming lanes.
     name: Smoke — Container
     needs: [distribution-identity, distribution, changes]
-    if: ${{ needs.changes.outputs.distribution == 'true' }}
+    if: github.event_name != 'workflow_dispatch'
     uses: $/.github/workflows/smoke-container.yml
     with:
       version: ${{ needs.distribution-identity.outputs.version }}
@@ -287,7 +376,7 @@ jobs:
         smoke,
         smoke-container,
       ]
-    if: ${{ always() }}
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -339,7 +428,7 @@ jobs:
     name: Runtime light cache seed
     needs: [gate-unique, distribution-identity]
     # Gate accepts the skipped PR-only dry run; require successful direct needs.
-    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs['gate-unique'].result == 'success' && needs['distribution-identity'].result == 'success' }}
+    if: github.event_name != 'workflow_dispatch'
     # Serialized with itself and never cancelled mid-save; a newer pending
     # seed replaces an older pending one.
     concurrency:
