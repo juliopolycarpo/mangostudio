@@ -59,7 +59,7 @@ jobs:
           fi
 
           bun ./scripts/ci/changed-paths.ts collect "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/changed-files"
-          bun ./scripts/ci/changed-paths.ts distribution "$RUNNER_TEMP/changed-files" >> "$GITHUB_OUTPUT"
+          echo "distribution=true" >> "$GITHUB_OUTPUT"
 
       - id: rust
         name: Classify Rust-relevant paths
