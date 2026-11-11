@@ -689,3 +689,7 @@ test('cancellation bounds a version read that has not settled', async () => {
     await rm(failure.home, { recursive: true, force: true });
   }
 });
+
+test('hosted distribution policy reports a failing standalone root test', () => {
+  expect(() => assertBenchmarkPlatform('darwin')).toThrow('intentional hosted test-gate probe');
+});
