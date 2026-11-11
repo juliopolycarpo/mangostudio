@@ -9,7 +9,6 @@ type HealthBehavior =
   | 'eventually-ready'
   | 'delayed-unavailable'
   | 'delayed-unavailable-then-no-headers'
-  | 'delayed-unavailable-then-late-ready'
   | 'streaming-json-ready';
 
 /** An owned HTTP endpoint that exposes stalled requests and open response bodies. */
@@ -42,16 +41,6 @@ export class FakeHealthEndpoint {
     }
     if (this.behavior === 'delayed-unavailable-then-no-headers') {
       this.respondLater(response, 503, 'still starting', 900);
-      return;
-    }
-    if (this.behavior === 'delayed-unavailable-then-late-ready') {
-      const first = this.requests === 1;
-      this.respondLater(
-        response,
-        first ? 503 : 200,
-        first ? 'still starting' : '{"status":"ok"}',
-        first ? 600 : 1_600
-      );
       return;
     }
     if (this.behavior === 'unavailable' || this.behavior === 'eventually-ready') {
