@@ -6,11 +6,7 @@ import {
   BROWSER_SMOKE_TEST_COMMAND,
 } from '../lib/browser-smoke';
 import { readText } from './support/read-text';
-import {
-  assertSmokeDeadlineBudget,
-  parseSmokeWorkflow,
-  smokeStepTimeout,
-} from './support/smoke-workflows';
+import { parseSmokeWorkflow } from './support/smoke-workflows';
 
 describe('browser smoke setup', () => {
   test('installs only Chromium with Playwright system dependencies through Bun', () => {
@@ -36,57 +32,64 @@ describe('browser smoke setup', () => {
     expect(manifest.scripts?.['test:e2e:setup']).toBe('bun ./scripts/test-e2e-setup.ts');
   });
 
-  test('CI installs Chromium before running the browser smoke lane', () => {
-    const workflow = readText('.github/workflows/browser-smoke.yml');
-    const setupIndex = workflow.indexOf('bun run test:e2e:setup');
-    const runIndex = workflow.indexOf('bun run test --e2e');
+  test('CI pins the Playwright image to the locked browser version', () => {
+    const workflow = parseSmokeWorkflow(readText('.github/workflows/browser-smoke.yml'));
+    const job = workflow.jobs['browser-smoke'];
+    const lock = Bun.JSONC.parse(readText('bun.lock')) as {
+      packages: Record<string, [string, ...unknown[]]>;
+    };
+    const packageId = lock.packages['@playwright/test']?.[0];
+    const version = packageId?.match(/^@playwright\/test@(\d+\.\d+\.\d+)$/)?.[1];
+    if (!version) {
+      throw new Error(
+        `expected @playwright/test lock entry with a stable version | received: ${packageId}`
+      );
+    }
 
-    expect(setupIndex).toBeGreaterThan(-1);
-    expect(runIndex).toBeGreaterThan(setupIndex);
-    expect(workflow).toContain('runs-on: ubuntu-24.04');
-    expect(workflow).toContain('bunx playwright install-deps chromium');
-    expect(workflow).not.toContain('npx playwright');
+    expect(job?.['runs-on']).toBe('ubuntu-26.04');
+    const imagePrefix = `mcr.microsoft.com/playwright:v${version}-resolute@sha256:`;
+    expect(job?.container?.image.slice(0, imagePrefix.length)).toBe(imagePrefix);
+    expect(job?.container?.image.slice(imagePrefix.length)).toMatch(/^[a-f0-9]{64}$/);
+    expect(job?.container?.volumes).toContain('/usr/bin/unzip:/usr/local/bin/unzip:ro');
   });
 
-  test.each([
-    ['cache miss', 'bun run test:e2e:setup', "steps.pw-cache.outputs.cache-restored != 'true'"],
-    [
-      'cache hit',
-      'bunx playwright install-deps chromium',
-      "steps.pw-cache.outputs.cache-restored == 'true'",
-    ],
-  ])(
-    'browser %s leaves room for installation, the smoke deadline and diagnostics',
-    (cachePath, installCommand, installCondition) => {
-      const workflow = parseSmokeWorkflow(readText('.github/workflows/browser-smoke.yml'));
-      const job = workflow.jobs['browser-smoke'];
-      if (!job) throw new Error('expected browser-smoke job | received: missing');
-      const install = job.steps?.find((step) => step.run === installCommand);
-      const smoke = job.steps?.find((step) => step.run?.includes('bun run test --e2e'));
-      if (!install || !smoke) {
-        throw new Error(
-          `expected ${cachePath} installation and smoke commands | received: missing`
-        );
-      }
+  test('CI verifies the image before launching either smoke suite', () => {
+    const workflowText = readText('.github/workflows/browser-smoke.yml');
+    const workflow = parseSmokeWorkflow(workflowText);
+    const steps = workflow.jobs['browser-smoke']?.steps ?? [];
+    const imageIndex = steps.findIndex((step) => step.name === 'Verify the Playwright image');
+    const developmentIndex = steps.findIndex((step) => step.run?.includes('bun run test --e2e'));
+    const productionIndex = steps.findIndex((step) =>
+      step.run?.includes('bun run test:e2e:production')
+    );
 
-      // Each runner executes one installation branch. Keep the old ten-minute
-      // maximum for the smoke command itself, independent of installation time.
-      expect(install.if).toBe(installCondition);
-      // Project the two measured phases, reserving at least five minutes for
-      // other setup and failure uploads. A cold manual Rust build is outside this model.
-      assertSmokeDeadlineBudget(`browser/${cachePath}`, { ...job, steps: [install, smoke] });
-      const smokeDeadline = smokeStepTimeout(smoke, {});
-      expect(smokeDeadline, `browser/${cachePath} must retain the ten-minute smoke allowance`).toBe(
-        10
-      );
-      const installDeadline = smokeStepTimeout(install, {});
-      expect(installDeadline).toBeLessThanOrEqual(10);
-      expect(
-        job['timeout-minutes'],
-        `browser/${cachePath} must reserve at least five minutes beyond installation and smoke deadlines`
-      ).toBeGreaterThanOrEqual((installDeadline ?? 0) + (smokeDeadline ?? 0) + 5);
-    }
-  );
+    expect(imageIndex).toBeGreaterThanOrEqual(0);
+    expect(steps[imageIndex]?.if).toBeUndefined();
+    expect(steps[imageIndex]?.run).toContain('/ms-playwright/.docker-info');
+    expect(steps[imageIndex]?.run).toContain('driverVersion');
+    expect(developmentIndex).toBeGreaterThan(imageIndex);
+    expect(productionIndex).toBeGreaterThan(imageIndex);
+    expect(workflowText).not.toContain('bunx playwright install-deps');
+    expect(workflowText).not.toContain('bun run test:e2e:setup');
+  });
+
+  test('CI uses the caller runtime artifact or builds one for both suites', () => {
+    const workflow = parseSmokeWorkflow(readText('.github/workflows/browser-smoke.yml'));
+    const build = workflow.jobs['build-runtime'];
+    const browser = workflow.jobs['browser-smoke'];
+    const runtime = browser?.steps?.find((step) => step.uses === '$/.github/actions/local-runtime');
+
+    expect(build?.uses).toBe('$/.github/workflows/local-runtime.yml');
+    expect(build?.if).toContain('!inputs.runtime_artifact');
+    expect(browser?.needs).toEqual(['build-runtime']);
+    expect(browser?.if).toContain("needs.build-runtime.result == 'success'");
+    expect(browser?.if).toContain(
+      "needs.build-runtime.result == 'skipped' && inputs.runtime_artifact"
+    );
+    expect(runtime?.with?.artifact).toContain(
+      'inputs.runtime_artifact || needs.build-runtime.outputs.artifact'
+    );
+  });
 
   test('testing docs show the setup command without npx fallbacks', () => {
     const docs = [

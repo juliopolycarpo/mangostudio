@@ -14,7 +14,7 @@ on:
       runtime_artifact:
         description: >
           Artifact holding the mangostudio-runtime binary the hub launches for
-          Local; empty builds it in this job instead.
+          Local; empty builds one binary for both browser jobs.
         type: string
         required: false
         default: ""
@@ -41,78 +41,56 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  build-runtime:
+    name: Build the Local runtime for standalone browser smoke
+    if: ${{ !inputs.runtime_artifact }}
+    uses: $/.github/workflows/local-runtime.yml
+
   browser-smoke:
+    needs: [build-runtime]
+    if: ${{ !cancelled() && (needs.build-runtime.result == 'success' || (needs.build-runtime.result == 'skipped' && inputs.runtime_artifact)) }}
     name: ${{ matrix.mode == 'production' && 'Production frontend regressions' || 'Chromium smoke suite' }}
     strategy:
       fail-fast: false
       matrix:
         mode: [development, production]
-    # ubuntu-24.04: Playwright 1.60 cannot install Chromium system deps on 26.04 yet.
-    runs-on: ubuntu-24.04
-    # Bound installation separately from the existing ten-minute smoke allowance;
-    # leave job headroom for the remaining setup and failure artifacts.
+    runs-on: ubuntu-26.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.0-resolute@sha256:4d70b558dbaff71611b2f3e7a32aa2b4d42cfc892078ad368cb7ea229c2ffd1f
+      # setup-bun extracts its archive with the Ubuntu runner's unzip.
+      volumes:
+        - /usr/bin/unzip:/usr/local/bin/unzip:ro
+    defaults:
+      run:
+        shell: bash
+    # Leave room for the image pull, artifact setup and failure diagnostics.
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
+      - name: Trust the checked-out workspace in the container
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - uses: $/.github/actions/setup-mango
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
-      - id: toolchain
-        name: Resolve Playwright version
-        # An empty version silently poisons the cache key, so fail here rather
-        # than inside cache-scoped's validity guard.
+      - name: Verify the Playwright image
         run: |
           set -euo pipefail
           playwright="$(bunx --bun playwright --version | awk '{print $2}')"
-          if [ -z "${playwright}" ]; then
-            echo "::error::playwright version probe returned an empty value"
+          image="$(bun -e 'console.log((await Bun.file("/ms-playwright/.docker-info").json()).driverVersion)')"
+          if [ -z "$playwright" ] || [ "$playwright" != "$image" ]; then
+            printf 'expected Playwright image version: %s | received: %s\n' "${playwright:-<empty>}" "${image:-<empty>}" >&2
             exit 1
           fi
-          echo "playwright=${playwright}" >> "$GITHUB_OUTPUT"
+          printf 'Playwright %s from the pinned image\n' "$image"
 
-      - name: Restore Playwright browser cache
-        id: pw-cache
-        uses: $/.github/actions/cache-scoped
-        with:
-          family: playwright
-          path: ~/.cache/ms-playwright
-          validity: ${{ steps.toolchain.outputs.playwright }}
-          exact-restore: "true"
-          mode: restore
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
-
-      - name: Install Playwright Chromium
-        if: steps.pw-cache.outputs.cache-restored != 'true'
-        timeout-minutes: 10
-        run: bun run test:e2e:setup
-
-      - name: Install OS deps for Chromium (cache hit path)
-        if: steps.pw-cache.outputs.cache-restored == 'true'
-        timeout-minutes: 10
-        run: bunx playwright install-deps chromium
-
-      - name: Save Playwright browser cache
-        if: steps.pw-cache.outputs.cache-restored != 'true'
-        uses: $/.github/actions/cache-scoped
-        with:
-          family: playwright
-          path: ~/.cache/ms-playwright
-          validity: ${{ steps.toolchain.outputs.playwright }}
-          exact-restore: "true"
-          mode: save
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
-
-      # The smoke hub spawns Local as the Rust runtime. With the binary in
-      # MANGOSTUDIO_RUNTIME_BINARY, `bun run dev` skips its own cargo build,
-      # which would otherwise start cold inside the web server's timeout. A
-      # manual dispatch has no artifact to download, so it builds here.
       - uses: $/.github/actions/local-runtime
         with:
-          artifact: ${{ inputs.runtime_artifact || '' }}
+          artifact: ${{ inputs.runtime_artifact || needs.build-runtime.outputs.artifact }}
 
       - name: Run browser smoke suite
         if: matrix.mode == 'development'

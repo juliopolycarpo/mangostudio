@@ -17,6 +17,10 @@ export interface SmokeStep {
 }
 
 export interface SmokeJob {
+  readonly if?: string;
+  readonly needs?: readonly string[];
+  readonly uses?: string;
+  readonly container?: { readonly image: string; readonly volumes?: readonly string[] };
   readonly env?: Record<string, string>;
   readonly steps?: readonly SmokeStep[];
   readonly strategy?: { readonly matrix: Record<string, string[] | MatrixEntry[]> };
