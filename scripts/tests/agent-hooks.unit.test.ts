@@ -243,6 +243,32 @@ async function firstHeartbeat(marker: string, who: string, timeoutMs = 5000) {
   );
 }
 
+async function waitForAdvancingHeartbeat(
+  marker: string,
+  who: string,
+  timeoutMs = 5000
+): Promise<void> {
+  const path = heartbeatPath(marker);
+  const deadline = performance.now() + timeoutMs;
+  let first: number | undefined;
+  let latest: number | undefined;
+  while (performance.now() < deadline) {
+    const text = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return null;
+      throw error;
+    });
+    if (text !== null) {
+      latest = (JSON.parse(text) as { beat: number }).beat;
+      first ??= latest;
+      if (latest > first) return;
+    }
+    await Bun.sleep(HEARTBEAT_MS);
+  }
+  throw new Error(
+    `${who}: expected ${path} to advance within ${timeoutMs}ms | received beat ${latest ?? 'none'}`
+  );
+}
+
 /** Return an explicit owned-hook exit if a required control event never arrives. */
 async function fixtureEvent(
   path: string,
@@ -1021,6 +1047,31 @@ describe('agent auto-fix hooks', () => {
     10000
   );
 
+  it('observes an advancing heartbeat after one quiet observation window', async () => {
+    const marker = join(await makeTempDir(), 'delayed.json');
+    const path = heartbeatPath(marker);
+    const startedAt = performance.timeOrigin + performance.now();
+    publishFixtureJson(path, { beat: 1, at: startedAt });
+    const delayed = Bun.sleep(12 * HEARTBEAT_MS).then(() => {
+      publishFixtureJson(path, { beat: 2, at: performance.timeOrigin + performance.now() });
+    });
+
+    try {
+      await waitForAdvancingHeartbeat(marker, 'delayed formatter');
+    } finally {
+      await delayed;
+    }
+  });
+
+  it('reports the last beat if a formatter heartbeat never advances', async () => {
+    const marker = join(await makeTempDir(), 'quiet.json');
+    publishFixtureJson(heartbeatPath(marker), { beat: 3, at: performance.timeOrigin });
+
+    await expect(waitForAdvancingHeartbeat(marker, 'quiet formatter', 100)).rejects.toThrow(
+      `quiet formatter: expected ${heartbeatPath(marker)} to advance within 100ms | received beat 3`
+    );
+  });
+
   it.each(['running tree', 'late grandchild'] as const)(
     'cooperatively stops a %s',
     async (state) => {
@@ -1053,8 +1104,9 @@ describe('agent auto-fix hooks', () => {
         fakes,
         async () => {
           if (state === 'running tree') {
-            for (const [fakeMarker, who] of fakes) await firstHeartbeat(fakeMarker, who);
-            for (const [fakeMarker] of fakes) expect(await stillBeating(fakeMarker)).toBe(true);
+            await Promise.all(
+              fakes.map(([fakeMarker, who]) => waitForAdvancingHeartbeat(fakeMarker, who))
+            );
             await Promise.all(fakes.map(([fakeMarker]) => requestFormatterStop(fakeMarker)));
           }
           expect(await proc.exited).toBe(0);
