@@ -1902,7 +1902,9 @@ step-summary diagnostics for every family. Callers supply `family`, `path`, and
 a `validity` string (toolchain versions plus content hashes). `setup-mango`
 wraps the Bun install family; every other family is invoked from the workflow
 that produces or consumes it. Every `setup-mango` job runs a frozen install.
-Linux x64, macOS arm64, and Windows x64 skip all Bun package-cache transfers.
+Linux, macOS, and Windows x64 and arm64 runners skip Bun package-cache transfers.
+[First hosted comparison](https://github.com/juliopolycarpo/mangostudio/issues/2025) ·
+[Remaining runner classes](https://github.com/juliopolycarpo/mangostudio/issues/2057)
 
 | Family              | Producer / consumer              | Path                      | Invalidators                                             | Restore behavior                                     |
 | ------------------- | -------------------------------- | ------------------------- | -------------------------------------------------------- | ---------------------------------------------------- |

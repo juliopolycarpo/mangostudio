@@ -75,7 +75,7 @@ function runSetup(
     'github.event_name': 'push',
     'github.ref': 'refs/heads/main',
     'runner.os': 'Linux',
-    'runner.arch': 'ARM64',
+    'runner.arch': 'ARM',
     'steps.cache.outcome': 'skipped',
     'steps.cache.outputs.cache-hit': 'false',
     'steps.bun-save-check.outcome': 'skipped',
@@ -110,6 +110,9 @@ describe('setup-mango Bun cache lifecycle', () => {
     ['Linux', 'X64'],
     ['macOS', 'ARM64'],
     ['Windows', 'X64'],
+    ['Linux', 'ARM64'],
+    ['macOS', 'X64'],
+    ['Windows', 'ARM64'],
   ])('%s %s installs without cache I/O on pushes and PRs', (os, arch) => {
     for (const event of ['push', 'pull_request']) {
       const cache = new FakeBunCache(false);
@@ -127,9 +130,8 @@ describe('setup-mango Bun cache lifecycle', () => {
   });
 
   test.each([
-    ['Linux', 'ARM64'],
-    ['macOS', 'X64'],
-    ['Windows', 'ARM64'],
+    ['Linux', 'ARM'],
+    ['Windows', 'X86'],
   ])('%s %s retains the main cache writer', (os, arch) => {
     const cache = new FakeBunCache(false);
     const { installs } = runSetup(cache, { 'runner.os': os, 'runner.arch': arch });
