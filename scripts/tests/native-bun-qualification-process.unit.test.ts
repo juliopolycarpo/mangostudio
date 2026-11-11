@@ -64,8 +64,8 @@ class LinuxStatFile {
   };
 }
 
-function linuxStat(start = '321'): string {
-  const fields = ['S', '7', '9', ...Array<string>(16).fill('0'), start];
+function linuxStat({ start = '321', parentPid = 7, group = 9, session = 0 } = {}): string {
+  const fields = ['S', parentPid, group, session, ...Array<string>(15).fill('0'), start];
   return `10 (worker (fixture)) ${fields.join(' ')}`;
 }
 
@@ -510,7 +510,7 @@ describe('native process identity', () => {
   });
 
   test('rejects malformed Linux start ticks without certifying an exited process', async () => {
-    const file = new LinuxStatFile(linuxStat('invalid'));
+    const file = new LinuxStatFile(linuxStat({ start: 'invalid' }));
     await expect(readLinuxProcessIdentity(processRow(10, 1), file.read)).rejects.toThrow(
       'Invalid /proc/10/stat start ticks "invalid"; expected decimal digits'
     );
@@ -592,7 +592,38 @@ describe('native process identity', () => {
   );
 });
 
-describe('native process census budget', () => {
+describe('native process census', () => {
+  test.each([
+    {
+      name: 'omits a Linux task reaped after ps listed its PID',
+      group: -1,
+      session: -1,
+      expected: [],
+    },
+    {
+      name: 'retains a Linux row with teardown parent and group but a valid session',
+      group: -1,
+      session: 0,
+      expected: [processRow(10, 0, '10:321', -1)],
+    },
+    {
+      name: 'retains a Linux process with no visible parent and a valid group',
+      group: 10,
+      session: 10,
+      expected: [processRow(10, 0, '10:321', 10)],
+    },
+  ])('$name', async ({ group, session, expected }) => {
+    const capture = new FakeCensusCapture(' 10 1 10 Thu Oct 8 12:00:00 2026 process-10\n');
+    const file = new LinuxStatFile(linuxStat({ parentPid: 0, group, session }));
+    const rows = await snapshotNativeProcesses({
+      platform: 'linux',
+      findExecutable: () => null,
+      capture: capture.run,
+      readLinuxStat: file.read,
+    });
+    expect(rows).toEqual([...expected]);
+  });
+
   test('gives a Windows census its own budget and a script that reports its phase', async () => {
     const created = '2026-10-19T23:15:06.0000000Z';
     const capture = new FakeCensusCapture(

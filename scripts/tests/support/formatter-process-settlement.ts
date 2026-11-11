@@ -1,4 +1,5 @@
 import {
+  isReapedLinuxProcessLineage,
   type NativeProcess,
   parseNativeProcesses,
   readLinuxProcessIdentity,
@@ -82,7 +83,7 @@ export async function readNativeFormatterProcess(
     const [state = '', parent, group, session] = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
     // procfs samples state before locking the signal handler. A reaped task
     // can still show that earlier state alongside the kernel's default lineage.
-    if (parent === '0' && group === '-1' && session === '-1' && stat.startsWith(`${pid} (`)) {
+    if (isReapedLinuxProcessLineage(parent, group, session) && stat.startsWith(`${pid} (`)) {
       isAlive(pid, () => state);
       return undefined;
     }
