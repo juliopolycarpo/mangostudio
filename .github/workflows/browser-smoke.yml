@@ -41,13 +41,27 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  lab-runtime:
+    uses: $/.github/workflows/local-runtime.yml
+
+  lab-frontend:
+    uses: $/.github/workflows/build.yml
+    with:
+      source_sha: ${{ github.sha }}
+
   browser-smoke:
+    needs: [lab-runtime, lab-frontend]
     name: ${{ matrix.mode == 'production' && 'Production frontend regressions' || 'Chromium smoke suite' }}
     strategy:
       fail-fast: false
       matrix:
         mode: [development, production]
     runs-on: ubuntu-26.04
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.0-resolute@sha256:4d70b558dbaff71611b2f3e7a32aa2b4d42cfc892078ad368cb7ea229c2ffd1f
+    defaults:
+      run:
+        shell: bash
     # Bound installation separately from the existing ten-minute smoke allowance;
     # leave job headroom for the remaining setup and failure artifacts.
     timeout-minutes: 25
@@ -60,50 +74,15 @@ jobs:
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
-      - id: toolchain
-        name: Resolve Playwright version
-        # An empty version silently poisons the cache key, so fail here rather
-        # than inside cache-scoped's validity guard.
+      - name: Verify the Playwright image version and Chromium paths
         run: |
           set -euo pipefail
           playwright="$(bunx --bun playwright --version | awk '{print $2}')"
-          if [ -z "${playwright}" ]; then
-            echo "::error::playwright version probe returned an empty value"
+          if [ "$playwright" != '1.65.0' ]; then
+            printf 'expected Playwright version: 1.65.0 | received: %s\n' "$playwright" >&2
             exit 1
           fi
-          echo "playwright=${playwright}" >> "$GITHUB_OUTPUT"
-
-      - name: Restore Playwright browser cache
-        id: pw-cache
-        uses: $/.github/actions/cache-scoped
-        with:
-          family: playwright
-          path: ~/.cache/ms-playwright
-          validity: ${{ steps.toolchain.outputs.playwright }}
-          exact-restore: "true"
-          mode: restore
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
-
-      - name: Install Playwright Chromium
-        if: steps.pw-cache.outputs.cache-restored != 'true'
-        timeout-minutes: 10
-        run: bun run test:e2e:setup
-
-      - name: Install OS deps for Chromium (cache hit path)
-        if: steps.pw-cache.outputs.cache-restored == 'true'
-        timeout-minutes: 10
-        run: bunx playwright install-deps chromium
-
-      - name: Save Playwright browser cache
-        if: steps.pw-cache.outputs.cache-restored != 'true'
-        uses: $/.github/actions/cache-scoped
-        with:
-          family: playwright
-          path: ~/.cache/ms-playwright
-          validity: ${{ steps.toolchain.outputs.playwright }}
-          exact-restore: "true"
-          mode: save
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+          bunx --bun playwright install --dry-run chromium
 
       # The smoke hub spawns Local as the Rust runtime. With the binary in
       # MANGOSTUDIO_RUNTIME_BINARY, `bun run dev` skips its own cargo build,
@@ -111,7 +90,7 @@ jobs:
       # manual dispatch has no artifact to download, so it builds here.
       - uses: $/.github/actions/local-runtime
         with:
-          artifact: ${{ inputs.runtime_artifact || '' }}
+          artifact: ${{ needs.lab-runtime.outputs.artifact }}
 
       - name: Run browser smoke suite
         if: matrix.mode == 'development'
@@ -123,10 +102,10 @@ jobs:
           CI: true
 
       - uses: $/.github/actions/download-frontend
-        if: matrix.mode == 'production' && inputs.frontend_artifact != ''
+        if: matrix.mode == 'production' && needs.lab-frontend.outputs.artifact != ''
         with:
-          artifact: ${{ inputs.frontend_artifact }}
-          bun-revision: ${{ inputs.frontend_bun_revision }}
+          artifact: ${{ needs.lab-frontend.outputs.artifact }}
+          bun-revision: ${{ needs.lab-frontend.outputs.bun_revision }}
 
       - name: Run production frontend regressions
         if: matrix.mode == 'production'
@@ -139,8 +118,8 @@ jobs:
           bun run test:e2e:production "${args[@]}" 2>&1 | tee smoke-run.log
         env:
           CI: true
-          FRONTEND_ARTIFACT: ${{ inputs.frontend_artifact || '' }}
-          PRODUCER_BUN_REVISION: ${{ inputs.frontend_bun_revision || '' }}
+          FRONTEND_ARTIFACT: ${{ needs.lab-frontend.outputs.artifact }}
+          PRODUCER_BUN_REVISION: ${{ needs.lab-frontend.outputs.bun_revision }}
 
       # Green runs leave their outcome in the step summary instead of an
       # artifact nobody downloads; failures get the full diagnostics below.
