@@ -1875,14 +1875,15 @@ those children contribute no coverage.
 
 ## CI Artifact Retention
 
-CI artifacts fall into four retention classes; keep new uploads aligned with them:
+CI artifacts fall into five retention classes. Use these policies for new uploads.
 
-| Class               | Examples                                                                                                                                             | Policy                                                 |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| Job-to-job handoff  | `test-shard-<n>` (shard → merge), `qa-test-metrics` and `qa-rust-coverage` (→ qa-metrics), `local-runtime-linux-x64` (build → shards, browser smoke) | 1 day — consumed within the same run                   |
-| Failure diagnostics | `test-shard-<n>-log`, merged coverage, Playwright traces and report                                                                                  | 7–14 days, uploaded only `if: failure()`               |
-| Release assets      | staged binaries and packages in the release pipeline                                                                                                 | 30 days                                                |
-| Main-push baselines | `qa-metrics` envelopes from green `main` CI runs                                                                                                     | 90 days — exact-SHA baselines for future PR QA reports |
+| Class               | Examples                                                                                      | Policy                                                 |
+| ------------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Test job retries    | `test-timings-baseline-<attempt>`, `test-shard-<n>`, `test-shard-frontend`, `qa-test-metrics` | 30 days. Targeted reruns can reuse them.               |
+| Job-to-job handoff  | `qa-rust-coverage` (→ qa-metrics), `local-runtime-linux-x64` (build → shards, browser smoke)  | 1 day — consumed within the same run                   |
+| Failure diagnostics | `test-shard-<n>-log`, merged coverage, Playwright traces and report                           | 7–14 days, uploaded only `if: failure()`               |
+| Release assets      | staged binaries and packages in the release pipeline                                          | 30 days                                                |
+| Main-push baselines | `qa-metrics` envelopes from green `main` CI runs                                              | 90 days — exact-SHA baselines for future PR QA reports |
 
 Green runs summarize their outcome in the step summary (`$GITHUB_STEP_SUMMARY`)
 instead of uploading success-only artifacts. The browser-smoke workflow keeps a
