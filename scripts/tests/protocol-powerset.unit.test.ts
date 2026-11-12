@@ -27,6 +27,7 @@ const POWERSET_LABEL = 'protocol:feature-powerset';
 
 const manifest = Bun.TOML.parse(readText('crates/mango-protocol/Cargo.toml')) as {
   features: Record<string, string[]>;
+  target?: Record<string, { dependencies?: Record<string, { optional?: boolean }> }>;
 };
 const CONFIGURATIONS = featurePowerset(manifest.features);
 
@@ -48,6 +49,18 @@ const run = (task: ProtocolTask, configurations: readonly string[]): RecordedHac
 });
 
 describe('the feature powerset the partitions must cover', () => {
+  test('enables optional Windows bindings through the tokio feature', () => {
+    const bindings = manifest.target?.['cfg(windows)']?.dependencies?.['windows-sys'];
+    expect(
+      bindings,
+      `(protocol Cargo.toml): expected optional Windows bindings | received: ${JSON.stringify(bindings)}`
+    ).toMatchObject({ optional: true });
+    expect(
+      manifest.features.tokio,
+      `(protocol Cargo.toml): expected tokio to enable dep:windows-sys | received: ${JSON.stringify(manifest.features.tokio)}`
+    ).toContain('dep:windows-sys');
+  });
+
   test('is the 36 configurations the gate has always run', () => {
     expect(
       CONFIGURATIONS.length,
