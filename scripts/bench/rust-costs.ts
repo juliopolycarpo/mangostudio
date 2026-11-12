@@ -126,7 +126,9 @@ async function main(): Promise<void> {
   }
   const version = (await Bun.file(join(ROOT, 'package.json')).json()).version as string;
   const workloads = rustCostWorkloads(version);
-  const profileArgs = shippingRustProfile(await Bun.file(join(ROOT, 'Cargo.toml')).text());
+  const { cargoArgs: profileArgs, packageOverrides } = shippingRustProfile(
+    await Bun.file(join(ROOT, 'Cargo.toml')).text()
+  );
   const schedule = {
     target: TARGET,
     jobs: JOBS,
@@ -140,7 +142,8 @@ async function main(): Promise<void> {
       measured: 20,
       modes: ['runtime-hello-health', 'hub-fresh-database', 'hub-migrated-database'],
     },
-    profile: 'repository shipping profile from Cargo.toml, including release package overrides',
+    profile: 'repository shipping profile defaults: opt3/fat LTO/one CGU/stripped/unwind',
+    releasePackageOverrides: packageOverrides,
     cache: 'retained registry/toolchain; empty target per clean trial; OS page cache uncontrolled',
     attributionRequested: flags['--attribution'] ?? false,
     startupRequested: Boolean(values['--startup-hub']),

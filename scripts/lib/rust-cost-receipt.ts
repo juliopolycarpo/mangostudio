@@ -137,20 +137,28 @@ export function summarizeRustCosts(
   );
 }
 
-/** Pins the declared shipping profile against Cargo-home profile overrides. Example: shippingRustProfile(await Bun.file('Cargo.toml').text()). */
-export function shippingRustProfile(manifest: string): string[] {
-  const parsed = Bun.TOML.parse(manifest) as { profile?: { release?: Record<string, unknown> } };
+/** Pins release defaults and records package settings from the sealed manifest.
+ * @example shippingRustProfile(await Bun.file('Cargo.toml').text())
+ */
+export function shippingRustProfile(manifest: string) {
+  const parsed = Bun.TOML.parse(manifest) as {
+    profile?: { release?: Record<string, unknown> & { package?: Record<string, unknown> } };
+  };
+  const release = parsed.profile?.release ?? {};
   const expected = { 'opt-level': 3, lto: 'fat', 'codegen-units': 1, strip: true, panic: 'unwind' };
   for (const [field, value] of Object.entries(expected)) {
-    if (parsed.profile?.release?.[field] !== value)
+    if (release[field] !== value)
       throw new Error(
-        `Shipping release profile ${field}: expected ${JSON.stringify(value)} | received: ${JSON.stringify(parsed.profile?.release?.[field])}`
+        `Shipping release profile ${field}: expected ${JSON.stringify(value)} | received: ${JSON.stringify(release[field])}`
       );
   }
-  return Object.entries(expected).flatMap(([field, value]) => [
-    '--config',
-    `profile.release.${field}=${JSON.stringify(value)}`,
-  ]);
+  return {
+    cargoArgs: Object.entries(expected).flatMap(([field, value]) => [
+      '--config',
+      `profile.release.${field}=${JSON.stringify(value)}`,
+    ]),
+    packageOverrides: release.package ?? {},
+  };
 }
 
 /** Qualifies unchanged and stamp-only rebuilds as distinct workloads. Example: qualifiesRustIncremental('restamp', before, after, 1). */
