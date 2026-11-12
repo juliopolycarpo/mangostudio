@@ -35,13 +35,17 @@ esse número em máquinas com recursos restritos.
 
 ### API de compatibilidade
 
-O TS 7.0 não expõe uma API programática estável. Todo script que analisa
-código TypeScript importa a API do compilador de `@typescript/typescript6`
-(fixado em `6.0.2`), o pacote oficial de compatibilidade side-by-side: as
-verificações de grafo de imports e de fronteiras em `scripts/lib/`, os scripts
-de cobertura do QA-gate em `scripts/qa-gate/` e o teste shared-browser-safety
-do frontend. Quando o TS 7.1 lançar uma nova API, a dependência
-de compatibilidade pode ser removida.
+As ferramentas do repositório usam a API do compilador do pacote de
+compatibilidade `@typescript/typescript6`, fixado em `6.0.2`. Entre os
+consumidores estão as verificações de grafo de imports e de fronteiras, a
+verificação de `NODE_ENV` em código de produção em
+`scripts/lib/no-node-env-branches.ts`, a cobertura do QA-gate, as chamadas à
+API do compilador em `scripts/tests/` e o teste shared-browser-safety do
+frontend.
+
+Execute `git grep -n -F '@typescript/typescript6'` para encontrar os imports
+e as declarações de dependência atuais. Remova a dependência de
+compatibilidade depois de migrar todos os consumidores.
 
 ## Turborepo
 
