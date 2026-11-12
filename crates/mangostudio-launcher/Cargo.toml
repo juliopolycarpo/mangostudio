@@ -20,7 +20,7 @@ workspace = true
 # async runtime. Archive handling is cfg-gated to match the release asset
 # formats: tar.gz on Unix, zip on Windows.
 [dependencies]
-sha2 = "0.11"
+sha2.workspace = true
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 [target.'cfg(unix)'.dependencies]

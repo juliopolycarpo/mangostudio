@@ -62,7 +62,7 @@ cap-std = { version = "4.0.3", default-features = false }
 # CLI audit --since accepts RFC 3339 instants and relative durations. Chrono is
 # already present at this version in the workspace lockfile.
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
-futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-util = { workspace = true, features = ["alloc"] }
 # The CSPRNG behind `generate_serve_token` (see the `base64` comment above).
 # Shares 0.4 with rand 0.10 (tungstenite's frame-masking key) and uuid, so it
 # adds no new version for `cargo deny`'s duplicate check to catch either. The
@@ -84,7 +84,7 @@ icu_collator = "2.3"
 # exactly (draft 2020-12, offline, format assertions on): the result-check
 # gate has to run the same validator the peer contract crate embeds, with an
 # instance-path pointer neither of those crates exposes publicly.
-jsonschema = { version = "0.60", default-features = false }
+jsonschema.workspace = true
 # External-agent hosting (`external_agents/`): the SDK's harness and session traits
 # plus the three product targets. Stdio only: every harness speaks line-framed
 # stdio through this crate's own launcher, so neither `websocket` nor the SDK's
@@ -133,10 +133,10 @@ rmcp = { version = "=3.9.0", default-features = false, features = [
 # `fs.grep` needs ECMAScript's non-Unicode RegExp semantics, including UTF-16
 # code units, named captures, and an engine interrupt hook for its hard deadline.
 rquickjs = { version = "0.14", default-features = false, features = ["std"] }
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-serde = { version = "1.0.219", default-features = false, features = ["derive", "std"] }
-serde_json = { version = "1.0.140", default-features = false, features = ["std"] }
-sha2 = "0.11"
+rustls.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
 sse-stream = "0.2"
 # A normal dependency, not a dev one: `main.rs` builds its own multi-thread
 # runtime for `stdio`/`serve`/`connect` (never `#[tokio::main]` — the
@@ -165,7 +165,7 @@ tokio = { version = "1.53.3", default-features = false, features = [
 # pins, so `cargo deny`'s duplicate-version check has nothing new to catch.
 # `rt` adds `TaskTracker`, which the external-agent supervisor uses to await every
 # task it spawns before its shutdown returns.
-tokio-util = { version = "0.7", default-features = false, features = ["rt"] }
+tokio-util = { workspace = true, features = ["rt"] }
 # `library.scan` validates `toml-agent`/`toml-settings` instances and reads a
 # Codex subagent's `name`/`description`, mirroring `smol-toml`'s parse in
 # `apps/shared/src/library/machine/instance-reader.ts`.
@@ -174,7 +174,7 @@ toml = { version = "1.1", default-features = false, features = ["std", "parse", 
 # locked): `src/library/smol_toml.rs` walks its events to judge each bare
 # scalar the way `smol-toml` does before the `toml` crate parses the document.
 toml_parser = { version = "1.1", default-features = false, features = ["std"] }
-webpki-roots = "1"
+webpki-roots.workspace = true
 
 [dev-dependencies]
 # Only this crate's own tests use the spawn launcher, standing in for a hub
@@ -197,12 +197,7 @@ libc = "0.2.189"
 # `signal`: `kill(pid, 0)` for lock-holder liveness, mirroring `process.kill(pid, 0)` on the
 # TypeScript side. `hostname`: `gethostname()` for the lock body's `host` field. `fs`:
 # `access(2)` for `workspace.validate`'s read+execute directory check.
-nix = { version = "0.31", default-features = false, features = [
-  "signal",
-  "hostname",
-  "user",
-  "fs",
-] }
+nix = { workspace = true, features = ["hostname", "user", "fs"] }
 # Restricted same-filesystem moves use renameat2/renameatx_np with NOREPLACE
 # through verified directory handles; cap-std only exposes replacing rename.
 # This exact version is already present transitively through cap-std.
@@ -224,18 +219,14 @@ rustix = { version = "1.1", default-features = false, features = ["fs"] }
 # Threading also provides OpenProcess/WaitForSingleObject for lock-holder liveness,
 # GetExitCodeProcess for the contained child, OpenProcessToken for the owner-only module's own
 # SID lookup, and CREATE_NO_WINDOW.
-windows-sys = { version = "0.61", features = [
+windows-sys = { workspace = true, features = [
   "Wdk_Storage_FileSystem",
-  "Win32_Foundation",
   "Win32_Globalization",
   "Win32_Networking_WinSock",
-  "Win32_Security",
-  "Win32_Security_Authorization",
   "Win32_Storage_FileSystem",
   "Win32_System_Console",
   "Win32_System_IO",
   "Win32_System_JobObjects",
-  "Win32_System_Pipes",
   "Win32_System_SystemInformation",
   "Win32_System_Threading",
 ] }
