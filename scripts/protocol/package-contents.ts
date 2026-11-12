@@ -23,10 +23,17 @@ export interface ProtocolManifest {
   readonly [key: string]: unknown;
 }
 
-/** The root manifest's Bun catalogs: the unnamed `catalog` and the `catalogs` by name. */
-export interface RootCatalogs {
-  readonly catalog?: Readonly<Record<string, string>>;
-  readonly catalogs?: Readonly<Record<string, Readonly<Record<string, string>>>>;
+type CatalogTable = Readonly<Record<string, string>>;
+
+interface CatalogDefinitions {
+  readonly catalog?: CatalogTable;
+  readonly catalogs?: Readonly<Record<string, CatalogTable>>;
+}
+
+/** Bun reads catalogs from the root manifest or its workspaces object. */
+export interface RootCatalogs extends CatalogDefinitions {
+  readonly workspaces?:
+    readonly string[] | (CatalogDefinitions & { readonly packages?: readonly string[] });
 }
 
 /** Every section that can carry a `catalog:` reference. */
@@ -38,45 +45,53 @@ const CATALOG_SECTIONS = [
 ] as const;
 
 /**
- * Replaces each `catalog:` / `catalog:<name>` specifier with the concrete range the root catalog holds. `npm pack`
- * copies the staged manifest verbatim and npm cannot resolve `catalog:`, so a
- * reference left in place makes the package uninstallable. Every section is
- * resolved, `devDependencies` included, so the tarball carries none.
+ * Replace Bun catalog references with their concrete ranges before packing.
+ * Resolve all four dependency sections so the staged manifest installs
+ * independently of the source workspace.
  *
  * @example
  * resolveCatalogReferences({ dependencies: { typebox: 'catalog:' } }, { catalog: { typebox: '1.4.5' } });
  * // { dependencies: { typebox: '1.4.5' } }
  */
-export function resolveCatalogReferences<T extends Record<string, unknown>>(
-  manifest: T,
+export function resolveCatalogReferences(
+  manifest: Record<string, unknown>,
   roots: RootCatalogs
-): T {
+): Record<string, unknown> {
+  const workspace = roots.workspaces;
+  // When workspaces declares either catalog field, Bun reads both tables there.
+  const definitions =
+    workspace && ('catalog' in workspace || 'catalogs' in workspace) ? workspace : roots;
   const resolved: Record<string, unknown> = { ...manifest };
   for (const section of CATALOG_SECTIONS) {
     const declared = manifest[section];
     if (declared === undefined) continue;
-    const next: Record<string, string> = {};
-    for (const [name, specifier] of Object.entries(declared as Record<string, string>)) {
-      if (!specifier.startsWith('catalog:')) {
-        next[name] = specifier;
-        continue;
-      }
-      const catalogName = specifier.slice('catalog:'.length);
-      const table =
-        catalogName === '' || catalogName === 'default'
-          ? roots.catalog
-          : roots.catalogs?.[catalogName];
-      const version = table?.[name];
-      if (version === undefined) {
-        throw new Error(
-          `${section}.${name} references "${specifier}", which the root package.json catalog does not define; expected a range for ${name}.`
-        );
-      }
-      next[name] = version;
-    }
-    resolved[section] = next;
+    resolved[section] = Object.fromEntries(
+      Object.entries(declared as Record<string, string>).map(([name, specifier]) => {
+        if (!specifier.startsWith('catalog:')) return [name, specifier];
+        const catalogName = specifier.slice('catalog:'.length).trim() || 'default';
+        const namedCatalogs = definitions.catalogs;
+        const named =
+          namedCatalogs && Object.hasOwn(namedCatalogs, catalogName)
+            ? namedCatalogs[catalogName]
+            : undefined;
+        const candidates = catalogName === 'default' ? [definitions.catalog, named] : [named];
+        const matches = candidates.filter((table) => table && Object.hasOwn(table, name));
+        if (matches.length > 1) {
+          throw new Error(
+            `${section}.${name} references "${specifier}", but ${name} is defined in both default catalogs.`
+          );
+        }
+        const version = matches[0]?.[name];
+        if (typeof version !== 'string' || version.trim() === '') {
+          throw new Error(
+            `${section}.${name} references "${specifier}". Expected a range for ${name} in the root package.json catalog. Received ${JSON.stringify(version)}.`
+          );
+        }
+        return [name, version];
+      })
+    );
   }
-  return resolved as T;
+  return resolved;
 }
 
 /** The key under `publishConfig` holding the published `exports` map. */

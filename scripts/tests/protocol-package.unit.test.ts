@@ -135,11 +135,62 @@ describe('resolveCatalogReferences', () => {
     expect(resolved.devDependencies).toEqual({ typebox: '1.4.5' });
   });
 
+  test('uses either default table and trims catalog names', () => {
+    const resolved = resolveCatalogReferences(
+      {
+        dependencies: { typebox: 'catalog:default' },
+        peerDependencies: { other: 'catalog:   ' },
+        optionalDependencies: { zod: 'catalog: tooling ' },
+      },
+      {
+        catalog: { other: '^2.0.0' },
+        catalogs: { default: { typebox: '1.4.5' }, tooling: { zod: '^4.0.0' } },
+      }
+    );
+    expect(resolved).toEqual({
+      dependencies: { typebox: '1.4.5' },
+      peerDependencies: { other: '^2.0.0' },
+      optionalDependencies: { zod: '^4.0.0' },
+    });
+  });
+
+  test('uses workspace catalogs when the workspaces object declares them', () => {
+    const resolved = resolveCatalogReferences(
+      { dependencies: { typebox: 'catalog:', zod: 'catalog:tooling' } },
+      {
+        catalog: { typebox: '1.3.0' },
+        workspaces: {
+          packages: ['packages/*'],
+          catalog: { typebox: '1.4.5' },
+          catalogs: { tooling: { zod: '^4.0.0' } },
+        },
+      }
+    );
+    expect(resolved.dependencies).toEqual({ typebox: '1.4.5', zod: '^4.0.0' });
+  });
+
+  test('rejects a dependency defined in both default tables', () => {
+    expect(() =>
+      resolveCatalogReferences(
+        { dependencies: { typebox: 'catalog:' } },
+        { catalog: { typebox: '1.4.5' }, catalogs: { default: { typebox: '1.3.0' } } }
+      )
+    ).toThrow(
+      'dependencies.typebox references "catalog:", but typebox is defined in both default catalogs.'
+    );
+  });
+
+  test('rejects a missing package that shares an Object prototype name', () => {
+    expect(() =>
+      resolveCatalogReferences({ dependencies: { constructor: 'catalog:' } }, roots)
+    ).toThrow('dependencies.constructor references "catalog:"');
+  });
+
   test('names the dependency and specifier the root catalog does not define', () => {
     expect(() =>
       resolveCatalogReferences({ dependencies: { missing: 'catalog:' } }, roots)
     ).toThrow(
-      'dependencies.missing references "catalog:", which the root package.json catalog does not define; expected a range for missing.'
+      'dependencies.missing references "catalog:". Expected a range for missing in the root package.json catalog. Received undefined.'
     );
   });
 

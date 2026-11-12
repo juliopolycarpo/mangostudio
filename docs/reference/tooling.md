@@ -21,15 +21,14 @@ per-target provenance and flags detected drift.
 
 ### Dependency catalog
 
-A dependency whose version two or more workspace manifests repeat lives once in the root
-`package.json` `catalog` (`typescript`, `typebox`, `@types/bun`, `better-auth`), and each
-manifest points at it with `"catalog:"`. Change the version in the catalog only; Dependabot's
-`bun` ecosystem reads root `catalog` entries and bumps them there. A dependency used by a
-single workspace keeps its literal range. The published `@mangostudio/protocol` also uses
-`catalog:`: npm cannot resolve it, so `scripts/protocol/package-contents.ts` rewrites every
-reference to the catalog's concrete range when staging the tarball, and
-`scripts/tests/protocol-package.unit.test.ts` fails if one leaks. `packages/cli` declares no
-catalog dependencies. A new published manifest that adopts `catalog:` needs the same rewrite.
+The root `package.json` catalog holds the shared ranges for `typescript`,
+`typebox`, `@types/bun`, and `better-auth`. Each workspace declares the
+dependency in its own manifest with `"catalog:"`. Update the shared range in
+the catalog. Dependencies used by one workspace keep their literal ranges.
+
+The protocol pack script replaces catalog references with concrete ranges
+in the staged manifest. The resulting tarball can be installed outside the
+repository without the root catalog. See [Bun's catalog documentation](https://bun.com/docs/pm/catalogs).
 
 ## Type checking
 
