@@ -1,4 +1,4 @@
-import { isMainCacheWriter, type RustCacheApi } from './github';
+import { isMainCacheWriter, retryIncompleteListing, type RustCacheApi } from './github';
 import { type RustCacheDeletion, type RustCacheEntry, selectRustCacheDeletions } from './selection';
 
 export interface RustCacheCleanupResult {
@@ -40,30 +40,26 @@ export async function cleanupRustCaches(
       `Invalid cleanup trigger ${trigger.id} ${trigger.event} ${trigger.head_branch} ${trigger.path} ${trigger.status}; expected a completed same-repository main writer`
     );
   }
-  const planned = selectRustCacheDeletions(await api.listCaches());
+  const planned = selectRustCacheDeletions(
+    await retryIncompleteListing('actions_caches', () => api.listCaches())
+  );
   const deletedIds: number[] = [];
   if (!context.apply) return { planned, deletedIds, deferred: null };
 
   for (const plan of planned) {
-    const active = await api.activeWriters();
-    if (active.length > 0) {
-      return {
-        planned,
-        deletedIds,
-        deferred: `Active main cache writers: ${active.map((run) => run.id).join(', ')}`,
-      };
-    }
-    // A new save cannot enter a stale ID-based deletion plan. Changed listings,
-    // ambiguous generations and lost replacements defer to a later completion.
-    if (!stillSelected(plan, await api.listCaches())) {
-      return {
-        planned,
-        deletedIds,
-        deferred: `Cache ${plan.entry.id} or replacement ${plan.replacement.id} changed or disappeared`,
-      };
-    }
+    // Restart the writer audit if the cache listing needs a fresh read.
+    const deferred = await retryIncompleteListing('actions_caches', async () => {
+      const active = await api.activeWriters();
+      if (active.length > 0)
+        return `Active main cache writers: ${active.map((run) => run.id).join(', ')}`;
+      if (!stillSelected(plan, await api.listCaches()))
+        return `Cache ${plan.entry.id} or replacement ${plan.replacement.id} changed or disappeared`;
+      return null;
+    });
+    if (deferred !== null) return { planned, deletedIds, deferred };
+
     if (await api.deleteCache(plan.entry.id)) deletedIds.push(plan.entry.id);
-    const after = await api.listCaches();
+    const after = await retryIncompleteListing('actions_caches', () => api.listCaches());
     if (
       !unchangedEntry(
         plan.replacement,
