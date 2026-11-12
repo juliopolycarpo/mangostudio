@@ -989,6 +989,45 @@ describe('the fuzz workspace lockfile', () => {
   // version leaves it stale in a pull request that never touches fuzz/. `cargo fuzz` cannot
   // refuse that itself, so the gates below have to.
 
+  test.each(['serde_json', 'tokio'])(
+    'keeps the fuzz requirement for %s aligned with the protocol crate',
+    (dependency) => {
+      type CargoDependency = string | { version?: string; workspace?: boolean };
+      type CargoDependencies = Record<string, CargoDependency>;
+
+      const protocolPath = 'crates/mango-protocol/Cargo.toml';
+      const fuzzPath = 'crates/mango-protocol/fuzz/Cargo.toml';
+      const protocol = Bun.TOML.parse(readText(protocolPath)) as {
+        dependencies: CargoDependencies;
+      };
+      const fuzz = Bun.TOML.parse(readText(fuzzPath)) as {
+        dependencies: CargoDependencies;
+      };
+      const { workspace } = Bun.TOML.parse(readText('Cargo.toml')) as {
+        workspace: { dependencies: CargoDependencies };
+      };
+      const protocolEntry = protocol.dependencies[dependency];
+      const protocolDependency =
+        typeof protocolEntry === 'object' && protocolEntry.workspace
+          ? workspace.dependencies[dependency]
+          : protocolEntry;
+      const fuzzDependency = fuzz.dependencies[dependency];
+      const expected =
+        typeof protocolDependency === 'string' ? protocolDependency : protocolDependency?.version;
+      const received =
+        typeof fuzzDependency === 'string' ? fuzzDependency : fuzzDependency?.version;
+
+      expect(
+        expected,
+        `${protocolPath}: expected a Cargo requirement for ${dependency} | received: ${expected}`
+      ).toBeString();
+      expect(
+        received,
+        `${fuzzPath}: expected ${dependency} requirement ${expected} | received: ${received}`
+      ).toBe(expected);
+    }
+  );
+
   test('cargo-shim resolves the fuzz workspace with --locked, not --no-deps', () => {
     // `--no-deps` skips the resolve, so it passes on a stale lock.
     const job = extractJobBlock(readText('.github/workflows/cargo-shim.yml'), 'workspace');
