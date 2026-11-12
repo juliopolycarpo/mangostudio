@@ -7,10 +7,15 @@ que o CI impõe. Meça de novo com os comandos abaixo em vez de editar os númer
 
 ## Perfil de release
 
-O `[profile.release]` do workspace, no `Cargo.toml` da raiz, define `opt-level = 3`,
-`lto = "fat"`, `codegen-units = 1`, `strip = true` e `panic = "unwind"`. O unwind é
-obrigatório: o isolamento de panics dos handlers captura o unwind, então o crate do runtime se
-recusa a compilar com uma estratégia de panic que aborta.
+O `[profile.release]` do workspace, no `Cargo.toml` da raiz, usa `opt-level = 3`,
+`lto = "fat"`, `codegen-units = 1`, `strip = true` e `panic = "unwind"` como padrão.
+O isolamento de panics dos handlers exige unwind, então o crate do runtime se recusa a
+compilar com uma estratégia de panic que aborta.
+
+Os pacotes `jsonschema`, `jsonschema-regex`, `jsonschema-value`, `referencing` e `fancy-regex`
+usam `opt-level = "s"`. As medições abaixo antecedem esses ajustes. A comparação do binário
+Linux x64 sem símbolos e a repetição das validações do corpus estão registradas no
+[#2126](https://github.com/juliopolycarpo/mangostudio/pull/2126).
 
 Comparação local em linux-x64 (`cargo build --release --locked -p mangostudio-runtime`, rebuild
 completo a cada vez numa máquina compartilhada de 28 threads com `CARGO_BUILD_JOBS=8`; leia os
