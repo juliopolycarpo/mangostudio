@@ -45,5 +45,34 @@ describe('code-health check', () => {
 
     expect(checkScript).toContain('touchesCodeHealthSurface');
     expect(checkScript).toContain("commandTask('root:code-health'");
+    expect(checkScript).toContain("commandTask('root:code-health-production'");
+  });
+
+  test('gates dependency placement against production entries only', () => {
+    const scripts = JSON.parse(readText('package.json')).scripts as Record<string, string>;
+    const knip = JSON.parse(readText('knip.json')) as {
+      workspaces: Record<string, { entry?: string[]; project?: string[] }>;
+    };
+
+    expect(scripts['code-health:production']).toContain('--production --strict');
+    expect(scripts['code-health:production']).toContain('--include dependencies,unlisted');
+    // Without a `!` production marker a workspace has no production graph, and
+    // Knip reports every runtime dependency in it as unused.
+    for (const workspace of [
+      'apps/api',
+      'apps/frontend',
+      'apps/shared',
+      'packages/protocol',
+      'packages/cli',
+    ]) {
+      const patterns = [
+        ...(knip.workspaces[workspace]?.entry ?? []),
+        ...(knip.workspaces[workspace]?.project ?? []),
+      ];
+      expect(
+        patterns.filter((pattern) => pattern.endsWith('!')),
+        `(knip.json): expected a production pattern ending in "!" for ${workspace} | received: ${JSON.stringify(patterns)}`
+      ).not.toHaveLength(0);
+    }
   });
 });

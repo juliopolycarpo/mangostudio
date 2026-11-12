@@ -1153,6 +1153,13 @@ when staged or changed files can affect dependencies, package exports, runtime o
 test entrypoints, scripts, hooks, workflows, or workspace source. Run
 `bun run code-health` directly while classifying a report.
 
+A second pass, `bun run code-health:production`, runs Knip in production mode
+over the `!`-marked entry and project patterns in `knip.json` and reports only
+dependency findings. It fails when shipped source imports a package that its own
+workspace does not list in `dependencies`, including one that resolves only
+because the root declares it as a devDependency. Exports used only by tests are
+not reported there; the default pass already covers unused exports.
+
 Files loaded by runtime discovery, process spawning, test configuration, or build
 aliases belong in the narrowest `entry` list in `knip.json`. Do not hide them with
 file ignores. A dependency may be ignored only when repository execution evidence

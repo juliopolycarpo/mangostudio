@@ -445,6 +445,14 @@ async function check(): Promise<never> {
   if (includeCodeHealth) {
     info('\nCode health');
     tasks.push(commandTask('root:code-health', ['bun', 'run', 'code-health'], { cwd: ROOT_DIR }));
+    // Production mode drops test and tooling entries, so a package that only
+    // shipped code imports must be a `dependency` of the workspace importing it,
+    // not a devDependency or a root dependency it happens to resolve through.
+    tasks.push(
+      commandTask('root:code-health-production', ['bun', 'run', 'code-health:production'], {
+        cwd: ROOT_DIR,
+      })
+    );
   }
 
   // The source scans below parse synchronously on this thread, so they go last:
