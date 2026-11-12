@@ -43,17 +43,16 @@ all = "warn"
 mango-protocol = { path = "crates/mango-protocol", version = "0.2.0" }
 mangostudio-runtime-contract = { path = "crates/mangostudio-runtime-contract", version = "0.2.0" }
 
-# Third-party dependencies declared by two or more members. An entry holds the
-# version and the feature set every consumer shares; a member adds its own extras
-# with `{ workspace = true, features = [...] }`. `default-features = false` can
-# only be set here (a member's own is ignored, and cargo warns), so an entry
-# whose consumers all keep the defaults leaves them on.
+# Third-party dependencies declared by two or more members. Each entry holds
+# the version and shared features. Cargo adds each member's features to this
+# list. A member inherits `default-features` when it omits the key. Setting
+# `default-features = true` on a member enables defaults for that dependency.
 futures-util = { version = "0.3", default-features = false }
 jsonschema = { version = "0.60", default-features = false }
 # `signal` is the one feature both users need; the runtime adds its own.
 nix = { version = "0.31", default-features = false, features = ["signal"] }
-# `ring`, not the `aws-lc-rs` default: it builds without cmake or nasm, which
-# is what keeps the Windows and aarch64 CI lanes from needing a C toolchain.
+# Select `ring` to keep the `aws-lc-rs` backend and its build dependencies out
+# of the graph.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { version = "1.0.219", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1.0.140", default-features = false, features = ["std"] }
