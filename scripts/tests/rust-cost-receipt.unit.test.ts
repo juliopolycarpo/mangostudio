@@ -11,6 +11,9 @@ import {
 } from '../lib/rust-cost-receipt';
 
 describe('Rust cost receipt contracts', () => {
+  const manifest =
+    '[profile.release]\nopt-level=3\nlto="fat"\ncodegen-units=1\nstrip=true\npanic="unwind"';
+
   it('rejects a restamp without changed artifact identity and keeps no-op invariants distinct', () => {
     const before = 'a'.repeat(64),
       after = 'b'.repeat(64);
@@ -26,10 +29,9 @@ describe('Rust cost receipt contracts', () => {
     );
   });
 
-  it('requires and pins the repository shipping profile without changing its tradeoffs', () => {
-    const manifest =
-      '[profile.release]\nopt-level=3\nlto="fat"\ncodegen-units=1\nstrip=true\npanic="unwind"';
-    expect(shippingRustProfile(manifest)).toEqual([
+  it('requires and pins the repository shipping profile defaults', () => {
+    const profile = shippingRustProfile(manifest);
+    expect(profile.cargoArgs).toEqual([
       '--config',
       'profile.release.opt-level=3',
       '--config',
@@ -41,10 +43,21 @@ describe('Rust cost receipt contracts', () => {
       '--config',
       'profile.release.panic="unwind"',
     ]);
+    expect(profile.packageOverrides).toEqual({});
     expect(() => shippingRustProfile(manifest.replace('lto="fat"', 'lto="thin"'))).toThrow(
       'expected "fat"'
     );
     expect(() => shippingRustProfile('')).toThrow('expected 3');
+  });
+
+  it('records the package overrides declared in the manifest', () => {
+    const profile = shippingRustProfile(
+      `${manifest}\n[profile.release.package.jsonschema]\nopt-level="s"\n[profile.release.package."*"]\ndebug=false`
+    );
+    expect(profile.packageOverrides).toEqual({
+      jsonschema: { 'opt-level': 's' },
+      '*': { debug: false },
+    });
   });
 
   it('keeps final CPU, elapsed and individual-process RSS in their original units', () => {

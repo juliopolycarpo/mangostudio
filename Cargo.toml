@@ -85,6 +85,19 @@ strip = true
 # `scripts/tests/protocol-lanes.unit.test.ts` rejects an abort in any manifest.
 panic = "unwind"
 
+# Reduce the code size of the JSON Schema validator, pattern engine and
+# reference resolver. See docs/reference/runtime-metrics.md for the profile.
+[profile.release.package.jsonschema]
+opt-level = "s"
+[profile.release.package.jsonschema-regex]
+opt-level = "s"
+[profile.release.package.jsonschema-value]
+opt-level = "s"
+[profile.release.package.referencing]
+opt-level = "s"
+[profile.release.package.fancy-regex]
+opt-level = "s"
+
 # Line tables keep file:line in panics and backtraces, which is all the debug
 # info the workspace needs; dependencies drop theirs. Measured on linux-x64 (30
 # cores, `cargo build --workspace --all-targets`): the cold build falls from

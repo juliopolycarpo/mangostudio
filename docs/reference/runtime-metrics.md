@@ -7,10 +7,13 @@ the commands below instead of editing numbers by hand.
 
 ## Release profile
 
-The workspace `[profile.release]` in the root `Cargo.toml` sets `opt-level = 3`, `lto = "fat"`,
-`codegen-units = 1`, `strip = true`, and `panic = "unwind"`. Unwinding is required: handler
-panic isolation catches the unwind, so the runtime crate refuses to compile with an aborting
-panic strategy.
+The workspace `[profile.release]` in the root `Cargo.toml` defaults to `opt-level = 3`, `lto = "fat"`,
+`codegen-units = 1`, `strip = true`, and `panic = "unwind"`. Handler panic isolation requires
+unwinding, so the runtime crate refuses to compile with an aborting panic strategy.
+
+The `jsonschema`, `jsonschema-regex`, `jsonschema-value`, `referencing`, and `fancy-regex` packages
+use `opt-level = "s"`. The measurements below predate those overrides. The stripped Linux x64
+comparison and validator replay are recorded in [#2126](https://github.com/juliopolycarpo/mangostudio/pull/2126).
 
 Local comparison on linux-x64 (`cargo build --release --locked -p mangostudio-runtime`, a
 full rebuild each time on a shared 28-thread machine with `CARGO_BUILD_JOBS=8`, so treat the
