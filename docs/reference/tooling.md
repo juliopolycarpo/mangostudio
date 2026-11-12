@@ -43,11 +43,15 @@ bound a run on a resource-constrained machine.
 
 ### Compatibility API
 
-TS 7.0 does not expose a stable programmatic API. The QA-gate coverage scripts
-(`scripts/qa-gate/source-*-coverage.ts`) import the compiler API from
-`@typescript/typescript6` (pinned to `6.0.2`), the official side-by-side
-compatibility package. When TS 7.1 ships a new API, the compat dependency can
-be removed.
+Repository tooling uses the compiler API from the side-by-side compatibility
+package `@typescript/typescript6`, pinned to `6.0.2`. Consumers include the
+import graph and boundary tooling, the production `NODE_ENV` check in
+`scripts/lib/no-node-env-branches.ts`, QA-gate coverage, compiler API calls
+in `scripts/tests/`, and the frontend's shared-browser-safety test.
+
+Run `git grep -n -F '@typescript/typescript6'` to find current imports and
+dependency declarations. Remove the compatibility dependency after all
+consumers have migrated.
 
 ## Turborepo
 

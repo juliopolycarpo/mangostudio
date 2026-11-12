@@ -376,7 +376,7 @@ a regra `import/no-cycle` do Bun ignora imports somente de tipos.
 
 ### Detecção de Código Duplicado
 
-Verificada via `jscpd` durante CI (qa-gate). A configuração é definida diretamente em `scripts/qa-gate/collect.ts`.
+Verificada via `jscpd` durante CI (qa-gate). A configuração é definida diretamente em `scripts/qa-gate/collect/duplication.ts`.
 
 ## Design System
 
