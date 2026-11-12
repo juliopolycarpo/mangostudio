@@ -43,6 +43,31 @@ all = "warn"
 mango-protocol = { path = "crates/mango-protocol", version = "0.2.0" }
 mangostudio-runtime-contract = { path = "crates/mangostudio-runtime-contract", version = "0.2.0" }
 
+# Third-party dependencies declared by two or more members. An entry holds the
+# version and the feature set every consumer shares; a member adds its own extras
+# with `{ workspace = true, features = [...] }`. `default-features = false` can
+# only be set here (a member's own is ignored, and cargo warns), so an entry
+# whose consumers all keep the defaults leaves them on.
+futures-util = { version = "0.3", default-features = false }
+jsonschema = { version = "0.60", default-features = false }
+# `signal` is the one feature both users need; the runtime adds its own.
+nix = { version = "0.31", default-features = false, features = ["signal"] }
+# `ring`, not the `aws-lc-rs` default: it builds without cmake or nasm, which
+# is what keeps the Windows and aarch64 CI lanes from needing a C toolchain.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+serde = { version = "1.0.219", default-features = false, features = ["derive", "std"] }
+serde_json = { version = "1.0.140", default-features = false, features = ["std"] }
+sha2 = "0.11"
+tokio-util = { version = "0.7", default-features = false }
+webpki-roots = "1"
+# The Win32 bindings both Windows-only users need; the runtime adds the rest.
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_System_Pipes",
+] }
+
 # The shipped `mangostudio-runtime` is the only release artifact this
 # workspace builds (the published launcher is built by `cargo install`, which
 # never reads this root profile). Measured on linux-x64 (see
