@@ -43,10 +43,11 @@ bound a run on a resource-constrained machine.
 
 ### Compatibility API
 
-TS 7.0 does not expose a stable programmatic API. The QA-gate coverage scripts
-(`scripts/qa-gate/source-*-coverage.ts`) import the compiler API from
-`@typescript/typescript6` (pinned to `6.0.2`), the official side-by-side
-compatibility package. When TS 7.1 ships a new API, the compat dependency can
+TS 7.0 does not expose a stable programmatic API. Every script that parses
+TypeScript source imports the compiler API from `@typescript/typescript6`
+(pinned to `6.0.2`), the official side-by-side compatibility package: the
+import-graph and boundary checks in `scripts/lib/`, the QA-gate coverage
+scripts in `scripts/qa-gate/`, and the frontend's shared-browser-safety test. When TS 7.1 ships a new API, the compat dependency can
 be removed.
 
 ## Turborepo

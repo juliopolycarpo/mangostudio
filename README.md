@@ -367,7 +367,7 @@ Prettier is disabled.
 
 ### Copy/Paste Detection
 
-Scanned via `jscpd` during CI (qa-gate). Configuration is defined inline in `scripts/qa-gate/collect.ts`.
+Scanned via `jscpd` during CI (qa-gate). Configuration is defined inline in `scripts/qa-gate/collect/duplication.ts`.
 
 ## Design System
 

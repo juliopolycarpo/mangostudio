@@ -35,10 +35,12 @@ esse número em máquinas com recursos restritos.
 
 ### API de compatibilidade
 
-O TS 7.0 não expõe uma API programática estável. Os scripts de cobertura do
-QA-gate (`scripts/qa-gate/source-*-coverage.ts`) importam a API do compilador
-de `@typescript/typescript6` (fixado em `6.0.2`), o pacote oficial de
-compatibilidade side-by-side. Quando o TS 7.1 lançar uma nova API, a dependência
+O TS 7.0 não expõe uma API programática estável. Todo script que analisa
+código TypeScript importa a API do compilador de `@typescript/typescript6`
+(fixado em `6.0.2`), o pacote oficial de compatibilidade side-by-side: as
+verificações de grafo de imports e de fronteiras em `scripts/lib/`, os scripts
+de cobertura do QA-gate em `scripts/qa-gate/` e o teste shared-browser-safety
+do frontend. Quando o TS 7.1 lançar uma nova API, a dependência
 de compatibilidade pode ser removida.
 
 ## Turborepo
