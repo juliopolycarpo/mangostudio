@@ -21,11 +21,15 @@ name: Rust Coverage
 # The job uploads two files and no verdict: `llvm-cov.json` (per-file line,
 # function and region counts) and `receipt.json` (the commit measured and the
 # test run's exit code). scripts/qa-gate/rust-coverage/ turns them into one
-# coverage measurement per crate. The receipt is written even when tests fail,
-# so a red run still reports partial coverage instead of none.
+# coverage measurement per crate. When tests fail after writing profile data,
+# the receipt lets the collector report partial coverage.
 
 on:
   workflow_call:
+    outputs:
+      artifact_id:
+        description: ID of the coverage artifact produced by this job.
+        value: ${{ jobs.coverage.outputs.artifact_id }}
 
 permissions:
   contents: read
@@ -35,6 +39,8 @@ jobs:
     name: Rust tests with coverage (ubuntu)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
     # Incremental state only pays off when one target directory is rebuilt; this
     # job builds once. Job level, not workflow level, because qa-workflows pins
     # the file's `permissions` block to sit directly above `jobs:`.
@@ -71,34 +77,34 @@ jobs:
         with:
           tool: cargo-llvm-cov@0.9.1
 
-      # The same flags as the plain step; `--no-report` defers the report so a
-      # failing test still leaves its profile data for the export below. The
-      # exit code is kept in RUNNER_TEMP (outside the uploaded directory) for
-      # the receipt, and the step still fails with it.
-      - name: Run tests with coverage
+      # Defer the report so the export can use profile data from a failed test
+      # command. Publish its exit code for the receipt before failing the step.
+      - id: tests
+        name: Run tests with coverage
         run: |
           status=0
           cargo llvm-cov --no-report --workspace --all-targets --all-features --locked || status=$?
-          echo "$status" > "$RUNNER_TEMP/tests-exit-code"
+          printf 'exit_code=%s\n' "$status" >> "$GITHUB_OUTPUT"
           exit "$status"
 
-      # Without the exit-code file (the run was killed before it wrote it) or
-      # without profile data this step fails and uploads nothing, which the
-      # collector reports as unavailable rather than as coverage.
-      - name: Export coverage and receipt
-        if: ${{ !cancelled() }}
+      # Setup failures and interrupted test commands leave no exit-code output.
+      - id: export_coverage
+        name: Export coverage and receipt
+        if: ${{ !cancelled() && steps.tests.outputs.exit_code != '' }}
+        env:
+          TESTS_EXIT_CODE: ${{ steps.tests.outputs.exit_code }}
         run: |
           mkdir -p qa-rust-coverage
-          tests_exit_code="$(cat "$RUNNER_TEMP/tests-exit-code")"
           cargo llvm-cov report --json --summary-only --output-path qa-rust-coverage/llvm-cov.json
-          printf '{"sourceSha":"%s","testsExitCode":%s}\n' "$GITHUB_SHA" "$tests_exit_code" > qa-rust-coverage/receipt.json
+          printf '{"sourceSha":"%s","testsExitCode":%s}\n' "$GITHUB_SHA" "$TESTS_EXIT_CODE" > qa-rust-coverage/receipt.json
 
-      - name: Upload Rust coverage
-        if: ${{ !cancelled() }}
+      - id: upload
+        name: Upload Rust coverage
+        if: ${{ !cancelled() && steps.export_coverage.outcome == 'success' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: qa-rust-coverage
           overwrite: true
           path: qa-rust-coverage/
-          if-no-files-found: ignore
+          if-no-files-found: error
           retention-days: 1
