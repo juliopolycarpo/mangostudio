@@ -51,6 +51,9 @@
         "tests/support/fixtures/mcp/echo-stdio-server.ts"
       ],
       "project": ["src/**/*.{ts,mjs}!", "tests/**/*.ts"],
+      "bun": {
+        "entry": ["tests/support/chatgpt/fake-server.ts"]
+      },
       "ignoreBinaries": ["mkfifo"]
     },
     "apps/frontend": {
@@ -64,7 +67,10 @@
     },
     "apps/shared": {
       "entry": ["tests/**/*.test.ts"],
-      "project": ["src/**/*.ts!", "tests/**/*.ts"]
+      "project": ["src/**/*.ts!", "tests/**/*.ts"],
+      "bun": {
+        "entry": ["src/test-utils/index.ts"]
+      }
     },
     "packages/protocol": {
       "entry": ["src/{index,stdio,ipc,in-process,ws,spawn,testing}.ts!", "tests/**/*.test.ts"],
