@@ -589,6 +589,11 @@ mod tests {
         fs::write(&path, "bad\n{\"ts\":\"2026-09-20T00:00:00Z\",\"method\":\"shell.run\",\"hub\":\"hub\",\"outcome\":\"denied\",\"durationMs\":1}\n{\"ts\":\"2026-09-20T00:00:00Z\",\"method\":\"git.exec\",\"hub\":\"hub\",\"outcome\":\"ok\",\"durationMs\":1}\n").unwrap();
         assert_eq!(audit_records(&path, None, true).unwrap().len(), 1);
         let after = parse_since("2026-09-21T00:00:00Z").unwrap();
+        assert_eq!(
+            parse_since("2026-09-21T05:30:00+05:30").unwrap(),
+            after,
+            "audit --since should compare the same instant across explicit UTC offsets"
+        );
         assert!(audit_records(&path, Some(after), false).unwrap().is_empty());
         assert!(parse_since("impossible").is_err());
         assert!(parse_since("-1h").is_err());
