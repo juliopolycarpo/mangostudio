@@ -48,6 +48,8 @@ apps/
 
 ```bash
 bun run check               # format + lint + typecheck em todos os workspaces
+bun run code-health         # relatório do Knip sobre código e dependências não utilizados
+bun run code-health:production  # declarações de dependências do código distribuído
 bun run test                # unit + integration (e2e é opt-in)
 bun run test --unit         # suítes unit da API, shared e frontend
 bun run test --integration  # suítes de integração da API e frontend

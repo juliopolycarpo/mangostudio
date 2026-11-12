@@ -69,6 +69,7 @@ Interactive fixtures must use local SDK servers, explicit synchronization barrie
 ```bash
 bun run check               # format + lint + typecheck + code health
 bun run code-health         # standalone Knip unused code/dependency report
+bun run code-health:production  # dependency placement in shipped workspaces
 bun run test                # unit + integration (e2e is opt-in)
 bun run test --unit         # API, shared, and frontend unit suites
 bun run test --integration  # API and frontend integration suites
@@ -1153,12 +1154,16 @@ when staged or changed files can affect dependencies, package exports, runtime o
 test entrypoints, scripts, hooks, workflows, or workspace source. Run
 `bun run code-health` directly while classifying a report.
 
-A second pass, `bun run code-health:production`, runs Knip in production mode
-over the `!`-marked entry and project patterns in `knip.json` and reports only
-dependency findings. It fails when shipped source imports a package that its own
-workspace does not list in `dependencies`, including one that resolves only
-because the root declares it as a devDependency. Exports used only by tests are
-not reported there; the default pass already covers unused exports.
+A second pass, `bun run code-health:production`, runs Knip in strict production
+mode. It reports dependency and resolution findings for the `!`-marked patterns
+in `knip.json` and for entries inferred from workspace manifests. For example, it
+flags a runtime import that resolves through a root devDependency when the
+importing workspace has no runtime declaration for it. The default pass covers
+unused exports.
+
+Knip treats manifest exports as production entries by default. The API and shared
+workspaces use `bun.entry` to mark the exported ChatGPT fake server and shared
+test utilities as test entries. The default pass still scans them.
 
 Files loaded by runtime discovery, process spawning, test configuration, or build
 aliases belong in the narrowest `entry` list in `knip.json`. Do not hide them with
