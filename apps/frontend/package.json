@@ -41,7 +41,8 @@
     "motion": "^14.10.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "tailwind-merge": "^3.7.0"
+    "tailwind-merge": "^3.7.0",
+    "typebox": "1.4.5"
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^21.0.4",
