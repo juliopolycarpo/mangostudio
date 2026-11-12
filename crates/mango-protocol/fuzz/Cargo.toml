@@ -18,10 +18,10 @@ cargo-fuzz = true
 arbitrary = { version = "1.4", features = ["derive"] }
 libfuzzer-sys = "0.4"
 mango-protocol = { path = ".." }
-serde_json = "1.0"
+serde_json = "1.0.140"
 
 [dependencies.tokio]
-version = "1"
+version = "1.53"
 optional = true
 features = ["rt", "time"]
 
