@@ -27,6 +27,7 @@ tokio = [
   "tokio/io-std",
   "tokio/io-util",
   "tokio/net",
+  "dep:windows-sys",
 ]
 # The reusable conformance suite, exercised through a Fixture, not this crate's own MemoryPort.
 testing = ["tokio"]
@@ -65,9 +66,8 @@ webpki-roots = { workspace = true, optional = true }
 nix = { workspace = true, optional = true }
 
 [target.'cfg(windows)'.dependencies]
-# The named pipe's security descriptor and the client's process id; nothing
-# else in the crate needs a platform binding.
-windows-sys.workspace = true
+# The named-pipe transport uses these bindings under the `tokio` feature.
+windows-sys = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest = { version = "1.11", default-features = false, features = ["std"] }
