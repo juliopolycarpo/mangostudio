@@ -586,15 +586,22 @@ mod tests {
     fn audit_filters_denials_and_ignores_malformed_lines() {
         let home = scratch_dir("native-audit");
         let path = home.join("audit.log");
-        fs::write(&path, "bad\n{\"ts\":\"2026-09-20T00:00:00Z\",\"method\":\"shell.run\",\"hub\":\"hub\",\"outcome\":\"denied\",\"durationMs\":1}\n{\"ts\":\"2026-09-20T00:00:00Z\",\"method\":\"git.exec\",\"hub\":\"hub\",\"outcome\":\"ok\",\"durationMs\":1}\n").unwrap();
-        assert_eq!(audit_records(&path, None, true).unwrap().len(), 1);
-        let after = parse_since("2026-09-21T00:00:00Z").unwrap();
+        let earlier = serde_json::json!({
+            "ts": "2026-09-21T10:59:59+11:00",
+            "method": "shell.run", "hub": "hub", "outcome": "denied", "durationMs": 1
+        });
+        let boundary = serde_json::json!({
+            "ts": "2026-09-20T17:00:00-07:00",
+            "method": "git.exec", "hub": "hub", "outcome": "ok", "durationMs": 1
+        });
+        fs::write(&path, format!("bad\n{earlier}\n{boundary}\n")).unwrap();
+        assert_eq!(audit_records(&path, None, true).unwrap(), vec![earlier]);
+        let since = parse_since("2026-09-21T05:30:00+05:30").unwrap();
         assert_eq!(
-            parse_since("2026-09-21T05:30:00+05:30").unwrap(),
-            after,
-            "audit --since should compare the same instant across explicit UTC offsets"
+            audit_records(&path, Some(since), false).unwrap(),
+            vec![boundary],
+            "audit --since should keep the boundary instant and drop the preceding second"
         );
-        assert!(audit_records(&path, Some(after), false).unwrap().is_empty());
         assert!(parse_since("impossible").is_err());
         assert!(parse_since("-1h").is_err());
         assert!(parse_since("24H").is_ok());
