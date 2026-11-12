@@ -19,7 +19,7 @@ import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
 import { assertNoUnexpectedArguments, fatal, info, parseArgs, runCommand } from '../lib/runner';
-import { type ProtocolManifest, publishedManifest } from './package-contents';
+import { type ProtocolManifest, publishedManifest, type RootCatalogs } from './package-contents';
 
 const PACKAGE_DIR = join(ROOT_DIR, 'packages', 'protocol');
 const DEFAULT_OUT = join(ROOT_DIR, '.mango', 'out', 'protocol');
@@ -38,7 +38,8 @@ await mkdir(stageDir, { recursive: true });
 const manifest = (await Bun.file(join(PACKAGE_DIR, 'package.json')).json()) as ProtocolManifest;
 let staged: Record<string, unknown>;
 try {
-  staged = publishedManifest(manifest);
+  const roots = (await Bun.file(join(ROOT_DIR, 'package.json')).json()) as RootCatalogs;
+  staged = publishedManifest(manifest, roots);
 } catch (caught) {
   fatal(caught instanceof Error ? caught.message : String(caught));
 }

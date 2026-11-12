@@ -11,6 +11,19 @@ estável para o Turborepo, que não aceita `bun@canary`. As chaves de cache usam
 runtimes por plataforma. A seção [Bun em inglês](../../reference/tooling.md#bun)
 explica a verificação de downloads no CI.
 
+### Catálogo de dependências
+
+O catálogo no `package.json` da raiz reúne os intervalos de versões de
+`typescript`, `typebox`, `@types/bun` e `better-auth`. Cada workspace declara
+a dependência no próprio manifesto com `"catalog:"`. Atualize o intervalo
+compartilhado no catálogo. Dependências usadas por um só workspace mantêm
+o intervalo literal.
+
+O script de empacotamento do protocolo substitui as referências ao catálogo
+pelos intervalos de versões no manifesto preparado para publicação. Assim, o
+tarball pode ser instalado fora do repositório sem o catálogo da raiz.
+Consulte a [documentação de catálogos do Bun](https://bun.com/docs/pm/catalogs).
+
 ## Verificação de tipos
 
 O script `typecheck` de cada workspace executa o verificador nativo

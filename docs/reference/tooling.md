@@ -19,6 +19,17 @@ against its GitHub release metadata digest and fails closed on disagreement.
 The channel can advance during a build; the distribution manifest records
 per-target provenance and flags detected drift.
 
+### Dependency catalog
+
+The root `package.json` catalog holds the shared ranges for `typescript`,
+`typebox`, `@types/bun`, and `better-auth`. Each workspace declares the
+dependency in its own manifest with `"catalog:"`. Update the shared range in
+the catalog. Dependencies used by one workspace keep their literal ranges.
+
+The protocol pack script replaces catalog references with concrete ranges
+in the staged manifest. The resulting tarball can be installed outside the
+repository without the root catalog. See [Bun's catalog documentation](https://bun.com/docs/pm/catalogs).
+
 ## Type checking
 
 Each workspace's `typecheck` script runs Bun's native `bun check --no-script`.

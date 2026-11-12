@@ -18,6 +18,12 @@
     "apps/*",
     "packages/*"
   ],
+  "catalog": {
+    "@types/bun": "^1.4.4",
+    "better-auth": "^1.7.18",
+    "typebox": "1.4.5",
+    "typescript": "7.0.2"
+  },
   "packageManager": "bun@1.4.4",
   "scripts": {
     "dev": "bun ./scripts/dev.ts",
@@ -60,7 +66,7 @@
     "@mangostudio/protocol": "workspace:*",
     "@mangostudio/shared": "workspace:*",
     "@playwright/test": "^1.65.0",
-    "@types/bun": "^1.4.4",
+    "@types/bun": "catalog:",
     "@typescript/typescript6": "6.0.2",
     "ajv": "^8.20.0",
     "git-cliff": "^2.14.2",
@@ -68,8 +74,8 @@
     "knip": "^6.44.2",
     "lefthook": "^2.2.2",
     "turbo": "2.11.10",
-    "typebox": "1.4.5",
-    "typescript": "7.0.2"
+    "typebox": "catalog:",
+    "typescript": "catalog:"
   },
   "patchedDependencies": {
     "@xterm/addon-webgl@0.19.0": "patches/@xterm%2Faddon-webgl@0.19.0.patch",

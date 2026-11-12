@@ -23,6 +23,77 @@ export interface ProtocolManifest {
   readonly [key: string]: unknown;
 }
 
+type CatalogTable = Readonly<Record<string, string>>;
+
+interface CatalogDefinitions {
+  readonly catalog?: CatalogTable;
+  readonly catalogs?: Readonly<Record<string, CatalogTable>>;
+}
+
+/** Bun reads catalogs from the root manifest or its workspaces object. */
+export interface RootCatalogs extends CatalogDefinitions {
+  readonly workspaces?:
+    readonly string[] | (CatalogDefinitions & { readonly packages?: readonly string[] });
+}
+
+/** Every section that can carry a `catalog:` reference. */
+const CATALOG_SECTIONS = [
+  'dependencies',
+  'devDependencies',
+  'peerDependencies',
+  'optionalDependencies',
+] as const;
+
+/**
+ * Replace Bun catalog references with their concrete ranges before packing.
+ * Resolve all four dependency sections so the staged manifest installs
+ * independently of the source workspace.
+ *
+ * @example
+ * resolveCatalogReferences({ dependencies: { typebox: 'catalog:' } }, { catalog: { typebox: '1.4.5' } });
+ * // { dependencies: { typebox: '1.4.5' } }
+ */
+export function resolveCatalogReferences(
+  manifest: Record<string, unknown>,
+  roots: RootCatalogs
+): Record<string, unknown> {
+  const workspace = roots.workspaces;
+  // When workspaces declares either catalog field, Bun reads both tables there.
+  const definitions =
+    workspace && ('catalog' in workspace || 'catalogs' in workspace) ? workspace : roots;
+  const resolved: Record<string, unknown> = { ...manifest };
+  for (const section of CATALOG_SECTIONS) {
+    const declared = manifest[section];
+    if (declared === undefined) continue;
+    resolved[section] = Object.fromEntries(
+      Object.entries(declared as Record<string, string>).map(([name, specifier]) => {
+        if (!specifier.startsWith('catalog:')) return [name, specifier];
+        const catalogName = specifier.slice('catalog:'.length).trim() || 'default';
+        const namedCatalogs = definitions.catalogs;
+        const named =
+          namedCatalogs && Object.hasOwn(namedCatalogs, catalogName)
+            ? namedCatalogs[catalogName]
+            : undefined;
+        const candidates = catalogName === 'default' ? [definitions.catalog, named] : [named];
+        const matches = candidates.filter((table) => table && Object.hasOwn(table, name));
+        if (matches.length > 1) {
+          throw new Error(
+            `${section}.${name} references "${specifier}", but ${name} is defined in both default catalogs.`
+          );
+        }
+        const version = matches[0]?.[name];
+        if (typeof version !== 'string' || version.trim() === '') {
+          throw new Error(
+            `${section}.${name} references "${specifier}". Expected a range for ${name} in the root package.json catalog. Received ${JSON.stringify(version)}.`
+          );
+        }
+        return [name, version];
+      })
+    );
+  }
+  return resolved;
+}
+
 /** The key under `publishConfig` holding the published `exports` map. */
 const PUBLISHED_EXPORTS = 'exports';
 
@@ -102,10 +173,16 @@ export function unshippedTargets(manifest: ProtocolManifest): string[] {
  * fails with `Module not found "./build.ts"`. A published SDK has no build
  * scripts.
  *
+ * `catalog:` specifiers are resolved against `roots` (the root manifest's
+ * catalogs); see `resolveCatalogReferences`.
+ *
  * @example
  * publishedManifest(manifest).publishConfig; // { access: 'public' }
  */
-export function publishedManifest(manifest: ProtocolManifest): Record<string, unknown> {
+export function publishedManifest(
+  manifest: ProtocolManifest,
+  roots: RootCatalogs = {}
+): Record<string, unknown> {
   const published = publishedExports(manifest);
   const unshipped = unshippedTargets(manifest);
   if (unshipped.length > 0) {
@@ -119,5 +196,5 @@ export function publishedManifest(manifest: ProtocolManifest): Record<string, un
   for (const [key, value] of Object.entries(publishConfig ?? {})) {
     if (key !== PUBLISHED_EXPORTS) honoured[key] = value;
   }
-  return { ...rest, exports: published, publishConfig: honoured };
+  return resolveCatalogReferences({ ...rest, exports: published, publishConfig: honoured }, roots);
 }

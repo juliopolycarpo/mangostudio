@@ -86,11 +86,11 @@
     "./terminal": "./src/terminal/index.ts"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.4",
-    "typescript": "7.0.2"
+    "@types/bun": "catalog:",
+    "typescript": "catalog:"
   },
   "dependencies": {
     "@mangostudio/protocol": "workspace:*",
-    "typebox": "1.4.5"
+    "typebox": "catalog:"
   }
 }
