@@ -85,12 +85,8 @@ strip = true
 # `scripts/tests/protocol-lanes.unit.test.ts` rejects an abort in any manifest.
 panic = "unwind"
 
-# The JSON Schema validator is monomorphised many times over and dominates
-# third-party code size in the shipped runtime. Optimise this family for size:
-# `s` cuts .text by 409,536 bytes (linux-x64, `cargo bloat --crates`, unstripped
-# file 266,744 smaller); `z` saves only 13 KB more in the file. Replaying the
-# generated conformance corpus through the contract validators, the median
-# validation moves from about 872 ns to 901 ns, noise next to one RPC round trip.
+# Reduce the code size of the JSON Schema validator, pattern engine and
+# reference resolver. See docs/reference/runtime-metrics.md for the profile.
 [profile.release.package.jsonschema]
 opt-level = "s"
 [profile.release.package.jsonschema-regex]
