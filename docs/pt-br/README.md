@@ -275,23 +275,25 @@ mangostudio/
 
 ## Scripts Principais
 
-| Comando                   | Descrição                                                              |
-| ------------------------- | ---------------------------------------------------------------------- |
-| `bun install`             | Instala todas as dependências do workspace                             |
-| `bun run dev`             | Inicia todos os servidores de dev simultaneamente                      |
-| `bun run dev --api`       | Inicia apenas o servidor de dev da API                                 |
-| `bun run build`           | Build do frontend para produção                                        |
-| `bun run build --binary`  | Gera os binários standalone do host (hub + runtime cargo)              |
-| `bun run check`           | Executa Bun lint/fmt, ciclos de importação e typecheck                 |
-| `bun run test`            | Executa as lanes unit e integration                                    |
-| `bun run test --unit`     | Executa apenas as suítes unitárias                                     |
-| `bun run test:e2e:setup`  | Instala Playwright Chromium para browser smoke                         |
-| `bun run test --e2e`      | Executa a suíte end-to-end com Playwright (opt-in)                     |
-| `bun run test --coverage` | Coleta cobertura de testes nos workspaces aplicáveis                   |
-| `bun run test:scripts`    | Executa testes de automação em `scripts/`                              |
-| `bun run fix`             | Aplica correções do Bun lint e formato                                 |
-| `bun run verify`          | Sequência local: check, test --coverage, build --all                   |
-| `bun run clean`           | Remove dist, relatórios locais de teste, coverage e artefatos de build |
+| Comando                          | Descrição                                                              |
+| -------------------------------- | ---------------------------------------------------------------------- |
+| `bun install`                    | Instala todas as dependências do workspace                             |
+| `bun run dev`                    | Inicia todos os servidores de dev simultaneamente                      |
+| `bun run dev --api`              | Inicia apenas o servidor de dev da API                                 |
+| `bun run build`                  | Build do frontend para produção                                        |
+| `bun run build --binary`         | Gera os binários standalone do host (hub + runtime cargo)              |
+| `bun run check`                  | Executa Bun lint/fmt, ciclos de importação e typecheck                 |
+| `bun run code-health`            | Verifica código e dependências não utilizados com Knip                 |
+| `bun run code-health:production` | Confere as declarações de dependências do código distribuído           |
+| `bun run test`                   | Executa as lanes unit e integration                                    |
+| `bun run test --unit`            | Executa apenas as suítes unitárias                                     |
+| `bun run test:e2e:setup`         | Instala Playwright Chromium para browser smoke                         |
+| `bun run test --e2e`             | Executa a suíte end-to-end com Playwright (opt-in)                     |
+| `bun run test --coverage`        | Coleta cobertura de testes nos workspaces aplicáveis                   |
+| `bun run test:scripts`           | Executa testes de automação em `scripts/`                              |
+| `bun run fix`                    | Aplica correções do Bun lint e formato                                 |
+| `bun run verify`                 | Sequência local: check, test --coverage, build --all                   |
+| `bun run clean`                  | Remove dist, relatórios locais de teste, coverage e artefatos de build |
 
 `verify` executa a sequência local de checks, cobertura e build. Os testes TypeScript do protocolo
 omitidos pela cobertura, os gates completos de Rust/protocolo e o smoke hospedado ficam

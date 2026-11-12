@@ -275,24 +275,25 @@ mangostudio/
 
 ## Main Scripts
 
-| Command                   | Description                                                    |
-| ------------------------- | -------------------------------------------------------------- |
-| `bun install`             | Install all workspace dependencies                             |
-| `bun run dev`             | Start all dev servers concurrently                             |
-| `bun run dev --api`       | Start only the API dev server                                  |
-| `bun run build`           | Build the frontend for production                              |
-| `bun run build --binary`  | Build the host's standalone binaries (hub + cargo runtime)     |
-| `bun run check`           | Run formatting, lint, typecheck, and code-health gates         |
-| `bun run code-health`     | Run the standalone Knip unused code/dependency report          |
-| `bun run test`            | Run unit and integration lanes                                 |
-| `bun run test --unit`     | Run unit suites only                                           |
-| `bun run test:e2e:setup`  | Install Playwright Chromium for browser smoke tests            |
-| `bun run test --e2e`      | Run the Playwright end-to-end suite (opt-in)                   |
-| `bun run test --coverage` | Run coverage collection across applicable workspaces           |
-| `bun run test:scripts`    | Run cross-cutting automation tests under `scripts/`            |
-| `bun run fix`             | Apply Bun lint and formatting fixes                            |
-| `bun run verify`          | Local sequence: check, test --coverage, build --all            |
-| `bun run clean`           | Remove dist, local test reports, coverage, and build artifacts |
+| Command                          | Description                                                    |
+| -------------------------------- | -------------------------------------------------------------- |
+| `bun install`                    | Install all workspace dependencies                             |
+| `bun run dev`                    | Start all dev servers concurrently                             |
+| `bun run dev --api`              | Start only the API dev server                                  |
+| `bun run build`                  | Build the frontend for production                              |
+| `bun run build --binary`         | Build the host's standalone binaries (hub + cargo runtime)     |
+| `bun run check`                  | Run formatting, lint, typecheck, and code-health gates         |
+| `bun run code-health`            | Run the standalone Knip unused code/dependency report          |
+| `bun run code-health:production` | Check dependency placement in shipped workspaces               |
+| `bun run test`                   | Run unit and integration lanes                                 |
+| `bun run test --unit`            | Run unit suites only                                           |
+| `bun run test:e2e:setup`         | Install Playwright Chromium for browser smoke tests            |
+| `bun run test --e2e`             | Run the Playwright end-to-end suite (opt-in)                   |
+| `bun run test --coverage`        | Run coverage collection across applicable workspaces           |
+| `bun run test:scripts`           | Run cross-cutting automation tests under `scripts/`            |
+| `bun run fix`                    | Apply Bun lint and formatting fixes                            |
+| `bun run verify`                 | Local sequence: check, test --coverage, build --all            |
+| `bun run clean`                  | Remove dist, local test reports, coverage, and build artifacts |
 
 `verify` runs the local check, coverage and build sequence. Protocol TypeScript tests omitted by
 coverage, full Rust/protocol gates and hosted smoke remain separate; see the

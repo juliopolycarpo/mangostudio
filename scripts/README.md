@@ -585,8 +585,9 @@ Nothing under `generated/` is formatted; see `bunfig.toml` for the current exclu
 
 ## Code health scan
 
-`bun run check` runs Knip as a blocking repository-wide task. Use
-`bun run code-health` for the standalone unused code and dependency report.
+`bun run check` runs both Knip passes as blocking repository-wide tasks. Run
+`bun run code-health` for the unused code and dependency report, or
+`bun run code-health:production` to check dependency placement in shipped workspaces.
 Register runtime-loaded files as narrow workspace entries in `knip.json`; dependency
 ignores require execution evidence documented in `docs/reference/testing.md`.
 

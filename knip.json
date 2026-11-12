@@ -50,28 +50,34 @@
         "tests/**/*.{test,integration}.ts",
         "tests/support/fixtures/mcp/echo-stdio-server.ts"
       ],
-      "project": ["src/**/*.{ts,mjs}", "tests/**/*.ts"],
+      "project": ["src/**/*.{ts,mjs}!", "tests/**/*.ts"],
+      "bun": {
+        "entry": ["tests/support/chatgpt/fake-server.ts"]
+      },
       "ignoreBinaries": ["mkfifo"]
     },
     "apps/frontend": {
       "entry": [
-        "src/main.tsx",
+        "src/main.tsx!",
         "tests/**/*.test.{ts,tsx}",
         "tests/support/setup/motion-react-stub.tsx",
         "tests/browser-support/webgl-constructor-fixture.ts"
       ],
-      "project": ["scripts/**/*.ts", "src/**/*.{ts,tsx}", "src/**/*.css", "tests/**/*.{ts,tsx}"]
+      "project": ["scripts/**/*.ts", "src/**/*.{ts,tsx}!", "src/**/*.css", "tests/**/*.{ts,tsx}"]
     },
     "apps/shared": {
       "entry": ["tests/**/*.test.ts"],
-      "project": ["src/**/*.ts", "tests/**/*.ts"]
+      "project": ["src/**/*.ts!", "tests/**/*.ts"],
+      "bun": {
+        "entry": ["src/test-utils/index.ts"]
+      }
     },
     "packages/protocol": {
-      "entry": ["src/{index,stdio,ipc,in-process,ws,spawn,testing}.ts", "tests/**/*.test.ts"],
-      "project": ["src/**/*.ts", "tests/**/*.ts"]
+      "entry": ["src/{index,stdio,ipc,in-process,ws,spawn,testing}.ts!", "tests/**/*.test.ts"],
+      "project": ["src/**/*.ts!", "tests/**/*.ts"]
     },
     "packages/cli": {
-      "project": ["bin/**/*.js"]
+      "project": ["bin/**/*.js!"]
     }
   }
 }
