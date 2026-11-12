@@ -18,6 +18,7 @@ export interface RustCacheApi {
 }
 
 type GithubFetch = (url: string, init: RequestInit) => Promise<Response>;
+type ListingField = 'actions_caches' | 'workflow_runs';
 
 const WRITER_PATHS = new Set<string>(RUST_CACHE_WRITERS.map((writer) => writer.path));
 const WRITER_EVENTS = new Set<string>(MAIN_WRITER_EVENTS);
@@ -27,7 +28,31 @@ const ACTIVE_STATUSES = ['requested', 'pending', 'waiting', 'queued', 'in_progre
 const PAGE_SIZE = 100;
 const MAX_PAGES = 100;
 
-class IncompleteListing extends Error {}
+class IncompleteListing extends Error {
+  constructor(
+    readonly field: ListingField,
+    entries: number,
+    total: number
+  ) {
+    super(`Incomplete ${field} listing ${entries}/${total}; expected every entry`);
+  }
+}
+
+/**
+ * Retry once from the start when a listing's row count disagrees with its total.
+ * @example await retryIncompleteListing('actions_caches', () => api.listCaches());
+ */
+export async function retryIncompleteListing<T>(
+  field: ListingField,
+  read: () => Promise<T>
+): Promise<T> {
+  try {
+    return await read();
+  } catch (error) {
+    if (!(error instanceof IncompleteListing) || error.field !== field) throw error;
+    return read();
+  }
+}
 
 /**
  * Recognize trusted main cache writers, including reusable-workflow callers.
@@ -124,7 +149,7 @@ export class GithubRustCacheApi implements RustCacheApi {
 
   private async pages<T>(
     path: string,
-    field: 'actions_caches' | 'workflow_runs',
+    field: ListingField,
     parse: (value: unknown) => T
   ): Promise<T[]> {
     const entries: T[] = [];
@@ -154,9 +179,7 @@ export class GithubRustCacheApi implements RustCacheApi {
       entries.push(...batch.map(parse));
       if (entries.length === total) return entries;
       if (entries.length > total || batch.length < PAGE_SIZE)
-        throw new IncompleteListing(
-          `Incomplete ${field} listing ${entries.length}/${total}; expected every entry`
-        );
+        throw new IncompleteListing(field, entries.length, total);
     }
     throw new Error(`Exceeded ${MAX_PAGES} ${field} pages; expected a complete bounded listing`);
   }
@@ -199,13 +222,8 @@ export class GithubRustCacheApi implements RustCacheApi {
    * @example await api.activeWriters();
    */
   async activeWriters(): Promise<CacheWriterRun[]> {
-    try {
-      return await this.readActiveWriters();
-    } catch (error) {
-      if (!(error instanceof IncompleteListing)) throw error;
-      // A writer can change status between requests, so discard the partial audit.
-      return this.readActiveWriters();
-    }
+    // A writer can change status between requests, so discard the partial audit.
+    return retryIncompleteListing('workflow_runs', () => this.readActiveWriters());
   }
 
   private async readActiveWriters(): Promise<CacheWriterRun[]> {

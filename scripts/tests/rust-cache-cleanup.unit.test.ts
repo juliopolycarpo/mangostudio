@@ -452,6 +452,113 @@ describe('GitHub cache adapter', () => {
     expect(http.calls.map(({ init }) => init.method)).toEqual(['GET', 'GET', 'GET', 'GET']);
   });
 
+  test('restarts an incomplete cache inventory from page one before planning', async () => {
+    const http = new FakeGithubHttp();
+    const stalePage = Array.from({ length: 100 }, (_, index) =>
+      changedEntry(OLD, { id: index + 1 })
+    );
+    http.replies = [
+      { status: 200, body: MAIN_RUN },
+      { status: 200, body: { total_count: 101, actions_caches: stalePage } },
+      { status: 200, body: { total_count: 101, actions_caches: [] } },
+      { status: 200, body: { total_count: 2, actions_caches: [NEW, OLD] } },
+    ];
+    const result = await cleanupRustCaches(http.api(), {
+      repository: REPOSITORY,
+      runId: MAIN_RUN.id,
+      apply: false,
+    });
+    expect(result.planned.map(({ entry, replacement }) => [entry.id, replacement.id])).toEqual([
+      [OLD.id, NEW.id],
+    ]);
+    expect(http.calls.slice(1).map(({ url }) => url.searchParams.get('page'))).toEqual([
+      '1',
+      '2',
+      '1',
+    ]);
+  });
+
+  test('audits writers again before retrying per-deletion cache revalidation', async () => {
+    const http = new FakeGithubHttp();
+    const writer = { ...MAIN_RUN, id: 43, status: 'requested' };
+    const empty = { status: 200, body: { total_count: 0, workflow_runs: [] } };
+    http.replies = [
+      { status: 200, body: MAIN_RUN },
+      { status: 200, body: { total_count: 2, actions_caches: [NEW, OLD] } },
+      empty,
+      empty,
+      empty,
+      empty,
+      empty,
+      { status: 200, body: { total_count: 3, actions_caches: [NEW, OLD] } },
+      { status: 200, body: { total_count: 1, workflow_runs: [writer] } },
+      empty,
+      empty,
+      empty,
+      empty,
+    ];
+    const result = await cleanupRustCaches(http.api(), {
+      repository: REPOSITORY,
+      runId: MAIN_RUN.id,
+      apply: true,
+    });
+    expect(result.deferred).toBe('Active main cache writers: 43');
+    expect(http.calls.map(({ init }) => init.method)).not.toContain('DELETE');
+    expect(http.calls.slice(8).map(({ url }) => url.searchParams.get('status'))).toEqual([
+      'requested',
+      'pending',
+      'waiting',
+      'queued',
+      'in_progress',
+    ]);
+  });
+
+  test('refuses deletion when the second cache revalidation is incomplete', async () => {
+    const http = new FakeGithubHttp();
+    const empty = { status: 200, body: { total_count: 0, workflow_runs: [] } };
+    http.replies = [
+      { status: 200, body: MAIN_RUN },
+      { status: 200, body: { total_count: 2, actions_caches: [NEW, OLD] } },
+      ...Array<typeof empty>(5).fill(empty),
+      { status: 200, body: { total_count: 2, actions_caches: [OLD] } },
+      ...Array<typeof empty>(5).fill(empty),
+      { status: 200, body: { total_count: 3, actions_caches: [OLD] } },
+    ];
+    await expect(
+      cleanupRustCaches(http.api(), { repository: REPOSITORY, runId: MAIN_RUN.id, apply: true })
+    ).rejects.toThrow('Incomplete actions_caches listing 1/3');
+    expect(http.replies).toEqual([]);
+    expect(http.calls.map(({ init }) => init.method)).not.toContain('DELETE');
+  });
+
+  test('retries revalidation and the retained-replacement check around one DELETE', async () => {
+    const http = new FakeGithubHttp();
+    const empty = { status: 200, body: { total_count: 0, workflow_runs: [] } };
+    const emptyAudit = Array<typeof empty>(5).fill(empty);
+    const both = { status: 200, body: { total_count: 2, actions_caches: [NEW, OLD] } };
+    http.replies = [
+      { status: 200, body: MAIN_RUN },
+      both,
+      ...emptyAudit,
+      { status: 200, body: { total_count: 3, actions_caches: [NEW, OLD] } },
+      ...emptyAudit,
+      both,
+      { status: 204 },
+      { status: 200, body: { total_count: 2, actions_caches: [NEW] } },
+      { status: 200, body: { total_count: 1, actions_caches: [NEW] } },
+    ];
+    const result = await cleanupRustCaches(http.api(), {
+      repository: REPOSITORY,
+      runId: MAIN_RUN.id,
+      apply: true,
+    });
+    expect(result.deletedIds).toEqual([OLD.id]);
+    expect(
+      http.calls.filter(({ init }) => init.method === 'DELETE').map(({ url }) => url.pathname)
+    ).toEqual([`/repos/${REPOSITORY}/actions/caches/${OLD.id}`]);
+    expect(http.replies).toEqual([]);
+  });
+
   test('rejects duplicate workflow run IDs across pages of one status', async () => {
     const http = new FakeGithubHttp();
     const first = Array.from({ length: 100 }, (_, index) => ({
