@@ -237,6 +237,7 @@ jobs:
       # proved no Rust path changed; any other skip is a missing artifact.
       rust_relevant: ${{ needs.changes.outputs.rust }}
       rust_result: ${{ needs.rust-coverage.result }}
+      rust_artifact_id: ${{ needs.rust-coverage.outputs.artifact_id }}
 
   smoke:
     # Boots the exact target artifacts produced once by distribution, then

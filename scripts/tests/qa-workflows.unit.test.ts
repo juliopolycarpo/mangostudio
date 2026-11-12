@@ -166,31 +166,34 @@ describe('unprivileged collection side', () => {
     expect(qaMetrics).toContain('QA_RUST_RELEVANT: ${{ inputs.rust_relevant }}');
     // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.
     expect(qaMetrics).toContain('QA_RUST_RESULT: ${{ inputs.rust_result }}');
-    // The download condition and the env mappings are the two uses of each input.
-    expect(qaMetrics.split('inputs.rust_relevant').length - 1).toBe(2);
-    expect(qaMetrics.split('inputs.rust_result').length - 1).toBe(2);
+    expect(qaMetrics.split('inputs.rust_relevant').length - 1).toBe(1);
+    expect(qaMetrics.split('inputs.rust_result').length - 1).toBe(1);
   });
 
-  test('qa-metrics reads the Rust coverage artifact of its own run, downloaded as data', () => {
+  test('qa-metrics downloads the artifact ID returned by the Rust coverage producer', () => {
+    const caller = extractJobBlock(readText('.github/workflows/ci.yml'), 'qa-metrics');
     const qaMetrics = readText('.github/workflows/qa-metrics.yml');
     const rustCoverage = readText('.github/workflows/rust-coverage.yml');
 
-    expect(rustCoverage).toContain('name: qa-rust-coverage');
-    expect(qaMetrics).toContain('name: qa-rust-coverage');
+    expect(rustCoverage).toMatch(/artifact_id: \$\{\{ steps\.upload\.outputs\.artifact-id \}\}/);
+    expect(rustCoverage).toMatch(/value: \$\{\{ jobs\.coverage\.outputs\.artifact_id \}\}/);
+    expect(caller).toMatch(
+      /rust_artifact_id: \$\{\{ needs\.rust-coverage\.outputs\.artifact_id \}\}/
+    );
+    expect(qaMetrics).toMatch(/artifact-ids: \$\{\{ inputs\.rust_artifact_id \}\}/);
+    expect(qaMetrics).not.toContain('name: qa-rust-coverage');
     // Same-run download: no `run-id`, so it can never read another run's bytes.
     expect(qaMetrics).not.toContain('run-id:');
     expect(qaMetrics).toContain('--rust-coverage ./qa-rust-coverage');
   });
 
-  test('skips the Rust coverage download only when CI proved the skip intentional', () => {
+  test('skips the Rust coverage download when the producer returned no artifact ID', () => {
     const job = extractJobBlock(readText('.github/workflows/qa-metrics.yml'), 'collect');
     const download = extractStepBlocks(job).find((step) =>
       step.includes('name: Download Rust coverage')
     );
 
-    expect(download).toContain(
-      "if: inputs.rust_relevant != 'false' || inputs.rust_result != 'skipped'"
-    );
+    expect(download).toContain("if: inputs.rust_artifact_id != ''");
     expect(download).toContain('continue-on-error: true');
   });
 });
@@ -200,7 +203,8 @@ describe('rust-coverage.yml (instrumented ubuntu Rust tests, PR code)', () => {
   const shim = readText('.github/workflows/cargo-shim.yml');
 
   test('is a reusable workflow with contents: read only and no privileged trigger', () => {
-    expect(workflow).toContain('on:\n  workflow_call:\n\npermissions:\n  contents: read\n\njobs:');
+    expect(workflow).toContain('on:\n  workflow_call:\n');
+    expect(workflow).toContain('\npermissions:\n  contents: read\n\njobs:');
     expect(workflow).not.toContain('pull_request_target');
     expect(workflow).not.toContain('secrets:');
     expect(workflow).not.toMatch(/: write\b/);
@@ -223,12 +227,23 @@ describe('rust-coverage.yml (instrumented ubuntu Rust tests, PR code)', () => {
     expect(workflow).not.toContain('nextest');
   });
 
-  test('exports the receipt even when the tests failed, never when the run was cancelled', () => {
-    expect(workflow).toMatch(
-      /name: Export coverage and receipt\n\s+if: \$\{\{ !cancelled\(\) \}\}/
+  test('exports only after the test command records an exit code, including failures', () => {
+    const steps = extractStepBlocks(extractJobBlock(workflow, 'coverage'));
+    const tests = steps.find((step) => step.includes('name: Run tests with coverage'));
+    const coverageExport = steps.find((step) => step.includes('name: Export coverage and receipt'));
+    const upload = steps.find((step) => step.includes('name: Upload Rust coverage'));
+
+    expect(tests).toContain('id: tests');
+    expect(tests).toContain('printf \'exit_code=%s\\n\' "$status" >> "$GITHUB_OUTPUT"');
+    expect(tests).toContain('exit "$status"');
+    expect(coverageExport).toMatch(
+      /if: \$\{\{ !cancelled\(\) && steps\.tests\.outputs\.exit_code != '' \}\}/
     );
-    expect(workflow).toMatch(/name: Upload Rust coverage\n\s+if: \$\{\{ !cancelled\(\) \}\}/);
-    expect(workflow).toContain('retention-days: 1');
+    expect(coverageExport).toMatch(/TESTS_EXIT_CODE: \$\{\{ steps\.tests\.outputs\.exit_code \}\}/);
+    expect(upload).toMatch(
+      /if: \$\{\{ !cancelled\(\) && steps\.export_coverage\.outcome == 'success' \}\}/
+    );
+    expect(upload).toContain('retention-days: 1');
   });
 
   test('cargo-shim keeps the plain run on macOS and Windows only', () => {

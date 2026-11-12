@@ -43,6 +43,10 @@ on:
         type: string
         required: false
         default: ""
+      rust_artifact_id:
+        description: Artifact ID returned by the Rust Coverage job, empty if it did not upload.
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -89,13 +93,13 @@ jobs:
           path: ./qa-test-metrics
 
       - name: Download Rust coverage
-        if: inputs.rust_relevant != 'false' || inputs.rust_result != 'skipped'
-        # continue-on-error: without the artifact the collector still emits an
-        # envelope with the Rust job's result when its coverage is unavailable.
+        if: inputs.rust_artifact_id != ''
+        # A previous attempt can have an artifact with the same name. Use the
+        # selected producer's ID and report its result if coverage is absent.
         continue-on-error: true
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: qa-rust-coverage
+          artifact-ids: ${{ inputs.rust_artifact_id }}
           path: ./qa-rust-coverage
 
       - name: Download frontend dist
