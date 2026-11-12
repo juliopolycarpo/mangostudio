@@ -19,6 +19,18 @@ against its GitHub release metadata digest and fails closed on disagreement.
 The channel can advance during a build; the distribution manifest records
 per-target provenance and flags detected drift.
 
+### Dependency catalog
+
+A dependency whose version two or more workspace manifests repeat lives once in the root
+`package.json` `catalog` (`typescript`, `typebox`, `@types/bun`, `better-auth`), and each
+manifest points at it with `"catalog:"`. Change the version in the catalog only; Dependabot's
+`bun` ecosystem reads root `catalog` entries and bumps them there. A dependency used by a
+single workspace keeps its literal range. The published `@mangostudio/protocol` also uses
+`catalog:`: npm cannot resolve it, so `scripts/protocol/package-contents.ts` rewrites every
+reference to the catalog's concrete range when staging the tarball, and
+`scripts/tests/protocol-package.unit.test.ts` fails if one leaks. `packages/cli` declares no
+catalog dependencies. A new published manifest that adopts `catalog:` needs the same rewrite.
+
 ## Type checking
 
 Each workspace's `typecheck` script runs Bun's native `bun check --no-script`.

@@ -34,7 +34,7 @@
     "@xterm/addon-web-links": "0.12.0",
     "@xterm/addon-webgl": "0.19.0",
     "@xterm/xterm": "6.0.0",
-    "better-auth": "^1.7.18",
+    "better-auth": "catalog:",
     "clsx": "^2.1.1",
     "lucide-react": "^1.70.0",
     "marked": "^18.1.3",
@@ -42,7 +42,7 @@
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "tailwind-merge": "^3.7.0",
-    "typebox": "1.4.5"
+    "typebox": "catalog:"
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^21.0.4",
@@ -51,12 +51,12 @@
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.8",
-    "@types/bun": "^1.4.4",
+    "@types/bun": "catalog:",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "tailwindcss": "4.3.5",
     "@tailwindcss/node": "4.3.5",
     "@tailwindcss/oxide": "4.3.5",
-    "typescript": "7.0.2"
+    "typescript": "catalog:"
   }
 }

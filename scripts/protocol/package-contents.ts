@@ -23,6 +23,62 @@ export interface ProtocolManifest {
   readonly [key: string]: unknown;
 }
 
+/** The root manifest's Bun catalogs: the unnamed `catalog` and the `catalogs` by name. */
+export interface RootCatalogs {
+  readonly catalog?: Readonly<Record<string, string>>;
+  readonly catalogs?: Readonly<Record<string, Readonly<Record<string, string>>>>;
+}
+
+/** Every section that can carry a `catalog:` reference. */
+const CATALOG_SECTIONS = [
+  'dependencies',
+  'devDependencies',
+  'peerDependencies',
+  'optionalDependencies',
+] as const;
+
+/**
+ * Replaces each `catalog:` / `catalog:<name>` specifier with the concrete range the root catalog holds. `npm pack`
+ * copies the staged manifest verbatim and npm cannot resolve `catalog:`, so a
+ * reference left in place makes the package uninstallable. Every section is
+ * resolved, `devDependencies` included, so the tarball carries none.
+ *
+ * @example
+ * resolveCatalogReferences({ dependencies: { typebox: 'catalog:' } }, { catalog: { typebox: '1.4.5' } });
+ * // { dependencies: { typebox: '1.4.5' } }
+ */
+export function resolveCatalogReferences<T extends Record<string, unknown>>(
+  manifest: T,
+  roots: RootCatalogs
+): T {
+  const resolved: Record<string, unknown> = { ...manifest };
+  for (const section of CATALOG_SECTIONS) {
+    const declared = manifest[section];
+    if (declared === undefined) continue;
+    const next: Record<string, string> = {};
+    for (const [name, specifier] of Object.entries(declared as Record<string, string>)) {
+      if (!specifier.startsWith('catalog:')) {
+        next[name] = specifier;
+        continue;
+      }
+      const catalogName = specifier.slice('catalog:'.length);
+      const table =
+        catalogName === '' || catalogName === 'default'
+          ? roots.catalog
+          : roots.catalogs?.[catalogName];
+      const version = table?.[name];
+      if (version === undefined) {
+        throw new Error(
+          `${section}.${name} references "${specifier}", which the root package.json catalog does not define; expected a range for ${name}.`
+        );
+      }
+      next[name] = version;
+    }
+    resolved[section] = next;
+  }
+  return resolved as T;
+}
+
 /** The key under `publishConfig` holding the published `exports` map. */
 const PUBLISHED_EXPORTS = 'exports';
 
@@ -102,10 +158,16 @@ export function unshippedTargets(manifest: ProtocolManifest): string[] {
  * fails with `Module not found "./build.ts"`. A published SDK has no build
  * scripts.
  *
+ * `catalog:` specifiers are resolved against `roots` (the root manifest's
+ * catalogs); see `resolveCatalogReferences`.
+ *
  * @example
  * publishedManifest(manifest).publishConfig; // { access: 'public' }
  */
-export function publishedManifest(manifest: ProtocolManifest): Record<string, unknown> {
+export function publishedManifest(
+  manifest: ProtocolManifest,
+  roots: RootCatalogs = {}
+): Record<string, unknown> {
   const published = publishedExports(manifest);
   const unshipped = unshippedTargets(manifest);
   if (unshipped.length > 0) {
@@ -119,5 +181,5 @@ export function publishedManifest(manifest: ProtocolManifest): Record<string, un
   for (const [key, value] of Object.entries(publishConfig ?? {})) {
     if (key !== PUBLISHED_EXPORTS) honoured[key] = value;
   }
-  return { ...rest, exports: published, publishConfig: honoured };
+  return resolveCatalogReferences({ ...rest, exports: published, publishConfig: honoured }, roots);
 }

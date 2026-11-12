@@ -6,6 +6,8 @@ import {
   publishedExports,
   publishedManifest,
   publishedSubpaths,
+  resolveCatalogReferences,
+  type RootCatalogs,
   unshippedTargets,
 } from '../protocol/package-contents';
 import { readText } from './support/read-text';
@@ -114,8 +116,42 @@ describe('publishedManifest', () => {
   });
 });
 
+describe('resolveCatalogReferences', () => {
+  const roots: RootCatalogs = {
+    catalog: { typebox: '1.4.5' },
+    catalogs: { tooling: { zod: '^4.0.0' } },
+  };
+
+  test('replaces default and named catalog references with the concrete range', () => {
+    const resolved = resolveCatalogReferences(
+      { dependencies: { typebox: 'catalog:', zod: 'catalog:tooling', other: '^2.0.0' } },
+      roots
+    );
+    expect(resolved.dependencies).toEqual({ typebox: '1.4.5', zod: '^4.0.0', other: '^2.0.0' });
+  });
+
+  test('resolves devDependencies too, so the tarball carries no catalog: reference', () => {
+    const resolved = resolveCatalogReferences({ devDependencies: { typebox: 'catalog:' } }, roots);
+    expect(resolved.devDependencies).toEqual({ typebox: '1.4.5' });
+  });
+
+  test('names the dependency and specifier the root catalog does not define', () => {
+    expect(() =>
+      resolveCatalogReferences({ dependencies: { missing: 'catalog:' } }, roots)
+    ).toThrow(
+      'dependencies.missing references "catalog:", which the root package.json catalog does not define; expected a range for missing.'
+    );
+  });
+
+  test('publishedManifest ships no catalog: specifier', () => {
+    const staged = publishedManifest({ ...MANIFEST, dependencies: { typebox: 'catalog:' } }, roots);
+    expect(staged.dependencies).toEqual({ typebox: '1.4.5' });
+  });
+});
+
 describe('the real protocol manifest', () => {
   const manifest = JSON.parse(readText('packages/protocol/package.json')) as ProtocolManifest;
+  const roots = JSON.parse(readText('package.json')) as RootCatalogs;
 
   test('offers the same subpaths from the workspace and from the tarball', () => {
     // `./schema/*` is published-only: build.ts copies spec/schema/1 in, and
@@ -127,7 +163,16 @@ describe('the real protocol manifest', () => {
   });
 
   test('stages cleanly, so the pack lane cannot be the first to find a bad map', () => {
-    expect(() => publishedManifest(manifest)).not.toThrow();
+    expect(() => publishedManifest(manifest, roots)).not.toThrow();
+  });
+
+  test('publishes concrete dependency ranges, never a catalog: reference', () => {
+    const staged = publishedManifest(manifest, roots);
+    const leaked = JSON.stringify(staged).match(/"[^"]+":\s*"catalog:[^"]*"/g) ?? [];
+    expect(
+      leaked,
+      `published manifest carries catalog references: ${JSON.stringify(leaked)}`
+    ).toEqual([]);
   });
 
   test('the release verification carries every tool its lanes are optional on', () => {
