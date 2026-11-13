@@ -1929,7 +1929,7 @@ Linux, macOS, and Windows x64 and arm64 runners skip Bun package-cache transfers
 | Family              | Producer / consumer              | Path                      | Invalidators                                             | Restore behavior                                     |
 | ------------------- | -------------------------------- | ------------------------- | -------------------------------------------------------- | ---------------------------------------------------- |
 | Bun install         | cache-enabled `setup-mango` jobs | `~/.bun/install/cache`    | OS, arch, Bun revision, lockfile                         | loose trusted-`main` prefix on cache-enabled runners |
-| Turbo task output   | check, test, build, QA metrics   | `.turbo/cache`            | OS, arch, Bun, Turbo, lane, lockfile, manifests, configs | lane-scoped trusted-`main` prefix                    |
+| Turbo task output   | check, build, QA metrics         | `.turbo/cache`            | OS, arch, Bun, Turbo, lane, lockfile, manifests, configs | lane-scoped trusted-`main` prefix                    |
 | Workflow lint tools | check                            | `.mango/artifacts/tools/` | pinned tool manifest                                     | exact trusted restore only                           |
 
 Inside the Turbo task output family each task is keyed by Turbo's own hash. The cached
@@ -1959,7 +1959,7 @@ save. Callers that miss at the same moment can still race to reserve the key.
 `actions/cache` never overwrites a key. A snapshot keyed by validity alone keeps
 the contents of the first run that saved it: a later run that restores it
 exactly computes whatever the snapshot lacked, skips its save because the key
-exists, and throws those outputs away. The Turbo lanes therefore pass
+exists, and throws those outputs away. The check and build lanes therefore pass
 `rotate: "true"` to a `restore` before the work and a `save` after it
 (`rotate` is rejected for `restore-save` and `restore-exact`, whose entry cannot
 be conditional):
@@ -1982,9 +1982,9 @@ be conditional):
   extracted; `save` runs only if the job succeeded and `.turbo/cache` holds a
   `*.tar.zst` newer than that baseline, which means Turbo ran a task the snapshot
   lacked. Only the payload counts: Turbo rewrites an entry's `-manifest.json` on
-  every hit. A run that only hit saves nothing. In `test.yml` only shard 1 saves.
+  every hit. A run that only hit saves nothing.
 - **Retention.** Every save carries what it restored plus the new outputs, so
-  the chain would only grow. Each job sets `TURBO_CACHE_MAX_SIZE=16MB`: at the
+  the chain would only grow. Each lane's job sets `TURBO_CACHE_MAX_SIZE=16MB`: at the
   start of the run Turbo deletes the oldest entries (by mtime, which the archive
   preserves) until the rest fit, so a snapshot is at most 16 MB plus one run's
   outputs. A lane saves at most one snapshot per run, and only a run that
@@ -1992,14 +1992,26 @@ be conditional):
   superseded ones are not accessed again, so GitHub removes each seven days
   after its last restore (or earlier, least recently used first, at the configured
   repository storage limit). Turbo does not delete caches or need `actions: write`.
-- **Quota.** The three lanes' complete sets are 3.6 MB (build), 6.5 KB (check)
-  and about 70 KB (test shard 1). A run that recomputed every build task wrote
+- **Quota.** The two lanes' complete sets are 3.6 MB (build) and 6.5 KB (check). A run that recomputed every build task wrote
   3.6 MB of new entries, so the next snapshot was 7.2 MB, and its save took
   about a second. With roughly 56 pushes to `main` and 15 pull
   requests a week, every run saving at today's sizes would hold about 0.4 GB in
   a rolling week; if every run saved a full 16 MB chain it would be about 2.3 GB.
   The gate job's cache-usage summary lists the `turbo` family, so growth shows
   there before it shows as an eviction.
+- **No test lane.** `test.yml` restores and saves no Turbo snapshot. The only
+  cacheable task its shards run is `//#test:scripts`, whose inputs
+  (`$TURBO_DEFAULT$`, `scripts/**`, the timings snapshot) change on nearly every
+  push, and the `test:coverage` tasks are `cache: false`. Hosted logs held 1
+  `//#test:scripts` hit in 59 runs (16 consecutive successful shard 1 runs on
+  2026-11-11..13: 0; every 6th successful run on 2026-10-30..11-10: 1 of 43),
+  while each run restored a ~16 MB archive twice and uploaded a new one. On
+  2026-11-13 the test lane held 421 Actions cache entries (6.79 GB) against 471
+  (5.42 GB) for build. Re-count the hits in the shard logs before adding a
+  cache back, and add one only once a cacheable task with inputs that hold
+  across pushes runs there. Existing `turbo-*-test-*` entries are never
+  accessed again and expire through GitHub's normal eviction; no cleanup script
+  removes them. `cache-policy.unit.test.ts` pins the absence.
 
 ### Pull-request runtime artifact profile
 
