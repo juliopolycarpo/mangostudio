@@ -308,11 +308,25 @@ describe('library hashing', () => {
     expect(normalizeHashPath('\\\\server\\share\\a\\', 'win32')).toBe('//server/share/a');
   });
 
-  it('strips a long run of trailing slashes in linear time', () => {
-    const hostile = `/library${'/'.repeat(50_000)}`;
+  // The bound separates a linear pass from the `/\/+$/` cleanup it replaced, not a
+  // fast runner from a slow one. On the second input that regex backtracks from
+  // every slash and took about 3.5 s; the linear pass takes about 1 ms. A 100 ms
+  // bound failed on a stalled macOS runner at 230 ms.
+  it.each([
+    ['at the end of the path', `/library${'/'.repeat(50_000)}`, '/library'],
+    [
+      'before a final segment, where a trailing-slash regex backtracks',
+      `/library${'/'.repeat(50_000)}x`,
+      `/library${'/'.repeat(50_000)}x`,
+    ],
+  ])('handles a long run of slashes %s in linear time', (_shape, hostile, expected) => {
     const start = performance.now();
-    expect(normalizeHashPath(hostile, 'posix')).toBe('/library');
-    expect(performance.now() - start).toBeLessThan(100);
+    expect(normalizeHashPath(hostile, 'posix')).toBe(expected);
+    const elapsedMs = performance.now() - start;
+    expect(
+      elapsedMs,
+      `expected a linear pass under 1000 ms | received: ${elapsedMs} ms`
+    ).toBeLessThan(1000);
   });
 
   it('hashes the same tree when realPath returns a trailing slash', async () => {
