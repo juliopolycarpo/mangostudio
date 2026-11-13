@@ -10,7 +10,7 @@ estável para o Turborepo, que não aceita `bun@canary`. As chaves de cache do T
 `bun --revision` e o manifesto de distribuição registra a revisão e a origem dos
 runtimes por plataforma. O CI instala o Bun pela ação composta local
 [`setup-bun`](../../../.github/actions/setup-bun/action.yml), que tenta uma vez,
-espera 45 s e tenta de novo, porque o canal `canary` troca os arquivos no lugar.
+espera 60 s, tenta de novo, espera 180 s e tenta de novo, porque o canal `canary` troca os arquivos no lugar.
 A seção [Bun em inglês](../../reference/tooling.md#bun) explica a verificação de
 downloads no CI e as duas exceções de `release.yml` e `protocol-release.yml`.
 

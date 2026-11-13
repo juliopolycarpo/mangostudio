@@ -63,8 +63,8 @@ jobs:
     # default, consuming distribution artifacts); never after it failed.
     if: ${{ !cancelled() && (needs.runtime.result == 'success' || (needs.runtime.result == 'skipped' && !inputs.rebuild)) }}
     runs-on: ${{ matrix.runner }}
-    # Linux step deadlines total up to 33 minutes for artifacts, 35 for manual rebuilds.
-    timeout-minutes: 37
+    # Linux step deadlines total up to 37 minutes for artifacts, 39 for manual rebuilds.
+    timeout-minutes: 41
     strategy:
       fail-fast: false
       matrix:
@@ -112,7 +112,8 @@ jobs:
 
       - name: Set up Bun
         uses: ./.github/actions/setup-bun # zizmor: ignore[self-repository] load the action from the selected source checkout
-        timeout-minutes: 4
+        # Three attempts and the 60 s and 180 s waits between them.
+        timeout-minutes: 8
 
       - name: Install toolchain (manual rebuild)
         if: ${{ inputs.rebuild }}
