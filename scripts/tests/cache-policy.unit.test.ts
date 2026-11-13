@@ -35,7 +35,12 @@ const CACHE_ACTION_SHA = '55cc8345863c7cc4c66a329aec7e433d2d1c52a9';
 const EXPRESSION_START = '$' + '{{';
 const CACHE_EPOCH_EXPRESSION = `cache-epoch: ${EXPRESSION_START} vars.CI_CACHE_EPOCH || 'v1' }}`;
 // Existing Playwright cache entries remain recognizable until they expire.
-const EXPECTED_FAMILIES = SCOPED_CACHE_FAMILIES.filter((family) => family !== 'playwright');
+// Registered for accounting only: no workflow or composite calls cache-scoped with
+// these. `bun` stays until its last entries (written 2026-11-11) pass the 14-day retention.
+const RETIRED_SCOPED_CACHE_FAMILIES = new Set(['playwright', 'bun']);
+const EXPECTED_FAMILIES = SCOPED_CACHE_FAMILIES.filter(
+  (family) => !RETIRED_SCOPED_CACHE_FAMILIES.has(family)
+);
 const RUST_CACHE_PREFIX_KEY = `prefix-key: v0-rust-${EXPRESSION_START} hashFiles('Cargo.toml') }}`;
 const RUST_CACHE_SAVE_IF = `save-if: ${EXPRESSION_START} github.ref == 'refs/heads/main' }}`;
 // The fuzz workspace is excluded from the root workspace and has its own
@@ -257,7 +262,7 @@ describe('CI cache policy', () => {
     expect(manifest).toContain("exact-restore must be 'true' or 'false'");
   });
 
-  test('passes the repository epoch fallback to every cache-scoped call', () => {
+  test('passes the repository epoch fallback to every cache-scoped call and none to setup-mango', () => {
     const sites = cacheScopedCallSites();
     expect(sites.length).toBeGreaterThan(0);
 
@@ -276,8 +281,12 @@ describe('CI cache policy', () => {
       const lines = readText(workflowFile).split('\n');
       for (const [index, line] of lines.entries()) {
         if (!/uses: [.$]\/\.github\/actions\/setup-mango\b/.test(line)) continue;
+        // setup-mango transfers no cache, so it declares no epoch input to pass.
         const followingLines = lines.slice(index + 1, index + 4).map((value) => value.trim());
-        expect(followingLines, `${workflowFile}:${index + 1}`).toContain(CACHE_EPOCH_EXPRESSION);
+        expect(
+          followingLines.filter((value) => value.startsWith('cache-epoch:')),
+          `${workflowFile}:${index + 1}: expected setup-mango cache-epoch input: none | received`
+        ).toEqual([]);
       }
     }
   });
@@ -300,14 +309,17 @@ describe('CI cache policy', () => {
     const sites = cacheScopedCallSites();
     const byFamily = (family: string) => sites.filter((site) => site.inputs.family === family);
 
-    const bun = byFamily('bun');
-    expect(bun).toHaveLength(3);
-    for (const site of bun) {
-      expect(site.inputs.validity).toContain("hashFiles('bun.lock')");
-    }
+    // Retired: setup-mango runs a frozen install with no package-cache transfer
+    // (#2025, #2057). setup-mango.unit.test.ts pins that contract; this guards
+    // every other call site against reviving the family.
+    expect(
+      byFamily('bun').map((site) => `${site.file}:${site.id}`),
+      'expected no cache-scoped call with family: bun | received'
+    ).toEqual([]);
     // The revision, not the version: every canary build reports the same
     // `1.4.0-canary.1` from `bun --version`, so a key built on that would share
-    // one Bun build's extracted packages with a different one.
+    // one Bun build's artifacts with a different one. Turbo keys read it from
+    // setup-mango's `bun-version` output.
     expect(readText('.github/actions/setup-mango/action.yml')).toContain('bun --revision');
 
     // One restore and one save per producer lane. QA consumes Check's cache

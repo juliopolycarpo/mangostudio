@@ -10,7 +10,7 @@ The `packageManager` field stays at `bun@1.4.4`: Turborepo requires a
 version-shaped value and cannot parse `bun@canary`. The `@types/bun` ranges
 follow this stable floor; canary runtime APIs may be newer than those types.
 
-Install-cache keys use `bun --revision`, and distribution manifests record
+Turbo cache keys use `bun --revision`, and distribution manifests record
 `bunRevision`, so different canary builds are distinguishable. Cross-platform
 compilation fetches channel assets through `scripts/lib/bun-cross-runtime.ts`.
 CI and the nightly workflow verify cold downloads with a five-minute limit.

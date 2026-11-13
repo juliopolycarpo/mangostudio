@@ -107,7 +107,7 @@ describe('Bun toolchain pins', () => {
     expect(seen).toBe(callSites);
   });
 
-  test('the install cache is keyed on the revision, not the version', () => {
+  test('the Bun build key is the revision, not the version', () => {
     // `--version` is unique per release and would work today. `--revision`
     // stays correct for a rebuilt tag or a channel too, which is the state this
     // repo spent three months in, and costs nothing to keep.
