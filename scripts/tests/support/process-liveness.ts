@@ -34,19 +34,65 @@ export function readProcessState(
       throw error;
     }
   }
+  return readPsProcessState(pid);
+}
+
+/** One `ps -o stat= -p <pid>` answer. */
+export interface PsStateAnswer {
+  readonly exitCode: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+export type PsStateQuery = (pid: number) => PsStateAnswer;
+
+const queryPsState: PsStateQuery = (pid) => {
   const result = Bun.spawnSync(['ps', '-o', 'stat=', '-p', String(pid)], {
     stdout: 'pipe',
     stderr: 'pipe',
   });
-  const output = result.stdout.toString().trim();
-  const error = result.stderr.toString().trim();
-  if (result.exitCode === 1 && output === '' && error === '') return undefined;
-  if (result.exitCode !== 0 || !/^\S+$/.test(output)) {
-    throw new Error(
-      `process ${pid}: expected readable process state | received: exit ${result.exitCode}, ${JSON.stringify(output)}, ${JSON.stringify(error)}`
-    );
+  return {
+    exitCode: result.exitCode,
+    stdout: result.stdout.toString(),
+    stderr: result.stderr.toString(),
+  };
+};
+
+/** Rereads of a transitional `?` state before it is reported: 40 x 5 ms. */
+export const TRANSITIONAL_STATE_READS = 40;
+const TRANSITIONAL_STATE_PAUSE_MS = 5;
+
+/**
+ * Read one PID's state through `ps`, the reader for POSIX hosts without /proc.
+ *
+ * macOS `ps` prints `?` when it cannot read a state for the process's threads,
+ * which happens while the process is being created or torn down. That answer
+ * describes the instant, not the process, so it is read again until `ps`
+ * reports a letter or the process is gone. A `?` that outlasts the rereads is
+ * returned as is, and {@link isAlive} refuses it.
+ *
+ * @example
+ * const state = readPsProcessState(child.pid); // e.g. "S", "Z", or undefined
+ */
+export function readPsProcessState(
+  pid: number,
+  query: PsStateQuery = queryPsState,
+  pause: (milliseconds: number) => void = (milliseconds) => Bun.sleepSync(milliseconds)
+): string | undefined {
+  for (let read = 1; ; read++) {
+    const result = query(pid);
+    const output = result.stdout.trim();
+    const error = result.stderr.trim();
+    if (result.exitCode === 1 && output === '' && error === '') return undefined;
+    if (result.exitCode !== 0 || !/^\S+$/.test(output)) {
+      throw new Error(
+        `process ${pid}: expected readable process state | received: exit ${result.exitCode}, ${JSON.stringify(output)}, ${JSON.stringify(error)}`
+      );
+    }
+    const state = output.slice(0, 1);
+    if (state !== '?' || read >= TRANSITIONAL_STATE_READS) return state;
+    pause(TRANSITIONAL_STATE_PAUSE_MS);
   }
-  return output.slice(0, 1);
 }
 
 /**

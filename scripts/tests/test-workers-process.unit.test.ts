@@ -33,7 +33,10 @@ import {
   isAlive,
   type ProcessStateTable,
   type ProcessStatReader,
+  type PsStateAnswer,
   readProcessState,
+  readPsProcessState,
+  TRANSITIONAL_STATE_READS,
 } from './support/process-liveness';
 import { fakeLane } from './support/test-worker-fakes';
 import {
@@ -227,6 +230,76 @@ class FakeFailingProcessStat {
     throw Object.assign(new Error(`process stat: ${this.code}`), { code: this.code });
   };
 }
+
+/** A `ps` that answers from a script, then repeats its last answer, and records each pause. */
+class FakeSequencedPs {
+  queries = 0;
+  readonly pauses: number[] = [];
+
+  constructor(private readonly answers: readonly PsStateAnswer[]) {}
+
+  readonly query = (): PsStateAnswer => {
+    const answer = this.answers[Math.min(this.queries, this.answers.length - 1)];
+    this.queries++;
+    if (!answer) throw new Error('FakeSequencedPs: expected at least one scripted answer');
+    return answer;
+  };
+
+  readonly pause = (milliseconds: number): void => {
+    this.pauses.push(milliseconds);
+  };
+}
+
+const psState = (state: string): PsStateAnswer => ({
+  exitCode: 0,
+  stdout: `${state}\n`,
+  stderr: '',
+});
+const PS_GONE: PsStateAnswer = { exitCode: 1, stdout: '', stderr: '' };
+
+describe('ps process state reader', () => {
+  // macOS prints `?` for a process caught while it is created or torn down;
+  // that instant failed a cancellation test whose child was exiting.
+  it('rereads a transitional state until ps reports a letter', () => {
+    const ps = new FakeSequencedPs([psState('?'), psState('?'), psState('S+')]);
+    expect(readPsProcessState(4242, ps.query, ps.pause)).toBe('S');
+    expect(ps.queries, 'expected two rereads after two transitional answers').toBe(3);
+    expect(ps.pauses).toEqual([5, 5]);
+  });
+
+  it('reports a process that exits during the rereads as absent', () => {
+    const ps = new FakeSequencedPs([psState('?'), PS_GONE]);
+    expect(readPsProcessState(4242, ps.query, ps.pause)).toBeUndefined();
+    expect(isAlive(4242, (pid) => readPsProcessState(pid, ps.query, ps.pause))).toBe(false);
+  });
+
+  it('returns a state that stays transitional so liveness still refuses it', () => {
+    const ps = new FakeSequencedPs([psState('?')]);
+    expect(readPsProcessState(4242, ps.query, ps.pause)).toBe('?');
+    expect(ps.queries, 'expected the bounded number of reads').toBe(TRANSITIONAL_STATE_READS);
+    expect(() => isAlive(4242, (pid) => readPsProcessState(pid, ps.query, ps.pause))).toThrow(
+      'process 4242: expected a process state letter | received: "?"'
+    );
+  });
+
+  it('answers a settled state with one query and no pause', () => {
+    const ps = new FakeSequencedPs([psState('Z')]);
+    expect(readPsProcessState(4242, ps.query, ps.pause)).toBe('Z');
+    expect(ps.queries).toBe(1);
+    expect(ps.pauses).toEqual([]);
+  });
+
+  it('refuses a failed or malformed ps answer on the first read', () => {
+    const denied = new FakeSequencedPs([{ exitCode: 2, stdout: '', stderr: 'ps: not permitted' }]);
+    expect(() => readPsProcessState(4242, denied.query, denied.pause)).toThrow(
+      'process 4242: expected readable process state | received: exit 2, "", "ps: not permitted"'
+    );
+    const malformed = new FakeSequencedPs([psState('S s')]);
+    expect(() => readPsProcessState(4242, malformed.query, malformed.pause)).toThrow(
+      'process 4242: expected readable process state | received: exit 0, "S s", ""'
+    );
+  });
+});
 
 describe('worker liveness assertions', () => {
   it.skipIf(process.platform !== 'linux')(
