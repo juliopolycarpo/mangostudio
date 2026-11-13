@@ -71,6 +71,9 @@ describe('Bun toolchain pins', () => {
 
     let seen = 0;
     for (const file of files) {
+      // The composite forwards its caller's `bun-version-file` input; its own
+      // tests pin that forwarding and the `.bun-version` default.
+      if (file === 'actions/setup-bun/action.yml') continue;
       const pins = [
         ...readText(join('.github', file)).matchAll(/bun-version-file:[ \t]*([^\n]+)/g),
       ];
@@ -97,12 +100,14 @@ describe('Bun toolchain pins', () => {
     }
     // Every `oven-sh/setup-bun` step must name the file; a step that stops
     // doing so would otherwise leave this test scanning nothing and passing.
-    const callSites = files.reduce(
-      (total, file) =>
-        total +
-        [...readText(join('.github', file)).matchAll(/uses:\s*oven-sh\/setup-bun@/g)].length,
-      0
-    );
+    const callSites = files
+      .filter((file) => file !== 'actions/setup-bun/action.yml')
+      .reduce(
+        (total, file) =>
+          total +
+          [...readText(join('.github', file)).matchAll(/uses:\s*oven-sh\/setup-bun@/g)].length,
+        0
+      );
     expect(callSites).toBeGreaterThan(0);
     expect(seen).toBe(callSites);
   });
@@ -206,5 +211,70 @@ describe('Bun cross-compile runtime', () => {
 
     const host = hostReleasePlatform();
     expect(Object.keys(runtimes)).toEqual(host === null ? [] : [host]);
+  });
+});
+
+interface ActionStep {
+  id?: string;
+  name?: string;
+  if?: string;
+  uses?: string;
+  run?: string;
+  shell?: string;
+  'continue-on-error'?: boolean;
+  with?: Record<string, string>;
+}
+
+const SETUP_BUN_ACTION = '.github/actions/setup-bun/action.yml';
+const SETUP_BUN_USES = /^oven-sh\/setup-bun@[a-f0-9]{40}$/;
+function setupBunActionSteps(): ActionStep[] {
+  const action = Bun.YAML.parse(readText(SETUP_BUN_ACTION)) as {
+    runs?: { using?: string; steps?: ActionStep[] };
+  };
+  expect(action.runs?.using, `${SETUP_BUN_ACTION} runs.using`).toBe('composite');
+  return action.runs?.steps ?? [];
+}
+
+describe('setup-bun composite action', () => {
+  test('tries once tolerantly, waits, then retries strictly, in that order', () => {
+    const steps = setupBunActionSteps();
+    expect(
+      steps.map((step) => (step.uses ? 'setup-bun' : 'run')),
+      `${SETUP_BUN_ACTION} step order`
+    ).toEqual(['setup-bun', 'run', 'setup-bun']);
+    const [first, wait, retry] = steps;
+    const failed = `steps.${first.id}.outcome == 'failure'`;
+
+    expect(first.id, 'first attempt needs an id for the retry condition').toBeTruthy();
+    expect(first['continue-on-error'], 'first attempt tolerates failure').toBe(true);
+    expect(wait.if, 'wait runs only after the first attempt failed').toContain(failed);
+    expect(wait.run, 'wait duration').toBe('sleep 10');
+    expect(wait.shell, 'wait step shell must be explicit for Windows runners').toBe('bash');
+    expect(retry.if, 'retry runs only after the first attempt failed').toContain(failed);
+    expect(
+      retry['continue-on-error'],
+      'retry failure must fail the job with setup-bun own error'
+    ).toBeUndefined();
+  });
+
+  test('both attempts run the same pinned setup-bun and read the version file input', () => {
+    const [first, , retry] = setupBunActionSteps();
+    for (const attempt of [first, retry]) {
+      expect(attempt.uses, 'setup-bun reference').toMatch(SETUP_BUN_USES);
+      expect(attempt.with, 'setup-bun inputs').toEqual({
+        'bun-version-file': '$' + '{{ inputs.bun-version-file }}',
+      });
+    }
+    expect(retry.uses, 'retry pin must equal the first attempt pin').toBe(first.uses);
+  });
+
+  test('defaults the version file to .bun-version', () => {
+    const action = Bun.YAML.parse(readText(SETUP_BUN_ACTION)) as {
+      inputs?: Record<string, { default?: string }>;
+    };
+    expect(Object.keys(action.inputs ?? {}), `${SETUP_BUN_ACTION} inputs`).toEqual([
+      'bun-version-file',
+    ]);
+    expect(action.inputs?.['bun-version-file']?.default).toBe('.bun-version');
   });
 });
