@@ -169,7 +169,7 @@ async function promoteVerifiedCanaryTags(
   const publication = await verifyCanaryNpmPublication(manifest, dependencies.registry, visibility);
   if (publication.missing.length > 0) {
     throw new Error(
-      `Canary tag promotion requires all seven verified packages; missing ${publication.missing.join(', ')}`
+      `Canary tag promotion requires all seven verified packages; missing ${publication.missing.join(', ')} (HTTP 404 on ${manifest.packageVersion} after the visibility wait; npm can serve a published version minutes late, so rerun with the original approved bytes)`
     );
   }
   const { updates, unchanged } = await visibility.run(

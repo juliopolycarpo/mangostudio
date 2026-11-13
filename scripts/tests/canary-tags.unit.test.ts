@@ -407,7 +407,7 @@ describe('canary OIDC tag recovery', () => {
     const { manifest, registry, runner, dependencies } = await fixture();
     registry.versions.set(versionUrl(MAIN_PACKAGE), { status: 404, body: {} });
     await expect(promoteCanaryTags(manifest, dependencies)).rejects.toThrow(
-      'requires all seven verified packages; missing mangostudio'
+      'requires all seven verified packages; missing mangostudio (HTTP 404 on 1.2.3-canary.aaaaaaa after the visibility wait'
     );
     expect(runner.writes).toEqual([]);
   });
