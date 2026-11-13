@@ -4,7 +4,16 @@
 
 The repo tracks the floating Bun `canary` channel in [`.bun-version`](../../.bun-version).
 Install it with `bun upgrade --canary`; it can advance without a repository change.
-CI installs the same channel through `oven-sh/setup-bun`.
+CI installs the same channel through the local composite
+[`setup-bun`](../../.github/actions/setup-bun/action.yml). Bun replaces canary assets in place, so a
+download can fail while an upload lands. The composite tries once, waits 10 s and
+tries once more; a second failure fails the job with `setup-bun`'s own error.
+The `release.yml` and `protocol-release.yml`
+trust bootstraps keep a direct call with the same inline retry, because the tag
+they authenticate has not been verified yet and none of its actions may run first.
+The composite and the two bootstraps share one `oven-sh/setup-bun` pin, which
+`bun-toolchain.unit.test.ts` enforces; Dependabot's `setup-bun` group updates
+all of them in one pull request.
 
 The `packageManager` field stays at `bun@1.4.4`: Turborepo requires a
 version-shaped value and cannot parse `bun@canary`. The `@types/bun` ranges

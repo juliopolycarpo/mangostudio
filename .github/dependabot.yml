@@ -30,6 +30,14 @@ updates:
       codeql-action:
         patterns:
           - "github/codeql-action*"
+      # The setup-bun composite and the two release trust bootstraps pin
+      # oven-sh/setup-bun to one SHA, and bun-toolchain.unit.test.ts requires
+      # them to match. The composite lives under /.github/actions/* and the
+      # bootstraps under /, so an ungrouped major would open one pull request
+      # per directory, and each alone would fail that test.
+      setup-bun:
+        patterns:
+          - "oven-sh/setup-bun"
       # Every other minor and patch bump in one PR. Without a group, an action
       # pinned in both a workflow and a composite action opens one PR per
       # directory for the same release. Dependabot assigns a dependency to the

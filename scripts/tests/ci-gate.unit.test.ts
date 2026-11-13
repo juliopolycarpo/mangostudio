@@ -396,7 +396,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     ],
   ])('%s requires successful Bun and nextest setup for dependent tests', (job, commands) => {
     const steps = extractStepBlocks(extractJobBlock(workflow, job));
-    const bun = steps.findIndex((step) => step.includes('uses: oven-sh/setup-bun@'));
+    const bun = steps.findIndex((step) => step.includes('uses: $/.github/actions/setup-bun'));
     const nextest = steps.findIndex((step) => step.includes('tool: cargo-nextest@'));
     for (const command of commands) {
       const target = steps.findIndex((step) => step.includes(command));
@@ -428,7 +428,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     for (const job of ['workspace', 'workspace-windows-arm64']) {
       const steps = extractStepBlocks(extractJobBlock(workflow, job));
       const independent = steps.filter((step) =>
-        /run: cargo (?:check|clippy|test|nextest|doc|build)\b|name: Check nextest|uses: (?:oven-sh\/setup-bun|taiki-e\/install-action)/.test(
+        /run: cargo (?:check|clippy|test|nextest|doc|build)\b|name: Check nextest|uses: (?:\$\/\.github\/actions\/setup-bun|taiki-e\/install-action)/.test(
           step
         )
       );

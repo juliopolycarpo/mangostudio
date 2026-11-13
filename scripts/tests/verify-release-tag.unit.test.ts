@@ -245,7 +245,15 @@ describe('release signature gates', () => {
       expect(block).toContain(
         'bun --no-env-file "$RUNNER_TEMP/release-trust/scripts/release/verify-release-tag.ts" "$RELEASE_TAG" "$GITHUB_WORKSPACE" "$EXPECTED_RELEASE_TAG"'
       );
-      expect(block).not.toContain('continue-on-error:');
+      // Only the trusted Bun download may tolerate a failure (its inline retry
+      // is strict); no verification or publishing step may.
+      const tolerant = extractStepBlocks(block).filter((step) =>
+        step.includes('continue-on-error:')
+      );
+      expect(
+        tolerant.map((step) => step.match(/id: ([\w-]+)/)?.[1]),
+        `${file} ${job} steps with continue-on-error`
+      ).toEqual(['trusted-bun']);
       const verification = extractStepBlocks(block).find((step) =>
         step.includes('verify-release-tag.ts')
       );

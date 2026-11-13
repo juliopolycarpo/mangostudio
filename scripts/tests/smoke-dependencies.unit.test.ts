@@ -116,7 +116,7 @@ describe('smoke matrix runtime dependencies', () => {
     const workflow = readText('.github/workflows/smoke-binary.yml');
     for (const job of ['binary'] as const) {
       const jobBlock = extractJobBlock(workflow, job);
-      expect(jobBlock).toContain('uses: oven-sh/setup-bun@');
+      expect(jobBlock).toContain('uses: ./.github/actions/setup-bun');
       const setupMangoSteps = extractStepBlocks(jobBlock).filter((step) =>
         /uses: \.\/\.github\/actions\/setup-mango/.test(step)
       );

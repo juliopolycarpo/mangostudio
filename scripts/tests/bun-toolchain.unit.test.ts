@@ -57,54 +57,92 @@ describe('Bun toolchain pins', () => {
     expect(raw.trim().split(/\s+/)).toHaveLength(1);
   });
 
-  test('every setup-bun call site reads .bun-version, never package.json', () => {
+  test('only the composite and the release trust bootstraps reference oven-sh/setup-bun', () => {
+    // The composite owns the retry, so a call site that bypasses it loses the
+    // retry silently. The release trust bootstraps cannot load an action from
+    // the tag they are still authenticating, so they carry the retry inline.
+    const allowed: Record<string, number> = {
+      'actions/setup-bun/action.yml': 2,
+      'workflows/protocol-release.yml': 2,
+      'workflows/release.yml': 2,
+    };
+    const received: Record<string, number> = {};
+    for (const file of githubYamlFiles()) {
+      const count = [...readText(join('.github', file)).matchAll(/uses:\s*oven-sh\/setup-bun@/g)]
+        .length;
+      if (count > 0) received[file] = count;
+    }
+    expect(
+      received,
+      'direct oven-sh/setup-bun references per file; route new Bun setup through ./.github/actions/setup-bun'
+    ).toEqual(allowed);
+  });
+
+  test('every direct oven-sh/setup-bun reference reads the expected version file and pin', () => {
     // package.json's `packageManager` is a Turborepo floor marker and does not
     // name an installable build; a call site left pointing at it would ask for a
     // release tag that has never existed.
-    //
-    // Every workflow and composite action is scanned rather than a listed few:
-    // the regression this guards against is a *new* call site copying the old
-    // `bun-version-file: package.json`, which a hardcoded list cannot see.
-    const files = [...new Bun.Glob('**/*.{yml,yaml}').scanSync({ cwd: join(ROOT_DIR, '.github') })]
-      .map((file) => file.replaceAll('\\', '/'))
-      .sort();
-
-    let seen = 0;
-    for (const file of files) {
-      const pins = [
-        ...readText(join('.github', file)).matchAll(/bun-version-file:[ \t]*([^\n]+)/g),
-      ];
-      for (const [index, match] of pins.entries()) {
-        seen++;
-        // Release authentication cannot take its executable pin from the tag
-        // it is authenticating; those two bootstraps read protected main's
-        // archived .bun-version before any tagged code can execute.
-        let expected = '.bun-version';
-        if (
-          index === 0 &&
-          (file === 'workflows/release.yml' || file === 'workflows/protocol-release.yml')
-        ) {
-          // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.
-          expected = '${{ runner.temp }}/release-trust/.bun-version';
-        }
-        // Native qualification runs its producer against a separate source
-        // checkout, including an untouched baseline with its own Bun pin.
-        if (file === 'workflows/native-bun-qualification.yml' && index === 1) {
-          expected = 'source/.bun-version';
-        }
-        expect(match[1].trim(), file).toBe(expected);
+    // Release authentication cannot take its executable pin from the tag it is
+    // authenticating; those bootstraps read protected main's archived
+    // .bun-version before any tagged code can execute.
+    const trusted = '$' + '{{ runner.temp }}/release-trust/.bun-version';
+    const expectedFile: Record<string, string> = {
+      'actions/setup-bun/action.yml': '$' + '{{ inputs.bun-version-file }}',
+      'workflows/protocol-release.yml': trusted,
+      'workflows/release.yml': trusted,
+    };
+    const pins = new Set<string>();
+    for (const [file, expected] of Object.entries(expectedFile)) {
+      for (const step of yamlSteps(file)) {
+        if (!step.uses?.startsWith('oven-sh/setup-bun@')) continue;
+        expect(step.with?.['bun-version-file'], `${file} bun-version-file`).toBe(expected);
+        pins.add(step.uses);
       }
     }
-    // Every `oven-sh/setup-bun` step must name the file; a step that stops
-    // doing so would otherwise leave this test scanning nothing and passing.
-    const callSites = files.reduce(
-      (total, file) =>
-        total +
-        [...readText(join('.github', file)).matchAll(/uses:\s*oven-sh\/setup-bun@/g)].length,
-      0
-    );
-    expect(callSites).toBeGreaterThan(0);
-    expect(seen).toBe(callSites);
+    expect([...pins], 'every direct setup-bun reference must share one pin').toHaveLength(1);
+    expect([...pins][0]).toMatch(SETUP_BUN_USES);
+  });
+
+  test('every other Bun setup goes through the composite and reads .bun-version', () => {
+    // Native qualification runs its producer against a separate source
+    // checkout, including an untouched baseline with its own Bun pin.
+    const expectedFile: Record<string, string> = {
+      'workflows/native-bun-qualification.yml#1': 'source/.bun-version',
+    };
+    let seen = 0;
+    for (const file of githubYamlFiles()) {
+      let index = 0;
+      for (const step of yamlSteps(file)) {
+        if (!COMPOSITE_SETUP_BUN.test(step.uses ?? '')) continue;
+        const expected = expectedFile[`${file}#${index}`] ?? '.bun-version';
+        index++;
+        seen++;
+        // An absent input falls back to the composite's `.bun-version` default.
+        expect(
+          step.with?.['bun-version-file'] ?? '.bun-version',
+          `${file} Bun setup #${index} bun-version-file`
+        ).toBe(expected);
+      }
+    }
+    expect(seen, 'composite Bun setup call sites').toBeGreaterThan(0);
+  });
+
+  test('the release trust bootstraps retry Bun setup once, tolerantly then strictly', () => {
+    for (const file of ['workflows/release.yml', 'workflows/protocol-release.yml']) {
+      const steps = yamlSteps(file);
+      const first = steps.findIndex((step) => step.uses?.startsWith('oven-sh/setup-bun@'));
+      const [attempt, wait, retry] = steps.slice(first, first + 3);
+      const failed = `steps.${attempt?.id}.outcome == 'failure'`;
+      expect(attempt?.id, `${file} first attempt id`).toBeTruthy();
+      expect(attempt?.['continue-on-error'], `${file} first attempt tolerates failure`).toBe(true);
+      expect(wait?.if, `${file} wait runs only after a failed first attempt`).toBe(failed);
+      expect(wait?.run, `${file} wait duration`).toBe('sleep 10');
+      expect(wait?.shell, `${file} wait shell`).toBe('bash');
+      expect(retry?.uses, `${file} retry reference`).toBe(attempt?.uses);
+      expect(retry?.if, `${file} retry runs only after a failed first attempt`).toBe(failed);
+      expect(retry?.['continue-on-error'], `${file} retry failure fails the job`).toBeUndefined();
+      expect(retry?.with, `${file} retry inputs`).toEqual(attempt?.with);
+    }
   });
 
   test('the Bun build key is the revision, not the version', () => {
@@ -206,5 +244,92 @@ describe('Bun cross-compile runtime', () => {
 
     const host = hostReleasePlatform();
     expect(Object.keys(runtimes)).toEqual(host === null ? [] : [host]);
+  });
+});
+
+interface ActionStep {
+  id?: string;
+  name?: string;
+  if?: string;
+  uses?: string;
+  run?: string;
+  shell?: string;
+  'timeout-minutes'?: number;
+  'continue-on-error'?: boolean;
+  with?: Record<string, string>;
+}
+
+const SETUP_BUN_ACTION = '.github/actions/setup-bun/action.yml';
+const SETUP_BUN_USES = /^oven-sh\/setup-bun@[a-f0-9]{40}$/;
+// Same-repository ($/), source-checkout (./) and tooling-checkout (./tooling/) references.
+const COMPOSITE_SETUP_BUN = /^(?:\$|\.|\.\/tooling)\/\.github\/actions\/setup-bun$/;
+
+function githubYamlFiles(): string[] {
+  return [...new Bun.Glob('**/*.{yml,yaml}').scanSync({ cwd: join(ROOT_DIR, '.github') })]
+    .map((file) => file.replaceAll('\\', '/'))
+    .sort();
+}
+
+/** Every step of a workflow's jobs or a composite action, in file order. */
+function yamlSteps(file: string): ActionStep[] {
+  const parsed = Bun.YAML.parse(readText(join('.github', file))) as {
+    jobs?: Record<string, { steps?: ActionStep[] }>;
+    runs?: { steps?: ActionStep[] };
+  };
+  return [
+    ...Object.values(parsed.jobs ?? {}).flatMap((job) => job.steps ?? []),
+    ...(parsed.runs?.steps ?? []),
+  ];
+}
+
+function setupBunActionSteps(): ActionStep[] {
+  const action = Bun.YAML.parse(readText(SETUP_BUN_ACTION)) as {
+    runs?: { using?: string; steps?: ActionStep[] };
+  };
+  expect(action.runs?.using, `${SETUP_BUN_ACTION} runs.using`).toBe('composite');
+  return action.runs?.steps ?? [];
+}
+
+describe('setup-bun composite action', () => {
+  test('tries once tolerantly, waits, then retries strictly, in that order', () => {
+    const steps = setupBunActionSteps();
+    expect(
+      steps.map((step) => (step.uses ? 'setup-bun' : 'run')),
+      `${SETUP_BUN_ACTION} step order`
+    ).toEqual(['setup-bun', 'run', 'setup-bun']);
+    const [first, wait, retry] = steps;
+    const failed = `steps.${first.id}.outcome == 'failure'`;
+
+    expect(first.id, 'first attempt needs an id for the retry condition').toBeTruthy();
+    expect(first['continue-on-error'], 'first attempt tolerates failure').toBe(true);
+    expect(wait.if, 'wait runs only after the first attempt failed').toContain(failed);
+    expect(wait.run, 'wait duration').toBe('sleep 10');
+    expect(wait.shell, 'wait step shell must be explicit for Windows runners').toBe('bash');
+    expect(retry.if, 'retry runs only after the first attempt failed').toContain(failed);
+    expect(
+      retry['continue-on-error'],
+      'retry failure must fail the job with setup-bun own error'
+    ).toBeUndefined();
+  });
+
+  test('both attempts run the same pinned setup-bun and read the version file input', () => {
+    const [first, , retry] = setupBunActionSteps();
+    for (const attempt of [first, retry]) {
+      expect(attempt.uses, 'setup-bun reference').toMatch(SETUP_BUN_USES);
+      expect(attempt.with, 'setup-bun inputs').toEqual({
+        'bun-version-file': '$' + '{{ inputs.bun-version-file }}',
+      });
+    }
+    expect(retry.uses, 'retry pin must equal the first attempt pin').toBe(first.uses);
+  });
+
+  test('defaults the version file to .bun-version', () => {
+    const action = Bun.YAML.parse(readText(SETUP_BUN_ACTION)) as {
+      inputs?: Record<string, { default?: string }>;
+    };
+    expect(Object.keys(action.inputs ?? {}), `${SETUP_BUN_ACTION} inputs`).toEqual([
+      'bun-version-file',
+    ]);
+    expect(action.inputs?.['bun-version-file']?.default).toBe('.bun-version');
   });
 });

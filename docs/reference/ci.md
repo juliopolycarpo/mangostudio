@@ -419,9 +419,15 @@ whose import graph stays inside the checkout (no `node_modules`).
 
 | Workflow           | Job(s)               | Setup                          |
 | ------------------ | -------------------- | ------------------------------ |
-| `ci.yml`           | `gate`               | `oven-sh/setup-bun` only       |
-| `smoke-binary.yml` | `binary` (default)   | `oven-sh/setup-bun` only       |
+| `ci.yml`           | `gate`               | `setup-bun` only               |
+| `smoke-binary.yml` | `binary` (default)   | `setup-bun` only               |
 | `smoke-binary.yml` | `binary` (`rebuild`) | `setup-mango` (full toolchain) |
+
+`setup-bun` is the local composite at `.github/actions/setup-bun`. It wraps
+`oven-sh/setup-bun` with one 10-second retry for transient canary download
+failures, and `setup-mango` calls it too. Do not call `oven-sh/setup-bun`
+from a workflow; `bun-toolchain.unit.test.ts` allows only the release trust
+bootstraps, which cannot load an action from an unverified tag.
 
 The Linux `binary` jobs also stage and test the Bookworm and Alpine Docker
 images. `smoke-container.yml` runs all four Docker/Podman and glibc/musl

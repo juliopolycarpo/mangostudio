@@ -145,9 +145,12 @@ describe('security workflows', () => {
     // so the catch-all has to come after the codeql-action pair, and that
     // group's own pattern must stay narrow or it would absorb everything.
     const groups = Object.entries(actions?.groups ?? {});
-    expect(groups.map(([name]) => name)).toEqual(['codeql-action', 'actions']);
+    expect(groups.map(([name]) => name)).toEqual(['codeql-action', 'setup-bun', 'actions']);
     // No update-types on the pair: init and analyze move together on a major too.
     expect(groups[0]?.[1]).toEqual({ patterns: ['github/codeql-action*'] });
+    // One pin shared across two directories: a split bump fails the shared-pin
+    // test, so majors must stay grouped here as well.
+    expect(groups[1]?.[1]).toEqual({ patterns: ['oven-sh/setup-bun'] });
     // A major must not ride in with the week's patches.
     expect(groups.at(-1)?.[1]).toEqual({
       patterns: ['*'],

@@ -33,9 +33,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
+      - uses: $/.github/actions/setup-bun
 
       # `bun audit` reads bun.lock directly, so there is no install step and
       # no dependency code runs. `--audit-level` gates the exit status as well

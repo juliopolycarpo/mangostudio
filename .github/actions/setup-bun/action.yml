@@ -1,0 +1,35 @@
+name: Setup Bun
+description: >
+  Install the Bun build named by a version file (default .bun-version) and retry the install once
+  after a short wait. The repository pins the `canary` channel, whose download fails transiently.
+  This is the only place outside the release trust bootstrap that references oven-sh/setup-bun.
+  Callers must run actions/checkout first.
+inputs:
+  bun-version-file:
+    description: File that names the Bun build to install, relative to the workspace.
+    default: .bun-version
+runs:
+  using: composite
+  steps:
+    # `!cancelled()` keeps these steps running when the caller opted into running after an earlier
+    # job failure; the caller's own `if` still decides whether the action runs at all.
+    - id: first-attempt
+      name: Set up Bun
+      if: ${{ !cancelled() }}
+      uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      continue-on-error: true
+      with:
+        bun-version-file: ${{ inputs.bun-version-file }}
+
+    # Bun replaces canary assets in place. A download can land during upload.
+    - name: Wait before retrying Bun setup
+      if: ${{ !cancelled() && steps.first-attempt.outcome == 'failure' }}
+      shell: bash
+      run: sleep 10
+
+    # No continue-on-error: a second failure fails the job with setup-bun's own error.
+    - name: Retry Bun setup
+      if: ${{ !cancelled() && steps.first-attempt.outcome == 'failure' }}
+      uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      with:
+        bun-version-file: ${{ inputs.bun-version-file }}
