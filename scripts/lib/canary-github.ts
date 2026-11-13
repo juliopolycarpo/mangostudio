@@ -30,13 +30,44 @@ const ghRunner: GhCommandRunner = {
   },
 };
 
+const STDERR_LIMIT = 300;
+const READ_ATTEMPTS = 3;
+const READ_BACKOFF_MS = 5_000;
+// Server errors, rate limiting and dropped connections; 4xx auth/not-found stay fatal.
+const TRANSIENT_STDERR =
+  /HTTP (?:5\d\d|429)\b|\b(?:timeout|timed out|EOF|connection reset|connection refused|temporar(?:y|ily)|unexpected end)\b/i;
+
+/** Whether gh stderr describes a failure worth rereading. Example: isTransientGhFailure('gh: Bad Gateway (HTTP 502)'). */
+export function isTransientGhFailure(stderr: string): boolean {
+  return TRANSIENT_STDERR.test(stderr);
+}
+
+/**
+ * Render gh stderr for an error message without leaking secrets: URLs (signed
+ * asset links carry query tokens) and credential shapes are redacted, whitespace
+ * is collapsed and the text is truncated.
+ * Example: describeGhStderr('gh: Bad Gateway (HTTP 502)') === 'gh: Bad Gateway (HTTP 502)'.
+ */
+export function describeGhStderr(stderr: string): string {
+  const text = stderr
+    .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, '<url>')
+    .replace(/\b(?:gh[pousr]_|github_pat_)\w+/g, '<token>')
+    .replace(/\b(Bearer|token|Basic)\s+\S+/gi, '$1 <redacted>')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (text === '') return '<empty>';
+  return text.length > STDERR_LIMIT ? `${text.slice(0, STDERR_LIMIT)}...` : text;
+}
+
 /** GitHub reads and controlled CLI writes for canary recovery. Example: const client = new CanaryGitHub('owner/repo'). */
 export class CanaryGitHub {
   private readonly base: string;
 
   constructor(
     repository: string,
-    private readonly runner: GhCommandRunner = ghRunner
+    private readonly runner: GhCommandRunner = ghRunner,
+    private readonly sleep: (milliseconds: number) => Promise<void> = (milliseconds) =>
+      Bun.sleep(milliseconds)
   ) {
     if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) {
       throw new Error(`Invalid GitHub repository: ${repository}; expected owner/repository`);
@@ -139,10 +170,19 @@ export class CanaryGitHub {
   /** Read paginated array responses, or counted object collections. Example: await client.list('repos/owner/repo/releases?per_page=100'). */
   async list(path: string, key?: string): Promise<readonly unknown[]> {
     this.requireRepositoryPath(path);
-    const result = await Promise.resolve(this.runner.run(['api', '--paginate', '--slurp', path]));
+    // A paginated read restarts from page one: a late 5xx must not discard earlier pages for good.
+    let result = await Promise.resolve(this.runner.run(['api', '--paginate', '--slurp', path]));
+    for (
+      let attempt = 1;
+      attempt < READ_ATTEMPTS && result.exitCode !== 0 && isTransientGhFailure(result.stderr);
+      attempt++
+    ) {
+      await this.sleep(READ_BACKOFF_MS * attempt);
+      result = await Promise.resolve(this.runner.run(['api', '--paginate', '--slurp', path]));
+    }
     if (result.exitCode !== 0) {
       throw new Error(
-        `GitHub paginated read: expected successful gh exit; received ${result.exitCode}`
+        `GitHub paginated read: expected successful gh exit | received: exit ${result.exitCode} for ${path} | stderr: ${describeGhStderr(result.stderr)}`
       );
     }
     let pages: unknown;
