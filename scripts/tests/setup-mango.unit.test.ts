@@ -12,6 +12,7 @@ interface SetupStep {
 }
 
 interface SetupManifest {
+  readonly inputs?: Readonly<Record<string, unknown>>;
   readonly outputs?: Readonly<Record<string, unknown>>;
   readonly runs: { readonly steps: readonly SetupStep[] };
 }
@@ -46,6 +47,13 @@ describe('setup-mango frozen install without a Bun package cache', () => {
     expect(transfers, `(${MANIFEST_PATH}): expected cache-transfer steps: none | received`).toEqual(
       []
     );
+  });
+
+  test('declares no inputs: nothing in it keys a cache on an epoch', () => {
+    expect(
+      Object.keys(manifest().inputs ?? {}),
+      `(${MANIFEST_PATH}): expected inputs: none | received`
+    ).toEqual([]);
   });
 
   test('exposes only the Bun revision output that Turbo keys read', () => {

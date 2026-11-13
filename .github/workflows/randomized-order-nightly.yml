@@ -112,8 +112,6 @@ jobs:
           persist-credentials: false
 
       - uses: $/.github/actions/setup-mango
-        with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Run database migrations
         run: bun run --filter @mangostudio/api migrate

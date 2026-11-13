@@ -150,8 +150,6 @@ jobs:
       - uses: ./.github/actions/distribution-source # zizmor: ignore[self-repository] load the action from the selected source checkout
 
       - uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
-        with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Verify committed versions are in lockstep
         run: bun run check:versions
@@ -390,8 +388,6 @@ jobs:
       - uses: ./.github/actions/distribution-source # zizmor: ignore[self-repository] load the action from the selected source checkout
 
       - uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
-        with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Download verified Windows runtime
         if: ${{ !inputs.reuse_distribution }}

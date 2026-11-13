@@ -2,10 +2,6 @@ name: Setup Mango (Bun + install)
 description: >
   Install the Bun build named by .bun-version and run a frozen install without a package-cache
   transfer. Callers must run actions/checkout first.
-inputs:
-  cache-epoch:
-    description: Repository-wide cache epoch used for emergency invalidation.
-    required: true
 outputs:
   bun-version:
     description: Resolved Bun revision used by downstream cache keys.

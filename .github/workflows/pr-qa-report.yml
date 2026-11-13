@@ -66,8 +66,6 @@ jobs:
           persist-credentials: true
 
       - uses: $/.github/actions/setup-mango
-        with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Resolve PR and download metrics archives
         id: resolve

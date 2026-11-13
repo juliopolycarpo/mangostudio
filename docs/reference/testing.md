@@ -2200,9 +2200,9 @@ checks still execute.
 
 `CI_CACHE_EPOCH` is the repository-wide emergency invalidation lever. It is an
 Actions repository variable with a documented `v1` fallback, passed explicitly
-to every cache call site. Composite actions cannot read the `vars` context, so
-callers must keep supplying `cache-epoch` rather than relying on a composite
-default. Increment the variable (for example, to `v2`) to force a clean miss
+to every `cache-scoped` call site. Composite actions cannot read the `vars` context, so
+those callers must keep supplying `cache-epoch` rather than relying on a composite
+default. `setup-mango` takes no epoch because it transfers no cache. Increment the variable (for example, to `v2`) to force a clean miss
 after suspected poisoning or a broken key rollout. Removing the variable returns
 to `v1`; only do that for a benign rollback because old `v1` entries may still
 exist.

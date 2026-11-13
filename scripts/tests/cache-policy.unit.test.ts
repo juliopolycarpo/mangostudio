@@ -261,7 +261,7 @@ describe('CI cache policy', () => {
     expect(manifest).toContain("exact-restore must be 'true' or 'false'");
   });
 
-  test('passes the repository epoch fallback to every cache-scoped call', () => {
+  test('passes the repository epoch fallback to every cache-scoped call and none to setup-mango', () => {
     const sites = cacheScopedCallSites();
     expect(sites.length).toBeGreaterThan(0);
 
@@ -280,8 +280,12 @@ describe('CI cache policy', () => {
       const lines = readText(workflowFile).split('\n');
       for (const [index, line] of lines.entries()) {
         if (!/uses: [.$]\/\.github\/actions\/setup-mango\b/.test(line)) continue;
+        // setup-mango transfers no cache, so it declares no epoch input to pass.
         const followingLines = lines.slice(index + 1, index + 4).map((value) => value.trim());
-        expect(followingLines, `${workflowFile}:${index + 1}`).toContain(CACHE_EPOCH_EXPRESSION);
+        expect(
+          followingLines.filter((value) => value.startsWith('cache-epoch:')),
+          `${workflowFile}:${index + 1}: expected setup-mango cache-epoch input: none | received`
+        ).toEqual([]);
       }
     }
   });
