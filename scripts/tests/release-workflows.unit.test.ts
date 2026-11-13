@@ -459,11 +459,17 @@ describe('release workflow binary gate', () => {
       'darwin-x64',
       'windows-arm64',
     ] as const;
-    expect(runtimeVersion.match(/- platform:/g)).toHaveLength(crossTargets.length);
+    // One probe job per native host; the hosts and the platforms each probes
+    // are pinned by the dedicated probe test below.
+    const probed = [...runtimeVersion.matchAll(/^ {12}platforms: (.+)$/gm)].flatMap((match) =>
+      (match[1] as string).split(' ')
+    );
+    expect(probed).toEqual([...crossTargets]);
     for (const platform of crossTargets) {
-      expect(runtimeVersion).toContain(
-        `platform: ${platform}\n            runner: ${runners[platform]}`
-      );
+      expect(
+        runtimeVersion,
+        `expected a ${runners[platform]} probe host for ${platform}`
+      ).toContain(`runner: ${runners[platform]}`);
     }
     const preparedInputs = extractStepBlocks(build).find((step) =>
       step.includes('name: Download prepared frontend')
@@ -510,16 +516,55 @@ describe('release workflow binary gate', () => {
     const workflow = readText('.github/workflows/distribution-build.yml');
     const probe = extractJobBlock(workflow, 'runtime-version');
     const upload = extractStepBlocks(probe).find((step) =>
-      step.includes('name: Upload the native runtime version receipt')
+      step.includes('name: Upload the native runtime version receipts')
     );
     expect(upload, 'expected the runtime version receipt upload').toBeDefined();
     expect(upload).toContain('uses: actions/upload-artifact@');
     expect(upload).toContain(
-      'name: runtime-version-$' + '{{ inputs.source_sha }}-$' + '{{ matrix.platform }}'
+      'name: runtime-version-$' + '{{ inputs.source_sha }}-$' + '{{ matrix.host }}'
     );
-    expect(upload, 'expected the source-and-platform receipt to be replaceable on retry').toContain(
+    expect(upload, 'expected the source-and-host receipts to be replaceable on retry').toContain(
       'overwrite: true'
     );
+  });
+
+  test('one probe job per native host covers every cross-linked runtime target', () => {
+    const probe = extractJobBlock(
+      readText('.github/workflows/distribution-build.yml'),
+      'runtime-version'
+    );
+    const hosts = [...probe.matchAll(/- host: (\S+)\n\s+platforms: (.+)\n\s+runner: (\S+)/g)].map(
+      (match) => ({
+        host: match[1] as string,
+        platforms: (match[2] as string).split(' '),
+        runner: match[3] as string,
+      })
+    );
+    expect(hosts).toEqual([
+      {
+        host: 'linux-arm64',
+        platforms: ['linux-arm64', 'linux-arm64-musl'],
+        runner: 'ubuntu-24.04-arm',
+      },
+      { host: 'darwin-x64', platforms: ['darwin-x64'], runner: 'macos-15-intel' },
+      { host: 'windows-arm64', platforms: ['windows-arm64'], runner: 'windows-11-arm' },
+    ]);
+    // The download pattern is `runtime-<sha>-<host>*`: every release target the
+    // host id prefixes must be one this job probes, or it would download a
+    // runtime it never verifies, and miss none that it lists.
+    for (const { host, platforms } of hosts) {
+      expect(
+        ALL_BINARY_TARGETS.map((target): string => target.arch).filter((arch) =>
+          arch.startsWith(host)
+        ),
+        `expected runtime-<sha>-${host}* to select exactly the probed platforms`
+      ).toEqual(platforms);
+    }
+    expect(probe).toContain(
+      'pattern: runtime-$' + '{{ inputs.source_sha }}-$' + '{{ matrix.host }}*'
+    );
+    expect(probe).toContain('for platform in $PLATFORMS; do');
+    expect(probe).toContain('path: .mango/runtime-versions/*.json');
   });
 
   test('the runtime producer records one receipt per target for distribution pairing', () => {

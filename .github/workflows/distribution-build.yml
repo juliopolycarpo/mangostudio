@@ -86,7 +86,9 @@ jobs:
   runtime-version:
     # The runtime producers cross-link these targets. Execute --version on
     # their matching hosts and bind the result to the same runtime bytes.
-    name: Verify runtime version ${{ matrix.platform }}
+    # One job per host: both Linux ARM64 targets run on the same ARM64 runner,
+    # so one job probes the gnu and the musl runtime.
+    name: Verify runtime version ${{ matrix.host }}
     needs: [runtime]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 8
@@ -94,13 +96,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: linux-arm64
+          - host: linux-arm64
+            platforms: linux-arm64 linux-arm64-musl
             runner: ubuntu-24.04-arm
-          - platform: linux-arm64-musl
-            runner: ubuntu-24.04-arm
-          - platform: darwin-x64
+          - host: darwin-x64
+            platforms: darwin-x64
             runner: macos-15-intel
-          - platform: windows-arm64
+          - host: windows-arm64
+            platforms: windows-arm64
             runner: windows-11-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -110,26 +113,39 @@ jobs:
       - uses: ./.github/actions/distribution-source # zizmor: ignore[self-repository] load the action from the selected source checkout
         timeout-minutes: 1
       - uses: ./.github/actions/setup-bun # zizmor: ignore[self-repository] load the action from the selected source checkout
-      - name: Download the matching Rust runtime
+      # The host id is a prefix of exactly the platforms this job probes:
+      # `linux-arm64*` selects the gnu and musl runtimes, the other two one each.
+      - name: Download the matching Rust runtimes
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: runtime-${{ inputs.source_sha }}-${{ matrix.platform }}
+          pattern: runtime-${{ inputs.source_sha }}-${{ matrix.host }}*
+          merge-multiple: true
           path: .mango/runtime-prebuilt
-      - name: Verify the runtime version on the target host
+      - name: Verify each runtime version on the target host
+        shell: bash
         env:
-          PLATFORM: ${{ matrix.platform }}
+          PLATFORMS: ${{ matrix.platforms }}
           SOURCE_SHA: ${{ inputs.source_sha }}
           VERSION: ${{ inputs.version }}
           RUNTIME_PROFILE: ${{ inputs.runtime_profile }}
-        run: bun --no-install ./scripts/release/verify-native-runtime.ts
-      - name: Upload the native runtime version receipt
+        # Every platform is probed even after one fails, so a single run names
+        # each broken runtime.
+        run: |
+          set -uo pipefail
+          failed=0
+          for platform in $PLATFORMS; do
+            PLATFORM="$platform" bun --no-install ./scripts/release/verify-native-runtime.ts || failed=1
+          done
+          exit "$failed"
+      - name: Upload the native runtime version receipts
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: runtime-version-${{ inputs.source_sha }}-${{ matrix.platform }}
-          path: .mango/runtime-versions/${{ matrix.platform }}.json
+          name: runtime-version-${{ inputs.source_sha }}-${{ matrix.host }}
+          # One `<platform>.json` per probed platform at the artifact root.
+          path: .mango/runtime-versions/*.json
           include-hidden-files: true
           retention-days: 1
-          # A retried probe may already have uploaded this source and target receipt.
+          # A retried probe may already have uploaded this source and host receipts.
           overwrite: true
           if-no-files-found: error
 
