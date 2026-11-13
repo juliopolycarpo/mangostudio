@@ -33,6 +33,7 @@ import {
   FAKE_TERMINAL_MANIFEST,
   FakeTerminalRuntimeClient,
 } from '../../support/mocks/fake-terminal-runtime-client';
+import { BASE_TEST_AUTH } from '../../support/setup/test-environment';
 
 interface TestUser {
   id: string;
@@ -85,6 +86,7 @@ describe('terminal HTTP routes', () => {
 
   it('refuses to open a terminal when [terminal] is disabled', async () => {
     loadConfigForTest({
+      auth: { ...BASE_TEST_AUTH },
       terminal: {
         enabled: false,
         idleTimeoutMinutes: 30,
@@ -110,7 +112,7 @@ describe('terminal HTTP routes with a fake runtime', () => {
   let routes: ReturnType<typeof createTerminalRoutes>;
 
   beforeEach(() => {
-    loadConfigForTest({});
+    loadConfigForTest({ auth: { ...BASE_TEST_AUTH } });
     client = new FakeTerminalRuntimeClient();
     service = createTerminalSessionService({
       getConfig: () => ({
@@ -130,9 +132,6 @@ describe('terminal HTTP routes with a fake runtime', () => {
   });
 
   it('rejects mixed login and shell selection with a Hub validation error before RPC', async () => {
-    loadConfigForTest({
-      auth: { secret: 'test-secret-at-least-32-characters-long', url: 'http://localhost:3001' },
-    });
     const user = await insertTestUser();
     client = new FakeTerminalRuntimeClient({
       manifest: { ...FAKE_TERMINAL_MANIFEST, terminalLoginArgv: true },
@@ -451,7 +450,7 @@ const ATTESTED_LOCAL: RuntimeCapabilityManifest['identityIsolation'] = {
 
 describe('terminal HTTP routes on a shared Local runtime', () => {
   it('refuses a Local terminal once a second account has connected to the same runtime', async () => {
-    loadConfigForTest({});
+    loadConfigForTest({ auth: { ...BASE_TEST_AUTH } });
     const manager = new RuntimeConnectionManager({
       resolveEnvironment: (userId) =>
         Promise.resolve({

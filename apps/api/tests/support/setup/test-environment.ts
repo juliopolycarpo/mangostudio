@@ -53,6 +53,16 @@ import { registerApplicationServices } from '../../../src/services/register-appl
  */
 export const SPLIT_DEPLOYMENT_TEST_ORIGIN = 'https://studio.test';
 
+/**
+ * The auth block every test starts from. `loadConfigForTest({})` replaces the
+ * installed config with bare defaults (empty secret), so a test that rebuilds
+ * config and then reaches `getAuth()` re-supplies this instead of retyping it.
+ */
+export const BASE_TEST_AUTH = {
+  secret: 'test-secret-at-least-32-characters-long',
+  url: 'http://localhost:3001',
+} as const;
+
 /** Set synchronously once config + services are in place (DB migrations follow). */
 let initialized = false;
 /** Memoizes the one-time async setup so repeated calls share a single run. */
@@ -68,10 +78,7 @@ function installBaseTestConfig(): void {
   // so a suite run never collides with a real `codex login`.
   setChatGptLoopbackPortForTest(0);
   loadConfigForTest({
-    auth: {
-      secret: 'test-secret-at-least-32-characters-long',
-      url: 'http://localhost:3001',
-    },
+    auth: { ...BASE_TEST_AUTH },
     // Same host/port the defaults already produce; the list is what differs.
     server: {
       host: '0.0.0.0',
