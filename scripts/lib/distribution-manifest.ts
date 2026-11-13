@@ -24,7 +24,7 @@ export const DISTRIBUTION_MANIFEST_FILE = 'distribution-manifest.json';
 
 /**
  * Which cargo profile built the bundle's runtimes. Only `shipping` bytes may be
- * published or promoted; `light` (thin LTO, more codegen units) exists for pull
+ * published or promoted; `light` (no LTO, more codegen units) exists for pull
  * request bundles and is indistinguishable from `shipping` by size, name or
  * digest alone, which is why the manifest records it.
  */
