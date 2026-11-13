@@ -1,23 +1,14 @@
-name: Setup Mango (Bun + cache + install)
+name: Setup Mango (Bun + install)
 description: >
-  Install the Bun build named by .bun-version, restore its install cache when eligible, and
-  run a frozen install. Callers must run actions/checkout first.
+  Install the Bun build named by .bun-version and run a frozen install without a package-cache
+  transfer. Callers must run actions/checkout first.
 inputs:
   cache-epoch:
     description: Repository-wide cache epoch used for emergency invalidation.
     required: true
 outputs:
-  cache-hit:
-    description: "'true' when the primary Bun install cache key matched"
-    value: ${{ steps.cache.outputs.cache-hit }}
-  primary-key:
-    description: Primary cache key used by this run.
-    value: ${{ steps.cache.outputs.primary-key }}
-  restored-prefix:
-    description: Trusted main-cache prefix considered during restore.
-    value: ${{ steps.cache.outputs.restored-prefix }}
   bun-version:
-    description: Resolved Bun revision used for cache keys and downstream families.
+    description: Resolved Bun revision used by downstream cache keys.
     value: ${{ steps.toolchain.outputs.bun }}
 runs:
   using: composite
@@ -41,19 +32,9 @@ runs:
       shell: bash
       run: echo '### Cache policy' >> "$GITHUB_STEP_SUMMARY"
 
-    # Frozen installs with an empty cache were faster on the Linux, macOS, and
-    # Windows x64 and ARM64 runners in the hosted comparisons (#2025, #2057).
-    - id: cache
-      name: Restore Bun install cache
-      if: runner.arch != 'X64' && runner.arch != 'ARM64'
-      uses: ./.github/actions/cache-scoped # zizmor: ignore[self-repository] use cache policy from the selected source checkout
-      with:
-        mode: restore
-        family: bun
-        path: ~/.bun/install/cache
-        validity: ${{ steps.toolchain.outputs.bun }}-${{ hashFiles('bun.lock') }}
-        cache-epoch: ${{ inputs.cache-epoch }}
-
+    # No Bun package-cache transfer: a frozen install from an empty cache beat
+    # restore-then-install on every runner class this repository uses
+    # (#2025, #2057).
     - name: Disable Turbo telemetry
       shell: bash
       run: echo "TURBO_TELEMETRY_DISABLED=1" >> "$GITHUB_ENV"
@@ -64,34 +45,3 @@ runs:
         echo "::group::bun install"
         bun install --frozen-lockfile
         echo "::endgroup::"
-
-    # Save inline: nested actions/cache post steps lose their path input.
-    # Publish only trusted main entries after the frozen install succeeds.
-    # A parallel caller may have completed this key since our initial restore.
-    # Check before compressing; the advisory lookup must not prevent another
-    # eligible writer from saving if it fails or the first writer never finishes.
-    - id: bun-save-check
-      name: Check whether another Bun writer completed this key
-      if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache.outcome != 'skipped' && steps.cache.outputs.cache-hit != 'true'
-      continue-on-error: true
-      uses: ./.github/actions/cache-scoped # zizmor: ignore[self-repository] use cache policy from the selected source checkout
-      with:
-        mode: restore
-        family: bun
-        path: ~/.bun/install/cache
-        validity: ${{ steps.toolchain.outputs.bun }}-${{ hashFiles('bun.lock') }}
-        cache-epoch: ${{ inputs.cache-epoch }}
-        lookup-only: "true"
-        exact-restore: "true"
-
-    # Simultaneous lookup misses can still race at reserve. Keep the cache
-    # action's normal collision/upload diagnostics and never serialize installs.
-    - name: Save Bun install cache
-      if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.cache.outcome != 'skipped' && steps.cache.outputs.cache-hit != 'true' && (steps.bun-save-check.outcome != 'success' || steps.bun-save-check.outputs.cache-hit != 'true')
-      uses: ./.github/actions/cache-scoped # zizmor: ignore[self-repository] use cache policy from the selected source checkout
-      with:
-        mode: save
-        family: bun
-        path: ~/.bun/install/cache
-        validity: ${{ steps.toolchain.outputs.bun }}-${{ hashFiles('bun.lock') }}
-        cache-epoch: ${{ inputs.cache-epoch }}
