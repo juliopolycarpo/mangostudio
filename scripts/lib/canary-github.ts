@@ -242,7 +242,11 @@ export class CanaryGitHub {
     if (result.exitCode !== 0) {
       // Do not echo arbitrary CLI output: a transport diagnostic can include a
       // signed asset URL or an inherited credential.
-      throw new Error(`GitHub command failed: expected exit0; received ${result.exitCode}`);
+      // Only a bare status code is safe to surface; gh prints it as "HTTP 422".
+      const status = /\bHTTP (\d{3})\b/.exec(result.stderr)?.[1];
+      throw new Error(
+        `GitHub command failed: expected exit0; received ${result.exitCode}${status ? ` (HTTP ${status})` : ''}`
+      );
     }
     return result;
   }

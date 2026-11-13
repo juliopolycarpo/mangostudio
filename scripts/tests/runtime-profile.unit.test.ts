@@ -198,7 +198,7 @@ describe('artifact runtime profile guard', () => {
   });
 
   test.each([
-    ['CARGO_PROFILE_RELEASE_LTO', 'thin', 'lto=thin, codegen-units=<unset>'],
+    ['CARGO_PROFILE_RELEASE_LTO', 'off', 'lto=off, codegen-units=<unset>'],
     ['CARGO_PROFILE_RELEASE_CODEGEN_UNITS', '16', 'lto=<unset>, codegen-units=16'],
   ])('shipping refuses %s=%j', (key, value, received) => {
     const result = runGuard('push', 'shipping', { [key]: value });
@@ -219,14 +219,15 @@ describe('artifact runtime profile guard', () => {
 
   test.each([
     ['CARGO_PROFILE_RELEASE_LTO', 'fat', 'lto=fat, codegen-units=16'],
-    ['CARGO_PROFILE_RELEASE_CODEGEN_UNITS', '1', 'lto=thin, codegen-units=1'],
+    ['CARGO_PROFILE_RELEASE_LTO', 'thin', 'lto=thin, codegen-units=16'],
+    ['CARGO_PROFILE_RELEASE_CODEGEN_UNITS', '1', 'lto=off, codegen-units=1'],
     ['CARGO_PROFILE_RELEASE_LTO', '', 'lto=<unset>, codegen-units=16'],
-    ['CARGO_PROFILE_RELEASE_CODEGEN_UNITS', '', 'lto=thin, codegen-units=<unset>'],
+    ['CARGO_PROFILE_RELEASE_CODEGEN_UNITS', '', 'lto=off, codegen-units=<unset>'],
   ])('light refuses %s=%j', (key, value, received) => {
     const result = runGuard('pull_request', 'light', { [key]: value });
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain(
-      `expected light profile: lto=thin, codegen-units=16 | received: ${received}`
+      `expected light profile: lto=off, codegen-units=16 | received: ${received}`
     );
     expect(result.stdout.toString()).not.toContain('runtime profile: light');
   });
@@ -234,9 +235,7 @@ describe('artifact runtime profile guard', () => {
   test('PRs may use light and every event may use shipping', () => {
     const light = runGuard('pull_request', 'light');
     expect(light.exitCode).toBe(0);
-    expect(light.stdout.toString()).toContain(
-      'runtime profile: light (lto=thin, codegen-units=16)'
-    );
+    expect(light.stdout.toString()).toContain('runtime profile: light (lto=off, codegen-units=16)');
     for (const event of ['pull_request', 'push', 'schedule', 'workflow_dispatch', 'release']) {
       const shipping = runGuard(event, 'shipping');
       expect(shipping.exitCode).toBe(0);
@@ -279,7 +278,7 @@ describe('cache-seed runtime mode', () => {
     expect(result.stderr.toString()).toBe('');
     expect(result.exitCode).toBe(0);
     expect(result.stdout.toString()).toContain(
-      'runtime profile: light (lto=thin, codegen-units=16)'
+      'runtime profile: light (lto=off, codegen-units=16)'
     );
     expect(result.stdout.toString()).toContain('runtime mode: cache-seed');
   });
@@ -333,13 +332,14 @@ describe('cache-seed runtime mode', () => {
 
   test.each([
     ['CARGO_PROFILE_RELEASE_LTO', 'fat', 'lto=fat, codegen-units=16'],
-    ['CARGO_PROFILE_RELEASE_CODEGEN_UNITS', '1', 'lto=thin, codegen-units=1'],
+    ['CARGO_PROFILE_RELEASE_LTO', 'thin', 'lto=thin, codegen-units=16'],
+    ['CARGO_PROFILE_RELEASE_CODEGEN_UNITS', '1', 'lto=off, codegen-units=1'],
     ['CARGO_PROFILE_RELEASE_LTO', '', 'lto=<unset>, codegen-units=16'],
   ])('a seed refuses %s=%j so its key cannot drift from the PR key', (key, value, received) => {
     const result = runGuard('push', 'light', { [key]: value }, SEED_CONTEXT);
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain(
-      `expected light profile: lto=thin, codegen-units=16 | received: ${received}`
+      `expected light profile: lto=off, codegen-units=16 | received: ${received}`
     );
   });
 });
@@ -366,7 +366,7 @@ describe('runtime profile callers and cache isolation', () => {
     expect(workflow).toMatch(/\n {6}profile:\n(?: {8}.*\n)*? {8}default: shipping\n/);
     const runtime = extractJobBlock(workflow, 'runtime');
     expect(jobProfileEnv('light')).toEqual({
-      CARGO_PROFILE_RELEASE_LTO: 'thin',
+      CARGO_PROFILE_RELEASE_LTO: 'off',
       CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16',
     });
     expect(jobProfileEnv('shipping')).toEqual({});
