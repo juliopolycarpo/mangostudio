@@ -20,7 +20,45 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  changes:
+    # Pull requests skip the Rust legs when no Rust source, manifest or CodeQL
+    # input changed. The JavaScript leg always runs, so the required code
+    # scanning check always receives an analysis. Pushes to main, the weekly
+    # schedule and manual runs analyze every leg: main's results are the
+    # baseline a pull request is compared with, and Canary qualification
+    # requires all three analyses on the main push run.
+    name: Detect CodeQL-relevant changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      rust: ${{ steps.changed.outputs.rust }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: $/.github/actions/setup-bun
+
+      - id: changed
+        name: Classify changed paths
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # Dependency-free script; runs without `bun install`. It refuses an
+        # empty diff instead of skipping a leg.
+        run: |
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "rust=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          bun ./scripts/ci/changed-paths.ts collect "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/changed-files"
+          bun ./scripts/ci/changed-paths.ts codeql "$RUNNER_TEMP/changed-files" | tee -a "$GITHUB_OUTPUT"
+
   analyze:
+    # Independent of the changes job: it runs on every event and starts at once.
     name: Analyze (${{ matrix.label }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
@@ -38,6 +76,42 @@ jobs:
             build-mode: none
             queries: security-extended
             category: "/language:javascript-typescript"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Extraction needs no repository build. Keep build-mode explicit so a
+      # future language must choose its own build path instead of inheriting
+      # an accidental one.
+      - uses: github/codeql-action/init@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: ${{ matrix.queries }}
+          # Extraction scope only; the query suite stays in the matrix above.
+          config-file: ./.github/codeql/config.yml
+
+      - uses: github/codeql-action/analyze@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
+        with:
+          category: ${{ matrix.category }}
+
+  analyze-rust:
+    # A separate job because a job-level `if` cannot read `matrix`, and a
+    # matrix `exclude` cannot remove `include` entries.
+    name: Analyze (${{ matrix.label }})
+    needs: [changes]
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    permissions:
+      actions: read # let CodeQL read workflow metadata for its analysis
+      contents: read # checkout of the analyzed source
+      security-events: write # upload SARIF results to code scanning
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
           # The runtime host and the protocol crate are Rust. build-mode none
           # extracts from source, so no cargo build or toolchain setup runs here.
           # Extraction only follows the modules the runner's own target
@@ -60,9 +134,6 @@ jobs:
         with:
           persist-credentials: false
 
-      # Neither language's extraction needs a repository build. Keep build-mode
-      # explicit so a future language must choose its own build path instead
-      # of inheriting an accidental one.
       - uses: github/codeql-action/init@1fc58d04a4d4374f921bdac573c3811c240f9c26 # v4.39.2
         with:
           languages: ${{ matrix.language }}

@@ -48,6 +48,32 @@ describe('security workflows', () => {
     expectWorkflowHasPinnedAction(workflow, 'github/codeql-action/analyze');
   });
 
+  test('CodeQL always analyzes JavaScript and gates only the Rust legs on pull requests', () => {
+    const workflow = readText('.github/workflows/codeql.yml');
+    const blocks = Object.fromEntries(
+      extractJobBlocks(workflow).map(({ job, block }) => [job, block])
+    );
+    expect(Object.keys(blocks).sort()).toEqual(['analyze', 'analyze-rust', 'changes']);
+
+    // The required code scanning check needs an analysis on every pull
+    // request, so the JavaScript leg must not wait for or depend on the gate.
+    expect(blocks.analyze).not.toContain('needs:');
+    expect(blocks.analyze).not.toMatch(/^ {4}if:/m);
+    expect(blocks.analyze).toContain('language: javascript-typescript');
+    expect(blocks.analyze).not.toContain('language: rust');
+
+    expect(blocks['analyze-rust']).toContain('needs: [changes]');
+    expect(blocks['analyze-rust']).toContain("if: needs.changes.outputs.rust == 'true'");
+    expect(blocks['analyze-rust']).not.toContain('language: javascript-typescript');
+
+    // Every event that is not a pull request analyzes all legs: main is the
+    // baseline, and Canary qualification requires the three analyses there.
+    expect(blocks.changes).toContain(
+      'if [ "$EVENT_NAME" != "pull_request" ]; then\n            echo "rust=true" >> "$GITHUB_OUTPUT"'
+    );
+    expect(blocks.changes).toContain('bun ./scripts/ci/changed-paths.ts codeql');
+  });
+
   test('dependency review is a PR-only vulnerability gate with no license policy', () => {
     const workflow = readText('.github/workflows/dependency-review.yml');
 

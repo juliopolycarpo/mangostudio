@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { decodeChangedPaths } from '../lib/changed-paths';
-import { distributionRelevant, releaseRelevance } from '../lib/ci-lanes';
+import { codeqlRustRelevant, distributionRelevant, releaseRelevance } from '../lib/ci-lanes';
 import { ROOT_DIR } from '../lib/config';
 import { touchesProtocolSurface } from '../lib/protocol';
 import { classifyChangedPaths, RUST_WORKSPACE_PATHS } from '../lib/rust-lanes';
@@ -306,6 +306,44 @@ describe('relevance policy parity', () => {
       steps[checkout + 1]?.trim().split(' # ', 1)[0],
       `expected a scoped checkout in ${workflow} / ${job}`
     ).toBe('- uses: ./.github/actions/distribution-source');
+  });
+
+  test.each([
+    'crates/mangostudio-runtime/src/main.rs',
+    'crates/mango-protocol/Cargo.toml',
+    'Cargo.toml',
+    'Cargo.lock',
+    'rust-toolchain.toml',
+    '.cargo/config.toml',
+    'scripts/tests/support/fixture.rs',
+    '.github/workflows/codeql.yml',
+    '.github/codeql/config.yml',
+    'scripts/lib/ci-lanes.ts',
+    'scripts/lib/changed-paths.ts',
+    'scripts/ci/changed-paths.ts',
+  ])('a change to %j selects the CodeQL Rust legs', (path) => {
+    expect(codeqlRustRelevant([path]), path).toBe(true);
+    expect(codeqlRustRelevant(['docs/guide.md', path]), `docs/guide.md + ${path}`).toBe(true);
+  });
+
+  test.each([
+    'apps/api/src/index.ts',
+    'apps/frontend/src/main.tsx',
+    'docs/reference/ci.md',
+    '.github/workflows/ci.yml',
+    '.github/dependabot.yml',
+    'bun.lock',
+    'scripts/lib/rust-lanes.ts',
+    'docs/crates/overview.md',
+  ])('a change to %j alone skips the CodeQL Rust legs', (path) => {
+    expect(codeqlRustRelevant([path]), path).toBe(false);
+  });
+
+  test('the CodeQL classifier refuses an empty or malformed diff instead of skipping a leg', () => {
+    expect(() => codeqlRustRelevant([])).toThrow('changed-paths: empty diff');
+    expect(() => codeqlRustRelevant(['../Cargo.toml'])).toThrow(
+      'changed-paths: invalid repository-relative path: "../Cargo.toml"'
+    );
   });
 
   test.each(['tsconfig.json', 'tsconfig.native-build.json'])(
