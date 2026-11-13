@@ -16,6 +16,8 @@ function expectWorkflowHasPinnedAction(workflow: string, action: string): void {
 interface DependabotConfig {
   updates: Array<{
     'package-ecosystem': string;
+    schedule?: { interval: string };
+    groups?: Record<string, { patterns?: string[] }>;
     ignore?: Array<{ 'dependency-name': string; versions?: string[] }>;
   }>;
 }
@@ -126,6 +128,23 @@ describe('security workflows', () => {
     expect(bunBlock).toContain('interval: weekly');
     expect(bunBlock).toContain('dev-minor-patch:');
     expect(bunBlock).toContain('prod-minor-patch:');
+  });
+
+  test('Dependabot opens one weekly pull request for ungrouped action bumps', () => {
+    const config = Bun.YAML.parse(readText('.github/dependabot.yml')) as DependabotConfig;
+    const actions = config.updates.find(
+      (update) => update['package-ecosystem'] === 'github-actions'
+    );
+
+    // A daily ungrouped schedule opened one PR per directory per release, and
+    // each PR runs every CI lane.
+    expect(actions?.schedule?.interval).toBe('weekly');
+
+    // Dependabot assigns a dependency to the first group whose patterns match,
+    // so the catch-all has to come after the codeql-action pair it must not absorb.
+    const groups = Object.entries(actions?.groups ?? {});
+    expect(groups.map(([name]) => name)).toEqual(['codeql-action', 'actions']);
+    expect(groups.at(-1)?.[1].patterns).toEqual(['*']);
   });
 
   test('Dependabot allows TypeBox updates after the Elysia compiler compatibility fix', () => {
