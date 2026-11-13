@@ -326,8 +326,8 @@ stay the same. Rust toolchains remain:
   [runtime-metrics.md](runtime-metrics.md) for the size and build-time
   trade-off. It keeps `panic = "unwind"` on purpose: handler panic isolation
   catches unwinds, so the crate refuses to compile under `panic = "abort"`.
-  Pull-request runtime artifacts override only LTO and codegen units to thin
-  LTO and 16 units, including PRs that touch Rust. Main, tag releases, Canary,
+  Pull-request runtime artifacts override only LTO and codegen units to
+  `lto=off` and 16 units, including PRs that touch Rust. Main, tag releases, Canary,
   scheduled distribution checks, and scheduled/manual release dry runs keep
   fat LTO and one unit. The reusable artifact builder rejects `light` on every
   event except `pull_request`, before checkout or cache access.
@@ -668,11 +668,13 @@ be confirmed before another mutation. Initial absence audits remain immediate.
 Identity, integrity, authorization and other HTTP failures still stop publication.
 Exhausted visibility waits fail and retain the original-byte recovery procedure.
 
-Npm verification and tag promotion have one five-minute monotonic wall-clock TTL,
+Npm verification and tag promotion have one twenty-minute monotonic wall-clock TTL,
+sized for npm serving a just-published version up to ten minutes late,
 including HTTP reads, body downloads, source-ordering checks and tag commands.
 Post-publication reads retry HTTP 404, 408, 429 and 5xx with backoff from one second
-to 30 seconds, sharing the deadline across all seven packages and final tag
-confirmations. Valid stale or absent canary tags are polled after successful writes;
+to one minute, sharing the deadline across all seven packages and final tag
+confirmations. The delays total seventeen minutes, so a version that never
+appears ends as a missing-package failure inside the TTL. Valid stale or absent canary tags are polled after successful writes;
 mutations are never retried by this polling loop. Logs identify the package or URL,
 attempt, HTTP status, elapsed/remaining time and next delay, then report a settled
 read or exhaustion. Expiry aborts outstanding reads/commands and fails with recovery

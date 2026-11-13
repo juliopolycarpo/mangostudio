@@ -2000,7 +2000,7 @@ be conditional):
 
 `runtime-build.yml` defaults to the shipping profile: fat LTO and one codegen
 unit. CI's distribution and PR release dry runs explicitly request `light` on
-`pull_request`: thin LTO and 16 units, including PRs that change Rust. The
+`pull_request`: no LTO (`lto=off`) and 16 units, including PRs that change Rust. The
 binary-smoke rebuild passes the same selection, but it runs only from
 `workflow_dispatch`, so it resolves to shipping. The overrides live at job scope, so
 rust-cache's CARGO environment hash separates both exact and fallback keys by
@@ -2009,9 +2009,18 @@ the light entry comes from the main-push seed described below.
 Shipping receives an empty override map, preserving its existing Cargo
 defaults and cache environment identity.
 
+The light profile drops LTO because the ThinLTO pass over the whole dependency
+graph dominates a warm rebuild, and a PR binary is only smoked, never published.
+Only `lto` and `codegen-units` change: `panic = "unwind"`, `strip = true` and the
+per-package `opt-level = "s"` overrides still come from the root manifest. The
+trial is in [light-profile-lto.md](measurements/light-profile-lto.md). Because
+rust-cache hashes `CARGO_*` into its key, the `lto=off` profile has a new key and
+restores nothing until the first main-push seed saves it. The PR that changes the
+profile and every PR before that seed build cold.
+
 The builder rejects empty/unknown profiles and every non-PR light artifact
 request before checkout, Cargo setup, or cache access. Light requests also
-require the actual Cargo overrides to be thin LTO and 16 codegen units, and
+require the actual Cargo overrides to be `lto=off` and 16 codegen units, and
 shipping requests reject any LTO or codegen-unit override. Main,
 tags, schedules, manual runs, and publication remain shipping. Main is the first shipping
 build of a PR change; its runtime and complete smoke lanes remain mandatory
@@ -2037,7 +2046,7 @@ installed before the writer runs. `runtime-profile.unit.test.ts` checks the shar
 key inputs and reproduces rust-cache v2.9.3's hash for both paths and every target.
 
 The guard accepts `cache-seed` only for a `push` to `refs/heads/main`, profile
-`light` with thin LTO and 16 units, the cache on, and an empty
+`light` with LTO off and 16 units, the cache on, and an empty
 `artifact_prefix`. Artifact mode still rejects light on every event except
 `pull_request` and requires a prefix. The seed has no upload step to reach: the
 single `actions/upload-artifact` step is conditional on `mode == 'artifact'`,
