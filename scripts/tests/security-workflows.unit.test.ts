@@ -16,6 +16,8 @@ function expectWorkflowHasPinnedAction(workflow: string, action: string): void {
 interface DependabotConfig {
   updates: Array<{
     'package-ecosystem': string;
+    schedule?: { interval: string; day?: string };
+    groups?: Record<string, { patterns?: string[]; 'update-types'?: string[] }>;
     ignore?: Array<{ 'dependency-name': string; versions?: string[] }>;
   }>;
 }
@@ -126,6 +128,31 @@ describe('security workflows', () => {
     expect(bunBlock).toContain('interval: weekly');
     expect(bunBlock).toContain('dev-minor-patch:');
     expect(bunBlock).toContain('prod-minor-patch:');
+  });
+
+  test('Dependabot opens one weekly pull request for action bumps outside the CodeQL pair', () => {
+    const config = Bun.YAML.parse(readText('.github/dependabot.yml')) as DependabotConfig;
+    const actions = config.updates.find(
+      (update) => update['package-ecosystem'] === 'github-actions'
+    );
+
+    // A daily ungrouped schedule opened one PR per directory per release, and
+    // each PR runs every CI lane. Weekly without a day means Monday, the
+    // morning the bun, cargo and docker updates already open theirs.
+    expect(actions?.schedule).toMatchObject({ interval: 'weekly', day: 'wednesday' });
+
+    // Dependabot assigns a dependency to the first group whose patterns match,
+    // so the catch-all has to come after the codeql-action pair, and that
+    // group's own pattern must stay narrow or it would absorb everything.
+    const groups = Object.entries(actions?.groups ?? {});
+    expect(groups.map(([name]) => name)).toEqual(['codeql-action', 'actions']);
+    // No update-types on the pair: init and analyze move together on a major too.
+    expect(groups[0]?.[1]).toEqual({ patterns: ['github/codeql-action*'] });
+    // A major must not ride in with the week's patches.
+    expect(groups.at(-1)?.[1]).toEqual({
+      patterns: ['*'],
+      'update-types': ['minor', 'patch'],
+    });
   });
 
   test('Dependabot allows TypeBox updates after the Elysia compiler compatibility fix', () => {
