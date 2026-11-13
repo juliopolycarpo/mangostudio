@@ -35,6 +35,18 @@ the distribution identity from `scripts/ci/distribution-identity.ts`: `version`,
 `release-dry-run`, both smoke lanes and the cache seed read the identity from
 `needs.changes.outputs`.
 
+It also restores the test timings baseline once and uploads it as
+`test-timings-baseline-<run_attempt>` (30 days), then passes the name to
+`test.yml` as the required `timings_artifact` input. The shard and frontend jobs
+download it with no intra-workflow `needs`, so they queue as soon as the
+`Local Runtime` build finishes instead of waiting on a separate resolver job. A
+miss records `cold` in `source-key.txt` for every consumer. The validity segment
+`test-shard-<SHARD_COUNT>` is the one main's merge job saves under, so the
+`SHARD_COUNT` in `ci.yml`'s `changes` job must equal the one in `test.yml`
+(`timings-cache-writes.unit.test.ts` pins this). A failed-job rerun does not
+re-run `changes`, so it keeps the attempt-1 artifact name and the same file
+partition; "Re-run all jobs" restores again and uploads the `-2` snapshot.
+
 Distribution skips use an allowlist in [`scripts/lib/ci-lanes.ts`](../../scripts/lib/ci-lanes.ts),
 not a broad rule that every Markdown change is irrelevant. On PRs, CI's `changes` job
 collects a validated, nonempty diff with both sides of renames and emits
@@ -407,7 +419,7 @@ whose import graph stays inside the checkout (no `node_modules`).
 
 | Workflow           | Job(s)               | Setup                          |
 | ------------------ | -------------------- | ------------------------------ |
-| `ci.yml`           | `gate`, `changes`    | `oven-sh/setup-bun` only       |
+| `ci.yml`           | `gate`               | `oven-sh/setup-bun` only       |
 | `smoke-binary.yml` | `binary` (default)   | `oven-sh/setup-bun` only       |
 | `smoke-binary.yml` | `binary` (`rebuild`) | `setup-mango` (full toolchain) |
 

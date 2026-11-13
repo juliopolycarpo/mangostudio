@@ -418,7 +418,7 @@ their own logs and failure receipts still exercise retained findings.
 **Why "re-run failed jobs" used to re-hang while "re-run all jobs" passed:**
 the hang follows specific files, and the file-to-shard partition is a function
 of the resolved timings baseline. Rerunning only failed jobs reuses the
-snapshot from the successful `resolve-timings` job, so the trigger files
+snapshot from the successful `changes` (Preflight) job in `ci.yml`, so the trigger files
 land on the same shard. Rerunning all jobs can pick up a newer baseline
 that moves those files.
 
@@ -493,7 +493,8 @@ existing 210-second watchdog.
 | 8      | 342s            | 277s to 1248s  | 759s                       | 433s                      | 62s                   |
 
 Test runner-seconds sum the elapsed execution of every `Test /` job, including
-the frontend, timings resolver and merge. Summed shard queue measures each
+the frontend, timings resolver and merge. The resolver was a separate job when
+these were measured; it is now a step of `ci.yml`'s Preflight job. Summed shard queue measures each
 numbered shard's `created_at` to `started_at`; it is aggregate waiting, not
 the workflow's critical path.
 

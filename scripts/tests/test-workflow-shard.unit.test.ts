@@ -7,12 +7,14 @@ import {
   extractStepBlocks,
   parseNeedsList,
 } from './support/workflow-blocks';
+import { workflowFiles } from './support/workflow-files';
 
 // The sharded Test workflow has one failure mode that is silent by
 // construction: a run that covers a fraction of the files and exits 0. Every
 // assertion here guards a way in.
 
 const workflow = readText('.github/workflows/test.yml');
+const ci = readText('.github/workflows/ci.yml');
 
 // Placeholder openers assembled out of band so the literal never appears in a
 // plain string — Bun's no-template-curly-in-string flags those. Same trick as
@@ -44,11 +46,7 @@ describe('reruns replace previous test evidence', () => {
   ] as const)('%s replaces artifacts with the same name before uploading', (path, names) => {
     const uploads = extractJobBlocks(readText(path))
       .flatMap(({ block }) => extractStepBlocks(block))
-      .filter(
-        (step) =>
-          step.includes('uses: actions/upload-artifact@') &&
-          !step.includes(`name: ${TIMINGS_SNAPSHOT}`)
-      );
+      .filter((step) => step.includes('uses: actions/upload-artifact@'));
     expect(uploads.map((step) => /^ {10}name: (.+)$/m.exec(step)?.[1])).toEqual([...names]);
     // A failed-job rerun can otherwise leave duplicate names and the merger
     // can download the earlier failed receipt even after the shard passed.
@@ -58,11 +56,12 @@ describe('reruns replace previous test evidence', () => {
 
 describe('test artifacts used by targeted reruns', () => {
   test.each([
-    ['resolve-timings', TIMINGS_SNAPSHOT],
-    ['shard', `test-shard-${EXPR} matrix.shard }}`],
-    ['frontend', 'test-shard-frontend'],
-  ])('%s retains %s for the GitHub rerun window', (job, artifact) => {
-    const upload = extractStepBlocks(extractJobBlock(workflow, job)).find(
+    ['ci.yml', 'changes', TIMINGS_SNAPSHOT],
+    ['test.yml', 'shard', `test-shard-${EXPR} matrix.shard }}`],
+    ['test.yml', 'frontend', 'test-shard-frontend'],
+  ])('%s job %s retains %s for the GitHub rerun window', (file, job, artifact) => {
+    const source = file === 'ci.yml' ? ci : workflow;
+    const upload = extractStepBlocks(extractJobBlock(source, job)).find(
       (step) =>
         step.includes('uses: actions/upload-artifact@') &&
         step.includes(`          name: ${artifact}\n`)
@@ -203,38 +202,88 @@ describe('Test workflow frontend job', () => {
 });
 
 describe('shared test timings', () => {
-  test('uploads one immutable snapshot on cache hits and cold runs', () => {
-    const resolver = extractJobBlock(workflow, 'resolve-timings');
-    expect(resolver).toContain(`artifact: ${TIMINGS_SNAPSHOT}`);
-    expect(resolver).toContain(
+  const preflight = extractJobBlock(ci, 'changes');
+
+  test('the Preflight job uploads one immutable snapshot on cache hits and cold runs', () => {
+    expect(preflight).toContain(`timings_artifact: ${TIMINGS_SNAPSHOT}`);
+    expect(preflight).toContain(
       `"${SHELL}TIMINGS_KEY:-cold}" > .mango/artifacts/timings/source-key.txt`
     );
-    const snapshot = extractStepBlocks(resolver).find((step) =>
-      step.includes('uses: actions/upload-artifact@')
+    const steps = extractStepBlocks(preflight);
+    const snapshot = steps.find(
+      (step) =>
+        step.includes('uses: actions/upload-artifact@') &&
+        step.includes(`name: ${TIMINGS_SNAPSHOT}`)
     );
-    expect(snapshot).toContain(`name: ${TIMINGS_SNAPSHOT}`);
+    expect(
+      snapshot,
+      `expected an upload named ${TIMINGS_SNAPSHOT} in the changes job`
+    ).toBeDefined();
     expect(snapshot).toContain('path: .mango/artifacts/timings');
     expect(snapshot).toContain('if-no-files-found: error');
+    expect(snapshot).toContain('include-hidden-files: true');
     expect(snapshot).not.toContain('overwrite: true');
     expect(snapshot).not.toMatch(/^\s+if:/m);
+    // Restore, then record the key, then upload: the cold marker must exist
+    // before the snapshot is frozen.
+    const restore = steps.findIndex((step) => step.includes('family: timings'));
+    const record = steps.findIndex((step) => step.includes('source-key.txt'));
+    const upload = steps.indexOf(snapshot ?? '');
+    for (const [step, at] of Object.entries({ restore, record, upload })) {
+      expect(
+        at,
+        `expected a ${step} step in the changes job | received index: ${at}`
+      ).toBeGreaterThanOrEqual(0);
+    }
+    expect(restore).toBeLessThan(record);
+    expect(record).toBeLessThan(upload);
   });
 
-  test.each(['shard', 'frontend'])('%s downloads the resolver snapshot before tests', (job) => {
-    const block = extractJobBlock(workflow, job);
-    expect(parseNeedsList(block)).toEqual(['resolve-timings']);
-    const steps = extractStepBlocks(block);
-    const download = steps.findIndex((step) =>
-      step.includes(`name: ${EXPR} needs.resolve-timings.outputs.artifact }}`)
-    );
-    const tests = steps.findIndex((step) => step.includes('run-tests-watchdog.ts'));
-    expect(download, `expected a timings download in ${job}`).toBeGreaterThanOrEqual(0);
-    expect(tests, `expected the watchdog after the timings download in ${job}`).toBeGreaterThan(
-      download
-    );
-    expect(steps[download]).toContain('uses: actions/download-artifact@');
-    expect(steps[download]).toContain('path: .mango/artifacts/timings');
-    expect(steps[download]).not.toMatch(/^\s+if:/m);
+  test('the Preflight job keeps the timings restore and the run-attempt comment', () => {
+    expect(preflight).toContain('Restore the test timings baseline exactly once');
+    expect(preflight).toContain('"re-run failed jobs"');
+    expect(preflight).toContain('"Re-run all jobs"');
   });
+
+  test('test.yml requires the timings artifact name from its caller', () => {
+    const parsed = Bun.YAML.parse(workflow) as {
+      on: { workflow_call: { inputs: Record<string, { type: string; required: boolean }> } };
+    };
+    const input = parsed.on.workflow_call.inputs.timings_artifact;
+    expect(input, 'expected workflow_call input timings_artifact').toBeDefined();
+    expect(input).toMatchObject({ type: 'string', required: true });
+    const caller = extractJobBlock(ci, 'test');
+    expect(caller).toContain(`timings_artifact: ${EXPR} needs.changes.outputs.timings_artifact }}`);
+    expect(parseNeedsList(caller)).toEqual(['changes', 'local-runtime']);
+  });
+
+  test('ci.yml is the only caller of test.yml', () => {
+    const callers = workflowFiles().filter((path) => readText(path).includes('workflows/test.yml'));
+    expect(callers).toEqual(['.github/workflows/ci.yml']);
+  });
+
+  test.each(['shard', 'frontend'])(
+    '%s downloads the snapshot before tests, with no needs',
+    (job) => {
+      const block = extractJobBlock(workflow, job);
+      expect(
+        parseNeedsList(block),
+        `expected ${job} to declare no intra-workflow needs | received: ${parseNeedsList(block).join(',')}`
+      ).toEqual([]);
+      const steps = extractStepBlocks(block);
+      const download = steps.findIndex((step) =>
+        step.includes(`name: ${EXPR} inputs.timings_artifact }}`)
+      );
+      const tests = steps.findIndex((step) => step.includes('run-tests-watchdog.ts'));
+      expect(download, `expected a timings download in ${job}`).toBeGreaterThanOrEqual(0);
+      expect(tests, `expected the watchdog after the timings download in ${job}`).toBeGreaterThan(
+        download
+      );
+      expect(steps[download]).toContain('uses: actions/download-artifact@');
+      expect(steps[download]).toContain('path: .mango/artifacts/timings');
+      expect(steps[download]).not.toMatch(/^\s+if:/m);
+    }
+  );
 });
 
 describe('Test workflow merge job', () => {
@@ -295,7 +344,6 @@ describe('Test workflow shape', () => {
   // the exact list worth pinning.
   test('declares exactly the jobs the merge job knows how to account for', () => {
     expect(extractJobBlocks(workflow).map(({ job }) => job)).toEqual([
-      'resolve-timings',
       'shard',
       'frontend',
       'merge',
@@ -315,11 +363,23 @@ describe('Test workflow shape', () => {
     expect(workflow).not.toContain('windows-latest');
   });
 
+  test('no job named resolve-timings remains in either workflow', () => {
+    for (const [file, source] of [
+      ['test.yml', workflow],
+      ['ci.yml', ci],
+    ]) {
+      expect(
+        extractJobBlocks(source).map(({ job }) => job),
+        `expected no resolve-timings job in ${file}`
+      ).not.toContain('resolve-timings');
+      expect(source).not.toContain('needs.resolve-timings');
+    }
+  });
+
   // ci.yml calls this as one `test` job, so the aggregate gate's `needs` list
   // is unchanged by the fan-out. Adding a third job here is fine; adding one to
   // ci.yml is what ci-gate.unit.test.ts guards.
   test('ci.yml still depends on a single test job', () => {
-    const ci = readText('.github/workflows/ci.yml');
     expect(extractJobBlock(ci, 'test')).toContain('uses: $/.github/workflows/test.yml');
     expect(parseNeedsList(extractJobBlock(ci, 'gate-unique'))).toContain('test');
   });

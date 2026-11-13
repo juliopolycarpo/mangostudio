@@ -40,6 +40,20 @@ jobs:
       channel: ${{ steps.identity.outputs.channel }}
       cargo_version: ${{ steps.identity.outputs.cargo_version }}
       source_sha: ${{ steps.source.outputs.sha }}
+      # Name of this attempt's shared test timings snapshot, handed to test.yml.
+      # Computed here, not in the `test` caller: a job that is not re-run keeps its earlier
+      # outputs, so "re-run failed jobs" (run_attempt 2, this job not re-run)
+      # still hands the attempt-1 name to the shard reruns. That artifact
+      # still exists (30-day retention) and holds the exact snapshot, hence the
+      # exact file partition, the failed shard ran with. "Re-run all jobs"
+      # re-runs this job: it restores the baseline again and uploads `-2`.
+      timings_artifact: test-timings-baseline-${{ github.run_attempt }}
+    env:
+      # Must equal SHARD_COUNT in test.yml: the restore below and the save in
+      # test.yml's merge job share the `test-shard-<N>` validity segment, so
+      # main's saved timings keep matching. timings-cache-writes.unit.test.ts
+      # pins the two together.
+      SHARD_COUNT: 2
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -104,6 +118,40 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: bun ./scripts/ci/distribution-identity.ts >> "$GITHUB_OUTPUT"
+
+      # Restore the test timings baseline exactly once, before the fan-out, so
+      # every shard and the frontend lane read one snapshot. A miss gives all of
+      # them the same cold snapshot even if another run saves or evicts a cache
+      # entry in between. The artifact stays 30 days (GitHub's job rerun
+      # window) because a retry reuses the artifacts of successful jobs.
+      - id: timings
+        name: Restore main test timings
+        uses: $/.github/actions/cache-scoped
+        with:
+          family: timings
+          path: .mango/artifacts/timings
+          validity: test-shard-${{ env.SHARD_COUNT }}
+          restore-prefix: test-
+          mode: restore
+          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+
+      - name: Record the restored timing key or cold fallback
+        env:
+          TIMINGS_KEY: ${{ steps.timings.outputs.matched-key }}
+        run: |
+          mkdir -p .mango/artifacts/timings
+          printf '%s\n' "${TIMINGS_KEY:-cold}" > .mango/artifacts/timings/source-key.txt
+
+      # No `overwrite`: the name carries the attempt, so each attempt's
+      # snapshot stays immutable.
+      - name: Upload the shared timings snapshot
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-timings-baseline-${{ github.run_attempt }}
+          path: .mango/artifacts/timings
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
 
   distribution:
     name: Distribution
@@ -175,10 +223,11 @@ jobs:
 
   test:
     name: Test
-    needs: [local-runtime]
+    needs: [changes, local-runtime]
     uses: $/.github/workflows/test.yml
     with:
       runtime_artifact: ${{ needs.local-runtime.outputs.artifact }}
+      timings_artifact: ${{ needs.changes.outputs.timings_artifact }}
 
   build:
     name: Build
