@@ -108,12 +108,24 @@ export async function promoteCanaryTags(
   dependencies: CanaryTagDependencies
 ): Promise<CanaryTagPromotion> {
   const visibility = new CanaryVisibilityWindow({
+    // npm served new versions 1.5 to 10.5 minutes after `npm publish` returned
+    // (runs 42374766275, 42484608455, 43037283185). Back off to one-minute polls
+    // and bound the whole recovery at twenty minutes. The delays total seventeen
+    // minutes, 60s of short ones then sixteen one-minute ones, so a version that
+    // never appears exhausts them inside the TTL and reaches the missing-package
+    // error instead of a TTL expiry.
     retryDelaysMs: [
-      1000, 2000, 4000, 8000, 15000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000,
+      1000,
+      2000,
+      4000,
+      8000,
+      15000,
+      30000,
+      ...Array.from({ length: 16 }, () => 60000),
     ],
     log: (message) => console.warn(message),
     ...dependencies.visibility,
-    ttlMs: dependencies.visibility?.ttlMs ?? 300_000,
+    ttlMs: dependencies.visibility?.ttlMs ?? 1_200_000,
   });
   return visibility.run(
     (signal) => promoteVerifiedCanaryTags(manifest, dependencies, visibility, signal),
@@ -159,7 +171,7 @@ async function promoteVerifiedCanaryTags(
   const publication = await verifyCanaryNpmPublication(manifest, dependencies.registry, visibility);
   if (publication.missing.length > 0) {
     throw new Error(
-      `Canary tag promotion requires all seven verified packages; missing ${publication.missing.join(', ')}`
+      `Canary tag promotion requires all seven verified packages; missing ${publication.missing.join(', ')} (HTTP 404 on ${manifest.packageVersion} after the visibility wait; npm can serve a published version minutes late, so rerun with the original approved bytes)`
     );
   }
   const { updates, unchanged } = await visibility.run(

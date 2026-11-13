@@ -1,12 +1,14 @@
 const VISIBILITY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000, 30000] as const;
 const MAX_VISIBILITY_WAIT_MS = 60_000;
-const MAX_VISIBILITY_TTL_MS = 300_000;
+const MAX_VISIBILITY_TTL_MS = 1_200_000;
+const MAX_VISIBILITY_DELAYS = 16;
+const MAX_TTL_VISIBILITY_DELAYS = 32;
 
 /** Controlled post-write polling; callers can shorten the shared wait budget. */
 export interface CanaryVisibilityOptions {
   readonly retryDelaysMs?: readonly number[];
   readonly sleep?: (milliseconds: number) => Promise<void>;
-  /** Optional shared elapsed-time limit, including I/O; at most five minutes. */
+  /** Optional shared elapsed-time limit, including I/O; at most twenty minutes. */
   readonly ttlMs?: number;
   /** Monotonic clock; fake sleeps must advance this clock. */
   readonly now?: () => number;
@@ -39,14 +41,15 @@ export class CanaryVisibilityWindow {
     }
     const maxWait = ttl === undefined ? MAX_VISIBILITY_WAIT_MS : MAX_VISIBILITY_TTL_MS;
     const delays = options.retryDelaysMs ?? VISIBILITY_DELAYS_MS;
+    const maxDelays = ttl === undefined ? MAX_VISIBILITY_DELAYS : MAX_TTL_VISIBILITY_DELAYS;
     if (
       !Array.isArray(delays) ||
-      delays.length > 16 ||
+      delays.length > maxDelays ||
       delays.some((delay) => typeof delay !== 'number' || !Number.isFinite(delay) || delay < 0) ||
       delays.reduce((total, delay) => total + delay, 0) > maxWait
     ) {
       throw new Error(
-        `Invalid canary visibility delays: expected at most 16 finite nonnegative millisecond delays totaling at most ${maxWait}; received ${Array.isArray(delays) ? `[${delays.map(String).join(', ')}]` : String(delays)}`
+        `Invalid canary visibility delays: expected at most ${maxDelays} finite nonnegative millisecond delays totaling at most ${maxWait}; received ${Array.isArray(delays) ? `[${delays.map(String).join(', ')}]` : String(delays)}`
       );
     }
     this.delays = [...delays];

@@ -88,7 +88,10 @@ const goodPages: GhCommandResult = {
 test.each(['\n', '\r\n'])('retains actual release HTTP status using %j headers', async (eol) => {
   const { runner, client } = fixture();
   runner.json(`${BASE}/releases/tags/v1.0.0`, { id: 1 }, 200, eol);
-  expect(await client.getRelease('v1.0.0')).toEqual({ status: 200, body: { id: 1 } });
+  expect(await client.getRelease('v1.0.0')).toEqual({
+    status: 200,
+    body: { id: 1 },
+  });
   runner.json(`${BASE}/releases/tags/absent`, { message: 'Not Found' }, 404, eol);
   runner.pages(`${BASE}/releases?per_page=100`, [[]]);
   expect(await client.getRelease('absent')).toEqual({
@@ -98,13 +101,21 @@ test.each(['\n', '\r\n'])('retains actual release HTTP status using %j headers',
 });
 test('finds an interrupted tagless draft on later release pages after a published lookup404', async () => {
   const { runner, client } = fixture();
-  const draft = { id: 33, tag_name: 'v1.0.0', draft: true, target_commitish: SHA };
+  const draft = {
+    id: 33,
+    tag_name: 'v1.0.0',
+    draft: true,
+    target_commitish: SHA,
+  };
   runner.json(`${BASE}/releases/tags/v1.0.0`, { message: 'Not Found' }, 404);
   runner.pages(`${BASE}/releases?per_page=100`, [
     [{ id: 1, tag_name: 'v0.9.0', draft: false }],
     [draft],
   ]);
-  expect(await client.getRelease('v1.0.0')).toEqual({ status: 200, body: draft });
+  expect(await client.getRelease('v1.0.0')).toEqual({
+    status: 200,
+    body: draft,
+  });
   expect(runner.calls).toEqual([
     ['api', '--include', `${BASE}/releases/tags/v1.0.0`],
     ['api', '--paginate', '--slurp', `${BASE}/releases?per_page=100`],
@@ -126,7 +137,10 @@ test('retains positive published metadata from the list instead of inventing abs
   const release = { id: 33, tag_name: 'v1.0.0', draft: false };
   runner.json(`${BASE}/releases/tags/v1.0.0`, { message: 'Not Found' }, 404);
   runner.pages(`${BASE}/releases?per_page=100`, [[release]]);
-  expect(await client.getRelease('v1.0.0')).toEqual({ status: 200, body: release });
+  expect(await client.getRelease('v1.0.0')).toEqual({
+    status: 200,
+    body: release,
+  });
 });
 
 test.each([200, 401, 403, 429, 500, 503])(
@@ -144,7 +158,10 @@ test.each([
   { pages: [], message: 'expected nonempty array of pages' },
   { pages: [{}], message: 'expected complete array collection' },
   { pages: [[null]], message: 'GitHub release listing entry: expected object' },
-  { pages: [[{ id: 1, draft: true }]], message: 'expected tag_name string and draft boolean' },
+  {
+    pages: [[{ id: 1, draft: true }]],
+    message: 'expected tag_name string and draft boolean',
+  },
   {
     pages: [[{ id: 1, tag_name: 'other' }]],
     message: 'expected tag_name string and draft boolean',
@@ -206,7 +223,10 @@ test('supports gh mixed LF status and CRLF headers observed in hosted reads', as
     ...result,
     stdout: Buffer.from(Buffer.from(result.stdout).toString().replace('Status\r\n', 'Status\n')),
   });
-  expect(await client.getJson(`${BASE}/test`)).toEqual({ status: 200, body: {} });
+  expect(await client.getJson(`${BASE}/test`)).toEqual({
+    status: 200,
+    body: {},
+  });
 });
 test.each([401, 403, 429, 500, 503])(
   'preserves genuine HTTP %i without inventing absence',
@@ -339,9 +359,17 @@ test.each(
 test('pagination CLI and JSON failures do not become empty lists', async () => {
   const { runner, client } = fixture();
   const args = ['api', '--paginate', '--slurp', `${BASE}/test`];
-  runner.respond(args, { exitCode: 1, stdout: Buffer.from('[]'), stderr: 'secret' });
+  runner.respond(args, {
+    exitCode: 1,
+    stdout: Buffer.from('[]'),
+    stderr: 'secret',
+  });
   await expect(client.list(`${BASE}/test`)).rejects.toThrow('expected successful gh exit');
-  runner.respond(args, { exitCode: 0, stdout: Buffer.from('broken'), stderr: '' });
+  runner.respond(args, {
+    exitCode: 0,
+    stdout: Buffer.from('broken'),
+    stderr: '',
+  });
   await expect(client.list(`${BASE}/test`)).rejects.toThrow('expected JSON page collection');
 });
 test.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])(
@@ -384,10 +412,14 @@ test('returns actual404 for missing asset evidence', async () => {
 });
 test('peels lightweight and annotated tags to exact full commit SHA', async () => {
   const { runner, client } = fixture();
-  runner.json(`${BASE}/git/ref/tags/v1`, { object: { type: 'commit', sha: SHA } });
+  runner.json(`${BASE}/git/ref/tags/v1`, {
+    object: { type: 'commit', sha: SHA },
+  });
   expect(await client.resolveTag('v1')).toEqual({ status: 200, body: SHA });
   runner.json(`${BASE}/git/ref/tags/v2`, { object: { type: 'tag', sha: TAG } });
-  runner.json(`${BASE}/git/tags/${TAG}`, { object: { type: 'commit', sha: SHA } });
+  runner.json(`${BASE}/git/tags/${TAG}`, {
+    object: { type: 'commit', sha: SHA },
+  });
   expect(await client.resolveTag('v2')).toEqual({ status: 200, body: SHA });
 });
 test('only actual absent tag ref returns404', async () => {
@@ -396,7 +428,9 @@ test('only actual absent tag ref returns404', async () => {
   expect((await client.resolveTag('absent')).status).toBe(404);
   runner.json(`${BASE}/git/ref/tags/failed`, { message: 'Forbidden' }, 403);
   await expect(client.resolveTag('failed')).rejects.toThrow('expected HTTP200');
-  runner.json(`${BASE}/git/ref/tags/missing-inner`, { object: { type: 'tag', sha: TAG } });
+  runner.json(`${BASE}/git/ref/tags/missing-inner`, {
+    object: { type: 'tag', sha: TAG },
+  });
   runner.json(`${BASE}/git/tags/${TAG}`, { message: 'Not Found' }, 404);
   await expect(client.resolveTag('missing-inner')).rejects.toThrow(
     'annotated tag: expected HTTP200'
@@ -415,10 +449,14 @@ test.each([
 });
 test('refuses cyclic and unbounded tag chains', async () => {
   const { runner, client } = fixture();
-  runner.json(`${BASE}/git/ref/tags/cycle`, { object: { type: 'tag', sha: TAG } });
+  runner.json(`${BASE}/git/ref/tags/cycle`, {
+    object: { type: 'tag', sha: TAG },
+  });
   runner.json(`${BASE}/git/tags/${TAG}`, { object: { type: 'tag', sha: TAG } });
   await expect(client.resolveTag('cycle')).rejects.toThrow('Cyclic annotated tag');
-  runner.json(`${BASE}/git/ref/tags/deep`, { object: { type: 'tag', sha: '0'.repeat(40) } });
+  runner.json(`${BASE}/git/ref/tags/deep`, {
+    object: { type: 'tag', sha: '0'.repeat(40) },
+  });
   for (let depth = 0; depth < 8; depth += 1) {
     runner.json(`${BASE}/git/tags/${String(depth).repeat(40)}`, {
       object: { type: 'tag', sha: String(depth + 1).repeat(40) },
@@ -432,9 +470,24 @@ test('writes through the owned runner and rejects failure without echoing secret
   const result = { exitCode: 0, stdout: Buffer.from('uploaded'), stderr: '' };
   runner.respond(args, result);
   expect(client.writeCommand(args)).toBe(result);
-  runner.respond(args, { exitCode: 1, stdout: new Uint8Array(), stderr: 'secret bearer token' });
+  runner.respond(args, {
+    exitCode: 1,
+    stdout: new Uint8Array(),
+    stderr: 'secret bearer token',
+  });
   expect(() => client.writeCommand(args)).toThrow('expected exit0; received 1');
   expect(() => client.writeCommand([])).toThrow('expected nonempty argument list');
+});
+test('a failed write surfaces only the HTTP status from gh stderr', () => {
+  const { runner, client } = fixture();
+  const args = ['release', 'create', 'v1', '--repo', 'owner/repo'];
+  runner.respond(args, {
+    exitCode: 1,
+    stdout: new Uint8Array(),
+    stderr: 'HTTP 422: Validation Failed (https://api.github.com/x?token=secret-value)',
+  });
+  expect(() => client.writeCommand(args)).toThrow('expected exit0; received 1 (HTTP 422)');
+  expect(() => client.writeCommand(args)).not.toThrow(/secret-value|Validation Failed/);
 });
 
 test('reads generic Actions binary bytes with exact HTTP status', async () => {
