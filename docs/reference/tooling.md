@@ -6,7 +6,7 @@ The repo tracks the floating Bun `canary` channel in [`.bun-version`](../../.bun
 Install it with `bun upgrade --canary`; it can advance without a repository change.
 CI installs the same channel through the local composite
 [`setup-bun`](../../.github/actions/setup-bun/action.yml). Bun replaces canary assets in place, so a
-download can fail while an upload lands. The composite tries once, waits 10 s and
+download can fail while an upload lands. The composite tries once, waits 45 s and
 tries once more; a second failure fails the job with `setup-bun`'s own error.
 The `release.yml` and `protocol-release.yml`
 trust bootstraps keep a direct call with the same inline retry, because the tag

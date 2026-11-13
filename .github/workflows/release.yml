@@ -154,7 +154,7 @@ jobs:
       - name: Wait before retrying trusted Bun setup
         if: steps.trusted-bun.outcome == 'failure'
         shell: bash
-        run: sleep 10
+        run: sleep 45
 
       - name: Retry trusted Bun setup
         if: steps.trusted-bun.outcome == 'failure'

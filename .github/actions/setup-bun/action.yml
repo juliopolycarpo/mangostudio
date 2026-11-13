@@ -1,7 +1,7 @@
 name: Setup Bun
 description: >
   Install the Bun build named by a version file (default .bun-version) and retry the install once
-  after a short wait. The repository pins the `canary` channel, whose download fails transiently.
+  after 45 seconds. The repository pins the `canary` channel, whose download fails transiently.
   This is the only place outside the release trust bootstrap that references oven-sh/setup-bun.
   Callers must run actions/checkout first.
 inputs:
@@ -21,11 +21,14 @@ runs:
       with:
         bun-version-file: ${{ inputs.bun-version-file }}
 
-    # Bun replaces canary assets in place. A download can land during upload.
+    # Bun replaces canary assets in place, one after another over about half a
+    # minute, and a replaced asset answers 404 for some seconds after its upload
+    # completes: bun-windows-x64.zip finished uploading at 21:58:53 UTC on
+    # 2026-11-13 and still answered 404 at 21:59:00. Wait out the whole sweep.
     - name: Wait before retrying Bun setup
       if: ${{ !cancelled() && steps.first-attempt.outcome == 'failure' }}
       shell: bash
-      run: sleep 10
+      run: sleep 45
 
     # No continue-on-error: a second failure fails the job with setup-bun's own error.
     - name: Retry Bun setup
