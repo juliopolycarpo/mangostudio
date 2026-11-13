@@ -8,6 +8,7 @@ import {
 } from './formatter-owned-stat';
 import {
   type FormatterNativeQueries,
+  FormatterQueryAdmissionExpiry,
   type FormatterSettlementHost,
   type NativeFormatterProcess,
   readNativeFormatterProcess,
@@ -72,6 +73,23 @@ class NativeSettlementClock implements FormatterSettlementHost {
 }
 
 const owned = [{ who: 'controlled formatter', native }];
+
+/** A clock that answers `now()` from a script, then holds its last value. */
+class ScriptedSettlementClock extends NativeSettlementClock {
+  private nowReads = 0;
+
+  constructor(private readonly instants: readonly number[]) {
+    super();
+  }
+
+  override now = (): number => {
+    const instant = this.instants[Math.min(this.nowReads, this.instants.length - 1)];
+    this.nowReads++;
+    if (instant === undefined) throw new Error('ScriptedSettlementClock: expected an instant');
+    return instant;
+  };
+  override pause = (): Promise<void> => Promise.resolve();
+}
 
 /** A timed native transcript that refuses queries admitted after its deadline. */
 class TimedNativeSettlementTranscript extends NativeSettlementClock {
@@ -697,6 +715,50 @@ describe('native formatter settlement', () => {
     expect(aggregate.cause).toBe(clock.queryFailure);
     expect(aggregate.message).toContain('native observation failed');
     expect(aggregate.message).toContain('"elapsedMs":310');
+  });
+  // A stalled macOS runner admitted the last query with about 1 ms left and
+  // computed its budget after the deadline; the settlement then reported a
+  // failed observation where every other deadline path reports the last census.
+  it('reports the last live census when the deadline passes between admission and budget', async () => {
+    const clock = new ScriptedSettlementClock([
+      0, // started
+      0, // first admission
+      0, // first budget: 300 ms
+      0, // first completion: one live process observed
+      0, // pause sizing
+      298.5, // second admission: 1 ms left, admitted
+      299.6, // second budget: under 1 ms, refused
+      299.6, // second completion
+      300, // remaining deadline wait: none
+    ]);
+    const error = await waitForFormatterSettlement(owned, clock).then(
+      () => undefined,
+      (failure: unknown) => failure
+    );
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      `formatter cancellation: expected live owned processes: 0 within 300ms | received last native observation: ${JSON.stringify({ elapsedMs: 0, live: [{ who: owned[0].who, current: native }] })}`
+    );
+    const cause = (error as Error).cause as AggregateError;
+    expect(cause.errors).toHaveLength(1);
+    expect(cause.errors[0]).toBeInstanceOf(FormatterQueryAdmissionExpiry);
+    expect((cause.errors[0] as FormatterQueryAdmissionExpiry).pid).toBe(1234);
+    expect(clock.reads, 'expected only the in-budget query to reach the host').toEqual([
+      [1234, 300],
+    ]);
+  });
+  it('reports no in-budget observation when the first query loses its budget after admission', async () => {
+    const clock = new ScriptedSettlementClock([
+      0, // started
+      298.5, // admission: 1 ms left, admitted
+      299.6, // budget: under 1 ms, refused
+      299.6, // completion
+      300, // remaining deadline wait: none
+    ]);
+    await expect(waitForFormatterSettlement(owned, clock)).rejects.toThrow(
+      'formatter cancellation: expected native observation before the 300ms deadline | received: no in-budget observation'
+    );
+    expect(clock.reads).toEqual([]);
   });
   it('does not report a live verdict when no native query fits before the deadline', async () => {
     const clock = new TimedNativeSettlementTranscript();
