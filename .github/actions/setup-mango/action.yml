@@ -19,22 +19,21 @@ runs:
       # `--revision`, not `--version`: `--revision` appends the commit that
       # built this Bun (`1.4.3+c6da4a4d3`), so it stays a correct key even when
       # `.bun-version` names something whose `--version` is not unique — a
-      # channel, or a rebuilt tag. Keying on `--version` was what handed one
-      # Bun build's extracted packages to a different one under `canary`; on a
-      # released pin it costs nothing and removes the way back to that bug.
+      # channel, or a rebuilt tag. Downstream cache keys (Turbo) read this
+      # through the `bun-version` output.
       run: echo "bun=$(bun --revision)" >> "$GITHUB_OUTPUT"
 
     - name: Start cache policy summary
       shell: bash
       run: echo '### Cache policy' >> "$GITHUB_STEP_SUMMARY"
 
-    # No Bun package-cache transfer: a frozen install from an empty cache beat
-    # restore-then-install on every runner class this repository uses
-    # (#2025, #2057).
     - name: Disable Turbo telemetry
       shell: bash
       run: echo "TURBO_TELEMETRY_DISABLED=1" >> "$GITHUB_ENV"
 
+    # No Bun package-cache transfer: a frozen install from an empty cache beat
+    # restore-then-install on every runner class this repository uses
+    # (#2025, #2057).
     - name: Install dependencies
       shell: bash
       run: |
