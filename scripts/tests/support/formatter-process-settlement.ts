@@ -175,6 +175,27 @@ const SETTLEMENT_HOST: FormatterSettlementHost = {
 };
 
 /**
+ * The settlement deadline passed between a query's admission and its budget.
+ * The loop admits a query with at least 1 ms left, and each query then reads
+ * the clock again; a stalled host can spend that millisecond in between. That
+ * is the deadline expiring, like an owned query that ran out its budget, and
+ * not a failed observation.
+ * @example if (error instanceof FormatterQueryAdmissionExpiry) console.error(error.pid);
+ */
+export class FormatterQueryAdmissionExpiry extends Error {
+  /** The budget the refused query would have received. */
+  readonly timeoutMs = 0;
+
+  constructor(
+    readonly pid: number,
+    deadlineMs: number
+  ) {
+    super(`formatter ${pid}: expected query admission before the ${deadlineMs}ms deadline`);
+    this.name = 'FormatterQueryAdmissionExpiry';
+  }
+}
+
+/**
  * Require native settlement within the old 300ms observation budget, independent of file writes.
  * @example await waitForFormatterSettlement(ownedBeforeCancellation);
  */
@@ -212,10 +233,7 @@ export async function waitForFormatterSettlement(
       owned.map(async (expected, index) => {
         const budgetMs = Math.max(0, Math.floor(deadline - host.now()));
         attempts[index] = { pid: expected.native.pid, budgetMs };
-        if (budgetMs < 1)
-          throw new Error(
-            `formatter ${expected.native.pid}: expected query admission before the ${budget}ms deadline`
-          );
+        if (budgetMs < 1) throw new FormatterQueryAdmissionExpiry(expected.native.pid, budget);
         return { expected, current: await host.read(expected.native.pid, budgetMs) };
       })
     );
@@ -226,7 +244,8 @@ export async function waitForFormatterSettlement(
         if (read.status === 'fulfilled') return true;
         const attempt = attempts[index];
         return (
-          (read.reason instanceof FormatterQueryExpiry ||
+          (read.reason instanceof FormatterQueryAdmissionExpiry ||
+            read.reason instanceof FormatterQueryExpiry ||
             read.reason instanceof FormatterQueryObservationExpiry ||
             read.reason instanceof FormatterStatReadExpiry) &&
           read.reason.pid === attempt?.pid &&
