@@ -7,8 +7,12 @@ updates:
     directories:
       - /
       - /.github/actions/*
+    # Weekly, grouped: every action bump PR starts the full CI fan-out, and
+    # taiki-e/install-action alone releases almost daily. Wednesday keeps this
+    # PR off Monday, when the bun, cargo and docker updates open theirs.
     schedule:
-      interval: daily
+      interval: weekly
+      day: wednesday
       time: "06:00"
       timezone: UTC
     # Let new action releases settle before adoption so a compromised release
@@ -26,6 +30,18 @@ updates:
       codeql-action:
         patterns:
           - "github/codeql-action*"
+      # Every other minor and patch bump in one PR. Without a group, an action
+      # pinned in both a workflow and a composite action opens one PR per
+      # directory for the same release. Dependabot assigns a dependency to the
+      # first group it matches, so codeql-action stays in its own PR above.
+      # Majors stay ungrouped, as in the bun groups: each needs its own review
+      # and its own revert.
+      actions:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: bun
     directory: /
