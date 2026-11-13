@@ -424,7 +424,7 @@ whose import graph stays inside the checkout (no `node_modules`).
 | `smoke-binary.yml` | `binary` (`rebuild`) | `setup-mango` (full toolchain) |
 
 `setup-bun` is the local composite at `.github/actions/setup-bun`. It wraps
-`oven-sh/setup-bun` with one 10-second retry for transient canary download
+`oven-sh/setup-bun` with one retry after 45 seconds for transient canary download
 failures, and `setup-mango` calls it too. Do not call `oven-sh/setup-bun`
 from a workflow; `bun-toolchain.unit.test.ts` allows only the release trust
 bootstraps, which cannot load an action from an unverified tag.

@@ -136,7 +136,7 @@ describe('Bun toolchain pins', () => {
       expect(attempt?.id, `${file} first attempt id`).toBeTruthy();
       expect(attempt?.['continue-on-error'], `${file} first attempt tolerates failure`).toBe(true);
       expect(wait?.if, `${file} wait runs only after a failed first attempt`).toBe(failed);
-      expect(wait?.run, `${file} wait duration`).toBe('sleep 10');
+      expect(wait?.run, `${file} wait duration`).toBe('sleep 45');
       expect(wait?.shell, `${file} wait shell`).toBe('bash');
       expect(retry?.uses, `${file} retry reference`).toBe(attempt?.uses);
       expect(retry?.if, `${file} retry runs only after a failed first attempt`).toBe(failed);
@@ -303,7 +303,7 @@ describe('setup-bun composite action', () => {
     expect(first.id, 'first attempt needs an id for the retry condition').toBeTruthy();
     expect(first['continue-on-error'], 'first attempt tolerates failure').toBe(true);
     expect(wait.if, 'wait runs only after the first attempt failed').toContain(failed);
-    expect(wait.run, 'wait duration').toBe('sleep 10');
+    expect(wait.run, 'wait duration').toBe('sleep 45');
     expect(wait.shell, 'wait step shell must be explicit for Windows runners').toBe('bash');
     expect(retry.if, 'retry runs only after the first attempt failed').toContain(failed);
     expect(
