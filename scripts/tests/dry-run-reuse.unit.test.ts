@@ -225,43 +225,70 @@ describe('same-run release dry-run runtime reuse', () => {
     expect(jobRuns(WORKFLOW, 'dry-run-linux', { ...reused, reuseDistribution: false })).toBe(false);
   });
 
-  test('Windows runs after a successful Linux archive despite the deliberately skipped runtime ancestor', () => {
+  test('Windows runs beside Linux despite the deliberately skipped runtime ancestor', () => {
     expect(parseNeedsList(extractJobBlock(WORKFLOW, 'dry-run-windows'))).toEqual([
       'changes',
-      'dry-run-linux',
-    ]);
-    expect(jobAncestors(WORKFLOW, 'dry-run-windows').sort()).toEqual([
-      'changes',
-      'dry-run-linux',
       'runtime',
     ]);
+    // Linux packaging is not an ancestor: the Windows lane reads its own
+    // target and must not wait for, or be skipped by, the Linux lane.
+    expect(jobAncestors(WORKFLOW, 'dry-run-windows').sort()).toEqual(['changes', 'runtime']);
+    const reused: JobScenario = { ...reusedRuntime, reuseDistribution: true };
     // The previous guard's implicit success() reproduces the hosted skip even
-    // though both direct prerequisites succeeded. The source guard must run.
-    expect(windowsRuns(reusedRuntime, "needs.changes.outputs.release == 'true'")).toBe(false);
-    expect(windowsRuns(reusedRuntime)).toBe(true);
-    expect(
-      windowsRuns({ ...reusedRuntime, results: { ...reusedRuntime.results, runtime: 'success' } })
-    ).toBe(true);
+    // though the changes prerequisite succeeded. The source guard must run.
+    expect(windowsRuns(reused, "needs.changes.outputs.release == 'true'")).toBe(false);
+    expect(windowsRuns(reused)).toBe(true);
+    expect(windowsRuns({ ...reused, results: { ...reused.results, runtime: 'success' } })).toBe(
+      true
+    );
   });
 
-  test.each(['failure', 'skipped', 'cancelled', undefined])(
-    'Windows refuses an unsuccessful or missing Linux archive (%s)',
+  test.each(['failure', 'cancelled', 'skipped', undefined])(
+    'Windows runs whatever the Linux lane reported (%s)',
     (result) => {
       expect(
         windowsRuns({
           ...reusedRuntime,
+          reuseDistribution: true,
           results: { ...reusedRuntime.results, 'dry-run-linux': result },
+        })
+      ).toBe(true);
+    }
+  );
+
+  test.each(['failure', 'cancelled', 'skipped', undefined])(
+    'Windows refuses a clean route whose runtime producer did not succeed (%s)',
+    (result) => {
+      expect(
+        windowsRuns({
+          ...reusedRuntime,
+          reuseDistribution: false,
+          results: { ...reusedRuntime.results, runtime: result },
+        })
+      ).toBe(false);
+    }
+  );
+
+  test.each(['failure', 'cancelled', 'skipped', undefined])(
+    'Windows refuses unvalidated artifact names (changes=%s)',
+    (result) => {
+      expect(
+        windowsRuns({
+          ...reusedRuntime,
+          reuseDistribution: true,
+          results: { ...reusedRuntime.results, changes: result },
         })
       ).toBe(false);
     }
   );
 
   test('Windows refuses cancelled, irrelevant or missing-release scenarios and unknown guard syntax', () => {
-    expect(windowsRuns({ ...reusedRuntime, cancelled: true })).toBe(false);
+    const reused: JobScenario = { ...reusedRuntime, reuseDistribution: true };
+    expect(windowsRuns({ ...reused, cancelled: true })).toBe(false);
     for (const release of ['false', '', undefined])
-      expect(windowsRuns({ ...reusedRuntime, release })).toBe(false);
+      expect(windowsRuns({ ...reused, release })).toBe(false);
     expect(() =>
-      windowsRuns(reusedRuntime, "always() && needs.changes.outputs.release == 'true'")
+      windowsRuns(reused, "always() && needs.changes.outputs.release == 'true'")
     ).toThrow('Unknown workflow condition');
   });
 

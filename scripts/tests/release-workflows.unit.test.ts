@@ -1047,12 +1047,13 @@ describe('release workflow binary gate', () => {
     const windows = extractJobBlock(workflow, 'dry-run-windows');
     expect(linux).not.toContain('bun run build --binary --platform windows-x64');
     expect(linux).not.toContain('bun ./scripts/release/archive-assets.ts --platform windows-x64');
-    expect(linux).toContain('name: Upload verified Windows runtime');
-    expect(linux).toContain('path: .mango/runtime-prebuilt/windows-x64');
+    // The Linux lane no longer relays the Windows runtime: a relay would make
+    // the Windows lane wait for Linux packaging it does not consume.
+    expect(linux).not.toContain('windows-x64');
     expect(windows).toContain('runs-on: windows-latest');
     expect(windows).toContain('uses: ./.github/actions/setup-mango');
-    expect(windows).toContain('name: dry-run-windows-runtime');
-    expect(windows).toContain('path: .mango/runtime-prebuilt/windows-x64');
+    expect(windows).toContain('name: dry-run-runtime-windows-x64');
+    expect(windows).toContain('path: .mango/runtime-prebuilt\n');
     expect(windows).toContain(
       'bun run build --binary --platform windows-x64 --runtime-dir .mango/runtime-prebuilt'
     );
@@ -1063,7 +1064,7 @@ describe('release workflow binary gate', () => {
       'bun ./scripts/release/verify-checksum.ts release-assets/SHA256SUMS "$archive"'
     );
     const order = [
-      'name: Download verified Windows runtime',
+      'name: Download Windows cargo runtime',
       'name: Build Windows x64 binary',
       'name: Archive Windows release assets',
       'name: Verify archive checksum',

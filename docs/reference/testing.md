@@ -1943,7 +1943,8 @@ and unit lanes, while unchanged patches retain the same keys.
 
 `mode` selects `restore-save` (default), `restore`, or `save`. The `lint-tools`
 family uses `exact-restore: true` to require a version-exact match for its
-checksum-pinned tools. Only `mode: restore` uses `actions/cache/restore` and
+checksum-pinned tools, and saves only on a push to `main`: other runs restore
+that entry with `mode: restore`. Only `mode: restore` uses `actions/cache/restore` and
 reports a trusted-`main` match. `restore-save` reports primary-key hits. A call
 site can gate an install on `cache-restored` when it sets both exact restore
 and `mode: restore`.

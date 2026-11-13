@@ -600,11 +600,11 @@ describe('release-dry-run.yml always-reporting gate', () => {
     expect(linuxBlock).toContain(
       "needs.runtime.result == 'success' || (inputs.reuse_distribution && needs.runtime.result == 'skipped')"
     );
-    // Also needs `changes` directly (not just transitively through
-    // dry-run-linux) so its own `if:` can read `needs.changes.outputs`.
-    expect(parseNeedsList(windowsBlock)).toEqual(['changes', 'dry-run-linux']);
+    // The Windows lane runs beside the Linux lane under the same guard: both
+    // read their target from the runtime job or the reused distribution.
+    expect(parseNeedsList(windowsBlock)).toEqual(['changes', 'runtime']);
     expect(windowsBlock).toContain(
-      `if: ${EXPR} !cancelled() && needs.changes.outputs.release == 'true' && needs['dry-run-linux'].result == 'success' }}`
+      `if: ${EXPR} !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.release == 'true' && (needs.runtime.result == 'success' || (inputs.reuse_distribution && needs.runtime.result == 'skipped')) }}`
     );
     expect(parseNeedsList(cargoBlock)).toEqual(['changes']);
     expect(cargoBlock).toContain("if: needs.changes.outputs.launcher == 'true'");

@@ -11,7 +11,7 @@ import { Writable } from 'node:stream';
 import { runTestsWithWatchdog, type WatchdogOptions } from '../ci/run-tests-watchdog';
 import { normalizeLogLine } from '../lib/log-lines';
 import { parseShardReceipt } from '../lib/shard-receipt';
-import { fixtureChildEnvironment } from './support/child-supervision';
+import { BUN_AGENT_MARKER_ENV, nestedBunTestEnvironment } from './support/child-supervision';
 
 /** Capture nested fixture findings without forwarding them to the enclosing test log. */
 class CaptureSink extends Writable {
@@ -59,7 +59,11 @@ describe('shard-meta attempts', () => {
   it.each(['0', '1'])(
     'keeps synthetic findings out of the enclosing Bun test log with FORCE_COLOR=%s',
     (forceColor) => {
-      const env = fixtureChildEnvironment();
+      // Every agent marker is set in the ambient environment on purpose: under
+      // one, Bun omits the `(pass)` line asserted below, which failed this test
+      // in agent sessions only.
+      const agentSession = Object.fromEntries(BUN_AGENT_MARKER_ENV.map((marker) => [marker, '1']));
+      const env = nestedBunTestEnvironment({ ...process.env, ...agentSession });
       env.FORCE_COLOR = forceColor;
       delete env.NO_COLOR;
       const child = Bun.spawnSync(
