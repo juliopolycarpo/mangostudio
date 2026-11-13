@@ -2,6 +2,7 @@ import { Elysia } from 'elysia';
 import { websocket } from 'elysia/websocket';
 
 import { getAuth } from '../../../src/auth';
+import { getAuthSecretValidationMessage, getConfig } from '../../../src/lib/config';
 import { REALTIME_WEBSOCKET_OPTIONS } from '../../../src/modules/realtime/http/realtime-routes';
 import { assertTestEnvironmentReady } from '../setup/test-environment';
 
@@ -44,6 +45,17 @@ export function createAuthenticatedApiTestApp(
   ...plugins: ApiTestPlugin[]
 ) {
   assertTestEnvironmentReady('createAuthenticatedApiTestApp');
+
+  // `getAuth()` memoizes on first call, so a config without a usable secret only
+  // fails for whichever test reaches it first — an order dependence. Fail every
+  // time instead, naming the cause.
+  const secretProblem = getAuthSecretValidationMessage(getConfig().auth.secret);
+  if (secretProblem) {
+    throw new Error(
+      `(createAuthenticatedApiTestApp): expected config.auth.secret to be a valid test secret | received: ${secretProblem} ` +
+        'A loadConfigForTest(...) call without `auth: BASE_TEST_AUTH` replaced the base test config.'
+    );
+  }
 
   const auth = getAuth();
   const api = auth.api as Record<string, unknown>;
