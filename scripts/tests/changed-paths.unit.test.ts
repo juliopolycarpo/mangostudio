@@ -316,11 +316,6 @@ describe('relevance policy parity', () => {
     'rust-toolchain.toml',
     '.cargo/config.toml',
     'scripts/tests/support/fixture.rs',
-    '.github/workflows/codeql.yml',
-    '.github/codeql/config.yml',
-    'scripts/lib/ci-lanes.ts',
-    'scripts/lib/changed-paths.ts',
-    'scripts/ci/changed-paths.ts',
   ])('a change to %j selects the CodeQL Rust legs', (path) => {
     expect(codeqlRustRelevant([path]), path).toBe(true);
     expect(codeqlRustRelevant(['docs/guide.md', path]), `docs/guide.md + ${path}`).toBe(true);

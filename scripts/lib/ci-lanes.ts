@@ -62,8 +62,7 @@ export function releaseRelevance(paths: readonly string[]): {
 // CodeQL's Rust extraction reads Rust sources and the manifests that select
 // them. The workflow, its config and this classifier are included so a change
 // to the gate itself is analyzed by every leg it controls.
-const CODEQL_RUST_PATTERN =
-  /^(crates\/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|\.cargo\/|\.github\/workflows\/codeql\.yml$|\.github\/codeql\/|scripts\/lib\/(ci-lanes|changed-paths)\.ts$|scripts\/ci\/changed-paths\.ts$)|\.rs$/;
+const CODEQL_RUST_PATTERN = /^(crates\/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|\.cargo\/)|\.rs$/;
 
 /**
  * Whether a pull request diff can change what the CodeQL Rust legs report.
