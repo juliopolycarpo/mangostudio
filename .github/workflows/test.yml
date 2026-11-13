@@ -87,13 +87,6 @@ jobs:
         shard: [1, 2]
     env:
       DATABASE_PATH: /tmp/mangostudio-test.sqlite
-      # Bounds the snapshot this job restores and saves back. Each save carries
-      # everything restored plus the new outputs, so without a bound the chain
-      # of snapshots only grows. At the start of the run Turbo deletes the
-      # oldest entries (by mtime, which the cache archive preserves) until the
-      # rest fit. The value is the same in every lane; see "CI Cache Policy" in
-      # docs/reference/testing.md.
-      TURBO_CACHE_MAX_SIZE: 16MB
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -102,32 +95,16 @@ jobs:
       - id: setup
         uses: $/.github/actions/setup-mango
 
-      - id: toolchain
-        name: Resolve test cache toolchains
-        # An empty version silently poisons the cache key, so fail here rather
-        # than inside cache-scoped's validity guard.
-        run: |
-          set -euo pipefail
-          turbo="$(bun run turbo:version | tail -n 1)"
-          if [ -z "${turbo}" ]; then
-            echo "::error::turbo version probe returned an empty value"
-            exit 1
-          fi
-          echo "turbo=${turbo}" >> "$GITHUB_OUTPUT"
-
-      # Every shard restores; only the first one saves, after its tests. All
-      # shards would save under keys that differ only by the run, uploading
-      # duplicate copies of one snapshot.
-      - id: turbo-cache
-        uses: $/.github/actions/cache-scoped
-        with:
-          family: turbo
-          path: .turbo/cache
-          validity: test-bun-${{ steps.setup.outputs.bun-version }}-turbo-${{ steps.toolchain.outputs.turbo }}-${{ hashFiles('turbo.jsonc', 'bun.lock', 'package.json', 'apps/*/package.json', 'apps/*/turbo.json', 'packages/*/package.json', 'packages/*/turbo.json') }}
-          restore-prefix: test-
-          mode: restore
-          rotate: "true"
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+      # No turbo cache here, deliberately: it almost never hits. The only
+      # cacheable task a shard runs is `//#test:scripts`, whose inputs
+      # (`$TURBO_DEFAULT$`, `scripts/**`, the timings snapshot) change on nearly
+      # every push, and the `test:coverage` tasks are `cache: false`. Hosted logs
+      # showed 1 hit in 59 runs (16 consecutive successful shard 1 runs on
+      # 2026-11-11..13: 0; every 6th successful run on 2026-10-30..11-10: 1 of
+      # 43), yet each run restored a ~16 MB archive twice and uploaded a new one.
+      # Re-count `//#test:scripts` cache hits in the shard logs before changing
+      # this. Add a cache back only when a task that is both cacheable and stable
+      # across pushes runs here (for example coverage tasks with declared inputs).
 
       # Each shard consumes the same artifact before Bun updates its slice.
       - name: Download the shared timings snapshot
@@ -166,21 +143,6 @@ jobs:
         run: |
           bun ./scripts/ci/run-tests-watchdog.ts --label="${SHARD}" --timeout-seconds=480 \
             -- bun run test --coverage --shard="${SHARD}/${SHARD_COUNT}"
-
-      # Saves only when this shard's run wrote cache entries the restored
-      # snapshot did not hold, under a key that extends the stable restore
-      # prefix.
-      - name: Save new Turbo outputs
-        if: success() && matrix.shard == 1
-        uses: $/.github/actions/cache-scoped
-        with:
-          family: turbo
-          path: .turbo/cache
-          validity: ${{ steps.turbo-cache.outputs.validity }}
-          mode: save
-          rotate: "true"
-          payload-glob: "*.tar.zst"
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       # Unhandled errors never reach the JUnit report: Bun's "# Unhandled error
       # between tests" block leaves failures="0" with no failing case while the

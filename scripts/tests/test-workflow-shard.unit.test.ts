@@ -155,18 +155,16 @@ describe('Test workflow shard matrix', () => {
     expect(extractJobBlock(workflow, 'shard')).toContain('include-hidden-files: true');
   });
 
-  test('only the first shard writes the shared turbo cache', () => {
-    // Every shard restores, so a save in each would upload duplicate copies of one
-    // snapshot, keyed apart only by the run.
-    const turboSteps = extractStepBlocks(extractJobBlock(workflow, 'shard')).filter((step) =>
-      step.includes('family: turbo')
-    );
-    const saves = turboSteps.filter((step) => /^\s+mode: save$/m.test(step));
-    expect(saves, `expected one turbo save step | received: ${saves.length}`).toHaveLength(1);
-    expect(saves[0]).toMatch(/if: success\(\) && matrix\.shard == 1/);
-    expect(turboSteps.filter((step) => !saves.includes(step))).toSatisfy((rest: string[]) =>
-      rest.every((step) => /^\s+mode: restore$/m.test(step))
-    );
+  test('restores and saves no turbo cache, because 1 in 59 sampled runs hit', () => {
+    // `//#test:scripts` is the only cacheable task a shard runs and its inputs
+    // change on nearly every push; the transfer cost more than it saved.
+    const shard = extractJobBlock(workflow, 'shard');
+    for (const forbidden of ['family: turbo', '.turbo/cache', 'turbo:version', 'steps.toolchain']) {
+      expect(
+        shard.includes(forbidden),
+        `expected shard job without '${forbidden}' | received: present`
+      ).toBe(false);
+    }
   });
 });
 

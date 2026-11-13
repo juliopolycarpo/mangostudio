@@ -58,10 +58,11 @@ interface TurboLane {
   readonly command: string;
 }
 
+// test.yml is deliberately absent: its shards restore and save no Turbo
+// snapshot (pinned by 'test.yml carries no Turbo cache' below).
 const TURBO_LANES: readonly TurboLane[] = [
   { file: '.github/workflows/build.yml', job: 'build', command: 'bun run build --frontend' },
   { file: '.github/workflows/lint.yml', job: 'check', command: 'bun run check' },
-  { file: '.github/workflows/test.yml', job: 'shard', command: 'bun run test --coverage' },
 ];
 
 // Turbo's task hash already covers the lockfile closure and every config it
@@ -647,14 +648,27 @@ describe('Turbo snapshot rotation', () => {
     });
   }
 
-  test('test.yml saves from the first shard only', () => {
-    const save = turboSites('.github/workflows/test.yml').find(
-      (site) => site.inputs.mode === 'save'
+  test('test.yml carries no Turbo cache, no version probe and no snapshot bound', () => {
+    const file = '.github/workflows/test.yml';
+    const received = turboSites(file).map((site) => `${site.inputs.mode ?? 'restore-save'}`);
+    expect(
+      received,
+      `expected ${file} turbo cache-scoped call sites: none | received: ${received.join(', ')}`
+    ).toEqual([]);
+    const text = readText(file);
+    for (const forbidden of ['bun run turbo:version', '.turbo/cache', 'steps.toolchain']) {
+      expect(
+        text.includes(forbidden),
+        `expected ${file} not to contain '${forbidden}' | received: present`
+      ).toBe(false);
+    }
+    const bounds = Object.keys(jobEnv(file, 'shard')).filter((name) =>
+      name.startsWith('TURBO_CACHE_')
     );
-    expect(save, 'expected test.yml turbo save step | received: none').toBeDefined();
-    expect(save?.block, 'expected test.yml turbo save to be gated to shard 1').toMatch(
-      /\bif:\s*success\(\) && matrix\.shard == 1\b/
-    );
+    expect(
+      bounds,
+      `expected no TURBO_CACHE_ bound on the shard job | received: ${bounds.join(', ')}`
+    ).toEqual([]);
   });
 
   test('bounds the restored snapshot the same way in every lane', () => {
