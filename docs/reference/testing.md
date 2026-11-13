@@ -2050,7 +2050,7 @@ installed before the writer runs. `runtime-profile.unit.test.ts` checks the shar
 key inputs and reproduces rust-cache v2.9.3's hash for both paths and every target.
 
 The guard accepts `cache-seed` only for a `push` to `refs/heads/main`, profile
-`light` with thin LTO and 16 units, the cache on, and an empty
+`light` with LTO off and 16 units, the cache on, and an empty
 `artifact_prefix`. Artifact mode still rejects light on every event except
 `pull_request` and requires a prefix. The seed has no upload step to reach: the
 single `actions/upload-artifact` step is conditional on `mode == 'artifact'`,
