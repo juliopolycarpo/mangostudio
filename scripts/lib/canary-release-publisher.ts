@@ -178,8 +178,10 @@ async function mutate(
     const result = await client.writeCommand(args);
     if (result.exitCode !== 0) throw new Error(`GitHub command exit${result.exitCode}`);
   } catch (cause) {
+    // The CLI prints only this message, so carry the cause's own text with it.
+    const reason = cause instanceof Error ? cause.message : String(cause);
     throw new Error(
-      `Canary ${phase} failed; external effects may exist, rerun with original approved bytes`,
+      `Canary ${phase} failed: ${reason}; external effects may exist, rerun with original approved bytes`,
       { cause }
     );
   }

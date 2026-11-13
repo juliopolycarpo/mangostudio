@@ -325,7 +325,9 @@ test('conflicting uploaded bytes never cause clobber or draft deletion', async (
   const { store, github, expected } = fixture();
   github.exists = true;
   github.seed('first.tar.gz');
-  Object.assign(github.assets.get('first.tar.gz') ?? {}, { digest: `sha256:${'b'.repeat(64)}` });
+  Object.assign(github.assets.get('first.tar.gz') ?? {}, {
+    digest: `sha256:${'b'.repeat(64)}`,
+  });
   await expect(publishVerifiedCanaryRelease(expected, store, github)).rejects.toThrow(
     'Published asset mismatch'
   );
@@ -365,6 +367,13 @@ test('interruption after first upload resumes with original bytes and fills only
     ['release', 'upload', TAG, '/approved/second.tar.gz', '--repo', REPOSITORY],
   ]);
 });
+test('a failed draft creation carries the command failure text in the error message', async () => {
+  const { store, github, expected } = fixture();
+  github.failAtWrite = 1;
+  await expect(publishVerifiedCanaryRelease(expected, store, github)).rejects.toThrow(
+    'Canary draft creation failed: fake interrupted command; external effects may exist'
+  );
+});
 test.each([1, 2, 4])('nonzero command at write%i stops all later phases', async (position) => {
   const { store, github, expected } = fixture();
   github.failAtWrite = position;
@@ -378,7 +387,9 @@ test('missing draft after successful creation is failure before upload', async (
   const { store, github, expected } = fixture();
   github.disappearAfterCreate = true;
   await expect(
-    publishVerifiedCanaryRelease(expected, store, github, { retryDelaysMs: [] })
+    publishVerifiedCanaryRelease(expected, store, github, {
+      retryDelaysMs: [],
+    })
   ).rejects.toThrow('expected audited draft; received absent');
   expect(github.writes.map((args) => args[1])).toEqual(['create']);
 });
@@ -386,7 +397,9 @@ test('invisible successful upload fails without duplicate upload attempts', asyn
   const { store, github, expected } = fixture();
   github.hideUploaded = true;
   await expect(
-    publishVerifiedCanaryRelease(expected, store, github, { retryDelaysMs: [] })
+    publishVerifiedCanaryRelease(expected, store, github, {
+      retryDelaysMs: [],
+    })
   ).rejects.toThrow('expected uploaded asset in fresh audit');
   expect(github.writes.map((args) => args[1])).toEqual(['create', 'upload']);
 });
@@ -394,7 +407,9 @@ test('a final draft never becomes a claimed complete publication', async () => {
   const { store, github, expected } = fixture();
   github.leaveDraftAfterPublish = true;
   await expect(
-    publishVerifiedCanaryRelease(expected, store, github, { retryDelaysMs: [] })
+    publishVerifiedCanaryRelease(expected, store, github, {
+      retryDelaysMs: [],
+    })
   ).rejects.toThrow('expected immutable complete release; received draft');
   expect(github.draft).toBe(true);
 });
