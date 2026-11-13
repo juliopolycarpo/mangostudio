@@ -35,11 +35,14 @@ test('the complete reader inventory cannot restore an old PR timing snapshot', (
   expect(cacheScopedCallSites().filter((site) => site.inputs.family === 'timings')).toHaveLength(
     callers.length
   );
-  expect(callers.map(({ path, job }) => `${path}:${job}`).sort()).toEqual(
-    ['resolve-timings', 'merge'].map((job) => `.github/workflows/test.yml:${job}`).sort()
-  );
+  expect(callers.map(({ path, job }) => `${path}:${job}`).sort()).toEqual([
+    '.github/workflows/ci.yml:changes',
+    '.github/workflows/test.yml:merge',
+  ]);
   const readers = callers.filter(({ step }) => !step.includes('mode: save'));
-  expect(readers.map(({ job }) => job)).toEqual(['resolve-timings']);
+  expect(readers.map(({ path, job }) => `${path}:${job}`)).toEqual([
+    '.github/workflows/ci.yml:changes',
+  ]);
   const resolver = readers[0]?.step;
   expect(resolver).toContain(`validity: test-shard-${EXPR} env.SHARD_COUNT }}`);
   expect(resolver).toContain('restore-prefix: test-');
@@ -55,4 +58,25 @@ test('the complete reader inventory cannot restore an old PR timing snapshot', (
   expect(action).toContain('restore_key="${prefix}-main-${VALIDITY}"');
   // eslint-disable-next-line no-template-curly-in-string -- GitHub expressions and shell placeholders are literal fixture input.
   expect(action).toContain('loose_prefix="${prefix}-main-${RESTORE_PREFIX}"');
+});
+
+test('the restore and the save agree on the shard-count validity segment', () => {
+  // main saves `test-shard-<N>-<run_id>` from test.yml; the restore in ci.yml
+  // looks up `test-shard-<N>`. A drifted N never matches main's entries exactly; only the loose
+  // `-main-test-` fallback still restores, so balance degrades silently.
+  const declared = (source: string, where: string): string => {
+    const value = /^ {2,6}SHARD_COUNT: (\d+)$/m.exec(source)?.[1];
+    expect(value, `expected SHARD_COUNT in ${where} | received: ${value}`).toBeDefined();
+    return value ?? '';
+  };
+  const ci = readText('.github/workflows/ci.yml');
+  const restoreCount = declared(extractJobBlock(ci, 'changes'), 'ci.yml changes job env');
+  const saveCount = declared(workflow, 'test.yml env');
+  expect(
+    restoreCount,
+    `expected ci.yml restore SHARD_COUNT to equal test.yml save SHARD_COUNT | received: ${restoreCount} vs ${saveCount}`
+  ).toBe(saveCount);
+  expect(extractJobBlock(ci, 'changes')).toContain(
+    `validity: test-shard-${EXPR} env.SHARD_COUNT }}\n`
+  );
 });
