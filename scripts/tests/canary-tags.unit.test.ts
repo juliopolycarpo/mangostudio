@@ -800,6 +800,29 @@ test('default npm visibility outlasts a ten-minute registry publication lag', as
   expect(runner.writes).toHaveLength(7);
 });
 
+// The delays must end before the TTL: a sleep that lands on the deadline throws
+// the TTL expiry and the read loop never returns the last 404.
+test('a version npm never serves fails as missing packages, not as a TTL expiry', async () => {
+  const { manifest, registry, dependencies, runner } = await fixture();
+  let now = 0;
+  registry.hiddenVersionReads.set(versionUrl(NAMES[0] ?? MAIN_PACKAGE), Number.MAX_SAFE_INTEGER);
+  const promotion = promoteCanaryTags(manifest, {
+    ...dependencies,
+    visibility: {
+      now: () => now,
+      sleep: (delay) => {
+        now += delay;
+        return Promise.resolve();
+      },
+    },
+  });
+  await expect(promotion).rejects.toThrow(
+    `Canary tag promotion requires all seven verified packages; missing ${NAMES[0] ?? MAIN_PACKAGE}`
+  );
+  expect(now, 'expected the default delays to total seventeen minutes').toBe(1_020_000);
+  expect(runner.writes).toHaveLength(0);
+});
+
 test('waits for stale final dist-tags after writing without repeating mutations or archives', async () => {
   const { manifest, registry, runner, dependencies } = await fixture();
   const delays: number[] = [];

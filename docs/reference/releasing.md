@@ -673,7 +673,8 @@ sized for npm serving a just-published version up to ten minutes late,
 including HTTP reads, body downloads, source-ordering checks and tag commands.
 Post-publication reads retry HTTP 404, 408, 429 and 5xx with backoff from one second
 to one minute, sharing the deadline across all seven packages and final tag
-confirmations. Valid stale or absent canary tags are polled after successful writes;
+confirmations. The delays total seventeen minutes, so a version that never
+appears ends as a missing-package failure inside the TTL. Valid stale or absent canary tags are polled after successful writes;
 mutations are never retried by this polling loop. Logs identify the package or URL,
 attempt, HTTP status, elapsed/remaining time and next delay, then report a settled
 read or exhaustion. Expiry aborts outstanding reads/commands and fails with recovery

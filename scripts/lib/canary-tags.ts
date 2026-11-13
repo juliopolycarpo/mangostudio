@@ -110,8 +110,10 @@ export async function promoteCanaryTags(
   const visibility = new CanaryVisibilityWindow({
     // npm served new versions 1.5 to 10.5 minutes after `npm publish` returned
     // (runs 42374766275, 42484608455, 43037283185). Back off to one-minute polls
-    // and bound the whole recovery at twenty minutes: 60s of short delays, then
-    // nineteen one-minute delays.
+    // and bound the whole recovery at twenty minutes. The delays total seventeen
+    // minutes, 60s of short ones then sixteen one-minute ones, so a version that
+    // never appears exhausts them inside the TTL and reaches the missing-package
+    // error instead of a TTL expiry.
     retryDelaysMs: [
       1000,
       2000,
@@ -119,7 +121,7 @@ export async function promoteCanaryTags(
       8000,
       15000,
       30000,
-      ...Array.from({ length: 19 }, () => 60000),
+      ...Array.from({ length: 16 }, () => 60000),
     ],
     log: (message) => console.warn(message),
     ...dependencies.visibility,
