@@ -150,7 +150,8 @@ jobs:
     needs: [resolve, policy, fresh]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Bun setup can wait four minutes for a republished canary asset.
+    timeout-minutes: 9
     permissions:
       contents: read
     steps:

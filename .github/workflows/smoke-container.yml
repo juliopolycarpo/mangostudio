@@ -41,7 +41,7 @@ jobs:
   container:
     name: Container transport
     runs-on: ubuntu-latest
-    timeout-minutes: 31
+    timeout-minutes: 35
     env:
       DATABASE_PATH: /tmp/mangostudio-container-smoke.sqlite
       MANGOSTUDIO_DIAGNOSTIC_LOGS: "0"
@@ -59,7 +59,8 @@ jobs:
         timeout-minutes: 1
 
       - uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
-        timeout-minutes: 5
+        # setup-mango sets Bun up first, which can wait four minutes.
+        timeout-minutes: 9
 
       - name: Download glibc runtime target
         timeout-minutes: 3

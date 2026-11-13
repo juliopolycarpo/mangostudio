@@ -389,7 +389,8 @@ jobs:
     needs: [source, approve, npm-canary, github-release-canary]
     if: ${{ always() }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Bun setup can wait four minutes for a republished canary asset.
+    timeout-minutes: 9
     permissions:
       contents: read
     steps:

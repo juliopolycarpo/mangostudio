@@ -272,7 +272,8 @@ jobs:
     name: Verify built Linux binary
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Bun setup can wait four minutes for a republished canary asset.
+    timeout-minutes: 9
     permissions:
       attestations: read # fetch build provenance for gh attestation verify
       contents: read

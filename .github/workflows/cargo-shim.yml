@@ -80,7 +80,8 @@ jobs:
   changes:
     name: Detect Rust changes
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Bun setup can wait four minutes for a republished canary asset.
+    timeout-minutes: 9
     outputs:
       rust: ${{ steps.changed.outputs.rust }}
       qualification: ${{ steps.changed.outputs.qualification }}
@@ -411,7 +412,8 @@ jobs:
     needs: [changes, workspace, workspace-windows-arm64, musl-clippy, real-binary-qualification]
     if: ${{ always() }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Bun setup can wait four minutes for a republished canary asset.
+    timeout-minutes: 9
     permissions:
       contents: read
     steps:

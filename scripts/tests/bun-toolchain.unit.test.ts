@@ -336,6 +336,30 @@ describe('setup-bun composite action', () => {
     }
   });
 
+  // Three attempts and the 60 s and 180 s waits take four minutes before any
+  // work starts. A 5-minute job was cancelled during the second wait.
+  test('every job that sets Bun up has room for both retry waits', () => {
+    const tight: string[] = [];
+    for (const file of githubYamlFiles().filter((name) => name.startsWith('workflows/'))) {
+      const workflow = Bun.YAML.parse(readText(join('.github', file))) as {
+        jobs?: Record<string, { 'timeout-minutes'?: unknown; steps?: Array<{ uses?: string }> }>;
+      };
+      for (const [id, job] of Object.entries(workflow.jobs ?? {})) {
+        const setsUpBun = (job.steps ?? []).some((step) =>
+          /\.github\/actions\/setup-(?:bun|mango)\b/.test(step.uses ?? '')
+        );
+        const minutes = job['timeout-minutes'];
+        if (setsUpBun && typeof minutes === 'number' && minutes < 8) {
+          tight.push(`${file}#${id}: ${minutes}`);
+        }
+      }
+    }
+    expect(
+      tight,
+      'expected job timeout-minutes: at least 8 where Bun is set up | received shorter deadlines'
+    ).toEqual([]);
+  });
+
   test('defaults the version file to .bun-version', () => {
     const action = Bun.YAML.parse(readText(SETUP_BUN_ACTION)) as {
       inputs?: Record<string, { default?: string }>;
