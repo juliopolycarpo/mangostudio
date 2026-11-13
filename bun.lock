@@ -29,7 +29,7 @@
         "@better-auth/api-key": "1.7.20",
         "@elysia/cors": "2.0.0-rc.1",
         "@elysia/openapi": "2.0.0-rc.1",
-        "@google/genai": "^2.32.0",
+        "@google/genai": "^3.0.0",
         "@mangostudio/protocol": "workspace:*",
         "@mangostudio/shared": "workspace:*",
         "better-auth": "catalog:",
@@ -206,7 +206,7 @@
 
     "@emnapi/wasi-threads": ["@emnapi/wasi-threads@1.2.2", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-c95qOXkHdydNKhscBTebqEC1CVAZpyqOfVfBzQ1qgzyl3gfeldUjIggDbIZgDKsHLgnsM+igH7TJ/eAasaVuMA=="],
 
-    "@google/genai": ["@google/genai@2.32.0", "", { "dependencies": { "google-auth-library": "^10.3.0", "p-retry": "^4.6.2", "protobufjs": "^7.5.4", "ws": "^8.18.0" }, "peerDependencies": { "@modelcontextprotocol/sdk": "^1.25.2" }, "optionalPeers": ["@modelcontextprotocol/sdk"] }, "sha512-60c79uXpR0a47bmGqDxbXEBuQUalNmwo5mx5kqb91jIW4FoqpsLSt86DeVhRhtH5+s/16Wqxt3sXzFQn2U1OHQ=="],
+    "@google/genai": ["@google/genai@3.0.0", "", { "dependencies": { "google-auth-library": "^10.3.0", "p-retry": "^4.6.2", "protobufjs": "^7.6.5", "ws": "^8.21.0" }, "peerDependencies": { "@modelcontextprotocol/sdk": "^1.25.2" }, "optionalPeers": ["@modelcontextprotocol/sdk"] }, "sha512-0o2uBXPWBNUu0jWg2Id5iBtCnsd7lnxKPQfnijKvNublG/zj40CToERvz/eyfNjzzXt2kwuvxpouLUrRCZ2WUQ=="],
 
     "@happy-dom/global-registrator": ["@happy-dom/global-registrator@21.0.4", "", { "dependencies": { "@types/node": ">=20.0.0", "happy-dom": "^21.0.4" } }, "sha512-Bbr0hW9hhDhBf3Jp0EyDlkCbFgbr0z2jd3BMKYOYW+fOkPM4Nx195GMXyCtRCGEgoNn6i09FabXrSkNFm2ONzg=="],
 
