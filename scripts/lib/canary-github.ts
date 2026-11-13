@@ -30,6 +30,25 @@ const ghRunner: GhCommandRunner = {
   },
 };
 
+const STDERR_LIMIT = 300;
+
+/**
+ * Render gh stderr for an error message without leaking secrets: URLs (signed
+ * asset links carry query tokens) and credential shapes are redacted, whitespace
+ * is collapsed and the text is truncated.
+ * Example: describeGhStderr('gh: Bad Gateway (HTTP 502)') === 'gh: Bad Gateway (HTTP 502)'.
+ */
+export function describeGhStderr(stderr: string): string {
+  const text = stderr
+    .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, '<url>')
+    .replace(/\b(?:gh[pousr]_|github_pat_)\w+/g, '<token>')
+    .replace(/\b(Bearer|token|Basic)\s+\S+/gi, '$1 <redacted>')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (text === '') return '<empty>';
+  return text.length > STDERR_LIMIT ? `${text.slice(0, STDERR_LIMIT)}...` : text;
+}
+
 /** GitHub reads and controlled CLI writes for canary recovery. Example: const client = new CanaryGitHub('owner/repo'). */
 export class CanaryGitHub {
   private readonly base: string;
@@ -142,7 +161,7 @@ export class CanaryGitHub {
     const result = await Promise.resolve(this.runner.run(['api', '--paginate', '--slurp', path]));
     if (result.exitCode !== 0) {
       throw new Error(
-        `GitHub paginated read: expected successful gh exit; received ${result.exitCode}`
+        `GitHub paginated read: expected successful gh exit | received: exit ${result.exitCode} for ${path} | stderr: ${describeGhStderr(result.stderr)}`
       );
     }
     let pages: unknown;

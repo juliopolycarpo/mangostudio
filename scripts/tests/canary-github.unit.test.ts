@@ -1,6 +1,11 @@
 import { expect, test } from 'bun:test';
 
-import { CanaryGitHub, type GhCommandResult, type GhCommandRunner } from '../lib/canary-github';
+import {
+  CanaryGitHub,
+  describeGhStderr,
+  type GhCommandResult,
+  type GhCommandRunner,
+} from '../lib/canary-github';
 
 class FakeGhRunner implements GhCommandRunner {
   readonly calls: string[][] = [];
@@ -423,4 +428,45 @@ test('reads the repository root endpoint for stable repository ID association', 
     status: 200,
     body: { id: 123, full_name: 'owner/repo' },
   });
+});
+
+test('a failed paginated read names the endpoint, exit code and gh stderr', async () => {
+  const { runner, client } = fixture();
+  const path = `${BASE}/actions/workflows/5/runs?per_page=100`;
+  runner.respond(['api', '--paginate', '--slurp', path], {
+    exitCode: 1,
+    stdout: Buffer.alloc(0),
+    stderr: 'gh: Server Error (HTTP 502)\n',
+  });
+  await expect(client.list(path)).rejects.toThrow(
+    `GitHub paginated read: expected successful gh exit | received: exit 1 for ${path} | stderr: gh: Server Error (HTTP 502)`
+  );
+});
+
+test.each([
+  {
+    name: 'keeps a plain message',
+    stderr: 'gh: Not Found (HTTP 404)',
+    expected: 'gh: Not Found (HTTP 404)',
+  },
+  { name: 'reports empty stderr', stderr: ' \n', expected: '<empty>' },
+  {
+    name: 'redacts URLs',
+    stderr: 'Get "https://x.test/a?token=abc": EOF',
+    expected: 'Get "<url> EOF',
+  },
+  {
+    name: 'redacts GitHub tokens',
+    stderr: 'bad ghs_ABC123 and github_pat_XYZ_9',
+    expected: 'bad <token> and <token>',
+  },
+  {
+    name: 'redacts bearer credentials',
+    stderr: 'Authorization: Bearer s3cret',
+    expected: 'Authorization: Bearer <redacted>',
+  },
+  { name: 'collapses whitespace', stderr: 'a\n\n  b', expected: 'a b' },
+  { name: 'truncates long output', stderr: 'x'.repeat(400), expected: `${'x'.repeat(300)}...` },
+])('describeGhStderr $name', ({ stderr, expected }) => {
+  expect(describeGhStderr(stderr)).toBe(expected);
 });
