@@ -8,7 +8,7 @@ const MAX_TTL_VISIBILITY_DELAYS = 48;
 export interface CanaryVisibilityOptions {
   readonly retryDelaysMs?: readonly number[];
   readonly sleep?: (milliseconds: number) => Promise<void>;
-  /** Optional shared elapsed-time limit, including I/O; at most twenty minutes. */
+  /** Optional shared elapsed-time limit, including I/O; at most forty minutes. */
   readonly ttlMs?: number;
   /** Monotonic clock; fake sleeps must advance this clock. */
   readonly now?: () => number;
