@@ -63,7 +63,10 @@ test('default retry delays total 60 seconds and return absence on exhaustion', a
 test('empty delays preserve an immediate absent observation', async () => {
   const clock = new FakeVisibilityClock();
   const reader = new FakeVisibilityReader([false]);
-  const window = new CanaryVisibilityWindow({ retryDelaysMs: [], sleep: clock.sleep.bind(clock) });
+  const window = new CanaryVisibilityWindow({
+    retryDelaysMs: [],
+    sleep: clock.sleep.bind(clock),
+  });
   expect(await window.read(reader.read.bind(reader), confirmed)).toBe(false);
   expect(clock.delays).toEqual([]);
   expect(reader.calls).toBe(1);
@@ -158,7 +161,7 @@ test('one wall-clock deadline is shared across independent reads', async () => {
   ).rejects.toThrow('TTL expired');
 });
 
-test.each([0, -1, NaN, Infinity, 300_001])('rejects invalid TTL %s', (ttlMs) => {
+test.each([0, -1, NaN, Infinity, 1_200_001])('rejects invalid TTL %s', (ttlMs) => {
   expect(() => new CanaryVisibilityWindow({ ttlMs })).toThrow('Invalid canary visibility TTL');
 });
 
@@ -195,7 +198,9 @@ class StalledVisibilityReader {
     this.signal = signal;
     this.calls++;
     return new Promise((_, reject) =>
-      signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+      signal.addEventListener('abort', () => reject(signal.reason), {
+        once: true,
+      })
     );
   }
 }
@@ -217,4 +222,31 @@ test('aborts stalled I/O at the real deadline and never starts another read afte
   expect(reader.signal?.aborted).toBe(true);
   await expect(window.read(reader.read.bind(reader), confirmed)).rejects.toThrow('TTL expired');
   expect(reader.calls).toBe(1);
+});
+
+test('a twenty-minute TTL accepts a twenty-five step schedule that sums to the TTL', () => {
+  const retryDelaysMs = [
+    1000,
+    2000,
+    4000,
+    8000,
+    15000,
+    30000,
+    ...Array.from({ length: 19 }, () => 60000),
+  ];
+  expect(retryDelaysMs).toHaveLength(25);
+  expect(
+    () => new CanaryVisibilityWindow({ ttlMs: 1_200_000, retryDelaysMs }),
+    'expected TTL 1200000 with 25 delays totaling 1200000 to be accepted'
+  ).not.toThrow();
+});
+
+test('a TTL schedule longer than thirty-two delays is refused', () => {
+  expect(
+    () =>
+      new CanaryVisibilityWindow({
+        ttlMs: 1_200_000,
+        retryDelaysMs: Array.from({ length: 33 }, () => 0),
+      })
+  ).toThrow('expected at most 32 finite nonnegative');
 });

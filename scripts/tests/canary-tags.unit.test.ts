@@ -127,7 +127,11 @@ class FakeCanaryCommands implements CanaryTagRunner {
         stderr: '',
       });
     if (command.join(' ') === `bunx --package npm@${CANARY_TAG_NPM_VERSION} npm --version`)
-      return Promise.resolve({ exitCode: this.probeExitCode, stdout: this.npmVersion, stderr: '' });
+      return Promise.resolve({
+        exitCode: this.probeExitCode,
+        stdout: this.npmVersion,
+        stderr: '',
+      });
     if (command[4] !== 'dist-tag' || command[5] !== 'add' || command[7] !== 'canary')
       throw new Error(`Unexpected fake command ${command.join(' ')}`);
     const specification = command[6];
@@ -144,7 +148,11 @@ class FakeCanaryCommands implements CanaryTagRunner {
         stderr: 'npm error E403 Allow npm dist-tag denied',
       });
     if (this.applyWrites) this.registry.owners.set(name, VERSION);
-    return Promise.resolve({ exitCode: 0, stdout: `+canary: ${name}@${VERSION}`, stderr: '' });
+    return Promise.resolve({
+      exitCode: 0,
+      stdout: `+canary: ${name}@${VERSION}`,
+      stderr: '',
+    });
   }
   get writes(): readonly (readonly string[])[] {
     return this.commands.filter((command) => command[4] === 'dist-tag');
@@ -170,11 +178,18 @@ async function fixture(): Promise<Fixture> {
       directory: `dist-npm/${platform.os}-${platform.cpu}`,
       files: [platform.binary, platform.runtimeBinary],
     })),
-    { name: MAIN_PACKAGE, directory: 'dist-npm/cli', files: ['README.md', 'bin/mangostudio.js'] },
+    {
+      name: MAIN_PACKAGE,
+      directory: 'dist-npm/cli',
+      files: ['README.md', 'bin/mangostudio.js'],
+    },
   ];
   for (const description of descriptions) {
     const contents: Record<string, string> = {
-      'package/package.json': JSON.stringify({ name: description.name, version: VERSION }),
+      'package/package.json': JSON.stringify({
+        name: description.name,
+        version: VERSION,
+      }),
     };
     for (const file of description.files)
       contents[`package/${file}`] = `${description.name} approved ${file}`;
@@ -184,7 +199,9 @@ async function fixture(): Promise<Fixture> {
         size: Buffer.byteLength(content),
         sha256: createHash('sha256').update(content).digest('hex'),
       });
-    let archive: Uint8Array = await new Bun.Archive(contents, { compress: 'gzip' }).bytes();
+    let archive: Uint8Array = await new Bun.Archive(contents, {
+      compress: 'gzip',
+    }).bytes();
     if (/^@mangostudio\/cli-(linux|darwin)-/.test(description.name)) {
       archive = executableFixtureArchive(archive);
     }
@@ -227,7 +244,13 @@ async function fixture(): Promise<Fixture> {
     registry,
     runner,
     ancestry,
-    dependencies: { registry, runner, ancestry, env: OIDC_ENV, visibility: { retryDelaysMs: [] } },
+    dependencies: {
+      registry,
+      runner,
+      ancestry,
+      env: OIDC_ENV,
+      visibility: { retryDelaysMs: [] },
+    },
     events,
   };
 }
@@ -258,7 +281,12 @@ describe('canary OIDC tag recovery', () => {
   test('verifies all seven archives before platform-first/wrapper-last writes, then confirms every tag', async () => {
     const { manifest, runner, dependencies, events } = await fixture();
     const result = await promoteCanaryTags(manifest, dependencies);
-    expect(result).toEqual({ sourceSha: SOURCE, version: VERSION, updated: NAMES, unchanged: [] });
+    expect(result).toEqual({
+      sourceSha: SOURCE,
+      version: VERSION,
+      updated: NAMES,
+      unchanged: [],
+    });
     const firstWrite = events.findIndex((event) => event.startsWith('write:'));
     expect(
       events.slice(0, firstWrite).filter((event) => event.startsWith('archive:'))
@@ -387,7 +415,10 @@ describe('canary OIDC tag recovery', () => {
     const { manifest, registry, runner, dependencies } = await fixture();
     const first = [...registry.archives.entries()][0];
     if (!first) throw new Error('Fixture lacks first archive');
-    registry.archives.set(first[0], { status: 200, body: new Uint8Array([1, 2, 3]) });
+    registry.archives.set(first[0], {
+      status: 200,
+      body: new Uint8Array([1, 2, 3]),
+    });
     await expect(promoteCanaryTags(manifest, dependencies)).rejects.toThrow(
       'Registry archive integrity mismatch'
     );
@@ -395,7 +426,10 @@ describe('canary OIDC tag recovery', () => {
   });
   test('registry permission failures block promotion', async () => {
     const { manifest, registry, runner, dependencies } = await fixture();
-    registry.versions.set(versionUrl(NAMES[0] ?? ''), { status: 403, body: {} });
+    registry.versions.set(versionUrl(NAMES[0] ?? ''), {
+      status: 403,
+      body: {},
+    });
     await expect(promoteCanaryTags(manifest, dependencies)).rejects.toThrow(
       'expected HTTP 200, received 403'
     );
@@ -505,9 +539,10 @@ describe('read-only canary owner planning before publication', () => {
     'refuses unproven owner value %j before ancestry reads',
     async (owner) => {
       const { manifest, ancestry } = await fixture();
-      const owners = { ...ownerMap(), mangostudio: owner } as unknown as Readonly<
-        Record<string, string | null>
-      >;
+      const owners = {
+        ...ownerMap(),
+        mangostudio: owner,
+      } as unknown as Readonly<Record<string, string | null>>;
       await expect(planCanaryTagUpdates(manifest, owners, ancestry)).rejects.toThrow(
         'expected version or explicit absent tag'
       );
@@ -658,7 +693,10 @@ test('waits for just-published versions before one byte audit and any tag write'
 test('visibility exhaustion still refuses tag writes and audits each visible archive only once', async () => {
   const { manifest, registry, runner, dependencies, events } = await fixture();
   const clock = new FakeTagVisibilitySleeper();
-  registry.versions.set(versionUrl(NAMES[0] ?? MAIN_PACKAGE), { status: 404, body: null });
+  registry.versions.set(versionUrl(NAMES[0] ?? MAIN_PACKAGE), {
+    status: 404,
+    body: null,
+  });
   await expect(
     promoteCanaryTags(manifest, {
       ...dependencies,
@@ -684,7 +722,10 @@ test.each([400, 401, 403])(
   async (status) => {
     const { manifest, registry, runner, dependencies } = await fixture();
     const clock = new FakeTagVisibilitySleeper();
-    registry.versions.set(versionUrl(NAMES[0] ?? MAIN_PACKAGE), { status, body: null });
+    registry.versions.set(versionUrl(NAMES[0] ?? MAIN_PACKAGE), {
+      status,
+      body: null,
+    });
     await expect(
       promoteCanaryTags(manifest, {
         ...dependencies,
@@ -733,6 +774,30 @@ test('default npm visibility recovers after more than the old sixty-second wait'
   expect(now).toBeLessThan(300_000);
   expect(runner.writes).toHaveLength(7);
   expect(registry.servedArchives).toHaveLength(7);
+});
+
+// Runs 42374766275, 42484608455 and 43037283185 published seven packages, then npm
+// served the first version document only 3 to 10 minutes later.
+test('default npm visibility outlasts a ten-minute registry publication lag', async () => {
+  const { manifest, registry, dependencies, runner } = await fixture();
+  let now = 0;
+  registry.hiddenVersionReads.set(versionUrl(NAMES[0] ?? MAIN_PACKAGE), 15);
+  const result = await promoteCanaryTags(manifest, {
+    ...dependencies,
+    visibility: {
+      now: () => now,
+      sleep: (delay) => {
+        now += delay;
+        return Promise.resolve();
+      },
+    },
+  });
+  expect(result.updated, 'expected all seven tags promoted after a delayed first package').toEqual(
+    NAMES
+  );
+  expect(now, 'expected elapsed ms past the old five-minute TTL').toBeGreaterThan(300_000);
+  expect(now, 'expected elapsed ms inside the twenty-minute TTL').toBeLessThan(1_200_000);
+  expect(runner.writes).toHaveLength(7);
 });
 
 test('waits for stale final dist-tags after writing without repeating mutations or archives', async () => {
@@ -808,7 +873,10 @@ test('permanent absence expires with the package and last HTTP status without an
   const { manifest, registry, dependencies, runner } = await fixture();
   let now = 0;
   const logs: string[] = [];
-  registry.versions.set(versionUrl(NAMES[0] ?? MAIN_PACKAGE), { status: 404, body: null });
+  registry.versions.set(versionUrl(NAMES[0] ?? MAIN_PACKAGE), {
+    status: 404,
+    body: null,
+  });
   await expect(
     promoteCanaryTags(manifest, {
       ...dependencies,

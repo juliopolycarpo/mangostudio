@@ -108,12 +108,22 @@ export async function promoteCanaryTags(
   dependencies: CanaryTagDependencies
 ): Promise<CanaryTagPromotion> {
   const visibility = new CanaryVisibilityWindow({
+    // npm served new versions 1.5 to 10.5 minutes after `npm publish` returned
+    // (runs 42374766275, 42484608455, 43037283185). Back off to one-minute polls
+    // and bound the whole recovery at twenty minutes: 60s of short delays, then
+    // nineteen one-minute delays.
     retryDelaysMs: [
-      1000, 2000, 4000, 8000, 15000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000, 30000,
+      1000,
+      2000,
+      4000,
+      8000,
+      15000,
+      30000,
+      ...Array.from({ length: 19 }, () => 60000),
     ],
     log: (message) => console.warn(message),
     ...dependencies.visibility,
-    ttlMs: dependencies.visibility?.ttlMs ?? 300_000,
+    ttlMs: dependencies.visibility?.ttlMs ?? 1_200_000,
   });
   return visibility.run(
     (signal) => promoteVerifiedCanaryTags(manifest, dependencies, visibility, signal),
