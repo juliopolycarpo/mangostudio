@@ -160,8 +160,6 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
       - uses: $/.github/actions/setup-mango
-        with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - id: approved
         name: Recover original approval or qualify retained CI distribution
@@ -232,8 +230,6 @@ jobs:
           node-version: "22.23.4"
           package-manager-cache: false
       - uses: $/.github/actions/setup-mango
-        with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - id: approved
         name: Recover and pin the original successful approval
@@ -315,8 +311,6 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
       - uses: $/.github/actions/setup-mango
-        with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - id: approved
         name: Recover and pin the original successful approval

@@ -6,7 +6,7 @@
 
 A versão instalada vem do canal `canary` em [`.bun-version`](../../../.bun-version).
 Instale com `bun upgrade --canary`. O campo `packageManager` registra uma versão
-estável para o Turborepo, que não aceita `bun@canary`. As chaves de cache usam
+estável para o Turborepo, que não aceita `bun@canary`. As chaves de cache do Turbo usam
 `bun --revision` e o manifesto de distribuição registra a revisão e a origem dos
 runtimes por plataforma. A seção [Bun em inglês](../../reference/tooling.md#bun)
 explica a verificação de downloads no CI.
