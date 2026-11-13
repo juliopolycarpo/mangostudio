@@ -17,7 +17,7 @@ interface DependabotConfig {
   updates: Array<{
     'package-ecosystem': string;
     schedule?: { interval: string; day?: string };
-    groups?: Record<string, { patterns?: string[] }>;
+    groups?: Record<string, { patterns?: string[]; 'update-types'?: string[] }>;
     ignore?: Array<{ 'dependency-name': string; versions?: string[] }>;
   }>;
 }
@@ -146,8 +146,13 @@ describe('security workflows', () => {
     // group's own pattern must stay narrow or it would absorb everything.
     const groups = Object.entries(actions?.groups ?? {});
     expect(groups.map(([name]) => name)).toEqual(['codeql-action', 'actions']);
-    expect(groups[0]?.[1].patterns).toEqual(['github/codeql-action*']);
-    expect(groups.at(-1)?.[1].patterns).toEqual(['*']);
+    // No update-types on the pair: init and analyze move together on a major too.
+    expect(groups[0]?.[1]).toEqual({ patterns: ['github/codeql-action*'] });
+    // A major must not ride in with the week's patches.
+    expect(groups.at(-1)?.[1]).toEqual({
+      patterns: ['*'],
+      'update-types': ['minor', 'patch'],
+    });
   });
 
   test('Dependabot allows TypeBox updates after the Elysia compiler compatibility fix', () => {
