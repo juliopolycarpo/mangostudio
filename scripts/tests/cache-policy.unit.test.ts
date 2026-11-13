@@ -356,6 +356,12 @@ describe('CI cache policy', () => {
       "hashFiles('scripts/lib/actions-lint/manifest.ts')"
     );
     expect(lintTools[0].inputs['exact-restore']).toBe('true');
+    // The tools are identical for one manifest hash, so only the trusted main
+    // scope stores them; every other run restores that entry and saves nothing.
+    expect(lintTools[0].inputs.mode).toBe(
+      '$' +
+        "{{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'restore-save' || 'restore' }}"
+    );
   });
 
   // Only `mode: restore` runs actions/cache/restore, the one path that can see

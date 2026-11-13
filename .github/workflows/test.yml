@@ -10,6 +10,15 @@ on:
           Local spawns it, so the shards cannot run without it.
         type: string
         required: true
+      timings_artifact:
+        description: >
+          Artifact holding the test timings baseline that ci.yml's `changes`
+          job restored once before this fan-out. Every shard and the frontend
+          lane download it, so they all balance against one snapshot. The name
+          carries the run attempt; see the output's comment in ci.yml for what
+          a failed-job rerun sees.
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -20,8 +29,8 @@ permissions:
 # per watchdog attempt after a healthy step reached 238s; the experiment's
 # preventive 147s criterion is historical. See docs/reference/testing.md for
 # evidence and limits.
-# Changing it is a three-line change: this value, the matrix list, and the shard
-# job's name — `env` is not one of the contexts available to `jobs.<id>.name`,
+# Changing it is a four-line change: this value, the matrix list, the shard
+# job's name and SHARD_COUNT in ci.yml's `changes` job (the timings restore key) — `env` is not one of the contexts available to `jobs.<id>.name`,
 # so that last one cannot interpolate this value.
 #
 # The split itself is balanced by measured per-file duration rather than by file
@@ -32,7 +41,9 @@ permissions:
 # fallback is `-main-` scoped; only successful main pushes save a baseline.)
 # That is correct either way, because the file records per-file durations, not a
 # partition. What has to stay stable is the file all shards of one run read, and
-# that is what resolve-timings pins.
+# that is what ci.yml's `changes` job pins: it restores once and the shards
+# download that snapshot. The restore key there must keep the same
+# `test-shard-<N>` validity as this file's save in the merge job.
 env:
   SHARD_COUNT: 2
   # Names every child a run spawns, and every one that never exits, in the shard
@@ -47,48 +58,6 @@ env:
   MANGOSTUDIO_SPAWN_DIAGNOSTICS: "1"
 
 jobs:
-  resolve-timings:
-    # Restore once before fan-out. A miss gives every shard the same cold
-    # snapshot, even if another run saves or evicts a cache entry.
-    # Retain the snapshot and downstream inputs for GitHub's 30-day job rerun
-    # window, since a retry reuses artifacts from successful jobs.
-    name: Resolve test timings baseline
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      artifact: test-timings-baseline-${{ github.run_attempt }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - id: timings
-        name: Restore main test timings
-        uses: $/.github/actions/cache-scoped
-        with:
-          family: timings
-          path: .mango/artifacts/timings
-          validity: test-shard-${{ env.SHARD_COUNT }}
-          restore-prefix: test-
-          mode: restore
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
-
-      - name: Record the restored timing key or cold fallback
-        env:
-          TIMINGS_KEY: ${{ steps.timings.outputs.matched-key }}
-        run: |
-          mkdir -p .mango/artifacts/timings
-          printf '%s\n' "${TIMINGS_KEY:-cold}" > .mango/artifacts/timings/source-key.txt
-
-      - name: Upload the shared timings snapshot
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: test-timings-baseline-${{ github.run_attempt }}
-          path: .mango/artifacts/timings
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 30
-
   shard:
     # Sharding got the suite off one serial process while a collision between
     # concurrent isolates inside one Bun process (oven-sh/bun#37968) blocked
@@ -104,11 +73,10 @@ jobs:
     # scripts/lib/test-lanes.ts), and the test step runs under
     # scripts/ci/run-tests-watchdog.ts, which kills a wedged invocation after
     # its per-attempt bound and retries once. Note for triage: a rerun of only
-    # failed jobs reuses resolve-timings' output and therefore the exact file
+    # failed jobs reuses the `changes` job's output and therefore the exact file
     # partition that hung; "re-run all jobs" re-resolves the baseline, which
     # is why it has looked more reliable.
     name: Tests (shard ${{ matrix.shard }}/2)
-    needs: [resolve-timings]
     runs-on: ubuntu-latest
     timeout-minutes: 18
     strategy:
@@ -165,7 +133,7 @@ jobs:
       - name: Download the shared timings snapshot
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: ${{ needs.resolve-timings.outputs.artifact }}
+          name: ${{ inputs.timings_artifact }}
           path: .mango/artifacts/timings
 
       - name: Run database migrations
@@ -268,7 +236,6 @@ jobs:
     # `test-shard-frontend`, so the merge job folds it in without a special
     # case.
     name: Tests (frontend)
-    needs: [resolve-timings]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -289,7 +256,7 @@ jobs:
       - name: Download the shared timings snapshot
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: ${{ needs.resolve-timings.outputs.artifact }}
+          name: ${{ inputs.timings_artifact }}
           path: .mango/artifacts/timings
 
       # Same watchdog as the shard job: this lane runs `--parallel=4

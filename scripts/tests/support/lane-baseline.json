@@ -85,7 +85,6 @@
   "gates": {
     "ci": {
       "needs": [
-        "distribution-identity",
         "changes",
         "distribution",
         "check",

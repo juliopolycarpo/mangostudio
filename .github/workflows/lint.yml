@@ -65,6 +65,9 @@ jobs:
           rotate: "true"
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
+      # Only main saves. A pull request restores main's exact entry through
+      # the restore key, which is not a primary-key hit, so `restore-save`
+      # uploaded a copy of the same tools under every pull request scope.
       - name: Restore workflow lint tools
         uses: $/.github/actions/cache-scoped
         with:
@@ -72,6 +75,7 @@ jobs:
           path: .mango/artifacts/tools/
           validity: ${{ hashFiles('scripts/lib/actions-lint/manifest.ts') }}
           exact-restore: "true"
+          mode: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'restore-save' || 'restore' }}
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - id: identity

@@ -23,6 +23,30 @@ The legacy jobs named `Gate` have been removed. The
 contexts enforced by the main ruleset. Canary independently verifies successful
 CI and relevant sibling workflows through their unique aggregate names.
 
+## Preflight
+
+`ci.yml`'s `changes` job is displayed as `Preflight`. It is the one job at the
+start of a run that every later lane can depend on, so tiny decisions fold into
+it instead of costing a runner slot and a queue wait each (the account runs under
+a concurrency cap). It classifies the diff (`distribution`, `rust`) and resolves
+the distribution identity from `scripts/ci/distribution-identity.ts`: `version`,
+`channel`, `cargo_version` and `source_sha` (the checked out `HEAD`; its
+`fetch-depth: 0` adds history, not a different commit). `distribution`, `build`,
+`release-dry-run`, both smoke lanes and the cache seed read the identity from
+`needs.changes.outputs`.
+
+It also restores the test timings baseline once and uploads it as
+`test-timings-baseline-<run_attempt>` (30 days), then passes the name to
+`test.yml` as the required `timings_artifact` input. The shard and frontend jobs
+download it with no intra-workflow `needs`, so they queue as soon as the
+`Local Runtime` build finishes instead of waiting on a separate resolver job. A
+miss records `cold` in `source-key.txt` for every consumer. The validity segment
+`test-shard-<SHARD_COUNT>` is the one main's merge job saves under, so the
+`SHARD_COUNT` in `ci.yml`'s `changes` job must equal the one in `test.yml`
+(`timings-cache-writes.unit.test.ts` pins this). A failed-job rerun does not
+re-run `changes`, so it keeps the attempt-1 artifact name and the same file
+partition; "Re-run all jobs" restores again and uploads the `-2` snapshot.
+
 Distribution skips use an allowlist in [`scripts/lib/ci-lanes.ts`](../../scripts/lib/ci-lanes.ts),
 not a broad rule that every Markdown change is irrelevant. On PRs, CI's `changes` job
 collects a validated, nonempty diff with both sides of renames and emits
@@ -178,7 +202,7 @@ Weekly and manual dry runs keep separate clean, uncached shipping-profile
 runtime and hub builds with version `0.0.0-dryrun`. Linux packaging/Docker checks,
 Windows PowerShell 5.1 installer checks and the Cargo publish dry run retain
 their command inventory. The main-only light runtime cache seed waits for
-successful `CI Gate` and direct distribution identity. Hosted reuse and artifact
+successful `CI Gate` and a successful `changes` (Preflight) job, which owns the distribution identity. Hosted reuse and artifact
 overhead require current-head qualification; no measured wall-clock reduction
 is claimed here.
 
@@ -393,11 +417,11 @@ Some CI jobs run only the repository-pinned Bun binary and never call
 `bun install` or restore CI caches. They execute small TypeScript entrypoints
 whose import graph stays inside the checkout (no `node_modules`).
 
-| Workflow           | Job(s)                          | Setup                          |
-| ------------------ | ------------------------------- | ------------------------------ |
-| `ci.yml`           | `gate`, `distribution-identity` | `oven-sh/setup-bun` only       |
-| `smoke-binary.yml` | `binary` (default)              | `oven-sh/setup-bun` only       |
-| `smoke-binary.yml` | `binary` (`rebuild`)            | `setup-mango` (full toolchain) |
+| Workflow           | Job(s)               | Setup                          |
+| ------------------ | -------------------- | ------------------------------ |
+| `ci.yml`           | `gate`               | `oven-sh/setup-bun` only       |
+| `smoke-binary.yml` | `binary` (default)   | `oven-sh/setup-bun` only       |
+| `smoke-binary.yml` | `binary` (`rebuild`) | `setup-mango` (full toolchain) |
 
 The Linux `binary` jobs also stage and test the Bookworm and Alpine Docker
 images. `smoke-container.yml` runs all four Docker/Podman and glibc/musl
