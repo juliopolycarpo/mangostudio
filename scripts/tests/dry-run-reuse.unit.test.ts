@@ -120,7 +120,7 @@ function jobRuns(workflow: string, job: string, scenario: JobScenario, override?
 
 describe('PR dry-run caller after a skipped distribution', () => {
   const docsOnly: JobScenario = {
-    results: { 'distribution-identity': 'success', changes: 'success', distribution: 'skipped' },
+    results: { changes: 'success', distribution: 'skipped' },
     event: 'pull_request',
   };
 
@@ -160,7 +160,7 @@ describe('light runtime cache seed after the PR-only dry run was added', () => {
     expect(jobRuns(CI, 'runtime-cache-seed', mainPush)).toBe(true);
   });
 
-  test.each(['gate-unique', 'distribution-identity'])(
+  test.each(['gate-unique', 'changes'])(
     'refuses an unsuccessful or missing prerequisite (%s)',
     (producer) => {
       for (const result of ['failure', 'cancelled', 'skipped', undefined]) {
@@ -357,13 +357,11 @@ describe('same-run release dry-run runtime reuse', () => {
   test('CI supplies exact same-run identity and artifacts, and never waits on a gate', () => {
     const ci = readText('.github/workflows/ci.yml');
     const caller = extractJobBlock(ci, 'release-dry-run');
-    expect(parseNeedsList(caller)).toEqual(['distribution-identity', 'distribution']);
+    expect(parseNeedsList(caller)).toEqual(['changes', 'distribution']);
     expect(caller).toContain('reuse_distribution: true');
-    expect(caller).toContain(`version: ${EXPR} needs.distribution-identity.outputs.version }}`);
-    expect(caller).toContain(
-      `source_sha: ${EXPR} needs.distribution-identity.outputs.source_sha }}`
-    );
-    expect(caller).toContain(`channel: ${EXPR} needs.distribution-identity.outputs.channel }}`);
+    expect(caller).toContain(`version: ${EXPR} needs.changes.outputs.version }}`);
+    expect(caller).toContain(`source_sha: ${EXPR} needs.changes.outputs.source_sha }}`);
+    expect(caller).toContain(`channel: ${EXPR} needs.changes.outputs.channel }}`);
     expect(caller).toContain(
       `target_artifacts: ${EXPR} needs.distribution.outputs.target_artifacts || '{}' }}`
     );

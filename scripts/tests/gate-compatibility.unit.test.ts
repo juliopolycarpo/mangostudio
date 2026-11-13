@@ -267,7 +267,7 @@ describe('unique checks preserve enforcement producers', () => {
         expect(caller).toContain(
           `if: ${EXPR} !cancelled() && github.event_name == 'pull_request' }}`
         );
-        expect(parseNeedsList(caller)).toEqual(['distribution-identity', 'distribution']);
+        expect(parseNeedsList(caller)).toEqual(['changes', 'distribution']);
         expect(triggers).toContain('  workflow_call:');
         expect(triggers).not.toContain('  pull_request:');
       } else {

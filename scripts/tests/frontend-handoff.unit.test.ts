@@ -9,9 +9,7 @@ describe('canonical production frontend handoff', () => {
     expect(extractJobBlock(ci, 'frontend')).toBe('');
     const producer = extractJobBlock(ci, 'build');
     expect(producer).toContain('uses: $/.github/workflows/build.yml');
-    expect(producer).toContain(
-      `source_sha: ${'$'}{{ needs.distribution-identity.outputs.source_sha }}`
-    );
+    expect(producer).toContain(`source_sha: ${'$'}{{ needs.changes.outputs.source_sha }}`);
     for (const name of ['distribution', 'browser-smoke', 'qa-metrics']) {
       const consumer = extractJobBlock(ci, name);
       expect(consumer, name).toContain(

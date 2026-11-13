@@ -189,8 +189,8 @@ produtores; não há fallback de recompilação.
 Dry runs semanais e manuais mantêm builds limpos e sem cache de runtime e hub,
 com perfil shipping e versão `0.0.0-dryrun`. Checks Linux de empacotamento/Docker,
 instaladores em Windows PowerShell 5.1 e Cargo publish dry run mantêm seus
-comandos. O seed de cache light exclusivo de main aguarda `CI Gate` e a
-identidade de distribuição bem-sucedidos. A reutilização hospedada e o custo
+comandos. O seed de cache light exclusivo de main aguarda o sucesso de `CI Gate` e do
+job `changes` (Preflight), que resolve a identidade de distribuição. A reutilização hospedada e o custo
 dos artefatos exigem validação no head atual; não há alegação de redução medida
 de tempo.
 

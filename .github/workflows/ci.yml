@@ -26,12 +26,20 @@ concurrency:
 
 jobs:
   changes:
-    name: Detect distribution-relevant changes
+    # Preflight: every tiny decision the rest of the run needs before it can
+    # fan out, in one job. Each separate job costs a runner slot and a queue
+    # wait, and the account runs under a concurrency cap, so the diff
+    # classification and the distribution identity share this checkout.
+    name: Preflight
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
       distribution: ${{ steps.changed.outputs.distribution }}
       rust: ${{ steps.rust.outputs.rust }}
+      version: ${{ steps.identity.outputs.version }}
+      channel: ${{ steps.identity.outputs.channel }}
+      cargo_version: ${{ steps.identity.outputs.cargo_version }}
+      source_sha: ${{ steps.source.outputs.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -82,24 +90,9 @@ jobs:
           grep '^rust=' "$RUNNER_TEMP/rust-lanes" >> "$GITHUB_OUTPUT"
           cat "$RUNNER_TEMP/rust-lanes"
 
-  distribution-identity:
-    name: Resolve distribution identity
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      version: ${{ steps.identity.outputs.version }}
-      channel: ${{ steps.identity.outputs.channel }}
-      cargo_version: ${{ steps.identity.outputs.cargo_version }}
-      source_sha: ${{ steps.source.outputs.sha }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
-
+      # `fetch-depth: 0` changes history, not the checked out commit, so HEAD is
+      # the same SHA the former single-purpose identity job resolved: the PR
+      # merge commit on pull_request, the pushed commit otherwise.
       - id: source
         name: Resolve checked out source SHA
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
@@ -114,7 +107,7 @@ jobs:
 
   distribution:
     name: Distribution
-    needs: [distribution-identity, changes, build]
+    needs: [changes, build]
     if: ${{ needs.changes.outputs.distribution == 'true' }}
     permissions:
       contents: read
@@ -122,9 +115,9 @@ jobs:
       attestations: write # persist provenance for main-push distribution bundles
     uses: $/.github/workflows/distribution-build.yml
     with:
-      version: ${{ needs.distribution-identity.outputs.version }}
-      source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
-      channel: ${{ needs.distribution-identity.outputs.channel }}
+      version: ${{ needs.changes.outputs.version }}
+      source_sha: ${{ needs.changes.outputs.source_sha }}
+      channel: ${{ needs.changes.outputs.channel }}
       retention_days: 7
       publication_retention_days: ${{ github.event_name == 'push' && 30 || 7 }}
       # PR smoke and dry runs consume target bundles. Main aggregates are the
@@ -166,14 +159,14 @@ jobs:
     # Internal relevance guards then report Gate without compiling or waiting
     # on a sibling workflow. A failed relevant distribution cannot supply bytes.
     name: Release Dry Run
-    needs: [distribution-identity, distribution]
+    needs: [changes, distribution]
     if: ${{ !cancelled() && github.event_name == 'pull_request' }}
     uses: $/.github/workflows/release-dry-run.yml
     with:
       reuse_distribution: true
-      version: ${{ needs.distribution-identity.outputs.version }}
-      source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
-      channel: ${{ needs.distribution-identity.outputs.channel }}
+      version: ${{ needs.changes.outputs.version }}
+      source_sha: ${{ needs.changes.outputs.source_sha }}
+      channel: ${{ needs.changes.outputs.channel }}
       target_artifacts: ${{ needs.distribution.outputs.target_artifacts || '{}' }}
 
   local-runtime:
@@ -189,10 +182,10 @@ jobs:
 
   build:
     name: Build
-    needs: [distribution-identity]
+    needs: [changes]
     uses: $/.github/workflows/build.yml
     with:
-      source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
+      source_sha: ${{ needs.changes.outputs.source_sha }}
 
   browser-smoke:
     name: Smoke — Browser
@@ -244,13 +237,13 @@ jobs:
     # stages those same Linux bytes into both Docker variants. The reusable
     # smoke workflow retains a manual rebuild fallback for one transition cycle.
     name: Smoke — Binary
-    needs: [distribution-identity, distribution, changes]
+    needs: [distribution, changes]
     if: ${{ needs.changes.outputs.distribution == 'true' }}
     uses: $/.github/workflows/smoke-binary.yml
     with:
-      version: ${{ needs.distribution-identity.outputs.version }}
-      source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
-      channel: ${{ needs.distribution-identity.outputs.channel }}
+      version: ${{ needs.changes.outputs.version }}
+      source_sha: ${{ needs.changes.outputs.source_sha }}
+      channel: ${{ needs.changes.outputs.channel }}
       target_artifacts: ${{ needs.distribution.outputs.target_artifacts }}
 
   smoke-container:
@@ -258,13 +251,13 @@ jobs:
     # runtime binaries distribution already built. Gated on the same changes
     # filter as the other distribution-consuming lanes.
     name: Smoke — Container
-    needs: [distribution-identity, distribution, changes]
+    needs: [distribution, changes]
     if: ${{ needs.changes.outputs.distribution == 'true' }}
     uses: $/.github/workflows/smoke-container.yml
     with:
-      version: ${{ needs.distribution-identity.outputs.version }}
-      source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
-      channel: ${{ needs.distribution-identity.outputs.channel }}
+      version: ${{ needs.changes.outputs.version }}
+      source_sha: ${{ needs.changes.outputs.source_sha }}
+      channel: ${{ needs.changes.outputs.channel }}
       target_artifacts: ${{ needs.distribution.outputs.target_artifacts }}
 
   gate-unique:
@@ -272,7 +265,6 @@ jobs:
     name: CI Gate
     needs:
       [
-        distribution-identity,
         changes,
         distribution,
         cross-runtimes,
@@ -338,9 +330,9 @@ jobs:
     # A seed re-runs only on an entry miss (a Cargo.lock, Cargo.toml or
     # toolchain change); on a hit each platform exits after the lookup.
     name: Runtime light cache seed
-    needs: [gate-unique, distribution-identity]
+    needs: [gate-unique, changes]
     # Gate accepts the skipped PR-only dry run; require successful direct needs.
-    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs['gate-unique'].result == 'success' && needs['distribution-identity'].result == 'success' }}
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs['gate-unique'].result == 'success' && needs.changes.result == 'success' }}
     # Serialized with itself and never cancelled mid-save; a newer pending
     # seed replaces an older pending one.
     concurrency:
@@ -350,8 +342,8 @@ jobs:
       contents: read
     uses: $/.github/workflows/runtime-build.yml
     with:
-      version: ${{ needs.distribution-identity.outputs.version }}
-      source_sha: ${{ needs.distribution-identity.outputs.source_sha }}
+      version: ${{ needs.changes.outputs.version }}
+      source_sha: ${{ needs.changes.outputs.source_sha }}
       profile: light
       mode: cache-seed
       cache: true
