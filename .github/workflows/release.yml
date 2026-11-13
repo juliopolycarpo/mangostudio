@@ -176,8 +176,6 @@ jobs:
           bun --no-env-file "$RUNNER_TEMP/release-trust/scripts/release/verify-release-tag.ts" "$RELEASE_TAG" "$GITHUB_WORKSPACE" "$EXPECTED_RELEASE_TAG"
 
       - uses: $/.github/actions/setup-mango
-        with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Verify versions are in lockstep
         # Fail before producing artifacts if the root and workspace package.json
@@ -284,8 +282,6 @@ jobs:
           persist-credentials: false
 
       - uses: $/.github/actions/setup-mango
-        with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - uses: $/.github/actions/download-distribution
         with:
@@ -327,8 +323,6 @@ jobs:
           persist-credentials: false
 
       - uses: $/.github/actions/setup-mango
-        with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - uses: $/.github/actions/download-distribution
         with:
@@ -412,8 +406,6 @@ jobs:
           persist-credentials: false
 
       - uses: $/.github/actions/setup-mango
-        with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - uses: $/.github/actions/download-distribution
         with:
@@ -549,8 +541,6 @@ jobs:
           package-manager-cache: false
 
       - uses: $/.github/actions/setup-mango
-        with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - uses: $/.github/actions/download-distribution
         with:
@@ -605,8 +595,6 @@ jobs:
           value: "${{ secrets.DIST_REPOS_TOKEN }}"
 
       - uses: $/.github/actions/setup-mango
-        with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - uses: $/.github/actions/download-distribution
         with:
@@ -662,8 +650,6 @@ jobs:
           value: "${{ secrets.DIST_REPOS_TOKEN }}"
 
       - uses: $/.github/actions/setup-mango
-        with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - uses: $/.github/actions/download-distribution
         with:
@@ -857,8 +843,6 @@ jobs:
           persist-credentials: false
 
       - uses: $/.github/actions/setup-mango
-        with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Install CLI from npm
         shell: bash

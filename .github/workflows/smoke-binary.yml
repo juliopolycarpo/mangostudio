@@ -118,8 +118,6 @@ jobs:
         if: ${{ inputs.rebuild }}
         timeout-minutes: 5
         uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
-        with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Download cargo runtime (manual rebuild)
         if: ${{ inputs.rebuild }}

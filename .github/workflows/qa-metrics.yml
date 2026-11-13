@@ -63,8 +63,6 @@ jobs:
 
       - id: setup
         uses: $/.github/actions/setup-mango
-        with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - id: frontend
         name: Download verified canonical frontend

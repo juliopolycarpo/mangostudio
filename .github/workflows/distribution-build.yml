@@ -144,8 +144,6 @@ jobs:
           ref: ${{ inputs.source_sha }}
       - uses: ./.github/actions/distribution-source # zizmor: ignore[self-repository] load the action from the selected source checkout
       - uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
-        with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
       - name: Build frontend once
         if: inputs.frontend_artifact == ''
         env:
@@ -210,8 +208,6 @@ jobs:
       - uses: ./.github/actions/distribution-source # zizmor: ignore[self-repository] load the action from the selected source checkout
       - uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
         if: ${{ !matrix.musl }}
-        with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
       - name: Download prepared frontend
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -290,8 +286,6 @@ jobs:
       - uses: ./.github/actions/distribution-source # zizmor: ignore[self-repository] load the action from the selected source checkout
 
       - uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
-        with:
-          cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
       - name: Verify checked out source identity
         env:

@@ -2,6 +2,8 @@ import { parseRustCacheKey } from './rust-cache/families';
 
 // All families written by cache-scoped. The policy receipt checks every call
 // site against this registry, so adding a writer also updates accounting.
+// `bun` is retired (setup-mango no longer transfers a package cache) and stays
+// only so entries still inside the 14-day retention are not reported as unknown.
 export const SCOPED_CACHE_FAMILIES = [
   'bun',
   'turbo',

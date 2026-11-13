@@ -1919,18 +1919,18 @@ All dependency and intermediate-state caches are owned by composites under
 `.github/actions/`; workflows must not call `actions/cache` directly. The shared
 `cache-scoped` composite owns the write-scope, trusted-`main` restore keys, and
 step-summary diagnostics for every family. Callers supply `family`, `path`, and
-a `validity` string (toolchain versions plus content hashes). `setup-mango`
-wraps the Bun install family; every other family is invoked from the workflow
-that produces or consumes it. Every `setup-mango` job runs a frozen install.
-Linux, macOS, and Windows x64 and arm64 runners skip Bun package-cache transfers.
+a `validity` string (toolchain versions plus content hashes). Every family is
+invoked from the workflow that produces or consumes it. `setup-mango` runs a
+frozen install and transfers no Bun package cache on any runner: every runner this
+repository uses is Linux, macOS, or Windows on x64 or arm64, and an empty-cache
+install beat restore-then-install on all six classes.
 [First hosted comparison](https://github.com/juliopolycarpo/mangostudio/issues/2025) ·
 [Remaining runner classes](https://github.com/juliopolycarpo/mangostudio/issues/2057)
 
-| Family              | Producer / consumer              | Path                      | Invalidators                                             | Restore behavior                                     |
-| ------------------- | -------------------------------- | ------------------------- | -------------------------------------------------------- | ---------------------------------------------------- |
-| Bun install         | cache-enabled `setup-mango` jobs | `~/.bun/install/cache`    | OS, arch, Bun revision, lockfile                         | loose trusted-`main` prefix on cache-enabled runners |
-| Turbo task output   | check, test, build, QA metrics   | `.turbo/cache`            | OS, arch, Bun, Turbo, lane, lockfile, manifests, configs | lane-scoped trusted-`main` prefix                    |
-| Workflow lint tools | check                            | `.mango/artifacts/tools/` | pinned tool manifest                                     | exact trusted restore only                           |
+| Family              | Producer / consumer            | Path                      | Invalidators                                             | Restore behavior                  |
+| ------------------- | ------------------------------ | ------------------------- | -------------------------------------------------------- | --------------------------------- |
+| Turbo task output   | check, test, build, QA metrics | `.turbo/cache`            | OS, arch, Bun, Turbo, lane, lockfile, manifests, configs | lane-scoped trusted-`main` prefix |
+| Workflow lint tools | check                          | `.mango/artifacts/tools/` | pinned tool manifest                                     | exact trusted restore only        |
 
 Inside the Turbo task output family each task is keyed by Turbo's own hash. The cached
 API unit task includes the SHA-256 of the runtime binary in it (see [API](#api)); without
@@ -1948,12 +1948,6 @@ that entry with `mode: restore`. Only `mode: restore` uses `actions/cache/restor
 reports a trusted-`main` match. `restore-save` reports primary-key hits. A call
 site can gate an install on `cache-restored` when it sets both exact restore
 and `mode: restore`.
-
-On a cache-enabled runner, `setup-mango` can save the Bun cache after a frozen
-install on a push to `main`. If the exact restore key misses, a metadata-only
-lookup (`lookup-only`, `exact-restore`) checks whether another caller already
-saved the key. An exact hit skips compression. A failed lookup or a miss keeps the normal
-save. Callers that miss at the same moment can still race to reserve the key.
 
 ### Turbo snapshot rotation
 
@@ -2208,10 +2202,11 @@ checks still execute.
 
 `CI_CACHE_EPOCH` is the repository-wide emergency invalidation lever. It is an
 Actions repository variable with a documented `v1` fallback, passed explicitly
-to every cache call site. Composite actions cannot read the `vars` context, so
-callers must keep supplying `cache-epoch` rather than relying on a composite
-default. Increment the variable (for example, to `v2`) to force a clean miss
-after suspected poisoning or a broken key rollout. Removing the variable returns
+to every `cache-scoped` call site. Composite actions cannot read the `vars`
+context, so those callers must keep supplying `cache-epoch` rather than relying
+on a composite default. `setup-mango` takes no epoch because it transfers no
+cache. Increment the variable (for example, to `v2`) to force a clean miss after
+suspected poisoning or a broken key rollout. Removing the variable returns
 to `v1`; only do that for a benign rollback because old `v1` entries may still
 exist.
 
