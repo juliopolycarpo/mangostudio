@@ -1927,10 +1927,10 @@ install beat restore-then-install on all six classes.
 [First hosted comparison](https://github.com/juliopolycarpo/mangostudio/issues/2025) ·
 [Remaining runner classes](https://github.com/juliopolycarpo/mangostudio/issues/2057)
 
-| Family              | Producer / consumer      | Path                      | Invalidators                                             | Restore behavior                  |
-| ------------------- | ------------------------ | ------------------------- | -------------------------------------------------------- | --------------------------------- |
-| Turbo task output   | check, build, QA metrics | `.turbo/cache`            | OS, arch, Bun, Turbo, lane, lockfile, manifests, configs | lane-scoped trusted-`main` prefix |
-| Workflow lint tools | check                    | `.mango/artifacts/tools/` | pinned tool manifest                                     | exact trusted restore only        |
+| Family              | Producer / consumer | Path                      | Invalidators                                             | Restore behavior                  |
+| ------------------- | ------------------- | ------------------------- | -------------------------------------------------------- | --------------------------------- |
+| Turbo task output   | check, build        | `.turbo/cache`            | OS, arch, Bun, Turbo, lane, lockfile, manifests, configs | lane-scoped trusted-`main` prefix |
+| Workflow lint tools | check               | `.mango/artifacts/tools/` | pinned tool manifest                                     | exact trusted restore only        |
 
 Inside the Turbo task output family each task is keyed by Turbo's own hash. The cached
 API unit task includes the SHA-256 of the runtime binary in it (see [API](#api)); without
@@ -2012,7 +2012,7 @@ be conditional):
 
 `runtime-build.yml` defaults to the shipping profile: fat LTO and one codegen
 unit. CI's distribution and PR release dry runs explicitly request `light` on
-`pull_request`: thin LTO and 16 units, including PRs that change Rust. The
+`pull_request`: no LTO (`lto=off`) and 16 units, including PRs that change Rust. The
 binary-smoke rebuild passes the same selection, but it runs only from
 `workflow_dispatch`, so it resolves to shipping. The overrides live at job scope, so
 rust-cache's CARGO environment hash separates both exact and fallback keys by
@@ -2021,9 +2021,18 @@ the light entry comes from the main-push seed described below.
 Shipping receives an empty override map, preserving its existing Cargo
 defaults and cache environment identity.
 
+The light profile drops LTO because the ThinLTO pass over the whole dependency
+graph dominates a warm rebuild, and a PR binary is only smoked, never published.
+Only `lto` and `codegen-units` change: `panic = "unwind"`, `strip = true` and the
+per-package `opt-level = "s"` overrides still come from the root manifest. The
+trial is in [light-profile-lto.md](measurements/light-profile-lto.md). Because
+rust-cache hashes `CARGO_*` into its key, the `lto=off` profile has a new key and
+restores nothing until the first main-push seed saves it. The PR that changes the
+profile and every PR before that seed build cold.
+
 The builder rejects empty/unknown profiles and every non-PR light artifact
 request before checkout, Cargo setup, or cache access. Light requests also
-require the actual Cargo overrides to be thin LTO and 16 codegen units, and
+require the actual Cargo overrides to be `lto=off` and 16 codegen units, and
 shipping requests reject any LTO or codegen-unit override. Main,
 tags, schedules, manual runs, and publication remain shipping. Main is the first shipping
 build of a PR change; its runtime and complete smoke lanes remain mandatory
@@ -2049,7 +2058,7 @@ installed before the writer runs. `runtime-profile.unit.test.ts` checks the shar
 key inputs and reproduces rust-cache v2.9.3's hash for both paths and every target.
 
 The guard accepts `cache-seed` only for a `push` to `refs/heads/main`, profile
-`light` with thin LTO and 16 units, the cache on, and an empty
+`light` with LTO off and 16 units, the cache on, and an empty
 `artifact_prefix`. Artifact mode still rejects light on every event except
 `pull_request` and requires a prefix. The seed has no upload step to reach: the
 single `actions/upload-artifact` step is conditional on `mode == 'artifact'`,
@@ -2206,11 +2215,8 @@ minimum, as mapped in [`ci.md`](./ci.md#minimum-supported-rust).
 The binary and Docker smoke matrix (`smoke-binary.yml`) restores no caches: it
 only pins Bun and runs dependency-free release scripts. Manual `rebuild` dispatches
 still use `setup-mango` because they compile inside the job. The QA metrics job
-consumes the frontend dist artifact and restores Check's Turbo snapshot in
-restore-only mode. The collector uses Check's key inputs and 16 MB bound. It
-never saves a Turbo snapshot and does not wait for the same run's Check job. A
-cache miss runs the normal checks. A hit reuses typecheck results while quick
-checks still execute.
+consumes the frontend dist artifact and Check's evidence report, and restores
+no cache.
 
 `CI_CACHE_EPOCH` is the repository-wide emergency invalidation lever. It is an
 Actions repository variable with a documented `v1` fallback, passed explicitly
