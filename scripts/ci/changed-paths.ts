@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
 // Dependency-free: changes jobs use this before bun install.
 // collect <base-sha> <head-sha> <file> keeps both rename sides and writes only
-// a successful, nonempty NUL diff. distribution/release <file> emit outputs.
+// a successful, nonempty NUL diff. distribution/release/codeql <file> emit outputs.
 import { writeFileSync } from 'node:fs';
 
 import { decodeChangedPaths, readChangedPaths } from '../lib/changed-paths';
-import { distributionRelevant, releaseRelevance } from '../lib/ci-lanes';
+import { codeqlRustRelevant, distributionRelevant, releaseRelevance } from '../lib/ci-lanes';
 
 /**
  * Collect literal paths without shell interpolation or Git's quoting rules.
@@ -44,9 +44,11 @@ if (import.meta.main) {
     } else if (command === 'release' && args.length === 1) {
       const verdict = releaseRelevance(readChangedPaths(args[0]));
       console.log(`release=${verdict.release}\nlauncher=${verdict.launcher}`);
+    } else if (command === 'codeql' && args.length === 1) {
+      console.log(`rust=${codeqlRustRelevant(readChangedPaths(args[0]))}`);
     } else {
       throw new Error(
-        'changed-paths: expected collect <base-sha> <head-sha> <file> | distribution <file> | release <file>'
+        'changed-paths: expected collect <base-sha> <head-sha> <file> | distribution <file> | release <file> | codeql <file>'
       );
     }
   } catch (error) {
