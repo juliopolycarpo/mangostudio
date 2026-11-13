@@ -45,9 +45,7 @@ jobs:
           ref: main
           persist-credentials: false
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
+      - uses: $/.github/actions/setup-bun
 
       # No install, PR code or artifact download runs with this token.
       - name: Delete superseded Rust cache IDs

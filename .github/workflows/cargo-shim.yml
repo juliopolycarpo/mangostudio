@@ -90,9 +90,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
+      - uses: $/.github/actions/setup-bun
 
       - id: changed
         name: Classify changed paths
@@ -173,9 +171,7 @@ jobs:
 
       # The runtime's MCP tests launch a small stdio MCP server fixture with Bun.
       - id: setup-bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
+        uses: $/.github/actions/setup-bun
         if: ${{ !cancelled() }}
 
       # Version-pinned here and hash-pinned through the action, which verifies
@@ -302,9 +298,7 @@ jobs:
 
       # The runtime's MCP tests launch a small stdio MCP server fixture with Bun.
       - id: setup-bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
+        uses: $/.github/actions/setup-bun
         if: ${{ !cancelled() }}
 
       # Pinned like the workspace job's install: the exact version through the
@@ -392,9 +386,7 @@ jobs:
       # unify that feature into the binary under qualification.
       - run: cargo build -p mangostudio-runtime --example fake_cursor_agent --locked
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
+      - uses: $/.github/actions/setup-bun
 
       - run: bun install --frozen-lockfile
 
@@ -427,9 +419,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
+      - uses: $/.github/actions/setup-bun
 
       - name: Evaluate mandatory job results
         env:

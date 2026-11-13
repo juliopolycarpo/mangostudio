@@ -111,20 +111,8 @@ jobs:
         timeout-minutes: 1
 
       - name: Set up Bun
-        id: setup_bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        timeout-minutes: 2
-        continue-on-error: true
-        with:
-          bun-version-file: .bun-version
-
-      - name: Retry Bun setup
-        id: retry_bun
-        if: ${{ steps.setup_bun.outcome == 'failure' }}
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        timeout-minutes: 2
-        with:
-          bun-version-file: .bun-version
+        uses: ./.github/actions/setup-bun # zizmor: ignore[self-repository] load the action from the selected source checkout
+        timeout-minutes: 4
 
       - name: Install toolchain (manual rebuild)
         if: ${{ inputs.rebuild }}

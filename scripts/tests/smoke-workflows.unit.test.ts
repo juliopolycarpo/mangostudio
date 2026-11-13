@@ -80,22 +80,18 @@ function expectedAssertionCondition(id: string): string {
 }
 
 describe('binary smoke Bun setup', () => {
-  test('retries setup once and fails the job if the retry fails', () => {
+  test('sets up Bun once through the retrying composite action', () => {
     const steps = readWorkflows().binary.jobs.binary.steps ?? [];
-    const attempts = steps.filter((step) => step.uses?.startsWith('oven-sh/setup-bun@'));
+    const setups = steps.filter((step) => step.uses?.includes('setup-bun'));
     expect(
-      attempts.map((step) => step.id),
-      'binary smoke Bun setup attempts'
-    ).toEqual(['setup_bun', 'retry_bun']);
-    const [first, retry] = attempts;
-    expect(first['continue-on-error'], 'first setup failure permits retry').toBe(true);
-    expect(retry.if, 'retry runs only on the first setup failure').toBe(
-      `${DOLLAR}{{ steps.setup_bun.outcome == 'failure' }}`
-    );
-    expect(retry['continue-on-error'], 'retry failure fails the job').toBeUndefined();
-    expect(retry.uses).toBe(first.uses);
-    expect(retry.with).toEqual({ 'bun-version-file': '.bun-version' });
-    expect(first.with).toEqual(retry.with);
+      setups.map((step) => step.uses?.split(' ')[0]),
+      'binary smoke Bun setup steps'
+    ).toEqual(['./.github/actions/setup-bun']);
+    const [setup] = setups;
+    // The composite owns the tolerant first attempt and the strict retry; a
+    // caller flag here would let a failed setup pass silently.
+    expect(setup['continue-on-error'], 'setup failure fails the job').toBeUndefined();
+    expect(setup.with, 'composite reads its .bun-version default').toBeUndefined();
   });
 });
 

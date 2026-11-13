@@ -45,9 +45,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
+      - uses: $/.github/actions/setup-bun
 
       - id: sources
         name: Select the candidate and optional baseline
@@ -104,7 +102,9 @@ jobs:
           path: source
           persist-credentials: false
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      # The source under qualification may be an old baseline without this
+      # action, so load it from the tooling checkout and read the source's pin.
+      - uses: ./tooling/.github/actions/setup-bun # zizmor: ignore[self-repository] load the action from the tooling checkout
         with:
           bun-version-file: source/.bun-version
 

@@ -468,7 +468,7 @@ describe('runtime profile callers and cache isolation', () => {
 
     const coldSeedOrArtifact = "steps.seed-cache.outputs.cache-hit != 'true'";
     const guardedSteps = [
-      ['uses: oven-sh/setup-bun@', coldSeedOrArtifact],
+      ['uses: ./.github/actions/setup-bun', coldSeedOrArtifact],
       ['name: Install zig and cargo-zigbuild', `runner.os == 'Linux' && ${coldSeedOrArtifact}`],
       ['id: rust-cache', `inputs.cache && ${coldSeedOrArtifact}`],
       [

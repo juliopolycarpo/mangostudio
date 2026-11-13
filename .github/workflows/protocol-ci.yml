@@ -65,9 +65,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
+      - uses: $/.github/actions/setup-bun
 
       - id: changed
         name: Check protocol paths
@@ -102,9 +100,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
+      - uses: $/.github/actions/setup-bun
       - id: install
         run: bun install --frozen-lockfile
       # `--ts-only` so this job never picks up the Rust toolchain GitHub's Linux
@@ -185,9 +181,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
+      - uses: $/.github/actions/setup-bun
       - id: install
         run: bun install --frozen-lockfile
       - id: toolchain
@@ -265,9 +259,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
+      - uses: $/.github/actions/setup-bun
       - run: rustup show active-toolchain
       - id: dependencies
         run: bun install --frozen-lockfile
@@ -291,9 +283,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
+      - uses: $/.github/actions/setup-bun
 
       - name: Evaluate mandatory job results
         env:

@@ -8,8 +8,11 @@ A versão instalada vem do canal `canary` em [`.bun-version`](../../../.bun-vers
 Instale com `bun upgrade --canary`. O campo `packageManager` registra uma versão
 estável para o Turborepo, que não aceita `bun@canary`. As chaves de cache usam
 `bun --revision` e o manifesto de distribuição registra a revisão e a origem dos
-runtimes por plataforma. A seção [Bun em inglês](../../reference/tooling.md#bun)
-explica a verificação de downloads no CI.
+runtimes por plataforma. O CI instala o Bun pela ação composta local
+[`setup-bun`](../../../.github/actions/setup-bun/action.yml), que tenta uma vez,
+espera 10 s e tenta de novo, porque o canal `canary` troca os arquivos no lugar.
+A seção [Bun em inglês](../../reference/tooling.md#bun) explica a verificação de
+downloads no CI e as duas exceções de `release.yml` e `protocol-release.yml`.
 
 ### Catálogo de dependências
 

@@ -109,9 +109,7 @@ jobs:
           ref: ${{ inputs.source_sha }}
       - uses: ./.github/actions/distribution-source # zizmor: ignore[self-repository] load the action from the selected source checkout
         timeout-minutes: 1
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
+      - uses: ./.github/actions/setup-bun # zizmor: ignore[self-repository] load the action from the selected source checkout
       - name: Download the matching Rust runtime
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:

@@ -581,27 +581,20 @@ describe('release workflow binary gate', () => {
     );
   });
 
-  test('runtime builds retry Bun setup once before starting Cargo', () => {
+  test('runtime builds set up Bun through the retrying composite before starting Cargo', () => {
     const runtime = extractJobBlock(readText('.github/workflows/runtime-build.yml'), 'runtime');
     const steps = extractStepBlocks(runtime);
-    const setup = steps.filter((step) => step.includes('uses: oven-sh/setup-bun@'));
-    expect(setup, `expected 2 Bun setup attempts | received: ${setup.length}`).toHaveLength(2);
-    const [first, retry] = setup;
-    const failedSetup = "if: steps.setup-bun.outcome == 'failure'";
-    expect(first).toContain('id: setup-bun');
-    expect(first).toContain('continue-on-error: true');
-    expect(first).toContain("if: steps.seed-cache.outputs.cache-hit != 'true'");
-    expect(retry).toContain(failedSetup);
-    expect(retry).not.toContain('continue-on-error:');
-    for (const attempt of setup) expect(attempt).toContain('bun-version-file: .bun-version');
-    const uses = /uses: oven-sh\/setup-bun@[a-f0-9]{40}/;
-    expect(first.match(uses)?.[0]).toBe(retry.match(uses)?.[0]);
-    const wait = steps[steps.indexOf(first) + 1];
-    expect(wait).toContain(failedSetup);
-    expect(wait).toContain('run: sleep 10');
-    expect(steps[steps.indexOf(first) + 2]).toBe(retry);
+    const setup = steps.filter((step) => step.includes('uses: ./.github/actions/setup-bun'));
+    expect(setup, `expected 1 Bun setup step | received: ${setup.length}`).toHaveLength(1);
+    expect(runtime).not.toContain('oven-sh/setup-bun@');
+    // The composite owns the retry; this job only keeps its cache-hit condition.
+    expect(setup[0]).toContain("if: steps.seed-cache.outputs.cache-hit != 'true'");
+    expect(setup[0]).not.toContain('continue-on-error:');
+    expect(setup[0]).not.toContain('bun-version-file:');
     const build = steps.findIndex((step) => step.includes('name: Build runtime'));
-    expect(build, 'expected a runtime build after Bun setup').toBeGreaterThan(steps.indexOf(retry));
+    expect(build, 'expected a runtime build after Bun setup').toBeGreaterThan(
+      steps.indexOf(setup[0])
+    );
   });
 
   test('archive upload payloads skip artifact re-compression', () => {
@@ -664,7 +657,7 @@ describe('release workflow binary gate', () => {
     expect(workflow.match(/uses: \.\/\.github\/actions\/download-distribution/g)).toHaveLength(2);
     for (const job of ['binary']) {
       const jobBlock = extractJobBlock(workflow, job);
-      const setupBunIndex = jobBlock.indexOf('uses: oven-sh/setup-bun@');
+      const setupBunIndex = jobBlock.indexOf('uses: ./.github/actions/setup-bun');
       // A missing step yields -1, which would satisfy the ordering check alone.
       expect(setupBunIndex, job).toBeGreaterThanOrEqual(0);
       expect(setupBunIndex).toBeLessThan(

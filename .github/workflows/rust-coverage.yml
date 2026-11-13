@@ -67,9 +67,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # The runtime's MCP tests launch a small stdio MCP server fixture with Bun.
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version-file: .bun-version
+      - uses: $/.github/actions/setup-bun
 
       # Version-pinned here and hash-pinned through the action, which verifies
       # the release checksum from its own manifest.
