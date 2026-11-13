@@ -274,9 +274,12 @@ describe('canary required validation producers', () => {
   });
   test('requires every analysis in the CodeQL producer matrix', () => {
     const receipt = qualifyCanarySource(source, new FakeQualificationApi());
-    const block = extractJobBlock(readFileSync('.github/workflows/codeql.yml', 'utf8'), 'analyze');
-    const labels = [...block.matchAll(/^ {12}label: (.+)$/gm)].map((match) => match[1]);
-    expect(labels.length).toBeGreaterThan(0);
+    const workflow = readFileSync('.github/workflows/codeql.yml', 'utf8');
+    // The Rust legs live in their own job so pull requests can skip them.
+    const labels = ['analyze', 'analyze-rust'].flatMap((job) =>
+      [...extractJobBlock(workflow, job).matchAll(/^ {12}label: (.+)$/gm)].map((match) => match[1])
+    );
+    expect(labels).toHaveLength(3);
     expect(
       receipt.siblings
         .find((sibling) => sibling.workflow === 'codeql.yml')
