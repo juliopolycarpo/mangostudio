@@ -356,22 +356,15 @@ jobs:
       - name: Verify Docker image serves health
         run: scripts/release/smoke-docker-image.sh mangostudio:dryrun-bookworm-amd64 linux/amd64 13002
 
-      # The clean qualification route builds the Windows hub natively below.
-      # PR reuse downloads the complete verified Windows target there instead.
-      - name: Upload verified Windows runtime
-        if: ${{ !inputs.reuse_distribution }}
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: dry-run-windows-runtime
-          path: .mango/runtime-prebuilt/windows-x64
-          retention-days: 1
-
   dry-run-windows:
     name: Windows release dry run
-    needs: [changes, dry-run-linux]
-    # PR reuse skips the runtime ancestor. Override implicit success() while
-    # retaining successful Linux packaging as the Windows prerequisite.
-    if: ${{ !cancelled() && needs.changes.outputs.release == 'true' && needs['dry-run-linux'].result == 'success' }}
+    # Beside the Linux dry run, not after it: each lane reads its own target
+    # from the same producer (the runtime job, or the reused distribution), so
+    # neither consumes the other's output and both report on one failure.
+    needs: [changes, runtime]
+    # PR reuse skips the runtime ancestor. Override implicit success() with
+    # the same guard as the Linux lane.
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.release == 'true' && (needs.runtime.result == 'success' || (inputs.reuse_distribution && needs.runtime.result == 'skipped')) }}
     runs-on: windows-latest
     timeout-minutes: 20
     defaults:
@@ -391,12 +384,14 @@ jobs:
         with:
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
 
-      - name: Download verified Windows runtime
+      # The runtime job's artifact holds `windows-x64/mangostudio-runtime.exe`,
+      # the layout `--runtime-dir` reads.
+      - name: Download Windows cargo runtime
         if: ${{ !inputs.reuse_distribution }}
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: dry-run-windows-runtime
-          path: .mango/runtime-prebuilt/windows-x64
+          name: dry-run-runtime-windows-x64
+          path: .mango/runtime-prebuilt
 
       - name: Download immutable Windows distribution
         if: inputs.reuse_distribution

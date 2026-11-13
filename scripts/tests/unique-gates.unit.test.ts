@@ -18,6 +18,6 @@ test.each(['ci', 'cargo-shim', 'protocol-ci', 'release-dry-run'])(
 );
 test('light cache seed waits for the surviving CI verdict', () => {
   const seed = extractJobBlock(readText('.github/workflows/ci.yml'), 'runtime-cache-seed');
-  expect(seed).toContain('needs: [gate-unique, distribution-identity]');
+  expect(seed).toContain('needs: [gate-unique, changes]');
   expect(seed).toContain("needs['gate-unique'].result == 'success'");
 });

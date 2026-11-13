@@ -570,7 +570,7 @@ describe('runtime profile callers and cache isolation', () => {
     const ci = readText('.github/workflows/ci.yml');
     const seed = extractJobBlock(ci, 'runtime-cache-seed');
     expect(seed).toContain(
-      `if: ${EXPR} !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs['gate-unique'].result == 'success' && needs['distribution-identity'].result == 'success' }}`
+      `if: ${EXPR} !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs['gate-unique'].result == 'success' && needs.changes.result == 'success' }}`
     );
     expect(seed).toContain(`uses: $/${RUNTIME_WORKFLOW}`);
     for (const input of ['profile: light', 'mode: cache-seed', 'cache: true']) {
@@ -585,7 +585,7 @@ describe('runtime profile callers and cache isolation', () => {
     );
     // The seed waits for the gate (so it only seeds a green commit and is exempt from the gate's
     // own needs); nothing mandatory or publishing waits for the seed.
-    expect(parseNeedsList(seed)).toEqual(['gate-unique', 'distribution-identity']);
+    expect(parseNeedsList(seed)).toEqual(['gate-unique', 'changes']);
     for (const job of ['gate', 'gate-unique', 'smoke', 'smoke-container', 'qa-metrics']) {
       expect(
         parseNeedsList(extractJobBlock(ci, job)),
