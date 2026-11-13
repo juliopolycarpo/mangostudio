@@ -326,8 +326,8 @@ stay the same. Rust toolchains remain:
   [runtime-metrics.md](runtime-metrics.md) for the size and build-time
   trade-off. It keeps `panic = "unwind"` on purpose: handler panic isolation
   catches unwinds, so the crate refuses to compile under `panic = "abort"`.
-  Pull-request runtime artifacts override only LTO and codegen units to thin
-  LTO and 16 units, including PRs that touch Rust. Main, tag releases, Canary,
+  Pull-request runtime artifacts override only LTO and codegen units to
+  `lto=off` and 16 units, including PRs that touch Rust. Main, tag releases, Canary,
   scheduled distribution checks, and scheduled/manual release dry runs keep
   fat LTO and one unit. The reusable artifact builder rejects `light` on every
   event except `pull_request`, before checkout or cache access.
