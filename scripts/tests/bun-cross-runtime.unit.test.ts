@@ -620,6 +620,34 @@ describe('downloadVerifiedAsset', () => {
       fetchSpy.mockRestore();
     }
   });
+
+  test('bounds a stalled metadata read by checksumMs when metadataMs is absent', async () => {
+    const server = serve({ listing: () => listingFor(sha256('old')), body: () => 'body' });
+    const metadata = new FakeGitHubMetadata(
+      server.base,
+      (init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('request aborted')), {
+            once: true,
+          });
+        })
+    );
+    const fetchSpy = spyOnGitHubMetadata(metadata);
+    try {
+      // The checksum listing shares the 50 ms and may miss it first on a slow
+      // host, so either read may be named. Without the fallback the metadata
+      // read would wait its 30 s default and this test would time out.
+      await expect(
+        downloadVerifiedAsset(ASSET, CHANNEL, archivePath, server.base, {
+          metadataBase: METADATA_BASE,
+          githubToken: 'test-github-token',
+          checksumMs: 50,
+        })
+      ).rejects.toThrow(/^Timed out after 50ms reading (release metadata|SHASUMS256\.txt)/);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
   test('writes the archive when the body matches the published digest', async () => {
     const body = 'pretend-zip-bytes';
     const server = serve({ listing: () => listingFor(sha256(body)), body: () => body });
