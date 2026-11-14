@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -12,7 +12,7 @@ import {
   resolveCanarySourceSnapshot,
   writeCanarySourceSnapshot,
 } from '../lib/canary-source-snapshot';
-import { fakeCliEnvironment, installFakeCli } from './support/fake-cli';
+import { fakeCliEnvironment, installFakeCli, removeFakeCliDirectory } from './support/fake-cli';
 
 const REPO = 'owner/repo';
 const BASE = `repos/${REPO}`;
@@ -641,7 +641,7 @@ test.each([false, true])('CLI recovery=%s freezes source before checkout', (reco
     expect(readFileSync(outputs, 'utf8')).toContain(`sha=${SHA}`);
     expect(readFileSync(outputs, 'utf8')).toContain(`version=${VERSION}`);
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFakeCliDirectory(directory);
   }
 });
 
@@ -700,7 +700,7 @@ test('CLI rejects an extra whitespace-only ZIP member instead of trimming it awa
     expect(result.stderr.toString()).toContain('expected sole source.json');
     expect(existsSync(join(directory, 'selection.json'))).toBe(false);
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFakeCliDirectory(directory);
   }
 });
 

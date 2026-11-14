@@ -1,9 +1,14 @@
 import { expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 
-import { fakeCliEnvironment, installCompiledFakeCli, installFakeCli } from './fake-cli';
+import {
+  fakeCliEnvironment,
+  installCompiledFakeCli,
+  installFakeCli,
+  removeFakeCliDirectory,
+} from './fake-cli';
 
 test('runs the named CLI fixture through native PATH and preserves argv, bytes and exit', () => {
   const directory = mkdtempSync(join(tmpdir(), 'mango fake cli-'));
@@ -32,7 +37,7 @@ test('runs the named CLI fixture through native PATH and preserves argv, bytes a
     expect([...command.stdout]).toEqual([0, 10, 255]);
     expect(command.stderr.toString()).toBe('fixture stderr');
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFakeCliDirectory(directory);
   }
 });
 
@@ -52,6 +57,16 @@ test.skipIf(process.platform !== 'linux')('reports a signaled launcher child as 
     const command = Bun.spawnSync([join(directory, 'mango-fixture')]);
     expect(command.exitCode, command.stderr.toString()).toBe(1);
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFakeCliDirectory(directory);
   }
+});
+
+test('removeFakeCliDirectory removes the tree and accepts one that is already gone', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mango fake cli-'));
+  mkdirSync(join(directory, 'nested'));
+  writeFileSync(join(directory, 'nested', 'gh.ts'), 'process.exit(0);');
+
+  removeFakeCliDirectory(directory);
+  expect(existsSync(directory), `(fake cli): expected removed: ${directory}`).toBe(false);
+  expect(() => removeFakeCliDirectory(directory)).not.toThrow();
 });

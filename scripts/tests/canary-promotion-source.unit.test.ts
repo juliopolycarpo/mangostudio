@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -7,7 +7,7 @@ import {
   type CanaryPromotionApi,
   resolveCanaryPromotionSource,
 } from '../lib/canary-promotion-source';
-import { fakeCliEnvironment, installFakeCli } from './support/fake-cli';
+import { fakeCliEnvironment, installFakeCli, removeFakeCliDirectory } from './support/fake-cli';
 
 const source = { repository: 'owner/repo', runId: 100, runAttempt: 3, sourceSha: 'a'.repeat(40) };
 const version = '1.0.0-canary.aaaaaaa';
@@ -387,6 +387,6 @@ test.each([
       expect(result.stderr.toString()).toContain(message);
     }
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFakeCliDirectory(directory);
   }
 });

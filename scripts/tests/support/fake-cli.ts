@@ -53,6 +53,16 @@ export function fakeCliEnvironment(
 }
 
 /**
+ * Remove a directory a fake CLI ran from. On Windows the fixture is a compiled
+ * executable, and the system can keep it locked for a moment after the child
+ * exits, so a single `rm` fails with EBUSY; the removal retries.
+ * @example try { run(directory); } finally { removeFakeCliDirectory(directory); }
+ */
+export function removeFakeCliDirectory(directory: string): void {
+  rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+}
+
+/**
  * Remove the launcher's private cache after the Bun worker finishes its suite.
  * @example afterAll(disposeCompiledFakeCli);
  */

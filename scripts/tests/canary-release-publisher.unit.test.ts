@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 
@@ -11,7 +11,7 @@ import {
   type CanaryReleasePublisherClient,
   publishVerifiedCanaryRelease,
 } from '../lib/canary-release-publisher';
-import { fakeCliEnvironment, installFakeCli } from './support/fake-cli';
+import { fakeCliEnvironment, installFakeCli, removeFakeCliDirectory } from './support/fake-cli';
 
 const REPOSITORY = 'owner/repo';
 const SOURCE = 'a'.repeat(40);
@@ -501,8 +501,7 @@ test.each([true, false])('CLI pins same-run plan digest before gh reads; valid=%
       expect(existsSync(trace)).toBe(false);
     }
   } finally {
-    // Windows can still hold the directory for a moment after the CLI child exits.
-    rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    removeFakeCliDirectory(directory);
   }
 });
 
