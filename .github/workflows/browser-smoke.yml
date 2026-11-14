@@ -35,10 +35,10 @@ permissions:
   contents: read
 
 # ci.yml's caller-level group already supersedes per-PR runs; this group covers
-# direct workflow_dispatch runs. Mirrors ci.yml: main is never cancelled.
+# direct workflow_dispatch runs. Mirrors ci.yml: a newer run on the same ref cancels this one.
 concurrency:
   group: browser-smoke-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: true
 
 jobs:
   build-runtime:

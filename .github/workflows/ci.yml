@@ -18,11 +18,13 @@ permissions:
 
 # One authoritative run per PR — keyed by PR number so a new push supersedes
 # (cancels) the previous run even across branch renames or forks, and never by
-# SHA, which would let stale runs survive. Runs on main are never cancelled so
-# every push can establish a green baseline.
+# SHA, which would let stale runs survive. Main follows the same rule: a new
+# push cancels the run of the previous commit, so only the newest main commit
+# gets a verdict. Nothing may depend on a per-commit main baseline, and a run
+# cancelled mid-flight leaves its cache seed to the next one.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: true
 
 jobs:
   changes:

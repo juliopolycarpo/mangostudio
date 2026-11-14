@@ -299,15 +299,17 @@ the two equal, so the pull request lane and a release re-run check the same set.
 ## Concurrency policy
 
 Workflows that declare `concurrency` follow a small set of rules so overlapping
-runs are predictable and `main` never loses a green publish path:
+runs are predictable and a newer commit always supersedes an older one:
 
 - **Pull requests.** Workflows triggered by `pull_request` key the concurrency
   group on the PR number (`github.event.pull_request.number`), not the commit
   SHA, so a new push supersedes the previous run even across branch renames or
-  forks. Those runs use `cancel-in-progress: true` unless the workflow also
-  serves pushes to `main` (see below).
-- **Pushes to `main`.** Runs on `refs/heads/main` are never cancelled in
-  progress, so each run can finish and qualify as a source for daily Canary.
+  forks. Those runs use `cancel-in-progress: true`.
+- **Pushes to `main`.** A new push to `refs/heads/main` cancels the run of the
+  previous commit, in progress or pending, so only the newest main commit gets
+  a verdict. Consumers of exact-commit results (the QA baseline, the light
+  runtime cache seed, Canary source selection) must tolerate a main commit
+  without a completed run; Canary selects the newest commit that has one.
 - **Publish workflows.** `release.yml` and `canary.yml` never cancel mid-publish
   (`cancel-in-progress: false`). Canary serializes scheduled and manual runs,
   retains original version approvals, and checks channel ancestry inside each

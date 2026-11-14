@@ -168,10 +168,26 @@ describe('ci.yml trigger and concurrency policy', () => {
     expect(workflow).toContain(
       `group: ${EXPR} github.workflow }}-${EXPR} github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}`
     );
-    // A new push must supersede the previous run — except on main, where every
-    // push has to reach Canary.
-    expect(workflow).toContain(`cancel-in-progress: ${EXPR} github.ref != 'refs/heads/main' }}`);
+    // A new push supersedes the previous run on every ref, main included:
+    // only the newest commit needs a verdict.
+    expect(workflow).toMatch(/^concurrency:\n {2}group: .+\n {2}cancel-in-progress: true$/m);
     expect(workflow).not.toContain('github.sha');
+  });
+
+  // Workflows that serve pull requests and main: a superseded main run must not
+  // keep runners from the commit that replaced it.
+  test.each([
+    'ci',
+    'cargo-shim',
+    'codeql',
+    'protocol-ci',
+    'smoke-binary',
+    'release-dry-run',
+    'browser-smoke',
+  ])('%s cancels a superseded run on every ref', (name) => {
+    const text = readText(`.github/workflows/${name}.yml`);
+    const setting = /^concurrency:\n {2}group: .+\n {2}cancel-in-progress: (.+)$/m.exec(text)?.[1];
+    expect(setting, `expected ${name}.yml workflow cancel-in-progress: true`).toBe('true');
   });
 });
 
