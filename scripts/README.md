@@ -131,6 +131,10 @@ Run one scan from the repository root with
   installs no signal handler. **This fails open:** if the job cannot be created (a parent job that
   forbids nesting) the runner prints one line to stderr and carries on without the guarantee,
   because a build should not fail over a safety net that only matters when the runner is killed.
+- **Dev server.** `bun run dev` starts `bun run dev` in `apps/api` through `runCommand`, with no
+  Turbo in between. It keeps the default `stdin: 'ignore'`, so the dev tree gets its own group and
+  a SIGINT or SIGTERM to the runner leaves no `bun --watch`, hub or `mangostudio-runtime` process
+  behind.
 - **Not covered.** On POSIX, SIGKILL of the runner cannot be caught; the children it already
   started keep running. A group whose leader had already exited when the signal arrived is not
   tracked, so a member it left behind is not stopped.

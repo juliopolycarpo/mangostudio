@@ -86,8 +86,9 @@ unchanged work is never rebuilt.
   single source of truth. No canary builds, no floating ranges.
 - **No Remote Cache yet.** Local cache only until the task model is proven.
 - **Root Bun wrappers are the public interface.** `bun run dev`, `bun run build`,
-  `bun run check`, and `bun run test` remain the canonical commands. Turborepo
-  is invoked through them or via the `turbo:*` inspection scripts.
+  `bun run check`, and `bun run test` remain the canonical commands. `build`,
+  `check` and `test` invoke Turborepo; `dev` does not. The `turbo:*` inspection
+  scripts call it directly.
 
 ### Configuration
 
@@ -98,7 +99,6 @@ Current task definitions:
 
 | Task                      | Cache | Outputs / Env                                                                                               | Notes                                                                                                                                 |
 | ------------------------- | ----- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `dev`                     | off   | —                                                                                                           | Persistent — runs dev servers                                                                                                         |
 | `build`                   | on    | `dist/**`                                                                                                   | Depends on upstream `^build`; `apps/frontend` overrides `env` to `MANGO_API_URL`, `VITE_*` and adds `dist-metafile.json` to `outputs` |
 | `check:quick`             | on    | —                                                                                                           | Bun lint / format; hashes workspace and root lint configuration inputs plus upstream workspace sources through `transit`              |
 | `transit`                 | —     | —                                                                                                           | Script-less. Hashes upstream sources into a dependent's key without ordering it; opt in with `dependsOn: ["transit"]`                 |
@@ -112,14 +112,25 @@ Current task definitions:
 
 ### Tasks outside Turbo
 
-The import-cycle scan is not a Turbo task. It reads generated and gitignored
-files that Turbo's VCS inputs omit, so a cache entry could never be valid, and
-Turbo would only add a second process layer. `bun run check` starts one
-`bun scripts/check-import-cycles.ts apps/<name>` per selected workspace outside
-Turbo. Each scan has its own label (`api:cycles`, `frontend:cycles`,
-`shared:cycles`) in the summary and in the `--report-file` result. The protocol
-lane runs `protocol:cycles` the same way. A workspace's `check:cycles` script
-runs the same scan by hand.
+Turbo runs the cached tasks above. An uncached task gets nothing from it but a
+second process layer, so `bun run` starts these tasks on the repository's own
+Bun runner (`scripts/lib/exec.ts`) instead:
+
+- **Import cycles.** The scan reads generated and gitignored files that Turbo's
+  VCS inputs omit, so a cache entry could never be valid. `bun run check` starts
+  one `bun scripts/check-import-cycles.ts apps/<name>` per selected workspace,
+  outside Turbo. Each scan has its own label (`api:cycles`,
+  `frontend:cycles`, `shared:cycles`) in the summary and in the `--report-file`
+  result. The protocol lane runs `protocol:cycles` the same way. A workspace's
+  `check:cycles` script runs the same scan by hand.
+- **Dev servers.** `bun run dev` runs `bun run dev` in each selected workspace
+  directory (today only `apps/api`). The child inherits the whole environment, as
+  Turbo's `--env-mode=loose` did. On SIGINT or SIGTERM the runner stops the dev
+  server and everything it started, including the `mangostudio-runtime`
+  process; see "Cancelling a runner" in [`scripts/README.md`](../../scripts/README.md).
+
+`test:integration` and `test:coverage` are uncached as well and still run through
+Turbo.
 
 ### Inspection Scripts
 

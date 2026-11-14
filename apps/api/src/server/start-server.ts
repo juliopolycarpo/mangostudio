@@ -117,7 +117,7 @@ async function startServerWithLock(options: StartOptions): Promise<ServerHandle>
   // Populated only by src/dev.ts, before startServer() runs — never by the
   // binary entry. It is an override for getSourceFrontendDir() alone: the dev
   // build lands in apps/frontend/dist, which that helper resolves against the
-  // cwd, and Turbo runs the dev task from apps/api.
+  // cwd, and scripts/dev.ts runs the dev script from apps/api.
   const devFrontendDir = getDevFrontendDir();
   const frontendDir =
     devFrontendDir ?? (getEmbeddedFrontend() ? EMBEDDED_FRONTEND_DIR : getSourceFrontendDir());

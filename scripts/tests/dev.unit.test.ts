@@ -1,15 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 
-import { ROOT_DIR } from '../lib/config';
+import { WORKSPACES } from '../lib/config';
 import {
-  createTurboDevCommand,
-  getDevCwd,
+  createDevTask,
   LOCAL_RUNTIME_BUILD_COMMAND,
   planLocalRuntimeBuild,
   RUSTUP_INSTALL_COMMAND,
   selectDevWorkspaces,
-  selectTurboDevUi,
 } from '../lib/dev';
+import { supervisionMode } from '../lib/process-tree';
 import { readText } from './support/read-text';
 
 describe('dev script', () => {
@@ -34,62 +33,68 @@ describe('dev script', () => {
     });
   });
 
-  test('creates one filtered Turbo invocation for selected workspaces', () => {
-    expect(createTurboDevCommand(['api', 'frontend'], 'tui')).toEqual([
-      'turbo',
-      'run',
-      'dev',
-      '--ui=tui',
-      '--env-mode=loose',
-      '--filter=@mangostudio/api',
-      '--filter=@mangostudio/frontend',
-    ]);
+  test('starts the api dev script from the workspace directory without Turbo', () => {
+    expect(createDevTask('api')).toEqual({
+      label: 'api:dev',
+      cmd: ['bun', 'run', 'dev'],
+      cwd: WORKSPACES.api.path,
+    });
   });
 
-  test('can force stream output for non-interactive dev invocations', () => {
-    expect(createTurboDevCommand(['api'], 'stream')).toEqual([
-      'turbo',
-      'run',
-      'dev',
-      '--ui=stream',
-      '--env-mode=loose',
-      '--filter=@mangostudio/api',
-    ]);
+  test('the api dev script is the watched server the task starts', () => {
+    const manifest = JSON.parse(readText('apps/api/package.json')) as {
+      scripts?: Record<string, string>;
+    };
+
+    expect(
+      manifest.scripts?.dev,
+      `(dev): expected the api manifest dev script | received: ${manifest.scripts?.dev}`
+    ).toBe('bun run --watch src/dev.ts serve');
   });
 
-  test('runs dev servers in loose env mode so injected secrets survive', () => {
-    expect(createTurboDevCommand(['api'], 'stream')).toContain('--env-mode=loose');
+  test('leaves stdin at the runner default so the dev tree gets its own process group', () => {
+    const devScript = readText('scripts/dev.ts');
+
+    expect(devScript).toContain('runCommand(task.label, task.cmd, { cwd: task.cwd })');
+    expect(
+      devScript,
+      'expected scripts/dev.ts to pass no stdin option | received a stdin override'
+    ).not.toMatch(/stdin:/);
+    expect(supervisionMode(undefined, 'linux', false)).toBe('group');
   });
 
-  test('uses stream mode in CI and TUI locally', () => {
-    expect(selectTurboDevUi({ CI: 'true' })).toBe('stream');
-    expect(selectTurboDevUi({})).toBe('tui');
+  test('passes no env option, so the server sees the ambient environment', () => {
+    // runCommand hands a child the caller's environment unless given `env`.
+    const devScript = readText('scripts/dev.ts');
+    expect(
+      devScript,
+      '(dev): expected scripts/dev.ts to pass runCommand no env option | received: an env: key'
+    ).not.toMatch(/\benv:/);
   });
 
-  test('runs Turbo from the repository root', () => {
-    expect(getDevCwd()).toBe(ROOT_DIR);
-  });
-
-  test('configures Turbo dev tasks for the interactive TUI', () => {
+  test('no longer declares a Turbo dev task', () => {
     const turboConfig = readText('turbo.jsonc');
 
-    expect(turboConfig).toContain('"ui": "tui"');
-    expect(turboConfig).toContain('"cache": false');
-    expect(turboConfig).toContain('"persistent": true');
-    expect(turboConfig).toContain('"interruptible": true');
+    expect(
+      turboConfig,
+      '(dev): expected turbo.jsonc to declare no dev task | received: a "dev" task entry'
+    ).not.toMatch(/^\s*"dev"\s*:/m);
+    expect(turboConfig).not.toContain('"persistent"');
+    expect(turboConfig).not.toContain('"interruptible"');
   });
 
-  test('delegates process orchestration to Turbo', () => {
+  test('keeps the TUI default for the build script that inherits the terminal', () => {
+    expect(readText('turbo.jsonc')).toContain('"ui": "tui"');
+    expect(readText('scripts/build-turbo.ts')).toContain("stdin: 'inherit'");
+  });
+
+  test('starts the dev servers through the runner, not through Turbo', () => {
     const devScript = readText('scripts/dev.ts');
 
     expect(devScript).toContain('runCommand');
-    expect(devScript).toContain('createTurboDevCommand');
+    expect(devScript).toContain('createDevTask');
+    expect(devScript).not.toContain('turbo');
     expect(devScript).not.toContain('runWorkspaceScript');
-    expect(devScript).not.toContain('Promise.all');
-  });
-
-  test('forwards the terminal so the Turbo TUI stays interactive', () => {
-    expect(readText('scripts/dev.ts')).toContain("stdin: turboUi === 'tui' ? 'inherit' : 'ignore'");
   });
 
   test('builds the Local runtime before the hub when cargo is present', () => {
@@ -120,12 +125,12 @@ describe('dev script', () => {
     expect(planLocalRuntimeBuild({ MANGOSTUDIO_RUNTIME_BINARY: '  ' }, true).kind).toBe('build');
   });
 
-  test('builds the runtime before handing the terminal to Turbo', () => {
+  test('builds the runtime before the dev servers start', () => {
     const devScript = readText('scripts/dev.ts');
 
     expect(devScript.indexOf('planLocalRuntimeBuild(')).toBeGreaterThan(-1);
     expect(devScript.indexOf('planLocalRuntimeBuild(')).toBeLessThan(
-      devScript.indexOf('createTurboDevCommand(runnableWorkspaces')
+      devScript.indexOf('createDevTask(workspace)')
     );
     expect(LOCAL_RUNTIME_BUILD_COMMAND).toEqual([
       'cargo',

@@ -1,5 +1,7 @@
 {
   "$schema": "https://turborepo.dev/schema.json",
+  // Repository scripts either pass `--ui=stream` or start Turbo without a
+  // terminal on stdin. `bun run build:turbo` inherits the terminal and gets this TUI.
   "ui": "tui",
   // turbo 2.11.6 rewrites the root AGENTS.md with a managed guidance block
   // whenever it detects an AI coding agent. AGENTS.md is hand-maintained here
@@ -54,11 +56,6 @@
     "VERSION",
   ],
   "tasks": {
-    "dev": {
-      "cache": false,
-      "persistent": true,
-      "interruptible": true,
-    },
     "build": {
       "dependsOn": ["^build"],
       "outputs": ["dist/**"],
