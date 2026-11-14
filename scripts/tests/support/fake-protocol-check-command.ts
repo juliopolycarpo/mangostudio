@@ -14,6 +14,7 @@ if (!directory)
 const tool = basename(process.execPath).replace(/\.exe$/i, '');
 const args = process.argv.slice(2);
 const allowedScripts = new Set([
+  'scripts/check-import-cycles.ts',
   './scripts/protocol/check-versions.ts',
   './scripts/protocol/verify-spec.ts',
   './scripts/protocol/verify-schema-equality.ts',

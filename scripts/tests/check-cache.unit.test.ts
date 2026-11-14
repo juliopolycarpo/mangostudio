@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { copyFileSync, cpSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import { createTurboCheckCommand } from '../lib/check';
+import { createTurboCheckCommand, createWorkspaceCycleCommand } from '../lib/check';
 import { ROOT_DIR, type WorkspaceName } from '../lib/config';
 import { protocolCheckTasks } from '../protocol/tasks';
 import {
@@ -68,18 +68,38 @@ function createFixture(): TypecheckFixture {
   return fixture;
 }
 
-function requiredCheck(fixture: TypecheckFixture, workspace: string) {
-  const command =
-    workspace === 'packages/protocol'
-      ? protocolCheckTasks(['--ts-only'], { cargo: false, cargoHack: false })[0]?.cmd
-      : createTurboCheckCommand([workspace.slice(5) as WorkspaceName]);
-  expect(command?.[0]).toBe('turbo');
-  return runTurbo(
+/**
+ * The repository's required check for one workspace: the cached Turbo tasks, then
+ * the cycle scan that always runs outside Turbo. The result fails when either does.
+ * @example
+ * const run = await requiredCheck(fixture, 'apps/api');
+ */
+async function requiredCheck(fixture: TypecheckFixture, workspace: string) {
+  const isProtocol = workspace === 'packages/protocol';
+  const protocolTasks = protocolCheckTasks(['--ts-only'], { cargo: false, cargoHack: false });
+  const turboCommand = isProtocol
+    ? protocolTasks.find((task) => task.label === 'protocol:workspace')?.cmd
+    : createTurboCheckCommand([workspace.slice(5) as WorkspaceName]);
+  expect(turboCommand?.[0]).toBe('turbo');
+  const cycleCommand = isProtocol
+    ? protocolTasks.find((task) => task.label === 'protocol:cycles')?.cmd
+    : createWorkspaceCycleCommand(workspace.slice(5) as WorkspaceName);
+  expect(cycleCommand?.slice(0, 2)).toEqual(['bun', 'scripts/check-import-cycles.ts']);
+  const turbo = await runTurbo(
     fixture.root,
-    [...(command?.slice(1) ?? []), ...fixture.turboArgs.filter((arg) => !arg.startsWith('--ui='))],
+    [
+      ...(turboCommand?.slice(1) ?? []),
+      ...fixture.turboArgs.filter((arg) => !arg.startsWith('--ui=')),
+    ],
     {},
     commands.run
   );
+  const cycles = await commands.run(cycleCommand ?? [], fixture.root);
+  return {
+    exitCode: turbo.exitCode === 0 ? cycles.exitCode : turbo.exitCode,
+    stdout: turbo.stdout + cycles.stdout,
+    stderr: turbo.stderr + cycles.stderr,
+  };
 }
 
 function rootCheck(fixture: TypecheckFixture, workspace: WorkspaceName) {
@@ -148,7 +168,6 @@ describe('lint cache and required cycle scans', () => {
           for (let attempt = 0; attempt < 2; attempt++) {
             const rejected = expectOutcome(await requiredCheck(fixture, workspace), 'fail');
             expect(rejected).toContain(`${packageName}:check:quick: cache hit`);
-            expect(rejected).toContain(`${packageName}:check:cycles: cache bypass`);
             expect(rejected).toContain(cycle.rule);
             expect(rejected.replaceAll('\\', '/')).toContain('build/a.ts');
           }
@@ -226,7 +245,6 @@ describe('lint cache and required cycle scans', () => {
       );
       const rejected = expectOutcome(await rootCheck(fixture, 'frontend'), 'fail');
       expect(rejected).toMatch(/@mangostudio\/frontend:check:quick(?:: |\r?\n)cache hit/);
-      expect(rejected).toMatch(/@mangostudio\/frontend:check:cycles(?:: |\r?\n)cache bypass/);
       expect(rejected).toContain('import/no-self-import');
       expect(rejected.replaceAll('\\', '/')).toContain('build/new-cycle.ts');
     },

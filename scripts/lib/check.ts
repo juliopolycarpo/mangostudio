@@ -1,4 +1,5 @@
 import { type WorkspaceName, WORKSPACES } from './config';
+import { createImportCycleCommand } from './import-cycle-command';
 
 /**
  * The Turbo task that typechecks a workspace and every workspace it imports,
@@ -7,7 +8,12 @@ import { type WorkspaceName, WORKSPACES } from './config';
  */
 export const TYPECHECK_TASK = 'typecheck:with-deps';
 
-export const TURBO_CHECK_TASKS = ['check:quick', 'check:cycles', TYPECHECK_TASK] as const;
+/**
+ * The cached tasks Turbo runs for a check. The cycle scan is not one of them:
+ * it reads generated and gitignored files that Turbo's VCS inputs omit, so it
+ * runs every time and gains nothing from a cache (see `createWorkspaceCycleCommand`).
+ */
+export const TURBO_CHECK_TASKS = ['check:quick', TYPECHECK_TASK] as const;
 
 /**
  * Select the supervised protocol companion; CI reports already capture its component typecheck.
@@ -35,4 +41,13 @@ export function createTurboCheckCommand(workspaces: WorkspaceName[], typecheck =
  */
 export function createWorkspaceFormatCommand(workspace: WorkspaceName): string[] {
   return ['bun', 'fmt', '--check', `apps/${workspace}`];
+}
+
+/**
+ * Build a workspace's import-cycle scan. It is the command behind the
+ * workspace's own `check:cycles` script, run from the repository root.
+ * @example createWorkspaceCycleCommand('api'); // ['bun', 'scripts/check-import-cycles.ts', 'apps/api']
+ */
+export function createWorkspaceCycleCommand(workspace: WorkspaceName): string[] {
+  return createImportCycleCommand([`apps/${workspace}`]);
 }

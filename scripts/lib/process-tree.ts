@@ -48,11 +48,10 @@ export const CHILD_LIMIT_ENV = 'MANGO_RUNNER_CONCURRENCY';
 
 /**
  * Children one runner process may have live at once, shared by every nested
- * `runParallel` / `mapWithConcurrency` call inside it. The widest fan-out in use
- * is `bun run protocol:check` with 12 tasks (13 with the powerset split); a
- * `bun run check` peaks at 11 children in the root runner and 16 live processes
- * across it and its nested protocol runner. 16 therefore never delays today's
- * runs and still stops accidental nesting from multiplying the process count.
+ * `runParallel` / `mapWithConcurrency` call inside it. The widest single fan-out
+ * in use is `bun run protocol:check` with 14 tasks. `bun run check` plans more
+ * root tasks than slots and queues the rest. The limit stops accidental nesting
+ * from multiplying the process count.
  */
 export const DEFAULT_CHILD_LIMIT = 16;
 

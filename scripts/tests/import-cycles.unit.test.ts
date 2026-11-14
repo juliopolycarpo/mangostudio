@@ -13,7 +13,8 @@ import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 import { ROOT_DIR } from '../lib/config';
-import { createImportCycleCommand, scanImportCycles } from '../lib/import-cycles';
+import { createImportCycleCommand } from '../lib/import-cycle-command';
+import { scanImportCycles } from '../lib/import-cycles';
 import { protocolCheckTasks } from '../protocol/tasks';
 import { countCircularDeps } from '../qa-gate/collect/circular';
 import { runCapture } from '../qa-gate/collect/support';
@@ -162,10 +163,13 @@ function joinOutputStreams(stdout: string, stderr: string): string {
 }
 
 function runCheck(root: string, workspace: string): CheckRun {
-  const protocolTask = protocolCheckTasks(['--ts-only'], { cargo: false, cargoHack: false })[0];
+  // The protocol lane runs its cycle scan as its own task, outside Turbo.
+  const protocolTask = protocolCheckTasks(['--ts-only'], { cargo: false, cargoHack: false }).find(
+    (task) => task.label === 'protocol:cycles'
+  );
   const command = workspace.startsWith('apps/')
     ? ['bun', 'run', 'check', `--${workspace.slice(5)}`]
-    : ['bunx', ...(protocolTask?.cmd ?? [])];
+    : (protocolTask?.cmd ?? []);
   const result = Bun.spawnSync(command, {
     cwd: root,
     stdout: 'pipe',

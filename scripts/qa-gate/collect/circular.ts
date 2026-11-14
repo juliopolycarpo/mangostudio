@@ -1,4 +1,4 @@
-import { createImportCycleCommand } from '../../lib/import-cycles';
+import { createImportCycleCommand } from '../../lib/import-cycle-command';
 import type { ComponentSpec } from './registry';
 import { runCapture, type RunResult } from './support';
 

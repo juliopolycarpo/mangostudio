@@ -28,21 +28,6 @@ interface Edge {
   readonly column: number;
 }
 
-/** The command used by the workspace check and QA collector.
- * @example createImportCycleCommand(['apps/api'], 'json');
- */
-export function createImportCycleCommand(
-  roots: readonly string[],
-  reporter: 'default' | 'json' = 'default'
-): string[] {
-  return [
-    'bun',
-    'scripts/check-import-cycles.ts',
-    ...(reporter === 'json' ? ['--json'] : []),
-    ...roots,
-  ];
-}
-
 function canonical(path: string): string {
   // Windows realpathSync can preserve an 8.3 short-name spelling. The native
   // variant expands it, keeping roots and resolved imports in the same graph.

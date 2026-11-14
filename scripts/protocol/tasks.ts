@@ -11,6 +11,7 @@ import { join } from 'node:path';
 
 import { TURBO_CHECK_TASKS } from '../lib/check';
 import { ROOT_DIR } from '../lib/config';
+import { createImportCycleCommand } from '../lib/import-cycle-command';
 import { cargoTargetDir } from '../lib/runtime-build';
 import { hasCargo, hasCargoHack, warnNoCargo, warnNoCargoHack } from './toolchain';
 
@@ -103,8 +104,8 @@ const CARGO_CLIPPY = [
 function typescriptCheckTasks(tsOnly: boolean, cargo: boolean, typecheck = true): ProtocolTask[] {
   return [
     {
-      // Cache normal lint separately from the always-run cycle scan, including
-      // generated files and top-level build helpers.
+      // Cached lint and typecheck. The always-run cycle scan is its own task
+      // below, since it reads generated files Turbo does not hash.
       // Standalone/scoped protocol checks enforce the repository's same rules.
       label: 'protocol:workspace',
       cmd: [
@@ -115,6 +116,7 @@ function typescriptCheckTasks(tsOnly: boolean, cargo: boolean, typecheck = true)
         '--filter=@mangostudio/protocol',
       ],
     },
+    { label: 'protocol:cycles', cmd: createImportCycleCommand(['packages/protocol']) },
     { label: 'protocol:versions', cmd: ['bun', './scripts/protocol/check-versions.ts'] },
     { label: 'protocol:verify-spec', cmd: ['bun', './scripts/protocol/verify-spec.ts'] },
     {

@@ -101,7 +101,6 @@ Current task definitions:
 | `dev`                     | off   | —                                                                                                           | Persistent — runs dev servers                                                                                                         |
 | `build`                   | on    | `dist/**`                                                                                                   | Depends on upstream `^build`; `apps/frontend` overrides `env` to `MANGO_API_URL`, `VITE_*` and adds `dist-metafile.json` to `outputs` |
 | `check:quick`             | on    | —                                                                                                           | Bun lint / format; hashes workspace and root lint configuration inputs plus upstream workspace sources through `transit`              |
-| `check:cycles`            | off   | —                                                                                                           | TS/JS cycle scan, including generated and ignored files absent from VCS cache inputs                                                  |
 | `transit`                 | —     | —                                                                                                           | Script-less. Hashes upstream sources into a dependent's key without ordering it; opt in with `dependsOn: ["transit"]`                 |
 | `typecheck`               | on    | —                                                                                                           | Inputs scoped to root `tsconfig.json`; depends on `transit`, so workspaces check at once                                              |
 | `typecheck:with-deps`     | —     | —                                                                                                           | Script-less. A workspace's `typecheck` plus its dependencies'; `bun run check` requests it                                            |
@@ -110,6 +109,17 @@ Current task definitions:
 | `test:coverage`           | off   | `$TURBO_ROOT$/.mango/artifacts/coverage/**`; env ↑                                                          | Coverage reports (always re-run)                                                                                                      |
 | `//#test:scripts`         | on    | inputs `$TURBO_DEFAULT$`, `scripts/**`; output `.mango/artifacts/junit/root.xml`; env `CI`, `MANGOSTUDIO_*` | Root script tests used by coverage and CI shards; restores their JUnit evidence on a cache hit                                        |
 | `//#test:scripts:workers` | on    | inputs `$TURBO_DEFAULT$`, `scripts/**`; env `CI`, `MANGOSTUDIO_*`                                           | Root script tests split across worker processes in the ordinary unit phase; no cached report output                                   |
+
+### Tasks outside Turbo
+
+The import-cycle scan is not a Turbo task. It reads generated and gitignored
+files that Turbo's VCS inputs omit, so a cache entry could never be valid, and
+Turbo would only add a second process layer. `bun run check` starts one
+`bun scripts/check-import-cycles.ts apps/<name>` per selected workspace outside
+Turbo. Each scan has its own label (`api:cycles`, `frontend:cycles`,
+`shared:cycles`) in the summary and in the `--report-file` result. The protocol
+lane runs `protocol:cycles` the same way. A workspace's `check:cycles` script
+runs the same scan by hand.
 
 ### Inspection Scripts
 
