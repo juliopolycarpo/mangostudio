@@ -1,14 +1,14 @@
 const VISIBILITY_DELAYS_MS = [1000, 2000, 4000, 8000, 15000, 30000] as const;
 const MAX_VISIBILITY_WAIT_MS = 60_000;
-const MAX_VISIBILITY_TTL_MS = 1_200_000;
+const MAX_VISIBILITY_TTL_MS = 2_400_000;
 const MAX_VISIBILITY_DELAYS = 16;
-const MAX_TTL_VISIBILITY_DELAYS = 32;
+const MAX_TTL_VISIBILITY_DELAYS = 48;
 
 /** Controlled post-write polling; callers can shorten the shared wait budget. */
 export interface CanaryVisibilityOptions {
   readonly retryDelaysMs?: readonly number[];
   readonly sleep?: (milliseconds: number) => Promise<void>;
-  /** Optional shared elapsed-time limit, including I/O; at most twenty minutes. */
+  /** Optional shared elapsed-time limit, including I/O; at most forty minutes. */
   readonly ttlMs?: number;
   /** Monotonic clock; fake sleeps must advance this clock. */
   readonly now?: () => number;

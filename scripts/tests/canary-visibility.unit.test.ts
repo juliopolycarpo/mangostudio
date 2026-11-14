@@ -161,7 +161,7 @@ test('one wall-clock deadline is shared across independent reads', async () => {
   ).rejects.toThrow('TTL expired');
 });
 
-test.each([0, -1, NaN, Infinity, 1_200_001])('rejects invalid TTL %s', (ttlMs) => {
+test.each([0, -1, NaN, Infinity, 2_400_001])('rejects invalid TTL %s', (ttlMs) => {
   expect(() => new CanaryVisibilityWindow({ ttlMs })).toThrow('Invalid canary visibility TTL');
 });
 
@@ -241,12 +241,30 @@ test('a twenty-minute TTL accepts a twenty-five step schedule that sums to the T
   ).not.toThrow();
 });
 
-test('a TTL schedule longer than thirty-two delays is refused', () => {
+test('a forty-minute TTL accepts the forty-step default schedule that ends five minutes early', () => {
+  const retryDelaysMs = [
+    1000,
+    2000,
+    4000,
+    8000,
+    15000,
+    30000,
+    ...Array.from({ length: 34 }, () => 60000),
+  ];
+  expect(retryDelaysMs).toHaveLength(40);
+  expect(retryDelaysMs.reduce((total, delay) => total + delay, 0)).toBe(2_100_000);
+  expect(
+    () => new CanaryVisibilityWindow({ ttlMs: 2_400_000, retryDelaysMs }),
+    'expected TTL 2400000 with 40 delays totaling 2100000 to be accepted'
+  ).not.toThrow();
+});
+
+test('a TTL schedule longer than forty-eight delays is refused', () => {
   expect(
     () =>
       new CanaryVisibilityWindow({
         ttlMs: 1_200_000,
-        retryDelaysMs: Array.from({ length: 33 }, () => 0),
+        retryDelaysMs: Array.from({ length: 49 }, () => 0),
       })
-  ).toThrow('expected at most 32 finite nonnegative');
+  ).toThrow('expected at most 48 finite nonnegative');
 });

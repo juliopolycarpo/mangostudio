@@ -668,12 +668,12 @@ be confirmed before another mutation. Initial absence audits remain immediate.
 Identity, integrity, authorization and other HTTP failures still stop publication.
 Exhausted visibility waits fail and retain the original-byte recovery procedure.
 
-Npm verification and tag promotion have one twenty-minute monotonic wall-clock TTL,
-sized for npm serving a just-published version up to ten minutes late,
+Npm verification and tag promotion have one forty-minute monotonic wall-clock TTL,
+sized for npm serving a just-published version up to thirteen minutes late, the longest observed,
 including HTTP reads, body downloads, source-ordering checks and tag commands.
 Post-publication reads retry HTTP 404, 408, 429 and 5xx with backoff from one second
 to one minute, sharing the deadline across all seven packages and final tag
-confirmations. The delays total seventeen minutes, so a version that never
+confirmations. The delays total thirty-five minutes, so a version that never
 appears ends as a missing-package failure inside the TTL. Valid stale or absent canary tags are polled after successful writes;
 mutations are never retried by this polling loop. Logs identify the package or URL,
 attempt, HTTP status, elapsed/remaining time and next delay, then report a settled

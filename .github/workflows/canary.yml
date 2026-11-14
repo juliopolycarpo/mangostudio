@@ -207,7 +207,8 @@ jobs:
       auth: ${{ steps.publish.outputs.auth }}
       provenance: ${{ steps.publish.outputs.provenance }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # The promotion waits up to 40 minutes for npm to serve a new version.
+    timeout-minutes: 55
     permissions:
       actions: read # recover immutable source and approval artifacts
       contents: write # include push-capable visibility of unfinished release drafts
