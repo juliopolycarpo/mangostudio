@@ -52,6 +52,7 @@ import {
   missingRustTools,
   planRustLane,
   RUST_CHECK_TASKS,
+  selectsRustLaneAlone,
 } from './lib/rust-workspace-lane';
 import { assertNoSharedRootImports } from './lib/shared-root-import-boundary';
 
@@ -494,7 +495,11 @@ async function check(): Promise<never> {
   if (effectiveWorkspaces.includes('frontend')) {
     tasks.push(localTask('frontend:api-import-boundary', () => assertFrontendApiImportBoundary()));
   }
-  tasks.push(localTask('root:shared-import-boundary', () => assertNoSharedRootImports()));
+  // Every run but `--rust` alone: that one selected no TypeScript at all, and
+  // the scan would add five seconds to a lane that is three when cargo is warm.
+  if (!selectsRustLaneAlone(scopedFiles, effectiveWorkspaces, effectiveIncludeRoot)) {
+    tasks.push(localTask('root:shared-import-boundary', () => assertNoSharedRootImports()));
+  }
 
   // Ordinary runs retain the runner's existing console and exit behavior.
   writeReport(pendingResults(), null);

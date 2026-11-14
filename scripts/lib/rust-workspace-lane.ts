@@ -146,6 +146,22 @@ export function planRustLane(
 }
 
 /**
+ * Whether a full `check` run selected the Rust lane and nothing else: no
+ * workspace, no root, no `--staged` or `--changed` file list. The TypeScript
+ * source scans have nothing to say about such a run.
+ *
+ * @example
+ * selectsRustLaneAlone(null, [], false); // true, for `bun run check --rust`
+ */
+export function selectsRustLaneAlone(
+  scopedFiles: readonly string[] | null,
+  workspaces: readonly string[],
+  includeRoot: boolean
+): boolean {
+  return scopedFiles === null && workspaces.length === 0 && !includeRoot;
+}
+
+/**
  * Thunks that run the tasks one after another however the caller starts them,
  * each still reporting its own result. cargo holds one lock on the target
  * directory, so two invocations started together only queue behind it and
