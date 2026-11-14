@@ -309,15 +309,18 @@ describe('library hashing', () => {
   });
 
   // The bound separates a linear pass from the `/\/+$/` cleanup it replaced, not a
-  // fast runner from a slow one. On the second input that regex backtracks from
-  // every slash and took about 3.5 s; the linear pass takes about 1 ms. A 100 ms
-  // bound failed on a stalled macOS runner at 230 ms.
+  // fast runner from a slow one. That regex backtracks from every slash when the
+  // run is followed by another character, and its cost is quadratic in the run:
+  // about 1.1 s for 50,000 slashes on Bun 1.4.4 and 3.4 s on 1.4.4-canary.1. The
+  // second input uses 200,000, sixteen times that cost, so an engine several
+  // times faster still lands seconds over the bound. The linear pass takes about
+  // 1 ms on either input. A 100 ms bound failed on a stalled macOS runner at 230 ms.
   it.each([
     ['at the end of the path', `/library${'/'.repeat(50_000)}`, '/library'],
     [
       'before a final segment, where a trailing-slash regex backtracks',
-      `/library${'/'.repeat(50_000)}x`,
-      `/library${'/'.repeat(50_000)}x`,
+      `/library${'/'.repeat(200_000)}x`,
+      `/library${'/'.repeat(200_000)}x`,
     ],
   ])('handles a long run of slashes %s in linear time', (_shape, hostile, expected) => {
     const start = performance.now();
