@@ -12,7 +12,10 @@ import { afterEach, describe, expect, it } from 'bun:test';
 
 import { GoogleGenAI } from '@google/genai/web';
 
-import type { createGeminiClient } from '../../../src/services/providers/gemini/client';
+import {
+  type createGeminiClient,
+  GEMINI_API_VERSION,
+} from '../../../src/services/providers/gemini/client';
 import { streamGeminiAgentTurn } from '../../../src/services/providers/gemini/interactions-stream';
 import type { AgentEvent, AgentTurnRequest } from '../../../src/services/providers/types';
 import { collectAgentEvents } from '../../support/providers/agent-event-collector';
@@ -109,8 +112,8 @@ class RecordingInteractionsServer {
     if (!this.server) throw new Error('Server was not started.');
     this.cachedClient ??= new GoogleGenAI({
       apiKey: 'test-key',
+      apiVersion: GEMINI_API_VERSION,
       httpOptions: {
-        apiVersion: 'v1beta',
         baseUrl: `http://127.0.0.1:${this.server.port}`,
       },
     });

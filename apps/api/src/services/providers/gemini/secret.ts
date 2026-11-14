@@ -35,9 +35,9 @@ import {
   createProviderSecretService,
   isPlaceholderConfigSecretValue,
 } from '../core/secret-service';
+import { GEMINI_API_VERSION } from './client';
 
-const GEMINI_VALIDATION_URL =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash';
+const GEMINI_VALIDATION_URL = `https://generativelanguage.googleapis.com/${GEMINI_API_VERSION}/models/gemini-2.5-flash`;
 
 type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
