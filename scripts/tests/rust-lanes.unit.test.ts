@@ -5,6 +5,7 @@ import { dirname, join, relative, sep } from 'node:path';
 
 import { SUITE_FLAGS } from '../ci/rust-lanes';
 import { ROOT_DIR } from '../lib/config';
+import { extractCrateInputs, scanCrateInputs } from '../lib/crate-inputs';
 import {
   API_DIR,
   classifyChangedPaths,
@@ -14,7 +15,6 @@ import {
   RUST_BINARY_RESOLVER,
   RUST_WORKSPACE_PATHS,
 } from '../lib/rust-lanes';
-import { extractCrateInputs, scanCrateInputs } from './support/crate-inputs';
 import { readText } from './support/read-text';
 import { extractOnBlock } from './support/workflow-blocks';
 

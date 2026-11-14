@@ -70,7 +70,9 @@ importing the specific module in new code:
 | `test-workers.ts`        | Test-lane worker plan, strict verdict, JUnit merge (+ test-worker-process.ts)                            |
 | `junit-report.ts`        | Reads Bun's JUnit XML; shared by the QA gate and the worker lanes                                        |
 | `actions-lint/`          | Pinned workflow static analysis: manifest, bootstrap, tasks                                              |
-| `rust-workspace-lane.ts` | Opt-in `--rust` lane: cargo commands, scoped-run selection, tool probe, clean paths                      |
+| `pass-stamp.ts`          | Local "this task passed for these inputs" stamps: key, read, write, run-or-replay                        |
+| `crate-inputs.ts`        | Files a Rust crate reads from outside its directory (lane coverage test, stamp inputs)                   |
+| `rust-workspace-lane.ts` | Opt-in `--rust` lane: cargo commands, scoped-run selection, tool probe, clean paths, stamp inputs        |
 
 Workspace `check:quick` scripts run cacheable Bun lint and format checks. The lint key
 includes the workspace's VCS inputs, upstream workspace sources through `transit`,

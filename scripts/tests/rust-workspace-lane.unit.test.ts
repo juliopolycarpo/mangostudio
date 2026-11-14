@@ -12,6 +12,7 @@ import {
   RUST_TEST_TASKS,
   rustCleanPaths,
   type RustLaneTask,
+  selectsRustLaneAlone,
 } from '../lib/rust-workspace-lane';
 import { readText } from './support/read-text';
 import { extractJobBlock, extractStepBlocks } from './support/workflow-blocks';
@@ -118,6 +119,26 @@ describe('planRustLane', () => {
       skipped: 'no changed path feeds the Rust workspace',
     });
     expect(planRustLane(true, [])).toEqual({ run: false, skipped: 'no changed files' });
+  });
+});
+
+describe('selectsRustLaneAlone', () => {
+  test('is true only for a full run that named no workspace and no root', () => {
+    expect(selectsRustLaneAlone(null, [], false)).toBe(true);
+  });
+
+  test.each([
+    ['a workspace beside --rust', null, ['api'], false],
+    ['root beside --rust', null, [], true],
+    ['a scoped run that mapped to nothing', ['docs/README.md'], [], false],
+  ] as const)('is false for %s', (_name, scopedFiles, workspaces, includeRoot) => {
+    expect(selectsRustLaneAlone(scopedFiles, workspaces, includeRoot)).toBe(false);
+  });
+
+  test('check gates the shared import scan on it', () => {
+    expect(readText('scripts/check.ts')).toMatch(
+      /if \(!selectsRustLaneAlone\([^)]*\)\) \{\s+tasks\.push\(localTask\('root:shared-import-boundary'/
+    );
   });
 });
 
