@@ -11,8 +11,9 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import ts from '@typescript/typescript6';
 
+import { isCycleScanExcluded } from './source-scan-paths';
+
 const SOURCE = /\.(?:[cm]?[jt]s|[jt]sx)$/i;
-const OMIT_DIRECTORIES = new Set(['node_modules', '.git', 'dist', 'coverage', '.turbo']);
 const MAX_SOURCE_BYTES = 4n * 1024n * 1024n;
 
 /** A closed import path and the location of its first edge. */
@@ -34,22 +35,9 @@ function canonical(path: string): string {
   return realpathSync.native(path);
 }
 
-function excluded(path: string, root: string): boolean {
-  const segments = relative(root, path).split(sep);
-  return (
-    segments.some((segment) => OMIT_DIRECTORIES.has(segment)) ||
-    segments[0] === '.mango' ||
-    segments[0] === 'target' ||
-    (segments[0] === 'crates' &&
-      segments[1] === 'mango-protocol' &&
-      segments[2] === 'fuzz' &&
-      segments[3] === 'target')
-  );
-}
-
 function collectFiles(path: string, root: string, files: Set<string>): void {
   const actual = canonical(path);
-  if (excluded(actual, root)) return;
+  if (isCycleScanExcluded(actual, root)) return;
   if (statSync(actual).isFile()) {
     if (SOURCE.test(actual)) files.add(actual);
     return;
@@ -99,7 +87,10 @@ function configFor(file: string, cache: Map<string, ts.CompilerOptions>): ts.Com
 function isLocal(path: string, root: string): boolean {
   const part = relative(root, path);
   return (
-    part !== '..' && !part.startsWith(`..${sep}`) && !isAbsolute(part) && !excluded(path, root)
+    part !== '..' &&
+    !part.startsWith(`..${sep}`) &&
+    !isAbsolute(part) &&
+    !isCycleScanExcluded(path, root)
   );
 }
 
@@ -240,6 +231,30 @@ function graphFor(files: Set<string>, root: string): Map<string, Edge[]> {
   return graph;
 }
 
+function loadImportGraph(
+  roots: readonly string[],
+  root: string
+): { base: string; graph: Map<string, Edge[]> } {
+  const base = canonical(root);
+  const files = new Set<string>();
+  for (const path of roots) collectFiles(resolve(base, path), base, files);
+  if (files.size === 0) {
+    throw new Error(`No JS or TS files found under cycle roots: ${roots.join(', ')}`);
+  }
+  return { base, graph: graphFor(files, base) };
+}
+
+/**
+ * Every file the scan reads for these roots: the sources it walks and each
+ * local file an import of theirs resolves to, as repository-relative POSIX
+ * paths. The pass stamp's key has to cover all of them.
+ * @example listImportGraphFiles(['apps/api'], process.cwd()); // ['apps/api/src/app.ts', ...]
+ */
+export function listImportGraphFiles(roots: readonly string[], root: string): string[] {
+  const { base, graph } = loadImportGraph(roots, root);
+  return [...graph.keys()].map((file) => relative(base, file).split(sep).join('/')).sort();
+}
+
 /**
  * Scan JS and TS sources under the roots, including gitignored generated source.
  * Exclude build trees and reject oversized inputs before parsing.
@@ -248,13 +263,7 @@ function graphFor(files: Set<string>, root: string): Map<string, Edge[]> {
  * @example scanImportCycles(['apps/api'], process.cwd());
  */
 export function scanImportCycles(roots: readonly string[], root: string): ImportCycle[] {
-  const base = canonical(root);
-  const files = new Set<string>();
-  for (const path of roots) collectFiles(resolve(base, path), base, files);
-  if (files.size === 0) {
-    throw new Error(`No JS or TS files found under cycle roots: ${roots.join(', ')}`);
-  }
-  const graph = graphFor(files, base);
+  const { base, graph } = loadImportGraph(roots, root);
   const state = new Map<string, 'active' | 'done'>();
   const stack: string[] = [];
   const positions = new Map<string, number>();

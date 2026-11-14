@@ -2,11 +2,11 @@ import { readFileSync } from 'node:fs';
 
 import { ROOT_DIR } from './config';
 import { collectModuleSpecifiers } from './import-specifiers';
+import { listFrontendBoundaryPaths } from './source-scan-paths';
 
 const PARITY_TEST =
   'apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts';
 const API_INTERNAL_PREFIX = '@mangostudio/api/internal/';
-const IGNORED_DIRECTORIES = new Set(['node_modules', 'dist', 'coverage', '.turbo', '.mango']);
 
 /**
  * Keep frontend runtime imports out of hub internals, except the test comparing
@@ -19,10 +19,7 @@ const IGNORED_DIRECTORIES = new Set(['node_modules', 'dist', 'coverage', '.turbo
  * assertFrontendApiImportBoundary(); // Checks the repository's frontend files.
  */
 export function assertFrontendApiImportBoundary(rootDir: string = ROOT_DIR): void {
-  const glob = new Bun.Glob('apps/frontend/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}');
-  const paths = [...glob.scanSync({ cwd: rootDir, onlyFiles: true, dot: true })]
-    .map((path) => path.replaceAll('\\', '/'))
-    .filter((path) => !IGNORED_DIRECTORIES.has(path.split('/')[2] ?? ''));
+  const paths = listFrontendBoundaryPaths(rootDir);
   if (paths.length === 0) {
     throw new Error(
       `Expected frontend JavaScript or TypeScript source files in ${rootDir}/apps/frontend.`

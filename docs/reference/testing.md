@@ -1998,6 +1998,63 @@ from outside that list or the package gains a workspace dependency. The lane is 
 not a Turbo task because the native-Bun qualification inventory certifies the exact command
 `scripts/test.ts` starts it with.
 
+`bun run check` stamps seven source scans: the four import-cycle scans (`frontend:cycles`,
+`api:cycles`, `shared:cycles`, `root:cycles`), `root:node-env-branches`,
+`frontend:api-import-boundary` and `root:shared-import-boundary`. They are pure functions of
+the repository's JS, TS and JSON files, its symlinks and its installed workspace links. On an unchanged tree a full `bun run check` took 1.9 to 2.6 s with the scans
+replayed and 5.4 to 6.4 s with the stamps cleared (three interleaved pairs, one loaded
+Linux machine). Their stamps are off in CI, with `bun run check --force` (which also passes `--force` to Turbo), and for every
+run that writes a `--report-file`.
+
+One key serves all seven, in `scripts/lib/source-scan-stamp.ts`. A key per workspace would be
+unsafe: the cycle scan follows imports through tsconfig `paths` and the `node_modules`
+workspace links into other workspaces, so any file can change another scan's verdict. The
+key is the content of:
+
+- every file Git lists (tracked, or untracked and not ignored) with a `.ts`, `.tsx`, `.mts`,
+  `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.json` or `.jsonc` extension, plus `bun.lock`,
+  `.bun-version` and `bunfig.toml`;
+- every file on disk with one of those extensions outside what the cycle scan skips
+  (`isCycleScanExcluded` in `scripts/lib/source-scan-paths.ts`: `node_modules`, `.git`,
+  `dist`, `coverage` and `.turbo` at any depth, the root `.mango` and `target`, the fuzz
+  crate's `target`, and `.claude/worktrees`). That is where gitignored generated source
+  comes in, and it is a superset of every file an import can resolve to, because the scan
+  only follows an import to a local file it does not skip;
+- the paths the `NODE_ENV` and frontend import scans enumerate, taken from the same functions
+  those scans call (`listNodeEnvScanPaths`, `listFrontendBoundaryPaths`), because their
+  globs skip fewer directories than the cycle scan does;
+- the `node_modules` links that point at workspaces, read from the repository root and from
+  every workspace the root `package.json` names (Bun's isolated layout resolves
+  `@mangostudio/shared` through `apps/api/node_modules` first);
+- every symlink the cycle scan's walk meets and every symlink Git lists, as
+  `path -> readlink target`. The scan follows an import through a link to files the key
+  already hashes under their real paths, so retargeting `apps/api/src/vendor` from one tree
+  to another changes the verdict while no hashed byte moves;
+- the sorted list of Git-listed source paths. The file set unions Git and disk, and
+  `root:shared-import-boundary` reads only the Git part, so a file that moves between ignored
+  and listed (a `.gitignore` edit or `git add -f`) must change the key without a byte of it
+  changing;
+- the Bun version and revision, the host platform, and the task's command.
+
+Files under `.mango/pass-stamps` are never part of the key. Third-party `node_modules`
+content is covered by `bun.lock` and `.bun-version`, the same assumption the protocol stamp
+makes. Not covered: a file outside the repository, such as a `node_modules` or
+`package.json` above the checkout or `~/.bunfig.toml`; the scans drop an import that
+resolves there. A tool that writes a JSON or source file inside the key's paths while the
+scans run, such as a Turbo cache directory inside the checkout, changes the key mid-run and
+no stamp is recorded; that is a rerun and never a stale pass.
+
+A key that cannot be computed, such as an unreadable directory (`EACCES` on a root-owned
+volume under the checkout), is a miss as well: the scans run, the reason is printed once and
+no stamp is written. It never fails the check. Until that directory is readable the
+scans stay unstamped.
+
+The digest is computed once and shared by the seven scans, then taken again after each scan
+ends (scans that end together share one), so an edit made during a run is not credited to it.
+`scripts/tests/source-scan-stamp.unit.test.ts` checks that every file the real scans read in
+this repository is in the key, that the key changes for each kind of input, and that a
+cycle introduced after a stamped pass is caught.
+
 The version is the one `cargo-shim.yml` installs through the SHA-pinned
 `taiki-e/install-action`; `scripts/tests/rust-nextest.unit.test.ts` fails when the two
 differ, and when the CI command stops matching the one above. nextest does not run

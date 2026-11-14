@@ -932,6 +932,7 @@ describe('import cycle checks', () => {
       '.mango/tmp',
       'target/debug',
       'crates/mango-protocol/fuzz/target/debug',
+      '.claude/worktrees/agent-a/src',
     ]) {
       injectCycle(root, path, TYPE_CYCLE);
     }
