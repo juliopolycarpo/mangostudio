@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import ts from '@typescript/typescript6';
 
 import { ROOT_DIR } from './config';
+import { listNodeEnvScanPaths } from './source-scan-paths';
 
 /**
  * Marker that exempts one intentional `NODE_ENV` read, written directly above
@@ -111,8 +112,7 @@ export function findDisallowedNodeEnvReads(
 }
 
 export function assertNoProductionNodeEnvBranches(rootDir: string = ROOT_DIR): void {
-  const glob = new Bun.Glob('apps/*/src/**/*.{js,jsx,ts,tsx,mjs,cjs}');
-  const sources = [...glob.scanSync({ cwd: rootDir, onlyFiles: true })].flatMap((path) => {
+  const sources = listNodeEnvScanPaths(rootDir).flatMap((path) => {
     const content = readFileSync(`${rootDir}/${path}`, 'utf8');
     // Filtered here as well as inside the scan so the whole tree's contents are
     // never resident at once.

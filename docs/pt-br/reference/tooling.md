@@ -108,6 +108,10 @@ runner Bun do próprio repositório (`scripts/lib/exec.ts`):
   próprio rótulo (`api:cycles`, `frontend:cycles`, `shared:cycles`) no resumo e no
   resultado de `--report-file`. A lane do protocolo roda `protocol:cycles` do
   mesmo jeito. O script `check:cycles` de um workspace roda a mesma varredura à mão.
+  Fora do CI, `bun run check` reaproveita uma varredura de ciclos que já passou
+  com os mesmos arquivos, a partir de um carimbo de aprovação local, e a rotula
+  `(replayed <chave>)`; `bun run check --force` a executa de novo. A seção
+  [Pass stamps em inglês](../../reference/testing.md#pass-stamps) descreve a chave.
 - **Servidores de dev.** `bun run dev` executa `bun run dev` no diretório de cada
   workspace selecionado (hoje só `apps/api`). O processo filho herda o ambiente
   inteiro, como o `--env-mode=loose` do Turbo fazia. Quando o runner tem um terminal

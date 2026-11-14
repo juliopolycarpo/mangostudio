@@ -181,6 +181,8 @@ describe('Check CLI result parity', () => {
           CHECK_FIXTURE_TURBO_EXIT: turbo,
           CHECK_FIXTURE_FMT_EXIT: fmt,
           CHECK_FIXTURE_CYCLES_EXIT: cycles,
+          // Stamps on would defer each scan's spawn behind its key and reorder the logs.
+          CI: '1',
         };
         const ordinary = await runCli(['--api'], env, fixture.directory);
         const reported = await runCli(

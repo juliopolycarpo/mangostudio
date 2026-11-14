@@ -10,8 +10,9 @@ export const TYPECHECK_TASK = 'typecheck:with-deps';
 
 /**
  * The cached tasks Turbo runs for a check. The cycle scan is not one of them:
- * it reads generated and gitignored files that Turbo's VCS inputs omit, so it
- * runs every time and gains nothing from a cache (see `createWorkspaceCycleCommand`).
+ * it reads generated and gitignored files that Turbo's VCS inputs omit, so Turbo
+ * cannot cache it. `bun run check` replays it from its own pass stamp instead
+ * (see `source-scan-stamp.ts` and `createWorkspaceCycleCommand`).
  */
 export const TURBO_CHECK_TASKS = ['check:quick', TYPECHECK_TASK] as const;
 

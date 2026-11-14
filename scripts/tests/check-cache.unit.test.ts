@@ -1,9 +1,20 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { copyFileSync, cpSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { createTurboCheckCommand, createWorkspaceCycleCommand } from '../lib/check';
 import { ROOT_DIR, type WorkspaceName } from '../lib/config';
+import { PASS_STAMP_DIR, readPassStamp } from '../lib/pass-stamp';
 import { protocolCheckTasks } from '../protocol/tasks';
 import {
   FIXTURE_COMMAND_TIMEOUT_MS,
@@ -106,11 +117,15 @@ async function requiredCheck(fixture: TypecheckFixture, workspace: string) {
   };
 }
 
-function rootCheck(fixture: TypecheckFixture, workspace: WorkspaceName) {
+function rootCheck(
+  fixture: TypecheckFixture,
+  workspace: WorkspaceName,
+  extra: { args?: string[]; env?: Record<string, string> } = {}
+) {
   return commands.run(
-    ['bun', 'run', 'check', `--${workspace}`],
+    ['bun', 'run', 'check', `--${workspace}`, ...(extra.args ?? [])],
     fixture.root,
-    hermeticTurboEnv({ TURBO_CACHE_DIR: join(fixture.root, '.turbo-cache') })
+    hermeticTurboEnv({ TURBO_CACHE_DIR: join(fixture.root, '.turbo-cache'), ...extra.env })
   );
 }
 
@@ -282,6 +297,101 @@ describe('lint cache and required cycle scans', () => {
       expect(rejected).toContain('error TS2322');
     },
     ROOT_CHECK_TIMEOUT_MS
+  );
+});
+
+describe('source scan pass stamps', () => {
+  // `CI` unset so the stamps are on whatever runs this file. Turbo's cache lives
+  // outside the fixture: a cache written under it during a scan is an untracked
+  // JSON file the scan's key sees, and the pass is then correctly not recorded.
+  const turboCaches: string[] = [];
+  const localEnv = () => {
+    const cache = mkdtempSync(join(tmpdir(), 'mango-check-stamp-turbo-'));
+    turboCaches.push(cache);
+    return { env: { CI: '', TURBO_CACHE_DIR: cache } };
+  };
+  afterEach(() => {
+    for (const cache of turboCaches.splice(0)) rmSync(cache, { recursive: true, force: true });
+  });
+  const replayed = (output: string, label: string): boolean =>
+    new RegExp(`${label} \\(replayed [0-9a-f]{12}\\)`).test(output);
+
+  test(
+    'replays an unchanged scan, runs it again with --force, and runs it after a source edit',
+    async () => {
+      const fixture = createFixture();
+      const LOCAL = localEnv();
+      const first = expectOutcome(await rootCheck(fixture, 'frontend', LOCAL), 'pass');
+      expect(
+        replayed(first, 'frontend:cycles'),
+        `(check): expected a first run | received:\n${first}`
+      ).toBe(false);
+
+      const second = expectOutcome(await rootCheck(fixture, 'frontend', LOCAL), 'pass');
+      for (const label of [
+        'frontend:cycles',
+        'frontend:api-import-boundary',
+        'root:shared-import-boundary',
+      ]) {
+        expect(
+          replayed(second, label),
+          `(check): expected ${label} replayed | received:\n${second}`
+        ).toBe(true);
+      }
+
+      const forced = expectOutcome(
+        await rootCheck(fixture, 'frontend', { ...LOCAL, args: ['--force'] }),
+        'pass'
+      );
+      expect(forced, '(check --force): expected no replay | received a replay').not.toContain(
+        '(replayed'
+      );
+
+      fixture.writeSource('@mangostudio/frontend', 'export const edited = 1;\n');
+      const edited = expectOutcome(await rootCheck(fixture, 'frontend', LOCAL), 'pass');
+      expect(
+        replayed(edited, 'frontend:cycles'),
+        `(check): expected a rerun after an edit | received:\n${edited}`
+      ).toBe(false);
+    },
+    4 * COMMAND_BUDGET_MS + 5_000
+  );
+
+  test(
+    'a report run never replays a scan',
+    async () => {
+      const fixture = createFixture();
+      const LOCAL = localEnv();
+      // Outside the fixture, or the report's own snapshots would change a scan's key.
+      const report = join(LOCAL.env.TURBO_CACHE_DIR, 'report.json');
+      // An ordinary run first, so the report run has a stamp it could replay. Without
+      // it the test passes even if report runs read stamps.
+      const ordinary = await rootCheck(fixture, 'frontend', LOCAL);
+      expectOutcome(ordinary, 'pass');
+      expect(
+        readPassStamp(join(fixture.root, PASS_STAMP_DIR), 'frontend:cycles'),
+        '(check): expected the ordinary run to record a frontend:cycles stamp | received: none'
+      ).not.toBeNull();
+
+      expectOutcome(
+        await rootCheck(fixture, 'frontend', {
+          ...LOCAL,
+          args: ['--report-file', report, '--report-id', '8f92b9cc-267b-4b95-b3af-d9c6637660e8'],
+        }),
+        'pass'
+      );
+      const parsed = JSON.parse(readFileSync(report, 'utf8')) as {
+        tasks: { label: string; state: string }[];
+      };
+      expect(
+        parsed.tasks.filter((task) => task.label.includes('replayed')),
+        '(check report): expected no replayed task | received one'
+      ).toEqual([]);
+      expect(parsed.tasks.find((task) => task.label === 'frontend:cycles')).toMatchObject({
+        state: 'executed',
+      });
+    },
+    2 * COMMAND_BUDGET_MS + 5_000
   );
 });
 

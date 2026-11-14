@@ -34,10 +34,45 @@ describe('check script', () => {
       'node_modules, .git, dist, coverage, and .turbo',
       'root .mango and target',
       'crates/mango-protocol/fuzz/target',
+      '.claude/worktrees',
       'over 4 MiB fail before parsing',
     ]) {
       expect(help, `expected cycle help to report ${policy}`).toContain(policy);
     }
+  });
+
+  test('check help documents --force and the replay of source scans', () => {
+    const result = Bun.spawnSync([process.execPath, './scripts/check.ts', '--help'], {
+      cwd: ROOT_DIR,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    expect(result.exitCode, result.stderr.toString()).toBe(0);
+    const help = result.stdout.toString();
+    for (const text of ['--force', 'Turbo gets --force', 'pass stamps', 'replayed']) {
+      expect(
+        help,
+        `(check --help): expected the help to mention ${text} | received: none`
+      ).toContain(text);
+    }
+  });
+
+  test('stamps the seven source scans, off for --force, CI and report runs', () => {
+    const checkScript = readText('scripts/check.ts');
+    for (const label of [
+      '`$' + '{workspace}:cycles`',
+      "'root:cycles'",
+      "'root:node-env-branches'",
+      "'frontend:api-import-boundary'",
+      "'root:shared-import-boundary'",
+    ]) {
+      expect(
+        checkScript,
+        `(check): expected sourceScanTask(${label} | received: no such stamped task`
+      ).toMatch(new RegExp(`sourceScanTask\\(\\s*${label.replaceAll(/[$.{}`]/g, '\\$&')}`));
+    }
+    expect(checkScript).toContain('passStampsEnabled(forceRun) && !reportTarget');
+    expect(checkScript).toContain('forceRun ? withTurboForce(command) : command');
   });
 
   test('creates one filtered Turbo invocation for selected workspaces', () => {
@@ -52,7 +87,7 @@ describe('check script', () => {
     ]);
   });
 
-  test('keeps the always-run cycle scan out of the cached Turbo tasks', () => {
+  test('keeps the cycle scan out of the cached Turbo tasks', () => {
     expect(
       TURBO_CHECK_TASKS,
       `(check): expected the cached Turbo check tasks without check:cycles | received: ${TURBO_CHECK_TASKS.join(', ')}`

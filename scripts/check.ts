@@ -34,6 +34,7 @@ import {
 } from './lib/dependency-policy';
 import { removePaths } from './lib/fs';
 import { createImportCycleCommand } from './lib/import-cycle-command';
+import { PASS_STAMP_DIR, passStampsEnabled } from './lib/pass-stamp';
 import { touchesProtocolSurface } from './lib/protocol';
 import { assertVersionsInLockstep } from './lib/release-version';
 import {
@@ -58,7 +59,9 @@ import {
   RUST_CHECK_TASKS,
   selectsRustLaneAlone,
 } from './lib/rust-workspace-lane';
+import { createSourceScanStamper } from './lib/source-scan-stamp';
 import { createSourceScanCommand } from './lib/source-scans';
+import { withTurboForce } from './lib/test';
 
 function printHelp(): never {
   console.log(`Usage: bun run check [workspace flags] [mode flags]
@@ -72,8 +75,14 @@ The Rust workspace lane (rustfmt, Clippy, rustdoc) runs only with --rust.
 Default workspace selection: --all
 Cycle scans include generated and gitignored TS/JS source files.
 They skip node_modules, .git, dist, coverage, and .turbo at any depth.
-They also skip root .mango and target, plus crates/mango-protocol/fuzz/target.
+They also skip root .mango and target, plus crates/mango-protocol/fuzz/target
+and .claude/worktrees.
 Source files over 4 MiB fail before parsing.
+The cycle scans, the NODE_ENV scan and the two import-boundary scans are pure
+functions of the repository's JS, TS and JSON files, its symlinks and its
+installed workspace links. Outside CI, one that already passed on the same
+inputs, lockfile and Bun build is reported as replayed and not run again;
+--force runs it. If the inputs cannot be read, the scans run without stamps.
 
 Workspace flags:
   --frontend
@@ -93,6 +102,8 @@ Mode flags:
   --report-file <path>  Write an internal JSON result (requires --report-id)
   --report-id <UUID>    Caller identity for --report-file
   --ci-report          Emit source/run-bound diagnostics (requires --all and report flags)
+  --force        Bypass the caches check owns: Turbo gets --force for the workspace
+                 tasks and the source scans ignore their pass stamps (.mango/pass-stamps)
   --help`);
   process.exit(0);
 }
@@ -108,6 +119,16 @@ const commandTask = (label: string, cmd: string[], opts: { cwd: string }): Check
   run: () => runCommand(label, cmd, opts),
 });
 
+// A source scan replayed from its pass stamp when none of its inputs changed.
+const sourceScanTask = (label: string, cmd: string[]): CheckTask => ({
+  label,
+  run: stampSourceScan(label, cmd, () => runCommand(label, cmd, { cwd: ROOT_DIR })),
+});
+
+// Turbo's own cache is the only one a task has; `--force` bypasses it.
+const turboCommand = (command: string[]): string[] =>
+  forceRun ? withTurboForce(command) : command;
+
 const localTask = (label: string, fn: () => void | Promise<void>): CheckTask => ({
   label,
   run: () => runTask(label, fn),
@@ -116,16 +137,17 @@ const localTask = (label: string, fn: () => void | Promise<void>): CheckTask => 
 function createWorkspaceTasks(workspaces: ReadonlyArray<WorkspaceName>): CheckTask[] {
   const turboChecks = commandTask(
     'workspaces:check',
-    createTurboCheckCommand([...workspaces], !ciReportMode),
+    turboCommand(createTurboCheckCommand([...workspaces], !ciReportMode)),
     {
       cwd: ROOT_DIR,
     }
   );
   // The cycle scan reads generated and gitignored files Turbo does not hash, so
-  // it runs outside Turbo and always executes. One process per workspace keeps
-  // each scan's repository-root base and gives each its own result label.
+  // it runs outside Turbo. Its own pass stamp hashes those files (see
+  // lib/source-scan-stamp.ts). One process per workspace keeps each scan's
+  // repository-root base and gives each its own result label.
   const cycleScans = workspaces.map((workspace) =>
-    commandTask(`${workspace}:cycles`, createWorkspaceCycleCommand(workspace), { cwd: ROOT_DIR })
+    sourceScanTask(`${workspace}:cycles`, createWorkspaceCycleCommand(workspace))
   );
   return [
     turboChecks,
@@ -140,10 +162,8 @@ function createWorkspaceTasks(workspaces: ReadonlyArray<WorkspaceName>): CheckTa
 
 function createRootTasks(skipFormat: boolean): CheckTask[] {
   const tasks: CheckTask[] = [
-    commandTask('root:cycles', createImportCycleCommand(ROOT_LINT_PATHS), { cwd: ROOT_DIR }),
-    commandTask('root:node-env-branches', createSourceScanCommand('node-env-branches'), {
-      cwd: ROOT_DIR,
-    }),
+    sourceScanTask('root:cycles', createImportCycleCommand(ROOT_LINT_PATHS)),
+    sourceScanTask('root:node-env-branches', createSourceScanCommand('node-env-branches')),
     localTask('root:versions', () => {
       assertVersionsInLockstep();
     }),
@@ -173,7 +193,7 @@ function createRootTasks(skipFormat: boolean): CheckTask[] {
 }
 
 const { workspaces, includeRoot, flags, values, positional } = parseArgs({
-  booleanFlags: ['--staged', '--changed', '--skip-format', '--ci-report'],
+  booleanFlags: ['--staged', '--changed', '--skip-format', '--ci-report', '--force'],
   valueFlags: ['--base', '--report-file', '--report-id'],
   selectionFlags: ['--rust'],
 });
@@ -184,6 +204,14 @@ if (flags['--help']) {
 
 const reportTarget = checkReportTarget(process.argv.slice(2), values);
 const ciReportMode = flags['--ci-report'];
+const forceRun = flags['--force'] === true;
+// A report records what ran, so a replayed task would be filed as an executed
+// one with no duration; report runs never replay.
+const stampSourceScan = createSourceScanStamper({
+  rootDir: ROOT_DIR,
+  stampDir: join(ROOT_DIR, PASS_STAMP_DIR),
+  enabled: passStampsEnabled(forceRun) && !reportTarget,
+});
 if (
   ciReportMode &&
   (!reportTarget || JSON.stringify(reportTarget.args) !== JSON.stringify(['--all', '--ci-report']))
@@ -520,10 +548,9 @@ async function check(): Promise<never> {
   // process of its own instead of blocking this thread (see lib/source-scans.ts).
   if (effectiveWorkspaces.includes('frontend')) {
     tasks.push(
-      commandTask(
+      sourceScanTask(
         'frontend:api-import-boundary',
-        createSourceScanCommand('frontend-api-import-boundary'),
-        { cwd: ROOT_DIR }
+        createSourceScanCommand('frontend-api-import-boundary')
       )
     );
   }
@@ -531,12 +558,9 @@ async function check(): Promise<never> {
   // the scan would add five seconds to a lane that is three when cargo is warm.
   if (!selectsRustLaneAlone(scopedFiles, effectiveWorkspaces, effectiveIncludeRoot)) {
     tasks.push(
-      commandTask(
+      sourceScanTask(
         'root:shared-import-boundary',
-        createSourceScanCommand('shared-import-boundary'),
-        {
-          cwd: ROOT_DIR,
-        }
+        createSourceScanCommand('shared-import-boundary')
       )
     );
   }

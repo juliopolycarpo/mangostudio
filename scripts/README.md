@@ -64,6 +64,8 @@ importing the specific module in new code:
 | `import-cycles.ts`        | TypeScript-resolved JS/TS graph scan shared by workspace checks and QA                                   |
 | `import-cycle-command.ts` | Builds the scanner's argv without loading the compiler                                                   |
 | `source-scans.ts`         | The source scans `check` runs as separate processes, and their commands                                  |
+| `source-scan-paths.ts`    | Which files each source scan enumerates from disk; the scans and their pass stamp both call it           |
+| `source-scan-stamp.ts`    | Input files, facts and the shared digest behind the seven source scans' pass stamps                      |
 | `changelog.ts`            | git-cliff arg/format logic (wrapped behind a project API)                                                |
 | `npm-pack.ts`             | npm distribution manifest builders                                                                       |
 | `release-version.ts`      | Canonical release version resolver + lockstep consistency check                                          |
@@ -95,13 +97,23 @@ dependencies reached from TypeScript roots and independent JavaScript roots.
 It includes declarations and generated or gitignored source files. The scanner
 skips `node_modules`, `.git`, `dist`, `coverage`, and `.turbo` at any depth.
 It also skips the repository root's `.mango` and `target` directories and
-`crates/mango-protocol/fuzz/target`. Source files over 4 MiB fail before parsing.
+`crates/mango-protocol/fuzz/target`, and `.claude/worktrees`, whose entries are other
+checkouts of this repository. Source files over 4 MiB fail before parsing.
 The scan resolves imports with the TypeScript compiler API and retains type-only edges.
 Turbo does not run the scan: ignored files are absent from its VCS cache inputs, so
 no cache entry could be valid. Dockerfiles are excluded from formatting.
 
 Run one scan from the repository root with
 `bun scripts/check-import-cycles.ts apps/api`.
+
+Outside CI, `bun run check` replays the seven source scans (`frontend:cycles`, `api:cycles`,
+`shared:cycles`, `root:cycles`, `root:node-env-branches`, `frontend:api-import-boundary`,
+`root:shared-import-boundary`) from a pass stamp in `.mango/pass-stamps` when no JS, TS or JSON
+file, lockfile or Bun build changed since they last passed. The summary labels such a task
+`(replayed <key>)`. `bun run check --force` runs them and passes `--force` to Turbo; report
+runs (`--report-file`) never replay. The key and what it leaves out are in
+`lib/source-scan-stamp.ts` and "Pass stamps" in
+[`docs/reference/testing.md`](../docs/reference/testing.md).
 
 ### Cancelling a runner
 

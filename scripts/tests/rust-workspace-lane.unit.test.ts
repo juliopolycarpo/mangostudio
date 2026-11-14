@@ -137,7 +137,7 @@ describe('selectsRustLaneAlone', () => {
 
   test('check gates the shared import scan on it', () => {
     expect(readText('scripts/check.ts')).toMatch(
-      /if \(!selectsRustLaneAlone\([^)]*\)\) \{\s+tasks\.push\(\s*commandTask\(\s*'root:shared-import-boundary'/
+      /if \(!selectsRustLaneAlone\([^)]*\)\) \{\s+tasks\.push\(\s*sourceScanTask\(\s*'root:shared-import-boundary'/
     );
   });
 });

@@ -122,7 +122,10 @@ Bun runner (`scripts/lib/exec.ts`) instead:
   outside Turbo. Each scan has its own label (`api:cycles`,
   `frontend:cycles`, `shared:cycles`) in the summary and in the `--report-file`
   result. The protocol lane runs `protocol:cycles` the same way. A workspace's
-  `check:cycles` script runs the same scan by hand.
+  `check:cycles` script runs the same scan by hand. Outside CI, `bun run check`
+  replays a cycle scan that already passed on the same files from a local pass stamp,
+  and labels it `(replayed <key>)`; `bun run check --force` runs it. See "Pass
+  stamps" in [`testing.md`](./testing.md).
 - **Dev servers.** `bun run dev` runs `bun run dev` in each selected workspace
   directory (today only `apps/api`). The child inherits the whole environment, as
   Turbo's `--env-mode=loose` did. When the runner has a terminal on both stdin
