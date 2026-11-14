@@ -1,7 +1,0 @@
-[features]
-hooks = true
-
-[[hooks.PostToolUse]]
-hooks = [
-  { type = "command", command = "bun \"$(git rev-parse --show-toplevel 2>/dev/null || pwd)/.codex/hooks/auto-fix.mjs\"", timeout = 30 },
-]

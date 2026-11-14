@@ -115,7 +115,6 @@ describe('labeler coverage', () => {
     const toolingSection = extractLabelSection(labeler, '"area: tooling":', '"area: db":');
     expect(toolingSection).toContain('- "bunfig.toml"');
     expect(toolingSection).toContain('- "lefthook.yml"');
-    expect(toolingSection).toContain('- "opencode.json"');
     expect(toolingSection).toContain('- ".editorconfig"');
     expect(toolingSection).toContain('- ".gitattributes"');
     expect(toolingSection).toContain('- ".gitmessage"');
@@ -127,7 +126,6 @@ describe('labeler coverage', () => {
     const buildSection = extractLabelSection(labeler, '"area: build":', '"area: docs":');
     expect(buildSection).not.toContain('bunfig.toml');
     expect(buildSection).not.toContain('lefthook.yml');
-    expect(buildSection).not.toContain('opencode.json');
     expect(buildSection).not.toContain('.editorconfig');
     expect(buildSection).not.toContain('.gitattributes');
     expect(buildSection).not.toContain('.gitmessage');

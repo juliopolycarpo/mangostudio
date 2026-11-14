@@ -15,7 +15,7 @@ const ROOT_CONFIG_FILES = new Set([
   'turbo.jsonc',
 ]);
 
-const SCRIPT_FILE_PATTERN = /^(?:\.claude\/hooks|\.codex\/hooks|scripts)\/.*\.(?:[cm]?[jt]sx?|sh)$/;
+const SCRIPT_FILE_PATTERN = /^(?:\.claude\/hooks|scripts)\/.*\.(?:[cm]?[jt]sx?|sh)$/;
 const WORKSPACE_SOURCE_PATTERN = /^(?:apps|packages)\/[^/]+\/(?:bin|scripts|src|tests)\//;
 const WORKSPACE_CONFIG_PATTERN =
   /^(?:apps|packages)\/[^/]+\/(?:build\.ts|bunfig\.toml|package\.json|tsconfig(?:\.[^/]+)?\.json|tsr\.config\.json|turbo\.json|v(?:ite|itest)\.config\.[cm]?[jt]s)$/;

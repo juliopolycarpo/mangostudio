@@ -27,7 +27,6 @@ export type FileWeights = Readonly<Record<string, number>>;
 const ROOT_LANE_WEIGHTS: FileWeights = {
   'apps/api/tests/integration/modules/environments/wsl-runtime-scripts.integration.test.ts': 9,
   'scripts/qa-gate/collect/capture-process.unit.test.ts': 10,
-  'scripts/tests/agent-hooks.unit.test.ts': 10,
   'scripts/tests/benchmark-runtime-version.unit.test.ts': 3,
   'scripts/tests/check-cache.unit.test.ts': 45,
   'scripts/tests/check-report.unit.test.ts': 4,

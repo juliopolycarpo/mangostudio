@@ -1,28 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bun",
-            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/session-path.mjs"]
-          }
-        ]
-      }
-    ],
-    "CwdChanged": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bun",
-            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/session-path.mjs"]
-          }
-        ]
-      }
-    ],
     "PreToolUse": [
       {
         "matcher": "Edit|Write|MultiEdit|NotebookEdit",
@@ -31,18 +9,6 @@
             "type": "command",
             "command": "bun",
             "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/protect-generated.mjs"]
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bun",
-            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/auto-fix.mjs"]
           }
         ]
       }

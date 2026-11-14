@@ -348,15 +348,7 @@ Files that pass formatting are re-staged automatically. All hooks must succeed f
 
 ## Editor Setup
 
-Claude Code hooks auto-prepend `node_modules/.bin` to PATH on session start and directory changes (`SessionStart` / `CwdChanged`). After every write or edit, a `PostToolUse` hook runs `auto-fix.mjs` to lint and format JavaScript and TypeScript, format supported data and documentation files, or run rustfmt. Dockerfiles are excluded. Zed uses Bun fmt through its external formatter interface. VS Code exposes `lint` and `format` tasks; automatic formatting is disabled because Bun does not provide an editor language server. A `PreToolUse` hook (`protect-generated.mjs`) blocks hand edits to generated files such as `CHANGELOG.md`, lockfiles, and `routeTree.gen.ts`, and names the command that regenerates them.
-
-### OpenCode
-
-OpenCode reads formatter wiring from `opencode.json`.
-
-OpenCode runs `bun fmt` for source, JSON, CSS, HTML, Markdown, TOML and YAML files. Dockerfiles are excluded.
-
-Prettier is disabled.
+Zed uses Bun fmt through its external formatter interface. VS Code exposes `lint` and `format` tasks; automatic formatting is disabled because Bun does not provide an editor language server. A Claude Code `PreToolUse` hook (`.claude/hooks/protect-generated.mjs`) blocks hand edits to generated files such as `CHANGELOG.md`, lockfiles, and `routeTree.gen.ts`, and names the command that regenerates them.
 
 ## Code Quality
 

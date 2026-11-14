@@ -1,15 +1,6 @@
 import { readlinkSync, realpathSync } from 'node:fs';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-
-import {
-  absolutePathForLookup,
-  candidatePaths,
-  extractHookCwd,
-  extractTouchedFilePath,
-  isInsideRepo,
-  toSlashPath,
-} from '../../.codex/hooks/auto-fix.mjs';
 
 const repoRoot = resolve(fileURLToPath(import.meta.url), '..', '..', '..');
 const nestedWorktreePrefix = /^\.claude\/worktrees\/[^/]+\//;
@@ -33,6 +24,87 @@ const protectedFiles = [
 const protectedDirectories = [
   { path: 'apps/shared/src/runtime-contract/generated/', regenerate: 'bun run contracts:emit' },
 ];
+
+/**
+ * Read the touched file path from a Claude hook payload.
+ * // Usage: const filePath = extractTouchedFilePath(input);
+ */
+export function extractTouchedFilePath(input) {
+  const parsed = parseHookInput(input);
+  return (
+    parsed?.tool_input?.file_path ??
+    parsed?.tool_input?.notebook_path ??
+    parsed?.tool_input?.path ??
+    parsed?.file_path ??
+    parsed?.path ??
+    ''
+  );
+}
+
+/**
+ * Read the hook's absolute working directory, falling back to the repository root.
+ * // Usage: const cwd = extractHookCwd(input); // '/repo/packages/protocol'
+ */
+export function extractHookCwd(input, root = repoRoot) {
+  const cwd = parseHookInput(input)?.cwd;
+  return typeof cwd === 'string' && isAbsolute(cwd) ? cwd : root;
+}
+
+/**
+ * List the absolute paths a touched file may name: from the hook cwd first, then the repo root
+ * when the cwd is inside the repo, since agents also send repo-relative paths from nested dirs.
+ * // Usage: candidatePaths('CHANGELOG.md', '/repo/packages/protocol', '/repo'); // ['/repo/packages/protocol/CHANGELOG.md', '/repo/CHANGELOG.md']
+ */
+export function candidatePaths(filePath, cwd, root = repoRoot) {
+  if (!filePath) {
+    return [];
+  }
+
+  const fromCwd = absolutePathForLookup(filePath, cwd);
+  if (isAbsolute(filePath)) {
+    return [fromCwd];
+  }
+
+  return isInsideRepo(cwd, root) ? [fromCwd, absolutePathForLookup(filePath, root)] : [fromCwd];
+}
+
+/**
+ * Anchor a path for filesystem lookup, preserving parent segments on POSIX.
+ * // Usage: absolutePathForLookup('src/file.ts', resolve('repo'));
+ */
+export function absolutePathForLookup(filePath, cwd) {
+  if (isAbsolute(filePath)) return sep === '/' ? filePath : resolve(filePath);
+  if (sep !== '/') return resolve(cwd, filePath);
+
+  // The filesystem must follow a symlink before processing a subsequent '..'.
+  return cwd.endsWith(sep) ? cwd + filePath : cwd + sep + filePath;
+}
+
+/**
+ * Check whether a resolved file path belongs to the current repository.
+ * // Usage: if (!isInsideRepo(filePath)) return;
+ */
+export function isInsideRepo(filePath, root = repoRoot) {
+  const relativePath = relative(root, filePath);
+  return (
+    relativePath !== '' &&
+    relativePath !== '..' &&
+    !relativePath.startsWith(`..${sep}`) &&
+    !isAbsolute(relativePath)
+  );
+}
+
+function toSlashPath(filePath) {
+  return filePath.replaceAll(sep, '/');
+}
+
+function parseHookInput(input) {
+  try {
+    return JSON.parse(input);
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Match a touched file against the generated files agents must not edit by hand.
@@ -60,7 +132,7 @@ export function findProtectedFile(filePath, root = repoRoot) {
  * // Usage: const { blocked, message } = runProtectGeneratedHook(stdinText);
  */
 export function runProtectGeneratedHook(input, root = repoRoot) {
-  const filePath = extractTouchedFilePath(input) || extractNotebookPath(input);
+  const filePath = extractTouchedFilePath(input);
   const candidates = candidatePaths(filePath, extractHookCwd(input, root), root);
   const match =
     candidates.map((candidate) => findProtectedFile(candidate, root)).find(Boolean) ??
@@ -130,14 +202,6 @@ export function toRepoPath(filePath, root) {
 
   const relativePath = toSlashPath(relative(root, filePath));
   return relativePath.replace(nestedWorktreePrefix, '');
-}
-
-function extractNotebookPath(input) {
-  try {
-    return JSON.parse(input)?.tool_input?.notebook_path ?? '';
-  } catch {
-    return '';
-  }
 }
 
 async function readStdin() {

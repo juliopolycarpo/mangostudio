@@ -74,7 +74,7 @@ describe('shared root Bun boundary', () => {
     'packages/protocol/src/forbidden.ts',
     'scripts/forbidden.ts',
     'tests/browser-smoke/forbidden.spec.ts',
-    '.codex/hooks/forbidden.mjs',
+    '.claude/hooks/forbidden.mjs',
     'tooling/forbidden.cjs',
   ])('keeps the root denial in %s', (path) => {
     const source = path.endsWith('.cjs')

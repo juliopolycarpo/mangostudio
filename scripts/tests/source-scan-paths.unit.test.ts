@@ -49,7 +49,7 @@ describe('isCycleScanExcluded', () => {
     ['apps/api/src/app.ts', false],
     ['apps/api/build/generated.ts', false],
     ['apps/api/target/x.ts', false],
-    ['.claude/hooks/auto-fix.mjs', false],
+    ['.claude/hooks/protect-generated.mjs', false],
     ['.claude/worktrees-notes/a.ts', false],
     ['crates/mango-protocol/fuzz/fuzz_targets/a.rs', false],
   ])('%s is excluded: %p', (path, expected) => {

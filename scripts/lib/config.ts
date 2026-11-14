@@ -39,7 +39,6 @@ export const ROOT_TOOLING_PATHS: string[] = [
   '.zed',
   '.vscode',
   '.claude',
-  '.codex',
   '.cursor/rules',
   '.github',
   '.mango',
@@ -47,7 +46,6 @@ export const ROOT_TOOLING_PATHS: string[] = [
   'README.md',
   'docs',
   'lefthook.yml',
-  'opencode.json',
   'knip.json',
   'playwright.config.ts',
   'scripts',
@@ -70,7 +68,6 @@ export const ROOT_TOOLING_PATHS: string[] = [
 // Lint accepts only source directories; JSON-only directories are errors.
 export const ROOT_LINT_PATHS: string[] = [
   '.claude/hooks',
-  '.codex/hooks',
   'scripts',
   'packages',
   'tests/browser-smoke',
