@@ -86,6 +86,14 @@ export type SpawnWorker = (options: WorkerSpawnOptions) => WorkerChild;
 export const spawnWorkerChild: SpawnWorker = (options) =>
   Bun.spawn({ ...options, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
 
+/**
+ * How long the lane's guardian gives a worker between SIGTERM and SIGKILL once
+ * the lane script is gone. The same 5 s as the runner's `CANCEL_GRACE_MS`, kept
+ * here so the lane script does not load ./process-tree.ts: every file it loads
+ * is an input of the cached API unit lane.
+ */
+export const WORKER_GUARDIAN_GRACE_MS = 5_000;
+
 /** What {@link guardWorkerSpawn} needs of a guardian link; `GuardianLink` is the real one. */
 export interface WorkerGuardian {
   /** Starts the guardian if it is not running yet. */

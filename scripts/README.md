@@ -164,6 +164,8 @@ Run one scan from the repository root with
     workers ran on until their files finished, and with the guardian they are gone within 2 s. The
     coverage runner needs none: its lanes are not detached and stay in the group the runner above
     signals.
+    A lane script started under Bun's `--no-orphans` policy loses its guardian with it, because Bun
+    ends that script's children when it dies; the same policy ends the workers.
   - A group child is covered with its whole group. A `stdin: 'inherit'` child shares the
     terminal's foreground group with the shell, so the guardian signals **that pid only** and
     whatever the child started keeps running.

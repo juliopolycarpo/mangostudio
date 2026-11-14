@@ -32,7 +32,6 @@ import { join } from 'node:path';
 
 import { ROOT_DIR } from './lib/config';
 import { error, info, log } from './lib/log';
-import { CANCEL_GRACE_MS } from './lib/process-tree';
 import { GuardianLink, launchGuardian } from './lib/runner-guardian';
 import { runWithTestHome } from './lib/test-home';
 import { laneById, type TestLaneId, workerReportPath } from './lib/test-lanes';
@@ -41,6 +40,7 @@ import {
   type SpawnWorker,
   spawnWorkerChild,
   startWorkerProcess,
+  WORKER_GUARDIAN_GRACE_MS,
   workerEnvironment,
 } from './lib/test-worker-process';
 import {
@@ -89,7 +89,7 @@ export function workerSpawn(): SpawnWorker {
   spawnGuardedWorker ??=
     process.platform === 'win32'
       ? spawnWorkerChild
-      : guardWorkerSpawn(new GuardianLink(() => launchGuardian(CANCEL_GRACE_MS), error));
+      : guardWorkerSpawn(new GuardianLink(() => launchGuardian(WORKER_GUARDIAN_GRACE_MS), error));
   return spawnGuardedWorker;
 }
 
