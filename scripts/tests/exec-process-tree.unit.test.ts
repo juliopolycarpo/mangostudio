@@ -549,12 +549,23 @@ describe.skipIf(IS_WINDOWS)('SIGKILL of the runner', () => {
     GRACE_TEST_TIMEOUT_MS
   );
 
-  test('leaves the guardian in a session and group of its own', async () => {
+  // Only procps can name a session; see `sessionOf`.
+  test.skipIf(process.platform !== 'linux')(
+    'leaves the guardian in a session of its own',
+    async () => {
+      const runner = startRunner([], true);
+      await readyPids();
+      const guardian = await guardianOf(runner);
+
+      expectGuarded('guardian session', guardian, sessionOf(guardian));
+    }
+  );
+
+  test('leaves the guardian in a process group of its own', async () => {
     const runner = startRunner([], true);
     await readyPids();
     const guardian = await guardianOf(runner);
 
-    expectGuarded('guardian session', guardian, sessionOf(guardian));
     expectGuarded('guardian process group', guardian, processGroupOf(guardian));
     expectGuarded(
       'runner process group apart from guardian',

@@ -88,7 +88,14 @@ export function processGroupOf(pid: number): number {
   return group;
 }
 
-/** The session `pid` belongs to (POSIX only), read through `ps` like {@link processGroupOf}. */
+/**
+ * The session `pid` belongs to, read through `ps` like {@link processGroupOf}.
+ * Linux only: the `sid` column is procps'. The `ps` of macOS has no session id
+ * column (its `sess` is a kernel pointer) and answers `sid` with its keyword list.
+ *
+ * @example
+ * sessionOf(process.pid); // the session the test runner itself is in
+ */
 export function sessionOf(pid: number): number {
   const out = Bun.spawnSync(['ps', '-o', 'sid=', '-p', String(pid)])
     .stdout.toString()
