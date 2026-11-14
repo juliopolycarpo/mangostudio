@@ -501,7 +501,8 @@ test.each([true, false])('CLI pins same-run plan digest before gh reads; valid=%
       expect(existsSync(trace)).toBe(false);
     }
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    // Windows can still hold the directory for a moment after the CLI child exits.
+    rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
 
