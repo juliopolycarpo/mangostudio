@@ -1868,6 +1868,35 @@ fails when a lane command stops matching its `cargo-shim.yml` step.
 `bun run clean --rust` removes the cargo target directories, including the
 `mangostudio-runtime` binary the API tests spawn.
 
+### Pass stamps
+
+cargo skips a build that is up to date, but nextest and the doctests still run every case:
+37 s for an unchanged tree on the machine that measured it. `bun run test --rust` therefore
+records a pass stamp per task in `.mango/pass-stamps/` and reports a task that already
+passed with the same inputs as `(replayed <key>)` without starting it (0.6 s for the same
+tree). `bun run check --rust` has no stamps: cargo answers an unchanged tree in about 3 s.
+
+A stamp is a SHA-256 key and nothing else; no output is saved or restored. The key covers:
+
+- the bytes of every working-tree file the crates read: `RUST_WORKSPACE_PATHS`, every file
+  the crate scan in `scripts/lib/crate-inputs.ts` finds (including the English catalog, which
+  the CI lane leaves to another test), and `package.json`, `bun.lock`, `.bun-version` and
+  `patches/**` for the Bun fixture the runtime tests start. Modified and untracked files
+  count; a deleted file leaves the list;
+- `rustc -Vv`, `cargo -V`, the nextest version, the Bun version and revision, and the host
+  platform;
+- the task's command line and environment, and the caller's `RUSTFLAGS`, `RUSTDOCFLAGS`,
+  `RUSTC_*`, `RUSTUP_TOOLCHAIN`, `CARGO_*`, `NEXTEST_*` and `MANGOSTUDIO_*` variables.
+
+Only exit 0 is recorded. The key is taken before the run and again after it, and the stamp
+is written only when both agree, so an edit made while the tests ran is not credited to
+them. A missing or malformed stamp is a miss. Stamps are never read or written when `CI`
+is set. `bun run test --force` ignores them and also passes `--force` to Turbo, so one flag
+reruns every selected lane. `bun run clean` removes them.
+
+A test that depends on something outside that list (a tool on `PATH`, a file under `$HOME`)
+is not covered: run with `--force` when you change one.
+
 The version is the one `cargo-shim.yml` installs through the SHA-pinned
 `taiki-e/install-action`; `scripts/tests/rust-nextest.unit.test.ts` fails when the two
 differ, and when the CI command stops matching the one above. nextest does not run

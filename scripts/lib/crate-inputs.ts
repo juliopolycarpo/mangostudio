@@ -1,6 +1,8 @@
 // Finds the files a stable Rust crate reads that live outside its own
-// directory, so a test can prove the `rust` lane in scripts/lib/rust-lanes.ts
-// fires when any of them changes. Test-only: nothing in CI imports it.
+// directory. A test uses it to prove the `rust` lane in scripts/lib/rust-lanes.ts
+// fires when any of them changes, and the pass stamps of `bun run test --rust`
+// hash every one of them (scripts/lib/rust-workspace-lane.ts). Nothing in CI
+// imports it.
 //
 // Three shapes are recognised, all by scanning source text (a macro's
 // expansion is not observable from outside `rustc`):

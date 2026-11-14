@@ -23,6 +23,17 @@ export function createTurboTestCommand(task: TestLaneTask, workspaces: Workspace
 }
 
 /**
+ * A Turbo command that ignores its cache. `--force` is Turbo's own flag, so it
+ * goes before the `--` that hands the rest to the task.
+ * // Usage: withTurboForce(['turbo', 'run', 'test:unit', '--', '--changed=abc']);
+ */
+export function withTurboForce(command: readonly string[]): string[] {
+  const separator = command.indexOf('--');
+  const end = separator === -1 ? command.length : separator;
+  return [...command.slice(0, end), '--force', ...command.slice(end)];
+}
+
+/**
  * The workspaces whose coverage lanes a `--shard=i/N` run may split. The
  * frontend is not one of them: Bun's LCOV is not union-mergeable across
  * shards, so its lane runs whole, in its own CI job (see `sharded` in

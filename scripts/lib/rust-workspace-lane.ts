@@ -20,9 +20,11 @@
 
 import { isAbsolute, relative, sep } from 'node:path';
 
-import type { RunResult } from './exec';
+import { scanCrateInputs } from './crate-inputs';
+import { captureCommand, type CaptureResult, type RunResult } from './exec';
+import { listCheckoutFiles } from './git';
 import { cargoTargetDir } from './runtime-build';
-import { classifyChangedPaths } from './rust-lanes';
+import { classifyChangedPaths, RUST_WORKSPACE_PATHS } from './rust-lanes';
 
 /** The executable a task needs on PATH beside `cargo` itself. */
 type RustTool = 'cargo' | 'cargo-nextest';
@@ -190,4 +192,78 @@ export function rustCleanPaths(
     );
   }
   return [inRepository.split(sep).join('/'), FUZZ_TARGET_DIR];
+}
+
+/**
+ * Files the Rust tests read that neither `RUST_WORKSPACE_PATHS` nor the crate
+ * scan names: the runtime's MCP tests start a Bun fixture, so the Bun pin, the
+ * lockfile and the dependency patches decide what that fixture runs.
+ */
+const RUST_TEST_HOST_INPUTS = ['package.json', 'bun.lock', '.bun-version', 'patches/**'] as const;
+
+/**
+ * Every checkout file a Rust test result depends on, for its pass stamp.
+ *
+ * `RUST_WORKSPACE_PATHS` says when CI runs the lanes, which is not the same
+ * question: it leaves out a crate input another lane already guards (the
+ * English catalog). A stamp has no other lane behind it, so this adds every
+ * file the crate scan finds, exemptions included.
+ *
+ * @example
+ * rustTestInputFiles('/repo', ['crates/x/src/lib.rs', 'docs/a.md']); // ['crates/x/src/lib.rs']
+ */
+export function rustTestInputFiles(
+  rootDir: string,
+  checkoutFiles: readonly string[] = listCheckoutFiles(rootDir)
+): string[] {
+  const scanned = scanCrateInputs(rootDir).map((input) =>
+    // A trailing slash names a directory the source appends a file name to.
+    input.path.endsWith('/') ? `${input.path}**` : input.path
+  );
+  const globs = [...RUST_WORKSPACE_PATHS, ...scanned, ...RUST_TEST_HOST_INPUTS].map(
+    (pattern) => new Bun.Glob(pattern)
+  );
+  return checkoutFiles.filter((file) => globs.some((glob) => glob.match(file)));
+}
+
+/**
+ * Environment variables that change what cargo builds or what a test does.
+ * `MANGO_RUNNER_GROUP` is deliberately outside the pattern: it names the
+ * parent runner's process and differs on every run.
+ */
+const RUST_TEST_ENV =
+  /^(?:RUSTFLAGS|RUSTDOCFLAGS|RUSTC_.+|RUSTUP_TOOLCHAIN|CARGO_.+|NEXTEST_.+|MANGOSTUDIO_.+)$/;
+
+/**
+ * Everything but file bytes that a Rust test result depends on: the task's
+ * command and environment, the compiler, cargo, nextest and Bun versions, the
+ * host, and the caller's cargo and MangoStudio variables.
+ *
+ * @example
+ * (await rustTestFacts(RUST_TEST_TASKS[0])).cargo; // 'cargo 1.99.0 (…)'
+ */
+export async function rustTestFacts(
+  task: RustLaneTask,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  capture: (cmd: string[]) => Promise<CaptureResult> = captureCommand
+): Promise<Record<string, string>> {
+  const version = async (cmd: string[]): Promise<string> => {
+    const { stdout, stderr, exitCode } = await capture(cmd);
+    // A tool that cannot report its version still gets a stable, distinct fact.
+    return exitCode === 0 ? stdout.trim() : `exit ${exitCode}: ${stderr.trim()}`;
+  };
+  const selected = Object.entries(env)
+    .filter(([name, value]) => RUST_TEST_ENV.test(name) && value !== undefined)
+    .sort(([left], [right]) => (left < right ? -1 : 1));
+  return {
+    task: JSON.stringify({ cmd: task.cmd, env: task.env ?? {} }),
+    rustc: await version(['rustc', '-Vv']),
+    cargo: await version(['cargo', '-V']),
+    ...(task.tool === 'cargo-nextest'
+      ? { nextest: await version(['cargo', 'nextest', '--version']) }
+      : {}),
+    bun: `${Bun.version} ${Bun.revision}`,
+    host: `${process.platform} ${process.arch}`,
+    env: JSON.stringify(selected),
+  };
 }

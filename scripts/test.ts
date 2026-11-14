@@ -3,6 +3,12 @@ import { join } from 'node:path';
 
 import { BROWSER_SMOKE_TEST_COMMAND } from './lib/browser-smoke';
 import { ALL_WORKSPACE_NAMES, ROOT_DIR, type WorkspaceName } from './lib/config';
+import {
+  PASS_STAMP_DIR,
+  passStampKey,
+  passStampsEnabled,
+  runWithPassStamp,
+} from './lib/pass-stamp';
 import { touchesProtocolSurface } from './lib/protocol';
 import {
   exitWithResults,
@@ -18,7 +24,13 @@ import {
   runSequential,
 } from './lib/runner';
 import { RUNTIME_BINARY_DIGEST_ENV, runtimeBinaryDigestEnv } from './lib/runtime-binary-digest';
-import { missingRustTools, planRustLane, RUST_TEST_TASKS } from './lib/rust-workspace-lane';
+import {
+  missingRustTools,
+  planRustLane,
+  RUST_TEST_TASKS,
+  rustTestFacts,
+  rustTestInputFiles,
+} from './lib/rust-workspace-lane';
 import {
   type ChangedLane,
   type ChangedLaneRun,
@@ -32,6 +44,7 @@ import {
   testLaneEnv,
   type TestLaneTask,
   type TestShard,
+  withTurboForce,
 } from './lib/test';
 import { JUNIT_DIR, TIMINGS_DIR } from './lib/test-lanes';
 
@@ -71,6 +84,10 @@ Lane flags:
                  workspace it imports by package name, or a non-module file —
                  runs whole instead. Not with --coverage; e2e runs whole.
   --base <ref>   Base ref for --changed (default: merge-base HEAD origin/main)
+  --force        Run every selected lane: Turbo gets --force, and the Rust lane
+                 ignores its pass stamps. Without it, outside CI, a Rust task
+                 that already passed with the same sources, tools and
+                 environment is reported as replayed and not run again.
   --help`);
   process.exit(0);
 }
@@ -82,6 +99,7 @@ let runE2ELane = false;
 let runCoverage = false;
 let runAllLanes = false;
 let runRustLane = false;
+let forceRun = false;
 let shard: TestShard | null = null;
 let only: WorkspaceName | null = null;
 let runChanged = false;
@@ -104,6 +122,8 @@ for (let index = 0; index < args.length; index += 1) {
     runAllLanes = true;
   } else if (arg === '--rust') {
     runRustLane = true;
+  } else if (arg === '--force') {
+    forceRun = true;
   } else if (arg.startsWith('--shard=')) {
     try {
       shard = parseShard(arg);
@@ -218,15 +238,21 @@ function planChangedRun(): { base: string; files: string[]; runs: ChangedLaneRun
 const changedRun = planChangedRun();
 const rootRun = changedRun?.runs.find((run) => run.lane === 'root');
 const rootScriptsBase = changedRun && rootRun?.mode === 'changed' ? changedRun.base : null;
+/** A Turbo command as this run issues it: with `--force` when the caller asked. */
+const forced = (command: string[]): string[] => (forceRun ? withTurboForce(command) : command);
 /** The root scripts lane as a phase runs it, or nothing under `--only`. */
 const rootScriptsTask = (phase: RootScriptsPhase): (() => Promise<RunResult>)[] =>
   runRootScripts
     ? [
         () =>
-          runCommand('root:test:scripts', createRootScriptsCommand(phase, rootScriptsBase), {
-            cwd: ROOT_DIR,
-            env: laneEnv,
-          }),
+          runCommand(
+            'root:test:scripts',
+            forced(createRootScriptsCommand(phase, rootScriptsBase)),
+            {
+              cwd: ROOT_DIR,
+              env: laneEnv,
+            }
+          ),
       ]
     : [];
 // The protocol suite is seconds and has no Bun-traceable boundary with the
@@ -271,7 +297,7 @@ function workspaceLaneTasks(task: TestLaneTask): (() => Promise<RunResult>)[] {
   return commands.map((command) => {
     const scoped = command.at(-1)?.startsWith('--changed=') ? ':changed' : '';
     return async () =>
-      runCommand(`workspaces:${task}${scoped}`, command, {
+      runCommand(`workspaces:${task}${scoped}`, forced(command), {
         cwd: ROOT_DIR,
         env: task === 'test:unit' ? await unitLaneEnv() : laneEnv,
       });
@@ -351,9 +377,20 @@ if (rustLane.run) {
     ...(await runSequential(
       RUST_TEST_TASKS.map(
         (task) => () =>
-          runCommand(task.label, [...task.cmd], {
-            cwd: ROOT_DIR,
-            ...(task.env ? { env: { ...task.env } } : {}),
+          runWithPassStamp({
+            label: task.label,
+            stampDir: join(ROOT_DIR, PASS_STAMP_DIR),
+            enabled: passStampsEnabled(forceRun),
+            key: async () =>
+              passStampKey(ROOT_DIR, {
+                files: rustTestInputFiles(ROOT_DIR),
+                facts: await rustTestFacts(task),
+              }),
+            run: () =>
+              runCommand(task.label, [...task.cmd], {
+                cwd: ROOT_DIR,
+                ...(task.env ? { env: { ...task.env } } : {}),
+              }),
           })
       )
     ))
@@ -375,7 +412,7 @@ if (runCoverage) {
     () =>
       runCommand(
         'workspaces:test:coverage',
-        createTurboTestCommand('test:coverage', coverageWorkspaces),
+        forced(createTurboTestCommand('test:coverage', coverageWorkspaces)),
         { cwd: ROOT_DIR, env: laneEnv }
       ),
   ]);

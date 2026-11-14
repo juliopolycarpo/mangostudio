@@ -17,6 +17,7 @@ const ARTIFACT_PATHS = [
   'apps/shared/dist',
   '.mango/artifacts',
   '.mango/out',
+  '.mango/pass-stamps',
   'apps/frontend/coverage',
   'apps/api/coverage',
   'apps/shared/coverage',
