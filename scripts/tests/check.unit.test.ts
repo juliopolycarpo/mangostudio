@@ -57,6 +57,9 @@ describe('check script', () => {
     }
   });
 
+  /** The label as a RegExp literal: every metacharacter, backslash included, is escaped. */
+  const escapeRegExp = (text: string): string => text.replaceAll(/[\\^$.*+?()[\]{}|]/g, '\\$&');
+
   test('stamps the seven source scans, off for --force, CI and report runs', () => {
     const checkScript = readText('scripts/check.ts');
     for (const label of [
@@ -69,7 +72,7 @@ describe('check script', () => {
       expect(
         checkScript,
         `(check): expected sourceScanTask(${label} | received: no such stamped task`
-      ).toMatch(new RegExp(`sourceScanTask\\(\\s*${label.replaceAll(/[$.{}`]/g, '\\$&')}`));
+      ).toMatch(new RegExp(`sourceScanTask\\(\\s*${escapeRegExp(label)}`));
     }
     expect(checkScript).toContain('passStampsEnabled(forceRun) && !reportTarget');
     expect(checkScript).toContain('forceRun ? withTurboForce(command) : command');

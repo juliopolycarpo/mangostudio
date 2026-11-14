@@ -109,19 +109,40 @@ export function listCycleScanTreeSymlinks(rootDir: string): string[] {
 }
 
 /**
- * `path -> target` for a symlink, or null when `absolute` is not one (or is gone).
- * The target is `readlink`'s text, not a resolved path: a retarget to a path that
- * does not exist yet still changes it.
+ * `text` with the platform separator spelled `/`, so a path from the OS reads like
+ * the POSIX paths Git lists. Where the separator is already `/` the text is
+ * returned as is: a backslash is then an ordinary filename character.
+ *
+ * @example
+ * posixText('..\\..\\shared\\src', '\\'); // '../../shared/src'
  */
-function describeSymlink(path: string, absolute: string): string | null {
+export function posixText(text: string, separator: string = sep): string {
+  return separator === '/' ? text : text.replaceAll(separator, '/');
+}
+
+/**
+ * What `readlink` says a symlink points at, in POSIX spelling, or null when
+ * `absolute` is not a symlink (or is gone). It is the link's own text, not a
+ * resolved path: a retarget to a path that does not exist yet still changes it.
+ * On Windows a junction reads back as an absolute path and a symlink as the
+ * relative text it was made with; both are kept as read. The key only has to be
+ * stable on one machine.
+ */
+export function readSymlinkTarget(absolute: string): string | null {
   try {
-    return `${path} -> ${readlinkSync(absolute)}`;
+    return posixText(readlinkSync(absolute));
   } catch (caught) {
     // EINVAL: not a symlink. ENOENT: removed since the listing.
     const code = (caught as NodeJS.ErrnoException).code;
     if (code === 'EINVAL' || code === 'ENOENT') return null;
     throw caught;
   }
+}
+
+/** `path -> target` for a symlink, or null when `absolute` is not one. */
+function describeSymlink(path: string, absolute: string): string | null {
+  const target = readSymlinkTarget(absolute);
+  return target === null ? null : `${path} -> ${target}`;
 }
 
 /**
@@ -160,7 +181,10 @@ export function listSymlinksAmong(rootDir: string, paths: readonly string[]): st
  */
 export function listNodeEnvScanPaths(rootDir: string): string[] {
   const glob = new Bun.Glob('apps/*/src/**/*.{js,jsx,ts,tsx,mjs,cjs}');
-  return [...glob.scanSync({ cwd: rootDir, onlyFiles: true })].sort();
+  // Normalised before sorting: `\` sorts after `/` and Git lists POSIX paths.
+  return [...glob.scanSync({ cwd: rootDir, onlyFiles: true })]
+    .map((path) => posixText(path))
+    .sort();
 }
 
 /** Top-level frontend directories the API import scan skips: generated or tool output. */
@@ -183,7 +207,7 @@ const FRONTEND_IGNORED_DIRECTORIES = new Set([
 export function listFrontendBoundaryPaths(rootDir: string): string[] {
   const glob = new Bun.Glob('apps/frontend/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}');
   return [...glob.scanSync({ cwd: rootDir, onlyFiles: true, dot: true })]
-    .map((path) => path.replaceAll('\\', '/'))
+    .map((path) => posixText(path))
     .filter((path) => !FRONTEND_IGNORED_DIRECTORIES.has(path.split('/')[2] ?? ''))
     .sort();
 }

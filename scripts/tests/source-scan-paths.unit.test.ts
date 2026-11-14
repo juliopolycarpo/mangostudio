@@ -11,6 +11,8 @@ import {
   listFrontendBoundaryPaths,
   listNodeEnvScanPaths,
   listSymlinksAmong,
+  posixText,
+  readSymlinkTarget,
 } from '../lib/source-scan-paths';
 import { canonicalPath } from './support/canonical-path';
 
@@ -122,6 +124,28 @@ describe('listCycleScanTreeSymlinks', () => {
 
   test('is empty when the tree has no symlink', () => {
     expect(listCycleScanTreeSymlinks(createTree({ 'a.ts': '' }))).toEqual([]);
+  });
+});
+
+describe('posixText', () => {
+  test('spells the platform separator as a slash', () => {
+    expect(posixText('..\\..\\shared\\src', '\\')).toBe('../../shared/src');
+    expect(posixText('C:\\repo\\apps\\api', '\\')).toBe('C:/repo/apps/api');
+  });
+
+  test('leaves a backslash alone where the separator is a slash', () => {
+    // On POSIX a backslash is a filename character: `a\\b` and `a/b` are different paths.
+    expect(posixText('a\\b/c', '/')).toBe('a\\b/c');
+  });
+});
+
+describe('readSymlinkTarget', () => {
+  test('returns the link text, and null for a regular file or a missing path', () => {
+    const root = createTree({ 'a.ts': '' });
+    symlinkSync('a.ts', join(root, 'alias.ts'));
+    expect(readSymlinkTarget(join(root, 'alias.ts'))).toBe('a.ts');
+    expect(readSymlinkTarget(join(root, 'a.ts'))).toBeNull();
+    expect(readSymlinkTarget(join(root, 'gone.ts'))).toBeNull();
   });
 });
 

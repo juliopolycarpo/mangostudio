@@ -18,7 +18,11 @@ import { listCheckoutFiles } from '../lib/git';
 import { createImportCycleCommand } from '../lib/import-cycle-command';
 import { listImportGraphFiles } from '../lib/import-cycles';
 import { readPassStamp } from '../lib/pass-stamp';
-import { listFrontendBoundaryPaths, listNodeEnvScanPaths } from '../lib/source-scan-paths';
+import {
+  listFrontendBoundaryPaths,
+  listNodeEnvScanPaths,
+  posixText,
+} from '../lib/source-scan-paths';
 import {
   createSourceScanStamper,
   sourceScanFacts,
@@ -125,8 +129,12 @@ describe('workspaceLinks', () => {
     symlinkSync('../../apps/api', join(root, 'node_modules/@mangostudio/api'), 'junction');
     symlinkSync('../../packages/protocol', join(root, 'node_modules/@mangostudio/protocol'));
     symlinkSync('.bun/pkg@1.0.0/node_modules/pkg', join(root, 'node_modules/pkg'), 'junction');
+    // Windows makes `api` a junction, and a junction reads back as the absolute
+    // path of its target; the symlink keeps the relative text it was made with.
+    const apiTarget =
+      process.platform === 'win32' ? posixText(join(root, 'apps', 'api')) : '../../apps/api';
     expect(workspaceLinks(root)).toEqual([
-      'node_modules/@mangostudio/api -> ../../apps/api',
+      `node_modules/@mangostudio/api -> ${apiTarget}`,
       'node_modules/@mangostudio/protocol -> ../../packages/protocol',
     ]);
   });
@@ -538,7 +546,8 @@ describe('createSourceScanStamper', () => {
     expect(report.lines).toHaveLength(1);
   });
 
-  test.skipIf(process.getuid?.() === 0)(
+  // Root reads any directory, and Windows has no mode bits to make one unreadable.
+  test.skipIf(process.getuid?.() === 0 || process.platform === 'win32')(
     'an unreadable directory in the checkout is a miss, not a failed check',
     async () => {
       const root = createRepository({

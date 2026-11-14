@@ -47,7 +47,7 @@
 // above the checkout root, `~/.bunfig.toml`). An import that resolves there is
 // not local, and the scans drop it.
 
-import { readdirSync, readFileSync, readlinkSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { RunResult } from './exec';
@@ -60,6 +60,7 @@ import {
   listFrontendBoundaryPaths,
   listNodeEnvScanPaths,
   listSymlinksAmong,
+  readSymlinkTarget,
 } from './source-scan-paths';
 
 /** Extensions a source scan reads, or the compiler's resolution reads for it. Case-insensitive, like the cycle scan's own test. */
@@ -151,16 +152,10 @@ function workspaceDirectories(rootDir: string): string[] {
 export function workspaceLinks(rootDir: string): string[] {
   const links: string[] = [];
   const record = (display: string, path: string): void => {
-    let target: string;
-    try {
-      target = readlinkSync(path);
-    } catch (caught) {
-      // Not a symlink (EINVAL), or gone since the listing.
-      const code = (caught as NodeJS.ErrnoException).code;
-      if (code === 'EINVAL' || code === 'ENOENT') return;
-      throw caught;
+    const target = readSymlinkTarget(path);
+    if (target !== null && !target.split('/').includes('.bun')) {
+      links.push(`${display} -> ${target}`);
     }
-    if (!target.split(/[\\/]/).includes('.bun')) links.push(`${display} -> ${target}`);
   };
   for (const workspace of workspaceDirectories(rootDir)) {
     const modules = join(rootDir, workspace, 'node_modules');
