@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { CANARY_SOURCE_WINDOW_DAYS } from '../lib/canary-source';
 import { LAUNCHER_PATTERN, RELEASE_PATTERN } from '../lib/ci-lanes';
 import { ROOT_DIR } from '../lib/config';
 import { ALL_BINARY_TARGETS } from '../lib/release-targets';
@@ -1491,6 +1492,15 @@ describe('release workflow binary gate', () => {
     const target = steps.find((value) => value.includes('name: Upload linux-x64 target'));
     expect(target).toContain(`retention-days: ${'$'}{{ inputs.retention_days }}`);
     expect(target).not.toContain('inputs.publication_retention_days');
+  });
+
+  test('Canary source window equals the main publication bundle retention', () => {
+    const ci = extractJobBlock(readText('.github/workflows/ci.yml'), 'distribution');
+    const pushRetention = /publication_retention_days:.*&&\s*(\d+)\s*\|\|/.exec(ci)?.[1];
+    expect(
+      Number(pushRetention),
+      `(ci.yml distribution): expected push publication_retention_days: ${CANARY_SOURCE_WINDOW_DAYS} | received: ${String(pushRetention)}`
+    ).toBe(CANARY_SOURCE_WINDOW_DAYS);
   });
 
   test('PR validation uploads target bundles while publication consumers retain aggregates', () => {

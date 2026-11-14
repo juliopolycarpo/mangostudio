@@ -162,7 +162,7 @@ the latest stable `v0.1.1` has no installer-script assets (checked 2026-10-22).
 their jobs above.
 
 Canary runs daily at 06:17 UTC from the latest successful push CI run on
-`main` and carries a curated asset subset. A pre-release tag is cut by hand
+`main` from the last 30 days and carries a curated asset subset. A pre-release tag is cut by hand
 and publishes the full stable artifact set.
 
 ### `release` environment
@@ -585,6 +585,17 @@ workflow identity and source SHA as job outputs before resolving the version.
 A missing or inconsistent result fails without substituting the scheduler's
 SHA or the current main tip. Selection code executes from the workflow revision;
 version resolution executes from the selected application source.
+
+The selector lists only runs created in the last 30 days
+(`CANARY_SOURCE_WINDOW_DAYS`, the push value of `publication_retention_days` in
+`ci.yml`). An older run's distribution bundles have expired, so it cannot be
+promoted anyway, and listing every successful push grew with each merge until the
+API's 1000-result cap. The window is a `created=>=` bound on the run listing, and
+the winner's `created_at` is checked against it as well. When nothing in the window
+qualifies, the error names it: `expected a completed successful main push CI run
+created since <ISO date> | received: none`. Runs named explicitly, by
+`recover_source_run_id` or by a restored `source.json` snapshot, are read
+individually and keep no window.
 
 The `approve` job promotes the existing shipping distribution from that CI
 run; Canary never compiles it again. It qualifies the CI Gate, shipping builder,
