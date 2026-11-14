@@ -30,7 +30,7 @@
  * });
  */
 
-import { mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { RunResult } from './exec';
@@ -63,6 +63,22 @@ export interface PassStampInputs {
 }
 
 /**
+ * The bytes of one listed input, or null when the path carries none: a
+ * directory (a submodule in the listing), or a file deleted since the listing
+ * was taken. Read in one step, with no existence check first, so the file
+ * cannot change between a check and the read.
+ */
+function readInputBytes(path: string): Buffer | null {
+  try {
+    return readFileSync(path);
+  } catch (caught) {
+    const code = (caught as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'EISDIR' || code === 'ENOTDIR') return null;
+    throw caught;
+  }
+}
+
+/**
  * The key for one set of inputs: file paths and bytes, then the facts, each in
  * sorted order so the same inputs give the same key however they were listed.
  *
@@ -73,10 +89,9 @@ export function passStampKey(rootDir: string, inputs: PassStampInputs): string {
   const hasher = new Bun.CryptoHasher('sha256');
   hasher.update(`pass-stamp ${STAMP_SCHEMA}\n`);
   for (const file of [...new Set(inputs.files)].sort()) {
-    const path = join(rootDir, file);
-    // A directory or a dangling symlink in the listing carries no bytes to hash.
-    if (!statSync(path, { throwIfNoEntry: false })?.isFile()) continue;
-    const content = new Bun.CryptoHasher('sha256').update(readFileSync(path)).digest('hex');
+    const bytes = readInputBytes(join(rootDir, file));
+    if (bytes === null) continue;
+    const content = new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
     hasher.update(`file ${JSON.stringify(file)} ${content}\n`);
   }
   for (const name of Object.keys(inputs.facts).sort()) {

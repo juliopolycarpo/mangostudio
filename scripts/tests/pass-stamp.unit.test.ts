@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -137,6 +137,18 @@ describe('passStampKey', () => {
       passStampKey(root, { files: ['a.rs'], facts })
     );
   });
+  test.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'an input that exists but cannot be read fails the key instead of being skipped',
+    () => {
+      writeInput('a.rs', 'a');
+      chmodSync(join(root, 'a.rs'), 0o000);
+      try {
+        expect(() => passStampKey(root, { files: ['a.rs'], facts: {} })).toThrow(/EACCES/);
+      } finally {
+        chmodSync(join(root, 'a.rs'), 0o600);
+      }
+    }
+  );
 });
 
 describe('stamp files', () => {
