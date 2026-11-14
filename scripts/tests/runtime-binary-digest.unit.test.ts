@@ -28,6 +28,7 @@ import {
   sha256OfFile,
 } from '../lib/runtime-binary-digest';
 import { readText } from './support/read-text';
+import { hermeticTurboEnv } from './support/turbo-run';
 
 const BINARY_NAME =
   process.platform === 'win32' ? 'mangostudio-runtime.exe' : 'mangostudio-runtime';
@@ -460,7 +461,7 @@ describe('resolveLaneRuntimeBinary matches the resolver the tests and the hub us
 describe('Turbo cache key of the API unit lane', () => {
   /** The `@mangostudio/api#test:unit` task hash Turbo computes for `env`, without running it. */
   async function unitTaskHash(digest: string | null): Promise<string> {
-    const env: Record<string, string | undefined> = { ...process.env };
+    const env = hermeticTurboEnv();
     delete env[RUNTIME_BINARY_DIGEST_ENV];
     if (digest !== null) env[RUNTIME_BINARY_DIGEST_ENV] = digest;
     const probe = Bun.spawn({
@@ -472,7 +473,7 @@ describe('Turbo cache key of the API unit lane', () => {
         '--dry=json',
       ],
       cwd: ROOT_DIR,
-      env: env as Record<string, string>,
+      env,
       stdout: 'pipe',
       stderr: 'pipe',
     });

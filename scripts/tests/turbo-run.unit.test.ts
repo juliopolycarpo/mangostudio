@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
-import { runTurbo, turboDryRun, type TurboResult } from './support/turbo-run';
+import { hermeticTurboEnv, runTurbo, turboDryRun, type TurboResult } from './support/turbo-run';
 
 class CapturedTurbo {
   calls: { cmd: readonly string[]; cwd: string; env: NodeJS.ProcessEnv }[] = [];
@@ -45,4 +45,49 @@ test('dry run failures identify the exit, arguments and stderr from the owner', 
   await expect(turboDryRun(ROOT_DIR, ['run', 'typecheck'], owner.run)).rejects.toThrow(
     'expected turbo dry run exit: 0 | received: 7 | args: run typecheck | stderr: invalid fixture config'
   );
+});
+
+/** The environment of a developer who exported cache-affecting Turbo overrides. */
+const CALLER_TURBO_OVERRIDES = {
+  TURBO_FORCE: 'true',
+  TURBO_CACHE_DIR: '/caller/turbo-cache',
+  TURBO_TEAM: 'caller-team',
+  PATH: '/caller/bin',
+} satisfies NodeJS.ProcessEnv;
+
+function expectEnvUnset(env: NodeJS.ProcessEnv, name: string): void {
+  expect(
+    env[name],
+    `(turbo env): expected ${name}: unset | received: ${env[name]}`
+  ).toBeUndefined();
+}
+
+test("the spawned Turbo env drops the caller's TURBO_* overrides and keeps the rest", () => {
+  const env = hermeticTurboEnv({}, CALLER_TURBO_OVERRIDES);
+  for (const name of ['TURBO_FORCE', 'TURBO_CACHE_DIR', 'TURBO_TEAM']) expectEnvUnset(env, name);
+  expect(env.PATH, `(turbo env): expected PATH: /caller/bin | received: ${env.PATH}`).toBe(
+    '/caller/bin'
+  );
+});
+
+test('a TURBO_* variable a test passes on purpose wins over the scrub', () => {
+  const env = hermeticTurboEnv(
+    { TURBO_CACHE_DIR: '/fixture/cache', TURBO_FORCE: 'false' },
+    CALLER_TURBO_OVERRIDES
+  );
+  expect(env.TURBO_CACHE_DIR).toBe('/fixture/cache');
+  expect(env.TURBO_FORCE).toBe('false');
+});
+
+test('runTurbo hands the owner an env without the ambient TURBO_FORCE', async () => {
+  const owner = new CapturedTurbo();
+  const ambient = process.env.TURBO_FORCE;
+  process.env.TURBO_FORCE = 'true';
+  try {
+    await runTurbo(ROOT_DIR, ['run', 'typecheck'], {}, owner.run);
+  } finally {
+    if (ambient === undefined) delete process.env.TURBO_FORCE;
+    else process.env.TURBO_FORCE = ambient;
+  }
+  expectEnvUnset(owner.calls[0]?.env ?? {}, 'TURBO_FORCE');
 });

@@ -18,6 +18,7 @@ import rootTurboConfig from '../../turbo.jsonc';
 import { ROOT_DIR } from '../lib/config';
 import { parseJunitXml } from '../lib/junit-report';
 import { discoverTestFiles } from '../lib/test-workers';
+import { hermeticTurboEnv } from './support/turbo-run';
 
 const scratch: string[] = [];
 afterEach(() => {
@@ -73,12 +74,12 @@ function fixture(): string {
 }
 
 const turbo = (dir: string, dry = false) =>
-  command(dir, [
-    join(ROOT_DIR, 'node_modules/.bin/turbo'),
-    'run',
-    'test',
-    ...(dry ? ['--dry=json'] : []),
-  ]);
+  Bun.spawnSync({
+    cwd: dir,
+    cmd: [join(ROOT_DIR, 'node_modules/.bin/turbo'), 'run', 'test', ...(dry ? ['--dry=json'] : [])],
+    env: hermeticTurboEnv(),
+    timeout: 10_000,
+  });
 
 describe('ignored/untracked inventory parity', () => {
   it('censuses exactly what Bun selects, including ignored files and excluding dependency/dot directories', () => {
