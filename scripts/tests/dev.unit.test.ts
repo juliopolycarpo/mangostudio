@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
+import { parseArgs } from '../lib/args';
 import { WORKSPACES } from '../lib/config';
 import {
   createDevTask,
@@ -31,6 +32,27 @@ describe('dev script', () => {
       runnableWorkspaces: ['api'],
       skippedWorkspaces: [],
     });
+  });
+
+  test.each([
+    ['a plain run', [], false],
+    ['--all', ['--all'], false],
+    ['--api', ['--api'], false],
+    ['--root', ['--root'], true],
+    ['--all --root', ['--all', '--root'], true],
+  ] as const)('%s reports a typed --root as %p', (_name, args, typed) => {
+    expect(
+      parseArgs({}, args).explicitRoot,
+      `(dev): expected explicitRoot: ${typed} for arguments: [${args.join(' ')}]`
+    ).toBe(typed);
+  });
+
+  test('warns about --root only when it was typed', () => {
+    // A plain `bun run dev` selects the root by default; warning there told
+    // the user to drop a flag they never passed.
+    const devScript = readText('scripts/dev.ts');
+    expect(devScript).toMatch(/if \(explicitRoot\) \{\s+warn\('Ignoring `--root` for `dev`\.'\);/);
+    expect(devScript).not.toContain('includeRoot');
   });
 
   test('starts the api dev script from the workspace directory without Turbo', () => {
