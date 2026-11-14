@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import type { CanaryApprovalApi } from './canary-approval';
-import { type CanarySource, selectCanarySource } from './canary-source';
+import { type CanarySource, canarySourceRunsQuery, selectCanarySource } from './canary-source';
 import { isValidSemver, normalizeVersion } from './release-version';
 
 /** One canary execution remains tied to this selection across full workflow reruns. */
@@ -34,9 +34,10 @@ export interface CanarySourceRecoveryInput {
   readonly runAttempt?: string;
   readonly approvalSha256?: string;
 }
-/** Transport keeps real status, complete pages, and every ZIP member; duplicate ZIP names must reject. */
+/** Transport keeps real status, complete pages, and every ZIP member; duplicate ZIP names must reject. `now` anchors the source window. */
 export interface CanarySourceSnapshotDependencies {
   readonly github: Pick<CanaryApprovalApi, 'getJson' | 'list' | 'readBytes'>;
+  now(): Date;
   unzip(bytes: Uint8Array): Promise<ReadonlyMap<string, Uint8Array>>;
 }
 const SOURCE_JOB = 'Resolve latest green main commit';
@@ -129,11 +130,13 @@ export async function resolveCanarySourceSnapshot(
   const original = earlier[0];
   if (!original) {
     const ciWorkflow = await workflow(deps, base, 'ci.yml');
-    const runs = await deps.github.list(
-      `${base}/actions/workflows/${ciWorkflow}/runs?branch=main&event=push&status=success&per_page=100`,
-      'workflow_runs'
-    );
-    const selected = selectCanarySource(runs, execution.repository, ciWorkflow);
+    // Only this listing is windowed. Recovery and restored snapshots name one exact
+    // run, which may legitimately predate the window, so they stay unbounded.
+    const query = canarySourceRunsQuery(base, ciWorkflow, deps.now());
+    const runs = await deps.github.list(query.path, 'workflow_runs');
+    const selected = selectCanarySource(runs, execution.repository, ciWorkflow, {
+      since: query.since,
+    });
     const raw = runs.find(
       (value) =>
         value !== null && typeof value === 'object' && 'id' in value && value.id === selected.runId

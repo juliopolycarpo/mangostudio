@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { appendFileSync } from 'node:fs';
 
-import { selectCanarySource } from '../lib/canary-source';
+import { canarySourceRunsQuery, selectCanarySource } from '../lib/canary-source';
 import { requiredEnv } from '../lib/runner';
 
 const repository = requiredEnv('REPO');
@@ -14,19 +14,16 @@ if (workflow.path !== '.github/workflows/ci.yml' || workflow.state !== 'active')
     `Expected active .github/workflows/ci.yml, received: ${JSON.stringify(workflow)}`
   );
 }
-const runsResult = Bun.spawnSync([
-  'gh',
-  'api',
-  '--paginate',
-  '--slurp',
-  `repos/${repository}/actions/workflows/${workflow.id}/runs?branch=main&event=push&status=success&per_page=100`,
-]);
+// The clock is read once, here at the entrypoint; the shared query derives the window from it.
+const query = canarySourceRunsQuery(`repos/${repository}`, workflow.id, new Date());
+const runsResult = Bun.spawnSync(['gh', 'api', '--paginate', '--slurp', query.path]);
 if (runsResult.exitCode !== 0) throw new Error(`CI run lookup failed: ${runsResult.stderr}`);
 const pages = JSON.parse(runsResult.stdout.toString());
 const source = selectCanarySource(
   pages.flatMap((page: { workflow_runs: unknown[] }) => page.workflow_runs),
   repository,
-  workflow.id
+  workflow.id,
+  { since: query.since }
 );
 appendFileSync(
   requiredEnv('GITHUB_OUTPUT'),

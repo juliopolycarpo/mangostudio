@@ -271,6 +271,16 @@ canary desse commit. A seleção congela ID, tentativa bem-sucedida, número
 original do run, SHA, repositório e workflow; um rerun antigo não ultrapassa
 um push mais novo. Reruns completos restauram o snapshot `source.json` original.
 
+O seletor lista só os runs criados nos últimos 30 dias (`CANARY_SOURCE_WINDOW_DAYS`,
+o valor de push de `publication_retention_days` em `ci.yml`). Os bundles de
+distribuição de um run mais antigo já expiraram, então ele não pode ser promovido, e
+listar todos os pushes bem-sucedidos crescia a cada merge até o limite de 1000
+resultados da API. A janela é um filtro `created=>=` na listagem, e o `created_at`
+do vencedor também é conferido contra ela. Se nada na janela qualifica, o erro a
+nomeia: `expected a completed successful main push CI run created since <data ISO> |
+received: none`. Runs indicados explicitamente, por `recover_source_run_id` ou por um
+snapshot `source.json` restaurado, são lidos individualmente e não têm janela.
+
 O job `approve` qualifica os produtores de validação e reutiliza os três
 artefatos shipping desse CI, sem recompilar. Exige CI Gate, builder, seis smokes
 nativos, container, análises CodeQL no mesmo SHA e Cargo Shim/Protocol quando

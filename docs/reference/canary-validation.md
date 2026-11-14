@@ -29,6 +29,14 @@ The complete CI workflow must succeed. A failed light-runtime cache seed therefo
 disqualifies the source even if `CI Gate` passed. This strict policy preserves the
 seed's PR-cache function and does not reinterpret a failed workflow as green.
 
+## Source window
+
+Canary selects its source only among successful `main` push CI runs created in
+the last 30 days, the retention of main publication bundles. Qualification
+reads the frozen run directly and has no window of its own: a recovered or
+restored older run still qualifies if its evidence has not expired. See
+[Canary channel](releasing.md#canary-channel) for the selection rules.
+
 ## Partial reruns and compatibility
 
 For each job name, the qualifier takes the newest producer attempt no later than

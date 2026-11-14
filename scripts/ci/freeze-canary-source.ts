@@ -73,6 +73,7 @@ async function main(): Promise<void> {
       },
       {
         github,
+        now: () => new Date(),
         async unzip(bytes) {
           const file = join(scratch, 'source.zip');
           writeFileSync(file, bytes);

@@ -20,6 +20,16 @@ const SHA = 'a'.repeat(40);
 const NEW_SHA = 'b'.repeat(40);
 const EXECUTION = 'e'.repeat(40);
 const VERSION = '1.0.0-canary.aaaaaaa';
+// Named fixed clock for in-process tests; the window it opens is spelled out in full.
+const FIXED_NOW = new Date('2026-11-13T06:17:00Z');
+const WINDOW_START = '2026-10-14T06:17:00Z';
+const RUNS_PATH = `${BASE}/actions/workflows/5/runs?branch=main&event=push&status=success&per_page=100&created=>=${WINDOW_START}`;
+const DAY_MS = 24 * 60 * 60 * 1000;
+// Child processes read the real clock, so their fake gh swaps the window start for this token.
+const REQUEST_WINDOW_PLACEHOLDER = '<window-start>';
+function isoSecondsBeforeNow(milliseconds: number): string {
+  return new Date(Date.now() - milliseconds).toISOString().replace(/\.\d{3}Z$/, 'Z');
+}
 const execution: CanarySourceExecution = {
   repository: REPO,
   runId: 200,
@@ -47,6 +57,7 @@ function ciRun(overrides: Record<string, unknown> = {}) {
     workflow_id: 5,
     path: '.github/workflows/ci.yml',
     head_sha: SHA,
+    created_at: '2026-11-04T09:00:00Z',
     event: 'push',
     head_branch: 'main',
     status: 'completed',
@@ -88,6 +99,7 @@ function sourceJob(attempt: number, conclusion = 'success') {
   };
 }
 class FakeSnapshotDependencies implements CanarySourceSnapshotDependencies {
+  now = () => FIXED_NOW;
   readonly calls: string[] = [];
   readonly values = new Map<string, { status: number; body: unknown }>();
   readonly pages = new Map<string, readonly unknown[]>();
@@ -145,10 +157,7 @@ class FakeSnapshotDependencies implements CanarySourceSnapshotDependencies {
     this.pages.set(`${BASE}/actions/runs/200/jobs?filter=all&per_page=100|jobs`, [
       sourceJob(attempt, 'pending'),
     ]);
-    this.pages.set(
-      `${BASE}/actions/workflows/5/runs?branch=main&event=push&status=success&per_page=100|workflow_runs`,
-      [ciRun()]
-    );
+    this.pages.set(`${RUNS_PATH}|workflow_runs`, [ciRun()]);
     this.values.set(`${BASE}/actions/runs/10/attempts/1`, { status: 200, body: ciRun() });
   }
 }
@@ -217,18 +226,15 @@ test('initial execution selects latest eligible CI and finishes identity after s
 });
 test('full rerun restores original application and CI identity even after a newer main push succeeds', async () => {
   const { deps, raw, context } = restoredFixture();
-  deps.pages.set(
-    `${BASE}/actions/workflows/5/runs?branch=main&event=push&status=success&per_page=100|workflow_runs`,
-    [
-      ciRun({
-        id: 11,
-        run_number: 101,
-        head_sha: NEW_SHA,
-        html_url: `https://github.com/${REPO}/actions/runs/11`,
-      }),
-      ciRun(),
-    ]
-  );
+  deps.pages.set(`${RUNS_PATH}|workflow_runs`, [
+    ciRun({
+      id: 11,
+      run_number: 101,
+      head_sha: NEW_SHA,
+      html_url: `https://github.com/${REPO}/actions/runs/11`,
+    }),
+    ciRun(),
+  ]);
   const result = await resolveCanarySourceSnapshot(context, deps);
   expect(result.source).toEqual(selected);
   expect(result.snapshotRaw).toBe(raw);
@@ -289,18 +295,15 @@ test.each(['failure', 'cancelled'])(
       sourceJob(1, conclusion),
       sourceJob(3, 'pending'),
     ]);
-    deps.pages.set(
-      `${BASE}/actions/workflows/5/runs?branch=main&event=push&status=success&per_page=100|workflow_runs`,
-      [
-        ciRun({
-          id: 11,
-          run_number: 101,
-          head_sha: NEW_SHA,
-          html_url: `https://github.com/${REPO}/actions/runs/11`,
-        }),
-        ciRun(),
-      ]
-    );
+    deps.pages.set(`${RUNS_PATH}|workflow_runs`, [
+      ciRun({
+        id: 11,
+        run_number: 101,
+        head_sha: NEW_SHA,
+        html_url: `https://github.com/${REPO}/actions/runs/11`,
+      }),
+      ciRun(),
+    ]);
     expect(
       (await resolveCanarySourceSnapshot({ ...execution, runAttempt: 3 }, deps)).source.sourceSha
     ).toBe(NEW_SHA);
@@ -309,13 +312,53 @@ test.each(['failure', 'cancelled'])(
 );
 test('no eligible CI fails without scheduler HEAD substitution', async () => {
   const deps = new FakeSnapshotDependencies();
-  deps.pages.set(
-    `${BASE}/actions/workflows/5/runs?branch=main&event=push&status=success&per_page=100|workflow_runs`,
-    []
-  );
+  deps.pages.set(`${RUNS_PATH}|workflow_runs`, []);
   await expect(resolveCanarySourceSnapshot(execution, deps)).rejects.toThrow(
-    'No eligible completed successful'
+    `expected a completed successful main push CI run created since ${WINDOW_START} | received: none`
   );
+});
+test('initial selection lists only runs created inside the retention window', async () => {
+  const deps = new FakeSnapshotDependencies();
+  await resolveCanarySourceSnapshot(execution, deps);
+  expect(
+    deps.calls.filter((path) => path.includes('/workflows/5/runs?')),
+    `(initial selection run listing): expected one query ending created=>=${WINDOW_START}`
+  ).toEqual([RUNS_PATH]);
+});
+test('initial selection never picks a run older than the window', async () => {
+  const deps = new FakeSnapshotDependencies();
+  deps.pages.set(`${RUNS_PATH}|workflow_runs`, [ciRun({ created_at: '2026-10-14T06:16:59Z' })]);
+  await expect(resolveCanarySourceSnapshot(execution, deps)).rejects.toThrow(
+    `CI run 10 outside source window: expected created since ${WINDOW_START} | received: 2026-10-14T06:16:59Z`
+  );
+});
+test('initial selection keeps a run created exactly at the window start', async () => {
+  const deps = new FakeSnapshotDependencies();
+  deps.pages.set(`${RUNS_PATH}|workflow_runs`, [ciRun({ created_at: WINDOW_START })]);
+  expect((await resolveCanarySourceSnapshot(execution, deps)).source).toEqual(selected);
+});
+test('explicit recovery selects a CI run older than the window', async () => {
+  const deps = new FakeSnapshotDependencies();
+  deps.values.set(`${BASE}/actions/runs/10/attempts/1`, {
+    status: 200,
+    body: ciRun({ created_at: '2026-01-02T03:04:05Z' }),
+  });
+  const resolved = await resolveCanarySourceSnapshot(execution, deps, {
+    runId: '10',
+    runAttempt: '1',
+    approvalSha256: '4'.repeat(64),
+  });
+  expect(resolved.source).toEqual(selected);
+  expect(queriedLatest(deps)).toBe(false);
+});
+test('restored snapshot verifies a CI run older than the window', async () => {
+  const { deps, context } = restoredFixture();
+  deps.values.set(`${BASE}/actions/runs/10/attempts/1`, {
+    status: 200,
+    body: ciRun({ created_at: '2026-01-02T03:04:05Z' }),
+  });
+  expect((await resolveCanarySourceSnapshot(context, deps)).source).toEqual(selected);
+  expect(queriedLatest(deps)).toBe(false);
 });
 test.each([404, 410, 403, 500])(
   'snapshot binary HTTP%i never triggers latest-source selection',
@@ -379,7 +422,7 @@ test.each(['failure', 'cancelled', 'in_progress'])(
       }),
     });
     await expect(resolveCanarySourceSnapshot(context, deps)).rejects.toThrow(
-      'No eligible completed successful'
+      'expected a completed successful main push CI run | received: none'
     );
     expect(queriedLatest(deps)).toBe(false);
   }
@@ -482,8 +525,30 @@ test('source writer rejects malformed restoration and unexpected restored data o
   ).toThrow('unexpected restored snapshot bytes');
 });
 
+// Named fake gh: requests are looked up by exact argv. The run listing's window start follows
+// the real clock, so it must lie about 30 days back before it is swapped for the placeholder.
 const fakeSnapshotGh = `#!/usr/bin/env bun
-import{appendFileSync}from'node:fs';const args=process.argv.slice(2);appendFileSync(process.env.FAKE_TRACE,JSON.stringify(args)+'\\n');const responses=await Bun.file(process.env.FAKE_RESPONSES).json();const response=responses[JSON.stringify(args)];if(!response){console.error('Unexpected fake snapshot gh command');process.exit(99);}process.stdout.write(response);`;
+import { appendFileSync } from 'node:fs';
+const args = process.argv.slice(2);
+appendFileSync(process.env.FAKE_TRACE, JSON.stringify(args) + '\\n');
+const responses = await Bun.file(process.env.FAKE_RESPONSES).json();
+const lookup = args.map((arg) => {
+  const match = /^(.*&created=>=)(\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z)$/.exec(arg);
+  if (!match) return arg;
+  const ageDays = (Date.now() - Date.parse(match[2])) / 86400000;
+  if (!(ageDays > 29.9 && ageDays < 30.1)) {
+    console.error('(fake gh): expected created=>= about 30 days before now | received: ' + arg);
+    process.exit(98);
+  }
+  return match[1] + '${REQUEST_WINDOW_PLACEHOLDER}';
+});
+const response = responses[JSON.stringify(lookup)];
+if (!response) {
+  console.error('(fake gh): expected a canned request | received: ' + JSON.stringify(args));
+  process.exit(99);
+}
+process.stdout.write(response);
+`;
 test.each([false, true])('CLI recovery=%s freezes source before checkout', (recovery) => {
   const directory = mkdtempSync(join(tmpdir(), 'fix-canary-approval-acquisition-snapshot-cli-'));
   try {
@@ -519,9 +584,11 @@ test.each([false, true])('CLI recovery=%s freezes source before checkout', (reco
         'api',
         '--paginate',
         '--slurp',
-        `${BASE}/actions/workflows/5/runs?branch=main&event=push&status=success&per_page=100`,
+        `${BASE}/actions/workflows/5/runs?branch=main&event=push&status=success&per_page=100&created=>=${REQUEST_WINDOW_PLACEHOLDER}`,
       ])
-    ] = JSON.stringify([{ total_count: 1, workflow_runs: [ciRun()] }]);
+    ] = JSON.stringify([
+      { total_count: 1, workflow_runs: [ciRun({ created_at: isoSecondsBeforeNow(DAY_MS) })] },
+    ]);
     const responsesPath = join(directory, 'responses.json');
     writeFileSync(responsesPath, JSON.stringify(responses));
     installFakeCli(directory, 'gh', fakeSnapshotGh);
@@ -751,8 +818,8 @@ test.each([
   [{ head_branch: 'other' }, 'Inconsistent CI run'],
   [{ html_url: 'https://example.com' }, 'Inconsistent CI run'],
   [{ head_sha: 'A'.repeat(40) }, 'Invalid head_sha'],
-  [{ status: 'in_progress' }, 'No eligible completed successful'],
-  [{ conclusion: 'failure' }, 'No eligible completed successful'],
+  [{ status: 'in_progress' }, 'expected a completed successful main push CI run | received: none'],
+  [{ conclusion: 'failure' }, 'expected a completed successful main push CI run | received: none'],
   [{ repository: { id: 2, full_name: REPO } }, 'Invalid selected CI repository'],
   [{ head_repository: { id: 2, full_name: REPO } }, 'Invalid selected CI repository'],
   [{ repository: { id: 1, full_name: 'other/repo' } }, 'Invalid selected CI repository'],
