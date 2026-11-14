@@ -13,6 +13,11 @@ export interface ParsedArgs {
    */
   explicitWorkspaces: WorkspaceName[];
   includeRoot: boolean;
+  /**
+   * Whether the caller typed `--root`. `includeRoot` is also true for `--all`
+   * and for the default selection, where nobody asked for the root.
+   */
+  explicitRoot: boolean;
   flags: Record<string, boolean>;
   values: Record<string, string>;
   positional: string[];
@@ -86,6 +91,7 @@ export function parseArgs(
       workspaces: [...ALL_WORKSPACE_NAMES],
       explicitWorkspaces: workspaces,
       includeRoot: true,
+      explicitRoot: includeRoot,
       flags,
       values,
       positional,
@@ -97,6 +103,7 @@ export function parseArgs(
       workspaces: [...ALL_WORKSPACE_NAMES],
       explicitWorkspaces: workspaces,
       includeRoot: true,
+      explicitRoot: includeRoot,
       flags,
       values,
       positional,
@@ -108,6 +115,7 @@ export function parseArgs(
     workspaces,
     explicitWorkspaces: workspaces,
     includeRoot,
+    explicitRoot: includeRoot,
     flags,
     values,
     positional,

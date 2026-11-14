@@ -30,7 +30,7 @@ Workspace flags:
   process.exit(0);
 }
 
-const { workspaces, explicitWorkspaces, includeRoot, flags, positional, usedDefaultSelection } =
+const { workspaces, explicitWorkspaces, explicitRoot, flags, positional, usedDefaultSelection } =
   parseArgs();
 
 if (flags['--help']) {
@@ -39,7 +39,8 @@ if (flags['--help']) {
 
 assertNoUnexpectedArguments(positional);
 
-if (includeRoot) {
+// Only a typed `--root`: the default selection and `--all` include the root too.
+if (explicitRoot) {
   warn('Ignoring `--root` for `dev`.');
 }
 
