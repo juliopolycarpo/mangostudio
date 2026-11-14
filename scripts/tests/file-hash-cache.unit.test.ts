@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -42,7 +43,7 @@ class CountingHasher {
   };
 }
 
-const SETTLED_MS = () => Date.now() + 60_000;
+const SETTLED_MS = () => Date.now() + 180_000;
 
 function setup() {
   const directory = createDirectory();
@@ -165,15 +166,19 @@ describe('createFileHashCache', () => {
     const { directory, clock } = setup();
     const file = join(directory, 'a.ts');
     writeFileSync(file, 'x');
-    // The cache path sits under a regular file, so its directory cannot be made.
-    const blocker = join(directory, 'blocker');
-    writeFileSync(blocker, 'file');
-    const pass = createFileHashCache(join(blocker, 'hashes.cache'), {
-      now: clock.now,
-    }).startPass();
+    // The cache path is a non-empty directory: the temporary file is written
+    // beside it and the rename onto it is what fails.
+    const cacheDirectory = join(directory, 'stamps');
+    const occupied = join(cacheDirectory, 'hashes.cache');
+    mkdirSync(occupied, { recursive: true });
+    writeFileSync(join(occupied, 'keep'), 'x');
+    const pass = createFileHashCache(occupied, { now: clock.now }).startPass();
     expect(pass.hashOf(file)).toBe(hashInputContent(file));
     expect(() => pass.commit()).not.toThrow();
-    expect(readdirSync(directory).sort()).toEqual(['a.ts', 'blocker']);
+    expect(
+      readdirSync(cacheDirectory),
+      '(file hash cache): expected no temporary file left beside the cache'
+    ).toEqual(['hashes.cache']);
   });
 
   test('a cache file in a directory that does not exist yet is created', () => {

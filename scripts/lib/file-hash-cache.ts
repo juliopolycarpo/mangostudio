@@ -4,8 +4,10 @@
 // thread, so the second and later passes answer from here instead.
 //
 // The cache is an optimisation and never an input. It stores no verdict, only
-// what `hashInputContent` would return, so a key computed through it is
-// byte-identical to one computed without it. Anything wrong with the file
+// what `hashInputContent` returned when the entry was recorded. It is a stat
+// cache with the limits of Git's index: bytes that change while size, mtime,
+// ctime and inode all stay the same are not seen (see the window below for the
+// one such writer it defends against). Anything wrong with the file
 // (missing, unreadable, malformed, another schema) is an empty cache, and a
 // failed write is dropped: neither changes a key or fails the caller.
 //
@@ -19,6 +21,13 @@
 // A file changed more recently than that is read again on every pass until it
 // settles. The reference time is taken before the pass's first stat, so it is
 // never later than any stat in the pass.
+//
+// The window is 60 s, not Git's clock tick, because of writes through a shared
+// memory map: the kernel stamps mtime and ctime on the first write to a page and
+// not again until it has written the page back (30 s by default on Linux,
+// `vm.dirty_expire_centisecs`). An entry recorded between two such writes would
+// answer with the old hash from then on. Past the window the page has been
+// written back, and the next mapped write moves the timestamps.
 //
 // Other rules that keep an entry honest:
 //   - The stat is taken before the read. The other order could pair new stat
@@ -38,7 +47,7 @@ import { hashInputContent } from './pass-stamp';
 const CACHE_SCHEMA = 1;
 
 /** How much older than the start of a pass a file's mtime and ctime must be for its entry to be kept. */
-const RACY_WINDOW_NS = 2_000_000_000n;
+const RACY_WINDOW_NS = 60_000_000_000n;
 
 /** The stat fields are decimal strings: JSON has no 64-bit integers. */
 interface CacheEntry {

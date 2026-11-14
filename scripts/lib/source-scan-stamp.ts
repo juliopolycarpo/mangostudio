@@ -42,8 +42,9 @@
 // Reading and hashing every one of those files is a synchronous pass of about
 // 200 ms, so the digest answers from a per-file hash cache kept beside the
 // stamps (`file-hash-cache.ts`) and reads only the files whose stat changed. The
-// cache never changes the digest, only how fast it comes. `createSourceScanStamper`
-// takes two digests per check run, not one per scan.
+// cache is a stat cache with the limits `file-hash-cache.ts` states.
+// `createSourceScanStamper` takes at most one digest before and one after the
+// scans that run together, not one per scan.
 //
 // A key that cannot be computed (an unreadable directory, a failing `git
 // ls-files`) is a cache miss: the scan runs, the reason is reported once, and no
@@ -217,8 +218,8 @@ export function sourceScanFacts(
 
 /**
  * The digest of every input the seven scans share, taken now. With a cache, a
- * file whose stat is unchanged is not read again; the digest is the same with
- * or without one.
+ * file whose stat is unchanged is not read again, and answers with the hash
+ * recorded for that stat.
  *
  * @example
  * sourceScanInputDigest('/repo'); // 'ab12…' (64 hex)
@@ -289,7 +290,8 @@ interface DigestWaiter {
 /**
  * Wrap scans in pass stamps that share their input digests.
  *
- * Two digests serve a whole check run, however many scans it holds:
+ * At most two digests serve the scans that run together, however many there
+ * are (one when every scan replays):
  *
  *   - Before. Every key request waits one macrotask, then one digest answers
  *     all of them. At the start of a check that is the digest shared by every

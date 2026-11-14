@@ -2049,8 +2049,8 @@ volume under the checkout), is a miss as well: the scans run, the reason is prin
 no stamp is written. It never fails the check. Until that directory is readable the
 scans stay unstamped.
 
-A run takes the digest twice, however many scans it holds. The first digest is shared by all
-seven and taken before they start. The second is taken once the last scan still running has
+A run takes the digest at most twice, however many scans it holds, and once when every scan
+replays. The first digest is shared by all seven and taken before they start. The second is taken once the last scan still running has
 ended, and goes to every scan that passed, so an edit made during a run is not credited to it.
 A scan that fails or cannot start counts as ended and does not hold the others up. A scan that
 does not pass gets no stamp.
@@ -2061,9 +2061,11 @@ runner can neither spawn nor reap. The digest therefore keeps a per-file hash ca
 (`scripts/lib/file-hash-cache.ts`) and reads only the files whose stat changed. An entry is
 reused only when size, mtime, ctime and inode all match; ctime catches a tool that rewrites a
 file and restores its mtime. Like Git's racy-index rule, an entry is not stored for a file whose
-mtime or ctime is within 2 s of the start of the pass, so a same-size write in the same clock
-tick is read again next time. Symlinks are never cached, because a link's own stat does not move
-when its target's bytes do. The cache holds no verdict and cannot change the digest: a missing,
+mtime or ctime is within 60 s of the start of the pass, so a recently written file is read again
+next time. The window is that long because a write through a shared memory map moves the
+timestamps only once until the kernel writes the page back (30 s by default on Linux). Symlinks are never cached, because a link's own stat does not move
+when its target's bytes do. The cache holds no verdict. It is a stat cache with the limits of Git's index: bytes that
+change while size, mtime, ctime and inode all stay the same are not seen. A missing,
 unreadable, malformed or older-schema file means every file is hashed, a failed write is ignored,
 and the file is written by renaming a complete temporary one.
 `scripts/tests/source-scan-stamp.unit.test.ts` checks that every file the real scans read in

@@ -351,7 +351,7 @@ class CountingHasher {
 }
 
 describe('sourceScanInputDigest with a file hash cache', () => {
-  const FAR_FUTURE_MS = 60_000;
+  const FAR_FUTURE_MS = 180_000;
   const EDITED = 'apps/api/src/index.ts';
 
   function setup(files: Readonly<Record<string, string>> = BASE_FILES) {
@@ -734,6 +734,36 @@ describe('createSourceScanStamper', () => {
         LABELS.map(() => 0)
       );
       for (const label of LABELS) {
+        expect(
+          readPassStamp(stampDir, label),
+          `(source scan stamper): expected a stamp for ${label} | received: none`
+        ).not.toBeNull();
+      }
+    });
+
+    test('a scan that starts while others wait delays their after digest until it ends too', async () => {
+      const { timeline, digest, stamp, stampDir, scans, outcomes } = start();
+      await settleTimers();
+      for (const scan of scans.slice(0, -1)) scan.end();
+      await settleTimers();
+      const late = new HeldScan('late:scan', timeline);
+      const lateOutcome = stamp(late.label, COMMAND, late.run)();
+      await settleTimers();
+      scans.at(-1)?.end();
+      await settleTimers();
+      expect(
+        digest.calls,
+        "(source scan stamper): expected the first before digest and the late scan's, no after digest yet"
+      ).toBe(2);
+
+      late.end();
+      await Promise.all([...outcomes, lateOutcome]);
+      expect(
+        timeline.events.slice(-2),
+        '(source scan stamper): expected one after digest, taken after the late scan ended'
+      ).toEqual(['end late:scan', 'digest']);
+      expect(digest.calls).toBe(3);
+      for (const label of [...LABELS, late.label]) {
         expect(
           readPassStamp(stampDir, label),
           `(source scan stamper): expected a stamp for ${label} | received: none`
