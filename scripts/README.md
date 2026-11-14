@@ -158,6 +158,14 @@ Run one scan from the repository root with
   still running. A child registered after `stopping` is still sent SIGTERM. A nested runner starts
   none; the guardian of the runner above covers its group. The cost is one extra Bun process per
   root runner, which the runner does not wait for: about 1 ms on a `runCommand` call.
+  - **Test workers.** A lane that splits (`scripts/run-test-workers.ts`) starts a guardian of its
+    own for its workers, which it spawns without `runCommand`. Killing the root runner already
+    reached them through the lane's group. Killing the lane script alone did not: its six root-lane
+    workers ran on until their files finished, and with the guardian they are gone within 2 s. The
+    coverage runner needs none: its lanes are not detached and stay in the group the runner above
+    signals.
+    A lane script started under Bun's `--no-orphans` policy loses its guardian with it, because Bun
+    ends that script's children when it dies; the same policy ends the workers.
   - A group child is covered with its whole group. A `stdin: 'inherit'` child shares the
     terminal's foreground group with the shell, so the guardian signals **that pid only** and
     whatever the child started keeps running.

@@ -32,9 +32,17 @@ import { join } from 'node:path';
 
 import { ROOT_DIR } from './lib/config';
 import { error, info, log } from './lib/log';
+import { GuardianLink, launchGuardian } from './lib/runner-guardian';
 import { runWithTestHome } from './lib/test-home';
 import { laneById, type TestLaneId, workerReportPath } from './lib/test-lanes';
-import { startWorkerProcess, workerEnvironment } from './lib/test-worker-process';
+import {
+  guardWorkerSpawn,
+  type SpawnWorker,
+  spawnWorkerChild,
+  startWorkerProcess,
+  WORKER_GUARDIAN_GRACE_MS,
+  workerEnvironment,
+} from './lib/test-worker-process';
 import {
   formatLaneSummary,
   laneSpec,
@@ -68,12 +76,36 @@ export interface RunnerDeps {
   readonly launcher?: readonly string[];
 }
 
+/**
+ * Starts a worker the lane's guardian will stop if this script is SIGKILLed.
+ * Built on first use: the guardian is a process, and only a lane that splits
+ * needs one. Windows has no guardian; `--no-orphans` covers its workers.
+ *
+ * @example
+ * startWorkerProcess(plan, prefix, undefined, undefined, undefined, workerSpawn());
+ */
+let spawnGuardedWorker: SpawnWorker | undefined;
+export function workerSpawn(): SpawnWorker {
+  spawnGuardedWorker ??=
+    process.platform === 'win32'
+      ? spawnWorkerChild
+      : guardWorkerSpawn(new GuardianLink(() => launchGuardian(WORKER_GUARDIAN_GRACE_MS), error));
+  return spawnGuardedWorker;
+}
+
 export const systemDeps = (): RunnerDeps => ({
   env: process.env,
   cpus: availableParallelism(),
   platform: process.platform,
   start: (plan) =>
-    startWorkerProcess(plan, plan.count > 1 ? `[${plan.laneId} ${plan.index}/${plan.count}] ` : ''),
+    startWorkerProcess(
+      plan,
+      plan.count > 1 ? `[${plan.laneId} ${plan.index}/${plan.count}] ` : '',
+      undefined,
+      undefined,
+      undefined,
+      workerSpawn()
+    ),
   runSerial: (command) => runWithTestHome(command, workerEnvironment(process.env, { env: {} })),
   onInterrupt: (handler) => {
     for (const name of INTERRUPTS) process.on(name, () => handler(name));

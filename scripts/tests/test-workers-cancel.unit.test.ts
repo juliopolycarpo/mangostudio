@@ -11,6 +11,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
+import { CANCEL_GRACE_MS } from '../lib/process-tree';
+import { fixtureChildEnvironment } from './support/child-supervision';
 import { FAKE_LANE_MAIN } from './support/fake-lane-main';
 import { FAKE_ROOT_RUNNER } from './support/fake-root-runner';
 import { isAlive } from './support/process-liveness';
@@ -64,7 +66,8 @@ async function beforeTeardownDeadline<T>(work: Promise<T>, what: string): Promis
 /** Starts `command` with the fake lane environment: three hanging workers, each with a child. */
 function startLane(
   command: readonly string[],
-  mode: 'hang-tree' | 'hang-session-pipes' = 'hang-tree'
+  mode: 'hang-tree' | 'hang-session-pipes' = 'hang-tree',
+  ambient: NodeJS.ProcessEnv = process.env
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'mangostudio-cancel-'));
   dirs.push(dir);
@@ -73,7 +76,7 @@ function startLane(
     cmd: [...command],
     cwd: API_DIR,
     env: {
-      ...process.env,
+      ...ambient,
       MANGO_TEST_WORKERS: '3',
       MANGOSTUDIO_FAKE_WORKER_MODES: JSON.stringify({
         1: mode,
@@ -149,6 +152,42 @@ describe.skipIf(process.platform === 'win32')('cancelling the integration lane m
       `expected live descendants: 0 | received: ${survivors.length} (pids ${survivors})`
     ).toEqual([]);
   });
+});
+
+// SIGKILL cannot be handled, so the lane forwards nothing: its guardian
+// (scripts/lib/runner-guardian.ts) is what stops the workers.
+describe.skipIf(process.platform === 'win32')('killing the worker runner with SIGKILL', () => {
+  it(
+    'stops every worker and the child each one started',
+    async () => {
+      // The lane as Turbo starts it, without the `--no-orphans` policy this test
+      // file runs under: with it Bun ends the guardian together with the lane.
+      const lane = startLane(
+        [process.execPath, FAKE_LANE_MAIN],
+        'hang-tree',
+        fixtureChildEnvironment()
+      );
+      const up = await until(() => lane.pidFiles().length === 6, 30_000);
+      const pids = lane.pids();
+      pidsToReap.push(...pids);
+      expect(
+        up,
+        `expected 3 workers and 3 children running | received files: ${lane.pidFiles()}`
+      ).toBe(true);
+
+      lane.child.kill('SIGKILL');
+      await lane.child.exited;
+
+      // SIGTERM, the guardian's grace, then SIGKILL for whatever ignored it.
+      await until(() => pids.every((pid) => !isAlive(pid)), CANCEL_GRACE_MS + 3_000);
+      const survivors = pids.filter((pid) => isAlive(pid));
+      expect(
+        survivors,
+        `(worker guardian): expected live descendants: 0 | received: ${survivors.length} (pids ${survivors})`
+      ).toEqual([]);
+    },
+    CANCEL_GRACE_MS + 40_000
+  );
 });
 
 describe.skipIf(process.platform !== 'linux')(
