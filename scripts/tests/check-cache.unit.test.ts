@@ -202,7 +202,6 @@ describe('lint cache and required cycle scans', () => {
       const fixture = createFixture();
       for (const file of [
         '.claude/hooks/leaf.ts',
-        '.codex/hooks/leaf.ts',
         'tests/browser-smoke/leaf.ts',
         'playwright.config.ts',
         'apps/frontend/build.ts',

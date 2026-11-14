@@ -6,7 +6,6 @@
     ".": {
       "entry": [
         ".claude/hooks/*.mjs",
-        ".codex/hooks/*.mjs",
         "scripts/check-source-scan.ts",
         "scripts/bench/startup.ts",
         "scripts/bench/runtime-handshake.ts",
@@ -35,7 +34,6 @@
         "scripts/tests/support/fake-build-smoke-server.ts",
         "scripts/tests/support/fake-check-tool.ts",
         "scripts/tests/support/fake-protocol-check-command.ts",
-        "scripts/tests/support/fake-rustfmt.ts",
         "scripts/tests/support/fake-smoke-workflow-command.ts",
         "scripts/tests/support/fixture-command-main.ts",
         "scripts/tests/support/archive-assets-fixture.ts",
@@ -43,7 +41,7 @@
         "scripts/tests/support/split-utf8-fixture-command.ts",
         "scripts/tests/support/push-dist-repo-fixture.ts"
       ],
-      "project": [".claude/hooks/*.mjs", ".codex/hooks/*.mjs", "scripts/**/*.{ts,mjs}"],
+      "project": [".claude/hooks/*.mjs", "scripts/**/*.{ts,mjs}"],
       "ignoreBinaries": ["lint"]
     },
     "apps/api": {

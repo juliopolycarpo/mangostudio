@@ -4,7 +4,6 @@ import {
   parseNativeProcesses,
   readLinuxProcessIdentity,
 } from '../../lib/native-bun-qualification-process';
-import { HEARTBEAT_MS } from './fake-rustfmt-markers';
 import {
   FormatterQueryExpiry,
   FormatterQueryLateResult,
@@ -14,6 +13,9 @@ import {
 } from './formatter-owned-query';
 import { FormatterStatReadExpiry, readOwnedFormatterStat } from './formatter-owned-stat';
 import { isAlive } from './process-liveness';
+
+/** Poll interval the settlement budget scales from: six beats bound one native query. */
+const HEARTBEAT_MS = 50;
 
 export interface NativeFormatterProcess extends NativeProcess {
   readonly state: string;
