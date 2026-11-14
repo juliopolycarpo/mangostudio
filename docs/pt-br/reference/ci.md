@@ -57,19 +57,20 @@ quando relevantes.
 
 ## Rust mínimo suportado
 
-Todos os crates Rust estáveis compartilham o mínimo intencional de Rust 1.99.0. Isso substitui o
-piso 1.97.0 do workspace, que seguia stable-minus-two, e a exceção 1.96.0 do launcher publicado.
-Todo membro estável herda `[workspace.package].rust-version` do `Cargo.toml` raiz, e o
+Todos os crates Rust estáveis compartilham o mínimo intencional de Rust 1.100.0. O mínimo único
+compartilhado foi introduzido na 1.99.0, substituindo o piso 1.97.0 do workspace, que seguia
+stable-minus-two, e a exceção 1.96.0 do launcher publicado, e agora passa para a 1.100.0. Todo
+membro estável herda `[workspace.package].rust-version` do `Cargo.toml` raiz, e o
 `rust-toolchain.toml` fixa o mesmo compilador. Testes de política exigem essa igualdade. As versões
 dos pacotes da aplicação e do protocolo continuam independentes. Veja
 [suporte Rust e releases](./releasing.md#suporte-rust-e-releases) para a migração dos consumidores.
 
 O Cargo Shim verifica o mínimo nos jobs nativos do workspace. A tabela mapeia cada check dos jobs
-removidos para seu substituto na 1.99.0. Os checks de features padrão continuam separados dos
+removidos para seu substituto na 1.100.0. Os checks de features padrão continuam separados dos
 checks com todas as features, e os comandos exclusivos do launcher mantêm seu próprio grafo de
 features das dependências.
 
-| Antes                    | Comando e escopo de pacote/features                                                                                                                                                                             | Alvo e runner antes                                                                                   | Substituto na 1.99.0                                                                                                                 |
+| Antes                    | Comando e escopo de pacote/features                                                                                                                                                                             | Alvo e runner antes                                                                                   | Substituto na 1.100.0                                                                                                                |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `workspace-msrv`, 1.97.0 | `cargo check --workspace --locked`: bibliotecas/binários do workspace, features padrão                                                                                                                          | Linux x64, `ubuntu-latest`                                                                            | `workspace` em Linux x64, macOS arm64 e Windows x64, `cargo build --workspace --locked`                                              |
 | `workspace-msrv`, 1.97.0 | `cargo check --workspace --all-targets --all-features --locked`: workspace, todo tipo de alvo e feature                                                                                                         | Linux x64, `ubuntu-latest`                                                                            | `workspace` em Linux x64, macOS arm64 e Windows x64, `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings` |
@@ -121,7 +122,7 @@ Os checks existentes continuam:
 O Ubuntu executa a suíte comportamental completa pelo libtest instrumentado, sem comparar
 inventários com o nextest.
 
-O Windows ARM64 agora compila o workspace completo e o launcher isolado na 1.99.0. O comando de
+O Windows ARM64 agora compila o workspace completo e o launcher isolado na 1.100.0. O comando de
 testes nativos continua limitado ao runtime; compilar o workspace completo não significa
 executar os testes de todos os crates nesse alvo. A resolução do workspace de fuzz, a regeneração
 da fixture ignorada e a qualificação do binário real mantêm seus comandos e critérios de
@@ -218,7 +219,7 @@ classificação (`scripts/ci/fresh-dependencies-receipt.mjs`), e só linka um lo
 quando o artefato foi retido (um lock produzido mas não enviado mantém o hash no
 recibo, marcado como não retido, sem link). O resultado de `fresh` cobre os três sistemas
 operacionais juntos. O grafo é construído e testado com a toolchain de
-desenvolvimento fixada (1.99.0) e unificação de features em todo o workspace
+desenvolvimento fixada (1.100.0) e unificação de features em todo o workspace
 (`--workspace --all-features`). Verifica o novo grafo no mínimo compartilhado, mas não substitui
 os checks de features padrão ou do launcher isolado contra o lock commitado. Um mínimo maior
 não resolve uma falha da política de crates duplicados.

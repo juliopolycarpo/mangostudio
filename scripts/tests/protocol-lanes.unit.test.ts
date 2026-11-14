@@ -404,7 +404,7 @@ describe('the protocol tree at the repository root', () => {
       toolchain: { channel: string };
     };
     const floor = workspace.package['rust-version'];
-    expect(floor, 'intentional Rust support baseline').toBe('1.99.0');
+    expect(floor, 'intentional Rust support baseline').toBe('1.100.0');
     expect(toolchain.channel, 'development compiler must prove the declared minimum').toBe(floor);
     for (const member of workspace.members) {
       const { package: metadata } = Bun.TOML.parse(readText(`${member}/Cargo.toml`)) as {

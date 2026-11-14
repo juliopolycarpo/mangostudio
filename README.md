@@ -37,7 +37,7 @@ against `SHA256SUMS` where applicable.
 | Manual                 | Download from [GitHub Releases](https://github.com/juliopolycarpo/mangostudio/releases/latest), verify with `SHA256SUMS` |
 
 The prebuilt app needs no local Rust compiler. `cargo install mangostudio` compiles the launcher
-and requires Rust 1.99.0 or newer. See the
+and requires Rust 1.100.0 or newer. See the
 [Rust support and release policy](docs/reference/releasing.md#rust-support-and-releases) when
 upgrading from Rust 1.96 or 1.97.
 
@@ -132,7 +132,7 @@ For container deployment details, see [`docs/operations/deployment.md`](docs/ope
 
 - [Bun](https://bun.sh/) on the channel named in [`.bun-version`](.bun-version) —
   select the matching [official release](https://github.com/oven-sh/bun/releases)
-- Rust 1.99.0 or newer via [rustup](https://rustup.rs/) (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`). The hub launches
+- Rust 1.100.0 or newer via [rustup](https://rustup.rs/) (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`). The hub launches
   Local as the cargo-built `mangostudio-runtime`, and `rust-toolchain.toml` pins the version
   rustup installs on first build.
 - One or more API keys or sign-in capable accounts for supported providers

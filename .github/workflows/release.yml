@@ -693,7 +693,7 @@ jobs:
     env:
       # The root rust-toolchain.toml otherwise overrides the action's selected
       # toolchain when Cargo enters the shared workspace.
-      RUSTUP_TOOLCHAIN: 1.99.0
+      RUSTUP_TOOLCHAIN: 1.100.0
     outputs:
       auth: ${{ steps.auth-mode.outputs.auth }}
     permissions:
@@ -706,7 +706,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.100.0
 
       - name: Verify packaged launcher install
         run: bash scripts/release/verify-launcher-package.sh
@@ -943,7 +943,7 @@ jobs:
     env:
       # Keep registry install verification on the shared workspace MSRV even
       # when the checkout's development toolchain advances.
-      RUSTUP_TOOLCHAIN: 1.99.0
+      RUSTUP_TOOLCHAIN: 1.100.0
     permissions:
       contents: read
     steps:
@@ -953,7 +953,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.100.0
 
       - name: Install launcher from crates.io
         shell: bash

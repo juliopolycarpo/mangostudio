@@ -11,29 +11,29 @@ momento da tag; nada é editado manualmente.
 
 ## Suporte Rust e releases
 
-Builds do código-fonte Rust e novas releases de crates Rust usam um único mínimo de Rust 1.99.0.
-Isso substitui de propósito o piso 1.97.0 do workspace, que seguia stable-minus-two, e a exceção
-1.96.0 do launcher. Todo crate estável herda o `rust-version` do workspace raiz, e o pin de
-desenvolvimento também é 1.99.0. A regra vale para o launcher publicado `mangostudio` e o SDK Rust
-`mango-protocol`, além dos crates não publicados do runtime. O SDK de agentes externos mantém
+Builds do código-fonte Rust e novas releases de crates Rust usam um único mínimo de Rust 1.100.0.
+O mínimo único compartilhado foi introduzido na 1.99.0, substituindo o piso 1.97.0 do workspace,
+que seguia stable-minus-two, e a exceção 1.96.0 do launcher, e agora passa para a 1.100.0. Todo
+crate estável herda o `rust-version` do workspace raiz, e o pin de desenvolvimento também é
+1.100.0. A regra vale para o launcher publicado `mangostudio` e o SDK Rust `mango-protocol`, além dos crates não publicados do runtime. O SDK de agentes externos mantém
 seu próprio mínimo e sua política de releases.
 
-Quem compila o launcher com Rust 1.96 ou 1.97 precisa atualizar o compilador antes de instalar
-uma release que contenha esta mudança:
+Quem compila o launcher com Rust 1.99 ou anterior precisa atualizar o compilador antes de instalar
+uma release que contenha este mínimo:
 
 ```bash
-rustup toolchain install 1.99.0 --profile minimal
-cargo +1.99.0 install mangostudio --locked
+rustup toolchain install 1.100.0 --profile minimal
+cargo +1.100.0 install mangostudio --locked
 ```
 
 Contribuidores podem deixar o rustup instalar o compilador do `rust-toolchain.toml`. Remova ou
 atualize um override antigo de `RUSTUP_TOOLCHAIN` ou uma seleção explícita de
-`cargo +1.96.0`/`cargo +1.97.0`. Consumidores do SDK Rust também precisam atualizar o compilador
+`cargo +1.99.0` (ou anterior). Consumidores do SDK Rust também precisam atualizar o compilador
 local e do CI antes de adotar uma release com o novo mínimo. Os metadados de crates já publicados
 continuam iguais; quem precisa de um compilador antigo pode manter uma versão publicada cujo
 `rust-version` o aceite. O SDK TypeScript e os usuários dos binários pré-compilados do app não
 passam a precisar de um compilador Rust local. `cargo binstall` não compila quando encontra um
-arquivo pré-compilado compatível, mas a compilação do launcher como fallback exige Rust 1.99.0
+arquivo pré-compilado compatível, mas a compilação do launcher como fallback exige Rust 1.100.0
 ou mais recente.
 
 O launcher mantém a versão da aplicação e a linha de releases com tags `v*`. O SDK Rust mantém a
@@ -41,7 +41,7 @@ versão dos pacotes do protocolo e a linha `protocol-v*`; compartilhar o compila
 une suas versões. Trate isso como uma mudança intencional de compatibilidade de código-fonte nas
 notas das próximas releases da aplicação e do protocolo que a incluírem. Gere cada changelog
 pela preparação normal da sua linha de releases e revise a seção para incluir o requisito de
-Rust 1.99 e a migração. Escolha versões de pacotes pelas regras de release existentes. Esta
+Rust 1.100 e a migração. Escolha versões de pacotes pelas regras de release existentes. Esta
 mudança não altera versões de pacotes nem a versão do wire; changelogs gerados nunca são editados
 manualmente.
 

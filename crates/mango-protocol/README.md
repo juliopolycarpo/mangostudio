@@ -4,7 +4,7 @@ Wire types and codec for [Mango Protocol](https://github.com/juliopolycarpo/mang
 the JSON-Schema contract MangoStudio hubs, runtimes and tools speak over stdio, local
 sockets and WebSocket. The TypeScript SDK `@mangostudio/protocol` reads the same frames.
 
-Building this revision requires Rust 1.99.0 or newer, including the codec-only feature set.
+Building this revision requires Rust 1.100.0 or newer, including the codec-only feature set.
 Published releases retain their declared `rust-version`; releases containing this baseline
 change require the new minimum. See the
 [consumer versioning guide](https://github.com/juliopolycarpo/mangostudio/blob/main/docs/protocol/versioning.md#rust-compiler-support) before
