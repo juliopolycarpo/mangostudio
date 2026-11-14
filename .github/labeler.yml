@@ -141,7 +141,6 @@ max-files-changed: 2999
           # product/binary build work; see issue #381.
           - "bunfig.toml"
           - "lefthook.yml"
-          - "opencode.json"
           - ".editorconfig"
           - ".gitattributes"
           - ".gitmessage"

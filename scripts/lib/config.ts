@@ -46,7 +46,6 @@ export const ROOT_TOOLING_PATHS: string[] = [
   'README.md',
   'docs',
   'lefthook.yml',
-  'opencode.json',
   'knip.json',
   'playwright.config.ts',
   'scripts',

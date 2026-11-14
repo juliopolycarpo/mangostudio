@@ -350,14 +350,6 @@ Arquivos formatados são re-adicionados ao stage automaticamente. Todos os hooks
 
 O Zed usa Bun fmt pela interface de formatador externo. O VS Code oferece as tarefas `lint` e `format`; a formatação automática está desativada porque Bun não fornece um language server de editor. Um hook `PreToolUse` do Claude Code (`.claude/hooks/protect-generated.mjs`) bloqueia edições manuais em arquivos gerados, como `CHANGELOG.md`, lockfiles e `routeTree.gen.ts`, e indica o comando que os regenera.
 
-### OpenCode
-
-A configuração de instruções e formatadores do OpenCode está em `opencode.json`.
-
-OpenCode executa `bun fmt` para arquivos de código, JSON, CSS, HTML, Markdown, TOML e YAML. Dockerfiles ficam excluídos.
-
-Prettier está desativado. As instruções do OpenCode são carregadas de `.agents/opencode/rules/*.md`.
-
 ## Qualidade de Código
 
 ### Lint e formatação

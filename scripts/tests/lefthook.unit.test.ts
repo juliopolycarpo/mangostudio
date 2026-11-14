@@ -25,20 +25,6 @@ describe('lefthook pre-commit config', () => {
     expect(lefthook.indexOf('    bun-lint:')).toBeLessThan(lefthook.indexOf('    bun-fmt:'));
   });
 
-  test('configures OpenCode to use Bun fmt for code and documentation files', () => {
-    const config = JSON.parse(readText('opencode.json')) as {
-      formatter: Record<string, { command: string[]; extensions: string[] }>;
-    };
-    const formatter = config.formatter['bun-fmt'];
-
-    expect(formatter.command).toEqual(['bun', 'fmt', '$FILE']);
-    expect(formatter.extensions).toContain('.ts');
-    expect(formatter.extensions).toContain('.jsonc');
-    expect(formatter.extensions).toContain('.mdc');
-    expect(formatter.extensions).toContain('.yaml');
-    expect(readText('opencode.json')).not.toContain('Dockerfile');
-  });
-
   test('runs affected workspace and code-health checks for staged files', () => {
     const lefthook = readText('lefthook.yml');
     const affectedCheck = extractPreCommitCommand(lefthook, 'check-affected');

@@ -350,14 +350,6 @@ Files that pass formatting are re-staged automatically. All hooks must succeed f
 
 Zed uses Bun fmt through its external formatter interface. VS Code exposes `lint` and `format` tasks; automatic formatting is disabled because Bun does not provide an editor language server. A Claude Code `PreToolUse` hook (`.claude/hooks/protect-generated.mjs`) blocks hand edits to generated files such as `CHANGELOG.md`, lockfiles, and `routeTree.gen.ts`, and names the command that regenerates them.
 
-### OpenCode
-
-OpenCode reads formatter wiring from `opencode.json`.
-
-OpenCode runs `bun fmt` for source, JSON, CSS, HTML, Markdown, TOML and YAML files. Dockerfiles are excluded.
-
-Prettier is disabled.
-
 ## Code Quality
 
 `bun lint` and `bun fmt` are the repository's linter and formatter. Their rules, overrides and generated-file exclusions live in [`bunfig.toml`](bunfig.toml). See the [Bun tooling guide](docs/reference/bun-tooling.md) for lint coverage, migration notes and intentional differences from the previous tools.
