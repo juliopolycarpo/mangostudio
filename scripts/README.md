@@ -76,6 +76,7 @@ importing the specific module in new code:
 | `junit-report.ts`         | Reads Bun's JUnit XML; shared by the QA gate and the worker lanes                                        |
 | `actions-lint/`           | Pinned workflow static analysis: manifest, bootstrap, tasks                                              |
 | `pass-stamp.ts`           | Local "this task passed for these inputs" stamps: key, read, write, run-or-replay                        |
+| `protocol-test-stamp.ts`  | Input files and facts behind the TypeScript protocol suite's pass stamp                                  |
 | `crate-inputs.ts`         | Files a Rust crate reads from outside its directory (lane coverage test, stamp inputs)                   |
 | `rust-workspace-lane.ts`  | Opt-in `--rust` lane: cargo commands, scoped-run selection, tool probe, clean paths, stamp inputs        |
 

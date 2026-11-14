@@ -10,6 +10,7 @@ import {
   runWithPassStamp,
 } from './lib/pass-stamp';
 import { touchesProtocolSurface } from './lib/protocol';
+import { protocolTestFacts, protocolTestInputFiles } from './lib/protocol-test-stamp';
 import {
   exitWithResults,
   fatal,
@@ -260,7 +261,24 @@ const rootScriptsTask = (phase: RootScriptsPhase): (() => Promise<RunResult>)[] 
 // at all, on the same predicate scripts/check.ts scopes it with.
 const runProtocol = runRootScripts && (!changedRun || touchesProtocolSurface(changedRun.files));
 const protocolTask = runProtocol
-  ? [() => runCommand('root:test:protocol', PROTOCOL_TEST_COMMAND, { cwd: ROOT_DIR })]
+  ? [
+      // Replayed from a pass stamp when nothing the suite reads has changed.
+      // The command stays the one the qualification inventory certifies.
+      () =>
+        runWithPassStamp({
+          label: 'root:test:protocol',
+          stampDir: join(ROOT_DIR, PASS_STAMP_DIR),
+          enabled: passStampsEnabled(forceRun),
+          key: () =>
+            Promise.resolve(
+              passStampKey(ROOT_DIR, {
+                files: protocolTestInputFiles(ROOT_DIR),
+                facts: protocolTestFacts(PROTOCOL_TEST_COMMAND),
+              })
+            ),
+          run: () => runCommand('root:test:protocol', PROTOCOL_TEST_COMMAND, { cwd: ROOT_DIR }),
+        }),
+    ]
   : [];
 
 /**
