@@ -3,6 +3,7 @@ import { delimiter, join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
 import { readText } from './support/read-text';
+import { hermeticTurboEnv } from './support/turbo-run';
 
 class TurboFrontendHashProbe {
   async hash(revision: string, wrapper = false): Promise<string> {
@@ -23,12 +24,10 @@ class TurboFrontendHashProbe {
           ],
       {
         cwd: ROOT_DIR,
-        env: {
-          ...process.env,
+        env: hermeticTurboEnv({
           PATH: `${join(ROOT_DIR, 'node_modules/.bin')}${delimiter}${process.env.PATH ?? ''}`,
           MANGOSTUDIO_FRONTEND_BUN_REVISION: revision,
-          TURBO_TELEMETRY_DISABLED: '1',
-        },
+        }),
         stdout: 'pipe',
         stderr: 'pipe',
       }
