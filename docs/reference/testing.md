@@ -1968,13 +1968,14 @@ A stamp is a SHA-256 key and nothing else; no output is saved or restored. The k
 
 - the bytes of every working-tree file the crates read: `RUST_WORKSPACE_PATHS`, every file
   the crate scan in `scripts/lib/crate-inputs.ts` finds (including the English catalog, which
-  the CI lane leaves to another test), and `package.json`, `bun.lock`, `.bun-version` and
-  `patches/**` for the Bun fixture the runtime tests start. Modified and untracked files
-  count; a deleted file leaves the list;
+  the CI lane leaves to another test), `package.json`, `bun.lock`, `.bun-version` and
+  `patches/**` for the Bun fixture the runtime tests start, and a local `.cargo/**` or
+  `.config/nextest.toml`. Modified and untracked files count; a deleted file leaves the list;
 - `rustc -Vv`, `cargo -V`, the nextest version, the Bun version and revision, and the host
   platform;
 - the task's command line and environment, and the caller's `RUSTFLAGS`, `RUSTDOCFLAGS`,
-  `RUSTC_*`, `RUSTUP_TOOLCHAIN`, `CARGO_*`, `NEXTEST_*` and `MANGOSTUDIO_*` variables.
+  `RUSTC_*`, `RUSTUP_TOOLCHAIN`, `CARGO_*`, `NEXTEST_*`, `XDG_RUNTIME_DIR` and `MANGO*`
+  variables (all but `MANGO_RUNNER_GROUP`, which differs on every run).
 
 Only exit 0 is recorded. The key is taken before the run and again after it, and the stamp
 is written only when both agree, so an edit made while the tests ran is not credited to
@@ -1984,6 +1985,18 @@ reruns every selected lane. `bun run clean` removes them.
 
 A test that depends on something outside that list (a tool on `PATH`, a file under `$HOME`)
 is not covered: run with `--force` when you change one.
+
+The TypeScript protocol suite in the unit phase (`root:test:protocol`) is stamped the same
+way. With every other unit lane restored from Turbo's cache it was the whole 6 s of an
+unchanged `bun run test --unit`; replayed, that run takes under a second. Its key
+(`scripts/lib/protocol-test-stamp.ts`) covers the files under `PROTOCOL_PATHS`, the root
+`package.json`, `bun.lock`, `.bun-version`, `bunfig.toml` and `tsconfig.json`,
+`scripts/lib/**` and `scripts/tests/support/**`, plus the command, the Bun build, the host
+and the caller's `MANGO*` and `XDG_RUNTIME_DIR` variables.
+`scripts/tests/protocol-test-stamp.unit.test.ts` fails when a protocol source imports a file
+from outside that list or the package gains a workspace dependency. The lane is a stamp and
+not a Turbo task because the native-Bun qualification inventory certifies the exact command
+`scripts/test.ts` starts it with.
 
 The version is the one `cargo-shim.yml` installs through the SHA-pinned
 `taiki-e/install-action`; `scripts/tests/rust-nextest.unit.test.ts` fails when the two
