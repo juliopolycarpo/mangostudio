@@ -45,7 +45,8 @@ jobs:
   changes:
     name: Detect changed release areas
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Bun setup can wait four minutes for a republished canary asset.
+    timeout-minutes: 9
     outputs:
       release: ${{ steps.changed.outputs.release }}
       launcher: ${{ steps.changed.outputs.launcher }}
@@ -588,7 +589,8 @@ jobs:
     needs: [changes, runtime, dry-run-linux, dry-run-windows, dry-run-cargo]
     if: ${{ always() }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Bun setup can wait four minutes for a republished canary asset.
+    timeout-minutes: 9
     permissions:
       contents: read
     steps:

@@ -199,7 +199,8 @@ jobs:
     # case.
     name: Tests (frontend)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Bun setup can wait four minutes; the install and the 210 s watchdog bound follow it.
+    timeout-minutes: 14
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

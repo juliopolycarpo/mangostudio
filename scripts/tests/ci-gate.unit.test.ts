@@ -241,7 +241,7 @@ describe('CI / Gate aggregate', () => {
 
   test('the canary cross-runtime download is bounded and gates CI', () => {
     const job = extractJobBlock(workflow, 'cross-runtimes');
-    expect(job).toContain('timeout-minutes: 5');
+    expect(job).toContain('timeout-minutes: 9');
     expect(job).toContain('bun ./scripts/ci/verify-cross-runtimes.ts');
     expect(parseNeedsList(extractJobBlock(workflow, 'gate-unique'))).toContain('cross-runtimes');
     expect(parseNeedsList(extractJobBlock(workflow, 'gate-unique'))).toContain('cross-runtimes');

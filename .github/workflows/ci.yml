@@ -32,7 +32,8 @@ jobs:
     # classification and the distribution identity share this checkout.
     name: Preflight
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Bun setup can wait four minutes for a republished canary asset.
+    timeout-minutes: 9
     outputs:
       distribution: ${{ steps.changed.outputs.distribution }}
       rust: ${{ steps.rust.outputs.rust }}
@@ -177,7 +178,8 @@ jobs:
   cross-runtimes:
     name: Cross-runtime download
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Bun setup can wait four minutes for a republished canary asset.
+    timeout-minutes: 9
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -327,7 +329,8 @@ jobs:
       ]
     if: ${{ always() }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Bun setup can wait four minutes for a republished canary asset.
+    timeout-minutes: 9
     permissions:
       contents: read
       actions: read # advisory cache usage only

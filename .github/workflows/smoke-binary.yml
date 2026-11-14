@@ -63,8 +63,8 @@ jobs:
     # default, consuming distribution artifacts); never after it failed.
     if: ${{ !cancelled() && (needs.runtime.result == 'success' || (needs.runtime.result == 'skipped' && !inputs.rebuild)) }}
     runs-on: ${{ matrix.runner }}
-    # Linux step deadlines total up to 33 minutes for artifacts, 35 for manual rebuilds.
-    timeout-minutes: 37
+    # Linux step deadlines total up to 38 minutes for artifacts, 44 for manual rebuilds.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -112,11 +112,13 @@ jobs:
 
       - name: Set up Bun
         uses: ./.github/actions/setup-bun # zizmor: ignore[self-repository] load the action from the selected source checkout
-        timeout-minutes: 4
+        # Three attempts and the 60 s and 180 s waits between them.
+        timeout-minutes: 8
 
       - name: Install toolchain (manual rebuild)
         if: ${{ inputs.rebuild }}
-        timeout-minutes: 5
+        # setup-mango sets Bun up first, which can wait four minutes.
+        timeout-minutes: 9
         uses: ./.github/actions/setup-mango # zizmor: ignore[self-repository] load the action from the selected source checkout
 
       - name: Download cargo runtime (manual rebuild)

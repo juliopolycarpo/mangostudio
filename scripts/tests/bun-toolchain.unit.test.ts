@@ -62,7 +62,7 @@ describe('Bun toolchain pins', () => {
     // retry silently. The release trust bootstraps cannot load an action from
     // the tag they are still authenticating, so they carry the retry inline.
     const allowed: Record<string, number> = {
-      'actions/setup-bun/action.yml': 2,
+      'actions/setup-bun/action.yml': 3,
       'workflows/protocol-release.yml': 2,
       'workflows/release.yml': 2,
     };
@@ -291,36 +291,81 @@ function setupBunActionSteps(): ActionStep[] {
 }
 
 describe('setup-bun composite action', () => {
-  test('tries once tolerantly, waits, then retries strictly, in that order', () => {
+  test('tries tolerantly, retries tolerantly after 60 s, then strictly after 180 s', () => {
     const steps = setupBunActionSteps();
     expect(
       steps.map((step) => (step.uses ? 'setup-bun' : 'run')),
       `${SETUP_BUN_ACTION} step order`
-    ).toEqual(['setup-bun', 'run', 'setup-bun']);
-    const [first, wait, retry] = steps;
-    const failed = `steps.${first.id}.outcome == 'failure'`;
+    ).toEqual(['setup-bun', 'run', 'setup-bun', 'run', 'setup-bun']);
+    const [first, firstWait, second, secondWait, last] = steps;
+    const firstFailed = `steps.${first.id}.outcome == 'failure'`;
+    const secondFailed = `steps.${second.id}.outcome == 'failure'`;
 
     expect(first.id, 'first attempt needs an id for the retry condition').toBeTruthy();
+    expect(second.id, 'second attempt needs an id for the last retry condition').toBeTruthy();
     expect(first['continue-on-error'], 'first attempt tolerates failure').toBe(true);
-    expect(wait.if, 'wait runs only after the first attempt failed').toContain(failed);
-    expect(wait.run, 'wait duration').toBe('sleep 45');
-    expect(wait.shell, 'wait step shell must be explicit for Windows runners').toBe('bash');
-    expect(retry.if, 'retry runs only after the first attempt failed').toContain(failed);
+    expect(second['continue-on-error'], 'second attempt tolerates failure').toBe(true);
+    expect(firstWait.if, 'first wait runs only after the first attempt failed').toContain(
+      firstFailed
+    );
+    expect(second.if, 'second attempt runs only after the first failed').toContain(firstFailed);
+    expect(secondWait.if, 'second wait runs only after the second attempt failed').toContain(
+      secondFailed
+    );
+    expect(last.if, 'last attempt runs only after the second failed').toContain(secondFailed);
+    // A replaced canary asset stayed unavailable for at least 88 s after its
+    // upload finished, so the waits have to add up to minutes.
+    expect([firstWait.run, secondWait.run], 'wait durations').toEqual(['sleep 60', 'sleep 180']);
+    for (const wait of [firstWait, secondWait]) {
+      expect(wait.shell, 'wait step shell must be explicit for Windows runners').toBe('bash');
+    }
     expect(
-      retry['continue-on-error'],
-      'retry failure must fail the job with setup-bun own error'
+      last['continue-on-error'],
+      'the last failure must fail the job with setup-bun own error'
     ).toBeUndefined();
   });
 
-  test('both attempts run the same pinned setup-bun and read the version file input', () => {
-    const [first, , retry] = setupBunActionSteps();
-    for (const attempt of [first, retry]) {
+  test('every attempt runs the same pinned setup-bun and reads the version file input', () => {
+    const [first, , second, , last] = setupBunActionSteps();
+    for (const attempt of [first, second, last]) {
       expect(attempt.uses, 'setup-bun reference').toMatch(SETUP_BUN_USES);
       expect(attempt.with, 'setup-bun inputs').toEqual({
         'bun-version-file': '$' + '{{ inputs.bun-version-file }}',
       });
+      expect(attempt.uses, 'every attempt must share the first attempt pin').toBe(first.uses);
     }
-    expect(retry.uses, 'retry pin must equal the first attempt pin').toBe(first.uses);
+  });
+
+  // Three attempts and the 60 s and 180 s waits take four minutes before any
+  // work starts. A 5-minute job was cancelled during the second wait.
+  test('every job that sets Bun up has room for both retry waits', () => {
+    const tight: string[] = [];
+    // Eight minutes covers the waits alone. These jobs still have real work
+    // after a recovered setup, so each keeps its former budget on top of the
+    // four minutes of waits.
+    const floors: Record<string, number> = {
+      'workflows/distribution-build.yml#runtime-version': 12,
+      'workflows/test.yml#frontend': 14,
+    };
+    for (const file of githubYamlFiles().filter((name) => name.startsWith('workflows/'))) {
+      const workflow = Bun.YAML.parse(readText(join('.github', file))) as {
+        jobs?: Record<string, { 'timeout-minutes'?: unknown; steps?: Array<{ uses?: string }> }>;
+      };
+      for (const [id, job] of Object.entries(workflow.jobs ?? {})) {
+        const setsUpBun = (job.steps ?? []).some((step) =>
+          /\.github\/actions\/setup-(?:bun|mango)\b/.test(step.uses ?? '')
+        );
+        const minutes = job['timeout-minutes'];
+        const floor = floors[`${file}#${id}`] ?? 8;
+        if (setsUpBun && typeof minutes === 'number' && minutes < floor) {
+          tight.push(`${file}#${id}: ${minutes} (floor ${floor})`);
+        }
+      }
+    }
+    expect(
+      tight,
+      'expected job timeout-minutes: at least its floor where Bun is set up | received shorter deadlines'
+    ).toEqual([]);
   });
 
   test('defaults the version file to .bun-version', () => {

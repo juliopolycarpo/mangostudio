@@ -29,7 +29,8 @@ jobs:
     # requires all three analyses on the main push run.
     name: Detect CodeQL-relevant changes
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Bun setup can wait four minutes for a republished canary asset.
+    timeout-minutes: 9
     outputs:
       rust: ${{ steps.changed.outputs.rust }}
     steps:
