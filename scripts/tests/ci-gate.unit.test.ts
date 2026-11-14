@@ -170,25 +170,41 @@ describe('ci.yml trigger and concurrency policy', () => {
     );
     // A new push supersedes the previous run on every ref, main included:
     // only the newest commit needs a verdict.
-    expect(workflow).toMatch(/^concurrency:\n {2}group: .+\n {2}cancel-in-progress: true$/m);
+    expect(workflow).toMatch(/^concurrency:\n {2}group: .+\n {2}cancel-in-progress: .+$/m);
     expect(workflow).not.toContain('github.sha');
   });
 
-  // Workflows that serve pull requests and main: a superseded main run must not
-  // keep runners from the commit that replaced it.
+  // A new commit supersedes the previous run on a PR and on main. Canary only
+  // accepts a main `push` run, so a cron or manual dispatch sharing the main
+  // group must wait instead of cancelling it.
+  const PUSH_OR_PR = `${EXPR} github.event_name == 'pull_request' || github.event_name == 'push' }}`;
   test.each([
-    'ci',
-    'cargo-shim',
-    'codeql',
-    'protocol-ci',
-    'smoke-binary',
-    'release-dry-run',
-    'browser-smoke',
-  ])('%s cancels a superseded run on every ref', (name) => {
+    ['ci', PUSH_OR_PR],
+    ['cargo-shim', PUSH_OR_PR],
+    ['codeql', PUSH_OR_PR],
+    ['protocol-ci', PUSH_OR_PR],
+    // CI calls the dry run only on pull requests; the cron and dispatches queue.
+    ['release-dry-run', `${EXPR} github.event_name == 'pull_request' }}`],
+    // A called smoke run has its own group, so only dispatches supersede each other.
+    ['smoke-binary', 'true'],
+    ['browser-smoke', 'true'],
+  ])('%s cancels only a superseded run', (name, expected) => {
     const text = readText(`.github/workflows/${name}.yml`);
     const setting = /^concurrency:\n {2}group: .+\n {2}cancel-in-progress: (.+)$/m.exec(text)?.[1];
-    expect(setting, `expected ${name}.yml workflow cancel-in-progress: true`).toBe('true');
+    expect(setting, `expected ${name}.yml workflow cancel-in-progress: ${expected}`).toBe(expected);
   });
+
+  test.each(['smoke-binary', 'browser-smoke'])(
+    '%s keys a called run on its run id, apart from manual dispatches',
+    (name) => {
+      const group = /^concurrency:\n {2}group: (.+)$/m.exec(
+        readText(`.github/workflows/${name}.yml`)
+      )?.[1];
+      expect(group, `expected ${name}.yml concurrency group split by event`).toBe(
+        `${EXPR} github.event_name == 'workflow_dispatch' && format('${name}-{0}', github.ref) || format('${name}-called-{0}', github.run_id) }}`
+      );
+    }
+  );
 });
 
 describe('CI / Gate aggregate', () => {

@@ -310,6 +310,8 @@ runs are predictable and a newer commit always supersedes an older one:
   a verdict. Consumers of exact-commit results (the QA baseline, the light
   runtime cache seed, Canary source selection) must tolerate a main commit
   without a completed run; Canary selects the newest commit that has one.
+  Only `push` and `pull_request` runs cancel: Canary accepts only a main `push`
+  run, so a cron or manual dispatch on `main` queues behind it instead.
 - **Publish workflows.** `release.yml` and `canary.yml` never cancel mid-publish
   (`cancel-in-progress: false`). Canary serializes scheduled and manual runs,
   retains original version approvals, and checks channel ancestry inside each
@@ -319,8 +321,10 @@ runs are predictable and a newer commit always supersedes an older one:
 Reusable workflows do not inherit a `concurrency` group from their caller, but
 cancelling the caller cancels the jobs it invoked, so `ci.yml`'s group already
 governs called workflows on a PR. Callables that also support
-`workflow_dispatch` declare their own group to cover direct runs (for example
-`browser-smoke.yml` keys on `github.ref`).
+`workflow_dispatch` declare their own group to cover direct runs. The smoke
+lanes key a dispatch on `github.ref` and a called run on `github.run_id`, so a
+dispatch on `main` cannot cancel the job CI Gate waits on. `release-dry-run.yml`
+cancels only pull-request runs; its cron and dispatches queue.
 
 ## Native Bun qualification
 

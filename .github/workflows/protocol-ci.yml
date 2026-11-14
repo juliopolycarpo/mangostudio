@@ -40,7 +40,7 @@ permissions:
 
 concurrency:
   group: protocol-ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 # Incremental compilation keeps state for rebuilding one target directory. A CI
 # job builds once, so that state only costs time and disk (measured and written

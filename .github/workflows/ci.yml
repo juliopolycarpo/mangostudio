@@ -21,10 +21,11 @@ permissions:
 # SHA, which would let stale runs survive. Main follows the same rule: a new
 # push cancels the run of the previous commit, so only the newest main commit
 # gets a verdict. Nothing may depend on a per-commit main baseline, and a run
-# cancelled mid-flight leaves its cache seed to the next one.
+# cancelled mid-flight leaves its cache seed to the next one. A manual dispatch
+# never cancels: Canary accepts only a main push run.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
 
 jobs:
   changes:
