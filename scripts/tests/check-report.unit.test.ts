@@ -216,7 +216,7 @@ describe('Check CLI result parity', () => {
     }
   );
 
-  test('a subprocess setup failure keeps unavailable labels and the executed source scan', async () => {
+  test('a subprocess setup failure reports every planned task unavailable', async () => {
     const fixture = makeCliFixture(fakeToolDirectory);
     try {
       const result = await runCli(
@@ -235,10 +235,10 @@ describe('Check CLI result parity', () => {
         'workspaces:check:unavailable',
         'api:cycles:unavailable',
         'root:fmt:api:unavailable',
-        'root:shared-import-boundary:executed',
+        'root:shared-import-boundary:unavailable',
       ]);
       expect(result.stderr).toContain('Invalid MANGO_RUNNER_CONCURRENCY');
-      expect(result.stderr).toContain('3 task(s) failed.');
+      expect(result.stderr).toContain('4 task(s) failed.');
     } finally {
       rmSync(fixture.directory, { recursive: true, force: true });
     }

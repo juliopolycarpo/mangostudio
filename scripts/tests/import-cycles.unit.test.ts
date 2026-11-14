@@ -69,6 +69,10 @@ function buildBaseFixture(): string {
     join(root, 'scripts/check-import-cycles.ts'),
     readText('scripts/check-import-cycles.ts')
   );
+  writeFileSync(
+    join(root, 'scripts/check-source-scan.ts'),
+    readText('scripts/check-source-scan.ts')
+  );
   for (const file of [
     'package.json',
     'bun.lock',

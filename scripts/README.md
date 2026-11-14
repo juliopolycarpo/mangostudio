@@ -14,6 +14,8 @@ scripts/
 ├── check.ts          Check orchestrator (bun run check; see full command contract below; --rust adds rustfmt, Clippy, rustdoc)
 ├── check-import-cycles.ts
 │                     Cycle-only TS/JS scan, including generated and gitignored files
+├── check-source-scan.ts
+│                     One source scan of check in its own process (lib/source-scans.ts)
 ├── check-versions.ts Assert application + launcher versions agree (bun run check:versions)
 ├── update-node-release-schedule.ts
 │                     Refresh bundled Node lifecycle and latest-patch data
@@ -61,6 +63,7 @@ importing the specific module in new code:
 | `config.ts`               | Workspace definitions + root lint/format path lists                                                      |
 | `import-cycles.ts`        | TypeScript-resolved JS/TS graph scan shared by workspace checks and QA                                   |
 | `import-cycle-command.ts` | Builds the scanner's argv without loading the compiler                                                   |
+| `source-scans.ts`         | The source scans `check` runs as separate processes, and their commands                                  |
 | `changelog.ts`            | git-cliff arg/format logic (wrapped behind a project API)                                                |
 | `npm-pack.ts`             | npm distribution manifest builders                                                                       |
 | `release-version.ts`      | Canonical release version resolver + lockstep consistency check                                          |
