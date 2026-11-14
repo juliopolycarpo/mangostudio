@@ -22,16 +22,26 @@ export interface ParsedArgs {
 export interface ParseArgsOptions {
   booleanFlags?: string[];
   valueFlags?: string[];
+  /**
+   * Boolean flags that name a lane of their own (`--rust`). Like a workspace
+   * flag, one of these alone is a selection, so the every-workspace default
+   * does not apply: `check --rust` runs the Rust lane and nothing else.
+   */
+  selectionFlags?: string[];
 }
 
 /**
  * Parse process.argv into workspace selection, flags, and positional args.
  * No selection flags defaults to every workspace plus root.
+ * `args` defaults to the process arguments; tests pass their own.
  * // Usage: const { workspaces, flags } = parseArgs({ booleanFlags: ['--staged'] });
  */
-export function parseArgs(options: ParseArgsOptions = {}): ParsedArgs {
-  const args = process.argv.slice(2);
-  const booleanFlags = new Set(['--help', ...(options.booleanFlags ?? [])]);
+export function parseArgs(
+  options: ParseArgsOptions = {},
+  args: readonly string[] = process.argv.slice(2)
+): ParsedArgs {
+  const selectionFlags = new Set(options.selectionFlags ?? []);
+  const booleanFlags = new Set(['--help', ...(options.booleanFlags ?? []), ...selectionFlags]);
   const valueFlags = new Set(options.valueFlags ?? []);
   const workspaces: WorkspaceName[] = [];
   let includeRoot = false;
@@ -68,8 +78,10 @@ export function parseArgs(options: ParseArgsOptions = {}): ParsedArgs {
     } else positional.push(arg);
   }
 
+  const namesLane = [...selectionFlags].some((flag) => flags[flag]);
+
   // Default: --all (all workspaces + root)
-  if (workspaces.length === 0 && !includeRoot && !allExplicit) {
+  if (workspaces.length === 0 && !includeRoot && !allExplicit && !namesLane) {
     return {
       workspaces: [...ALL_WORKSPACE_NAMES],
       explicitWorkspaces: workspaces,

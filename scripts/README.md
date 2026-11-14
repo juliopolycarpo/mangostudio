@@ -11,14 +11,14 @@ scripts/
 ├── dev.ts            Start dev servers (bun run dev)
 ├── build.ts          Build workspaces or standalone binaries (bun run build)
 ├── build-runtime.ts  Build the cargo mangostudio-runtime per release target (bun run build:runtime)
-├── check.ts          Check orchestrator (bun run check; see full command contract below)
+├── check.ts          Check orchestrator (bun run check; see full command contract below; --rust adds rustfmt, Clippy, rustdoc)
 ├── check-import-cycles.ts
 │                     Cycle-only TS/JS scan, including generated and gitignored files
 ├── check-versions.ts Assert application + launcher versions agree (bun run check:versions)
 ├── update-node-release-schedule.ts
 │                     Refresh bundled Node lifecycle and latest-patch data
 ├── fix.ts            Apply Bun lint and format fixes (bun run fix)
-├── test.ts           Run unit/integration/e2e/coverage lanes, whole, sharded, or --changed (bun run test)
+├── test.ts           Run unit/integration/e2e/coverage lanes, whole, sharded, or --changed (bun run test; --rust adds nextest and doctests)
 ├── run-test-workers.ts
 │                     Run one test lane in worker processes with one merged report (API unit/integration, root test:scripts:workers)
 ├── verify.ts         check → test --coverage → build --all (bun run verify)
@@ -48,28 +48,29 @@ The full Rust protocol gates run separately through `bun run protocol:check`.
 `lib/runner.ts` is a barrel re-exporting focused, single-concern modules — prefer
 importing the specific module in new code:
 
-| Module                 | Concern                                                                                                  |
-| ---------------------- | -------------------------------------------------------------------------------------------------------- |
-| `log.ts`               | Leveled console output + ANSI colors                                                                     |
-| `args.ts`              | CLI argument + workspace-selection parsing                                                               |
-| `git.ts`               | Change detection (`Bun.spawnSync`), workspace mapping                                                    |
-| `exec.ts`              | `runCommand`, `captureCommand`, `mapWithConcurrency`, `archiveConcurrency`, `runParallel`, `runTask`     |
-| `process-tree.ts`      | Child limit and cancellation behind `runCommand`: process groups on POSIX, a job object on Windows       |
-| `summary.ts`           | Pass/fail reporting + exit handling                                                                      |
-| `fs.ts`                | Cross-platform `removePaths` (no spawned `rm`)                                                           |
-| `fs-assert.ts`         | `assertFile`/`assertDirectory` (throw) + `fileError` (collect)                                           |
-| `config.ts`            | Workspace definitions + root lint/format path lists                                                      |
-| `import-cycles.ts`     | TypeScript-resolved JS/TS graph scan shared by workspace checks and QA                                   |
-| `changelog.ts`         | git-cliff arg/format logic (wrapped behind a project API)                                                |
-| `npm-pack.ts`          | npm distribution manifest builders                                                                       |
-| `release-version.ts`   | Canonical release version resolver + lockstep consistency check                                          |
-| `prepare-release.ts`   | Two-phase lockstep version bump for release preparation                                                  |
-| `bun-cross-runtime.ts` | Per-target Bun runtime for `--compile` when `.bun-version` names a channel                               |
-| `runtime-build.ts`     | Cargo runtime per release target: triple map, glibc floor, prebuilt-dir resolution, staged-binary checks |
-| `executable-header.ts` | ELF / Mach-O / PE header reader: format, CPU, ELF interpreter, highest `GLIBC_` version                  |
-| `test-workers.ts`      | Test-lane worker plan, strict verdict, JUnit merge (+ test-worker-process.ts)                            |
-| `junit-report.ts`      | Reads Bun's JUnit XML; shared by the QA gate and the worker lanes                                        |
-| `actions-lint/`        | Pinned workflow static analysis: manifest, bootstrap, tasks                                              |
+| Module                   | Concern                                                                                                  |
+| ------------------------ | -------------------------------------------------------------------------------------------------------- |
+| `log.ts`                 | Leveled console output + ANSI colors                                                                     |
+| `args.ts`                | CLI argument + workspace-selection parsing                                                               |
+| `git.ts`                 | Change detection (`Bun.spawnSync`), workspace mapping                                                    |
+| `exec.ts`                | `runCommand`, `captureCommand`, `mapWithConcurrency`, `archiveConcurrency`, `runParallel`, `runTask`     |
+| `process-tree.ts`        | Child limit and cancellation behind `runCommand`: process groups on POSIX, a job object on Windows       |
+| `summary.ts`             | Pass/fail reporting + exit handling                                                                      |
+| `fs.ts`                  | Cross-platform `removePaths` (no spawned `rm`)                                                           |
+| `fs-assert.ts`           | `assertFile`/`assertDirectory` (throw) + `fileError` (collect)                                           |
+| `config.ts`              | Workspace definitions + root lint/format path lists                                                      |
+| `import-cycles.ts`       | TypeScript-resolved JS/TS graph scan shared by workspace checks and QA                                   |
+| `changelog.ts`           | git-cliff arg/format logic (wrapped behind a project API)                                                |
+| `npm-pack.ts`            | npm distribution manifest builders                                                                       |
+| `release-version.ts`     | Canonical release version resolver + lockstep consistency check                                          |
+| `prepare-release.ts`     | Two-phase lockstep version bump for release preparation                                                  |
+| `bun-cross-runtime.ts`   | Per-target Bun runtime for `--compile` when `.bun-version` names a channel                               |
+| `runtime-build.ts`       | Cargo runtime per release target: triple map, glibc floor, prebuilt-dir resolution, staged-binary checks |
+| `executable-header.ts`   | ELF / Mach-O / PE header reader: format, CPU, ELF interpreter, highest `GLIBC_` version                  |
+| `test-workers.ts`        | Test-lane worker plan, strict verdict, JUnit merge (+ test-worker-process.ts)                            |
+| `junit-report.ts`        | Reads Bun's JUnit XML; shared by the QA gate and the worker lanes                                        |
+| `actions-lint/`          | Pinned workflow static analysis: manifest, bootstrap, tasks                                              |
+| `rust-workspace-lane.ts` | Opt-in `--rust` lane: cargo commands, scoped-run selection, tool probe                                   |
 
 Workspace `check:quick` scripts run cacheable Bun lint and format checks. The lint key
 includes the workspace's VCS inputs, upstream workspace sources through `transit`,
