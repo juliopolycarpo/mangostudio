@@ -40,10 +40,11 @@ export const WORKERS_ENV = 'MANGO_TEST_WORKERS';
 export const MAX_WORKERS = 8;
 
 /**
- * Median lane wall time on a 34-CPU host, three runs per width: 262 s at one
- * worker, 76 s at four, 49 s at six, 38 s at eight. The default is six, the
- * smaller of the two widths that beat four by more than 10% with every report
- * equal to the serial lane's.
+ * Median api-unit lane wall time on a 34-CPU host, three runs per width: 262 s
+ * at one worker, 76 s at four, 49 s at six, 38 s at eight. The default is six,
+ * the smaller of the two widths that beat four by more than 10% with every
+ * report equal to the serial lane's. The weighted root lane takes the same
+ * default: 105 s at four, 77 s at six on a 28-CPU host.
  */
 const DEFAULT_WORKERS = 6;
 
@@ -60,7 +61,8 @@ const DEFAULT_WORKERS = 6;
  * script with no MangoStudio code. Lift this when that is understood. An
  * explicit `MANGO_TEST_WORKERS` still wins, with the same validation.
  *
- * A lane may name a default of its own (`laneDefault`); six is the unit lane's.
+ * A lane may name a default of its own (`laneDefault`); six is the api-unit and
+ * root lanes', four the api-integration lane's.
  *
  * @example
  * resolveWorkerCount({}, 34, 'linux'); // => 6
