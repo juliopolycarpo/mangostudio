@@ -215,7 +215,16 @@ export function rustCleanPaths(
  * scan names: the runtime's MCP tests start a Bun fixture, so the Bun pin, the
  * lockfile and the dependency patches decide what that fixture runs.
  */
-const RUST_TEST_HOST_INPUTS = ['package.json', 'bun.lock', '.bun-version', 'patches/**'] as const;
+const RUST_TEST_HOST_INPUTS = [
+  'package.json',
+  'bun.lock',
+  '.bun-version',
+  'patches/**',
+  // Read by cargo and nextest when present. A local nextest config can filter
+  // tests, so removing it must not replay the filtered pass as a full one.
+  '.cargo/**',
+  '.config/nextest.toml',
+] as const;
 
 /**
  * Every checkout file a Rust test result depends on, for its pass stamp.
@@ -244,16 +253,18 @@ export function rustTestInputFiles(
 
 /**
  * Environment variables that change what cargo builds or what a test does.
- * `MANGO_RUNNER_GROUP` is deliberately outside the pattern: it names the
- * parent runner's process and differs on every run.
+ * Every `MANGO_*` name counts: the runtime reads `MANGO_HOME` and a spawned
+ * test binary inherits whatever the caller exported. `MANGO_RUNNER_GROUP` is
+ * the one exception: it names the parent runner's process and differs on
+ * every run. `XDG_RUNTIME_DIR` places the IPC socket directory.
  */
 const RUST_TEST_ENV =
-  /^(?:RUSTFLAGS|RUSTDOCFLAGS|RUSTC_.+|RUSTUP_TOOLCHAIN|CARGO_.+|NEXTEST_.+|MANGOSTUDIO_.+)$/;
+  /^(?:RUSTFLAGS|RUSTDOCFLAGS|RUSTC_.+|RUSTUP_TOOLCHAIN|CARGO_.+|NEXTEST_.+|MANGO(?!_RUNNER_GROUP$).+|XDG_RUNTIME_DIR)$/;
 
 /**
  * Everything but file bytes that a Rust test result depends on: the task's
  * command and environment, the compiler, cargo, nextest and Bun versions, the
- * host, and the caller's cargo and MangoStudio variables.
+ * host, and the caller's cargo, nextest and `MANGO*` variables.
  *
  * @example
  * (await rustTestFacts(RUST_TEST_TASKS[0])).cargo; // 'cargo 1.99.0 (…)'

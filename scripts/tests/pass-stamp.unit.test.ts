@@ -3,7 +3,9 @@ import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync }
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { scanCrateInputs } from '../lib/crate-inputs';
 import type { CaptureResult, RunResult } from '../lib/exec';
+import { listCheckoutFiles } from '../lib/git';
 import {
   PASS_STAMP_DIR,
   passStampKey,
@@ -309,6 +311,29 @@ describe('Rust test stamp inputs', () => {
     expect(classifyChangedPaths([catalog]).rust).toBe(false);
     expect(rustTestInputFiles(repository, [catalog])).toEqual([catalog]);
   });
+
+  test('keys the local cargo and nextest configuration', () => {
+    const repository = join(import.meta.dir, '..', '..');
+    const local = ['.cargo/config.toml', '.config/nextest.toml'];
+    expect(rustTestInputFiles(repository, local)).toEqual(local);
+  });
+
+  test('every path the crate scan finds keys at least one checkout file', () => {
+    // A scan entry naming a directory without a trailing slash becomes no glob
+    // of its own; it is keyed only while another pattern covers its files.
+    const repository = join(import.meta.dir, '..', '..');
+    const checkoutFiles = listCheckoutFiles(repository);
+    const keyed = new Set(rustTestInputFiles(repository, checkoutFiles));
+    const unkeyed = scanCrateInputs(repository)
+      .map((input) => input.path)
+      .filter((path) => {
+        const directory = path.endsWith('/') ? path : `${path}/`;
+        const beneath = checkoutFiles.filter((file) => file.startsWith(directory));
+        const files = beneath.length > 0 ? beneath : [path];
+        return !files.every((file) => keyed.has(file));
+      });
+    expect(unkeyed, 'expected every scanned crate input in the stamp key').toEqual([]);
+  });
 });
 
 /** Answers version probes from a table and records what was asked. */
@@ -368,6 +393,8 @@ describe('rustTestFacts', () => {
         CARGO_TARGET_DIR: 'out',
         NEXTEST_RETRIES: '2',
         MANGO_RUNNER_GROUP: '4242',
+        MANGO_HOME: '/tmp/mango-home',
+        XDG_RUNTIME_DIR: '/run/user/1000',
         PATH: '/usr/bin',
         HOME: '/home/someone',
       },
@@ -376,8 +403,10 @@ describe('rustTestFacts', () => {
     expect(JSON.parse(facts.env as string)).toEqual([
       ['CARGO_TARGET_DIR', 'out'],
       ['MANGOSTUDIO_RUNTIME_BINARY', '/x'],
+      ['MANGO_HOME', '/tmp/mango-home'],
       ['NEXTEST_RETRIES', '2'],
       ['RUSTFLAGS', '-D warnings'],
+      ['XDG_RUNTIME_DIR', '/run/user/1000'],
     ]);
   });
 
