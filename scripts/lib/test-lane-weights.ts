@@ -31,7 +31,7 @@ const ROOT_LANE_WEIGHTS: FileWeights = {
   'scripts/tests/benchmark-runtime-version.unit.test.ts': 3,
   'scripts/tests/check-cache.unit.test.ts': 35,
   'scripts/tests/check-report.unit.test.ts': 4,
-  'scripts/tests/exec-process-tree.unit.test.ts': 15,
+  'scripts/tests/exec-process-tree.unit.test.ts': 30,
   'scripts/tests/fixture-command.unit.test.ts': 7,
   'scripts/tests/frontend-api-import-boundary.unit.test.ts': 3,
   'scripts/tests/import-cycles.unit.test.ts': 30,
