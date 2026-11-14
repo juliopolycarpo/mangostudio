@@ -6,7 +6,7 @@
 // Usage: see scripts/tests/test-workers-cancel.unit.test.ts
 
 import { startWorkerProcess } from '../../lib/test-worker-process';
-import { main, systemDeps } from '../../run-test-workers';
+import { main, systemDeps, workerSpawn } from '../../run-test-workers';
 import { fixtureChildEnvironment } from './child-supervision';
 import { FAKE_BUN_TEST } from './fake-bun-test';
 
@@ -28,7 +28,9 @@ if (import.meta.main) {
           `[${plan.laneId} ${plan.index}/${plan.count}] `,
           undefined,
           undefined,
-          fixtureChildEnvironment()
+          fixtureChildEnvironment(),
+          // The lane's own spawn, so killing this script exercises its guardian.
+          workerSpawn()
         ),
       launcher: [process.execPath, FAKE_BUN_TEST],
       mergedPath,

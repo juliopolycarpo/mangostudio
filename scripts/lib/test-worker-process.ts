@@ -2,6 +2,7 @@
 // its output line by line under the worker's name, and reports how it ended.
 // The verdict logic is in ./test-workers.ts and never sees a process.
 
+import type { GuardedChild } from './runner-guardian';
 import { settleWorker, signalWorker, WORKER_TOKEN_ENV } from './test-worker-settle';
 import type { WorkerExit, WorkerHandle, WorkerPlan } from './test-workers';
 
@@ -84,6 +85,41 @@ export type SpawnWorker = (options: WorkerSpawnOptions) => WorkerChild;
  */
 export const spawnWorkerChild: SpawnWorker = (options) =>
   Bun.spawn({ ...options, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
+
+/** What {@link guardWorkerSpawn} needs of a guardian link; `GuardianLink` is the real one. */
+export interface WorkerGuardian {
+  /** Starts the guardian if it is not running yet. */
+  open(): void;
+  /** Registers a worker; the result deregisters it. */
+  watch(child: GuardedChild): () => void;
+}
+
+/**
+ * A `SpawnWorker` whose workers the lane's guardian stops when the lane script
+ * is SIGKILLed (see ./runner-guardian.ts). Without it they ran on to the end of
+ * their files: the launcher between the lane and `bun test` does not notice its
+ * parent die, and a settling worker leads a group no one else signals.
+ *
+ * A worker that leads its group is registered as the group; any other as its
+ * pid, the launcher, which forwards SIGTERM to its `bun test`. The guardian is
+ * opened before the spawn and the worker is deregistered once it has exited.
+ *
+ * @example
+ * const spawn = guardWorkerSpawn(new GuardianLink(() => launchGuardian(5_000), error));
+ */
+export function guardWorkerSpawn(
+  guardian: WorkerGuardian,
+  spawn: SpawnWorker = spawnWorkerChild
+): SpawnWorker {
+  return (options) => {
+    guardian.open();
+    const child = spawn(options);
+    const release = guardian.watch({ kind: options.detached ? 'group' : 'pid', pid: child.pid });
+    // A rejected exit wait still means the lane has stopped waiting for it.
+    void child.exited.then(release, release);
+    return child;
+  };
+}
 
 /**
  * Reads `stream` and hands over each complete line (without its newline). A

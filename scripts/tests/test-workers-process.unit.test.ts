@@ -11,14 +11,17 @@ import { dirname, join } from 'node:path';
 
 import { parseJunitXml } from '../lib/junit-report';
 import { CANCEL_GRACE_MS } from '../lib/process-tree';
+import type { GuardedChild } from '../lib/runner-guardian';
 import {
   EXIT_ABANDON_MS,
+  guardWorkerSpawn,
   pumpLines,
   type SpawnWorker,
   spawnWorkerChild,
   startWorkerProcess,
   type WorkerChild,
   workerEnvironment,
+  type WorkerGuardian,
 } from '../lib/test-worker-process';
 import { SETTLE_GRACE_MS, WORKER_TOKEN_ENV } from '../lib/test-worker-settle';
 import {
@@ -813,6 +816,91 @@ describe('a worker whose exit is never reported', () => {
     expect(await within(1_000), 'expected no synthesized exit for a worker without a group').toBe(
       STILL_WAITING
     );
+  });
+});
+
+/** A guardian link that records what the lane asked of it, in order. */
+class FakeWorkerGuardian implements WorkerGuardian {
+  readonly events: string[] = [];
+
+  open(): void {
+    this.events.push('open');
+  }
+
+  watch(child: GuardedChild): () => void {
+    this.events.push(`watch ${child.kind} ${child.pid}`);
+    return () => {
+      this.events.push(`release ${child.pid}`);
+    };
+  }
+}
+
+/** A worker child that exits, or whose exit wait fails, when the test says so. */
+class FakeWorkerChild implements WorkerChild {
+  readonly stdout = new ReadableStream<Uint8Array>();
+  readonly stderr = new ReadableStream<Uint8Array>();
+  readonly exitCode = null;
+  readonly signalCode = null;
+  private readonly exit = Promise.withResolvers<unknown>();
+  readonly exited = this.exit.promise;
+
+  constructor(readonly pid: number) {}
+
+  kill(): void {}
+
+  leave(): void {
+    this.exit.resolve(0);
+  }
+
+  failExitWait(): void {
+    this.exit.reject(new Error('exit wait failed'));
+  }
+}
+
+describe('guardWorkerSpawn', () => {
+  const options = { cmd: ['bun', 'test'], cwd: '/repo', env: {} };
+
+  /** A guarded spawn over fakes: the guardian's record and the one child it starts. */
+  const guarded = (pid: number) => {
+    const guardian = new FakeWorkerGuardian();
+    const child = new FakeWorkerChild(pid);
+    const spawn = guardWorkerSpawn(guardian, () => {
+      guardian.events.push('spawn');
+      return child;
+    });
+    return { guardian, child, spawn };
+  };
+
+  it('opens the guardian before the spawn and registers a group leader as its group', () => {
+    const { guardian, child, spawn } = guarded(4101);
+
+    expect(spawn({ ...options, detached: true })).toBe(child);
+    expect(guardian.events).toEqual(['open', 'spawn', 'watch group 4101']);
+  });
+
+  it('registers a worker that leads no group by its pid alone', () => {
+    const { guardian, spawn } = guarded(4102);
+
+    spawn({ ...options, detached: false });
+    expect(guardian.events).toEqual(['open', 'spawn', 'watch pid 4102']);
+  });
+
+  it('deregisters the worker once it has exited', async () => {
+    const { guardian, child, spawn } = guarded(4103);
+    spawn({ ...options, detached: true });
+
+    child.leave();
+    await child.exited;
+    expect(guardian.events.at(-1)).toBe('release 4103');
+  });
+
+  it('deregisters the worker when its exit wait fails', async () => {
+    const { guardian, child, spawn } = guarded(4104);
+    spawn({ ...options, detached: true });
+
+    child.failExitWait();
+    await child.exited.catch(() => undefined);
+    expect(guardian.events.at(-1)).toBe('release 4104');
   });
 });
 
