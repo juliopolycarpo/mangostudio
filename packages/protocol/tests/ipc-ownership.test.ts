@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { afterEach, expect, jest, test } from 'bun:test';
 import { mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { connect, createServer, Socket } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -80,13 +80,39 @@ test('probe observation fixture never calls an inconclusive result a listener', 
 });
 
 test('a probe timeout is inconclusive and destroys the bounded dial', async () => {
+  jest.useFakeTimers();
   const socket = new Socket();
-  const result = await probe('fake probe', () => socket);
-  expect(result).toEqual({ outcome: 'inconclusive', reason: 'timeout' });
+  let verdict: Awaited<ReturnType<typeof probe>> | undefined;
+  const result = probe('fake probe', () => socket).then((outcome) => {
+    verdict = outcome;
+  });
+  jest.advanceTimersByTime(PROBE_BOUND_MS - 1);
+  await Promise.resolve();
+  expect({ verdict, destroyed: socket.destroyed }).toEqual({
+    verdict: undefined,
+    destroyed: false,
+  });
+  jest.advanceTimersByTime(1);
+  await result;
+  expect(verdict).toEqual({ outcome: 'inconclusive', reason: 'timeout' });
   expect(socket.destroyed).toBe(true);
 });
 
 const unix = process.platform !== 'win32';
+
+// Mirrors FIRST_HELLO_TIMEOUT_MS and PROBE_TIMEOUT_MS in src/transports/ipc.ts, which stay
+// unexported so the published API does not grow. Each deadline test below fails if the
+// transport's bound drifts from these values: it must hold open at bound - 1 and close at bound.
+const HELLO_BOUND_MS = 15_000;
+const PROBE_BOUND_MS = 1_000;
+
+// Captured before any test installs fake timers, so waits on real socket I/O keep a real clock.
+const realSetTimeout = globalThis.setTimeout;
+const flushSocketIo = (): Promise<void> => new Promise((resolve) => realSetTimeout(resolve, 25));
+
+afterEach(() => {
+  jest.useRealTimers();
+});
 
 test.skipIf(!unix)(
   'accepted transport connections are bounded and dropped owners release capacity',
@@ -172,21 +198,37 @@ test.skipIf(!unix)(
       accepted = resolve;
     });
     const server = await listenIpc(join(dir, 's'), () => accepted());
+    // Fake timers go in before the connect: the transport arms its deadline on accept.
+    jest.useFakeTimers();
     const socket = connect(server.path);
     socket.resume();
     socket.on('error', () => undefined);
-    const closed = new Promise<void>((resolve) => socket.once('close', () => resolve()));
+    let socketClosed = false;
+    const closed = new Promise<void>((resolve) =>
+      socket.once('close', () => {
+        socketClosed = true;
+        resolve();
+      })
+    );
     try {
       await reached;
+      jest.advanceTimersByTime(HELLO_BOUND_MS - 1);
+      await flushSocketIo();
+      expect({ socketClosed, destroyed: socket.destroyed }).toEqual({
+        socketClosed: false,
+        destroyed: false,
+      });
+      jest.advanceTimersByTime(1);
       await closed;
       expect(socket.destroyed).toBe(true);
     } finally {
+      jest.useRealTimers();
       socket.destroy();
       await server.close();
       await rm(dir, { recursive: true, force: true });
     }
   },
-  20_000
+  5_000
 );
 
 test.skipIf(!unix)(
@@ -196,6 +238,10 @@ test.skipIf(!unix)(
     let host: Session | undefined;
     let readyResult: Promise<string> | undefined;
     let closedCount = 0;
+    let accepted!: () => void;
+    const reached = new Promise<void>((resolve) => {
+      accepted = resolve;
+    });
     const server = await listenIpc(join(dir, 's'), (port) => {
       host = new Session(port, {
         peer: { name: 'timeout-fixture', version: '0', role: 'hub' },
@@ -209,18 +255,32 @@ test.skipIf(!unix)(
       host.onClose(() => {
         closedCount++;
       });
+      accepted();
     });
+    // Both the transport deadline and the Session handshake timer arm on accept, so fake
+    // timers go in before the connect. Only the 15 s hello bound is advanced; the 60 s
+    // handshake timer can never fire, so a rejection here came from the transport close.
+    jest.useFakeTimers();
     const socket = connect(server.path);
     socket.resume();
     socket.on('error', () => undefined);
     const socketClosed = new Promise<void>((resolve) => socket.once('close', () => resolve()));
     try {
+      // Advance only once the accept armed both timers, or the advance would predate them.
+      await reached;
+      jest.advanceTimersByTime(HELLO_BOUND_MS - 1);
+      await flushSocketIo();
+      expect(host?.state).toBe('handshaking');
+      expect(closedCount).toBe(0);
+      jest.advanceTimersByTime(1);
       await socketClosed;
+      // The race timer is real (`realSetTimeout`): it bounds how long the Session may lag
+      // the transport close, exactly as it did when the 15 s wait was real.
       let timer: ReturnType<typeof setTimeout> | undefined;
       const result = await Promise.race([
         readyResult,
         new Promise<string>((resolve) => {
-          timer = setTimeout(() => resolve('still pending after transport closed'), 250);
+          timer = realSetTimeout(() => resolve('still pending after transport closed'), 250);
         }),
       ]);
       if (timer) clearTimeout(timer);
@@ -228,13 +288,14 @@ test.skipIf(!unix)(
       expect(host?.state).toBe('closed');
       expect(closedCount).toBe(1);
     } finally {
+      jest.useRealTimers();
       socket.destroy();
       await host?.close();
       await server.close();
       await rm(dir, { recursive: true, force: true });
     }
   },
-  20_000
+  5_000
 );
 
 test.skipIf(!unix)(
