@@ -9,6 +9,26 @@ const QUIET_TURBO_ENV = {
   TURBO_NO_UPDATE_NOTIFIER: '1',
 };
 
+/**
+ * The environment a spawned Turbo should see: the caller's, minus every `TURBO_*`
+ * variable, then `extraEnv`. A caller's `TURBO_FORCE=true` (or `TURBO_CACHE_DIR`,
+ * `TURBO_TEAM`, ...) turns every cache hit these tests assert into a miss, so only
+ * the overrides a test passes on purpose reach Turbo.
+ *
+ * @example
+ * Bun.spawn({ cmd, env: hermeticTurboEnv({ TURBO_CACHE_DIR: cacheDir }) });
+ */
+export function hermeticTurboEnv(
+  extraEnv: Readonly<Record<string, string>> = {},
+  inherited: NodeJS.ProcessEnv = process.env
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(inherited)) {
+    if (value !== undefined && !key.startsWith('TURBO_')) env[key] = value;
+  }
+  return { ...env, ...extraEnv, ...QUIET_TURBO_ENV };
+}
+
 /** The fields of a `turbo run --dry=json` task the typecheck graph tests read. */
 export interface DryRunTask {
   readonly taskId: string;
@@ -45,8 +65,7 @@ export function runTurbo(
   capture: (cmd: readonly string[], cwd: string, env: NodeJS.ProcessEnv) => Promise<TurboResult>
 ): Promise<TurboResult> {
   const cmd = [join(ROOT_DIR, 'node_modules', '.bin', 'turbo'), ...args];
-  const env = { ...(process.env as Record<string, string>), ...extraEnv, ...QUIET_TURBO_ENV };
-  return capture(cmd, cwd, env);
+  return capture(cmd, cwd, hermeticTurboEnv(extraEnv));
 }
 
 /**

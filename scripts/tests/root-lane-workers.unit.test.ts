@@ -34,6 +34,7 @@ import {
   silentWorker,
   withWorker,
 } from './support/test-worker-fakes';
+import { hermeticTurboEnv } from './support/turbo-run';
 
 const WORKERS_SCRIPT = 'test:scripts:workers';
 const WORKERS_TASK = `//#${WORKERS_SCRIPT}`;
@@ -360,7 +361,7 @@ describe('what Turbo hashes for the plain root lane', () => {
     const probe = Bun.spawn({
       cmd: [join(ROOT_DIR, 'node_modules', '.bin', 'turbo'), 'run', WORKERS_TASK, '--dry=json'],
       cwd: ROOT_DIR,
-      env: { ...(process.env as Record<string, string>), ...extraEnv },
+      env: hermeticTurboEnv(extraEnv),
       stdout: 'pipe',
       stderr: 'pipe',
     });

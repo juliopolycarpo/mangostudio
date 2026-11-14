@@ -10,7 +10,7 @@ import {
   FIXTURE_STOP_TIMEOUT_MS,
   FixtureCommands,
 } from './support/fixture-command';
-import { runTurbo, turboDryRun } from './support/turbo-run';
+import { hermeticTurboEnv, runTurbo, turboDryRun } from './support/turbo-run';
 import { createTypecheckFixture, type TypecheckFixture } from './support/typecheck-fixture';
 
 const WORKSPACES = ['apps/api', 'apps/frontend', 'apps/shared', 'packages/protocol'];
@@ -83,12 +83,11 @@ function requiredCheck(fixture: TypecheckFixture, workspace: string) {
 }
 
 function rootCheck(fixture: TypecheckFixture, workspace: WorkspaceName) {
-  return commands.run(['bun', 'run', 'check', `--${workspace}`], fixture.root, {
-    ...process.env,
-    TURBO_CACHE_DIR: join(fixture.root, '.turbo-cache'),
-    TURBO_TELEMETRY_DISABLED: '1',
-    TURBO_NO_UPDATE_NOTIFIER: '1',
-  });
+  return commands.run(
+    ['bun', 'run', 'check', `--${workspace}`],
+    fixture.root,
+    hermeticTurboEnv({ TURBO_CACHE_DIR: join(fixture.root, '.turbo-cache') })
+  );
 }
 
 function expectOutcome(

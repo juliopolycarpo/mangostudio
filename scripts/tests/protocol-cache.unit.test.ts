@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { readText } from './support/read-text';
+import { hermeticTurboEnv } from './support/turbo-run';
 
 const TURBO = join(import.meta.dir, '../../node_modules/.bin/turbo');
 const PROTOCOL_PACKAGE = '@mangostudio/protocol';
@@ -17,6 +18,7 @@ function buildHash(root: string): string {
   const result = Bun.spawnSync({
     cmd: [TURBO, 'run', 'build', `--filter=${PROTOCOL_PACKAGE}`, '--dry=json'],
     cwd: root,
+    env: hermeticTurboEnv(),
     stdout: 'pipe',
     stderr: 'pipe',
   });
