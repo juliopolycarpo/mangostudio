@@ -28,9 +28,7 @@ import {
   assertDependencyCohort,
   assertNoDisallowedWorkspaceDependencies,
 } from './lib/dependency-policy';
-import { assertFrontendApiImportBoundary } from './lib/frontend-api-import-boundary';
 import { createImportCycleCommand } from './lib/import-cycle-command';
-import { assertNoProductionNodeEnvBranches } from './lib/no-node-env-branches';
 import { touchesProtocolSurface } from './lib/protocol';
 import { assertVersionsInLockstep } from './lib/release-version';
 import {
@@ -55,7 +53,7 @@ import {
   RUST_CHECK_TASKS,
   selectsRustLaneAlone,
 } from './lib/rust-workspace-lane';
-import { assertNoSharedRootImports } from './lib/shared-root-import-boundary';
+import { createSourceScanCommand } from './lib/source-scans';
 
 function printHelp(): never {
   console.log(`Usage: bun run check [workspace flags] [mode flags]
@@ -138,7 +136,9 @@ function createWorkspaceTasks(workspaces: ReadonlyArray<WorkspaceName>): CheckTa
 function createRootTasks(skipFormat: boolean): CheckTask[] {
   const tasks: CheckTask[] = [
     commandTask('root:cycles', createImportCycleCommand(ROOT_LINT_PATHS), { cwd: ROOT_DIR }),
-    localTask('root:node-env-branches', () => assertNoProductionNodeEnvBranches()),
+    commandTask('root:node-env-branches', createSourceScanCommand('node-env-branches'), {
+      cwd: ROOT_DIR,
+    }),
     localTask('root:versions', () => {
       assertVersionsInLockstep();
     }),
@@ -498,15 +498,29 @@ async function check(): Promise<never> {
     );
   }
 
-  // The source scans below parse synchronously on this thread, so they go last:
-  // every subprocess task above is already spawned and runs alongside them.
+  // The source scans parse hundreds of files synchronously, so each gets a
+  // process of its own instead of blocking this thread (see lib/source-scans.ts).
   if (effectiveWorkspaces.includes('frontend')) {
-    tasks.push(localTask('frontend:api-import-boundary', () => assertFrontendApiImportBoundary()));
+    tasks.push(
+      commandTask(
+        'frontend:api-import-boundary',
+        createSourceScanCommand('frontend-api-import-boundary'),
+        { cwd: ROOT_DIR }
+      )
+    );
   }
   // Every run but `--rust` alone: that one selected no TypeScript at all, and
   // the scan would add five seconds to a lane that is three when cargo is warm.
   if (!selectsRustLaneAlone(scopedFiles, effectiveWorkspaces, effectiveIncludeRoot)) {
-    tasks.push(localTask('root:shared-import-boundary', () => assertNoSharedRootImports()));
+    tasks.push(
+      commandTask(
+        'root:shared-import-boundary',
+        createSourceScanCommand('shared-import-boundary'),
+        {
+          cwd: ROOT_DIR,
+        }
+      )
+    );
   }
 
   // Ordinary runs retain the runner's existing console and exit behavior.

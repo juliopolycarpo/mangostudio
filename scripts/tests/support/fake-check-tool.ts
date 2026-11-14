@@ -7,6 +7,7 @@
  *   `CHECK_FIXTURE_TURBO_DELAY=yes`, then exits with `CHECK_FIXTURE_TURBO_EXIT`.
  * - `bun scripts/check-import-cycles.ts` exits with `CHECK_FIXTURE_CYCLES_EXIT`, the way a
  *   workspace cycle scan reports its verdict.
+ * - `bun ./scripts/check-source-scan.ts` exits 0: a source scan that found nothing.
  * - any other `bun` unblocks `CHECK_FIXTURE_UNBLOCK_REPORT` once Check has failed to publish a snapshot
  *   onto it, then exits with `CHECK_FIXTURE_FMT_EXIT`.
  * - `git` blocks `CHECK_FIXTURE_BLOCK_REPORT` and fails with a fixed message.
@@ -70,6 +71,9 @@ if (tool === 'git') {
 }
 if (tool === 'bun' && process.argv[2] === 'scripts/check-import-cycles.ts') {
   process.exit(exitCodeFrom('CHECK_FIXTURE_CYCLES_EXIT'));
+}
+if (tool === 'bun' && process.argv[2] === './scripts/check-source-scan.ts') {
+  process.exit(0);
 }
 if (tool === 'bun') {
   const report = fixtureEnv('CHECK_FIXTURE_UNBLOCK_REPORT');

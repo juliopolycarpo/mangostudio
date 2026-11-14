@@ -31,7 +31,11 @@ function createFixture(): TypecheckFixture {
     copyFileSync(join(ROOT_DIR, file), join(root, file));
   }
   cpSync(join(ROOT_DIR, 'scripts/lib'), join(root, 'scripts/lib'), { recursive: true });
-  for (const file of ['scripts/check.ts', 'scripts/check-import-cycles.ts']) {
+  for (const file of [
+    'scripts/check.ts',
+    'scripts/check-import-cycles.ts',
+    'scripts/check-source-scan.ts',
+  ]) {
     copyFileSync(join(ROOT_DIR, file), join(root, file));
   }
   const rootManifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
