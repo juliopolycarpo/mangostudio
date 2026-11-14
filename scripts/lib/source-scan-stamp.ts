@@ -39,6 +39,12 @@
 //   - The command, the Bun build and the host. No scan reads an environment
 //     variable.
 //
+// Reading and hashing every one of those files is a synchronous pass of about
+// 200 ms, so the digest answers from a per-file hash cache kept beside the
+// stamps (`file-hash-cache.ts`) and reads only the files whose stat changed. The
+// cache never changes the digest, only how fast it comes. `createSourceScanStamper`
+// takes two digests per check run, not one per scan.
+//
 // A key that cannot be computed (an unreadable directory, a failing `git
 // ls-files`) is a cache miss: the scan runs, the reason is reported once, and no
 // stamp is written. It never fails the check.
@@ -51,10 +57,12 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import type { RunResult } from './exec';
+import { createFileHashCache, type FileHashCache } from './file-hash-cache';
 import { listCheckoutFiles } from './git';
 import { dim } from './log';
 import { PASS_STAMP_DIR, passStampKey, runWithPassStamp } from './pass-stamp';
 import {
+  listCycleScanTree,
   listCycleScanTreeFiles,
   listCycleScanTreeSymlinks,
   listFrontendBoundaryPaths,
@@ -77,7 +85,8 @@ const SOURCE_SCAN_HOST_FILES = ['bun.lock', '.bun-version', 'bunfig.toml'] as co
  */
 export function sourceScanInputFiles(
   rootDir: string,
-  checkoutFiles: readonly string[] = listCheckoutFiles(rootDir)
+  checkoutFiles: readonly string[] = listCheckoutFiles(rootDir),
+  cycleTreeFiles: readonly string[] = listCycleScanTreeFiles(rootDir, SOURCE_SCAN_INPUT_EXTENSION)
 ): string[] {
   const hostFiles = new Set<string>(SOURCE_SCAN_HOST_FILES);
   const fromGit = checkoutFiles.filter(
@@ -89,7 +98,7 @@ export function sourceScanInputFiles(
   return [
     ...new Set([
       ...fromGit,
-      ...listCycleScanTreeFiles(rootDir, SOURCE_SCAN_INPUT_EXTENSION),
+      ...cycleTreeFiles,
       ...listNodeEnvScanPaths(rootDir),
       ...listFrontendBoundaryPaths(rootDir),
     ]),
@@ -190,7 +199,8 @@ const SHARED_ROOT_SCAN_EXTENSION = /\.(?:[cm]?[jt]s|[jt]sx)$/;
  */
 export function sourceScanFacts(
   rootDir: string,
-  checkoutFiles: readonly string[] = listCheckoutFiles(rootDir)
+  checkoutFiles: readonly string[] = listCheckoutFiles(rootDir),
+  cycleTreeSymlinks: readonly string[] = listCycleScanTreeSymlinks(rootDir)
 ): Record<string, string> {
   return {
     bun: `${Bun.version} ${Bun.revision}`,
@@ -200,28 +210,34 @@ export function sourceScanFacts(
       checkoutFiles.filter((file) => SHARED_ROOT_SCAN_EXTENSION.test(file)).sort()
     ),
     symlinks: JSON.stringify(
-      [
-        ...new Set([
-          ...listCycleScanTreeSymlinks(rootDir),
-          ...listSymlinksAmong(rootDir, checkoutFiles),
-        ]),
-      ].sort()
+      [...new Set([...cycleTreeSymlinks, ...listSymlinksAmong(rootDir, checkoutFiles)])].sort()
     ),
   };
 }
 
 /**
- * The digest of every input the seven scans share, taken now.
+ * The digest of every input the seven scans share, taken now. With a cache, a
+ * file whose stat is unchanged is not read again; the digest is the same with
+ * or without one.
  *
  * @example
  * sourceScanInputDigest('/repo'); // 'ab12…' (64 hex)
  */
-export function sourceScanInputDigest(rootDir: string): string {
+export function sourceScanInputDigest(rootDir: string, cache?: FileHashCache): string {
+  const pass = cache?.startPass();
   const checkoutFiles = listCheckoutFiles(rootDir);
-  return passStampKey(rootDir, {
-    files: sourceScanInputFiles(rootDir, checkoutFiles),
-    facts: sourceScanFacts(rootDir, checkoutFiles),
-  });
+  // One walk of the tree serves both the file list and the symlink fact.
+  const tree = listCycleScanTree(rootDir, SOURCE_SCAN_INPUT_EXTENSION);
+  const key = passStampKey(
+    rootDir,
+    {
+      files: sourceScanInputFiles(rootDir, checkoutFiles, tree.files),
+      facts: sourceScanFacts(rootDir, checkoutFiles, tree.symlinks),
+    },
+    pass?.hashOf
+  );
+  pass?.commit();
+  return key;
 }
 
 /**
@@ -262,17 +278,33 @@ export type SourceScanStamper = (
 /** The input digest could not be taken; the scan runs without a stamp. */
 class ScanKeyUnavailable extends Error {}
 
+/** Where the digest keeps its per-file hashes, in the stamp directory. Not a name a stamp label can take: those end in `.json`. */
+const FILE_HASH_CACHE_NAME = 'source-scan-file-hashes.cache';
+
+interface DigestWaiter {
+  resolve: (value: string) => void;
+  reject: (reason: unknown) => void;
+}
+
 /**
- * Wrap scans in pass stamps that share one input digest.
+ * Wrap scans in pass stamps that share their input digests.
  *
- * Every key request waits one macrotask, then the digest is computed once for
- * all of them. At the start of a check that is the "before" digest shared by
- * every scan, taken after the runner has spawned its other tasks, because the
- * digest is a synchronous pass over thousands of files. After a scan, the
- * request is its "after" digest, computed once the scan has ended; requests
- * from scans that end while another digest is being computed batch into the
- * next one. A digest is always taken after the request that receives it, so it
- * is never older than the run it vouches for.
+ * Two digests serve a whole check run, however many scans it holds:
+ *
+ *   - Before. Every key request waits one macrotask, then one digest answers
+ *     all of them. At the start of a check that is the digest shared by every
+ *     scan, taken after the runner has spawned its other tasks, because a
+ *     digest is a synchronous pass over thousands of files.
+ *   - After. A scan that exited 0 asks for it once its run has ended, and every
+ *     such scan waits for the last scan still running to end, then shares one
+ *     digest. A scan that failed, threw, or could not take its key counts as
+ *     ended the moment it is done, so it never holds the others up.
+ *
+ * The invariant: a digest handed to a scan is computed after that scan's run
+ * ended. A scan asks for its "after" digest only once it has ended, and the
+ * digest is taken after the asking, so it is never older than the run it
+ * vouches for. A scan that starts while others wait delays their digest until
+ * it ends too, which keeps the invariant for it.
  *
  * A digest that throws is a miss, not a failure: the scan runs (or, when only
  * the "after" digest failed, keeps the result it already has), no stamp is
@@ -283,42 +315,89 @@ class ScanKeyUnavailable extends Error {}
  * const run = stamp('root:cycles', command, () => runCommand('root:cycles', command));
  */
 export function createSourceScanStamper(options: SourceScanStamperOptions): SourceScanStamper {
-  const digest = options.inputDigest ?? sourceScanInputDigest;
+  const hashCache = createFileHashCache(join(options.stampDir, FILE_HASH_CACHE_NAME));
+  const digest =
+    options.inputDigest ?? ((rootDir: string) => sourceScanInputDigest(rootDir, hashCache));
   const report = options.report ?? dim;
   let reported = false;
-  let waiting: Array<{
-    resolve: (value: string) => void;
-    reject: (reason: unknown) => void;
-  }> = [];
-  const nextDigest = (): Promise<string> =>
+
+  /** Take one digest and hand it to everyone in the batch. */
+  const answer = (batch: readonly DigestWaiter[]): void => {
+    try {
+      const taken = digest(options.rootDir);
+      for (const waiter of batch) waiter.resolve(taken);
+    } catch (caught) {
+      const reason = new ScanKeyUnavailable(
+        caught instanceof Error ? caught.message : String(caught),
+        { cause: caught }
+      );
+      for (const waiter of batch) waiter.reject(reason);
+    }
+  };
+
+  let beforeWaiting: DigestWaiter[] = [];
+  const beforeDigest = (): Promise<string> =>
     new Promise((resolve, reject) => {
-      waiting.push({ resolve, reject });
-      if (waiting.length > 1) return;
+      beforeWaiting.push({ resolve, reject });
+      if (beforeWaiting.length > 1) return;
       setTimeout(() => {
-        const batch = waiting;
-        waiting = [];
-        try {
-          const taken = digest(options.rootDir);
-          for (const waiter of batch) waiter.resolve(taken);
-        } catch (caught) {
-          const reason = new ScanKeyUnavailable(
-            caught instanceof Error ? caught.message : String(caught),
-            { cause: caught }
-          );
-          for (const waiter of batch) waiter.reject(reason);
-        }
+        const batch = beforeWaiting;
+        beforeWaiting = [];
+        answer(batch);
       }, 0);
     });
 
+  // Scans handed to the stamper that have not ended: the "after" digest waits for zero.
+  let running = 0;
+  let afterWaiting: DigestWaiter[] = [];
+  let flushQueued = false;
+  // A macrotask, so a scan that exited 0 has asked for its digest before this looks.
+  const queueFlush = (): void => {
+    if (flushQueued) return;
+    flushQueued = true;
+    setTimeout(() => {
+      flushQueued = false;
+      if (running > 0 || afterWaiting.length === 0) return;
+      const batch = afterWaiting;
+      afterWaiting = [];
+      answer(batch);
+    }, 0);
+  };
+  const afterDigest = (): Promise<string> =>
+    new Promise((resolve, reject) => {
+      afterWaiting.push({ resolve, reject });
+      queueFlush();
+    });
+
   return (label, command, run) => async () => {
+    running += 1;
+    let ended = false;
+    const markEnded = (): void => {
+      if (ended) return;
+      ended = true;
+      running -= 1;
+      queueFlush();
+    };
     let finished: RunResult | undefined;
+    let keyRequests = 0;
     try {
       return await runWithPassStamp({
         label,
         stampDir: options.stampDir,
         enabled: options.enabled,
-        key: async () => sourceScanTaskKey(options.rootDir, await nextDigest(), command),
-        run: async () => (finished = await run()),
+        // `runWithPassStamp` asks twice: before the run, then after an exit 0.
+        key: async () => {
+          keyRequests += 1;
+          const inputs = keyRequests === 1 ? await beforeDigest() : await afterDigest();
+          return sourceScanTaskKey(options.rootDir, inputs, command);
+        },
+        run: async () => {
+          try {
+            return (finished = await run());
+          } finally {
+            markEnded();
+          }
+        },
         report,
       });
     } catch (caught) {
@@ -331,6 +410,8 @@ export function createSourceScanStamper(options: SourceScanStamperOptions): Sour
       }
       // Only an exit-0 run reaches the "after" digest, and its result is the one to keep.
       return finished ?? run();
+    } finally {
+      markEnded();
     }
   };
 }

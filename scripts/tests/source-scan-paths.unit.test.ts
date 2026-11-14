@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { scanImportCycles } from '../lib/import-cycles';
 import {
   isCycleScanExcluded,
+  listCycleScanTree,
   listCycleScanTreeFiles,
   listCycleScanTreeSymlinks,
   listFrontendBoundaryPaths,
@@ -124,6 +125,36 @@ describe('listCycleScanTreeSymlinks', () => {
 
   test('is empty when the tree has no symlink', () => {
     expect(listCycleScanTreeSymlinks(createTree({ 'a.ts': '' }))).toEqual([]);
+  });
+});
+
+describe('listCycleScanTree', () => {
+  test('returns what the file walk and the symlink walk return separately', () => {
+    const root = createTree({
+      'apps/shared/src/x.ts': '',
+      'apps/api/src/index.ts': '',
+      'config/base.json': '{}',
+      'docs/notes.md': '',
+      'dist/gen.ts': '',
+    });
+    symlinkSync('../../shared/src', join(root, 'apps/api/src/vendor'));
+    symlinkSync('x.ts', join(root, 'apps/shared/src/alias.ts'));
+    symlinkSync('../src', join(root, 'dist/skipped'));
+    const pattern = /\.(?:ts|json)$/;
+    const tree = listCycleScanTree(root, pattern);
+    expect(tree, '(cycle scan tree): expected one walk to equal the two separate walks').toEqual({
+      files: listCycleScanTreeFiles(root, pattern),
+      symlinks: listCycleScanTreeSymlinks(root),
+    });
+    expect(tree.files).toEqual([
+      'apps/api/src/index.ts',
+      'apps/shared/src/x.ts',
+      'config/base.json',
+    ]);
+    expect(tree.symlinks).toEqual([
+      'apps/api/src/vendor -> ../../shared/src',
+      'apps/shared/src/alias.ts -> x.ts',
+    ]);
   });
 });
 

@@ -46,7 +46,7 @@ const ROOT_LANE_WEIGHTS: FileWeights = {
   'scripts/tests/shared-root-import-boundary.unit.test.ts': 8,
   'scripts/tests/smoke-binary-cleanup.unit.test.ts': 3,
   'scripts/tests/smoke-step-continuation.unit.test.ts': 15,
-  'scripts/tests/source-scan-stamp.unit.test.ts': 10,
+  'scripts/tests/source-scan-stamp.unit.test.ts': 12,
   'scripts/tests/supervision-fixtures.unit.test.ts': 25,
   'scripts/tests/test-workers-cancel.unit.test.ts': 3,
   'scripts/tests/test-workers-process.unit.test.ts': 10,

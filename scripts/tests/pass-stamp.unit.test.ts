@@ -7,6 +7,7 @@ import { scanCrateInputs } from '../lib/crate-inputs';
 import type { CaptureResult, RunResult } from '../lib/exec';
 import { listCheckoutFiles } from '../lib/git';
 import {
+  hashInputContent,
   PASS_STAMP_DIR,
   passStampKey,
   passStampsEnabled,
@@ -86,8 +87,34 @@ function stamped(task: FakeTask, report: FakeReport, files: string[], enabled = 
   });
 }
 
+describe('hashInputContent', () => {
+  test('is the SHA-256 of the bytes, and null for a directory, a missing path or a path under a file', () => {
+    writeInput('a.rs', 'abc');
+    mkdirSync(join(root, 'submodule'));
+    expect(hashInputContent(join(root, 'a.rs'))).toBe(
+      'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'
+    );
+    expect(hashInputContent(join(root, 'submodule'))).toBeNull();
+    expect(hashInputContent(join(root, 'gone.rs'))).toBeNull();
+    expect(hashInputContent(join(root, 'a.rs', 'below'))).toBeNull();
+  });
+});
+
 describe('passStampKey', () => {
   const facts = { cargo: 'cargo 1.99.0' };
+
+  test('takes each file hash from a supplied hasher and gives the same key as reading the files', () => {
+    writeInput('a.rs', 'a');
+    writeInput('b.rs', 'b');
+    const asked: string[] = [];
+    const recordingHasher = (path: string): string | null => {
+      asked.push(path);
+      return hashInputContent(path);
+    };
+    const inputs = { files: ['b.rs', 'a.rs', 'gone.rs'], facts };
+    expect(passStampKey(root, inputs, recordingHasher)).toBe(passStampKey(root, inputs));
+    expect(asked).toEqual([join(root, 'a.rs'), join(root, 'b.rs'), join(root, 'gone.rs')]);
+  });
 
   test('is the same for the same bytes and facts, however the inputs are ordered', () => {
     writeInput('a.rs', 'a');

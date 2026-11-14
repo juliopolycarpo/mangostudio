@@ -63,14 +63,17 @@ export interface PassStampInputs {
 }
 
 /**
- * The bytes of one listed input, or null when the path carries none: a
- * directory (a submodule in the listing), or a file deleted since the listing
- * was taken. Read in one step, with no existence check first, so the file
- * cannot change between a check and the read.
+ * The SHA-256 of one listed input's bytes, or null when the path carries none:
+ * a directory (a submodule in the listing), or a file deleted since the
+ * listing was taken. Read in one step, with no existence check first, so the
+ * file cannot change between a check and the read.
+ *
+ * @example
+ * hashInputContent('/repo/Cargo.lock'); // 'ab12…' (64 hex)
  */
-function readInputBytes(path: string): Buffer | null {
+export function hashInputContent(path: string): string | null {
   try {
-    return readFileSync(path);
+    return new Bun.CryptoHasher('sha256').update(readFileSync(path)).digest('hex');
   } catch (caught) {
     const code = (caught as NodeJS.ErrnoException).code;
     if (code === 'ENOENT' || code === 'EISDIR' || code === 'ENOTDIR') return null;
@@ -79,19 +82,27 @@ function readInputBytes(path: string): Buffer | null {
 }
 
 /**
- * The key for one set of inputs: file paths and bytes, then the facts, each in
- * sorted order so the same inputs give the same key however they were listed.
+ * The key for one set of inputs: file paths and content hashes, then the
+ * facts, each in sorted order so the same inputs give the same key however
+ * they were listed.
+ *
+ * `contentHash` takes an absolute path and returns what `hashInputContent`
+ * would. A caller may pass one that answers from a cache: the key is the same
+ * as long as the answers are.
  *
  * @example
  * passStampKey('/repo', { files: ['Cargo.lock'], facts: { cargo: 'cargo 1.99.0' } });
  */
-export function passStampKey(rootDir: string, inputs: PassStampInputs): string {
+export function passStampKey(
+  rootDir: string,
+  inputs: PassStampInputs,
+  contentHash: (path: string) => string | null = hashInputContent
+): string {
   const hasher = new Bun.CryptoHasher('sha256');
   hasher.update(`pass-stamp ${STAMP_SCHEMA}\n`);
   for (const file of [...new Set(inputs.files)].sort()) {
-    const bytes = readInputBytes(join(rootDir, file));
-    if (bytes === null) continue;
-    const content = new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
+    const content = contentHash(join(rootDir, file));
+    if (content === null) continue;
     hasher.update(`file ${JSON.stringify(file)} ${content}\n`);
   }
   for (const name of Object.keys(inputs.facts).sort()) {
