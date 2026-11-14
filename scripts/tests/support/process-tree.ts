@@ -8,6 +8,7 @@
 //
 //   runner       the fake root runner: `runCommand`s one fake child, like
 //                `scripts/check.ts` runs `turbo`
+//   runner-exit  a runner that calls `process.exit` while its child is live
 //   child        the fake direct child (the `cargo` of the story): spawns one
 //                grandchild, writes `ready.json` once the grandchild is up, then
 //                waits to be stopped
@@ -87,6 +88,42 @@ export function processGroupOf(pid: number): number {
   return group;
 }
 
+/** The session `pid` belongs to (POSIX only), read through `ps` like {@link processGroupOf}. */
+export function sessionOf(pid: number): number {
+  const out = Bun.spawnSync(['ps', '-o', 'sid=', '-p', String(pid)])
+    .stdout.toString()
+    .trim();
+  const session = Number(out);
+  if (!Number.isInteger(session) || session < 1) {
+    throw new Error(`expected a session for pid ${pid} | received: ${JSON.stringify(out)}`);
+  }
+  return session;
+}
+
+/**
+ * The guardians a live runner started: its direct children running
+ * `runner-guardian.ts`. Matching on the parent keeps this to processes the test
+ * itself started, so it must be read while the runner is alive; a guardian that
+ * outlives a killed runner is no longer anyone's child, so a test records its pid
+ * first and tracks that.
+ *
+ * @example
+ * const [guardian] = findGuardianPids(runner.pid);
+ */
+export function findGuardianPids(runnerPid: number): number[] {
+  const table = Bun.spawnSync(['ps', '-ax', '-o', 'pid=,ppid=,command='])
+    .stdout.toString()
+    .split('\n');
+  const pids: number[] = [];
+  for (const row of table) {
+    const [pid, ppid, ...command] = row.trim().split(/\s+/);
+    if (Number(ppid) === runnerPid && command.join(' ').includes('runner-guardian.ts')) {
+      pids.push(Number(pid));
+    }
+  }
+  return pids;
+}
+
 /**
  * Polls until `done()` holds or `timeoutMs` passes, and reports whether it held.
  *
@@ -160,6 +197,18 @@ async function runFakeProductionCommand(dir: string, phase: string, held: string
   return 0;
 }
 
+/**
+ * Starts the fake child through `runCommand`, waits until it and its grandchild
+ * can take a signal and the test creates `release`, then ends the process with
+ * the child still live, the way an uncaught error or a stray `process.exit` would.
+ */
+async function runFakeExitingRunner(dir: string, extra: string[]): Promise<number> {
+  void runCommand('fake-cargo', fixtureCommand('child', dir, ...extra));
+  await waitFor(() => readReadyPids(dir) !== undefined, FAKE_LIFETIME_MS);
+  await waitFor(() => existsSync(join(dir, RELEASE_FILE)), FAKE_LIFETIME_MS);
+  return 0;
+}
+
 async function runFakeRunner(dir: string, childRole: string, extra: string[]): Promise<number> {
   const interactive = childRole === 'interactive';
   const role = interactive ? 'child' : childRole;
@@ -202,7 +251,10 @@ async function runFakeChild(
   // a shim's.
   const up = join(dir, GRANDCHILD_UP);
   await waitFor(() => existsSync(up) && readFileSync(up, 'utf8') !== '', FAKE_LIFETIME_MS);
-  const ready: ReadyPids = { child: process.pid, grandchild: Number(readFileSync(up, 'utf8')) };
+  const ready: ReadyPids = {
+    child: process.pid,
+    grandchild: Number(readFileSync(up, 'utf8')),
+  };
   writeFileSync(join(dir, 'ready.json'), JSON.stringify(ready));
   await Bun.sleep(FAKE_LIFETIME_MS);
 }
@@ -250,6 +302,7 @@ if (import.meta.main) {
   const [role, dir = '', ...rest] = process.argv.slice(2);
   const numbers = rest.map(Number);
   if (role === 'runner') process.exit(await runFakeRunner(dir, rest[0] ?? 'child', rest.slice(1)));
+  if (role === 'runner-exit') process.exit(await runFakeExitingRunner(dir, rest));
   if (role === 'production-command') {
     process.exit(await runFakeProductionCommand(dir, rest[0] ?? '', rest[1] ?? ''));
   }

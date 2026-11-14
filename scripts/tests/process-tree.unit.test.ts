@@ -30,6 +30,8 @@ class FakeProcessHost implements SupervisorHost {
   readonly graceMs = CANCEL_GRACE_MS;
   readonly groupKills: Array<[pid: number, signal: string]> = [];
   readonly exitStatuses: number[] = [];
+  /** Group kills and `announceStopping` calls in the order they happened. */
+  readonly timeline: string[] = [];
   readonly reports: string[] = [];
   readonly exited: Promise<void>;
   private resolveExited: () => void = () => undefined;
@@ -68,12 +70,17 @@ class FakeProcessHost implements SupervisorHost {
 
   killGroup(pid: number, signal: NodeJS.Signals): void {
     this.groupKills.push([pid, signal]);
+    this.timeline.push(`${signal} ${pid}`);
     // Only SIGKILL stops the members this fake models: they ignore the rest.
     if (signal === 'SIGKILL') this.liveGroups.delete(pid);
   }
 
   groupAlive(pid: number): boolean {
     return this.liveGroups.has(pid);
+  }
+
+  announceStopping(): void {
+    this.timeline.push('stopping');
   }
 
   stdinIsTerminal(): boolean {
@@ -623,6 +630,73 @@ describe('ChildSupervisor', () => {
 
         expect(interactive.signals).toEqual([name]);
       }
+    });
+  });
+
+  // The guardian behind a runner learns from `announceStopping` that the signals
+  // went out, so it does not send a second SIGTERM if the runner then dies.
+  describe('announcing that it has signalled its children', () => {
+    test('after the first cancelling signal went to every child, and not before', async () => {
+      const host = new FakeProcessHost();
+      const supervisor = new ChildSupervisor(host);
+      const first = new FakeChild('a', 101, true);
+      const second = new FakeChild('b', 102, true);
+      watch(host, supervisor, first);
+      watch(host, supervisor, second);
+
+      host.deliver('SIGTERM');
+
+      expect(host.timeline).toEqual(['SIGTERM 101', 'SIGTERM 102', 'stopping']);
+      stop(host, first);
+      stop(host, second);
+      await host.advance(25);
+      await host.exited;
+    });
+
+    test('after the runner ends on its own with children live', () => {
+      const host = new FakeProcessHost();
+      const supervisor = new ChildSupervisor(host);
+      watch(host, supervisor, new FakeChild('lane-group', 101, true));
+
+      host.endProcess();
+
+      expect(host.timeline).toEqual(['SIGTERM 101', 'stopping']);
+    });
+
+    test('after the SIGKILL a second signal escalates to', async () => {
+      const host = new FakeProcessHost();
+      const supervisor = new ChildSupervisor(host);
+      watch(host, supervisor, new FakeChild('lane', 101, true));
+
+      host.deliver('SIGINT');
+      await host.advance(1_500);
+      host.deliver('SIGINT');
+
+      expect(host.timeline).toEqual(['SIGINT 101', 'stopping', 'SIGKILL 101', 'stopping']);
+      await host.exited;
+    });
+
+    test('after the SIGKILL that ends a grace nobody honoured', async () => {
+      const host = new FakeProcessHost();
+      const supervisor = new ChildSupervisor(host);
+      watch(host, supervisor, new FakeChild('lane-stubborn', 101, true));
+
+      host.deliver('SIGTERM');
+      await host.advance(CANCEL_GRACE_MS + 50);
+
+      expect(host.timeline).toEqual(['SIGTERM 101', 'stopping', 'SIGKILL 101', 'stopping']);
+      await host.exited;
+    });
+
+    test('never, while nothing is cancelled or ending', () => {
+      const host = new FakeProcessHost();
+      const supervisor = new ChildSupervisor(host);
+      const child = new FakeChild('lane', 101, true);
+      const release = watch(host, supervisor, child);
+      stop(host, child);
+      release();
+
+      expect(host.timeline).toEqual([]);
     });
   });
 

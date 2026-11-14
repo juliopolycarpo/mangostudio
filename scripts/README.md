@@ -143,9 +143,33 @@ Run one scan from the repository root with
   its own group. Either way Ctrl-C, SIGINT, SIGTERM and SIGHUP to the runner leave no
   `bun --watch`, hub or `mangostudio-runtime` process behind. `devStdinMode` in `scripts/lib/dev.ts`
   makes the choice.
-- **Not covered.** On POSIX, SIGKILL of the runner cannot be caught; the children it already
-  started keep running. A group whose leader had already exited when the signal arrived is not
-  tracked, so a member it left behind is not stopped.
+- **SIGKILL of the runner (POSIX).** SIGKILL and an OOM kill cannot be caught, so the runner
+  forwards nothing. `scripts/lib/runner-guardian.ts` covers it with a guardian process, started
+  before the first child the runner supervises. The guardian leads its own session, has its stdio
+  detached, ignores SIGINT, SIGTERM and SIGHUP, and reads one pipe from the runner. The runner
+  writes a line when it starts owning a child and another when the child has exited. End of file on
+  the pipe means the runner is gone, whatever the cause: the guardian SIGTERMs every child still
+  registered, waits the same 5 s a cancelled runner gives, SIGKILLs what remains and exits. After a
+  normal exit nothing is registered, so the guardian ends at once and signals nothing. A runner that
+  has signalled its children itself (a SIGINT, SIGTERM or SIGHUP it handled, an exit with children
+  still live, the escalation to SIGKILL on a repeated signal or an unmet grace) writes a `stopping`
+  line in the same breath, synchronously. On EOF the guardian then sends no second SIGTERM, since a
+  tool may read a repeated SIGTERM as "force quit": it waits the grace and SIGKILLs only what is
+  still running. A child registered after `stopping` is still sent SIGTERM. A nested runner starts
+  none; the guardian of the runner above covers its group. The cost is one extra Bun process per
+  root runner, which the runner does not wait for: about 1 ms on a `runCommand` call.
+  - A group child is covered with its whole group. A `stdin: 'inherit'` child shares the
+    terminal's foreground group with the shell, so the guardian signals **that pid only** and
+    whatever the child started keeps running.
+  - **Not covered.** A child the runner was killed in the instant before registering; a group
+    whose leader had already exited (it is deregistered then); a guardian that is itself SIGKILLed.
+    A guardian that cannot start, or stops answering, is reported once on stderr and the run
+    carries on without it, as with the Windows job.
+  - **Pid reuse.** The guardian signals only registered children. The runner deregisters a child as
+    soon as it has reaped it, and once the runner is gone the guardian never probes or signals a
+    child again after seeing it gone. A stranger could be hit only if the pid space wrapped inside
+    one of those two windows, a few milliseconds and one 25 ms poll.
+  - Windows never starts a guardian; the job object does the same work.
 
 ## Hub compiler and prepared frontend
 

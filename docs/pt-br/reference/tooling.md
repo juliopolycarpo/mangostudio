@@ -115,7 +115,9 @@ runner Bun do próprio repositório (`scripts/lib/exec.ts`):
   execução da API pode perguntar onde guardar um segredo de autenticação gerado;
   caso contrário o stdin é ignorado. Em SIGINT, SIGTERM ou SIGHUP o runner
   encerra o servidor de dev e tudo o que ele iniciou, inclusive o processo
-  `mangostudio-runtime`; veja "Cancelling a runner" em
+  `mangostudio-runtime`. Se o runner levar SIGKILL, um processo guardião que ele
+  iniciou encerra tudo no lugar dele; a exceção é o servidor que herdou o stdin,
+  onde só o pid do servidor recebe o sinal. Veja "Cancelling a runner" em
   [`scripts/README.md`](../../../scripts/README.md).
 
 `test:integration` e `test:coverage` também não têm cache e continuam passando pelo Turbo.

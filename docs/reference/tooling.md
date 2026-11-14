@@ -129,8 +129,10 @@ Bun runner (`scripts/lib/exec.ts`) instead:
   and stdout, the dev server inherits stdin, so the API's first-run prompt can
   ask where to store a generated auth secret; otherwise stdin is ignored. On
   SIGINT, SIGTERM or SIGHUP the runner stops the dev server and everything it
-  started, including the `mangostudio-runtime` process; see "Cancelling a runner"
-  in [`scripts/README.md`](../../scripts/README.md).
+  started, including the `mangostudio-runtime` process. If the runner is SIGKILLed,
+  a guardian process it started stops them instead; the exception is a server that
+  inherited stdin, where only the server's own pid is signalled. See "Cancelling a
+  runner" in [`scripts/README.md`](../../scripts/README.md).
 
 `test:integration` and `test:coverage` are uncached as well and still run through
 Turbo.
