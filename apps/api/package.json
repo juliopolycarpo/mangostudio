@@ -31,7 +31,7 @@
     "@better-auth/api-key": "1.7.20",
     "@elysia/cors": "2.0.0-rc.1",
     "@elysia/openapi": "2.0.0-rc.1",
-    "@google/genai": "^3.0.0",
+    "@google/genai": "^3.1.0",
     "@mangostudio/protocol": "workspace:*",
     "@mangostudio/shared": "workspace:*",
     "better-auth": "catalog:",
