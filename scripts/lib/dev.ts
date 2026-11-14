@@ -44,10 +44,9 @@ export interface DevTask {
  *
  * It runs from the workspace directory, the cwd Turbo gave the script. `bun run
  * --filter` would add another process and prefix every output line with the
- * package name. The runner starts it with the default `stdin: 'ignore'`, so the
- * dev tree leads its own process group and a SIGINT or SIGTERM to the runner
- * stops all of it. No `env` is passed: the child inherits the ambient
- * environment, as `--env-mode=loose` did.
+ * package name. The caller chooses the stdin mode with {@link devStdinMode}. No
+ * `env` is passed: the child inherits the ambient environment, as
+ * `--env-mode=loose` did.
  *
  * @example
  * createDevTask('api'); // { label: 'api:dev', cmd: ['bun', 'run', 'dev'], cwd: '<root>/apps/api' }
@@ -55,6 +54,29 @@ export interface DevTask {
 export function createDevTask(workspace: WorkspaceName): DevTask {
   return { label: `${workspace}:dev`, cmd: ['bun', 'run', 'dev'], cwd: WORKSPACES[workspace].path };
 }
+
+/**
+ * How the dev server's stdin is wired: `inherit` when the runner has a terminal
+ * on both stdin and stdout, `ignore` otherwise.
+ *
+ * The API's first-run prompt (the generated `BETTER_AUTH_SECRET` storage choice)
+ * needs a TTY on both ends, so `ignore` made a fresh checkout fail without
+ * asking. `inherit` keeps the server in the terminal's foreground group so it
+ * can read the terminal, which the runner supervises as a `direct` child (see
+ * `supervisionMode`). Everywhere else (a pipe, CI, a redirect) the default
+ * `ignore` stays, so the dev tree leads its own process group and a signal to
+ * the runner stops all of it.
+ *
+ * @example
+ * devStdinMode(true, true); // 'inherit'
+ * devStdinMode(true, false); // 'ignore'
+ */
+export function devStdinMode(stdinIsTerminal: boolean, stdoutIsTerminal: boolean): DevStdinMode {
+  return stdinIsTerminal && stdoutIsTerminal ? 'inherit' : 'ignore';
+}
+
+/** The `stdin` option `bun run dev` hands `runCommand`. */
+export type DevStdinMode = 'inherit' | 'ignore';
 
 function isDevWorkspace(workspace: WorkspaceName): boolean {
   return DEV_WORKSPACES.includes(workspace);

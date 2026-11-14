@@ -125,9 +125,12 @@ Bun runner (`scripts/lib/exec.ts`) instead:
   `check:cycles` script runs the same scan by hand.
 - **Dev servers.** `bun run dev` runs `bun run dev` in each selected workspace
   directory (today only `apps/api`). The child inherits the whole environment, as
-  Turbo's `--env-mode=loose` did. On SIGINT or SIGTERM the runner stops the dev
-  server and everything it started, including the `mangostudio-runtime`
-  process; see "Cancelling a runner" in [`scripts/README.md`](../../scripts/README.md).
+  Turbo's `--env-mode=loose` did. When the runner has a terminal on both stdin
+  and stdout, the dev server inherits stdin, so the API's first-run prompt can
+  ask where to store a generated auth secret; otherwise stdin is ignored. On
+  SIGINT, SIGTERM or SIGHUP the runner stops the dev server and everything it
+  started, including the `mangostudio-runtime` process; see "Cancelling a runner"
+  in [`scripts/README.md`](../../scripts/README.md).
 
 `test:integration` and `test:coverage` are uncached as well and still run through
 Turbo.

@@ -135,9 +135,13 @@ Run one scan from the repository root with
   forbids nesting) the runner prints one line to stderr and carries on without the guarantee,
   because a build should not fail over a safety net that only matters when the runner is killed.
 - **Dev server.** `bun run dev` starts `bun run dev` in `apps/api` through `runCommand`, with no
-  Turbo in between. It keeps the default `stdin: 'ignore'`, so the dev tree gets its own group and
-  a SIGINT or SIGTERM to the runner leaves no `bun --watch`, hub or `mangostudio-runtime` process
-  behind.
+  Turbo in between. With a terminal on both stdin and stdout it passes `stdin: 'inherit'`, so the
+  API's first-run prompt (it needs a TTY on both ends) can ask where to store a generated auth secret;
+  the server then stays in the terminal's foreground group and is supervised as a `direct` child.
+  Otherwise (a pipe, CI, a redirect) it keeps the default `stdin: 'ignore'` and the dev tree gets
+  its own group. Either way Ctrl-C, SIGINT, SIGTERM and SIGHUP to the runner leave no
+  `bun --watch`, hub or `mangostudio-runtime` process behind. `devStdinMode` in `scripts/lib/dev.ts`
+  makes the choice.
 - **Not covered.** On POSIX, SIGKILL of the runner cannot be caught; the children it already
   started keep running. A group whose leader had already exited when the signal arrived is not
   tracked, so a member it left behind is not stopped.
