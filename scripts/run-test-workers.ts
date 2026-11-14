@@ -12,6 +12,10 @@
 // more than half the cores, and one on
 // Windows: see resolveWorkerCount).
 //
+// A worker takes `--shard=i/N`, or, for a lane with tracked weights
+// (scripts/lib/test-lane-weights.ts), the explicit files `partitionByWeight`
+// gives it, so the split is balanced and still a function of the commit.
+//
 // A command with anything after the lane's directory (`bun run test --changed`
 // appends `--changed=<sha>`) selects files, so it is not the whole lane and
 // runs as one process exactly as before.

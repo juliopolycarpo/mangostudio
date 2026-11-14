@@ -603,9 +603,11 @@ the `/2` there cannot interpolate the value.
 
 The unit phase of `bun run test` runs `test:scripts:workers` through
 `scripts/run-test-workers.ts --lane=root`. The command after `--` remains
-`bun test --timeout 15000 scripts`. Four workers is the POSIX default, capped
+`bun test --timeout 15000 scripts`. Six workers is the POSIX default, capped
 at half the CPU cores with a minimum of one. Windows defaults to one;
-`MANGO_TEST_WORKERS=<1-8>` overrides either default.
+`MANGO_TEST_WORKERS=<1-8>` overrides either default. Each worker runs explicit
+files chosen from tracked weights, see
+[Balancing workers by tracked weights](#balancing-workers-by-tracked-weights).
 
 The original `test:scripts` command remains serial for coverage, CI shards,
 and changed-file selection. Its report is `.mango/artifacts/junit/root.xml`;
@@ -620,8 +622,8 @@ files outside `scripts/`: `wsl-runtime-scripts.integration.test.ts` and
 requires every file exactly once and complete, nonempty worker reports before
 accepting its merged report. Serial comparisons qualify case and outcome parity.
 
-The width comparison used three serial samples and three at each candidate
-width on source `49bb715f686620f94e04e650c229ca34a8b5ca96`, under WSL with direct
+The first width comparison, made when the split was Bun's round-robin
+`--shard`, used three serial samples and three at each candidate width on source `49bb715f686620f94e04e650c229ca34a8b5ca96`, under WSL with direct
 lane commands and no Turbo hits. All reports contained 2,599 cases across 182
 files: 2,586 pass, 13 skip, zero fail. The rule selected the smallest clean
 width within 10% of the fastest median; four was within that band and reduced
@@ -642,6 +644,9 @@ feature. They do not qualify a default-only runtime or native Windows width.
 Process-tree RSS counts shared pages per process and excludes native
 PowerShell memory. Final correctness uses a separately built default runtime,
 whose checksum must remain unchanged while building the fake example.
+
+That table is the round-robin split. The weighted split moved the default from
+four to six; its measurements are in the weights section below.
 
 The actual root workers and launchers retain `--no-orphans`. Named handshake,
 signal, watchdog and cancellation fakes use `fixtureChildEnvironment()` with
@@ -728,8 +733,10 @@ Things this deliberately does not do:
   not change it.
 - **No timings file.** The split would then depend on an untracked file that every
   coverage run refreshes, and rotate between runs (see
-  [Why the unisolated lane opts out too](#why-the-unisolated-lane-opts-out-too)
-  for what that costs). Round-robin is a function of the file set.
+  [Why API integration keeps a split that is a function of the commit](#why-api-integration-keeps-a-split-that-is-a-function-of-the-commit)
+  for what that costs). Round-robin is a function of the file set. The root and
+  API integration lanes balance by tracked weights instead; see
+  [Balancing workers by tracked weights](#balancing-workers-by-tracked-weights).
 - **A selected run is one process.** `bun run test --changed` appends
   `--changed=<sha>` after the lane directory; anything there selects files, so the
   runner starts the command through the launcher as it always was. A split run would
@@ -773,10 +780,11 @@ throwaway tree.
 `bun run test` and `bun run --filter @mangostudio/api test:integration` also use
 `scripts/run-test-workers.ts`. Integration defaults to four workers, capped at
 half the available cores. `MANGO_TEST_WORKERS=<1-8>` overrides the width. Each
-worker runs the unchanged unisolated command, `bun test --timeout 15000
-tests/integration`, over its deterministic `--shard=i/N` slice. It does not use
-Bun's in-process `--parallel` or a timings file. Coverage keeps its existing
-single-process, unisolated command and CI shard matrix.
+worker runs the unisolated command, `bun test --timeout 15000`, over the
+explicit files its tracked-weights split gives it (see
+[Balancing workers by tracked weights](#balancing-workers-by-tracked-weights)).
+It does not use Bun's in-process `--parallel` or a timings file. Coverage keeps
+its existing single-process, unisolated command and CI `--shard=i/N` matrix.
 
 The integration workers own their temporary homes and managed config paths,
 in-memory databases, OS-assigned ports and separate reports, as the unit workers
@@ -863,7 +871,7 @@ The root `//#test:scripts` lane uses the same snapshot. Turbo explicitly hashes
 `.mango/artifacts/timings/root.json` along with the shard arguments and restores
 both the JUnit report and the updated timings slice on a cache hit.
 
-#### Why API integration keeps file-order sharding
+#### Why API integration keeps a split that is a function of the commit
 
 `api-integration` files share one module graph, so the other files in a shard
 decide what each file inherits, including the in-memory database from
@@ -881,10 +889,10 @@ Round-robin is derived by each shard from the file set alone, so the same commit
 always produces the same partition and a leak is reproducible from the SHA.
 Measured on the 101-file lane (Bun 1.4.0, 85.3s total, `--shard=i/8`):
 
-| Split                                | Critical shard | Reproducible |
-| ------------------------------------ | -------------- | ------------ |
-| `--timings`, balanced (rotates)      | 20.3s          | no           |
-| Round-robin (what the lane now runs) | 29.9s          | yes          |
+| Split                            | Critical shard | Reproducible |
+| -------------------------------- | -------------- | ------------ |
+| `--timings`, balanced (rotates)  | 20.3s          | no           |
+| Round-robin (what CI shards run) | 29.9s          | yes          |
 
 +9.6s, and cheap because one file (`spawn-runtime-child`, 20.3s) is 24% of the
 lane and is the floor under _any_ split — the balancing had little left to win.
@@ -905,6 +913,86 @@ If the nightly's unisolated lane does go red on cross-file leakage, the
 escalation is to unshard `api-integration` and run it whole in its own CI job the
 way the frontend lane does — correct by construction, at 85.3s on the critical
 path instead of 29.9s.
+
+The rule is that the partition is a function of the commit. Round-robin is one
+way to meet it, and the plain `test:integration` run now meets it with tracked
+weights: the same commit gives the same files in the same workers and the same
+order inside each worker (path order, which Bun keeps; the contract test pins
+it). The split changes every file's companions once, and a worker's companions
+are no longer those of a CI `--shard=i/N` shard of the same width. Eight runs of
+the weighted lane (three measured, five more as a soak) had no failure and ran
+the same 1,309 cases as the round-robin lane. If a weighted run fails where a
+round-robin run passes, the cause is a leak the old companions hid. Report it
+with the files that shared the worker, and put the lane back on `--shard` by
+removing its entry from `LANE_WEIGHTS` while the leak is fixed.
+
+#### Balancing workers by tracked weights
+
+Bun's `--shard=i/N` gives file `k` of the sorted list to shard `k % N + 1`, so the
+heaviest files can land together by accident of their names. In the root lane
+they did: `run-tests-watchdog`, `check-cache`, `supervision-fixtures`,
+`import-cycles`, `exec-process-tree`, `test-workers-process`, `capture-process`
+and `native-build-command` all sorted into shard 1, which held 217.0 s in the
+median run while the other three held 39.4 s, 46.4 s and 59.5 s. The root and API
+integration lanes now balance by weights that are source:
+
+- `scripts/lib/test-lane-weights.ts` lists each file that took 3 s or more with
+  its time in seconds, read from the per-file `<testsuite time>` of a lane
+  report, rounded to the nearest second below 10 s and to the nearest 5 s from
+  10 s up. An unlisted file weighs 1.
+- The runner sorts the lane's files by weight, heaviest first (ties by path), and
+  gives each to the worker with the least weight so far (ties to the lowest
+  index). Each worker's files run in path order and arrive as `./path` arguments
+  in place of the lane directory. The partition is a pure function of the file
+  list and the manifest, so every machine and every run derives the same one from
+  the same commit (`partitionByWeight` in `scripts/lib/test-workers.ts`). Paths
+  compare by code unit, never by locale.
+- A `./`-prefixed argument selects its file and nothing else. A bare argument is
+  a substring filter, so `a.test.ts` would also run `a.test.tsx`.
+  `test-workers-shard-contract.unit.test.ts` runs real Bun to pin that, a path
+  prefix selecting nothing, and Bun running the given files in the order given.
+- The census is unchanged: the files in the reports must equal the files the lane
+  owns, each in one report. The list is the one the runner already built with
+  `discoverTestFiles` plus `alsoRuns`. A file that `bun test scripts` would select
+  and the list lacks is run by no worker, and `root-lane-workers.unit.test.ts`
+  fails on it before the lane does.
+- These keep their commands: one worker (the serial command), a selected run
+  (`--changed` or a name filter, one process), Windows (the serial command by
+  default, `--shard` when a width is set) and the API unit lane (`--shard`). CI's
+  shards and both coverage scripts also stay on `--shard`, with Bun's timings.
+- No test asserts a timing. `test-lane-weights.unit.test.ts` checks that every
+  listed path is a file the lane owns, each weight is an integer above 1, the keys
+  are in path order, the split is the same whatever order the files arrive in, and
+  no worker is empty (a worker with no file argument would run the whole lane).
+  A stale weight costs balance and nothing else.
+
+To refresh the weights, run the lane three times, average each file's
+`<testsuite time>` in `.mango/artifacts/test-workers/<lane>.xml`, round as above
+and keep the keys sorted. A refresh is optional.
+
+Measured on a 28-CPU host shared with other work (load average 4 to 25 at the
+start of a run), median of three runs, each lane run directly:
+`bun ./scripts/run-test-workers.ts --lane=root -- bun test --timeout 15000
+scripts` and `bun ../../scripts/run-test-workers.ts --lane=api-integration -- bun
+test --timeout 15000 tests/integration` from `apps/api`.
+
+| Lane            | Split           | Workers | Wall (median) | Slowest and fastest worker (median run) | Cases |
+| --------------- | --------------- | ------- | ------------- | --------------------------------------- | ----- |
+| root            | `--shard` (old) | 4       | 217.2 s       | 217.0 s and 39.4 s                      | 6,218 |
+| root            | weights         | 4       | 104.9 s       | 104.7 s and 88.8 s                      | 6,263 |
+| root            | weights         | 6       | 76.5 s        | 76.4 s and 61.4 s                       | 6,263 |
+| api-integration | `--shard` (old) | 4       | 79.4 s        | 79.3 s and 25.7 s                       | 1,309 |
+| api-integration | weights         | 4       | 63.7 s        | 63.6 s and 53.7 s                       | 1,309 |
+
+The root lane runs 45 more cases after the change, from the tests of the
+partition and the manifest; the other 316 files report the same cases and
+outcomes. The api-integration reports are identical case for case, 0 failed. Six
+root workers beat four by 27%. The rule used for the API unit lane is to move off
+four only for a width at least 10% faster with equal reports, so the root lane
+takes the runner's default of six, still capped at half the cores. A split cannot
+go below its heaviest file: `check-cache` and `run-tests-watchdog` weigh 35 each
+in the root lane, `terminal-socket` and `rust-runtime-qualification` 25 each in
+api-integration.
 
 #### Merging is not concatenation
 

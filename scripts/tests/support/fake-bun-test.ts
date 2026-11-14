@@ -53,7 +53,14 @@ async function main(argv: readonly string[]): Promise<void> {
   const flag = (name: string): string | undefined =>
     argv.find((arg) => arg.startsWith(`${name}=`))?.slice(name.length + 1);
   const outfile = flag('--reporter-outfile');
-  const [index, count] = (flag('--shard') ?? '1/1').split('/').map(Number) as [number, number];
+  // A worker of a weighted lane has no `--shard` and names its files as `./path`
+  // arguments; its place in the lane is then in its report's name,
+  // `worker-<index>-of-<count>.xml`.
+  const named = argv.filter((arg) => arg.startsWith('./')).map((arg) => arg.slice(2));
+  const place = named.length > 0 ? /worker-(\d+)-of-(\d+)\.xml$/.exec(outfile ?? '') : null;
+  const [index, count] = (flag('--shard') ?? (place ? `${place[1]}/${place[2]}` : '1/1'))
+    .split('/')
+    .map(Number) as [number, number];
   const mode = (JSON.parse(process.env.MANGOSTUDIO_FAKE_WORKER_MODES ?? '{}')[String(index)] ??
     'pass') as Mode;
 
@@ -63,11 +70,13 @@ async function main(argv: readonly string[]): Promise<void> {
 
   // The lane's directory is the last argument, as in the real command.
   const testDir = argv.at(-1) ?? 'tests/unit';
-  const files = discoverTestFiles(process.cwd(), testDir).map((path) => ({
-    path,
-    cases: Array.from({ length: FAKE_CASES_PER_FILE }, (_, item) => `case ${item}`),
-    outcome: mode === 'exit1' ? ('fail' as const) : undefined,
-  }));
+  const files = (named.length > 0 ? named : discoverTestFiles(process.cwd(), testDir)).map(
+    (path) => ({
+      path,
+      cases: Array.from({ length: FAKE_CASES_PER_FILE }, (_, item) => `case ${item}`),
+      outcome: mode === 'exit1' ? ('fail' as const) : undefined,
+    })
+  );
 
   if (mode === 'sigkill') process.kill(process.pid, 'SIGKILL');
   if (mode === 'hang-session-pipes') {
@@ -144,7 +153,7 @@ async function main(argv: readonly string[]): Promise<void> {
     leaked.unref();
   }
   if (mode !== 'no-report' && outfile) {
-    writeFileSync(outfile, reportOf(shardOf(files, { index, count })));
+    writeFileSync(outfile, reportOf(named.length > 0 ? files : shardOf(files, { index, count })));
   }
   process.exit(mode === 'exit1' ? 1 : 0);
 }

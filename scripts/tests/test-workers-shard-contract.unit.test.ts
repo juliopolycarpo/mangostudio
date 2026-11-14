@@ -1,5 +1,6 @@
 /**
- * The runner leaves the file split to `bun test --shard=i/N` and checks the
+ * The runner leaves the file split to `bun test --shard=i/N` (or hands each worker
+ * explicit `./path` files, for a lane with weights) and checks the
  * result, so the split has to be what the check assumes: deterministic, every
  * file in exactly one shard, and the same files `discoverTestFiles` counts.
  * This runs real Bun over a throwaway tree, so a Bun release that changes any
@@ -26,6 +27,7 @@ const FILE_NAMES = [
   'deep/er/h.spec.ts',
   'deep/i_test.ts',
   'deep/j_spec.ts',
+  'deep/k.test.ts',
   'deep/k.test.tsx',
   'deep/l.test.js',
   'deep/m.test.jsx',
@@ -52,8 +54,12 @@ beforeAll(() => {
 
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-/** The files whose cases `bun test` reported, as the report spells them. */
-function filesOfRun(label: string, ...flags: string[]): string[] {
+/** The files whose cases `bun test` reported, as the report spells them, in the order it ran them. */
+function reportedFiles(
+  label: string,
+  flags: readonly string[],
+  selection: readonly string[]
+): string[] {
   const outfile = join(root, `${label}.xml`);
   const run = Bun.spawnSync(
     [
@@ -62,7 +68,7 @@ function filesOfRun(label: string, ...flags: string[]): string[] {
       '--reporter=junit',
       `--reporter-outfile=${outfile}`,
       ...flags,
-      TEST_DIR,
+      ...selection,
     ],
     { cwd: root, stdout: 'pipe', stderr: 'pipe' }
   );
@@ -73,8 +79,19 @@ function filesOfRun(label: string, ...flags: string[]): string[] {
   const files = parseJunitXml(readFileSync(outfile, 'utf8')).cases.flatMap((reported) =>
     reported.file ? [reported.file.replaceAll('\\', '/')] : []
   );
-  return [...new Set(files)].sort();
+  return [...new Set(files)];
 }
+
+/** The files whose cases `bun test` reported, sorted, for the lane directory and `flags`. */
+const filesOfRun = (label: string, ...flags: string[]): string[] =>
+  reportedFiles(label, flags, [TEST_DIR]).sort();
+
+/** Like {@link filesOfRun}, for the files or filters given in place of the lane directory. */
+const filesOfArguments = (
+  label: string,
+  flags: readonly string[],
+  selection: readonly string[]
+): string[] => reportedFiles(label, flags, selection).sort();
 
 describe('bun test --shard', () => {
   it('runs exactly the files discoverTestFiles counts', () => {
@@ -106,6 +123,64 @@ describe('bun test --shard', () => {
       expect(second).toEqual(first);
     });
   }
+});
+
+// A weighted lane hands each worker `./path` arguments (see `planWorkers`). A
+// bare argument is a substring filter, so `a.test.ts` would also select
+// `a.test.tsx`; a `./` one has to select its own file and nothing else.
+describe('bun test with ./path arguments', () => {
+  const named = (files: readonly string[]): string[] => files.map((file) => `./${file}`);
+
+  it('selects the one file named, not a file whose path merely contains it', () => {
+    const lone = `${TEST_DIR}/deep/k.test.ts`;
+
+    expect(
+      filesOfArguments('lone-prefix', [], named([lone])),
+      `expected ./${lone} to select only ${lone}, not ${lone}x`
+    ).toEqual([lone]);
+  });
+
+  // An unisolated lane's files share a module graph, so the order they run in
+  // decides what each inherits. The runner passes each worker's files in path
+  // order; this pins that Bun then runs them in the order given and not in an
+  // order of its own, which would make the per-worker sort a no-op.
+  it.each([
+    ['path order', (files: string[]) => files],
+    ['reverse path order', (files: string[]) => [...files].reverse()],
+  ])('runs the files in the order they are given: %s', (label, arrange) => {
+    const group = discoverTestFiles(root, TEST_DIR).filter((_, at) => at % 2 === 0);
+    const given = arrange(group);
+
+    expect(
+      reportedFiles(`order-${label.replaceAll(' ', '-')}`, [], named(given)),
+      `expected bun test to run ${given.length} files in the order given | received: another order`
+    ).toEqual(given);
+  });
+
+  it('selects nothing for a prefix of a file name', () => {
+    const run = Bun.spawnSync([process.execPath, 'test', `./${TEST_DIR}/deep/k.te`], {
+      cwd: root,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+
+    expect(run.exitCode, 'expected a path prefix to select no file and fail').not.toBe(0);
+    expect(run.stderr.toString()).toContain('had no matches');
+  });
+
+  it('runs the files of every group once when the lane is split into explicit groups', () => {
+    const everything = discoverTestFiles(root, TEST_DIR);
+    const groups = [
+      everything.filter((_, at) => at % 3 === 0),
+      everything.filter((_, at) => at % 3 === 1),
+      everything.filter((_, at) => at % 3 === 2),
+    ];
+
+    const ran = groups.map((group, at) => filesOfArguments(`explicit-${at}`, [], named(group)));
+
+    expect(ran).toEqual(groups.map((group) => [...group].sort()));
+    expect(ran.flat().sort()).toEqual(everything);
+  });
 });
 
 describe('bun test --no-orphans', () => {

@@ -132,7 +132,8 @@ export const TEST_LANES: readonly TestLane[] = [
     // the JUnit report. A hit must describe the same partition as a fresh run.
     timingsPath: `${TIMINGS_DIR}/root.json`,
     // The plain run (`test:scripts:workers`, the unit phase of `bun run test`)
-    // is split across worker processes; `test:scripts` stays one `bun test`
+    // is split across worker processes, balanced by the tracked weights in
+    // `test-lane-weights.ts`; `test:scripts` stays one `bun test`
     // because it is the coverage phase's and CI's, and writes `junitPath`.
     //
     // `scripts` is a substring filter, not a directory: `bun test scripts` also
@@ -140,9 +141,12 @@ export const TEST_LANES: readonly TestLane[] = [
     // both lanes today and stay in both, so the lanes run the same tests;
     // `root-lane-workers.unit.test.ts` fails when this list and the filter's
     // matches disagree.
+    //
+    // No `defaultWidth`: with the weighted split six workers beat four (median
+    // wall 76.5 s against 104.9 s), so the lane takes the runner's default of
+    // six. docs/reference/testing.md has the measurements.
     workers: {
       testDir: 'scripts',
-      defaultWidth: 4,
       alsoRuns: [
         'apps/api/tests/integration/modules/environments/wsl-runtime-scripts.integration.test.ts',
         'apps/api/tests/unit/modules/environments/runtime-slot-scripts.test.ts',
@@ -216,9 +220,12 @@ export const TEST_LANES: readonly TestLane[] = [
     // nightly's job (`.github/workflows/randomized-order-nightly.yml`).
     //
     // The plain `test:integration` run is the one place the lane goes wider: as
-    // several processes, each an unisolated `bun test` over the round-robin
-    // slice `--shard=i/N` gives it, so a worker's companions are the same ones a
-    // CI shard of that width has. `settle` makes each worker prove it left no
+    // several processes, each an unisolated `bun test` over the explicit files
+    // `partitionByWeight` gives it from the tracked weights in
+    // `test-lane-weights.ts`, in path order. That split is a function of the
+    // commit like the round-robin one, so a leak is reproducible from the SHA,
+    // but a worker's companions are no longer the ones a CI shard of that width
+    // has (CI keeps `--shard=i/N`). `settle` makes each worker prove it left no
     // process behind (these tests spawn the runtime, servers and shells).
     // `test:coverage:integration` stays one process, for the reason the api-unit
     // entry gives.

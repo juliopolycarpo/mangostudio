@@ -738,6 +738,7 @@ describe('a worker whose exit is never reported', () => {
       laneId: 'wedged',
       cwd: tmpdir(),
       argv: [process.execPath, '-e', 'await Bun.sleep(30_000)'],
+      files: null,
       reportPath: '',
       settle,
       env: settle ? { [WORKER_TOKEN_ENV]: `wedged-${process.pid}-${Date.now()}` } : {},
