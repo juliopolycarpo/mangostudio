@@ -109,6 +109,29 @@ export function listCycleScanTreeSymlinks(rootDir: string): string[] {
 }
 
 /**
+ * `listCycleScanTreeFiles` and `listCycleScanTreeSymlinks` from one walk, for a
+ * caller that needs both and would otherwise read every directory twice.
+ *
+ * @example
+ * listCycleScanTree('/repo', /\.tsx?$/); // { files: ['apps/api/src/app.ts'], symlinks: [] }
+ */
+export function listCycleScanTree(
+  rootDir: string,
+  pattern: RegExp
+): { files: string[]; symlinks: string[] } {
+  const files: string[] = [];
+  const symlinks: string[] = [];
+  walkCycleScanTree(rootDir, (entry, absolute, path) => {
+    if (entry.isFile() && pattern.test(entry.name)) files.push(path);
+    else if (entry.isSymbolicLink()) {
+      const line = describeSymlink(path, absolute);
+      if (line !== null) symlinks.push(line);
+    }
+  });
+  return { files: files.sort(), symlinks: symlinks.sort() };
+}
+
+/**
  * `text` with the platform separator spelled `/`, so a path from the OS reads like
  * the POSIX paths Git lists. Where the separator is already `/` the text is
  * returned as is: a backslash is then an ordinary filename character.

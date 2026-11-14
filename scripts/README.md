@@ -66,6 +66,7 @@ importing the specific module in new code:
 | `source-scans.ts`         | The source scans `check` runs as separate processes, and their commands                                  |
 | `source-scan-paths.ts`    | Which files each source scan enumerates from disk; the scans and their pass stamp both call it           |
 | `source-scan-stamp.ts`    | Input files, facts and the shared digest behind the seven source scans' pass stamps                      |
+| `file-hash-cache.ts`      | Persistent per-file SHA-256 cache (stat-validated) that the source scan digest reads through             |
 | `changelog.ts`            | git-cliff arg/format logic (wrapped behind a project API)                                                |
 | `npm-pack.ts`             | npm distribution manifest builders                                                                       |
 | `release-version.ts`      | Canonical release version resolver + lockstep consistency check                                          |
@@ -111,7 +112,9 @@ Outside CI, `bun run check` replays the seven source scans (`frontend:cycles`, `
 `root:shared-import-boundary`) from a pass stamp in `.mango/pass-stamps` when no JS, TS or JSON
 file, lockfile or Bun build changed since they last passed. The summary labels such a task
 `(replayed <key>)`. `bun run check --force` runs them and passes `--force` to Turbo; report
-runs (`--report-file`) never replay. The key and what it leaves out are in
+runs (`--report-file`) never replay. A run takes two digests of the scan inputs: one before the
+scans start and one after the last of them ends, shared by every scan that passed. A per-file
+hash cache in `.mango/pass-stamps` means unchanged files are not read again. The key and what it leaves out are in
 `lib/source-scan-stamp.ts` and "Pass stamps" in
 [`docs/reference/testing.md`](../docs/reference/testing.md).
 

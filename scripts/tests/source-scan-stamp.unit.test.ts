@@ -2,10 +2,13 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import {
   chmodSync,
   cpSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,10 +17,11 @@ import { dirname, join } from 'node:path';
 import { createWorkspaceCycleCommand } from '../lib/check';
 import { ROOT_DIR, ROOT_LINT_PATHS } from '../lib/config';
 import type { RunResult } from '../lib/exec';
+import { createFileHashCache } from '../lib/file-hash-cache';
 import { listCheckoutFiles } from '../lib/git';
 import { createImportCycleCommand } from '../lib/import-cycle-command';
 import { listImportGraphFiles } from '../lib/import-cycles';
-import { readPassStamp } from '../lib/pass-stamp';
+import { hashInputContent, readPassStamp } from '../lib/pass-stamp';
 import {
   listFrontendBoundaryPaths,
   listNodeEnvScanPaths,
@@ -328,6 +332,201 @@ describe('sourceScanInputDigest', () => {
   });
 });
 
+/** A wall clock a test sets: files written a moment ago are "recent" or "old" at its say. */
+class FakeClock {
+  constructor(public ms: number) {}
+  now = (): number => this.ms;
+}
+
+/** The content reader behind a cache miss; records each path it is asked to read. */
+class CountingHasher {
+  paths: string[] = [];
+  hash = (path: string): string | null => {
+    this.paths.push(path);
+    return hashInputContent(path);
+  };
+  readsOf(path: string): number {
+    return this.paths.filter((read) => read === path).length;
+  }
+}
+
+describe('sourceScanInputDigest with a file hash cache', () => {
+  const FAR_FUTURE_MS = 180_000;
+  const EDITED = 'apps/api/src/index.ts';
+
+  function setup(files: Readonly<Record<string, string>> = BASE_FILES) {
+    const root = createRepository(files);
+    const cachePath = join(createDirectory('mango-source-scan-hash-cache-'), 'hashes.cache');
+    const clock = new FakeClock(Date.now() + FAR_FUTURE_MS);
+    const hasher = new CountingHasher();
+    // A new cache per call reads the persisted file, as the next check run would.
+    const digestWithCache = (): string =>
+      sourceScanInputDigest(
+        root,
+        createFileHashCache(cachePath, { now: clock.now, hashFile: hasher.hash })
+      );
+    return { root, cachePath, clock, hasher, digestWithCache };
+  }
+
+  test('a cold cache, a warm cache and no cache give the same digest, and the warm one reads nothing', () => {
+    const { root, hasher, digestWithCache } = setup();
+    const plain = sourceScanInputDigest(root);
+    const cold = digestWithCache();
+    const coldReads = hasher.paths.length;
+    const warm = digestWithCache();
+    expect(
+      cold,
+      `(source scan digest): expected cold = no cache ${plain} | received: ${cold}`
+    ).toBe(plain);
+    expect(
+      warm,
+      `(source scan digest): expected warm = no cache ${plain} | received: ${warm}`
+    ).toBe(plain);
+    expect(coldReads, '(source scan digest): expected the cold pass to read files').toBeGreaterThan(
+      0
+    );
+    expect(
+      hasher.paths.length,
+      `(source scan digest): expected 0 reads on the warm pass | received: ${hasher.paths.length - coldReads}`
+    ).toBe(coldReads);
+  });
+
+  test('one cache object serves two digests in a row without rereading', () => {
+    const { root, cachePath, clock, hasher } = setup();
+    const cache = createFileHashCache(cachePath, { now: clock.now, hashFile: hasher.hash });
+    const first = sourceScanInputDigest(root, cache);
+    const reads = hasher.paths.length;
+    expect(sourceScanInputDigest(root, cache)).toBe(first);
+    expect(hasher.paths.length).toBe(reads);
+  });
+
+  test('an edit is seen by a warm cache: only the edited file is read again', () => {
+    const { root, hasher, digestWithCache } = setup();
+    const before = digestWithCache();
+    write(root, EDITED, 'export const api = 22;\n');
+    const edited = digestWithCache();
+    expect(edited).toBe(sourceScanInputDigest(root));
+    expect(edited).not.toBe(before);
+    expect(hasher.readsOf(join(root, EDITED))).toBe(2);
+    expect(hasher.readsOf(join(root, 'apps/shared/src/index.ts'))).toBe(1);
+  });
+
+  // The ctime guard needs a rewrite whose size and mtime match and whose inode
+  // is the same. `utimes` and ctime semantics differ on Windows, so it stays off there.
+  test.skipIf(process.platform === 'win32')(
+    'a same-size rewrite with the mtime restored still changes the digest',
+    () => {
+      const { root, cachePath, hasher, digestWithCache } = setup();
+      const path = join(root, EDITED);
+      const pinned = 1_700_000_000;
+      utimesSync(path, pinned, pinned);
+      const before = digestWithCache();
+      // The fake clock is a minute ahead, so the entry is stored: only the ctime can reject it.
+      const stored = (
+        JSON.parse(readFileSync(cachePath, 'utf8')) as {
+          files: Record<string, { size: string; mtimeNs: string; ctimeNs: string; ino: string }>;
+        }
+      ).files[path];
+      expect(
+        stored,
+        `(ctime guard): expected a stored entry for ${EDITED} before the rewrite | received: none`
+      ).toBeDefined();
+      // Past the kernel's coarse ctime tick, so the rewrite gets a different ctime.
+      Bun.sleepSync(20);
+      writeFileSync(path, 'export const api = 2;\n');
+      utimesSync(path, pinned, pinned);
+      const statAfter = lstatSync(path, { bigint: true });
+      expect(
+        {
+          size: statAfter.size.toString(),
+          mtimeNs: statAfter.mtimeNs.toString(),
+          ino: statAfter.ino.toString(),
+        },
+        '(ctime guard): expected a rewrite with the stored size, mtime and inode'
+      ).toEqual({ size: stored?.size, mtimeNs: stored?.mtimeNs, ino: stored?.ino });
+      expect(
+        statAfter.ctimeNs.toString(),
+        `(ctime guard): expected ctime to move on rewrite | received: ${stored?.ctimeNs} unchanged`
+      ).not.toBe(stored?.ctimeNs);
+      const after = digestWithCache();
+      expect(
+        after,
+        '(source scan digest): expected a different digest after a same-size rewrite | received: unchanged'
+      ).not.toBe(before);
+      expect(after).toBe(sourceScanInputDigest(root));
+      expect(hasher.readsOf(path)).toBe(2);
+    }
+  );
+
+  test.each([
+    ['an empty file', ''],
+    ['text that is not JSON', 'this is not json'],
+    ['a JSON array', '[]'],
+    ['a cache from another schema version', '{"schema":999,"files":{}}'],
+    ['a cache without a file table', '{"schema":1}'],
+    [
+      'an entry that is not an object',
+      '{"schema":1,"files":{"/x":"nope","/y":{"sha256":"not-hex"}}}',
+    ],
+  ])('%s as the cache file is ignored', (_name, content) => {
+    const { root, cachePath, hasher, digestWithCache } = setup();
+    writeFileSync(cachePath, content);
+    const digest = digestWithCache();
+    expect(digest).toBe(sourceScanInputDigest(root));
+    expect(hasher.readsOf(join(root, EDITED))).toBe(1);
+    // The ignored file is replaced by a usable one, so the next pass is warm.
+    const reads = hasher.paths.length;
+    expect(digestWithCache()).toBe(digest);
+    expect(hasher.paths.length).toBe(reads);
+  });
+
+  test('a poisoned entry for a file whose stat differs is not believed', () => {
+    const { root, cachePath, digestWithCache } = setup();
+    const path = join(root, EDITED);
+    const wrong = {
+      [path]: { size: '1', mtimeNs: '1', ctimeNs: '1', ino: '1', sha256: 'f'.repeat(64) },
+    };
+    writeFileSync(cachePath, JSON.stringify({ schema: 1, files: wrong }));
+    expect(digestWithCache()).toBe(sourceScanInputDigest(root));
+  });
+
+  test('a file written within the racy window is read on every pass until it settles', () => {
+    const { root, clock, hasher, digestWithCache } = setup();
+    const path = join(root, EDITED);
+    // The files were written just now, so "now" is inside their racy window.
+    clock.ms = Date.now();
+    digestWithCache();
+    digestWithCache();
+    expect(
+      hasher.readsOf(path),
+      '(racy window): expected 2 reads in 2 passes inside the window'
+    ).toBe(2);
+    clock.ms = Date.now() + FAR_FUTURE_MS;
+    digestWithCache();
+    digestWithCache();
+    expect(
+      hasher.readsOf(path),
+      '(racy window): expected 1 more read, then a cache hit, once the window had passed'
+    ).toBe(3);
+  });
+
+  test('a cache that cannot be written does not change the digest', () => {
+    const { root, hasher } = setup();
+    // A regular file where the cache directory should be: mkdir and rename both fail.
+    const blocker = join(createDirectory('mango-source-scan-hash-blocker-'), 'file');
+    writeFileSync(blocker, 'not a directory');
+    const clock = new FakeClock(Date.now() + FAR_FUTURE_MS);
+    const digest = sourceScanInputDigest(
+      root,
+      createFileHashCache(join(blocker, 'hashes.cache'), {
+        now: clock.now,
+        hashFile: hasher.hash,
+      })
+    );
+    expect(digest).toBe(sourceScanInputDigest(root));
+  });
+});
+
 describe('sourceScanTaskKey', () => {
   const COMMAND = ['bun', 'scripts/check-import-cycles.ts', 'apps/api'];
   const DIGEST = 'a'.repeat(64);
@@ -361,11 +560,48 @@ class FakeScan {
 class FakeDigest {
   calls = 0;
   value = 'inputs-one';
+  constructor(private readonly timeline?: Timeline) {}
   take = (): string => {
     this.calls += 1;
+    this.timeline?.events.push('digest');
     return this.value;
   };
 }
+
+/** The order digests were taken and scans ended in. */
+class Timeline {
+  events: string[] = [];
+}
+
+/** A scan that runs until the test ends it, so the test decides who ends when. */
+class HeldScan {
+  starts = 0;
+  private finish: (result: RunResult) => void = () => undefined;
+  private fail: (reason: Error) => void = () => undefined;
+  constructor(
+    readonly label: string,
+    private readonly timeline: Timeline
+  ) {}
+  run = (): Promise<RunResult> => {
+    this.starts += 1;
+    return new Promise((resolve, reject) => {
+      this.finish = resolve;
+      this.fail = reject;
+    });
+  };
+  end(exitCode = 0): void {
+    this.timeline.events.push(`end ${this.label}`);
+    this.finish({ label: this.label, exitCode, duration: 5 });
+  }
+  /** The scan cannot run at all: its process did not spawn. */
+  cannotStart(): void {
+    this.timeline.events.push(`end ${this.label}`);
+    this.fail(new Error(`spawn ${this.label} ENOENT`));
+  }
+}
+
+/** Let every timer and microtask that is due run. */
+const settleTimers = (): Promise<void> => Bun.sleep(15);
 
 class FakeReport {
   lines: string[] = [];
@@ -436,8 +672,169 @@ describe('createSourceScanStamper', () => {
       '(source scan stamper): expected every scan to start after exactly 1 digest'
     ).toEqual([1, 1, 1]);
     expect(scans.map((scan) => scan.starts)).toEqual([1, 1, 1]);
-    // Scans that end in the same turn share one after digest.
-    expect(digest.calls).toBeLessThan(2 * scans.length);
+    // Every scan ends in the same turn, so they share one after digest.
+    expect(digest.calls, '(source scan stamper): expected 1 before and 1 after digest').toBe(2);
+  });
+
+  describe('a check run of seven scans', () => {
+    const LABELS = [
+      'frontend:cycles',
+      'api:cycles',
+      'shared:cycles',
+      'root:cycles',
+      'root:node-env-branches',
+      'frontend:api-import-boundary',
+      'root:shared-import-boundary',
+    ];
+
+    function start() {
+      const timeline = new Timeline();
+      const digest = new FakeDigest(timeline);
+      const rootDir = createDirectory('mango-source-scan-run-root-');
+      const stampDir = join(createDirectory('mango-source-scan-run-stamps-'), 'stamps');
+      const stamp = createSourceScanStamper({
+        rootDir,
+        stampDir,
+        enabled: true,
+        inputDigest: digest.take,
+        report: new FakeReport().write,
+      });
+      const scans = LABELS.map((label) => new HeldScan(label, timeline));
+      const outcomes = scans.map((scan) =>
+        stamp(scan.label, COMMAND, scan.run)().then(
+          (result) => ({ result }),
+          (error: unknown) => ({ error })
+        )
+      );
+      return { timeline, digest, stamp, stampDir, scans, outcomes };
+    }
+
+    test('take the after digest once, after the last scan has ended', async () => {
+      const { timeline, digest, stampDir, scans, outcomes } = start();
+      await settleTimers();
+      expect(
+        [digest.calls, scans.map((scan) => scan.starts)],
+        '(source scan stamper): expected 1 before digest and every scan started'
+      ).toEqual([1, [1, 1, 1, 1, 1, 1, 1]]);
+      for (const scan of scans.slice(0, -1)) {
+        scan.end();
+        await settleTimers();
+        expect(
+          digest.calls,
+          `(source scan stamper): expected no after digest while a scan still runs | received: ${digest.calls} digests after ${scan.label} ended`
+        ).toBe(1);
+      }
+      scans.at(-1)?.end();
+      const settled = await Promise.all(outcomes);
+      expect(
+        timeline.events,
+        '(source scan stamper): expected before digest, 7 ends, one after digest'
+      ).toEqual(['digest', ...LABELS.map((label) => `end ${label}`), 'digest']);
+      expect(settled.map((outcome) => 'result' in outcome && outcome.result.exitCode)).toEqual(
+        LABELS.map(() => 0)
+      );
+      for (const label of LABELS) {
+        expect(
+          readPassStamp(stampDir, label),
+          `(source scan stamper): expected a stamp for ${label} | received: none`
+        ).not.toBeNull();
+      }
+    });
+
+    test('a scan that starts while others wait delays their after digest until it ends too', async () => {
+      const { timeline, digest, stamp, stampDir, scans, outcomes } = start();
+      await settleTimers();
+      for (const scan of scans.slice(0, -1)) scan.end();
+      await settleTimers();
+      const late = new HeldScan('late:scan', timeline);
+      const lateOutcome = stamp(late.label, COMMAND, late.run)();
+      await settleTimers();
+      scans.at(-1)?.end();
+      await settleTimers();
+      expect(
+        digest.calls,
+        "(source scan stamper): expected the first before digest and the late scan's, no after digest yet"
+      ).toBe(2);
+
+      late.end();
+      await Promise.all([...outcomes, lateOutcome]);
+      expect(
+        timeline.events.slice(-2),
+        '(source scan stamper): expected one after digest, taken after the late scan ended'
+      ).toEqual(['end late:scan', 'digest']);
+      expect(digest.calls).toBe(3);
+      for (const label of [...LABELS, late.label]) {
+        expect(
+          readPassStamp(stampDir, label),
+          `(source scan stamper): expected a stamp for ${label} | received: none`
+        ).not.toBeNull();
+      }
+    });
+
+    test('a failing scan and a scan that cannot start do not hold the others up and get no stamp', async () => {
+      const { timeline, digest, stampDir, scans, outcomes } = start();
+      await settleTimers();
+      scans[0]?.end(1);
+      scans[1]?.cannotStart();
+      for (const scan of scans.slice(2)) scan.end();
+      const settled = await Promise.all(outcomes);
+      expect(
+        digest.calls,
+        '(source scan stamper): expected 1 before and 1 after digest despite a failing scan'
+      ).toBe(2);
+      expect(timeline.events.at(-1)).toBe('digest');
+      expect(timeline.events.slice(1, -1)).toHaveLength(7);
+      expect(settled[0]).toMatchObject({ result: { exitCode: 1 } });
+      expect(
+        settled[1],
+        '(source scan stamper): expected the spawn failure to surface'
+      ).toMatchObject({ error: { message: 'spawn api:cycles ENOENT' } });
+      expect(readPassStamp(stampDir, LABELS[0] as string)).toBeNull();
+      expect(readPassStamp(stampDir, LABELS[1] as string)).toBeNull();
+      for (const label of LABELS.slice(2)) {
+        expect(
+          readPassStamp(stampDir, label),
+          `(source scan stamper): expected a stamp for ${label} | received: none`
+        ).not.toBeNull();
+      }
+    });
+
+    test('a failing scan that ends last still gets the others their digest, after it', async () => {
+      const { timeline, digest, scans, outcomes } = start();
+      await settleTimers();
+      for (const scan of scans.slice(1)) scan.end();
+      await settleTimers();
+      expect(
+        digest.calls,
+        '(source scan stamper): expected the digest to wait for the last scan'
+      ).toBe(1);
+      scans[0]?.end(1);
+      await Promise.all(outcomes);
+      expect(timeline.events.at(-1)).toBe('digest');
+      expect(timeline.events.at(-2)).toBe(`end ${LABELS[0]}`);
+      expect(digest.calls).toBe(2);
+    });
+
+    test('a second run on the same inputs replays all seven with one digest', async () => {
+      const { digest, scans, outcomes, stamp } = start();
+      await settleTimers();
+      for (const scan of scans) scan.end();
+      await Promise.all(outcomes);
+      const callsAfterMiss = digest.calls;
+      const rerun = LABELS.map((label) => new FakeScan(label));
+      const replayed = await Promise.all(
+        rerun.map((scan) => stamp(scan.label, COMMAND, scan.run)())
+      );
+      expect(callsAfterMiss, '(source scan stamper): expected a miss run to take 2 digests').toBe(
+        2
+      );
+      expect(
+        digest.calls - callsAfterMiss,
+        '(source scan stamper): expected a hit run to take 1 digest'
+      ).toBe(1);
+      expect(rerun.map((scan) => scan.starts)).toEqual(LABELS.map(() => 0));
+      expect(replayed.every((result) => /replayed/.test(result.label))).toBe(true);
+    });
   });
 
   test('takes the after digest only once the scan has ended', async () => {
