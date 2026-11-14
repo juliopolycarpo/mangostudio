@@ -21,13 +21,18 @@ import {
   type CiCheckIdentity,
   parseCheckerReceipt,
 } from './lib/ci-check-evidence';
-import { touchesCodeHealthSurface } from './lib/code-health';
+import {
+  createCodeHealthCommand,
+  planCodeHealthCache,
+  touchesCodeHealthSurface,
+} from './lib/code-health';
 import { ROOT_DIR, ROOT_LINT_PATHS, ROOT_TOOLING_PATHS, type WorkspaceName } from './lib/config';
 import { touchesContractArtifactSurface } from './lib/contract-artifacts';
 import {
   assertDependencyCohort,
   assertNoDisallowedWorkspaceDependencies,
 } from './lib/dependency-policy';
+import { removePaths } from './lib/fs';
 import { createImportCycleCommand } from './lib/import-cycle-command';
 import { touchesProtocolSurface } from './lib/protocol';
 import { assertVersionsInLockstep } from './lib/release-version';
@@ -487,14 +492,27 @@ async function check(): Promise<never> {
 
   if (includeCodeHealth) {
     info('\nCode health');
-    tasks.push(commandTask('root:code-health', ['bun', 'run', 'code-health'], { cwd: ROOT_DIR }));
+    // Local runs reuse Knip's per-file cache; CI and an unreadable Knip run cold.
+    const codeHealthCache = planCodeHealthCache(ROOT_DIR);
+    await removePaths(codeHealthCache.stale);
+    tasks.push(
+      commandTask(
+        'root:code-health',
+        createCodeHealthCommand('default', codeHealthCache.generation),
+        {
+          cwd: ROOT_DIR,
+        }
+      )
+    );
     // Production mode drops test and tooling entries, so a package that only
     // shipped code imports must be a `dependency` of the workspace importing it,
     // not a devDependency or a root dependency it happens to resolve through.
     tasks.push(
-      commandTask('root:code-health-production', ['bun', 'run', 'code-health:production'], {
-        cwd: ROOT_DIR,
-      })
+      commandTask(
+        'root:code-health-production',
+        createCodeHealthCommand('production', codeHealthCache.generation),
+        { cwd: ROOT_DIR }
+      )
     );
   }
 

@@ -611,6 +611,13 @@ Nothing under `generated/` is formatted; see `bunfig.toml` for the current exclu
 Register runtime-loaded files as narrow workspace entries in `knip.json`; dependency
 ignores require execution evidence documented in `docs/reference/testing.md`.
 
+A local `bun run check` passes Knip `--cache`, with a directory per pass under
+`.mango/knip-cache/<generation>/`: 5.3 s to 1.8 s per pass on an unchanged tree, same
+report. Knip keys each cached file on that file's own metadata. The generation is a hash of
+the Knip version and `knip.json`, so a new Knip or a new configuration starts cold, and
+`check` removes earlier generations. CI and the two package scripts run uncached;
+`bun run clean` removes the cache.
+
 ## Adding a script
 
 1. Create `scripts/<name>.ts`; import helpers from `lib/`.

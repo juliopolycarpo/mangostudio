@@ -18,6 +18,7 @@ const ARTIFACT_PATHS = [
   '.mango/artifacts',
   '.mango/out',
   '.mango/pass-stamps',
+  '.mango/knip-cache',
   'apps/frontend/coverage',
   'apps/api/coverage',
   'apps/shared/coverage',

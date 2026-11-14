@@ -48,8 +48,8 @@ describe('code-health check', () => {
     const checkScript = readText('scripts/check.ts');
 
     expect(checkScript).toContain('touchesCodeHealthSurface');
-    expect(checkScript).toContain("commandTask('root:code-health'");
-    expect(checkScript).toContain("commandTask('root:code-health-production'");
+    expect(checkScript).toMatch(/commandTask\(\s*'root:code-health',/);
+    expect(checkScript).toMatch(/commandTask\(\s*'root:code-health-production',/);
   });
 
   test('gates dependency placement against production entries only', () => {
