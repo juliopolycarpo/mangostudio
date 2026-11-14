@@ -340,6 +340,13 @@ describe('setup-bun composite action', () => {
   // work starts. A 5-minute job was cancelled during the second wait.
   test('every job that sets Bun up has room for both retry waits', () => {
     const tight: string[] = [];
+    // Eight minutes covers the waits alone. These jobs still have real work
+    // after a recovered setup, so each keeps its former budget on top of the
+    // four minutes of waits.
+    const floors: Record<string, number> = {
+      'workflows/distribution-build.yml#runtime-version': 12,
+      'workflows/test.yml#frontend': 14,
+    };
     for (const file of githubYamlFiles().filter((name) => name.startsWith('workflows/'))) {
       const workflow = Bun.YAML.parse(readText(join('.github', file))) as {
         jobs?: Record<string, { 'timeout-minutes'?: unknown; steps?: Array<{ uses?: string }> }>;
@@ -349,14 +356,15 @@ describe('setup-bun composite action', () => {
           /\.github\/actions\/setup-(?:bun|mango)\b/.test(step.uses ?? '')
         );
         const minutes = job['timeout-minutes'];
-        if (setsUpBun && typeof minutes === 'number' && minutes < 8) {
-          tight.push(`${file}#${id}: ${minutes}`);
+        const floor = floors[`${file}#${id}`] ?? 8;
+        if (setsUpBun && typeof minutes === 'number' && minutes < floor) {
+          tight.push(`${file}#${id}: ${minutes} (floor ${floor})`);
         }
       }
     }
     expect(
       tight,
-      'expected job timeout-minutes: at least 8 where Bun is set up | received shorter deadlines'
+      'expected job timeout-minutes: at least its floor where Bun is set up | received shorter deadlines'
     ).toEqual([]);
   });
 

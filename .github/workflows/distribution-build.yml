@@ -91,7 +91,8 @@ jobs:
     name: Verify runtime version ${{ matrix.host }}
     needs: [runtime]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 8
+    # Bun setup can wait four minutes; the checkout, download and probe follow it.
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
