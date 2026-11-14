@@ -13,8 +13,9 @@
 // children in the group it was given, so the one group signal from above is the
 // only one they ever see.
 //
-// Not covered: SIGKILL of the runner itself. It cannot be caught, and the
-// children it already moved to their own groups outlive it.
+// SIGKILL of the runner itself cannot be caught. ./runner-guardian covers it: a
+// separate process that stops whatever the runner had registered once the runner
+// is gone. `runCommand` starts it, not the supervisor here.
 //
 // Windows has no process groups to signal, so the runner puts itself in a job
 // object that kills every member when the runner ends, by Ctrl-C, `taskkill /F`
@@ -341,6 +342,13 @@ export interface SupervisorHost {
   killGroup(pid: number, signal: NodeJS.Signals): void;
   /** True while any process, a zombie included, is left in group `pid`. */
   groupAlive(pid: number): boolean;
+  /**
+   * Called right after the supervisor signalled every child it watches, from a
+   * signal handler or the `exit` handler alike, so it must be synchronous. It is
+   * how a guardian behind the runner learns not to signal them a second time.
+   * A host with no guardian leaves it out.
+   */
+  announceStopping?(): void;
   /** True when stdin is a terminal, so a Ctrl-C may already have reached an interactive child. */
   stdinIsTerminal(): boolean;
   exit(status: number): never;
@@ -350,9 +358,16 @@ export interface SupervisorHost {
   readonly graceMs: number;
 }
 
-/** The host that is the running process. */
-export function processHost(): SupervisorHost {
+/**
+ * The host that is the running process. `announceStopping` is what runs once the
+ * supervisor has signalled its children; it defaults to nothing.
+ *
+ * @example
+ * new ChildSupervisor(processHost(() => guardian.stopping()));
+ */
+export function processHost(announceStopping: () => void = () => undefined): SupervisorHost {
   return {
+    announceStopping,
     onSignal(name, handler) {
       process.on(name, handler);
       return () => {
@@ -457,6 +472,7 @@ export class ChildSupervisor {
       if (child.ownsGroup) this.host.killGroup(child.pid, signal);
       else child.signal(signal);
     }
+    this.host.announceStopping?.();
   }
 
   private async cancel(name: CancelSignal): Promise<void> {
@@ -496,6 +512,11 @@ export class ChildSupervisor {
       if (child.ownsGroup) this.host.killGroup(child.pid, name);
       else this.forwardToInteractive(child, name);
     }
+    // An interactive child on a terminal may so far have had only the kernel's
+    // Ctrl-C, with this runner's SIGTERM due a second later. A runner SIGKILLed in
+    // that second leaves such a child the grace and a SIGKILL from the guardian,
+    // not a SIGTERM; the cost of never sending a second SIGTERM to the rest.
+    this.host.announceStopping?.();
   }
 
   /**
@@ -530,6 +551,7 @@ export class ChildSupervisor {
       if (child.ownsGroup) this.host.killGroup(child.pid, signal);
       else child.signal(signal);
     }
+    this.host.announceStopping?.();
   }
 
   /** Waits until every watched child and every member of its group is gone, up to `ms`. */

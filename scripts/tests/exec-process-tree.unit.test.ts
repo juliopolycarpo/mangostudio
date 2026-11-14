@@ -4,11 +4,13 @@ import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 
 import { runCommand, runParallel } from '../lib/exec';
+import { CANCEL_GRACE_MS } from '../lib/process-tree';
 import { fixtureChildEnvironment } from './support/child-supervision';
 import { isAlive, readProcessState } from './support/process-liveness';
 import {
   ECHO_STDERR,
   ECHO_STDOUT,
+  findGuardianPids,
   fixtureCommand,
   forceKill,
   forceKillGroup,
@@ -18,6 +20,7 @@ import {
   readWorkerPids,
   type ReadyPids,
   RELEASE_FILE,
+  sessionOf,
   SIGNALS_LOG,
   waitFor,
   WORKERS_LOG,
@@ -33,6 +36,8 @@ const READY_TIMEOUT_MS = 10_000;
 // Allow a descendant's state to settle after cancellation. This is shorter
 // than the 3 s the slow grandchild takes to stop.
 const SETTLE_TIMEOUT_MS = 1_000;
+/** Per-test limit for cases that wait out a cancel grace (5 s); Bun's default is 5 s. */
+const GRACE_TEST_TIMEOUT_MS = 15_000;
 
 type RunnerProcess = ReturnType<typeof Bun.spawn>;
 
@@ -56,6 +61,8 @@ const ONCE_EACH = 'child SIGINT x1, grandchild SIGINT x1';
 
 let dir = '';
 const spawned: RunnerProcess[] = [];
+/** Guardians found while their runner was alive, so cleanup can reach them after it is not. */
+const guardians: number[] = [];
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'mango-process-tree-'));
@@ -68,6 +75,7 @@ afterEach(() => {
     forceKillGroup(runner.pid);
     forceKill(runner.pid);
   }
+  for (const guardian of guardians.splice(0)) forceKill(guardian);
   const pids = readReadyPids(dir);
   if (pids) {
     forceKill(pids.child);
@@ -111,7 +119,9 @@ function startProductionRunner(heldPhase: string): RunnerProcess {
     const command = fixtureCommand('production-command', dir, phase, heldPhase)
       .map((part) => `'${part.replaceAll("'", "'\\''")}'`)
       .join(' ');
-    writeFileSync(join(bin, name), `#!/bin/sh\nexec ${command} "$@"\n`, { mode: 0o755 });
+    writeFileSync(join(bin, name), `#!/bin/sh\nexec ${command} "$@"\n`, {
+      mode: 0o755,
+    });
   }
   const runner = Bun.spawn(
     [process.execPath, join(import.meta.dir, '..', 'browser-production.ts')],
@@ -156,6 +166,20 @@ async function readyPids(): Promise<ReadyPids> {
     );
   }
   return pids;
+}
+
+/**
+ * The guardian the live runner started. It exists before the runner's first child
+ * does, so once `readyPids` returned it is there to be found.
+ */
+async function guardianOf(runner: RunnerProcess): Promise<number> {
+  await waitFor(() => findGuardianPids(runner.pid).length > 0, READY_TIMEOUT_MS);
+  const found = findGuardianPids(runner.pid);
+  guardians.push(...found);
+  if (found.length !== 1) {
+    throw new Error(`expected guardians of runner ${runner.pid}: 1 | received: ${found.length}`);
+  }
+  return found[0] as number;
 }
 
 /** Waits for the pids to stop executing and reports live processes. */
@@ -292,15 +316,19 @@ describe('cancelling a runner', () => {
   // handler that swallows SIGTERM, or one that takes seconds to wind down, is
   // still running when the leader is gone. Nothing may outlive the runner.
   describe.skipIf(IS_WINDOWS)('a group member that outlives its leader', () => {
-    test('SIGTERM still stops a grandchild that ignores it', async () => {
-      const runner = startRunner(['child', 'linger:0', 'ignore']);
-      const pids = await readyPids();
+    test(
+      'SIGTERM still stops a grandchild that ignores it',
+      async () => {
+        const runner = startRunner(['child', 'linger:0', 'ignore']);
+        const pids = await readyPids();
 
-      runner.kill('SIGTERM');
-      await runner.exited;
+        runner.kill('SIGTERM');
+        await runner.exited;
 
-      await expectNothingLeft(pids);
-    });
+        await expectNothingLeft(pids);
+      },
+      GRACE_TEST_TIMEOUT_MS
+    );
 
     test('the runner waits for a grandchild that needs 3 s to stop', async () => {
       const runner = startRunner(['child', 'linger:0', 'linger:3000']);
@@ -361,7 +389,9 @@ describe('cancelling a runner', () => {
     });
 
     test('a nested runner leaves its children in the group it was given', async () => {
-      const runner = startRunner([], true, { MANGO_RUNNER_GROUP: String(process.pid) });
+      const runner = startRunner([], true, {
+        MANGO_RUNNER_GROUP: String(process.pid),
+      });
       const pids = await readyPids();
 
       expectValue('nested runner child process group', runner.pid, processGroupOf(pids.child));
@@ -428,7 +458,9 @@ describe('cancelling a runner', () => {
     // The runner above owns the group both of them are in, so the group signal
     // is the only one; a nested runner that forwarded too would make it two.
     test('reaches the children of a nested runner exactly once', async () => {
-      const runner = startRunner([], true, { MANGO_RUNNER_GROUP: String(process.pid) });
+      const runner = startRunner([], true, {
+        MANGO_RUNNER_GROUP: String(process.pid),
+      });
       const pids = await readyPids();
 
       process.kill(-runner.pid, 'SIGINT');
@@ -438,6 +470,248 @@ describe('cancelling a runner', () => {
       expectValue('SIGINT deliveries', ONCE_EACH, signalDeliveries());
     });
   });
+});
+
+/** Fails with `(runner guardian): expected <what>: <expected> | received: <actual>`. */
+function expectGuarded(what: string, expected: unknown, actual: unknown): void {
+  if (Object.is(expected, actual)) return;
+  throw new Error(
+    `(runner guardian): expected ${what}: ${String(expected)} | received: ${String(actual)}`
+  );
+}
+
+// SIGKILL cannot be caught, so the runner forwards nothing. The guardian it
+// started, which holds the other end of a pipe from it, sees the pipe close and
+// stops what the runner had registered.
+describe.skipIf(IS_WINDOWS)('SIGKILL of the runner', () => {
+  /** Longer than the grace a SIGTERM-ignoring member gets, with room for a slow host. */
+  const KILL_BOUND_MS = CANCEL_GRACE_MS + 3_000;
+
+  /**
+   * Waits for the fixture pids to stop running within `ms`, and names the ones
+   * that did not as `child <pid>, grandchild <pid>`; empty when none is left.
+   */
+  async function survivorsAfter(
+    pids: Readonly<Record<string, number>>,
+    ms: number
+  ): Promise<string> {
+    await waitFor(() => Object.values(pids).every((pid) => !isAlive(pid)), ms);
+    return Object.entries(pids)
+      .filter(([, pid]) => isAlive(pid))
+      .map(([role, pid]) => `${role} ${pid}`)
+      .join(', ');
+  }
+
+  test('stops the child and a grandchild that takes a moment to leave', async () => {
+    const runner = startRunner(['child', 'linger:0', 'linger:1000']);
+    const pids = await readyPids();
+
+    runner.kill('SIGKILL');
+    expectGuarded('runner exit status', 137, await runner.exited);
+
+    const left = await survivorsAfter(
+      { child: pids.child, grandchild: pids.grandchild },
+      KILL_BOUND_MS
+    );
+    expectGuarded('live fixture pids after the runner was killed', '', left);
+    expectGuarded(
+      'signals the guardian sent',
+      'child SIGTERM x1, grandchild SIGTERM x1',
+      signalDeliveries()
+    );
+  });
+
+  test(
+    'SIGKILLs a grandchild that ignores SIGTERM once the grace has passed',
+    async () => {
+      const runner = startRunner(['child', 'linger:0', 'ignore']);
+      const pids = await readyPids();
+
+      const killedAt = Date.now();
+      runner.kill('SIGKILL');
+      await runner.exited;
+
+      // Still running well inside the grace: SIGTERM alone did not move it.
+      await Bun.sleep(CANCEL_GRACE_MS / 2);
+      expectGuarded('grandchild running inside the grace', true, isAlive(pids.grandchild));
+
+      const left = await survivorsAfter(
+        { child: pids.child, grandchild: pids.grandchild },
+        KILL_BOUND_MS
+      );
+      expectGuarded('live fixture pids after the grace', '', left);
+      expectGuarded(
+        'grandchild outlived SIGTERM for at least the grace',
+        true,
+        Date.now() - killedAt >= CANCEL_GRACE_MS - 250
+      );
+    },
+    GRACE_TEST_TIMEOUT_MS
+  );
+
+  test('leaves the guardian in a session and group of its own', async () => {
+    const runner = startRunner([], true);
+    await readyPids();
+    const guardian = await guardianOf(runner);
+
+    expectGuarded('guardian session', guardian, sessionOf(guardian));
+    expectGuarded('guardian process group', guardian, processGroupOf(guardian));
+    expectGuarded(
+      'runner process group apart from guardian',
+      runner.pid,
+      processGroupOf(runner.pid)
+    );
+  });
+
+  test('ignores the cancelling signals sent to it', async () => {
+    const runner = startRunner();
+    await readyPids();
+    const guardian = await guardianOf(runner);
+
+    for (const name of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.kill(guardian, name);
+    await Bun.sleep(300);
+
+    expectGuarded('guardian running after SIGINT, SIGTERM and SIGHUP', true, isAlive(guardian));
+  });
+
+  // The runner's group is the terminal's foreground group, shared with the shell
+  // and whatever else is in the job, so the guardian signals the child's pid and
+  // nothing wider: the grandchild, in the same group, is left to its own devices.
+  test('signals only the pid of an interactive child, never the group it shares', async () => {
+    const runner = startRunner(['interactive'], true);
+    const pids = await readyPids();
+    const guardian = await guardianOf(runner);
+
+    runner.kill('SIGKILL');
+    await runner.exited;
+
+    const childLeft = await survivorsAfter({ child: pids.child }, KILL_BOUND_MS);
+    expectGuarded('live interactive child', '', childLeft);
+    const guardianLeft = await survivorsAfter({ guardian }, KILL_BOUND_MS);
+    expectGuarded('live guardian once its only entry is gone', '', guardianLeft);
+    expectGuarded('group-mate grandchild still running', true, isAlive(pids.grandchild));
+    expectGuarded('signals the guardian sent', 'child SIGTERM x1', signalDeliveries());
+  });
+});
+
+describe.skipIf(IS_WINDOWS)('the guardian when the runner is not killed', () => {
+  test('ends with the runner on a normal exit', async () => {
+    const runner = startRunner(['worker']);
+    await waitFor(() => readWorkerPids(dir).length > 0, READY_TIMEOUT_MS);
+    const guardian = await guardianOf(runner);
+
+    writeFileSync(join(dir, RELEASE_FILE), 'go');
+    expectGuarded('runner exit status', 0, await runner.exited);
+
+    const left = await waitFor(() => !isAlive(guardian), 2_000);
+    expectGuarded('guardian gone after a normal runner exit', true, left);
+  });
+
+  test('ends with the runner on SIGTERM, after the runner stopped its children', async () => {
+    const runner = startRunner();
+    const pids = await readyPids();
+    const guardian = await guardianOf(runner);
+
+    runner.kill('SIGTERM');
+    expectGuarded('runner exit status', 143, await runner.exited);
+
+    await expectNothingLeft(pids);
+    expectGuarded('guardian gone', true, await waitFor(() => !isAlive(guardian), 2_000));
+    // The runner stopped them once; a guardian acting as well would make it two.
+    expectGuarded(
+      'SIGTERM deliveries',
+      'child SIGTERM x1, grandchild SIGTERM x1',
+      signalDeliveries()
+    );
+  });
+
+  test('is not started by a nested runner, whose children the runner above covers', async () => {
+    const runner = startRunner([], true, {
+      MANGO_RUNNER_GROUP: String(process.pid),
+    });
+    await readyPids();
+
+    expectGuarded('guardians of a nested runner', '', findGuardianPids(runner.pid).join(','));
+  });
+
+  test('a guardian that died does not change how the runner ends', async () => {
+    const runner = startRunner(['worker']);
+    await waitFor(() => readWorkerPids(dir).length > 0, READY_TIMEOUT_MS);
+    const guardian = await guardianOf(runner);
+
+    forceKill(guardian);
+    await waitFor(() => !isAlive(guardian), 2_000);
+    writeFileSync(join(dir, RELEASE_FILE), 'go');
+
+    expectGuarded('runner exit status with its guardian dead', 0, await runner.exited);
+    const stderr = await readText(runner.stderr as ReadableStream<Uint8Array>);
+    expectGuarded('unhandled error on stderr', false, /unhandled|error:/i.test(stderr));
+  });
+});
+
+// A runner that has signalled its children itself tells the guardian so (the
+// `stopping` line), and the guardian then sends no second SIGTERM: a tool that
+// reads a repeated SIGTERM as "force quit" would lose its graceful shutdown.
+describe.skipIf(IS_WINDOWS)('a runner that signalled its children and then went away', () => {
+  const KILL_BOUND_MS = CANCEL_GRACE_MS + 3_000;
+  const ONE_SIGTERM_EACH = 'child SIGTERM x1, grandchild SIGTERM x1';
+
+  /** The fake runner that calls `process.exit` while its child is live. */
+  function startExitingRunner(args: string[]): RunnerProcess {
+    const runner = Bun.spawn(fixtureCommand('runner-exit', dir, ...args), {
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+      env: fakeEnv(),
+    });
+    spawned.push(runner);
+    return runner;
+  }
+
+  async function expectBothGone(pids: ReadyPids): Promise<void> {
+    await waitFor(() => !isAlive(pids.child) && !isAlive(pids.grandchild), KILL_BOUND_MS);
+    const left = [pids.child, pids.grandchild].filter((pid) => isAlive(pid));
+    expectGuarded('live fixture pids', '', left.join(','));
+  }
+
+  test(
+    'process.exit with a live child gives it one SIGTERM, not a second from the guardian',
+    async () => {
+      const runner = startExitingRunner(['linger:1000', 'linger:1000']);
+      const pids = await readyPids();
+      const guardian = await guardianOf(runner);
+
+      writeFileSync(join(dir, RELEASE_FILE), 'go');
+      expectGuarded('runner exit status', 0, await runner.exited);
+      await expectBothGone(pids);
+      expectGuarded(
+        'guardian gone after the children left',
+        true,
+        await waitFor(() => !isAlive(guardian), 2_000)
+      );
+      expectGuarded('SIGTERM deliveries', ONE_SIGTERM_EACH, signalDeliveries());
+    },
+    GRACE_TEST_TIMEOUT_MS
+  );
+
+  test(
+    'SIGKILL during the grace that follows a SIGTERM adds no second SIGTERM, then SIGKILLs the survivors',
+    async () => {
+      const runner = startRunner(['child', 'ignore', 'ignore']);
+      const pids = await readyPids();
+      await guardianOf(runner);
+
+      runner.kill('SIGTERM');
+      await waitFor(() => signalDeliveries() === ONE_SIGTERM_EACH, READY_TIMEOUT_MS);
+      runner.kill('SIGKILL');
+      await runner.exited;
+
+      // Both ignore SIGTERM, so only the guardian's SIGKILL after the grace removes them.
+      await expectBothGone(pids);
+      expectGuarded('SIGTERM deliveries', ONE_SIGTERM_EACH, signalDeliveries());
+    },
+    GRACE_TEST_TIMEOUT_MS
+  );
 });
 
 describe('a child that fails', () => {

@@ -10,6 +10,7 @@ import { ROOT_DIR, type WorkspaceName, WORKSPACES } from './config';
 import { dim, error } from './log';
 import {
   bindDescendantsToRunner,
+  CANCEL_GRACE_MS,
   childLimit,
   ChildSupervisor,
   isNestedRunner,
@@ -18,6 +19,7 @@ import {
   SlotPool,
   supervisionMode,
 } from './process-tree';
+import { GuardianLink, launchGuardian } from './runner-guardian';
 
 export interface RunResult {
   label: string;
@@ -60,9 +62,16 @@ export async function captureCommand(
   return { stdout, stderr, exitCode };
 }
 
+/**
+ * Stops this runner's children if the runner is SIGKILLed; see ./runner-guardian.
+ * Starts on the first child the runner supervises, never on Windows or in a
+ * nested runner, whose children `supervisionMode` leaves to someone else.
+ */
+const guardian = new GuardianLink(() => launchGuardian(CANCEL_GRACE_MS), error);
+
 /** Built on first use, so a bad MANGO_RUNNER_CONCURRENCY fails the command that hits it. */
 let childSlots: SlotPool | undefined;
-const supervisor = new ChildSupervisor(processHost());
+const supervisor = new ChildSupervisor(processHost(() => guardian.stopping()));
 
 /** Whether the runner above owns this process's group; read once, as it cannot change. */
 let nestedRunner: boolean | undefined;
@@ -87,7 +96,8 @@ interface RunCommandOptions {
  * At most `MANGO_RUNNER_CONCURRENCY` (default 16) children run at once per
  * process, however many `runParallel` calls are nested; the rest wait for a
  * slot. When the runner receives SIGINT, SIGTERM or SIGHUP, every child and
- * everything it started is stopped, and the runner exits 128 + the signal.
+ * everything it started is stopped, and the runner exits 128 + the signal. When
+ * the runner is SIGKILLed, a guardian process stops them instead.
  * // Usage: await runCommand('build', ['bun', 'run', 'build']);
  */
 export async function runCommand(
@@ -129,6 +139,8 @@ async function spawnAndWait(
   if (opts?.logCommand !== false) dim(`  $ ${cmd.join(' ')}`);
 
   const mode = supervisionMode(opts?.stdin, process.platform, runsNested());
+  // Before the spawn, so no child ever exists that the guardian could not hear of.
+  if (mode !== 'none') guardian.open();
   const proc = Bun.spawn({
     cmd,
     cwd: opts?.cwd ?? ROOT_DIR,
@@ -143,6 +155,15 @@ async function spawnAndWait(
     detached: mode === 'group',
   });
 
+  // An interactive child shares the terminal's group, which is not the runner's
+  // to signal, so the guardian is given its pid alone.
+  const unguard =
+    mode === 'none'
+      ? undefined
+      : guardian.watch({
+          kind: mode === 'group' ? 'group' : 'pid',
+          pid: proc.pid,
+        });
   const release =
     mode === 'none'
       ? undefined
@@ -157,6 +178,8 @@ async function spawnAndWait(
   try {
     exitCode = await proc.exited;
   } finally {
+    // First, so the window in which the guardian holds a reapable pid stays short.
+    unguard?.();
     release?.();
   }
   const duration = Math.round(performance.now() - start);
