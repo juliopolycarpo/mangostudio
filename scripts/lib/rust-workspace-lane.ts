@@ -1,6 +1,7 @@
 /**
- * The Rust workspace lane of `bun run check` and `bun run test`: which cargo
- * commands each one runs and when a scoped run keeps the lane.
+ * The Rust workspace lane of `bun run check`, `bun run test` and
+ * `bun run clean`: which cargo commands each one runs, when a scoped run keeps
+ * the lane, and which cargo output `clean --rust` removes.
  *
  * The commands are the ones `.github/workflows/cargo-shim.yml` runs in its
  * `workspace` job; `scripts/tests/rust-workspace-lane.unit.test.ts` compares
@@ -17,7 +18,10 @@
  * if (plan.run) tasks.push(...chainRustTasks(RUST_CHECK_TASKS, runRustTask));
  */
 
+import { isAbsolute, relative, sep } from 'node:path';
+
 import type { RunResult } from './exec';
+import { cargoTargetDir } from './runtime-build';
 import { classifyChangedPaths } from './rust-lanes';
 
 /** The executable a task needs on PATH beside `cargo` itself. */
@@ -160,4 +164,30 @@ export function chainRustTasks(
     previous = settled.catch(() => undefined);
     return settled;
   });
+}
+
+/** The excluded nightly fuzz workspace's own target directory. */
+const FUZZ_TARGET_DIR = 'crates/mango-protocol/fuzz/target';
+
+/**
+ * Repository-relative cargo output directories `bun run clean --rust` removes:
+ * the workspace target directory and the fuzz workspace's. A `CARGO_TARGET_DIR`
+ * outside the repository is refused, because a shared directory there holds
+ * other checkouts' builds.
+ *
+ * @example
+ * rustCleanPaths('/repo', { CARGO_TARGET_DIR: 'out' }); // ['out', 'crates/mango-protocol/fuzz/target']
+ */
+export function rustCleanPaths(
+  rootDir: string,
+  env: Readonly<Record<string, string | undefined>> = process.env
+): string[] {
+  const inRepository = relative(rootDir, cargoTargetDir(rootDir, env));
+  if (inRepository === '' || inRepository.startsWith('..') || isAbsolute(inRepository)) {
+    throw new Error(
+      `(clean --rust): expected CARGO_TARGET_DIR inside the repository | received: ${env.CARGO_TARGET_DIR}; ` +
+        'remove it with "cargo clean"'
+    );
+  }
+  return [inRepository.split(sep).join('/'), FUZZ_TARGET_DIR];
 }

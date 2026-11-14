@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { join } from 'node:path';
 
 import { parseArgs } from '../lib/args';
 import { ROOT_DIR } from '../lib/config';
@@ -9,6 +10,7 @@ import {
   planRustLane,
   RUST_CHECK_TASKS,
   RUST_TEST_TASKS,
+  rustCleanPaths,
   type RustLaneTask,
 } from '../lib/rust-workspace-lane';
 import { readText } from './support/read-text';
@@ -166,6 +168,32 @@ describe('chainRustTasks', () => {
   });
 });
 
+describe('rustCleanPaths', () => {
+  const root = join('/', 'repo');
+
+  test('removes the workspace and fuzz target directories by default', () => {
+    expect(rustCleanPaths(root, {})).toEqual(['target', 'crates/mango-protocol/fuzz/target']);
+  });
+
+  test('follows a CARGO_TARGET_DIR inside the repository', () => {
+    expect(rustCleanPaths(root, { CARGO_TARGET_DIR: join('.mango', 'cargo') })).toEqual([
+      '.mango/cargo',
+      'crates/mango-protocol/fuzz/target',
+    ]);
+    expect(rustCleanPaths(root, { CARGO_TARGET_DIR: join(root, 'out') })[0]).toBe('out');
+  });
+
+  test.each([
+    ['an absolute directory elsewhere', join('/', 'var', 'cache', 'cargo')],
+    ['a relative escape', join('..', 'shared-target')],
+    ['the repository root itself', '.'],
+  ])('refuses %s', (_name, moved) => {
+    expect(() => rustCleanPaths(root, { CARGO_TARGET_DIR: moved })).toThrow(
+      `(clean --rust): expected CARGO_TARGET_DIR inside the repository | received: ${moved}`
+    );
+  });
+});
+
 describe('--rust selection', () => {
   const options = { booleanFlags: ['--staged'], selectionFlags: ['--rust'] };
 
@@ -210,7 +238,7 @@ describe('--rust selection', () => {
     }
   });
 
-  test.each(['check', 'test'])('%s --help documents --rust', (script) => {
+  test.each(['check', 'test', 'clean'])('%s --help documents --rust', (script) => {
     const { exitCode, output } = runScript(`./scripts/${script}.ts`, '--help');
     expect(exitCode).toBe(0);
     expect(output).toContain('--rust');

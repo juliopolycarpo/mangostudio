@@ -22,7 +22,7 @@ scripts/
 ├── run-test-workers.ts
 │                     Run one test lane in worker processes with one merged report (API unit/integration, root test:scripts:workers)
 ├── verify.ts         check → test --coverage → build --all (bun run verify)
-├── clean.ts          Remove build artifacts (bun run clean)
+├── clean.ts          Remove build artifacts (bun run clean; --rust adds the cargo target directories)
 ├── changelog.ts      git-cliff wrapper: init/preview/release (bun run changelog)
 ├── changelog-separators.ts
 │                     Repair historical release separators only (--check for read-only validation)
@@ -70,7 +70,7 @@ importing the specific module in new code:
 | `test-workers.ts`        | Test-lane worker plan, strict verdict, JUnit merge (+ test-worker-process.ts)                            |
 | `junit-report.ts`        | Reads Bun's JUnit XML; shared by the QA gate and the worker lanes                                        |
 | `actions-lint/`          | Pinned workflow static analysis: manifest, bootstrap, tasks                                              |
-| `rust-workspace-lane.ts` | Opt-in `--rust` lane: cargo commands, scoped-run selection, tool probe                                   |
+| `rust-workspace-lane.ts` | Opt-in `--rust` lane: cargo commands, scoped-run selection, tool probe, clean paths                      |
 
 Workspace `check:quick` scripts run cacheable Bun lint and format checks. The lint key
 includes the workspace's VCS inputs, upstream workspace sources through `transit`,

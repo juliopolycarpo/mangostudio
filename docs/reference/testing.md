@@ -1865,6 +1865,8 @@ pre-commit hook never start cargo. With `--staged` or `--changed`, `--rust` runs
 a changed path is in `RUST_WORKSPACE_PATHS` (`scripts/lib/rust-lanes.ts`), the list
 `cargo-shim.yml` selects its lanes with. `scripts/tests/rust-workspace-lane.unit.test.ts`
 fails when a lane command stops matching its `cargo-shim.yml` step.
+`bun run clean --rust` removes the cargo target directories, including the
+`mangostudio-runtime` binary the API tests spawn.
 
 The version is the one `cargo-shim.yml` installs through the SHA-pinned
 `taiki-e/install-action`; `scripts/tests/rust-nextest.unit.test.ts` fails when the two
