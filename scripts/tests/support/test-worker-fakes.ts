@@ -82,6 +82,19 @@ export function shardOf(
     .filter((_, position) => position % plan.count === plan.index - 1);
 }
 
+/**
+ * The files a planned worker runs: the ones named on its command line (`./path`
+ * arguments, as a weighted lane plans them), else its `--shard` of `lane`.
+ */
+export function assignedTo(
+  lane: readonly FakeTestFile[],
+  plan: Pick<WorkerPlan, 'index' | 'count' | 'files'>
+): FakeTestFile[] {
+  if (!plan.files) return shardOf(lane, plan);
+  const named = new Set(plan.files);
+  return lane.filter((file) => named.has(file.path));
+}
+
 /** In-memory report files, keyed by path, standing in for the disk. */
 export class FakeReportDisk {
   readonly files = new Map<string, string>();
@@ -102,7 +115,7 @@ const settled = (exit: WorkerExit): WorkerHandle => ({
 export const healthyWorker =
   (lane: readonly FakeTestFile[], disk: FakeReportDisk): StartWorker =>
   (plan) => {
-    disk.write(plan.reportPath, reportOf(shardOf(lane, plan)));
+    disk.write(plan.reportPath, reportOf(assignedTo(lane, plan)));
     return {
       ...settled({ exitCode: 0, signal: null }),
       settle: plan.settle ? () => Promise.resolve([]) : undefined,
@@ -113,7 +126,7 @@ export const healthyWorker =
 export const diskWorker =
   (lane: readonly FakeTestFile[]): StartWorker =>
   (plan) => {
-    writeFileSync(plan.reportPath, reportOf(shardOf(lane, plan)));
+    writeFileSync(plan.reportPath, reportOf(assignedTo(lane, plan)));
     return {
       ...settled({ exitCode: 0, signal: null }),
       settle: plan.settle ? () => Promise.resolve([]) : undefined,
@@ -130,7 +143,7 @@ export const withWorker =
 export const failingWorker =
   (lane: readonly FakeTestFile[], disk: FakeReportDisk): StartWorker =>
   (plan) => {
-    const failing = shardOf(lane, plan).map((file) => ({ ...file, outcome: 'fail' as const }));
+    const failing = assignedTo(lane, plan).map((file) => ({ ...file, outcome: 'fail' as const }));
     disk.write(plan.reportPath, reportOf(failing));
     return settled({ exitCode: 1, signal: null });
   };

@@ -27,7 +27,7 @@ import { dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:p
 import { assertTemporaryHome } from '../lib/temp-home';
 import { REAL_HOME_ENV, TEST_HOME_KIND, TEST_HOME_PREFIX, testHomeEnv } from '../lib/test-home';
 import { laneById, type TestLaneId } from '../lib/test-lanes';
-import { laneSpec, planWorkers, WORKERS_ENV } from '../lib/test-workers';
+import { discoverTestFiles, laneSpec, planWorkers, WORKERS_ENV } from '../lib/test-workers';
 import { canonicalPath as canonical } from './support/canonical-path';
 import {
   FIXTURE_COMMAND_TIMEOUT_MS,
@@ -132,7 +132,8 @@ describe('API lane scripts start bun test through the temporary-home launcher', 
       );
     }
     const spec = laneSpec(laneById(call.laneId), call.command);
-    for (const plan of planWorkers(spec, 4, tmpdir())) {
+    const files = discoverTestFiles(spec.cwd, spec.testDir);
+    for (const plan of planWorkers(spec, 4, tmpdir(), files)) {
       expect(
         plan.argv.slice(0, spec.launcher.length + 2),
         `worker ${plan.index}/${plan.count} must start bun test through ${LAUNCHER} | received: ${plan.argv.join(' ')}`
@@ -329,13 +330,14 @@ describe('Turbo task definitions of the API lanes', () => {
     }
   }
 
-  test('the test:unit closure is the eleven files the cache key names', () => {
+  test('the test:unit closure is the twelve files the cache key names', () => {
     expect(launcherFiles().sort()).toEqual([
       'scripts/lib/config.ts',
       'scripts/lib/junit-report.ts',
       'scripts/lib/log.ts',
       'scripts/lib/temp-home.ts',
       'scripts/lib/test-home.ts',
+      'scripts/lib/test-lane-weights.ts',
       'scripts/lib/test-lanes.ts',
       'scripts/lib/test-worker-process.ts',
       'scripts/lib/test-worker-settle.ts',

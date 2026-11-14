@@ -67,7 +67,8 @@ importing the specific module in new code:
 | `bun-cross-runtime.ts`   | Per-target Bun runtime for `--compile` when `.bun-version` names a channel                               |
 | `runtime-build.ts`       | Cargo runtime per release target: triple map, glibc floor, prebuilt-dir resolution, staged-binary checks |
 | `executable-header.ts`   | ELF / Mach-O / PE header reader: format, CPU, ELF interpreter, highest `GLIBC_` version                  |
-| `test-workers.ts`        | Test-lane worker plan, strict verdict, JUnit merge (+ test-worker-process.ts)                            |
+| `test-workers.ts`        | Test-lane worker plan, weighted partition, strict verdict, JUnit merge (+ test-worker-process.ts)        |
+| `test-lane-weights.ts`   | Tracked per-file weights that balance the root and API integration lanes' workers                        |
 | `junit-report.ts`        | Reads Bun's JUnit XML; shared by the QA gate and the worker lanes                                        |
 | `actions-lint/`          | Pinned workflow static analysis: manifest, bootstrap, tasks                                              |
 | `pass-stamp.ts`          | Local "this task passed for these inputs" stamps: key, read, write, run-or-replay                        |

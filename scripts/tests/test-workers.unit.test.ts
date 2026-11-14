@@ -4,14 +4,19 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import { parseJunitXml } from '../lib/junit-report';
+import { LANE_WEIGHTS } from '../lib/test-lane-weights';
+import { laneById } from '../lib/test-lanes';
 import { WORKER_TOKEN_ENV } from '../lib/test-worker-settle';
 import {
+  DEFAULT_FILE_WEIGHT,
   describeCaseDifference,
   discoverTestFiles,
   formatLaneSummary,
   judgeWorkers,
+  laneSpec,
   MAX_WORKERS,
   mergeReports,
+  partitionByWeight,
   planWorkers,
   resolveWorkerCount,
   runWorkerLane,
@@ -22,6 +27,7 @@ import {
   WORKERS_ENV,
 } from '../lib/test-workers';
 import {
+  assignedTo,
   crashingWorker,
   failingWorker,
   fakeLane,
@@ -230,6 +236,243 @@ describe('planWorkers', () => {
       ).toThrow(`which the runner sets per worker | received: ${flag}`);
     }
   );
+});
+
+describe('partitionByWeight', () => {
+  // Four heavy files, then twelve that weigh the default 1 each.
+  const heavy = { 'x/h1.test.ts': 40, 'x/h2.test.ts': 30, 'x/h3.test.ts': 20, 'x/h4.test.ts': 10 };
+  const light = Array.from({ length: 12 }, (_, at) => `x/l${String(at).padStart(2, '0')}.test.ts`);
+  const files = [...Object.keys(heavy), ...light];
+  const loadOf = (group: readonly string[]): number =>
+    group.reduce(
+      (sum, file) => sum + (heavy[file as keyof typeof heavy] ?? DEFAULT_FILE_WEIGHT),
+      0
+    );
+
+  it.each([2, 3, 4, 8])('puts every file in exactly one of %i groups', (count) => {
+    const groups = partitionByWeight(files, heavy, count);
+
+    expect(groups).toHaveLength(count);
+    expect(
+      groups.flat().sort(),
+      `expected ${files.length} files, each in one of ${count} groups | received: ${groups.flat().length} placed`
+    ).toEqual([...files].sort());
+  });
+
+  it('gives the same groups for the same files however they arrive', () => {
+    const once = partitionByWeight(files, heavy, 4);
+
+    expect(partitionByWeight([...files].reverse(), heavy, 4)).toEqual(once);
+    expect(
+      partitionByWeight(
+        [...files].sort(() => 0.5 - Math.random()),
+        heavy,
+        4
+      )
+    ).toEqual(once);
+    expect(partitionByWeight(files, heavy, 4)).toEqual(once);
+  });
+
+  it('spreads the heavy files over different groups and evens out the weight', () => {
+    const groups = partitionByWeight(files, heavy, 4);
+
+    const holders = Object.keys(heavy).map((file) =>
+      groups.findIndex((group) => group.includes(file))
+    );
+    expect(
+      new Set(holders).size,
+      `expected 4 heavy files in 4 different groups | received groups: ${holders.join(', ')}`
+    ).toBe(4);
+    // The 40 and the 30 stay alone; the 20 and the 10 take the 12 light files
+    // between them until both reach 21.
+    expect(groups.map(loadOf)).toEqual([40, 30, 21, 21]);
+  });
+
+  it('breaks ties toward the lowest group and the lowest path', () => {
+    const equal = ['b.test.ts', 'a.test.ts', 'd.test.ts', 'c.test.ts', 'e.test.ts'];
+
+    expect(partitionByWeight(equal, {}, 2)).toEqual([
+      ['a.test.ts', 'c.test.ts', 'e.test.ts'],
+      ['b.test.ts', 'd.test.ts'],
+    ]);
+  });
+
+  it('keeps each group in path order, as the serial lane runs its files', () => {
+    for (const group of partitionByWeight(files, heavy, 3)) {
+      expect(group).toEqual([...group].sort());
+    }
+  });
+
+  it('compares paths by code unit, not by locale', () => {
+    // localeCompare puts 'a' before 'B'; code units put 'B' first.
+    expect(partitionByWeight(['a.test.ts', 'B.test.ts'], {}, 1)).toEqual([
+      ['B.test.ts', 'a.test.ts'],
+    ]);
+  });
+
+  it('ignores a weight for a file the lane does not have', () => {
+    expect(partitionByWeight(['a.test.ts', 'b.test.ts'], { 'gone.test.ts': 99 }, 2)).toEqual([
+      ['a.test.ts'],
+      ['b.test.ts'],
+    ]);
+  });
+});
+
+describe('planWorkers with weights', () => {
+  const WEIGHTED: WorkerLaneSpec = {
+    ...SPEC,
+    id: 'root',
+    cwd: '/work',
+    command: ['bun', 'test', '--timeout', '15000', 'scripts'],
+    testDir: 'scripts',
+    weights: { 'scripts/big.test.ts': 9 },
+  };
+  const owned = [
+    'apps/api/tests/unit/slot-scripts.test.ts',
+    'scripts/a.test.ts',
+    'scripts/big.test.ts',
+    'scripts/c.test.ts',
+    'scripts/d.test.ts',
+  ];
+
+  it('hands each worker its files as ./path arguments in place of the directory, and no shard', () => {
+    const plans = planWorkers(WEIGHTED, 2, '/reports/run-1', owned);
+
+    for (const plan of plans) {
+      const named = plan.argv.filter((arg) => arg.startsWith('./'));
+      expect(named, `worker ${plan.index}/2 files`).toEqual(
+        (plan.files ?? []).map((file) => `./${file}`)
+      );
+      expect(plan.argv.slice(-named.length)).toEqual(named);
+      expect(plan.argv).not.toContain('scripts');
+      expect(plan.argv.some((arg) => arg.startsWith('--shard'))).toBe(false);
+      expect(plan.argv).toContain('--no-orphans');
+      expect(plan.argv).toContain('--timeout');
+      expect(plan.argv).toContain(`--reporter-outfile=${plan.reportPath}`);
+    }
+    expect(plans.flatMap((plan) => plan.files ?? []).sort()).toEqual(owned);
+    expect(plans[0]?.files).toEqual(['scripts/big.test.ts']);
+  });
+
+  it('plans the same worker arguments on every call', () => {
+    const argvOf = (): string[][] =>
+      planWorkers(WEIGHTED, 3, '/reports/run-1', owned).map((plan) => [...plan.argv]);
+
+    expect(argvOf()).toEqual(argvOf());
+  });
+
+  it('runs a single worker as the serial command, whatever the weights', () => {
+    const [only] = planWorkers(WEIGHTED, 1, '/reports/run-1', owned);
+
+    expect(only?.files).toBeNull();
+    expect(only?.argv.at(-1)).toBe('scripts');
+    expect(only?.argv.some((arg) => arg.startsWith('./') || arg.startsWith('--shard'))).toBe(false);
+  });
+
+  it('keeps --shard for a lane without weights', () => {
+    const plans = planWorkers(SPEC, 4, '/reports/run-1', owned);
+
+    expect(plans.every((plan) => plan.files === null)).toBe(true);
+    expect(plans.map((plan) => plan.argv.find((arg) => arg.startsWith('--shard=')))).toEqual([
+      '--shard=1/4',
+      '--shard=2/4',
+      '--shard=3/4',
+      '--shard=4/4',
+    ]);
+  });
+
+  it('refuses to split by weight without the lane’s file list', () => {
+    expect(() => planWorkers(WEIGHTED, 2, '/reports/run-1')).toThrow(
+      'expected the file list of root to split it by weight | received: none'
+    );
+  });
+
+  it('refuses a split that would leave a worker with no file, which would run the whole lane', () => {
+    expect(() => planWorkers(WEIGHTED, 8, '/reports/run-1', owned)).toThrow(
+      'expected at least one file per worker | received: 5 files for 8 workers'
+    );
+  });
+
+  it.each(['root', 'api-integration'] as const)(
+    'carries the tracked weights of %s into its spec, except on Windows',
+    (id) => {
+      const command = ['bun', 'test', laneById(id).workers?.testDir ?? ''];
+
+      expect(laneSpec(laneById(id), command, undefined, 'linux').weights).toBe(LANE_WEIGHTS[id]);
+      expect(laneSpec(laneById(id), command, undefined, 'win32').weights).toBeUndefined();
+    }
+  );
+
+  it('leaves the api unit lane on --shard', () => {
+    const command = ['bun', 'test', 'tests/unit'];
+
+    expect(laneSpec(laneById('api-unit'), command, undefined, 'linux').weights).toBeUndefined();
+  });
+});
+
+describe('a weighted lane run end to end with fake workers', () => {
+  const lane = fakeLane(10, 2).map((file, at) => ({ ...file, path: `scripts/f${at}.test.ts` }));
+  const WEIGHTED: WorkerLaneSpec = {
+    ...SPEC,
+    id: 'root',
+    cwd: '/work',
+    command: ['bun', 'test', 'scripts'],
+    testDir: 'scripts',
+    weights: { 'scripts/f0.test.ts': 6, 'scripts/f1.test.ts': 6 },
+  };
+
+  it('passes when the workers run the files they were handed, each file once', async () => {
+    const scratch = mkdtempSync(join(tmpdir(), 'mangostudio-weighted-lane-'));
+    mkdirSync(join(scratch, 'scripts'));
+    for (const file of lane) writeFileSync(join(scratch, file.path), '');
+    try {
+      const { verdict } = await runWorkerLane({
+        spec: { ...WEIGHTED, cwd: scratch },
+        count: 3,
+        mergedPath: join(scratch, 'out', 'root.xml'),
+        scratchRoot: scratch,
+        start: (plan) => {
+          writeFileSync(plan.reportPath, reportOf(assignedTo(lane, plan)));
+          return { exited: Promise.resolve({ exitCode: 0, signal: null }), kill: noKill };
+        },
+      });
+
+      expect(verdict.failures).toEqual([]);
+      expect(verdict.totals.files).toBe(10);
+      expect(verdict.totals.cases).toBe(20);
+      expect(verdict.workers.map((worker) => worker.files)).toEqual([2, 2, 6]);
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
+  it('fails the lane, naming the file, when a worker reports one it was not handed', async () => {
+    const disk = new FakeReportDisk();
+    const plans = planWorkers(
+      WEIGHTED,
+      3,
+      '/reports/run-1',
+      lane.map((file) => file.path)
+    );
+    const runs = await runWorkers(plans, (plan) =>
+      writingWorker(
+        reportOf(
+          plan.index === 2
+            ? lane.filter((file) => file.path !== plan.files?.[0])
+            : assignedTo(lane, plan)
+        ),
+        disk
+      )(plan)
+    );
+    const verdict = judgeWorkers({
+      runs,
+      readReport: disk.read,
+      census: lane.map((file) => file.path),
+      testDir: 'scripts',
+    });
+
+    expect(verdict.failures.join('\n')).toContain('was reported by');
+  });
 });
 
 describe('the merged report equals the single-worker report', () => {

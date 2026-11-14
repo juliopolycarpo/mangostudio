@@ -4,7 +4,8 @@
 // Why processes of their own and not `bun test --parallel=N`: Bun's workers
 // share one process, and that process is where oven-sh/bun#37968 aborts whole
 // files (see docs/reference/testing.md, "Known upstream blocker"). A worker here
-// is a complete `bun test` that owns its file subset (`--shard=i/N`), its
+// is a complete `bun test` that owns its file subset (`--shard=i/N`, or the
+// explicit files of a weighted lane: see `partitionByWeight`), its
 // temporary HOME (the launcher gives every process a fresh one), its in-memory
 // database, its OS-assigned ports and its own JUnit report, so nothing is shared
 // between workers but the checkout. That is the shape the sharded CI lanes
@@ -28,6 +29,7 @@ import { Glob } from 'bun';
 
 import { ROOT_DIR } from './config';
 import { endOfOpenTag, type JunitCounts, parseJunitXml, readAttributes } from './junit-report';
+import { type FileWeights, LANE_WEIGHTS } from './test-lane-weights';
 import type { TestLane } from './test-lanes';
 import { type Leftover, WORKER_TOKEN_ENV } from './test-worker-settle';
 
@@ -97,6 +99,11 @@ export interface WorkerLaneSpec {
   readonly testDir: string;
   /** Files outside `testDir` the command also runs; see `TestLane.workers.alsoRuns`. */
   readonly alsoRuns?: readonly string[];
+  /**
+   * Tracked per-file weights of a lane that splits by them; see
+   * `LANE_WEIGHTS` (./test-lane-weights.ts). Absent, the workers take `--shard=i/N`.
+   */
+  readonly weights?: FileWeights;
   /** What starts each worker's `bun test`: the temporary-HOME launcher. */
   readonly launcher: readonly string[];
   /**
@@ -133,6 +140,9 @@ export function laneSpec(
     command,
     testDir: lane.workers.testDir,
     alsoRuns: lane.workers.alsoRuns,
+    // Windows keeps `--shard`: explicit file arguments have not been tried
+    // there, and the lane runs one worker, with the serial command, by default.
+    weights: platform === 'win32' ? undefined : LANE_WEIGHTS[lane.id],
     launcher: launcher ?? [process.execPath, join(ROOT_DIR, 'scripts', 'with-test-home.ts')],
     // Windows keeps the serial default and Bun's orphan cleanup. It has no
     // POSIX process group for the replacement settlement guard to inspect.
@@ -148,6 +158,11 @@ export interface WorkerPlan {
   readonly laneId: string;
   readonly cwd: string;
   readonly argv: readonly string[];
+  /**
+   * The files this worker was handed on its command line, or null for a worker
+   * that takes `--shard=index/count` (or the whole lane, when it is the only one).
+   */
+  readonly files: readonly string[] | null;
   readonly reportPath: string;
   /** This worker leads its own process group and must leave nothing running. */
   readonly settle: boolean;
@@ -184,10 +199,48 @@ export function splitLaneCommand(
 
 const OWNED_FLAGS = ['--reporter', '--reporter-outfile', '--shard', '--no-orphans'];
 
+/** What a file the weights do not list is worth: the weights list only the heavy ones. */
+export const DEFAULT_FILE_WEIGHT = 1;
+
+const byPath = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
 /**
- * One plan per worker. Each gets `--shard=i/N` (none for a single worker, which
- * runs the serial command as it was), `--no-orphans`, and `--reporter=junit`
- * writing to a path inside `reportDir` that no other worker has.
+ * Splits `files` into `count` groups of about equal weight: heaviest first (ties
+ * by path), each file to the group with the least weight so far (ties to the
+ * lowest index). A function of the file list and the tracked weights alone, so
+ * every machine and every run derives the same groups from the same commit.
+ * Each group is in path order, as the serial lane would run it. Paths compare by
+ * code unit, since a locale comparison would differ by machine.
+ *
+ * @example
+ * partitionByWeight(['a.test.ts', 'b.test.ts', 'c.test.ts'], { 'a.test.ts': 5 }, 2);
+ * // => [['a.test.ts'], ['b.test.ts', 'c.test.ts']]
+ */
+export function partitionByWeight(
+  files: readonly string[],
+  weights: FileWeights,
+  count: number
+): string[][] {
+  const weightOf = (file: string): number => weights[file] ?? DEFAULT_FILE_WEIGHT;
+  const groups = Array.from({ length: count }, () => ({ load: 0, files: [] as string[] }));
+  const heaviestFirst = [...files].sort((a, b) => weightOf(b) - weightOf(a) || byPath(a, b));
+  for (const file of heaviestFirst) {
+    const lightest = groups.reduce((best, group) => (group.load < best.load ? group : best));
+    lightest.load += weightOf(file);
+    lightest.files.push(file);
+  }
+  return groups.map((group) => group.files.sort(byPath));
+}
+
+/**
+ * One plan per worker. Each gets `--no-orphans`, `--reporter=junit` writing to
+ * a path inside `reportDir` that no other worker has, and its share of the lane:
+ * `--shard=i/N` (none for a single worker, which runs the serial command as it
+ * was), or, for a spec with `weights` and more than one worker, the files
+ * `partitionByWeight` gives it as `./path` arguments in place of the lane's
+ * directory. Bun reads a `./`-prefixed argument as a path, so each one selects
+ * its file and nothing whose path merely contains it. `files` is every file the
+ * lane owns, which a weighted split needs.
  *
  * @example
  * planWorkers(spec, 4, '/tmp/run-1').map((plan) => plan.reportPath);
@@ -196,9 +249,10 @@ const OWNED_FLAGS = ['--reporter', '--reporter-outfile', '--shard', '--no-orphan
 export function planWorkers(
   spec: WorkerLaneSpec,
   count: number,
-  reportDir: string
+  reportDir: string,
+  files: readonly string[] | null = null
 ): readonly WorkerPlan[] {
-  const { lane } = splitLaneCommand(spec.command, spec.testDir);
+  const { lane, extra } = splitLaneCommand(spec.command, spec.testDir);
   const owned = lane.find((arg) => OWNED_FLAGS.some((flag) => arg.split('=')[0] === flag));
   if (owned) {
     throw new Error(
@@ -206,9 +260,24 @@ export function planWorkers(
     );
   }
 
+  const weights = count > 1 ? spec.weights : undefined;
+  if (weights && files === null) {
+    throw new Error(
+      `test workers: expected the file list of ${spec.id} to split it by weight | received: none`
+    );
+  }
+  const groups = weights ? partitionByWeight(files ?? [], weights, count) : null;
+  if (groups?.some((group) => group.length === 0)) {
+    // A worker with no file argument would run the whole lane.
+    throw new Error(
+      `test workers: expected at least one file per worker | received: ${files?.length ?? 0} files for ${count} workers`
+    );
+  }
+
   return Array.from({ length: count }, (_, offset) => {
     const index = offset + 1;
     const reportPath = join(reportDir, `worker-${index}-of-${count}.xml`);
+    const own = groups?.[offset] ?? null;
     const flags = [
       // The worker dies with its launcher and takes its own descendants along, so
       // the SIGKILL that ends a cancelled lane (which no launcher can forward) does
@@ -218,15 +287,25 @@ export function planWorkers(
       ...(spec.settle ? [] : ['--no-orphans']),
       '--reporter=junit',
       `--reporter-outfile=${reportPath}`,
-      ...(count > 1 ? [`--shard=${index}/${count}`] : []),
+      ...(count > 1 && !own ? [`--shard=${index}/${count}`] : []),
     ];
-    const [program, subcommand, ...rest] = spec.command;
+    const [program, subcommand, ...rest] = lane;
+    // The lane's own arguments end at its directory; a worker with files names them instead.
+    const selection = own ? [...rest.slice(0, -1), ...own.map((file) => `./${file}`)] : rest;
     return {
       index,
       count,
       laneId: spec.id,
       cwd: spec.cwd,
-      argv: [...spec.launcher, program as string, subcommand as string, ...flags, ...rest],
+      argv: [
+        ...spec.launcher,
+        program as string,
+        subcommand as string,
+        ...flags,
+        ...selection,
+        ...extra,
+      ],
+      files: own,
       reportPath,
       settle: spec.settle,
       env: (spec.settle ? { [WORKER_TOKEN_ENV]: crypto.randomUUID() } : {}) as Record<
@@ -765,7 +844,7 @@ export async function runWorkerLane(
   const census = [...discoverTestFiles(spec.cwd, spec.testDir), ...(spec.alsoRuns ?? [])].sort();
   const reportDir = mkdtempSync(join(options.scratchRoot ?? tmpdir(), 'mangostudio-test-workers-'));
   try {
-    const plans = planWorkers(spec, options.count, reportDir);
+    const plans = planWorkers(spec, options.count, reportDir, census);
     const runs = await runWorkers(plans, options.start, options);
     const verdict = judgeWorkers({
       runs,

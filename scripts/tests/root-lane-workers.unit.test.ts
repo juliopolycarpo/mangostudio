@@ -125,24 +125,27 @@ describe('the root lane is declared as a worker lane', () => {
     ).toBe('bun test --timeout 15000 scripts');
   });
 
-  it('starts every worker through the temporary-home launcher with a shard and a report of its own', () => {
-    const spec = laneSpec(laneById('root'), laneCommand(scripts[WORKERS_SCRIPT] ?? ''));
-    const plans = planWorkers(spec, 4, tmpdir());
+  it('starts every worker through the temporary-home launcher with its own files and report', () => {
+    const spec = laneSpec(
+      laneById('root'),
+      laneCommand(scripts[WORKERS_SCRIPT] ?? ''),
+      undefined,
+      'linux'
+    );
+    const plans = planWorkers(spec, 4, tmpdir(), laneFiles());
 
     expect(spec.alsoRuns).toEqual(laneById('root').workers?.alsoRuns);
-    expect(plans.map((plan) => plan.argv.at(-1))).toEqual([
-      'scripts',
-      'scripts',
-      'scripts',
-      'scripts',
-    ]);
+    expect(plans.flatMap((plan) => plan.files ?? []).sort()).toEqual(laneFiles());
     for (const plan of plans) {
       const launcher = plan.argv.slice(0, spec.launcher.length);
       expect(
         launcher.at(-1)?.replaceAll('\\', '/'),
         `expected worker ${plan.index}/${plan.count} to start through scripts/with-test-home.ts | received: ${plan.argv.join(' ')}`
       ).toEndWith('/scripts/with-test-home.ts');
-      expect(plan.argv).toContain(`--shard=${plan.index}/4`);
+      expect(plan.argv.some((arg) => arg.startsWith('--shard'))).toBe(false);
+      expect(plan.argv.filter((arg) => arg.startsWith('./'))).toEqual(
+        (plan.files ?? []).map((file) => `./${file}`)
+      );
       expect(plan.argv).toContain('--no-orphans');
       expect(plan.argv).toContain(`--reporter-outfile=${plan.reportPath}`);
       expect(plan.cwd, 'expected the workers to run at the repository root').toBe(ROOT_DIR);
@@ -191,6 +194,28 @@ describe('the lane owns what the serial command runs', () => {
   });
 });
 
+describe('the weighted api-integration lane owns what its serial command runs', () => {
+  // A weighted worker is handed explicit paths, so a file the directory filter
+  // would select from outside the census runs in no worker and fails nothing.
+  it('lists every file the tests/integration filter selects in apps/api', () => {
+    const apiDir = join(ROOT_DIR, 'apps', 'api');
+    const workers = laneById('api-integration').workers;
+    const filter = workers?.testDir ?? '';
+    const selected = bunTestFiles(apiDir)
+      .filter((file) => file.includes(filter))
+      .sort();
+    const owned = [...discoverTestFiles(apiDir, filter), ...(workers?.alsoRuns ?? [])].sort();
+    const missing = selected.filter((file) => !owned.includes(file));
+
+    expect(filter).toBe('tests/integration');
+    expect(
+      missing,
+      `(api-integration lane): expected 'bun test ${filter}' to select no file outside the census | received: ${missing[0]} (move it under ${filter}/ or add it to workers.alsoRuns)`
+    ).toEqual([]);
+    expect(owned.filter((file) => !selected.includes(file))).toEqual([]);
+  });
+});
+
 describe('the coverage script and the CI shards stay what they were', () => {
   it('keeps test:scripts one bun test that writes the coverage evidence', () => {
     const script = scripts['test:scripts'] ?? '';
@@ -234,7 +259,7 @@ describe('the coverage script and the CI shards stay what they were', () => {
 
 describe('the runner over the root tree', () => {
   it.each([
-    { label: 'four on a large POSIX host', cpus: 34, platform: 'linux' as const, count: 4 },
+    { label: 'six on a large POSIX host', cpus: 34, platform: 'linux' as const, count: 6 },
     { label: 'half the cores on a smaller host', cpus: 6, platform: 'linux' as const, count: 3 },
     { label: 'one on a single-core host', cpus: 1, platform: 'linux' as const, count: 1 },
     { label: 'one on Windows', cpus: 34, platform: 'win32' as const, count: 1 },
