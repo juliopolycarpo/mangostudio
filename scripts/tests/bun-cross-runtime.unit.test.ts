@@ -610,7 +610,9 @@ describe('downloadVerifiedAsset', () => {
         downloadVerifiedAsset(ASSET, CHANNEL, archivePath, server.base, {
           metadataBase: METADATA_BASE,
           githubToken: 'test-github-token',
-          checksumMs: 50,
+          // Only the stalled read is short: with one 50 ms bound for both, a slow
+          // loopback fetch of the checksum listing could miss it first.
+          metadataMs: 50,
         })
       ).rejects.toThrow('Timed out after 50ms reading release metadata');
       expect(metadata.requests[0]?.authorization).toBe('Bearer test-github-token');

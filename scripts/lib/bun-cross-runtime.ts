@@ -40,6 +40,8 @@ const ASSET_TIMEOUT_MS = 120_000;
 /** Per-request ceilings, overridable so a test can stall a request cheaply. */
 interface AssetTimeouts {
   readonly checksumMs?: number;
+  /** The release metadata read alone; it shares `checksumMs` when absent. */
+  readonly metadataMs?: number;
   readonly assetMs?: number;
   readonly metadataBase?: string;
   /** Used only for the official GitHub release metadata endpoint. */
@@ -545,7 +547,7 @@ async function fetchReleaseAssetDigest(
   if (!request) {
     request = underDeadline(
       `reading release metadata: ${safeUrl}`,
-      timeouts.checksumMs ?? CHECKSUM_TIMEOUT_MS,
+      timeouts.metadataMs ?? timeouts.checksumMs ?? CHECKSUM_TIMEOUT_MS,
       async (signal) => {
         let response: Response;
         try {
