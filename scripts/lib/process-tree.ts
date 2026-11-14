@@ -539,11 +539,17 @@ export class ChildSupervisor {
     });
   }
 
-  /** The watched children that are not yet gone: a leader running, or a group with members. */
+  /**
+   * The watched children that are not yet gone: a leader running, or a group
+   * with members. A child seen gone leaves `targets` for good: its pid or group
+   * id is free for an unrelated process from that moment, so it is never probed
+   * or signalled again, here or in {@link stopAll}.
+   */
   private unsettled(): SupervisedChild[] {
-    return this.targets.filter((child) =>
+    this.targets = this.targets.filter((child) =>
       child.ownsGroup ? this.host.groupAlive(child.pid) : this.live.has(child)
     );
+    return this.targets;
   }
 
   private stopUnsettled(signal: NodeJS.Signals): void {

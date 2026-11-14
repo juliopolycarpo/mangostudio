@@ -484,6 +484,71 @@ describe('ChildSupervisor', () => {
     expect(host.exitStatuses).toEqual([143]);
   });
 
+  // Once a group is seen empty its id is free: an unrelated process can lead a
+  // group with that id before the runner has finished with a slower child.
+  describe('a group id reused after its group was seen gone', () => {
+    /** One child stops at once, its id is then reused; the other ignores the signal. */
+    const cancelWithReusedId = async (host: FakeProcessHost) => {
+      const supervisor = new ChildSupervisor(host);
+      const quick = new FakeChild('lane-quick', 101, true);
+      watch(host, supervisor, quick);
+      watch(host, supervisor, new FakeChild('lane-stubborn', 102, true));
+
+      host.deliver('SIGTERM');
+      stop(host, quick);
+      await host.advance(50);
+      host.liveGroups.add(101);
+    };
+
+    test('is not killed when the grace runs out', async () => {
+      const host = new FakeProcessHost();
+      await cancelWithReusedId(host);
+
+      await host.advance(CANCEL_GRACE_MS);
+      await host.advance(25);
+      await host.exited;
+
+      expect(host.groupKills).toEqual([
+        [101, 'SIGTERM'],
+        [102, 'SIGTERM'],
+        [102, 'SIGKILL'],
+      ]);
+      expect(host.reports.join('\n')).toContain('killing: lane-stubborn');
+      expect(host.liveGroups.has(101)).toBe(true);
+    });
+
+    test('is not killed by a second signal after the window', async () => {
+      const host = new FakeProcessHost();
+      await cancelWithReusedId(host);
+
+      await host.advance(1_500);
+      host.deliver('SIGTERM');
+      await host.exited;
+
+      expect(host.groupKills).toEqual([
+        [101, 'SIGTERM'],
+        [102, 'SIGTERM'],
+        [102, 'SIGKILL'],
+      ]);
+    });
+
+    test('is not signalled by the exit handler of a runner that settled', async () => {
+      const host = new FakeProcessHost();
+      const supervisor = new ChildSupervisor(host);
+      const quick = new FakeChild('lane-quick', 101, true);
+      watch(host, supervisor, quick);
+
+      host.deliver('SIGTERM');
+      stop(host, quick);
+      await host.advance(50);
+      await host.exited;
+      host.liveGroups.add(101);
+      host.endProcess();
+
+      expect(host.groupKills).toEqual([[101, 'SIGTERM']]);
+    });
+  });
+
   // The leader exiting says nothing about the rest of its group.
   describe('a group member that outlives its leader', () => {
     test('is waited for until it stops on its own', async () => {
