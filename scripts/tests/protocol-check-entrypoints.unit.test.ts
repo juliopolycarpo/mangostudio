@@ -91,6 +91,16 @@ test('the public protocol CLI cannot skip typechecking through an undocumented a
   expect(workspace[0]?.args, 'public protocol checker must retain typecheck:with-deps').toContain(
     'typecheck:with-deps'
   );
+  expect(
+    workspace[0]?.args,
+    'protocol Turbo call must not request the always-run cycle scan'
+  ).not.toContain('check:cycles');
+  expect(
+    result.calls
+      .filter((call) => call.tool === 'bun' && call.args[0] === 'scripts/check-import-cycles.ts')
+      .map((call) => call.args.slice(1)),
+    'expected one direct protocol cycle scan over packages/protocol'
+  ).toEqual([['packages/protocol']]);
 });
 
 test('root Check selects the ordinary or canonical-report supervised companion', () => {
@@ -111,7 +121,8 @@ test('the internal report companion omits only the delivered component typecheck
       .map((call) => ({ ...call, args: call.args.filter((arg) => arg !== 'typecheck:with-deps') }))
       .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
   );
-  expect(report.calls).toHaveLength(7);
+  // Turbo, the cycle scan, the versions check, the spec verifier, schema equality and three fixture checks.
+  expect(report.calls).toHaveLength(8);
 });
 
 test('the internal report companion rejects arguments before starting commands', async () => {

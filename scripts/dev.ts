@@ -1,10 +1,9 @@
+import { ROOT_DIR } from './lib/config';
 import {
-  createTurboDevCommand,
+  createDevTask,
   DEV_WORKSPACES,
-  getDevCwd,
   planLocalRuntimeBuild,
   selectDevWorkspaces,
-  selectTurboDevUi,
 } from './lib/dev';
 import {
   assertNoUnexpectedArguments,
@@ -13,6 +12,7 @@ import {
   info,
   parseArgs,
   runCommand,
+  runParallel,
   warn,
 } from './lib/runner';
 
@@ -71,7 +71,7 @@ if (runtimeBuild.kind === 'skip') {
   info(`Skipping the Local runtime build: ${runtimeBuild.reason}.`);
 } else {
   info(`Building the Local runtime: ${runtimeBuild.command.join(' ')}`);
-  const built = await runCommand('runtime', [...runtimeBuild.command], { cwd: getDevCwd() });
+  const built = await runCommand('runtime', [...runtimeBuild.command], { cwd: ROOT_DIR });
   if (built.exitCode !== 0) {
     fatal(`\`${runtimeBuild.command.join(' ')}\` exited ${built.exitCode}; Local cannot start.`);
   }
@@ -79,11 +79,16 @@ if (runtimeBuild.kind === 'skip') {
 
 info(`Starting dev task(s): ${runnableWorkspaces.join(', ')}`);
 
-const turboUi = selectTurboDevUi(process.env);
+// The dev servers run straight from this runner: Turbo added no cache and no
+// ordering for a persistent, uncached task. stdin stays at the runner default
+// (`ignore`), which puts each server in its own process group, so Ctrl-C or
+// `kill -TERM` on this runner stops the whole tree (see "Cancelling a runner"
+// in scripts/README.md).
+const results = await runParallel(
+  runnableWorkspaces.map((workspace) => {
+    const task = createDevTask(workspace);
+    return () => runCommand(task.label, task.cmd, { cwd: task.cwd });
+  })
+);
 
-const result = await runCommand('dev', createTurboDevCommand(runnableWorkspaces, turboUi), {
-  cwd: getDevCwd(),
-  stdin: turboUi === 'tui' ? 'inherit' : 'ignore',
-});
-
-process.exit(result.exitCode);
+process.exit(results.find((result) => result.exitCode !== 0)?.exitCode ?? 0);

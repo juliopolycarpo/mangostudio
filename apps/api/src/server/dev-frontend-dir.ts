@@ -6,8 +6,8 @@
  * populates it.
  *
  * It exists because `getSourceFrontendDir()` resolves `apps/frontend/dist`
- * against `process.cwd()`, and Turbo runs the API's dev task with the cwd set to
- * `apps/api`, not the repo root.
+ * against `process.cwd()`, and `scripts/dev.ts` runs the API's dev script with the
+ * cwd set to `apps/api`, not the repo root.
  */
 
 let devFrontendDir: string | null = null;

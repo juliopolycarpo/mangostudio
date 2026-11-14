@@ -48,40 +48,44 @@ The full Rust protocol gates run separately through `bun run protocol:check`.
 `lib/runner.ts` is a barrel re-exporting focused, single-concern modules — prefer
 importing the specific module in new code:
 
-| Module                   | Concern                                                                                                  |
-| ------------------------ | -------------------------------------------------------------------------------------------------------- |
-| `log.ts`                 | Leveled console output + ANSI colors                                                                     |
-| `args.ts`                | CLI argument + workspace-selection parsing                                                               |
-| `git.ts`                 | Change detection (`Bun.spawnSync`), workspace mapping                                                    |
-| `exec.ts`                | `runCommand`, `captureCommand`, `mapWithConcurrency`, `archiveConcurrency`, `runParallel`, `runTask`     |
-| `process-tree.ts`        | Child limit and cancellation behind `runCommand`: process groups on POSIX, a job object on Windows       |
-| `summary.ts`             | Pass/fail reporting + exit handling                                                                      |
-| `fs.ts`                  | Cross-platform `removePaths` (no spawned `rm`)                                                           |
-| `fs-assert.ts`           | `assertFile`/`assertDirectory` (throw) + `fileError` (collect)                                           |
-| `config.ts`              | Workspace definitions + root lint/format path lists                                                      |
-| `import-cycles.ts`       | TypeScript-resolved JS/TS graph scan shared by workspace checks and QA                                   |
-| `changelog.ts`           | git-cliff arg/format logic (wrapped behind a project API)                                                |
-| `npm-pack.ts`            | npm distribution manifest builders                                                                       |
-| `release-version.ts`     | Canonical release version resolver + lockstep consistency check                                          |
-| `prepare-release.ts`     | Two-phase lockstep version bump for release preparation                                                  |
-| `bun-cross-runtime.ts`   | Per-target Bun runtime for `--compile` when `.bun-version` names a channel                               |
-| `runtime-build.ts`       | Cargo runtime per release target: triple map, glibc floor, prebuilt-dir resolution, staged-binary checks |
-| `executable-header.ts`   | ELF / Mach-O / PE header reader: format, CPU, ELF interpreter, highest `GLIBC_` version                  |
-| `test-workers.ts`        | Test-lane worker plan, weighted partition, strict verdict, JUnit merge (+ test-worker-process.ts)        |
-| `test-lane-weights.ts`   | Tracked per-file weights that balance the root and API integration lanes' workers                        |
-| `junit-report.ts`        | Reads Bun's JUnit XML; shared by the QA gate and the worker lanes                                        |
-| `actions-lint/`          | Pinned workflow static analysis: manifest, bootstrap, tasks                                              |
-| `pass-stamp.ts`          | Local "this task passed for these inputs" stamps: key, read, write, run-or-replay                        |
-| `crate-inputs.ts`        | Files a Rust crate reads from outside its directory (lane coverage test, stamp inputs)                   |
-| `rust-workspace-lane.ts` | Opt-in `--rust` lane: cargo commands, scoped-run selection, tool probe, clean paths, stamp inputs        |
+| Module                    | Concern                                                                                                  |
+| ------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `log.ts`                  | Leveled console output + ANSI colors                                                                     |
+| `args.ts`                 | CLI argument + workspace-selection parsing                                                               |
+| `git.ts`                  | Change detection (`Bun.spawnSync`), workspace mapping                                                    |
+| `exec.ts`                 | `runCommand`, `captureCommand`, `mapWithConcurrency`, `archiveConcurrency`, `runParallel`, `runTask`     |
+| `process-tree.ts`         | Child limit and cancellation behind `runCommand`: process groups on POSIX, a job object on Windows       |
+| `summary.ts`              | Pass/fail reporting + exit handling                                                                      |
+| `fs.ts`                   | Cross-platform `removePaths` (no spawned `rm`)                                                           |
+| `fs-assert.ts`            | `assertFile`/`assertDirectory` (throw) + `fileError` (collect)                                           |
+| `config.ts`               | Workspace definitions + root lint/format path lists                                                      |
+| `import-cycles.ts`        | TypeScript-resolved JS/TS graph scan shared by workspace checks and QA                                   |
+| `import-cycle-command.ts` | Builds the scanner's argv without loading the compiler                                                   |
+| `changelog.ts`            | git-cliff arg/format logic (wrapped behind a project API)                                                |
+| `npm-pack.ts`             | npm distribution manifest builders                                                                       |
+| `release-version.ts`      | Canonical release version resolver + lockstep consistency check                                          |
+| `prepare-release.ts`      | Two-phase lockstep version bump for release preparation                                                  |
+| `bun-cross-runtime.ts`    | Per-target Bun runtime for `--compile` when `.bun-version` names a channel                               |
+| `runtime-build.ts`        | Cargo runtime per release target: triple map, glibc floor, prebuilt-dir resolution, staged-binary checks |
+| `executable-header.ts`    | ELF / Mach-O / PE header reader: format, CPU, ELF interpreter, highest `GLIBC_` version                  |
+| `test-workers.ts`         | Test-lane worker plan, weighted partition, strict verdict, JUnit merge (+ test-worker-process.ts)        |
+| `test-lane-weights.ts`    | Tracked per-file weights that balance the root and API integration lanes' workers                        |
+| `junit-report.ts`         | Reads Bun's JUnit XML; shared by the QA gate and the worker lanes                                        |
+| `actions-lint/`           | Pinned workflow static analysis: manifest, bootstrap, tasks                                              |
+| `pass-stamp.ts`           | Local "this task passed for these inputs" stamps: key, read, write, run-or-replay                        |
+| `crate-inputs.ts`         | Files a Rust crate reads from outside its directory (lane coverage test, stamp inputs)                   |
+| `rust-workspace-lane.ts`  | Opt-in `--rust` lane: cargo commands, scoped-run selection, tool probe, clean paths, stamp inputs        |
 
 Workspace `check:quick` scripts run cacheable Bun lint and format checks. The lint key
 includes the workspace's VCS inputs, upstream workspace sources through `transit`,
 and the root Bun, EditorConfig, Git ignore, TypeScript and Turbo configurations.
-Workspace `check:cycles` scripts always run `check-import-cycles.ts`, independently
-of lint cache hits. Both tasks are selected by `bun run check`, the protocol lane
-and each workspace's `check` script. The cycle pass uses a TypeScript-resolved
-graph scan, so formatting exclusions and `.gitignore` cannot hide TS/JS cycles.
+`bun run check` runs `check-import-cycles.ts` once per selected workspace
+(`api:cycles`, `frontend:cycles`, `shared:cycles`) and the protocol lane runs it as
+`protocol:cycles`. These scans run outside Turbo, so a lint cache hit never skips
+them. Each workspace's `check` script still chains lint,
+`check:cycles` and typecheck for a by-hand run. The cycle pass uses a
+TypeScript-resolved graph scan, so formatting exclusions and `.gitignore` cannot
+hide TS/JS cycles.
 It checks TS, TSX, MTS, CTS, JS, JSX, MJS and CJS files, including JavaScript
 dependencies reached from TypeScript roots and independent JavaScript roots.
 It includes declarations and generated or gitignored source files. The scanner
@@ -89,8 +93,8 @@ skips `node_modules`, `.git`, `dist`, `coverage`, and `.turbo` at any depth.
 It also skips the repository root's `.mango` and `target` directories and
 `crates/mango-protocol/fuzz/target`. Source files over 4 MiB fail before parsing.
 The scan resolves imports with the TypeScript compiler API and retains type-only edges.
-Turbo always reruns `check:cycles` because ignored files are absent from its VCS
-cache inputs. Dockerfiles are excluded from formatting.
+Turbo does not run the scan: ignored files are absent from its VCS cache inputs, so
+no cache entry could be valid. Dockerfiles are excluded from formatting.
 
 Run one scan from the repository root with
 `bun scripts/check-import-cycles.ts apps/api`.
@@ -102,7 +106,7 @@ Run one scan from the repository root with
 - **Limit.** At most `MANGO_RUNNER_CONCURRENCY` (default 16) children run at once **per runner
   process**, not per run: every nested `runParallel` / `mapWithConcurrency` call in that process
   shares the pool, but a runner started as a child holds a pool of its own, so the whole tree can
-  hold more. The widest fan-out today is `bun run protocol:check` with 13 tasks.
+  hold more. The widest fan-out today is `bun run protocol:check` with 14 tasks.
 - **POSIX.** Each child leads its own process group, in a new session. On SIGINT, SIGTERM or SIGHUP
   the runner signals every child group once, waits until every group is empty (a leader that exits
   while a member keeps running does not end the wait), SIGKILLs what is still running after 5 s, and
@@ -127,6 +131,10 @@ Run one scan from the repository root with
   installs no signal handler. **This fails open:** if the job cannot be created (a parent job that
   forbids nesting) the runner prints one line to stderr and carries on without the guarantee,
   because a build should not fail over a safety net that only matters when the runner is killed.
+- **Dev server.** `bun run dev` starts `bun run dev` in `apps/api` through `runCommand`, with no
+  Turbo in between. It keeps the default `stdin: 'ignore'`, so the dev tree gets its own group and
+  a SIGINT or SIGTERM to the runner leaves no `bun --watch`, hub or `mangostudio-runtime` process
+  behind.
 - **Not covered.** On POSIX, SIGKILL of the runner cannot be caught; the children it already
   started keep running. A group whose leader had already exited when the signal arrived is not
   tracked, so a member it left behind is not stopped.

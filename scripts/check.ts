@@ -11,6 +11,7 @@ import {
 import {
   createProtocolCheckCommand,
   createTurboCheckCommand,
+  createWorkspaceCycleCommand,
   createWorkspaceFormatCommand,
 } from './lib/check';
 import { checkReportIdentity, checkReportTarget, writeCheckReport } from './lib/check-report';
@@ -28,7 +29,7 @@ import {
   assertNoDisallowedWorkspaceDependencies,
 } from './lib/dependency-policy';
 import { assertFrontendApiImportBoundary } from './lib/frontend-api-import-boundary';
-import { createImportCycleCommand } from './lib/import-cycles';
+import { createImportCycleCommand } from './lib/import-cycle-command';
 import { assertNoProductionNodeEnvBranches } from './lib/no-node-env-branches';
 import { touchesProtocolSurface } from './lib/protocol';
 import { assertVersionsInLockstep } from './lib/release-version';
@@ -117,8 +118,15 @@ function createWorkspaceTasks(workspaces: ReadonlyArray<WorkspaceName>): CheckTa
       cwd: ROOT_DIR,
     }
   );
+  // The cycle scan reads generated and gitignored files Turbo does not hash, so
+  // it runs outside Turbo and always executes. One process per workspace keeps
+  // each scan's repository-root base and gives each its own result label.
+  const cycleScans = workspaces.map((workspace) =>
+    commandTask(`${workspace}:cycles`, createWorkspaceCycleCommand(workspace), { cwd: ROOT_DIR })
+  );
   return [
     turboChecks,
+    ...cycleScans,
     ...workspaces.map((workspace) =>
       commandTask(`root:fmt:${workspace}`, createWorkspaceFormatCommand(workspace), {
         cwd: ROOT_DIR,

@@ -170,13 +170,13 @@ describe('protocol lane selection', () => {
       'turbo',
       'run',
       'check:quick',
-      'check:cycles',
       'typecheck:with-deps',
       '--ui=stream',
       '--filter=@mangostudio/protocol',
     ]);
     expect(labels(protocolCheckTasks(['--ts-only']))).toEqual([
       'protocol:workspace',
+      'protocol:cycles',
       'protocol:versions',
       'protocol:verify-spec',
       'protocol:schema-equality',
@@ -184,6 +184,13 @@ describe('protocol lane selection', () => {
       'protocol:fixtures:ssh-argv',
       'protocol:fixtures:catalog-example',
     ]);
+  });
+
+  test('the protocol cycle scan is a direct command, not a Turbo task', () => {
+    const cycles = protocolCheckTasks(['--ts-only']).find(
+      (task) => task.label === 'protocol:cycles'
+    );
+    expect(cycles?.cmd).toEqual(['bun', 'scripts/check-import-cycles.ts', 'packages/protocol']);
   });
 
   test('a narrowed schema-equality run is told so, rather than shelling out to cargo', () => {
@@ -196,6 +203,7 @@ describe('protocol lane selection', () => {
   test('--rs-only drops the TypeScript lanes and the cross-language round trip', () => {
     const cmds = labels(protocolCheckTasks(['--rs-only'], INSTALLED));
     expect(cmds).not.toContain('protocol:workspace');
+    expect(cmds).not.toContain('protocol:cycles');
     expect(cmds).not.toContain('protocol:verify-spec');
     // The round trip drives the Rust decoder from the TypeScript encoder, so it
     // belongs to neither half alone.
@@ -230,6 +238,7 @@ describe('protocol lane selection', () => {
     // toolchain gets `bun run check` passing on the half they can run.
     expect(labels(protocolCheckTasks([], BARE))).toEqual([
       'protocol:workspace',
+      'protocol:cycles',
       'protocol:versions',
       'protocol:verify-spec',
       'protocol:schema-equality',

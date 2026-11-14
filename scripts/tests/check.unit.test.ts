@@ -1,8 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 
-import { createTurboCheckCommand, createWorkspaceFormatCommand } from '../lib/check';
+import {
+  createTurboCheckCommand,
+  createWorkspaceCycleCommand,
+  createWorkspaceFormatCommand,
+  TURBO_CHECK_TASKS,
+} from '../lib/check';
 import { ROOT_DIR } from '../lib/config';
-import { createImportCycleCommand } from '../lib/import-cycles';
+import { createImportCycleCommand } from '../lib/import-cycle-command';
 import { readText } from './support/read-text';
 
 describe('check script', () => {
@@ -40,7 +45,6 @@ describe('check script', () => {
       'turbo',
       'run',
       'check:quick',
-      'check:cycles',
       'typecheck:with-deps',
       '--ui=stream',
       '--filter=@mangostudio/api',
@@ -48,15 +52,50 @@ describe('check script', () => {
     ]);
   });
 
+  test('keeps the always-run cycle scan out of the cached Turbo tasks', () => {
+    expect(
+      TURBO_CHECK_TASKS,
+      `(check): expected the cached Turbo check tasks without check:cycles | received: ${TURBO_CHECK_TASKS.join(', ')}`
+    ).toEqual(['check:quick', 'typecheck:with-deps']);
+  });
+
+  test.each(['api', 'frontend', 'shared'] as const)(
+    'scans the %s workspace for import cycles from the repository root',
+    (workspace) => {
+      expect(createWorkspaceCycleCommand(workspace)).toEqual([
+        'bun',
+        'scripts/check-import-cycles.ts',
+        `apps/${workspace}`,
+      ]);
+    }
+  );
+
+  test('a workspace cycle scan is the command its own check:cycles script runs', () => {
+    // `bun ../../scripts/check-import-cycles.ts .` from apps/<name> resolves its root to
+    // apps/<name> against ROOT_DIR, the same argument the direct command passes.
+    for (const workspace of ['api', 'frontend', 'shared'] as const) {
+      const manifest = JSON.parse(readText(`apps/${workspace}/package.json`)) as {
+        scripts?: Record<string, string>;
+      };
+      expect(manifest.scripts?.['check:cycles']).toBe('bun ../../scripts/check-import-cycles.ts .');
+      expect(createWorkspaceCycleCommand(workspace).slice(1)).toEqual([
+        'scripts/check-import-cycles.ts',
+        `apps/${workspace}`,
+      ]);
+    }
+  });
+
   test('checks selected workspace docs and configuration outside Turbo', () => {
     expect(createWorkspaceFormatCommand('api')).toEqual(['bun', 'fmt', '--check', 'apps/api']);
   });
 
-  test('delegates workspace source checks to Turbo', () => {
+  test('delegates cached workspace checks to Turbo and runs cycle scans directly', () => {
     const checkScript = readText('scripts/check.ts');
 
     expect(checkScript).toContain('createTurboCheckCommand');
     expect(checkScript).toMatch(/commandTask\(\s*'workspaces:check'/);
+    expect(checkScript).toContain('createWorkspaceCycleCommand(workspace)');
+    expect(checkScript).toContain('`$' + '{workspace}:cycles`');
     expect(checkScript).not.toContain('runWorkspaceScript');
     expect(checkScript).not.toContain('root:madge');
   });

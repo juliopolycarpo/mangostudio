@@ -76,7 +76,7 @@ execução de tasks entre workspaces e fornece cache endereçável por conteúdo
 - **Sem Remote Cache ainda.** Apenas cache local até o modelo de tasks estar
   consolidado.
 - **Wrappers Bun na raiz são a interface pública.** `bun run dev`, `bun run build`,
-  `bun run check` e `bun run test` permanecem os comandos canônicos.
+  `bun run check` e `bun run test` permanecem os comandos canônicos. `build`, `check` e `test` chamam o Turborepo; `dev` não.
 
 ### Tasks atuais
 
@@ -84,10 +84,8 @@ execução de tasks entre workspaces e fornece cache endereçável por conteúdo
 
 | Task                      | Cache | Outputs / Env                                                                                               | Notas                                                                                                                           |
 | ------------------------- | ----- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `dev`                     | off   | —                                                                                                           | Persistente — roda servidores de dev                                                                                            |
 | `build`                   | on    | `dist/**`                                                                                                   | Depende de `^build`; `apps/frontend` sobrescreve `env` para `MANGO_API_URL`, `VITE_*` e inclui `dist-metafile.json` nos outputs |
 | `check:quick`             | on    | —                                                                                                           | Bun lint / formato; inclui configurações da raiz e fontes upstream via `transit` na chave                                       |
-| `check:cycles`            | off   | —                                                                                                           | Ciclos TS/JS, incluindo arquivos gerados e ignorados ausentes dos inputs de cache do VCS                                        |
 | `transit`                 | —     | —                                                                                                           | Sem script; inclui fontes upstream na chave sem ordenar sua execução; opt-in com `dependsOn: ["transit"]`                       |
 | `typecheck`               | on    | —                                                                                                           | Inclui `tsconfig.json` raiz e depende de `transit`; workspaces verificam tipos em paralelo                                      |
 | `typecheck:with-deps`     | —     | —                                                                                                           | Sem script; seleciona `typecheck` do workspace e de suas dependências; usado por `bun run check`                                |
@@ -96,6 +94,28 @@ execução de tasks entre workspaces e fornece cache endereçável por conteúdo
 | `test:coverage`           | off   | `$TURBO_ROOT$/.mango/artifacts/coverage/**`; env ↑                                                          | Relatórios de cobertura, sempre reexecutados                                                                                    |
 | `//#test:scripts`         | on    | inputs `$TURBO_DEFAULT$`, `scripts/**`; output `.mango/artifacts/junit/root.xml`; env `CI`, `MANGOSTUDIO_*` | Testes da raiz usados pela cobertura e pelos shards de CI; restaura a evidência JUnit em um hit                                 |
 | `//#test:scripts:workers` | on    | inputs `$TURBO_DEFAULT$`, `scripts/**`; env `CI`, `MANGOSTUDIO_*`                                           | Testes da raiz divididos em processos de workers na fase unit comum; sem relatório restaurado do cache                          |
+
+### Tasks fora do Turbo
+
+O Turbo roda as tasks com cache acima. Uma task sem cache não ganha nada com ele
+além de uma segunda camada de processos, então `bun run` inicia estas tasks no
+runner Bun do próprio repositório (`scripts/lib/exec.ts`):
+
+- **Ciclos de import.** A varredura lê arquivos gerados e ignorados pelo Git que
+  os inputs de VCS do Turbo omitem, então nenhuma entrada de cache seria válida.
+  `bun run check` inicia um `bun scripts/check-import-cycles.ts apps/<nome>` por
+  workspace selecionado, fora do Turbo. Cada varredura tem seu
+  próprio rótulo (`api:cycles`, `frontend:cycles`, `shared:cycles`) no resumo e no
+  resultado de `--report-file`. A lane do protocolo roda `protocol:cycles` do
+  mesmo jeito. O script `check:cycles` de um workspace roda a mesma varredura à mão.
+- **Servidores de dev.** `bun run dev` executa `bun run dev` no diretório de cada
+  workspace selecionado (hoje só `apps/api`). O processo filho herda o ambiente
+  inteiro, como o `--env-mode=loose` do Turbo fazia. Em SIGINT ou SIGTERM o runner
+  encerra o servidor de dev e tudo o que ele iniciou, inclusive o processo
+  `mangostudio-runtime`; veja "Cancelling a runner" em
+  [`scripts/README.md`](../../../scripts/README.md).
+
+`test:integration` e `test:coverage` também não têm cache e continuam passando pelo Turbo.
 
 ### Cache local e em CI
 

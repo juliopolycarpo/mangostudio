@@ -170,8 +170,8 @@ describe('childLimit', () => {
     );
   });
 
-  test('default covers the widest fan-out in use, 13 tasks with the powerset split', () => {
-    expect(DEFAULT_CHILD_LIMIT).toBeGreaterThanOrEqual(13);
+  test('default covers the widest single fan-out in use, the 14 protocol:check tasks', () => {
+    expect(DEFAULT_CHILD_LIMIT).toBeGreaterThanOrEqual(14);
   });
 });
 

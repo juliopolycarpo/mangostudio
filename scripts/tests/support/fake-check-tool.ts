@@ -5,7 +5,9 @@
  *
  * - `turbo` blocks `CHECK_FIXTURE_BLOCK_REPORT` when set, sleeps when
  *   `CHECK_FIXTURE_TURBO_DELAY=yes`, then exits with `CHECK_FIXTURE_TURBO_EXIT`.
- * - `bun` unblocks `CHECK_FIXTURE_UNBLOCK_REPORT` once Check has failed to publish a snapshot
+ * - `bun scripts/check-import-cycles.ts` exits with `CHECK_FIXTURE_CYCLES_EXIT`, the way a
+ *   workspace cycle scan reports its verdict.
+ * - any other `bun` unblocks `CHECK_FIXTURE_UNBLOCK_REPORT` once Check has failed to publish a snapshot
  *   onto it, then exits with `CHECK_FIXTURE_FMT_EXIT`.
  * - `git` blocks `CHECK_FIXTURE_BLOCK_REPORT` and fails with a fixed message.
  *
@@ -65,6 +67,9 @@ if (tool === 'git') {
   blockReport(report);
   console.error('fake git failed after blocking the report');
   process.exit(128);
+}
+if (tool === 'bun' && process.argv[2] === 'scripts/check-import-cycles.ts') {
+  process.exit(exitCodeFrom('CHECK_FIXTURE_CYCLES_EXIT'));
 }
 if (tool === 'bun') {
   const report = fixtureEnv('CHECK_FIXTURE_UNBLOCK_REPORT');

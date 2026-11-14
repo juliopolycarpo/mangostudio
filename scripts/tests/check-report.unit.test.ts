@@ -149,6 +149,7 @@ const makeCliFixture = (fakeToolDirectory: string) => {
       MANGO_RUNNER_CONCURRENCY: '2',
       CHECK_FIXTURE_TURBO_EXIT: '0',
       CHECK_FIXTURE_FMT_EXIT: '0',
+      CHECK_FIXTURE_CYCLES_EXIT: '0',
     },
   };
 };
@@ -168,17 +169,18 @@ describe('Check CLI result parity', () => {
   });
 
   test.each([
-    ['success', '0', '0', 0],
-    ['multiple task failures', '2', '7', 1],
+    ['success', '0', '0', '0', 0],
+    ['multiple task failures', '2', '7', '1', 1],
   ])(
     '%s preserves human logs and exit with the report adapter enabled',
-    async (_name, turbo, fmt, exitCode) => {
+    async (_name, turbo, fmt, cycles, exitCode) => {
       const fixture = makeCliFixture(fakeToolDirectory);
       try {
         const env = {
           ...fixture.env,
           CHECK_FIXTURE_TURBO_EXIT: turbo,
           CHECK_FIXTURE_FMT_EXIT: fmt,
+          CHECK_FIXTURE_CYCLES_EXIT: cycles,
         };
         const ordinary = await runCli(['--api'], env, fixture.directory);
         const reported = await runCli(
@@ -199,6 +201,7 @@ describe('Check CLI result parity', () => {
         expect(report.state).toBe('completed');
         expect(report.tasks.map((task) => task.label)).toEqual([
           'workspaces:check',
+          'api:cycles',
           'root:fmt:api',
           'root:shared-import-boundary',
         ]);
@@ -206,7 +209,7 @@ describe('Check CLI result parity', () => {
           report.tasks
             .filter((task) => task.state === 'executed' && task.exitCode !== 0)
             .map((task) => task.label)
-        ).toEqual(exitCode === 0 ? [] : ['workspaces:check', 'root:fmt:api']);
+        ).toEqual(exitCode === 0 ? [] : ['workspaces:check', 'api:cycles', 'root:fmt:api']);
       } finally {
         rmSync(fixture.directory, { recursive: true, force: true });
       }
@@ -230,11 +233,12 @@ describe('Check CLI result parity', () => {
       expect(report.state).toBe('unavailable');
       expect(report.tasks.map((task) => `${task.label}:${task.state}`)).toEqual([
         'workspaces:check:unavailable',
+        'api:cycles:unavailable',
         'root:fmt:api:unavailable',
         'root:shared-import-boundary:executed',
       ]);
       expect(result.stderr).toContain('Invalid MANGO_RUNNER_CONCURRENCY');
-      expect(result.stderr).toContain('2 task(s) failed.');
+      expect(result.stderr).toContain('3 task(s) failed.');
     } finally {
       rmSync(fixture.directory, { recursive: true, force: true });
     }
@@ -265,6 +269,7 @@ describe('Check CLI result parity', () => {
       expect(report.state).toBe('completed');
       expect(report.tasks.map((task) => `${task.label}:${task.state}`)).toEqual([
         'workspaces:check:executed',
+        'api:cycles:executed',
         'root:fmt:api:executed',
         'root:shared-import-boundary:executed',
       ]);

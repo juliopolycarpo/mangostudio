@@ -63,9 +63,10 @@ export default defineConfig({
       // the developer started it with, which is their real `~/.mango`. A hub
       // left on :3001 now fails the run loudly ("already used") instead.
       reuseExistingServer: false,
-      // `bun run dev` -> turbo -> `bun run --watch` is a chain of processes;
-      // a graceful signal lets each one forward it instead of the chain being
-      // cut off at the top and leaving the hub listening on :3001.
+      // `bun run dev` -> `bun ./scripts/dev.ts` -> `bun run dev` ->
+      // `bun run --watch` is a chain of processes; a graceful signal lets the
+      // dev runner stop each one instead of the chain being cut off at the top
+      // and leaving the hub listening on :3001.
       gracefulShutdown: { signal: 'SIGTERM', timeout: 10_000 },
       env: {
         ...smokeHubEnv(smokeHome),

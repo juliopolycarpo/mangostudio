@@ -55,39 +55,24 @@ const CHECK_RUNS: Record<string, { filtered: string[]; args: string[] }> = {
  */
 const EXPECTED_CHECK_TASKS: Record<string, string[]> = {
   full: [
-    `${API}#check:cycles`,
     `${API}#check:quick`,
     `${API}#typecheck`,
-    `${FRONTEND}#check:cycles`,
     `${FRONTEND}#check:quick`,
     `${FRONTEND}#typecheck`,
     `${PROTOCOL}#typecheck`,
-    `${SHARED}#check:cycles`,
     `${SHARED}#check:quick`,
     `${SHARED}#typecheck`,
   ],
   frontend: [
     `${API}#typecheck`,
-    `${FRONTEND}#check:cycles`,
     `${FRONTEND}#check:quick`,
     `${FRONTEND}#typecheck`,
     `${PROTOCOL}#typecheck`,
     `${SHARED}#typecheck`,
   ],
-  api: [
-    `${API}#check:cycles`,
-    `${API}#check:quick`,
-    `${API}#typecheck`,
-    `${PROTOCOL}#typecheck`,
-    `${SHARED}#typecheck`,
-  ],
-  shared: [
-    `${PROTOCOL}#typecheck`,
-    `${SHARED}#check:cycles`,
-    `${SHARED}#check:quick`,
-    `${SHARED}#typecheck`,
-  ],
-  protocol: [`${PROTOCOL}#check:cycles`, `${PROTOCOL}#check:quick`, `${PROTOCOL}#typecheck`],
+  api: [`${API}#check:quick`, `${API}#typecheck`, `${PROTOCOL}#typecheck`, `${SHARED}#typecheck`],
+  shared: [`${PROTOCOL}#typecheck`, `${SHARED}#check:quick`, `${SHARED}#typecheck`],
+  protocol: [`${PROTOCOL}#check:quick`, `${PROTOCOL}#typecheck`],
 };
 
 describe('typecheck closure guard', () => {
@@ -155,7 +140,7 @@ describe('typecheck task graph', () => {
 
   for (const [filter, run] of Object.entries(CHECK_RUNS)) {
     test(
-      `a ${filter} run executes lint, cycles and every dependency's typecheck`,
+      `a ${filter} run executes lint and every dependency's typecheck, never the cycle scan`,
       async () => {
         const received = executableTaskIds(await turboDryRun(ROOT_DIR, run.args, commands.run));
 
