@@ -47,6 +47,12 @@ import {
   type RunResult,
   runTask,
 } from './lib/runner';
+import {
+  chainRustTasks,
+  missingRustTools,
+  planRustLane,
+  RUST_CHECK_TASKS,
+} from './lib/rust-workspace-lane';
 import { assertNoSharedRootImports } from './lib/shared-root-import-boundary';
 
 function printHelp(): never {
@@ -57,6 +63,7 @@ generated contract-artifact freshness, lockfile dedupe, the TypeScript Mango Pro
 lanes (spec, schema equality, fixtures) and workflow static analysis
 (actionlint, zizmor, ShellCheck) in parallel.
 Run bun run protocol:check separately for the full protocol gate, including Rust.
+The Rust workspace lane (rustfmt, Clippy, rustdoc) runs only with --rust.
 Default workspace selection: --all
 Cycle scans include generated and gitignored TS/JS source files.
 They skip node_modules, .git, dist, coverage, and .turbo at any depth.
@@ -68,7 +75,10 @@ Workspace flags:
   --api
   --shared
   --root     Run root-level checks only (tooling lint + docs)
-  --all
+  --all      Every workspace plus root; does not include --rust
+  --rust     Rust workspace lane: cargo fmt --check, Clippy and cargo doc with
+             warnings denied. Alone it runs only this lane. With --staged or
+             --changed it runs only when a changed path feeds the Rust workspace.
 
 Mode flags:
   --staged       Scope to workspaces touched by staged files
@@ -151,6 +161,7 @@ function createRootTasks(skipFormat: boolean): CheckTask[] {
 const { workspaces, includeRoot, flags, values, positional } = parseArgs({
   booleanFlags: ['--staged', '--changed', '--skip-format', '--ci-report'],
   valueFlags: ['--base', '--report-file', '--report-id'],
+  selectionFlags: ['--rust'],
 });
 
 if (flags['--help']) {
@@ -324,6 +335,8 @@ async function check(): Promise<never> {
   // reaches it: its lane is wired here explicitly. Scoped runs skip it unless a
   // protocol path changed.
   let includeProtocol = includeRoot;
+  // The files a scoped run reads its lanes from; null on a full run.
+  let scopedFiles: string[] | null = null;
 
   if (flags['--staged']) {
     const files = getStagedFiles();
@@ -332,6 +345,7 @@ async function check(): Promise<never> {
       writeReport([], null);
       process.exit(0);
     }
+    scopedFiles = files;
     const mapped = mapFilesToWorkspaces(files);
     effectiveWorkspaces = mapped.workspaces;
     effectiveIncludeRoot = mapped.includeRoot;
@@ -347,6 +361,7 @@ async function check(): Promise<never> {
       writeReport([], null);
       process.exit(0);
     }
+    scopedFiles = files;
     const mapped = mapFilesToWorkspaces(files);
     effectiveWorkspaces = mapped.workspaces;
     effectiveIncludeRoot = mapped.includeRoot;
@@ -432,6 +447,25 @@ async function check(): Promise<never> {
       commandTask('root:protocol', createProtocolCheckCommand(ciReportMode), {
         cwd: ROOT_DIR,
       })
+    );
+  }
+
+  // Opt-in only: the pre-commit hook runs `check --staged` and CI's Check job
+  // runs `--all` with no cargo cache, and neither may start a cold Clippy.
+  const rustLane = planRustLane(flags['--rust'] === true, scopedFiles);
+  if (rustLane.skipped) info(`\nRust workspace: skipped, ${rustLane.skipped}`);
+  if (rustLane.run) {
+    const missingTools = missingRustTools(RUST_CHECK_TASKS);
+    if (missingTools.length > 0) throw new Error(missingTools.join('\n'));
+    info('\nRust workspace');
+    const chained = chainRustTasks(RUST_CHECK_TASKS, (task) =>
+      runCommand(task.label, [...task.cmd], {
+        cwd: ROOT_DIR,
+        ...(task.env ? { env: { ...task.env } } : {}),
+      })
+    );
+    tasks.push(
+      ...RUST_CHECK_TASKS.map((task, index) => ({ label: task.label, run: chained[index] }))
     );
   }
 

@@ -15,8 +15,10 @@ import {
   runCommand,
   runParallel,
   type RunResult,
+  runSequential,
 } from './lib/runner';
 import { RUNTIME_BINARY_DIGEST_ENV, runtimeBinaryDigestEnv } from './lib/runtime-binary-digest';
+import { missingRustTools, planRustLane, RUST_TEST_TASKS } from './lib/rust-workspace-lane';
 import {
   type ChangedLane,
   type ChangedLaneRun,
@@ -52,7 +54,11 @@ Lane flags:
   --integration
   --e2e
   --coverage     Run coverage collection across applicable workspaces
-  --all          Run all lanes (unit + integration + e2e)
+  --all          Run all lanes (unit + integration + e2e); does not include --rust
+  --rust         Rust workspace lane, after the other phases: cargo nextest and
+                 the doctests. Alone it runs only this lane. With --changed it
+                 runs only when a changed path feeds the Rust workspace. Not
+                 with --only or --shard.
   --shard=i/N    Run only shard i of N. Every sharded lane splits its own
                  files, so N shards run on N machines and something must merge
                  the results (scripts/ci/merge-test-shards.ts). The frontend
@@ -75,6 +81,7 @@ let runIntegrationLane = false;
 let runE2ELane = false;
 let runCoverage = false;
 let runAllLanes = false;
+let runRustLane = false;
 let shard: TestShard | null = null;
 let only: WorkspaceName | null = null;
 let runChanged = false;
@@ -95,6 +102,8 @@ for (let index = 0; index < args.length; index += 1) {
     runCoverage = true;
   } else if (arg === '--all') {
     runAllLanes = true;
+  } else if (arg === '--rust') {
+    runRustLane = true;
   } else if (arg.startsWith('--shard=')) {
     try {
       shard = parseShard(arg);
@@ -137,6 +146,12 @@ if (shard && !runCoverage) {
 // --only names one workspace whole.
 if (shard && only) {
   fatal('--shard and --only are mutually exclusive.');
+}
+
+// --only names one TypeScript workspace and --shard one slice of the coverage
+// lanes; the cargo workspace is neither, so the pair has no meaning to run.
+if (runRustLane && (only || shard)) {
+  fatal('--rust cannot be combined with --only or --shard; the Rust lane runs whole.');
 }
 
 if (baseRef && !runChanged) {
@@ -264,11 +279,19 @@ function workspaceLaneTasks(task: TestLaneTask): (() => Promise<RunResult>)[] {
 }
 
 const hasExplicitLaneSelection =
-  runUnitLane || runIntegrationLane || runE2ELane || runCoverage || runAllLanes;
+  runUnitLane || runIntegrationLane || runE2ELane || runCoverage || runAllLanes || runRustLane;
 const shouldRunUnit = runAllLanes || !hasExplicitLaneSelection || runUnitLane;
 const shouldRunIntegration = runAllLanes || !hasExplicitLaneSelection || runIntegrationLane;
 // e2e is opt-in only (--e2e or --all); excluded from the implicit default run
 const shouldRunE2E = runAllLanes || runE2ELane;
+
+const rustLane = planRustLane(runRustLane, changedRun ? changedRun.files : null);
+// Before any phase starts: a missing tool found after a ten-minute unit phase
+// is the same failure, later.
+if (rustLane.run) {
+  const missingTools = missingRustTools(RUST_TEST_TASKS);
+  if (missingTools.length > 0) fatal(missingTools.join('\n'));
+}
 
 header('Test');
 
@@ -280,6 +303,8 @@ if (changedRun) {
     );
   }
 }
+
+if (rustLane.skipped) info(`\nRust workspace: skipped, ${rustLane.skipped}`);
 
 const results: RunResult[] = [];
 
@@ -311,6 +336,28 @@ if (shouldRunE2E) {
   info('\nPhase: e2e');
   const e2eResult = await runCommand('e2e', [...BROWSER_SMOKE_TEST_COMMAND], { cwd: ROOT_DIR });
   results.push(e2eResult);
+}
+
+if (results.some((result) => result.exitCode !== 0)) {
+  exitWithResults(results);
+}
+
+// A phase of its own, never beside the API lanes: nextest builds into the
+// target directory those lanes resolve `mangostudio-runtime` from, and a relink
+// under running tests would swap the binary after its digest was taken.
+if (rustLane.run) {
+  info('\nPhase: rust');
+  results.push(
+    ...(await runSequential(
+      RUST_TEST_TASKS.map(
+        (task) => () =>
+          runCommand(task.label, [...task.cmd], {
+            cwd: ROOT_DIR,
+            ...(task.env ? { env: { ...task.env } } : {}),
+          })
+      )
+    ))
+  );
 }
 
 if (results.some((result) => result.exitCode !== 0)) {

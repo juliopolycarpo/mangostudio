@@ -1854,8 +1854,19 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo nextest run --workspace --all-targets --all-features --locked --retries 0
 cargo test --doc --workspace --all-features --locked
-RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --locked
+RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --all-features --locked
 ```
+
+`bun run check --rust` runs the rustfmt, Clippy and rustdoc commands above, one after
+another; `bun run test --rust` runs nextest and the doctests in a phase of their own, after
+the unit and integration phases. Both fail when `cargo` or `cargo-nextest` is missing
+instead of skipping. The lane is opt-in: `--all`, a bare `bun run check` and the
+pre-commit hook never start cargo. With `--staged` or `--changed`, `--rust` runs only when
+a changed path is in `RUST_WORKSPACE_PATHS` (`scripts/lib/rust-lanes.ts`), the list
+`cargo-shim.yml` selects its lanes with. `scripts/tests/rust-workspace-lane.unit.test.ts`
+fails when a lane command stops matching its `cargo-shim.yml` step.
+`bun run clean --rust` removes the cargo target directories, including the
+`mangostudio-runtime` binary the API tests spawn.
 
 The version is the one `cargo-shim.yml` installs through the SHA-pinned
 `taiki-e/install-action`; `scripts/tests/rust-nextest.unit.test.ts` fails when the two

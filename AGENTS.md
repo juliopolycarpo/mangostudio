@@ -82,15 +82,17 @@ Useful docs:
   including the published `mangostudio` launcher. `rust-toolchain.toml` pins the same development
   toolchain; policy tests enforce equality. The launcher keeps the application version, while
   `[workspace.package].version` remains the protocol version.
-- Check Rust changes with `cargo fmt --all -- --check`,
+- Check Rust changes with `bun run check --rust` and `bun run test --rust`, which run
+  `cargo fmt --all -- --check`,
   `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`,
   `cargo nextest run --workspace --all-targets --all-features --locked --retries 0` (install
   `cargo-nextest` at the version `docs/reference/testing.md` names; `--retries 0` keeps a flaky
   test a failure),
   `cargo test --doc --workspace --all-features --locked` (nextest, like `--all-targets`, excludes
   doctests by definition), and
-  `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --locked`. Protocol changes still
-  run the separate protocol gates listed in `packages/protocol/AGENTS.md`.
+  `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --all-features --locked`. The lane
+  is opt-in: `--all` and the pre-commit hook never start cargo. Protocol changes still run the
+  separate protocol gates listed in `packages/protocol/AGENTS.md`.
 
 ## Naming Shortcuts
 
