@@ -34,11 +34,12 @@ on:
 permissions:
   contents: read
 
-# ci.yml's caller-level group already supersedes per-PR runs; this group covers
-# direct workflow_dispatch runs. Mirrors ci.yml: main is never cancelled.
+# ci.yml's group already supersedes the calling run, which cancels this one. A
+# called run gets a group of its own, so a manual dispatch on the same ref cannot
+# cancel the job CI Gate waits on; dispatches supersede each other per ref.
 concurrency:
-  group: browser-smoke-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: ${{ github.event_name == 'workflow_dispatch' && format('browser-smoke-{0}', github.ref) || format('browser-smoke-called-{0}', github.run_id) }}
+  cancel-in-progress: true
 
 jobs:
   build-runtime:

@@ -36,7 +36,7 @@ permissions:
 
 concurrency:
   group: release-dry-run-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   DRY_RUN_VERSION: ${{ inputs.version || '0.0.0-dryrun' }}
