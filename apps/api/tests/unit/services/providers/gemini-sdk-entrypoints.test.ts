@@ -3,6 +3,7 @@ import { describe, expect, it } from 'bun:test';
 import { GoogleGenAI as NodeGoogleGenAI } from '@google/genai/node';
 import { GoogleGenAI } from '@google/genai/web';
 
+import { GEMINI_API_VERSION } from '../../../../src/services/providers/gemini/client';
 import { FakeGeminiHttp } from '../../../support/providers/fake-gemini-http';
 
 type Entry = 'node' | 'web';
@@ -12,6 +13,7 @@ function client(entry: Entry, peer: FakeGeminiHttp) {
   const Constructor = entry === 'web' ? GoogleGenAI : NodeGoogleGenAI;
   return new Constructor({
     apiKey: 'synthetic-key',
+    apiVersion: GEMINI_API_VERSION,
     httpOptions: {
       baseUrl: 'https://gemini.invalid',
       fetch: peer.fetch,

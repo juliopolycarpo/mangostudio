@@ -11,7 +11,24 @@ import {
   resetGeminiClientCache,
 } from '../../../../src/services/providers/gemini/client';
 
+const realFetch = globalThis.fetch;
+
+/** Named fake for the SDK's global fetch: records each URL and answers an empty model list. */
+class RecordingModelListFetch {
+  readonly urls: string[] = [];
+
+  readonly fetch = (input: string | URL | Request): Promise<Response> => {
+    this.urls.push(input instanceof Request ? input.url : String(input));
+    return Promise.resolve(
+      new Response(JSON.stringify({ models: [] }), {
+        headers: { 'content-type': 'application/json' },
+      })
+    );
+  };
+}
+
 afterEach(() => {
+  globalThis.fetch = realFetch;
   resetGeminiClientCache();
   resetProviderObservability();
 });
@@ -46,5 +63,14 @@ describe('createGeminiClient', () => {
     const previous = createGeminiClient('gemini-reset-key');
     resetGeminiClientCache();
     expect(createGeminiClient('gemini-reset-key')).not.toBe(previous);
+  });
+
+  it('calls the v1beta endpoints, not the v1 default of @google/genai 3', async () => {
+    const recorder = new RecordingModelListFetch();
+    globalThis.fetch = recorder.fetch as typeof fetch;
+
+    await createGeminiClient('gemini-version-key').models.list();
+
+    expect(recorder.urls.map((url) => new URL(url).pathname)).toEqual(['/v1beta/models']);
   });
 });
