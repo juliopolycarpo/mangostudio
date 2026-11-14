@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -8,7 +8,7 @@ import {
   type CanaryValidationSource,
   qualifyCanarySource,
 } from '../lib/canary-validation';
-import { fakeCliEnvironment, installFakeCli } from './support/fake-cli';
+import { fakeCliEnvironment, installFakeCli, removeFakeCliDirectory } from './support/fake-cli';
 import { extractJobBlock } from './support/workflow-blocks';
 
 const source: CanaryValidationSource = {
@@ -493,7 +493,7 @@ test.each([
       );
     }
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFakeCliDirectory(directory);
   }
 });
 

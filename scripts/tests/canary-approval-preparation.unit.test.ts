@@ -17,7 +17,7 @@ import type { CanarySource } from '../lib/canary-source';
 import type { CanaryValidationReceipt } from '../lib/canary-validation';
 import type { DistributionManifest } from '../lib/distribution-manifest';
 import { createReleaseAssetPlan, selectCanaryAssets } from '../lib/release-assets';
-import { fakeCliEnvironment, installFakeCli } from './support/fake-cli';
+import { fakeCliEnvironment, installFakeCli, removeFakeCliDirectory } from './support/fake-cli';
 
 const hash = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 function fixture() {
@@ -501,7 +501,7 @@ class FakeApprovalChildCommands {
       );
   }
 }
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -572,7 +572,7 @@ test('default prepare CLI maps source outputs, invokes named child fakes and emi
     expect(changed.exitCode).toBe(1);
     expect(changed.stderr.toString()).toContain('Frozen CI identity mismatch');
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFakeCliDirectory(directory);
   }
 });
 test('default prepare CLI publisher pin refuses a fresh CI origin and produces no approval', () => {
@@ -599,7 +599,7 @@ test('default prepare CLI publisher pin refuses a fresh CI origin and produces n
     expect(run.stderr.toString()).toContain('refusing new approval');
     expect(() => readFileSync(join(directory, 'output/approval.tar.gz'))).toThrow();
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFakeCliDirectory(directory);
   }
 });
 test('default stage CLI copies original files and metadata with the frozen builder time', async () => {
@@ -644,7 +644,7 @@ test('default stage CLI copies original files and metadata with the frozen build
     expect(mismatch.exitCode).toBe(1);
     expect(mismatch.stderr.toString()).toContain('Mixed distribution manifest');
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFakeCliDirectory(directory);
   }
 });
 
@@ -709,7 +709,7 @@ test.each([
       expect(run.stdout.toString()).not.toContain(token);
       expect(run.stderr.toString()).not.toContain('raw transport');
     } finally {
-      rmSync(directory, { recursive: true, force: true });
+      removeFakeCliDirectory(directory);
     }
   }
 );

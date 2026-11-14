@@ -11,7 +11,7 @@ import {
   distributionBundleMember,
   validateArtifactEvidence,
 } from '../lib/distribution-artifact';
-import { fakeCliEnvironment, installFakeCli } from './support/fake-cli';
+import { fakeCliEnvironment, installFakeCli, removeFakeCliDirectory } from './support/fake-cli';
 
 const approval: ApprovedArtifact = {
   repository: 'owner/repo',
@@ -376,7 +376,7 @@ describe('cross-run artifact download CLI', () => {
       expect(await new Response(corrupt.stderr).text()).toContain(`ZIP digest: expected ${digest}`);
       expect(await Bun.file(join(directory, 'invalid/npm.tar.gz')).exists()).toBe(false);
     } finally {
-      rmSync(directory, { recursive: true, force: true });
+      removeFakeCliDirectory(directory);
     }
   });
 });

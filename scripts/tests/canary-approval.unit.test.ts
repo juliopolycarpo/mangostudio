@@ -13,7 +13,7 @@ import type { CanaryDistribution } from '../lib/canary-promotion';
 import type { CanaryPromotionReceipt } from '../lib/canary-publication-evidence';
 import type { CanarySource } from '../lib/canary-source';
 import type { DistributionManifest } from '../lib/distribution-manifest';
-import { fakeCliEnvironment, installFakeCli } from './support/fake-cli';
+import { fakeCliEnvironment, installFakeCli, removeFakeCliDirectory } from './support/fake-cli';
 
 const REPO = 'owner/repo';
 const SHA = 'a'.repeat(40);
@@ -735,7 +735,7 @@ if(args[0]==='attestation'&&args[1]==='verify'){
 const response=fixture.responses[JSON.stringify(args)];if(!response){console.error('Unexpected fake gh command');process.exit(99);}process.stdout.write(Buffer.from(response.stdout,'base64'));process.exit(response.exitCode);
 `;
 test('CLI recovers exact durable payload and manifests with explicit provenance policy and no Actions fallback', async () => {
-  const { mkdtempSync, readFileSync, rmSync, writeFileSync } = await import('node:fs');
+  const { mkdtempSync, readFileSync, writeFileSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
   const directory = mkdtempSync(join(tmpdir(), 'fix-canary-approval-acquisition-cli-'));
@@ -823,7 +823,7 @@ test('CLI recovers exact durable payload and manifests with explicit provenance 
     expect(readFileSync(outputs, 'utf8')).toContain('approval_origin=release');
     expect(readFileSync(trace, 'utf8')).not.toContain('/actions/');
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFakeCliDirectory(directory);
   }
 });
 
@@ -839,7 +839,7 @@ test('recovery retains the exact original promotion JSON serialization', async (
 });
 
 test('approval CLI rejects an extra whitespace-only ZIP member', async () => {
-  const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
   const directory = mkdtempSync(join(tmpdir(), 'fix-canary-approval-acquisition-extra-member-'));
@@ -925,7 +925,7 @@ test('approval CLI rejects an extra whitespace-only ZIP member', async () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain('expected sole flat approval.tar.gz');
   } finally {
-    rmSync(directory, { recursive: true, force: true });
+    removeFakeCliDirectory(directory);
   }
 });
 
