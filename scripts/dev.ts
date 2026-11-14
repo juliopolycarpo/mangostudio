@@ -1,7 +1,10 @@
+import { isatty } from 'node:tty';
+
 import { ROOT_DIR } from './lib/config';
 import {
   createDevTask,
   DEV_WORKSPACES,
+  devStdinMode,
   planLocalRuntimeBuild,
   selectDevWorkspaces,
 } from './lib/dev';
@@ -81,14 +84,17 @@ if (runtimeBuild.kind === 'skip') {
 info(`Starting dev task(s): ${runnableWorkspaces.join(', ')}`);
 
 // The dev servers run straight from this runner: Turbo added no cache and no
-// ordering for a persistent, uncached task. stdin stays at the runner default
-// (`ignore`), which puts each server in its own process group, so Ctrl-C or
-// `kill -TERM` on this runner stops the whole tree (see "Cancelling a runner"
-// in scripts/README.md).
+// ordering for a persistent, uncached task. On a terminal (stdin and stdout
+// both TTYs) the server inherits stdin so the API's first-run prompt can read
+// it; it then stays in the terminal's foreground group and the runner signals
+// only that child. Otherwise stdin is `ignore`, which puts each server in its
+// own process group, so Ctrl-C or `kill -TERM` on this runner stops the whole
+// tree (see "Cancelling a runner" in scripts/README.md).
+const stdin = devStdinMode(isatty(0), isatty(1));
 const results = await runParallel(
   runnableWorkspaces.map((workspace) => {
     const task = createDevTask(workspace);
-    return () => runCommand(task.label, task.cmd, { cwd: task.cwd });
+    return () => runCommand(task.label, task.cmd, { cwd: task.cwd, stdin });
   })
 );
 

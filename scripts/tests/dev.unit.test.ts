@@ -4,6 +4,7 @@ import { parseArgs } from '../lib/args';
 import { WORKSPACES } from '../lib/config';
 import {
   createDevTask,
+  devStdinMode,
   LOCAL_RUNTIME_BUILD_COMMAND,
   planLocalRuntimeBuild,
   RUSTUP_INSTALL_COMMAND,
@@ -74,15 +75,32 @@ describe('dev script', () => {
     ).toBe('bun run --watch src/dev.ts serve');
   });
 
-  test('leaves stdin at the runner default so the dev tree gets its own process group', () => {
+  test.each([
+    ['a terminal on stdin and stdout', true, true, 'inherit'],
+    ['a pipe on stdout', true, false, 'ignore'],
+    ['a pipe on stdin', false, true, 'ignore'],
+    ['no terminal at all', false, false, 'ignore'],
+  ] as const)('devStdinMode with %s is %s', (name, stdinIsTerminal, stdoutIsTerminal, expected) => {
+    expect(
+      devStdinMode(stdinIsTerminal, stdoutIsTerminal),
+      `(devStdinMode): expected stdin mode: ${expected} for ${name} | received: ${devStdinMode(stdinIsTerminal, stdoutIsTerminal)}`
+    ).toBe(expected);
+  });
+
+  test('passes the terminal-derived stdin mode to the dev task, not a fixed one', () => {
     const devScript = readText('scripts/dev.ts');
 
-    expect(devScript).toContain('runCommand(task.label, task.cmd, { cwd: task.cwd })');
+    expect(devScript).toContain('const stdin = devStdinMode(isatty(0), isatty(1));');
+    expect(devScript).toContain('runCommand(task.label, task.cmd, { cwd: task.cwd, stdin })');
     expect(
       devScript,
-      'expected scripts/dev.ts to pass no stdin option | received a stdin override'
-    ).not.toMatch(/stdin:/);
-    expect(supervisionMode(undefined, 'linux', false)).toBe('group');
+      "(dev): expected scripts/dev.ts to pass no literal stdin mode | received: a literal 'inherit' or 'ignore' stdin"
+    ).not.toMatch(/stdin:\s*'/);
+  });
+
+  test('supervises an inherited dev stdin directly and an ignored one as a group', () => {
+    expect(supervisionMode(devStdinMode(true, true), 'linux', false)).toBe('direct');
+    expect(supervisionMode(devStdinMode(false, false), 'linux', false)).toBe('group');
   });
 
   test('passes no env option, so the server sees the ambient environment', () => {

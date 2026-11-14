@@ -110,7 +110,10 @@ runner Bun do próprio repositório (`scripts/lib/exec.ts`):
   mesmo jeito. O script `check:cycles` de um workspace roda a mesma varredura à mão.
 - **Servidores de dev.** `bun run dev` executa `bun run dev` no diretório de cada
   workspace selecionado (hoje só `apps/api`). O processo filho herda o ambiente
-  inteiro, como o `--env-mode=loose` do Turbo fazia. Em SIGINT ou SIGTERM o runner
+  inteiro, como o `--env-mode=loose` do Turbo fazia. Quando o runner tem um terminal
+  em stdin e em stdout, o servidor de dev herda o stdin, e o prompt de primeira
+  execução da API pode perguntar onde guardar um segredo de autenticação gerado;
+  caso contrário o stdin é ignorado. Em SIGINT, SIGTERM ou SIGHUP o runner
   encerra o servidor de dev e tudo o que ele iniciou, inclusive o processo
   `mangostudio-runtime`; veja "Cancelling a runner" em
   [`scripts/README.md`](../../../scripts/README.md).
