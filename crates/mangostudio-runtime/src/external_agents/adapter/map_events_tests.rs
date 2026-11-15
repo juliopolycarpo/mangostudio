@@ -241,10 +241,21 @@ fn owned_deltas_compact_excess_capacity_and_sdk_normalized_dirty_text() {
             else {
                 panic!("expected delta")
             };
-            assert!(
-                text.capacity() > text.len(),
-                "the real SDK keeps the original slack capacity"
-            );
+            // Since SDK 0.8 a stripped buffer is reclaimed once the survivors are under a
+            // quarter of it; clean text, which the SDK passes through, keeps its slack. Both
+            // must leave the mapper with `capacity == len`.
+            if dirty {
+                assert!(
+                    text.capacity() < 1024 * 1024,
+                    "the real SDK reclaims a mostly stripped buffer | received capacity {}",
+                    text.capacity()
+                );
+            } else {
+                assert!(
+                    text.capacity() > text.len(),
+                    "the real SDK keeps the slack of clean text"
+                );
+            }
             let expected_text = text.clone();
             let mut event = agent_event(sdk::EventKind::Completed);
             event.kind = normalized;
@@ -265,6 +276,21 @@ fn owned_deltas_compact_excess_capacity_and_sdk_normalized_dirty_text() {
             );
         }
     }
+}
+
+/// SDK 0.8's structured answer has no wire event yet and the runtime never asks for one: it maps
+/// to nothing on purpose, and it must not be mistaken for a terminal.
+#[test]
+fn a_structured_output_maps_to_nothing_and_does_not_end_the_turn() {
+    let answer = sdk::EventKind::structured_output(json!({ "verdict": "pass" }))
+        .expect("a small value fits the SDK bound");
+    let event = agent_event(answer);
+    assert!(
+        !event.is_terminal(),
+        "expected a marker | received {:?}",
+        event.kind
+    );
+    assert_eq!(map_event(TargetId::Claude, &event), MappedEvent::default());
 }
 
 #[test]

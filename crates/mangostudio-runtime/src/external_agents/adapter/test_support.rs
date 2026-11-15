@@ -2,8 +2,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use mango_agent_codex::testing::VersionAnsweringLauncher;
 use mango_external_agents::testing::{Announcer, FakeLauncher, FakeProcess};
-use mango_external_agents::{LaunchSpec, Limits, ManagedProcess, ProcessLauncher};
+use mango_external_agents::{Limits, ProcessLauncher};
 use mango_protocol::frame::PeerInfo;
 use mango_protocol::session::{Session, SessionOptions};
 use serde_json::{Value, json};
@@ -20,6 +21,33 @@ use crate::test_support::ScratchDir;
 
 pub(super) const THREAD: &str = "sdk-test-thread";
 pub(super) const TURN: &str = "sdk-test-turn";
+/// The executable the rig's resolver hands every target.
+const VENDOR_EXECUTABLE: &str = "/synthetic/vendor-agent";
+
+/// The `initialize` answer of a Codex app-server at the supported floor.
+///
+/// The SDK reads the version from this `userAgent` as well as from `codex --version`, and
+/// refuses a build under `MINIMUM_CODEX_VERSION`.
+pub(super) fn codex_initialize_result() -> Value {
+    json!({
+        "userAgent": format!("codex/{}", mango_agent_codex::MINIMUM_CODEX_VERSION),
+        "platformFamily": "unix",
+        "platformOs": "linux",
+    })
+}
+
+/// Frames the host writes to a Codex child to open a session. SDK 0.8 added the gateway readiness
+/// read to the 4 frames of SDK 0.7. A broken-pipe fake that fails the write after this many
+/// lands on the first request past the open.
+pub(super) const CODEX_OPEN_WRITES: usize = 5;
+
+/// The `account/gatewayOAuth/read` answer of a provider without gateway OAuth.
+///
+/// Since SDK 0.8 every Codex connection must read it successfully before any authenticated
+/// request; an empty result is malformed and blocks the session.
+pub(super) fn codex_gateway_ready() -> Value {
+    json!({"required": false, "status": null})
+}
 
 /// A small app-server peer with real Codex request/notification shapes.
 #[derive(Clone, Default)]
@@ -35,9 +63,8 @@ impl CodexPeer {
     fn answer(&self, line: &str) -> Vec<String> {
         let frame: Value = serde_json::from_str(line).expect("a JSON-RPC frame");
         let result = match frame["method"].as_str() {
-            Some("initialize") => {
-                json!({"userAgent": "codex/0.154.0", "platformFamily":"unix", "platformOs":"linux"})
-            }
+            Some("initialize") => codex_initialize_result(),
+            Some("account/gatewayOAuth/read") => codex_gateway_ready(),
             Some("account/read") => {
                 json!({"account":{"type":"chatgpt","email":"synthetic@example.test","planType":"plus"},"requiresOpenaiAuth":true})
             }
@@ -123,52 +150,34 @@ impl ExecutableResolver for InstalledExecutable {
         _target: wire::TargetId,
         _cancel: &'a CancellationToken,
     ) -> PortFuture<'a, Option<std::path::PathBuf>> {
-        Box::pin(async { Some("/synthetic/vendor-agent".into()) })
+        Box::pin(async { Some(VENDOR_EXECUTABLE.into()) })
     }
 }
 
-/// A launcher that answers the Codex `codex --version` probe itself and hands every other launch to
-/// the launcher it wraps.
+/// `inner` behind the SDK's version-answering launcher, which answers `<executable> --version`
+/// at the supported floor and never forwards it.
 ///
-/// Since SDK 0.7.1, opening a Codex session or listing its native sessions first launches
-/// `codex --version` through the host's launcher, and the runtime vouches for no discovery receipt
-/// on purpose. The fake launchers here queue one child per launch with no argv to tell launches
-/// apart, so the probe would take the child queued for the app-server and the open would time out.
-/// The probe is answered with a build at the supported floor and is not forwarded, so the wrapped
-/// launcher's queue and launch log keep counting only the launches a test scripts.
+/// Opening a Codex session or listing its native sessions first launches `codex --version`
+/// through the host's launcher, and the runtime vouches for no discovery receipt on purpose. The
+/// fake launchers here queue one child per launch with no argv to tell launches apart, so the
+/// probe would take the child queued for the app-server and the open would time out. The probe is
+/// answered here, so the wrapped launcher's queue and launch log keep counting only the launches
+/// a test scripts. The SDK matches the bare `codex` program or the one executable named here.
 ///
 /// ```ignore
 /// let fake = FakeLauncher::new();
 /// fake.push(CodexPeer::default().process(Announcer::new()));
-/// let launcher = VersionAnsweringLauncher::over(Arc::new(fake.clone()));
-/// let rig = Rig::new(launcher, wire::TargetId::Codex, limits()).await;
+/// let launcher = codex_version_answered(Arc::new(fake.clone()), "/synthetic/codex");
 /// // The version probe never reaches `fake`; the app-server launch does.
 /// ```
-pub(super) struct VersionAnsweringLauncher {
+pub(super) fn codex_version_answered(
     inner: Arc<dyn ProcessLauncher>,
-}
-impl VersionAnsweringLauncher {
-    /// Wraps `inner`.
-    pub(super) fn over(inner: Arc<dyn ProcessLauncher>) -> Arc<Self> {
-        Arc::new(Self { inner })
-    }
-}
-#[async_trait::async_trait]
-impl ProcessLauncher for VersionAnsweringLauncher {
-    async fn spawn(&self, spec: LaunchSpec) -> mango_external_agents::Result<ManagedProcess> {
-        if spec.argv.get(1).map(String::as_str) != Some("--version") {
-            return self.inner.spawn(spec).await;
-        }
-        let answer = FakeLauncher::new();
-        answer.push(FakeProcess::transcript([format!(
-            "codex-cli {}",
-            mango_agent_codex::MINIMUM_CODEX_VERSION
-        )]));
-        answer.spawn(spec).await
-    }
+    executable: &str,
+) -> Arc<dyn ProcessLauncher> {
+    Arc::new(VersionAnsweringLauncher::new(inner).with_executable(executable))
 }
 
-/// `launcher`, wrapped in a [`VersionAnsweringLauncher`] when `target` is Codex.
+/// `launcher`, with the Codex probe answered when `target` is Codex.
 ///
 /// Claude's own `--version` probe is answered by its test launchers with a Claude build, so only
 /// Codex gets the Codex answer.
@@ -177,7 +186,7 @@ fn codex_probe_answered(
     target: wire::TargetId,
 ) -> Arc<dyn ProcessLauncher> {
     match target {
-        wire::TargetId::Codex => VersionAnsweringLauncher::over(launcher),
+        wire::TargetId::Codex => codex_version_answered(launcher, VENDOR_EXECUTABLE),
         _ => launcher,
     }
 }

@@ -549,6 +549,8 @@ fn account_label(target: TargetId, mode: &sdk::AuthMode) -> &'static str {
         (TargetId::Codex, sdk::AuthMode::Other(label)) if label == "amazon-bedrock" => {
             "Amazon Bedrock"
         }
+        // Includes `gcp`, which SDK 0.8 reports for a Google Cloud sign-in: the owner is signed in,
+        // and no label for the provider is shown yet.
         (TargetId::Codex, _) => "Signed in",
         (TargetId::Cursor, _) => "Cursor",
     }
@@ -923,7 +925,10 @@ fn cause_error(cause: &sdk::Error) -> RemoteError {
         sdk::Error::AuthRequired { .. } => {
             external(codes::UNAVAILABLE, message, "external_agent_signed_out")
         }
-        sdk::Error::Launch { .. } => {
+        // `Teardown` is a launched tree that would not stop. SDK 0.8 split it from `Launch`, but
+        // this runtime's launcher reported it as `Launch` before, and the hub saw this code and
+        // kind for it. They stay so the wire does not move; the pid is the host's own business.
+        sdk::Error::Launch { .. } | sdk::Error::Teardown { .. } => {
             external(codes::UNAVAILABLE, message, "external_agent_launch_failed")
         }
         sdk::Error::Link { .. } => {

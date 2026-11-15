@@ -273,7 +273,6 @@ async fn own(
     let (exit_tx, exit_rx) = watch::channel(None);
     let control = GuardedControl {
         pid: child.id(),
-        program: program.clone(),
         tail,
         kill: kill.clone(),
         interrupts: interrupt_tx,
@@ -568,7 +567,6 @@ fn link_error(operation: &str, error: &io::Error) -> Error {
 /// The SDK's control half: pid, stderr tail, wait, interrupt, kill.
 struct GuardedControl {
     pid: Option<u32>,
-    program: String,
     tail: StderrTail,
     kill: CancellationToken,
     interrupts: mpsc::Sender<InterruptReply>,
@@ -592,9 +590,13 @@ impl GuardedControl {
             .expect("wait_for returned a recorded terminal"))
     }
 
-    fn launch_failure(&self, message: String) -> Error {
-        Error::Launch {
-            program: self.program.clone(),
+    /// A failure to end or confirm the exit of a child that already started.
+    ///
+    /// SDK 0.8 reserves `Error::Launch` for starting an executable; a tree that would not
+    /// stop is `Error::Teardown`, which names the leader's pid for the host to reconcile.
+    fn teardown_failure(&self, message: String) -> Error {
+        Error::Teardown {
+            pid: self.pid,
             message,
         }
     }
@@ -620,7 +622,7 @@ impl ProcessControl for GuardedControl {
             })?
             .clone()
             .expect("wait_for returned a recorded exit");
-        status.map_err(|message| self.launch_failure(message))
+        status.map_err(|message| self.teardown_failure(message))
     }
 
     async fn interrupt(&self, _reason: CancelReason) -> Result<InterruptOutcome> {
@@ -644,7 +646,7 @@ impl ProcessControl for GuardedControl {
         self.terminal()
             .await?
             .cleanup
-            .map_err(|message| self.launch_failure(message))
+            .map_err(|message| self.teardown_failure(message))
     }
 }
 

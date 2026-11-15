@@ -7,7 +7,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use mango_external_agents::testing::{Announcer, FakeLauncher, FakeProcess};
+use mango_agent_claude::testing::{FakeClaudeCli, HELP_WITH_JSON_SCHEMA};
+use mango_external_agents::testing::{Announcer, FakeLauncher};
 use mango_external_agents::{
     ByteSink, ByteSource, CancelReason, Error, ExitStatus, InterruptOutcome, LaunchSpec, Limits,
     ManagedProcess, ProcessControl, ProcessLauncher, Result,
@@ -17,15 +18,11 @@ use tokio::sync::Notify;
 
 use super::backend::{Backend, ProductHarnesses};
 use super::lifecycle_tests::observed;
-use super::test_support::{self as fixtures, CodexPeer, Rig, VersionAnsweringLauncher};
+use super::test_support::{self as fixtures, CodexPeer, Rig};
 use crate::external_agents::failure::{AgentFailure, CleanupOutcome, FailureCause};
 use crate::external_agents::port::{AgentBackend, AgentSession, CloseCause, TurnRequest};
 use crate::external_agents::wire;
 use mango_protocol::error::codes;
-
-const HELP: &str = include_str!("../../../tests/fixtures/external-agents/claude-help-2.1.270.txt");
-const VERSION: &str = "2.1.270 (Claude Code)";
-const SIGNED_IN: &str = r#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max"}"#;
 
 /// What the control does when the SDK, then the adapter, asks it to kill.
 #[derive(Clone, Copy, Debug)]
@@ -132,19 +129,18 @@ pub(super) struct SpawnGate {
     pub(super) release: Notify,
 }
 
-/// Answers Claude's three probes from a queue and gives every other launch a [`StubbornChild`].
+/// Answers Claude's three probes through the SDK's [`FakeClaudeCli`] and gives every other launch
+/// a [`StubbornChild`].
 pub(super) struct StubbornClaudeLauncher {
-    probes: FakeLauncher,
+    probes: FakeClaudeCli,
     gate: Mutex<Option<Arc<SpawnGate>>>,
     script: Arc<KillScript>,
     children: Mutex<Vec<Arc<StubbornChild>>>,
 }
 impl StubbornClaudeLauncher {
     pub(super) fn new(script: impl IntoIterator<Item = Kill>) -> Arc<Self> {
-        let probes = FakeLauncher::new();
-        probes.push(FakeProcess::transcript([VERSION]));
-        probes.push(FakeProcess::transcript(HELP.lines().map(str::to_owned)));
-        probes.push(FakeProcess::transcript([SIGNED_IN]));
+        // The recorded 2.1.270 surface, signed in: what the runtime's discovery reads.
+        let probes = FakeClaudeCli::new().with_help(HELP_WITH_JSON_SCHEMA);
         Arc::new(Self {
             probes,
             gate: Mutex::new(None),
@@ -182,9 +178,7 @@ impl StubbornClaudeLauncher {
     }
 }
 fn is_probe(spec: &LaunchSpec) -> bool {
-    spec.argv
-        .iter()
-        .any(|argument| matches!(argument.as_str(), "--version" | "--help" | "auth"))
+    mango_agent_claude::testing::is_probe(&spec.argv)
 }
 #[async_trait::async_trait]
 impl ProcessLauncher for StubbornClaudeLauncher {
@@ -428,7 +422,7 @@ async fn claude_reports_a_refused_close_the_way_codex_does() {
         fake.push(CodexPeer::default().process(Announcer::new()));
         let (codex_launcher, log) = observed(fake.clone(), false, refusals);
         let backend = Backend::new(
-            VersionAnsweringLauncher::over(codex_launcher),
+            fixtures::codex_version_answered(codex_launcher, "/synthetic/codex"),
             Arc::new(ProductHarnesses),
             limits(),
             Duration::from_millis(500),

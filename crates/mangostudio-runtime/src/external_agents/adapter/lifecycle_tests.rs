@@ -11,7 +11,7 @@ use mango_external_agents::{
 };
 
 use super::backend::{Backend, ProductHarnesses};
-use super::test_support::{self as fixtures, CodexPeer, Rig, VersionAnsweringLauncher};
+use super::test_support::{self as fixtures, CodexPeer, Rig};
 use crate::external_agents::failure::{CleanupOutcome, FailureCause, SessionUsability};
 use crate::external_agents::port::{AgentBackend, CloseCause, TurnRequest};
 use crate::external_agents::wire;
@@ -112,7 +112,7 @@ async fn failed_approval_stdin_settles_the_child_and_the_next_message_uses_a_fre
     };
     fake.push(
         peer.process(Announcer::new())
-            .failing_stdin_after(5, "EPIPE"),
+            .failing_stdin_after(fixtures::CODEX_OPEN_WRITES + 1, "EPIPE"),
     );
     fake.push(
         CodexPeer {
@@ -132,7 +132,7 @@ async fn failed_approval_stdin_settles_the_child_and_the_next_message_uses_a_fre
         .to_owned();
     assert_eq!(
         fake.written().len(),
-        5,
+        fixtures::CODEX_OPEN_WRITES + 1,
         "the failure must land on the answer, after handshake and turn start"
     );
     let response = rig
@@ -200,7 +200,7 @@ async fn failed_turn_start_stdin_reports_uncertain_admission_over_rpc_and_reopen
     fake.push(
         CodexPeer::default()
             .process(Announcer::new())
-            .failing_stdin_after(4, "EPIPE"),
+            .failing_stdin_after(fixtures::CODEX_OPEN_WRITES, "EPIPE"),
     );
     fake.push(
         CodexPeer {
@@ -214,7 +214,7 @@ async fn failed_turn_start_stdin_reports_uncertain_admission_over_rpc_and_reopen
     rig.open().await;
     assert_eq!(
         fake.written().len(),
-        4,
+        fixtures::CODEX_OPEN_WRITES,
         "the broken pipe must follow the open handshake"
     );
     let failed = rig.turn("rpc-broken-write").await.unwrap_err();
@@ -254,7 +254,7 @@ async fn a_failed_live_account_read_exposes_rpc_link_provenance_separately_from_
     fake.push(
         CodexPeer::default()
             .process(Announcer::new())
-            .failing_stdin_after(4, "EPIPE"),
+            .failing_stdin_after(fixtures::CODEX_OPEN_WRITES, "EPIPE"),
     );
     fake.push(
         CodexPeer {
@@ -356,7 +356,7 @@ async fn dropping_an_active_stream_settles_work_while_session_drop_reaps_the_chi
     let (launcher, log) = observed(fake.clone(), false, 0);
     let rig = Rig::new(launcher.clone(), wire::TargetId::Codex, fixtures::limits()).await;
     let backend = Backend::new(
-        VersionAnsweringLauncher::over(launcher),
+        fixtures::codex_version_answered(launcher, "/synthetic/codex"),
         Arc::new(ProductHarnesses),
         fixtures::limits(),
         Duration::from_secs(2),

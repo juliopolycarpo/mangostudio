@@ -6,12 +6,12 @@ use std::time::Duration;
 
 use mango_agent_codex::MINIMUM_CODEX_VERSION;
 use mango_agent_codex::discovery::{gate, parse_version};
+use mango_external_agents::LaunchSpec;
 use mango_external_agents::discovery::GateVerdict;
 use mango_external_agents::testing::{FakeLauncher, FakeProcess};
-use mango_external_agents::{LaunchSpec, ProcessLauncher};
 
 use super::backend::{Backend, ProductHarnesses};
-use super::test_support::{self as fixtures, VersionAnsweringLauncher};
+use super::test_support::{self as fixtures, codex_version_answered};
 use crate::external_agents::failure::FailureCause;
 use crate::external_agents::port::AgentBackend;
 use crate::external_agents::wire;
@@ -30,7 +30,7 @@ fn launch(argv: &[&str]) -> LaunchSpec {
 #[tokio::test]
 async fn a_version_probe_is_answered_at_the_floor_and_not_forwarded() {
     let inner = FakeLauncher::new();
-    let launcher = VersionAnsweringLauncher::over(Arc::new(inner.clone()));
+    let launcher = codex_version_answered(Arc::new(inner.clone()), "/synthetic/codex");
 
     let mut probe = launcher
         .spawn(launch(&["/synthetic/codex", "--version"]))
@@ -66,7 +66,7 @@ async fn a_version_probe_is_answered_at_the_floor_and_not_forwarded() {
 async fn any_other_launch_is_delegated_and_recorded_by_the_wrapped_launcher() {
     let inner = FakeLauncher::new();
     inner.push(FakeProcess::transcript(["app-server"]));
-    let launcher = VersionAnsweringLauncher::over(Arc::new(inner.clone()));
+    let launcher = codex_version_answered(Arc::new(inner.clone()), "/synthetic/codex");
 
     launcher
         .spawn(launch(&["/synthetic/codex", "app-server"]))
