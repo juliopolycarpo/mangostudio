@@ -2382,7 +2382,8 @@ is listed under `refs/heads/main`. The explicit family registry preserves the
 runner OS and architecture, target, compiler/environment hash and cache archive
 version, including distinct shipping and light-profile environment hashes.
 Only the root-manifest prefix and dependency hash rotate. Sole entries, unknown
-families, fuzz and other cache kinds remain untouched. Before each deletion the
+families, fuzz and other cache kinds remain untouched (the fuzz key has no manifest
+segment and `protocol-fuzz.yml` pins its nightly; see "Fuzzing" in `docs/protocol/conformance.md`). Before each deletion the
 script audits active main writers and fetches the complete listing again; a
 detected writer, changed generation or lost replacement defers cleanup until a
 later writer's completion. The audit checks pre-start statuses before running

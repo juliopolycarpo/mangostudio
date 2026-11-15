@@ -1076,11 +1076,13 @@ describe('the fuzz workspace lockfile', () => {
     const steps = extractStepBlocks(
       extractJobBlock(readText('.github/workflows/protocol-fuzz.yml'), 'fuzz')
     );
-    const guard = steps.findIndex((step) => /cargo \+nightly metadata .*--locked/.test(step));
-    const fuzz = steps.findIndex((step) => step.includes('cargo +nightly fuzz run'));
+    const guard = steps.findIndex((step) =>
+      /cargo \+"\$FUZZ_NIGHTLY" metadata .*--locked/.test(step)
+    );
+    const fuzz = steps.findIndex((step) => step.includes('cargo +"$FUZZ_NIGHTLY" fuzz run'));
     expect(
       guard,
-      'no `cargo +nightly metadata --locked` step in protocol-fuzz.yml'
+      'no `cargo +"$FUZZ_NIGHTLY" metadata --locked` step in protocol-fuzz.yml'
     ).toBeGreaterThan(-1);
     expect(guard, 'the --locked guard must precede the `cargo fuzz run` step').toBeLessThan(fuzz);
     expect(steps[guard]).toContain('--all-features');
@@ -1093,12 +1095,12 @@ describe('the fuzz workspace lockfile', () => {
     const steps = extractStepBlocks(
       extractJobBlock(readText('.github/workflows/protocol-fuzz.yml'), 'fuzz')
     );
-    const fuzz = steps.find((step) => step.includes('cargo +nightly fuzz run'));
-    expect(fuzz, 'no `cargo +nightly fuzz run` step in protocol-fuzz.yml').toBeDefined();
+    const fuzz = steps.find((step) => step.includes('cargo +"$FUZZ_NIGHTLY" fuzz run'));
+    expect(fuzz, 'no `cargo +"$FUZZ_NIGHTLY" fuzz run` step in protocol-fuzz.yml').toBeDefined();
     expect(
       fuzz,
-      'expected `cargo +nightly fuzz run --target x86_64-unknown-linux-gnu` | received no --target pin'
-    ).toMatch(/cargo \+nightly fuzz run\s+--target x86_64-unknown-linux-gnu\b/);
+      'expected `cargo +"$FUZZ_NIGHTLY" fuzz run --target x86_64-unknown-linux-gnu` | received no --target pin'
+    ).toMatch(/cargo \+"\$FUZZ_NIGHTLY" fuzz run\s+--target x86_64-unknown-linux-gnu\b/);
   });
 
   test('release-prepare refreshes the fuzz lock along with the root one', () => {
@@ -1109,6 +1111,96 @@ describe('the fuzz workspace lockfile', () => {
       /'--manifest-path',\s*FUZZ_MANIFEST/
     );
     expect(script).toContain("'crates/mango-protocol/fuzz/Cargo.toml'");
+  });
+});
+
+// A floating `nightly` changes `rustc -vV` every day, and Swatinem/rust-cache hashes that into its key
+// for every installed toolchain: the fuzz cache then misses on every run and each job rebuilds the
+// dependencies under sanitizer instrumentation. One dated pin keeps the key stable.
+const FUZZ_PIN_VARIABLE = 'FUZZ_NIGHTLY';
+const FUZZ_PIN_SHAPE = /^nightly-\d{4}-\d{2}-\d{2}$/;
+// Where a toolchain is chosen: `cargo +X`, `rustup toolchain install|default|run X`,
+// `rustup override set X`, `RUSTUP_TOOLCHAIN=X`, or a `toolchain: X` action input.
+const TOOLCHAIN_SELECTOR =
+  /(?:\bcargo\s+\+|\brustup\s+(?:toolchain\s+install|default|override\s+set|run)\s+|\bRUSTUP_TOOLCHAIN[=:]\s*|^\s*(?:-\s+)?toolchain:\s*)(\S+)/;
+const PIN_REFERENCE = new RegExp(`^"?\\$\\{?${FUZZ_PIN_VARIABLE}\\}?"?$`);
+const BARE_NIGHTLY = /(?<![\w-])nightly(?![\w-])/;
+
+/**
+ * Report every toolchain choice in a workflow that is not the pinned variable, as
+ * `line N: <what was received>`. Comment lines are skipped.
+ * @example unpinnedToolchains('run: cargo +nightly fuzz build'); // ['line 1: ...']
+ */
+function unpinnedToolchains(workflow: string): string[] {
+  const found: string[] = [];
+  workflow.split('\n').forEach((raw, index) => {
+    const line = raw.replace(/(^|\s)#.*$/, '');
+    const selected = TOOLCHAIN_SELECTOR.exec(line)?.[1];
+    if (selected !== undefined && !PIN_REFERENCE.test(selected)) {
+      found.push(`line ${index + 1}: toolchain ${selected} in \`${line.trim()}\``);
+    } else if (selected === undefined && BARE_NIGHTLY.test(line)) {
+      found.push(`line ${index + 1}: bare nightly in \`${line.trim()}\``);
+    }
+  });
+  return found;
+}
+
+describe('unpinnedToolchains', () => {
+  test.each([
+    ['rustup install', 'run: rustup toolchain install nightly --profile minimal'],
+    ['cargo selector', '        run: cargo +nightly metadata --locked'],
+    ['a literal date repeated outside the variable', 'cargo +nightly-2026-11-14 fuzz run x'],
+    ['an env override', 'RUSTUP_TOOLCHAIN=nightly cargo fuzz run x'],
+    ['an action input', '        toolchain: nightly'],
+    ['a stable channel', 'rustup default stable'],
+  ])('flags %s', (_label, text) => {
+    expect(
+      unpinnedToolchains(text),
+      `expected an unpinned toolchain | received: ${text}`
+    ).toHaveLength(1);
+  });
+
+  test.each([
+    'rustup toolchain install "$FUZZ_NIGHTLY" --profile minimal',
+    'cargo +"$FUZZ_NIGHTLY" fuzz run x',
+    'cargo +$FUZZ_NIGHTLY metadata --locked',
+    '  FUZZ_NIGHTLY: nightly-2026-11-14',
+    '# cargo +nightly in a comment',
+    'cargo fuzz run x # nightly',
+    'cargo build --locked',
+  ])('accepts %s', (text) => {
+    expect(unpinnedToolchains(text)).toEqual([]);
+  });
+
+  test('names the line of each offender', () => {
+    expect(unpinnedToolchains('a\ncargo +nightly check')).toEqual([
+      'line 2: toolchain nightly in `cargo +nightly check`',
+    ]);
+  });
+});
+
+describe('protocol-fuzz pins its nightly toolchain', () => {
+  const workflow = readText('.github/workflows/protocol-fuzz.yml');
+
+  test('one workflow-level variable holds a dated nightly', () => {
+    const parsed = Bun.YAML.parse(workflow) as { env?: Record<string, unknown> };
+    const received = parsed.env?.[FUZZ_PIN_VARIABLE];
+    expect(
+      FUZZ_PIN_SHAPE.test(String(received)),
+      `protocol-fuzz.yml env.${FUZZ_PIN_VARIABLE}: expected nightly-YYYY-MM-DD | received: ${String(received)}`
+    ).toBe(true);
+  });
+
+  test('installs the pin and selects only the pin', () => {
+    const install = `rustup toolchain install "$${FUZZ_PIN_VARIABLE}"`;
+    expect(
+      workflow.includes(install),
+      `protocol-fuzz.yml: expected \`${install}\` | received no install of the pin`
+    ).toBe(true);
+    expect(
+      unpinnedToolchains(workflow),
+      `protocol-fuzz.yml: expected every toolchain choice to be "$${FUZZ_PIN_VARIABLE}"`
+    ).toEqual([]);
   });
 });
 
