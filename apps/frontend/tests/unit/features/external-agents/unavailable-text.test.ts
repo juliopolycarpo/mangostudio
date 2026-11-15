@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'bun:test';
 
-import { en } from '@mangostudio/shared/i18n';
+import { en, ptBR } from '@mangostudio/shared/i18n';
 
 import { externalUnavailableText } from '@/features/external-agents/useExternalAgents';
 
@@ -28,6 +28,14 @@ describe('externalUnavailableText', () => {
     expect(externalUnavailableText('signed-out', en)).toBe(
       en.externalAgents.unavailable['signed-out']
     );
+  });
+
+  it('says a refused launch in both shipped languages without a build placeholder', () => {
+    for (const messages of [en, ptBR]) {
+      const text = externalUnavailableText('launch-refused', messages);
+      expect(text).toBe(messages.externalAgents.unavailable['launch-refused']);
+      expect(text).not.toContain('{version}');
+    }
   });
 
   it('prints a version containing replacement patterns literally', () => {

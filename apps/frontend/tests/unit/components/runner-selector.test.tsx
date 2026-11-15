@@ -203,6 +203,33 @@ describe('external availability states', () => {
   });
 
   /**
+   * The operating system refused to start a CLI that is on disk (a lost exec bit, a descriptor
+   * limit, a missing working directory). The row used to read as "undetermined" and stay
+   * selectable, with a turn that could only fail; it now says what happened and what to check.
+   */
+  it('disables a CLI the operating system refused to start and says what to check', () => {
+    renderSelector({
+      externalAgents: [
+        descriptor({
+          discoveryState: 'determined',
+          unavailableReason: 'launch-refused',
+          remedy: { kind: 'none' },
+        }),
+      ],
+    });
+
+    expect(codexOption()).toBeDisabled();
+    expect(
+      screen.getByText(
+        'Installed, but the operating system refused to start it. Check that the file is executable or reinstall it, then try again.'
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/You can still try a turn/)).toBeNull();
+    // The program is on disk, so an install prompt would send the user the wrong way.
+    expect(screen.queryByRole('link', { name: /Install this agent/i })).toBeNull();
+  });
+
+  /**
    * A reason is a diagnosis; a remedy is the next step. The two that MangoStudio
    * can actually do something about link into the surface that already owns the
    * install recipes, rather than growing a second install affordance here.

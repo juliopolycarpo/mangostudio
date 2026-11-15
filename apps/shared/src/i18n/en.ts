@@ -3909,6 +3909,9 @@ export const messages: Messages = {
       'disclosure-required': 'Read and accept this agent\u2019s third-party notice first',
       'installed-but-unusable':
         'Installed and signed in, but it accepts none of the permissions MangoStudio offers',
+      // The sentence carries the next step: the remedy for this reason offers no control.
+      'launch-refused':
+        'Installed, but the operating system refused to start it. Check that the file is executable or reinstall it, then try again.',
     },
     /** The next step, not just the diagnosis. */
     remedy: {

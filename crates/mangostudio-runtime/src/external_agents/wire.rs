@@ -200,6 +200,10 @@ pub(crate) struct DiscoveryReport {
     pub source: DiscoverySource,
     pub probed_at_ms: u64,
     pub attempts: u8,
+    /// The runtime's own code for a probe that failed, never vendor text. The only one sent is
+    /// `mangostudio_runtime_contract::errors::EXTERNAL_AGENT_DISCOVERY_LAUNCH_REFUSED_CODE`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_code: Option<&'static str>,
 }
 
 /// Where a descriptor's facts came from.

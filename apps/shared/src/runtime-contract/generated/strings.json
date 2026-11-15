@@ -57,7 +57,8 @@
       "claude-error_max_turns",
       "claude-error_max_budget_usd",
       "claude-error_max_structured_output_retries"
-    ]
+    ],
+    "externalAgentDiscoveryLaunchRefusedCode": "launch-refused"
   },
   "setupPendingSignature": "runtime setup is pending on this machine",
   "updateExitCode": 75,

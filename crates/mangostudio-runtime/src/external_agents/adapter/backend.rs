@@ -228,8 +228,8 @@ impl AgentBackend for Backend {
             let found = failure::settled(found, self.cleanup_timeout).await?;
             let probed_at_ms = crate::ports::wall_clock::epoch_millis(std::time::SystemTime::now());
             // The SDK reads every launch failure of its version probe as "not installed". Only a
-            // missing executable is; one that exists but would not start is undetermined, and the
-            // OS error goes to the operator since the wire has no field for it.
+            // missing executable is; one that exists but would not start is a refused launch. The
+            // wire carries a fixed code for it, never the OS error, which goes to the operator.
             if let (mango_external_agents::GateVerdict::NotInstalled, Some(refusal)) =
                 (&found.discovery.gate, refusal)
             {
@@ -241,7 +241,7 @@ impl AgentBackend for Backend {
                         "osError": refusal.describe(),
                     }),
                 ));
-                return Ok(map::undetermined(target, probed_at_ms));
+                return Ok(map::launch_refused(target, probed_at_ms));
             }
             Ok(map::descriptor(
                 target,

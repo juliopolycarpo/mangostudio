@@ -132,6 +132,19 @@ export const ExternalAgentUnavailableReasonSchema = Type.Union([
    * describes.
    */
   Type.Literal('installed-but-unusable'),
+  /**
+   * The CLI is on disk and the operating system refused to start it: a lost
+   * execute bit, a descriptor limit, a working directory that no longer exists.
+   *
+   * Inferred by the hub from the runtime's `launch-refused` discovery failure
+   * code (`EXTERNAL_AGENT_DISCOVERY_LAUNCH_REFUSED_CODE`), never sent by a
+   * runtime as a reason. The discover result is closed, and a released hub
+   * rejects the whole reply over a literal it does not know, so the signal rides
+   * in `discovery.failureCode`, which that hub already accepts. Nothing else is
+   * known about the target, so no capability and no remedy control is offered:
+   * the fix (the file's mode, the limit, the directory) is on the machine.
+   */
+  Type.Literal('launch-refused'),
 ]);
 
 export type ExternalAgentUnavailableReason = Static<typeof ExternalAgentUnavailableReasonSchema>;

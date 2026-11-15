@@ -108,6 +108,18 @@ export const EXTERNAL_AGENT_FINISHED_TURN_ERROR_CODES = [
 ] as const;
 
 /**
+ * The `discovery.failureCode` a runtime reports for a vendor CLI that exists on disk and that the
+ * operating system refused to start (a lost execute bit, a descriptor limit, a working directory
+ * that is gone).
+ *
+ * It rides on the discovery report instead of on `unavailableReason` because the discover result is
+ * a closed shape that a released hub validates whole: a reason literal that hub has never heard of
+ * would reject the reply and drop every target's answer in the batch, while `failureCode` is a field
+ * it already accepts. The hub reads this code and derives the `launch-refused` reason itself.
+ */
+export const EXTERNAL_AGENT_DISCOVERY_LAUNCH_REFUSED_CODE = 'launch-refused';
+
+/**
  * Kind carried in `details.kind` when a named backup set is gone.
  *
  * Named rather than spelled inline because two processes match on it: the

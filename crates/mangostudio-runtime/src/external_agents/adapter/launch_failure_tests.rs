@@ -3,8 +3,8 @@
 //! The SDK's three harnesses read an `Error::Launch` from their version probe as "not installed",
 //! and this runtime's launcher raises `Error::Launch` for every OS spawn failure. A vendor CLI that
 //! is on `PATH` but cannot be executed must therefore not come back as a descriptor that tells the
-//! user to install it: it is installed but undetermined, and the OS error is logged. Unix only:
-//! Windows resolves a bare program name through `PATHEXT`, so a plain file without an executable
+//! user to install it: it is a refused launch (installed, nothing else known), and the OS error is
+//! logged. Unix only: Windows resolves a bare program name through `PATHEXT`, so a plain file without an executable
 //! extension is never a candidate there and the same setup is a missing program, not a refused one.
 #![cfg(unix)]
 
@@ -21,6 +21,7 @@ use crate::external_agents::port::AgentBackend;
 use crate::external_agents::wire::{DiscoveryState, RemedyKind, TargetId, UnavailableReason};
 use crate::subprocess::AlwaysAllow;
 use crate::test_support::scratch_dir;
+use mangostudio_runtime_contract::errors::EXTERNAL_AGENT_DISCOVERY_LAUNCH_REFUSED_CODE;
 
 /// Every target the runtime discovers: each launches its bare program name when the host resolved
 /// no executable path.
@@ -61,9 +62,10 @@ fn production_backend(diagnostics: &Arc<RecordingDiagnostics>) -> Arc<Backend> {
 enum Discovered {
     /// A descriptor that says the CLI is not installed, with the install remedy.
     NotInstalled,
-    /// A descriptor that says the CLI is installed and its state could not be determined, with no
-    /// unavailable reason and no remedy.
-    InstalledUndetermined,
+    /// A descriptor that says the CLI is installed and was refused by the operating system: no
+    /// unavailable reason and no remedy on the wire (a released hub rejects a reason it does not
+    /// know), and the `launch-refused` code on the discovery report.
+    LaunchRefused,
     /// Anything else, as the descriptor's own facts.
     Other(String),
     /// A failure on the wire.
@@ -90,25 +92,32 @@ async fn discover(backend: &Backend, target: TargetId, bin: &Path, cwd: &Path) -
                 .remedy
                 .as_ref()
                 .is_some_and(|remedy| remedy.kind == RemedyKind::Install);
+            let failure_code = descriptor.discovery.and_then(|report| report.failure_code);
             match (
                 descriptor.installed,
                 descriptor.discovery_state,
                 descriptor.unavailable_reason,
+                failure_code,
             ) {
-                (false, DiscoveryState::Determined, Some(UnavailableReason::NotInstalled))
-                    if remedy_install =>
+                (
+                    false,
+                    DiscoveryState::Determined,
+                    Some(UnavailableReason::NotInstalled),
+                    None,
+                ) if remedy_install => Discovered::NotInstalled,
+                (true, DiscoveryState::Undetermined, None, Some(code))
+                    if code == EXTERNAL_AGENT_DISCOVERY_LAUNCH_REFUSED_CODE
+                        && descriptor.remedy.is_none() =>
                 {
-                    Discovered::NotInstalled
-                }
-                (true, DiscoveryState::Undetermined, None) if descriptor.remedy.is_none() => {
-                    Discovered::InstalledUndetermined
+                    Discovered::LaunchRefused
                 }
                 _ => Discovered::Other(format!(
-                    "installed {} state {:?} reason {:?} remedy {:?}",
+                    "installed {} state {:?} reason {:?} remedy {:?} failureCode {:?}",
                     descriptor.installed,
                     descriptor.discovery_state,
                     descriptor.unavailable_reason,
-                    descriptor.remedy
+                    descriptor.remedy,
+                    failure_code
                 )),
             }
         }
@@ -132,9 +141,9 @@ fn program_of(target: TargetId) -> &'static str {
     }
 }
 
-/// Asserts that a non-executable CLI on `PATH` is installed-but-undetermined, with the OS error in
+/// Asserts that a non-executable CLI on `PATH` is a refused launch, with the OS error in
 /// the operator log and nothing of the filesystem layout in it.
-async fn assert_non_executable_is_undetermined(target: TargetId) {
+async fn assert_non_executable_is_a_refused_launch(target: TargetId) {
     let diagnostics = Arc::new(RecordingDiagnostics::default());
     let bin = scratch_dir("launch-failure-bin");
     let cwd = scratch_dir("launch-failure-cwd");
@@ -150,8 +159,8 @@ async fn assert_non_executable_is_undetermined(target: TargetId) {
 
     assert_eq!(
         found,
-        Discovered::InstalledUndetermined,
-        "({target:?} discovery): expected an installed, undetermined descriptor for a \
+        Discovered::LaunchRefused,
+        "({target:?} discovery): expected a launch-refused descriptor for a \
          non-executable `{}` on PATH | received {found:?}",
         program_of(target)
     );
@@ -169,18 +178,18 @@ async fn assert_non_executable_is_undetermined(target: TargetId) {
 }
 
 #[tokio::test]
-async fn a_non_executable_claude_on_path_is_undetermined_not_not_installed() {
-    assert_non_executable_is_undetermined(TargetId::Claude).await;
+async fn a_non_executable_claude_on_path_is_a_refused_launch_not_not_installed() {
+    assert_non_executable_is_a_refused_launch(TargetId::Claude).await;
 }
 
 #[tokio::test]
-async fn a_non_executable_codex_on_path_is_undetermined_not_not_installed() {
-    assert_non_executable_is_undetermined(TargetId::Codex).await;
+async fn a_non_executable_codex_on_path_is_a_refused_launch_not_not_installed() {
+    assert_non_executable_is_a_refused_launch(TargetId::Codex).await;
 }
 
 #[tokio::test]
-async fn a_non_executable_cursor_agent_on_path_is_undetermined_not_not_installed() {
-    assert_non_executable_is_undetermined(TargetId::Cursor).await;
+async fn a_non_executable_cursor_agent_on_path_is_a_refused_launch_not_not_installed() {
+    assert_non_executable_is_a_refused_launch(TargetId::Cursor).await;
 }
 
 #[tokio::test]
@@ -230,8 +239,8 @@ async fn a_missing_working_directory_is_not_a_missing_program() {
 
     assert_eq!(
         found,
-        Discovered::InstalledUndetermined,
-        "expected a missing cwd to leave the CLI undetermined, not not-installed | \
+        Discovered::LaunchRefused,
+        "expected a missing cwd to read as a refused launch, not not-installed | \
          received {found:?}"
     );
     let lines = diagnostics.lines();
@@ -331,9 +340,9 @@ async fn a_refusal_never_leaks_into_another_target_or_a_later_discovery() {
         (together, later),
         (
             vec![
-                (TargetId::Claude, Discovered::InstalledUndetermined),
+                (TargetId::Claude, Discovered::LaunchRefused),
                 (TargetId::Codex, Discovered::NotInstalled),
-                (TargetId::Cursor, Discovered::InstalledUndetermined),
+                (TargetId::Cursor, Discovered::LaunchRefused),
             ],
             Discovered::NotInstalled
         ),

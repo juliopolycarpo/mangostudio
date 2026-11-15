@@ -297,6 +297,87 @@ fn a_resolved_executable_replaces_the_program_name() {
 // Descriptors, per vendor
 // ---------------------------------------------------------------------------
 
+/// A CLI the operating system refused to start is installed and nothing else is known. The report
+/// says why with the one code the hub turns into the `launch-refused` reason; the descriptor carries
+/// no unavailable reason of its own, because a released hub rejects a reason literal it does not
+/// know and, with it, the whole discover result.
+#[test]
+fn a_refused_launch_is_installed_undetermined_and_names_itself_in_the_discovery_report() {
+    for (target, login) in [
+        (TargetId::Claude, "claude auth login"),
+        (TargetId::Codex, "codex login"),
+        (TargetId::Cursor, "cursor-agent login"),
+    ] {
+        let received = serde_json::to_value(launch_refused(target, PROBED_AT_MS))
+            .expect("the descriptor serializes");
+        let expected = json!({
+            "targetId": target.as_str(),
+            "installed": true,
+            "discoveryState": "undetermined",
+            "authState": "unknown",
+            "loginCommand": login,
+            "capabilities": no_capabilities(),
+            "supportedConfigurations": [],
+            "discovery": with(live(), json!({ "failureCode": "launch-refused" })),
+        });
+        assert_eq!(
+            received, expected,
+            "{target:?} launch-refused descriptor drifted"
+        );
+    }
+}
+
+/// The code the report carries is the one `strings.json` shares with the hub, not a second spelling.
+#[test]
+fn the_refused_launch_code_is_the_shared_contract_constant() {
+    let received = serde_json::to_value(launch_refused(TargetId::Codex, PROBED_AT_MS))
+        .expect("the descriptor serializes");
+    assert_eq!(
+        received["discovery"]["failureCode"],
+        mangostudio_runtime_contract::errors::EXTERNAL_AGENT_DISCOVERY_LAUNCH_REFUSED_CODE
+    );
+}
+
+/// Every other descriptor stays free of a failure code, so the hub reads none as a refusal.
+#[test]
+fn only_a_refused_launch_carries_a_discovery_failure_code() {
+    for (target, discovery) in [
+        (TargetId::Claude, sdk::Discovery::not_installed()),
+        (TargetId::Claude, claude_signed_in_subscription()),
+        (TargetId::Codex, codex_too_old()),
+        (TargetId::Cursor, cursor_current()),
+    ] {
+        let received = describe(target, &discovery);
+        assert!(
+            received["discovery"].get("failureCode").is_none(),
+            "expected no failureCode on {target:?} | received {received}"
+        );
+    }
+}
+
+/// A released hub validates the whole discover result against its own closed schema. The refused
+/// descriptor has to pass that schema, or one refused CLI would cost that hub every target's answer.
+#[test]
+fn a_refused_launch_answers_the_released_hubs_discovery_contract() {
+    let released: Value = serde_json::from_str(include_str!(
+        "../../../tests/fixtures/external-agents/discover-result-before-state.json"
+    ))
+    .expect("the historical result schema is JSON");
+    let validator = jsonschema::validator_for(&released).expect("a valid JSON Schema");
+    let result = serde_json::to_value(wire::DiscoverResult {
+        descriptors: vec![launch_refused(TargetId::Claude, PROBED_AT_MS)],
+    })
+    .expect("the result serializes");
+    let errors: Vec<String> = validator
+        .iter_errors(&result)
+        .map(|error| error.to_string())
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "expected the released hub's schema to accept a launch-refused descriptor | received {errors:?}"
+    );
+}
+
 /// An inconclusive gate remains tryable but must not promise a determined discovery.
 #[test]
 fn unknown_discovery_is_undetermined_without_an_unavailable_reason() {
@@ -1950,6 +2031,15 @@ fn every_mapped_result_validates_against_the_catalog() {
     for (target, discovery) in &fixtures {
         let result = wire::DiscoverResult {
             descriptors: vec![descriptor(*target, discovery, None, PROBED_AT_MS)],
+        };
+        assert_valid(
+            "external-agent.discover",
+            &serde_json::to_value(result).expect("serializable"),
+        );
+    }
+    for target in [TargetId::Claude, TargetId::Codex, TargetId::Cursor] {
+        let result = wire::DiscoverResult {
+            descriptors: vec![launch_refused(target, PROBED_AT_MS)],
         };
         assert_valid(
             "external-agent.discover",

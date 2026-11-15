@@ -306,12 +306,11 @@ describe('the model a turn resolves to', () => {
 });
 
 /**
- * An adapter that answered "installed, undetermined" and nothing else (the runtime's answer for a
- * CLI it found but could not start) has an empty matrix like a cold cache, and the same remedy.
- * Only that shape is "not ready"; every other row keeps the pair check it always had.
+ * A CLI the operating system refused to start arrives as a descriptor with the `launch-refused`
+ * reason, so the resolver refuses it on the reason like any other unavailable target. Nothing else
+ * is special: an adapter answer with an empty matrix and no reason gets the pair check it always had.
  */
 describe('an adapter answer with nothing to check a permission pair against', () => {
-  const NOT_READY = 'This agent has not finished reporting what it can do here yet. Try again.';
   const PAIR_REFUSED =
     'This agent does not support the permission combination this chat is set to.';
 
@@ -319,12 +318,31 @@ describe('an adapter answer with nothing to check a permission pair against', ()
     return await resolverWith(DEFAULT_EXTERNAL_AGENT_SETTINGS, agent)({ ...BASE, chat: chat() });
   }
 
-  it('is not ready when it is installed, undetermined and has an empty matrix', async () => {
+  it('refuses a launch-refused row on its reason, not as "not ready" and not as a pair', async () => {
+    const result = await resolution(
+      descriptor({
+        discoveryState: 'determined',
+        supportedConfigurations: [],
+        unavailableReason: 'launch-refused',
+        remedy: { kind: 'none' },
+      })
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      reason: 'launch-refused',
+      message: 'This agent cannot run here right now.',
+    });
+    expect(result).not.toHaveProperty('notReady');
+  });
+
+  it('gives an undetermined row with an empty matrix and no reason the pair refusal', async () => {
     const result = await resolution(
       descriptor({ discoveryState: 'undetermined', supportedConfigurations: [] })
     );
 
-    expect(result).toMatchObject({ ok: false, notReady: true, message: NOT_READY });
+    expect(result).toMatchObject({ ok: false, message: PAIR_REFUSED });
+    expect(result).not.toHaveProperty('notReady');
   });
 
   it('still resolves an undetermined row that carries a matrix', async () => {

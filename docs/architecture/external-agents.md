@@ -162,21 +162,30 @@ call, and concurrent targets do not share it). The rule:
   refusals whatever the filesystem holds.
 
 A refusal returns an installed, `undetermined` descriptor with no unavailable reason and no install
-remedy, and the runtime writes one `external_agent_launch_refused` warn line to stderr naming the
-target and the OS error, never argv, the working directory or the environment. The wire has no
-field for the OS error, and an error response would drop the target's row whenever another target
-in the same batch answered. Open and turn launches are untouched: they still fail with
-`external_agent_launch_failed`. Only the version probe that decides installed-or-not is
-reclassified; a later probe the SDK already degrades (Claude `--help` and `auth status`, the Codex
-app-server handshake) keeps its behavior.
+remedy, plus `discovery.failureCode: "launch-refused"`. The runtime also writes one
+`external_agent_launch_refused` warn line to stderr naming the target and the OS error, never argv,
+the working directory or the environment. The OS error stays there: the wire carries only the fixed
+code, and the user-facing copy is a translated string that does not quote it. An error response
+would drop the target's row whenever another target in the same batch answered. Open and turn
+launches are untouched: they still fail with `external_agent_launch_failed`. Only the version probe
+that decides installed-or-not is reclassified; a later probe the SDK already degrades (Claude
+`--help` and `auth status`, the Codex app-server handshake) keeps its behavior.
 
-The hub reads that descriptor as installed and undetermined with an empty `supportedConfigurations`,
-which is what a cold cache also looks like, so it answers the same way. A turn gets the existing
-`unavailable` failure ("has not finished reporting what it can do here yet. Try again") instead of
-"does not support the permission combination", and the disclosure route answers 503 instead of
-recording an acknowledgement over an empty capability set. The row stays selectable: there is no
-unavailable reason that describes it honestly, and a new one would change the shared contract. An
-undetermined row that carries a matrix, and any determined row, behave as before.
+The code rides on `failureCode` instead of a new `unavailableReason` literal because the discover
+result is a closed shape and the hub validates the whole reply. A hub released before the reason
+existed would reject an unknown literal and degrade every target in the batch to the cheap pass. It
+already accepts `failureCode`, so an older hub sees an installed, undetermined, selectable row (the
+pre-reason behavior) and a newer hub on an older runtime sees the same row it always did.
+
+The hub derives the reason `launch-refused` from that code, for an installed target that no adapter
+reason or `not-installed` already explains, and marks the row `determined`: the refusal is the
+answer, not a probe still in flight. The remedy is `none`, since the fix is on the machine (make the
+file executable, or reinstall). Some refusals are transient (a descriptor limit, a busy file), so
+the copy ends with "try again"; the discovery cache holds the row for its 30 second TTL, then the
+next request probes again and the row clears once the program starts. The row is not selectable. A turn aimed at it fails the `unsupported`
+preflight with `details.unavailableReason: "launch-refused"`, and the disclosure route answers 404
+as it does for any unavailable row. An undetermined row with an empty matrix and no failure code
+(a cold cache) keeps the "has not finished reporting what it can do here yet" answer.
 
 On Unix the launcher's `PATH` walk follows glibc `execvp`. It goes on past a candidate that is
 missing (ENOENT, ENOTDIR, ESTALE, ENODEV, ETIMEDOUT) or that the user may not execute (EACCES, a
@@ -824,6 +833,11 @@ refused, and this is what "every cell" adds up to. An **empty** matrix is a cold
 a finding, so it does not trigger it — reading one as a verdict would grey out a working target on
 the first render after a restart.
 
+`launch-refused` is the other hub-inferred reason. The runtime does not send it as a reason: it
+sends `discovery.failureCode: "launch-refused"` on an installed descriptor (see the launch-refusal
+rule under Discovery), and the hub turns that into the reason. A reason literal in the discover
+result would break a hub that predates it.
+
 ### Remedies
 
 A reason is a diagnosis. Every reason therefore carries a **remedy**: the next step, named as
@@ -839,6 +853,7 @@ something the interface can render as a control rather than as prose.
 | `environment-unreachable` | `contact-admin`     | Who to ask                                       |
 | `isolation-unproven`      | `contact-admin`     | Who to ask, plus the transport-specific guidance |
 | `installed-but-unusable`  | `contact-admin`     | Who to ask                                       |
+| `launch-refused`          | `none`              | Copy only: make the file executable or reinstall |
 | `runtime-unsupported`     | `none`              | Nothing — the _runtime_ lacks the adapter        |
 
 The map is `satisfies Record<ExternalAgentUnavailableReason, ExternalAgentRemedyKind>`, so a reason

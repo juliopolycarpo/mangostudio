@@ -3882,6 +3882,9 @@ export const messages = {
       'disclosure-required': 'Leia e aceite o aviso de terceiros deste agente primeiro',
       'installed-but-unusable':
         'Instalado e conectado, mas não aceita nenhuma das permissões que o MangoStudio oferece',
+      // A frase traz o próximo passo: o remédio desta razão não oferece nenhum controle.
+      'launch-refused':
+        'Instalado, mas o sistema operacional se recusou a iniciá-lo. Confira se o arquivo é executável ou reinstale-o e tente de novo.',
     },
     /** O próximo passo, não só o diagnóstico. */
     remedy: {

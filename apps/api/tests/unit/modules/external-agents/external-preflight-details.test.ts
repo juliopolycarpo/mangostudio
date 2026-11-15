@@ -17,6 +17,17 @@ describe('externalPreflightDetails', () => {
     });
   });
 
+  it('carries the reason of a CLI the operating system refused to start, without a build', () => {
+    expect(
+      externalPreflightDetails({
+        kind: 'unsupported',
+        message: 'This agent cannot run here right now.',
+        unavailableReason: 'launch-refused',
+      }),
+      'expected details with the launch-refused reason alone'
+    ).toEqual({ details: { unavailableReason: 'launch-refused' } });
+  });
+
   it('omits the required build when the refusal names none', () => {
     expect(
       externalPreflightDetails({
