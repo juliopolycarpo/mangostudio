@@ -1,4 +1,5 @@
-import { isMainCacheWriter, retryIncompleteListing, type RustCacheApi } from './github';
+import { retryIncompleteListing } from '../actions-api/client';
+import { isMainCacheWriter, type RustCacheApi } from './github';
 import { type RustCacheDeletion, type RustCacheEntry, selectRustCacheDeletions } from './selection';
 
 export interface RustCacheCleanupResult {
