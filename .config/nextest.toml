@@ -1,0 +1,26 @@
+# nextest runs every test in its own process, so an in-process lock cannot
+# serialize anything. A test group can: at most one member runs at a time.
+#
+# The Windows service fixtures in `crates/mangostudio-runtime/src/cli/user_service.rs`
+# (`windows_tests`) each start a cold PowerShell and run CIM queries. Four of them
+# stacked on one starved `windows-latest` runner and three hit their 30 s cap
+# (run 43724320796); alone they take 2.4 to 5.3 s. Only tests that start real
+# PowerShell belong here, and `scripts/tests/rust-nextest.unit.test.ts` fails when
+# this list and the module's PowerShell tests differ. Everything else keeps
+# running in parallel. Retries stay 0: this file may add groups, never retries,
+# filters or skips (the same test enforces that).
+
+[test-groups]
+windows-powershell-fixture = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = '''
+package(mangostudio-runtime) & (
+    test(=cli::native_operation::user_service::windows_tests::fixture_child_capture_excludes_lifetimes_older_than_each_parent)
+  | test(=cli::native_operation::user_service::windows_tests::fixture_receipts_distinguish_original_and_reused_process_lifetimes)
+  | test(=cli::native_operation::user_service::windows_tests::owned_fixture_fallback_preserves_failure_and_independently_ends_captured_lifetimes)
+  | test(=cli::native_operation::user_service::windows_tests::the_runner_tree_is_terminated_after_the_runner_itself_is_gone)
+  | test(=cli::native_operation::user_service::windows_tests::the_slot_fallback_ends_a_shim_run_that_no_task_started)
+)
+'''
+test-group = 'windows-powershell-fixture'

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, readdirSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
@@ -8,9 +8,10 @@ import { extractJobBlock, extractStepBlocks } from './support/workflow-blocks';
 
 // The Rust workspace tests run under cargo-nextest, one process per test.
 // What must not change is the test set and the outcomes: the same targets, the
-// same features, nothing filtered, nothing retried into a pass. Doctests stay
-// on `cargo test --doc`, because nextest does not run them, and the ignored
-// fixture generator stays on `cargo test -- --ignored`.
+// same features, nothing filtered, nothing retried into a pass. The one thing
+// `.config/nextest.toml` may do is run the Windows PowerShell fixtures one at a
+// time. Doctests stay on `cargo test --doc`, because nextest does not run them,
+// and the ignored fixture generator stays on `cargo test -- --ignored`.
 
 const WORKSPACE_TESTS =
   'cargo nextest run --workspace --all-targets --all-features --locked --retries 0';
@@ -38,6 +39,60 @@ const INSTALL_NEXTEST =
 
 function pinnedNextest(step: string | undefined): string | undefined {
   return INSTALL_NEXTEST.exec(step ?? '')?.[1];
+}
+
+const FIXTURE_GROUP = 'windows-powershell-fixture';
+const USER_SERVICE_SOURCE = 'crates/mangostudio-runtime/src/cli/user_service.rs';
+// How nextest names a test in the runtime's library binary: the module path
+// without the crate. `user_service.rs` is mounted by `cli.rs` through
+// `native_operation.rs`, not as `cli::user_service`.
+const WINDOWS_TEST_PREFIX = 'cli::native_operation::user_service::windows_tests::';
+// A test that touches any of these runs a real PowerShell, directly or through
+// the owned fixture it spawns. `FakeTaskExec` tests match none of them.
+const REAL_POWERSHELL_TOKENS = /\bProcessExec\b|\bWindowsFixture\b|\bCommand::new\b/;
+
+interface NextestOverride {
+  filter?: string;
+  'test-group'?: string;
+}
+
+interface NextestConfig {
+  'test-groups'?: Record<string, unknown>;
+  profile?: { default?: { overrides?: NextestOverride[] } & Record<string, unknown> };
+}
+
+function parseNextestConfig(): NextestConfig {
+  return Bun.TOML.parse(readText('.config/nextest.toml')) as NextestConfig;
+}
+
+/** The exact test names the group's filter lists, as nextest prints them. */
+function groupedTestNames(): string[] {
+  const filter = parseNextestConfig().profile?.default?.overrides?.[0]?.filter ?? '';
+  return [...filter.matchAll(/test\(=([^)\s]+)\)/g)].map((match) => match[1] as string);
+}
+
+/** The text between `mod windows_tests {` and its closing brace at column 0. */
+function windowsModuleBody(source: string): string {
+  const open = source.indexOf('mod windows_tests {\n');
+  const close = source.indexOf('\n}\n', open);
+  if (open < 0 || close < 0) {
+    throw new Error(
+      `expected a mod windows_tests block in ${USER_SERVICE_SOURCE} | received: none`
+    );
+  }
+  return source.slice(open, close);
+}
+
+/**
+ * Each `#[test]` of the module with the text up to the next one. rustfmt puts
+ * the attribute on its own line at four spaces, so the split is exact; a helper
+ * defined between tests is attributed to the test above it, which fails closed.
+ */
+function windowsModuleTests(source: string): { name: string; body: string }[] {
+  return windowsModuleBody(source)
+    .split(/^ {4}#\[test\]\n/m)
+    .slice(1)
+    .map((body) => ({ name: /\bfn (\w+)\(/.exec(body)?.[1] ?? '<unnamed>', body }));
 }
 
 describe('workspace tests run under nextest in Cargo Shim', () => {
@@ -169,14 +224,124 @@ describe('nextest cannot be weakened outside the command line', () => {
     expect(text, `expected no NEXTEST_* override in ${file}`).not.toMatch(/NEXTEST_/);
   });
 
-  test('there is no repository nextest config that retries or filters tests', () => {
-    const config = join(ROOT_DIR, '.config/nextest.toml');
-    const text = existsSync(config) ? readText('.config/nextest.toml') : '';
+  test('the repository nextest config only adds the one serial PowerShell test group', () => {
+    const config = parseNextestConfig();
+
+    // An allow-list, not a deny-list: any other key (retries, default-filter,
+    // slow-timeout, a second override, a profile) is a new way to weaken or
+    // reshape the gate and fails here until this test says it is intended.
+    expect(
+      Object.keys(config).sort(),
+      'expected only [profile, test-groups] in .config/nextest.toml'
+    ).toEqual(['profile', 'test-groups']);
+    expect(config['test-groups']).toEqual({ [FIXTURE_GROUP]: { 'max-threads': 1 } });
+    expect(Object.keys(config.profile ?? {}), 'expected only the default profile').toEqual([
+      'default',
+    ]);
+    expect(
+      Object.keys(config.profile?.default ?? {}),
+      'expected the default profile to hold only overrides (no retries, default-filter or skip)'
+    ).toEqual(['overrides']);
+    expect(config.profile?.default?.overrides).toHaveLength(1);
+    expect(Object.keys(config.profile?.default?.overrides?.[0] ?? {}).sort()).toEqual([
+      'filter',
+      'test-group',
+    ]);
+    expect(config.profile?.default?.overrides?.[0]?.['test-group']).toBe(FIXTURE_GROUP);
+  });
+});
+
+// Every test that starts a real PowerShell or CIM query must run in the serial
+// group. nextest runs one process per test, so only a nextest test group can
+// serialize them; an in-process lock would not.
+describe('real PowerShell fixtures run one at a time under nextest', () => {
+  const source = readText(USER_SERVICE_SOURCE);
+  const realPowershellTests = windowsModuleTests(source).filter((test) =>
+    REAL_POWERSHELL_TOKENS.test(test.body)
+  );
+  const grouped = groupedTestNames();
+
+  test('the scan finds the module and the fixtures known today, so a broken parser cannot pass vacuously', () => {
+    const names = windowsModuleTests(source).map((test) => test.name);
+
+    expect(names, 'expected fake-backed tests in windows_tests to be scanned too').toContain(
+      'restart_waits_for_installer_claim_and_then_stops_before_starting'
+    );
+    for (const known of [
+      'fixture_receipts_distinguish_original_and_reused_process_lifetimes',
+      'fixture_child_capture_excludes_lifetimes_older_than_each_parent',
+      'the_runner_tree_is_terminated_after_the_runner_itself_is_gone',
+      'the_slot_fallback_ends_a_shim_run_that_no_task_started',
+      'owned_fixture_fallback_preserves_failure_and_independently_ends_captured_lifetimes',
+    ]) {
+      expect(
+        realPowershellTests.map((test) => test.name),
+        `expected ${known} detected as a real PowerShell test`
+      ).toContain(known);
+    }
+    expect(
+      realPowershellTests.map((test) => test.name),
+      'expected a FakeTaskExec test not to count as real PowerShell'
+    ).not.toContain('restart_waits_for_installer_claim_and_then_stops_before_starting');
+  });
+
+  test('the group lists exactly the tests that start real PowerShell', () => {
+    const real = realPowershellTests.map((test) => test.name).sort();
 
     expect(
-      text,
-      'expected no retries, default-filter or overrides in .config/nextest.toml'
-    ).not.toMatch(/retries|default-filter|overrides|\bskip\b/);
+      grouped.map((name) => name.replace(WINDOWS_TEST_PREFIX, '')).sort(),
+      `expected the ${FIXTURE_GROUP} filter in .config/nextest.toml to list the tests that use ProcessExec or WindowsFixture in ${USER_SERVICE_SOURCE}: ${real.join(', ')}`
+    ).toEqual(real);
+    for (const name of grouped) {
+      expect(name, `expected ${name} under ${WINDOWS_TEST_PREFIX}`).toStartWith(
+        WINDOWS_TEST_PREFIX
+      );
+    }
+  });
+
+  test('the filter is the package plus an exact-name list and nothing else', () => {
+    const filter = (parseNextestConfig().profile?.default?.overrides?.[0]?.filter ?? '').replace(
+      /\s+/g,
+      ''
+    );
+    const names = grouped.length;
+    const expected = `package(mangostudio-runtime)&(${Array(names).fill('test(=NAME)').join('|')})`;
+
+    expect(
+      filter.replace(/test\(=[^)]+\)/g, 'test(=NAME)'),
+      `expected: ${expected} | received: ${filter}`
+    ).toBe(expected);
+  });
+
+  test('the module path in the filter is the path the test binary reports', () => {
+    // nextest names a library test by its module path without the crate:
+    // lib.rs -> cli.rs (#[path]) -> native_operation.rs -> user_service.rs.
+    // Linux lists the same prefix for the unix `tests` module in that file.
+    expect(readText('crates/mangostudio-runtime/src/lib.rs')).toMatch(/^pub mod cli;$/m);
+    expect(readText('crates/mangostudio-runtime/src/cli.rs')).toMatch(
+      /^#\[path = "cli\/native_operation\.rs"\]\nmod native_operation;$/m
+    );
+    expect(readText('crates/mangostudio-runtime/src/cli/native_operation.rs')).toMatch(
+      /^mod user_service;$/m
+    );
+    expect(WINDOWS_TEST_PREFIX).toBe('cli::native_operation::user_service::windows_tests::');
+    expect(source).toMatch(/^#\[cfg\(all\(test, windows\)\)\]\nmod windows_tests \{$/m);
+  });
+
+  test('every PowerShell fixture query uses the one named test timeout', () => {
+    const literals = [...windowsModuleBody(source).matchAll(/\.run\(&\w+,\s*([^)]*)\)/g)].map(
+      (match) => match[1]
+    );
+
+    expect(
+      literals,
+      'expected every ProcessExec.run in windows_tests to pass FIXTURE_SCRIPT_TIMEOUT, not a literal'
+    ).not.toHaveLength(0);
+    for (const argument of literals) {
+      expect(argument, `expected FIXTURE_SCRIPT_TIMEOUT | received: ${argument}`).toBe(
+        'FIXTURE_SCRIPT_TIMEOUT'
+      );
+    }
   });
 });
 

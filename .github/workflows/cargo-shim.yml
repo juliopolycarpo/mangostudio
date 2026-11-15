@@ -42,6 +42,7 @@ on:
       - "rustfmt.toml"
       - "rust-toolchain.toml"
       - ".cargo/config.toml"
+      - ".config/nextest.toml"
       - ".github/workflows/cargo-shim.yml"
       - ".github/workflows/rust-coverage.yml"
       - ".github/actions/setup-zigbuild/**"

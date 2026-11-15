@@ -49,6 +49,8 @@ export const RUST_WORKSPACE_PATHS = [
   'rustfmt.toml',
   'rust-toolchain.toml',
   '.cargo/config.toml',
+  // nextest reads it: it groups the Windows PowerShell fixtures into one serial slot.
+  '.config/nextest.toml',
   '.github/workflows/cargo-shim.yml',
   '.github/workflows/rust-coverage.yml',
   '.github/actions/setup-zigbuild/**',
