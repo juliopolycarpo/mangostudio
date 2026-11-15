@@ -334,6 +334,9 @@ async fn own(
 /// not installed or that the OS refused to start. `pid` is [`PipeChild::id`], which on Unix is
 /// the guardian's pid until the start gate reports ready.
 ///
+/// A cancelled start reaches this too, but only a dropped `spawn` future cancels a start, so
+/// nobody receives that result.
+///
 /// # Example
 /// ```ignore
 /// let error = failed_start_error(Error::program_not_found("codex"), Some(42), Ok(()));
