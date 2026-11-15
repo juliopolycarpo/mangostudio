@@ -90,35 +90,45 @@ pub(crate) enum FailureKind {
 pub(crate) struct McpFailure {
     pub kind: FailureKind,
     pub message: String,
+    /// The process a failed start may have left running, and why it is not proven gone. The
+    /// service logs it, because a cancelled request's message never reaches the hub.
+    pub leftover_process: Option<String>,
 }
 
 impl McpFailure {
-    pub(crate) fn connection(message: impl Into<String>) -> Self {
+    fn of(kind: FailureKind, message: impl Into<String>) -> Self {
         Self {
-            kind: FailureKind::Connection,
+            kind,
             message: message.into(),
+            leftover_process: None,
         }
+    }
+
+    pub(crate) fn connection(message: impl Into<String>) -> Self {
+        Self::of(FailureKind::Connection, message)
     }
 
     pub(crate) fn call(failure: CallFailure, message: impl Into<String>) -> Self {
-        Self {
-            kind: FailureKind::Call(failure),
-            message: message.into(),
-        }
+        Self::of(FailureKind::Call(failure), message)
     }
 
     pub(crate) fn denied(message: impl Into<String>) -> Self {
-        Self {
-            kind: FailureKind::Denied,
-            message: message.into(),
-        }
+        Self::of(FailureKind::Denied, message)
     }
 
     pub(crate) fn cancelled(message: impl Into<String>) -> Self {
-        Self {
-            kind: FailureKind::Cancelled,
-            message: message.into(),
-        }
+        Self::of(FailureKind::Cancelled, message)
+    }
+
+    /// Records the process this failure's start may have left running.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let failure = McpFailure::cancelled("cancelled").with_leftover_process("process tree 42: ...");
+    /// ```
+    pub(crate) fn with_leftover_process(mut self, leftover: impl Into<String>) -> Self {
+        self.leftover_process = Some(leftover.into());
+        self
     }
 }
 

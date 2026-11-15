@@ -400,8 +400,9 @@ fn connect_failure(config: &McpConfig) -> impl Fn(String) -> McpFailure + '_ {
 /// The failure a connect reports when its stdio server did not start.
 ///
 /// A [`StartError::Leftover`] keeps the kind of the start error it followed, so a cancelled
-/// connect is still a cancellation, and appends the process that may still be running to the
-/// message.
+/// connect is still a cancellation. The process that may still be running is appended to the
+/// message and recorded in [`McpFailure::leftover_process`], which the service logs: the hub
+/// never reads the message of a request it cancelled.
 ///
 /// # Example
 /// ```ignore
@@ -420,11 +421,9 @@ fn start_failure(config: &McpConfig, command: &str, error: StartError) -> McpFai
                 Some(pid) => format!("process tree {pid}"),
                 None => "a process tree".to_owned(),
             };
-            let _ = write!(
-                failure.message,
-                "; {tree} from that start may still be running: {cleanup}"
-            );
-            return failure;
+            let leftover = format!("{tree} from that start may still be running: {cleanup}");
+            let _ = write!(failure.message, "; {leftover}");
+            return failure.with_leftover_process(leftover);
         }
         StartError::Cancelled => {
             return McpFailure::cancelled(format!(
@@ -921,6 +920,11 @@ mod tests {
                 "({rendered}): expected the start failure ({start_text:?}), the tree \
                  ({tree_text:?}) and the cleanup failure in the message | received {:?}",
                 failure.message
+            );
+            assert_eq!(
+                failure.leftover_process,
+                Some(format!("{tree_text}: {unproven}")),
+                "({rendered}): expected the leftover process recorded for the service log"
             );
         }
     }
