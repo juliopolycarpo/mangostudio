@@ -965,6 +965,14 @@ fn cause_error(cause: &sdk::Error) -> RemoteError {
         sdk::Error::AuthRequired { .. } => {
             external(codes::UNAVAILABLE, message, "external_agent_signed_out")
         }
+        // The launcher established that the program does not exist: the fact the runtime's own
+        // executable resolver reports at open as `external_agent_not_installed`. The hub already
+        // presents that kind (the install remedy, and a stale discovery answer dropped), so an
+        // executable that vanished between the resolve and the spawn, or that a Claude turn
+        // finds gone, reaches it the same way. The code is the resolver's too, `INTERNAL`.
+        sdk::Error::ProgramNotFound { .. } => {
+            external(codes::INTERNAL, message, "external_agent_not_installed")
+        }
         // `Teardown` is a launched tree that would not stop. SDK 0.8 split it from `Launch`, but
         // this runtime's launcher reported it as `Launch` before, and the hub saw this code and
         // kind for it. They stay so the wire does not move; the pid is the host's own business.

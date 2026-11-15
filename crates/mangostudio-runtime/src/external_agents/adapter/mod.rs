@@ -14,6 +14,8 @@ mod backend;
 mod claude_stop_tests;
 #[cfg(test)]
 mod environment_tests;
+#[cfg(test)]
+mod launch_error_kind_tests;
 #[cfg(all(test, unix))]
 mod launch_failure_tests;
 #[cfg(test)]

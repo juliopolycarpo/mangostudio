@@ -1819,6 +1819,38 @@ fn a_teardown_failure_keeps_the_launch_failed_wire_kind() {
     );
 }
 
+/// SDK 0.9 reports "the program does not exist" as `ProgramNotFound`, apart from `Launch`. The hub
+/// already presents the kind the runtime's executable resolver answers for a missing CLI, so the
+/// launcher's own finding reaches it the same way, and the message names the program the SDK
+/// redacts rather than a path.
+#[test]
+fn a_missing_program_gets_the_not_installed_wire_kind() {
+    let remote = remote_error(&sdk::Error::program_not_found(
+        "/home/someone/.local/bin/codex",
+    ));
+    assert_eq!(
+        (remote.code.as_str(), details(&remote)["kind"].as_str()),
+        (codes::INTERNAL, Some("external_agent_not_installed")),
+        "expected (code, kind) of a missing program | received {remote:?}"
+    );
+    assert_eq!(
+        remote.message, "expected to launch codex, received no such program",
+        "expected the SDK's redacted sentence | received {:?}",
+        remote.message
+    );
+    let annotated = remote_error(
+        &sdk::Error::program_not_found("claude").with_dispatch(sdk::Dispatch::NotSubmitted),
+    );
+    assert_eq!(
+        (
+            details(&annotated)["kind"].as_str(),
+            details(&annotated)["dispatch"].as_str()
+        ),
+        (Some("external_agent_not_installed"), Some("not-submitted")),
+        "expected the kind and the dispatch fact of an annotated missing program"
+    );
+}
+
 #[test]
 fn vendor_launch_and_timeout_failures_get_their_own_codes() {
     let cases = [

@@ -16,7 +16,7 @@
 use std::ffi::OsString;
 use std::future::Future;
 use std::io;
-use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use mango_external_agents::process::{
@@ -169,17 +169,12 @@ impl ProcessLauncher for GuardedProcessLauncher {
         let owner = self.release.own();
         tokio::spawn(own(start, cancel, ready_tx, (permit, owner, self.release)));
         let result = ready_rx.await.unwrap_or_else(|_| {
-            Err(Failed::from(Error::Closed {
+            Err(Error::Closed {
                 subject: "external-agent process owner",
-            }))
+            })
         });
         let _ = abandon.disarm();
-        result.map_err(|failed| {
-            if let Some(refusal) = failed.refusal {
-                observe(refusal);
-            }
-            failed.error
-        })
+        result
     }
 }
 
@@ -221,7 +216,7 @@ struct Terminal {
 async fn own(
     start: Start,
     cancel: CancellationToken,
-    ready: oneshot::Sender<std::result::Result<ManagedProcess, Failed>>,
+    ready: oneshot::Sender<Result<ManagedProcess>>,
     (permit, owner, release): (OwnedSemaphorePermit, Owner, &'static Release),
 ) {
     let Start {
@@ -250,22 +245,22 @@ async fn own(
     let mut child = match launched {
         Ok(child) => child,
         Err(failure) => {
-            let _ = ready.send(Err(failure.into_failed(&program, &request).await));
+            let _ = ready.send(Err(failure.into_error(&program, &request).await));
             return;
         }
     };
     if let Err(failure) = open_gate(&mut child, &cancel).await {
         child.abort_start();
         let _ = cleanup(child, None, release).await;
-        let _ = ready.send(Err(failure.into_failed(&program, &request).await));
+        let _ = ready.send(Err(failure.into_error(&program, &request).await));
         return;
     }
     let (Some(stdout), Some(stderr)) = (child.take_stdout(), child.take_stderr()) else {
         let _ = cleanup(child, None, release).await;
-        let _ = ready.send(Err(Failed::from(Error::Launch {
+        let _ = ready.send(Err(Error::Launch {
             program,
             message: String::from("a child without its stdout and stderr pipes"),
-        })));
+        }));
         return;
     };
     let stdin = child.take_stdin();
@@ -335,67 +330,61 @@ enum StartFailure {
 }
 
 impl StartFailure {
-    /// The SDK error for this failure, plus the OS refusal when it was not a missing program.
-    async fn into_failed(self, program: &str, request: &Arc<ProcessRequest>) -> Failed {
+    /// The SDK error for this failure.
+    ///
+    /// An OS failure is [`Error::ProgramNotFound`] exactly when [`is_missing_program`] says the
+    /// program does not exist, and [`Error::Launch`] otherwise: the SDK's version probes read the
+    /// first as "not installed" and hand the second to the host.
+    async fn into_error(self, program: &str, request: &Arc<ProcessRequest>) -> Error {
         match self {
-            Self::Cancelled => Failed::from(Error::Cancelled {
+            Self::Cancelled => Error::Cancelled {
                 reason: CancelReason::Requested,
-            }),
-            Self::Refused => Failed::from(Error::Cancelled {
+            },
+            Self::Refused => Error::Cancelled {
                 reason: CancelReason::ConsentRevoked,
-            }),
+            },
             Self::Os(error) => {
-                let refusal = LaunchRefusal::of(&error);
+                let message = describe_os_error(&error);
                 let request = Arc::clone(request);
                 // The classification stats the cwd and the PATH candidates, so it runs off the
                 // async threads.
                 let missing = run_blocking(move || is_missing_program(&error, &request)).await;
-                Failed {
-                    error: launch_error(program, &refusal),
-                    refusal: (!missing).then_some(refusal),
+                if missing {
+                    Error::program_not_found(program)
+                } else {
+                    Error::Launch {
+                        program: program.to_owned(),
+                        message,
+                    }
                 }
             }
         }
     }
 }
 
-/// A spawn failure from the OS, reduced to structured values: the errno, or the error kind when
-/// there is none. A custom io error's text can carry argv or cwd, so it is never kept.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct LaunchRefusal {
-    errno: Option<i32>,
-    kind: io::ErrorKind,
-}
-
-impl LaunchRefusal {
-    fn of(error: &io::Error) -> Self {
-        Self {
-            errno: error.raw_os_error(),
-            kind: error.kind(),
-        }
-    }
-
-    /// The OS error text for a raw errno, or the error kind.
-    ///
-    /// # Example
-    /// ```ignore
-    /// assert_eq!(refusal.describe(), "an OS launch failure (Permission denied (os error 13))");
-    /// ```
-    pub(crate) fn describe(&self) -> String {
-        match self.errno {
-            Some(code) => format!(
-                "an OS launch failure ({})",
-                io::Error::from_raw_os_error(code)
-            ),
-            None => format!("a launcher failure ({:?})", self.kind),
-        }
+/// A spawn failure from the OS, reduced to structured values: the errno's own text, or the error
+/// kind when there is none. A custom io error's text can carry argv or cwd, so it is never kept.
+///
+/// # Example
+/// ```ignore
+/// let error = io::Error::from_raw_os_error(libc::EACCES);
+/// assert_eq!(describe_os_error(&error), "an OS launch failure (Permission denied (os error 13))");
+/// ```
+fn describe_os_error(error: &io::Error) -> String {
+    match error.raw_os_error() {
+        Some(code) => format!(
+            "an OS launch failure ({})",
+            io::Error::from_raw_os_error(code)
+        ),
+        None => format!("a launcher failure ({:?})", error.kind()),
     }
 }
 
 /// Whether `error` says the program does not exist, as opposed to an executable that could not be
 /// started.
 ///
-/// Only a missing program may read as "not installed":
+/// The answer picks the SDK error: [`Error::ProgramNotFound`] when true, [`Error::Launch`] when
+/// false. Only a missing program may read as "not installed":
 ///
 /// - ENOENT and ENOTDIR (a `PATH` search that ends on a file entry reports ENOTDIR) mean a missing
 ///   program only while the cwd is still a directory, because the guardian reports `chdir` and
@@ -434,68 +423,6 @@ fn is_path_resolution_errno(errno: Option<i32>) -> bool {
 #[cfg(not(unix))]
 fn is_path_resolution_errno(_errno: Option<i32>) -> bool {
     false
-}
-
-/// Maps an OS failure to [`Error::Launch`] from structured values only, whether or not the SDK
-/// reads it as "not installed": the SDK keeps seeing `Launch`, so every open and turn reports the
-/// same message as before.
-fn launch_error(program: &str, refusal: &LaunchRefusal) -> Error {
-    Error::Launch {
-        program: program.to_owned(),
-        message: refusal.describe(),
-    }
-}
-
-/// What a failed start hands back to [`GuardedProcessLauncher::spawn`].
-struct Failed {
-    error: Error,
-    /// Set when the failure was not a missing program; see [`witnessing`].
-    refusal: Option<LaunchRefusal>,
-}
-
-impl From<Error> for Failed {
-    fn from(error: Error) -> Self {
-        Self {
-            error,
-            refusal: None,
-        }
-    }
-}
-
-type Witness = Arc<Mutex<Option<LaunchRefusal>>>;
-
-tokio::task_local! {
-    static WITNESS: Witness;
-}
-
-/// Runs `work` and returns the first launch refusal any [`GuardedProcessLauncher::spawn`] awaited
-/// inside it recorded.
-///
-/// The SDK's probes read every `Error::Launch` as "not installed". Discovery wraps its harness
-/// call in this so it can tell a missing executable from one that exists but would not start,
-/// without changing the error the SDK sees. The record is private to this call: a concurrent
-/// discovery has its own, and nothing outlives it. A launch started on another task is not seen,
-/// which falls back to the SDK's own answer.
-///
-/// # Example
-/// ```ignore
-/// let (found, refusal) = witnessing(harness.discover(&host)).await;
-/// ```
-pub(crate) async fn witnessing<F: Future>(work: F) -> (F::Output, Option<LaunchRefusal>) {
-    let witness = Witness::default();
-    let output = WITNESS.scope(Arc::clone(&witness), work).await;
-    let refusal = *witness.lock().unwrap_or_else(PoisonError::into_inner);
-    (output, refusal)
-}
-
-/// Records `refusal` for the enclosing [`witnessing`] call, if any; the first one wins.
-fn observe(refusal: LaunchRefusal) {
-    let _ = WITNESS.try_with(|witness| {
-        witness
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get_or_insert(refusal);
-    });
 }
 
 /// Waits for the start gate, releases it, and waits for exec to succeed or fail.

@@ -16,7 +16,6 @@ use tokio_util::sync::CancellationToken;
 use super::super::port::{self, AccountKey, AgentBackend, AgentResult, Host};
 use super::super::supervisor::PortFuture;
 use super::super::wire::{self, TargetId};
-use super::launcher::witnessing;
 use super::{failure, map, session};
 use crate::diagnostics::{DiagnosticSink, StderrDiagnostics, diagnostic_line};
 
@@ -149,9 +148,8 @@ impl Backend {
             diagnostics: Arc::new(StderrDiagnostics),
         }
     }
-    /// Sends the operator diagnostics to `diagnostics` instead of stderr. Unix only: its callers
-    /// are the launch-failure tests, which need a real non-executable file on `PATH`.
-    #[cfg(all(test, unix))]
+    /// Sends the operator diagnostics to `diagnostics` instead of stderr.
+    #[cfg(test)]
     pub(crate) fn with_diagnostics(mut self, diagnostics: Arc<dyn DiagnosticSink>) -> Self {
         self.diagnostics = diagnostics;
         self
@@ -219,30 +217,32 @@ impl AgentBackend for Backend {
         let key = key
             .map(|key| AccountFingerprintKey::new(key.bytes()).expect("the owned key is nonempty"));
         cancellable(cancel, sdk_cancel, async {
-            let (found, refusal) = witnessing(async {
-                self.harnesses
-                    .discover(target, executable, &host, key.as_ref())
-                    .await
-            })
-            .await;
-            let found = failure::settled(found, self.cleanup_timeout).await?;
+            let found = self
+                .harnesses
+                .discover(target, executable, &host, key.as_ref())
+                .await;
             let probed_at_ms = crate::ports::wall_clock::epoch_millis(std::time::SystemTime::now());
-            // The SDK reads every launch failure of its version probe as "not installed". Only a
-            // missing executable is; one that exists but would not start is a refused launch. The
-            // wire carries a fixed code for it, never the OS error, which goes to the operator.
-            if let (mango_external_agents::GateVerdict::NotInstalled, Some(refusal)) =
-                (&found.discovery.gate, refusal)
-            {
-                self.diagnostics.write_line(&diagnostic_line(
-                    "external_agent_launch_refused",
-                    &serde_json::json!({
-                        "level": "warn",
-                        "target": target.as_str(),
-                        "osError": refusal.describe(),
-                    }),
-                ));
-                return Ok(map::launch_refused(target, probed_at_ms));
-            }
+            let found = match found {
+                Ok(found) => found,
+                // The SDK's version probes read only `ProgramNotFound` as "not installed" and
+                // return every other launch failure. A CLI that exists but would not start is a
+                // refused launch. The wire carries a fixed code for it, never the OS error, which
+                // goes to the operator.
+                Err(error) => {
+                    let Some(os_error) = failure::refused_launch(&error) else {
+                        return Err(failure::settle(error, self.cleanup_timeout).await);
+                    };
+                    self.diagnostics.write_line(&diagnostic_line(
+                        "external_agent_launch_refused",
+                        &serde_json::json!({
+                            "level": "warn",
+                            "target": target.as_str(),
+                            "osError": os_error,
+                        }),
+                    ));
+                    return Ok(map::launch_refused(target, probed_at_ms));
+                }
+            };
             Ok(map::descriptor(
                 target,
                 &found.discovery,

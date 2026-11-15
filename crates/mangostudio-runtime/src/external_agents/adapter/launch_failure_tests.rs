@@ -1,21 +1,22 @@
 //! Discovery over the real guarded launcher and a real file on `PATH`.
 //!
-//! The SDK's three harnesses read an `Error::Launch` from their version probe as "not installed",
-//! and this runtime's launcher raises `Error::Launch` for every OS spawn failure. A vendor CLI that
-//! is on `PATH` but cannot be executed must therefore not come back as a descriptor that tells the
-//! user to install it: it is a refused launch (installed, nothing else known), and the OS error is
-//! logged. Unix only: Windows resolves a bare program name through `PATHEXT`, so a plain file without an executable
+//! The SDK's three harnesses read only `Error::ProgramNotFound` from their version probe as "not
+//! installed" and return every other launch failure, and this runtime's launcher raises
+//! `ProgramNotFound` exactly for a missing program. A vendor CLI that is on `PATH` but cannot be
+//! executed must therefore not come back as a descriptor that tells the user to install it: it is a
+//! refused launch (installed, nothing else known), and the OS error is logged. Unix only: Windows
+//! resolves a bare program name through `PATHEXT`, so a plain file without an executable
 //! extension is never a candidate there and the same setup is a missing program, not a refused one.
 #![cfg(unix)]
 
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use super::backend::{Backend, ProductHarnesses};
 use super::launcher::GuardedProcessLauncher;
-use super::test_support::{host, limits};
+use super::test_support::{RecordingDiagnostics, host, limits};
 use crate::diagnostics::DiagnosticSink;
 use crate::external_agents::port::AgentBackend;
 use crate::external_agents::wire::{DiscoveryState, RemedyKind, TargetId, UnavailableReason};
@@ -26,22 +27,6 @@ use mangostudio_runtime_contract::errors::EXTERNAL_AGENT_DISCOVERY_LAUNCH_REFUSE
 /// Every target the runtime discovers: each launches its bare program name when the host resolved
 /// no executable path.
 const TARGETS: [TargetId; 3] = [TargetId::Claude, TargetId::Codex, TargetId::Cursor];
-
-/// Keeps the diagnostic lines a backend wrote, instead of printing them to stderr.
-#[derive(Default)]
-struct RecordingDiagnostics(Mutex<Vec<String>>);
-
-impl DiagnosticSink for RecordingDiagnostics {
-    fn write_line(&self, line: &str) {
-        self.0.lock().unwrap().push(line.to_owned());
-    }
-}
-
-impl RecordingDiagnostics {
-    fn lines(&self) -> Vec<String> {
-        self.0.lock().unwrap().clone()
-    }
-}
 
 /// A backend over the production launcher and harnesses: only the filesystem is fixture.
 fn production_backend(diagnostics: &Arc<RecordingDiagnostics>) -> Arc<Backend> {

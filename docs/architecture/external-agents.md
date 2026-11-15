@@ -143,11 +143,13 @@ remains tryable when its other checks allow it. Home, the selector and Settings 
 The field is optional for older runtimes; explicit refusals still make the affected target or
 permission combination unavailable.
 
-Only a missing executable reads as `not-installed`. The SDK's harnesses treat any launch error from
-their version probe as "not installed", and the runtime's launcher raises that error for every OS
-spawn failure, so the runtime tells the two apart itself. It records the OS error of a failed
-probe launch as structured values for the duration of one discovery call (no state outlives the
-call, and concurrent targets do not share it). The rule:
+Only a missing executable reads as `not-installed`. The SDK's launcher port has two errors for a
+child that never started, and its version probes treat them differently: `Error::ProgramNotFound`
+means the program does not exist and reads as "not installed", while `Error::Launch` means it is
+there and would not start, and the probe returns it from `discover` as an error. The runtime's
+launcher (`adapter/launcher.rs`) says which one it is, from the OS error alone; nothing is recorded
+on the side. It returns `ProgramNotFound` exactly when this rule says the program is missing, and
+`Launch` (naming the OS error, from structured values only) for every other failure:
 
 - ENOENT, ENOTDIR or an absent `PATH` is a missing program while the working directory still
   exists. The guardian reports `chdir` and `execve` failures through one errno pipe, so ENOENT
@@ -161,15 +163,30 @@ call, and concurrent targets do not share it). The rule:
 - ENOEXEC, ETXTBSY, EMFILE, ENFILE, ENOMEM and a working directory that no longer exists are
   refusals whatever the filesystem holds.
 
-A refusal returns an installed, `undetermined` descriptor with no unavailable reason and no install
-remedy, plus `discovery.failureCode: "launch-refused"`. The runtime also writes one
-`external_agent_launch_refused` warn line to stderr naming the target and the OS error, never argv,
-the working directory or the environment. The OS error stays there: the wire carries only the fixed
-code, and the user-facing copy is a translated string that does not quote it. An error response
-would drop the target's row whenever another target in the same batch answered. Open and turn
-launches are untouched: they still fail with `external_agent_launch_failed`. Only the version probe
-that decides installed-or-not is reclassified; a later probe the SDK already degrades (Claude
-`--help` and `auth status`, the Codex app-server handshake) keeps its behavior.
+`Backend::discover` (`adapter/backend.rs`) reads the harness's answer. A `Launch` error that carries
+no child's cleanup control is a refusal. It returns an installed, `undetermined` descriptor with no
+unavailable reason and no install remedy, plus `discovery.failureCode: "launch-refused"`, and the
+runtime writes one `external_agent_launch_refused` warn line to stderr naming the target and the OS
+error, never argv, the working directory or the environment. The OS error stays there: the wire
+carries only the fixed code, and the user-facing copy is a translated string that does not quote
+it. An error response would drop the target's row whenever another target in the same batch
+answered. A `Launch` that carries a cleanup control is not a refusal, because that child may still
+be running: the adapter kills and waits it, then the failure surfaces as before. Every other error
+(a timeout, a closed link, a cancellation) also still fails the call.
+
+That reading is sound because each harness's version probe is the only launch whose failure
+reaches `discover` as an error (SDK 0.9.0):
+
+| Harness | Version probe                                                   | Later probes                                                                            |
+| ------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Claude  | `ProgramNotFound` is not installed; any other error is returned | `--help` and `auth status` read any launch failure as "did not start" and degrade       |
+| Codex   | `ProgramNotFound` is not installed; any other error is returned | the app-server handshake degrades to unknown auth on any error but a cleanup obligation |
+| Cursor  | `ProgramNotFound` is not installed; any other error is returned | none; the floor check before an open skips on either launch error                       |
+
+Open and turn launches keep failing with `external_agent_launch_failed` for a `Launch`. A
+`ProgramNotFound` on open or turn (an executable that vanished between the resolve and the spawn)
+reaches the hub as `external_agent_not_installed`, the kind the runtime's own resolver answers for a
+missing executable, which the hub already presents with the install remedy.
 
 The code rides on `failureCode` instead of a new `unavailableReason` literal because the discover
 result is a closed shape and the hub validates the whole reply. A hub released before the reason
@@ -904,12 +921,12 @@ login that lapsed, or a consent that was withdrawn, in between reaches the strea
 after the 200 is committed. `openRefusalFor` (hub) maps the failures that already have a
 presentation onto an unavailable reason and its remedy, from the same tables as the selector:
 
-| Open failure                                                                                                                             | Reason                | Remedy                                   |
-| ---------------------------------------------------------------------------------------------------------------------------------------- | --------------------- | ---------------------------------------- |
-| `external_agent_signed_out` (the SDK's Claude and Codex harnesses return `Error::AuthRequired` at open, Cursor's from `session/new`)     | `signed-out`          | `sign-in`, with the target's own command |
-| `external_agent_not_installed` (the runtime resolves the executable at every open, so this also covers an agent removed since discovery) | `not-installed`       | `install`                                |
-| `external_agent_version_unsupported` (the SDK's version gate, with the SDK's minimum as the structured `requiredVersion` detail)         | `version-unsupported` | `update`                                 |
-| `RuntimeConsentDeniedError` (the machine owner withdrew consent)                                                                         | `runtime-denied`      | `contact-admin`                          |
+| Open failure                                                                                                                                                                                                              | Reason                | Remedy                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- | ---------------------------------------- |
+| `external_agent_signed_out` (the SDK's Claude and Codex harnesses return `Error::AuthRequired` at open, Cursor's from `session/new`)                                                                                      | `signed-out`          | `sign-in`, with the target's own command |
+| `external_agent_not_installed` (the runtime resolves the executable at every open, so this also covers an agent removed since discovery, and the launcher's own `ProgramNotFound` for one that vanished before the spawn) | `not-installed`       | `install`                                |
+| `external_agent_version_unsupported` (the SDK's version gate, with the SDK's minimum as the structured `requiredVersion` detail)                                                                                          | `version-unsupported` | `update`                                 |
+| `RuntimeConsentDeniedError` (the machine owner withdrew consent)                                                                                                                                                          | `runtime-denied`      | `contact-admin`                          |
 
 The SSE `error` chunk keeps its English `error` sentence, which an older client still shows, and
 gains the optional `unavailableReason`, `remedy` and, beside `version-unsupported`,
@@ -950,7 +967,7 @@ in parentheses. A failure the runtime gave no kind, such as an open timeout, sho
 
 | Open failure                                                                                        | What the user sees                                                                         |
 | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `external_agent_launch_failed` (also an executable that vanished between the resolve and the spawn) | the generic sentence and the kind; the failure is the launch itself, not a state to remedy |
+| `external_agent_launch_failed` (an executable that exists but the operating system would not start) | the generic sentence and the kind; the failure is the launch itself, not a state to remedy |
 | `external_agent_link_lost`, `_closed`, `_protocol`, `_vendor`, `_failure`                           | the generic sentence and the kind; nothing the product already presents describes them     |
 | an open timeout (no runtime kind)                                                                   | the generic sentence alone                                                                 |
 
@@ -1026,7 +1043,7 @@ target unavailable.
 
 `crates/mangostudio-runtime/src/external_agents/` hosts the same ten methods over the published
 External Agents SDK (`mango-external-agents`, `mango-agent-claude`, `mango-agent-codex` and
-`mango-agent-acp`, pinned exactly at 0.8.0). The SDK owns vendor protocols, harness lifecycle and
+`mango-agent-acp`, pinned exactly at 0.9.0). The SDK owns vendor protocols, harness lifecycle and
 the idle-turn bound; the runtime owns authorized launch, scratch, consent, the session cap, the
 per-turn payload budget and hard deadline, and the one mapper from SDK types to this wire.
 
@@ -1048,10 +1065,17 @@ neither logs in nor opens a browser. The runtime's test launchers answer both wi
 read with an empty result fails with a version or sign-in refusal instead of opening.
 
 The SDK also reports a launched process tree it could not end as `Error::Teardown`, apart from
-`Error::Launch` (a failed start), and a harness treats a `Launch` from its version probe as an
-executable that is not there. `GuardedProcessLauncher` therefore returns `Teardown` from `wait`
+`Error::Launch` (a failed start). `GuardedProcessLauncher` therefore returns `Teardown` from `wait`
 and `kill`. The mapper keeps the code and kind the hub saw before (`UNAVAILABLE`,
 `external_agent_launch_failed`), so the wire does not move.
+
+SDK 0.9.0 splits a failed start in two: `Error::ProgramNotFound` for a program that does not exist
+and `Error::Launch` for every other failure. Through 0.8.0 the version probes read any `Launch` as
+"not installed". Since 0.9.0 they read only `ProgramNotFound` that way and return the rest from
+`discover`; see [Discovery](#discovery) for how the launcher chooses and how `Backend::discover`
+reads the answer. The runtime's test launchers use the SDK's `FakeLauncher::missing_program()` for
+a missing CLI and `FakeLauncher::refusing_launches(..)` for one that will not start: an unqueued
+`FakeLauncher::new()` launch is a `Launch` now.
 `EventKind::StructuredOutput`, which the SDK emits only when a host passes a JSON schema to a
 Claude turn, has no wire event; the runtime passes none and the mapper drops it explicitly.
 
