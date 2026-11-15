@@ -111,6 +111,7 @@ export async function deleteActionsCache(
  * @example const client = new GithubActionsClient('owner/repo', token);
  */
 export class GithubActionsClient {
+  private readonly repositoryRoot: string;
   private readonly root: string;
 
   constructor(
@@ -122,7 +123,8 @@ export class GithubActionsClient {
       throw new Error(`Invalid repository ${JSON.stringify(repository)}; expected owner/repo`);
     }
     if (!token) throw new Error('Invalid GITHUB_TOKEN ""; expected a nonempty Actions token');
-    this.root = `https://api.github.com/repos/${repository}/actions`;
+    this.repositoryRoot = `https://api.github.com/repos/${repository}`;
+    this.root = `${this.repositoryRoot}/actions`;
   }
 
   /**
@@ -131,7 +133,32 @@ export class GithubActionsClient {
    * @example await client.response('/runs/42');
    */
   async response(path: string, method = 'GET'): Promise<Response> {
-    const response = await this.request(`${this.root}${path}`, {
+    const response = await this.send(`${this.root}${path}`, method);
+    if (!response.ok && !(method === 'DELETE' && response.status === 404)) {
+      throw new Error(
+        `${method} ${path} returned ${response.status}; expected a successful GitHub Actions API response`
+      );
+    }
+    return response;
+  }
+
+  /**
+   * GET one repository resource outside `/actions` (for example a pull
+   * request). A 404 is returned so the caller can treat it as absent.
+   * @example await client.repositoryResponse('/pulls/42');
+   */
+  async repositoryResponse(path: string): Promise<Response> {
+    const response = await this.send(`${this.repositoryRoot}${path}`, 'GET');
+    if (!response.ok && response.status !== 404) {
+      throw new Error(
+        `GET ${path} returned ${response.status}; expected a successful GitHub API response`
+      );
+    }
+    return response;
+  }
+
+  private send(url: string, method: string): Promise<Response> {
+    return this.request(url, {
       method,
       redirect: 'error',
       signal: AbortSignal.timeout(30_000),
@@ -141,12 +168,6 @@ export class GithubActionsClient {
         'x-github-api-version': '2022-11-28',
       },
     });
-    if (!response.ok && !(method === 'DELETE' && response.status === 404)) {
-      throw new Error(
-        `${method} ${path} returned ${response.status}; expected a successful GitHub Actions API response`
-      );
-    }
-    return response;
   }
 
   /**
