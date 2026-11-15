@@ -78,18 +78,19 @@ schema equality and package validation remain mandatory when relevant.
 
 ## Minimum supported Rust
 
-All stable Rust crates share the intentional Rust 1.99.0 minimum. This replaces the workspace's
-stable-minus-two floor of 1.97.0 and the published launcher's 1.96.0 exception. Every stable member
-inherits `[workspace.package].rust-version` from the root `Cargo.toml`, and `rust-toolchain.toml`
-pins the same compiler. Policy tests enforce that equality. Application and protocol package
+All stable Rust crates share the intentional Rust 1.100.0 minimum. The single shared minimum was
+introduced at 1.99.0, replacing the workspace's stable-minus-two floor of 1.97.0 and the published
+launcher's 1.96.0 exception, and now moves to 1.100.0. Every stable member inherits
+`[workspace.package].rust-version` from the root `Cargo.toml`, and `rust-toolchain.toml` pins the
+same compiler. Policy tests enforce that equality. Application and protocol package
 versions still move independently. See [Rust support and releases](./releasing.md#rust-support-and-releases)
 for the consumer migration.
 
 Cargo Shim checks the minimum through its native workspace jobs. The table maps every check from
-the removed jobs to its replacement at 1.99.0. Default-feature checks stay separate from
+the removed jobs to its replacement at 1.100.0. Default-feature checks stay separate from
 all-feature checks, and launcher-only commands keep the launcher's own dependency feature graph.
 
-| Before                   | Command and package/feature scope                                                                                                                                                                              | Target and runner before                                                                            | Replacement at 1.99.0                                                                                                                      |
+| Before                   | Command and package/feature scope                                                                                                                                                                              | Target and runner before                                                                            | Replacement at 1.100.0                                                                                                                     |
 | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `workspace-msrv`, 1.97.0 | `cargo check --workspace --locked`: workspace libraries/binaries, default features                                                                                                                             | Linux x64, `ubuntu-latest`                                                                          | `workspace` on Linux x64, macOS arm64 and Windows x64, `cargo build --workspace --locked`                                                  |
 | `workspace-msrv`, 1.97.0 | `cargo check --workspace --all-targets --all-features --locked`: workspace, every target kind and feature                                                                                                      | Linux x64, `ubuntu-latest`                                                                          | `workspace` on Linux x64, macOS arm64 and Windows x64, `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`     |
@@ -134,7 +135,7 @@ The existing checks remain:
 | `musl-clippy`, `Cargo Shim Gate`             | `cargo-zigbuild clippy --locked -p mangostudio-runtime --all-targets --target <t> -- -D warnings`: runtime, default features                 | Linux cross-checks for `x86_64-unknown-linux-musl` and `aarch64-unknown-linux-musl`, same Rust path signal |
 | Protocol CI, `Protocol Gate`                 | Protocol feature powerset, interop, schema equality and published-package checks; advisory semver is separate                                | Existing protocol path signal and Linux/macOS/Windows coverage                                             |
 
-Windows ARM64 now compiles the full workspace as well as the launcher alone at 1.99.0. Its native
+Windows ARM64 now compiles the full workspace as well as the launcher alone at 1.100.0. Its native
 test command remains scoped to the runtime; full-workspace compilation does not claim native
 execution of every crate's tests there. Fuzz-workspace resolution, ignored fixture regeneration
 and real-binary qualification retain their commands and relevance predicates.
@@ -230,7 +231,7 @@ classification (`scripts/ci/fresh-dependencies-receipt.mjs`), and links a lock
 only when its artifact was retained (a lock that was produced but not uploaded
 keeps its hash in the receipt, labelled not retained, without a link). The `fresh` result covers the three operating
 systems together. The graph is built and tested with the pinned development
-toolchain (1.99.0) and workspace-wide feature unification
+toolchain (1.100.0) and workspace-wide feature unification
 (`--workspace --all-features`). It checks the new graph at the shared minimum, but does not
 replace default-feature or launcher-only checks against the committed lock. A higher minimum
 does not resolve a duplicate-crate dependency-policy failure.

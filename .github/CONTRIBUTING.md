@@ -10,7 +10,7 @@ This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.
 
 - [Bun](https://bun.sh/) on the channel named in [`.bun-version`](../.bun-version) —
   select the matching [official release](https://github.com/oven-sh/bun/releases)
-- Rust 1.99.0 or newer via [rustup](https://rustup.rs/) — `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`. The hub launches
+- Rust 1.100.0 or newer via [rustup](https://rustup.rs/) — `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`. The hub launches
   Local as the cargo-built `mangostudio-runtime`; `bun run dev` builds it first, and
   `rust-toolchain.toml` pins the version
 - Git with commit signing configured (see [Commit Guidelines](#commit-guidelines))

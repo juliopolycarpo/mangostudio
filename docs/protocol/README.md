@@ -28,8 +28,8 @@ every wire change follows.
 
 ## Develop
 
-Rust source builds require Rust 1.99.0 or newer, the shared workspace minimum. The development
-toolchain is pinned to 1.99.0 in `rust-toolchain.toml`.
+Rust source builds require Rust 1.100.0 or newer, the shared workspace minimum. The development
+toolchain is pinned to 1.100.0 in `rust-toolchain.toml`.
 
 ```sh
 bun run protocol:check   # typecheck, spec, schema equality, fixtures, rustfmt, Clippy, round trip

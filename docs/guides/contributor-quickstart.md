@@ -6,7 +6,7 @@ Use this guide when you want the shortest path from clone to a validated change.
 
 You need [Bun](https://bun.sh/) at the version in [`.bun-version`](../../.bun-version)
 (select the matching [official release](https://github.com/oven-sh/bun/releases))
-and Rust 1.99.0 or newer from [rustup](https://rustup.rs/)
+and Rust 1.100.0 or newer from [rustup](https://rustup.rs/)
 (`curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`). The hub launches Local as
 the cargo-built `mangostudio-runtime` binary, and `rust-toolchain.toml` pins the version rustup
 installs on first build.

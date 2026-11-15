@@ -78,7 +78,7 @@ Useful docs:
   `cargo update -w --manifest-path crates/mango-protocol/fuzz/Cargo.toml`; Cargo Shim’s Ubuntu
   `workspace` job runs the `Resolve excluded fuzz workspace` step with locked metadata resolution
   and fails on a stale fuzz lock.
-- `[workspace.package].rust-version` owns the Rust 1.99.0 minimum for every stable member,
+- `[workspace.package].rust-version` owns the Rust 1.100.0 minimum for every stable member,
   including the published `mangostudio` launcher. `rust-toolchain.toml` pins the same development
   toolchain; policy tests enforce equality. The launcher keeps the application version, while
   `[workspace.package].version` remains the protocol version.

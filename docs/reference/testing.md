@@ -2091,7 +2091,7 @@ doctests, so they stay on `cargo test --doc`, and the ignored fixture generator
 - Ubuntu's CI run of this set is the instrumented libtest one in `rust-coverage.yml`
   (see below); macOS, Windows and the Windows ARM64 runtime lane run nextest. Ubuntu also runs
   `cargo test -p mangostudio --all-targets --locked` to test the launcher with its own default
-  features, separately from workspace feature unification, on the shared Rust 1.99.0 minimum.
+  features, separately from workspace feature unification, on the shared Rust 1.100.0 minimum.
 
 ## Rust Coverage In CI
 
@@ -2424,7 +2424,7 @@ variable unset and set to `0`. Local builds stay incremental, because nothing in
 `.cargo/config.toml` or the profiles sets it.
 
 At the time of these measurements, the separate `workspace-msrv` and `target-msrv` lanes were
-also uncached. Their checks now run in the native workspace lanes at the shared Rust 1.99.0
+also uncached. Their checks now run in the native workspace lanes at the shared Rust 1.100.0
 minimum, as mapped in [`ci.md`](./ci.md#minimum-supported-rust).
 
 The binary and Docker smoke matrix (`smoke-binary.yml`) restores no caches: it

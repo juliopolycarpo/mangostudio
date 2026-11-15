@@ -565,7 +565,7 @@ jobs:
     env:
       # The root rust-toolchain.toml otherwise overrides the action's selected
       # toolchain while Cargo walks up to the shared workspace manifest.
-      RUSTUP_TOOLCHAIN: 1.99.0
+      RUSTUP_TOOLCHAIN: 1.100.0
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -576,7 +576,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
-          toolchain: 1.99.0
+          toolchain: 1.100.0
 
       - name: Verify packaged launcher install
         run: bash scripts/release/verify-launcher-package.sh

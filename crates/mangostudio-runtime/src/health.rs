@@ -675,21 +675,21 @@ pub(crate) fn which_in(name: &str, path_var: &std::ffi::OsStr) -> Option<PathBuf
 
 /// Checks a concrete path before trying to execute it, such as `/usr/bin/git`.
 pub(crate) fn is_executable_file(path: &Path) -> bool {
-    let Ok(metadata) = std::fs::metadata(path) else {
-        return false;
-    };
-    if !metadata.is_file() {
-        return false;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        metadata.permissions().mode() & 0o111 != 0
-    }
-    #[cfg(not(unix))]
-    {
-        true
-    }
+    std::fs::metadata(path)
+        .is_ok_and(|metadata| metadata.is_file() && has_execute_permission(&metadata))
+}
+
+/// Whether any execute bit is set in a file's mode.
+#[cfg(unix)]
+fn has_execute_permission(metadata: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    metadata.permissions().mode() & 0o111 != 0
+}
+
+/// Windows has no execute bit: any regular file may be started.
+#[cfg(not(unix))]
+fn has_execute_permission(_metadata: &std::fs::Metadata) -> bool {
+    true
 }
 
 /// A cancelled `git` probe — distinct from "git is not available", which
@@ -1053,6 +1053,42 @@ mod tests {
             Some("2.88.0".into())
         );
         assert_eq!(super::parse_gh_version(""), None);
+    }
+
+    #[test]
+    fn an_executable_file_is_a_regular_file_the_platform_can_start() {
+        let dir = scratch_home("executable-file");
+        let file = dir.join("tool");
+        std::fs::write(&file, "").unwrap();
+        let missing = dir.join("missing");
+        assert!(
+            !super::is_executable_file(&missing),
+            "expected a missing path to be refused | received executable: {}",
+            missing.display()
+        );
+        let directory = std::path::Path::new(dir.as_os_str());
+        assert!(
+            !super::is_executable_file(directory),
+            "expected a directory to be refused | received executable: {}",
+            directory.display()
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for (mode, expected) in [(0o644, false), (0o755, true), (0o001, true)] {
+                std::fs::set_permissions(&file, std::fs::Permissions::from_mode(mode)).unwrap();
+                assert_eq!(
+                    super::is_executable_file(&file),
+                    expected,
+                    "expected mode {mode:o} to be executable: {expected}"
+                );
+            }
+        }
+        #[cfg(not(unix))]
+        assert!(
+            super::is_executable_file(&file),
+            "expected a regular file to be executable on a platform without execute bits"
+        );
     }
 
     #[cfg(unix)]

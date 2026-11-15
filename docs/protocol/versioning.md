@@ -39,10 +39,10 @@ the wire major. Deploy order does not matter within a major.
 
 ## Rust compiler support
 
-The Rust SDK shares the workspace's Rust 1.99.0 minimum. Releases that contain this baseline
-change require Rust 1.99.0 or newer, including codec-only consumers. Update the compiler in local
+The Rust SDK shares the workspace's Rust 1.100.0 minimum. Releases that contain this baseline
+change require Rust 1.100.0 or newer, including codec-only consumers. Update the compiler in local
 development and downstream CI before adopting one. Previously published crate metadata keeps its
-declared minimum, so consumers that still need Rust 1.97 can retain a compatible published
+declared minimum, so consumers that still need Rust 1.99 or older can retain a compatible published
 version. Check the release notes and the crate's `rust-version` when upgrading.
 
 The compiler minimum is a package source-compatibility requirement. It changes neither the wire

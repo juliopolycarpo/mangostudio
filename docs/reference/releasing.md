@@ -26,35 +26,35 @@ root-relative paths.
 
 ## Rust support and releases
 
-Rust source builds and new Rust crate releases use a single minimum of Rust 1.99.0. This
-intentionally replaces the workspace's stable-minus-two floor of 1.97.0 and the launcher's
-1.96.0 exception. Every stable crate inherits the root workspace's `rust-version`, and the
-development pin is also 1.99.0. It applies to the published `mangostudio` launcher and
-`mango-protocol` Rust SDK as well as the unpublished runtime crates. The external-agent SDK
-keeps its own minimum and release policy.
+Rust source builds and new Rust crate releases use a single minimum of Rust 1.100.0. The single
+shared minimum was introduced at 1.99.0, replacing the workspace's stable-minus-two floor of
+1.97.0 and the launcher's 1.96.0 exception, and now moves to 1.100.0. Every stable crate inherits
+the root workspace's `rust-version`, and the development pin is also 1.100.0. It applies to the
+published `mangostudio` launcher and `mango-protocol` Rust SDK as well as the unpublished runtime
+crates. The external-agent SDK keeps its own minimum and release policy.
 
-Users building the launcher with Rust 1.96 or 1.97 must update their compiler before installing
-a release that contains this policy change:
+Users building the launcher with Rust 1.99 or older must update their compiler before installing
+a release that contains this minimum:
 
 ```bash
-rustup toolchain install 1.99.0 --profile minimal
-cargo +1.99.0 install mangostudio --locked
+rustup toolchain install 1.100.0 --profile minimal
+cargo +1.100.0 install mangostudio --locked
 ```
 
 Source contributors can let rustup install `rust-toolchain.toml`'s compiler. Remove or update an
-older `RUSTUP_TOOLCHAIN` override or explicit `cargo +1.96.0`/`cargo +1.97.0` selection. Downstream
+older `RUSTUP_TOOLCHAIN` override or explicit `cargo +1.99.0` (or older) selection. Downstream
 Rust SDK consumers must also update their CI and local compiler before adopting a release with
 the new minimum. Previously published crate metadata stays unchanged; a consumer that needs an
 older compiler can keep a published version whose `rust-version` supports it. The TypeScript SDK
 and users of prebuilt app binaries acquire no local Rust compiler requirement. `cargo binstall`
 does not compile when it finds a matching prebuilt archive, but compiling its fallback launcher
-requires Rust 1.99.0 or newer.
+requires Rust 1.100.0 or newer.
 
 The launcher keeps the application version and bare `v*` release train. The Rust SDK keeps the
 protocol package version and `protocol-v*` train; sharing a compiler minimum does not combine
 their versions. Treat this as an intentional source-compatibility change in the next application
 and protocol release notes that ship it. Generate each changelog through its normal release
-preparation and review that section for the Rust 1.99 requirement and migration. Select package
+preparation and review that section for the Rust 1.100 requirement and migration. Select package
 versions under the existing release rules. This change bumps no package version and changes no
 wire version; generated changelogs are never edited by hand.
 
@@ -1157,7 +1157,7 @@ The binstall binary does not use the launcher
 cache under `~/.mango/dist/`.
 
 `cargo install mangostudio` builds the thin Rust launcher from
-`crates/mangostudio-launcher/` with Rust 1.99.0 or newer. On first run it
+`crates/mangostudio-launcher/` with Rust 1.100.0 or newer. On first run it
 downloads the platform archive matching the crate version from the GitHub
 release into `~/.mango/dist/<version>/` (verified against `SHA256SUMS`, same
 layout as the shell installer) and execs the real binary. Both install paths
@@ -1179,7 +1179,7 @@ Design notes:
 - The root Rust CI lane (`.github/workflows/cargo-shim.yml`) triggers on every
   PR targeting `main`, but a cheap `changes` job skips the toolchain
   when no Rust path changed. It builds and tests the locked workspace on Linux,
-  macOS and Windows at the shared Rust 1.99.0 minimum, checks Windows ARM64, and resolves the
+  macOS and Windows at the shared Rust 1.100.0 minimum, checks Windows ARM64, and resolves the
   excluded fuzz workspace. Its legacy `gate` job, named `Gate`, reports the bare
   API context `Gate`; its additive job reports `Cargo Shim Gate`. See
   [`ci.md`](./ci.md#branch-protection--required-checks) for the current required contexts.
