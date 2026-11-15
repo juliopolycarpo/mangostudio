@@ -59,6 +59,10 @@ export const EXTERNAL_AGENT_REMEDIES = {
   'isolation-unproven': 'contact-admin',
   'disclosure-required': 'accept-disclosure',
   'installed-but-unusable': 'contact-admin',
+  // The program is on disk, so `install` would send the user the wrong way (#2226 removed that
+  // prompt from this row on purpose), and the person at the machine is usually the one who can
+  // fix it, so `contact-admin` would misdirect them. The sentence names the check.
+  'launch-refused': 'none',
 } as const satisfies Record<ExternalAgentUnavailableReason, ExternalAgentRemedyKind>;
 
 /**

@@ -138,7 +138,22 @@ describe('external agent descriptor', () => {
       // reported by one: each adapter knows why its own cells are refused, not
       // that the result leaves nothing selectable.
       'installed-but-unusable',
+      // Inferred by the hub from the runtime's `launch-refused` discovery failure code, never sent
+      // on the wire as a reason: a released hub rejects a literal it does not know.
+      'launch-refused',
     ]);
+  });
+
+  it('accepts a launch-refused row, installed and determined, with no matrix', () => {
+    expect(
+      Value.Check(ExternalAgentDescriptorSchema, {
+        ...DESCRIPTOR,
+        discoveryState: 'determined',
+        supportedConfigurations: [],
+        unavailableReason: 'launch-refused',
+        remedy: { kind: 'none' },
+      })
+    ).toBe(true);
   });
 
   /**
@@ -724,6 +739,12 @@ describe('what would fix an unavailable agent', () => {
     // MangoStudio can offer no button.
     expect(externalRemedyFor('environment-unreachable')?.kind).toBe('contact-admin');
     expect(externalRemedyFor('isolation-unproven')?.kind).toBe('contact-admin');
+  });
+
+  it('offers no control for a CLI the operating system refused to start', () => {
+    // Not `install`: #2226 removed the install prompt from this row on purpose, since the program
+    // is on disk and the fix (its mode, a descriptor limit, a missing directory) is on the machine.
+    expect(externalRemedyFor('launch-refused')).toEqual({ kind: 'none' });
   });
 });
 

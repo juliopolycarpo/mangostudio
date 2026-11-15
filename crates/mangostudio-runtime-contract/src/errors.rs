@@ -95,6 +95,15 @@ pub const EXTERNAL_AGENT_FINISHED_TURN_ERROR_CODES: [&str; 5] = [
     "claude-error_max_structured_output_retries",
 ];
 
+/// The `discovery.failureCode` a runtime reports for a vendor CLI that exists on disk and that the
+/// operating system refused to start.
+///
+/// Mirrors `EXTERNAL_AGENT_DISCOVERY_LAUNCH_REFUSED_CODE` in
+/// `apps/shared/src/runtime-contract/errors.ts`. It travels on the discovery report rather than as
+/// an `unavailableReason`: a released hub rejects a reason literal it does not know, and with it the
+/// whole discover result.
+pub const EXTERNAL_AGENT_DISCOVERY_LAUNCH_REFUSED_CODE: &str = "launch-refused";
+
 /// Maps a wire error code onto the known union, mirroring
 /// `narrowRuntimeErrorCode` in `apps/shared/src/runtime-contract/errors.ts`.
 ///
@@ -198,6 +207,19 @@ mod tests {
             super::EXTERNAL_AGENT_FINISHED_TURN_ERROR_CODES.to_vec(),
             codes,
             "expected the Rust finished-turn error codes to match strings.json"
+        );
+    }
+
+    /// The hub matches this exact spelling on `discovery.failureCode` to derive the
+    /// `launch-refused` reason, so a drift on either side would put the refused row back among the
+    /// selectable ones without any other test noticing.
+    #[test]
+    fn the_discovery_launch_refused_code_mirrors_strings_json() {
+        assert_eq!(
+            super::EXTERNAL_AGENT_DISCOVERY_LAUNCH_REFUSED_CODE,
+            errors_document()["externalAgentDiscoveryLaunchRefusedCode"]
+                .as_str()
+                .expect("the generated strings.json names the launch-refused discovery code")
         );
     }
 

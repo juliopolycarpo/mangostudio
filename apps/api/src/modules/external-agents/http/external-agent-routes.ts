@@ -42,7 +42,6 @@ import {
   type DiscoveredExternalAgent,
   type ExternalAgentDiscoveryService,
   externalAgentDiscoveryService,
-  isUndeterminedWithoutMatrix,
 } from '../application/external-agent-discovery';
 import {
   type ExternalCommandCatalogCache,
@@ -212,9 +211,8 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
             code: ERROR_CODES.NOT_FOUND,
           };
         }
-        if (!agent.adapterAnswered || isUndeterminedWithoutMatrix(agent)) {
-          // The probe was refused, timed out or never started, or it found the CLI and could
-          // not start it so it reported no capability set at all. Recording anyway
+        if (!agent.adapterAnswered) {
+          // The probe was refused, timed out or never started. Recording anyway
           // would store consent to a capability set nobody was shown, so the
           // notice stays unanswered and the client may retry.
           set.status = 503;

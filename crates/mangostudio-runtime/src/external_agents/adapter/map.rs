@@ -29,6 +29,7 @@ use mango_agent_codex::CodexHarness;
 use mango_agent_codex::account::{AccountFingerprintKey, CodexAccount};
 use mango_external_agents as sdk;
 use mango_protocol::error::{RemoteError, codes};
+use mangostudio_runtime_contract::errors::EXTERNAL_AGENT_DISCOVERY_LAUNCH_REFUSED_CODE;
 
 use super::super::wire::{self, TargetId};
 use crate::tool_argument::tool_argument;
@@ -236,6 +237,7 @@ pub(crate) fn descriptor(
         source: wire::DiscoverySource::Live,
         probed_at_ms,
         attempts: 1,
+        failure_code: None,
     });
     match &discovery.gate {
         sdk::GateVerdict::NotInstalled => not_installed(target, report),
@@ -249,16 +251,21 @@ pub(crate) fn descriptor(
     }
 }
 
-/// A target whose executable exists but would not start, so nothing else is known: installed,
-/// undetermined, with no unavailable reason and no install remedy.
+/// A target whose executable exists but the operating system refused to start, so nothing else is
+/// known: installed, undetermined, with no install remedy.
+///
+/// It sends no `unavailableReason`. The discover result is a closed shape that a released hub
+/// validates whole, so a reason literal that hub has never heard of would fail the reply for every
+/// target in the batch. The refusal is named in `discovery.failureCode`, a field that hub already
+/// accepts, and the hub derives the `launch-refused` reason from it.
 ///
 /// # Example
 ///
 /// ```ignore
-/// let descriptor = undetermined(TargetId::Claude, 1_000);
+/// let descriptor = launch_refused(TargetId::Claude, 1_000);
 /// assert!(descriptor.installed && descriptor.unavailable_reason.is_none());
 /// ```
-pub(crate) fn undetermined(target: TargetId, probed_at_ms: u64) -> wire::Descriptor {
+pub(crate) fn launch_refused(target: TargetId, probed_at_ms: u64) -> wire::Descriptor {
     wire::Descriptor {
         target_id: target,
         installed: true,
@@ -277,6 +284,7 @@ pub(crate) fn undetermined(target: TargetId, probed_at_ms: u64) -> wire::Descrip
             source: wire::DiscoverySource::Live,
             probed_at_ms,
             attempts: 1,
+            failure_code: Some(EXTERNAL_AGENT_DISCOVERY_LAUNCH_REFUSED_CODE),
         }),
     }
 }

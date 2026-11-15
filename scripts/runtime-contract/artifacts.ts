@@ -14,6 +14,7 @@
 import { PINNED_GITHUB_GRAPHQL_DOCUMENTS } from '@mangostudio/shared/github';
 import {
   CONSENT_DENIED_KIND,
+  EXTERNAL_AGENT_DISCOVERY_LAUNCH_REFUSED_CODE,
   EXTERNAL_AGENT_FINISHED_TURN_ERROR_CODES,
   EXTERNAL_AGENT_SESSION_DETAIL,
   EXTERNAL_AGENT_SESSION_STATES,
@@ -167,6 +168,7 @@ function stringsDocument(): Record<string, unknown> {
       externalAgentSessionDetail: EXTERNAL_AGENT_SESSION_DETAIL,
       externalAgentSessionStates: [...EXTERNAL_AGENT_SESSION_STATES],
       externalAgentFinishedTurnErrorCodes: [...EXTERNAL_AGENT_FINISHED_TURN_ERROR_CODES],
+      externalAgentDiscoveryLaunchRefusedCode: EXTERNAL_AGENT_DISCOVERY_LAUNCH_REFUSED_CODE,
     },
     setupPendingSignature: RUNTIME_SETUP_PENDING_SIGNATURE,
     updateExitCode: RUNTIME_UPDATE_EXIT_CODE,

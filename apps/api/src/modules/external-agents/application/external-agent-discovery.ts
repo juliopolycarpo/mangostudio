@@ -55,7 +55,10 @@ import {
   externalRemedyFor,
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from '@mangostudio/shared/external-agents';
-import { RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
+import {
+  EXTERNAL_AGENT_DISCOVERY_LAUNCH_REFUSED_CODE,
+  RuntimeConsentDeniedError,
+} from '@mangostudio/shared/runtime-contract';
 
 import { onEnvironmentInvalidation } from '../../../services/realtime/environment-invalidation-hooks';
 import { publishExternalAgentsInvalidation } from '../../../services/realtime/external-agents-invalidation';
@@ -133,27 +136,6 @@ export interface AuthoritativeAgentDiscovery {
 export interface DiscoveredExternalAgent {
   readonly descriptor: ExternalAgentDescriptor;
   readonly adapterAnswered: boolean;
-}
-
-/**
- * Whether an adapter answered but left nothing to act on: an installed target whose
- * `discoveryState` is `undetermined` with an empty `supportedConfigurations`.
- *
- * The runtime answers exactly this for a CLI it found but could not start (a lost exec bit, a
- * descriptor limit): it knows the program exists and nothing else. A turn has no permission
- * pair to check against an empty matrix, and a consent record over its empty capability set
- * would never match the real one, so both callers treat it as "not ready, try again", the same
- * as an adapter that has not answered. An undetermined row that carries a matrix, and a
- * determined row of any matrix, are not this.
- */
-export function isUndeterminedWithoutMatrix(agent: DiscoveredExternalAgent): boolean {
-  const { descriptor } = agent;
-  return (
-    agent.adapterAnswered &&
-    descriptor.installed &&
-    descriptor.discoveryState === 'undetermined' &&
-    descriptor.supportedConfigurations.length === 0
-  );
 }
 
 export interface DescribeExternalAgentsOptions {
@@ -365,10 +347,17 @@ function unavailableReasonFor(
   installed: boolean,
   authState: ExternalAgentAuthState,
   fromAdapter: ExternalAgentUnavailableReason | undefined,
-  supportedConfigurations: readonly ExternalSupportedConfiguration[]
+  supportedConfigurations: readonly ExternalSupportedConfiguration[],
+  discovery: ExternalAgentDiscoveryReport | undefined
 ): ExternalAgentUnavailableReason | undefined {
   if (fromAdapter) return fromAdapter;
   if (!installed) return 'not-installed';
+  // The runtime found the program and the operating system would not start it, so it knows nothing
+  // else about it. It says so in a field a released hub already validates (see the constant), and
+  // the reason is derived here: a reason literal on the wire would fail that hub's whole reply.
+  if (discovery?.failureCode === EXTERNAL_AGENT_DISCOVERY_LAUNCH_REFUSED_CODE) {
+    return 'launch-refused';
+  }
   if (authState === 'signed-out') return 'signed-out';
   // Last, and only over a matrix an adapter actually answered with. Each cell
   // already carries its own refusal; this is what "every cell" adds up to, and
@@ -420,7 +409,8 @@ function buildDescriptor(input: DescriptorInput): ExternalAgentDescriptor {
     input.installed,
     input.authState,
     input.adapterReason,
-    input.supportedConfigurations
+    input.supportedConfigurations,
+    input.discovery
   );
   const remedy = externalRemedyFor(reason, loginCommand ? { loginCommand } : {});
   const version = input.version?.trim() ? input.version.slice(0, MAX_VERSION_LENGTH) : undefined;
@@ -436,9 +426,14 @@ function buildDescriptor(input: DescriptorInput): ExternalAgentDescriptor {
     targetId: input.targetId,
     environmentId: input.environmentId,
     installed: input.installed,
+    // A refused launch is a finding, not uncertainty: the runtime sends `undetermined` so an older
+    // hub keeps the row tryable, but an "undetermined" label beside an unavailable reason would
+    // contradict it.
     discoveryState:
-      input.discoveryState ??
-      (input.installed && !reason && !version ? 'undetermined' : 'determined'),
+      reason === 'launch-refused'
+        ? 'determined'
+        : (input.discoveryState ??
+          (input.installed && !reason && !version ? 'undetermined' : 'determined')),
     ...(version && { version }),
     ...(requiredVersion && { requiredVersion }),
     authState: input.authState,

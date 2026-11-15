@@ -253,14 +253,26 @@ describe('external agent disclosure routes', () => {
     expect(discovery.waited).toEqual([true]);
   });
 
-  it('refuses to record consent over an installed, undetermined answer with no matrix', async () => {
+  it('refuses to record consent over a CLI the operating system refused to start', async () => {
     const { app, discovery } = await signedInApp();
 
-    // The runtime's answer for a CLI it found but could not start.
+    // What the hub builds from the runtime's answer for a CLI it found but could not start.
     discovery.adapterAnswered = true;
-    discovery.answer = { discoveryState: 'undetermined', supportedConfigurations: [] };
+    discovery.answer = {
+      discoveryState: 'determined',
+      supportedConfigurations: [],
+      unavailableReason: 'launch-refused',
+      remedy: { kind: 'none' },
+    };
     const response = await acknowledge(app);
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(404);
+
+    // The row keeps its own reason instead of being stamped `disclosure-required`: the notice is
+    // unreachable until the CLI starts, so the selector must not offer it.
+    const refused = await agentsIn(
+      await app.handle(new Request('http://localhost/external-agents'))
+    );
+    expect(refused[0]?.unavailableReason).toBe('launch-refused');
 
     // Nothing was stored: once the CLI starts and the adapter reports a matrix, the
     // notice is still owed.

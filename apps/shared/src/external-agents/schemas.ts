@@ -874,7 +874,8 @@ export type ExternalAgentAccount = Static<typeof ExternalAgentAccountSchema>;
  * answer without knowing whether the last answer was probed or remembered.
  *
  * Optional because it is a claim only an adapter that actually caches can make.
- * Nothing here changes what the selector renders.
+ * Nothing here changes what the selector renders, with one exception: a
+ * `failureCode` of `launch-refused` makes the hub mark the row unavailable.
  */
 export const ExternalAgentDiscoveryReportSchema = Type.Object(
   {
@@ -884,7 +885,13 @@ export const ExternalAgentDiscoveryReportSchema = Type.Object(
     probedAtMs: Type.Integer({ minimum: 0 }),
     /** Handshake attempts the probe took. Above one means something was retried. */
     attempts: Type.Integer({ minimum: 1, maximum: 16 }),
-    /** The adapter's own code for a probe that failed. Never vendor text. */
+    /**
+     * The adapter's own code for a probe that failed. Never vendor text.
+     *
+     * One code is acted on: `launch-refused` (`EXTERNAL_AGENT_DISCOVERY_LAUNCH_REFUSED_CODE`),
+     * which the hub turns into the `launch-refused` unavailable reason. Any other value is
+     * diagnostics for the Logs page.
+     */
     failureCode: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
   },
   { additionalProperties: false }

@@ -78,6 +78,7 @@ const UNAVAILABLE_TONE: Record<
   'disclosure-required': 'warning',
   'version-unsupported': 'warning',
   'installed-but-unusable': 'warning',
+  'launch-refused': 'warning',
   'runtime-denied': 'warning',
   'environment-unreachable': 'error',
   'isolation-unproven': 'error',

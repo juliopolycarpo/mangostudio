@@ -10,6 +10,7 @@ import {
   NO_EXTERNAL_AGENT_CAPABILITIES,
 } from '@mangostudio/shared/external-agents';
 import {
+  EXTERNAL_AGENT_DISCOVERY_LAUNCH_REFUSED_CODE,
   type RuntimeCapabilityManifest,
   RuntimeConsentDeniedError,
 } from '@mangostudio/shared/runtime-contract';
@@ -306,6 +307,79 @@ describe('external agent discovery — the authoritative pass', () => {
       authState: 'signed-in',
     });
     expect(codex?.descriptor.unavailableReason).toBeUndefined();
+  });
+
+  /**
+   * What the runtime answers for a CLI it found on disk and could not start: installed, undetermined,
+   * no matrix, and the `launch-refused` code on the discovery report, the one field a released hub
+   * already accepts. The hub turns that into a reason, so the row is not selectable.
+   */
+  const REFUSED_LAUNCH: AuthoritativeAgentStatus = {
+    targetId: 'codex',
+    installed: true,
+    authState: 'unknown',
+    discoveryState: 'undetermined',
+    capabilities: NO_EXTERNAL_AGENT_CAPABILITIES,
+    supportedConfigurations: [],
+    discovery: {
+      source: 'live',
+      probedAtMs: 1,
+      attempts: 1,
+      failureCode: EXTERNAL_AGENT_DISCOVERY_LAUNCH_REFUSED_CODE,
+    },
+  };
+
+  it('turns a refused launch into a determined, unavailable row that is still installed', async () => {
+    const service = createExternalAgentDiscoveryService({
+      probingService: PROBING,
+      authoritative: authoritative([REFUSED_LAUNCH]),
+    });
+    const [codex] = await service.describeExternalAgents(SCOPE, { waitForAdapter: true });
+
+    expect(codex?.adapterAnswered).toBe(true);
+    expect(codex?.descriptor).toMatchObject({
+      installed: true,
+      discoveryState: 'determined',
+      unavailableReason: 'launch-refused',
+      remedy: { kind: 'none' },
+    });
+    expect(Value.Check(ExternalAgentDescriptorSchema, codex?.descriptor)).toBe(true);
+  });
+
+  it('reads the launch-refused code only on an installed target', async () => {
+    const service = createExternalAgentDiscoveryService({
+      probingService: PROBING,
+      authoritative: authoritative([{ ...REFUSED_LAUNCH, installed: false }]),
+    });
+    const [codex] = await service.describeExternalAgents(SCOPE, { waitForAdapter: true });
+
+    expect(codex?.descriptor.unavailableReason).toBe('not-installed');
+  });
+
+  it('ignores a discovery failure code it does not know', async () => {
+    const service = createExternalAgentDiscoveryService({
+      probingService: PROBING,
+      authoritative: authoritative([
+        {
+          ...REFUSED_LAUNCH,
+          discovery: { source: 'live', probedAtMs: 1, attempts: 1, failureCode: 'probe-timeout' },
+        },
+      ]),
+    });
+    const [codex] = await service.describeExternalAgents(SCOPE, { waitForAdapter: true });
+
+    expect(codex?.descriptor.unavailableReason).toBeUndefined();
+    expect(codex?.descriptor.discoveryState).toBe('undetermined');
+  });
+
+  it('keeps an adapter-reported reason over the launch-refused code', async () => {
+    const service = createExternalAgentDiscoveryService({
+      probingService: PROBING,
+      authoritative: authoritative([{ ...REFUSED_LAUNCH, unavailableReason: 'runtime-denied' }]),
+    });
+    const [codex] = await service.describeExternalAgents(SCOPE, { waitForAdapter: true });
+
+    expect(codex?.descriptor.unavailableReason).toBe('runtime-denied');
   });
 
   /**
