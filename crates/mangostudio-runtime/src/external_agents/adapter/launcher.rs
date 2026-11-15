@@ -251,16 +251,20 @@ async fn own(
     };
     if let Err(failure) = open_gate(&mut child, &cancel).await {
         child.abort_start();
-        let _ = cleanup(child, None, release).await;
-        let _ = ready.send(Err(failure.into_error(&program, &request).await));
+        let pid = child.id();
+        let (_, tree) = cleanup(child, None, release).await;
+        let start = failure.into_error(&program, &request).await;
+        let _ = ready.send(Err(failed_start_error(start, pid, tree)));
         return;
     }
     let (Some(stdout), Some(stderr)) = (child.take_stdout(), child.take_stderr()) else {
-        let _ = cleanup(child, None, release).await;
-        let _ = ready.send(Err(Error::Launch {
+        let pid = child.id();
+        let (_, tree) = cleanup(child, None, release).await;
+        let start = Error::Launch {
             program,
             message: String::from("a child without its stdout and stderr pipes"),
-        }));
+        };
+        let _ = ready.send(Err(failed_start_error(start, pid, tree)));
         return;
     };
     let stdin = child.take_stdin();
@@ -320,6 +324,33 @@ async fn own(
         true
     });
     let _ = terminal_tx.send(Some(Terminal { cleanup }));
+}
+
+/// The error for a start that failed after a child existed.
+///
+/// `start` stands when the tree is proven gone. When `tree` is an `Err`, a guardian or a
+/// descendant may still be running, so the result is [`Error::Teardown`] with `pid` and the
+/// start failure kept in its message: a caller must not read a leftover process as a CLI that is
+/// not installed or that the OS refused to start. `pid` is [`PipeChild::id`], which on Unix is
+/// the guardian's pid until the start gate reports ready.
+///
+/// # Example
+/// ```ignore
+/// let error = failed_start_error(Error::program_not_found("codex"), Some(42), Ok(()));
+/// assert!(error.is_program_not_found());
+/// ```
+fn failed_start_error(
+    start: Error,
+    pid: Option<u32>,
+    tree: std::result::Result<(), String>,
+) -> Error {
+    match tree {
+        Ok(()) => start,
+        Err(unproven) => Error::Teardown {
+            pid,
+            message: format!("{unproven} after a failed start ({start})"),
+        },
+    }
 }
 
 /// Why a child never started.

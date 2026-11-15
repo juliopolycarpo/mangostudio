@@ -1069,6 +1069,13 @@ The SDK also reports a launched process tree it could not end as `Error::Teardow
 and `kill`. The mapper keeps the code and kind the hub saw before (`UNAVAILABLE`,
 `external_agent_launch_failed`), so the wire does not move.
 
+A start can also fail after a child exists: `execve` fails behind the start gate, or the start is
+cancelled. The launcher then ends the child and waits for the empty-tree proof. If that proof does
+not arrive, `spawn` returns `Teardown` with the child's pid and the start failure in its message,
+instead of `ProgramNotFound` or `Launch`: a version probe fails with
+`external_agent_launch_failed` and discovery answers neither "not installed" nor `launch-refused`
+while a process may still be running.
+
 SDK 0.9.0 splits a failed start in two: `Error::ProgramNotFound` for a program that does not exist
 and `Error::Launch` for every other failure. Through 0.8.0 the version probes read any `Launch` as
 "not installed". Since 0.9.0 they read only `ProgramNotFound` that way and return the rest from
