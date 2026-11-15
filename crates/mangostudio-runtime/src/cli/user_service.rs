@@ -942,6 +942,15 @@ mod windows_tests {
     const PROCESS_CHILD_DISCOVERY_PROBE: &str =
         include_str!("../../tests/fixtures/windows-service-child-discovery.probe.ps1");
 
+    /// Hang guard for one real PowerShell fixture script, not a product budget.
+    /// Production keeps `MANAGER_TIMEOUT` (30 s) because an operator waits on
+    /// it. A fixture starts a cold PowerShell and runs CIM queries, and the
+    /// assertions read the output, never the elapsed time. On a starved
+    /// `windows-latest` runner one fixture needed 41 s, and a 30 s cap turns
+    /// that into a bare `TimedOut` instead of the fixture's own message. Each
+    /// script also polls for its processes for at most 20 s, below this cap.
+    const FIXTURE_SCRIPT_TIMEOUT: Duration = Duration::from_secs(60);
+
     struct FakeTaskExec {
         calls: Mutex<Vec<String>>,
         timeouts: Mutex<Vec<Duration>>,
@@ -1153,7 +1162,7 @@ mod windows_tests {
             super::scheduled_task::ps_quote(&probe.to_string_lossy()),
         );
         let (ok, output) = ProcessExec
-            .run(&script, Duration::from_secs(30))
+            .run(&script, FIXTURE_SCRIPT_TIMEOUT)
             .expect("PowerShell runs the named CIM query fakes");
         assert!(
             ok,
@@ -1214,7 +1223,7 @@ mod windows_tests {
             super::scheduled_task::ps_quote(&probe.to_string_lossy()),
         );
         let (ok, output) = ProcessExec
-            .run(&script, Duration::from_secs(30))
+            .run(&script, FIXTURE_SCRIPT_TIMEOUT)
             .expect("PowerShell runs the named child-query fakes");
         assert!(
             ok,
@@ -1288,7 +1297,7 @@ mod windows_tests {
         .join("\n");
         inspect_then_cleanup(&mut runner, |runner| {
             runner.start()?;
-            let (ok, output) = ProcessExec.run(&script, Duration::from_secs(60))?;
+            let (ok, output) = ProcessExec.run(&script, FIXTURE_SCRIPT_TIMEOUT)?;
             if !ok {
                 return Err(io::Error::other(format!(
                     "expected runner tree cleanup | received: {output}"
@@ -1354,7 +1363,7 @@ mod windows_tests {
         .join("\n");
         inspect_then_cleanup(&mut orphan, |orphan| {
             orphan.start()?;
-            let (ok, output) = ProcessExec.run(&script, Duration::from_secs(60))?;
+            let (ok, output) = ProcessExec.run(&script, FIXTURE_SCRIPT_TIMEOUT)?;
             if !ok {
                 return Err(io::Error::other(format!(
                     "expected hand-started shim cleanup | received: {output}"
@@ -1397,7 +1406,7 @@ mod windows_tests {
             let mut original = String::new();
             let result = inspect_then_cleanup(&mut fixture, |fixture| {
                 fixture.start()?;
-                let (ok, output) = ProcessExec.run(&script, Duration::from_secs(30))?;
+                let (ok, output) = ProcessExec.run(&script, FIXTURE_SCRIPT_TIMEOUT)?;
                 if !ok {
                     return Err(io::Error::other(format!(
                         "expected control capture | received: {output}"
@@ -1441,7 +1450,7 @@ mod windows_tests {
                 "$ErrorActionPreference = 'Stop'\n{PROCESS_LIFETIME_HELPERS}\n$captured = {captured} | ConvertFrom-Json\nGet-ServiceTestReceipt $captured | ConvertTo-Json -Compress -Depth 5"
             );
             let (ok, output) = ProcessExec
-                .run(&verify, Duration::from_secs(30))
+                .run(&verify, FIXTURE_SCRIPT_TIMEOUT)
                 .expect("independent CIM post-fallback query");
             assert!(ok, "expected independent native query | received: {output}");
             ensure_capture_unchanged(&original, &output).unwrap_or_else(|error| {

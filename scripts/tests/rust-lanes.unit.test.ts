@@ -101,6 +101,8 @@ describe('classifyChangedPaths', () => {
     ['packages/protocol/src/testing/conformance.ts', true, true],
     // The nextest parity step runs this script in the workspace job.
     ['scripts/bench/rust-test-inventory.ts', true, true],
+    // nextest reads it: an edit to the Windows PowerShell test group must run the Windows lane.
+    ['.config/nextest.toml', true, true],
     ['apps/frontend/src/main.tsx', false, false],
     ['docs/reference/releasing.md', false, false],
     ['docs/protocol/conformance.md', false, false],

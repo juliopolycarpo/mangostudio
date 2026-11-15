@@ -2084,8 +2084,28 @@ doctests, so they stay on `cargo test --doc`, and the ignored fixture generator
   macOS and Windows, which execute nextest. Ubuntu executes instrumented libtest directly. A case that one runner lists and the other does not, or flags `#[ignore]` differently,
   fails the job and is printed by its `<package>/<kind>/<binary>::<test>` identity.
 - No retries. `--retries 0` is on every command line, and the workflow tests reject
-  `NEXTEST_*` environment overrides and a `.config/nextest.toml` that retries, filters or
-  overrides, so a flaky test fails the gate instead of passing on a second attempt.
+  `NEXTEST_*` environment overrides and any `.config/nextest.toml` content beyond the one
+  serial group below (no retries, `default-filter`, skips or other overrides), so a flaky
+  test fails the gate instead of passing on a second attempt.
+- Real PowerShell runs one test at a time. Each `windows_tests` fixture in
+  `crates/mangostudio-runtime/src/cli/user_service.rs` that starts a real PowerShell and
+  CIM query (`ProcessExec`, or a `WindowsFixture` it queries) belongs to the
+  `windows-powershell-fixture` test group in `.config/nextest.toml`, `max-threads = 1`.
+  nextest runs one process per test, so a `static Mutex` serializes nothing here; only a
+  test group does. The reason is run 43724320796: nextest started four of these tests at
+  once on a starved `windows-latest` runner, four cold PowerShell and CIM startups stacked,
+  and three hit their 30 s cap, where alone each takes 2.4 to 5.3 s. The group lists exact
+  test names, so a new fixture test is not serialized until it is added there.
+  `scripts/tests/rust-nextest.unit.test.ts` reads the module and fails when a test that
+  uses `ProcessExec` or `WindowsFixture` is missing from the filter, or the filter names a
+  test that does not start PowerShell. It cannot see PowerShell started through a helper in
+  another module, so a new helper of that kind needs its callers added by hand. The
+  module's fixture scripts run under the named `FIXTURE_SCRIPT_TIMEOUT` (60 s), which the
+  same test enforces. It is a hang guard for scripts whose assertions read output, not the
+  30 s `MANAGER_TIMEOUT` an operator waits on in production. The group matches nothing on
+  Linux because the module is `cfg(windows)`; only the Windows lanes exercise it.
+  `tests/subprocess_windows.rs` also starts PowerShell, behind an in-process lock that
+  separate nextest processes do not share; it is not in the group.
 - Process isolation. A test that passed only because another test in its binary had already
   initialised process state now runs alone and fails; fix the test, do not retry it.
 - Ubuntu's CI run of this set is the instrumented libtest one in `rust-coverage.yml`
