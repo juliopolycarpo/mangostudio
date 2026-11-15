@@ -2,6 +2,7 @@
 //! error onto the project types in [`super::types`].
 
 use std::collections::{BTreeMap, HashSet};
+use std::fmt::Write as _;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
@@ -396,8 +397,34 @@ fn connect_failure(config: &McpConfig) -> impl Fn(String) -> McpFailure + '_ {
     }
 }
 
+/// The failure a connect reports when its stdio server did not start.
+///
+/// A [`StartError::Leftover`] keeps the kind of the start error it followed, so a cancelled
+/// connect is still a cancellation. The process that may still be running is appended to the
+/// message and recorded in [`McpFailure::leftover_process`], which the service logs: the hub
+/// never reads the message of a request it cancelled.
+///
+/// # Example
+/// ```ignore
+/// let failure = start_failure(&config, "bun", StartError::LimitExceeded);
+/// assert_eq!(failure.kind, FailureKind::Connection);
+/// ```
 fn start_failure(config: &McpConfig, command: &str, error: StartError) -> McpFailure {
     let detail = match error {
+        StartError::Leftover {
+            start,
+            pid,
+            cleanup,
+        } => {
+            let mut failure = start_failure(config, command, *start);
+            let tree = match pid {
+                Some(pid) => format!("process tree {pid}"),
+                None => "a process tree".to_owned(),
+            };
+            let leftover = format!("{tree} from that start may still be running: {cleanup}");
+            let _ = write!(failure.message, "; {leftover}");
+            return failure.with_leftover_process(leftover);
+        }
         StartError::Cancelled => {
             return McpFailure::cancelled(format!(
                 "MCP server \"{}\" connect was cancelled before launch",
@@ -847,6 +874,58 @@ mod tests {
             env: BTreeMap::new(),
             url: None,
             timeout_ms: Some(FIXTURE_START_TIMEOUT_MS),
+        }
+    }
+
+    /// A start that left a process behind keeps the failure it followed and names the process:
+    /// a refused exec is still a connection failure, a cancelled connect still a cancellation.
+    #[test]
+    fn a_start_that_left_a_process_behind_keeps_its_kind_and_names_the_tree() {
+        let unproven = "MCP server process tree did not report empty within 5s";
+        let cases = [
+            (
+                StartError::Spawn(std::io::Error::from(std::io::ErrorKind::PermissionDenied)),
+                Some(4242),
+                FailureKind::Connection,
+                "command \"bun\" could not start",
+                "process tree 4242 from that start may still be running",
+            ),
+            (
+                StartError::Cancelled,
+                None,
+                FailureKind::Cancelled,
+                "connect was cancelled before launch",
+                "a process tree from that start may still be running",
+            ),
+        ];
+        for (start, pid, kind, start_text, tree_text) in cases {
+            let rendered = format!("{start:?}");
+            let failure = start_failure(
+                &fixture_config(),
+                "bun",
+                StartError::Leftover {
+                    start: Box::new(start),
+                    pid,
+                    cleanup: unproven.to_owned(),
+                },
+            );
+            assert_eq!(
+                failure.kind, kind,
+                "({rendered}): expected the kind of the start error"
+            );
+            assert!(
+                failure.message.contains(start_text)
+                    && failure.message.contains(tree_text)
+                    && failure.message.ends_with(unproven),
+                "({rendered}): expected the start failure ({start_text:?}), the tree \
+                 ({tree_text:?}) and the cleanup failure in the message | received {:?}",
+                failure.message
+            );
+            assert_eq!(
+                failure.leftover_process,
+                Some(format!("{tree_text}: {unproven}")),
+                "({rendered}): expected the leftover process recorded for the service log"
+            );
         }
     }
 

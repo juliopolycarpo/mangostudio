@@ -694,7 +694,17 @@ impl Service {
     }
 
     /// Maps a client failure onto the TypeScript host's wire error for `method`.
+    ///
+    /// A failure whose start may have left a process running is logged first as
+    /// `mcp_start_left_a_process`: a cancelled request's wire error carries no message, so the log
+    /// line is the only report of that process.
     fn remote(&self, method: &str, config: &McpConfig, failure: McpFailure) -> RemoteError {
+        if let Some(leftover) = &failure.leftover_process {
+            self.diagnostic(
+                "mcp_start_left_a_process",
+                &[("serverSlug", config.slug.as_str()), ("detail", leftover)],
+            );
+        }
         match failure.kind {
             FailureKind::Connection => RemoteError::new(codes::INTERNAL, failure.message)
                 .with_detail("kind", "mcp_connection")
@@ -1189,6 +1199,71 @@ mod tests {
         assert_eq!(detail(&call, "mcpFailure"), Some(&json!("timeout")));
         let denied = service.remote("mcp.connect", &config, McpFailure::denied("revoked"));
         assert_eq!(denied.code, codes::DENIED);
+    }
+
+    /// The hub does not read the message of a request it cancelled, so a cancelled connect whose
+    /// start left a process behind must reach the operator log.
+    #[tokio::test]
+    async fn a_cancelled_connect_that_left_a_process_behind_is_logged() {
+        let leftover = "process tree 4242 from that start may still be running: MCP server \
+                        process tree did not report empty within 5s";
+        let events = Arc::new(RecordingEvents::new(true));
+        let service = service_with(
+            FakeConnector {
+                fail: Some(
+                    McpFailure::cancelled("MCP server \"local\" connect was cancelled")
+                        .with_leftover_process(leftover),
+                ),
+                ..FakeConnector::default()
+            },
+            Arc::clone(&events),
+        );
+
+        let error = service
+            .connect(params("server-1"), &CancellationToken::new())
+            .await
+            .expect_err("expected the cancelled connect to fail | received a session");
+
+        assert_eq!(
+            (error.code.as_str(), error.message.as_str()),
+            (codes::CANCELLED, "mcp.connect was cancelled"),
+            "expected the plain cancellation on the wire"
+        );
+        let lines = events.diagnostics.lock().unwrap().clone();
+        assert!(
+            matches!(lines.as_slice(), [line]
+                if line.contains("mcp_start_left_a_process")
+                    && line.contains("\"serverSlug\":\"local\"")
+                    && line.contains("process tree 4242")
+                    && line.contains("did not report empty within 5s")),
+            "expected one mcp_start_left_a_process line naming the server and the tree | \
+             received {lines:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failure_that_left_no_process_behind_writes_no_leftover_line() {
+        let events = Arc::new(RecordingEvents::new(true));
+        let service = service_with(
+            FakeConnector {
+                fail: Some(McpFailure::cancelled(
+                    "MCP server \"local\" connect was cancelled",
+                )),
+                ..FakeConnector::default()
+            },
+            Arc::clone(&events),
+        );
+
+        let _ = service
+            .connect(params("server-1"), &CancellationToken::new())
+            .await
+            .expect_err("expected the cancelled connect to fail | received a session");
+
+        let lines = events.diagnostics.lock().unwrap().clone();
+        assert!(
+            lines.is_empty(),
+            "expected no diagnostic for a failure without a leftover process | received {lines:?}"
+        );
     }
 
     #[tokio::test]

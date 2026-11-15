@@ -66,6 +66,37 @@ pub(crate) enum StartError {
     Spawn(io::Error),
     /// The owner task ended before it reported a result.
     Unavailable,
+    /// The start failed with `start` after a child existed, and that child's tree was not proven
+    /// gone: a guardian or a descendant may still be running under `pid`.
+    Leftover {
+        start: Box<StartError>,
+        pid: Option<u32>,
+        /// Why the empty-tree proof is missing, as [`cleanup`] reported it.
+        cleanup: String,
+    },
+}
+
+/// The error for a start that failed after a child existed.
+///
+/// `start` stands when the tree is proven gone. When `tree` is an `Err`, the result is
+/// [`StartError::Leftover`], so the caller can report the process that may still be running
+/// instead of only the reason the server did not start. `pid` is [`PipeChild::id`], which on
+/// Unix is the guardian's pid until the start gate reports ready.
+///
+/// # Example
+/// ```ignore
+/// let error = failed_start(StartError::Cancelled, Some(42), Ok(()));
+/// assert!(matches!(error, StartError::Cancelled));
+/// ```
+fn failed_start(start: StartError, pid: Option<u32>, tree: Result<(), String>) -> StartError {
+    match tree {
+        Ok(()) => start,
+        Err(cleanup) => StartError::Leftover {
+            start: Box::new(start),
+            pid,
+            cleanup,
+        },
+    }
 }
 
 /// A started server: its two protocol pipes plus the owner of its process tree.
@@ -228,17 +259,20 @@ async fn own(
     };
     if let Err(error) = release(&mut child, &cancel).await {
         child.abort_start();
-        let _ = cleanup(child, None, tracker).await;
-        let _ = ready.send(Err(error));
+        let pid = child.id();
+        let tree = cleanup(child, None, tracker).await;
+        let _ = ready.send(Err(failed_start(error, pid, tree)));
         return;
     }
     let (Some(stdin), Some(stdout), Some(stderr)) =
         (child.take_stdin(), child.take_stdout(), child.take_stderr())
     else {
-        let _ = cleanup(child, None, tracker).await;
-        let _ = ready.send(Err(StartError::Spawn(io::Error::other(
+        let pid = child.id();
+        let tree = cleanup(child, None, tracker).await;
+        let error = StartError::Spawn(io::Error::other(
             "the MCP server started without its three stdio pipes",
-        ))));
+        ));
+        let _ = ready.send(Err(failed_start(error, pid, tree)));
         return;
     };
     // A server that writes diagnostics would block on a full stderr pipe. The TypeScript host
@@ -379,6 +413,59 @@ async fn within_cleanup_bound<T>(wait: impl Future<Output = T>, release: &Releas
 async fn discard(mut stderr: Reader) {
     let mut buffer = [0_u8; 8 * 1024];
     while matches!(stderr.read(&mut buffer).await, Ok(read) if read > 0) {}
+}
+
+#[cfg(test)]
+mod failed_start_tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_start_with_a_proven_empty_tree_keeps_the_start_error() {
+        let cancelled = failed_start(StartError::Cancelled, Some(4242), Ok(()));
+        assert!(
+            matches!(cancelled, StartError::Cancelled),
+            "expected StartError::Cancelled to stand | received {cancelled:?}"
+        );
+
+        let refused = failed_start(
+            StartError::Spawn(io::Error::from(io::ErrorKind::PermissionDenied)),
+            Some(4242),
+            Ok(()),
+        );
+        assert!(
+            matches!(&refused, StartError::Spawn(error)
+                if error.kind() == io::ErrorKind::PermissionDenied),
+            "expected StartError::Spawn(PermissionDenied) to stand | received {refused:?}"
+        );
+    }
+
+    /// A tree that was not proven gone is reported with its pid, the cleanup failure and the
+    /// start error it followed, for a refused exec and for a cancelled start alike.
+    #[test]
+    fn a_failed_start_whose_cleanup_failed_is_a_leftover_naming_the_pid_and_both_failures() {
+        let unproven = "MCP server process tree did not report empty within 5s";
+        let cancelled = failed_start(StartError::Cancelled, Some(4242), Err(unproven.to_owned()));
+        assert!(
+            matches!(&cancelled, StartError::Leftover { start, pid: Some(4242), cleanup }
+                if matches!(**start, StartError::Cancelled) && cleanup == unproven),
+            "expected Leftover {{ start: Cancelled, pid: Some(4242), cleanup: {unproven:?} }} | \
+             received {cancelled:?}"
+        );
+
+        let refused = failed_start(
+            StartError::Spawn(io::Error::from(io::ErrorKind::PermissionDenied)),
+            None,
+            Err(unproven.to_owned()),
+        );
+        assert!(
+            matches!(&refused, StartError::Leftover { start, pid: None, cleanup }
+                if matches!(&**start, StartError::Spawn(error)
+                    if error.kind() == io::ErrorKind::PermissionDenied)
+                    && cleanup == unproven),
+            "expected Leftover {{ start: Spawn(PermissionDenied), pid: None, cleanup: \
+             {unproven:?} }} | received {refused:?}"
+        );
+    }
 }
 
 #[cfg(all(test, unix))]
