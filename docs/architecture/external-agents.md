@@ -1076,6 +1076,7 @@ and `Error::Launch` for every other failure. Through 0.8.0 the version probes re
 reads the answer. The runtime's test launchers use the SDK's `FakeLauncher::missing_program()` for
 a missing CLI and `FakeLauncher::refusing_launches(..)` for one that will not start: an unqueued
 `FakeLauncher::new()` launch is a `Launch` now.
+
 `EventKind::StructuredOutput`, which the SDK emits only when a host passes a JSON schema to a
 Claude turn, has no wire event; the runtime passes none and the mapper drops it explicitly.
 
