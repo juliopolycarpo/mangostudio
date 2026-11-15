@@ -43,6 +43,7 @@ jobs:
     permissions:
       contents: read # check out trusted main cleanup tooling
       actions: write # delete caches saved on this pull request's merge ref
+      pull-requests: read # skip a pull request that was reopened before this ran
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

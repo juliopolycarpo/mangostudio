@@ -27,6 +27,27 @@ class IncompleteListing extends Error {
   }
 }
 
+/** A listing whose total or membership moved between pages: a cache was saved or deleted mid-read. */
+export class UnstableListing extends Error {}
+
+const UNSTABLE_LISTING_ATTEMPTS = 3;
+
+/**
+ * Read a listing again, up to three attempts, when it moved between pages. For
+ * a repository-wide listing that other jobs keep changing; any other error and
+ * the last unstable attempt are thrown.
+ * @example await retryUnstableListing(() => api.listAllCaches());
+ */
+export async function retryUnstableListing<T>(read: () => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await read();
+    } catch (error) {
+      if (!(error instanceof UnstableListing) || attempt === UNSTABLE_LISTING_ATTEMPTS) throw error;
+    }
+  }
+}
+
 /**
  * Retry once from the start when a listing's row count disagrees with its total.
  * @example await retryIncompleteListing('actions_caches', () => api.listCaches());
@@ -80,10 +101,16 @@ export async function listActionsCaches(
   client: GithubActionsClient,
   filters: Readonly<Record<string, string>> = {}
 ): Promise<ActionsCacheEntry[]> {
-  const query = new URLSearchParams({ ...filters, sort: 'created_at', direction: 'desc' });
+  const query = new URLSearchParams({
+    ...filters,
+    sort: 'created_at',
+    direction: 'desc',
+  });
   const entries = await client.pages(`/caches?${query}`, 'actions_caches', parseCacheEntry);
   if (new Set(entries.map((entry) => entry.id)).size !== entries.length) {
-    throw new Error('Duplicate cache IDs in paginated listing; expected a stable complete listing');
+    throw new UnstableListing(
+      'Duplicate cache IDs in paginated listing; expected a stable complete listing'
+    );
   }
   return entries;
 }
@@ -191,7 +218,7 @@ export class GithubActionsClient {
       }
       const count = Number(body.total_count);
       if (total !== undefined && total !== count)
-        throw new Error(
+        throw new UnstableListing(
           `Changing ${field} total ${total} -> ${count}; expected a stable complete listing`
         );
       total = count;

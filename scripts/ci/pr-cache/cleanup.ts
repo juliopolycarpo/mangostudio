@@ -1,4 +1,8 @@
-import { type ActionsCacheEntry, retryIncompleteListing } from '../actions-api/client';
+import {
+  type ActionsCacheEntry,
+  retryIncompleteListing,
+  retryUnstableListing,
+} from '../actions-api/client';
 import type { PullRequestCacheApi } from './github';
 import {
   pullRequestMergeRef,
@@ -59,7 +63,8 @@ async function deletePlanned(
 
 /**
  * Delete every cache saved under one pull request's merge ref, and nothing
- * saved under any other ref. Without `apply` it only plans.
+ * saved under any other ref. Without `apply` it only plans. A pull request that
+ * is open (reopened before this ran) or unknown to GitHub keeps its caches.
  * @example await cleanupPullRequestCaches(api, 2222, { apply: true });
  */
 export async function cleanupPullRequestCaches(
@@ -68,6 +73,14 @@ export async function cleanupPullRequestCaches(
   options: { readonly apply: boolean }
 ): Promise<PullRequestCacheCleanupResult> {
   const ref = pullRequestMergeRef(pullRequest);
+  const state = await api.pullRequestState(pullRequest);
+  if (state !== 'closed') {
+    const skipped =
+      state === 'open'
+        ? { open: [pullRequest], unknown: [] }
+        : { open: [], unknown: [pullRequest] };
+    return deletePlanned(api, [], options.apply, skipped);
+  }
   const listed = await retryIncompleteListing('actions_caches', () => api.listCachesOnRef(ref));
   return deletePlanned(api, selectPullRequestCaches(listed, pullRequest), options.apply);
 }
@@ -81,7 +94,12 @@ export async function sweepClosedPullRequestCaches(
   api: PullRequestCacheApi,
   options: { readonly apply: boolean }
 ): Promise<PullRequestCacheCleanupResult> {
-  const listed = await retryIncompleteListing('actions_caches', () => api.listAllCaches());
+  // Other jobs save and delete caches while this pages through the whole
+  // repository. A stale plan is harmless: a vanished cache answers 404 and a
+  // newer one waits for the next sweep.
+  const listed = await retryUnstableListing(() =>
+    retryIncompleteListing('actions_caches', () => api.listAllCaches())
+  );
   const states = new Map<number, PullRequestState>();
   const unknown: number[] = [];
   for (const number of pullRequestNumbers(listed)) {

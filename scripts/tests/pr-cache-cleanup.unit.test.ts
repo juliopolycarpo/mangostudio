@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type { ActionsCacheEntry } from '../ci/actions-api/client';
+import { type ActionsCacheEntry, UnstableListing } from '../ci/actions-api/client';
 import { parsePullRequestCacheArguments } from '../ci/pr-cache-cleanup';
 import {
   cleanupPullRequestCaches,
@@ -54,7 +54,10 @@ const MIXED_LISTING = [
 
 class FakePullRequestCacheApi implements PullRequestCacheApi {
   entries: ActionsCacheEntry[] = [...MIXED_LISTING];
-  states = new Map<number, PullRequestState>();
+  states = new Map<number, PullRequestState>([[7, 'closed']]);
+  // Repository-wide listings that fail as unstable before one succeeds.
+  unstableListings = 0;
+  allListings = 0;
   deletedIds: number[] = [];
   goneIds = new Set<number>();
   failDeleteOf: number | undefined;
@@ -70,6 +73,9 @@ class FakePullRequestCacheApi implements PullRequestCacheApi {
   }
 
   listAllCaches(): Promise<ActionsCacheEntry[]> {
+    this.allListings++;
+    if (this.allListings <= this.unstableListings)
+      return Promise.reject(new UnstableListing('Changing actions_caches total 8 -> 9'));
     return Promise.resolve(this.entries);
   }
 
@@ -225,6 +231,24 @@ describe('single pull request cleanup', () => {
   });
 });
 
+describe('reopened or unknown pull request', () => {
+  test('keeps the caches of a pull request that is open again', async () => {
+    const api = new FakePullRequestCacheApi();
+    api.states.set(7, 'open');
+    const result = await cleanupPullRequestCaches(api, 7, { apply: true });
+    expect(api.deletedIds).toEqual([]);
+    expect(api.refsListed).toEqual([]);
+    expect(result.skipped).toEqual({ open: [7], unknown: [] });
+  });
+
+  test('keeps the caches of a number GitHub does not know', async () => {
+    const api = new FakePullRequestCacheApi();
+    const result = await cleanupPullRequestCaches(api, 70, { apply: true });
+    expect(api.deletedIds).toEqual([]);
+    expect(result.skipped).toEqual({ open: [], unknown: [70] });
+  });
+});
+
 describe('closed pull request sweep', () => {
   function sweepApi(): FakePullRequestCacheApi {
     const api = new FakePullRequestCacheApi();
@@ -244,6 +268,24 @@ describe('closed pull request sweep', () => {
     expect(formatPullRequestCacheReport(result)).toContain(
       'Left alone: 1 open pull requests, 1 with an unknown state'
     );
+  });
+
+  test('reads the repository listing again when it moved between pages', async () => {
+    const api = sweepApi();
+    api.unstableListings = 2;
+    await sweepClosedPullRequestCaches(api, { apply: true });
+    expect(api.allListings).toBe(3);
+    expect(api.deletedIds).toEqual([1, 2, 3]);
+  });
+
+  test('gives up after three unstable listings and deletes nothing', async () => {
+    const api = sweepApi();
+    api.unstableListings = 3;
+    await expect(sweepClosedPullRequestCaches(api, { apply: true })).rejects.toThrow(
+      'Changing actions_caches total 8 -> 9'
+    );
+    expect(api.allListings).toBe(3);
+    expect(api.deletedIds).toEqual([]);
   });
 
   test('deletes nothing in a dry run and plans the same set', async () => {
@@ -325,7 +367,10 @@ describe('GitHub adapter', () => {
       { status: 200, body: { total_count: 101, actions_caches: first } },
       {
         status: 200,
-        body: { total_count: 101, actions_caches: [cache(101, 'refs/pull/7/merge')] },
+        body: {
+          total_count: 101,
+          actions_caches: [cache(101, 'refs/pull/7/merge')],
+        },
       },
     ];
     expect(await http.api().listCachesOnRef('refs/pull/7/merge')).toHaveLength(101);
@@ -340,7 +385,13 @@ describe('GitHub adapter', () => {
   test('lists every cache without a ref filter for the sweep', async () => {
     const http = new FakeGithubHttp();
     http.replies = [
-      { status: 200, body: { total_count: 1, actions_caches: [cache(1, 'refs/pull/7/merge')] } },
+      {
+        status: 200,
+        body: {
+          total_count: 1,
+          actions_caches: [cache(1, 'refs/pull/7/merge')],
+        },
+      },
     ];
     await http.api().listAllCaches();
     expect(http.calls[0].url.searchParams.has('ref')).toBe(false);
@@ -352,7 +403,7 @@ describe('GitHub adapter', () => {
       status: 200,
       body: { total_count: 2, actions_caches: [cache(1, 'refs/pull/7/merge')] },
     };
-    http.replies = [partial, partial];
+    http.replies = [{ status: 200, body: { state: 'closed' } }, partial, partial];
     await expect(cleanupPullRequestCaches(http.api(), 7, { apply: true })).rejects.toThrow(
       'Incomplete actions_caches listing 1/2'
     );

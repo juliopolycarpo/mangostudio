@@ -360,21 +360,25 @@ sat on the merge refs of closed pull requests.
   closed pull request, deleted by cache ID. The script lists with the API `ref`
   filter, then matches the ref again on each entry, so no other ref is touched:
   not `main`, not another pull request, not `refs/pull/<N>/head`. A 404 on
-  delete counts as already gone.
+  delete counts as already gone. The script reads the pull request's state
+  first: one that was reopened before the run started, or a number GitHub does
+  not know, keeps its caches.
 - **Trigger.** `pull_request_target` with `types: [closed]`. A fork pull request
   gets a read-only token on `pull_request`, which cannot delete caches.
   `pull_request_target` runs the base branch's file with a write token, which is
   safe only because no pull request code runs: the job checks out `main` with
   `persist-credentials: false`, installs nothing and downloads no artifact. The
   pull request number reaches the script through `env` and must be a positive
-  integer. Permissions are `actions: write` and `contents: read`, with a
+  integer. Permissions are `actions: write`, `contents: read` and
+  `pull-requests: read`, with a
   concurrency group per pull request number and a 10-minute timeout. A pull
   request into a branch that lacks the workflow is not cleaned on close; use the
   sweep below.
 - **Backlog sweep.** Run the workflow by hand (`workflow_dispatch`, `main` only).
   It lists every cache, asks the pulls API which pull requests are closed and
   deletes only those merge-ref caches. Open pull requests and numbers GitHub
-  does not know keep theirs. It is a dry run unless the `delete` input is set.
+  does not know keep theirs. Other jobs save and delete caches while it reads, so
+  a listing that moves between pages is read again, up to three attempts. It is a dry run unless the `delete` input is set.
   The sweep is idempotent and resumable: a failed run reports how many caches it
   deleted, and a re-run lists only what remains. The workflow token's limit is
   1,000 requests per hour per repository, and the 1,022-cache backlog needs about

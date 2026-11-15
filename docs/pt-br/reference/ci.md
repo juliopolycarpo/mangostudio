@@ -282,21 +282,26 @@ ou sem:
   pull request fechado, por ID. O script lista com o filtro `ref` da API e confere
   a ref de novo em cada entrada, então nenhuma outra ref é tocada: nem `main`,
   nem outro pull request, nem `refs/pull/<N>/head`. Um 404 no delete conta como
-  já removido.
+  já removido. O script lê antes o estado do pull request: um que foi reaberto
+  antes da execução começar, ou um número que o GitHub não conhece, mantém os
+  caches.
 - **Gatilho.** `pull_request_target` com `types: [closed]`. Um pull request de
   fork recebe token somente leitura em `pull_request`, que não apaga caches.
   `pull_request_target` roda o arquivo da branch base com token de escrita, o que
   só é seguro porque nenhum código do pull request roda: o job faz checkout de
   `main` com `persist-credentials: false`, não instala nada e não baixa
   artefatos. O número do pull request chega ao script por `env` e precisa ser um
-  inteiro positivo. As permissões são `actions: write` e `contents: read`, com
+  inteiro positivo. As permissões são `actions: write`, `contents: read` e
+  `pull-requests: read`, com
   grupo de concorrência por número de pull request e timeout de 10 minutos. Um
   pull request para uma branch sem o workflow não é limpo ao fechar; use a
   varredura abaixo.
 - **Varredura do backlog.** Rode o workflow manualmente (`workflow_dispatch`,
   só em `main`). Ele lista todos os caches, pergunta à API de pulls quais pull
   requests estão fechados e apaga só os caches de merge deles. Pull requests
-  abertos e números que o GitHub não conhece mantêm os seus. É um dry run, a menos
+  abertos e números que o GitHub não conhece mantêm os seus. Outros jobs salvam e
+  apagam caches durante a leitura, então uma listagem que muda entre páginas é
+  lida de novo, até três tentativas. É um dry run, a menos
   que a entrada `delete` esteja marcada. A varredura é idempotente e pode ser
   retomada: uma execução que falha informa quantos caches apagou, e a seguinte
   lista só o que sobrou. O limite do token do workflow é de 1.000 requisições por
