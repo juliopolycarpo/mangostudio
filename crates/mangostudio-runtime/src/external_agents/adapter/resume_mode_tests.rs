@@ -18,9 +18,8 @@ fn codex_with_thread(workspace: String) -> FakeProcess {
         let frame: Value = serde_json::from_str(line).expect("a JSON-RPC frame");
         let thread = json!({"id": THREAD, "cwd": workspace});
         let result = match frame["method"].as_str() {
-            Some("initialize") => {
-                json!({"userAgent": "codex/0.154.0", "platformFamily":"unix", "platformOs":"linux"})
-            }
+            Some("initialize") => fixtures::codex_initialize_result(),
+            Some("account/gatewayOAuth/read") => fixtures::codex_gateway_ready(),
             Some("account/read") => {
                 json!({"account":{"type":"chatgpt","email":"synthetic@example.test","planType":"plus"},"requiresOpenaiAuth":true})
             }

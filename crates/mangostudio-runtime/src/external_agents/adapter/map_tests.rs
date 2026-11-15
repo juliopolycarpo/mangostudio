@@ -331,8 +331,7 @@ struct CutOffClaudeProbe {
 impl sdk::ProcessLauncher for CutOffClaudeProbe {
     async fn spawn(&self, spec: sdk::LaunchSpec) -> sdk::Result<sdk::ManagedProcess> {
         let lines = if spec.argv.iter().any(|arg| arg == "--help") {
-            let help =
-                include_str!("../../../tests/fixtures/external-agents/claude-help-2.1.270.txt");
+            let help = mango_agent_claude::testing::HELP_WITH_JSON_SCHEMA;
             let cut_at = help
                 .lines()
                 .position(|line| line.trim_start().starts_with("--permission-prompts"))
@@ -630,6 +629,9 @@ fn codex_account_labels_never_carry_an_identity() {
             sdk::AuthMode::Other(String::from("amazon-bedrock")),
             "Amazon Bedrock",
         ),
+        // SDK 0.8 reports a GCP sign-in as this mode (0.7 read it as `Unknown`). It has no label of
+        // its own here, so it shows the generic one.
+        (sdk::AuthMode::Other(String::from("gcp")), "Signed in"),
         (
             sdk::AuthMode::Other(String::from("someone@example.com")),
             "Signed in",
@@ -1706,6 +1708,33 @@ fn caller_errors_stay_argument_errors() {
             sdk::Capability::Steering
         )))["capability"],
         "steering"
+    );
+}
+
+/// SDK 0.8 split a launched tree that would not stop (`Teardown`) from a failed start (`Launch`).
+/// This runtime's launcher reported such a tree as `Launch` before, so the hub keeps seeing the
+/// same code and kind for it, and the SDK's own sentence names the tree and the cause.
+#[test]
+fn a_teardown_failure_keeps_the_launch_failed_wire_kind() {
+    let teardown = sdk::Error::Teardown {
+        pid: Some(4242),
+        message: String::from("a live process after 5s"),
+    };
+    let remote = remote_error(&teardown);
+    assert_eq!(
+        (remote.code.as_str(), details(&remote)["kind"].as_str()),
+        (codes::UNAVAILABLE, Some("external_agent_launch_failed")),
+        "expected (code, kind) of a teardown failure | received {remote:?}"
+    );
+    assert!(
+        remote.message.contains("4242") && remote.message.contains("a live process after 5s"),
+        "expected the SDK's own sentence naming the tree and the cause | received {:?}",
+        remote.message
+    );
+    let failure = super::super::failure::facts(teardown);
+    assert_eq!(
+        failure.cause,
+        crate::external_agents::failure::FailureCause::Other
     );
 }
 

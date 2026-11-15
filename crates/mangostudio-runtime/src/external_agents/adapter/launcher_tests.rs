@@ -23,6 +23,51 @@ async fn start(launcher: &GuardedProcessLauncher, spec: LaunchSpec) -> ManagedPr
         .unwrap_or_else(|error| panic!("expected a started child | received {error}"))
 }
 
+/// A control over a child that already ended, with the outcomes its owner published and no process.
+fn ended_control(
+    pid: Option<u32>,
+    exit: std::result::Result<ExitStatus, String>,
+    cleanup: std::result::Result<(), String>,
+) -> GuardedControl {
+    let (interrupt_tx, _interrupts) = mpsc::channel(1);
+    let (_terminal_tx, terminal) = watch::channel(Some(Terminal { cleanup }));
+    let (_exit_tx, exit) = watch::channel(Some(exit));
+    GuardedControl {
+        pid,
+        tail: StderrTail::with_capacity(0),
+        kill: CancellationToken::new(),
+        interrupts: interrupt_tx,
+        terminal,
+        exit,
+        _lease: Arc::new(Lease {
+            _guard: CancellationToken::new().drop_guard(),
+        }),
+    }
+}
+
+/// SDK 0.8 reserves `Error::Launch` for starting an executable: a child that started and then
+/// would not stop or be confirmed gone is `Error::Teardown` and keeps the leader's pid.
+#[tokio::test]
+async fn a_started_child_that_will_not_end_is_a_teardown_not_a_launch_failure() {
+    let control = ended_control(
+        Some(4242),
+        Err("a wait failure (Other)".to_owned()),
+        Err("a live process after 5s".to_owned()),
+    );
+    for (operation, result) in [
+        ("kill", control.kill(CancelReason::Requested).await),
+        ("wait", control.wait().await.map(|_| ())),
+    ] {
+        match result {
+            Err(Error::Teardown { pid, message }) => {
+                assert_eq!(pid, Some(4242), "{operation}: expected the leader pid");
+                assert!(!message.is_empty(), "{operation}: expected a cause");
+            }
+            other => panic!("expected Error::Teardown from {operation} | received {other:?}"),
+        }
+    }
+}
+
 #[cfg(unix)]
 mod unix {
     use std::path::{Path, PathBuf};

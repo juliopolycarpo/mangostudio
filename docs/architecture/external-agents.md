@@ -860,7 +860,7 @@ into the environments surface that owns the recipes, the same link the selector 
 `requiredVersion` from the runtime's structured detail of the same name (the SDK's own minimum, the
 value discovery reports on the descriptor), trimmed and cut to 64 characters; when it is absent the
 client says "a newer version". Nothing in the runtime's message is parsed or shown. The runtime's
-own message for this kind names both builds ("expected version 0.154.0 or newer, received 0.150.0")
+own message for this kind names both builds ("expected version 0.166.0 or newer, received 0.162.1")
 and the found one also travels as the optional `foundVersion` detail, for diagnostics only: the SDK
 keeps the found value out of its sentence because it can be a line the CLI printed, so the runtime
 echoes it only when it has the shape of a version token (letters, digits and `.`, `-`, `+`, `_`, up
@@ -967,7 +967,7 @@ target unavailable.
 
 `crates/mangostudio-runtime/src/external_agents/` hosts the same ten methods over the published
 External Agents SDK (`mango-external-agents`, `mango-agent-claude`, `mango-agent-codex` and
-`mango-agent-acp`, pinned exactly at 0.7.1). The SDK owns vendor protocols, harness lifecycle and
+`mango-agent-acp`, pinned exactly at 0.8.0). The SDK owns vendor protocols, harness lifecycle and
 the idle-turn bound; the runtime owns authorized launch, scratch, consent, the session cap, the
 per-turn payload budget and hard deadline, and the one mapper from SDK types to this wire.
 
@@ -979,6 +979,22 @@ than the default location's. Credentials still never cross. `adapter/environment
 both halves. Opening a Codex session or listing its native sessions also runs `codex --version`
 before `codex app-server`. The runtime passes no discovery receipt, so an outdated build is refused
 before it can write to `CODEX_HOME`. The probe runs inside that request's own deadline.
+
+SDK 0.8.0 raises the Codex floor to 0.166.0 (`MINIMUM_CODEX_VERSION`) and makes every Codex
+connection read `account/gatewayOAuth/read` successfully, after `initialized` and before any
+authenticated request. A gateway the SDK finds not ready surfaces as signed out; the runtime
+neither logs in nor opens a browser. The runtime's test launchers answer both with the SDK's
+`mango_agent_codex::testing::VersionAnsweringLauncher` and `adapter/test_support.rs`'s
+`codex_initialize_result`/`codex_gateway_ready`. A fake that claims an older build or answers the
+read with an empty result fails with a version or sign-in refusal instead of opening.
+
+The SDK also reports a launched process tree it could not end as `Error::Teardown`, apart from
+`Error::Launch` (a failed start), and a harness treats a `Launch` from its version probe as an
+executable that is not there. `GuardedProcessLauncher` therefore returns `Teardown` from `wait`
+and `kill`. The mapper keeps the code and kind the hub saw before (`UNAVAILABLE`,
+`external_agent_launch_failed`), so the wire does not move.
+`EventKind::StructuredOutput`, which the SDK emits only when a host passes a JSON schema to a
+Claude turn, has no wire event; the runtime passes none and the mapper drops it explicitly.
 
 The product consumes `port.rs`'s `AgentBackend` and `AgentSession` operations for discovery,
 opening, native history, turns/reviews, responses, steering, cancellation, close and account usage.

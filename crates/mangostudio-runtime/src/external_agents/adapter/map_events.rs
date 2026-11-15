@@ -165,13 +165,18 @@ pub(crate) fn map_event(target: TargetId, event: &sdk::AgentEvent) -> MappedEven
         Kind::Error { error } => MappedEvent::wire(wire::Event::Error {
             error: agent_error(error),
         }),
+        // SDK 0.8's validated answer to a JSON schema. The runtime never passes a schema, so a
+        // harness does not emit one, and the wire has no event for it: dropped on purpose
+        // until the contract carries structured output.
+        Kind::StructuredOutput { .. } => MappedEvent::default(),
         _ => MappedEvent::default(),
     }
 }
 
 /// Consumes one received event, moving compact delta buffers into the wire.
-/// Strings with spare capacity keep the previous clone's compaction, since the
-/// SDK strips dirty text in place without shrinking its original allocation.
+/// Strings with spare capacity keep the previous clone's compaction: the SDK
+/// passes clean text through untouched and only reclaims a stripped buffer
+/// whose survivors fall under a quarter of it.
 ///
 /// # Example
 /// ```ignore

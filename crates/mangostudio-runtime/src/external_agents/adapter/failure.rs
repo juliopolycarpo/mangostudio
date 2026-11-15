@@ -41,6 +41,9 @@ pub(super) fn facts(error: Error) -> AgentFailure {
         Error::VersionGate { .. } => FailureCause::Version,
         Error::AuthRequired { .. } => FailureCause::Authentication,
         Error::Launch { .. } => FailureCause::Launch,
+        // The tree of an already-launched child; the cleanup handle travels separately as
+        // `cleanup`, so the cause alone carries no recovery decision.
+        Error::Teardown { .. } => FailureCause::Other,
         Error::Link { .. } => FailureCause::Link,
         Error::Closed { .. } => FailureCause::Closed,
         Error::Protocol { .. } | Error::InvalidVendorValue { .. } => FailureCause::Protocol,
