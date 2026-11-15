@@ -83,6 +83,10 @@ function buildBaseFixture(): string {
   ]) {
     writeFileSync(join(root, file), readText(file));
   }
+  // `package.json` names `patchedDependencies` files and `bun.lock` records
+  // them. Turbo 2.11.11 reads those paths during package discovery and aborts
+  // with "No such file or directory" when the fixture lacks `patches/`.
+  cpSync(join(ROOT_DIR, 'patches'), join(root, 'patches'), { recursive: true });
   const git = Bun.spawnSync(['git', 'init', '-q'], { cwd: root, stderr: 'pipe' });
   expect(
     git.exitCode,
