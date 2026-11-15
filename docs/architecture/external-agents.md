@@ -147,18 +147,35 @@ Only a missing executable reads as `not-installed`. The SDK's harnesses treat an
 their version probe as "not installed", and the runtime's launcher raises that error for every OS
 spawn failure, so the runtime tells the two apart itself. It records the OS error of a failed
 probe launch as structured values for the duration of one discovery call (no state outlives the
-call, and concurrent targets do not share it). A missing program counts as such only when the
-error is ENOENT, ENOTDIR or an absent `PATH` and the working directory still exists. A CLI that
-is on `PATH` but cannot be executed (EACCES after a lost exec bit, ENOEXEC, ETXTBSY), a probe that
-hit EMFILE, ENFILE or ENOMEM, and a working directory that no longer exists all return an
-installed, `undetermined` descriptor with no unavailable reason and no install remedy, and the
-runtime writes one `external_agent_launch_refused` warn line to stderr naming the target and the OS
-error, never argv, the working directory or the environment. The wire has no field for the OS
-error, and an error response would drop the target's row whenever another target in the same
-batch answered. Open and turn launches are untouched: they still fail with
+call, and concurrent targets do not share it). The rule:
+
+- ENOENT, ENOTDIR or an absent `PATH` is a missing program while the working directory still
+  exists. The guardian reports `chdir` and `execve` failures through one errno pipe, so ENOENT
+  raised from inside a program that does exist (its shebang interpreter or dynamic loader is gone)
+  cannot be told from a missing program and also reads as `not-installed`.
+- EACCES, ELOOP and ENAMETOOLONG come from resolving a path, and an unsearchable `PATH` entry
+  raises them for a CLI that is installed nowhere. They count as a refusal only with evidence that
+  the program exists: the explicit path (when the program name contains a separator) or at least
+  one `PATH` candidate stats as an existing non-directory. Otherwise the program is missing. The
+  check reuses the launcher's own candidate list and stats off the async threads.
+- ENOEXEC, ETXTBSY, EMFILE, ENFILE, ENOMEM and a working directory that no longer exists are
+  refusals whatever the filesystem holds.
+
+A refusal returns an installed, `undetermined` descriptor with no unavailable reason and no install
+remedy, and the runtime writes one `external_agent_launch_refused` warn line to stderr naming the
+target and the OS error, never argv, the working directory or the environment. The wire has no
+field for the OS error, and an error response would drop the target's row whenever another target
+in the same batch answered. Open and turn launches are untouched: they still fail with
 `external_agent_launch_failed`. Only the version probe that decides installed-or-not is
 reclassified; a later probe the SDK already degrades (Claude `--help` and `auth status`, the Codex
-app-server handshake) keeps its behavior. Windows has no equivalent case: a bare name resolves
+app-server handshake) keeps its behavior.
+
+On Unix the launcher's `PATH` walk follows glibc `execvp`. It goes on past a candidate that is
+missing (ENOENT, ENOTDIR, ESTALE, ENODEV, ETIMEDOUT) or that the user may not execute (EACCES, a
+directory they cannot search), and remembers an EACCES. Any other errno means a file was found and
+stops the walk. If nothing ran, the remembered EACCES is the error reported, else the last one.
+A non-executable `prog` early on `PATH` therefore no longer hides a working one later. Windows has
+no runtime-side walk to align: `CreateProcessW` searches `PATH` itself and resolves a bare name
 through `PATHEXT`, so a file without an executable extension is never a candidate and the program
 is missing.
 

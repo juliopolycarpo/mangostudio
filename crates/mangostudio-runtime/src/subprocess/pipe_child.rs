@@ -74,6 +74,28 @@ impl PipeChild {
         }
     }
 
+    /// Whether `request`'s program exists as a non-directory where the launch would look for it:
+    /// the explicit path, or a `PATH` candidate. A launch that fails with a permission-class error
+    /// is a found-but-unrunnable program only when this holds; an unsearchable `PATH` entry alone
+    /// is no evidence. Blocks on the filesystem. Platforms without a runtime-side search report
+    /// `true`, because the OS resolves the name and its permission errors name a found file.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let found = PipeChild::program_exists(&ProcessRequest::new("sh", Vec::<String>::new()));
+    /// ```
+    pub(crate) fn program_exists(request: &ProcessRequest) -> bool {
+        #[cfg(unix)]
+        {
+            super::unix_guardian::program_exists(request)
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = request;
+            true
+        }
+    }
+
     pub(crate) async fn wait_ready(&mut self) -> io::Result<()> {
         match self {
             #[cfg(unix)]

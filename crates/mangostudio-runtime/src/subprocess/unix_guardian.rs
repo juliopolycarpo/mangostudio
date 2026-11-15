@@ -19,6 +19,7 @@ use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::process::ExitStatusExt;
+use std::path::Path;
 use std::pin::Pin;
 use std::process::ExitStatus;
 use std::sync::{Mutex, OnceLock};
@@ -586,6 +587,39 @@ fn program_candidates(program: &CString, path: Option<&[u8]>) -> io::Result<Vec<
             CString::new(candidate).expect("a validated PATH and program have no NUL")
         })
         .collect::<Vec<_>>())
+}
+
+/// Whether `request`'s program resolves to an existing non-directory somewhere the launch would
+/// look: the one path when the program contains a separator, else each `PATH` candidate in order.
+///
+/// Uses the same [`program_candidates`] the guardian walks. A candidate whose directory cannot be
+/// searched does not stat, so an unsearchable `PATH` entry is no evidence the program exists. The
+/// stat blocks, so callers run it off the async threads.
+pub(super) fn program_exists(request: &ProcessRequest) -> bool {
+    let Ok(program) = cstring(request.program.as_os_str(), "program") else {
+        return false;
+    };
+    let path = match &request.env {
+        Some(environment) => environment
+            .get(OsStr::new("PATH"))
+            .map(|value| value.as_bytes().to_vec()),
+        None => inherited_environment()
+            .iter()
+            .find_map(|entry| entry.to_bytes().strip_prefix(b"PATH=").map(<[u8]>::to_vec)),
+    };
+    let Ok(candidates) = program_candidates(&program, path.as_deref()) else {
+        return false;
+    };
+    candidates.iter().any(|candidate| {
+        let candidate = Path::new(OsStr::from_bytes(candidate.to_bytes()));
+        // The guardian changes into the cwd before `execve`, so a relative candidate is
+        // relative to it, not to this process.
+        let resolved = match &request.cwd {
+            Some(cwd) if candidate.is_relative() => cwd.join(candidate),
+            _ => candidate.to_path_buf(),
+        };
+        std::fs::metadata(resolved).is_ok_and(|meta| !meta.is_dir())
+    })
 }
 
 fn raw_spawn_lock() -> &'static Mutex<()> {

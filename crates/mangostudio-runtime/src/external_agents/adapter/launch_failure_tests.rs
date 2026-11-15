@@ -234,6 +234,68 @@ async fn a_missing_working_directory_is_not_a_missing_program() {
         "expected a missing cwd to leave the CLI undetermined, not not-installed | \
          received {found:?}"
     );
+    let lines = diagnostics.lines();
+    assert!(
+        matches!(lines.as_slice(), [line]
+            if line.contains("external_agent_launch_refused")
+                && line.contains("\"target\":\"claude\"")
+                && line.contains("No such file or directory (os error 2)")),
+        "expected exactly one external_agent_launch_refused line naming ENOENT | \
+         received {lines:?}"
+    );
+}
+
+/// Restores a directory's mode on drop so the scratch cleanup can remove it.
+struct Unsearchable(std::path::PathBuf);
+
+impl Drop for Unsearchable {
+    fn drop(&mut self) {
+        let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+    }
+}
+
+/// An unsearchable `PATH` entry is the OS refusing to look, not a program it found. With the CLI
+/// installed nowhere else, execve reports EACCES for it all the same, so only the evidence that a
+/// candidate exists makes the failure a refusal.
+#[tokio::test]
+async fn an_unsearchable_path_entry_with_the_cli_nowhere_is_still_not_installed() {
+    // Root ignores directory modes, so the entry would stay searchable and the setup would
+    // prove nothing.
+    if nix::unistd::geteuid().is_root() {
+        eprintln!("skipped: running as root, directory modes do not restrict root");
+        return;
+    }
+    for target in TARGETS {
+        let diagnostics = Arc::new(RecordingDiagnostics::default());
+        let parent = scratch_dir("launch-sealed-parent");
+        let sealed = parent.path().join("sealed");
+        std::fs::create_dir(&sealed).expect("mkdir the sealed PATH entry");
+        std::fs::set_permissions(&sealed, std::fs::Permissions::from_mode(0o000))
+            .expect("seal the PATH entry");
+        let _restore = Unsearchable(sealed.clone());
+        let cwd = scratch_dir("launch-sealed-cwd");
+
+        let found = discover(
+            &production_backend(&diagnostics),
+            target,
+            &sealed,
+            cwd.path(),
+        )
+        .await;
+
+        assert_eq!(
+            found,
+            Discovered::NotInstalled,
+            "({target:?} discovery): expected a not-installed descriptor when the only PATH \
+             entry is unsearchable and holds no candidate | received {found:?}"
+        );
+        assert!(
+            diagnostics.lines().is_empty(),
+            "({target:?} discovery): expected no diagnostic for a CLI installed nowhere | \
+             received {:?}",
+            diagnostics.lines()
+        );
+    }
 }
 
 /// A refusal recorded for one target must not reach a target discovered at the same time, nor a

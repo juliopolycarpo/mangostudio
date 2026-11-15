@@ -128,45 +128,108 @@ mod unix {
         path
     }
 
+    /// A launch request for `program` with exactly `path` as its `PATH`.
+    fn request_in(program: &str, path: &Path, cwd: &Path) -> ProcessRequest {
+        let mut request = ProcessRequest::new(program, std::iter::empty::<OsString>());
+        request.env = Some(BTreeMap::from([(
+            OsString::from("PATH"),
+            path.as_os_str().to_owned(),
+        )]));
+        request.cwd = Some(cwd.to_path_buf());
+        request
+    }
+
     /// What the spawn errors the guardian can report mean to the launcher, with the cwd a real
     /// directory unless the row says otherwise. Only a missing program may read as not installed.
     #[test]
     fn only_a_missing_program_in_an_existing_cwd_is_a_missing_program() {
         let cwd = scratch_dir("agent-launcher-classify");
         let absent_cwd = cwd.join("removed");
+        let empty_path = scratch_dir("agent-launcher-classify-empty");
+        let present_path = scratch_dir("agent-launcher-classify-present");
+        let present = unexecutable_file(&present_path);
         let errno = |code: i32| io::Error::from_raw_os_error(code);
-        let rows: Vec<(&str, io::Error, &Path, bool)> = vec![
-            ("ENOENT", errno(libc::ENOENT), cwd.path(), true),
-            ("ENOTDIR", errno(libc::ENOTDIR), cwd.path(), true),
+        let nowhere = request_in("agent-cli", &empty_path, &cwd);
+        let nowhere_in_absent_cwd = request_in("agent-cli", &empty_path, &absent_cwd);
+        let found_on_path = request_in("agent-cli", &present_path, &cwd);
+        let explicit_found = request_in(present.to_str().expect("utf-8"), &empty_path, &cwd);
+        let explicit_missing = request_in("/nonexistent/agent-cli", &empty_path, &cwd);
+        let rows: Vec<(&str, io::Error, &ProcessRequest, bool)> = vec![
+            ("ENOENT", errno(libc::ENOENT), &nowhere, true),
+            ("ENOTDIR", errno(libc::ENOTDIR), &nowhere, true),
             (
                 "no PATH to search",
                 io::Error::new(io::ErrorKind::NotFound, "PATH is required"),
-                cwd.path(),
+                &nowhere,
                 true,
             ),
-            ("ENOENT, cwd gone", errno(libc::ENOENT), &absent_cwd, false),
+            (
+                "ENOENT, cwd gone",
+                errno(libc::ENOENT),
+                &nowhere_in_absent_cwd,
+                false,
+            ),
             (
                 "ENOTDIR, cwd gone",
                 errno(libc::ENOTDIR),
-                &absent_cwd,
+                &nowhere_in_absent_cwd,
                 false,
             ),
-            ("EACCES", errno(libc::EACCES), cwd.path(), false),
-            ("ENOEXEC", errno(libc::ENOEXEC), cwd.path(), false),
-            ("ETXTBSY", errno(libc::ETXTBSY), cwd.path(), false),
-            ("EMFILE", errno(libc::EMFILE), cwd.path(), false),
-            ("ENFILE", errno(libc::ENFILE), cwd.path(), false),
-            ("ENOMEM", errno(libc::ENOMEM), cwd.path(), false),
+            // Path resolution refusals count only when a candidate exists to be refused.
+            (
+                "EACCES, file on PATH",
+                errno(libc::EACCES),
+                &found_on_path,
+                false,
+            ),
+            (
+                "ELOOP, file on PATH",
+                errno(libc::ELOOP),
+                &found_on_path,
+                false,
+            ),
+            (
+                "ENAMETOOLONG, file on PATH",
+                errno(libc::ENAMETOOLONG),
+                &found_on_path,
+                false,
+            ),
+            (
+                "EACCES, explicit file",
+                errno(libc::EACCES),
+                &explicit_found,
+                false,
+            ),
+            ("EACCES, CLI nowhere", errno(libc::EACCES), &nowhere, true),
+            ("ELOOP, CLI nowhere", errno(libc::ELOOP), &nowhere, true),
+            (
+                "ENAMETOOLONG, CLI nowhere",
+                errno(libc::ENAMETOOLONG),
+                &nowhere,
+                true,
+            ),
+            (
+                "EACCES, explicit path missing",
+                errno(libc::EACCES),
+                &explicit_missing,
+                true,
+            ),
+            // Host-resource and found-file failures never read as missing, evidence or not.
+            ("ENOEXEC", errno(libc::ENOEXEC), &nowhere, false),
+            ("ETXTBSY", errno(libc::ETXTBSY), &nowhere, false),
+            ("EMFILE", errno(libc::EMFILE), &nowhere, false),
+            ("ENFILE", errno(libc::ENFILE), &nowhere, false),
+            ("ENOMEM", errno(libc::ENOMEM), &nowhere, false),
             (
                 "a guardian protocol error",
                 io::Error::new(io::ErrorKind::InvalidData, "invalid readiness byte"),
-                cwd.path(),
+                &nowhere,
                 false,
             ),
         ];
-        for (name, error, cwd, expected) in rows {
+        for (name, error, request, expected) in rows {
             assert_eq!(
-                is_missing_program(&error, cwd),
+                is_missing_program(&error, request),
                 expected,
                 "({name}): expected is_missing_program {expected} | received {} for {error:?}",
                 !expected

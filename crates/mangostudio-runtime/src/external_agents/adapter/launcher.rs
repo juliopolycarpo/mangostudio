@@ -16,7 +16,6 @@
 use std::ffi::OsString;
 use std::future::Future;
 use std::io;
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
@@ -155,9 +154,8 @@ impl ProcessLauncher for GuardedProcessLauncher {
                     received: self.limit + 1,
                 })?;
         let start = Start {
-            request: request(&spec),
+            request: Arc::new(request(&spec)),
             stdin_pipe: spec.stdin,
-            cwd: spec.cwd.clone(),
             program,
             check: Arc::clone(&self.check),
             spawner: Arc::clone(&self.spawner),
@@ -204,11 +202,10 @@ fn request(spec: &LaunchSpec) -> ProcessRequest {
 }
 
 struct Start {
-    request: ProcessRequest,
+    /// Shared with the blocking spawn so a failure can still look up the program and the cwd.
+    request: Arc<ProcessRequest>,
     stdin_pipe: bool,
     program: String,
-    /// The directory the child starts in, kept to tell a missing cwd from a missing program.
-    cwd: PathBuf,
     check: Arc<dyn LaunchCheck>,
     spawner: Arc<dyn ChildSpawner>,
     tail: StderrTail,
@@ -231,12 +228,12 @@ async fn own(
         request,
         stdin_pipe,
         program,
-        cwd,
         check,
         spawner,
         tail,
     } = start;
     let spawn_cancel = cancel.clone();
+    let spawn_request = Arc::clone(&request);
     let launched = run_blocking(move || {
         if spawn_cancel.is_cancelled() {
             return Err(StartFailure::Cancelled);
@@ -246,21 +243,21 @@ async fn own(
             return Err(StartFailure::Cancelled);
         }
         spawner
-            .spawn(&request, stdin_pipe)
+            .spawn(&spawn_request, stdin_pipe)
             .map_err(StartFailure::Os)
     })
     .await;
     let mut child = match launched {
         Ok(child) => child,
         Err(failure) => {
-            let _ = ready.send(Err(failure.into_failed(&program, &cwd).await));
+            let _ = ready.send(Err(failure.into_failed(&program, &request).await));
             return;
         }
     };
     if let Err(failure) = open_gate(&mut child, &cancel).await {
         child.abort_start();
         let _ = cleanup(child, None, release).await;
-        let _ = ready.send(Err(failure.into_failed(&program, &cwd).await));
+        let _ = ready.send(Err(failure.into_failed(&program, &request).await));
         return;
     }
     let (Some(stdout), Some(stderr)) = (child.take_stdout(), child.take_stderr()) else {
@@ -339,7 +336,7 @@ enum StartFailure {
 
 impl StartFailure {
     /// The SDK error for this failure, plus the OS refusal when it was not a missing program.
-    async fn into_failed(self, program: &str, cwd: &Path) -> Failed {
+    async fn into_failed(self, program: &str, request: &Arc<ProcessRequest>) -> Failed {
         match self {
             Self::Cancelled => Failed::from(Error::Cancelled {
                 reason: CancelReason::Requested,
@@ -349,9 +346,10 @@ impl StartFailure {
             }),
             Self::Os(error) => {
                 let refusal = LaunchRefusal::of(&error);
-                let cwd = cwd.to_owned();
-                // `cwd.is_dir()` touches the filesystem, so it runs off the async threads.
-                let missing = run_blocking(move || is_missing_program(&error, &cwd)).await;
+                let request = Arc::clone(request);
+                // The classification stats the cwd and the PATH candidates, so it runs off the
+                // async threads.
+                let missing = run_blocking(move || is_missing_program(&error, &request)).await;
                 Failed {
                     error: launch_error(program, &refusal),
                     refusal: (!missing).then_some(refusal),
@@ -397,21 +395,45 @@ impl LaunchRefusal {
 /// Whether `error` says the program does not exist, as opposed to an executable that could not be
 /// started.
 ///
-/// Only a missing program may read as "not installed". The guardian reports `chdir` and `execve`
-/// failures through one errno pipe, so a missing cwd is the same ENOENT as a missing program, and
-/// a PATH search that ends on a file entry reports ENOTDIR instead of ENOENT; both count as a
-/// missing program only while `cwd` is still a directory. EACCES, ENOEXEC, ETXTBSY, EMFILE and
-/// every other failure mean the program was found.
+/// Only a missing program may read as "not installed":
+///
+/// - ENOENT and ENOTDIR (a `PATH` search that ends on a file entry reports ENOTDIR) mean a missing
+///   program only while the cwd is still a directory, because the guardian reports `chdir` and
+///   `execve` failures through one errno pipe. An ENOENT raised from inside an existing program (a
+///   missing shebang interpreter or dynamic loader) is indistinguishable and reads as missing too.
+/// - EACCES, ELOOP and ENAMETOOLONG come from resolving the path, so they name a found-but-refused
+///   program only when [`PipeChild::program_exists`] finds a candidate; an unsearchable `PATH`
+///   entry with the CLI nowhere else is a missing program, not an undetermined one.
+/// - Everything else (ENOEXEC, ETXTBSY, EMFILE, ENFILE, ENOMEM, a guardian protocol error) is a
+///   found file or a host-resource failure: a refusal.
+///
+/// Blocks on the filesystem.
 ///
 /// # Example
 /// ```ignore
-/// assert!(is_missing_program(&io::Error::from_raw_os_error(libc::ENOENT), cwd));
+/// assert!(is_missing_program(&io::Error::from_raw_os_error(libc::ENOENT), &request));
 /// ```
-fn is_missing_program(error: &io::Error, cwd: &Path) -> bool {
-    matches!(
-        error.kind(),
-        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
-    ) && cwd.is_dir()
+fn is_missing_program(error: &io::Error, request: &ProcessRequest) -> bool {
+    match error.kind() {
+        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory => {
+            request.cwd.as_deref().is_none_or(std::path::Path::is_dir)
+        }
+        _ if is_path_resolution_errno(error.raw_os_error()) => !PipeChild::program_exists(request),
+        _ => false,
+    }
+}
+
+/// EACCES, ELOOP and ENAMETOOLONG: the errnos `execve` raises while resolving the path of a
+/// candidate, so they are evidence of a program only if a candidate actually exists.
+#[cfg(unix)]
+fn is_path_resolution_errno(errno: Option<i32>) -> bool {
+    matches!(errno, Some(libc::EACCES | libc::ELOOP | libc::ENAMETOOLONG))
+}
+
+/// No runtime-side `PATH` search exists off Unix, so a permission error names a found file.
+#[cfg(not(unix))]
+fn is_path_resolution_errno(_errno: Option<i32>) -> bool {
+    false
 }
 
 /// Maps an OS failure to [`Error::Launch`] from structured values only, whether or not the SDK
