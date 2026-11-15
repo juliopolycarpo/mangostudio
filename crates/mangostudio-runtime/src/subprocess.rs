@@ -417,6 +417,13 @@ mod tests {
         path
     }
 
+    /// Deadline for a script whose pid files the test reads afterwards. The
+    /// deadline starts before admission, so under load a short one can expire
+    /// before the shell has written its pid (seen on a macOS runner at 300 ms:
+    /// "parent-pid was never written"). Three seconds leaves the script time
+    /// to start; the scripts sleep far longer, so the deadline still fires.
+    const PID_WRITING_SCRIPT_DEADLINE: Duration = Duration::from_secs(3);
+
     fn budget(deadline: Duration) -> ChildBudget {
         ChildBudget {
             deadline,
@@ -500,12 +507,12 @@ mod tests {
         let cancel = CancellationToken::new();
 
         let result = tokio::time::timeout(
-            Duration::from_secs(2),
+            Duration::from_secs(10),
             run_bounded_child(
                 &sh,
                 &[],
                 None::<&HashMap<String, String>>,
-                budget(Duration::from_millis(300)),
+                budget(PID_WRITING_SCRIPT_DEADLINE),
                 &cancel,
             ),
         )
@@ -540,7 +547,7 @@ mod tests {
             &dir,
             "backgrounds-and-sleeps.sh",
             &format!(
-                "echo $$ > {}\nsleep 5 & echo $! > {}\nsleep 5\n",
+                "echo $$ > {}\nsleep 30 & echo $! > {}\nsleep 30\n",
                 parent_pid_file.display(),
                 descendant_pid_file.display()
             ),
@@ -551,7 +558,7 @@ mod tests {
             &sh,
             &[],
             None::<&HashMap<String, String>>,
-            budget(Duration::from_millis(300)),
+            budget(PID_WRITING_SCRIPT_DEADLINE),
             &cancel,
         )
         .await
