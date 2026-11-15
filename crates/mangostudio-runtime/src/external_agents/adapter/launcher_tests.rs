@@ -174,6 +174,112 @@ mod unix {
         }
     }
 
+    /// A launch of the bare name `prog` with `path_entries` as the whole `PATH`.
+    fn spec_searching(path_entries: &[&Path], cwd: &Path) -> LaunchSpec {
+        let path = std::env::join_paths(path_entries).expect("PATH entries have no ':'");
+        LaunchSpec {
+            argv: vec!["prog".to_owned()],
+            cwd: cwd.to_path_buf(),
+            env: BTreeMap::from([("PATH".to_owned(), path.to_string_lossy().into_owned())]),
+            stdin: false,
+            hide_window: true,
+        }
+    }
+
+    /// Writes `directory/prog` with `mode`; a script that prints `ran`.
+    fn prog_with_mode(directory: &Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        let path = directory.join("prog");
+        std::fs::write(&path, "#!/bin/sh\necho ran\n").expect("write prog");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode))
+            .expect("set the prog mode");
+    }
+
+    /// An earlier `PATH` entry holding a `prog` this user may not execute must not shadow a working
+    /// one later on, as `execvp` and every shell resolve it.
+    #[tokio::test]
+    async fn the_path_search_runs_a_later_entry_past_a_non_executable_one() {
+        let root = scratch_dir("agent-launcher-path-walk-mode");
+        let refused = root.join("refused");
+        let working = root.join("working");
+        std::fs::create_dir_all(&refused).expect("mkdir refused");
+        std::fs::create_dir_all(&working).expect("mkdir working");
+        prog_with_mode(&refused, 0o644);
+        prog_with_mode(&working, 0o755);
+
+        let mut process = start(&launcher(), spec_searching(&[&refused, &working], &root)).await;
+        assert_eq!(
+            read_all(&mut process).await.trim(),
+            "ran",
+            "expected the later working prog to run | received other output"
+        );
+        wait(&process).await;
+    }
+
+    /// Restores a directory's mode on drop so the scratch cleanup can remove it.
+    struct Unsearchable(PathBuf);
+
+    impl Drop for Unsearchable {
+        fn drop(&mut self) {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    #[tokio::test]
+    async fn the_path_search_runs_a_later_entry_past_an_unsearchable_directory() {
+        use std::os::unix::fs::PermissionsExt;
+        // Root ignores directory permission bits, so a chmod 000 directory stays searchable.
+        if nix::unistd::geteuid().is_root() {
+            eprintln!("skipped: running as root, directory modes do not restrict root");
+            return;
+        }
+        let root = scratch_dir("agent-launcher-path-walk-dir");
+        let sealed = root.join("sealed");
+        let working = root.join("working");
+        std::fs::create_dir_all(&sealed).expect("mkdir sealed");
+        std::fs::create_dir_all(&working).expect("mkdir working");
+        prog_with_mode(&sealed, 0o755);
+        prog_with_mode(&working, 0o755);
+        std::fs::set_permissions(&sealed, std::fs::Permissions::from_mode(0o000))
+            .expect("seal the directory");
+        let _restore = Unsearchable(sealed.clone());
+
+        let mut process = start(&launcher(), spec_searching(&[&sealed, &working], &root)).await;
+        assert_eq!(
+            read_all(&mut process).await.trim(),
+            "ran",
+            "expected the prog behind the unsearchable directory to run | received other output"
+        );
+        wait(&process).await;
+    }
+
+    #[tokio::test]
+    async fn a_path_holding_only_a_non_executable_prog_still_fails_with_eacces() {
+        let root = scratch_dir("agent-launcher-path-walk-only-refused");
+        let refused = root.join("refused");
+        let empty = root.join("empty");
+        std::fs::create_dir_all(&refused).expect("mkdir refused");
+        std::fs::create_dir_all(&empty).expect("mkdir empty");
+        prog_with_mode(&refused, 0o644);
+
+        // The refusal comes first and a missing candidate follows, so the remembered EACCES is
+        // what must be reported, not the last candidate's ENOENT.
+        let result = launcher()
+            .spawn(spec_searching(&[&refused, &empty], &root))
+            .await;
+        let Err(Error::Launch { message, .. }) = result else {
+            panic!(
+                "expected Error::Launch | received {:?}",
+                result.map(|_| "a started child")
+            );
+        };
+        assert!(
+            message.contains("os error 13"),
+            "expected the remembered EACCES | received {message:?}"
+        );
+    }
+
     #[test]
     fn a_refusal_names_the_os_error_or_the_kind_and_never_a_custom_message() {
         let errno = LaunchRefusal::of(&io::Error::from_raw_os_error(libc::EACCES));

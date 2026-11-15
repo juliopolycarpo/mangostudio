@@ -1381,15 +1381,43 @@ unsafe fn target_main(fds: GuardianFds, spec: &ExecSpec) -> ! {
     if let Err(error) = unsafe { reset_inherited_signal_state() } {
         exec_failed_and_exit(fds.exec_error_write, error);
     }
+    // The PATH walk follows glibc's `execvp`: keep searching past a candidate that is missing or
+    // that this process may not execute, remember EACCES, and stop at any other errno because it
+    // means a file was found and the failure is its own to report. Pure integer logic over
+    // `errno`, so nothing here allocates.
     let mut error = libc::ENOENT;
+    let mut denied = false;
     for program in &spec.programs {
         unsafe { libc::execve(program.as_ptr(), spec.argv.as_ptr(), spec.envp.as_ptr()) };
         error = unsafe { errno_raw() };
-        if error != libc::ENOENT && error != libc::ENOTDIR {
-            break;
+        if error == libc::EACCES {
+            denied = true;
+        }
+        if !search_continues(error) {
+            exec_failed_and_exit(fds.exec_error_write, error);
         }
     }
-    exec_failed_and_exit(fds.exec_error_write, error)
+    exec_failed_and_exit(fds.exec_error_write, exhausted_search_error(error, denied))
+}
+
+/// Whether the PATH walk goes on to the next candidate after `execve` failed with `error`.
+///
+/// This is glibc's `execvp` set. ENOENT, ENOTDIR, ESTALE, ENODEV and ETIMEDOUT mean the candidate
+/// is absent or unreachable; EACCES means it (or a directory above it) is not ours to run, which
+/// a later PATH entry may be. Everything else (ENOEXEC, ETXTBSY, E2BIG, ENOMEM, ELOOP, EMFILE,
+/// ...) means a candidate was found and the failure belongs to it, so the walk stops there and
+/// reports it, which also keeps a resource failure from being retried against every entry.
+const fn search_continues(error: libc::c_int) -> bool {
+    matches!(
+        error,
+        libc::EACCES | libc::ENOENT | libc::ENOTDIR | libc::ESTALE | libc::ENODEV | libc::ETIMEDOUT
+    )
+}
+
+/// The errno to report once every candidate failed with one for which [`search_continues`] held:
+/// EACCES if any candidate was refused, otherwise the last candidate's own, as `execvp` does.
+const fn exhausted_search_error(last: libc::c_int, denied: bool) -> libc::c_int {
+    if denied { libc::EACCES } else { last }
 }
 
 /// Signals the runtime itself sends to a child (`SIGINT`, `SIGTERM`), or that a shell, agent CLI,
@@ -2186,6 +2214,42 @@ mod tests {
     use std::ffi::OsString;
 
     use super::collect_inheritable;
+    use super::{exhausted_search_error, search_continues};
+
+    /// The errnos of glibc's `execvp` walk: absent or refused candidates go on, found-file
+    /// failures stop.
+    #[test]
+    fn the_path_walk_continues_exactly_for_the_execvp_errnos() {
+        for (name, errno, continues) in [
+            ("EACCES", libc::EACCES, true),
+            ("ENOENT", libc::ENOENT, true),
+            ("ENOTDIR", libc::ENOTDIR, true),
+            ("ESTALE", libc::ESTALE, true),
+            ("ENODEV", libc::ENODEV, true),
+            ("ETIMEDOUT", libc::ETIMEDOUT, true),
+            ("ENOEXEC", libc::ENOEXEC, false),
+            ("ETXTBSY", libc::ETXTBSY, false),
+            ("E2BIG", libc::E2BIG, false),
+            ("ELOOP", libc::ELOOP, false),
+            ("ENAMETOOLONG", libc::ENAMETOOLONG, false),
+            ("ENOMEM", libc::ENOMEM, false),
+            ("EMFILE", libc::EMFILE, false),
+        ] {
+            assert_eq!(
+                search_continues(errno),
+                continues,
+                "({name}): expected search_continues {continues} | received {}",
+                !continues
+            );
+        }
+    }
+
+    #[test]
+    fn an_exhausted_walk_reports_a_remembered_eacces_over_the_last_errno() {
+        assert_eq!(exhausted_search_error(libc::ENOENT, true), libc::EACCES);
+        assert_eq!(exhausted_search_error(libc::ENOENT, false), libc::ENOENT);
+        assert_eq!(exhausted_search_error(libc::ENOTDIR, false), libc::ENOTDIR);
+    }
 
     #[test]
     fn close_except_closes_every_unlisted_descriptor_and_keeps_the_listed_one() {
