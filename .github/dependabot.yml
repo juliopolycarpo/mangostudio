@@ -123,6 +123,9 @@ updates:
       timezone: UTC
     commit-message:
       prefix: chore(deps)
+    # `default-days` matches `registry.global-min-publish-age` in
+    # .cargo/config.toml, the hold `cargo update` applies locally;
+    # scripts/tests/security-workflows.unit.test.ts keeps it at least as long.
     cooldown:
       default-days: 3
       semver-major-days: 7

@@ -61,8 +61,15 @@ jobs:
           echo "rustc=$(rustc -V)" >> "$GITHUB_OUTPUT"
           echo "cargo=$(cargo -V)" >> "$GITHUB_OUTPUT"
 
+      # This lane reports what a downstream consumer resolves today, and a
+      # consumer's resolver is not bound by this repository's cooldown.
+      # `.cargo/config.toml` holds back versions younger than three days when
+      # the committed lock is updated; lifting it here keeps the newest
+      # releases in the graph this lane judges.
       - id: generate
         name: Resolve an independent dependency graph
+        env:
+          CARGO_RESOLVER_INCOMPATIBLE_PUBLISH_AGE: allow
         run: |
           rm Cargo.lock
           cargo generate-lockfile

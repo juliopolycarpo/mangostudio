@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, parse, sep } from 'node:path';
 
+import { ROOT_DIR } from '../lib/config';
 import { assertRustCostEnvironment, inspectRustCostCargoConfigs } from '../lib/rust-cost-inputs';
 import { OwnedCargoConfigFiles } from './support/owned-cargo-config-files';
 
@@ -239,6 +240,20 @@ describe('Rust cost Cargo configuration admission and seal', () => {
     );
     const result = await files.inspect();
     expect(result[join(files.root, '.cargo/config.toml')]).toMatch(/^[a-f0-9]{64}$/);
+    await expect(files.inspect([])).rejects.toThrow('received: target');
+  });
+  test('admits the tracked repository config with its crt-static flag and publish-age cooldown', async () => {
+    // `[registry]` is an admitted table; this pins that the cooldown the
+    // repository ships does not make the cost baseline refuse its own config.
+    const trackedRepositoryConfig = await readFile(join(ROOT_DIR, '.cargo/config.toml'), 'utf8');
+    expect(trackedRepositoryConfig).toContain('global-min-publish-age = "3 days"');
+    expect(trackedRepositoryConfig).toContain('target-feature=+crt-static');
+    const files = await fixture();
+    await files.write(join(files.root, '.cargo/config.toml'), trackedRepositoryConfig);
+    const result = await files.inspect();
+    expect(result[join(files.root, '.cargo/config.toml')]).toMatch(/^[a-f0-9]{64}$/);
+    // An untracked copy of the same file is refused for its `target` table only:
+    // the cooldown's `registry` table is admitted from any location.
     await expect(files.inspect([])).rejects.toThrow('received: target');
   });
   test('records only hashes for credential configuration and names only rejected selectors', async () => {

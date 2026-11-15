@@ -11,7 +11,12 @@ import {
 import { reportFreshDependencies } from '../ci/report-fresh-dependencies.mjs';
 import { ROOT_DIR } from '../lib/config';
 import { readText } from './support/read-text';
-import { extractJobBlock, extractOnBlock, sectionKeys } from './support/workflow-blocks';
+import {
+  extractJobBlock,
+  extractOnBlock,
+  extractStepBlocks,
+  sectionKeys,
+} from './support/workflow-blocks';
 
 interface Issue {
   number: number;
@@ -481,6 +486,24 @@ describe('fresh dependency workflow', () => {
     expect(condition).toContain("&& github.ref == 'refs/heads/main'");
     expect(report).toContain('issues: write');
     expect(report).toContain('reportFreshDependencies');
+  });
+
+  test('resolves without the repository cooldown, which only the committed lock honours', () => {
+    // The fresh lane judges what a downstream consumer resolves today. With the
+    // hold from .cargo/config.toml active, `cargo generate-lockfile` would skip
+    // every release younger than the configured minimum publish age.
+    const cargoConfig = readText('.cargo/config.toml');
+    expect(cargoConfig, 'cooldown missing from .cargo/config.toml').toMatch(
+      /^global-min-publish-age = "3 days"$/m
+    );
+    const generate = extractStepBlocks(extractJobBlock(workflow, 'resolve')).find((step) =>
+      step.includes('id: generate')
+    );
+    expect(generate, 'resolve job lost its `id: generate` step').toBeDefined();
+    expect(generate).toContain('CARGO_RESOLVER_INCOMPATIBLE_PUBLISH_AGE: allow');
+    expect(generate).toContain('cargo generate-lockfile');
+    // Only the resolver opts out: every later cargo command reads the lock.
+    expect(workflow.match(/CARGO_RESOLVER_INCOMPATIBLE_PUBLISH_AGE/g)).toHaveLength(1);
   });
 
   test('the resolver exposes its identity so resolution failure is distinguishable', () => {

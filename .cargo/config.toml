@@ -8,3 +8,17 @@
 # example, a RUSTFLAGS override, which replaces it) fails packaging instead.
 [target.'cfg(all(windows, target_env = "msvc"))']
 rustflags = ["-C", "target-feature=+crt-static"]
+
+# Skip crate versions published less than three days ago whenever Cargo
+# resolves or updates a lockfile (`cargo update`, a new dependency, a loosened
+# requirement), so a release that is yanked or found malicious in its first
+# days does not reach Cargo.lock. `--locked` builds do not resolve and
+# `cargo install` ignores the setting, so the committed lock and the published
+# launcher are unaffected. Lift the hold for one command with
+# `CARGO_RESOLVER_INCOMPATIBLE_PUBLISH_AGE=allow`, for example to take a
+# same-day security fix with `cargo update -p <crate>`. The hold applies again
+# to the next `cargo update` that unlocks that crate, which steps back from a
+# locked version still younger than three days. Dependabot's cargo
+# `cooldown` in .github/dependabot.yml uses the same three days.
+[registry]
+global-min-publish-age = "3 days"

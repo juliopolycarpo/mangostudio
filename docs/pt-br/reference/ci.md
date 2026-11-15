@@ -195,6 +195,21 @@ job `changes` (Preflight), que resolve a identidade de distribuição. A reutili
 dos artefatos exigem validação no head atual; não há alegação de redução medida
 de tempo.
 
+## Quarentena de dependências Cargo
+
+O `.cargo/config.toml` define `registry.global-min-publish-age = "3 days"`. Quando o
+Cargo resolve ou atualiza um lockfile (`cargo update`, uma nova dependência, um
+requisito afrouxado), ele ignora versões de crates publicadas há menos de três dias,
+de modo que uma versão retirada (yanked) ou considerada maliciosa nos primeiros dias
+não chega ao `Cargo.lock`. O `cargo update --dry-run` mostra uma versão retida como
+`(available: vX.Y.Z, published N days ago)`. Os builds de CI e de release usam
+`--locked` e não resolvem, o `cargo install` ignora a configuração, e o workspace
+excluído do fuzz a herda por ser um diretório descendente. Defina
+`CARGO_RESOLVER_INCOMPATIBLE_PUBLISH_AGE=allow` para suspender a retenção em um
+único comando; o próximo `cargo update` que destravar essa crate volta de uma versão
+travada com menos de três dias. O `cooldown` do Dependabot para cargo em `.github/dependabot.yml`
+usa os mesmos três dias.
+
 ## Dependências Rust resolvidas do zero
 
 O `rust-fresh-dependencies.yml` resolve um novo lockfile Cargo da raiz toda terça
@@ -205,7 +220,10 @@ lock resolvido fica como artefato do workflow e nunca é commitado. Esse workflo
 informativo não alimenta um gate obrigatório de PR. Falhas agendadas ou manuais
 na `main` atualizam uma única issue do bot, preservando notas dos mantenedores; uma
 execução manual em outra ref e a validação do workflow em PRs nunca escrevem issues.
-O CI com lock e o Dependabot continuam independentes.
+O CI com lock e o Dependabot continuam independentes. O passo de resolução define
+`CARGO_RESOLVER_INCOMPATIBLE_PUBLISH_AGE=allow`: o workflow mostra o que um consumidor
+downstream resolve hoje, então não segue a [quarentena](#quarentena-de-dependências-cargo)
+que o lock commitado segue.
 
 Toda execução não cancelada também guarda um artefato `fresh-rust-receipt` e um
 resumo do passo ao lado do artefato `fresh-rust-lockfile`: o SHA do código, o
