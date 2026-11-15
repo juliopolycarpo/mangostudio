@@ -16,7 +16,9 @@ use tokio_util::sync::CancellationToken;
 use super::super::port::{self, AccountKey, AgentBackend, AgentResult, Host};
 use super::super::supervisor::PortFuture;
 use super::super::wire::{self, TargetId};
+use super::launcher::witnessing;
 use super::{failure, map, session};
+use crate::diagnostics::{DiagnosticSink, StderrDiagnostics, diagnostic_line};
 
 // Four 2MiB UTF-8 Text resources can expand to 48MiB of JSON. The shared runtime
 // prompt allows another 6MiB when every unit needs six-byte escaping. 55MiB also
@@ -130,6 +132,7 @@ pub(crate) struct Backend {
     harnesses: Arc<dyn SdkHarnessFactory>,
     limits: Limits,
     cleanup_timeout: Duration,
+    diagnostics: Arc<dyn DiagnosticSink>,
 }
 impl Backend {
     pub(crate) fn new(
@@ -143,7 +146,14 @@ impl Backend {
             harnesses,
             limits,
             cleanup_timeout,
+            diagnostics: Arc::new(StderrDiagnostics),
         }
+    }
+    /// Sends the operator diagnostics to `diagnostics` instead of stderr.
+    #[cfg(test)]
+    pub(crate) fn with_diagnostics(mut self, diagnostics: Arc<dyn DiagnosticSink>) -> Self {
+        self.diagnostics = diagnostics;
+        self
     }
     /// Builds the SDK host with its own cancel token, returning the product token to link it to.
     ///
@@ -208,18 +218,35 @@ impl AgentBackend for Backend {
         let key = key
             .map(|key| AccountFingerprintKey::new(key.bytes()).expect("the owned key is nonempty"));
         cancellable(cancel, sdk_cancel, async {
-            let found = failure::settled(
+            let (found, refusal) = witnessing(async {
                 self.harnesses
                     .discover(target, executable, &host, key.as_ref())
-                    .await,
-                self.cleanup_timeout,
-            )
-            .await?;
+                    .await
+            })
+            .await;
+            let found = failure::settled(found, self.cleanup_timeout).await?;
+            let probed_at_ms = crate::ports::wall_clock::epoch_millis(std::time::SystemTime::now());
+            // The SDK reads every launch failure of its version probe as "not installed". Only a
+            // missing executable is; one that exists but would not start is undetermined, and the
+            // OS error goes to the operator since the wire has no field for it.
+            if let (mango_external_agents::GateVerdict::NotInstalled, Some(refusal)) =
+                (&found.discovery.gate, refusal)
+            {
+                self.diagnostics.write_line(&diagnostic_line(
+                    "external_agent_launch_refused",
+                    &serde_json::json!({
+                        "level": "warn",
+                        "target": target.as_str(),
+                        "osError": refusal.describe(),
+                    }),
+                ));
+                return Ok(map::undetermined(target, probed_at_ms));
+            }
             Ok(map::descriptor(
                 target,
                 &found.discovery,
                 found.account.as_ref(),
-                crate::ports::wall_clock::epoch_millis(std::time::SystemTime::now()),
+                probed_at_ms,
             ))
         })
         .await
