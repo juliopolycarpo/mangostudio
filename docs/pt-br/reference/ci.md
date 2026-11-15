@@ -266,6 +266,50 @@ com o argumento de porta e verifica que o estado do servidor registra o bind pad
 `.env` e do TOML. Esses caminhos de smoke qualificam contratos de bind diferentes; veja
 `tests/browser-smoke/support/smoke-home.ts`, `scripts/release/smoke-binary.sh` e os dois Dockerfiles.
 
+## Limpeza de caches de pull request
+
+Os caches por PR (`...-turbo-pr-<N>-test|build|check-...`,
+`...-lint-tools-pr-<N>-...`, `...-playwright-pr-<N>-...`) ficam em
+`refs/pull/<N>/merge`. Só esse pull request consegue restaurá-los; depois que
+ele fecha, ocupam espaço até a remoção de 7 dias do GitHub. Na medição, o
+repositório tinha 1.685 caches (53,7 GB); 1.022 deles (12,7 GB) estavam nas refs
+de merge de pull requests fechados.
+
+`pr-cache-cleanup.yml` apaga esses caches quando o pull request fecha, com merge
+ou sem:
+
+- **O que é apagado.** Todo cache cuja ref é exatamente `refs/pull/<N>/merge` do
+  pull request fechado, por ID. O script lista com o filtro `ref` da API e confere
+  a ref de novo em cada entrada, então nenhuma outra ref é tocada: nem `main`,
+  nem outro pull request, nem `refs/pull/<N>/head`. Um 404 no delete conta como
+  já removido.
+- **Gatilho.** `pull_request_target` com `types: [closed]`. Um pull request de
+  fork recebe token somente leitura em `pull_request`, que não apaga caches.
+  `pull_request_target` roda o arquivo da branch base com token de escrita, o que
+  só é seguro porque nenhum código do pull request roda: o job faz checkout de
+  `main` com `persist-credentials: false`, não instala nada e não baixa
+  artefatos. O número do pull request chega ao script por `env` e precisa ser um
+  inteiro positivo. As permissões são `actions: write` e `contents: read`, com
+  grupo de concorrência por número de pull request e timeout de 10 minutos. Um
+  pull request para uma branch sem o workflow não é limpo ao fechar; use a
+  varredura abaixo.
+- **Varredura do backlog.** Rode o workflow manualmente (`workflow_dispatch`,
+  só em `main`). Ele lista todos os caches, pergunta à API de pulls quais pull
+  requests estão fechados e apaga só os caches de merge deles. Pull requests
+  abertos e números que o GitHub não conhece mantêm os seus. É um dry run, a menos
+  que a entrada `delete` esteja marcada. A varredura é idempotente e pode ser
+  retomada: uma execução que falha informa quantos caches apagou, e a seguinte
+  lista só o que sobrou. O limite do token do workflow é de 1.000 requisições por
+  hora por repositório e o backlog de 1.022 caches exige cerca de 1.240; espere
+  várias execuções ou rode o script localmente com um token pessoal.
+
+Para rodar o script localmente, defina `GITHUB_REPOSITORY` e `GITHUB_TOKEN`:
+`bun ./scripts/ci/pr-cache-cleanup.ts --pr <N>` ou `--all-closed`. Os dois apenas
+simulam por padrão e imprimem contagens e bytes por pull request; `--delete`
+apaga de fato. `scripts/tests/pr-cache-cleanup.unit.test.ts` fixa a seleção por
+ref exata, a validação do número e as regras de gatilho, checkout e `env` do
+workflow.
+
 ## Proteção de branch / checks obrigatórios
 
 O [ruleset ativo de main](https://github.com/juliopolycarpo/mangostudio/rules/14350640)
