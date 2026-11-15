@@ -32,6 +32,16 @@ missing_docs = "warn"
 [workspace.lints.clippy]
 all = "warn"
 
+# Cargo's own lints (stable since 1.100, the workspace minimum). An unused
+# dependency still costs every build its download and compile, and Cargo
+# only warns about it by default, which no `-D warnings` lane turns into a
+# failure: that flag reaches rustc and clippy, not Cargo. Dev-dependencies
+# are not checked, the lint only fires when every target that could use a
+# dependency is built, as `--workspace --all-targets` does, and a direct
+# dependency that another dependency also pulls in is not reported.
+[workspace.lints.cargo]
+unused_dependencies = "deny"
+
 [workspace.dependencies]
 # Pinned with a version alongside the path so `cargo deny`'s wildcard check
 # (deny.toml's `bans.wildcards = "deny"`) has something to check: a bare

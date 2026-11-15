@@ -416,6 +416,27 @@ describe('the protocol tree at the repository root', () => {
     }
   });
 
+  test('every stable crate fails its build on an unused dependency', () => {
+    // Cargo only warns about an unused dependency by default, and `-D warnings`
+    // reaches rustc and clippy, not Cargo. The deny lives in the workspace
+    // table, so it holds only for members that inherit `[lints]`.
+    const { workspace } = Bun.TOML.parse(readText('Cargo.toml')) as {
+      workspace: { members: string[]; lints: { cargo?: Record<string, string> } };
+    };
+    expect(
+      workspace.lints.cargo?.unused_dependencies,
+      'expected [workspace.lints.cargo] unused_dependencies = "deny"'
+    ).toBe('deny');
+    for (const member of workspace.members) {
+      const { lints } = Bun.TOML.parse(readText(`${member}/Cargo.toml`)) as {
+        lints?: { workspace?: boolean };
+      };
+      expect(lints, `${member} must inherit the workspace lint table`).toEqual({
+        workspace: true,
+      });
+    }
+  });
+
   test('no workspace member opts the release profile into panic = "abort"', () => {
     // `mangostudio-runtime::panic::catch_panics` is a redaction control that
     // silently becomes a no-op the moment any crate's release profile sets
