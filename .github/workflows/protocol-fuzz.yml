@@ -12,7 +12,8 @@ permissions:
 
 # One scheduled run at a time. A cold cache builds tokio, jsonschema and regex
 # under sanitizer instrumentation before the 300s run starts, so two overlapping
-# runs would fight over the same cache entry for no extra coverage.
+# runs would fight over the same cache entry for no extra coverage. The cache is
+# warm on every run except the first after a FUZZ_NIGHTLY or lockfile change.
 concurrency:
   group: protocol-fuzz-${{ github.ref }}
   cancel-in-progress: false
@@ -23,9 +24,17 @@ concurrency:
 # Swatinem/rust-cache exports the same value for jobs that restore a cache but
 # not for lanes without one, so it is set here and pinned by
 # scripts/tests/cargo-incremental.unit.test.ts.
+#
+# FUZZ_NIGHTLY is the one place this workflow names a compiler. Swatinem/rust-cache
+# hashes `rustc -vV` of every installed toolchain into its key, so a floating
+# `nightly` produced a new key each day and no run ever restored a cache. Bump
+# it by hand to a dated nightly that installs and builds the fuzz crate; the
+# policy test in scripts/tests/protocol-lanes.unit.test.ts rejects a bare
+# `nightly`. See "Fuzzing" in docs/protocol/conformance.md.
 env:
   CARGO_INCREMENTAL: "0"
   CARGO_TERM_COLOR: always
+  FUZZ_NIGHTLY: nightly-2026-11-14
 
 jobs:
   fuzz:
@@ -72,10 +81,10 @@ jobs:
       # The root rust-toolchain.toml pins a stable channel for the rest of the
       # repository, and that file applies here too (rustup resolves it by
       # directory, not by cargo workspace); the fuzz crate has no toolchain file
-      # of its own, so every invocation below selects nightly explicitly with
-      # `+nightly` instead. libFuzzer instrumentation needs `-Z` flags only
-      # nightly accepts.
-      - run: rustup toolchain install nightly --profile minimal
+      # of its own, so every invocation below selects the pinned nightly
+      # explicitly with `+"$FUZZ_NIGHTLY"` instead. libFuzzer instrumentation
+      # needs `-Z` flags only nightly accepts.
+      - run: rustup toolchain install "$FUZZ_NIGHTLY" --profile minimal
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: crates/mango-protocol/fuzz
@@ -89,7 +98,7 @@ jobs:
       # `--locked` first turns that into a failure.
       - name: Fail on a stale fuzz lockfile
         working-directory: crates/mango-protocol/fuzz
-        run: cargo +nightly metadata --locked --all-features --format-version 1 > /dev/null
+        run: cargo +"$FUZZ_NIGHTLY" metadata --locked --all-features --format-version 1 > /dev/null
       - name: Run the target for 5 minutes
         working-directory: crates/mango-protocol/fuzz
         # Matrix values reach the shell through `env:`, never through `${{ }}`
@@ -118,7 +127,7 @@ jobs:
             # shellcheck disable=SC2206 # a flag list, split on purpose
             extra=($EXTRA_ARGS)
           fi
-          cargo +nightly fuzz run --target x86_64-unknown-linux-gnu \
+          cargo +"$FUZZ_NIGHTLY" fuzz run --target x86_64-unknown-linux-gnu \
             "${features[@]}" "$TARGET" -- \
             -max_total_time=300 -timeout=30 "${extra[@]}"
       - name: Upload the corpus and any crashing input
