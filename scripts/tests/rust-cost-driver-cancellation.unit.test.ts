@@ -154,10 +154,20 @@ const OWNED_CONFIG_FILES = new OwnedCargoConfigFiles(${JSON.stringify(this.direc
     await Bun.write(driver, fixtureDriver);
     const bin = join(this.directory, 'bin');
     await mkdir(bin);
+    // The driver refuses a compiler that is not the pin, and the fixture tree carries the
+    // repository's own rust-toolchain.toml, so FakeRustc reports whatever that file pins.
+    const toolchainFile = join(this.sourceRoot, 'rust-toolchain.toml');
+    const pinnedToolchain = (await readFile(toolchainFile, 'utf8')).match(
+      /channel\s*=\s*"([^"]+)"/
+    )?.[1];
+    if (!pinnedToolchain)
+      throw new Error(
+        `Rust cost fixture: expected channel = "<version>" in ${toolchainFile} | received none`
+      );
     const sources: Record<string, string> = {
       stat: `console.log('ext2/ext3');`,
       git: `const args = process.argv.slice(2); if (args[0] === 'rev-parse') console.log('0000000000000000000000000000000000000000'); else if (args[0] === 'ls-files') console.log('Cargo.toml\\nCargo.lock\\nrust-toolchain.toml\\n.cargo/config.toml\\ncrates/mangostudio-runtime/src/main.rs'); else if (args[0] !== 'status') throw new Error('Unexpected fake git command: '+args);`,
-      rustc: `console.log('rustc 1.99.0 (fixture)\\nhost: x86_64-unknown-linux-gnu');`,
+      rustc: `console.log('rustc ${pinnedToolchain} (fixture)\\nhost: x86_64-unknown-linux-gnu');`,
       cargo: `
 import { publishFixtureJson } from ${JSON.stringify(join(this.sourceRoot, 'scripts/tests/support/atomic-fixture-json.ts'))};
 const args = process.argv.slice(2);
