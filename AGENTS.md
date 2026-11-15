@@ -82,6 +82,13 @@ Useful docs:
   including the published `mangostudio` launcher. `rust-toolchain.toml` pins the same development
   toolchain; policy tests enforce equality. The launcher keeps the application version, while
   `[workspace.package].version` remains the protocol version.
+- `.cargo/config.toml` sets `registry.global-min-publish-age = "3 days"`: when Cargo resolves or
+  updates a lockfile it skips crate versions published less than three days ago. `--locked` builds
+  do not resolve and `cargo install` ignores the setting. Run
+  `CARGO_RESOLVER_INCOMPATIBLE_PUBLISH_AGE=allow cargo update -p <crate>` to take a newer release
+  for one command; the next `cargo update` that unlocks that crate steps back from a locked
+  version still younger than three days. Dependabot's cargo `cooldown` uses the same three days, and the fresh
+  dependencies workflow opts out because it reports what a downstream consumer resolves.
 - Check Rust changes with `bun run check --rust` and `bun run test --rust`, which run
   `cargo fmt --all -- --check`,
   `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`,

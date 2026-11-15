@@ -17,6 +17,7 @@ interface DependabotConfig {
   updates: Array<{
     'package-ecosystem': string;
     schedule?: { interval: string; day?: string };
+    cooldown?: { 'default-days'?: number; 'semver-major-days'?: number };
     groups?: Record<string, { patterns?: string[]; 'update-types'?: string[] }>;
     ignore?: Array<{ 'dependency-name': string; versions?: string[] }>;
   }>;
@@ -154,6 +155,17 @@ describe('security workflows', () => {
     expect(bunBlock).toContain('interval: weekly');
     expect(bunBlock).toContain('dev-minor-patch:');
     expect(bunBlock).toContain('prod-minor-patch:');
+  });
+
+  test('Dependabot waits at least as long as the Cargo publish-age hold before a cargo bump', () => {
+    const cargoConfig = readText('.cargo/config.toml');
+    const hold = /^global-min-publish-age = "(\d+) days"$/m.exec(cargoConfig);
+    expect(hold, 'global-min-publish-age missing from .cargo/config.toml').not.toBeNull();
+    const config = Bun.YAML.parse(readText('.github/dependabot.yml')) as DependabotConfig;
+    const cargo = config.updates.find((update) => update['package-ecosystem'] === 'cargo');
+    // A shorter Dependabot cooldown would propose versions that the
+    // repository's own `cargo update` skips.
+    expect(cargo?.cooldown?.['default-days']).toBeGreaterThanOrEqual(Number(hold?.[1]));
   });
 
   test('Dependabot opens one weekly pull request for action bumps outside the CodeQL pair', () => {

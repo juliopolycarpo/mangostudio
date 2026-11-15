@@ -207,6 +207,21 @@ successful `CI Gate` and a successful `changes` (Preflight) job, which owns the 
 overhead require current-head qualification; no measured wall-clock reduction
 is claimed here.
 
+## Cargo dependency cooldown
+
+`.cargo/config.toml` sets `registry.global-min-publish-age = "3 days"`. When Cargo
+resolves or updates a lockfile (`cargo update`, a new dependency, a loosened
+requirement) it skips crate versions published less than three days ago, so a
+release that is yanked or found malicious in its first days does not reach
+`Cargo.lock`. `cargo update --dry-run` prints a held release as
+`(available: vX.Y.Z, published N days ago)`. CI and release builds pass
+`--locked` and do not resolve, `cargo install` ignores the setting, and the excluded
+fuzz workspace inherits it as a descendant directory. Set
+`CARGO_RESOLVER_INCOMPATIBLE_PUBLISH_AGE=allow` to lift the hold for one command; the
+next `cargo update` that unlocks that crate steps back from a locked version still younger
+than three days.
+Dependabot's cargo `cooldown` in `.github/dependabot.yml` uses the same three days.
+
 ## Fresh Rust dependencies
 
 `rust-fresh-dependencies.yml` resolves a new root Cargo lockfile each Tuesday and
@@ -217,7 +232,10 @@ is retained as a workflow artifact and never committed. This advisory workflow
 does not feed a required PR gate. Failed scheduled or manual runs of `main` update
 one bot-owned compatibility issue, preserving maintainer notes; a manual run on
 another ref and PR validation of the workflow never write issues. Locked CI and
-Dependabot continue independently.
+Dependabot continue independently. The resolving step sets
+`CARGO_RESOLVER_INCOMPATIBLE_PUBLISH_AGE=allow`: the lane reports what a downstream
+consumer resolves today, so it is not held to the [cooldown](#cargo-dependency-cooldown)
+the committed lock follows.
 
 Every run that is not cancelled also keeps a `fresh-rust-receipt` artifact and
 step summary beside the `fresh-rust-lockfile` artifact: the source SHA, the
