@@ -80,6 +80,11 @@ class FakeDiscovery implements Pick<ExternalAgentDiscoveryService, 'describeExte
   readonly scopes: ProbeScope[] = [];
   readonly waited: boolean[] = [];
   adapterAnswered = false;
+  /** What an answering adapter reports: a real matrix, or none, as the runtime does for a CLI it could not start. */
+  answer: Partial<ExternalAgentDescriptor> = {
+    capabilities: ADAPTER_CAPABILITIES,
+    supportedConfigurations: ADAPTER_CONFIGURATIONS,
+  };
 
   describeExternalAgents(
     scope: ProbeScope,
@@ -88,10 +93,7 @@ class FakeDiscovery implements Pick<ExternalAgentDiscoveryService, 'describeExte
     this.scopes.push(scope);
     this.waited.push(options.waitForAdapter === true);
     const descriptor = this.adapterAnswered
-      ? descriptorFor(scope.environmentId, {
-          capabilities: ADAPTER_CAPABILITIES,
-          supportedConfigurations: ADAPTER_CONFIGURATIONS,
-        })
+      ? descriptorFor(scope.environmentId, this.answer)
       : descriptorFor(scope.environmentId);
     return Promise.resolve([{ descriptor, adapterAnswered: this.adapterAnswered }]);
   }
@@ -249,6 +251,40 @@ describe('external agent disclosure routes', () => {
     await acknowledge(app);
 
     expect(discovery.waited).toEqual([true]);
+  });
+
+  it('refuses to record consent over an installed, undetermined answer with no matrix', async () => {
+    const { app, discovery } = await signedInApp();
+
+    // The runtime's answer for a CLI it found but could not start.
+    discovery.adapterAnswered = true;
+    discovery.answer = { discoveryState: 'undetermined', supportedConfigurations: [] };
+    const response = await acknowledge(app);
+    expect(response.status).toBe(503);
+
+    // Nothing was stored: once the CLI starts and the adapter reports a matrix, the
+    // notice is still owed.
+    discovery.answer = {
+      capabilities: ADAPTER_CAPABILITIES,
+      supportedConfigurations: ADAPTER_CONFIGURATIONS,
+    };
+    const agents = await agentsIn(
+      await app.handle(new Request('http://localhost/external-agents'))
+    );
+    expect(agents[0]?.unavailableReason).toBe('disclosure-required');
+  });
+
+  it('records consent over an undetermined answer that carries a matrix', async () => {
+    const { app, discovery } = await signedInApp();
+
+    discovery.adapterAnswered = true;
+    discovery.answer = {
+      discoveryState: 'undetermined',
+      capabilities: ADAPTER_CAPABILITIES,
+      supportedConfigurations: ADAPTER_CONFIGURATIONS,
+    };
+
+    expect((await acknowledge(app)).status).toBe(200);
   });
 
   it('refuses to record consent to a capability set nobody answered for', async () => {

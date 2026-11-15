@@ -170,6 +170,14 @@ in the same batch answered. Open and turn launches are untouched: they still fai
 reclassified; a later probe the SDK already degrades (Claude `--help` and `auth status`, the Codex
 app-server handshake) keeps its behavior.
 
+The hub reads that descriptor as installed and undetermined with an empty `supportedConfigurations`,
+which is what a cold cache also looks like, so it answers the same way. A turn gets the existing
+`unavailable` failure ("has not finished reporting what it can do here yet. Try again") instead of
+"does not support the permission combination", and the disclosure route answers 503 instead of
+recording an acknowledgement over an empty capability set. The row stays selectable: there is no
+unavailable reason that describes it honestly, and a new one would change the shared contract. An
+undetermined row that carries a matrix, and any determined row, behave as before.
+
 On Unix the launcher's `PATH` walk follows glibc `execvp`. It goes on past a candidate that is
 missing (ENOENT, ENOTDIR, ESTALE, ENODEV, ETIMEDOUT) or that the user may not execute (EACCES, a
 directory they cannot search), and remembers an EACCES. Any other errno means a file was found and
