@@ -1,0 +1,87 @@
+name: Pull Request Cache Cleanup
+
+# Delete the per-PR Actions caches (turbo, lint-tools, playwright) a pull request
+# leaves on refs/pull/<N>/merge. Only that pull request can restore them, so once
+# it closes, merged or not, they are dead weight until GitHub evicts them.
+#
+# pull_request_target, not pull_request: a fork pull request gets a read-only
+# GITHUB_TOKEN on pull_request, which cannot delete caches. pull_request_target
+# runs this file from the base branch with a write token, which is safe only
+# because no pull request code runs here. The job checks out main, never the PR
+# head, runs no install and downloads no artifact. The one value the pull request
+# controls is its number: it travels through env, never through shell
+# interpolation, and the script accepts nothing but a positive integer.
+#
+# A pull request into a branch that lacks this file is not cleaned on close; the
+# manual backlog sweep covers it.
+on:
+  pull_request_target:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      delete:
+        description: >-
+          Delete the caches of every closed pull request. Unchecked, the run only
+          reports what it would delete.
+        type: boolean
+        default: false
+
+permissions: {}
+
+# One run per pull request number; the backlog sweep has its own group. Deletion
+# is idempotent, so a queued run never cancels one in progress.
+concurrency:
+  group: pr-cache-cleanup-${{ github.event.pull_request.number || 'backlog' }}
+  cancel-in-progress: false
+
+jobs:
+  closed-pull-request:
+    name: Delete the closed pull request's caches
+    if: ${{ github.event_name == 'pull_request_target' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read # check out trusted main cleanup tooling
+      actions: write # delete caches saved on this pull request's merge ref
+      pull-requests: read # skip a pull request that was reopened before this ran
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+
+      - uses: $/.github/actions/setup-bun
+
+      # No install, PR code or artifact download runs with this token.
+      - name: Delete the pull request's caches
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: bun ./scripts/ci/pr-cache-cleanup.ts --pr "$PR_NUMBER" --delete
+
+  closed-backlog:
+    name: Sweep caches of closed pull requests
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read # check out trusted main cleanup tooling
+      actions: write # delete caches of closed pull requests
+      pull-requests: read # tell open pull requests from closed ones
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+
+      - uses: $/.github/actions/setup-bun
+
+      # Open pull requests keep their caches. Without the delete input this only reports.
+      - name: Sweep closed pull request caches
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DELETE_CACHES: ${{ inputs.delete }}
+        run: |
+          args=(--all-closed)
+          if [ "$DELETE_CACHES" = "true" ]; then args+=(--delete); fi
+          bun ./scripts/ci/pr-cache-cleanup.ts "${args[@]}"

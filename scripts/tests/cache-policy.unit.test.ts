@@ -118,7 +118,7 @@ function rustCacheSteps(): RustCacheStep[] {
 }
 
 describe('CI cache policy', () => {
-  test('grants cache deletion only to the dedicated main cleanup job', () => {
+  test('grants cache deletion only to the dedicated cleanup jobs', () => {
     const holders: string[] = [];
     for (const file of workflowFiles()) {
       const text = readText(file);
@@ -131,7 +131,13 @@ describe('CI cache policy', () => {
         if (typeof value === 'object' && value?.actions === 'write') holders.push(`${file}:${job}`);
       }
     }
-    expect(holders).toEqual(['.github/workflows/rust-cache-cleanup.yml:cleanup']);
+    // pr-cache-cleanup.yml holds the other two grants; its own policy test
+    // (pr-cache-cleanup.unit.test.ts) pins what those jobs may check out and run.
+    expect(holders.sort()).toEqual([
+      '.github/workflows/pr-cache-cleanup.yml:closed-backlog',
+      '.github/workflows/pr-cache-cleanup.yml:closed-pull-request',
+      '.github/workflows/rust-cache-cleanup.yml:cleanup',
+    ]);
     const workflow = readText('.github/workflows/rust-cache-cleanup.yml');
     const job = extractJobBlock(workflow, 'cleanup');
     expect(workflow).toContain('permissions: {}');

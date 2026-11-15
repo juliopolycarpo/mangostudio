@@ -1,13 +1,7 @@
+import type { ActionsCacheEntry } from '../actions-api/client';
 import { MAIN_CACHE_REF, parseRustCacheKey } from './families';
 
-export interface RustCacheEntry {
-  readonly id: number;
-  readonly key: string;
-  readonly ref: string;
-  readonly version: string;
-  readonly created_at: string;
-  readonly size_in_bytes: number;
-}
+export type RustCacheEntry = ActionsCacheEntry;
 
 export interface RustCacheDeletion {
   readonly entry: RustCacheEntry;
