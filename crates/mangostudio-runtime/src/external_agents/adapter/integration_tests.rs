@@ -148,8 +148,10 @@ impl Harness for CountingHarness {
         self.log.probes.fetch_add(1, Ordering::SeqCst);
         match self.probe {
             ProbeBehaviour::Answer => self.inner.probe(host).await,
-            ProbeBehaviour::Fail => Err(SdkError::Launch {
-                program: String::from("fake-agent"),
+            // Not `Launch`: since SDK 0.9 that is a program that would not start, which discovery
+            // reports as a refused launch. This is a probe that failed for any other reason.
+            ProbeBehaviour::Fail => Err(SdkError::Link {
+                peer: String::from("fake-agent"),
                 message: String::from("probe refused"),
             }),
             ProbeBehaviour::Stall => {

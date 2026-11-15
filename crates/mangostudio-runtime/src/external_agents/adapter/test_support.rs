@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use super::backend::{Backend, ProductHarnesses};
+use crate::diagnostics::DiagnosticSink;
 use crate::external_agents::port::{self, CloseCause};
 use crate::external_agents::supervisor::{
     ExecutableResolver, PortFuture, Ports, Supervisor, WorkspaceAuthority,
@@ -130,6 +131,22 @@ pub(super) fn host(cwd: std::path::PathBuf) -> port::Host {
         environment: Default::default(),
         runtime_version: "sdk-lifecycle-test".into(),
         cancel: CancellationToken::new(),
+    }
+}
+
+/// Keeps the diagnostic lines a backend wrote, instead of printing them to stderr.
+#[derive(Default)]
+pub(super) struct RecordingDiagnostics(std::sync::Mutex<Vec<String>>);
+
+impl DiagnosticSink for RecordingDiagnostics {
+    fn write_line(&self, line: &str) {
+        self.0.lock().unwrap().push(line.to_owned());
+    }
+}
+
+impl RecordingDiagnostics {
+    pub(super) fn lines(&self) -> Vec<String> {
+        self.0.lock().unwrap().clone()
     }
 }
 

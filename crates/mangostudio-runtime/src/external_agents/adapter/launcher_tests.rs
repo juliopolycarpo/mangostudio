@@ -344,95 +344,94 @@ mod unix {
     }
 
     #[test]
-    fn a_refusal_names_the_os_error_or_the_kind_and_never_a_custom_message() {
-        let errno = LaunchRefusal::of(&io::Error::from_raw_os_error(libc::EACCES));
+    fn a_launch_failure_names_the_os_error_or_the_kind_and_never_a_custom_message() {
+        let errno = describe_os_error(&io::Error::from_raw_os_error(libc::EACCES));
         assert_eq!(
-            errno.describe(),
+            errno,
             "an OS launch failure (Permission denied (os error 13))"
         );
-        let custom = LaunchRefusal::of(&io::Error::other("argv --token=secret in /home/ada/work"));
+        let custom = describe_os_error(&io::Error::other("argv --token=secret in /home/ada/work"));
         assert_eq!(
-            custom.describe(),
-            "a launcher failure (Other)",
-            "expected the kind only | received {:?}",
-            custom.describe()
+            custom, "a launcher failure (Other)",
+            "expected the kind only | received {custom:?}"
         );
     }
 
+    /// A launch error the SDK hands to the host instead of reading as "not installed": the program
+    /// exists, so the error must stay `Launch` and name the errno.
     #[tokio::test]
-    async fn a_non_executable_program_is_the_same_launch_error_and_is_witnessed() {
+    async fn a_non_executable_program_is_a_launch_error_and_not_a_missing_program() {
         let directory = scratch_dir("agent-launcher-unexecutable");
         let program = unexecutable_file(&directory);
-        let (result, refusal) = witnessing(launcher().spawn(spec(
-            &[program.to_str().expect("utf-8")],
-            &directory,
-            false,
-        )))
-        .await;
-        let Err(Error::Launch { message, .. }) = result else {
-            panic!(
-                "expected Error::Launch | received {:?}",
-                result.map(|_| "a started child")
-            );
+        let result = launcher()
+            .spawn(spec(&[program.to_str().expect("utf-8")], &directory, false))
+            .await;
+        let Err(error) = result else {
+            panic!("expected Error::Launch | received a started child");
         };
         assert!(
-            message.contains("os error 13"),
-            "expected the SDK to keep seeing a launch error naming EACCES | received {message:?}"
-        );
-        assert_eq!(
-            refusal.map(|refusal| refusal.describe()),
-            Some(message),
-            "expected the witness to hold the same structured failure"
+            !error.is_program_not_found()
+                && matches!(&error, Error::Launch { message, .. } if message.contains("os error 13")),
+            "expected Error::Launch naming EACCES | received {error:?}"
         );
     }
 
     #[tokio::test]
-    async fn a_missing_program_is_not_witnessed() {
-        let directory = scratch_dir("agent-launcher-not-witnessed");
-        let (result, refusal) =
-            witnessing(launcher().spawn(spec(&["/nonexistent/agent-cli"], &directory, false)))
-                .await;
+    async fn a_missing_program_is_program_not_found() {
+        let directory = scratch_dir("agent-launcher-not-found");
+        let result = launcher()
+            .spawn(spec(&["/nonexistent/agent-cli"], &directory, false))
+            .await;
+        let Err(error) = result else {
+            panic!("expected Error::ProgramNotFound | received a started child");
+        };
         assert!(
-            matches!(result, Err(Error::Launch { .. })) && refusal.is_none(),
-            "expected a launch error and no witnessed refusal | received {:?} and {refusal:?}",
-            result.map(|_| "a started child")
+            error.is_program_not_found()
+                && matches!(&error, Error::ProgramNotFound { program } if program == "/nonexistent/agent-cli"),
+            "expected Error::ProgramNotFound naming the program | received {error:?}"
         );
     }
 
     #[tokio::test]
-    async fn a_missing_cwd_is_witnessed_as_a_refusal_not_a_missing_program() {
+    async fn a_missing_cwd_is_a_launch_error_and_not_a_missing_program() {
         let directory = scratch_dir("agent-launcher-cwd-gone");
         let gone = directory.join("removed");
-        let (result, refusal) =
-            witnessing(launcher().spawn(spec(&["/bin/sh"], &gone, false))).await;
+        let result = launcher().spawn(spec(&["/bin/sh"], &gone, false)).await;
+        let Err(error) = result else {
+            panic!("expected Error::Launch | received a started child");
+        };
         assert!(
-            matches!(result, Err(Error::Launch { .. })) && refusal.is_some(),
-            "expected a launch error and a witnessed refusal for a missing cwd | \
-             received {:?} and {refusal:?}",
-            result.map(|_| "a started child")
+            !error.is_program_not_found()
+                && matches!(&error, Error::Launch { message, .. } if message.contains("os error 2")),
+            "expected Error::Launch naming ENOENT for a missing cwd | received {error:?}"
         );
     }
 
+    /// An unsearchable `PATH` entry makes `execve` report EACCES for a program installed nowhere,
+    /// which is a missing program and not a refused launch.
     #[tokio::test]
-    async fn a_refusal_outside_a_witness_scope_is_dropped_and_the_first_one_wins() {
-        observe(LaunchRefusal::of(&io::Error::from_raw_os_error(
-            libc::EMFILE,
-        )));
-        let ((), refusal) = witnessing(async {
-            observe(LaunchRefusal::of(&io::Error::from_raw_os_error(
-                libc::EACCES,
-            )));
-            observe(LaunchRefusal::of(&io::Error::from_raw_os_error(
-                libc::EMFILE,
-            )));
-        })
-        .await;
-        assert_eq!(
-            refusal,
-            Some(LaunchRefusal::of(&io::Error::from_raw_os_error(
-                libc::EACCES
-            ))),
-            "expected only the first in-scope refusal | received {refusal:?}"
+    async fn an_unsearchable_path_entry_with_the_program_nowhere_is_program_not_found() {
+        use std::os::unix::fs::PermissionsExt;
+        // Root ignores directory permission bits, so a chmod 000 directory stays searchable.
+        if nix::unistd::geteuid().is_root() {
+            eprintln!("skipped: running as root, directory modes do not restrict root");
+            return;
+        }
+        let root = scratch_dir("agent-launcher-sealed-only");
+        let sealed = root.join("sealed");
+        std::fs::create_dir_all(&sealed).expect("mkdir sealed");
+        std::fs::set_permissions(&sealed, std::fs::Permissions::from_mode(0o000))
+            .expect("seal the directory");
+        let _restore = Unsearchable(sealed.clone());
+
+        let result = launcher().spawn(spec_searching(&[&sealed], &root)).await;
+        let Err(error) = result else {
+            panic!("expected Error::ProgramNotFound | received a started child");
+        };
+        assert!(
+            error.is_program_not_found(),
+            "expected Error::ProgramNotFound for an unsearchable PATH entry holding no candidate \
+             | received {error:?}"
         );
     }
 
@@ -857,23 +856,24 @@ mod unix {
     }
 
     #[tokio::test]
-    async fn a_missing_program_is_a_launch_error_naming_the_os_failure() {
+    async fn a_missing_program_error_carries_no_environment_value() {
         let directory = scratch_dir("agent-launcher-missing");
         let mut missing = spec(&["/nonexistent/agent-cli"], &directory, false);
         missing
             .env
             .insert("AGENT_TOKEN".to_owned(), "env-secret-value".to_owned());
         let result = launcher().spawn(missing).await;
-        let Err(Error::Launch { program, message }) = result else {
-            panic!(
-                "expected Error::Launch | received {:?}",
-                result.map(|_| "a started child")
-            );
+        let Err(error) = result else {
+            panic!("expected Error::ProgramNotFound | received a started child");
         };
-        assert_eq!(program, "/nonexistent/agent-cli");
         assert!(
-            message.contains("os error 2") && !message.contains("env-secret-value"),
-            "expected the OS error and no environment value | received {message:?}"
+            matches!(&error, Error::ProgramNotFound { program } if program == "/nonexistent/agent-cli"),
+            "expected Error::ProgramNotFound naming the program | received {error:?}"
+        );
+        let rendered = format!("{error} {error:?}");
+        assert!(
+            !rendered.contains("env-secret-value"),
+            "expected no environment value in the error | received {rendered:?}"
         );
     }
 

@@ -40,7 +40,9 @@ pub(super) fn facts(error: Error) -> AgentFailure {
         | Error::LimitExceeded { .. } => FailureCause::InvalidRequest,
         Error::VersionGate { .. } => FailureCause::Version,
         Error::AuthRequired { .. } => FailureCause::Authentication,
-        Error::Launch { .. } => FailureCause::Launch,
+        // A missing program is a launch that did not happen, like any other failure to start.
+        // The wire tells them apart (`map::cause_error`); recovery does not.
+        Error::Launch { .. } | Error::ProgramNotFound { .. } => FailureCause::Launch,
         // The tree of an already-launched child; the cleanup handle travels separately as
         // `cleanup`, so the cause alone carries no recovery decision.
         Error::Teardown { .. } => FailureCause::Other,
@@ -84,6 +86,26 @@ pub(super) fn facts(error: Error) -> AgentFailure {
         ),
         busy_refusal: matches!(error, Error::Busy)
             || matches!(&error, Error::Operation { source, .. } if matches!(**source, Error::Busy)),
+    }
+}
+
+/// The OS failure summary when `error` is a program that is present but could not be started.
+///
+/// This is what the SDK's version probes now return from `discover` for every launch failure that
+/// is not [`Error::ProgramNotFound`]. An error that carries a child's cleanup control is `None`
+/// whatever its cause: that child may still be running, so the caller reconciles it through
+/// [`settle`] instead of reading the failure as a refused launch.
+///
+/// ```ignore
+/// if let Some(os_error) = refused_launch(&error) { report_launch_refused(os_error); }
+/// ```
+pub(super) fn refused_launch(error: &Error) -> Option<&str> {
+    if error.cleanup_control().is_some() {
+        return None;
+    }
+    match error.cause() {
+        Error::Launch { message, .. } => Some(message),
+        _ => None,
     }
 }
 
@@ -171,6 +193,43 @@ mod tests {
         let unobserved = facts(Error::Busy);
         assert_eq!(unobserved.dispatch, None);
         assert_eq!(unobserved.dispatch(), Dispatch::AcceptanceUnknown);
+    }
+
+    /// Not a refused launch: a missing program, a child still owned, and everything unrelated.
+    #[test]
+    fn only_a_launch_failure_without_a_child_is_a_refused_launch() {
+        let launch = || Error::Launch {
+            program: String::from("claude"),
+            message: String::from("an OS launch failure (Permission denied (os error 13))"),
+        };
+        assert_eq!(
+            refused_launch(&launch()),
+            Some("an OS launch failure (Permission denied (os error 13))")
+        );
+        assert_eq!(
+            refused_launch(&launch().with_dispatch(mango_external_agents::Dispatch::NotSubmitted)),
+            Some("an OS launch failure (Permission denied (os error 13))"),
+            "expected a dispatch annotation not to hide the launch failure"
+        );
+        for other in [
+            Error::program_not_found("claude"),
+            Error::Busy,
+            Error::Closed { subject: "link" },
+        ] {
+            assert_eq!(
+                refused_launch(&other),
+                None,
+                "expected {other:?} not to read as a refused launch"
+            );
+        }
+    }
+
+    #[test]
+    fn a_missing_program_is_a_launch_cause_that_recovery_treats_like_any_failed_start() {
+        let failure = facts(Error::program_not_found("claude"));
+        assert_eq!(failure.cause, FailureCause::Launch);
+        assert_eq!(failure.cleanup, CleanupOutcome::NotRequired);
+        assert_eq!(failure.session, SessionUsability::Unknown);
     }
 
     #[tokio::test]
