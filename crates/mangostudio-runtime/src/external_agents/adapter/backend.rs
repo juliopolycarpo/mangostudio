@@ -149,8 +149,9 @@ impl Backend {
             diagnostics: Arc::new(StderrDiagnostics),
         }
     }
-    /// Sends the operator diagnostics to `diagnostics` instead of stderr.
-    #[cfg(test)]
+    /// Sends the operator diagnostics to `diagnostics` instead of stderr. Unix only: its callers
+    /// are the launch-failure tests, which need a real non-executable file on `PATH`.
+    #[cfg(all(test, unix))]
     pub(crate) fn with_diagnostics(mut self, diagnostics: Arc<dyn DiagnosticSink>) -> Self {
         self.diagnostics = diagnostics;
         self
