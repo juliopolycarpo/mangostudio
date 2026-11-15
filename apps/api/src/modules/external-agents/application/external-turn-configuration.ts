@@ -53,6 +53,7 @@ import type { OwnedChatRecord } from '../../chats/infrastructure/chat-repository
 import {
   type ExternalAgentDiscoveryService,
   externalAgentDiscoveryService,
+  isUndeterminedWithoutMatrix,
 } from './external-agent-discovery';
 import {
   type ExternalIdentityIsolationRegistry,
@@ -203,7 +204,9 @@ export function createExternalTurnConfigurationResolver(
     // check below refuses every send against a cold cache — and told the user
     // to change a permission setting, which fixes nothing. Nothing has been
     // asked yet, and the remedy is to wait rather than to change anything.
-    if (!found.adapterAnswered) {
+    // An adapter that answered "installed, undetermined" with no matrix (a CLI it found but could
+    // not start) has the same empty list and the same remedy: nothing was learned to check against.
+    if (!found.adapterAnswered || isUndeterminedWithoutMatrix(found)) {
       return {
         ok: false,
         notReady: true,

@@ -304,3 +304,55 @@ describe('the model a turn resolves to', () => {
     expect(resolution.configuration.effort).toBe('high');
   });
 });
+
+/**
+ * An adapter that answered "installed, undetermined" and nothing else (the runtime's answer for a
+ * CLI it found but could not start) has an empty matrix like a cold cache, and the same remedy.
+ * Only that shape is "not ready"; every other row keeps the pair check it always had.
+ */
+describe('an adapter answer with nothing to check a permission pair against', () => {
+  const NOT_READY = 'This agent has not finished reporting what it can do here yet. Try again.';
+  const PAIR_REFUSED =
+    'This agent does not support the permission combination this chat is set to.';
+
+  async function resolution(agent: ExternalAgentDescriptor) {
+    return await resolverWith(DEFAULT_EXTERNAL_AGENT_SETTINGS, agent)({ ...BASE, chat: chat() });
+  }
+
+  it('is not ready when it is installed, undetermined and has an empty matrix', async () => {
+    const result = await resolution(
+      descriptor({ discoveryState: 'undetermined', supportedConfigurations: [] })
+    );
+
+    expect(result).toMatchObject({ ok: false, notReady: true, message: NOT_READY });
+  });
+
+  it('still resolves an undetermined row that carries a matrix', async () => {
+    const result = await resolution(descriptor({ discoveryState: 'undetermined' }));
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('keeps the permission-combination refusal for a determined row with an unsupported pair', async () => {
+    const result = await resolution(
+      descriptor({
+        discoveryState: 'determined',
+        supportedConfigurations: [
+          { level: 'default', routing: 'auto-review', supported: true, unattended: false },
+        ],
+      })
+    );
+
+    expect(result).toMatchObject({ ok: false, message: PAIR_REFUSED });
+    expect(result).not.toHaveProperty('notReady');
+  });
+
+  it('keeps the permission-combination refusal for a determined row with an empty matrix', async () => {
+    const result = await resolution(
+      descriptor({ discoveryState: 'determined', supportedConfigurations: [] })
+    );
+
+    expect(result).toMatchObject({ ok: false, message: PAIR_REFUSED });
+    expect(result).not.toHaveProperty('notReady');
+  });
+});

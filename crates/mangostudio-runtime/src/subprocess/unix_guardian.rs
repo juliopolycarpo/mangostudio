@@ -19,6 +19,7 @@ use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::process::ExitStatusExt;
+use std::path::Path;
 use std::pin::Pin;
 use std::process::ExitStatus;
 use std::sync::{Mutex, OnceLock};
@@ -586,6 +587,39 @@ fn program_candidates(program: &CString, path: Option<&[u8]>) -> io::Result<Vec<
             CString::new(candidate).expect("a validated PATH and program have no NUL")
         })
         .collect::<Vec<_>>())
+}
+
+/// Whether `request`'s program resolves to an existing non-directory somewhere the launch would
+/// look: the one path when the program contains a separator, else each `PATH` candidate in order.
+///
+/// Uses the same [`program_candidates`] the guardian walks. A candidate whose directory cannot be
+/// searched does not stat, so an unsearchable `PATH` entry is no evidence the program exists. The
+/// stat blocks, so callers run it off the async threads.
+pub(super) fn program_exists(request: &ProcessRequest) -> bool {
+    let Ok(program) = cstring(request.program.as_os_str(), "program") else {
+        return false;
+    };
+    let path = match &request.env {
+        Some(environment) => environment
+            .get(OsStr::new("PATH"))
+            .map(|value| value.as_bytes().to_vec()),
+        None => inherited_environment()
+            .iter()
+            .find_map(|entry| entry.to_bytes().strip_prefix(b"PATH=").map(<[u8]>::to_vec)),
+    };
+    let Ok(candidates) = program_candidates(&program, path.as_deref()) else {
+        return false;
+    };
+    candidates.iter().any(|candidate| {
+        let candidate = Path::new(OsStr::from_bytes(candidate.to_bytes()));
+        // The guardian changes into the cwd before `execve`, so a relative candidate is
+        // relative to it, not to this process.
+        let resolved = match &request.cwd {
+            Some(cwd) if candidate.is_relative() => cwd.join(candidate),
+            _ => candidate.to_path_buf(),
+        };
+        std::fs::metadata(resolved).is_ok_and(|meta| !meta.is_dir())
+    })
 }
 
 fn raw_spawn_lock() -> &'static Mutex<()> {
@@ -1381,15 +1415,43 @@ unsafe fn target_main(fds: GuardianFds, spec: &ExecSpec) -> ! {
     if let Err(error) = unsafe { reset_inherited_signal_state() } {
         exec_failed_and_exit(fds.exec_error_write, error);
     }
+    // The PATH walk follows glibc's `execvp`: keep searching past a candidate that is missing or
+    // that this process may not execute, remember EACCES, and stop at any other errno because it
+    // means a file was found and the failure is its own to report. Pure integer logic over
+    // `errno`, so nothing here allocates.
     let mut error = libc::ENOENT;
+    let mut denied = false;
     for program in &spec.programs {
         unsafe { libc::execve(program.as_ptr(), spec.argv.as_ptr(), spec.envp.as_ptr()) };
         error = unsafe { errno_raw() };
-        if error != libc::ENOENT && error != libc::ENOTDIR {
-            break;
+        if error == libc::EACCES {
+            denied = true;
+        }
+        if !search_continues(error) {
+            exec_failed_and_exit(fds.exec_error_write, error);
         }
     }
-    exec_failed_and_exit(fds.exec_error_write, error)
+    exec_failed_and_exit(fds.exec_error_write, exhausted_search_error(error, denied))
+}
+
+/// Whether the PATH walk goes on to the next candidate after `execve` failed with `error`.
+///
+/// This is glibc's `execvp` set. ENOENT, ENOTDIR, ESTALE, ENODEV and ETIMEDOUT mean the candidate
+/// is absent or unreachable; EACCES means it (or a directory above it) is not ours to run, which
+/// a later PATH entry may be. Everything else (ENOEXEC, ETXTBSY, E2BIG, ENOMEM, ELOOP, EMFILE,
+/// ...) means a candidate was found and the failure belongs to it, so the walk stops there and
+/// reports it, which also keeps a resource failure from being retried against every entry.
+const fn search_continues(error: libc::c_int) -> bool {
+    matches!(
+        error,
+        libc::EACCES | libc::ENOENT | libc::ENOTDIR | libc::ESTALE | libc::ENODEV | libc::ETIMEDOUT
+    )
+}
+
+/// The errno to report once every candidate failed with one for which [`search_continues`] held:
+/// EACCES if any candidate was refused, otherwise the last candidate's own, as `execvp` does.
+const fn exhausted_search_error(last: libc::c_int, denied: bool) -> libc::c_int {
+    if denied { libc::EACCES } else { last }
 }
 
 /// Signals the runtime itself sends to a child (`SIGINT`, `SIGTERM`), or that a shell, agent CLI,
@@ -2186,6 +2248,42 @@ mod tests {
     use std::ffi::OsString;
 
     use super::collect_inheritable;
+    use super::{exhausted_search_error, search_continues};
+
+    /// The errnos of glibc's `execvp` walk: absent or refused candidates go on, found-file
+    /// failures stop.
+    #[test]
+    fn the_path_walk_continues_exactly_for_the_execvp_errnos() {
+        for (name, errno, continues) in [
+            ("EACCES", libc::EACCES, true),
+            ("ENOENT", libc::ENOENT, true),
+            ("ENOTDIR", libc::ENOTDIR, true),
+            ("ESTALE", libc::ESTALE, true),
+            ("ENODEV", libc::ENODEV, true),
+            ("ETIMEDOUT", libc::ETIMEDOUT, true),
+            ("ENOEXEC", libc::ENOEXEC, false),
+            ("ETXTBSY", libc::ETXTBSY, false),
+            ("E2BIG", libc::E2BIG, false),
+            ("ELOOP", libc::ELOOP, false),
+            ("ENAMETOOLONG", libc::ENAMETOOLONG, false),
+            ("ENOMEM", libc::ENOMEM, false),
+            ("EMFILE", libc::EMFILE, false),
+        ] {
+            assert_eq!(
+                search_continues(errno),
+                continues,
+                "({name}): expected search_continues {continues} | received {}",
+                !continues
+            );
+        }
+    }
+
+    #[test]
+    fn an_exhausted_walk_reports_a_remembered_eacces_over_the_last_errno() {
+        assert_eq!(exhausted_search_error(libc::ENOENT, true), libc::EACCES);
+        assert_eq!(exhausted_search_error(libc::ENOENT, false), libc::ENOENT);
+        assert_eq!(exhausted_search_error(libc::ENOTDIR, false), libc::ENOTDIR);
+    }
 
     #[test]
     fn close_except_closes_every_unlisted_descriptor_and_keeps_the_listed_one() {

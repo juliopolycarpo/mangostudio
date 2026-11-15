@@ -135,6 +135,27 @@ export interface DiscoveredExternalAgent {
   readonly adapterAnswered: boolean;
 }
 
+/**
+ * Whether an adapter answered but left nothing to act on: an installed target whose
+ * `discoveryState` is `undetermined` with an empty `supportedConfigurations`.
+ *
+ * The runtime answers exactly this for a CLI it found but could not start (a lost exec bit, a
+ * descriptor limit): it knows the program exists and nothing else. A turn has no permission
+ * pair to check against an empty matrix, and a consent record over its empty capability set
+ * would never match the real one, so both callers treat it as "not ready, try again", the same
+ * as an adapter that has not answered. An undetermined row that carries a matrix, and a
+ * determined row of any matrix, are not this.
+ */
+export function isUndeterminedWithoutMatrix(agent: DiscoveredExternalAgent): boolean {
+  const { descriptor } = agent;
+  return (
+    agent.adapterAnswered &&
+    descriptor.installed &&
+    descriptor.discoveryState === 'undetermined' &&
+    descriptor.supportedConfigurations.length === 0
+  );
+}
+
 export interface DescribeExternalAgentsOptions {
   /**
    * Wait for the authoritative pass on a cold miss instead of serving the scan.

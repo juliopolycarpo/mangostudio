@@ -249,6 +249,38 @@ pub(crate) fn descriptor(
     }
 }
 
+/// A target whose executable exists but would not start, so nothing else is known: installed,
+/// undetermined, with no unavailable reason and no install remedy.
+///
+/// # Example
+///
+/// ```ignore
+/// let descriptor = undetermined(TargetId::Claude, 1_000);
+/// assert!(descriptor.installed && descriptor.unavailable_reason.is_none());
+/// ```
+pub(crate) fn undetermined(target: TargetId, probed_at_ms: u64) -> wire::Descriptor {
+    wire::Descriptor {
+        target_id: target,
+        installed: true,
+        discovery_state: wire::DiscoveryState::Undetermined,
+        version: None,
+        required_version: None,
+        auth_state: wire::AuthState::Unknown,
+        login_command: Some(login_command(target).to_owned()),
+        capabilities: wire::Capabilities::default(),
+        supported_configurations: Vec::new(),
+        models: None,
+        account: None,
+        unavailable_reason: None,
+        remedy: None,
+        discovery: Some(wire::DiscoveryReport {
+            source: wire::DiscoverySource::Live,
+            probed_at_ms,
+            attempts: 1,
+        }),
+    }
+}
+
 /// A target with nothing installed: an empty matrix, the vendor's login
 /// command, and the install remedy.
 fn not_installed(target: TargetId, report: Option<wire::DiscoveryReport>) -> wire::Descriptor {

@@ -118,6 +118,324 @@ mod unix {
         }
     }
 
+    /// Writes a script the kernel will not execute: a body, but no execute bit.
+    fn unexecutable_file(directory: &Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = directory.join("agent-cli");
+        std::fs::write(&path, "#!/bin/sh\nexit 0\n").expect("write the fixture");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
+            .expect("clear the execute bits");
+        path
+    }
+
+    /// A launch request for `program` with exactly `path` as its `PATH`.
+    fn request_in(program: &str, path: &Path, cwd: &Path) -> ProcessRequest {
+        let mut request = ProcessRequest::new(program, std::iter::empty::<OsString>());
+        request.env = Some(BTreeMap::from([(
+            OsString::from("PATH"),
+            path.as_os_str().to_owned(),
+        )]));
+        request.cwd = Some(cwd.to_path_buf());
+        request
+    }
+
+    /// What the spawn errors the guardian can report mean to the launcher, with the cwd a real
+    /// directory unless the row says otherwise. Only a missing program may read as not installed.
+    #[test]
+    fn only_a_missing_program_in_an_existing_cwd_is_a_missing_program() {
+        let cwd = scratch_dir("agent-launcher-classify");
+        let absent_cwd = cwd.join("removed");
+        let empty_path = scratch_dir("agent-launcher-classify-empty");
+        let present_path = scratch_dir("agent-launcher-classify-present");
+        let present = unexecutable_file(&present_path);
+        let errno = |code: i32| io::Error::from_raw_os_error(code);
+        let nowhere = request_in("agent-cli", &empty_path, &cwd);
+        let nowhere_in_absent_cwd = request_in("agent-cli", &empty_path, &absent_cwd);
+        let found_on_path = request_in("agent-cli", &present_path, &cwd);
+        let explicit_found = request_in(present.to_str().expect("utf-8"), &empty_path, &cwd);
+        let explicit_missing = request_in("/nonexistent/agent-cli", &empty_path, &cwd);
+        let rows: Vec<(&str, io::Error, &ProcessRequest, bool)> = vec![
+            ("ENOENT", errno(libc::ENOENT), &nowhere, true),
+            ("ENOTDIR", errno(libc::ENOTDIR), &nowhere, true),
+            (
+                "no PATH to search",
+                io::Error::new(io::ErrorKind::NotFound, "PATH is required"),
+                &nowhere,
+                true,
+            ),
+            (
+                "ENOENT, cwd gone",
+                errno(libc::ENOENT),
+                &nowhere_in_absent_cwd,
+                false,
+            ),
+            (
+                "ENOTDIR, cwd gone",
+                errno(libc::ENOTDIR),
+                &nowhere_in_absent_cwd,
+                false,
+            ),
+            // Path resolution refusals count only when a candidate exists to be refused.
+            (
+                "EACCES, file on PATH",
+                errno(libc::EACCES),
+                &found_on_path,
+                false,
+            ),
+            (
+                "ELOOP, file on PATH",
+                errno(libc::ELOOP),
+                &found_on_path,
+                false,
+            ),
+            (
+                "ENAMETOOLONG, file on PATH",
+                errno(libc::ENAMETOOLONG),
+                &found_on_path,
+                false,
+            ),
+            (
+                "EACCES, explicit file",
+                errno(libc::EACCES),
+                &explicit_found,
+                false,
+            ),
+            ("EACCES, CLI nowhere", errno(libc::EACCES), &nowhere, true),
+            ("ELOOP, CLI nowhere", errno(libc::ELOOP), &nowhere, true),
+            (
+                "ENAMETOOLONG, CLI nowhere",
+                errno(libc::ENAMETOOLONG),
+                &nowhere,
+                true,
+            ),
+            (
+                "EACCES, explicit path missing",
+                errno(libc::EACCES),
+                &explicit_missing,
+                true,
+            ),
+            // Host-resource and found-file failures never read as missing, evidence or not.
+            ("ENOEXEC", errno(libc::ENOEXEC), &nowhere, false),
+            ("ETXTBSY", errno(libc::ETXTBSY), &nowhere, false),
+            ("EMFILE", errno(libc::EMFILE), &nowhere, false),
+            ("ENFILE", errno(libc::ENFILE), &nowhere, false),
+            ("ENOMEM", errno(libc::ENOMEM), &nowhere, false),
+            (
+                "a guardian protocol error",
+                io::Error::new(io::ErrorKind::InvalidData, "invalid readiness byte"),
+                &nowhere,
+                false,
+            ),
+        ];
+        for (name, error, request, expected) in rows {
+            assert_eq!(
+                is_missing_program(&error, request),
+                expected,
+                "({name}): expected is_missing_program {expected} | received {} for {error:?}",
+                !expected
+            );
+        }
+    }
+
+    /// A launch of the bare name `prog` with `path_entries` as the whole `PATH`.
+    fn spec_searching(path_entries: &[&Path], cwd: &Path) -> LaunchSpec {
+        let path = std::env::join_paths(path_entries).expect("PATH entries have no ':'");
+        LaunchSpec {
+            argv: vec!["prog".to_owned()],
+            cwd: cwd.to_path_buf(),
+            env: BTreeMap::from([("PATH".to_owned(), path.to_string_lossy().into_owned())]),
+            stdin: false,
+            hide_window: true,
+        }
+    }
+
+    /// Writes `directory/prog` with `mode`; a script that prints `ran`.
+    fn prog_with_mode(directory: &Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        let path = directory.join("prog");
+        std::fs::write(&path, "#!/bin/sh\necho ran\n").expect("write prog");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode))
+            .expect("set the prog mode");
+    }
+
+    /// An earlier `PATH` entry holding a `prog` this user may not execute must not shadow a working
+    /// one later on, as `execvp` and every shell resolve it.
+    #[tokio::test]
+    async fn the_path_search_runs_a_later_entry_past_a_non_executable_one() {
+        let root = scratch_dir("agent-launcher-path-walk-mode");
+        let refused = root.join("refused");
+        let working = root.join("working");
+        std::fs::create_dir_all(&refused).expect("mkdir refused");
+        std::fs::create_dir_all(&working).expect("mkdir working");
+        prog_with_mode(&refused, 0o644);
+        prog_with_mode(&working, 0o755);
+
+        let mut process = start(&launcher(), spec_searching(&[&refused, &working], &root)).await;
+        assert_eq!(
+            read_all(&mut process).await.trim(),
+            "ran",
+            "expected the later working prog to run | received other output"
+        );
+        wait(&process).await;
+    }
+
+    /// Restores a directory's mode on drop so the scratch cleanup can remove it.
+    struct Unsearchable(PathBuf);
+
+    impl Drop for Unsearchable {
+        fn drop(&mut self) {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    #[tokio::test]
+    async fn the_path_search_runs_a_later_entry_past_an_unsearchable_directory() {
+        use std::os::unix::fs::PermissionsExt;
+        // Root ignores directory permission bits, so a chmod 000 directory stays searchable.
+        if nix::unistd::geteuid().is_root() {
+            eprintln!("skipped: running as root, directory modes do not restrict root");
+            return;
+        }
+        let root = scratch_dir("agent-launcher-path-walk-dir");
+        let sealed = root.join("sealed");
+        let working = root.join("working");
+        std::fs::create_dir_all(&sealed).expect("mkdir sealed");
+        std::fs::create_dir_all(&working).expect("mkdir working");
+        prog_with_mode(&sealed, 0o755);
+        prog_with_mode(&working, 0o755);
+        std::fs::set_permissions(&sealed, std::fs::Permissions::from_mode(0o000))
+            .expect("seal the directory");
+        let _restore = Unsearchable(sealed.clone());
+
+        let mut process = start(&launcher(), spec_searching(&[&sealed, &working], &root)).await;
+        assert_eq!(
+            read_all(&mut process).await.trim(),
+            "ran",
+            "expected the prog behind the unsearchable directory to run | received other output"
+        );
+        wait(&process).await;
+    }
+
+    #[tokio::test]
+    async fn a_path_holding_only_a_non_executable_prog_still_fails_with_eacces() {
+        let root = scratch_dir("agent-launcher-path-walk-only-refused");
+        let refused = root.join("refused");
+        let empty = root.join("empty");
+        std::fs::create_dir_all(&refused).expect("mkdir refused");
+        std::fs::create_dir_all(&empty).expect("mkdir empty");
+        prog_with_mode(&refused, 0o644);
+
+        // The refusal comes first and a missing candidate follows, so the remembered EACCES is
+        // what must be reported, not the last candidate's ENOENT.
+        let result = launcher()
+            .spawn(spec_searching(&[&refused, &empty], &root))
+            .await;
+        let Err(Error::Launch { message, .. }) = result else {
+            panic!(
+                "expected Error::Launch | received {:?}",
+                result.map(|_| "a started child")
+            );
+        };
+        assert!(
+            message.contains("os error 13"),
+            "expected the remembered EACCES | received {message:?}"
+        );
+    }
+
+    #[test]
+    fn a_refusal_names_the_os_error_or_the_kind_and_never_a_custom_message() {
+        let errno = LaunchRefusal::of(&io::Error::from_raw_os_error(libc::EACCES));
+        assert_eq!(
+            errno.describe(),
+            "an OS launch failure (Permission denied (os error 13))"
+        );
+        let custom = LaunchRefusal::of(&io::Error::other("argv --token=secret in /home/ada/work"));
+        assert_eq!(
+            custom.describe(),
+            "a launcher failure (Other)",
+            "expected the kind only | received {:?}",
+            custom.describe()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_non_executable_program_is_the_same_launch_error_and_is_witnessed() {
+        let directory = scratch_dir("agent-launcher-unexecutable");
+        let program = unexecutable_file(&directory);
+        let (result, refusal) = witnessing(launcher().spawn(spec(
+            &[program.to_str().expect("utf-8")],
+            &directory,
+            false,
+        )))
+        .await;
+        let Err(Error::Launch { message, .. }) = result else {
+            panic!(
+                "expected Error::Launch | received {:?}",
+                result.map(|_| "a started child")
+            );
+        };
+        assert!(
+            message.contains("os error 13"),
+            "expected the SDK to keep seeing a launch error naming EACCES | received {message:?}"
+        );
+        assert_eq!(
+            refusal.map(|refusal| refusal.describe()),
+            Some(message),
+            "expected the witness to hold the same structured failure"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_missing_program_is_not_witnessed() {
+        let directory = scratch_dir("agent-launcher-not-witnessed");
+        let (result, refusal) =
+            witnessing(launcher().spawn(spec(&["/nonexistent/agent-cli"], &directory, false)))
+                .await;
+        assert!(
+            matches!(result, Err(Error::Launch { .. })) && refusal.is_none(),
+            "expected a launch error and no witnessed refusal | received {:?} and {refusal:?}",
+            result.map(|_| "a started child")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_missing_cwd_is_witnessed_as_a_refusal_not_a_missing_program() {
+        let directory = scratch_dir("agent-launcher-cwd-gone");
+        let gone = directory.join("removed");
+        let (result, refusal) =
+            witnessing(launcher().spawn(spec(&["/bin/sh"], &gone, false))).await;
+        assert!(
+            matches!(result, Err(Error::Launch { .. })) && refusal.is_some(),
+            "expected a launch error and a witnessed refusal for a missing cwd | \
+             received {:?} and {refusal:?}",
+            result.map(|_| "a started child")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refusal_outside_a_witness_scope_is_dropped_and_the_first_one_wins() {
+        observe(LaunchRefusal::of(&io::Error::from_raw_os_error(
+            libc::EMFILE,
+        )));
+        let ((), refusal) = witnessing(async {
+            observe(LaunchRefusal::of(&io::Error::from_raw_os_error(
+                libc::EACCES,
+            )));
+            observe(LaunchRefusal::of(&io::Error::from_raw_os_error(
+                libc::EMFILE,
+            )));
+        })
+        .await;
+        assert_eq!(
+            refusal,
+            Some(LaunchRefusal::of(&io::Error::from_raw_os_error(
+                libc::EACCES
+            ))),
+            "expected only the first in-scope refusal | received {refusal:?}"
+        );
+    }
+
     /// Reads stdout to EOF within the bound.
     async fn read_all(process: &mut ManagedProcess) -> String {
         let mut output = Vec::new();

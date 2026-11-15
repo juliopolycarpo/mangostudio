@@ -143,6 +143,50 @@ remains tryable when its other checks allow it. Home, the selector and Settings 
 The field is optional for older runtimes; explicit refusals still make the affected target or
 permission combination unavailable.
 
+Only a missing executable reads as `not-installed`. The SDK's harnesses treat any launch error from
+their version probe as "not installed", and the runtime's launcher raises that error for every OS
+spawn failure, so the runtime tells the two apart itself. It records the OS error of a failed
+probe launch as structured values for the duration of one discovery call (no state outlives the
+call, and concurrent targets do not share it). The rule:
+
+- ENOENT, ENOTDIR or an absent `PATH` is a missing program while the working directory still
+  exists. The guardian reports `chdir` and `execve` failures through one errno pipe, so ENOENT
+  raised from inside a program that does exist (its shebang interpreter or dynamic loader is gone)
+  cannot be told from a missing program and also reads as `not-installed`.
+- EACCES, ELOOP and ENAMETOOLONG come from resolving a path, and an unsearchable `PATH` entry
+  raises them for a CLI that is installed nowhere. They count as a refusal only with evidence that
+  the program exists: the explicit path (when the program name contains a separator) or at least
+  one `PATH` candidate stats as an existing non-directory. Otherwise the program is missing. The
+  check reuses the launcher's own candidate list and stats off the async threads.
+- ENOEXEC, ETXTBSY, EMFILE, ENFILE, ENOMEM and a working directory that no longer exists are
+  refusals whatever the filesystem holds.
+
+A refusal returns an installed, `undetermined` descriptor with no unavailable reason and no install
+remedy, and the runtime writes one `external_agent_launch_refused` warn line to stderr naming the
+target and the OS error, never argv, the working directory or the environment. The wire has no
+field for the OS error, and an error response would drop the target's row whenever another target
+in the same batch answered. Open and turn launches are untouched: they still fail with
+`external_agent_launch_failed`. Only the version probe that decides installed-or-not is
+reclassified; a later probe the SDK already degrades (Claude `--help` and `auth status`, the Codex
+app-server handshake) keeps its behavior.
+
+The hub reads that descriptor as installed and undetermined with an empty `supportedConfigurations`,
+which is what a cold cache also looks like, so it answers the same way. A turn gets the existing
+`unavailable` failure ("has not finished reporting what it can do here yet. Try again") instead of
+"does not support the permission combination", and the disclosure route answers 503 instead of
+recording an acknowledgement over an empty capability set. The row stays selectable: there is no
+unavailable reason that describes it honestly, and a new one would change the shared contract. An
+undetermined row that carries a matrix, and any determined row, behave as before.
+
+On Unix the launcher's `PATH` walk follows glibc `execvp`. It goes on past a candidate that is
+missing (ENOENT, ENOTDIR, ESTALE, ENODEV, ETIMEDOUT) or that the user may not execute (EACCES, a
+directory they cannot search), and remembers an EACCES. Any other errno means a file was found and
+stops the walk. If nothing ran, the remembered EACCES is the error reported, else the last one.
+A non-executable `prog` early on `PATH` therefore no longer hides a working one later. Windows has
+no runtime-side walk to align: `CreateProcessW` searches `PATH` itself and resolves a bare name
+through `PATHEXT`, so a file without an executable extension is never a candidate and the program
+is missing.
+
 **Discovery is not free.** The authoritative pass is a subprocess on someone else's machine, so it
 carries a stated budget: a per-call timeout, a cache TTL per (user, environment), a single-flight
 so a burst of selector renders produces one probe, and a cap on concurrent discoveries per
