@@ -68,6 +68,73 @@ async fn a_started_child_that_will_not_end_is_a_teardown_not_a_launch_failure() 
     }
 }
 
+/// A start that failed keeps its own error only when the child's tree is proven gone.
+#[test]
+fn a_failed_start_with_a_proven_empty_tree_keeps_the_start_error() {
+    let missing = failed_start_error(Error::program_not_found("codex"), Some(4242), Ok(()));
+    assert!(
+        missing.is_program_not_found(),
+        "expected the missing-program error to stand | received {missing:?}"
+    );
+
+    let refused = failed_start_error(
+        Error::Launch {
+            program: "codex".to_owned(),
+            message: "an OS launch failure (Permission denied (os error 13))".to_owned(),
+        },
+        Some(4242),
+        Ok(()),
+    );
+    assert!(
+        matches!(&refused, Error::Launch { message, .. } if message.contains("os error 13")),
+        "expected the launch error to stand | received {refused:?}"
+    );
+}
+
+/// A cleanup that could not prove the tree empty may have left a guardian or a descendant running.
+/// That outranks every start failure, a cancelled start included: the result is `Error::Teardown`
+/// with the pid, and it is never the missing-program error a version probe reads as "not
+/// installed".
+#[test]
+fn a_failed_start_whose_cleanup_failed_is_a_teardown_naming_the_pid_and_the_start_failure() {
+    let unproven = "a process tree not proven empty within 2s";
+    let starts = [
+        (Error::program_not_found("codex"), "no such program"),
+        (
+            Error::Launch {
+                program: "codex".to_owned(),
+                message: "an OS launch failure (Permission denied (os error 13))".to_owned(),
+            },
+            "os error 13",
+        ),
+        (
+            Error::Cancelled {
+                reason: CancelReason::Requested,
+            },
+            "cancelled",
+        ),
+    ];
+    for (start, start_text) in starts {
+        let rendered = format!("{start:?}");
+        let error = failed_start_error(start, Some(4242), Err(unproven.to_owned()));
+        assert!(
+            !error.is_program_not_found(),
+            "({rendered}): expected a teardown, never a missing program | received {error:?}"
+        );
+        match error {
+            Error::Teardown { pid, message } => {
+                assert_eq!(pid, Some(4242), "({rendered}): expected the child's pid");
+                assert!(
+                    message.contains(unproven) && message.contains(start_text),
+                    "({rendered}): expected the cleanup failure and the start failure \
+                     ({start_text:?}) in the message | received {message:?}"
+                );
+            }
+            other => panic!("({rendered}): expected Error::Teardown | received {other:?}"),
+        }
+    }
+}
+
 #[cfg(unix)]
 mod unix {
     use std::path::{Path, PathBuf};

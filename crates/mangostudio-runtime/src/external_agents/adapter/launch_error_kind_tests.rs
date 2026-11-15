@@ -198,6 +198,76 @@ async fn a_launcher_that_reports_a_launch_failure_discovers_as_launch_refused() 
     }
 }
 
+/// A launcher whose every start fails and whose cleanup of the failed child then fails too: what
+/// `GuardedProcessLauncher` returns when the tree of a child that never ran is not proven empty.
+struct LeftoverChildLauncher;
+
+#[async_trait::async_trait]
+impl ProcessLauncher for LeftoverChildLauncher {
+    async fn spawn(
+        &self,
+        _spec: mango_external_agents::LaunchSpec,
+    ) -> mango_external_agents::Result<mango_external_agents::ManagedProcess> {
+        Err(Error::Teardown {
+            pid: Some(4242),
+            message: format!(
+                "a process tree not proven empty within 2s after a failed start ({})",
+                launch_failure(OS_REFUSAL)
+            ),
+        })
+    }
+}
+
+/// A failed start that leaves a process behind says nothing about whether the CLI is installed:
+/// discovery fails with the launch-failed kind instead of answering not-installed or
+/// launch-refused.
+#[tokio::test]
+async fn a_failed_start_with_a_leftover_child_fails_discovery_instead_of_describing_the_cli() {
+    for target in TARGETS {
+        let diagnostics = Arc::new(RecordingDiagnostics::default());
+        let backend = backend_over(
+            Arc::new(LeftoverChildLauncher),
+            Arc::new(ProductHarnesses),
+            &diagnostics,
+        );
+
+        let outcome = backend
+            .discover(target, None, host(std::env::temp_dir()), None)
+            .await;
+
+        let remote = match outcome {
+            Err(failure) => failure.into_remote(),
+            Ok(descriptor) => panic!(
+                "({target:?} discovery): expected a failure naming the leftover tree | received \
+                 a descriptor with installed {} and reason {:?}",
+                descriptor.installed, descriptor.unavailable_reason
+            ),
+        };
+        assert_eq!(
+            (
+                remote.code.as_str(),
+                remote
+                    .details
+                    .as_ref()
+                    .and_then(|details| details["kind"].as_str()),
+            ),
+            (codes::UNAVAILABLE, Some("external_agent_launch_failed")),
+            "({target:?} discovery): expected the launch-failed (code, kind) | received {remote:?}"
+        );
+        assert!(
+            remote.message.contains("process tree 4242"),
+            "({target:?} discovery): expected the message to name the leftover pid 4242 | \
+             received {:?}",
+            remote.message
+        );
+        assert!(
+            diagnostics.lines().is_empty(),
+            "({target:?} discovery): expected no launch-refused diagnostic | received {:?}",
+            diagnostics.lines()
+        );
+    }
+}
+
 /// A launch error that still carries a child's cleanup control is not a refused launch: the child
 /// may be running, so the error surfaces after the adapter reaps it, as it did before.
 #[tokio::test]
