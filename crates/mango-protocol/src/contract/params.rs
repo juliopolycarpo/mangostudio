@@ -36,6 +36,26 @@ pub(super) fn compile(field: &str, schema: &Value) -> Result<Validator, Validati
 /// level short for exactly these two keywords, since the violation is about
 /// a property that (for `required`) never appears in the document at all.
 pub(super) fn first_violation(validator: &Validator, value: &Value) -> Option<(String, String)> {
+    first_violation_rendered(validator, value, |error| error.to_string())
+}
+
+/// [`first_violation`] with a reason that never quotes `value`:
+/// [`jsonschema::ValidationError::masked`] keeps the keyword, the property
+/// names and the JSON types and redacts the instance. For a handler's
+/// result, which can hold data only the server has (a file's contents, a
+/// command's output) that an `INTERNAL` message must not echo to the peer.
+pub(super) fn first_violation_masked(
+    validator: &Validator,
+    value: &Value,
+) -> Option<(String, String)> {
+    first_violation_rendered(validator, value, |error| error.masked().to_string())
+}
+
+fn first_violation_rendered(
+    validator: &Validator,
+    value: &Value,
+    render_reason: impl FnOnce(&jsonschema::ValidationError<'_>) -> String,
+) -> Option<(String, String)> {
     let error = validator.validate(value).err()?;
     let base = error.instance_path();
     let pointer = match error.kind() {
@@ -52,12 +72,12 @@ pub(super) fn first_violation(validator: &Validator, value: &Value) -> Option<(S
     } else {
         pointer.as_str().to_string()
     };
-    Some((path, error.to_string()))
+    Some((path, render_reason(&error)))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{compile, first_violation};
+    use super::{compile, first_violation, first_violation_masked};
     use serde_json::json;
 
     #[test]
@@ -109,6 +129,33 @@ mod tests {
         let validator = compile("params", &schema).expect("compiles");
         let (path, _) = first_violation(&validator, &json!({"a": [{}, 1]})).expect("a violation");
         assert_eq!(path, "/a/1");
+    }
+
+    #[test]
+    fn the_masked_reason_keeps_the_path_and_drops_the_value() {
+        let schema = json!({
+            "type": "object",
+            "properties": { "text": { "type": "string" } },
+        });
+        let validator = compile("result", &schema).expect("compiles");
+        let value = json!({ "text": 424242 });
+
+        let (path, reason) = first_violation(&validator, &value).expect("a violation");
+        let (masked_path, masked_reason) =
+            first_violation_masked(&validator, &value).expect("a violation");
+
+        assert_eq!(
+            masked_path, path,
+            "masking changes the reason, not the path"
+        );
+        assert!(
+            reason.contains("424242"),
+            "expected the unmasked reason to quote the value | received: {reason}"
+        );
+        assert!(
+            !masked_reason.contains("424242") && masked_reason.contains("string"),
+            "expected a masked reason that names the type but not the value | received: {masked_reason}"
+        );
     }
 
     #[test]
