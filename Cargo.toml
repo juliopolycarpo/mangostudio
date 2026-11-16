@@ -122,3 +122,46 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+# API tests and the CI test shards spawn a debug `mangostudio-runtime`. Its
+# `hello` compiles the contract's JSON Schemas and parses the catalog, which at
+# opt-level 0 takes ~190 ms per spawn (release: ~40 ms). These dependencies run
+# the work, so they build at opt-level 1: `hello` falls to ~66 ms, and the three
+# runtime-spawning API integration files (`rust-runtime-qualification`,
+# `spawn-runtime-child`, `rust-runtime-library-propagation`) take ~48 s instead
+# of ~54 s.
+# Leaving one out costs `hello` 33-64 ms (jsonschema, referencing,
+# jsonschema-value, fancy-regex, serde_json) or 5-8 ms (regex-automata,
+# regex-syntax); jsonschema-regex and regex are within noise, so they stay at 0.
+# Re-run the leave-one-out when startup changes.
+#
+# Measured on linux-x64 (28 cores) against the unchanged profile, as CPU
+# seconds (user + sys), because other work shared the host:
+# - `cargo nextest run --workspace --all-targets --all-features`, cold: ~750 s
+#   to ~930 s. `cargo clippy` is unchanged (~230 s): crates only get checked.
+# - `target/` stays at ~3.4 GB; the debug runtime goes from 137 to 131 MB.
+#
+# Two alternatives were measured and rejected:
+# - opt-level 2 gives the same `hello` for ~1400 s of cold test-build CPU.
+# - `package."*"` at opt-level 1 is ~16 ms faster per spawn but also compiles
+#   every proc macro and build script at opt-level 1 (a package glob outranks
+#   `profile.dev.build-override`), taking cold CPU to ~1450 s for the test build
+#   and ~560 s for clippy.
+#
+# Workspace crates stay at opt-level 0 so editing them keeps the fast rebuild:
+# at opt-level 2, `mango-protocol` and `mangostudio-runtime-contract` took ~19 s
+# each to compile instead of 3 s and 1 s, and they add only 2-4 ms to `hello`.
+[profile.dev.package.jsonschema]
+opt-level = 1
+[profile.dev.package.jsonschema-value]
+opt-level = 1
+[profile.dev.package.referencing]
+opt-level = 1
+[profile.dev.package.fancy-regex]
+opt-level = 1
+[profile.dev.package.serde_json]
+opt-level = 1
+[profile.dev.package.regex-automata]
+opt-level = 1
+[profile.dev.package.regex-syntax]
+opt-level = 1
