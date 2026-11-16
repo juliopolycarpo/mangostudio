@@ -239,6 +239,8 @@ impl PushOutcome {
 pub struct LineDecoder {
     max_frame_bytes: usize,
     buffer: Vec<u8>,
+    /// How many leading bytes of `buffer` are known to hold no `\n`.
+    scanned: usize,
     failure: Option<CodecError>,
 }
 
@@ -264,6 +266,7 @@ impl LineDecoder {
         Self {
             max_frame_bytes,
             buffer: Vec::new(),
+            scanned: 0,
             failure: None,
         }
     }
@@ -306,13 +309,19 @@ impl LineDecoder {
         let mut frames = Vec::new();
         let mut failure = None;
         let mut consumed = 0;
-        while let Some(offset) = self.buffer[consumed..]
+        // The first `self.scanned` bytes of the buffer are the partial record
+        // earlier pushes already searched, and held no `\n`. Searching from
+        // there keeps a record that arrives in many pieces linear in its size
+        // rather than quadratic.
+        let mut search_from = self.scanned;
+        while let Some(offset) = self.buffer[search_from..]
             .iter()
             .position(|byte| *byte == b'\n')
         {
-            let end = consumed + offset;
+            let end = search_from + offset;
             let line = &self.buffer[consumed..end];
             consumed = end + 1;
+            search_from = consumed;
             let content = strip_carriage_return(line);
             // The size check runs before the blank check, not after: §11's "a
             // decoder MUST refuse a line that exceeds the limit" names the
@@ -338,6 +347,8 @@ impl LineDecoder {
             }
         }
         self.buffer.drain(..consumed);
+        // What is left is one partial record with no `\n` in it.
+        self.scanned = self.buffer.len();
 
         if failure.is_none() {
             let partial = strip_carriage_return(&self.buffer).len();
@@ -348,6 +359,7 @@ impl LineDecoder {
         if let Some(error) = &failure {
             self.failure = Some(error.clone());
             self.buffer.clear();
+            self.scanned = 0;
         }
         PushOutcome {
             frames,
@@ -371,6 +383,7 @@ impl LineDecoder {
             return Err(failure.clone());
         }
         let line = std::mem::take(&mut self.buffer);
+        self.scanned = 0;
         if is_blank(strip_carriage_return(&line)) {
             return Ok(Vec::new());
         }
@@ -626,6 +639,33 @@ mod tests {
         decoder.push(b"{\"type\":\"ping\"}");
         assert_eq!(decoder.finish().expect("flushes"), vec![Frame::Ping]);
         assert_eq!(decoder.finish().expect("empty"), Vec::new());
+    }
+
+    #[test]
+    fn a_push_after_finish_starts_a_fresh_record() {
+        // `finish` empties the buffer, so the offset the decoder remembers for
+        // it must go back to zero too: a stale one, longer than the next push,
+        // would index past the end of the buffer.
+        let mut decoder = LineDecoder::new(DEFAULT_MAX_FRAME_BYTES);
+        decoder.push(&[b' '; 32]);
+        assert_eq!(decoder.finish().expect("blank"), Vec::new());
+        assert_eq!(
+            decoder.push(b"{\"type\":\"ping\"}\n").frames,
+            vec![Frame::Ping]
+        );
+    }
+
+    #[test]
+    fn a_terminator_after_many_pieces_of_one_record_delivers_it_once() {
+        let mut decoder = LineDecoder::new(DEFAULT_MAX_FRAME_BYTES);
+        let line = b"{\"type\":\"ping\"}\n{\"type\":\"pong\"}\n";
+        let mut frames = Vec::new();
+        for piece in line.chunks(3) {
+            let outcome = decoder.push(piece);
+            assert!(outcome.is_ok(), "{outcome:?}");
+            frames.extend(outcome.frames);
+        }
+        assert_eq!(frames, vec![Frame::Ping, Frame::Pong]);
     }
 
     #[test]
