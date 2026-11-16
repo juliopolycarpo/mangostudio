@@ -1,6 +1,6 @@
 /**
  * The in-app logo is drawn at most 48 CSS pixels wide (the brand lockup and the
- * not-found page), so a 128 px export covers a 2.5x display. It used to be the
+ * not-found page), so a 144 px export covers a 3x display. It used to be the
  * 512 px PWA icon byte for byte: 26 KB downloaded on every first paint, and a
  * second copy of the same bytes in the dist and in the embedded binary beside
  * `public/icon-512.png`. This pins the small export so the icon is not copied
@@ -15,7 +15,7 @@ const FRONTEND_ROOT = join(import.meta.dir, '../..');
 const LOGO_PATH = join(FRONTEND_ROOT, 'src/assets/logo.png');
 const PWA_ICON_PATH = join(FRONTEND_ROOT, 'public/icon-512.png');
 
-const MAX_LOGO_EDGE_PX = 128;
+const MAX_LOGO_EDGE_PX = 144;
 const MAX_LOGO_BYTES = 8 * 1024;
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
