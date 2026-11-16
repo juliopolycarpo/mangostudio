@@ -46,6 +46,7 @@ import { toolIdentityRoutes } from './modules/tool-identity/http/tool-identity-r
 import { workspaceRoutes } from './modules/workspaces/http/workspace-routes';
 import { apiKeyGuard } from './plugins/api-key-guard';
 import { errorHandler } from './plugins/error-handler';
+import { handlerIdleTimeout } from './plugins/handler-idle-timeout';
 import { rateLimit } from './plugins/rate-limit';
 import { classifyRateLimit } from './plugins/rate-limit-policy';
 import { authRoutes } from './routes/auth';
@@ -68,6 +69,10 @@ const requestLogger = createDiagnosticLogger('request');
  * Separating this ensures Eden Treaty correctly identifies /api as a namespace.
  */
 const api = new Elysia({ prefix: '/api' })
+  // First, so the request is already extended when any route's work starts, and
+  // so its error hook runs before the error handler below answers and stops the
+  // chain. See the plugin for what it does and does not cover.
+  .use(handlerIdleTimeout)
   // Centralized error handling
   .use(errorHandler)
   // Rate limiting with per-route-group buckets. `classifyRateLimit` routes

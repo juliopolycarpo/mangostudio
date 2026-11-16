@@ -1,13 +1,25 @@
-import type { Kysely } from 'kysely';
+import { type Kysely, sql } from 'kysely';
 
 import { getDb } from '../../../db/database';
 import type { ActivityEventInsert, ActivityEventSelect, Database } from '../../../db/types';
 
-/** Rows older than this are dropped on the next write for the same user. */
+/** Rows older than this are dropped by the user's next retention pass. */
 export const ACTIVITY_RETENTION_MS = 90 * 24 * 60 * 60_000;
 
 /** Hard cap per user, so a heavy week cannot outgrow the retention window. */
 export const ACTIVITY_MAX_ROWS_PER_USER = 5_000;
+
+/**
+ * Rows a user may write between two retention passes. A pass keeps this many
+ * fewer rows than the cap, so the rows written before the next pass fit under
+ * it: a single-row write never takes the feed past the cap, and a batch can
+ * only while its own call is pruning.
+ */
+export const ACTIVITY_RETENTION_INTERVAL_ROWS = 50;
+
+/** Rows a retention pass keeps per user: the newest ones. */
+export const ACTIVITY_ROWS_KEPT_BY_PRUNE =
+  ACTIVITY_MAX_ROWS_PER_USER - ACTIVITY_RETENTION_INTERVAL_ROWS;
 
 export interface ActivityListFilter {
   readonly userId: string;
@@ -97,26 +109,34 @@ export function createActivityRepository(injected?: Kysely<Database>): ActivityR
 
     async prune(userId, now) {
       const ageCutoff = now - ACTIVITY_RETENTION_MS;
-      // The `createdAt` of the oldest row the cap keeps. Reading it costs one
-      // walk of the covering index rather than a COUNT plus a second pass, and
-      // collapses both retention rules into a single range delete below.
-      const overflow = await db()
+      // The oldest row the pass keeps. Reading it costs one walk of the
+      // covering index rather than a COUNT plus a second pass, and collapses
+      // both retention rules into a single range delete below.
+      const oldestKept = await db()
         .selectFrom('activity_events')
-        .select('createdAt')
+        .select(['createdAt', 'id'])
         .where('userId', '=', userId)
         .orderBy('createdAt', 'desc')
         .orderBy('id', 'desc')
         .limit(1)
-        .offset(ACTIVITY_MAX_ROWS_PER_USER - 1)
+        .offset(ACTIVITY_ROWS_KEPT_BY_PRUNE - 1)
         .executeTakeFirst();
 
-      const cutoff = Math.max(ageCutoff, overflow?.createdAt ?? 0);
-      if (cutoff <= 0) return;
+      // Everything ordered before the boundary goes. The boundary is a
+      // `(createdAt, id)` position, the feed's own order: the rows of a batch
+      // share one `createdAt`, so a `createdAt` cutoff alone would keep every
+      // row tied with the oldest kept one. `(ageCutoff, '')` sorts before any
+      // row at `ageCutoff`, so as a boundary it drops exactly the expired rows.
+      const boundary =
+        oldestKept && oldestKept.createdAt >= ageCutoff
+          ? { createdAt: oldestKept.createdAt, id: oldestKept.id }
+          : { createdAt: ageCutoff, id: '' };
+      if (boundary.createdAt <= 0) return;
 
       await db()
         .deleteFrom('activity_events')
         .where('userId', '=', userId)
-        .where('createdAt', '<', cutoff)
+        .where(sql<boolean>`("createdAt", "id") < (${boundary.createdAt}, ${boundary.id})`)
         .execute();
     },
   };

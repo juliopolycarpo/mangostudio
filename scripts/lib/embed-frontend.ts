@@ -133,6 +133,9 @@ function assertEmbeddable(distDir: string, urlPaths: readonly string[]): void {
 /** Directory under `embedDir` that holds the generated variants. */
 const VARIANTS_DIRNAME = 'variants';
 
+/** Directory under `embedDir` that keeps compressed output between builds, by content hash. */
+const COMPRESSION_CACHE_DIRNAME = 'compression-cache';
+
 /** Writes manifest + entry modules and returns the entry to compile. // Usage: writeEmbedModules(options) */
 export function writeEmbedModules(options: EmbedModuleOptions): EmbedModules {
   const urlPaths = listDistFiles(options.distDir);
@@ -143,7 +146,12 @@ export function writeEmbedModules(options: EmbedModuleOptions): EmbedModules {
   // frontend no longer ships must not survive to be embedded by mistake.
   const variantsDir = join(options.embedDir, VARIANTS_DIRNAME);
   rmSync(variantsDir, { recursive: true, force: true });
-  const variants = writePrecompressedVariants(options.distDir, variantsDir, urlPaths);
+  // The compression cache lives beside, not inside, the cleared variants
+  // directory: it is keyed by content, so a stale entry is never served, only
+  // pruned when a build stops using it.
+  const variants = writePrecompressedVariants(options.distDir, variantsDir, urlPaths, {
+    cacheDir: join(options.embedDir, COMPRESSION_CACHE_DIRNAME),
+  });
 
   const manifestPath = join(options.embedDir, 'frontend-manifest.ts');
   writeFileSync(manifestPath, renderFrontendManifestModule(options.distDir, urlPaths, variants));

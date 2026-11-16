@@ -14,6 +14,7 @@ import { dirname, join, resolve } from 'node:path';
 
 import { assertNoUnexpectedArguments, parseArgs } from '../lib/args';
 import { nearestRank } from '../lib/latency-stats';
+import { sha256File } from '../release/verify-checksum';
 
 const PREFIX = 'EXTERNAL_AGENT_BOUNDARY_SAMPLE ';
 const REPO_ROOT = resolve(import.meta.dir, '../..');
@@ -158,7 +159,21 @@ async function capture(argv: string[], cwd = REPO_ROOT): Promise<string> {
   return stdout;
 }
 
-async function runSample(binary: string, sourceSha: string, test: string, rssPath: string) {
+/** Which side of the comparison a measured process belongs to. */
+type BoundaryRole = 'base' | 'head';
+
+export interface BoundaryBinary {
+  readonly binary: string;
+  readonly sourceSha: string;
+}
+
+async function runSample(
+  role: BoundaryRole,
+  binary: string,
+  sourceSha: string,
+  test: string,
+  rssPath: string
+) {
   const measureRss = process.platform === 'linux' && (await Bun.file('/usr/bin/time').exists());
   const argv = [binary, test, '--exact', '--ignored', '--nocapture', '--test-threads=1'];
   const stdout = await capture(
@@ -167,16 +182,91 @@ async function runSample(binary: string, sourceSha: string, test: string, rssPat
   const sample = parseBoundarySample(stdout, sourceSha);
   const measuredRss = measureRss ? Number((await readFile(rssPath, 'utf8')).trim()) : NaN;
   const peakRssKiB = Number.isSafeInteger(measuredRss) && measuredRss > 0 ? measuredRss : null;
-  return { ...sample, test, ns: sample.elapsedNs / sample.iterations, peakRssKiB };
+  return { ...sample, role, test, ns: sample.elapsedNs / sample.iterations, peakRssKiB };
 }
 
-async function binaryMetadata(binary: string, sourceSha: string) {
-  const bytes = await Bun.file(binary).arrayBuffer();
+export type RawBoundarySample = Awaited<ReturnType<typeof runSample>>;
+
+/**
+ * Runs every test `samples` times against both binaries, fresh process each
+ * time, alternating which side goes first. Each sample carries the `role` it was
+ * measured for, because `sourceSha` cannot tell the sides apart: two builds of
+ * one commit (a profile, flag or allocator experiment) share it.
+ *
+ * Each binary is hashed before the first sample and again after the last, and a
+ * difference fails the run naming both hashes. With equal SHAs the file hash is
+ * the only identity a side has, so a binary rebuilt mid-run would otherwise be
+ * recorded under the hash of whichever build was on disk at the end.
+ * @example const { samples: raw } = await collectBoundarySamples({ base, head, tests, samples: 30, rssPath });
+ */
+export async function collectBoundarySamples(options: {
+  base: BoundaryBinary;
+  head: BoundaryBinary;
+  tests: readonly string[];
+  samples: number;
+  rssPath: string;
+}): Promise<{ samples: RawBoundarySample[]; binarySha256: Record<BoundaryRole, string> }> {
+  const { base, head, tests, samples, rssPath } = options;
+  const sides: readonly (readonly [BoundaryRole, BoundaryBinary])[] = [
+    ['base', base],
+    ['head', head],
+  ];
+  const sha256Before = Object.fromEntries(
+    sides.map(([role, side]) => [role, sha256File(resolve(side.binary))])
+  ) as Record<BoundaryRole, string>;
+  const raw: RawBoundarySample[] = [];
+  for (const test of tests) {
+    for (let index = 0; index < samples; index++) {
+      const order: readonly (readonly [BoundaryRole, BoundaryBinary])[] =
+        index % 2 === 0
+          ? [
+              ['base', base],
+              ['head', head],
+            ]
+          : [
+              ['head', head],
+              ['base', base],
+            ];
+      for (const [role, side] of order)
+        raw.push(await runSample(role, resolve(side.binary), side.sourceSha, test, rssPath));
+    }
+  }
+  for (const [role, side] of sides) {
+    const after = sha256File(resolve(side.binary));
+    if (after !== sha256Before[role])
+      throw new Error(
+        `Expected the ${role} binary ${side.binary} unchanged while sampling; sha256 before: ${sha256Before[role]}, after: ${after}.`
+      );
+  }
+  return { samples: raw, binarySha256: sha256Before };
+}
+
+/**
+ * Splits raw samples into per-test base and head summaries by `role`, never by
+ * `sourceSha`: the same commit built twice must still compare as two sides.
+ * @example summarizeBoundaryComparison(['a::b'], raw);
+ */
+export function summarizeBoundaryComparison(
+  tests: readonly string[],
+  raw: readonly Pick<RawBoundarySample, 'role' | 'test' | 'ns' | 'peakRssKiB'>[]
+) {
+  return tests.map((test) => ({
+    test,
+    base: summarizeBoundarySamples(
+      raw.filter((sample) => sample.test === test && sample.role === 'base')
+    ),
+    head: summarizeBoundarySamples(
+      raw.filter((sample) => sample.test === test && sample.role === 'head')
+    ),
+  }));
+}
+
+async function binaryMetadata(binary: string, sourceSha: string, binarySha256: string) {
   const lock = await capture(['git', 'show', `${sourceSha}:Cargo.lock`]);
   return {
     binary,
     sourceSha,
-    binarySha256: new Bun.CryptoHasher('sha256').update(bytes).digest('hex'),
+    binarySha256,
     lockSha256: new Bun.CryptoHasher('sha256').update(lock).digest('hex'),
   };
 }
@@ -219,38 +309,18 @@ async function main() {
   if (tests.length === 0)
     throw new Error(`Expected a registered --case; received ${values['--case']}.`);
   const temp = await mkdtemp(join(tmpdir(), 'mango-boundary-bench-'));
-  const raw: Awaited<ReturnType<typeof runSample>>[] = [];
   try {
-    for (const test of tests) {
-      for (let index = 0; index < samples; index++) {
-        const order =
-          index % 2 === 0
-            ? [
-                [base, baseSha],
-                [head, headSha],
-              ]
-            : [
-                [head, headSha],
-                [base, baseSha],
-              ];
-        for (const [binary, sha] of order)
-          raw.push(
-            await runSample(resolve(binary as string), sha as string, test, join(temp, 'rss.txt'))
-          );
-      }
-    }
-    const summaries = tests.map((test) => ({
-      test,
-      base: summarizeBoundarySamples(
-        raw.filter((sample) => sample.test === test && sample.sourceSha === baseSha)
-      ),
-      head: summarizeBoundarySamples(
-        raw.filter((sample) => sample.test === test && sample.sourceSha === headSha)
-      ),
-    }));
+    const { samples: raw, binarySha256 } = await collectBoundarySamples({
+      base: { binary: base, sourceSha: baseSha },
+      head: { binary: head, sourceSha: headSha },
+      tests,
+      samples,
+      rssPath: join(temp, 'rss.txt'),
+    });
+    const summaries = summarizeBoundaryComparison(tests, raw);
     const receipt = {
-      base: await binaryMetadata(resolve(base), baseSha),
-      head: await binaryMetadata(resolve(head), headSha),
+      base: await binaryMetadata(resolve(base), baseSha, binarySha256.base),
+      head: await binaryMetadata(resolve(head), headSha, binarySha256.head),
       environment: {
         os: `${platform()} ${release()} ${arch()}`,
         cpu: cpus()[0]?.model ?? null,

@@ -1449,6 +1449,12 @@ What the launcher sets, besides the home:
 - `MANGOSTUDIO_REAL_HOME` carries the launcher's original home. The API preload aborts the lane
   with the received and expected values when `homedir()` still equals it, which is how a
   launcher whose `HOME` did not take effect is caught before the first test.
+- `VERSION` is removed. A release build stamps it and `getVersion()` reads it from the environment,
+  so a value left exported after building a release hub would turn every lane into a release-build
+  run: the hub refuses the source-built Local runtime as another release, and doctor reports drift
+  against its fixture runtime. A test that needs a release version sets `process.env.VERSION`
+  itself and restores it. A bare `bun test` keeps the inherited value, which the release smoke jobs
+  rely on.
 
 A bare `bun test` from `apps/api` bypasses the launcher and runs on your real home — use the
 package scripts. To select one file, run the launcher from the API workspace so the preload
