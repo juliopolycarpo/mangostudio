@@ -6,6 +6,7 @@ import type { MessagePart } from '@mangostudio/shared/types';
 import { getDb } from '../../../../src/db/database';
 import {
   CHECKPOINT_TEXT_INTERVAL_CHARS,
+  type CheckpointWriteOptions,
   createDatabaseCheckpointStore,
   createTurnCheckpointPart,
   type TurnCheckpointStore,
@@ -31,6 +32,8 @@ interface RecordedWrite {
   readonly kind: 'rewrite' | 'delta';
   /** Characters handed to the store. */
   readonly bytes: number;
+  /** Whether the writer asked the store for a commit at synchronous = FULL. */
+  readonly durable: boolean;
 }
 
 interface PendingWrite {
@@ -74,12 +77,15 @@ class HeldCheckpointStore implements TurnCheckpointStore {
     while (this.inFlight.length > 0) this.releaseOldest();
   }
 
-  rewriteRow(row: {
-    text: string;
-    partsJson: string;
-    providerState: string | null;
-    generationTime: string | null | undefined;
-  }): Promise<void> {
+  rewriteRow(
+    row: {
+      text: string;
+      partsJson: string;
+      providerState: string | null;
+      generationTime: string | null | undefined;
+    },
+    options: CheckpointWriteOptions
+  ): Promise<void> {
     return this.start(
       'rewrite',
       {
@@ -88,28 +94,32 @@ class HeldCheckpointStore implements TurnCheckpointStore {
         providerState: row.providerState,
         generationTime: row.generationTime ?? null,
       },
-      row.text.length + row.partsJson.length
+      row.text.length + row.partsJson.length,
+      options.durable
     );
   }
 
-  appendDelta(_seq: number, deltaJson: string): Promise<void> {
+  appendDelta(_seq: number, deltaJson: string, options: CheckpointWriteOptions): Promise<void> {
     return this.start(
       'delta',
       foldCheckpointDeltas(this.stored, [JSON.parse(deltaJson) as CheckpointDelta]),
-      deltaJson.length
+      deltaJson.length,
+      options.durable
     );
   }
 
   private start(
     kind: RecordedWrite['kind'],
     next: CheckpointedContent,
-    bytes: number
+    bytes: number,
+    durable: boolean
   ): Promise<void> {
     const checkpoint = next.parts.find(isTurnCheckpointPart);
     if (!checkpoint) throw new Error('expected a turn_checkpoint part in the stored parts');
     const write = {
       kind,
       bytes,
+      durable,
       text: next.text,
       sequence: checkpoint.sequence,
       partCount: next.parts.length,
@@ -486,6 +496,43 @@ describe('TurnCheckpointWriter write shape', () => {
     expect(written).toBeLessThan(10 * resultLength + 20_000);
   });
 
+  it('asks the store for a durable commit only for the checkpoint that requests one', async () => {
+    const { store, writer, parts } = setup();
+    expect(await writer.checkpoint({ force: true })).toBe(true);
+    parts.push({ type: 'tool_call', toolCallId: 'call-1', name: 'run_shell', args: {} });
+    expect(await writer.checkpoint({ durable: true })).toBe(true);
+    parts.push({ type: 'tool_result', toolCallId: 'call-1', content: 'ok' });
+    expect(await writer.checkpoint({ force: true })).toBe(true);
+
+    // The first write is a full row, the others deltas; only the second is durable.
+    expect(store.writes.map(({ kind, durable }) => ({ kind, durable }))).toEqual([
+      { kind: 'rewrite', durable: false },
+      { kind: 'delta', durable: true },
+      { kind: 'delta', durable: false },
+    ]);
+  });
+
+  it('writes a durable first checkpoint as a durable full row', async () => {
+    const { store, writer } = setup();
+
+    expect(await writer.checkpoint({ durable: true })).toBe(true);
+
+    expect(store.writes.map(({ kind, durable }) => ({ kind, durable }))).toEqual([
+      { kind: 'rewrite', durable: true },
+    ]);
+  });
+
+  it('writes a durable checkpoint even when the throttle would skip a best-effort one', async () => {
+    const { store, writer } = setup();
+    expect(await writer.checkpoint({ force: true })).toBe(true);
+
+    // Same instant, no new text: a best-effort call is skipped, a durable one is required.
+    expect(await writer.checkpoint()).toBe(false);
+    expect(await writer.checkpoint({ durable: true })).toBe(true);
+
+    expect(store.writes.map(({ durable }) => durable)).toEqual([false, true]);
+  });
+
   it('does not send a result again when a later upsert replaces it with an equal copy', async () => {
     const { store, parts, writer } = setup();
     const content = 'r'.repeat(50_000);
@@ -547,6 +594,113 @@ describe('TurnCheckpointWriter write shape', () => {
       ['rewrite', 10],
       ['rewrite', 40],
     ]);
+  });
+
+  it('rewrites, rather than drops, a durable delta planned on top of a write which then failed', async () => {
+    const { store, writer, append } = setup();
+    store.hold();
+    append(10);
+    const first = writer.checkpoint({ force: true });
+    append(10);
+    const marker = writer.checkpoint({ durable: true });
+    append(10);
+    const after = writer.checkpoint({ force: true });
+    await tick();
+    expect(store.inFlight).toHaveLength(1);
+    store.inFlight[0]?.fail(new Error('disk full'));
+    await tick();
+    store.releaseAll();
+
+    const outcomes = await Promise.all([first, marker, after]);
+    append(10);
+    const next = await writer.checkpoint({ force: true });
+
+    // The durable marker lands as a durable full row of the turn as it is when the
+    // write runs; the ordinary delta behind it is dropped; the checkpoint after that
+    // is a delta over the re-planned row.
+    expect({
+      outcomes,
+      next,
+      writes: store.writes.map((write) => [write.kind, write.durable, write.text.length]),
+    }).toEqual({
+      outcomes: [false, true, false],
+      next: true,
+      writes: [
+        ['rewrite', false, 10],
+        ['rewrite', true, 30],
+        ['delta', false, 40],
+      ],
+    });
+  });
+
+  it('drops a delta planned while a re-planned rewrite was in flight when a second one supersedes it', async () => {
+    const { store, writer, append, state } = setup();
+    store.hold();
+    append(10);
+    const first = writer.checkpoint({ force: true });
+    append(10);
+    const firstMarker = writer.checkpoint({ durable: true });
+    append(10);
+    const secondMarker = writer.checkpoint({ durable: true });
+    await tick();
+    // The first write fails: the first marker, planned as a delta on top of it, is
+    // planned again as a rewrite and goes in flight.
+    store.inFlight[0]?.fail(new Error('disk full'));
+    await tick();
+    // The failed write stays listed; the second entry is the re-planned rewrite.
+    expect(store.inFlight).toHaveLength(2);
+    // Planned against the re-planned rewrite, while it is in flight.
+    append(10);
+    const late = writer.checkpoint({ force: true });
+    store.releaseAll();
+
+    const outcomes = await Promise.all([first, firstMarker, secondMarker, late]);
+
+    // The second marker was planned before the first was planned again, so it is planned
+    // again too, as a rewrite of the live turn (40 characters). The late delta was
+    // planned against the state that rewrite replaced and its text is already in it:
+    // folded over it, the row would hold 50 characters of a 40 character turn.
+    expect({
+      outcomes,
+      writes: store.writes.map((write) => [write.kind, write.durable, write.text.length]),
+      stored: store.writes.at(-1)?.text.length,
+      live: state.text.length,
+    }).toEqual({
+      outcomes: [false, true, true, false],
+      writes: [
+        ['rewrite', false, 10],
+        ['rewrite', true, 30],
+        ['rewrite', true, 40],
+      ],
+      stored: 40,
+      live: 40,
+    });
+  });
+
+  it('reports a durable write that itself failed as false, and rewrites on the next checkpoint', async () => {
+    const { store, writer, append } = setup();
+    append(10);
+    expect(await writer.checkpoint({ force: true })).toBe(true);
+    store.failNextWrite(new Error('disk full'));
+    append(10);
+
+    const marker = await writer.checkpoint({ durable: true });
+    append(10);
+    const next = await writer.checkpoint({ durable: true });
+
+    expect({
+      marker,
+      next,
+      writes: store.writes.map((write) => [write.kind, write.durable, write.text.length]),
+    }).toEqual({
+      marker: false,
+      next: true,
+      writes: [
+        ['rewrite', false, 10],
+        ['delta', true, 20],
+        ['rewrite', true, 30],
+      ],
+    });
   });
 
   it('writes a trailing text part that grows in place as an append', async () => {

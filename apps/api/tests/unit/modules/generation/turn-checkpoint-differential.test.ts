@@ -23,6 +23,7 @@ import {
   upsertToolResultPart,
 } from '../../../../src/modules/generation/application/stream-text-turn-helpers';
 import {
+  type CheckpointWriteOptions,
   createDatabaseCheckpointStore,
   createTurnCheckpointPart,
   type TurnCheckpointStore,
@@ -67,12 +68,15 @@ class FlakyDatabaseStore implements TurnCheckpointStore {
     this.failNext = false;
   }
 
-  rewriteRow(row: Parameters<TurnCheckpointStore['rewriteRow']>[0]): Promise<void> {
-    return this.guarded(() => this.inner.rewriteRow(row));
+  rewriteRow(
+    row: Parameters<TurnCheckpointStore['rewriteRow']>[0],
+    options: CheckpointWriteOptions
+  ): Promise<void> {
+    return this.guarded(() => this.inner.rewriteRow(row, options));
   }
 
-  appendDelta(seq: number, deltaJson: string): Promise<void> {
-    return this.guarded(() => this.inner.appendDelta(seq, deltaJson));
+  appendDelta(seq: number, deltaJson: string, options: CheckpointWriteOptions): Promise<void> {
+    return this.guarded(() => this.inner.appendDelta(seq, deltaJson, options));
   }
 
   private guarded(write: () => Promise<void>): Promise<void> {

@@ -209,6 +209,37 @@ path = "/var/lib/mangostudio/database.sqlite"
 
 SQLite com WAL mode é adequado para deploys single-server. O arquivo de banco deve ser incluído em rotinas de backup regulares.
 
+O hub roda o banco em WAL mode e, depois que as migrações terminam, baixa `PRAGMA synchronous` de `FULL`
+para `NORMAL`. Em `NORMAL`, um commit é acrescentado ao write-ahead log sem fsync, e o log é sincronizado
+quando o SQLite faz o checkpoint dele no arquivo principal. Se o sistema de arquivos não der WAL mode ao
+hub, ele mantém `FULL` e registra `synchronous_kept_full`.
+
+O que uma falha custa depende do que falhou:
+
+- **O hub cai ou é encerrado à força.** Nada se perde: o sistema operacional ainda guarda as páginas
+  escritas.
+- **Queda de energia ou falha do sistema operacional.** Qualquer commit dos últimos 30 segundos, mais ou
+  menos (o intervalo de writeback do sistema operacional), pode se perder, a menos que seja uma das
+  escritas abaixo. São o final de uma resposta em streaming (a próxima inicialização marca esse turno
+  como interrompido), logins recentes (esses usuários entram de novo), mudanças de configuração e outras
+  edições comuns. O banco continua consistente, porque o SQLite nunca aplica metade de um commit.
+- **Sempre sincronizadas (`FULL`).** Dois tipos de escrita são gravados em `FULL`, e o fsync do log também
+  persiste todo commit anterior a elas:
+  - Marcadores de efeito colateral de ferramenta: o checkpoint que registra uma chamada de ferramenta
+    como em execução (qualquer ferramenta que não seja uma leitura simples), cada imagem gerada
+    concluída, o recibo gravado antes de um turno de agente externo ser enviado e o resultado de uma
+    geração de imagem avulsa. Isso estreita a janela em que uma queda de energia faz o hub executar esse
+    passo uma segunda vez; não a fecha. A ferramenta começa enquanto o marcador é gravado, então uma
+    queda nesses poucos milissegundos ainda mostra a chamada como não iniciada.
+  - Revogações: substituir ou revogar um token de pareamento do runtime, revogar uma chave de API e as
+    requisições de autenticação que apagam ou trocam uma credencial (logout, revogar uma ou todas as
+    sessões, trocar ou redefinir a senha, atualizar ou apagar uma chave de API). Login, cadastro e
+    leituras de sessão ficam em `NORMAL`. Uma credencial que você foi avisado de que acabou não volta.
+
+As migrações rodam em `FULL`, antes de a conexão ser rebaixada, então mantêm a mesma durabilidade de antes
+desta mudança, e a janela em que uma queda de energia pode interromper uma atualização não é maior do que
+era.
+
 ## Reverse Proxy
 
 ### nginx

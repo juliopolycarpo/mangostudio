@@ -316,7 +316,12 @@ schema-derived choices.
 ## Database
 
 SQLite via Kysely. The ordered registry in `apps/api/src/db/migrations/index.ts`
-is the source of truth for migrations. Table families include:
+is the source of truth for migrations. The hub runs the file database in WAL mode
+(`apps/api/src/db/database.ts`) and lowers `synchronous` to `NORMAL` once its migrations have
+finished; writes that guard a step the database cannot undo, and revocations (pairing tokens, API keys,
+the auth requests that delete or rotate a credential), commit at `FULL` through `runDurably` and `withFullDurability`
+(`apps/api/src/db/durability.ts`). What a power loss can and cannot lose is described in
+[deployment](../operations/deployment.md#database). Table families include:
 
 - Core tables: `chats`, `messages`, `generated_images`, `chat_attachments`
 - Auth tables: Better Auth standard schema (5 tables)

@@ -50,6 +50,7 @@ import {
   ToolPolicyError,
 } from './tool-execution-lifecycle';
 import { errorToToolMessage, parseToolArgs, stringifyToolResult } from './tool-result-utils';
+import { classifyToolRetrySafety } from './turn-checkpoint';
 
 /** Accumulators a completed tool execution writes into for the turn. */
 interface ToolResultSink {
@@ -176,6 +177,24 @@ export function synchronizeToolProgressForCheckpoint(
   });
 }
 
+/**
+ * Whether checkpointing this item records a call starting that the hub must not
+ * run a second time after a power loss: a tool that is not a plain read
+ * (`classifyToolRetrySafety`) moving to `running`. Recovery treats a call whose
+ * last surviving state is `queued` as not started and lets the model run it
+ * again, so this marker is the one write worth an fsync. Read-only tools, other
+ * transitions and results are not: a lost result reads as an unknown outcome,
+ * which recovery handles by asking the model to verify.
+ *
+ * @example
+ * await checkpointTurn(session, { durable: recordsIrreversibleToolStart(item) });
+ */
+export function recordsIrreversibleToolStart(item: ToolExecutionProgressItem): boolean {
+  if (item.kind !== 'event' || item.event.type !== 'tool_execution') return false;
+  const { name, execution } = item.event;
+  return execution.status === 'running' && classifyToolRetrySafety(name) !== 'safe_read';
+}
+
 /** Context an image-generation tool call needs beyond its own identifiers. */
 interface ImageGenerationCallContext {
   userId: string;
@@ -185,7 +204,8 @@ interface ImageGenerationCallContext {
   allParts: MessagePart[];
   generatedImageArtifacts: PersistedGeneratedImageInput[];
   nextToolResults: NonNullable<AgentTurnRequest['toolResults']>;
-  checkpoint?: () => Promise<void>;
+  /** Writes a required checkpoint; `durable` commits it at `synchronous = FULL`. */
+  checkpoint?: (options?: { durable?: boolean }) => Promise<void>;
 }
 
 /**
@@ -246,7 +266,9 @@ export async function* executeImageGenerationCall(
     lifecycle.transition('running');
     toolCallPart.execution = lifecycle.current;
     yield* drainLifecycleEvents(lifecycleEvents);
-    await ctx.checkpoint?.();
+    // Awaited before the provider call below, so a durable write here is a real
+    // write-ahead record that a paid generation may be under way.
+    await ctx.checkpoint?.({ durable: true });
 
     const plan = createGenerateImageToolPlan(args, {
       toolCallId: callId,
@@ -300,7 +322,9 @@ export async function* executeImageGenerationCall(
           modelName: outcome.modelName,
           generationTime: outcome.generationTime,
         };
-        await ctx.checkpoint?.();
+        // The paid image exists now; a lost record makes recovery seal the card as
+        // abandoned and the model generate (and be charged for) another.
+        await ctx.checkpoint?.({ durable: true });
       } else {
         if (part) {
           part.status = 'error';

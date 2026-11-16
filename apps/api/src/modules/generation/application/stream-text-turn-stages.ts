@@ -58,6 +58,7 @@ import {
   executeImageGenerationCall,
   finalizeDanglingToolExecutions,
   handleTurnCompleted,
+  recordsIrreversibleToolStart,
   synchronizeToolProgressForCheckpoint,
   upsertToolCallPart,
   upsertToolResultPart,
@@ -287,8 +288,12 @@ export async function prepareStreamTextTurn(
   return session;
 }
 
-async function checkpointTurn(session: StreamTextTurnSession, force = false): Promise<void> {
-  await session.checkpointWriter.checkpoint({ force });
+async function checkpointTurn(
+  session: StreamTextTurnSession,
+  force = false,
+  durable = false
+): Promise<void> {
+  await session.checkpointWriter.checkpoint({ force, durable });
 }
 
 /**
@@ -648,7 +653,9 @@ async function* executePendingToolCalls(
         nextToolResults,
         includeSubagentTrace: multiAgentSettings.traceVisibility !== 'off',
       });
-      await checkpointTurn(session, true);
+      // The call is already running while this lands: durable narrows the window
+      // in which a power loss leaves it recorded as not started.
+      await checkpointTurn(session, true, recordsIrreversibleToolStart(item));
     }
     return;
   }
@@ -678,7 +685,7 @@ async function* executePendingToolCalls(
             signal,
           })) {
             synchronizeToolProgressForCheckpoint(item, session.allParts);
-            await checkpointTurn(session, true);
+            await checkpointTurn(session, true, recordsIrreversibleToolStart(item));
             nonImageResultEntries.push(item);
           }
         })()
@@ -693,7 +700,7 @@ async function* executePendingToolCalls(
       allParts: session.allParts,
       generatedImageArtifacts: session.generatedImageArtifacts,
       nextToolResults,
-      checkpoint: () => checkpointTurn(session, true),
+      checkpoint: (options) => checkpointTurn(session, true, options?.durable === true),
     });
   }
 
