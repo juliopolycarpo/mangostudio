@@ -985,10 +985,8 @@ async fn handle_probe_agent_clis(
 mod tests {
     use std::path::Path;
 
-    use mangostudio_runtime_contract::catalog::method;
-
     use super::*;
-    use crate::result_check::{check_result, compile_result_schema};
+    use crate::serve::runtime_contract;
     use crate::test_support::scratch_dir;
 
     /// A directory usable as a synthetic `PATH` entry, holding one
@@ -1312,9 +1310,8 @@ mod tests {
         let result = handle_probe_runtimes(params, CancellationToken::new())
             .await
             .unwrap();
-        let declared = method("probing.runtimes").expect("the catalog declares probing.runtimes");
-        let validator = compile_result_schema(&declared.result);
-        check_result("probing.runtimes", &validator, &result)
+        runtime_contract()
+            .check_result("probing.runtimes", &result)
             .expect("the real handler output must validate against its own schema");
     }
 
@@ -1409,10 +1406,8 @@ mod tests {
         let result = handle_probe_version_managers(params, CancellationToken::new())
             .await
             .unwrap();
-        let declared = method("probing.version-managers")
-            .expect("the catalog declares probing.version-managers");
-        let validator = compile_result_schema(&declared.result);
-        check_result("probing.version-managers", &validator, &result)
+        runtime_contract()
+            .check_result("probing.version-managers", &result)
             .expect("the real handler output must validate against its own schema");
     }
 
@@ -1497,10 +1492,8 @@ mod tests {
         let result = handle_probe_agent_clis(params, CancellationToken::new())
             .await
             .unwrap();
-        let declared =
-            method("probing.agent-clis").expect("the catalog declares probing.agent-clis");
-        let validator = compile_result_schema(&declared.result);
-        check_result("probing.agent-clis", &validator, &result)
+        runtime_contract()
+            .check_result("probing.agent-clis", &result)
             .expect("the real handler output must validate against its own schema");
     }
 

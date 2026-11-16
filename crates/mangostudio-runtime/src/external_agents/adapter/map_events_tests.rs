@@ -2,15 +2,12 @@
 //! exact JSON, and against the embedded catalog's `external-agent.event`
 //! payload schema inside an envelope.
 
-use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use jsonschema::Validator;
 use mango_external_agents as sdk;
 use serde_json::{Value, json};
 
 use super::*;
-use crate::result_check::{check_result, compile_result_schema};
 
 // ---------------------------------------------------------------------------
 // Named fixtures
@@ -41,15 +38,6 @@ fn map(kind: sdk::EventKind) -> MappedEvent {
     map_owned_event(TargetId::Codex, agent_event(kind))
 }
 
-fn event_validator() -> &'static Validator {
-    static VALIDATOR: OnceLock<Validator> = OnceLock::new();
-    VALIDATOR.get_or_init(|| {
-        let topic = mangostudio_runtime_contract::catalog::event("external-agent.event")
-            .expect("expected external-agent.event in the embedded catalog");
-        compile_result_schema(&topic.payload)
-    })
-}
-
 fn assert_valid_event(event: &wire::Event) {
     let envelope = wire::EventEnvelope {
         session_id: String::from("session-1"),
@@ -59,7 +47,9 @@ fn assert_valid_event(event: &wire::Event) {
         event: event.clone(),
     };
     let payload = serde_json::to_value(&envelope).expect("envelope serializes");
-    if let Err(error) = check_result("external-agent.event", event_validator(), &payload) {
+    if let Err(error) =
+        mangostudio_runtime_contract::schemas::validate_event("external-agent.event", &payload)
+    {
         panic!("expected a valid external-agent.event payload | received {error}: {payload}");
     }
 }

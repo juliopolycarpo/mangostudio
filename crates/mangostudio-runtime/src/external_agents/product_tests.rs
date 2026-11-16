@@ -177,7 +177,6 @@ impl crate::ports::authorization::Authorization for DiscoveryAuthorization {
 
 /// Calls the actual service handler over a handshaken session with a named owned backend.
 async fn discovery_from_calling_hub(state: wire::DiscoveryState) -> serde_json::Value {
-    use mango_protocol::contract::Contract;
     use mango_protocol::frame::PeerInfo;
     use mango_protocol::session::{Session, SessionOptions};
     let peer = |role: &str| PeerInfo {
@@ -216,10 +215,8 @@ async fn discovery_from_calling_hub(state: wire::DiscoveryState) -> serde_json::
     });
     let registry =
         crate::external_agents::service::register(crate::registry::Registry::new(), supervisor);
-    let contract =
-        Contract::from_catalog(mangostudio_runtime_contract::catalog::catalog().clone()).unwrap();
     let _served = crate::serve::serve(
-        &contract,
+        crate::serve::runtime_contract(),
         &runtime,
         registry,
         Arc::new(DiscoveryAuthorization),
