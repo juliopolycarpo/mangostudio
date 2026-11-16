@@ -116,7 +116,9 @@ opt-level = "s"
 # `profile.test` inherits all of this. For a stepping debugger, override
 # locally with `CARGO_PROFILE_DEV_DEBUG=full`, which reaches only the workspace
 # crates: the package override below outranks it, so dependencies also need
-# `--config 'profile.dev.package."*".debug="full"'`.
+# `--config 'profile.dev.package."*".debug="full"'`. The seven crates raised to
+# opt-level 1 below show variables as optimized out; to step through one, add
+# `--config 'profile.dev.package.<name>.opt-level=0'`.
 [profile.dev]
 debug = "line-tables-only"
 

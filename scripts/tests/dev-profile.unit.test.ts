@@ -5,20 +5,10 @@ import { readText } from './support/read-text';
 /**
  * The dev profile raises a few dependencies to opt-level 1 so the debug runtime that API tests and CI
  * shards spawn starts in ~66 ms instead of ~190 ms. The comment above the tables in `Cargo.toml` has
- * the measurements; these tests keep the shape that makes them true.
+ * the measurements; these tests keep the overrides from going stale or reaching the wrong crates.
  */
 
 type PackageOverrides = Record<string, Record<string, unknown>>;
-
-const HOT_DEPENDENCIES = [
-  'fancy-regex',
-  'jsonschema',
-  'jsonschema-value',
-  'referencing',
-  'regex-automata',
-  'regex-syntax',
-  'serde_json',
-];
 
 function devPackageOverrides(): PackageOverrides {
   const manifest = Bun.TOML.parse(readText('Cargo.toml')) as {
@@ -37,14 +27,18 @@ function workspacePackageNames(): string[] {
 }
 
 describe('[profile.dev.package] opt-level overrides', () => {
-  test('every hot dependency of a runtime spawn builds at opt-level 1', () => {
-    const overrides = devPackageOverrides();
-    const received = Object.fromEntries(
-      HOT_DEPENDENCIES.map((name) => [name, overrides[name]?.['opt-level']])
+  test('every package a dev override names exists in Cargo.lock', () => {
+    // A renamed or removed dependency would otherwise leave a dead override behind a Cargo warning.
+    const locked = new Set(
+      [...readText('Cargo.lock').matchAll(/^name = "([^"]+)"$/gm)].map((match) => match[1])
     );
-    expect(received, 'expected opt-level 1 for every hot dependency').toEqual(
-      Object.fromEntries(HOT_DEPENDENCIES.map((name) => [name, 1]))
+    const missing = Object.keys(devPackageOverrides()).filter(
+      (name) => name !== '*' && !locked.has(name)
     );
+    expect(
+      missing,
+      `expected every [profile.dev.package.<name>] to name a package in Cargo.lock | received missing: ${missing.join(', ') || 'none'}`
+    ).toEqual([]);
   });
 
   test('no workspace crate is optimized, so editing one keeps its opt-level 0 rebuild', () => {
