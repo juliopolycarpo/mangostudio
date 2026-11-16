@@ -10,9 +10,7 @@
 // are all reachable from it.
 //
 // The two must not drift: `scripts/tests/newline-splitter-parity.unit.test.ts`
-// runs one oracle against both. This copy differs on purpose in one way: a read
-// that completes lines and then overflows returns the lines first and raises on
-// the next call.
+// runs one oracle against both, so a change to one shows up as a failure there.
 //
 // The hand-written readers this replaces kept the unterminated tail in one
 // string, appended every read to it and searched the whole string again. A line

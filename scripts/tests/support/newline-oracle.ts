@@ -16,13 +16,6 @@ export interface OracleOptions {
   readonly onOverflow: 'truncate' | 'refuse';
 }
 
-/**
- * When a `refuse` splitter raises for a read that also completed lines:
- * `immediate` raises and the lines are lost, `deferred` returns them and raises
- * on the next call (or on `finish`).
- */
-export type RefusalTiming = 'immediate' | 'deferred';
-
 /** What a caller can observe from one `push` or `finish`. */
 export type Observed = { readonly lines: readonly string[] } | { readonly refused: true };
 
@@ -58,13 +51,14 @@ export function cutToCap(line: string, maxLineLength: number): string {
  * Split the stream at every newline, hand each push the lines whose newline it
  * carried, and measure the unterminated rest at `finish`. A line over the cap
  * refuses at the push that proves it: the one that completes it, or the one
- * after which the held text is already over the cap.
+ * after which the held text is already over the cap. The lines that push
+ * completed before the refusing one are still returned, and the refusal is the
+ * next entry (the next push, or `finish`).
  */
 export function expected(
   stream: string,
   pushes: readonly string[],
-  options: OracleOptions,
-  timing: RefusalTiming
+  options: OracleOptions
 ): Observed[] {
   const parts = stream.split('\n');
   const rest = parts.pop() ?? '';
@@ -97,7 +91,7 @@ export function expected(
     const openStart = next > 0 ? (lineEnds[next - 1] ?? 0) + 1 : 0;
     if (!refused && refuse && consumed - openStart > options.maxLineLength) refused = true;
     if (refused) {
-      if (timing === 'deferred' && completed.length > 0) observed.push({ lines: completed });
+      if (completed.length > 0) observed.push({ lines: completed });
       return [...observed, { refused: true }];
     }
     observed.push({ lines: completed });

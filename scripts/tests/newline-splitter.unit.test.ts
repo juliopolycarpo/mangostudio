@@ -77,7 +77,7 @@ describe('NewlineSplitter', () => {
         seed,
         options,
         pushes,
-        received: expected(stream, pushes, options, 'deferred'),
+        received: expected(stream, pushes, options),
       });
     }
   });
@@ -94,7 +94,7 @@ describe('NewlineSplitter', () => {
         expect({ onOverflow, cut, received }).toEqual({
           onOverflow,
           cut,
-          received: expected(stream, pushes, options, 'deferred'),
+          received: expected(stream, pushes, options),
         });
       }
     }
