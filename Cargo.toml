@@ -108,6 +108,24 @@ opt-level = "s"
 [profile.release.package.fancy-regex]
 opt-level = "s"
 
+# For local release builds and benchmarks, never for a binary that ships:
+# `cargo build --profile release-fast -p mangostudio-runtime` writes to
+# `target/release-fast/`. Thin LTO with 16 codegen units cuts the runtime build
+# from ~450 s to ~140 s of wall time on linux-x64 (28 cores; CPU time rises from
+# ~910 s to ~1360 s, so a small machine gains little) and keeps the per-package
+# overrides above. The binary is ~31% larger than the shipping one (37.0 against
+# 28.2 MB) and benchmarks a few percent slower, so nothing that packages,
+# publishes or stages a runtime may use it: `scripts/build-runtime.ts` and the
+# release workflows build `--release`, and
+# `scripts/tests/release-fast-profile.unit.test.ts` fails if a release file names
+# this profile. CI's `light` runtime build is separate: it sets
+# `CARGO_PROFILE_RELEASE_LTO=off` through the environment so its cache key
+# differs from the shipping one.
+[profile.release-fast]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+
 # Line tables keep file:line in panics and backtraces, which is all the debug
 # info the workspace needs; dependencies drop theirs. Measured on linux-x64 (30
 # cores, `cargo build --workspace --all-targets`): the cold build falls from
