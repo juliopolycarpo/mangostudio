@@ -210,6 +210,68 @@ describe('createResponsesReasoningTracker', () => {
       ).toBe('\n\nThird.');
     });
 
+    it('starts a reasoning item that follows answer text without a separator', () => {
+      const tracker = createResponsesReasoningTracker();
+
+      const streamed = [
+        summaryDelta('rs_1', 0, 'First thought.'),
+        event({
+          type: 'response.output_item.added',
+          item: { type: 'message', id: 'msg_1' },
+        }),
+        event({ type: 'response.output_text.delta', delta: 'Answer.' }),
+        event({
+          type: 'response.output_item.added',
+          item: { type: 'reasoning', id: 'rs_2' },
+        }),
+        summaryDelta('rs_2', 0, 'Second thought.'),
+        summaryDelta('rs_2', 1, 'Second thought, part two.'),
+      ].map((ev) => tracker.consumeStreamEvent(ev));
+
+      expect(streamed).toEqual([
+        'First thought.',
+        null,
+        null,
+        null,
+        'Second thought.',
+        '\n\nSecond thought, part two.',
+      ]);
+    });
+
+    it('starts a reasoning item that follows a function call without a separator', () => {
+      const tracker = createResponsesReasoningTracker();
+
+      const streamed = [
+        summaryDelta('rs_1', 0, 'First thought.'),
+        event({
+          type: 'response.output_item.added',
+          item: { type: 'function_call', id: 'fc_1', call_id: 'call_1', name: 'search' },
+        }),
+        event({
+          type: 'response.output_item.added',
+          item: { type: 'reasoning', id: 'rs_2' },
+        }),
+        summaryDelta('rs_2', 0, 'Second thought.'),
+      ].map((ev) => tracker.consumeStreamEvent(ev));
+
+      expect(streamed).toEqual(['First thought.', null, null, 'Second thought.']);
+    });
+
+    it('keeps the separator between two reasoning items with nothing between them', () => {
+      const tracker = createResponsesReasoningTracker();
+
+      const streamed = [
+        summaryDelta('rs_1', 0, 'First thought.'),
+        event({
+          type: 'response.output_item.added',
+          item: { type: 'reasoning', id: 'rs_2' },
+        }),
+        summaryDelta('rs_2', 0, 'Second thought.'),
+      ].map((ev) => tracker.consumeStreamEvent(ev));
+
+      expect(streamed).toEqual(['First thought.', null, '\n\nSecond thought.']);
+    });
+
     it('does not open a paragraph for an empty delta', () => {
       const tracker = createResponsesReasoningTracker();
 

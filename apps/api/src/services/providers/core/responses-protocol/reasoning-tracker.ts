@@ -98,6 +98,18 @@ export function createResponsesReasoningTracker(): ResponsesReasoningTracker {
           return emit(ev.text);
         }
 
+        // Answer text or a tool call ends the reasoning phase. The turn opens a new thinking
+        // part for the next reasoning item, so its first text must not carry a separator.
+        case 'response.output_text.delta': {
+          lastEmittedSummaryPart = null;
+          return null;
+        }
+
+        case 'response.output_item.added': {
+          if (ev.item.type !== 'reasoning') lastEmittedSummaryPart = null;
+          return null;
+        }
+
         default:
           return null;
       }
