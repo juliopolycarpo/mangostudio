@@ -3,6 +3,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   DelimitedTextSplitter,
   type DelimitedTextSplitterOptions,
+  RecordTooLongError,
 } from '../../src/utils/delimited-text-splitter';
 
 /** What a caller can observe from one `push` or `finish`. */
@@ -42,7 +43,9 @@ function cutToCap(record: string, options: DelimitedTextSplitterOptions): string
  * each push the records whose delimiter its last unit completed, and measure
  * the unterminated rest at `finish`. A record over the cap refuses at the push
  * that proves it (the delimiter arrived, or the held text outgrew the cap by
- * more than a delimiter prefix) and `finish` refuses a rest over the cap.
+ * more than a delimiter prefix) and `finish` refuses a rest over the cap. The
+ * records that push completed before the refusing one are still returned, and
+ * the refusal is the next entry.
  */
 function expected(
   stream: string,
@@ -71,14 +74,26 @@ function expected(
     let refused = false;
     for (; next < records.length && itemAt(records, next).delimiterEnd <= consumed; next += 1) {
       const text = itemAt(records, next).text;
-      if (options.onOverflow === 'refuse' && text.length > options.maxRecordLength) refused = true;
+      if (options.onOverflow === 'refuse' && text.length > options.maxRecordLength) {
+        refused = true;
+        break;
+      }
       completed.push(cutToCap(text, options));
     }
     const openStart = next > 0 ? itemAt(records, next - 1).delimiterEnd : 0;
-    if (options.onOverflow === 'refuse' && consumed - openStart - slack > options.maxRecordLength) {
+    if (
+      !refused &&
+      options.onOverflow === 'refuse' &&
+      consumed - openStart - slack > options.maxRecordLength
+    ) {
       refused = true;
     }
-    if (refused) return [...observed, { refused: true }];
+    if (refused) {
+      // The records completed before the refusing one come back with their push;
+      // the refusal is raised by the next call, or by `finish`.
+      if (completed.length > 0) observed.push({ records: completed });
+      return [...observed, { refused: true }];
+    }
     observed.push({ records: completed });
   }
   if (options.onOverflow === 'refuse' && rest.length > options.maxRecordLength) {
@@ -248,6 +263,55 @@ describe('DelimitedTextSplitter', () => {
       );
       expect(observeError(() => splitter.push('\n'))).toBe(refusal);
       expect(observeError(() => splitter.finish())).toBe(refusal);
+    });
+
+    it('names the lengths on the error it throws, and it is a RangeError', () => {
+      const splitter = new DelimitedTextSplitter('\n', {
+        maxRecordLength: 4,
+        onOverflow: 'refuse',
+      });
+
+      const refusal = observeError(() => splitter.push('abcdefg'));
+
+      expect(refusal).toBeInstanceOf(RecordTooLongError);
+      expect(refusal).toMatchObject({
+        name: 'RecordTooLongError',
+        recordLength: 7,
+        maxRecordLength: 4,
+      });
+    });
+
+    it('returns the records a read completed before its tail overflowed, then refuses on the next call', () => {
+      const splitter = new DelimitedTextSplitter('\n', {
+        maxRecordLength: 4,
+        onOverflow: 'refuse',
+      });
+
+      expect(splitter.push('ok1\nok2\nabcdefgh')).toEqual(['ok1', 'ok2']);
+
+      expect(observeError(() => splitter.push('')).message).toContain('record length 8 exceeds');
+    });
+
+    it('returns the records before a completed record that is over the cap, then refuses on finish', () => {
+      const splitter = new DelimitedTextSplitter('\n', {
+        maxRecordLength: 4,
+        onOverflow: 'refuse',
+      });
+
+      expect(splitter.push('ok\nabcdefgh\nlater\n')).toEqual(['ok']);
+
+      expect(observeError(() => splitter.finish()).message).toContain('record length 8 exceeds');
+    });
+
+    it('refuses at once when the read completed no record before the overflow', () => {
+      const splitter = new DelimitedTextSplitter('\n', {
+        maxRecordLength: 4,
+        onOverflow: 'refuse',
+      });
+
+      expect(observeError(() => splitter.push('abcdefgh\nok\n')).message).toContain(
+        'record length 8 exceeds'
+      );
     });
 
     it('accepts a record of exactly the cap, with its delimiter split across pushes', () => {

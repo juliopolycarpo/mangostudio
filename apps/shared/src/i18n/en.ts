@@ -2931,6 +2931,7 @@ export const messages: Messages = {
           },
         },
         streamEnded: 'The connection ended before the upgrade finished.',
+        streamFrameTooLong: 'The upgrade output has a line too long to show, so it was stopped.',
       },
     },
     // Product names — identical in every locale, but centralized here so the UI
@@ -3698,6 +3699,7 @@ export const messages: Messages = {
       linesDropped: '{count} earlier lines were dropped.',
       startError: 'The install could not be started.',
       streamError: 'The install console connection dropped.',
+      streamFrameTooLong: 'The install output has a line too long to show, so it was stopped.',
       reconnecting: 'Reconnecting to the console…',
       unsupported: 'This install is not supported on this platform.',
       missingRequirements: 'Install first: {requirements}',

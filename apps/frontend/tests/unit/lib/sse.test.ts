@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, spyOn } from 'bun:test';
 
 import { SSE_FRAME_MAX_CHARS } from '@mangostudio/shared/streaming';
+import { DelimitedTextSplitter } from '@mangostudio/shared/utils/delimited-text-splitter';
 
-import { readSseChunks } from '@/lib/sse';
+import { readSseChunks, SseFrameTooLongError } from '@/lib/sse';
 
 function readerOfBytes(chunks: readonly Uint8Array[]): ReadableStreamDefaultReader<Uint8Array> {
   return new ReadableStream<Uint8Array>({
@@ -125,19 +126,52 @@ describe('readSseChunks', () => {
   });
 
   describe('line cap', () => {
-    it(`rejects with the length and the cap when one line outgrows ${SSE_FRAME_MAX_CHARS} characters`, async () => {
-      const reader = readerOf(['data: ok\n', `data: ${'a'.repeat(SSE_FRAME_MAX_CHARS)}`]);
+    async function rejectionOf(chunks: readonly string[]): Promise<{
+      readonly error: unknown;
+      readonly seen: string[][];
+    }> {
       const seen: string[][] = [];
+      try {
+        for await (const payloads of readSseChunks(readerOf(chunks))) seen.push(payloads);
+      } catch (error) {
+        return { error, seen };
+      }
+      throw new Error(`expected readSseChunks to reject | received: ${JSON.stringify(seen)}`);
+    }
 
-      const outcome = (async () => {
-        for await (const payloads of readSseChunks(reader)) seen.push(payloads);
-      })();
+    it(`rejects with a SseFrameTooLongError carrying the length and the cap when one line outgrows ${SSE_FRAME_MAX_CHARS} characters`, async () => {
+      const { error, seen } = await rejectionOf([
+        'data: ok\n',
+        `data: ${'a'.repeat(SSE_FRAME_MAX_CHARS)}`,
+      ]);
 
-      await expect(outcome).rejects.toThrow(
-        `record length ${SSE_FRAME_MAX_CHARS + 6} exceeds the cap | expected at most ${SSE_FRAME_MAX_CHARS} characters`
-      );
-      // Everything before the oversized line was delivered.
+      expect(error).toBeInstanceOf(SseFrameTooLongError);
+      expect(error).toMatchObject({
+        name: 'SseFrameTooLongError',
+        lineLength: SSE_FRAME_MAX_CHARS + 6,
+        maxLineLength: SSE_FRAME_MAX_CHARS,
+        message: `SSE line of ${SSE_FRAME_MAX_CHARS + 6} characters exceeds the ${SSE_FRAME_MAX_CHARS}-character limit`,
+      });
       expect(seen).toEqual([['ok']]);
+    });
+
+    it('delivers the payloads the same read completed before the oversized line, then rejects', async () => {
+      const { error, seen } = await rejectionOf([
+        `data: one\ndata: two\ndata: ${'a'.repeat(SSE_FRAME_MAX_CHARS)}`,
+        'data: never read\n',
+      ]);
+
+      expect(error).toBeInstanceOf(SseFrameTooLongError);
+      expect(seen).toEqual([['one', 'two']]);
+    });
+
+    it('still rejects when the body ends right after the read that held the oversized line', async () => {
+      const { error, seen } = await rejectionOf([
+        `data: one\ndata: ${'a'.repeat(SSE_FRAME_MAX_CHARS)}`,
+      ]);
+
+      expect(error).toBeInstanceOf(SseFrameTooLongError);
+      expect(seen).toEqual([['one']]);
     });
 
     it('accepts a line of exactly the cap', async () => {
@@ -154,22 +188,26 @@ describe('readSseChunks', () => {
 
   // The reader used to append each read to one string and split it again, so a
   // line spanning n reads cost O(line * n): 1 MiB in 16-byte reads took several
-  // seconds. The bound separates linear from quadratic; it is no benchmark.
-  it('delivers a 1 MiB line read in 16-byte pieces within 2500 ms', async () => {
+  // seconds. Rather than time it, pin that every read goes through the splitter
+  // once and only the new text is handed to it: the splitter's own linearity is
+  // proven in apps/shared/tests/unit/delimited-text-splitter.test.ts.
+  it('hands each read to the splitter once, and nothing else, for a 1 MiB line in 16-byte reads', async () => {
     const bytes = new TextEncoder().encode(`data: ${'a'.repeat(1024 * 1024)}\n`);
-    let offset = 0;
-    const reader = new ReadableStream<Uint8Array>({
-      pull(controller) {
-        if (offset >= bytes.byteLength) controller.close();
-        else controller.enqueue(bytes.slice(offset, (offset += 16)));
-      },
-    }).getReader();
+    const reads: Uint8Array[] = [];
+    for (let offset = 0; offset < bytes.byteLength; offset += 16) {
+      reads.push(bytes.slice(offset, offset + 16));
+    }
+    const push = spyOn(DelimitedTextSplitter.prototype, 'push');
+    try {
+      const seen = await collectFrom(readerOfBytes(reads));
 
-    const startedAt = performance.now();
-    const seen = await collectFrom(reader);
-    const elapsedMs = performance.now() - startedAt;
-
-    expect(seen.flat().map((payload) => payload.length)).toEqual([1024 * 1024]);
-    expect(elapsedMs).toBeLessThan(2500);
+      expect(seen.flat().map((payload) => payload.length)).toEqual([1024 * 1024]);
+      expect({
+        calls: push.mock.calls.length,
+        charactersHandedIn: push.mock.calls.reduce((total, [text]) => total + text.length, 0),
+      }).toEqual({ calls: reads.length, charactersHandedIn: bytes.byteLength });
+    } finally {
+      push.mockRestore();
+    }
   });
 });

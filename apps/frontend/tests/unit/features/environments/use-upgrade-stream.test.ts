@@ -7,6 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 
+import { en } from '@mangostudio/shared/i18n';
 import { SSE_FRAME_MAX_CHARS } from '@mangostudio/shared/streaming';
 import type { UpgradeStreamEvent } from '@mangostudio/shared/updates';
 import { act } from '@testing-library/react';
@@ -165,7 +166,7 @@ describe('useUpgradeStream', () => {
     expect(result.current.lines.map((line) => line.text)).toEqual(['still going']);
   });
 
-  it('reads as failed, naming the cap, when one line outgrows the frame cap', async () => {
+  it('reads as failed, with the localized text, when one line outgrows the frame cap', async () => {
     fetchMock.mockResolvedValue(
       streamingResponse([
         sse([{ type: 'output', stream: 'stdout', line: 'before', done: false }]),
@@ -177,7 +178,9 @@ describe('useUpgradeStream', () => {
     act(() => result.current.start({ channel: 'stable' }));
 
     await waitFor(() => expect(result.current.phase).toBe('failed'));
-    expect(result.current.streamError).toContain(`record length ${SSE_FRAME_MAX_CHARS + 6}`);
+    // The reader's own message names a character count; the dialog gets the dictionary text.
+    expect(result.current.streamError).toBe(en.environments.machine.update.streamFrameTooLong);
+    expect(result.current.lines.map((line) => line.text)).toEqual(['before']);
     expect(result.current.report).toBeNull();
   });
 

@@ -9,6 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 
 import type { InstallStreamEvent } from '@mangostudio/shared/environments';
+import { en } from '@mangostudio/shared/i18n';
 import { SSE_FRAME_MAX_CHARS } from '@mangostudio/shared/streaming';
 import { act } from '@testing-library/react';
 
@@ -251,6 +252,9 @@ describe('useInstallStream', () => {
     // The replay would carry the same line again, so the hook must not retry.
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(result.current.exit).toBeNull();
+    // Not the "connection dropped" text, which would be false here.
+    expect(result.current.streamError).toBe(en.environments.install.streamFrameTooLong);
+    expect(result.current.lines.map((line) => line.text)).toEqual(['before']);
   });
 
   it('resets to idle when no run is active', () => {
