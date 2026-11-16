@@ -1,13 +1,16 @@
 /**
- * What `isRunningStaleBuild` reads from the page and the hub. Injected so a
+ * What `probeBuildFreshness` reads from the page and the hub. Injected so a
  * test can stage "the hub was upgraded" without a second build.
  */
 export interface BuildProbe {
   /** The `src` of the entry script this tab loaded, or `null` when there is none (dev server, tests). */
   readonly loadedEntryScript: () => string | null;
-  /** The hub's current `index.html`, fetched past any cache. Rejects when the hub cannot be reached. */
+  /** The hub's current `index.html`, fetched past any cache. Rejects when the hub cannot be reached in time. */
   readonly fetchShell: () => Promise<string>;
 }
+
+/** How long the shell probe waits for the hub; a hub mid-restart can accept a connection and say nothing. */
+const SHELL_PROBE_TIMEOUT_MS = 5_000;
 
 /** The content-hashed entry bundle `index.html` points at. */
 const ENTRY_SCRIPT_PATTERN = /\/assets\/main-[\w-]+\.js/;
@@ -22,12 +25,22 @@ function browserBuildProbe(): BuildProbe {
       return null;
     },
     fetchShell: async () => {
-      const response = await fetch('/index.html', { cache: 'no-store' });
+      const response = await fetch('/index.html', {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(SHELL_PROBE_TIMEOUT_MS),
+      });
       if (!response.ok) throw new Error(`GET /index.html answered ${response.status}`);
       return response.text();
     },
   };
 }
+
+/**
+ * What a probe found out. `unknown` is a real answer, not a missing one: it
+ * means the hub could not say, which is not a reason to stop retrying and not a
+ * reason to believe the tab is current.
+ */
+export type BuildFreshness = 'stale' | 'current' | 'unknown';
 
 /**
  * Whether the hub now serves a different build than this tab is running.
@@ -39,29 +52,34 @@ function browserBuildProbe(): BuildProbe {
  * a 404 and a script error read alike in every browser), so this compares the
  * entry bundle the tab loaded with the one the hub's `index.html` names now.
  *
- * Answers `false` whenever it cannot tell: the hub is unreachable (offline,
- * where retrying may well work), the page has no hashed entry (dev server), or
- * the shell does not name one. Never reloads anything itself, so it cannot
- * loop.
+ * - `stale`: the shell names another entry bundle.
+ * - `current`: it names the one this tab loaded, or the page has no hashed
+ *   entry at all (the dev server), so there is nothing to be stale against.
+ * - `unknown`: the hub could not be reached in time, or answered with a shell
+ *   that names no entry bundle. Mid-upgrade the hub is down for seconds, then
+ *   serves the new build, so this must not be remembered as "current".
+ *
+ * Never reloads anything itself, so it cannot loop.
  *
  * @example
- * if (await isRunningStaleBuild()) offerReloadOnly();
+ * if ((await probeBuildFreshness()) === 'stale') offerReloadOnly();
  */
-export async function isRunningStaleBuild(
+export async function probeBuildFreshness(
   probe: BuildProbe = browserBuildProbe()
-): Promise<boolean> {
+): Promise<BuildFreshness> {
   const loaded = probe.loadedEntryScript();
-  if (loaded === null) return false;
+  if (loaded === null) return 'current';
   try {
     const current = ENTRY_SCRIPT_PATTERN.exec(await probe.fetchShell())?.[0];
-    return current !== undefined && current !== loaded;
+    if (current === undefined) return 'unknown';
+    return current === loaded ? 'current' : 'stale';
   } catch {
-    return false;
+    return 'unknown';
   }
 }
 
-/** How long a "not stale" answer is reused before the next failure asks the hub again. */
-const NOT_STALE_FRESH_MS = 30_000;
+/** How long a "current" answer is reused before the next failure asks the hub again. */
+const CURRENT_FRESH_MS = 30_000;
 
 export interface StaleBuildMonitor {
   /**
@@ -75,9 +93,16 @@ export interface StaleBuildMonitor {
   subscribe(listener: () => void): () => void;
   /**
    * A lazy chunk arrived, so the hub is serving what this tab asks for.
-   * Forgets a remembered "not stale", so the next failure probes again.
+   * Forgets a remembered "current", so the next failure probes again.
    */
   noteChunkLoaded(): void;
+  /**
+   * The hub answered something (a realtime reconnect, the browser coming back
+   * online). Probes now when the last probe could not reach it, so a tab that
+   * has no Retry to press, such as one showing only messages, still learns that
+   * the hub came back with a new build. Does nothing otherwise.
+   */
+  noteHubReachable(): void;
 }
 
 /**
@@ -85,27 +110,35 @@ export interface StaleBuildMonitor {
  *
  * "Stale" is sticky: the hub has the new files and this tab's names are gone for
  * good, so it stays true until the page reloads and the monitor starts over.
- * "Not stale" is reused for 30 s or until a chunk loads, whichever comes first.
+ * "Current" is reused for 30 s or until a chunk loads, whichever comes first.
+ * "Unknown" is never reused: the next failure probes again, and so does the hub
+ * becoming reachable.
  */
 export function createStaleBuildMonitor(
   probe: BuildProbe,
   now: () => number = () => Date.now()
 ): StaleBuildMonitor {
   let stale = false;
-  let shared: { readonly promise: Promise<boolean>; settledAt: number | null } | null = null;
+  let shared: {
+    readonly promise: Promise<boolean>;
+    settledAt: number | null;
+    result: BuildFreshness | null;
+  } | null = null;
   const listeners = new Set<() => void>();
 
   function startProbe(): Promise<boolean> {
     const entry: NonNullable<typeof shared> = {
-      promise: isRunningStaleBuild(probe).then((isStale) => {
+      promise: probeBuildFreshness(probe).then((freshness) => {
         entry.settledAt = now();
-        if (isStale && !stale) {
+        entry.result = freshness;
+        if (freshness === 'stale' && !stale) {
           stale = true;
           for (const listener of listeners) listener();
         }
-        return isStale;
+        return freshness === 'stale';
       }),
       settledAt: null,
+      result: null,
     };
     shared = entry;
     return entry.promise;
@@ -114,9 +147,11 @@ export function createStaleBuildMonitor(
   return {
     check() {
       if (stale) return Promise.resolve(true);
+      // An unknown answer is not reusable, and an in-flight probe is (it has no answer yet).
       const reusable =
         shared !== null &&
-        (shared.settledAt === null || now() - shared.settledAt < NOT_STALE_FRESH_MS);
+        (shared.settledAt === null ||
+          (shared.result === 'current' && now() - shared.settledAt < CURRENT_FRESH_MS));
       return reusable && shared ? shared.promise : startProbe();
     },
     isStale: () => stale,
@@ -125,7 +160,10 @@ export function createStaleBuildMonitor(
       return () => listeners.delete(listener);
     },
     noteChunkLoaded() {
-      if (shared?.settledAt != null) shared = null;
+      if (shared?.result === 'current') shared = null;
+    },
+    noteHubReachable() {
+      if (!stale && shared?.result === 'unknown') void startProbe();
     },
   };
 }

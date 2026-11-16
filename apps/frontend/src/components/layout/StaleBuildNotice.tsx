@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { useI18n } from '@/hooks/use-i18n';
-import { useBuildIsStale } from '@/hooks/use-stale-build';
+import { useBuildIsStale, useRecheckStaleBuildWhenReachable } from '@/hooks/use-stale-build';
 import type { StaleBuildMonitor } from '@/lib/stale-build';
 
 /** Id of the notice's Reload button, so a failure panel can hand focus to it. */
@@ -20,6 +20,7 @@ export const STALE_BUILD_RELOAD_ID = 'stale-build-reload';
  */
 export function StaleBuildNotice({ monitor }: { readonly monitor?: StaleBuildMonitor }) {
   const stale = useBuildIsStale(monitor);
+  useRecheckStaleBuildWhenReachable(monitor);
   const { t } = useI18n();
   if (!stale) return null;
   return (
