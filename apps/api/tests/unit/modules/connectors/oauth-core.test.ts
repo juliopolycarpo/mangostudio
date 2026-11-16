@@ -234,6 +234,33 @@ describe('oauth core with a second provider profile', () => {
     await expect(exchange).rejects.toThrow('Could not reach the Acme authorization server.');
   });
 
+  it('reports a deadline that fires during the body read as unreachable, not malformed', async () => {
+    // Named fake for a server that sends headers and then stalls the body until aborted.
+    const stalledBodyAuthServerFetch: FetchLike = (_input, init) =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              init?.signal?.addEventListener('abort', () =>
+                controller.error(new Error('aborted by signal'))
+              );
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      );
+
+    const exchange = exchangeAuthorizationCode(acmeProfile, {
+      code: 'code-1',
+      codeVerifier: 'verifier-1',
+      authBaseUrl: AUTH_BASE_URL,
+      fetchImpl: stalledBodyAuthServerFetch,
+      requestTimeoutMs: 20,
+    });
+
+    await expect(exchange).rejects.toThrow('Could not reach the Acme authorization server.');
+  });
+
   it('sends every token request with a deadline signal even when no seam is given', async () => {
     let deadlineSignal: AbortSignal | undefined;
     await exchangeAuthorizationCode(acmeProfile, {

@@ -180,18 +180,22 @@ async function requestToken(
   fetchImpl: FetchLike,
   requestTimeoutMs: number
 ): Promise<TokenEndpointResponse> {
+  // One deadline for the exchange, the body read included.
+  const deadline = AbortSignal.timeout(requestTimeoutMs);
+  const unreachable = (cause: unknown) =>
+    profile.createFlowError(`Could not reach the ${profile.label} authorization server.`, {
+      cause,
+    });
   let response: Response;
   try {
     response = await fetchImpl(`${authBaseUrl}/oauth/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ client_id: profile.clientId, ...params }).toString(),
-      signal: AbortSignal.timeout(requestTimeoutMs),
+      signal: deadline,
     });
   } catch (error) {
-    throw profile.createFlowError(`Could not reach the ${profile.label} authorization server.`, {
-      cause: error,
-    });
+    throw unreachable(error);
   }
 
   if (!response.ok) {
@@ -204,7 +208,10 @@ async function requestToken(
     );
   }
 
-  return parseTokenEndpointPayload(profile, await response.json().catch(() => null));
+  const payload: unknown = await response.json().catch(() => null);
+  // A deadline that fires mid-body is a stalled server, not a malformed payload.
+  if (payload === null && deadline.aborted) throw unreachable(deadline.reason);
+  return parseTokenEndpointPayload(profile, payload);
 }
 
 /** Exchanges an authorization code (plus PKCE verifier) for a token bundle. */
