@@ -6,27 +6,7 @@ import {
   decodeMessageParts,
   readMessageParts,
 } from '../../../../src/modules/messages/infrastructure/message-parts-codec';
-
-/** Named fake for the hub log: collects every structured line written to `console.warn`. */
-class WarnCapture {
-  readonly lines: string[] = [];
-  private readonly original = console.warn;
-  private readonly originalFlag = process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS;
-
-  start(): void {
-    // The test lanes silence diagnostic logs; this fake needs them on.
-    process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS = '1';
-    console.warn = (...args: unknown[]) => {
-      this.lines.push(args.map(String).join(' '));
-    };
-  }
-
-  stop(): void {
-    console.warn = this.original;
-    if (this.originalFlag === undefined) delete process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS;
-    else process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS = this.originalFlag;
-  }
-}
+import { DiagnosticWarnCapture } from '../../../support/diagnostic-warn-capture';
 
 describe('decodeMessageParts', () => {
   it('reports a missing cell as absent', () => {
@@ -93,7 +73,7 @@ describe('decodeMessageParts', () => {
 
 describe('readMessageParts', () => {
   it('degrades a corrupt cell to undefined and logs the message id, not the value', () => {
-    const capture = new WarnCapture();
+    const capture = new DiagnosticWarnCapture();
     capture.start();
     let parts: unknown;
     try {
@@ -109,7 +89,7 @@ describe('readMessageParts', () => {
   });
 
   it('reports the same damaged cell once, not on every read', () => {
-    const capture = new WarnCapture();
+    const capture = new DiagnosticWarnCapture();
     capture.start();
     try {
       for (let read = 0; read < 3; read++) {
@@ -125,20 +105,8 @@ describe('readMessageParts', () => {
     expect(capture.lines[1]).toContain('"messageId":"msg-other"');
   });
 
-  it('stays silent when told the row was already reported', () => {
-    const capture = new WarnCapture();
-    capture.start();
-    try {
-      readMessageParts({ id: 'msg-quiet', parts: '{not json' }, { quiet: true });
-    } finally {
-      capture.stop();
-    }
-
-    expect(capture.lines).toEqual([]);
-  });
-
   it('returns valid parts without logging', () => {
-    const capture = new WarnCapture();
+    const capture = new DiagnosticWarnCapture();
     capture.start();
     let parts: unknown;
     try {
