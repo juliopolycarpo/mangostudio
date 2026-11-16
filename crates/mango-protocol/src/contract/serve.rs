@@ -340,12 +340,21 @@ async fn answer(
             .check(&method, &params, &policy.capabilities, &context)
             .await?;
     }
+    // Resolved before the handler runs, not after: a handler with side
+    // effects must never run for a request that can only end in `INTERNAL`,
+    // or its caller cannot tell whether the effect happened.
+    let result_validator = if policy.validate_results {
+        Some(
+            policy
+                .core
+                .result_validator(policy.index)
+                .map_err(|error| uncompiled(&method, error))?,
+        )
+    } else {
+        None
+    };
     let result = erased.call(&method, params, context).await?;
-    if policy.validate_results {
-        let result_validator = policy
-            .core
-            .result_validator(policy.index)
-            .map_err(|error| uncompiled(&method, error))?;
+    if let Some(result_validator) = result_validator {
         check_result(&method, result_validator, &result, ReasonStyle::Quoted)?;
     }
     Ok(result)

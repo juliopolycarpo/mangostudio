@@ -213,7 +213,13 @@ impl Contract {
     /// reports it here, at construction. This constructor cannot: the first
     /// request that reaches that schema is answered `INTERNAL`, with the
     /// method and the catalog field in its details (the caller sent nothing
-    /// wrong, so never `INVALID_PARAMS`). Call [`Contract::compile_all`] in a
+    /// wrong, so never `INVALID_PARAMS`). A method's schema failure is
+    /// reported before its handler runs, never after: [`Contract::serve`]
+    /// resolves the `result` schema ahead of the handler when
+    /// [`ServeOptions`] asks for `validate_results`, and a host that checks
+    /// results itself calls [`Contract::ensure_result_schema`] first, so a
+    /// handler with side effects does not run for a request that can only end
+    /// in `INTERNAL`. Call [`Contract::compile_all`] in a
     /// test, or once at start where an early failure is worth the cost, so a
     /// broken catalog is caught before a request finds it. Until then,
     /// [`Contract::catalog`] and the `rpc.discover` answer publish the
@@ -614,6 +620,52 @@ impl Contract {
             .result_validator(index)
             .map_err(|error| uncompiled(method, error))?;
         check_result(method, validator, result, ReasonStyle::Masked)
+    }
+
+    /// Compiles `method`'s `result` schema now, if nothing has yet, so a host
+    /// that checks results itself ([`Contract::check_result`]) can find out
+    /// that the schema is broken before it runs the handler. Otherwise a
+    /// handler with side effects would run, and its caller would then get
+    /// `INTERNAL` without knowing whether the effect happened. A no-op on a
+    /// contract the eager constructors built, and after the first call.
+    ///
+    /// # Errors
+    /// `METHOD_UNSUPPORTED` for a method the contract does not declare, as
+    /// [`Contract::check_result`] answers; `INTERNAL` with `details.method`,
+    /// `details.field` and `details.reason` when the schema does not compile.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use mango_protocol::catalog::CatalogMethod;
+    /// use mango_protocol::contract::Contract;
+    /// use serde_json::json;
+    ///
+    /// let contract = Contract::builder("example", "1.0.0")
+    ///     .method(CatalogMethod {
+    ///         name: "text.echo".into(),
+    ///         description: None,
+    ///         params: json!({ "type": "object" }),
+    ///         result: json!({ "type": "object" }),
+    ///         capabilities: vec![],
+    ///         deprecated: false,
+    ///     })
+    ///     .build()
+    ///     .expect("a valid contract");
+    /// contract.ensure_result_schema("text.echo").expect("the schema compiles");
+    /// assert_eq!(
+    ///     contract.ensure_result_schema("text.other").unwrap_err().code,
+    ///     "METHOD_UNSUPPORTED"
+    /// );
+    /// ```
+    pub fn ensure_result_schema(&self, method: &str) -> Result<(), RemoteError> {
+        let index = self
+            .method_index(method)
+            .ok_or_else(|| unsupported(&self.core.catalog.name, method))?;
+        self.core
+            .result_validator(index)
+            .map(|_| ())
+            .map_err(|error| uncompiled(method, error))
     }
 
     /// The position of `name` in the catalog's methods, which is also the
@@ -1127,6 +1179,32 @@ mod tests {
             details.get("field"),
             Some(&json!("catalog.methods[0].result")),
             "expected the failing schema's field | received: {details:?}"
+        );
+    }
+
+    /// `ensure_result_schema` finds a broken result schema without a result
+    /// to check, so a host can do it before the handler runs.
+    #[test]
+    fn ensure_result_schema_reports_a_broken_schema_before_any_result_exists() {
+        let lazy = Contract::from_shared_catalog_lazy(catalog_with_malformed_schemas())
+            .expect("names are valid");
+        let error = lazy
+            .ensure_result_schema("math.add")
+            .expect_err("math.add's result schema does not compile");
+        assert_eq!(error.code, "INTERNAL");
+        let details = error.details.as_ref().expect("details");
+        assert_eq!(details.get("method"), Some(&json!("math.add")));
+        assert_eq!(
+            details.get("field"),
+            Some(&json!("catalog.methods[0].result")),
+            "expected the failing schema's field | received: {details:?}"
+        );
+
+        lazy.ensure_result_schema("text.echo")
+            .expect("text.echo's result schema compiles");
+        assert_eq!(
+            lazy.ensure_result_schema("no.such").unwrap_err().code,
+            "METHOD_UNSUPPORTED"
         );
     }
 

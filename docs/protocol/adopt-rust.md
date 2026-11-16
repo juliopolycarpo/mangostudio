@@ -164,7 +164,10 @@ instead: it checks names and the catalog's shape, and each method's `params` and
 compiles on the first request that needs it (shared by every handler the contract serves). A
 schema that does not compile then answers that method `INTERNAL`, with `details.method`,
 `details.field` (such as `catalog.methods[3].result`) and a shortened `details.reason`, and never
-`INVALID_PARAMS`: the caller sent nothing wrong. Until `compile_all()` has passed, `catalog()` and
+`INVALID_PARAMS`: the caller sent nothing wrong. A method's schema failure is reported before its handler runs, never after: `serve`
+resolves the `result` schema ahead of the handler when `validate_results` is on, and a host that
+calls `check_result` itself calls `ensure_result_schema(method)` first, so a handler with side
+effects does not run for a request that can only end in `INTERNAL`. Until `compile_all()` has passed, `catalog()` and
 `rpc.discover` publish schemas nothing has checked. Call `Contract::compile_all()` in a test, or once at start, to get the error the
 eager constructors would have returned before a request finds it.
 
