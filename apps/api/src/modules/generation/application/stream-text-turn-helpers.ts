@@ -216,12 +216,13 @@ export function createToolStartMarkerWriter(session: {
       session.allParts
     );
     const written = await session.checkpointWriter.checkpoint({ force: true, durable: true });
-    if (!written) {
-      throw new Error(
-        `Tool "${name}" was not started: its running marker could not be saved, so a restart could not tell whether it ran.`
-      );
-    }
+    if (!written) throw new Error(toolStartMarkerFailedMessage(name));
   };
+}
+
+/** What the model is told when a call's running marker could not be stored and the call was not started. */
+function toolStartMarkerFailedMessage(name: string): string {
+  return `Tool "${name}" was not started: its running marker could not be saved, so a restart could not tell whether it ran.`;
 }
 
 /** Context an image-generation tool call needs beyond its own identifiers. */
@@ -233,8 +234,11 @@ interface ImageGenerationCallContext {
   allParts: MessagePart[];
   generatedImageArtifacts: PersistedGeneratedImageInput[];
   nextToolResults: NonNullable<AgentTurnRequest['toolResults']>;
-  /** Writes a required checkpoint; `durable` commits it at `synchronous = FULL`. */
-  checkpoint?: (options?: { durable?: boolean }) => Promise<void>;
+  /**
+   * Writes a required checkpoint; `durable` commits it at `synchronous = FULL`.
+   * Resolves to whether it was stored.
+   */
+  checkpoint?: (options?: { durable?: boolean }) => Promise<boolean>;
 }
 
 /**
@@ -296,8 +300,14 @@ export async function* executeImageGenerationCall(
     toolCallPart.execution = lifecycle.current;
     yield* drainLifecycleEvents(lifecycleEvents);
     // Awaited before the provider call below, so a durable write here is a real
-    // write-ahead record that a paid generation may be under way.
-    await ctx.checkpoint?.({ durable: true });
+    // write-ahead record that a paid generation may be under way. Same rule as
+    // `createToolStartMarkerWriter`: no stored marker, or a cancel while it was being
+    // written, and nothing is generated.
+    ctx.signal?.throwIfAborted();
+    if ((await ctx.checkpoint?.({ durable: true })) === false) {
+      throw new Error(toolStartMarkerFailedMessage(name));
+    }
+    ctx.signal?.throwIfAborted();
 
     const plan = createGenerateImageToolPlan(args, {
       toolCallId: callId,

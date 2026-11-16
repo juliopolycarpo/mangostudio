@@ -283,8 +283,10 @@ What a failure costs depends on what failed:
     submitted, and the result of a standalone image generation. The hub waits for that checkpoint
     before it starts the tool, so a crash or a power loss cannot leave a call that ran recorded as not
     started. If the checkpoint cannot be written, the tool does not start and the model receives an
-    error. A call that was cancelled while the marker was being written keeps its `running` marker
-    and reads as an unknown outcome after recovery. This costs one fsync per such call.
+    error. This covers image generation too. A call cancelled while its marker is being written does
+    not start and is normally stored as `cancelled`; if the hub crashes before that is saved,
+    recovery finds the `running` marker and reads the outcome as unknown. This costs one fsync per
+    such call.
   - Revocations: replacing or revoking a runtime pairing token, revoking an API key, and the auth
     requests that delete or rotate a credential (sign-out, revoking one or all sessions, changing or
     resetting a password, updating or deleting an API key). Sign-in, sign-up and session reads stay at

@@ -288,12 +288,12 @@ export async function prepareStreamTextTurn(
   return session;
 }
 
-async function checkpointTurn(
+function checkpointTurn(
   session: StreamTextTurnSession,
   force = false,
   durable = false
-): Promise<void> {
-  await session.checkpointWriter.checkpoint({ force, durable });
+): Promise<boolean> {
+  return session.checkpointWriter.checkpoint({ force, durable });
 }
 
 /**

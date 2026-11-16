@@ -228,9 +228,13 @@ O que uma falha custa depende do que falhou:
   - Marcadores de efeito colateral de ferramenta: o checkpoint que registra uma chamada de ferramenta
     como em execução (qualquer ferramenta que não seja uma leitura simples), cada imagem gerada
     concluída, o recibo gravado antes de um turno de agente externo ser enviado e o resultado de uma
-    geração de imagem avulsa. Isso estreita a janela em que uma queda de energia faz o hub executar esse
-    passo uma segunda vez; não a fecha. A ferramenta começa enquanto o marcador é gravado, então uma
-    queda nesses poucos milissegundos ainda mostra a chamada como não iniciada.
+    geração de imagem avulsa. O hub espera esse checkpoint antes de iniciar a ferramenta, então uma queda
+    do processo ou de energia não deixa uma chamada que foi executada registrada como não iniciada. Se o
+    checkpoint não puder ser gravado, a ferramenta não inicia e o modelo recebe um erro. Isso vale também
+    para a geração de imagem. Uma chamada cancelada enquanto o marcador é gravado não inicia e
+    normalmente fica registrada como `cancelled`; se o hub cair antes de isso ser salvo, a recuperação
+    encontra o marcador `running` e trata o resultado como desconhecido. Isso custa um fsync por chamada
+    desse tipo.
   - Revogações: substituir ou revogar um token de pareamento do runtime, revogar uma chave de API e as
     requisições de autenticação que apagam ou trocam uma credencial (logout, revogar uma ou todas as
     sessões, trocar ou redefinir a senha, atualizar ou apagar uma chave de API). Login, cadastro e
