@@ -295,12 +295,20 @@ export class TurnCheckpointWriter {
   // Checkpointing is best effort: a failed write is logged and swallowed so a
   // transient DB error can neither abort the live turn nor reject every later
   // write chained onto the queue.
-  private async writePlanned(planned: PlannedWrite): Promise<boolean> {
+  private async writePlanned(queued: PlannedWrite): Promise<boolean> {
+    let planned = queued;
+    let replannedAsRewrite = false;
     // An earlier write failed after this delta was planned on top of it, so the
-    // delta would leave a gap. Skipping it is safe: the failure already reset the
-    // planner, and the next checkpoint rewrites the row.
+    // delta would leave a gap. An ordinary checkpoint skips it: the failure already
+    // reset the planner, and the next checkpoint rewrites the row. A durable one
+    // (the record that a tool call or paid image is under way) must not be dropped,
+    // as a full rewrite never was: it is planned again against the live turn, as a
+    // rewrite that no earlier write has to have landed for.
     if (planned.plan.kind === 'delta' && planned.failuresAtPlan !== this.failedWrites) {
-      return false;
+      if (!planned.durable) return false;
+      this.planner.reset();
+      planned = this.planWrite(this.options.getContent(), true);
+      replannedAsRewrite = true;
     }
     try {
       if (planned.plan.kind === 'rebase') {
@@ -318,6 +326,10 @@ export class TurnCheckpointWriter {
           durable: planned.durable,
         });
       }
+      // Writes planned while this one waited were planned against a planner state this
+      // rewrite replaced. Forget it, so the next checkpoint rewrites the row rather than
+      // extending a state the row may no longer hold.
+      if (replannedAsRewrite) this.planner.reset();
       return true;
     } catch (error) {
       this.failedWrites += 1;

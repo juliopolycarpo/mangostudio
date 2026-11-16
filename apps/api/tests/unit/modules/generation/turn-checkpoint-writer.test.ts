@@ -596,6 +596,69 @@ describe('TurnCheckpointWriter write shape', () => {
     ]);
   });
 
+  it('rewrites, rather than drops, a durable delta planned on top of a write which then failed', async () => {
+    const { store, writer, append } = setup();
+    store.hold();
+    append(10);
+    const first = writer.checkpoint({ force: true });
+    append(10);
+    const marker = writer.checkpoint({ durable: true });
+    append(10);
+    const after = writer.checkpoint({ force: true });
+    await tick();
+    expect(store.inFlight).toHaveLength(1);
+    store.inFlight[0]?.fail(new Error('disk full'));
+    await tick();
+    store.releaseAll();
+
+    const outcomes = await Promise.all([first, marker, after]);
+    append(10);
+    const next = await writer.checkpoint({ force: true });
+
+    // The durable marker lands as a durable full row of the turn as it is when the
+    // write runs; the ordinary delta behind it is dropped; the checkpoint after that
+    // rewrites again, because the planner no longer trusts what it planned.
+    expect({
+      outcomes,
+      next,
+      writes: store.writes.map((write) => [write.kind, write.durable, write.text.length]),
+    }).toEqual({
+      outcomes: [false, true, false],
+      next: true,
+      writes: [
+        ['rewrite', false, 10],
+        ['rewrite', true, 30],
+        ['rewrite', false, 40],
+      ],
+    });
+  });
+
+  it('reports a durable write that itself failed as false, and rewrites on the next checkpoint', async () => {
+    const { store, writer, append } = setup();
+    append(10);
+    expect(await writer.checkpoint({ force: true })).toBe(true);
+    store.failNextWrite(new Error('disk full'));
+    append(10);
+
+    const marker = await writer.checkpoint({ durable: true });
+    append(10);
+    const next = await writer.checkpoint({ durable: true });
+
+    expect({
+      marker,
+      next,
+      writes: store.writes.map((write) => [write.kind, write.durable, write.text.length]),
+    }).toEqual({
+      marker: false,
+      next: true,
+      writes: [
+        ['rewrite', false, 10],
+        ['delta', true, 20],
+        ['rewrite', true, 30],
+      ],
+    });
+  });
+
   it('writes a trailing text part that grows in place as an append', async () => {
     const { store, parts, writer, state } = setup();
     parts.push({ type: 'text', text: 'a'.repeat(5_000) });
