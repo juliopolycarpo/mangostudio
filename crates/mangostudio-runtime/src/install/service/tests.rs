@@ -1824,11 +1824,9 @@ async fn an_install_run_aborted_at_teardown_is_audited_once_by_its_owner() {
     use crate::ports::authorization::Authorization;
     use crate::ports::clock::SystemClock;
     use crate::registry::Registry;
-    use mango_protocol::contract::Contract;
     use mango_protocol::frame::PeerInfo;
     use mango_protocol::port::port_pair;
     use mango_protocol::session::{Session, SessionOptions};
-    use mangostudio_runtime_contract::catalog::catalog;
     use std::future::Future;
     use std::pin::Pin;
 
@@ -1870,10 +1868,15 @@ async fn an_install_run_aborted_at_teardown_is_audited_once_by_its_owner() {
     within("the runtime handshake", runtime.ready())
         .await
         .unwrap();
-    let contract = Contract::from_catalog(catalog().clone()).unwrap();
-    crate::serve::serve(&contract, &runtime, registry, Arc::new(GrantsAll), "host")
-        .unwrap()
-        .persist();
+    crate::serve::serve(
+        crate::serve::runtime_contract(),
+        &runtime,
+        registry,
+        Arc::new(GrantsAll),
+        "host",
+    )
+    .unwrap()
+    .persist();
 
     let request = tokio::spawn({
         let hub = hub.clone();

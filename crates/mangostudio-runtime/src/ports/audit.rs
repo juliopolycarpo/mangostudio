@@ -42,7 +42,7 @@
 //! mirrors and tests, ready for whichever change adds the whitelist and
 //! calls it. Carrying raw, unredacted `params` here in the meantime would
 //! risk exactly the leak this crate's other seams (`panic::catch_panics`,
-//! `result_check`) all exist to prevent — a file's contents or a shell
+//! the masked result check) all exist to prevent — a file's contents or a shell
 //! command ending up in a log line. Deliberately omitted for now; a later
 //! change that implements methods is what should also design the whitelist
 //! and add the field.

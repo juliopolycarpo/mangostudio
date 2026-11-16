@@ -484,15 +484,13 @@ async fn build_resolve_contained_result(
 mod tests {
     use std::path::PathBuf;
 
-    use mangostudio_runtime_contract::catalog::method;
-
     use super::{
         BrowseParams, MAX_WORKSPACE_DIRECTORY_ENTRIES, ResolveContainedParams, ValidateParams,
         ValidationOutcome, browse_filesystem_error, browse_path_shape_error, build_browse_result,
         build_resolve_contained_result, build_validate_result, compare_directory_entry_names,
         read_workspace_directory, validate_resolved_path, workdir_validation_error,
     };
-    use crate::result_check::{check_result, compile_result_schema};
+    use crate::serve::runtime_contract;
     use crate::test_support::scratch_dir as scratch_root;
     use crate::workspace_path::WorkspacePathError;
     use tokio_util::sync::CancellationToken;
@@ -779,9 +777,8 @@ mod tests {
         )
         .await
         .unwrap();
-        let declared = method("workspace.browse").expect("the catalog declares workspace.browse");
-        let validator = compile_result_schema(&declared.result);
-        check_result("workspace.browse", &validator, &result)
+        runtime_contract()
+            .check_result("workspace.browse", &result)
             .expect("the real handler output must validate against its own schema");
     }
 
@@ -862,10 +859,8 @@ mod tests {
         })
         .await
         .unwrap();
-        let declared =
-            method("workspace.validate").expect("the catalog declares workspace.validate");
-        let validator = compile_result_schema(&declared.result);
-        check_result("workspace.validate", &validator, &result)
+        runtime_contract()
+            .check_result("workspace.validate", &result)
             .expect("the ok:true shape must validate against its own schema");
     }
 
@@ -907,10 +902,8 @@ mod tests {
         })
         .await
         .unwrap();
-        let declared =
-            method("workspace.validate").expect("the catalog declares workspace.validate");
-        let validator = compile_result_schema(&declared.result);
-        check_result("workspace.validate", &validator, &result)
+        runtime_contract()
+            .check_result("workspace.validate", &result)
             .expect("the ok:false shape must validate against its own schema");
     }
 
@@ -1026,10 +1019,8 @@ mod tests {
         })
         .await
         .unwrap();
-        let declared = method("workspace.resolve-contained")
-            .expect("the catalog declares workspace.resolve-contained");
-        let validator = compile_result_schema(&declared.result);
-        check_result("workspace.resolve-contained", &validator, &result)
+        runtime_contract()
+            .check_result("workspace.resolve-contained", &result)
             .expect("the real handler output must validate against its own schema");
     }
 
@@ -1199,7 +1190,6 @@ mod tests {
     /// fired, so the cancel lands mid-listing by construction, not by timing.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn a_hub_cancel_mid_listing_stops_the_registered_browse_handler() {
-        use mango_protocol::contract::Contract;
         use mango_protocol::port::port_pair;
         use mango_protocol::session::{RequestOptions, Session, SessionOptions};
 
@@ -1236,11 +1226,8 @@ mod tests {
             Session::spawn(runtime_port, SessionOptions::new(peer("runtime")));
         hub.ready().await.unwrap();
         runtime.ready().await.unwrap();
-        let contract =
-            Contract::from_catalog(mangostudio_runtime_contract::catalog::catalog().clone())
-                .unwrap();
         crate::serve::serve(
-            &contract,
+            runtime_contract(),
             &runtime,
             super::register(crate::registry::Registry::new()),
             std::sync::Arc::new(GrantsAll),

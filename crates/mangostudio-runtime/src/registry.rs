@@ -33,7 +33,7 @@ use crate::panic::catch_panics;
 use crate::ports::audit::{Audit, AuditEntry, NoopAudit, Outcome};
 use crate::ports::clock::{Clock, SystemClock};
 use crate::ports::exclusivity::{CallExclusivity, NoExclusivity};
-use crate::result_check::{cached_result_validator, check_result};
+use crate::serve::runtime_contract;
 
 /// Whether a method name is implemented, declared but not implemented, or
 /// not part of the contract at all. Diagnostic only: every case other than
@@ -132,12 +132,24 @@ impl Registry {
     /// anywhere in `handler`'s own future becomes a bounded, redacted
     /// `INTERNAL` error (see [`crate::panic`]); a successful result is
     /// checked against the contract's schema before this registry records
-    /// anything (see [`crate::result_check`]); and the outcome — `Ok`,
+    /// anything (see below); and the outcome — `Ok`,
     /// `Error`, or the panic case — is recorded through this registry's
     /// [`Audit`] port only once all of that has already happened. This
     /// mirrors `apps/runtime/src/consent-gate.ts`'s `gateHandlers` composed
     /// with `checkResults`: the audit line reflects whether the *checked*
     /// result was valid, never the handler's raw, unchecked return value.
+    ///
+    /// The result check is [`mango_protocol::contract::Contract::check_result`]
+    /// on [`crate::serve::runtime_contract`], the one compiled copy of each
+    /// `result` schema. It runs here, in every build, and not through
+    /// `ServeOptions::validate_results`: that option runs after the handler
+    /// settles, by which time the audit port would already have recorded
+    /// `Ok` for a result the schema refuses. `check_result` also masks the
+    /// checked value in its `reason`, because a result can hold a file's
+    /// contents or a command's output that an `INTERNAL` message must not
+    /// echo. The TypeScript runtime turned its check off in production; this
+    /// crate never does, since a Rust peer is exactly the other language
+    /// the contract exists to keep honest.
     ///
     /// `P` and `R` need not match the method's declared schema exactly:
     /// [`mango_protocol::contract::Contract::serve`] validates the wire
@@ -226,12 +238,11 @@ impl Registry {
         Fut: Future<Output = Result<R, RemoteError>> + Send + 'static,
     {
         let method_name = method_name.into();
-        let declared = method(&method_name).unwrap_or_else(|| {
-            panic!(
-                "\"{method_name}\" is not declared by the embedded catalog; a registry may only \
-                 implement a method its own contract knows about"
-            )
-        });
+        assert!(
+            method(&method_name).is_some(),
+            "\"{method_name}\" is not declared by the embedded catalog; a registry may only \
+             implement a method its own contract knows about"
+        );
         assert!(
             !self
                 .implemented
@@ -249,7 +260,6 @@ impl Registry {
              would silently shadow the first handler, and implemented_methods() would report \
              the name twice"
         );
-        let validator = cached_result_validator(&method_name, &declared.result);
         let handler = Arc::new(handler);
         let audit = Arc::clone(&self.audit);
         let clock = Arc::clone(&self.clock);
@@ -265,7 +275,6 @@ impl Registry {
             move |params: Value, context: CallContext| {
                 let method_name = method_name.clone();
                 let handler = Arc::clone(&handler);
-                let validator = Arc::clone(&validator);
                 let audit = Arc::clone(&audit);
                 let clock = Arc::clone(&clock);
                 let exclusivity = Arc::clone(&exclusivity);
@@ -313,7 +322,12 @@ impl Registry {
                             })?;
                             match handler(params, context).await {
                                 Ok(result) => match serde_json::to_value(result) {
-                                    Ok(value) => check_result(&method_name, &validator, &value)
+                                    // The contract's compiled `result` schema,
+                                    // checked here rather than through
+                                    // `ServeOptions::validate_results` so the audit
+                                    // line records a failed check.
+                                    Ok(value) => runtime_contract()
+                                        .check_result(&method_name, &value)
                                         .map(|()| value),
                                     Err(error) => Err(RemoteError::new(
                                         codes::INTERNAL,

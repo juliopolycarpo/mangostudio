@@ -17,7 +17,6 @@ use mango_protocol::error::codes;
 use serde_json::{Value, json};
 
 use super::*;
-use crate::result_check::{cached_result_validator, check_result};
 
 // ---------------------------------------------------------------------------
 // Named fixtures
@@ -2040,10 +2039,7 @@ fn the_dispatch_travels_only_when_an_operation_recorded_it() {
 // ---------------------------------------------------------------------------
 
 fn assert_valid(method: &str, result: &Value) {
-    let declared = mangostudio_runtime_contract::catalog::method(method)
-        .unwrap_or_else(|| panic!("expected {method} in the embedded catalog"));
-    let validator = cached_result_validator(method, &declared.result);
-    if let Err(error) = check_result(method, &validator, result) {
+    if let Err(error) = crate::serve::runtime_contract().check_result(method, result) {
         panic!("expected a valid {method} result | received {error}: {result}");
     }
 }
