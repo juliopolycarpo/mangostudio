@@ -1,18 +1,19 @@
-//! What `LineDecoder::push` costs as a record grows, at a fixed read size.
+//! A standalone benchmark of `LineDecoder::push`: ns per input byte as a record grows, at a fixed
+//! read size. It asserts nothing about time and is `#[ignore]`d, so the suite never runs it; the
+//! guard that keeps `push` linear is `scan_work_stays_linear_in_the_record_size` in
+//! `src/codec/ndjson.rs`.
 //!
-//! A decoder that looks for the terminator again from the start of the partial record on every
-//! push does `record * pushes / 2` bytes of scanning for one record, so doubling the record
-//! quadruples the work. The two tests here pin and report that curve:
-//!
-//! - `a_record_fed_in_tiny_pieces_decodes_in_linear_time` runs with the suite and fails on a
-//!   rescanning decoder.
-//! - `report_line_decoder_cost` is `#[ignore]`d and prints a table. Run it in release mode, on
-//!   this checkout and on a base checkout, to compare:
+//! It uses only the public API, so the same file measures any checkout. To compare against a
+//! base, copy it into a base checkout's `crates/mango-protocol/tests/it/`, add `mod
+//! line_decoder_cost;` to that `main.rs`, and run the same command in both trees:
 //!
 //! ```sh
 //! cargo test -p mango-protocol --all-features --release --test it \
 //!     report_line_decoder_cost -- --ignored --nocapture
 //! ```
+//!
+//! Each scenario prints the median over 9 passes (after a warm-up), the min-max, and the host load
+//! average, which on a shared host is part of the result.
 
 use std::time::{Duration, Instant};
 
@@ -65,24 +66,6 @@ fn feed(stream: &[u8], read_bytes: usize, expected_frames: usize) -> Duration {
         "expected {expected_frames} decoded frames | received: {frames}"
     );
     elapsed
-}
-
-#[test]
-fn a_record_fed_in_tiny_pieces_decodes_in_linear_time() {
-    // 256 KiB in 16-byte reads is 16,384 pushes. A decoder that rescans the partial record on
-    // every push scans ~2 GiB for this record, many seconds in a debug build; one that scans only
-    // the new bytes takes milliseconds. The bound is two orders of magnitude above the linear
-    // cost so a loaded host does not trip it.
-    const BOUND: Duration = Duration::from_secs(3);
-    let stream = record_of(256 * 1024);
-
-    let elapsed = feed(&stream, 16, 1);
-
-    assert!(
-        elapsed < BOUND,
-        "expected a 256 KiB record fed in 16-byte reads to decode in under {BOUND:?} | received: \
-         {elapsed:?}"
-    );
 }
 
 /// `lines` copies of the same small frame, to show the per-record path did not regress.
