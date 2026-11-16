@@ -14,12 +14,16 @@ import { ByteBoundedCache } from '../lib/byte-bounded-cache';
 import { contentEtag, fileEtag, matchesEtag } from '../lib/http-cache';
 import { HASHED_ASSET_DIR, isApiOwnedPath, isSpaRoute } from '../lib/spa-guard';
 import { negotiateEncoding, varyOnAcceptEncoding } from './accept-encoding';
+import { resolveByteRange } from './byte-range';
 import {
   type EmbeddedContentCoding,
   type EmbeddedFrontendEncodings,
   type EmbeddedFrontendFiles,
+  type EmbeddedFrontendIdentity,
+  type EmbeddedIdentityInfo,
   getEmbeddedFrontend,
   getEmbeddedFrontendEncodings,
+  getEmbeddedFrontendIdentity,
 } from './embedded-frontend';
 import {
   type FallbackResponseHeaders,
@@ -43,7 +47,12 @@ export function registerFrontend(app: App, frontendDir: string): void {
   const embedded = getEmbeddedFrontend();
   if (embedded) {
     console.warn('[frontend] Serving embedded frontend assets');
-    registerEmbeddedSpa(app, embedded, getEmbeddedFrontendEncodings());
+    registerEmbeddedSpa(
+      app,
+      embedded,
+      getEmbeddedFrontendEncodings(),
+      getEmbeddedFrontendIdentity()
+    );
     return;
   }
 
@@ -113,6 +122,8 @@ function embeddedEtag(filePath: string): string | null {
 interface EmbeddedAsset {
   /** Null when the build embedded only precompressed copies; see `inflateIdentity`. */
   identityPath: string | null;
+  /** What the build measured about the left-out identity bytes; set exactly when `identityPath` is null. */
+  droppedIdentity: EmbeddedIdentityInfo | null;
   encodings: Readonly<Partial<Record<EmbeddedContentCoding, string>>>;
   cacheControl: string;
   /** Set explicitly when the file loader's guess is not enough: the shell, and every variant. */
@@ -133,6 +144,7 @@ type InflatedBody = Uint8Array<ArrayBuffer>;
 function createEmbeddedAsset(
   urlPath: string,
   identityPath: string | null,
+  droppedIdentity: EmbeddedIdentityInfo | null,
   encodings: EmbeddedFrontendEncodings,
   identityBodies: ByteBoundedCache<string, InflatedBody>
 ): EmbeddedAsset {
@@ -142,6 +154,7 @@ function createEmbeddedAsset(
   const isShell = urlPath === '/index.html';
   return {
     identityPath,
+    droppedIdentity,
     encodings: variants,
     cacheControl: embeddedCacheControl(urlPath),
     // A variant's own path ends in `.br` or `.gz`, which the file loader maps to
@@ -174,10 +187,11 @@ function representationEtag(
   const known = asset.etags.get(coding);
   if (known !== undefined) return known;
   let etag: string | null;
-  if (coding === 'identity' && asset.identityPath === null) {
-    // Hashed over the inflated bytes, so the tag equals the one a binary that
-    // embedded the identity file would send for the same content.
-    etag = contentEtag(inflateIdentity(asset));
+  if (coding === 'identity' && asset.droppedIdentity) {
+    // Measured at build time over the original bytes, so it equals the tag a
+    // binary that embedded the identity file would send, and a conditional
+    // request never has to inflate to be answered.
+    etag = asset.droppedIdentity.etag;
   } else {
     const path = coding === 'identity' ? asset.identityPath : asset.encodings[coding];
     etag = path ? embeddedEtag(path) : null;
@@ -187,33 +201,80 @@ function representationEtag(
 }
 
 /**
- * The most inflated identity bytes one server keeps. Browsers send br or gzip,
- * so identity requests come from scripts and tools (`curl` without
- * `--compressed`, health checkers, some proxies); 4 MiB holds the largest
- * script of the current frontend (1.6 MB) and a neighbour, and is the ceiling
- * of what this path can add to the process, however many such requests arrive.
- */
-const IDENTITY_BODY_CACHE_BYTES = 4 * 1024 * 1024;
-
-/**
  * The identity bytes of an asset whose identity file was not embedded,
- * inflated from its gzip copy, or taken from the byte-bounded cache when a
- * recent request already paid for it.
+ * inflated from its gzip copy, or taken from the byte-bounded cache when an
+ * earlier request already paid for it.
  *
  * `Bun.gunzipSync`, never `node:zlib`: importing it for a Brotli decoder keeps
  * its module in the AOT binary, +184,384 B on linux-x64. That is also why the
  * build drops identity only where a gzip copy exists.
+ *
+ * Only a GET that is answered from these bytes calls it. HEAD and conditional
+ * requests are answered from the length and tag the build recorded.
  */
 function inflateIdentity(asset: EmbeddedAsset): InflatedBody {
   const gzipPath = asset.encodings.gzip;
-  // `registerEmbeddedSpa` refuses an identity-less asset without a gzip copy.
-  if (!gzipPath) throw new Error('embedded asset has neither identity bytes nor a gzip copy');
-  return asset.identityBodies.getOrCompute(
-    asset.urlPath,
+  const expected = asset.droppedIdentity;
+  // `registerEmbeddedSpa` refuses an identity-less asset without a gzip copy or a measurement.
+  if (!gzipPath || !expected) {
+    throw new Error('embedded asset has neither identity bytes nor a gzip copy');
+  }
+  return asset.identityBodies.getOrCompute(asset.urlPath, () => {
     // Bun's typing says `ArrayBufferLike`; gunzip always allocates a plain buffer, which is
     // what a `Response` body type accepts.
-    () => Bun.gunzipSync(readFileSync(gzipPath)) as InflatedBody
-  );
+    const inflated = Bun.gunzipSync(readFileSync(gzipPath)) as InflatedBody;
+    // HEAD advertises the recorded length, so a copy that inflates to anything
+    // else fails here, loudly, instead of sending a body that contradicts it.
+    if (inflated.byteLength !== expected.bytes) {
+      throw new Error(
+        `embedded ${asset.urlPath}: gzip copy inflates to ${inflated.byteLength} bytes, ` +
+          `expected ${expected.bytes} recorded at build time`
+      );
+    }
+    return inflated;
+  });
+}
+
+/**
+ * Answers an identity GET or HEAD for an asset the build left without identity
+ * bytes. Headers and the 304 verdict were settled by the caller.
+ *
+ * HEAD says the recorded length and never inflates, because its body would be
+ * discarded. A GET inflates once per cold asset and honours a single `bytes=`
+ * range from the decoded buffer, as Bun does over a stored file (see
+ * `byte-range.ts`): 206 with `Content-Range`, 416 when unsatisfiable. `If-Range`
+ * is honoured only as the exact strong tag; a date or a weak tag gets the whole
+ * body, which is what Bun does for a stored file.
+ */
+function serveDroppedIdentity(
+  asset: EmbeddedAsset,
+  info: EmbeddedIdentityInfo,
+  request: Request,
+  headers: Record<string, string>
+): Response {
+  if (request.method === 'HEAD') {
+    return new Response(null, { headers: { ...headers, 'Content-Length': String(info.bytes) } });
+  }
+  const ifRange = request.headers.get('if-range');
+  const rangeHeader =
+    ifRange === null || ifRange.trim() === info.etag ? request.headers.get('range') : null;
+  const verdict = resolveByteRange(rangeHeader, info.bytes);
+  if (verdict.kind === 'unsatisfiable') {
+    return new Response(null, {
+      status: 416,
+      headers: { ...headers, 'Accept-Ranges': 'bytes', 'Content-Range': `bytes */${info.bytes}` },
+    });
+  }
+  const body = inflateIdentity(asset);
+  if (verdict.kind === 'whole') return new Response(body, { headers });
+  return new Response(body.subarray(verdict.start, verdict.end + 1), {
+    status: 206,
+    headers: {
+      ...headers,
+      'Accept-Ranges': 'bytes',
+      'Content-Range': `bytes ${verdict.start}-${verdict.end}/${info.bytes}`,
+    },
+  });
 }
 
 /**
@@ -228,11 +289,11 @@ function inflateIdentity(asset: EmbeddedAsset): InflatedBody {
  * nothing about its response depends on the request header.
  *
  * Each representation has its own length and its own strong ETag, so a cache
- * revalidating one can never be told another is unchanged. Range is not handled
- * here: Bun answers it over the stored bytes, which makes it a range of the
- * selected representation. Bun also ignores `If-Range`, for identity files just
- * the same, so a client resuming against a different representation than the one
- * it validated is not protected by the ETag here.
+ * revalidating one can never be told another is unchanged. Range over a stored
+ * file is Bun's: it answers a range of the selected representation, and honours
+ * `If-Range` only for an exact strong tag. Identity bytes the build left out are
+ * inflated in memory, where Bun would ignore Range, so `serveDroppedIdentity`
+ * answers it with the same verdicts.
  */
 function serveEmbeddedAsset(
   asset: EmbeddedAsset,
@@ -262,8 +323,8 @@ function serveEmbeddedAsset(
       return new Response(null, { status: 304, headers });
     }
   }
-  if (choice === 'identity' && asset.identityPath === null) {
-    return new Response(inflateIdentity(asset), { headers });
+  if (choice === 'identity' && asset.droppedIdentity) {
+    return serveDroppedIdentity(asset, asset.droppedIdentity, request, headers);
   }
   const filePath = choice === 'identity' ? asset.identityPath : asset.encodings[choice];
   return new Response(Bun.file(filePath as string), { headers });
@@ -289,19 +350,32 @@ function serveEmbeddedAsset(
 function registerEmbeddedSpa(
   app: App,
   files: EmbeddedFrontendFiles,
-  encodings: EmbeddedFrontendEncodings
+  encodings: EmbeddedFrontendEncodings,
+  identity: EmbeddedFrontendIdentity
 ): void {
   const assets = new Map<string, EmbeddedAsset>();
-  const identityBodies = new ByteBoundedCache<string, InflatedBody>(IDENTITY_BODY_CACHE_BYTES);
+  // Sized to hold every inflated body at once: the build knows their total, so a
+  // sweep over all of them inflates each once and never evicts. That total is the
+  // most this path can add to the process (about 5.9 MB for the current frontend),
+  // reached only if identity clients fetch everything. Browsers send br or gzip,
+  // so identity requests come from scripts and tools.
+  const identityBodies = new ByteBoundedCache<string, InflatedBody>(
+    Object.values(identity).reduce((total, info) => total + info.bytes, 0)
+  );
   for (const [urlPath, filePath] of Object.entries(files)) {
-    if (filePath === null && encodings[urlPath]?.gzip === undefined) {
+    const droppedIdentity = filePath === null ? (identity[urlPath] ?? null) : null;
+    if (filePath === null && (encodings[urlPath]?.gzip === undefined || !droppedIdentity)) {
       // A manifest the build never writes; refuse it here rather than 500 on first use.
       console.warn(
-        `[frontend] Embedded ${urlPath} has no identity bytes and no gzip copy; not served`
+        `[frontend] Embedded ${urlPath} has no identity bytes and no gzip copy or no build-time ` +
+          'measurement of them; not served'
       );
       continue;
     }
-    assets.set(urlPath, createEmbeddedAsset(urlPath, filePath, encodings, identityBodies));
+    assets.set(
+      urlPath,
+      createEmbeddedAsset(urlPath, filePath, droppedIdentity, encodings, identityBodies)
+    );
   }
   const shell = assets.get('/index.html');
   if (!shell) {

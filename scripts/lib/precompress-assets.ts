@@ -25,6 +25,7 @@ import {
 import { dirname, join } from 'node:path';
 import { brotliCompressSync, brotliDecompressSync, constants, gunzipSync } from 'node:zlib';
 
+import { contentEtag } from '@mangostudio/api/internal/lib/http-cache';
 import { distFilePath } from '@mangostudio/shared/utils/dist-files';
 
 /** Codings a variant can be stored in. Order is the server's tie-break preference. */
@@ -74,6 +75,12 @@ export interface PrecompressedVariant {
   /** Absolute path of the stored variant. */
   filePath: string;
   originalBytes: number;
+  /**
+   * The strong `ETag` an identity response of the original bytes carries, spelled by the
+   * server's own `contentEtag`. The manifest records it for a file whose identity copy is
+   * left out, so the server can answer a conditional request without inflating.
+   */
+  originalEtag: string;
   compressedBytes: number;
 }
 
@@ -132,10 +139,11 @@ export function writePrecompressedVariants(
     // Same verdict `isWorthwhile` would give, reached before compressing, so a
     // tiny file costs neither a compressor call nor a cache entry.
     if (original.byteLength < MIN_INPUT_BYTES) continue;
+    const originalEtag = contentEtag(original);
     for (const coding of VARIANT_CODINGS) {
       const compressed = cacheDir
-        ? compressThroughCache(cacheDir, coding, original, compressor, usedCacheKeys)
-        : compressor(coding, original);
+        ? compressThroughCache(cacheDir, coding, original, urlPath, compressor, usedCacheKeys)
+        : compressVerified(coding, original, urlPath, compressor);
       if (!isWorthwhile(original.byteLength, compressed.byteLength)) continue;
       const filePath = distFilePath(
         join(variantsDir, coding),
@@ -148,6 +156,7 @@ export function writePrecompressedVariants(
         coding,
         filePath,
         originalBytes: original.byteLength,
+        originalEtag,
         compressedBytes: compressed.byteLength,
       });
     }
@@ -197,6 +206,31 @@ function roundTrips(coding: VariantCoding, compressed: Uint8Array, original: Uin
 }
 
 /**
+ * Compresses `original` and proves the output decodes back to it, so a broken
+ * copy fails the build here and not a request later. The server inflates the
+ * gzip copy of a hashed asset in place of identity bytes, and a Brotli copy is
+ * what browsers receive, so neither can be trusted unchecked.
+ *
+ * Runs on every fresh compression, cached or not; a cache hit is verified on
+ * read instead (see {@link compressThroughCache}).
+ */
+function compressVerified(
+  coding: VariantCoding,
+  original: Uint8Array<ArrayBuffer>,
+  urlPath: string,
+  compressor: NonNullable<PrecompressOptions['compressor']>
+): Uint8Array {
+  const compressed = compressor(coding, original);
+  if (!roundTrips(coding, compressed, original)) {
+    throw new Error(
+      `precompress ${urlPath}: the ${coding} copy (${compressed.byteLength} bytes) does not ` +
+        `decode back to the ${original.byteLength} original bytes; refusing to embed it`
+    );
+  }
+  return compressed;
+}
+
+/**
  * Returns the cached copy of `original` as `coding`, compressing and storing it
  * on a miss.
  *
@@ -212,6 +246,7 @@ function compressThroughCache(
   cacheDir: string,
   coding: VariantCoding,
   original: Uint8Array<ArrayBuffer>,
+  urlPath: string,
   compressor: NonNullable<PrecompressOptions['compressor']>,
   usedKeys: Set<string>
 ): Uint8Array {
@@ -220,7 +255,8 @@ function compressThroughCache(
   const cachedPath = join(cacheDir, key);
   const cached = readCachedEntry(cachedPath);
   if (cached && roundTrips(coding, cached, original)) return cached;
-  const compressed = compressor(coding, original);
+  // Verified before it is stored, so a bad output never becomes a cache entry.
+  const compressed = compressVerified(coding, original, urlPath, compressor);
   mkdirSync(cacheDir, { recursive: true });
   // Written under a temporary name and renamed, so an interrupted build never
   // leaves a half-written entry under the real key.

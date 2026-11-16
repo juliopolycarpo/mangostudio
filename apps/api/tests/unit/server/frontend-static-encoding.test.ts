@@ -9,7 +9,7 @@
  * or not the server picked the representation the test meant to ask for.
  */
 
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -39,14 +39,35 @@ const FONT_BYTES = 'not-really-a-font';
 
 const NO_IDENTITY_JS = 'console.log("embedded chunk without identity bytes");\n'.repeat(60);
 const BR_ONLY_CSS = '.embedded-br-only { color: rebeccapurple; }\n'.repeat(60);
+const SECOND_NO_IDENTITY_CSS = '.second-dropped { color: teal; }\n'.repeat(80);
+const WRONG_LENGTH_JS = 'console.log("recorded length is wrong");\n'.repeat(60);
 
 const MAIN_URL = '/assets/main-AbCd1234.js';
 /** br + gzip copies and no identity file: identity is inflated from the gzip copy. */
 const NO_IDENTITY_URL = '/assets/noIdentity-AbCd1234.js';
 /** A br copy and no identity file: a manifest the build never writes, refused at registration. */
 const BR_ONLY_URL = '/assets/brOnly-AbCd1234.css';
+/** A second asset without identity bytes, so a sweep has more than one body to hold. */
+const SECOND_NO_IDENTITY_URL = '/assets/secondDropped-AbCd1234.css';
+/** Recorded at build time as shorter than its gzip copy inflates to: the copy and the record disagree. */
+const WRONG_LENGTH_URL = '/assets/wrongLength-AbCd1234.js';
 const GZIP_ONLY_URL = '/assets/gzipOnly-AbCd1234.js';
 const PLAIN_URL = '/assets/plain-AbCd1234.js';
+
+/** What the build records about an asset whose identity bytes it left out. */
+function measure(content: string): { bytes: number; etag: string } {
+  return { bytes: Buffer.byteLength(content), etag: contentEtag(Buffer.from(content)) };
+}
+
+/** The build's measurements of every `null` manifest entry the server is meant to serve. */
+const DROPPED_IDENTITY = {
+  [NO_IDENTITY_URL]: measure(NO_IDENTITY_JS),
+  [SECOND_NO_IDENTITY_URL]: measure(SECOND_NO_IDENTITY_CSS),
+  [WRONG_LENGTH_URL]: {
+    ...measure(WRONG_LENGTH_JS),
+    bytes: Buffer.byteLength(WRONG_LENGTH_JS) - 1,
+  },
+};
 
 interface RawResponse {
   status: number;
@@ -120,6 +141,11 @@ async function startServer(): Promise<EncodingServer> {
     br: readFileSync(noIdentity.encodings.br as string),
   };
   const brOnly = fixtureWithVariants('brOnly.css', BR_ONLY_CSS, ['br']);
+  const secondNoIdentity = fixtureWithVariants('secondDropped.css', SECOND_NO_IDENTITY_CSS, [
+    'br',
+    'gzip',
+  ]);
+  const wrongLength = fixtureWithVariants('wrongLength.js', WRONG_LENGTH_JS, ['br', 'gzip']);
   const encodings: Record<string, Record<string, string>> = {
     '/index.html': index.encodings,
     [MAIN_URL]: main.encodings,
@@ -127,6 +153,8 @@ async function startServer(): Promise<EncodingServer> {
     '/config.js': config.encodings,
     [NO_IDENTITY_URL]: noIdentity.encodings,
     [BR_ONLY_URL]: brOnly.encodings,
+    [SECOND_NO_IDENTITY_URL]: secondNoIdentity.encodings,
+    [WRONG_LENGTH_URL]: wrongLength.encodings,
   };
   registerEmbeddedFrontend(
     {
@@ -138,8 +166,11 @@ async function startServer(): Promise<EncodingServer> {
       '/fonts/inter.woff2': writeFixture('inter.woff2', FONT_BYTES),
       [NO_IDENTITY_URL]: null,
       [BR_ONLY_URL]: null,
+      [SECOND_NO_IDENTITY_URL]: null,
+      [WRONG_LENGTH_URL]: null,
     },
-    encodings as EmbeddedFrontendEncodings
+    encodings as EmbeddedFrontendEncodings,
+    DROPPED_IDENTITY
   );
 
   const uploadsDir = mkdtempSync(join(tmpdir(), 'encoding-uploads-'));
@@ -172,6 +203,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  mock.restore();
   await server?.stop();
   server = null;
   resetEmbeddedFrontend();
@@ -452,9 +484,8 @@ describe('embedded asset representation headers', () => {
     expect(head.body.length).toBe(0);
   });
 
-  // File-backed fixtures, as in source runs. Bun does not slice the virtual files
-  // of a compiled binary: there the full representation answers 200, which is
-  // equally valid and identical for identity and encoded copies alike.
+  // File-backed fixtures, the same kind Bun slices inside a compiled binary
+  // (measured: 206 for identity, gzip and Brotli over `$bunfs` files).
   test('answers Range over the selected representation, bound to its ETag', async () => {
     const gzip = await send(MAIN_URL, { 'Accept-Encoding': 'gzip' });
     const partial = await send(MAIN_URL, { 'Accept-Encoding': 'gzip', Range: 'bytes=0-9' });
@@ -536,6 +567,224 @@ describe('embedded assets without identity bytes', () => {
     expect(head.body.length).toBe(0);
     expect(head.headers['content-length']).toBe(String(NO_IDENTITY_JS.length));
     expect(head.headers.etag).toBe(first.headers.etag as string);
+  });
+
+  describe('without inflating', () => {
+    /** Counts calls into Bun's inflater, which is the whole cost of this path. */
+    function watchInflater() {
+      return spyOn(Bun, 'gunzipSync');
+    }
+
+    test('answers HEAD from the recorded length on a cold cache', async () => {
+      const inflater = watchInflater();
+      // With the copy gone, only a request that never reads it can still succeed.
+      rmSync(noIdentityCopies.gzipPath);
+
+      const head = await send(NO_IDENTITY_URL, {}, 'HEAD');
+
+      expect(head.status).toBe(200);
+      expect(head.body.length).toBe(0);
+      expect(head.headers['content-length']).toBe(String(Buffer.byteLength(NO_IDENTITY_JS)));
+      expect(head.headers.etag).toBe(contentEtag(Buffer.from(NO_IDENTITY_JS)));
+      expect(inflater.mock.calls.length, 'inflater calls for HEAD on a cold cache').toBe(0);
+    });
+
+    test('answers If-None-Match from the recorded tag on a cold cache', async () => {
+      const inflater = watchInflater();
+      rmSync(noIdentityCopies.gzipPath);
+
+      const conditional = await send(NO_IDENTITY_URL, {
+        'If-None-Match': contentEtag(Buffer.from(NO_IDENTITY_JS)),
+      });
+      const conditionalHead = await send(
+        NO_IDENTITY_URL,
+        { 'If-None-Match': contentEtag(Buffer.from(NO_IDENTITY_JS)) },
+        'HEAD'
+      );
+
+      expect(conditional.status).toBe(304);
+      expect(conditional.body.length).toBe(0);
+      expect(conditionalHead.status).toBe(304);
+      expect(inflater.mock.calls.length, 'inflater calls for 304 on a cold cache').toBe(0);
+    });
+
+    test('answers an unsatisfiable range from the recorded length on a cold cache', async () => {
+      const inflater = watchInflater();
+
+      const response = await send(NO_IDENTITY_URL, { Range: 'bytes=99999999-' });
+
+      expect(response.status).toBe(416);
+      expect(inflater.mock.calls.length, 'inflater calls for 416 on a cold cache').toBe(0);
+    });
+
+    test('inflates each asset once across two full sweeps of every identity request', async () => {
+      const inflater = watchInflater();
+      const sweep = [NO_IDENTITY_URL, SECOND_NO_IDENTITY_URL];
+
+      for (let pass = 0; pass < 2; pass += 1) {
+        for (const url of sweep) {
+          const response = await send(url);
+          expect(response.status, `${url} pass ${pass}`).toBe(200);
+        }
+      }
+
+      expect(
+        inflater.mock.calls.length,
+        `inflater calls for ${sweep.length} assets over 2 sweeps: expected ${sweep.length}`
+      ).toBe(sweep.length);
+    });
+
+    test('fails a GET whose gzip copy inflates to a length other than the recorded one', async () => {
+      const response = await send(WRONG_LENGTH_URL);
+
+      // The HEAD length was promised from the record, so the body must not contradict it.
+      expect(response.status).toBe(500);
+      expect(response.body.toString()).not.toContain('recorded length is wrong');
+    });
+
+    test('refuses a null entry the build recorded no measurement for', async () => {
+      await server?.stop();
+      server = null;
+      resetEmbeddedFrontend();
+      clearFrontendFallback();
+      const index = fixtureWithVariants('index2.html', INDEX_HTML, ['gzip']);
+      const unmeasured = fixtureWithVariants('unmeasured.js', NO_IDENTITY_JS, ['gzip']);
+      registerEmbeddedFrontend(
+        { '/index.html': index.identity, '/assets/unmeasured-AbCd1234.js': null },
+        {
+          '/index.html': index.encodings,
+          '/assets/unmeasured-AbCd1234.js': unmeasured.encodings,
+        } as EmbeddedFrontendEncodings
+      );
+      const app = new Elysia().onError(NotFound, ({ request: req, set }) =>
+        frontendNotFound(req, set)
+      );
+      registerFrontend(app as unknown as App, '/nonexistent-frontend-dir');
+      await app.modules;
+      app.listen({ hostname: '127.0.0.1', port: 0, reusePort: false });
+      try {
+        const response = await raw(
+          app.server?.port as number,
+          '/assets/unmeasured-AbCd1234.js',
+          {},
+          'GET'
+        );
+
+        expect(response.status).toBe(404);
+      } finally {
+        await app.stop();
+      }
+    });
+  });
+
+  describe('Range over inflated identity', () => {
+    const SIZE = Buffer.byteLength(NO_IDENTITY_JS);
+    const body = Buffer.from(NO_IDENTITY_JS);
+    const etag = contentEtag(body);
+
+    // Each verdict is what a stored file gets from Bun, measured on a compiled hub
+    // (`$bunfs` files) against the base build.
+    test.each([
+      ['bytes=0-9', 206, 0, 9],
+      ['bytes=5-', 206, 5, SIZE - 1],
+      ['bytes=-7', 206, SIZE - 7, SIZE - 1],
+      ['bytes=0-0', 206, 0, 0],
+      ['bytes=0-99999999999', 206, 0, SIZE - 1],
+      ['bytes=-99999999', 206, 0, SIZE - 1],
+      [`bytes=${SIZE - 1}-`, 206, SIZE - 1, SIZE - 1],
+      ['bytes= 0-9', 206, 0, 9],
+      ['BYTES=0-9', 206, 0, 9],
+    ])(
+      'answers %s with 206 and the slice of the decoded body',
+      async (range, status, start, end) => {
+        const response = await send(NO_IDENTITY_URL, { Range: range });
+
+        expect(response.status).toBe(status);
+        expect(response.headers['content-range']).toBe(`bytes ${start}-${end}/${SIZE}`);
+        expect(response.headers['accept-ranges']).toBe('bytes');
+        expect(response.headers['content-length']).toBe(String(end - start + 1));
+        expect(response.headers.etag).toBe(etag);
+        expect(response.headers['content-encoding']).toBeUndefined();
+        expect(response.body.equals(body.subarray(start, end + 1))).toBe(true);
+      }
+    );
+
+    test.each(['bytes=-0', `bytes=${SIZE}-`, 'bytes=99999999-'])(
+      'answers %s with 416 and the length',
+      async (range) => {
+        const response = await send(NO_IDENTITY_URL, { Range: range });
+
+        expect(response.status).toBe(416);
+        expect(response.headers['content-range']).toBe(`bytes */${SIZE}`);
+        expect(response.headers['accept-ranges']).toBe('bytes');
+        expect(response.body.length).toBe(0);
+      }
+    );
+
+    test.each([
+      'bytes=0-1,5-6',
+      'bytes=5-2',
+      'bytes=abc',
+      'bytes=-',
+      'bytes=0-9,',
+      'bytes=0-9;x',
+      'items=0-1',
+    ])('answers %s with the whole body', async (range) => {
+      const response = await send(NO_IDENTITY_URL, { Range: range });
+
+      expect(response.status).toBe(200);
+      expect(response.headers['content-range']).toBeUndefined();
+      expect(response.body.equals(body)).toBe(true);
+    });
+
+    test('a plain 200 does not advertise ranges, as for a stored file', async () => {
+      const response = await send(NO_IDENTITY_URL);
+
+      expect(response.headers['accept-ranges']).toBeUndefined();
+    });
+
+    test('honours If-Range only for the exact strong tag', async () => {
+      const matching = await send(NO_IDENTITY_URL, { Range: 'bytes=0-9', 'If-Range': etag });
+      const stale = await send(NO_IDENTITY_URL, { Range: 'bytes=0-9', 'If-Range': '"stale"' });
+      const weak = await send(NO_IDENTITY_URL, { Range: 'bytes=0-9', 'If-Range': `W/${etag}` });
+      const date = await send(NO_IDENTITY_URL, {
+        Range: 'bytes=0-9',
+        'If-Range': 'Wed, 21 Oct 2015 07:28:00 GMT',
+      });
+
+      expect(matching.status).toBe(206);
+      for (const response of [stale, weak, date]) {
+        expect(response.status).toBe(200);
+        expect(response.body.equals(body)).toBe(true);
+      }
+    });
+
+    test('answers HEAD with the whole length, ignoring Range', async () => {
+      const head = await send(NO_IDENTITY_URL, { Range: 'bytes=0-9' }, 'HEAD');
+
+      expect(head.status).toBe(200);
+      expect(head.headers['content-length']).toBe(String(SIZE));
+      expect(head.body.length).toBe(0);
+    });
+
+    test('answers If-None-Match before Range', async () => {
+      const response = await send(NO_IDENTITY_URL, { Range: 'bytes=0-9', 'If-None-Match': etag });
+
+      expect(response.status).toBe(304);
+    });
+
+    test('ranges the encoded copies exactly as before', async () => {
+      const gzip = await send(NO_IDENTITY_URL, { 'Accept-Encoding': 'gzip' });
+      const partial = await send(NO_IDENTITY_URL, {
+        'Accept-Encoding': 'gzip',
+        Range: 'bytes=0-9',
+      });
+
+      expect(partial.status).toBe(206);
+      expect(partial.headers['content-encoding']).toBe('gzip');
+      expect(partial.headers['content-range']).toBe(`bytes 0-9/${gzip.body.length}`);
+      expect(partial.body.equals(gzip.body.subarray(0, 10))).toBe(true);
+    });
   });
 });
 

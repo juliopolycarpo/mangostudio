@@ -61,6 +61,7 @@ describe('renderFrontendManifestModule variants', () => {
         coding: 'br',
         filePath: '/out/variants/br/assets/index-AbCd1234.js.br',
         originalBytes: 1000,
+        originalEtag: '"1a2b3c"',
         compressedBytes: 300,
       },
       {
@@ -68,6 +69,7 @@ describe('renderFrontendManifestModule variants', () => {
         coding: 'gzip',
         filePath: '/out/variants/gzip/assets/index-AbCd1234.js.gz',
         originalBytes: 1000,
+        originalEtag: '"1a2b3c"',
         compressedBytes: 350,
       },
     ]);
@@ -94,6 +96,7 @@ describe('renderFrontendManifestModule variants', () => {
     coding: 'gzip' as const,
     filePath: `/out/variants/gzip${urlPath}.gz`,
     originalBytes: 1000,
+    originalEtag: '"1a2b3c"',
     compressedBytes: 350,
   });
   const brotliCopy = (urlPath: string) => ({
@@ -101,6 +104,7 @@ describe('renderFrontendManifestModule variants', () => {
     coding: 'br' as const,
     filePath: `/out/variants/br${urlPath}.br`,
     originalBytes: 1000,
+    originalEtag: '"1a2b3c"',
     compressedBytes: 300,
   });
 
@@ -113,6 +117,40 @@ describe('renderFrontendManifestModule variants', () => {
     // The key stays, so the route and the doctor's file count do not change.
     expect(source).toContain('"/assets/index-AbCd1234.js": null,');
     expect(source).not.toContain(JSON.stringify(join(distDir, 'assets', 'index-AbCd1234.js')));
+  });
+
+  test('records the length and ETag of every file whose identity bytes were left out', () => {
+    const source = renderFrontendManifestModule(distDir, listDistFiles(distDir), [
+      brotliCopy('/assets/index-AbCd1234.js'),
+      gzipCopy('/assets/index-AbCd1234.js'),
+      gzipCopy('/index.html'),
+    ]);
+
+    const table = source.slice(source.indexOf('export const embeddedFrontendIdentity'));
+    expect(table).toContain('"/assets/index-AbCd1234.js": { bytes: 1000, etag: "\\"1a2b3c\\"" },');
+    // A file that kept its identity bytes needs no measurement: the server stats the embedded file.
+    expect(table).not.toContain('/index.html');
+  });
+
+  test('every null manifest entry has a measurement, and nothing else does', () => {
+    const urlPaths = listDistFiles(distDir);
+    const source = renderFrontendManifestModule(distDir, urlPaths, [
+      gzipCopy('/assets/index-AbCd1234.js'),
+      gzipCopy('/index.html'),
+    ]);
+
+    const routes = source.slice(
+      source.indexOf('export const embeddedFrontend:'),
+      source.indexOf('export const embeddedFrontendEncodings')
+    );
+    const nullKeys = [...routes.matchAll(/^ {2}("[^"]+"): null,$/gm)].map((match) => match[1]);
+    const table = source.slice(source.indexOf('export const embeddedFrontendIdentity'));
+    const measuredKeys = [...table.matchAll(/^ {2}("[^"]+"): \{ bytes:/gm)].map(
+      (match) => match[1]
+    );
+
+    expect(measuredKeys).toEqual(nullKeys);
+    expect(nullKeys).toEqual(['"/assets/index-AbCd1234.js"']);
   });
 
   test('keeps identity where the server could not inflate it', () => {
@@ -145,13 +183,11 @@ describe('renderEmbedEntryModule', () => {
       '/repo/apps/api/src/index.ts'
     );
 
-    const registerIndex = source.indexOf(
-      'registerEmbeddedFrontend(embeddedFrontend, embeddedFrontendEncodings);'
-    );
+    const registration =
+      'registerEmbeddedFrontend(embeddedFrontend, embeddedFrontendEncodings, embeddedFrontendIdentity);';
+    const registerIndex = source.indexOf(registration);
     const bootIndex = source.indexOf('await import("/repo/apps/api/src/index.ts");');
-    expect(source).toContain(
-      'registerEmbeddedFrontend(embeddedFrontend, embeddedFrontendEncodings);'
-    );
+    expect(source).toContain(registration);
     expect(registerIndex).toBeGreaterThan(-1);
     expect(bootIndex).toBeGreaterThan(registerIndex);
   });
