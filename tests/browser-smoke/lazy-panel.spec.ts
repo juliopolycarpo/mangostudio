@@ -58,7 +58,7 @@ test('a rail panel whose chunk cannot be fetched fails inside the rail and recov
   ).toEqual([]);
 });
 
-test('choosing a panel whose chunk is slow keeps the current panel up and marks the button busy', async ({
+test('choosing a panel whose chunk is slow keeps the current panel up, marks the button busy, then shows a spinner', async ({
   page,
 }) => {
   test.setTimeout(90_000);
@@ -95,6 +95,12 @@ test('choosing a panel whose chunk is slow keeps the current panel up and marks 
   await expect(githubButton).toHaveAttribute('aria-busy', 'true');
   await expect(page.getByRole('button', { name: 'New terminal' })).toBeVisible();
   await expect(page.getByTestId('github-panel')).toHaveCount(0);
+
+  // Held for longer than a second, the old panel gives way to a spinner so a
+  // slow fetch is visible and announced, not only a highlight on the dock.
+  const rail = page.getByRole('complementary', { name: 'Agent side panel' });
+  await expect(rail.getByRole('status')).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByRole('button', { name: 'New terminal' })).toHaveCount(0);
 
   releaseChunk();
   await expect(page.getByTestId('github-panel')).toBeVisible({ timeout: 30_000 });

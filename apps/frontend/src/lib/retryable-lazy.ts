@@ -1,15 +1,14 @@
 import { type ComponentType, createElement, lazy, type ReactNode, useState } from 'react';
 
 /**
- * What a `retryableLazy` import throws when its chunk cannot be fetched or
- * evaluated: offline, a 404 for a hashed name the hub no longer has after an
- * upgrade under an open tab, or a script that threw while it ran.
+ * What a `retryableLazy` import throws when its chunk cannot be fetched:
+ * offline, or a 404 for a hashed name the hub no longer has after an upgrade
+ * under an open tab (the hub then answers with HTML, which the browser also
+ * refuses as a module).
  *
  * Its own class so a boundary can treat this failure, and only this one, as
- * "the code did not arrive". Browsers word the underlying `TypeError`
- * differently ("Failed to fetch dynamically imported module", "error loading
- * dynamically imported module", "Importing a module script failed"), so
- * matching on the message would miss one of them.
+ * "the code did not arrive". A chunk that arrived but threw while it ran is not
+ * one: that is a bug no retry can fix, and it is rethrown as it was.
  */
 export class LazyChunkLoadError extends Error {
   constructor(cause: unknown) {
@@ -19,6 +18,22 @@ export class LazyChunkLoadError extends Error {
     );
     this.name = 'LazyChunkLoadError';
   }
+}
+
+// What each engine throws, as a TypeError, when a dynamic import cannot be
+// fetched or is refused as a module:
+//   Chromium  "Failed to fetch dynamically imported module: <url>"
+//   Firefox   "error loading dynamically imported module: <url>"
+//   WebKit    "Importing a module script failed."
+//   Chromium, a static import inside the chunk: "Failed to load module script: ..."
+// Anything else a module throws while it evaluates keeps its own type and text.
+const CHUNK_FETCH_FAILURE =
+  /dynamically imported module|importing a module script failed|failed to load module script/i;
+
+/** True for the `TypeError` a browser raises when a dynamic import's chunk could not be fetched. */
+// Usage: isChunkFetchFailure(new TypeError('Failed to fetch dynamically imported module: /a.js'))
+export function isChunkFetchFailure(error: unknown): boolean {
+  return error instanceof TypeError && CHUNK_FETCH_FAILURE.test(error.message);
 }
 
 export interface RetryableLazy<Props extends object> {
@@ -33,11 +48,25 @@ export interface RetryableLazy<Props extends object> {
    */
   preload(): void;
   /**
-   * Forgets a failed import so the next render fetches again. `React.lazy` keeps
-   * a rejected promise for good, so without this a retry would re-throw the
-   * first failure without touching the network.
+   * Forgets a failed import so the next render fetches again, now. A user's
+   * Retry calls this. `React.lazy` keeps a rejected promise for good, so without
+   * it a retry would re-throw the first failure without touching the network.
+   * A failed import is also forgotten on its own once `backoffMs` has passed,
+   * so a view that mounts again later heals without a click.
    */
   reset(): void;
+}
+
+export interface RetryableLazyOptions {
+  /** Delay before a mount after a failure asks the network again, by consecutive failures. */
+  readonly backoffMs?: (consecutiveFailures: number) => number;
+  /** Clock for the backoff; tests replace it. */
+  readonly now?: () => number;
+}
+
+/** 1 s after the first failure, doubling to 30 s: a recovered connection heals, a dead one is not hammered. */
+function defaultBackoffMs(consecutiveFailures: number): number {
+  return Math.min(1_000 * 2 ** (consecutiveFailures - 1), 30_000);
 }
 
 interface LazyBinding<Props extends object> {
@@ -76,44 +105,68 @@ function LazyHost<Props extends object>({ binding, componentProps }: LazyHostPro
  * <Suspense fallback={<Spinner />}><GitPanel.Component chatId={id} /></Suspense>
  */
 export function retryableLazy<Props extends object>(
-  load: () => Promise<{ default: (props: Props) => ReactNode }>
+  load: () => Promise<{ default: (props: Props) => ReactNode }>,
+  { backoffMs = defaultBackoffMs, now = Date.now }: RetryableLazyOptions = {}
 ): RetryableLazy<Props> {
   // `lazy` wants a `ComponentType`; a function component taking `Props` is one.
   type Loaded = { default: ComponentType<Props> };
-  let pending: Promise<Loaded> | null = null;
+  /** One try at the import. `failedAt` is set when its promise rejects. */
+  interface Attempt {
+    view: ComponentType<Props>;
+    pending: Promise<Loaded> | null;
+    failedAt: number | null;
+  }
   let loadedComponent: ComponentType<Props> | null = null;
+  let consecutiveFailures = 0;
 
   // One shared promise per attempt, so `preload()` and the lazy component
   // never race two fetches of the same chunk.
-  const start = () => {
-    pending ??= (load() as Promise<Loaded>).then(
+  const begin = (attempt: Attempt) => {
+    attempt.pending ??= (load() as Promise<Loaded>).then(
       (module) => {
         loadedComponent = module.default;
+        consecutiveFailures = 0;
         return module;
       },
       (error: unknown): never => {
-        pending = null;
-        throw new LazyChunkLoadError(error);
+        // Mark the attempt that failed, not whichever is current by now: a
+        // late rejection of an old attempt must not touch a newer one.
+        attempt.failedAt = now();
+        consecutiveFailures += 1;
+        throw isChunkFetchFailure(error) ? new LazyChunkLoadError(error) : error;
       }
     );
-    return pending;
+    return attempt.pending;
   };
 
-  let current = lazy(start);
+  const createAttempt = (): Attempt => {
+    const attempt: Attempt = { view: undefined as never, pending: null, failedAt: null };
+    attempt.view = lazy(() => begin(attempt));
+    return attempt;
+  };
+
+  let current = createAttempt();
+
+  /** The attempt a new mount should use: the current one, or a fresh one once its failure has aged out. */
+  const attemptForMount = (): Attempt => {
+    if (current.failedAt !== null && now() - current.failedAt >= backoffMs(consecutiveFailures)) {
+      current = createAttempt();
+    }
+    return current;
+  };
+
   const binding: LazyBinding<Props> = {
     loaded: () => loadedComponent,
-    lazyView: () => current,
+    lazyView: () => attemptForMount().view,
   };
 
   return {
     Component: (props) => createElement(LazyHost<Props>, { binding, componentProps: props }),
     preload() {
-      start().catch(() => undefined);
+      begin(attemptForMount()).catch(() => undefined);
     },
     reset() {
-      pending = null;
-      loadedComponent = null;
-      current = lazy(start);
+      if (current.failedAt !== null) current = createAttempt();
     },
   };
 }

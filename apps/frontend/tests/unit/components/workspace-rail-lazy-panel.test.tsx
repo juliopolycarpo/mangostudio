@@ -8,13 +8,14 @@
  * `workspace-rail.test.tsx` has already loaded the stubs by the time it ends.
  */
 
-import { describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 
 import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
 import { en } from '@mangostudio/shared/i18n';
 import userEvent from '@testing-library/user-event';
 
 import { render, screen, waitFor } from '../../support/harness/render';
+import { FakeIdleScheduler } from '../../support/mocks/fake-idle-scheduler';
 
 const chunkState = { gitFailuresLeft: 1, gitEvaluations: 0, githubEvaluations: 0 };
 
@@ -58,6 +59,16 @@ function renderRail() {
 }
 
 describe('WorkspaceRail lazy panel bodies', () => {
+  // happy-dom has no requestIdleCallback; without this the idle warm-up falls
+  // back to a 2 s real timer that these cases would race.
+  const idle = new FakeIdleScheduler();
+  beforeEach(() => {
+    idle.install();
+  });
+  afterEach(() => {
+    idle.restore();
+  });
+
   it('shows the failure inside the rail, keeps the dock usable, and recovers on Retry', async () => {
     const user = userEvent.setup();
     renderRail();
@@ -79,6 +90,8 @@ describe('WorkspaceRail lazy panel bodies', () => {
     await screen.findByTestId('git-panel-content');
     expect(chunkState.githubEvaluations).toBe(0);
 
+    // The idle warm-up has not run yet, so the hover is what starts the chunk.
+    expect(idle.pending).toBe(1);
     await user.hover(screen.getByRole('button', { name: 'Show GitHub panel' }));
 
     await waitFor(() => expect(chunkState.githubEvaluations).toBe(1));
@@ -86,6 +99,19 @@ describe('WorkspaceRail lazy panel bodies', () => {
 
     await user.click(screen.getByRole('button', { name: 'Show GitHub panel' }));
     expect(await screen.findByTestId('github-panel-content')).toBeInTheDocument();
+    expect(chunkState.githubEvaluations).toBe(1);
+  });
+
+  it('warms the other panels when the browser goes idle', async () => {
+    renderRail();
+    await screen.findByTestId('git-panel-content');
+    expect(idle.pending).toBe(1);
+    // Re-requested whenever the panel list is recomputed; every request carries the same timeout.
+    expect(new Set(idle.timeouts)).toEqual(new Set([3_000]));
+
+    await idle.runIdle();
+
+    // One evaluation whether the hover case above warmed it first or this warm-up did.
     expect(chunkState.githubEvaluations).toBe(1);
   });
 });

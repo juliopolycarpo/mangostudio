@@ -7,9 +7,9 @@ import {
 import { PanelRightOpen } from 'lucide-react';
 import {
   type Ref,
+  startTransition,
   Suspense,
   useCallback,
-  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -34,6 +34,12 @@ import { RailPanel } from './RailPanel';
 
 const DESKTOP_RAIL_QUERY = '(min-width: 1024px)';
 const COLLAPSED_RAIL_WIDTH = 48;
+/**
+ * How long a panel switch may keep the previous body up. Past this the body
+ * shows the spinner instead, so a chunk that is slow (or hung) is visible and
+ * announced, rather than only a highlight on the dock.
+ */
+const SLOW_PANEL_SWITCH_MS = 1_000;
 
 interface WorkspaceRailProps {
   readonly chatId: string;
@@ -72,10 +78,15 @@ export function WorkspaceRail({
     () => getAvailableWorkspacePanels({ chatId, workdir, todoCount: todos.length }, settings),
     [chatId, settings, todos.length, workdir]
   );
+  // The panel the person asked for: the dock answers at once.
   const [activePanelId, setActivePanelId] = useState<WorkspacePanelId | null>(
     () => availablePanels[0]?.id ?? null
   );
-  const shownPanelId = useDeferredValue(activePanelId);
+  // The panel whose body is on screen. It follows `activePanelId` in a
+  // transition when a body is already showing, so a chunk still on its way
+  // leaves the previous panel up instead of a spinner.
+  const [shownPanelId, setShownPanelId] = useState<WorkspacePanelId | null>(activePanelId);
+  const [slowSwitch, setSlowSwitch] = useState(false);
   const [collapsed, setCollapsedState] = useState(() => readRailCollapsed(chatId));
   const [mobileOpen, setMobileOpen] = useState(false);
   const [width, setWidth] = useState(settings.width);
@@ -91,13 +102,16 @@ export function WorkspaceRail({
 
   useEffect(() => {
     if (!availablePanels.some((panel) => panel.id === activePanelId)) {
-      setActivePanelId(availablePanels[0]?.id ?? null);
+      const fallbackPanelId = availablePanels[0]?.id ?? null;
+      setActivePanelId(fallbackPanelId);
+      setShownPanelId(fallbackPanelId);
     }
   }, [activePanelId, availablePanels]);
 
   // Warm the other panels' chunks once the page is quiet, so the first click
-  // on one is not a fetch. Hover and focus on the dock button still start it
-  // sooner; a data-saver preference leaves both to the click.
+  // on one is not a fetch. Only this idle warm-up is skipped under a data-saver
+  // preference; hover and focus on a dock button still start the chunk, since
+  // the person is about to ask for it.
   useEffect(
     () =>
       preloadWhenIdle(
@@ -130,9 +144,17 @@ export function WorkspaceRail({
     writeRailCollapsed(chatId, nextCollapsed);
   };
 
+  const bodyOnScreen = isDesktop ? !collapsed : mobileOpen;
+
   const selectPanel = useCallback(
     (panelId: WorkspacePanelId) => {
       setActivePanelId(panelId);
+      // Only a body that is already showing is worth holding up while the next
+      // one loads. Opening a collapsed rail or the drawer shows the requested
+      // panel at once; holding back would mount the previous one first, with
+      // its queries, for the length of the chunk fetch.
+      if (bodyOnScreen) startTransition(() => setShownPanelId(panelId));
+      else setShownPanelId(panelId);
       // Selecting a panel is a request to *see* it, so a collapsed rail opens.
       // Written through the same storage as the collapse button rather than
       // through `setCollapsed`, which is declared below this callback.
@@ -143,7 +165,7 @@ export function WorkspaceRail({
       // cleared `collapsed` picked a panel nothing on screen showed.
       if (!isDesktop) setMobileOpen(true);
     },
-    [chatId, isDesktop]
+    [bodyOnScreen, chatId, isDesktop]
   );
 
   // The rail has no keyboard shortcut for switching panels, so the command
@@ -162,17 +184,33 @@ export function WorkspaceRail({
     onWidthChange?.(widthRef.current);
   };
 
+  const switching = shownPanelId !== activePanelId;
+  useEffect(() => {
+    if (!switching) return;
+    const timer = setTimeout(() => setSlowSwitch(true), SLOW_PANEL_SWITCH_MS);
+    return () => {
+      clearTimeout(timer);
+      setSlowSwitch(false);
+    };
+  }, [switching]);
+
   if (availablePanels.length === 0) return null;
 
   const activePanel =
     availablePanels.find((panel) => panel.id === activePanelId) ?? availablePanels[0];
   // The dock answers a click at once; the body follows once its chunk is in,
-  // and the panel that was showing stays up until then.
+  // and the panel that was showing stays up until then (or the spinner, once
+  // that takes longer than SLOW_PANEL_SWITCH_MS).
   const shownPanel = availablePanels.find((panel) => panel.id === shownPanelId) ?? activePanel;
   const activeTitle = panelTitles[shownPanel.id];
   const ActivePanelContent = shownPanel.component;
   // Set while a chosen panel's body is still on its way and the previous one is up.
   const loadingPanelId = shownPanel.id === activePanel.id ? null : activePanel.id;
+  const panelSpinner = (
+    <div className="flex h-full items-center justify-center">
+      <Spinner size="md" label={t.common.loading} />
+    </div>
+  );
   const panelContent = (
     closeMode: 'collapse' | 'close',
     onClose: () => void,
@@ -187,24 +225,22 @@ export function WorkspaceRail({
       }
       onClose={onClose}
     >
-      {/* Keyed by panel, so a failure in one panel's chunk does not follow the
-          person to the next one. */}
-      <Suspense
-        fallback={
-          <div className="flex h-full items-center justify-center">
-            <Spinner size="md" label={t.common.loading} />
-          </div>
-        }
-      >
-        <LazyChunkBoundary key={shownPanel.id} onRetry={() => shownPanel.lazyBody?.reset()}>
-          <ActivePanelContent
-            chatId={chatId}
-            workdir={workdir}
-            todos={todos}
-            environmentId={environmentId}
-          />
-        </LazyChunkBoundary>
-      </Suspense>
+      {slowSwitch && loadingPanelId ? (
+        panelSpinner
+      ) : (
+        // Keyed by panel, so a failure in one panel's chunk does not follow the
+        // person to the next one.
+        <Suspense fallback={panelSpinner}>
+          <LazyChunkBoundary key={shownPanel.id} onRetry={() => shownPanel.lazyBody?.reset()}>
+            <ActivePanelContent
+              chatId={chatId}
+              workdir={workdir}
+              todos={todos}
+              environmentId={environmentId}
+            />
+          </LazyChunkBoundary>
+        </Suspense>
+      )}
     </RailPanel>
   );
 

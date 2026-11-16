@@ -1,5 +1,5 @@
 import { TriangleAlert } from 'lucide-react';
-import { Component, type ReactNode } from 'react';
+import { Component, createRef, type ReactNode } from 'react';
 
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -42,14 +42,42 @@ export class LazyChunkBoundary extends Component<LazyChunkBoundaryProps, LazyChu
     return { error };
   }
 
+  private readonly regionRef = createRef<HTMLDivElement>();
+  /** Set by Retry: the button that had focus is about to unmount, so focus has to move. */
+  private focusRegionOnRecovery = false;
+
   private readonly retry = (): void => {
+    this.focusRegionOnRecovery = true;
     this.props.onRetry();
     this.setState(NO_ERROR);
   };
 
+  componentDidUpdate(
+    _previousProps: LazyChunkBoundaryProps,
+    previousState: LazyChunkBoundaryState
+  ) {
+    // Without this, focus falls to <body> when the Retry button goes away and a
+    // keyboard user has to tab in from the top of the page again.
+    if (this.focusRegionOnRecovery && previousState.error !== undefined) {
+      this.focusRegionOnRecovery = false;
+      this.regionRef.current?.focus({ preventScroll: true });
+    }
+  }
+
   render(): ReactNode {
     const { error } = this.state;
-    if (error === undefined) return this.props.children;
+    if (error === undefined) {
+      return (
+        <div
+          ref={this.regionRef}
+          tabIndex={-1}
+          data-testid="lazy-chunk-region"
+          className="h-full outline-none"
+        >
+          {this.props.children}
+        </div>
+      );
+    }
     if (!(error instanceof LazyChunkLoadError)) {
       throw error instanceof Error
         ? error

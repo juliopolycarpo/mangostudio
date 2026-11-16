@@ -73,6 +73,30 @@ describe('LazyChunkBoundary', () => {
     expect(fake.requests).toBe(2);
   });
 
+  it('moves focus to the panel region when Retry unmounts under the keyboard', async () => {
+    const user = userEvent.setup();
+    const lazyBody = retryableLazy(fakeChunkLoader(1).load);
+
+    render(
+      <LazyChunkBoundary onRetry={lazyBody.reset}>
+        <Suspense fallback={<p>loading</p>}>
+          <lazyBody.Component />
+        </Suspense>
+      </LazyChunkBoundary>
+    );
+    const retry = await screen.findByRole('button', { name: en.common.retry });
+    retry.focus();
+    await user.keyboard('{Enter}');
+    await screen.findByText('panel body');
+
+    expect(
+      document.activeElement,
+      `expected focus on the lazy-chunk region after Retry | received: ${
+        document.activeElement?.tagName ?? 'nothing'
+      }`
+    ).toBe(screen.getByTestId('lazy-chunk-region'));
+  });
+
   it('offers a page reload for the case where asking again cannot help', async () => {
     const lazyBody = retryableLazy(fakeChunkLoader(Number.POSITIVE_INFINITY).load);
 
