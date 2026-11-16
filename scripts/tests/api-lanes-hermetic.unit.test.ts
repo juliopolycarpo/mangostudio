@@ -330,11 +330,12 @@ describe('Turbo task definitions of the API lanes', () => {
     }
   }
 
-  test('the test:unit closure is the thirteen files the cache key names', () => {
+  test('the test:unit closure is the fourteen files the cache key names', () => {
     expect(launcherFiles().sort()).toEqual([
       'scripts/lib/config.ts',
       'scripts/lib/junit-report.ts',
       'scripts/lib/log.ts',
+      'scripts/lib/newline-splitter.ts',
       'scripts/lib/runner-guardian.ts',
       'scripts/lib/temp-home.ts',
       'scripts/lib/test-home.ts',

@@ -5,6 +5,7 @@ import {
   encodeStopping,
   encodeWatch,
   type GuardedChild,
+  GUARDIAN_LINE_MAX_CHARS,
   GUARDIAN_READY,
   type GuardianChannel,
   type GuardianHost,
@@ -172,6 +173,50 @@ describe('LineBuffer', () => {
 
     expect(lines.push('group 4001\ngroup 40')).toEqual(['group 4001']);
     expect(lines.push('')).toEqual([]);
+  });
+
+  test('matches splitting the whole stream for every cut of a stream with a final fragment', () => {
+    const stream = 'group 4001\n\npid 4002\r\ndone 4001\nstopp';
+    const parts = stream.split('\n');
+    parts.pop();
+
+    for (let cut = 0; cut <= stream.length; cut += 1) {
+      const lines = new LineBuffer();
+      const received = [...lines.push(stream.slice(0, cut)), ...lines.push(stream.slice(cut))];
+      expect({ cut, received }).toEqual({ cut, received: parts });
+    }
+    const lines = new LineBuffer();
+    const oneCharacterReads = [...stream].flatMap((character) => lines.push(character));
+    expect(oneCharacterReads).toEqual(parts);
+  });
+
+  test('cuts a line over the limit to the limit instead of failing, and carries on after it', () => {
+    const lines = new LineBuffer();
+    const garbage = 'x'.repeat(GUARDIAN_LINE_MAX_CHARS + 500);
+
+    expect(lines.push(garbage.slice(0, 700))).toEqual([]);
+    const received = lines.push(`${garbage.slice(700)}\ngroup 4001\n`);
+
+    expect(received.map((line) => line.length)).toEqual([GUARDIAN_LINE_MAX_CHARS, 10]);
+    expect(received[1]).toBe('group 4001');
+  });
+
+  // The buffer used to split the whole held string on every read: a 1 MiB line
+  // in 16-byte reads took several seconds. The bound separates linear from
+  // quadratic; it is no benchmark.
+  test('holds a 1 MiB line read in 16-byte pieces within 1500 ms, and still finds the next command', () => {
+    const stream = `${'x'.repeat(1024 * 1024)}\npid 4002\n`;
+    const lines = new LineBuffer();
+    const received: string[] = [];
+
+    const startedAt = performance.now();
+    for (let offset = 0; offset < stream.length; offset += 16) {
+      received.push(...lines.push(stream.slice(offset, offset + 16)));
+    }
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(received.map((line) => line.length)).toEqual([GUARDIAN_LINE_MAX_CHARS, 8]);
+    expect(elapsedMs).toBeLessThan(1500);
   });
 });
 
@@ -370,6 +415,18 @@ describe('runGuardian', () => {
     const host = new FakeGuardianHost([GROUP]);
 
     await runGuardian(chunksOf('gro', 'up 40', '01\n'), host, 5_000);
+
+    expect(host.signals).toEqual(['SIGTERM group 4001']);
+  });
+
+  test('still registers children after a line far over the limit', async () => {
+    const host = new FakeGuardianHost([GROUP]);
+
+    await runGuardian(
+      chunksOf('x'.repeat(GUARDIAN_LINE_MAX_CHARS * 3), '\ngroup 4001\n'),
+      host,
+      5_000
+    );
 
     expect(host.signals).toEqual(['SIGTERM group 4001']);
   });

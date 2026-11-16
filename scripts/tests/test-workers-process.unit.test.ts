@@ -957,6 +957,100 @@ describe('pumpLines', () => {
     await pumpLines(stream, (line) => lines.push(line));
     expect(lines).toEqual(['é']);
   });
+
+  /** The lines a whole-stream reader reports: complete ones CR-trimmed, the unterminated rest as is. */
+  function linesOfWholeStream(bytes: Uint8Array): string[] {
+    const parts = new TextDecoder().decode(bytes).split('\n');
+    const rest = parts.pop() ?? '';
+    const lines = parts.map((line) => line.replace(/\r$/, ''));
+    return rest === '' ? lines : [...lines, rest];
+  }
+
+  function streamOfByteCuts(
+    bytes: Uint8Array,
+    cuts: readonly number[]
+  ): ReadableStream<Uint8Array> {
+    return new ReadableStream({
+      start(controller) {
+        let start = 0;
+        for (const cut of [...cuts, bytes.byteLength]) {
+          controller.enqueue(bytes.slice(start, cut));
+          start = cut;
+        }
+        controller.close();
+      },
+    });
+  }
+
+  it('reports the same lines as splitting the whole stream, however the bytes are cut', async () => {
+    // 2, 3 and 4 byte characters, CRLF, a blank line and an unterminated rest.
+    const bytes = new TextEncoder().encode('café\r\n✓ ok\n\n\u{1f96d}\r\nlast\r');
+    const expected = linesOfWholeStream(bytes);
+
+    for (let cut = 0; cut <= bytes.byteLength; cut += 1) {
+      const lines: string[] = [];
+      await pumpLines(streamOfByteCuts(bytes, [cut]), (line) => lines.push(line));
+      expect({ cut, lines }).toEqual({ cut, lines: expected });
+    }
+    const oneByteReads: string[] = [];
+    const everyByte = Array.from({ length: bytes.byteLength - 1 }, (_, index) => index + 1);
+    await pumpLines(streamOfByteCuts(bytes, everyByte), (line) => oneByteReads.push(line));
+    expect(oneByteReads).toEqual(expected);
+  });
+
+  it('reports a line over the limit once, with its length and the limit, and drains the rest', async () => {
+    let pulls = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        if (pulls === 1) controller.enqueue(new TextEncoder().encode('fine\n'));
+        else if (pulls <= 5) controller.enqueue(new TextEncoder().encode('x'.repeat(4)));
+        else controller.close();
+      },
+    });
+    const lines: string[] = [];
+
+    await pumpLines(stream, (line) => lines.push(line), undefined, 10);
+
+    expect(lines).toEqual([
+      'fine',
+      '(NewlineSplitter): line length 12 exceeds the cap | expected at most 10 characters before the newline',
+    ]);
+    // Every chunk was still read, so the child is never blocked on a full pipe.
+    expect(pulls).toBe(6);
+  });
+
+  it('accepts a line of exactly the limit', async () => {
+    const lines: string[] = [];
+
+    await pumpLines(
+      streamOf('a'.repeat(10), '\n', 'b'.repeat(10)),
+      (line) => lines.push(line),
+      undefined,
+      10
+    );
+
+    expect(lines).toEqual(['a'.repeat(10), 'b'.repeat(10)]);
+  });
+
+  // The reader used to search the whole pending text on every read: a 1 MiB
+  // line in 16-byte reads took several seconds. The bound separates linear from
+  // quadratic; it is no benchmark.
+  it('delivers a 1 MiB line read in 16-byte pieces within 1500 ms', async () => {
+    const bytes = new TextEncoder().encode(`${'a'.repeat(1024 * 1024)}\n`);
+    const everySixteen = Array.from(
+      { length: Math.floor((bytes.byteLength - 1) / 16) },
+      (_, index) => (index + 1) * 16
+    );
+    const lines: string[] = [];
+
+    const startedAt = performance.now();
+    await pumpLines(streamOfByteCuts(bytes, everySixteen), (line) => lines.push(line));
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(lines.map((line) => line.length)).toEqual([1024 * 1024]);
+    expect(elapsedMs).toBeLessThan(1500);
+  });
 });
 
 describe('workerEnvironment', () => {

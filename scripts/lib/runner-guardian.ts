@@ -59,6 +59,8 @@
 // Run directly, as `bun runner-guardian.ts <runner pid> <grace ms>`, this file is
 // the guardian program; the runner pid is only there to name the process in `ps`.
 
+import { NewlineSplitter } from './newline-splitter';
+
 /** What a registered pid names: a process group the child leads, or the child alone. */
 type GuardedKind = 'group' | 'pid';
 
@@ -134,10 +136,21 @@ export function parseCommand(line: string): GuardianCommand | undefined {
 }
 
 /**
+ * The longest line {@link LineBuffer} keeps. The longest command is `group `
+ * and ten digits, so a line this long is never a command.
+ */
+export const GUARDIAN_LINE_MAX_CHARS = 1024;
+
+/**
  * Splits a byte stream into complete lines. A trailing fragment without its
  * newline is held back and never returned: a registration is written in one
  * `write` far below the pipe's atomic size, so a fragment is a runner that died
  * mid-write and describes nothing.
+ *
+ * A line over {@link GUARDIAN_LINE_MAX_CHARS} comes back cut to that length
+ * instead of failing the read. It cannot parse as a command and the ledger
+ * ignores it, whereas a guardian that stopped reading would no longer stop the
+ * runner's children when it dies, which is the one thing it is for.
  *
  * @example
  * const lines = new LineBuffer();
@@ -145,12 +158,13 @@ export function parseCommand(line: string): GuardianCommand | undefined {
  * lines.push('242\ndone 4242\n'); // ['group 4242', 'done 4242']
  */
 export class LineBuffer {
-  private held = '';
+  private readonly splitter = new NewlineSplitter({
+    maxLineLength: GUARDIAN_LINE_MAX_CHARS,
+    onOverflow: 'truncate',
+  });
 
   push(text: string): string[] {
-    const parts = (this.held + text).split('\n');
-    this.held = parts.pop() ?? '';
-    return parts;
+    return this.splitter.push(text);
   }
 }
 

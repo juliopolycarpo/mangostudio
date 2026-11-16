@@ -89,6 +89,77 @@ describe('scripts/lib/child-streams', () => {
       expect(hung.kind).toBe('timeout');
     });
 
+    test('reports what splitting the whole stream reports, however the bytes are cut', async () => {
+      const cases = [
+        { text: 'café ✓ \u{1f96d}\r\nrest\n', expected: 'café ✓ \u{1f96d}\r' },
+        { text: '\nafter an empty first line', expected: '' },
+      ];
+      for (const { text, expected } of cases) {
+        const bytes = encoder.encode(text);
+        for (let cut = 0; cut <= bytes.byteLength; cut += 1) {
+          const result = await readFirstLine(
+            streamOf(bytes.slice(0, cut), bytes.slice(cut)),
+            5_000
+          );
+          expect({ text, cut, result }).toEqual({
+            text,
+            cut,
+            result: { kind: 'line', line: expected },
+          });
+        }
+        const oneByteReads = Array.from({ length: bytes.byteLength }, (_, at) =>
+          bytes.slice(at, at + 1)
+        );
+        expect(await readFirstLine(streamOf(...oneByteReads), 5_000)).toEqual({
+          kind: 'line',
+          line: expected,
+        });
+      }
+      const unterminated = encoder.encode('café \u{1f96d}');
+      for (let cut = 0; cut <= unterminated.byteLength; cut += 1) {
+        const result = await readFirstLine(
+          streamOf(unterminated.slice(0, cut), unterminated.slice(cut)),
+          5_000
+        );
+        expect({ cut, result }).toEqual({
+          cut,
+          result: { kind: 'eof', partial: 'café \u{1f96d}' },
+        });
+      }
+    });
+
+    test('rejects with the length and the limit when the first line outgrows the limit', async () => {
+      const outcome = readFirstLine(streamOf('abcd', 'efgh', 'ijkl'), 5_000, 10);
+
+      await expect(outcome).rejects.toThrow(
+        '(NewlineSplitter): line length 12 exceeds the cap | expected at most 10 characters before the newline'
+      );
+    });
+
+    test('accepts a first line of exactly the limit', async () => {
+      const result = await readFirstLine(streamOf('a'.repeat(10), '\nrest'), 5_000, 10);
+
+      expect(result).toEqual({ kind: 'line', line: 'a'.repeat(10) });
+    });
+
+    // The reader used to search the whole buffer on every read: a 1 MiB line in
+    // 16-byte reads took several seconds. The bound separates linear from
+    // quadratic; it is no benchmark.
+    test('reads a 1 MiB first line in 16-byte pieces within 1500 ms', async () => {
+      const bytes = encoder.encode(`${'a'.repeat(1024 * 1024)}\n`);
+      const pieces: Uint8Array[] = [];
+      for (let offset = 0; offset < bytes.byteLength; offset += 16) {
+        pieces.push(bytes.slice(offset, offset + 16));
+      }
+
+      const startedAt = performance.now();
+      const result = await readFirstLine(streamOf(...pieces), 30_000);
+      const elapsedMs = performance.now() - startedAt;
+
+      expect(result.kind === 'line' ? result.line.length : result).toBe(1024 * 1024);
+      expect(elapsedMs).toBeLessThan(1500);
+    });
+
     test('returns as soon as the record arrives rather than waiting out the budget', async () => {
       const startedAt = Date.now();
       const result = await readFirstLine(streamOf('ready\n'), 30_000);
