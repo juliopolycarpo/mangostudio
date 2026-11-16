@@ -158,6 +158,59 @@ Todos os alvos crescem os mesmos ~17,7 MB de bytecode (`bun build --compile` do 
 embutido para os outros sete alvos). O `.map` externo mantém o formato, e os stack traces
 continuam apontando para as linhas do código original.
 
+## Binário do hub: cópias de assets embutidas
+
+O frontend embutido carregava uma cópia sem compressão de cada asset com hash ao lado das cópias
+gzip e Brotli. Agora essa cópia fica de fora quando existe uma cópia gzip (veja
+`docs/architecture/frontend-build.md`), o que só um cliente que não aceita nenhuma das duas
+codificações percebe: navegadores enviam br ou gzip, então requisições sem codificação vêm de
+scripts, verificadores de saúde e alguns proxies.
+
+Medido com `scripts/bench/hub-footprint.ts` (sete rodadas intercaladas, um home isolado novo por
+início, memória de `/proc/<pid>/status` 10 s depois do primeiro `/api/health` saudável, depois da
+carga de requisições e depois de mais 1, 10 e 100 requisições sem codificação para o maior
+script). linux-x64 glibc, Bun 1.4.5-canary, hub de produção, binários em btrfs. A carga média do
+host ficou entre 15 e 112 (outros jobs), então nenhuma mudança de inicialização é afirmada.
+
+| Binário do hub                   | Tamanho (B) | VmRSS ocioso (KB) | Após a carga (KB) | Após +1 / +10 / +100 requisições sem codificação (KB) |
+| -------------------------------- | ----------: | ----------------: | ----------------: | ----------------------------------------------------- |
+| base                             | 102,137,608 |            69,124 |            75,552 | 75,564 / 75,548 / 74,940                              |
+| cópias sem codificação removidas |  96,218,888 |            70,184 |            75,672 | 75,684 / 75,524 / 75,572                              |
+
+O binário encolhe 5,8% (5,9 MB; os 113 registros de tamanho e `ETag` do manifesto custam 16 KB
+disso). O RSS ocioso fica 1 MB maior na mediana, com faixas que se sobrepõem (68.504–69.364 contra
+68.836–70.684 KB), e o consumo após 1, 10 e 100 requisições para o maior script continua estável:
+o corpo descomprimido fica em cache, não é alocado por requisição. Descomprimir a cada requisição,
+sem o cache, levou cerca de 10 ms por requisição para o script de 1,6 MB (4 ms com ele) e deixou o
+hub 4 MB maior após a mesma carga.
+
+O cache é dimensionado a partir do build: o tamanho decodificado total dos assets cuja cópia sem
+codificação foi removida, 5,86 MB hoje (113 arquivos). É o máximo que esse caminho pode somar ao
+processo, atingido só se clientes sem codificação buscarem todos eles; uma varredura descomprime
+cada asset uma vez e a segunda passada não descomprime nada. Medido com duas varreduras completas
+sem codificação (`accept-encoding: identity`) de todos os 132 arquivos `.js` e `.css` com hash,
+cinco rodadas intercaladas, 5 s ocioso antes:
+
+| Binário do hub   | VmRSS ocioso (KB) | Após a varredura 1 (KB) | Após a varredura 2 (KB) | Anon / arquivo após a varredura 1 (KB) |
+| ---------------- | ----------------: | ----------------------: | ----------------------: | -------------------------------------- |
+| base             |            69,704 |                  79,272 |                  79,224 | 18,376 / 60,900                        |
+| cópias removidas |            69,620 |                  79,264 |                  79,248 | 22,980 / 56,188                        |
+
+A varredura custa a mesma memória total nos dois casos: os 4,6 MB que o hub passa a manter como
+corpos decodificados são os 4,7 MB de páginas embutidas mapeadas que ele deixa de tocar, e a
+segunda varredura não soma nada.
+
+HEAD e `If-None-Match` para um asset sem bytes sem codificação são respondidos com o tamanho e o
+`ETag` que o build registrou no manifesto, então nenhum dos dois descomprime nada, nem com o cache
+frio. As respostas br e gzip são byte a byte as cópias embutidas. `Range` não muda no hub
+compilado: o Bun fatia um arquivo armazenado, então a base responde 206 para identity, gzip e br,
+e o servidor fatia os bytes decodificados para dar as mesmas respostas a identity. Medido com um
+cliente HTTP cru contra um hub base e um hub novo, 19 requisições identity (`Range` simples,
+aberto, sufixo, limitado, insatisfazível, múltiplo e malformado, mais `If-None-Match`, HEAD e
+`If-Range`) deram status, tamanhos e cabeçalhos idênticos, e `If-Range` com o tag forte, um tag
+fraco e uma data deu 206, 200 e 200 nos dois. gzip e br foram idênticos em seis formas de `Range`
+e em HEAD.
+
 ## Como medir de novo
 
 - Tamanhos: baixe os artefatos `runtime-<sha>-<platform>` de uma execução de CI
