@@ -42,6 +42,13 @@ describe('parseAotOrder', () => {
     });
   });
 
+  test('accepts the entry-module line newer Bun canaries write', () => {
+    // Written by Bun 1.4.5-canary.1+8b22022db, which CI installs.
+    expect(parseAotOrder('aot-order v1\nE entry.ts\nM 0 entry.ts\nF 0 0 b0 - 1:1 \n')).toEqual({
+      functionCount: 1,
+    });
+  });
+
   test.each([
     ['an empty file', '', 'expected first line "aot-order v1" | received: ""'],
     [
@@ -52,7 +59,7 @@ describe('parseAotOrder', () => {
     [
       'a line of no known kind',
       'aot-order v1\nP 1\nX = 1 b0 - 0:0 \n',
-      'expected a "P <n>", "M <n> <module>" or "F <...>" line | received: "X = 1 b0 - 0:0 "',
+      'expected a "P <n>", "E <entry>", "M <n> <module>" or "F <...>" line | received: "X = 1 b0 - 0:0 "',
     ],
     [
       'a function line with no index',

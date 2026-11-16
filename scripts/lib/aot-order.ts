@@ -90,14 +90,14 @@ export function parseAotOrder(text: string): AotOrderSummary {
   }
   let functionCount = 0;
   for (const line of lines.slice(1)) {
-    // `P <program size>` and `M <index> <module>` describe the program; `F ...` is one function.
-    if (/^(?:P \d+|M \d+ \S+)$/.test(line)) continue;
+    // `P <program size>`, `E <entry module>` (newer Bun) and `M <index> <module>` describe the program; `F ...` is one function.
+    if (/^(?:P \d+|E \S+|M \d+ \S+)$/.test(line)) continue;
     if (/^F (?:=|\d+) \d+ \S+ \S+ \S+ ?$/.test(line)) {
       functionCount += 1;
       continue;
     }
     throw new Error(
-      `aot order: expected a "P <n>", "M <n> <module>" or "F <...>" line | received: ${JSON.stringify(line)}`
+      `aot order: expected a "P <n>", "E <entry>", "M <n> <module>" or "F <...>" line | received: ${JSON.stringify(line)}`
     );
   }
   if (functionCount === 0) {
