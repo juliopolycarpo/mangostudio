@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import {
+  HUB_HANDLER_IDLE_TIMEOUT_SECONDS,
   HUB_IDLE_TIMEOUT_SECONDS,
   hubListenOptions,
   SSE_KEEPALIVE_FRAME,
@@ -23,6 +24,11 @@ describe('hub connection limits', () => {
 
   it('frames the keepalive as an SSE comment', () => {
     expect(new TextDecoder().decode(SSE_KEEPALIVE_FRAME)).toBe(': keepalive\n\n');
+  });
+
+  it("keeps the handler idle timeout above the listener default and inside Bun's documented cap", () => {
+    expect(HUB_HANDLER_IDLE_TIMEOUT_SECONDS).toBeGreaterThan(HUB_IDLE_TIMEOUT_SECONDS);
+    expect(HUB_HANDLER_IDLE_TIMEOUT_SECONDS).toBeLessThanOrEqual(255);
   });
 
   it('gives the listener the idle timeout the keepalive is sized for', () => {
