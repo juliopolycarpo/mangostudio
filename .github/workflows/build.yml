@@ -79,11 +79,6 @@ jobs:
           bun run build --frontend
           bun ./scripts/ci/frontend-artifact.ts record
 
-      # The eager set is what a first page load downloads. A static import that
-      # drags lazy code into the entry shows up here before it reaches users.
-      - name: Check the first-load budget
-        run: bun ./scripts/ci/frontend-load-graph.ts --budget scripts/ci/frontend-bundle-budget.json
-
       - id: identity
         name: Record producer Bun revision
         run: bun -e 'console.log("bun_revision=" + Bun.revision)' >> "$GITHUB_OUTPUT"
@@ -121,3 +116,13 @@ jobs:
           rotate: "true"
           payload-glob: "*.tar.zst"
           cache-epoch: ${{ vars.CI_CACHE_EPOCH || 'v1' }}
+
+      # The eager set is what a first page load downloads. A static import that
+      # drags lazy code into the entry shows up here before it reaches users.
+      # It is the last step on purpose: a miss fails the job, and the upload, the
+      # API build and the Turbo save are already done, so the over-budget build
+      # stays downloadable for inspection. It still runs after an API build
+      # failure, so one red step does not hide the other.
+      - name: Check the first-load budget
+        if: ${{ !cancelled() && steps.frontend.outcome == 'success' }}
+        run: bun ./scripts/ci/frontend-load-graph.ts --budget scripts/ci/frontend-bundle-budget.json
