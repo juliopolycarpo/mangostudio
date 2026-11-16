@@ -1,6 +1,7 @@
 /**
  * Migration 064 replaces the `(userId)` index on `chats` with
- * `(userId, updatedAt DESC)`. The chat list reads one user's chats newest
+ * `(userId, updatedAt DESC)` and drops `idx_chats_updated_at`, which no read
+ * uses. The chat list reads one user's chats newest
  * first; with `userId` alone SQLite loaded every row, state blobs included,
  * into a temp B-tree and sorted them. The plan is read from the exact SQL and
  * parameters `listByUserId` sends, so a reshaped query that stops matching the
@@ -20,13 +21,20 @@ import type { Database } from '../../../src/db/types';
 import {
   getById,
   getByIdWithState,
+  getOwnedChat,
+  listByIdsForUser,
   listByUserId,
+  listChatIdsByWorkdir,
+  listChatIdsUnderWorktreeRoot,
+  verifyChatOwnership,
 } from '../../../src/modules/chats/infrastructure/chat-repository';
+import { updateChatAfterTurn } from '../../../src/modules/generation/infrastructure/conversation-persistence';
 
 const TARGET = '064_chats_user_updated_index';
 const PREVIOUS = '063_messages_ordered_read_indexes';
 const NEW_INDEX = 'idx_chats_user_id_updated_at';
 const REPLACED_INDEX = 'chats_userId_idx';
+const DROPPED_INDEX = 'idx_chats_updated_at';
 
 const OWNER = 'user-owner';
 const OTHER = 'user-other';
@@ -81,6 +89,21 @@ async function capturedChatsRead(read: () => Promise<unknown>): Promise<Compiled
     );
   }
   return reads[0] as CompiledQuery;
+}
+
+/** Every statement a production call sent against `chats`, as executed. */
+async function capturedChatsStatements(read: () => Promise<unknown>): Promise<CompiledQuery[]> {
+  executed = [];
+  await read();
+  const statements = executed.filter((query) => /(from|update) "chats"/.test(query.sql));
+  if (statements.length === 0) {
+    throw new Error(
+      `expected statements on chats: at least 1 | received: 0 (${JSON.stringify(
+        executed.map((query) => query.sql)
+      )})`
+    );
+  }
+  return statements;
 }
 
 /**
@@ -145,6 +168,15 @@ describe('064_chats_user_updated_index', () => {
     expect(await indexSql(REPLACED_INDEX)).toBeNull();
   });
 
+  it('drops the updatedAt-only index, which nothing reads', async () => {
+    await migrateTo(PREVIOUS);
+    expect(await indexSql(DROPPED_INDEX)).not.toBeNull();
+
+    await migrateTo(TARGET);
+
+    expect(await indexSql(DROPPED_INDEX)).toBeNull();
+  });
+
   it('restores the userId index and drops the new one on the way down', async () => {
     await migrateTo(TARGET);
 
@@ -154,6 +186,17 @@ describe('064_chats_user_updated_index', () => {
       `CREATE INDEX "${REPLACED_INDEX}" on "chats" ("userId")`
     );
     expect(await indexSql(NEW_INDEX)).toBeNull();
+  });
+
+  it('recreates the updatedAt-only index on the way down exactly as 004 made it', async () => {
+    await migrateTo(PREVIOUS);
+    const original = await indexSql(DROPPED_INDEX);
+    expect(original).toBe(`CREATE INDEX "${DROPPED_INDEX}" on "chats" ("updatedAt")`);
+
+    await migrateTo(TARGET);
+    await migrateTo(PREVIOUS);
+
+    expect(await indexSql(DROPPED_INDEX)).toBe(original);
   });
 
   it('lists the same chats in the same order, ties by rowid, before and after', async () => {
@@ -212,6 +255,42 @@ describe('the chat list plan', () => {
     const plan = planOf(await capturedChatsRead(() => listByUserId(OWNER, typedDb())));
 
     expect(plan).toEqual([`SEARCH chats USING INDEX ${NEW_INDEX} (userId=?)`]);
+  });
+});
+
+describe('chats statements without idx_chats_updated_at', () => {
+  const OTHER_ID = 'chat-00';
+  const reads: [string, () => Promise<unknown>][] = [
+    ['the chat list', () => listByUserId(OWNER, typedDb())],
+    ['getById', () => getById(OTHER_ID, typedDb())],
+    ['getByIdWithState', () => getByIdWithState(OTHER_ID, typedDb())],
+    ['getOwnedChat', () => getOwnedChat(OTHER_ID, OWNER, typedDb())],
+    ['listByIdsForUser', () => listByIdsForUser([OTHER_ID], OWNER, typedDb())],
+    ['listChatIdsByWorkdir', () => listChatIdsByWorkdir(OWNER, 'local', '/work/0', typedDb())],
+    [
+      'listChatIdsUnderWorktreeRoot',
+      () => listChatIdsUnderWorktreeRoot(OWNER, 'local', '/work', typedDb()),
+    ],
+    ['verifyChatOwnership', () => verifyChatOwnership(OTHER_ID, OWNER, typedDb())],
+    // The image turn and createMessage write recency with the same `id` filter.
+    ['the recency update after a turn', () => updateChatAfterTurn(OTHER_ID, 9_000, typedDb())],
+  ];
+
+  it.each(reads)('%s does not use it before the migration', async (_label, read) => {
+    await migrateTo(PREVIOUS);
+
+    const plans = (await capturedChatsStatements(read)).flatMap(planOf);
+
+    expect(plans.filter((line) => line.includes(DROPPED_INDEX))).toEqual([]);
+  });
+
+  it.each(reads)('%s stays an index or key search after the migration', async (_label, read) => {
+    await migrateTo(TARGET);
+
+    const plans = (await capturedChatsStatements(read)).flatMap(planOf);
+
+    expect(plans.filter((line) => line.startsWith('SCAN chats'))).toEqual([]);
+    expect(plans.some((line) => line.startsWith('SEARCH chats'))).toBe(true);
   });
 });
 

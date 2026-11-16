@@ -12,8 +12,14 @@ import type { Migration } from 'kysely/migration';
  * entry, so a descending column read forwards supplies both keys. An ascending
  * column read backwards would give `rowid DESC` for chats that share a
  * millisecond and bring the sort back. `userId` stays a prefix, so every owner
- * lookup (and the cascade from `user`) is still served, and the number of
- * indexes on `chats` is unchanged.
+ * lookup (and the cascade from `user`) is still served.
+ *
+ * It also drops `idx_chats_updated_at` (`updatedAt` alone), which 004 added
+ * for the chat list. No read uses it: the list has its own index now, and the
+ * recency writes (`updateChatAfterTurn`, the image turn, `createMessage`)
+ * filter on `id`, which the primary key serves. Every recency write would
+ * otherwise maintain two indexes that hold `updatedAt`. `chats` ends up with
+ * one secondary index, where it had two.
  */
 export const chatsUserUpdatedIndex: Migration = {
   async up(db): Promise<void> {
@@ -22,9 +28,17 @@ export const chatsUserUpdatedIndex: Migration = {
       db
     );
     await db.schema.dropIndex('chats_userId_idx').ifExists().execute();
+    await db.schema.dropIndex('idx_chats_updated_at').ifExists().execute();
   },
 
   async down(db): Promise<void> {
+    // As 004 created it.
+    await db.schema
+      .createIndex('idx_chats_updated_at')
+      .ifNotExists()
+      .on('chats')
+      .columns(['updatedAt'])
+      .execute();
     await db.schema
       .createIndex('chats_userId_idx')
       .ifNotExists()
