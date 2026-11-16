@@ -279,7 +279,9 @@ build):
   grammar it embeds) and the active theme, and a theme switch loads just the new theme. It
   used to start from four themes and eight common grammars, so one `ts` block fetched about
   1.2 MB raw in 22 requests. Shiki already runs on its JavaScript regex engine, so no
-  Oniguruma WASM is involved.
+  Oniguruma WASM is involved. `MarkdownContent` also asks for the highlighter core as soon
+  as the source holds a fence, in parallel with the renderer chunk, which takes the first
+  block from three rounds to two.
 
 `tests/browser-smoke/load-waterfall.spec.ts` watches the same first uses in a real browser
 (opt-in: `MANGO_LOAD_WATERFALL=1`, and `MANGO_LOAD_PROFILE=slow-4g` for a CDP throttle) and prints
