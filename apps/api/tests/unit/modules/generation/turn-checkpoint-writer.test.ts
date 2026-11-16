@@ -486,6 +486,23 @@ describe('TurnCheckpointWriter write shape', () => {
     expect(written).toBeLessThan(10 * resultLength + 20_000);
   });
 
+  it('does not send a result again when a later upsert replaces it with an equal copy', async () => {
+    const { store, parts, writer } = setup();
+    const content = 'r'.repeat(50_000);
+    parts.push({ type: 'tool_result', toolCallId: 'call-mixed', content });
+    expect(await writer.checkpoint({ force: true })).toBe(true);
+
+    // As in a mixed image batch: the progress sync wrote the result, a checkpoint
+    // landed, then the collector upserted it again as a new object.
+    parts[1] = { type: 'tool_result', toolCallId: 'call-mixed', content: `${content}` };
+    expect(await writer.checkpoint({ force: true })).toBe(true);
+
+    const [first, second] = store.writes;
+    expect(first?.bytes).toBeGreaterThanOrEqual(50_000);
+    expect(second?.kind).toBe('delta');
+    expect(second?.bytes).toBeLessThan(1_000);
+  });
+
   it('rewrites the row after a failed write rather than leaving a gap in the deltas', async () => {
     const { store, writer, append } = setup();
     append(10);
