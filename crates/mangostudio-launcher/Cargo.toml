@@ -21,7 +21,7 @@ workspace = true
 # formats: tar.gz on Unix, zip on Windows.
 [dependencies]
 sha2.workspace = true
-ureq = { version = "3", default-features = false, features = ["rustls"] }
+ureq = { version = "3.5", default-features = false, features = ["rustls"] }
 
 [target.'cfg(unix)'.dependencies]
 flate2 = "1"

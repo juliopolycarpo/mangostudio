@@ -17,6 +17,8 @@ struct Route {
     status: u16,
     body: Vec<u8>,
     delay: Duration,
+    /// Send the body in this many chunks with this pause between them.
+    trickle: Option<(usize, Duration)>,
 }
 
 pub struct FakeReleaseServer {
@@ -88,6 +90,24 @@ impl FakeReleaseServer {
         self.register(path, 200, Vec::new(), Duration::from_secs(20));
     }
 
+    /// Answer at once but send the body in `chunks` pieces with `pause` between
+    /// them: a slow link that never goes quiet. The whole transfer takes about
+    /// `chunks * pause`, longer than a per-read deadline set just above `pause`.
+    pub fn serve_trickling(&self, path: &str, body: Vec<u8>, chunks: usize, pause: Duration) {
+        self.routes
+            .lock()
+            .expect("expected the route table lock to be healthy")
+            .insert(
+                path.to_string(),
+                Route {
+                    status: 200,
+                    body,
+                    delay: Duration::ZERO,
+                    trickle: Some((chunks, pause)),
+                },
+            );
+    }
+
     pub fn serve_status(&self, path: &str, status: u16) {
         self.register(path, status, Vec::new(), Duration::ZERO);
     }
@@ -102,6 +122,7 @@ impl FakeReleaseServer {
                     status,
                     body,
                     delay,
+                    trickle: None,
                 },
             );
     }
@@ -229,6 +250,7 @@ fn answer(
             status: 404,
             body: Vec::new(),
             delay: Duration::ZERO,
+            trickle: None,
         });
     thread::sleep(route.delay);
 
@@ -244,6 +266,18 @@ fn answer(
     );
     let mut stream = &stream;
     let _ = stream.write_all(head.as_bytes());
-    let _ = stream.write_all(&route.body);
+    match route.trickle {
+        Some((chunks, pause)) if chunks > 0 => {
+            let size = route.body.len().div_ceil(chunks).max(1);
+            for piece in route.body.chunks(size) {
+                let _ = stream.write_all(piece);
+                let _ = stream.flush();
+                thread::sleep(pause);
+            }
+        }
+        _ => {
+            let _ = stream.write_all(&route.body);
+        }
+    }
     let _ = stream.flush();
 }

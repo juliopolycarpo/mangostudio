@@ -24,23 +24,47 @@ See the [historical Cargo canary receipt](../../docs/reference/releasing.md#hist
 for the pre-2026-09-16 publication record.
 
 An install counts as complete when the binary exists and, for trees the
-launcher unpacked, the files listed in its `.launcher-record` still have the
-recorded sizes, which catches a binary truncated by a power loss. Trees made by
-the install scripts or an older launcher have no record and start as they are.
+launcher unpacked, every file listed in its `.launcher-record` still has the
+recorded size. The record catches truncated or missing files, such as a binary
+cut short by a power loss; it does not authenticate anything and has the same
+trust as the binary it describes. Trees made by the install scripts or an older
+launcher have no record and start as they are.
+
+One rule decides every start that follows a failed repair (offline, lock
+trouble, an install in use, a bad download): a binary or runtime whose size
+differs from its record line is never started, and the launcher fails with the
+reason. If the binaries match the record, or there is no record, the installed
+build starts with a warning.
+
 When an install is needed:
 
-- Launchers installing the same version take turns on a lock file in the
-  install root, waiting up to 15 minutes with a one-line message. If the file
-  system refuses locks, an existing install still starts; with none, the
-  install proceeds without the lock.
-- The archive is unpacked into a `.launcher-staging-<version>.*` directory and
-  renamed into place. An existing tree is moved aside to
-  `.launcher-rollback-<version>.*` first and deleted after the new one is in
-  place, so a running hub keeps its files. If the tree cannot be replaced (a
-  Windows hub holds its files) the launcher checks that before downloading,
-  warns, and starts the installed build.
-- A start under the lock restores a tree left in a rollback directory by an
-  interrupted update and removes scratch directories of dead launchers.
+- Launchers installing the same version take turns on a lock file,
+  `.launcher-<version>.lock`, in the install root. A waiting launcher prints a
+  line every 30 seconds and gives up only after an hour, far past a healthy
+  install. Nothing is installed without the lock: if it cannot be opened or
+  taken (a read-only directory, a file system without locking), the launcher
+  starts a build whose binaries match the record, and otherwise fails naming
+  the lock file.
+- Requests are bounded by silence rather than total time: 30 seconds each to
+  resolve and to connect, and 60 seconds for any single read of the response, so
+  a slow link that keeps sending finishes and a stalled one ends. Downloads make
+  three attempts with backoff, and an archive that fails checksum verification
+  is never run.
+- The archive is unpacked into a `.launcher-staging-<version>.*` directory,
+  recorded, flushed to disk (files and directory on Unix; on Windows the files
+  only, since std cannot flush a directory there) and renamed into place. An
+  incomplete tree is moved to `.launcher-trash-<version>.*` first and deleted
+  after the new one is in, so a hub that holds its files on Windows blocks the
+  move instead of being half deleted. The launcher checks that before
+  downloading, and starts the installed build with a warning if its binaries
+  are intact.
+- A start that has to install first adopts a verified staging tree left by a
+  launcher that died before the rename, with no download, then removes the
+  other scratch directories of dead launchers. A start that needs no install
+  removes them only when it can take the lock without waiting. These sweeps are
+  safe only because every launcher creates scratch directories under the lock;
+  the hub's `.staging-*` and the install scripts' `.install-*` directories are
+  never touched.
 
 `cargo binstall mangostudio` installs the prebuilt app binary directly from the
 matching GitHub release archive instead of building the launcher. The installed
@@ -62,7 +86,6 @@ to install both binaries together.
 
 ## Notes
 
-- Downloads make three total attempts (two retries) with backoff, each request is bounded by a deadline (30 s for `SHA256SUMS`, 10 minutes for the archive), and an archive that fails checksum verification is never run.
 - musl is detected at **compile** time (`target_env = "musl"`). A glibc-built launcher on Alpine
   picks the glibc archive. On Alpine, manually extract the matching `linux-x64-musl` or
   `linux-arm64-musl` release archive and install `libstdc++` (`apk add libstdc++`), or build
