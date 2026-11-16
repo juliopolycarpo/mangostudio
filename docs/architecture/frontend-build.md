@@ -255,11 +255,21 @@ serves), the images and fonts they reference, the largest eager modules and pack
 lazy chunk count, and for each first use of a feature (terminal, first fenced code block,
 Git and GitHub panels) how many rounds of requests and how many chunk requests it needs.
 `--budget` makes the Brotli total of the eager files a gate; `.github/workflows/build.yml`
-runs it after the production build, and the limit lives in
-`scripts/ci/frontend-bundle-budget.json` with a few KB of slack over the build it was set
-from, so lowering it after a real saving is a one-line change. When it fails, run the script
-without `--budget` and read "Largest eager modules": the usual cause is a static import
-that pulled a lazy module into the entry.
+runs it as the last step of the build job, so a miss still leaves the uploaded frontend to
+inspect. The limit lives in `scripts/ci/frontend-bundle-budget.json`, about 1% above the
+build it was set from. Rebuilding one commit with five Bun revisions (canaries from 5 to 16
+November and stable 1.4.4) moved the eager Brotli total by 276 B (429,761 to 430,037), so
+the slack is room for growth, not for bundler drift. The gate is for a large accidental
+eager import, not for policing a few KB.
+
+Whoever lands the change that grows the first load raises `eagerBrotliBytes` in that file in
+the same PR (a dependency bump, a feature that belongs in the first load); whoever lands a
+saving lowers it, so the gap stays small. The failure message prints the measured total,
+the limit, the overage, the Bun revision and both options. When growth was not intended, run
+the script without `--budget` and read "Largest eager modules": the usual cause is a static
+import that pulled a lazy module into the entry. A scenario that names a renamed module
+shows as a warning row under `--budget` instead of failing the build; update
+`LOAD_SCENARIOS` in the script.
 
 Traps the numbers above exposed (Bun 1.4.5-canary, measured in Chromium against a production
 build):

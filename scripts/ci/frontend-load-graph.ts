@@ -443,24 +443,43 @@ export interface LoadGraphReport {
   readonly modules: readonly ModuleBytes[];
   readonly owners: readonly ModuleBytes[];
   readonly scenarios: readonly ScenarioResult[];
+  /** Scenarios that no longer match the build; only filled when errors are collected. */
+  readonly scenarioProblems: readonly string[];
 }
 
+/**
+ * `onScenarioError: 'collect'` turns a scenario that names a module the build
+ * no longer has into a `scenarioProblems` entry instead of a throw. The budget
+ * gate uses it: renaming a file must not fail the build over a report row.
+ */
 export async function buildLoadGraphReport(
   distDir: string,
   metafile: LoadGraphMetafile,
-  scenarios: readonly LoadScenario[] = LOAD_SCENARIOS
+  scenarios: readonly LoadScenario[] = LOAD_SCENARIOS,
+  onScenarioError: 'throw' | 'collect' = 'throw'
 ): Promise<LoadGraphReport> {
   const bundle = await measureBundle(distDir, { builder: 'bun', capturedAt: '' });
   const eager = await measureEagerPayload(distDir, bundle.files);
   const eagerFiles = new Set(eager.files.map((file) => file.path));
   const modules = eagerModules(metafile, eagerFiles);
+  const resolved: ScenarioResult[] = [];
+  const scenarioProblems: string[] = [];
+  for (const scenario of scenarios) {
+    try {
+      resolved.push(resolveScenario(metafile, eagerFiles, scenario));
+    } catch (error) {
+      if (onScenarioError === 'throw') throw error;
+      scenarioProblems.push(error instanceof Error ? error.message : String(error));
+    }
+  }
   return {
     eager,
     assets: await measureEagerAssets(distDir, [...eagerFiles]),
     chunks: chunkStats(metafile, eagerFiles),
     modules,
     owners: bytesByOwner(modules),
-    scenarios: scenarios.map((scenario) => resolveScenario(metafile, eagerFiles, scenario)),
+    scenarios: resolved,
+    scenarioProblems,
   };
 }
 
@@ -510,6 +529,16 @@ export function renderLoadGraphReport(report: LoadGraphReport, moduleRows: numbe
         } |`
     ),
     '',
+    ...(report.scenarioProblems.length === 0
+      ? []
+      : [
+          '### Scenario problems',
+          '',
+          `LOAD_SCENARIOS in scripts/ci/frontend-load-graph.ts no longer matches the build, so the rows above are incomplete. Update the scenario to the renamed module; the eager total and the budget are not affected.`,
+          '',
+          ...report.scenarioProblems.map((problem) => `- ${problem}`),
+          '',
+        ]),
   ];
   return lines.join('\n');
 }
@@ -538,10 +567,34 @@ export function parseBundleBudget(source: string, path: string): BundleBudget {
   return { eagerBrotliBytes: limit };
 }
 
+export interface BudgetContext {
+  /** The budget file as the caller named it, so the message says where to raise it. */
+  readonly budgetPath: string;
+  /** `Bun.version_with_sha`: tells a bundler change apart from a source change. */
+  readonly bunRevision: string;
+}
+
 /** The failure message when the eager payload is over budget, or `undefined` when it fits. */
-export function budgetViolation(eager: EagerPayload, budget: BundleBudget): string | undefined {
+export function budgetViolation(
+  eager: EagerPayload,
+  budget: BundleBudget,
+  context: BudgetContext
+): string | undefined {
   if (eager.brotliBytes <= budget.eagerBrotliBytes) return undefined;
-  return `eager payload is ${eager.brotliBytes} B Brotli over ${eager.files.length} files; budget is ${budget.eagerBrotliBytes} B (over by ${eager.brotliBytes - budget.eagerBrotliBytes} B). A static import pulled lazy code into the entry: run this script without --budget and read "Largest eager modules".`;
+  return [
+    `eager payload is ${eager.brotliBytes} B Brotli over ${eager.files.length} files; the budget in ${context.budgetPath} is ${budget.eagerBrotliBytes} B (over by ${eager.brotliBytes - budget.eagerBrotliBytes} B), built with Bun ${context.bunRevision}.`,
+    `If the growth is intended (a dependency bump, a feature that belongs in the first load), raise "eagerBrotliBytes" in ${context.budgetPath} in this PR.`,
+    'Otherwise a static import may have pulled lazy code into the entry: run this script without --budget and read "Largest eager modules".',
+  ].join('\n');
+}
+
+/** The pass line, with the numbers and Bun revision a drift investigation starts from. */
+export function budgetSummary(
+  eager: EagerPayload,
+  budget: BundleBudget,
+  context: BudgetContext
+): string {
+  return `eager ${eager.brotliBytes} B Brotli within the ${budget.eagerBrotliBytes} B budget in ${context.budgetPath} (${budget.eagerBrotliBytes - eager.brotliBytes} B spare), built with Bun ${context.bunRevision}`;
 }
 
 const VALUE_FLAGS = ['--dist', '--metafile', '--modules', '--budget'] as const;
@@ -591,7 +644,9 @@ if (import.meta.main) {
 
   const report = await buildLoadGraphReport(
     distDir,
-    (await metafileFile.json()) as LoadGraphMetafile
+    (await metafileFile.json()) as LoadGraphMetafile,
+    LOAD_SCENARIOS,
+    budget ? 'collect' : 'throw'
   );
   process.stdout.write(
     argv.includes('--json')
@@ -599,14 +654,13 @@ if (import.meta.main) {
       : renderLoadGraphReport(report, moduleRows)
   );
 
-  const violation = budget ? budgetViolation(report.eager, budget) : undefined;
-  if (violation) {
-    process.stderr.write(`frontend-load-graph: ${violation}\n`);
-    process.exit(1);
-  }
-  if (budget) {
-    process.stderr.write(
-      `frontend-load-graph: eager ${report.eager.brotliBytes} B Brotli within budget ${budget.eagerBrotliBytes} B\n`
-    );
+  if (budget && budgetPath) {
+    const context = { budgetPath, bunRevision: Bun.version_with_sha };
+    const violation = budgetViolation(report.eager, budget, context);
+    if (violation) {
+      process.stderr.write(`frontend-load-graph: ${violation}\n`);
+      process.exit(1);
+    }
+    process.stderr.write(`frontend-load-graph: ${budgetSummary(report.eager, budget, context)}\n`);
   }
 }
