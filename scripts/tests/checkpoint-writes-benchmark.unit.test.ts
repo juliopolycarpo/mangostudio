@@ -119,6 +119,7 @@ describe('providerFrames', () => {
     answerChars: 10,
     chunkDelayMs: 7,
     toolCalls: 0,
+    toolName: 'read_file' as const,
     toolResultChars: 0,
     turns: 1,
   };
@@ -174,6 +175,42 @@ describe('providerFrames', () => {
     expect(answer.frames.join('')).not.toContain('read_file');
     expect(contentDeltas(answer.frames).join('')).toBe(fillerText(10));
   });
+
+  it('asks for write_file calls of the requested size, each to its own path', async () => {
+    const prompt = encodeScenarioPrompt({
+      ...answerScenario,
+      toolCalls: 2,
+      chunkDelayMs: 0,
+      toolName: 'write_file',
+      toolResultChars: 12,
+    });
+
+    const first = await collect([{ role: 'user', content: prompt }]);
+    const second = await collect([{ role: 'user', content: prompt }, { role: 'tool' }]);
+
+    const argumentsOf = (frames: string[]): unknown => {
+      const call = frames
+        .map(
+          (frame) =>
+            JSON.parse(frame.slice('data: '.length)) as {
+              choices: Array<{
+                delta: { tool_calls?: Array<{ function: { name: string; arguments: string } }> };
+              }>;
+            }
+        )
+        .flatMap((frame) => frame.choices.flatMap((choice) => choice.delta.tool_calls ?? []))[0];
+      return call
+        ? { name: call.function.name, ...(JSON.parse(call.function.arguments) as object) }
+        : null;
+    };
+    expect([
+      argumentsOf(first.frames.filter((f) => f.startsWith('data: {'))),
+      argumentsOf(second.frames.filter((f) => f.startsWith('data: {'))),
+    ]).toEqual([
+      { name: 'write_file', path: 'written-0.txt', content: fillerText(12) },
+      { name: 'write_file', path: 'written-1.txt', content: fillerText(12) },
+    ]);
+  });
 });
 
 describe('scenario prompt and filler text', () => {
@@ -183,6 +220,8 @@ describe('scenario prompt and filler text', () => {
         answerChars: scenario.answerChars,
         chunkDelayMs: scenario.chunkDelayMs,
         toolCalls: scenario.toolCalls,
+        toolName: scenario.toolName,
+        toolResultChars: scenario.toolResultChars,
       });
     }
     expect(decodeScenarioPrompt('hello')).toBeNull();
@@ -219,6 +258,7 @@ describe('startFakeProvider', () => {
               answerChars: 40,
               chunkDelayMs: 0,
               toolCalls: 0,
+              toolName: 'read_file',
               toolResultChars: 0,
               turns: 1,
             }),

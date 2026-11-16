@@ -14,8 +14,9 @@
  *     `-wal` files, WAL commits and fsyncs. They are exact and do not depend on host load
  *
  * Scenarios: `text-16k-1ms`, `text-16k-20ms`, `text-64k-1ms`, `text-64k-20ms` (4-character
- * chunks, one `chat.completion.chunk` each) and `tools-20x65k` (four turns of 20 `read_file`
- * calls with 65 KB results).
+ * chunks, one `chat.completion.chunk` each), `tools-20x65k` (four turns of 20 `read_file`
+ * calls with 65 KB results) and `writes-20x65k` (four turns of 20 `write_file` calls of 65 KB
+ * each, the tool a hub records as running with a durable write).
  *
  * The hub refuses loopback and private provider addresses (`base-url-policy.ts`), so the fake
  * provider listens on a global IPv6 address of this host (`--provider-host` overrides the
@@ -62,9 +63,14 @@ export interface Scenario {
   readonly answerChars: number;
   /** Pause between provider chunks. */
   readonly chunkDelayMs: number;
-  /** `read_file` calls the model makes before it answers. */
+  /** Calls to `toolName` the model makes before it answers. */
   readonly toolCalls: number;
-  /** Size of the file each `read_file` returns. */
+  /**
+   * The tool the model calls. `read_file` is a plain read; `write_file` changes files, so the
+   * hub records each call as running durably (a write the others do not make).
+   */
+  readonly toolName: 'read_file' | 'write_file';
+  /** Size of the file each `read_file` returns, or of the content each `write_file` writes. */
   readonly toolResultChars: number;
   /** Turns per run, each in a fresh chat. */
   readonly turns: number;
@@ -75,6 +81,7 @@ const textScenario = (name: string, answerChars: number, chunkDelayMs: number): 
   answerChars,
   chunkDelayMs,
   toolCalls: 0,
+  toolName: 'read_file',
   toolResultChars: 0,
   turns: 1,
 });
@@ -89,6 +96,16 @@ export const SCENARIOS: readonly Scenario[] = [
     answerChars: TOOL_FINAL_ANSWER_CHARS,
     chunkDelayMs: 0,
     toolCalls: 20,
+    toolName: 'read_file',
+    toolResultChars: 65_000,
+    turns: 4,
+  },
+  {
+    name: 'writes-20x65k',
+    answerChars: TOOL_FINAL_ANSWER_CHARS,
+    chunkDelayMs: 0,
+    toolCalls: 20,
+    toolName: 'write_file',
     toolResultChars: 65_000,
     turns: 4,
   },
@@ -111,19 +128,41 @@ export function fillerText(length: number): string {
 
 /** The scenario rides in the prompt so one provider serves every scenario. */
 export function encodeScenarioPrompt(scenario: Scenario): string {
-  return `SCENARIO answer=${scenario.answerChars} delay=${scenario.chunkDelayMs} tools=${scenario.toolCalls}`;
+  return (
+    `SCENARIO answer=${scenario.answerChars} delay=${scenario.chunkDelayMs} ` +
+    `tools=${scenario.toolCalls} tool=${scenario.toolName} size=${scenario.toolResultChars}`
+  );
 }
 
 export function decodeScenarioPrompt(
   prompt: string
-): Pick<Scenario, 'answerChars' | 'chunkDelayMs' | 'toolCalls'> | null {
-  const match = /SCENARIO answer=(\d+) delay=(\d+) tools=(\d+)/.exec(prompt);
+): Pick<
+  Scenario,
+  'answerChars' | 'chunkDelayMs' | 'toolCalls' | 'toolName' | 'toolResultChars'
+> | null {
+  const match =
+    /SCENARIO answer=(\d+) delay=(\d+) tools=(\d+) tool=(read_file|write_file) size=(\d+)/.exec(
+      prompt
+    );
   if (!match) return null;
   return {
     answerChars: Number(match[1]),
     chunkDelayMs: Number(match[2]),
     toolCalls: Number(match[3]),
+    toolName: match[4] as Scenario['toolName'],
+    toolResultChars: Number(match[5]),
   };
+}
+
+/** The arguments the fake model gives the scenario's tool for its `index`-th call. */
+function toolArguments(
+  scenario: Pick<Scenario, 'toolName' | 'toolResultChars'>,
+  index: number
+): Record<string, unknown> {
+  if (scenario.toolName === 'write_file') {
+    return { path: `written-${index}.txt`, content: fillerText(scenario.toolResultChars) };
+  }
+  return { path: TOOL_FIXTURE_FILE };
 }
 
 interface ChatMessage {
@@ -155,7 +194,7 @@ function sseFrame(payload: unknown): string {
 }
 
 /**
- * The streamed frames for one provider request: a `read_file` call while the scenario
+ * The streamed frames for one provider request: a call to the scenario's tool while the scenario
  * still wants tool calls, otherwise the answer in `CHUNK_CHARS` pieces. `pause` is awaited
  * between answer chunks so a caller (or a test) controls the pacing.
  */
@@ -168,6 +207,8 @@ export async function* providerFrames(
     answerChars: TOOL_FINAL_ANSWER_CHARS,
     chunkDelayMs: 0,
     toolCalls: 0,
+    toolName: 'read_file' as const,
+    toolResultChars: 0,
   };
   const id = `chatcmpl-${randomUUID()}`;
   const chunk = (delta: Record<string, unknown>, finishReason: string | null) =>
@@ -201,7 +242,10 @@ export async function* providerFrames(
             index: 0,
             id: `call_${toolsDone}_${id.slice(-8)}`,
             type: 'function',
-            function: { name: 'read_file', arguments: JSON.stringify({ path: TOOL_FIXTURE_FILE }) },
+            function: {
+              name: scenario.toolName,
+              arguments: JSON.stringify(toolArguments(scenario, toolsDone)),
+            },
           },
         ],
       },
@@ -602,7 +646,7 @@ async function configureHub(client: HubClient, provider: FakeProvider): Promise<
     thinkingEnabled: false,
     reasoningEffort: agent.reasoningEffort,
     maxToolIterations: 200,
-    toolNames: ['read_file'],
+    toolNames: ['read_file', 'write_file'],
     toolsEnabled: true,
     subagentIds: [],
     metadata: agent.metadata ?? {},
