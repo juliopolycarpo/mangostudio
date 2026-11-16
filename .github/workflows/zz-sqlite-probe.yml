@@ -1,0 +1,85 @@
+name: zz SQLite probe (temporary)
+on:
+  push:
+    branches: [fix/api-native-qualification]
+permissions:
+  contents: read
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+      - name: Probe
+        run: |
+          cat > "$RUNNER_TEMP/probe.ts" <<'TS'
+          import { Database } from 'bun:sqlite';
+          import { mkdtempSync } from 'node:fs';
+          import { tmpdir } from 'node:os';
+          import { join } from 'node:path';
+          const dir = mkdtempSync(join(tmpdir(), 'probe-'));
+          const one = (db: Database, p: string) => Object.values(db.query(`PRAGMA ${p}`).get() as object)[0];
+          const out: Record<string, unknown> = { bun: Bun.version, platform: process.platform, arch: process.arch };
+          const a = new Database(join(dir, 'a.sqlite'));
+          out.sqliteVersion = (a.query('select sqlite_version() v').get() as { v: string }).v;
+          out.compileOptions = a.query('PRAGMA compile_options').all().map((r) => Object.values(r as object)[0]);
+          out.syncBeforeWal = one(a, 'synchronous');
+          out.journalModeSet = one(a, 'journal_mode = WAL');
+          out.syncAfterWal = one(a, 'synchronous');
+          a.exec('PRAGMA synchronous = FULL');
+          out.syncAfterExplicitFull = one(a, 'synchronous');
+          out.fullfsync = one(a, 'fullfsync');
+          out.checkpointFullfsync = one(a, 'checkpoint_fullfsync');
+          const b = new Database(join(dir, 'b.sqlite'));
+          b.exec('PRAGMA synchronous = FULL');
+          out.explicitFullBeforeWal_syncAfterWalSwitch = (b.exec('PRAGMA journal_mode = WAL'), one(b, 'synchronous'));
+          a.close(); b.close();
+          const c = new Database(join(dir, 'a.sqlite'));
+          out.reopenedWalFile_sync = one(c, 'synchronous');
+          out.reopenedWalFile_journal = one(c, 'journal_mode');
+          c.close();
+          const stats = (xs: number[]) => {
+            const s = [...xs].sort((x, y) => x - y);
+            const q = (p: number) => s[Math.min(s.length - 1, Math.floor(p * s.length))]!;
+            return { n: s.length, minMs: +s[0]!.toFixed(3), medianMs: +q(0.5).toFixed(3), p95Ms: +q(0.95).toFixed(3), maxMs: +s.at(-1)!.toFixed(3) };
+          };
+          const commits = (name: string, sync: string, fullfsync: number, ckpt: number) => {
+            const db = new Database(join(dir, `${name}.sqlite`));
+            db.exec('PRAGMA journal_mode = WAL');
+            db.exec(`PRAGMA synchronous = ${sync}`);
+            db.exec(`PRAGMA fullfsync = ${fullfsync}`);
+            db.exec(`PRAGMA checkpoint_fullfsync = ${ckpt}`);
+            db.exec('CREATE TABLE t (v TEXT)');
+            const times: number[] = [];
+            for (let i = 0; i < 300; i++) {
+              const t0 = performance.now();
+              db.exec(`INSERT INTO t VALUES ('${'x'.repeat(200)}')`);
+              times.push(performance.now() - t0);
+            }
+            const c0 = performance.now();
+            db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+            const checkpointMs = +(performance.now() - c0).toFixed(3);
+            db.close();
+            return { ...stats(times.slice(10)), checkpointMs };
+          };
+          for (let round = 1; round <= 3; round++) {
+            out[`round${round}`] = {
+              full_fullfsync0: commits(`f0_${round}`, 'FULL', 0, 0),
+              full_fullfsync1: commits(`f1_${round}`, 'FULL', 1, 0),
+              normal_fullfsync0: commits(`n0_${round}`, 'NORMAL', 0, 0),
+              normal_fullfsync1: commits(`n1_${round}`, 'NORMAL', 1, 0),
+              normal_ckptFullfsync1: commits(`nc_${round}`, 'NORMAL', 0, 1),
+            };
+          }
+          console.log('PROBE ' + JSON.stringify(out, null, 1));
+          TS
+          bun "$RUNNER_TEMP/probe.ts"
