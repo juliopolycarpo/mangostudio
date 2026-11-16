@@ -7,13 +7,13 @@ import type { Migration } from 'kysely/migration';
  * `userId` alone SQLite loaded every row of the user, blob columns included,
  * into a temp B-tree and sorted them.
  *
- * `updatedAt` is stored descending on purpose. SQLite appends `rowid` to every
- * index entry, so an ascending column read backwards would list chats that
- * share a millisecond in descending `rowid` order, while the sort it replaces
- * left them in ascending order. A descending column read forwards keeps the
- * order every client has seen. `userId` stays a prefix, so every owner lookup
- * (and the cascade from `user`) is still served, and the number of indexes on
- * `chats` is unchanged.
+ * `updatedAt` is stored descending on purpose. The list asks for
+ * `updatedAt DESC, rowid ASC`, and SQLite appends `rowid` to every index
+ * entry, so a descending column read forwards supplies both keys. An ascending
+ * column read backwards would give `rowid DESC` for chats that share a
+ * millisecond and bring the sort back. `userId` stays a prefix, so every owner
+ * lookup (and the cascade from `user`) is still served, and the number of
+ * indexes on `chats` is unchanged.
  */
 export const chatsUserUpdatedIndex: Migration = {
   async up(db): Promise<void> {

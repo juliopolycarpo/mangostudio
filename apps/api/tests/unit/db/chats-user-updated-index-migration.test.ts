@@ -106,13 +106,14 @@ async function seedChats(): Promise<void> {
   }
 }
 
-/** The list as it was read before the migration: `selectAll` and a sort, owner only. */
+/** The list as it was read before the migration (`selectAll` and a sort, owner only), under the order the list now defines. */
 async function listWithPreviousQuery(): Promise<Record<string, unknown>[]> {
   return (await typedDb()
     .selectFrom('chats')
     .selectAll()
     .where('userId', '=', OWNER)
     .orderBy('updatedAt', 'desc')
+    .orderBy(sql`rowid`, 'asc')
     .execute()) as unknown as Record<string, unknown>[];
 }
 
@@ -155,7 +156,7 @@ describe('064_chats_user_updated_index', () => {
     expect(await indexSql(NEW_INDEX)).toBeNull();
   });
 
-  it('lists the same chats in the same order, ties included, before and after', async () => {
+  it('lists the same chats in the same order, ties by rowid, before and after', async () => {
     await migrateTo(PREVIOUS);
     await seedChats();
     const before = await listWithPreviousQuery();
@@ -172,6 +173,11 @@ describe('064_chats_user_updated_index', () => {
     const previousIds = before.map((row) => String(row.id));
     expect(afterWithPreviousQuery.map((row) => String(row.id))).toEqual(previousIds);
     expect(listed.map((chat) => chat.id)).toEqual(previousIds);
+    // The tie order is the query's, not the planner's: chats sharing a millisecond list oldest insert first.
+    for (const [position, chat] of listed.entries()) {
+      const next = listed[position + 1];
+      if (next?.updatedAt === chat.updatedAt) expect(chat.id < next.id).toBe(true);
+    }
     for (const [position, chat] of listed.entries()) {
       const row = before[position] as Record<string, unknown>;
       expect(chat).toMatchObject({

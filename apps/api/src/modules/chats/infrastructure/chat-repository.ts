@@ -12,7 +12,7 @@ import {
   usableVendorId,
   vendorSelection,
 } from '@mangostudio/shared/external-agents';
-import type { Kysely, Selectable, Updateable } from 'kysely';
+import { type Kysely, type Selectable, sql, type Updateable } from 'kysely';
 
 import type { Database } from '../../../db/types';
 import { generateId } from '../../../utils/id';
@@ -232,8 +232,10 @@ export interface ChatRecordWithState extends ChatRecord {
 
 /**
  * Every chat one user owns, most recently updated first, with the state the
- * list needs to show each chat's context usage. The `(userId, updatedAt DESC)`
- * index supplies the order, so SQLite streams rows instead of sorting them.
+ * list needs to show each chat's context usage. Chats that share a millisecond
+ * keep creation order (`rowid` ascending), as messages do with `timestamp, rowid`.
+ * The `(userId, updatedAt DESC)` index supplies both keys, so SQLite streams rows
+ * instead of sorting them; `rowid DESC` or `id` would bring the sort back.
  */
 export async function listByUserId(
   userId: string,
@@ -244,6 +246,7 @@ export async function listByUserId(
     .select([...CHAT_COLUMNS, ...CHAT_STATE_COLUMNS])
     .where('userId', '=', userId)
     .orderBy('updatedAt', 'desc')
+    .orderBy(sql`rowid`, 'asc')
     .execute();
   return rows.map(mapChatRowWithState);
 }
