@@ -34,6 +34,11 @@ function fakeChunkLoader(failures: number) {
   return fake;
 }
 
+// Long enough that only Retry, never the clock, starts a new attempt.
+function longBackoff(): number {
+  return 60_000;
+}
+
 function Broken(): ReactNode {
   throw new Error('the panel itself is broken');
 }
@@ -97,6 +102,114 @@ describe('LazyChunkBoundary', () => {
         document.activeElement?.tagName ?? 'nothing'
       }`
     ).toBe(screen.getByTestId('lazy-chunk-region'));
+  });
+
+  it('keeps focus in the region when Retry fails again', async () => {
+    const user = userEvent.setup();
+    const fake = fakeChunkLoader(2);
+    const lazyBody = retryableLazy(fake.load, { backoffMs: longBackoff });
+
+    render(
+      <LazyChunkBoundary onRetry={lazyBody.reset}>
+        <Suspense fallback={<p>loading</p>}>
+          <lazyBody.Component />
+        </Suspense>
+      </LazyChunkBoundary>
+    );
+    await user.click(await screen.findByRole('button', { name: en.common.retry }));
+    await waitFor(() => expect(fake.requests).toBe(2));
+    await screen.findByRole('button', { name: en.common.retry });
+
+    expect(
+      document.activeElement,
+      `expected focus in the lazy-chunk region after a second failure | received: ${
+        document.activeElement?.tagName ?? 'nothing'
+      }`
+    ).toBe(screen.getByTestId('lazy-chunk-region'));
+  });
+
+  describe('with a Suspense boundary outside it, as in the rail', () => {
+    function renderOutsideSuspense(lazyBody: ReturnType<typeof retryableLazy>) {
+      return render(
+        <Suspense fallback={<p>outer fallback</p>}>
+          <LazyChunkBoundary onRetry={lazyBody.reset}>
+            <lazyBody.Component />
+          </LazyChunkBoundary>
+        </Suspense>
+      );
+    }
+
+    it('keeps the failure and the focus up while Retry waits for the chunk', async () => {
+      const user = userEvent.setup();
+      const arrival = Promise.withResolvers<{ default: typeof Arrived }>();
+      let requests = 0;
+      const lazyBody = retryableLazy(
+        (): Promise<{ default: typeof Arrived }> => {
+          requests += 1;
+          return requests === 1
+            ? Promise.reject(new TypeError('Importing a module script failed.'))
+            : arrival.promise;
+        },
+        { backoffMs: longBackoff }
+      );
+      renderOutsideSuspense(lazyBody);
+
+      await user.click(await screen.findByRole('button', { name: en.common.retry }));
+      await waitFor(() => expect(requests).toBe(2));
+
+      expect(
+        screen.queryByText('outer fallback'),
+        'the outer fallback replaced the failure while the chunk was loading'
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId('lazy-chunk-failure')).toHaveAttribute('aria-busy', 'true');
+      expect(document.activeElement, 'focus while the retry is pending').toBe(
+        screen.getByTestId('lazy-chunk-region')
+      );
+
+      arrival.resolve({ default: Arrived });
+      await screen.findByText('panel body');
+      expect(document.activeElement, 'focus once the panel arrived').toBe(
+        screen.getByTestId('lazy-chunk-region')
+      );
+    });
+
+    it('keeps focus in the region when Retry fails again', async () => {
+      const user = userEvent.setup();
+      const fake = fakeChunkLoader(2);
+      const lazyBody = retryableLazy(fake.load, { backoffMs: longBackoff });
+      renderOutsideSuspense(lazyBody);
+
+      await user.click(await screen.findByRole('button', { name: en.common.retry }));
+      await waitFor(() => expect(fake.requests).toBe(2));
+      await waitFor(() =>
+        expect(screen.getByTestId('lazy-chunk-failure')).toHaveAttribute('aria-busy', 'false')
+      );
+
+      expect(
+        document.activeElement,
+        `expected focus in the lazy-chunk region after a second failure | received: ${
+          document.activeElement?.tagName ?? 'nothing'
+        }`
+      ).toBe(screen.getByTestId('lazy-chunk-region'));
+    });
+  });
+
+  it('adds no focusable wrapper around content that draws its own failure', async () => {
+    const lazyBody = retryableLazy(fakeChunkLoader(0).load);
+
+    render(
+      <LazyChunkBoundary onRetry={lazyBody.reset} renderFailure={() => <p>plain fallback</p>}>
+        <Suspense fallback={<p>loading</p>}>
+          <lazyBody.Component />
+        </Suspense>
+      </LazyChunkBoundary>
+    );
+    await screen.findByText('panel body');
+
+    expect(
+      screen.queryByTestId('lazy-chunk-region'),
+      'a tabIndex={-1} wrapper around text that has no Retry to keep focus for'
+    ).not.toBeInTheDocument();
   });
 
   it('offers a page reload for the case where asking again cannot help', async () => {
