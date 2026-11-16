@@ -13,11 +13,7 @@ import { listAttachmentsByMessageIds } from '../../attachments/infrastructure/at
 import { listGeneratedImagesByMessageIds } from '../../generated-images/infrastructure/generated-image-repository';
 import { type GalleryCursor, type GalleryEntry, tiedRowidCeiling } from '../domain/gallery-cursor';
 import { encodeTranscriptCursor, type TranscriptCursor } from '../domain/transcript-cursor';
-import {
-  decodeMessageParts,
-  readMessageParts,
-  warnCorruptMessageParts,
-} from './message-parts-codec';
+import { decodeMessageParts, readMessageParts } from './message-parts-codec';
 
 export interface CreateMessageData {
   id: string;
@@ -139,20 +135,28 @@ function mapMessage(
 }
 
 /**
- * Every row this returns was decoded here, so this is where a corrupt `parts`
- * cell on a history read is logged once; the callers below decode quietly.
+ * `parts` as the text history selects it: the stored cell when it names a
+ * context boundary event, `NULL` otherwise. Text history reads `parts` only to
+ * find that boundary, and a tool result can run to tens of KB, so the other
+ * cells stay inside SQLite instead of being copied out and parsed for nothing.
+ * The substring test only narrows the candidates; a row that names an event in
+ * prose is still decoded and rejected by {@link sliceRowsAfterCompactionBoundary}.
  */
-function sliceRowsAfterCompactionBoundary<T extends { id: string; parts: string | null }>(
-  rows: T[]
-): T[] {
+const boundaryCandidateParts = sql<string | null>`CASE WHEN ${sql.join(
+  [...CONTEXT_BOUNDARY_EVENTS].map((event) => sql`instr(parts, ${event}) > 0`),
+  sql` OR `
+)} THEN parts END`;
+
+/**
+ * Drops the rows older than the newest context boundary. A corrupt `parts`
+ * cell cannot mark a boundary, so it is skipped without a warning here: the
+ * read that actually uses a row's parts (the transcript page, the rich
+ * history) is the one that reports it.
+ */
+function sliceRowsAfterCompactionBoundary<T extends { parts: string | null }>(rows: T[]): T[] {
   for (let index = rows.length - 1; index >= 0; index--) {
     const decoded = decodeMessageParts(rows[index].parts);
-    if (decoded.kind === 'corrupt') {
-      // Fall back to the full history window for this row.
-      warnCorruptMessageParts(rows[index].id, decoded.shape);
-      continue;
-    }
-    if (decoded.kind === 'absent') continue;
+    if (decoded.kind !== 'ok') continue;
 
     const hasBoundary = decoded.parts.some(
       (part) => part.type === 'system_event' && CONTEXT_BOUNDARY_EVENTS.has(part.event)
@@ -304,6 +308,9 @@ export async function listByChatId(
  * The newest rows are taken `timestamp DESC, rowid DESC`: a limit that splits
  * rows sharing a timestamp keeps the newest of them, and the reversed window
  * reads in insertion order.
+ *
+ * Only boundary candidates carry `parts` (see {@link boundaryCandidateParts});
+ * the turns returned are text, so a corrupt cell is not reported from here.
  */
 export async function loadHistory(
   chatId: string,
@@ -312,7 +319,7 @@ export async function loadHistory(
 ): Promise<SimpleTurn[]> {
   let q = db
     .selectFrom('messages')
-    .select(['id', 'role', 'text', 'parts'])
+    .select(['id', 'role', 'text', boundaryCandidateParts.as('parts')])
     .where('chatId', '=', chatId)
     .where('interactionMode', '!=', 'image')
     .orderBy('timestamp', 'desc')
@@ -357,7 +364,7 @@ export async function loadRichHistory(
     id: row.id,
     role: row.role,
     text: row.text,
-    parts: readMessageParts(row, { quiet: true }),
+    parts: readMessageParts(row),
     providerState: row.providerState ?? null,
     modelName: row.modelName ?? null,
   }));

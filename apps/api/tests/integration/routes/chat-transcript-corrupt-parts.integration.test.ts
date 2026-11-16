@@ -8,6 +8,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 
 import { getDb } from '../../../src/db/database';
 import { chatRoutes } from '../../../src/modules/chats/http/chat-routes';
+import { DiagnosticWarnCapture } from '../../support/diagnostic-warn-capture';
 import { insertTestChat, insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
@@ -37,27 +38,6 @@ afterEach(() => {
   restoreAuth?.();
   restoreAuth = null;
 });
-
-/** Named fake for the hub log: collects every structured line written to `console.warn`. */
-class WarnCapture {
-  readonly lines: string[] = [];
-  private readonly original = console.warn;
-  private readonly originalFlag = process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS;
-
-  start(): void {
-    // The test lanes silence diagnostic logs; this fake needs them on.
-    process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS = '1';
-    console.warn = (...args: unknown[]) => {
-      this.lines.push(args.map(String).join(' '));
-    };
-  }
-
-  stop(): void {
-    console.warn = this.original;
-    if (this.originalFlag === undefined) delete process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS;
-    else process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS = this.originalFlag;
-  }
-}
 
 async function seedChatWithCorruptMiddleRow(corruptParts: string) {
   sequence += 1;
@@ -138,7 +118,7 @@ describe('GET /chats/:id/messages with a corrupt parts cell', () => {
 
   it('logs a warning naming the message id without echoing the stored value', async () => {
     const { chatId, ids } = await seedChatWithCorruptMiddleRow(CORRUPT_VALUE);
-    const capture = new WarnCapture();
+    const capture = new DiagnosticWarnCapture();
     capture.start();
     let response: Response;
     try {
