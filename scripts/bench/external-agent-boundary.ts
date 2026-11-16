@@ -14,6 +14,7 @@ import { dirname, join, resolve } from 'node:path';
 
 import { assertNoUnexpectedArguments, parseArgs } from '../lib/args';
 import { nearestRank } from '../lib/latency-stats';
+import { sha256File } from '../release/verify-checksum';
 
 const PREFIX = 'EXTERNAL_AGENT_BOUNDARY_SAMPLE ';
 const REPO_ROOT = resolve(import.meta.dir, '../..');
@@ -191,7 +192,12 @@ export type RawBoundarySample = Awaited<ReturnType<typeof runSample>>;
  * time, alternating which side goes first. Each sample carries the `role` it was
  * measured for, because `sourceSha` cannot tell the sides apart: two builds of
  * one commit (a profile, flag or allocator experiment) share it.
- * @example await collectBoundarySamples({ base, head, tests, samples: 30, rssPath });
+ *
+ * Each binary is hashed before the first sample and again after the last, and a
+ * difference fails the run naming both hashes. With equal SHAs the file hash is
+ * the only identity a side has, so a binary rebuilt mid-run would otherwise be
+ * recorded under the hash of whichever build was on disk at the end.
+ * @example const { samples: raw } = await collectBoundarySamples({ base, head, tests, samples: 30, rssPath });
  */
 export async function collectBoundarySamples(options: {
   base: BoundaryBinary;
@@ -199,8 +205,15 @@ export async function collectBoundarySamples(options: {
   tests: readonly string[];
   samples: number;
   rssPath: string;
-}): Promise<RawBoundarySample[]> {
+}): Promise<{ samples: RawBoundarySample[]; binarySha256: Record<BoundaryRole, string> }> {
   const { base, head, tests, samples, rssPath } = options;
+  const sides: readonly (readonly [BoundaryRole, BoundaryBinary])[] = [
+    ['base', base],
+    ['head', head],
+  ];
+  const sha256Before = Object.fromEntries(
+    sides.map(([role, side]) => [role, sha256File(resolve(side.binary))])
+  ) as Record<BoundaryRole, string>;
   const raw: RawBoundarySample[] = [];
   for (const test of tests) {
     for (let index = 0; index < samples; index++) {
@@ -218,7 +231,14 @@ export async function collectBoundarySamples(options: {
         raw.push(await runSample(role, resolve(side.binary), side.sourceSha, test, rssPath));
     }
   }
-  return raw;
+  for (const [role, side] of sides) {
+    const after = sha256File(resolve(side.binary));
+    if (after !== sha256Before[role])
+      throw new Error(
+        `Expected the ${role} binary ${side.binary} unchanged while sampling; sha256 before: ${sha256Before[role]}, after: ${after}.`
+      );
+  }
+  return { samples: raw, binarySha256: sha256Before };
 }
 
 /**
@@ -241,13 +261,12 @@ export function summarizeBoundaryComparison(
   }));
 }
 
-async function binaryMetadata(binary: string, sourceSha: string) {
-  const bytes = await Bun.file(binary).arrayBuffer();
+async function binaryMetadata(binary: string, sourceSha: string, binarySha256: string) {
   const lock = await capture(['git', 'show', `${sourceSha}:Cargo.lock`]);
   return {
     binary,
     sourceSha,
-    binarySha256: new Bun.CryptoHasher('sha256').update(bytes).digest('hex'),
+    binarySha256,
     lockSha256: new Bun.CryptoHasher('sha256').update(lock).digest('hex'),
   };
 }
@@ -291,7 +310,7 @@ async function main() {
     throw new Error(`Expected a registered --case; received ${values['--case']}.`);
   const temp = await mkdtemp(join(tmpdir(), 'mango-boundary-bench-'));
   try {
-    const raw = await collectBoundarySamples({
+    const { samples: raw, binarySha256 } = await collectBoundarySamples({
       base: { binary: base, sourceSha: baseSha },
       head: { binary: head, sourceSha: headSha },
       tests,
@@ -300,8 +319,8 @@ async function main() {
     });
     const summaries = summarizeBoundaryComparison(tests, raw);
     const receipt = {
-      base: await binaryMetadata(resolve(base), baseSha),
-      head: await binaryMetadata(resolve(head), headSha),
+      base: await binaryMetadata(resolve(base), baseSha, binarySha256.base),
+      head: await binaryMetadata(resolve(head), headSha, binarySha256.head),
       environment: {
         os: `${platform()} ${release()} ${arch()}`,
         cpu: cpus()[0]?.model ?? null,

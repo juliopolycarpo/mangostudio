@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -122,7 +122,7 @@ describe.skipIf(process.platform === 'win32')('base and head comparison', () => 
     const slow = createFakeBoundaryBinary(directory, 'slow', 5000);
     const tests = ['external_agents::turns::benchmarks::fingerprint_ordinary'];
 
-    const raw = await collectBoundarySamples({
+    const { samples: raw } = await collectBoundarySamples({
       base: { binary: fast, sourceSha: SHA },
       head: { binary: slow, sourceSha: SHA },
       tests,
@@ -142,7 +142,7 @@ describe.skipIf(process.platform === 'win32')('base and head comparison', () => 
     const first = createFakeBoundaryBinary(directory, 'first', 1000);
     const second = createFakeBoundaryBinary(directory, 'second', 2000);
 
-    const raw = await collectBoundarySamples({
+    const { samples: raw } = await collectBoundarySamples({
       base: { binary: first, sourceSha: SHA },
       head: { binary: second, sourceSha: SHA },
       tests: ['external_agents::turns::benchmarks::fingerprint_ordinary'],
@@ -151,5 +151,54 @@ describe.skipIf(process.platform === 'win32')('base and head comparison', () => 
     });
 
     expect(raw.map((entry) => entry.role)).toEqual(['base', 'head', 'head', 'base']);
+  });
+
+  it('returns the hash each binary had before sampling', async () => {
+    const fast = createFakeBoundaryBinary(directory, 'fast', 1000);
+    const slow = createFakeBoundaryBinary(directory, 'slow', 5000);
+    const sha256 = (path: string) =>
+      new Bun.CryptoHasher('sha256').update(readFileSync(path)).digest('hex');
+
+    const { binarySha256 } = await collectBoundarySamples({
+      base: { binary: fast, sourceSha: SHA },
+      head: { binary: slow, sourceSha: SHA },
+      tests: ['external_agents::turns::benchmarks::fingerprint_ordinary'],
+      samples: 1,
+      rssPath: join(directory, 'rss.txt'),
+    });
+
+    expect(binarySha256).toEqual({ base: sha256(fast), head: sha256(slow) });
+  });
+
+  it('fails naming both hashes when a binary is rebuilt while sampling', async () => {
+    // Prints its receipt, then appends a comment to itself on its first run: a
+    // build replaced mid-run, with the same SHA and different bytes.
+    const rebuilt = join(directory, 'rebuilt');
+    writeFileSync(
+      rebuilt,
+      `#!/bin/sh\nprintf '%s\\n' '${receipt(sample).trim()}'\nif [ ! -e '${rebuilt}.touched' ]; then : > '${rebuilt}.touched'; printf '# rebuilt\\n' >> '${rebuilt}'; fi\n`
+    );
+    chmodSync(rebuilt, 0o755);
+    const stable = createFakeBoundaryBinary(directory, 'stable', 1000);
+    const hashBefore = new Bun.CryptoHasher('sha256').update(readFileSync(rebuilt)).digest('hex');
+
+    const failure = await collectBoundarySamples({
+      base: { binary: rebuilt, sourceSha: SHA },
+      head: { binary: stable, sourceSha: SHA },
+      tests: ['external_agents::turns::benchmarks::fingerprint_ordinary'],
+      samples: 2,
+      rssPath: join(directory, 'rss.txt'),
+    }).then(
+      () => undefined,
+      (error: unknown) => error
+    );
+
+    const hashAfter = new Bun.CryptoHasher('sha256').update(readFileSync(rebuilt)).digest('hex');
+    expect(hashAfter, 'expected the fake binary to change itself while sampling').not.toBe(
+      hashBefore
+    );
+    expect(String(failure)).toContain(
+      `Expected the base binary ${rebuilt} unchanged while sampling; sha256 before: ${hashBefore}, after: ${hashAfter}.`
+    );
   });
 });
