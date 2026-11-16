@@ -200,6 +200,11 @@ export async function runDurably<T>(
   const baseline = await baselineBelowFull(db, label);
   if (baseline === undefined) return work(db);
   return db.connection().execute(async (conn) => {
+    // Read the level again while holding the connection: a window opened through another
+    // handle of the same connection (`baseline` is recorded per handle) may have raised it
+    // since, and then neither the raise nor the restore below is ours to do.
+    const found = await readLevel(conn);
+    if (found !== undefined && found >= SYNCHRONOUS_FULL) return work(conn);
     await sql`PRAGMA synchronous = FULL`.execute(conn);
     try {
       return await work(conn);
@@ -249,7 +254,10 @@ async function restoreUnlessWindowOpen(db: Kysely<Database>, baseline: number): 
  *
  * Like {@link runDurably}, it reads the level instead of assuming it, and it
  * cannot raise a transaction handle; it then logs `durable_commit_not_raised` once
- * per `label` when the level is below `FULL`.
+ * per `label` when the level is below `FULL`. Windows are kept per Kysely handle,
+ * so overlapping windows must use the same handle (the hub has one, `getDb()`): a
+ * window on a derived handle would restore the baseline while another handle's
+ * window is still open.
  *
  * @example
  * await withFullDurability(getDb(), 'api_key_revoke', () => api.deleteApiKey(options));

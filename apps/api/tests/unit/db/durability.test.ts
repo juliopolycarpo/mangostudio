@@ -400,6 +400,28 @@ describe('a connection that starts below FULL', () => {
     });
   });
 
+  it('does not lower a window opened on the connection when a derived handle finishes inside it', async () => {
+    file = new ObservedFileDatabase(directory);
+    await relaxDurability(file.db);
+    const derived = file.db.withTables<Record<never, never>>();
+    // The first call adopts `derived` with a NORMAL baseline.
+    await runDurably(derived, 'durability_test_cross_handle_adopt', () => Promise.resolve());
+
+    const levelAfterInner = await withFullDurability(
+      file.db,
+      'durability_test_cross_handle',
+      async () => {
+        await runDurably(derived, 'durability_test_cross_handle_inner', () => Promise.resolve());
+        return file.level();
+      }
+    );
+
+    expect({ levelAfterInner, after: file.level() }).toEqual({
+      levelAfterInner: FULL,
+      after: NORMAL,
+    });
+  });
+
   it('says so for a transaction handle, which SQLite cannot raise', async () => {
     file = new ObservedFileDatabase(directory);
     startAt(NORMAL);
