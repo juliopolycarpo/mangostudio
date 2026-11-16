@@ -1,21 +1,22 @@
 /**
  * Turns an `AsyncIterable` of JSON-serializable events into a Server-Sent
- * Events `Response`: a heartbeat comment keeps a reverse proxy from closing
- * an idle connection, an uncaught throw from the source becomes one
- * `SSEErrorEvent` rather than a dropped connection, and a disconnecting
- * client's `cancel()` returns the source's own iterator so it can clean up.
+ * Events `Response`: a heartbeat comment keeps the hub's own idle timeout and
+ * any intermediary from closing a quiet connection, an uncaught throw from the
+ * source becomes one `SSEErrorEvent` rather than a dropped connection, and a
+ * disconnecting client's `cancel()` returns the source's own iterator so it can
+ * clean up.
  *
  * Every route that streams progress this way (`/environments/install/:runId/
- * log`, `/machine/upgrade`) goes through this one implementation rather than
- * its own copy.
+ * log`, `/environments/:id/runtime/runs/:runId/log`, `/machine/upgrade`) goes
+ * through this one implementation rather than its own copy.
  */
 
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { SSEErrorEvent } from '@mangostudio/shared/streaming';
 
-const KEEPALIVE_INTERVAL_MS = 15_000;
+import { SSE_KEEPALIVE_FRAME, SSE_KEEPALIVE_INTERVAL_MS } from './hub-connection-limits';
+
 const ENCODER = new TextEncoder();
-const KEEPALIVE_BYTES = ENCODER.encode(': keepalive\n\n');
 
 function sseEvent(data: object): Uint8Array {
   return ENCODER.encode(`data: ${JSON.stringify(data)}\n\n`);
@@ -37,11 +38,11 @@ export function sseResponse<T extends object>(
     async start(controller) {
       const heartbeat = setInterval(() => {
         try {
-          controller.enqueue(KEEPALIVE_BYTES);
+          controller.enqueue(SSE_KEEPALIVE_FRAME);
         } catch {
           // The client may already have disconnected.
         }
-      }, KEEPALIVE_INTERVAL_MS);
+      }, SSE_KEEPALIVE_INTERVAL_MS);
       try {
         while (!disconnected) {
           const next = await iterator.next();

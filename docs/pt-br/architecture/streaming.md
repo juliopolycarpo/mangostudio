@@ -83,7 +83,7 @@ data: {"type":"done","done":true}
 ```
 
 - Cada evento é enquadrado como `data: <JSON>\n\n`.
-- Um comentário keepalive (`: keepalive\n\n`) é enviado a cada 5 segundos em `/api/respond/stream` (turnos internos e externos), via `generation/application/sse-keepalive.ts`. O helper geral `lib/sse-stream.ts`, usado por outras rotas SSE, usa 15 segundos para evitar timeouts em proxies.
+- Toda rota SSE envia um comentário keepalive (`: keepalive\n\n`) a cada 5 segundos: `/api/respond/stream` (turnos internos e externos) e as rotas construídas sobre `lib/sse-stream.ts`. O intervalo fica em `lib/hub-connection-limits.ts`, ao lado do `idleTimeout` de 10 s do listener do hub; o Bun fecha um stream que fica em silêncio por mais tempo que isso.
 - Todo evento carrega um campo `done`; o evento final usa `done: true`.
 - Os eventos são encerrados por uma linha em branco dupla.
 
