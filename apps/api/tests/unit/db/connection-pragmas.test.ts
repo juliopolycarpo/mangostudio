@@ -1,6 +1,6 @@
 /**
- * The hub's file database runs WAL with `synchronous = NORMAL`: commits stop
- * paying an fsync each, and a power loss can drop the last few of them.
+ * A file database opens in WAL mode at SQLite's default `synchronous = FULL`;
+ * the hub lowers it after its migrations (see `durability.test.ts`).
  */
 import { Database as SQLiteDatabase } from 'bun:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
@@ -13,6 +13,8 @@ import { applyConnectionPragmas } from '../../../src/db/database';
 /** `PRAGMA synchronous` answers with the numeric level: 0 off, 1 normal, 2 full, 3 extra. */
 const SYNCHRONOUS_NORMAL = 1;
 const SYNCHRONOUS_FULL = 2;
+
+const API_ROOT = join(import.meta.dir, '..', '..', '..');
 
 let directory: string;
 let sqlite: SQLiteDatabase | undefined;
@@ -33,11 +35,9 @@ afterEach(() => {
 });
 
 describe('applyConnectionPragmas', () => {
-  it('opens a file database in WAL mode with synchronous NORMAL and foreign keys on', () => {
+  it('opens a file database in WAL mode with foreign keys on, still syncing every commit', () => {
     const path = join(directory, 'database.sqlite');
     sqlite = new SQLiteDatabase(path);
-    // A fresh connection starts at SQLite's default, FULL.
-    expect(pragma('synchronous')).toBe(SYNCHRONOUS_FULL);
 
     applyConnectionPragmas(sqlite, path);
 
@@ -45,7 +45,7 @@ describe('applyConnectionPragmas', () => {
       journalMode: pragma('journal_mode'),
       synchronous: pragma('synchronous'),
       foreignKeys: pragma('foreign_keys'),
-    }).toEqual({ journalMode: 'wal', synchronous: SYNCHRONOUS_NORMAL, foreignKeys: 1 });
+    }).toEqual({ journalMode: 'wal', synchronous: SYNCHRONOUS_FULL, foreignKeys: 1 });
   });
 
   it('leaves an in-memory database out of WAL and at the default synchronous level', () => {
@@ -60,7 +60,7 @@ describe('applyConnectionPragmas', () => {
     }).toEqual({ journalMode: 'memory', synchronous: SYNCHRONOUS_FULL, foreignKeys: 1 });
   });
 
-  it('keeps the data a reopened file database committed under synchronous NORMAL', () => {
+  it('keeps the data a reopened file database committed', () => {
     const path = join(directory, 'database.sqlite');
     sqlite = new SQLiteDatabase(path);
     applyConnectionPragmas(sqlite, path);
@@ -72,4 +72,39 @@ describe('applyConnectionPragmas', () => {
 
     expect(sqlite.query('SELECT v FROM t').get()).toEqual({ v: 'committed' });
   });
+});
+
+describe('getDb on a file database', () => {
+  it('opens in WAL at FULL, and runMigrations lowers it to NORMAL', () => {
+    // A child process: `getDb()` is a process-wide singleton the other tests share.
+    const script = `
+      import { sql } from 'kysely';
+      import { loadConfigForTest } from './src/lib/config';
+      import { getDb } from './src/db/database';
+      import { runMigrations } from './src/server/migrations';
+      loadConfigForTest({ database: { path: process.env.CONNECTION_PRAGMAS_DB_PATH } });
+      const read = async (name) =>
+        Object.values((await sql.raw('PRAGMA ' + name).execute(getDb())).rows[0])[0];
+      const before = { journalMode: await read('journal_mode'), synchronous: await read('synchronous') };
+      await runMigrations();
+      const after = { synchronous: await read('synchronous') };
+      console.log('RESULT ' + JSON.stringify({ before, after }));
+    `;
+
+    const child = Bun.spawnSync(['bun', '-e', script], {
+      cwd: API_ROOT,
+      env: { ...process.env, CONNECTION_PRAGMAS_DB_PATH: join(directory, 'hub.sqlite') },
+    });
+
+    const output = child.stdout.toString();
+    const line = output.split('\n').find((candidate) => candidate.startsWith('RESULT '));
+    expect(
+      line,
+      `expected a RESULT line | received exit ${child.exitCode}: ${output} ${child.stderr.toString()}`
+    ).toBeDefined();
+    expect(JSON.parse(line?.slice('RESULT '.length) ?? '{}')).toEqual({
+      before: { journalMode: 'wal', synchronous: SYNCHRONOUS_FULL },
+      after: { synchronous: SYNCHRONOUS_NORMAL },
+    });
+  }, 60_000);
 });
