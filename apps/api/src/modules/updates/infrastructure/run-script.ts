@@ -12,8 +12,18 @@
  */
 
 import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
+import { DelimitedTextSplitter } from '@mangostudio/shared/utils/delimited-text-splitter';
 
 import { bridgeEmitter } from '../../../lib/emit-bridge';
+
+/**
+ * The longest line relayed, in UTF-16 code units. A script that writes `\r`
+ * progress without ever writing `\n` would otherwise grow one line without
+ * bound. A longer line is cut to this length and the rest is dropped up to the
+ * next `\n`. Consumers cut lines further (the upgrade stream to 8 KiB), so the
+ * cap sits above that and changes nothing they emit.
+ */
+export const SCRIPT_LINE_MAX_CHARS = 64 * 1024;
 
 export interface ScriptOutputLine {
   readonly stream: 'stdout' | 'stderr';
@@ -93,24 +103,25 @@ function spawnPiped(
 }
 
 /** Splits a byte stream into UTF-8 lines, tagging each with `stream`, and pushes them through `push`. */
-async function pumpLines(
+export async function pumpLines(
   stream: ReadableStream<Uint8Array>,
   streamName: ScriptOutputLine['stream'],
   push: (line: ScriptOutputLine) => void
 ): Promise<void> {
   const decoder = new TextDecoder();
-  let buffer = '';
+  const lines = new DelimitedTextSplitter('\n', {
+    maxRecordLength: SCRIPT_LINE_MAX_CHARS,
+    onOverflow: 'truncate',
+  });
+  const relay = (line: string): void => {
+    push({ stream: streamName, line: line.replace(/\r$/, '') });
+  };
   for await (const chunk of stream) {
-    buffer += decoder.decode(chunk, { stream: true });
-    let newline = buffer.indexOf('\n');
-    while (newline !== -1) {
-      push({ stream: streamName, line: buffer.slice(0, newline).replace(/\r$/, '') });
-      buffer = buffer.slice(newline + 1);
-      newline = buffer.indexOf('\n');
-    }
+    for (const line of lines.push(decoder.decode(chunk, { stream: true }))) relay(line);
   }
-  buffer += decoder.decode();
-  if (buffer.length > 0) push({ stream: streamName, line: buffer.replace(/\r$/, '') });
+  for (const line of lines.push(decoder.decode())) relay(line);
+  const unterminated = lines.finish();
+  if (unterminated.length > 0) relay(unterminated);
 }
 
 /**
