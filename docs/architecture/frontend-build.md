@@ -243,6 +243,45 @@ static-import closure of those scripts) and **lazy**, because a totals-only diff
 `apps/frontend/dist-metafile.json` (gitignored), which the report reads to flag any module
 bundled into more than one chunk.
 
+### First-load graph and budget
+
+```bash
+bun ./scripts/ci/frontend-load-graph.ts --budget scripts/ci/frontend-bundle-budget.json
+```
+
+`scripts/ci/frontend-load-graph.ts` reads the build output and prints what a first load costs:
+the eager files with raw, gzip and Brotli sizes (Brotli is the quality-11 copy the hub
+serves), the images and fonts they reference, the largest eager modules and packages, the
+lazy chunk count, and for each first use of a feature (terminal, first fenced code block,
+Git and GitHub panels) how many rounds of requests and how many chunk requests it needs.
+`--budget` makes the Brotli total of the eager files a gate; `.github/workflows/build.yml`
+runs it after the production build, and the limit lives in
+`scripts/ci/frontend-bundle-budget.json` with a few KB of slack over the build it was set
+from, so lowering it after a real saving is a one-line change. When it fails, run the script
+without `--budget` and read "Largest eager modules": the usual cause is a static import
+that pulled a lazy module into the entry.
+
+Traps the numbers above exposed (Bun 1.4.5-canary, measured in Chromium against a production
+build):
+
+- **A dynamic import is one round, whatever the chunk graph looks like.** Bun writes a
+  chunk-dependency table into the entry, so an `import()` fetches the target's whole
+  static closure in parallel. The 75-byte stub chunks Bun emits for a module that is both a
+  dynamic-import target and shared by another chunk therefore cost a request but not a
+  round trip, and merging a stub into its target saves nothing on the wire. A cold
+  `import(stub)` written by hand, outside that table, is sequential.
+- **`minChunkSize` does not pay.** At 4 KiB, 16 KiB and 64 KiB it cut the 130 lazy chunks to
+  107, 100 and 105, but folded the small ones into the entry (+1.8, +2.0 and +6.3 KB Brotli
+  eager), removed no round from any first use, and took the first code block from 22
+  requests to 21, 21 and 20.
+- **The first fenced code block is bytes-bound, not round-bound.** One `ts` block loads the
+  eight common grammars and four themes (about 1.2 MB raw, 22 requests, three rounds).
+  Over a 150 ms, 1.6 Mbit/s profile the grammar round is most of the wait.
+
+`tests/browser-smoke/load-waterfall.spec.ts` watches the same first uses in a real browser
+(opt-in: `MANGO_LOAD_WATERFALL=1`, and `MANGO_LOAD_PROFILE=slow-4g` for a CDP throttle) and prints
+`LOAD_WATERFALL` lines from the page's Resource Timing entries.
+
 ## Serving a built frontend
 
 `apps/api/src/server/frontend-static.ts` picks one of three modes at boot:
