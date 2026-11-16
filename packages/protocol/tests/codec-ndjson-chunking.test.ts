@@ -169,6 +169,22 @@ describe('LineDecoder across chunk boundaries', () => {
     expect(decoder.push(Buffer.from('ng"}\n')).frames).toEqual([PING]);
   });
 
+  it.each([
+    ['Uint8Array', (text: string) => encoder.encode(text)],
+    ['Node Buffer', (text: string) => Buffer.from(text)],
+  ] as const)(
+    'does not keep the bytes left after a line feed in a %s chunk',
+    (_kind, makeChunk) => {
+      const decoder = new LineDecoder();
+      const chunk = makeChunk('{"type":"ping"}\n{"type":"pi');
+
+      expect(decoder.push(chunk).frames).toEqual([PING]);
+      chunk.fill(0x7b);
+
+      expect(decoder.push('ng"}\n').frames).toEqual([PING]);
+    }
+  );
+
   it('decodes trailing data on finish after many pushes, and finishes twice cleanly', () => {
     const decoder = new LineDecoder();
     const bytes = encoder.encode(`${line(PING)}${JSON.stringify(UNICODE)}\r`);
@@ -235,13 +251,18 @@ const PIECE_SIZES = [0, 1, 2, 3, 7, 16, 255, 4096, 5000] as const;
 
 /** Deterministic xorshift32, so a failing seed can be replayed. */
 function seededRandom(seed: number): () => number {
-  let state = seed || 1;
-  return () => {
+  // xorshift32 started from a small seed emits values near zero for its first
+  // draws, which would give every seed the same one-line, one-byte-piece
+  // stream. A multiplicative spread and a few discarded draws avoid that.
+  let state = Math.imul(seed, 0x9e3779b1) >>> 0 || 1;
+  const draw = (): number => {
     state ^= state << 13;
     state ^= state >>> 17;
     state ^= state << 5;
     return (state >>> 0) / 0x1_0000_0000;
   };
+  for (let warmUp = 0; warmUp < 8; warmUp += 1) draw();
+  return draw;
 }
 
 function pickLine(next: () => number): string {
@@ -277,9 +298,15 @@ describe('LineDecoder against a decode-the-whole-stream model', () => {
       let offset = 0;
       do {
         const fixed = PIECE_SIZES[Math.floor(next() * PIECE_SIZES.length)] as number;
-        const size = next() < 0.2 ? 1 + Math.floor(next() * 64) : fixed;
+        // Pieces of a few dozen bytes cut through short lines, so a push often
+        // ends mid-record right after a line feed.
+        const size = next() < 0.5 ? 1 + Math.floor(next() * 64) : fixed;
         const piece = stream.slice(offset, offset + size);
-        observed.push(observe(decoder.push(asChunk(piece, next()))));
+        const chunk = asChunk(piece, next());
+        observed.push(observe(decoder.push(chunk)));
+        // A caller may reuse its buffer once `push` returns, so a decoder that
+        // still points into it would read these bytes on a later push.
+        if (typeof chunk !== 'string') chunk.fill(0x7b);
         offset += piece.byteLength;
         pushEnds.push(offset);
       } while (offset < stream.byteLength);
