@@ -232,19 +232,32 @@ export function bytesByOwner(modules: readonly ModuleBytes[]): ModuleBytes[] {
  * names the module that calls `import()` and the module it loads, both as they
  * appear in the metafile's `inputs`. `to` entries load in parallel; `to` may be
  * a suffix, so a grammar matches whatever version of `@shikijs/langs` is installed.
+ * `alongside` lists imports other modules request in the same round, such as an
+ * early start that does not wait for the renderer.
  */
+export interface LoadScenarioImport {
+  readonly from: string;
+  readonly to: readonly string[];
+}
+
+export interface LoadScenarioStep extends LoadScenarioImport {
+  readonly alongside?: readonly LoadScenarioImport[];
+}
+
 export interface LoadScenario {
   readonly id: string;
   readonly title: string;
-  readonly steps: readonly { readonly from: string; readonly to: readonly string[] }[];
+  readonly steps: readonly LoadScenarioStep[];
 }
 
 const shikiGrammar = (name: string): string => `@shikijs/langs/dist/${name}.mjs`;
 const shikiTheme = (name: string): string => `@shikijs/themes/dist/${name}.mjs`;
 
 /**
- * A first fenced block loads the renderer, the highlighter core, then its own
- * grammar and the active theme in parallel (the default dark theme here).
+ * A first fenced block asks for the renderer and the highlighter core in the
+ * same round (`MarkdownContent` starts the core as soon as it sees a fence it
+ * can colour), then for its own grammar and the active theme in parallel (the
+ * default dark theme here).
  */
 function markdownCodeScenario(id: string, title: string, grammar: string): LoadScenario {
   return {
@@ -254,8 +267,8 @@ function markdownCodeScenario(id: string, title: string, grammar: string): LoadS
       {
         from: 'src/components/MarkdownContent.tsx',
         to: ['src/components/MarkdownContentRenderer.tsx'],
+        alongside: [{ from: 'src/lib/code-highlighter-preload.ts', to: ['src/lib/shiki.ts'] }],
       },
-      { from: 'src/components/MarkdownContentRenderer.tsx', to: ['src/lib/shiki.ts'] },
       { from: 'src/lib/shiki.ts', to: [shikiGrammar(grammar), shikiTheme('one-dark-pro')] },
     ],
   };
@@ -341,42 +354,17 @@ export function resolveScenario(
   const steps: ScenarioStepResult[] = [];
 
   for (const step of scenario.steps) {
-    const [from] = inputsMatching(metafile, step.from);
-    if (from === undefined) {
-      throw new Error(
-        `scenario "${scenario.id}": module ${step.from} is not in the metafile; expected an input path such as src/...`
-      );
-    }
-    const callerOutput = outputsContaining(metafile, from)[0];
-    const callerDir = callerOutput === undefined ? '' : posix.dirname(callerOutput);
-
     const fetched: string[] = [];
     let rounds = 0;
-    for (const target of step.to) {
-      const [to] = inputsMatching(metafile, target);
-      if (to === undefined) {
-        throw new Error(`scenario "${scenario.id}": module ${target} is not in the metafile`);
-      }
-      const edge = metafile.inputs[from]?.imports.find(
-        (candidate) => candidate.kind === 'dynamic-import' && candidate.entryPoint === to
-      );
-      if (edge === undefined) {
-        // No dynamic edge: the module is bundled into whatever chunk holds the
-        // caller. That is a valid result (eager), unless it is not loaded either.
-        const holders = outputsContaining(metafile, to);
-        if (!holders.some((holder) => loaded.has(holder))) {
-          throw new Error(
-            `scenario "${scenario.id}": ${from} has no dynamic import of ${to}, and ${to} is in ${holders.join(', ')}, which nothing loaded`
-          );
-        }
-        continue;
-      }
-      const depth = fetchStatic(metafile, posix.join(callerDir, edge.path), loaded, fetched);
-      rounds = Math.max(rounds, depth);
+    // Everything in a step is requested at once, so the step costs the slowest
+    // import, and each import sees only what earlier steps loaded.
+    for (const request of [step, ...(step.alongside ?? [])]) {
+      rounds = Math.max(rounds, resolveImport(metafile, scenario.id, request, loaded, fetched));
     }
     for (const chunk of fetched) loaded.add(chunk);
+    const [from] = inputsMatching(metafile, step.from);
     steps.push({
-      from,
+      from: from ?? step.from,
       chunks: fetched,
       rounds,
       rawBytes: fetched.reduce((sum, chunk) => sum + (outputBytes(metafile, chunk) ?? 0), 0),
@@ -391,6 +379,49 @@ export function resolveScenario(
     requests: steps.reduce((sum, step) => sum + step.chunks.length, 0),
     rawBytes: steps.reduce((sum, step) => sum + step.rawBytes, 0),
   };
+}
+
+/** Resolves one module's dynamic imports; returns the rounds they need and appends new chunks to `fetched`. */
+function resolveImport(
+  metafile: LoadGraphMetafile,
+  scenarioId: string,
+  request: LoadScenarioImport,
+  loaded: ReadonlySet<string>,
+  fetched: string[]
+): number {
+  const [from] = inputsMatching(metafile, request.from);
+  if (from === undefined) {
+    throw new Error(
+      `scenario "${scenarioId}": module ${request.from} is not in the metafile; expected an input path such as src/...`
+    );
+  }
+  const callerOutput = outputsContaining(metafile, from)[0];
+  const callerDir = callerOutput === undefined ? '' : posix.dirname(callerOutput);
+
+  let rounds = 0;
+  for (const target of request.to) {
+    const [to] = inputsMatching(metafile, target);
+    if (to === undefined) {
+      throw new Error(`scenario "${scenarioId}": module ${target} is not in the metafile`);
+    }
+    const edge = metafile.inputs[from]?.imports.find(
+      (candidate) => candidate.kind === 'dynamic-import' && candidate.entryPoint === to
+    );
+    if (edge === undefined) {
+      // No dynamic edge: the module is bundled into whatever chunk holds the
+      // caller. That is a valid result (eager), unless it is not loaded either.
+      const holders = outputsContaining(metafile, to);
+      if (!holders.some((holder) => loaded.has(holder))) {
+        throw new Error(
+          `scenario "${scenarioId}": ${from} has no dynamic import of ${to}, and ${to} is in ${holders.join(', ')}, which nothing loaded`
+        );
+      }
+      continue;
+    }
+    const depth = fetchStatic(metafile, posix.join(callerDir, edge.path), loaded, fetched);
+    rounds = Math.max(rounds, depth);
+  }
+  return rounds;
 }
 
 function outputBytes(metafile: LoadGraphMetafile, key: string): number | undefined {

@@ -195,6 +195,38 @@ describe('resolveScenario', () => {
     expect(result).toMatchObject({ rounds: 1, requests: 4 });
   });
 
+  test('imports requested alongside one another cost one round, not two', () => {
+    const result = resolveScenario(fixtureMetafile(), EAGER, {
+      id: 'alongside',
+      title: 'Alongside',
+      steps: [
+        {
+          from: 'src/main.tsx',
+          to: ['src/Lazy.tsx'],
+          alongside: [{ from: 'src/main.tsx', to: ['src/Second.tsx'] }],
+        },
+      ],
+    });
+    expect(result).toMatchObject({ rounds: 1, requests: 4 });
+    expect(result.steps, 'one result per step, however many imports it holds').toHaveLength(1);
+  });
+
+  test('an import alongside another one names its module when the build lacks it', () => {
+    expect(() =>
+      resolveScenario(fixtureMetafile(), EAGER, {
+        id: 'alongside-missing',
+        title: 'Alongside missing',
+        steps: [
+          {
+            from: 'src/main.tsx',
+            to: ['src/Lazy.tsx'],
+            alongside: [{ from: 'src/Renamed.tsx', to: ['src/Second.tsx'] }],
+          },
+        ],
+      })
+    ).toThrow('scenario "alongside-missing": module src/Renamed.tsx is not in the metafile');
+  });
+
   test('a module missing from the metafile names it', () => {
     expect(() =>
       resolveScenario(fixtureMetafile(), EAGER, {
@@ -312,6 +344,20 @@ describe('scenarios against a recorded build', () => {
     );
     expect(byId.get('terminal')?.requests, 'terminal requests').toBeGreaterThan(0);
     expect(byId.get('markdown-code')?.requests, 'markdown-code requests').toBeGreaterThan(0);
+  });
+
+  test('a first code block is two rounds: renderer and highlighter together, then grammar and theme', async () => {
+    const metafile = await recordedMetafile();
+    const result = resolveScenario(
+      metafile,
+      entryOutputs(metafile),
+      LOAD_SCENARIOS.find((scenario) => scenario.id === 'markdown-code') as LoadScenario
+    );
+    expect(result.rounds, 'rounds for the first ts block').toBe(2);
+    expect(
+      result.steps.map((step) => step.rounds),
+      'rounds per step'
+    ).toEqual([1, 1]);
   });
 
   test('a renamed module is a collected problem under the budget gate and a throw otherwise', async () => {
