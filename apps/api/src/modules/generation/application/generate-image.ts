@@ -136,7 +136,7 @@ export async function generateImage(
   // Nothing is recorded before the provider call above, so this commit is the
   // only record of a generation that was already paid for: durable, or a power
   // loss leaves the user with no image and a retry that is charged again.
-  await runDurably(db, (conn) =>
+  await runDurably(db, 'image_turn', (conn) =>
     persistImageTurn(
       {
         userId: input.userId,

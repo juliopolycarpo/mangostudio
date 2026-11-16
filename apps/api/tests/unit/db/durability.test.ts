@@ -40,8 +40,9 @@ class FakePragmaRunner implements PragmaRunner {
   }
 }
 
+/** Statements that set the level; reading it back is not a change. */
 const pragmaStatements = () =>
-  file.observed.filter((entry) => /PRAGMA synchronous/i.test(entry.sql));
+  file.observed.filter((entry) => /PRAGMA synchronous\s*=/i.test(entry.sql));
 
 beforeEach(() => {
   directory = mkdtempSync(join(tmpdir(), 'durability-'));
@@ -121,7 +122,7 @@ describe('runDurably', () => {
     await relaxDurability(file.db);
     await sql`CREATE TABLE marker (v TEXT)`.execute(file.db);
 
-    const seen = await runDurably(file.db, async (conn) => {
+    const seen = await runDurably(file.db, 'durability_test_commit', async (conn) => {
       const before = await readLevel(conn);
       const inTransaction = await conn.transaction().execute(async (trx) => {
         await sql`INSERT INTO marker VALUES ('written')`.execute(trx);
@@ -142,9 +143,9 @@ describe('runDurably', () => {
     await relaxDurability(file.db);
 
     const failure = new Error('expected failure from the durable work');
-    const outcome = await runDurably(file.db, () => Promise.reject(failure)).catch(
-      (error: unknown) => error
-    );
+    const outcome = await runDurably(file.db, 'durability_test_failure', () =>
+      Promise.reject(failure)
+    ).catch((error: unknown) => error);
 
     expect({ outcome, synchronous: file.level() }).toEqual({
       outcome: failure,
@@ -156,19 +157,24 @@ describe('runDurably', () => {
     file = new ObservedFileDatabase(directory);
     // Never relaxed: the baseline is FULL, so there is nothing to raise.
 
-    await runDurably(file.db, (conn) => sql`SELECT 1`.execute(conn));
+    const warnings = await new DiagnosticWarnCapture().during(() =>
+      runDurably(file.db, 'durability_test_unrelaxed', (conn) => sql`SELECT 1`.execute(conn))
+    );
 
-    expect({ pragmaStatements: pragmaStatements().length, synchronous: file.level() }).toEqual({
-      pragmaStatements: 0,
-      synchronous: FULL,
-    });
+    expect({
+      pragmaStatements: pragmaStatements().length,
+      synchronous: file.level(),
+      warnings,
+    }).toEqual({ pragmaStatements: 0, synchronous: FULL, warnings: [] });
   });
 
   it('does not raise a database that stayed at FULL because it is not in WAL mode', async () => {
     file = new ObservedFileDatabase(directory, { applyPragmas: false });
     await new DiagnosticWarnCapture().during(() => relaxDurability(file.db));
 
-    await runDurably(file.db, (conn) => sql`SELECT 1`.execute(conn));
+    await new DiagnosticWarnCapture().during(() =>
+      runDurably(file.db, 'durability_test_not_wal', (conn) => sql`SELECT 1`.execute(conn))
+    );
 
     expect({ pragmaStatements: pragmaStatements().length, synchronous: file.level() }).toEqual({
       pragmaStatements: 0,
@@ -181,14 +187,51 @@ describe('runDurably', () => {
     await relaxDurability(file.db);
     const before = pragmaStatements().length;
 
-    const seen = await file.db
-      .transaction()
-      .execute((trx) => runDurably(trx, () => Promise.resolve(file.level())));
+    let seen: number | undefined;
+    await new DiagnosticWarnCapture().during(async () => {
+      seen = await file.db
+        .transaction()
+        .execute((trx) =>
+          runDurably(trx, 'durability_test_in_transaction', () => Promise.resolve(file.level()))
+        );
+    });
 
     expect({ seen, newPragmaStatements: pragmaStatements().length - before }).toEqual({
       seen: NORMAL,
       newPragmaStatements: 0,
     });
+  });
+
+  it('says so, once per label, when it is called inside a transaction on a relaxed database', async () => {
+    file = new ObservedFileDatabase(directory);
+    await relaxDurability(file.db);
+    const label = 'durability_test_loud_transaction';
+
+    const warnings = await new DiagnosticWarnCapture().during(() =>
+      file.db.transaction().execute(async (trx) => {
+        await runDurably(trx, label, () => Promise.resolve());
+        await runDurably(trx, label, () => Promise.resolve());
+      })
+    );
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('durable_commit_not_raised');
+    expect(warnings[0]).toContain(label);
+    expect(warnings[0]).toContain('inside a transaction');
+  });
+
+  it('says so when it is called with a Kysely derived from the relaxed connection', async () => {
+    file = new ObservedFileDatabase(directory);
+    await relaxDurability(file.db);
+    const label = 'durability_test_loud_derived';
+
+    const warnings = await new DiagnosticWarnCapture().during(() =>
+      runDurably(file.db.withTables<Record<never, never>>(), label, () => Promise.resolve())
+    );
+
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain(label);
+    expect(warnings[0]).toContain('not the relaxed connection');
   });
 });
 

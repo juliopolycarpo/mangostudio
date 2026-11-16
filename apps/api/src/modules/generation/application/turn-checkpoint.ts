@@ -81,12 +81,12 @@ export function createDatabaseCheckpointStore(
   return {
     rewriteRow: (row, { durable }) => {
       const write = (conn: Kysely<Database>) => rewriteCheckpointedRow({ messageId, ...row }, conn);
-      return durable ? runDurably(db, write) : write(db);
+      return durable ? runDurably(db, 'turn_checkpoint_rewrite', write) : write(db);
     },
     appendDelta: async (seq, deltaJson, { durable }) => {
       const write = (conn: Kysely<Database>) =>
         insertCheckpointDelta({ messageId, seq, deltaJson }, conn);
-      await (durable ? runDurably(db, write) : write(db));
+      await (durable ? runDurably(db, 'turn_checkpoint_delta', write) : write(db));
     },
   };
 }

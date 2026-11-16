@@ -34,7 +34,7 @@ export async function insertAttempt(
   row: Omit<ExternalTurnAttemptInsert, 'state' | 'nativeTurnId' | 'terminalReason'>,
   db: Kysely<Database>
 ): Promise<void> {
-  await runDurably(db, (conn) =>
+  await runDurably(db, 'external_turn_attempt', (conn) =>
     conn
       .insertInto('external_turn_attempts')
       .values({ ...row, state: 'acceptance-unknown', nativeTurnId: null, terminalReason: null })

@@ -122,7 +122,9 @@ describe('a database that was never relaxed', () => {
         durable: true,
       });
 
-      expect(unrelaxed.observed.some((entry) => /PRAGMA synchronous/i.test(entry.sql))).toBe(false);
+      expect(unrelaxed.observed.some((entry) => /PRAGMA synchronous\s*=/i.test(entry.sql))).toBe(
+        false
+      );
     } finally {
       await unrelaxed.destroy();
       rmSync(unrelaxedDirectory, { recursive: true, force: true });
