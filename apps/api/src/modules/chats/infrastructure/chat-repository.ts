@@ -12,7 +12,7 @@ import {
   usableVendorId,
   vendorSelection,
 } from '@mangostudio/shared/external-agents';
-import type { Kysely, Selectable, Updateable } from 'kysely';
+import { type Kysely, type Selectable, sql, type Updateable } from 'kysely';
 
 import type { Database } from '../../../db/types';
 import { generateId } from '../../../utils/id';
@@ -129,7 +129,38 @@ function toRunnerConfiguration(row: RunnerColumns): ChatRunnerConfiguration {
   throw new ChatRunnerCorruptionError(row.id, `unknown runnerKind '${row.runnerKind}'`);
 }
 
-function mapChatRow(row: Selectable<Database['chats']>): ChatRecord {
+/**
+ * Every chat column except the two persisted-state blobs. A read that does not
+ * parse them selects this list so SQLite never loads them: a provider
+ * continuation envelope can be kilobytes per chat.
+ */
+const CHAT_COLUMNS = [
+  'id',
+  'title',
+  'createdAt',
+  'updatedAt',
+  'model',
+  'textModel',
+  'imageModel',
+  'runnerKind',
+  'runnerAgentId',
+  'runnerTargetId',
+  'runnerPermissionLevel',
+  'runnerApprovalRouting',
+  'runnerModel',
+  'runnerEffort',
+  'workdir',
+  'environmentId',
+  'restrictToolsToWorkdir',
+  'userId',
+] as const;
+
+const CHAT_STATE_COLUMNS = ['lastProviderState', 'lastContextState'] as const;
+
+type ChatColumnsRow = Pick<Selectable<Database['chats']>, (typeof CHAT_COLUMNS)[number]>;
+type ChatStateRow = Pick<Selectable<Database['chats']>, (typeof CHAT_STATE_COLUMNS)[number]>;
+
+function mapChatRow(row: ChatColumnsRow): ChatRecord {
   return {
     id: row.id,
     title: row.title,
@@ -145,6 +176,12 @@ function mapChatRow(row: Selectable<Database['chats']>): ChatRecord {
     environmentId: row.environmentId,
     restrictToolsToWorkdir: toOverrideFlag(row.restrictToolsToWorkdir),
     userId: row.userId,
+  };
+}
+
+function mapChatRowWithState(row: ChatColumnsRow & ChatStateRow): ChatRecordWithState {
+  return {
+    ...mapChatRow(row),
     lastProviderState: row.lastProviderState,
     lastContextState: row.lastContextState,
   };
@@ -185,18 +222,33 @@ export interface ChatRecord {
   environmentId: string;
   restrictToolsToWorkdir: boolean | null;
   userId: string | null;
+}
+
+/** A chat with the persisted provider and context state the context meter reads. */
+export interface ChatRecordWithState extends ChatRecord {
   lastProviderState: string | null;
   lastContextState: string | null;
 }
 
-export async function listByUserId(userId: string, db: Kysely<Database>): Promise<ChatRecord[]> {
+/**
+ * Every chat one user owns, most recently updated first, with the state the
+ * list needs to show each chat's context usage. Chats that share a millisecond
+ * keep creation order (`rowid` ascending), as messages do with `timestamp, rowid`.
+ * The `(userId, updatedAt DESC)` index supplies both keys, so SQLite streams rows
+ * instead of sorting them; `rowid DESC` or `id` would bring the sort back.
+ */
+export async function listByUserId(
+  userId: string,
+  db: Kysely<Database>
+): Promise<ChatRecordWithState[]> {
   const rows = await db
     .selectFrom('chats')
-    .selectAll()
+    .select([...CHAT_COLUMNS, ...CHAT_STATE_COLUMNS])
     .where('userId', '=', userId)
     .orderBy('updatedAt', 'desc')
+    .orderBy(sql`rowid`, 'asc')
     .execute();
-  return rows.map(mapChatRow);
+  return rows.map(mapChatRowWithState);
 }
 
 /** Exactly what the batched git state read consumes; narrow on purpose so a
@@ -290,8 +342,25 @@ export async function listChatIdsUnderWorktreeRoot(
 }
 
 export async function getById(id: string, db: Kysely<Database>): Promise<ChatRecord | undefined> {
-  const row = await db.selectFrom('chats').selectAll().where('id', '=', id).executeTakeFirst();
+  const row = await db
+    .selectFrom('chats')
+    .select(CHAT_COLUMNS)
+    .where('id', '=', id)
+    .executeTakeFirst();
   return row ? mapChatRow(row) : undefined;
+}
+
+/** {@link getById} plus the persisted state, for the one reader that parses it. */
+export async function getByIdWithState(
+  id: string,
+  db: Kysely<Database>
+): Promise<ChatRecordWithState | undefined> {
+  const row = await db
+    .selectFrom('chats')
+    .select([...CHAT_COLUMNS, ...CHAT_STATE_COLUMNS])
+    .where('id', '=', id)
+    .executeTakeFirst();
+  return row ? mapChatRowWithState(row) : undefined;
 }
 
 function runnerColumns(
@@ -321,8 +390,6 @@ export async function createChat(data: CreateChatData, db: Kysely<Database>): Pr
     environmentId: data.environmentId ?? LOCAL_ENVIRONMENT_ID,
     restrictToolsToWorkdir: null,
     userId: data.userId,
-    lastProviderState: null,
-    lastContextState: null,
   };
   await db
     .insertInto('chats')
@@ -343,8 +410,8 @@ export async function createChat(data: CreateChatData, db: Kysely<Database>): Pr
       environmentId: chat.environmentId,
       restrictToolsToWorkdir: null,
       userId: chat.userId,
-      lastProviderState: chat.lastProviderState,
-      lastContextState: chat.lastContextState,
+      lastProviderState: null,
+      lastContextState: null,
     })
     .execute();
   return chat;
