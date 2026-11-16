@@ -46,7 +46,7 @@ describe('renderFrontendManifestModule', () => {
     expect(source).toContain(
       `import f0 from ${JSON.stringify(join(distDir, 'assets', 'index-AbCd1234.js'))} with { type: 'file' };`
     );
-    expect(source).toContain('export const embeddedFrontend: Record<string, string> = {');
+    expect(source).toContain('export const embeddedFrontend: Record<string, string | null> = {');
     expect(source).toContain('"/index.html": f3 as unknown as string,');
     expect(source).toContain('"/assets/nested/font.woff2": f1 as unknown as string,');
   });
@@ -87,6 +87,46 @@ describe('renderFrontendManifestModule variants', () => {
     );
     expect(routes).not.toContain('.br');
     expect(routes).not.toContain('v0');
+  });
+
+  const gzipCopy = (urlPath: string) => ({
+    urlPath,
+    coding: 'gzip' as const,
+    filePath: `/out/variants/gzip${urlPath}.gz`,
+    originalBytes: 1000,
+    compressedBytes: 350,
+  });
+  const brotliCopy = (urlPath: string) => ({
+    urlPath,
+    coding: 'br' as const,
+    filePath: `/out/variants/br${urlPath}.br`,
+    originalBytes: 1000,
+    compressedBytes: 300,
+  });
+
+  test('leaves the identity bytes out of a hashed asset that has a gzip copy', () => {
+    const source = renderFrontendManifestModule(distDir, listDistFiles(distDir), [
+      brotliCopy('/assets/index-AbCd1234.js'),
+      gzipCopy('/assets/index-AbCd1234.js'),
+    ]);
+
+    // The key stays, so the route and the doctor's file count do not change.
+    expect(source).toContain('"/assets/index-AbCd1234.js": null,');
+    expect(source).not.toContain(JSON.stringify(join(distDir, 'assets', 'index-AbCd1234.js')));
+  });
+
+  test('keeps identity where the server could not inflate it', () => {
+    // Brotli only: no gzip copy to inflate. Root file: the doctor reads /build-info.json from the manifest.
+    const source = renderFrontendManifestModule(distDir, listDistFiles(distDir), [
+      brotliCopy('/assets/index-AbCd1234.js'),
+      gzipCopy('/index.html'),
+      gzipCopy('/build-info.json'),
+    ]);
+
+    expect(source).toContain(JSON.stringify(join(distDir, 'assets', 'index-AbCd1234.js')));
+    expect(source).toContain(JSON.stringify(join(distDir, 'index.html')));
+    expect(source).toContain(JSON.stringify(join(distDir, 'build-info.json')));
+    expect(source).not.toContain(': null,');
   });
 
   test('emits an empty encodings table when nothing was compressed', () => {
@@ -151,6 +191,12 @@ describe('writeEmbedModules', () => {
     const manifest = readFileSync(result.manifestPath, 'utf8');
     expect(manifest).toContain('"/assets/big-AbCd1234.js": { "br": v');
     expect(listDistFiles(distDir)).toHaveLength(5);
+    // Guard: a hashed asset with a gzip copy must not embed its identity bytes again. It keeps its
+    // route (`null` value) and its file stays out of the compiled binary (no import of it).
+    expect(manifest).toContain('"/assets/big-AbCd1234.js": null,');
+    expect(manifest).not.toContain(join(distDir, 'assets', 'big-AbCd1234.js'));
+    // `index-AbCd1234.js` is below the compression threshold: no copy, so identity stays.
+    expect(manifest).toContain(join(distDir, 'assets', 'index-AbCd1234.js'));
   });
 
   test('drops variants left behind by an earlier build', () => {

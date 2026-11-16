@@ -10,6 +10,7 @@ import { BUILD_STATE_FILE, BUILD_STATE_URL_PATH } from '@mangostudio/shared/util
 import { NotFound } from 'elysia';
 
 import type { App } from '../app';
+import { ByteBoundedCache } from '../lib/byte-bounded-cache';
 import { contentEtag, fileEtag, matchesEtag } from '../lib/http-cache';
 import { HASHED_ASSET_DIR, isApiOwnedPath, isSpaRoute } from '../lib/spa-guard';
 import { negotiateEncoding, varyOnAcceptEncoding } from './accept-encoding';
@@ -110,7 +111,8 @@ function embeddedEtag(filePath: string): string | null {
  * the map hit.
  */
 interface EmbeddedAsset {
-  identityPath: string;
+  /** Null when the build embedded only precompressed copies; see `inflateIdentity`. */
+  identityPath: string | null;
   encodings: Readonly<Partial<Record<EmbeddedContentCoding, string>>>;
   cacheControl: string;
   /** Set explicitly when the file loader's guess is not enough: the shell, and every variant. */
@@ -119,12 +121,20 @@ interface EmbeddedAsset {
   validated: boolean;
   /** Validators already spelled, per coding (`identity` included). */
   etags: Map<string, string | null>;
+  /** The manifest key; names this asset in `identityBodies`. */
+  urlPath: string;
+  /** Shared by every asset of one server: inflated identity bodies, bounded in total bytes. */
+  identityBodies: ByteBoundedCache<string, InflatedBody>;
 }
+
+/** An inflated identity body, typed so a `Response` accepts it. */
+type InflatedBody = Uint8Array<ArrayBuffer>;
 
 function createEmbeddedAsset(
   urlPath: string,
-  identityPath: string,
-  encodings: EmbeddedFrontendEncodings
+  identityPath: string | null,
+  encodings: EmbeddedFrontendEncodings,
+  identityBodies: ByteBoundedCache<string, InflatedBody>
 ): EmbeddedAsset {
   const variants = encodings[urlPath] ?? {};
   const hashed = urlPath.startsWith(`/${HASHED_ASSET_DIR}/`);
@@ -137,13 +147,21 @@ function createEmbeddedAsset(
     // A variant's own path ends in `.br` or `.gz`, which the file loader maps to
     // an opaque type, so the identity file's type is what every representation
     // of an asset with variants must advertise.
-    contentType: isShell ? 'text/html' : hasVariants ? Bun.file(identityPath).type : null,
+    // `Bun.file(path).type` comes from the extension alone, so the URL path
+    // answers it when the identity file was not embedded.
+    contentType: isShell
+      ? 'text/html'
+      : hasVariants
+        ? Bun.file(identityPath ?? urlPath).type
+        : null,
     // `immutable` hashed files never revalidate, so a validator is dead weight
     // there — unless a second representation exists, where a validator that
     // tells the two apart is what keeps a stored copy of one from being
     // mistaken for the other.
     validated: !hashed || hasVariants,
     etags: new Map(),
+    urlPath,
+    identityBodies,
   };
 }
 
@@ -155,10 +173,47 @@ function representationEtag(
   if (!asset.validated) return null;
   const known = asset.etags.get(coding);
   if (known !== undefined) return known;
-  const path = coding === 'identity' ? asset.identityPath : asset.encodings[coding];
-  const etag = path ? embeddedEtag(path) : null;
+  let etag: string | null;
+  if (coding === 'identity' && asset.identityPath === null) {
+    // Hashed over the inflated bytes, so the tag equals the one a binary that
+    // embedded the identity file would send for the same content.
+    etag = contentEtag(inflateIdentity(asset));
+  } else {
+    const path = coding === 'identity' ? asset.identityPath : asset.encodings[coding];
+    etag = path ? embeddedEtag(path) : null;
+  }
   asset.etags.set(coding, etag);
   return etag;
+}
+
+/**
+ * The most inflated identity bytes one server keeps. Browsers send br or gzip,
+ * so identity requests come from scripts and tools (`curl` without
+ * `--compressed`, health checkers, some proxies); 4 MiB holds the largest
+ * script of the current frontend (1.6 MB) and a neighbour, and is the ceiling
+ * of what this path can add to the process, however many such requests arrive.
+ */
+const IDENTITY_BODY_CACHE_BYTES = 4 * 1024 * 1024;
+
+/**
+ * The identity bytes of an asset whose identity file was not embedded,
+ * inflated from its gzip copy, or taken from the byte-bounded cache when a
+ * recent request already paid for it.
+ *
+ * `Bun.gunzipSync`, never `node:zlib`: importing it for a Brotli decoder keeps
+ * its module in the AOT binary, +184,384 B on linux-x64. That is also why the
+ * build drops identity only where a gzip copy exists.
+ */
+function inflateIdentity(asset: EmbeddedAsset): InflatedBody {
+  const gzipPath = asset.encodings.gzip;
+  // `registerEmbeddedSpa` refuses an identity-less asset without a gzip copy.
+  if (!gzipPath) throw new Error('embedded asset has neither identity bytes nor a gzip copy');
+  return asset.identityBodies.getOrCompute(
+    asset.urlPath,
+    // Bun's typing says `ArrayBufferLike`; gunzip always allocates a plain buffer, which is
+    // what a `Response` body type accepts.
+    () => Bun.gunzipSync(readFileSync(gzipPath)) as InflatedBody
+  );
 }
 
 /**
@@ -207,6 +262,9 @@ function serveEmbeddedAsset(
       return new Response(null, { status: 304, headers });
     }
   }
+  if (choice === 'identity' && asset.identityPath === null) {
+    return new Response(inflateIdentity(asset), { headers });
+  }
   const filePath = choice === 'identity' ? asset.identityPath : asset.encodings[choice];
   return new Response(Bun.file(filePath as string), { headers });
 }
@@ -234,8 +292,16 @@ function registerEmbeddedSpa(
   encodings: EmbeddedFrontendEncodings
 ): void {
   const assets = new Map<string, EmbeddedAsset>();
+  const identityBodies = new ByteBoundedCache<string, InflatedBody>(IDENTITY_BODY_CACHE_BYTES);
   for (const [urlPath, filePath] of Object.entries(files)) {
-    assets.set(urlPath, createEmbeddedAsset(urlPath, filePath, encodings));
+    if (filePath === null && encodings[urlPath]?.gzip === undefined) {
+      // A manifest the build never writes; refuse it here rather than 500 on first use.
+      console.warn(
+        `[frontend] Embedded ${urlPath} has no identity bytes and no gzip copy; not served`
+      );
+      continue;
+    }
+    assets.set(urlPath, createEmbeddedAsset(urlPath, filePath, encodings, identityBodies));
   }
   const shell = assets.get('/index.html');
   if (!shell) {

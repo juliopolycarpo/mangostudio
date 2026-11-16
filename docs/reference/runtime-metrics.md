@@ -153,6 +153,42 @@ Every target grows by the same ~17.7 MB of bytecode (`bun build --compile` of th
 entry for the other seven targets). The external `.map` is unchanged in shape, and stack
 traces still resolve to original source lines.
 
+## Hub binary: embedded asset copies
+
+The embedded frontend used to carry an uncompressed copy of every hashed asset next to its gzip
+and Brotli copies. The uncompressed copy is now left out when a gzip copy exists (see
+`docs/architecture/frontend-build.md`), which only a client that accepts neither coding notices:
+browsers send br or gzip, so identity requests come from scripts, health checkers and some
+proxies.
+
+Measured with `scripts/bench/hub-footprint.ts` (seven interleaved rounds, a fresh isolated home per
+start, memory from `/proc/<pid>/status` 10 s after the first healthy `/api/health`, then after the
+request workload and after 1, 10 and 100 more identity requests for the largest script).
+linux-x64 glibc, Bun 1.4.5-canary, production hub, binaries on btrfs. The host load average was 15
+to 112 (other jobs), so no startup change is claimed.
+
+| Hub binary              |    Size (B) | Idle VmRSS (KB) | After workload (KB) | After +1 / +10 / +100 identity requests (KB) |
+| ----------------------- | ----------: | --------------: | ------------------: | -------------------------------------------- |
+| base                    | 102,137,608 |          69,124 |              75,552 | 75,564 / 75,548 / 74,940                     |
+| identity copies dropped |  96,218,888 |          70,184 |              75,672 | 75,684 / 75,524 / 75,572                     |
+
+The binary shrinks 5.8% (5.9 MB). Idle RSS is 1 MB higher at the median with overlapping ranges
+(68,504–69,364 against 68,836–70,684 KB), and the footprint after 1, 10 and 100 identity requests
+stays flat: the inflated body is cached up to a 4 MiB ceiling, not allocated per request. Inflating
+on every request instead, without the cache, took about 10 ms per identity request for the 1.6 MB
+script (4 ms with it) and left the hub 4 MB larger after the same workload. br and gzip responses are byte for byte the embedded copies; HEAD and `If-None-Match` answer as
+before; `Range` returns the whole body with 200 for identity and for the stored codings alike, as
+it did before this change.
+
+Reproduce, from a clean checkout of each revision (both builds on one filesystem):
+
+```bash
+bun run build --binary --hub-only --production
+cp .mango/out/linux-x64/mangostudio /path/on/disk/head-hub
+bun run scripts/bench/hub-footprint.ts --rounds 7 --idle-seconds 10 --workload \
+  --identity-checkpoints 1,10,100 base=/path/on/disk/base-hub head=/path/on/disk/head-hub
+```
+
 ## Build and validation baseline, 2026-10-08
 
 These observations use implementation source

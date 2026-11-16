@@ -308,6 +308,16 @@ at least 128 B and 5 %; fonts and images are never tried.
   manifest's second export, `embeddedFrontendEncodings`, maps an identity URL path to its
   copies. They are deliberately not keys of `embeddedFrontend`: every key there is a public
   route and a line in `doctor`'s file count.
+- **No identity copy for hashed assets.** A file under `/assets/` that has a gzip copy is not
+  embedded uncompressed: its `embeddedFrontend` value is `null`, and a request that accepts no
+  stored coding inflates the gzip copy with `Bun.gunzipSync` (never `node:zlib`, which adds 184 KB
+  to the binary). Inflated bodies sit in a cache bounded to 4 MiB, shared by all assets, so
+  identity-only clients (`curl` without `--compressed`, health checkers) cost one inflation per
+  asset and the memory ceiling does not depend on how many requests arrive. The `ETag` is the hash
+  of the inflated bytes, the tag a build that embedded them would send. Root files keep their
+  identity copy: the doctor reads `/build-info.json` from the manifest. Brotli-only files and
+  files without any copy keep identity too, because there is nothing to inflate. A manifest
+  that names a `null` file with no gzip copy is refused at registration with a warning.
 - **Compression cache.** Brotli 11 on the bundle takes about 10 s, and the step runs on every
   build, `--reuse-frontend` included. `writeEmbedModules` therefore keeps the compressed bytes
   under `.mango/out/embed/compression-cache/`, one file per coding and input, named by a SHA-256

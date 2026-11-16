@@ -8,8 +8,14 @@
  * null and the server keeps serving from the filesystem.
  */
 
-/** URL path (e.g. '/assets/index-abc.js') → embedded file path servable via Bun.file(). */
-export type EmbeddedFrontendFiles = Readonly<Record<string, string>>;
+/**
+ * URL path (e.g. '/assets/index-abc.js') → embedded file path servable via Bun.file().
+ *
+ * `null` marks a file whose identity bytes the build left out and kept only as
+ * precompressed copies; the server inflates its gzip copy for a client that
+ * accepts no stored coding.
+ */
+export type EmbeddedFrontendFiles = Readonly<Record<string, string | null>>;
 
 /** Codings a precompressed copy can be stored in. */
 export type EmbeddedContentCoding = 'br' | 'gzip';

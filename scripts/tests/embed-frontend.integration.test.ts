@@ -19,8 +19,8 @@ test('native compilation embeds HTML and CSS file-loader values as paths', () =>
   writeFileSync(
     entry,
     `import { embeddedFrontend } from './frontend-manifest';
-console.log(await Bun.file(embeddedFrontend['/index.html']).text());
-console.log(await Bun.file(embeddedFrontend['/styles.css']).text());
+console.log(await Bun.file(embeddedFrontend['/index.html'] as string).text());
+console.log(await Bun.file(embeddedFrontend['/styles.css'] as string).text());
 `
   );
   const binary = join(directory, process.platform === 'win32' ? 'manifest.exe' : 'manifest');

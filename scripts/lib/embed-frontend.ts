@@ -49,14 +49,29 @@ export function renderFrontendManifestModule(
   urlPaths: readonly string[],
   variants: readonly PrecompressedVariant[] = []
 ): string {
-  const imports = urlPaths.map((urlPath, index) => {
-    const filePath = distFilePath(distDir, urlPath);
-    return `import f${index} from ${JSON.stringify(filePath)} with { type: 'file' };`;
-  });
+  // The server inflates a dropped identity file from its gzip copy, so only a
+  // hashed bundle file that has one can lose its identity bytes. The key stays
+  // (the route and the doctor's file count are unchanged) with `null` where
+  // the embedded path would be. Root files keep identity: the doctor reads
+  // `/build-info.json` from the manifest, and the rest are small.
+  const withGzip = new Set(
+    variants.filter((variant) => variant.coding === 'gzip').map((variant) => variant.urlPath)
+  );
+  const identityDropped = (urlPath: string): boolean =>
+    urlPath.startsWith(HASHED_ASSET_PREFIX) && withGzip.has(urlPath);
+  const imports = urlPaths.flatMap((urlPath, index) =>
+    identityDropped(urlPath)
+      ? []
+      : [
+          `import f${index} from ${JSON.stringify(distFilePath(distDir, urlPath))} with { type: 'file' };`,
+        ]
+  );
   // File-loader values are paths at runtime. Bun's native type checker still
   // assigns HTMLBundle/CSS types from the extension, so narrow only this generated boundary.
-  const entries = urlPaths.map(
-    (urlPath, index) => `  ${JSON.stringify(urlPath)}: f${index} as unknown as string,`
+  const entries = urlPaths.map((urlPath, index) =>
+    identityDropped(urlPath)
+      ? `  ${JSON.stringify(urlPath)}: null,`
+      : `  ${JSON.stringify(urlPath)}: f${index} as unknown as string,`
   );
   const variantImports = variants.map(
     (variant, index) =>
@@ -68,7 +83,7 @@ export function renderFrontendManifestModule(
     ...imports,
     ...variantImports,
     '',
-    'export const embeddedFrontend: Record<string, string> = {',
+    'export const embeddedFrontend: Record<string, string | null> = {',
     ...entries,
     '};',
     '',
@@ -129,6 +144,9 @@ function assertEmbeddable(distDir: string, urlPaths: readonly string[]): void {
       'Build the frontend before compiling the binary.'
   );
 }
+
+/** Content-hashed bundle files; mirrors `HASHED_ASSET_DIR` in `apps/api/src/lib/spa-guard.ts`. */
+const HASHED_ASSET_PREFIX = '/assets/';
 
 /** Directory under `embedDir` that holds the generated variants. */
 const VARIANTS_DIRNAME = 'variants';

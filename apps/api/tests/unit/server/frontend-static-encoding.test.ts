@@ -10,7 +10,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -37,7 +37,14 @@ const PLAIN_JS = 'console.log("embedded chunk with no variants");\n'.repeat(60);
 const CONFIG_JS = `window.__MANGO_CONFIG__ = { apiUrl: "" };\n${'// padding\n'.repeat(40)}`;
 const FONT_BYTES = 'not-really-a-font';
 
+const NO_IDENTITY_JS = 'console.log("embedded chunk without identity bytes");\n'.repeat(60);
+const BR_ONLY_CSS = '.embedded-br-only { color: rebeccapurple; }\n'.repeat(60);
+
 const MAIN_URL = '/assets/main-AbCd1234.js';
+/** br + gzip copies and no identity file: identity is inflated from the gzip copy. */
+const NO_IDENTITY_URL = '/assets/noIdentity-AbCd1234.js';
+/** A br copy and no identity file: a manifest the build never writes, refused at registration. */
+const BR_ONLY_URL = '/assets/brOnly-AbCd1234.css';
 const GZIP_ONLY_URL = '/assets/gzipOnly-AbCd1234.js';
 const PLAIN_URL = '/assets/plain-AbCd1234.js';
 
@@ -55,6 +62,8 @@ interface EncodingServer {
 
 let fixtureDir: string;
 let server: EncodingServer | null = null;
+/** The stored gzip and Brotli copies of the asset embedded without identity bytes. */
+let noIdentityCopies: { gzipPath: string; gzip: Buffer; br: Buffer };
 
 /** Writes `content` and returns its path. */
 function writeFixture(name: string, content: string | Uint8Array): string {
@@ -104,11 +113,20 @@ async function startServer(): Promise<EncodingServer> {
   const main = fixtureWithVariants('main.js', MAIN_JS, ['br', 'gzip']);
   const gzipOnly = fixtureWithVariants('gzipOnly.js', GZIP_ONLY_JS, ['gzip']);
   const config = fixtureWithVariants('config.js', CONFIG_JS, ['gzip']);
+  const noIdentity = fixtureWithVariants('noIdentity.js', NO_IDENTITY_JS, ['br', 'gzip']);
+  noIdentityCopies = {
+    gzipPath: noIdentity.encodings.gzip as string,
+    gzip: readFileSync(noIdentity.encodings.gzip as string),
+    br: readFileSync(noIdentity.encodings.br as string),
+  };
+  const brOnly = fixtureWithVariants('brOnly.css', BR_ONLY_CSS, ['br']);
   const encodings: Record<string, Record<string, string>> = {
     '/index.html': index.encodings,
     [MAIN_URL]: main.encodings,
     [GZIP_ONLY_URL]: gzipOnly.encodings,
     '/config.js': config.encodings,
+    [NO_IDENTITY_URL]: noIdentity.encodings,
+    [BR_ONLY_URL]: brOnly.encodings,
   };
   registerEmbeddedFrontend(
     {
@@ -118,6 +136,8 @@ async function startServer(): Promise<EncodingServer> {
       [PLAIN_URL]: writeFixture('plain.js', PLAIN_JS),
       '/config.js': config.identity,
       '/fonts/inter.woff2': writeFixture('inter.woff2', FONT_BYTES),
+      [NO_IDENTITY_URL]: null,
+      [BR_ONLY_URL]: null,
     },
     encodings as EmbeddedFrontendEncodings
   );
@@ -444,6 +464,78 @@ describe('embedded asset representation headers', () => {
     expect(partial.headers['content-range']).toBe(`bytes 0-9/${gzip.body.length}`);
     expect(partial.headers.etag).toBe(gzip.headers.etag as string);
     expect(partial.body.equals(gzip.body.subarray(0, 10))).toBe(true);
+  });
+});
+
+describe('embedded assets without identity bytes', () => {
+  test('inflates the gzip copy for a client that accepts no stored copy', async () => {
+    for (const header of [undefined, 'identity', 'deflate', 'gzip;q=0, br;q=0']) {
+      const response = await send(
+        NO_IDENTITY_URL,
+        header === undefined ? {} : { 'Accept-Encoding': header }
+      );
+
+      expect(response.status, `Accept-Encoding ${String(header)}`).toBe(200);
+      expect(response.headers['content-encoding']).toBeUndefined();
+      expect(response.headers['content-type']).toStartWith('text/javascript');
+      expect(response.headers['content-length']).toBe(String(response.body.length));
+      // The tag a binary that embedded identity would send for the same bytes.
+      expect(response.headers.etag).toBe(contentEtag(Buffer.from(NO_IDENTITY_JS)));
+      expect(varyDirectives(response)).toContain('Accept-Encoding');
+      expect(response.body.toString()).toBe(NO_IDENTITY_JS);
+    }
+  });
+
+  test('serves the stored copies untouched', async () => {
+    const gzip = await send(NO_IDENTITY_URL, { 'Accept-Encoding': 'gzip' });
+    const brotli = await send(NO_IDENTITY_URL, { 'Accept-Encoding': 'gzip, br' });
+
+    expect(gzip.headers['content-encoding']).toBe('gzip');
+    expect(brotli.headers['content-encoding']).toBe('br');
+    expect(decode(gzip)).toBe(NO_IDENTITY_JS);
+    expect(decode(brotli)).toBe(NO_IDENTITY_JS);
+    // Byte for byte what the build embedded, not a re-encoding of the same content.
+    expect(gzip.body.equals(noIdentityCopies.gzip)).toBe(true);
+    expect(brotli.body.equals(noIdentityCopies.br)).toBe(true);
+    expect(gzip.headers['content-length']).toBe(String(noIdentityCopies.gzip.length));
+    expect(brotli.headers['content-length']).toBe(String(noIdentityCopies.br.length));
+  });
+
+  test('serves the same inflated bytes for every identity request, from one inflation', async () => {
+    const first = await send(NO_IDENTITY_URL);
+    // The gzip copy is gone from disk, so a second identity answer can only come from the cache.
+    rmSync(noIdentityCopies.gzipPath);
+    const second = await send(NO_IDENTITY_URL);
+    const head = await send(NO_IDENTITY_URL, {}, 'HEAD');
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(second.body.equals(first.body)).toBe(true);
+    expect(second.headers.etag).toBe(first.headers.etag as string);
+    expect(head.headers['content-length']).toBe(String(first.body.length));
+  });
+
+  test('does not route an identity-less asset that has no gzip copy to inflate', async () => {
+    for (const header of ['br', 'identity']) {
+      const response = await send(BR_ONLY_URL, { 'Accept-Encoding': header });
+
+      expect(response.status, `Accept-Encoding ${header}`).toBe(404);
+      expect(response.body.toString()).not.toContain(BR_ONLY_CSS.slice(0, 20));
+    }
+  });
+
+  test('revalidates inflated identity with 304 and answers HEAD without a body', async () => {
+    const first = await send(NO_IDENTITY_URL);
+    const conditional = await send(NO_IDENTITY_URL, {
+      'If-None-Match': first.headers.etag as string,
+    });
+    const head = await send(NO_IDENTITY_URL, {}, 'HEAD');
+
+    expect(conditional.status).toBe(304);
+    expect(head.status).toBe(200);
+    expect(head.body.length).toBe(0);
+    expect(head.headers['content-length']).toBe(String(NO_IDENTITY_JS.length));
+    expect(head.headers.etag).toBe(first.headers.etag as string);
   });
 });
 
