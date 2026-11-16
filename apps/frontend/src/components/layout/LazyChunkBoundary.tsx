@@ -1,8 +1,9 @@
 import { TriangleAlert } from 'lucide-react';
-import { Component, createRef, type ReactNode } from 'react';
+import { Component, type ReactNode, type RefObject, startTransition, useRef } from 'react';
 
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
+import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_LG } from '@/lib/icon-sizes';
 import { LazyChunkLoadError } from '@/lib/retryable-lazy';
@@ -13,11 +14,18 @@ interface LazyChunkBoundaryProps {
   readonly onRetry: () => void;
 }
 
-interface LazyChunkBoundaryState {
-  readonly error: unknown;
+interface ChunkErrorBoundaryProps extends LazyChunkBoundaryProps {
+  /** The region around the boundary: it stays mounted when the boundary swaps its children for the failure. */
+  readonly regionRef: RefObject<HTMLDivElement | null>;
 }
 
-const NO_ERROR: LazyChunkBoundaryState = { error: undefined };
+interface LazyChunkBoundaryState {
+  readonly error: unknown;
+  /** A Retry is waiting on the chunk; the failure stays up, with a spinner, meanwhile. */
+  readonly retrying: boolean;
+}
+
+const NO_ERROR: LazyChunkBoundaryState = { error: undefined, retrying: false };
 
 /**
  * Keeps a lazy chunk that did not arrive local to the region that needed it.
@@ -32,65 +40,73 @@ const NO_ERROR: LazyChunkBoundaryState = { error: undefined };
  * Only `LazyChunkLoadError` is caught. Any other error is a bug in the panel
  * itself and is rethrown so the route boundary reports it as it always did.
  *
+ * The region is a `tabIndex={-1}` wrapper outside the error boundary proper:
+ * React throws away a boundary's own children when it catches, so a wrapper
+ * inside would be rebuilt and take the focus with it.
+ *
  * @example
  * <LazyChunkBoundary onRetry={GitPanel.reset}><Suspense fallback={…}><GitPanel.Component /></Suspense></LazyChunkBoundary>
  */
-export class LazyChunkBoundary extends Component<LazyChunkBoundaryProps, LazyChunkBoundaryState> {
+export function LazyChunkBoundary({ children, onRetry }: LazyChunkBoundaryProps) {
+  const regionRef = useRef<HTMLDivElement>(null);
+  return (
+    <div
+      ref={regionRef}
+      tabIndex={-1}
+      data-testid="lazy-chunk-region"
+      className="h-full outline-none"
+    >
+      <ChunkErrorBoundary regionRef={regionRef} onRetry={onRetry}>
+        {children}
+      </ChunkErrorBoundary>
+    </div>
+  );
+}
+
+class ChunkErrorBoundary extends Component<ChunkErrorBoundaryProps, LazyChunkBoundaryState> {
   state = NO_ERROR;
 
   static getDerivedStateFromError(error: unknown): LazyChunkBoundaryState {
-    return { error };
+    return { error, retrying: false };
   }
-
-  private readonly regionRef = createRef<HTMLDivElement>();
-  /** Set by Retry: the button that had focus is about to unmount, so focus has to move. */
-  private focusRegionOnRecovery = false;
 
   private readonly retry = (): void => {
-    this.focusRegionOnRecovery = true;
+    // Focus moves to the region, which stays mounted whether the chunk arrives
+    // or fails again. The Retry button does not stay: it is replaced either way.
+    this.props.regionRef.current?.focus({ preventScroll: true });
     this.props.onRetry();
-    this.setState(NO_ERROR);
+    this.setState({ retrying: true });
+    // A transition, so a Suspense boundary that sits outside this one (the
+    // rail's) keeps the failure on screen while the chunk loads, instead of
+    // hiding the region, and the focus in it, behind its fallback.
+    startTransition(() => this.setState(NO_ERROR));
   };
 
-  componentDidUpdate(
-    _previousProps: LazyChunkBoundaryProps,
-    previousState: LazyChunkBoundaryState
-  ) {
-    // Without this, focus falls to <body> when the Retry button goes away and a
-    // keyboard user has to tab in from the top of the page again.
-    if (this.focusRegionOnRecovery && previousState.error !== undefined) {
-      this.focusRegionOnRecovery = false;
-      this.regionRef.current?.focus({ preventScroll: true });
-    }
-  }
-
   render(): ReactNode {
-    const { error } = this.state;
-    if (error === undefined) {
-      return (
-        <div
-          ref={this.regionRef}
-          tabIndex={-1}
-          data-testid="lazy-chunk-region"
-          className="h-full outline-none"
-        >
-          {this.props.children}
-        </div>
-      );
-    }
-    if (!(error instanceof LazyChunkLoadError)) {
+    const { error, retrying } = this.state;
+    if (error !== undefined && !(error instanceof LazyChunkLoadError)) {
       throw error instanceof Error
         ? error
         : new Error('A lazy panel threw a non-Error value.', { cause: error });
     }
-    return <LazyChunkFailure onRetry={this.retry} />;
+    return error === undefined ? (
+      this.props.children
+    ) : (
+      <LazyChunkFailure retrying={retrying} onRetry={this.retry} />
+    );
   }
 }
 
-function LazyChunkFailure({ onRetry }: { readonly onRetry: () => void }) {
+function LazyChunkFailure({
+  retrying,
+  onRetry,
+}: {
+  readonly retrying: boolean;
+  readonly onRetry: () => void;
+}) {
   const { t } = useI18n();
   return (
-    <div role="alert" data-testid="lazy-chunk-failure" className="h-full">
+    <div role="alert" aria-busy={retrying} data-testid="lazy-chunk-failure" className="h-full">
       <EmptyState
         icon={<TriangleAlert aria-hidden size={ICON_LG} />}
         tone="warning"
@@ -98,10 +114,11 @@ function LazyChunkFailure({ onRetry }: { readonly onRetry: () => void }) {
         hint={t.errors.lazyChunk.hint}
         className="h-full"
         action={
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
             <Button size="sm" onClick={onRetry}>
               {t.common.retry}
             </Button>
+            {retrying ? <Spinner size="sm" label={t.common.loading} /> : null}
             <Button size="sm" variant="secondary" onClick={() => window.location.reload()}>
               {t.errors.lazyChunk.reload}
             </Button>
