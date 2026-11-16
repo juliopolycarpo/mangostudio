@@ -23,15 +23,23 @@ use crate::registry::Registry;
 
 /// The embedded catalog compiled into a [`Contract`], once per process.
 ///
-/// Every transport serves the same static catalog, so compiling it per
+/// Every transport serves the same static catalog, so building it per
 /// connection (every `serve` supersession, every `connect` redial) only
-/// repeated the catalog validation and every schema compile. It is also the
-/// one holder of each method's compiled `result` schema:
+/// repeated the catalog validation. It is also the one holder of each
+/// method's compiled `result` schema:
 /// [`crate::registry::Registry::implement`] checks every handler's result
 /// with [`Contract::check_result`] on this contract.
 ///
+/// Schemas compile on the first request that needs them
+/// ([`Contract::from_shared_catalog_lazy`]), not at start: a hub calls a
+/// fraction of the 68 methods, and compiling all of them costs about 8 ms
+/// before `hello`. A schema that does not compile therefore shows up as an
+/// `INTERNAL` answer, not a start-up panic, so
+/// `every_schema_in_the_embedded_catalog_compiles` in this module's tests
+/// calls [`Contract::compile_all`] to fail the build instead.
+///
 /// # Panics
-/// Panics if the embedded catalog does not compile into a contract. That is a
+/// Panics if the embedded catalog's names do not form a contract. That is a
 /// build-time fact about `catalog.json`, which
 /// `mangostudio-runtime-contract`'s own tests already hold.
 ///
@@ -48,9 +56,9 @@ pub fn runtime_contract() -> &'static Contract {
     CONTRACT.get_or_init(|| {
         // The shared handle: the contract holds the catalog the process
         // already parsed, not a second copy.
-        Contract::from_shared_catalog(shared_catalog()).expect(
-            "the embedded catalog compiles into a contract; a change to the catalog that broke \
-             this would already fail mangostudio-runtime-contract's own build",
+        Contract::from_shared_catalog_lazy(shared_catalog()).expect(
+            "the embedded catalog's names form a contract; a change to the catalog that broke \
+             this fails `every_schema_in_the_embedded_catalog_compiles`",
         )
     })
 }
@@ -112,4 +120,24 @@ pub fn serve(
         discover: true,
     };
     contract.serve(session, registry.into_contract_handlers(), options)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::runtime_contract;
+
+    /// [`runtime_contract`] compiles schemas on first use, so a schema in the
+    /// embedded catalog that is not valid JSON Schema 2020-12 would otherwise
+    /// surface as an `INTERNAL` answer in production. This compiles all of
+    /// them: 68 methods' `params` and `result`, every event payload and the
+    /// capability document.
+    #[test]
+    fn every_schema_in_the_embedded_catalog_compiles() {
+        if let Err(error) = runtime_contract().compile_all() {
+            panic!(
+                "(embedded catalog): expected every schema to compile | received {} at {}: {}",
+                error.received, error.field, error.expected
+            );
+        }
+    }
 }
