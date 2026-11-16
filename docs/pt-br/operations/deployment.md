@@ -231,9 +231,10 @@ O que uma falha custa depende do que falhou:
     geração de imagem avulsa. Isso estreita a janela em que uma queda de energia faz o hub executar esse
     passo uma segunda vez; não a fecha. A ferramenta começa enquanto o marcador é gravado, então uma
     queda nesses poucos milissegundos ainda mostra a chamada como não iniciada.
-  - Revogações: substituir ou revogar um token de pareamento do runtime, revogar uma chave de API e toda
-    requisição que os endpoints de autenticação tratam (logout, revogação de sessão, troca de senha).
-    Uma credencial que você foi avisado de que acabou não volta.
+  - Revogações: substituir ou revogar um token de pareamento do runtime, revogar uma chave de API e as
+    requisições de autenticação que apagam ou trocam uma credencial (logout, revogar uma ou todas as
+    sessões, trocar ou redefinir a senha, atualizar ou apagar uma chave de API). Login, cadastro e
+    leituras de sessão ficam em `NORMAL`. Uma credencial que você foi avisado de que acabou não volta.
 
 As migrações rodam em `FULL`, antes de a conexão ser rebaixada, então mantêm a mesma durabilidade de antes
 desta mudança, e a janela em que uma queda de energia pode interromper uma atualização não é maior do que

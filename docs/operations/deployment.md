@@ -284,9 +284,10 @@ What a failure costs depends on what failed:
     power loss lets the hub run such a step a second time; it does not close it. The tool starts while
     its marker is being written, so a power loss in those few milliseconds still shows the call as not
     started.
-  - Revocations: replacing or revoking a runtime pairing token, revoking an API key, and every request
-    the auth endpoints handle (sign-out, session revocation, password change). A
-    credential you were told is gone does not come back.
+  - Revocations: replacing or revoking a runtime pairing token, revoking an API key, and the auth
+    requests that delete or rotate a credential (sign-out, revoking one or all sessions, changing or
+    resetting a password, updating or deleting an API key). Sign-in, sign-up and session reads stay at
+    `NORMAL`. A credential you were told is gone does not come back.
 
 Migrations run at `FULL`, before the connection is lowered, so they keep the same durability as before
 this change and the window in which a power loss can interrupt an upgrade is no larger than it was.

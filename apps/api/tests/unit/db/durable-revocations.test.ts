@@ -127,10 +127,10 @@ describe('a request handled by Better Auth', () => {
       return new Response('{}');
     };
 
-    const response = await handleAuthRequest(new Request('http://localhost/api/auth/sign-out'), {
-      db: file.db,
-      handler,
-    });
+    const response = await handleAuthRequest(
+      new Request('http://localhost/api/auth/sign-out', { method: 'POST', body: '{}' }),
+      { db: file.db, handler }
+    );
 
     expect({
       status: response.status,
@@ -145,10 +145,10 @@ describe('a database that is not relaxed', () => {
     const plainDirectory = mkdtempSync(join(tmpdir(), 'durable-revocations-plain-'));
     const plain = new ObservedFileDatabase(plainDirectory);
     try {
-      await handleAuthRequest(new Request('http://localhost/api/auth/sign-out'), {
-        db: plain.db,
-        handler: () => Promise.resolve(new Response('{}')),
-      });
+      await handleAuthRequest(
+        new Request('http://localhost/api/auth/sign-out', { method: 'POST', body: '{}' }),
+        { db: plain.db, handler: () => Promise.resolve(new Response('{}')) }
+      );
 
       expect(plain.observed.some((entry) => /PRAGMA synchronous\s*=/i.test(entry.sql))).toBe(false);
     } finally {
