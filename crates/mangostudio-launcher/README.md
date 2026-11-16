@@ -23,7 +23,7 @@ version, canary versions (`*-canary`) included, never the newest canary release.
 See the [historical Cargo canary receipt](../../docs/reference/releasing.md#historical-cargo-canary-receipt)
 for the pre-2026-09-16 publication record.
 
-An install counts as complete when the binary exists and, for trees the
+An install counts as complete when the binary exists and is not empty and, for trees the
 launcher unpacked, every file listed in its `.launcher-record` still has the
 recorded size. The record catches truncated or missing files, such as a binary
 cut short by a power loss; it does not authenticate anything and has the same
@@ -40,8 +40,11 @@ When an install is needed:
 
 - Launchers installing the same version take turns on a lock file,
   `.launcher-<version>.lock`, in the install root. A waiting launcher prints a
-  line every 30 seconds and gives up only after an hour, far past a healthy
-  install. Nothing is installed without the lock: if it cannot be opened or
+  line every 30 seconds and stops waiting after an hour. That is far past a
+  usual install but not a guarantee: with no total download deadline, a 60 MB
+  archive on a link under about 17 KB/s takes longer. The launcher then says
+  another launcher is still installing, starts a build whose binaries match the
+  record, and otherwise fails so the command can be run again. Nothing is installed without the lock: if it cannot be opened or
   taken (a read-only directory, a file system without locking), the launcher
   starts a build whose binaries match the record, and otherwise fails naming
   the lock file.
@@ -50,14 +53,22 @@ When an install is needed:
   a slow link that keeps sending finishes and a stalled one ends. Downloads make
   three attempts with backoff, and an archive that fails checksum verification
   is never run.
-- The archive is unpacked into a `.launcher-staging-<version>.*` directory,
-  recorded, flushed to disk (files and directory on Unix; on Windows the files
-  only, since std cannot flush a directory there) and renamed into place. An
+- The archive is unpacked into a `.launcher-staging-<version>.<pid>-<nanos>`
+  directory. Its files are flushed, then the record is written and flushed,
+  then the directory is flushed (Unix; on Windows the files only, since std
+  cannot flush a directory there), and only then is it renamed into place, so
+  a record on disk never sits beside files that did not reach it. An
   incomplete tree is moved to `.launcher-trash-<version>.*` first and deleted
   after the new one is in, so a hub that holds its files on Windows blocks the
-  move instead of being half deleted. The launcher checks that before
-  downloading, and starts the installed build with a warning if its binaries
-  are intact.
+  move instead of being half deleted. On Windows the launcher checks that by
+  opening the binaries without sharing, before downloading, and nothing is
+  moved for the check; on Unix a running binary does not block the move. If the
+  tree cannot be replaced, the installed build starts with a warning when its
+  binaries are intact.
+- A start with no version directory first moves back a trash tree whose
+  binaries are intact (an update died after setting the only good copy aside).
+  Scratch names are matched exactly (`<pid>-<nanos>` after the version), so a
+  version such as `0.2.0-canary.abc1234` is never mistaken for `0.2.0-canary`.
 - A start that has to install first adopts a verified staging tree left by a
   launcher that died before the rename, with no download, then removes the
   other scratch directories of dead launchers. A start that needs no install

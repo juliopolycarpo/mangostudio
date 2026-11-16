@@ -53,9 +53,11 @@ const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const READ_TIMEOUT: Duration = Duration::from_secs(60);
 /// A start waits for as long as another launcher holds the install lock and
-/// says so every `LOCK_NOTICE_EVERY`; it gives up only after this ceiling, which
-/// is far above a healthy installer's worst case (three archive attempts with
-/// backoff), so it only ever ends a lock held by something stuck.
+/// says so every `LOCK_NOTICE_EVERY`; it gives up only after this ceiling. That
+/// is far above a healthy installer's usual time, but not a guarantee: with no
+/// total download deadline, a 60 MB archive on a link under about 17 KB/s takes
+/// longer. The waiter then reports that the other launcher is still installing
+/// and falls back (starts an intact install, or fails and can simply be rerun).
 const LOCK_CEILING: Duration = Duration::from_secs(3600);
 const LOCK_NOTICE_EVERY: Duration = Duration::from_secs(30);
 const LOCK_POLL: Duration = Duration::from_millis(100);
@@ -238,6 +240,34 @@ fn scratch_prefix(kind: &str, version: &str) -> String {
     format!(".launcher-{kind}-{version}.")
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScratchKind {
+    Staging,
+    Trash,
+}
+
+impl ScratchKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Staging => "staging",
+            Self::Trash => "trash",
+        }
+    }
+}
+
+/// True for the run tag `Release::for_this_build` makes: `<pid>-<nanos>`.
+/// A version string can itself contain dots (`0.2.0-canary` and
+/// `0.2.0-canary.abc1234`), so a name that merely starts with this version's
+/// prefix may belong to another version, which has its own lock. Only a
+/// remainder of exactly this shape belongs to the version asked for.
+fn is_run_tag(text: &str) -> bool {
+    text.split_once('-').is_some_and(|(pid, nanos)| {
+        let digits =
+            |part: &str| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit());
+        digits(pid) && digits(nanos)
+    })
+}
+
 /// What `ensure_install` found or did.
 #[derive(Debug, PartialEq, Eq)]
 enum InstallStart {
@@ -354,7 +384,9 @@ fn staging_is_verified(staging: &Path) -> bool {
 }
 
 /// Make sure `install_dir` holds a complete install, downloading one only when
-/// it does not. A complete install costs two `stat` calls and nothing else.
+/// it does not. Judging an install costs a `stat` of the binary, a read of the
+/// record and a `stat` per recorded file (a handful); a launcher run adds one
+/// `read_dir` of the install root to look for leftovers. No network, no lock.
 ///
 /// If the install cannot be repaired (offline, lock trouble, an install in use,
 /// a bad download) but its binaries are intact, it is started anyway: that is
@@ -390,6 +422,17 @@ fn repair_install(release: &Release<'_>, install_dir: &Path) -> Result<InstallSt
         return Ok(InstallStart::Complete);
     }
 
+    // No version directory but a trash tree that can still run: a launcher
+    // died (or a rename back failed) after moving the only good copy aside.
+    // Put it back before anything is swept.
+    if !install_dir.exists() {
+        restore_from_trash(release.version, install_root, install_dir);
+        if inspect_install(install_dir) == InstallState::Complete {
+            sweep_scratch_dirs(release.version, install_root);
+            return Ok(InstallStart::Complete);
+        }
+    }
+
     // A launcher that died after unpacking and verifying, before moving the
     // tree in, left a staging tree with its record: finish that install
     // instead of downloading again, which also works offline.
@@ -405,10 +448,9 @@ fn repair_install(release: &Release<'_>, install_dir: &Path) -> Result<InstallSt
     sweep_scratch_dirs(release.version, install_root);
 
     // Find out cheaply, before downloading ~60 MB, whether the existing tree
-    // can be replaced at all. On Windows a running hub holds its files and the
-    // directory cannot move.
+    // can be replaced at all, without moving it.
     if install_dir.exists() {
-        probe_replaceable(release, install_root, install_dir)?;
+        check_replaceable(install_dir)?;
     }
 
     eprintln!(
@@ -473,9 +515,9 @@ fn wait_for_lock(
         let waited = started.elapsed();
         if waited >= release.lock_ceiling {
             return Err(format!(
-                "gave up after {}s waiting for another launcher to finish installing {} (lock {}); if no launcher is running, a stuck process holds it",
-                waited.as_secs(),
+                "another launcher is still installing {} after {}s (lock {}); not waiting longer. An installed build with intact binaries is started, otherwise run the command again once that install finishes",
                 release.version,
+                waited.as_secs(),
                 path.display()
             ));
         }
@@ -491,40 +533,59 @@ fn wait_for_lock(
     }
 }
 
-/// The directories in `install_root` whose names start with `prefix`, in name
-/// order.
-fn scratch_dirs(install_root: &Path, prefix: &str) -> Vec<PathBuf> {
+/// This version's staging and trash directories in `install_root`, in name
+/// order, from one `read_dir` pass. Names must be exactly
+/// `.launcher-<kind>-<version>.<run tag>` (see `is_run_tag`).
+fn scratch_dirs(version: &str, install_root: &Path) -> Vec<(ScratchKind, PathBuf)> {
     let Ok(entries) = fs::read_dir(install_root) else {
         return Vec::new();
     };
-    let mut found: Vec<PathBuf> = entries
-        .filter_map(Result::ok)
-        .filter(|entry| entry.file_name().to_string_lossy().starts_with(prefix))
-        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
-        .map(|entry| entry.path())
-        .collect();
-    found.sort();
+    let mut found = Vec::new();
+    for entry in entries.filter_map(Result::ok) {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        for kind in [ScratchKind::Staging, ScratchKind::Trash] {
+            let owned = name
+                .strip_prefix(&scratch_prefix(kind.label(), version))
+                .is_some_and(is_run_tag);
+            if owned && entry.file_type().is_ok_and(|file_type| file_type.is_dir()) {
+                found.push((kind, entry.path()));
+            }
+        }
+    }
+    found.sort_by(|left, right| left.1.cmp(&right.1));
     found
-}
-
-fn leftover_scratch_dirs(version: &str, install_root: &Path) -> Vec<PathBuf> {
-    ["staging", "trash"]
-        .iter()
-        .flat_map(|kind| scratch_dirs(install_root, &scratch_prefix(kind, version)))
-        .collect()
 }
 
 /// A staging tree a dead launcher finished: unpacked, recorded and flushed.
 fn verified_staging_tree(version: &str, install_root: &Path) -> Option<PathBuf> {
-    scratch_dirs(install_root, &scratch_prefix("staging", version))
+    scratch_dirs(version, install_root)
         .into_iter()
+        .filter(|(kind, _)| *kind == ScratchKind::Staging)
+        .map(|(_, path)| path)
         .find(|staging| staging_is_verified(staging))
+}
+
+/// Move the first trash tree that can still run back to `install_dir`. Only
+/// called when `install_dir` is missing.
+fn restore_from_trash(version: &str, install_root: &Path, install_dir: &Path) {
+    let usable = scratch_dirs(version, install_root)
+        .into_iter()
+        .filter(|(kind, _)| *kind == ScratchKind::Trash)
+        .map(|(_, path)| path)
+        .find(|trash| inspect_install(trash) != InstallState::Unusable);
+    if let Some(trash) = usable
+        && fs::rename(&trash, install_dir).is_ok()
+    {
+        eprintln!(
+            "Restored the MangoStudio {version} install that an interrupted update had set aside."
+        );
+    }
 }
 
 /// Remove this version's staging and trash directories. Call only under the
 /// install lock.
 fn sweep_scratch_dirs(version: &str, install_root: &Path) {
-    for leftover in leftover_scratch_dirs(version, install_root) {
+    for (_, leftover) in scratch_dirs(version, install_root) {
         let _ = fs::remove_dir_all(leftover);
     }
 }
@@ -536,7 +597,7 @@ fn sweep_scratch_dirs(version: &str, install_root: &Path) {
 /// its scratch directories are not leftovers. If the file can't be opened or
 /// locked, the sweep is skipped; the next install sweeps.
 fn tidy_leftovers(version: &str, install_root: &Path) {
-    if leftover_scratch_dirs(version, install_root).is_empty() {
+    if scratch_dirs(version, install_root).is_empty() {
         return;
     }
     let Ok(lock) = fs::OpenOptions::new()
@@ -551,38 +612,41 @@ fn tidy_leftovers(version: &str, install_root: &Path) {
     }
 }
 
-/// Move `install_dir` aside and straight back. It is the same first move the
-/// replace does later, so it fails exactly when that would, and it fails before
-/// the archive is downloaded.
-fn probe_replaceable(
-    release: &Release<'_>,
-    install_root: &Path,
-    install_dir: &Path,
-) -> Result<(), String> {
-    probe_replaceable_with(release, install_root, install_dir, |from, to| {
-        fs::rename(from, to)
-    })
+/// Tell before downloading ~60 MB whether the real swap's first move (the
+/// install directory to trash) would fail, without moving anything: moving a
+/// working install away just to ask would put the only good copy at risk on
+/// every repair attempt.
+///
+/// On Windows a running hub holds its files open without delete sharing, and a
+/// directory with such a file inside cannot be renamed; opening each binary
+/// with no sharing at all fails the same way. On Unix a rename is not blocked
+/// by a running executable, so there is nothing to ask and the swap itself
+/// reports any other refusal.
+#[cfg(windows)]
+fn check_replaceable(install_dir: &Path) -> Result<(), String> {
+    use std::os::windows::fs::OpenOptionsExt;
+    for name in [BINARY_NAME, RUNTIME_BINARY_NAME] {
+        match fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(install_dir.join(name))
+        {
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(format!(
+                    "cannot replace the install at {}: {name} is in use: {error}",
+                    install_dir.display()
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
-fn probe_replaceable_with(
-    release: &Release<'_>,
-    install_root: &Path,
-    install_dir: &Path,
-    rename: impl Fn(&Path, &Path) -> io::Result<()>,
-) -> Result<(), String> {
-    let aside = release.trash_path(install_root);
-    rename(install_dir, &aside).map_err(|error| {
-        format!(
-            "cannot replace the install at {}: {error}",
-            install_dir.display()
-        )
-    })?;
-    rename(&aside, install_dir).map_err(|error| {
-        format!(
-            "cannot put the install back at {} after checking it can be replaced: {error}; the next start reinstalls it",
-            install_dir.display()
-        )
-    })
+#[cfg(unix)]
+fn check_replaceable(_install_dir: &Path) -> Result<(), String> {
+    Ok(())
 }
 
 fn download_manifest(release: &Release<'_>) -> Result<String, String> {
@@ -623,12 +687,12 @@ fn install_archive(
         return Err(format!("archive is missing {BINARY_NAME}"));
     }
     make_executable(&staged_binary)?;
-    let record = completion_record(staging.path())
-        .map_err(|error| format!("cannot record the unpacked files: {error}"))?;
-    fs::write(staging.path().join(INSTALL_RECORD), record)
-        .map_err(|error| format!("cannot record the unpacked files: {error}"))?;
+    // The order matters to adoption: files first, then the record, so a record
+    // that reached the disk never sits beside files whose blocks did not.
     persist_tree(staging.path())
         .map_err(|error| format!("cannot flush the unpacked files: {error}"))?;
+    write_record(staging.path())
+        .map_err(|error| format!("cannot record the unpacked files: {error}"))?;
 
     if let Err(failure) = replace_install(release, install_root, staging.path(), install_dir) {
         staging.keep();
@@ -697,14 +761,10 @@ fn completion_record(directory: &Path) -> io::Result<String> {
         .collect())
 }
 
-/// Flush every top-level file of the staged tree and then the directory, so a
-/// record that exists afterwards describes bytes that reached the disk: sizes
-/// alone would not catch a right-sized file whose blocks were never written
-/// (delayed allocation on XFS or ext4 `data=writeback`). On Unix the parent
-/// directory is flushed after the rename too (`replace_install`). Windows
-/// flushes the files (`FlushFileBuffers`) but std has no way to flush a
-/// directory entry there, so after a power loss the rename itself may be lost;
-/// the install is then simply missing and the next start repairs it.
+/// Flush every top-level file of the unpacked tree, before the record exists:
+/// sizes alone would not catch a right-sized file whose blocks were never
+/// written (delayed allocation on XFS or ext4 `data=writeback`), so the record
+/// may only be written once the bytes it describes are on disk.
 fn persist_tree(directory: &Path) -> io::Result<()> {
     for entry in fs::read_dir(directory)? {
         let entry = entry?;
@@ -712,6 +772,20 @@ fn persist_tree(directory: &Path) -> io::Result<()> {
             sync_file(&entry.path())?;
         }
     }
+    Ok(())
+}
+
+/// Write the record of the (already flushed) tree, flush it, then flush the
+/// directory that names the files. Only after this is the tree adoptable, and
+/// only then is it renamed into place. On Unix the install root is flushed
+/// after that rename too (`replace_install`). Windows flushes the files
+/// (`FlushFileBuffers`) but std has no way to flush a directory entry there,
+/// so after a power loss the rename itself may be lost; the install is then
+/// simply missing and the next start repairs it.
+fn write_record(directory: &Path) -> io::Result<()> {
+    let record_path = directory.join(INSTALL_RECORD);
+    fs::write(&record_path, completion_record(directory)?)?;
+    sync_file(&record_path)?;
     sync_directory(directory);
     Ok(())
 }
@@ -1060,7 +1134,7 @@ mod tests {
 
     const TEST_VERSION: &str = "0.0.0";
     const TEST_PLATFORM: &str = "test-platform";
-    const TEST_TAG: &str = "test-owner";
+    const TEST_TAG: &str = "1-1";
 
     /// A scratch install root removed on drop.
     struct ScratchRoot(PathBuf);
@@ -1516,23 +1590,24 @@ mod tests {
     fn a_slow_but_steady_download_outlasts_the_read_deadline_without_failing() {
         let fixture = InstallFixture::new();
         fixture.publish("binary one");
-        // Four pieces 250 ms apart: the transfer takes about a second, well past
-        // the 600 ms read deadline, yet no single read waits that long.
+        // Twenty pieces 100 ms apart: the transfer takes about two seconds,
+        // past the 1.5 s read deadline, yet no single read waits more than a
+        // fifteenth of it, so a loaded host cannot trip the deadline by delay.
         fixture.server.serve_trickling(
             &format!("/{}", fixture.asset()),
             archive_with_binary("binary one"),
-            4,
-            Duration::from_millis(250),
+            20,
+            Duration::from_millis(100),
         );
         let mut release = fixture.release();
-        release.read_timeout = Duration::from_millis(600);
+        release.read_timeout = Duration::from_millis(1500);
         let started = Instant::now();
 
         let outcome = ensure_install(&release, &fixture.install_dir());
 
         assert_eq!(outcome, Ok(InstallStart::Installed));
         assert!(
-            started.elapsed() > Duration::from_millis(600),
+            started.elapsed() > Duration::from_millis(1500),
             "expected the transfer to run longer than the read deadline | took {:?}",
             started.elapsed()
         );
@@ -1699,7 +1774,7 @@ mod tests {
         let outcome = wait_for_lock(&release, &path, || Err(fs::TryLockError::WouldBlock));
 
         assert!(
-            matches!(&outcome, Err(message) if message.contains("gave up") && message.contains(".launcher-0.0.0.lock")),
+            matches!(&outcome, Err(message) if message.contains("still installing") && message.contains(".launcher-0.0.0.lock")),
             "expected a ceiling failure naming the lock file | received {outcome:?}"
         );
     }
@@ -1781,7 +1856,7 @@ mod tests {
         // the tree in. The install it meant to replace is incomplete.
         fixture.lay_down_complete_install("old binary");
         fixture.shorten_binary();
-        let staging = fixture.staging_dir("dead-launcher");
+        let staging = fixture.staging_dir("11-1");
         fixture.lay_down_tree(&staging, "new binary");
 
         let outcome = ensure_install(
@@ -1802,10 +1877,10 @@ mod tests {
     fn an_install_interrupted_between_the_two_moves_is_finished_from_its_staging_tree() {
         let fixture = InstallFixture::new();
         // The old tree is already in trash and the version directory is gone.
-        let trash = fixture.trash_dir("dead-launcher");
+        let trash = fixture.trash_dir("11-2");
         fixture.lay_down_tree(&trash, "old binary");
         fs::write(trash.join(BINARY_NAME), "bin").expect("expected the old tree to be short");
-        fixture.lay_down_tree(&fixture.staging_dir("dead-launcher"), "new binary");
+        fixture.lay_down_tree(&fixture.staging_dir("11-1"), "new binary");
 
         let outcome = fixture.start();
 
@@ -1820,11 +1895,11 @@ mod tests {
         let fixture = InstallFixture::new();
         fixture.publish("binary one");
         // Partial unpack: files but no record.
-        let no_record = fixture.staging_dir("dead-one");
+        let no_record = fixture.staging_dir("12-1");
         fs::create_dir_all(&no_record).expect("expected a staging dir");
         fs::write(no_record.join(BINARY_NAME), "half").expect("expected a file");
         // A record the files do not match.
-        let short = fixture.staging_dir("dead-two");
+        let short = fixture.staging_dir("13-1");
         fixture.lay_down_tree(&short, "binary two");
         fs::write(short.join(BINARY_NAME), "bin").expect("expected a short file");
 
@@ -1841,7 +1916,7 @@ mod tests {
         let fixture = InstallFixture::new();
         // Killed after the move-in, before deleting the old tree.
         fixture.lay_down_complete_install("new binary");
-        let trash = fixture.trash_dir("dead-launcher");
+        let trash = fixture.trash_dir("11-2");
         fixture.lay_down_tree(&trash, "old binary");
         // The killed launcher had created the lock file before it got here.
         drop(fixture.hold_lock());
@@ -1858,7 +1933,7 @@ mod tests {
     fn a_complete_start_leaves_scratch_alone_while_another_launcher_holds_the_lock() {
         let fixture = InstallFixture::new();
         fixture.lay_down_complete_install("binary one");
-        let staging = fixture.staging_dir("live-launcher");
+        let staging = fixture.staging_dir("14-1");
         fixture.lay_down_tree(&staging, "being unpacked");
         let installer_lock = fixture.hold_lock();
 
@@ -1970,11 +2045,14 @@ mod tests {
             matches!(&outcome, Ok(InstallStart::KeptInstalled { reason }) if reason.contains("cannot replace the install")),
             "expected the installed build to be kept with the move error | received {outcome:?}"
         );
-        assert!(
-            fixture.no_requests(),
-            "expected the replace check to run before any download | received {:?}",
-            fixture.server.requests()
-        );
+        // Only Windows can tell before downloading; elsewhere the swap fails.
+        if cfg!(windows) {
+            assert!(
+                fixture.no_requests(),
+                "expected the replace check to run before any download | received {:?}",
+                fixture.server.requests()
+            );
+        }
         assert_eq!(fixture.installed_binary_body(), "old binary");
     }
 
@@ -1993,35 +2071,143 @@ mod tests {
             matches!(&outcome, Err(message) if message.contains("cannot replace the install")),
             "expected a replace failure | received {outcome:?}"
         );
-        assert!(fixture.no_requests());
+        if cfg!(windows) {
+            assert!(fixture.no_requests());
+        }
     }
 
     #[test]
-    fn a_probe_that_cannot_put_the_install_back_says_the_next_start_reinstalls_it() {
+    fn the_replace_check_moves_nothing_and_reports_an_install_in_use() {
         let fixture = InstallFixture::new();
         fixture.lay_down_complete_install("binary one");
-        let calls = std::cell::Cell::new(0);
-        // The first move works; the way back is refused.
-        let rename_that_fails_on_the_way_back = |from: &Path, to: &Path| {
-            calls.set(calls.get() + 1);
-            if calls.get() == 1 {
-                fs::rename(from, to)
-            } else {
-                Err(io::Error::from(io::ErrorKind::PermissionDenied))
-            }
-        };
+        let before = fs::read_dir(&fixture.root.0)
+            .expect("expected a readable root")
+            .count();
 
-        let outcome = probe_replaceable_with(
-            &fixture.release(),
-            &fixture.root.0,
+        assert_eq!(check_replaceable(&fixture.install_dir()), Ok(()));
+        assert_eq!(
+            fs::read_dir(&fixture.root.0)
+                .expect("expected a readable root")
+                .count(),
+            before,
+            "expected the check to leave the install root as it was"
+        );
+        assert_eq!(fixture.installed_binary_body(), "binary one");
+
+        // Only Windows can tell in advance; elsewhere the swap reports it.
+        #[cfg(windows)]
+        {
+            let blocker = block_replace(&fixture);
+            let outcome = check_replaceable(&fixture.install_dir());
+            drop(blocker);
+            assert!(
+                matches!(&outcome, Err(message) if message.contains("cannot replace the install") && message.contains("in use")),
+                "expected an in-use failure naming the install | received {outcome:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_startable_install_left_in_trash_with_no_version_directory_is_put_back_and_starts_offline()
+    {
+        let offline = ClosedConnectionServer::start();
+        let fixture = InstallFixture::new();
+        // A launcher died (or a rename back failed) after moving the only good
+        // copy aside: binaries intact, a sibling off.
+        let trash = fixture.trash_dir("11-2");
+        fixture.lay_down_tree(&trash, "the only good copy");
+        fs::write(trash.join("README.md"), "damaged by a crash")
+            .expect("expected a damaged sibling");
+        assert!(!fixture.install_dir().exists());
+
+        let outcome = ensure_install(
+            &fixture.release_at(offline.base_url()),
             &fixture.install_dir(),
-            rename_that_fails_on_the_way_back,
         );
 
         assert!(
-            matches!(&outcome, Err(message) if message.contains("cannot put the install back") && message.contains("the next start reinstalls it")),
-            "expected the put-back failure | received {outcome:?}"
+            matches!(&outcome, Ok(InstallStart::KeptInstalled { reason }) if reason.contains("cannot download")),
+            "expected the restored build to be kept with the download error | received {outcome:?}"
         );
+        assert_eq!(fixture.installed_binary_body(), "the only good copy");
+        assert!(!trash.exists(), "expected the trash tree to be moved back");
+    }
+
+    #[test]
+    fn an_unusable_tree_left_in_trash_is_not_put_back() {
+        let offline = ClosedConnectionServer::start();
+        let fixture = InstallFixture::new();
+        let trash = fixture.trash_dir("11-2");
+        fixture.lay_down_tree(&trash, "old binary");
+        fs::write(trash.join(BINARY_NAME), "bin").expect("expected a short binary");
+
+        let outcome = ensure_install(
+            &fixture.release_at(offline.base_url()),
+            &fixture.install_dir(),
+        );
+
+        assert!(
+            matches!(&outcome, Err(message) if message.contains("cannot download")),
+            "expected the download failure | received {outcome:?}"
+        );
+        assert!(!fixture.install_dir().exists());
+        assert!(!trash.exists());
+    }
+
+    #[test]
+    fn scratch_of_a_version_that_extends_this_one_is_neither_adopted_nor_swept() {
+        let offline = ClosedConnectionServer::start();
+        // `0.2.0-canary.abc1234` shares the prefix `.launcher-staging-0.2.0-canary.`
+        // with `0.2.0-canary` but has its own lock and its own installs.
+        let fixture = InstallFixture::with_version("0.2.0-canary");
+        let other_version = "0.2.0-canary.abc1234";
+        let other_staging = fixture.root.0.join(format!(
+            "{}{}",
+            scratch_prefix("staging", other_version),
+            "11-1"
+        ));
+        let other_trash = fixture.root.0.join(format!(
+            "{}{}",
+            scratch_prefix("trash", other_version),
+            "11-2"
+        ));
+        fixture.lay_down_tree(&other_staging, "another version's verified tree");
+        fixture.lay_down_tree(&other_trash, "another version's old tree");
+        let own_leftover = fixture.staging_dir("12-1");
+        fs::create_dir_all(&own_leftover).expect("expected a leftover of this version");
+
+        let outcome = ensure_install(
+            &fixture.release_at(offline.base_url()),
+            &fixture.install_dir(),
+        );
+
+        assert!(
+            matches!(&outcome, Err(message) if message.contains("cannot download")),
+            "expected no adoption of the other version's tree, only the download failure | received {outcome:?}"
+        );
+        assert!(!fixture.install_dir().exists());
+        assert!(
+            other_staging.exists(),
+            "expected the other version's staging to survive"
+        );
+        assert!(
+            other_trash.exists(),
+            "expected the other version's trash to survive"
+        );
+        assert!(
+            !own_leftover.exists(),
+            "expected this version's own leftover swept"
+        );
+    }
+
+    #[test]
+    fn is_run_tag_accepts_only_pid_dash_nanos() {
+        for accepted in ["1-1", "4242-1731800000000000000"] {
+            assert!(is_run_tag(accepted), "expected {accepted:?} accepted");
+        }
+        for rejected in ["", "1", "-1", "1-", "abc1234.11-1", "a-1", "1-2-3", "1.2-3"] {
+            assert!(!is_run_tag(rejected), "expected {rejected:?} rejected");
+        }
     }
 
     #[test]
