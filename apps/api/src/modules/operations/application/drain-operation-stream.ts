@@ -43,8 +43,8 @@ export async function drainOperationStream(
     return;
   }
   const decoder = new TextDecoder();
-  // A frame over the cap makes `push` throw, which settles the operation as
-  // unresolved like any other transport failure.
+  // A frame over the cap makes `push` (or `finish`, after the last read) throw,
+  // which settles the operation as unresolved like any other transport failure.
   const frames = new DelimitedTextSplitter('\n\n', {
     maxRecordLength: SSE_FRAME_MAX_CHARS,
     onOverflow: 'refuse',
@@ -74,6 +74,11 @@ export async function drainOperationStream(
         }
       }
     }
+    // A refusal that came with the last read's frames is raised here, not by
+    // `push`: without this an oversized frame at the end of the body would be
+    // dropped and the operation could settle on the frames before it. The
+    // unterminated frame `finish` returns is discarded, never trusted.
+    frames.finish();
     // `done` closes the transport. For external turns only the domain terminal
     // reason establishes success; partial text and generic done are insufficient.
     if (externalTerminalState === 'unresolved') state = 'unresolved';

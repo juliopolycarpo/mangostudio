@@ -1,7 +1,7 @@
 //! The catalog: every method and topic the hub/runtime contract defines,
 //! parsed once from the TypeScript-generated `catalog.json`.
 
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use mango_protocol::Catalog;
 use mango_protocol::catalog::{CatalogEvent, CatalogMethod};
@@ -13,7 +13,9 @@ use mango_protocol::catalog::{CatalogEvent, CatalogMethod};
 /// escapes; it does not parse and reserialize the contract.
 const CATALOG_JSON: &str = include_str!(concat!(env!("OUT_DIR"), "/catalog.compact.json"));
 
-static CATALOG: OnceLock<Catalog> = OnceLock::new();
+/// Shared rather than owned, so a `Contract` built from it ([`shared_catalog`])
+/// holds this one parsed copy.
+static CATALOG: OnceLock<Arc<Catalog>> = OnceLock::new();
 
 /// The topic a runtime publishes its keep-alive on, verified below against
 /// the embedded catalog (`runtime_heartbeat_topic_names_a_topic_the_catalog_actually_declares`)
@@ -38,13 +40,36 @@ pub const RUNTIME_HEARTBEAT_TOPIC: &str = "runtime.heartbeat";
 /// ```
 #[must_use]
 pub fn catalog() -> &'static Catalog {
+    parsed_catalog()
+}
+
+/// The same parsed catalog as [`catalog`], as a shared handle: what
+/// [`mango_protocol::contract::Contract::from_shared_catalog`] takes so the
+/// contract holds this copy instead of cloning it (about 1.5 MiB parsed).
+///
+/// # Panics
+/// As [`catalog`].
+///
+/// # Example
+///
+/// ```
+/// use mangostudio_runtime_contract::catalog::{catalog, shared_catalog};
+///
+/// assert!(std::ptr::eq(&*shared_catalog(), catalog()));
+/// ```
+#[must_use]
+pub fn shared_catalog() -> Arc<Catalog> {
+    Arc::clone(parsed_catalog())
+}
+
+fn parsed_catalog() -> &'static Arc<Catalog> {
     CATALOG.get_or_init(|| {
         let catalog: Catalog = serde_json::from_str(CATALOG_JSON)
             .expect("catalog.json is a well-formed Catalog document");
         catalog
             .validate()
             .expect("catalog.json satisfies the protocol's own catalog.validate()");
-        catalog
+        Arc::new(catalog)
     })
 }
 
