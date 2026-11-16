@@ -595,11 +595,17 @@ configuration are refused; receipts contain paths and hashes rather than configu
 `grep.ts` drives `fs.grep` on the real runtime binary, one fresh child (and `MANGO_HOME`) per
 sample so peak RSS (`VmHWM`, Linux) belongs to that scenario alone. Each sample times only the
 request. `cancel` aborts a catastrophic match after 200 ms and reports the abort-to-answer
-latency. Run the same command on a base and a head binary on a quiet machine to compare them.
+latency. Run the same command on a base and a head binary on a quiet machine to compare them:
+several binaries rotate their run order (ABBA for two, so each leads equally often), and every sample records
+its match count and the runtime's `truncated` flag, because a time near 2,100 ms with `truncated`
+is a file that spent its 2 s budget, not a scan time. `--pattern` and `--ignore-case` change the
+pattern (the default has one required literal, which the runtime's literal prefilter uses).
 
 ```bash
 bun run scripts/bench/grep.ts target/release/mangostudio-runtime --runs 15
 bun run scripts/bench/grep.ts <binary> --scenario files-1000,cancel --json
+bun run scripts/bench/grep.ts base=<old> head=<new> --scenario large-file --large-mib 64 --runs 10
+bun run scripts/bench/grep.ts <binary> --scenario large-file --pattern '(\d+)-NEEDLE$' --ignore-case
 ```
 
 `line-decoder.ts` loads `LineDecoder` from the `ndjson.ts` path it is given, so a base checkout and
