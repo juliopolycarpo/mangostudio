@@ -12,7 +12,7 @@ import { createBunSqliteDialect } from '../../../src/db/bun-sqlite-dialect';
 import { allMigrations } from '../../../src/db/migrations';
 
 const TARGET = '065_message_checkpoint_deltas';
-const PREVIOUS = '063_messages_ordered_read_indexes';
+const PREVIOUS = '064_chats_user_updated_index';
 const TABLE = 'message_checkpoint_deltas';
 const TRIGGER = 'trg_message_checkpoint_deltas_cleanup';
 

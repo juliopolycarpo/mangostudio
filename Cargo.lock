@@ -1405,6 +1405,7 @@ dependencies = [
 name = "mangostudio-runtime"
 version = "0.1.1"
 dependencies = [
+ "aho-corasick",
  "async-trait",
  "base64 0.23.1",
  "bytes",
@@ -1424,6 +1425,7 @@ dependencies = [
  "mango-external-agents",
  "mango-protocol",
  "mangostudio-runtime-contract",
+ "memchr",
  "nix",
  "regex",
  "reqwest",

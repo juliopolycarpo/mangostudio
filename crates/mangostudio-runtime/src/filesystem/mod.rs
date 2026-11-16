@@ -2,6 +2,7 @@
 
 mod capability;
 pub mod freshness;
+mod grep_prefilter;
 mod io;
 mod params;
 mod patch;

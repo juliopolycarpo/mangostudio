@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -162,6 +170,32 @@ describe('writeEmbedModules', () => {
     expect(second.variantCount).toBe(0);
     expect(existsSync(join(embedDir, 'variants'))).toBe(false);
     expect(readFileSync(second.manifestPath, 'utf8')).not.toContain('big-AbCd1234');
+  });
+
+  test('keeps compressed output between builds while clearing the variants directory', () => {
+    const options = {
+      distDir,
+      embedDir,
+      registryModulePath: '/repo/apps/api/src/server/embedded-frontend.ts',
+      apiEntryPath: '/repo/apps/api/src/index.ts',
+    };
+    writeFileSync(
+      join(distDir, 'assets', 'big-AbCd1234.js'),
+      'console.log("big chunk");\n'.repeat(80)
+    );
+    const first = writeEmbedModules(options);
+    const cacheDir = join(embedDir, 'compression-cache');
+    const cachedAfterFirst = readdirSync(cacheDir).sort();
+    expect(
+      cachedAfterFirst.length,
+      `expected cache entries after the first build: br + gzip of the 2 KB chunk | received: ${cachedAfterFirst}`
+    ).toBe(2);
+
+    const second = writeEmbedModules(options);
+
+    expect(readdirSync(cacheDir).sort()).toEqual(cachedAfterFirst);
+    expect(second.variantCount).toBe(first.variantCount);
+    expect(second.variantBytes).toBe(first.variantBytes);
   });
 
   // The binary has no disk fallback, so an unservable manifest has to stop the
