@@ -15,6 +15,58 @@ The `jsonschema`, `jsonschema-regex`, `jsonschema-value`, `referencing`, and `fa
 use `opt-level = "s"`. The measurements below predate those overrides. The stripped Linux x64
 comparison and validator replay are recorded in [#2126](https://github.com/juliopolycarpo/mangostudio/pull/2126).
 
+### Size-optimised dependencies
+
+Twenty-nine more packages build with `opt-level = "s"`: the MCP, HTTP, TLS and WebSocket clients
+(`rmcp`, `reqwest`, `hyper`, `hyper-util`, `rustls`, `rustls-webpki`, `tungstenite`,
+`tokio-tungstenite`, `sse-stream`), URL, TOML, collation and time parsing, the three external-agent
+adapters and their protocol schema, `mango-protocol`, the runtime contract, `cap-std` and
+`cap-primitives`, `globset`, and the regex engine crates (`aho-corasick`, `regex-automata`,
+`regex-syntax`). The packages that run per request or per line stay at 3: `mangostudio-runtime`,
+`mango-external-agents`, `memchr`, `serde_json`, `tokio`, and QuickJS (`rquickjs-sys`, C built by
+cc-rs, which reads its optimisation level from the package profile, so `s` there would compile the
+regex engine `fs.grep` runs with `-Os`). `crates/mangostudio-runtime/tests/it/release_profile.rs`
+pins both lists.
+
+Two things were measured and rejected, so the list stops here:
+
+- `mangostudio-runtime` itself at `s` takes the stripped binary from 23.8 MB to 19.4 MB, and
+  `fs.grep` over 1,000 files slows by 7% (paired median +7.2 ms on 106 ms, 6 of 41 pairs faster).
+  Its per-file work is in that crate. A `[profile.release.package.mangostudio-runtime]` table also
+  left the symbol table in the stripped binary (+5.4 MB), so the test refuses that table.
+- `aho-corasick`, `regex-automata` and `regex-syntax` at `s` cost nothing measurable on `fs.grep`
+  (the prefilter and the pattern analysis use them), so they stay on the list.
+
+Linux x64, glibc, `cargo build --release --locked -p mangostudio-runtime`, stripped:
+
+| Build              | Stripped bytes | vs. main |
+| ------------------ | -------------: | -------: |
+| main               |     28,021,696 |        — |
+| 29 packages at `s` |     23,772,832 |   −15.2% |
+
+`fs.grep`, median ms, 61 interleaved runs per binary (`scripts/bench/grep.ts`, binaries pinned
+to eight CPUs, one fixture build per run, host load 0.3 to 1.5), default pattern:
+
+| Scenario   |  main | 29 packages at `s` | paired median delta (pairs where `s` was faster) |
+| ---------- | ----: | -----------------: | ------------------------------------------------ |
+| files-100  |  10.5 |               11.1 | +0.5 ms (26 of 61)                               |
+| files-1000 | 105.2 |              106.7 | +1.5 ms (21 of 61)                               |
+| large-file |  29.6 |               29.6 | +0.2 ms (25 of 61)                               |
+
+Patterns that always enter QuickJS (no required literal, or the literal on every line) differ by
+−1.4% to −0.5% across 41 runs, inside the paired spread of ±25 to ±60 ms. `hello` (40.2 vs
+40.4 ms) and five `fs.list-directory` calls over 20,000 entries (158.9 vs 157.1 ms median per call)
+are unchanged. To compare a change to the list, build both revisions and run the bench on the
+binaries:
+
+```sh
+CARGO_TARGET_DIR=target/main cargo build --release --locked -p mangostudio-runtime   # on main
+CARGO_TARGET_DIR=target/head cargo build --release --locked -p mangostudio-runtime   # on the branch
+bun run scripts/bench/grep.ts main=target/main/release/mangostudio-runtime \
+  head=target/head/release/mangostudio-runtime --runs 61 --warmup 3 \
+  --scenario files-100,files-1000,large-file --large-mib 16
+```
+
 Local comparison on linux-x64 (`cargo build --release --locked -p mangostudio-runtime`, a
 full rebuild each time on a shared 28-thread machine with `CARGO_BUILD_JOBS=8`, so treat the
 times as relative):

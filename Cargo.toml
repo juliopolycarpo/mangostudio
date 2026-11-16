@@ -108,6 +108,75 @@ opt-level = "s"
 [profile.release.package.fancy-regex]
 opt-level = "s"
 
+# Size over speed for the code a runtime call runs rarely or spends waiting on
+# I/O: MCP, HTTP and TLS clients, WebSocket framing, URL and TOML parsing,
+# collation, the external-agent adapters and the protocol and contract crates.
+# Measured on linux-x64 (docs/reference/runtime-metrics.md): the stripped runtime
+# shrinks 15% with `fs.grep`, `hello` and `fs.list-directory` within noise.
+# The packages that run per line or per byte stay at 3 (`mangostudio-runtime`,
+# `mango-external-agents`, `memchr`, `serde_json`, `tokio`) and so does QuickJS
+# (`rquickjs-sys`): cc-rs takes its C optimisation level from the package
+# profile, so `s` there would build the regex engine with `-Os`. The
+# `release_profile` integration test pins both lists.
+[profile.release.package.rmcp]
+opt-level = "s"
+[profile.release.package.reqwest]
+opt-level = "s"
+[profile.release.package.hyper]
+opt-level = "s"
+[profile.release.package.hyper-util]
+opt-level = "s"
+[profile.release.package.rustls]
+opt-level = "s"
+[profile.release.package.rustls-webpki]
+opt-level = "s"
+[profile.release.package.tungstenite]
+opt-level = "s"
+[profile.release.package.tokio-tungstenite]
+opt-level = "s"
+[profile.release.package.sse-stream]
+opt-level = "s"
+[profile.release.package.url]
+opt-level = "s"
+[profile.release.package.idna]
+opt-level = "s"
+[profile.release.package.toml]
+opt-level = "s"
+[profile.release.package.toml_parser]
+opt-level = "s"
+[profile.release.package.icu_collator]
+opt-level = "s"
+[profile.release.package.icu_normalizer]
+opt-level = "s"
+[profile.release.package.chrono]
+opt-level = "s"
+[profile.release.package.globset]
+opt-level = "s"
+[profile.release.package.aho-corasick]
+opt-level = "s"
+[profile.release.package.regex-automata]
+opt-level = "s"
+[profile.release.package.regex-syntax]
+opt-level = "s"
+[profile.release.package.cap-primitives]
+opt-level = "s"
+[profile.release.package.cap-std]
+opt-level = "s"
+[profile.release.package.serde_with]
+opt-level = "s"
+[profile.release.package.agent-client-protocol-schema]
+opt-level = "s"
+[profile.release.package.mango-agent-acp]
+opt-level = "s"
+[profile.release.package.mango-agent-claude]
+opt-level = "s"
+[profile.release.package.mango-agent-codex]
+opt-level = "s"
+[profile.release.package.mango-protocol]
+opt-level = "s"
+[profile.release.package.mangostudio-runtime-contract]
+opt-level = "s"
+
 # Line tables keep file:line in panics and backtraces, which is all the debug
 # info the workspace needs; dependencies drop theirs. Measured on linux-x64 (30
 # cores, `cargo build --workspace --all-targets`): the cold build falls from
