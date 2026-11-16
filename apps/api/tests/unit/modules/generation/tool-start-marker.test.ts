@@ -8,15 +8,19 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:test';
 
 import type { MessagePart } from '@mangostudio/shared/types';
+import type { Kysely } from 'kysely';
 
+import type { Database } from '../../../../src/db/types';
 import {
   executeStandardToolCallsWithProgress,
+  type StandardToolExecutionContext,
   type ToolExecutionProgressItem,
 } from '../../../../src/modules/generation/application/standard-tool-execution';
 import {
   createToolStartMarkerWriter,
   synchronizeToolProgressForCheckpoint,
 } from '../../../../src/modules/generation/application/stream-text-turn-helpers';
+import * as realSubagentRunner from '../../../../src/modules/generation/application/subagent-runner';
 import {
   type CheckpointWriteOptions,
   createTurnCheckpointPart,
@@ -28,6 +32,7 @@ import {
   type CheckpointedContent,
   foldCheckpointDeltas,
 } from '../../../../src/modules/messages/infrastructure/message-checkpoint-deltas';
+import * as realToolBridge from '../../../../src/services/mcp/tool-bridge';
 import { clearRegistry, getAllTools, registerTool } from '../../../../src/services/tools/registry';
 import type { RegisteredTool } from '../../../../src/services/tools/types';
 import { waitUntil } from '../../../support/wait-until';
@@ -57,7 +62,6 @@ class OrderRecordingStore implements TurnCheckpointStore {
     generationTime: null,
   };
   private holding = false;
-  private commitDelayMs = 0;
   private readonly held: Array<() => void> = [];
   private failure: Error | null = null;
 
@@ -65,11 +69,6 @@ class OrderRecordingStore implements TurnCheckpointStore {
 
   hold(): void {
     this.holding = true;
-  }
-
-  /** Makes every write take `ms` to land, as a busy disk does. */
-  slowCommits(ms: number): void {
-    this.commitDelayMs = ms;
   }
 
   releaseOldest(): void {
@@ -127,14 +126,6 @@ class OrderRecordingStore implements TurnCheckpointStore {
       );
       this.log.push(`commit(${options.durable ? 'durable' : 'plain'}):${running.join(',')}`);
     };
-    if (this.commitDelayMs > 0) {
-      return new Promise((resolve) => {
-        setTimeout(() => {
-          land();
-          resolve();
-        }, this.commitDelayMs);
-      });
-    }
     if (!this.holding) {
       land();
       return Promise.resolve();
@@ -217,15 +208,24 @@ function createHarness() {
    * `consumeLikeTurn` adds what the turn does with every progress item: project it into the
    * parts and write a forced checkpoint, which is slower than the executor and so falls behind it.
    */
+  const consumed = { items: 0 };
   const run = async (
     calls: Array<[callId: string, name: string]>,
     signal?: AbortSignal,
-    options: { consumeLikeTurn?: boolean } = {}
+    options: {
+      consumeLikeTurn?: boolean;
+      context?: Partial<StandardToolExecutionContext>;
+      /** Arguments for a call; the default carries only its id. */
+      argsFor?: (callId: string) => Record<string, unknown>;
+    } = {}
   ): Promise<ToolExecutionProgressItem[]> => {
     for (const [callId, name] of calls) announce(callId, name);
     const items: ToolExecutionProgressItem[] = [];
     for await (const item of executeStandardToolCallsWithProgress(
-      calls.map(([callId, name]) => [callId, { name, argsStr: JSON.stringify({ id: callId }) }]),
+      calls.map(([callId, name]) => [
+        callId,
+        { name, argsStr: JSON.stringify(options.argsFor?.(callId) ?? { id: callId }) },
+      ]),
       {
         userId: 'user-marker',
         chatId: 'chat-marker',
@@ -234,6 +234,7 @@ function createHarness() {
         allowedToolNames: new Set([MUTATING_TOOL, READ_ONLY_TOOL]),
         signal,
         beforeToolStart: createToolStartMarkerWriter(session),
+        ...options.context,
       }
     )) {
       items.push(item);
@@ -241,10 +242,11 @@ function createHarness() {
         synchronizeToolProgressForCheckpoint(item, session.allParts);
         await session.checkpointWriter.checkpoint({ force: true });
       }
+      consumed.items += 1;
     }
     return items;
   };
-  return { log, store, session, run };
+  return { log, store, session, run, consumed };
 }
 
 const executionOf = (items: ToolExecutionProgressItem[], callId: string) => {
@@ -396,15 +398,17 @@ describe('tool start marker', () => {
 
   it('never stores a running call as queued while the turn works through its backlog', async () => {
     // The executor announces every call as queued and moves on; the turn writes one checkpoint per
-    // item, so it is still on the queued items when the first calls have already started. A queued
+    // item, so it is still on the queued items when the calls have already started. A queued
     // snapshot that lands after the running marker must not put the call back to queued.
+    // Every write is held and released one at a time, so the turn is provably behind the executor
+    // (not just slow) and the interleaving does not depend on timing.
     let releaseTools!: () => void;
     const toolsMayFinish = new Promise<void>((resolve) => {
       releaseTools = resolve;
     });
     clearRegistry();
     registerTool(logsWhenExecuted(MUTATING_TOOL, harness.log, toolsMayFinish));
-    harness.store.slowCommits(3);
+    harness.store.hold();
     const calls: Array<[string, string]> = [
       ['call-a', MUTATING_TOOL],
       ['call-b', MUTATING_TOOL],
@@ -412,14 +416,23 @@ describe('tool start marker', () => {
     ];
     const finished = harness.run(calls, undefined, { consumeLikeTurn: true });
 
-    await waitUntil(
-      () => calls.every(([id]) => harness.log.entries.includes(`tool:${MUTATING_TOOL}:${id}`)),
-      'every call to start',
-      5_000
-    );
-    // Let the turn drain its backlog while the tools are still running.
-    await Bun.sleep(150);
+    // Three queued items and three running items arrive before the tools may finish.
+    const itemsBeforeToolsFinish = calls.length * 2;
+    while (harness.consumed.items < itemsBeforeToolsFinish) {
+      await waitUntil(
+        () => harness.store.heldCount > 0 || harness.consumed.items >= itemsBeforeToolsFinish,
+        `a checkpoint write or ${itemsBeforeToolsFinish} consumed items`,
+        5_000,
+        () => `consumed ${harness.consumed.items}, log ${JSON.stringify(harness.log.entries)}`
+      );
+      harness.store.releaseOldest();
+    }
+    expect(
+      calls.every(([id]) => harness.log.entries.includes(`tool:${MUTATING_TOOL}:${id}`)),
+      `expected every call to have started | received log ${JSON.stringify(harness.log.entries)}`
+    ).toBe(true);
     releaseTools();
+    harness.store.releaseAll();
     await finished;
 
     const { entries } = harness.log;
@@ -472,5 +485,159 @@ describe('synchronizeToolProgressForCheckpoint', () => {
     synchronizeToolProgressForCheckpoint(transition('running'), parts);
 
     expect(parts).toEqual([part('running')]);
+  });
+});
+
+/**
+ * The tool kinds that do not go through the builtin branch of the executor. Each is a call that
+ * is not a plain read, so each must wait for its marker; a hook placed inside the builtin branch
+ * alone would let these start unrecorded.
+ */
+describe('tool start marker for MCP and delegated calls', () => {
+  const MCP_TOOL = 'mcp__fixture__push';
+  const DELEGATE_TOOL = 'delegate_to_agent';
+  let registrySnapshot: RegisteredTool[];
+  let harness: ReturnType<typeof createHarness>;
+
+  /** Named fake for the MCP lookup: the server row exists and the call is logged when it runs. */
+  const installMcpBridgeWithFixtureServer = (log: EventLog) => {
+    spyOn(realToolBridge, 'resolveMcpToolExecution').mockImplementation((_db, userId, name) =>
+      Promise.resolve({
+        parsed: { serverSlug: 'fixture', toolName: name.replace('mcp__fixture__', '') },
+        server: { id: 'server-fixture', userId, slug: 'fixture' } as never,
+      })
+    );
+    spyOn(realToolBridge, 'executeResolvedMcpTool').mockImplementation((_userId, _target, args) => {
+      log.push(`tool:${MCP_TOOL}:${typeof args.id === 'string' ? args.id : ''}`);
+      return Promise.resolve({ content: [], contentText: 'pushed', isError: false } as never);
+    });
+  };
+
+  /** Named fake for the subagent run a delegation starts. */
+  const installSubagentRunnerThatLogs = (log: EventLog) => {
+    spyOn(realSubagentRunner, 'runSubagentTurn').mockImplementation((input) => {
+      log.push(`tool:${DELEGATE_TOOL}:${input.request.task}`);
+      return Promise.resolve({
+        agentId: 'explore',
+        agentName: 'Explore',
+        status: 'completed',
+        summary: 'done',
+        messages: [],
+        toolCallCount: 0,
+        tools: [],
+        durationMs: 1,
+        trace: { type: 'subagent_trace', messages: [], tools: [] },
+      } as never);
+    });
+  };
+
+  beforeEach(() => {
+    spyOn(console, 'error').mockImplementation(() => undefined);
+    harness = createHarness();
+    registrySnapshot = snapshotRegistry();
+    clearRegistry();
+    registerTool(logsWhenExecuted(DELEGATE_TOOL, harness.log));
+    installMcpBridgeWithFixtureServer(harness.log);
+    installSubagentRunnerThatLogs(harness.log);
+  });
+
+  afterEach(() => {
+    clearRegistry();
+    for (const tool of registrySnapshot) registerTool(tool);
+    mock.restore();
+  });
+
+  const mcpContext = (): Partial<StandardToolExecutionContext> => ({
+    db: {} as Kysely<Database>,
+    allowedToolNames: new Set([MCP_TOOL]),
+  });
+
+  const delegationContext = (): Partial<StandardToolExecutionContext> => ({
+    allowedToolNames: new Set([DELEGATE_TOOL]),
+    delegationRuntime: {
+      db: {} as Kysely<Database>,
+      userId: 'user-marker',
+      chatId: 'chat-marker',
+      environmentId: 'local',
+      parentAgentProfile: { id: 'default' } as never,
+      parentModelName: 'gpt-test',
+      settings: {
+        enabled: true,
+        traceVisibility: 'off',
+        maxDepth: 1,
+        maxSubagentCalls: 3,
+        timeoutMs: 5_000,
+        defaultMaxTurns: 3,
+      },
+      state: { subagentCallCount: 0 },
+    },
+  });
+
+  it('starts an MCP tool only after its durable running marker is committed', async () => {
+    harness.store.hold();
+    const finished = harness.run([['call-mcp', MCP_TOOL]], undefined, { context: mcpContext() });
+
+    await waitUntil(
+      () => harness.store.heldCount > 0,
+      'the MCP call to wait on its marker write',
+      2_000
+    );
+    await Bun.sleep(30);
+    expect(harness.log.entries).toEqual([]);
+
+    harness.store.releaseAll();
+    await finished;
+
+    expect(harness.log.entries.slice(0, 2)).toEqual([
+      'commit(durable):call-mcp',
+      `tool:${MCP_TOOL}:call-mcp`,
+    ]);
+  });
+
+  it('does not start an MCP tool whose marker could not be written', async () => {
+    harness.store.failNextWrite(new Error('disk full'));
+
+    const items = await harness.run([['call-mcp', MCP_TOOL]], undefined, {
+      context: mcpContext(),
+    });
+
+    expect(harness.log.entries).toEqual([]);
+    expect(executionOf(items, 'call-mcp').isError).toBe(true);
+  });
+
+  it('starts a delegation only after its durable running marker is committed', async () => {
+    harness.store.hold();
+    const finished = harness.run([['call-delegate', DELEGATE_TOOL]], undefined, {
+      context: delegationContext(),
+      argsFor: () => ({ agentId: 'explore', task: 'call-delegate' }),
+    });
+
+    await waitUntil(
+      () => harness.store.heldCount > 0,
+      'the delegation to wait on its marker write',
+      2_000
+    );
+    await Bun.sleep(30);
+    expect(harness.log.entries).toEqual([]);
+
+    harness.store.releaseAll();
+    await finished;
+
+    expect(harness.log.entries.slice(0, 2)).toEqual([
+      'commit(durable):call-delegate',
+      `tool:${DELEGATE_TOOL}:call-delegate`,
+    ]);
+  });
+
+  it('does not start a delegation whose marker could not be written', async () => {
+    harness.store.failNextWrite(new Error('disk full'));
+
+    const items = await harness.run([['call-delegate', DELEGATE_TOOL]], undefined, {
+      context: delegationContext(),
+      argsFor: () => ({ agentId: 'explore', task: 'call-delegate' }),
+    });
+
+    expect(harness.log.entries).toEqual([]);
+    expect(executionOf(items, 'call-delegate').isError).toBe(true);
   });
 });

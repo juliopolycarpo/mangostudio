@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import { ActivityEventSchema } from '@mangostudio/shared/activity';
+import { sql } from 'kysely';
 import Value from 'typebox/value';
 
 import type { getDb } from '../../../src/db/database';
@@ -101,6 +102,16 @@ describe('respond stream test helpers', () => {
 
     expect(() => deleteFrom('messages')).toThrow(
       'stream database: expected activity_events or message_checkpoint_deltas deletion | received: messages'
+    );
+  });
+
+  it('answers PRAGMA synchronous as FULL and refuses any other raw statement', async () => {
+    const db = mockPassThroughDb('user-1')().getDb() as never;
+
+    const answer = await sql<{ synchronous: number }>`PRAGMA synchronous`.execute(db);
+    expect(answer.rows).toEqual([{ synchronous: 2 }]);
+    await expect(sql`PRAGMA journal_mode`.execute(db)).rejects.toThrow(
+      'stream database: expected PRAGMA synchronous | received PRAGMA journal_mode'
     );
   });
 

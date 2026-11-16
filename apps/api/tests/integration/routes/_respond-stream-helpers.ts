@@ -255,7 +255,15 @@ function defaultSelectFrom(
  */
 const FullSynchronousExecutor = {
   transformQuery: (node: unknown) => node,
-  compileQuery: () => ({ sql: 'PRAGMA synchronous', parameters: [], query: {} }),
+  compileQuery: (node: unknown) => {
+    const statement = (node as { sqlFragments?: readonly string[] }).sqlFragments?.join('');
+    if (statement !== 'PRAGMA synchronous') {
+      throw new Error(
+        `stream database: expected PRAGMA synchronous | received ${statement ?? JSON.stringify(node)}`
+      );
+    }
+    return { sql: statement, parameters: [], query: node };
+  },
   executeQuery: () => Promise.resolve({ rows: [{ synchronous: 2 }] }),
 };
 
