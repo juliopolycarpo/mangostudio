@@ -241,7 +241,7 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
           VERSION: ${{ inputs.version }}
           GITHUB_TOKEN: ${{ github.token }}
-        run: bun run build --binary --hub-only --platform "$PLATFORM" --reuse-frontend
+        run: bun run build --binary --hub-only --platform "$PLATFORM" --reuse-frontend --require-aot-order
       - name: Build native musl hub in Alpine
         if: ${{ matrix.musl }}
         env:
@@ -264,7 +264,7 @@ jobs:
               if [ -n "$FRONTEND_ARTIFACT" ]; then
                 bun ./scripts/ci/frontend-artifact.ts verify --bun-revision "$PRODUCER_BUN_REVISION"
               fi
-              bun run build --binary --hub-only --platform "$PLATFORM" --reuse-frontend
+              bun run build --binary --hub-only --platform "$PLATFORM" --reuse-frontend --require-aot-order
             '
       - name: Upload native hub and compiler receipt
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

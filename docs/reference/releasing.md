@@ -275,6 +275,17 @@ Bun uses `--aot --trim --format=esm --sourcemap=external` and production
 frontend or runtime work. Shipping builds require native compiler records.
 Bytecode remains an explicit fallback for standalone builds.
 
+On Linux producers (glibc and musl) the native compile runs twice. The first pass adds
+`--aot-record-order`; the build starts that binary in a throwaway home, drives the same request
+workload the footprint benchmark uses, stops it, and passes the recorded file to the shipping
+compile as `--aot-order`. The order file numbers functions by position, so a file from any other
+program silently places nothing; recording from the binary about to ship avoids that. If the
+recording hub does not start, does not write a file, writes one `--aot-order` would only warn
+about, or outlives its 120 s deadline, a local build warns and ships the hub without an order. The
+release workflow passes `--require-aot-order`, so there the build fails instead and no hub ships
+without the layout by accident. macOS and Windows producers compile once and log why. See
+[runtime-metrics.md](runtime-metrics.md#hub-binary-aot-function-order).
+
 `--reuse-frontend` accepts `apps/frontend/dist/build-info.json` only when both
 the prepared build and checkout are clean, name the same HEAD and use the same
 build mode. It retains the original build time and regenerates absolute embed

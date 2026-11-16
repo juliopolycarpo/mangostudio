@@ -130,6 +130,62 @@ The TypeScript runtime's removal is most of the production TS deletions; its beh
 into the Rust production lines, and its compatibility coverage into Rust tests and frozen
 fixtures.
 
+## Hub binary: AOT function order
+
+The shipping hub is compiled with Bun's native `--aot` (see `docs/reference/releasing.md`); the
+bytecode section below is the explicit `--compiler bytecode` fallback. On Linux the build compiles
+the hub twice: once with `--aot-record-order`, then again with `--aot-order=<file>`, where the file
+is what the first binary wrote when it ran a fixed workload.
+
+`--aot-record-order` makes a binary write the order its functions first ran in when it exits with
+`BUN_AOT_ORDER_OUT` set; `--aot-order` lays the next compile out that way, so the code a hub touches
+while starting and serving sits together and the rest is not paged in. The binary is the same size.
+
+Measured with `scripts/bench/hub-footprint.ts`: seven interleaved rounds, a fresh isolated home per
+start, memory read from `/proc/<pid>/status` after 10 s idle and again 3 s after a workload (sign up
+and in, list chats five times, fetch `/` and the largest script as br, gzip and identity). linux-x64
+glibc, Bun 1.4.5-canary, production hub with the embedded frontend, binaries on btrfs (on tmpfs the
+executable's pages count as `RssShmem` instead of `RssFile`; the totals match).
+
+| Variant        | Binary size (B) | Idle VmRSS (KB) | Idle range (KB) | After workload (KB) |
+| -------------- | --------------: | --------------: | --------------: | ------------------: |
+| base           |     102,137,608 |          69,296 |   69,056–69,740 |              75,744 |
+| function order |     102,137,608 |          59,404 |   59,072–59,920 |              66,044 |
+
+Idle RSS falls 14.3% and RSS after the workload 12.8%. The host load average was 10 to 18 while this
+ran, so no startup change is claimed: median start to first healthy `/api/health` was 143 ms for the
+base and 152 ms with the order, inside that noise.
+
+The file numbers functions by position, so it only works for the program it came from. One recorded
+from the previous build changed nothing (69.4 MB idle), and Bun does not say so: an empty, garbage
+or wrong-version file only prints "is not an order file", and a missing file is the only build
+error. Recordings of one binary were byte-identical across six runs. The build therefore records
+from the binary it is about to ship (`scripts/lib/aot-order.ts`), checks the file's shape itself, and
+never reuses a file from an earlier build. Recording takes the hub through `scripts/lib/hub-workload.ts`
+in a throwaway home on a loopback port under a 120 s deadline, and kills the hub whatever happens.
+It adds one extra compile and a run, about 8 s on a loaded host to a hub-only build that takes 15 to
+20 s. If recording fails the build warns and ships the hub without an order (about 10 MB more
+memory); `--require-aot-order`, which the release workflow passes, fails the build instead. Bun
+records on Linux only, so macOS and Windows hosts compile once and say so. Of the shipped targets
+the four Linux ones (x64 and arm64, glibc and musl) are built natively and record their own; only
+linux-x64 glibc has been measured.
+
+Reproduce, from a clean checkout of each revision (both builds on one filesystem):
+
+```bash
+bun run build --binary --hub-only --production
+cp .mango/out/linux-x64/mangostudio /path/on/disk/head-hub
+bun run scripts/bench/hub-footprint.ts --rounds 5 --idle-seconds 10 --workload \
+  base=/path/on/disk/base-hub head=/path/on/disk/head-hub
+```
+
+**Not shipped.** `--no-compile-function-source` produced a byte-identical binary: with
+`--sourcemap=external` function source is already `[native code]`. `compile.trim.remove` for
+`webassembly`, `inspector`, `profiler`, `intl-segmenter`, `ffi` and `native-addons` took 5.1 MB
+(5.01%) off the base hub and passed the binary smoke, but it has no effect on memory, is only
+reachable through `Bun.build`, and a removed feature fails with `ERR_FEATURE_REMOVED` at first use
+rather than at build time.
+
 ## Hub binary: bytecode
 
 The hub is not a cargo build, but it ships beside the runtime, so its startup and size are

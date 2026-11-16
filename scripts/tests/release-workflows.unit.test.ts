@@ -446,6 +446,9 @@ describe('release workflow binary gate', () => {
     expect(hub).toContain('runs-on: $' + '{{ matrix.runner }}');
     expect(hub.match(/--hub-only/g)).toHaveLength(2);
     expect(hub).toContain('--reuse-frontend');
+    // Every native hub leg, glibc and Alpine, fails rather than ship a hub without the AOT function
+    // order recorded from itself (macOS and Windows legs skip recording, which is not a failure).
+    expect(hub.match(/--hub-only [^\n]*--require-aot-order/g)).toHaveLength(2);
     expect(hub).toContain('oven/bun:$' + '{BUN_CHANNEL}-alpine');
     expect(hub).toContain('bun install --frozen-lockfile');
     expect(build).toContain('needs: [hub, runtime, runtime-version]');
