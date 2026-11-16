@@ -12,6 +12,7 @@ import type { Database } from '../../../db/types';
 import { listAttachmentsByMessageIds } from '../../attachments/infrastructure/attachment-repository';
 import { listGeneratedImagesByMessageIds } from '../../generated-images/infrastructure/generated-image-repository';
 import { type GalleryCursor, type GalleryEntry, tiedRowidCeiling } from '../domain/gallery-cursor';
+import { GeneratingMessageTextEditError } from '../domain/message-generating';
 import { encodeTranscriptCursor, type TranscriptCursor } from '../domain/transcript-cursor';
 import {
   deleteCheckpointDeltas,
@@ -248,6 +249,13 @@ export async function updateMessage(
       .where('id', '=', id)
       .executeTakeFirst();
     let merged: typeof updates = updates;
+    // The live writer holds its own view of the stored text and appends deltas to it, so
+    // an edit that leaves the turn generating would be extended with the old content's
+    // continuation. Refuse it; an edit that also settles the turn is safe, because the
+    // writer's next delta is guarded on `isGenerating = 1`.
+    if (stored?.isGenerating === 1 && 'text' in updates && updates.isGenerating !== 0) {
+      throw new GeneratingMessageTextEditError(id);
+    }
     if (stored?.isGenerating === 1) {
       const [folded] = await foldCheckpointDeltasIntoRows([stored], trx);
       if (folded && folded !== stored) {

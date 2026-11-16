@@ -12,6 +12,7 @@ import { createTurnCheckpointPart } from '../../../../src/modules/generation/app
 import {
   CheckpointPlanner,
   type CheckpointSource,
+  holdBackHighSurrogate,
   toCheckpointPart,
 } from '../../../../src/modules/generation/application/turn-checkpoint-delta';
 import {
@@ -32,7 +33,7 @@ class ReplayedStore {
       this.rebases++;
       this.rebaseChars += plan.partsJson.length;
       this.content = {
-        text: source.text,
+        text: plan.text,
         parts: JSON.parse(plan.partsJson) as MessagePart[],
         providerState: source.providerState,
         generationTime: source.generationTime ?? null,
@@ -192,6 +193,26 @@ describe('CheckpointPlanner', () => {
     expect(store.deltaChars - before).toBeLessThan(200);
   });
 
+  it('still notices a changed result after an equal copy replaced the one it holds', () => {
+    const planner = new CheckpointPlanner();
+    const store = new ReplayedStore();
+    const { parts, live } = newTurn();
+    const content = 'r'.repeat(40_000);
+    parts.push({ type: 'tool_result', toolCallId: 'c1', content });
+    store.apply(planner.plan(live), live);
+
+    // The planner refreshes its mark to the new string object on an equal match; string
+    // identity is not observable from here, so this pins that the refresh keeps the value.
+    parts[1] = { type: 'tool_result', toolCallId: 'c1', content: `${content}` };
+    store.apply(planner.plan(live), live);
+    const afterCopy = store.deltaChars;
+    parts[1] = { type: 'tool_result', toolCallId: 'c1', content: `${content}`.slice(0, 39_999) };
+    store.apply(planner.plan(live), live);
+
+    expectStoreMatchesLive(store, live);
+    expect(store.deltaChars - afterCopy).toBeGreaterThan(39_000);
+  });
+
   it('writes a text part whose stored prefix changed, though its length did not', () => {
     const planner = new CheckpointPlanner();
     const store = new ReplayedStore();
@@ -296,5 +317,107 @@ describe('CheckpointPlanner', () => {
     parts.push({ type: 'text', text: 'b' });
 
     expect(planner.plan(live).kind).toBe('rebase');
+  });
+});
+
+// Escapes are written as code unit numbers, so no lone surrogate sits in this file's source.
+const HIGH_HALF = String.fromCharCode(0xd83d);
+const LOW_HALF = String.fromCharCode(0xde00);
+const GRINNING_FACE = `${HIGH_HALF}${LOW_HALF}`;
+
+describe('holdBackHighSurrogate', () => {
+  it('drops a trailing high surrogate and nothing else', () => {
+    expect({
+      split: holdBackHighSurrogate(`ab${HIGH_HALF}`),
+      whole: holdBackHighSurrogate(`ab${GRINNING_FACE}`),
+      plain: holdBackHighSurrogate('ab'),
+      empty: holdBackHighSurrogate(''),
+      onlyHalf: holdBackHighSurrogate(HIGH_HALF),
+      trailingLow: holdBackHighSurrogate(`ab${LOW_HALF}`),
+    }).toEqual({
+      split: 'ab',
+      whole: `ab${GRINNING_FACE}`,
+      plain: 'ab',
+      empty: '',
+      onlyHalf: '',
+      trailingLow: `ab${LOW_HALF}`,
+    });
+  });
+});
+
+describe('CheckpointPlanner and a character the stream has delivered half of', () => {
+  it('holds the half back from a rebase and sends the whole pair with the next delta', () => {
+    const planner = new CheckpointPlanner();
+    const store = new ReplayedStore();
+    const { parts, live } = newTurn();
+    live.text = `hi ${HIGH_HALF}`;
+    parts.push({ type: 'text', text: live.text });
+
+    const first = planner.plan(live);
+    store.apply(first, live);
+    const heldBack = { text: store.content.text, part: store.content.parts[1] };
+
+    live.text = `hi ${GRINNING_FACE} there`;
+    parts[1] = { type: 'text', text: live.text };
+    store.apply(planner.plan(live), live);
+
+    expect({ first: first.kind, heldBack, after: store.content.text }).toEqual({
+      first: 'rebase',
+      heldBack: { text: 'hi ', part: { type: 'text', text: 'hi ' } },
+      after: live.text,
+    });
+    expectStoreMatchesLive(store, live);
+  });
+
+  it('holds the half back from a delta, in the message text and in the text part alike', () => {
+    const planner = new CheckpointPlanner();
+    const store = new ReplayedStore();
+    const { parts, live } = newTurn();
+    live.text = 'hi ';
+    parts.push({ type: 'text', text: 'hi ' });
+    store.apply(planner.plan(live), live);
+
+    live.text = `hi ${HIGH_HALF}`;
+    parts[1] = { type: 'text', text: live.text };
+    const split = planner.plan(live);
+    store.apply(split, live);
+    const heldBack = { text: store.content.text, part: store.content.parts[1] };
+    live.text = `hi ${GRINNING_FACE}`;
+    parts[1] = { type: 'text', text: live.text };
+    store.apply(planner.plan(live), live);
+
+    expect({ kind: split.kind, heldBack, after: store.content.text }).toEqual({
+      kind: 'delta',
+      heldBack: { text: 'hi ', part: { type: 'text', text: 'hi ' } },
+      after: live.text,
+    });
+    expectStoreMatchesLive(store, live);
+  });
+
+  it('holds back a thinking part that ends in half a pair', () => {
+    const planner = new CheckpointPlanner();
+    const store = new ReplayedStore();
+    const { parts, live } = newTurn();
+    parts.push({ type: 'thinking', text: `hm ${HIGH_HALF}` });
+
+    store.apply(planner.plan(live), live);
+
+    expect(store.content.parts[1]).toEqual({ type: 'thinking', text: 'hm ' });
+  });
+
+  it('never gives the store a lone surrogate while the stream splits pairs at every offset', () => {
+    const planner = new CheckpointPlanner();
+    const store = new ReplayedStore();
+    const { parts, live } = newTurn();
+    parts.push({ type: 'text', text: '' });
+    const stream = `a${GRINNING_FACE}é${GRINNING_FACE}${GRINNING_FACE}z`;
+
+    for (let end = 1; end <= stream.length; end++) {
+      live.text = stream.slice(0, end);
+      parts[1] = { type: 'text', text: live.text };
+      store.apply(planner.plan(live), live);
+      expect(store.content.text).toBe(stream.slice(0, end).replace(/[\uD800-\uDBFF]$/, ''));
+    }
+    expectStoreMatchesLive(store, live);
   });
 });

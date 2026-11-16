@@ -14,8 +14,11 @@ export interface CheckpointSource {
 }
 
 export type CheckpointPlan =
-  /** The whole row, because the change is not expressible as a delta. */
-  | { readonly kind: 'rebase'; readonly partsJson: string }
+  /**
+   * The whole row, because the change is not expressible as a delta. `text` is what the
+   * row's text column must hold: the live text without a half surrogate pair at its end.
+   */
+  | { readonly kind: 'rebase'; readonly partsJson: string; readonly text: string }
   | { readonly kind: 'delta'; readonly deltaJson: string };
 
 /** What the store holds for one part, enough to tell what changed without re-reading it. */
@@ -52,6 +55,37 @@ interface PersistedState {
   readonly textLength: number;
   readonly textTail: string;
   readonly providerState: string | null;
+}
+
+const isHighSurrogateAt = (text: string, index: number): boolean => {
+  const unit = text.charCodeAt(index);
+  return unit >= 0xd800 && unit <= 0xdbff;
+};
+
+/**
+ * The text without a trailing high surrogate, the first half of a character the stream
+ * has not finished delivering. A checkpoint that cut there would store a lone half: the
+ * message `text` column is bound as plain TEXT, where SQLite turns it into U+FFFD, while
+ * a delta is JSON and keeps it exactly, so the next delta would continue a different
+ * string than the row holds. The held-back half goes out with the next checkpoint, or
+ * with the final write.
+ */
+export function holdBackHighSurrogate(text: string): string {
+  return text.length > 0 && isHighSurrogateAt(text, text.length - 1) ? text.slice(0, -1) : text;
+}
+
+/** `source` as a checkpoint may cut it: no text or text part ends in half a surrogate pair. */
+function holdBackSplitPairs(source: CheckpointSource): CheckpointSource {
+  const text = holdBackHighSurrogate(source.text);
+  let parts = source.parts;
+  source.parts.forEach((part, index) => {
+    if (part.type !== 'text' && part.type !== 'thinking') return;
+    const held = holdBackHighSurrogate(part.text);
+    if (held === part.text) return;
+    if (parts === source.parts) parts = [...source.parts];
+    (parts as MessagePart[])[index] = { ...part, text: held };
+  });
+  return text === source.text && parts === source.parts ? source : { ...source, text, parts };
 }
 
 /** Characters of a text's end kept to check that what was stored is still its prefix. */
@@ -131,7 +165,8 @@ function markPart(part: MessagePart, json?: string): PartMark {
 export class CheckpointPlanner {
   private persisted: PersistedState | null = null;
 
-  plan(source: CheckpointSource): CheckpointPlan {
+  plan(live: CheckpointSource): CheckpointPlan {
+    const source = holdBackSplitPairs(live);
     const previous = this.persisted;
     if (
       !previous ||
@@ -171,6 +206,9 @@ export class CheckpointPlanner {
           part.isError === mark.isError &&
           part.content === mark.content
         ) {
+          // Equal under a different string object: hold the new one, so the next
+          // comparison of this result is a pointer check again, not a scan.
+          marks[i] = { ...mark, content: part.content };
           continue;
         }
       } else {
@@ -216,6 +254,6 @@ export class CheckpointPlanner {
       textTail: tailOf(source.text),
       providerState: source.providerState,
     };
-    return { kind: 'rebase', partsJson: `[${serialized.join(',')}]` };
+    return { kind: 'rebase', partsJson: `[${serialized.join(',')}]`, text: source.text };
   }
 }
