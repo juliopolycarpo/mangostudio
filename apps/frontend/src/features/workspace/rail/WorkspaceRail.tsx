@@ -202,10 +202,13 @@ export function WorkspaceRail({
   // and the panel that was showing stays up until then (or the spinner, once
   // that takes longer than SLOW_PANEL_SWITCH_MS).
   const shownPanel = availablePanels.find((panel) => panel.id === shownPanelId) ?? activePanel;
-  const activeTitle = panelTitles[shownPanel.id];
   const ActivePanelContent = shownPanel.component;
   // Set while a chosen panel's body is still on its way and the previous one is up.
   const loadingPanelId = shownPanel.id === activePanel.id ? null : activePanel.id;
+  const showingSpinner = slowSwitch && loadingPanelId !== null;
+  // The header names what the body is: the previous panel while it is still up,
+  // the chosen one once the spinner has replaced it.
+  const activeTitle = panelTitles[(showingSpinner ? activePanel : shownPanel).id];
   const panelSpinner = (
     <div className="flex h-full items-center justify-center">
       <Spinner size="md" label={t.common.loading} />
@@ -225,7 +228,7 @@ export function WorkspaceRail({
       }
       onClose={onClose}
     >
-      {slowSwitch && loadingPanelId ? (
+      {showingSpinner ? (
         panelSpinner
       ) : (
         // Keyed by panel, so a failure in one panel's chunk does not follow the
