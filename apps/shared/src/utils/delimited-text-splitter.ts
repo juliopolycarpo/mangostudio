@@ -81,7 +81,9 @@ export class DelimitedTextSplitter {
    * The records this read completed, in order, without their delimiter. In
    * `refuse` mode a read that completes records and then overflows returns
    * those records, and the refusal is raised by the next `push` or `finish`; a
-   * read that completes none raises it at once.
+   * read that completes none raises it at once. A refuse-mode caller must
+   * therefore call `finish()` at the end of the stream, even when it discards the
+   * value: otherwise a refusal held back by the last read never surfaces.
    */
   push(text: string): string[] {
     if (this.#refusal) throw this.#refusal;
