@@ -75,6 +75,41 @@ describe('relaxDurability', () => {
     });
   });
 
+  it('asks for F_FULLFSYNC on macOS only, so a FULL commit reaches stable storage', async () => {
+    file = new ObservedFileDatabase(directory);
+    const onMac = new FakePragmaRunner('wal');
+    const onLinux = new FakePragmaRunner('wal');
+
+    await relaxDurability(file.db, onMac, 'darwin');
+    await relaxDurability(file.db, onLinux, 'linux');
+
+    expect({ onMac: onMac.statementsRun, onLinux: onLinux.statementsRun }).toEqual({
+      onMac: ['synchronous = NORMAL', 'fullfsync = 1'],
+      onLinux: ['synchronous = NORMAL'],
+    });
+  });
+
+  it('does not set fullfsync on a database that stays at FULL outside WAL, even on macOS', async () => {
+    file = new ObservedFileDatabase(directory, { applyPragmas: false });
+    const runner = new FakePragmaRunner('delete');
+
+    await new DiagnosticWarnCapture().during(() => relaxDurability(file.db, runner, 'darwin'));
+
+    expect(runner.statementsRun).toEqual([]);
+  });
+
+  it.skipIf(process.platform !== 'darwin')(
+    'leaves fullfsync on in a real macOS connection after it is relaxed',
+    async () => {
+      file = new ObservedFileDatabase(directory);
+
+      await relaxDurability(file.db);
+
+      const row = file.sqlite.query('PRAGMA fullfsync').get() as { fullfsync: number };
+      expect({ fullfsync: row.fullfsync }).toEqual({ fullfsync: 1 });
+    }
+  );
+
   it('keeps FULL and warns once when the journal mode is not wal', async () => {
     file = new ObservedFileDatabase(directory, { applyPragmas: false });
     const runner = new FakePragmaRunner('delete');

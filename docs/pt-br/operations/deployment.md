@@ -214,6 +214,20 @@ para `NORMAL`. Em `NORMAL`, um commit é acrescentado ao write-ahead log sem fsy
 quando o SQLite faz o checkpoint dele no arquivo principal. Se o sistema de arquivos não der WAL mode ao
 hub, ele mantém `FULL` e registra `synchronous_kept_full`.
 
+Toda conexão começa em `FULL` porque o hub define esse nível explicitamente depois de mudar para WAL, e
+não porque o SQLite o use por padrão. O macOS usa o SQLite da Apple, compilado com `NORMAL` como padrão em
+WAL, então uma conexão que abre um arquivo WAL ali rodaria as migrações abaixo de `FULL`.
+
+No macOS, o `fsync` só chega ao cache do disco; é o `F_FULLFSYNC` que chega ao armazenamento estável, e o
+SQLite só o usa em sincronizações comuns quando `PRAGMA fullfsync` está ligado. A build da Apple já o usa
+nos checkpoints (`checkpoint_fullfsync` vem ligado). Depois das migrações, o hub define `fullfsync = 1` no
+macOS, de modo que as escritas sempre sincronizadas abaixo sobrevivam a uma queda de energia, e não só a
+uma falha do sistema operacional. Isso não custa nada nos commits comuns, que não sincronizam em `NORMAL`.
+Em um runner macOS hospedado do GitHub, um commit em `FULL` levou cerca de 1,1 ms com a opção e 0,1 a
+0,2 ms sem ela (mediana de três execuções de 290 commits); discos físicos costumam pagar mais por uma
+descarga completa, e isso acontece uma vez por chamada de ferramenta que não seja uma leitura simples. As
+migrações mantêm o `fsync` simples.
+
 O que uma falha custa depende do que falhou:
 
 - **O hub cai ou é encerrado à força.** Nada se perde: o sistema operacional ainda guarda as páginas

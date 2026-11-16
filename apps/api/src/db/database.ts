@@ -27,9 +27,9 @@ const dbLogger = createDiagnosticLogger('db');
  * `db/durability.ts`), because Kysely's SQLite adapter does not run a migration
  * in a transaction and a lost bookkeeping row would make the next start re-run a
  * migration that is not idempotent. The default is not `FULL` everywhere: macOS
- * links Apple's SQLite, built with `SQLITE_DEFAULT_WAL_SYNCHRONOUS=1`, which
- * lowers a connection to `NORMAL` when it first enters WAL mode unless the level
- * was set by a pragma. Setting it after the switch holds on every build.
+ * links Apple's SQLite, built with `SQLITE_DEFAULT_WAL_SYNCHRONOUS=1`, so a
+ * connection that enters WAL mode, or opens a file already in it (every restart),
+ * reads `NORMAL`. Setting the level after the switch holds on every build.
  *
  * @example applyConnectionPragmas(new Database(path), path);
  */

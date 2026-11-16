@@ -132,13 +132,22 @@ function pragmaRunnerFor(db: Kysely<Database>): PragmaRunner {
  * (the level is read, not assumed). An in-memory database has nothing to sync and
  * stays quiet.
  *
+ * On macOS it also sets `fullfsync = 1`. Apple's `fsync` stops at the drive's cache;
+ * only `F_FULLFSYNC` reaches stable storage, and SQLite uses it for ordinary syncs
+ * only when that pragma is on (Apple's build already uses it for checkpoints). At
+ * `NORMAL` a commit does not sync at all, so the flag costs nothing there; it makes
+ * the `FULL` commits of {@link runDurably} and {@link withFullDurability} durable
+ * across a power loss instead of only across an operating-system crash. It is set
+ * here, after the migrations, so they keep the plain `fsync` they always had.
+ *
  * @example
  * await runMigrations(db);
  * await relaxDurability(db); // resolves 'normal', or 'full' when WAL is not active
  */
 export async function relaxDurability(
   db: Kysely<Database>,
-  pragmas: PragmaRunner = pragmaRunnerFor(db)
+  pragmas: PragmaRunner = pragmaRunnerFor(db),
+  platform: NodeJS.Platform = process.platform
 ): Promise<'normal' | 'full'> {
   const journalMode = await pragmas.read('journal_mode');
   if (journalMode !== 'wal') {
@@ -153,6 +162,7 @@ export async function relaxDurability(
     return 'full';
   }
   await pragmas.run('synchronous = NORMAL');
+  if (platform === 'darwin') await pragmas.run('fullfsync = 1');
   relaxedConnections.set(db, SYNCHRONOUS_NORMAL);
   return 'normal';
 }
