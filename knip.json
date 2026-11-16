@@ -13,6 +13,7 @@
         "scripts/bench/rust-costs.ts",
         "scripts/bench/grep.ts",
         "scripts/bench/library-walk.ts",
+        "scripts/bench/line-decoder.ts",
         "scripts/ci/{distribution-identity,evaluate-gate,frontend-bundle-report,native-bun-qualification,verify-cross-runtimes}.ts",
         "scripts/ci/qualify-canary-source.ts",
         "scripts/ci/select-canary-source.ts",
