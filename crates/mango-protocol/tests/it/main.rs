@@ -27,6 +27,8 @@ mod fixtures;
 mod fixtures_legacy_hello;
 mod fixtures_ssh_argv;
 mod layout;
+mod line_decoder_chunking;
+mod line_decoder_cost;
 mod properties;
 mod session;
 mod transport_ipc;
