@@ -171,6 +171,60 @@ describe('CheckpointPlanner', () => {
     expectStoreMatchesLive(store, live);
   });
 
+  it('does not write a tool result again when it is upserted as an equal copy', () => {
+    const planner = new CheckpointPlanner();
+    const store = new ReplayedStore();
+    const { parts, live } = newTurn();
+    const content = 'r'.repeat(40_000);
+    parts.push({ type: 'tool_result', toolCallId: 'c1', content });
+    store.apply(planner.plan(live), live);
+    const before = store.deltaChars;
+
+    // A mixed image batch upserts the same result again as a new object.
+    parts[1] = {
+      type: 'tool_result',
+      toolCallId: 'c1',
+      content: `${content.slice(0, 20_000)}${content.slice(20_000)}`,
+    };
+    store.apply(planner.plan(live), live);
+
+    expectStoreMatchesLive(store, live);
+    expect(store.deltaChars - before).toBeLessThan(200);
+  });
+
+  it('writes a text part whose stored prefix changed, though its length did not', () => {
+    const planner = new CheckpointPlanner();
+    const store = new ReplayedStore();
+    const { parts, live } = newTurn();
+    parts.push({ type: 'text', text: 'The quick brown fox jumps over the lazy dog' });
+    live.text = 'The quick brown fox jumps over the lazy dog';
+    store.apply(planner.plan(live), live);
+
+    // Rewritten in place: same length, new ending. Appending nothing would lose the edit.
+    parts[1] = { type: 'text', text: 'The quick brown fox jumps over the lazy cat' };
+    live.text = 'The quick brown fox jumps over the lazy cat';
+    store.apply(planner.plan(live), live);
+
+    expectStoreMatchesLive(store, live);
+  });
+
+  it('rebases when the message text no longer starts with what was stored', () => {
+    const planner = new CheckpointPlanner();
+    const store = new ReplayedStore();
+    const { parts, live } = newTurn();
+    parts.push({ type: 'text', text: 'first draft of the reply' });
+    live.text = 'first draft of the reply';
+    store.apply(planner.plan(live), live);
+
+    parts[1] = { type: 'text', text: 'second draft of the reply, longer' };
+    live.text = 'second draft of the reply, longer';
+    const plan = planner.plan(live);
+    store.apply(plan, live);
+
+    expect(plan.kind).toBe('rebase');
+    expectStoreMatchesLive(store, live);
+  });
+
   it('carries a thinking part that becomes redacted or incomplete without growing', () => {
     const planner = new CheckpointPlanner();
     const store = new ReplayedStore();

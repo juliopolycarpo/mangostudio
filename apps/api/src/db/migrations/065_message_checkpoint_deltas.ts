@@ -14,11 +14,18 @@ import type { Migration } from 'kysely/migration';
  *
  * Rows exist only while the message is generating. The trigger removes them
  * when the message stops generating, whichever writer ends it (the finalizers,
- * crash reconciliation, the PATCH route), so no caller has to remember to.
+ * crash reconciliation, the PUT route), so no caller has to remember to.
  * Deleting a message removes them through the foreign key.
  *
- * `WITHOUT ROWID` keeps each row in the primary-key B-tree, so a small
- * checkpoint dirties one page instead of a table page and an index page.
+ * The trigger belongs to `messages`: a later migration that rebuilds that table
+ * (create, copy, drop, rename) drops it with the old table and has to recreate
+ * it; `message-checkpoint-deltas-migration.test.ts` fails if it goes missing.
+ *
+ * `WITHOUT ROWID` keeps each row in the primary-key B-tree instead of a rowid
+ * table plus a separate key index, which saves a page write for the small deltas
+ * (a tool boundary, a few hundred characters of text). A delta past roughly 1 KiB
+ * spills to overflow pages either way, so it is not the main saving; the main
+ * one is that a checkpoint no longer rewrites the row.
  */
 export const messageCheckpointDeltas: Migration = {
   async up(db): Promise<void> {

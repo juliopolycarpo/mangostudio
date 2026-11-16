@@ -20,27 +20,49 @@ export type CheckpointPlan =
 
 /** What the store holds for one part, enough to tell what changed without re-reading it. */
 type PartMark =
-  /** Grows by appending: only the characters past `length` are new. */
+  /**
+   * Grows by appending: only the characters past `length` are new. `tail` is the
+   * last few stored characters, so a part that was rewritten rather than
+   * extended is noticed without comparing the whole text.
+   */
   | {
       readonly kind: 'text';
       readonly type: 'text' | 'thinking';
       readonly length: number;
+      readonly tail: string;
       readonly flags: string;
     }
   /**
-   * Written when the result arrives and replaced wholesale if it is upserted
-   * again, never edited in place, so the same object means the same content
-   * and nothing is read to decide.
+   * Written when the result arrives. The content string is held by reference:
+   * a result that is upserted again with the same content (the stream does this
+   * for mixed image batches) compares equal in constant time when it is the same
+   * string, and a changed one is written again.
    */
-  | { readonly kind: 'result'; readonly part: MessagePart }
+  | {
+      readonly kind: 'result';
+      readonly toolCallId: string;
+      readonly content: string;
+      readonly isError: boolean | undefined;
+    }
   /** Small and mutable (a call's lifecycle, a todo list): compared by value. */
   | { readonly kind: 'json'; readonly json: string };
 
 interface PersistedState {
   readonly marks: PartMark[];
   readonly textLength: number;
+  readonly textTail: string;
   readonly providerState: string | null;
 }
+
+/** Characters of a text's end kept to check that what was stored is still its prefix. */
+const TAIL_CHARS = 32;
+
+const tailOf = (text: string, length = text.length): string =>
+  text.slice(Math.max(0, length - TAIL_CHARS), length);
+
+/** Whether `text` still begins with what was stored: its first `length` characters end in `tail`. */
+const endsStoredPrefixWith = (text: string, length: number, tail: string): boolean =>
+  text.length >= length && tailOf(text, length) === tail;
 
 /**
  * The part as a checkpoint stores it. The recovery summary on the turn
@@ -67,10 +89,21 @@ function textFlags(part: Extract<MessagePart, { type: 'text' | 'thinking' }>): s
 
 function markPart(part: MessagePart, json?: string): PartMark {
   if (part.type === 'text' || part.type === 'thinking') {
-    return { kind: 'text', type: part.type, length: part.text.length, flags: textFlags(part) };
+    return {
+      kind: 'text',
+      type: part.type,
+      length: part.text.length,
+      tail: tailOf(part.text),
+      flags: textFlags(part),
+    };
   }
   if (part.type === 'tool_result') {
-    return { kind: 'result', part };
+    return {
+      kind: 'result',
+      toolCallId: part.toolCallId,
+      content: part.content,
+      isError: part.isError,
+    };
   }
   return { kind: 'json', json: json ?? JSON.stringify(toCheckpointPart(part)) };
 }
@@ -81,10 +114,15 @@ function markPart(part: MessagePart, json?: string): PartMark {
  * rebase (the whole row) when there is nothing to diff against or the turn did
  * something other than grow.
  *
- * Planning is cheap on purpose. Text and thinking parts are only ever extended
- * (the stream appends to the trailing part), so they are compared by length and
- * flags. A tool result is written once and then skipped by identity without
- * reading it. Only the small parts that can change in place are serialized again.
+ * Planning is cheap on purpose, so it leans on how the stream builds a turn:
+ * text and thinking parts only grow (the stream appends to the trailing part),
+ * and a tool result is set once, or replaced whole. Each assumption is checked
+ * where that is cheap (a text part must still end its stored prefix with the same
+ * characters, a result must still hold the same string) and the plan falls back
+ * to writing the part, or the row, when it does not. A change the checks cannot
+ * see, such as an edit in the middle of a long text, is what the differential
+ * test (`turn-checkpoint-differential.test.ts`) guards. Only the small parts
+ * that can change in place are serialized again.
  *
  * Plans assume they are written in order. After a failed write, call
  * {@link reset}: the next plan is then a rebase, which does not depend on any
@@ -98,7 +136,7 @@ export class CheckpointPlanner {
     if (
       !previous ||
       source.parts.length < previous.marks.length ||
-      source.text.length < previous.textLength
+      !endsStoredPrefixWith(source.text, previous.textLength, previous.textTail)
     ) {
       return this.rebase(source);
     }
@@ -118,16 +156,23 @@ export class CheckpointPlanner {
           (part.type === 'text' || part.type === 'thinking') &&
           part.type === mark.type &&
           textFlags(part) === mark.flags &&
-          part.text.length >= mark.length
+          endsStoredPrefixWith(part.text, mark.length, mark.tail)
         ) {
           if (part.text.length > mark.length) {
             ops.push({ i, append: part.text.slice(mark.length) });
-            marks[i] = { ...mark, length: part.text.length };
+            marks[i] = { ...mark, length: part.text.length, tail: tailOf(part.text) };
           }
           continue;
         }
       } else if (mark.kind === 'result') {
-        if (part === mark.part) continue;
+        if (
+          part.type === 'tool_result' &&
+          part.toolCallId === mark.toolCallId &&
+          part.isError === mark.isError &&
+          part.content === mark.content
+        ) {
+          continue;
+        }
       } else {
         const json = JSON.stringify(toCheckpointPart(part));
         if (json === mark.json) continue;
@@ -152,6 +197,7 @@ export class CheckpointPlanner {
     this.persisted = {
       marks,
       textLength: source.text.length,
+      textTail: tailOf(source.text),
       providerState: source.providerState,
     };
     return { kind: 'delta', deltaJson: JSON.stringify(delta) };
@@ -167,6 +213,7 @@ export class CheckpointPlanner {
     this.persisted = {
       marks: source.parts.map((part, index) => markPart(part, serialized[index])),
       textLength: source.text.length,
+      textTail: tailOf(source.text),
       providerState: source.providerState,
     };
     return { kind: 'rebase', partsJson: `[${serialized.join(',')}]` };

@@ -100,6 +100,14 @@ export async function insertCheckpointDelta(
   return (result.numInsertedOrUpdatedRows ?? 0n) > 0n;
 }
 
+/** Drops every delta of a message; the caller has already folded them into the row. */
+export async function deleteCheckpointDeltas(
+  messageId: string,
+  db: Kysely<Database>
+): Promise<void> {
+  await db.deleteFrom('message_checkpoint_deltas').where('messageId', '=', messageId).execute();
+}
+
 /**
  * Replaces the checkpointed columns of a generating message with a full
  * snapshot and drops the deltas that predate it, in one transaction: the old
@@ -129,10 +137,7 @@ export async function rewriteCheckpointedRow(
       .where('id', '=', input.messageId)
       .where('isGenerating', '=', 1)
       .execute();
-    await trx
-      .deleteFrom('message_checkpoint_deltas')
-      .where('messageId', '=', input.messageId)
-      .execute();
+    await deleteCheckpointDeltas(input.messageId, trx);
   });
 }
 
