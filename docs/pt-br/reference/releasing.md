@@ -192,7 +192,7 @@ o artefato do hub nativo o carrega. Produtores macOS e Windows compilam uma vez 
 O `distribution-build.yml` recebe as plataformas que precisam gravar em `aot_order_platforms` (ids
 separados por espaço, ou `all`; vazio por padrão). O `release.yml` passa `all`; o `ci.yml` passa
 `all` nos pushes, porque o Canary diário promove esses pacotes, e só `linux-x64` nos pull requests,
-o hub que o dry run de release reaproveita. A gravação adiciona de 10 a 20 s a uma etapa de hub
+o hub que o dry run de release reaproveita. A gravação adiciona cerca de 5 s localmente (conte mais num runner) a uma etapa de hub
 Linux que termina antes dos jobs de runtime, então não alonga a execução. O hub de gravação não tem
 runtime ao lado; veja
 [runtime-metrics.md](runtime-metrics.md#binário-do-hub-ordem-de-funções-aot) para o que isso cobre

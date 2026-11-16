@@ -188,7 +188,7 @@ hub que leva de 15 a 20 s. Se a gravação falha, o build avisa e distribui o hu
 10 MB a mais de memória); `--require-aot-order` faz o build falhar. O build de distribuição passa
 essa flag para as plataformas listadas na entrada `aot_order_platforms`: todas em um release e em
 pushes para a main (o Canary diário promove esses pacotes), e só linux-x64 em pull requests, o hub
-que o dry run de release reaproveita. Nessas execuções o tempo adicionado é de 10 a 20 s numa etapa
+que o dry run de release reaproveita. Nessas execuções o tempo adicionado é de cerca de 5 s medidos localmente (14 s contra 9 s num build só do hub sem gravação; conte mais num runner) numa etapa
 de hub Linux que termina bem antes dos 6 a 12 minutos dos jobs de runtime, então o caminho crítico
 não muda. O Bun grava só no Linux, então hosts macOS e Windows compilam uma vez e dizem isso. Dos
 alvos distribuídos, os quatro Linux (x64 e arm64, glibc e musl) são construídos nativamente e

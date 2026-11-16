@@ -292,7 +292,7 @@ and the native hub artifact carries it. macOS and Windows producers compile once
 `distribution-build.yml` takes the platforms that must record through `aot_order_platforms` (space
 separated ids, or `all`; empty by default). `release.yml` passes `all`; `ci.yml` passes `all` for
 pushes, because daily Canary promotes those bundles, and only `linux-x64` for pull requests, the hub
-that the release dry run reuses. Recording adds about 10 to 20 s to a Linux hub leg that finishes
+that the release dry run reuses. Recording adds about 5 s locally (allow more on a runner) to a Linux hub leg that finishes
 before the runtime jobs, so it does not lengthen the run. The recording hub has no runtime beside
 it; see [runtime-metrics.md](runtime-metrics.md#hub-binary-aot-function-order) for what that
 covers and what a recorded runtime would add.

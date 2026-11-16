@@ -182,7 +182,7 @@ It adds one extra compile and a run, about 8 s on a loaded host to a hub-only bu
 memory); `--require-aot-order` fails the build instead. The distribution build passes it for the
 platforms its `aot_order_platforms` input lists: every platform for a release and for pushes to
 main (daily Canary promotes those bundles), and linux-x64 only on pull requests, the hub their
-release dry run reuses. On those runs the added time is about 10 to 20 s on a Linux hub leg that
+release dry run reuses. On those runs the added time is about 5 s measured locally (14 s against 9 s for a plain hub-only build; allow more on a runner) on a Linux hub leg that
 finishes well before the 6 to 12 minute runtime jobs, so the critical path does not move. Bun records
 on Linux only, so macOS and Windows hosts compile once and say so. Of the shipped targets the four
 Linux ones (x64 and arm64, glibc and musl) are built natively and record their own; only linux-x64
