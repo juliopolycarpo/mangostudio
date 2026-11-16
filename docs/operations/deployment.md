@@ -263,6 +263,13 @@ path = "/var/lib/mangostudio/database.sqlite"
 
 SQLite with WAL mode is suitable for single-server deployments. The database file should be backed up regularly.
 
+The hub opens the database with `PRAGMA synchronous = NORMAL`. A commit is appended to the write-ahead
+log without an fsync, and the log is synced when SQLite checkpoints it into the main file. Killing or
+crashing the hub loses nothing, because the operating system still holds the written pages. A power
+loss or an operating-system crash can drop the last few commits, and the database stays consistent.
+In practice that is the tail of a streaming reply, which the next start marks interrupted.
+Deploy on storage that survives power loss if you need every acknowledged write to persist.
+
 ## Reverse Proxy
 
 ### nginx

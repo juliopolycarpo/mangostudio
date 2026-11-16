@@ -17,6 +17,26 @@ let dbInstance: Kysely<Database> | null = null;
 const dbLogger = createDiagnosticLogger('db');
 
 /**
+ * Sets the connection pragmas the hub relies on.
+ *
+ * A file database runs in WAL mode with `synchronous = NORMAL`: a commit is
+ * appended to the WAL without an fsync, and the WAL is synced when SQLite
+ * checkpoints it into the main file. A hub crash or kill loses nothing, because
+ * the OS still holds the written pages. A power loss or OS crash can drop the
+ * last few commits (the database stays consistent), which for this hub means the
+ * tail of a streaming turn that its checkpoints had not yet synced.
+ *
+ * @example applyConnectionPragmas(new Database(path), path);
+ */
+export function applyConnectionPragmas(sqlite: SQLiteDatabase, dbPath: string): void {
+  if (dbPath !== ':memory:') {
+    sqlite.exec('PRAGMA journal_mode = WAL;');
+    sqlite.exec('PRAGMA synchronous = NORMAL;');
+  }
+  sqlite.exec('PRAGMA foreign_keys = ON;');
+}
+
+/**
  * Returns the singleton Kysely database instance.
  * Creates it on first call with WAL mode enabled.
  */
@@ -32,8 +52,7 @@ export function getDb(): Kysely<Database> {
     }
 
     const sqlite = new SQLiteDatabase(dbPath);
-    if (dbPath !== ':memory:') sqlite.exec('PRAGMA journal_mode = WAL;');
-    sqlite.exec('PRAGMA foreign_keys = ON;');
+    applyConnectionPragmas(sqlite, dbPath);
 
     dbInstance = new Kysely<Database>({
       dialect: createBunSqliteDialect(sqlite),
