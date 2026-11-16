@@ -2,7 +2,7 @@ import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { Plus, TerminalSquare } from 'lucide-react';
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { Button, buttonClassName } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -197,9 +197,7 @@ export function TerminalRailPanel({ chatId, environmentId }: TerminalRailPanelPr
           wrapper paints `canvas` so the extra strip matches the view. */}
       <div className="min-h-0 flex-1 bg-canvas pl-2">
         {activeId ? (
-          <Suspense fallback={null}>
-            <LazyTerminalView key={activeId} sessionId={activeId} onExit={refreshAfterExit} />
-          </Suspense>
+          <LazyTerminalView key={activeId} sessionId={activeId} onExit={refreshAfterExit} />
         ) : null}
       </div>
       {closingSession ? (

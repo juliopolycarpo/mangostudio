@@ -1,14 +1,12 @@
-import { lazy, Suspense } from 'react';
+import { Suspense } from 'react';
 
+import { LazyChunkBoundary } from '@/components/layout/LazyChunkBoundary';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
+import { retryableLazy } from '@/lib/retryable-lazy';
 
 import type { DiffSelection } from './DiffViewer';
-
-const DiffViewerRenderer = lazy(() =>
-  import('./DiffViewer').then((module) => ({ default: module.DiffViewer }))
-);
 
 interface LazyDiffViewerProps {
   readonly chatId: string;
@@ -16,22 +14,29 @@ interface LazyDiffViewerProps {
   readonly onClose: () => void;
 }
 
+const diffViewer = retryableLazy<LazyDiffViewerProps>(() =>
+  import('./DiffViewer').then((module) => ({ default: module.DiffViewer }))
+);
+
 /**
  * Loads the diff viewer on the first opened diff, mirroring `MarkdownContent`:
  * the viewer statically pulls the shiki engine, and every chat would otherwise
  * pay for it at startup whether or not a diff is ever opened.
  *
  * The boundary lives here rather than at each call site so the panel keeps one
- * `lazy()` and one fallback instead of a copy per place a diff can open.
+ * lazy binding, one fallback and one failure state (Retry and Reload) instead of
+ * a copy per place a diff can open.
  *
  * @example
  * <LazyDiffViewer chatId={chatId} selection={diffSelection} onClose={close} />
  */
 export function LazyDiffViewer(props: LazyDiffViewerProps) {
   return (
-    <Suspense fallback={<DiffViewerFallback />}>
-      <DiffViewerRenderer {...props} />
-    </Suspense>
+    <LazyChunkBoundary onRetry={diffViewer.reset}>
+      <Suspense fallback={<DiffViewerFallback />}>
+        <diffViewer.Component {...props} />
+      </Suspense>
+    </LazyChunkBoundary>
   );
 }
 

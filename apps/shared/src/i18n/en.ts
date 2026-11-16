@@ -4264,9 +4264,12 @@ export const messages: Messages = {
       home: 'Back to MangoStudio',
     },
     lazyChunk: {
-      title: 'This panel could not be loaded',
+      title: 'This view could not be loaded',
       hint: 'The connection may have dropped, or MangoStudio was updated while this tab was open. Try again, or reload the page.',
       reload: 'Reload page',
+      staleTitle: 'MangoStudio was updated',
+      staleHint:
+        'This tab is running an older version, whose files are gone. Reload the page to continue.',
     },
     bootstrap: {
       title: 'MangoStudio could not finish loading',

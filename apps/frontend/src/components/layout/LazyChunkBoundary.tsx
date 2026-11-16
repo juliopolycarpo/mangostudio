@@ -1,16 +1,27 @@
 import { TriangleAlert } from 'lucide-react';
-import { Component, type ReactNode } from 'react';
+import { Component, type ReactNode, useEffect, useState } from 'react';
 
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_LG } from '@/lib/icon-sizes';
 import { LazyChunkLoadError } from '@/lib/retryable-lazy';
+import { isRunningStaleBuild } from '@/lib/stale-build';
 
 interface LazyChunkBoundaryProps {
   readonly children: ReactNode;
   /** Forgets the failed import (`RetryableLazy.reset`) before the children render again. */
   readonly onRetry: () => void;
+  /**
+   * Draws something in place of the failure panel, for content that has a
+   * graceful form (markdown falls back to its plain text). The panel's Retry and
+   * Reload do not appear then, so pair it with `onFailure`.
+   */
+  readonly renderFailure?: () => ReactNode;
+  /** Called once when the chunk failed, e.g. to forget it so the next mount asks the network again. */
+  readonly onFailure?: () => void;
+  /** Whether the hub now serves a newer build than this tab. Replaceable in tests. */
+  readonly probeStaleBuild?: () => Promise<boolean>;
 }
 
 interface LazyChunkBoundaryState {
@@ -42,6 +53,10 @@ export class LazyChunkBoundary extends Component<LazyChunkBoundaryProps, LazyChu
     return { error };
   }
 
+  componentDidCatch(error: unknown): void {
+    if (error instanceof LazyChunkLoadError) this.props.onFailure?.();
+  }
+
   private readonly retry = (): void => {
     this.props.onRetry();
     this.setState(NO_ERROR);
@@ -55,26 +70,62 @@ export class LazyChunkBoundary extends Component<LazyChunkBoundaryProps, LazyChu
         ? error
         : new Error('A lazy panel threw a non-Error value.', { cause: error });
     }
-    return <LazyChunkFailure onRetry={this.retry} />;
+    if (this.props.renderFailure) return this.props.renderFailure();
+    return (
+      <LazyChunkFailure
+        onRetry={this.retry}
+        probeStaleBuild={this.props.probeStaleBuild ?? isRunningStaleBuild}
+      />
+    );
   }
 }
 
-function LazyChunkFailure({ onRetry }: { readonly onRetry: () => void }) {
+interface LazyChunkFailureProps {
+  readonly onRetry: () => void;
+  readonly probeStaleBuild: () => Promise<boolean>;
+}
+
+/**
+ * Two situations look alike from the failed import and need different advice:
+ * a dropped connection (Retry can work) and a hub that was upgraded under this
+ * tab (the hashed chunk name is gone, so only Reload can). The panel offers
+ * both at first and, once the probe says the build is stale, only Reload.
+ * It never reloads on its own.
+ */
+function LazyChunkFailure({ onRetry, probeStaleBuild }: LazyChunkFailureProps) {
   const { t } = useI18n();
+  const [stale, setStale] = useState(false);
+
+  useEffect(() => {
+    let current = true;
+    void probeStaleBuild().then((isStale) => {
+      if (current) setStale(isStale);
+    });
+    return () => {
+      current = false;
+    };
+  }, [probeStaleBuild]);
+
   return (
-    <div role="alert" data-testid="lazy-chunk-failure" className="h-full">
+    <div role="alert" data-testid="lazy-chunk-failure" data-stale-build={stale} className="h-full">
       <EmptyState
         icon={<TriangleAlert aria-hidden size={ICON_LG} />}
         tone="warning"
-        title={t.errors.lazyChunk.title}
-        hint={t.errors.lazyChunk.hint}
+        title={stale ? t.errors.lazyChunk.staleTitle : t.errors.lazyChunk.title}
+        hint={stale ? t.errors.lazyChunk.staleHint : t.errors.lazyChunk.hint}
         className="h-full"
         action={
           <div className="flex gap-2">
-            <Button size="sm" onClick={onRetry}>
-              {t.common.retry}
-            </Button>
-            <Button size="sm" variant="secondary" onClick={() => window.location.reload()}>
+            {stale ? null : (
+              <Button size="sm" onClick={onRetry}>
+                {t.common.retry}
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant={stale ? 'primary' : 'secondary'}
+              onClick={() => window.location.reload()}
+            >
               {t.errors.lazyChunk.reload}
             </Button>
           </div>

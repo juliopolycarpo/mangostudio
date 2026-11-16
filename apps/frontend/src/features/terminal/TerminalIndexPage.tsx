@@ -1,7 +1,7 @@
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { Plus, TerminalSquare, X } from 'lucide-react';
-import { Suspense, useState } from 'react';
+import { useState } from 'react';
 
 import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
@@ -216,9 +216,7 @@ export function TerminalIndexPage() {
 
       {activeId ? (
         <div className="min-h-0 flex-1 overflow-hidden rounded-md border border-stroke">
-          <Suspense fallback={null}>
-            <LazyTerminalView key={activeId} sessionId={activeId} />
-          </Suspense>
+          <LazyTerminalView key={activeId} sessionId={activeId} />
         </div>
       ) : null}
     </div>
