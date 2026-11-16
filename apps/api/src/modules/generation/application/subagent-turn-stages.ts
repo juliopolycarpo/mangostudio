@@ -198,6 +198,8 @@ export async function runSubagentStreamLoop(
     assertSubagentActive(input.signal);
     const pendingCalls = new Map<string, { name: string; argsStr: string }>();
     let turnCompleted = false;
+    // Scoped to the iteration: a tool round between two thoughts separates them.
+    let openReasoningEntry: { role: 'system'; text: string } | undefined;
 
     for await (const event of generateAgentTurnStream({
       userId: input.userId,
@@ -227,12 +229,24 @@ export async function runSubagentStreamLoop(
       },
     })) {
       assertSubagentActive(input.signal);
+      // Reasoning arrives per token. The stored trace is embedded in the parent
+      // message row that every checkpoint rewrites, so a run of consecutive
+      // deltas is one transcript entry; any other event ends the run.
+      if (event.type === 'reasoning_delta') {
+        if (event.text) {
+          if (openReasoningEntry) {
+            openReasoningEntry.text += event.text;
+          } else {
+            openReasoningEntry = { role: 'system', text: event.text };
+            session.transcript.push(openReasoningEntry);
+          }
+        }
+        continue;
+      }
+      openReasoningEntry = undefined;
       if (event.type === 'assistant_text_delta') {
         session.summary += event.text;
         input.onEvent?.({ type: 'text', agentId: runtime.profile.id, text: event.text });
-      }
-      if (event.type === 'reasoning_delta') {
-        session.transcript.push({ role: 'system', text: event.text });
       }
       if (event.type === 'tool_call_started') {
         pendingCalls.set(event.callId, { name: event.name ?? '', argsStr: '' });
