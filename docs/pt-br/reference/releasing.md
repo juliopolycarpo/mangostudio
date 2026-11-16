@@ -449,7 +449,9 @@ congelada. É evidência histórica desse par versionado, não uma promessa de q
 uma versão raiz atual tem crate canary ou de que o launcher resolve o canary mais
 recente. O launcher constrói a URL da release a partir da própria versão exata
 do crate e faz três tentativas totais de download (duas repetições); launchers
-`*-canary` atualizam essa instalação versionada em toda execução. Verifique o
+`*-canary` comparam, em toda execução, a entrada do `SHA256SUMS` da release com
+o digest registrado ao lado dessa instalação versionada e só baixam o arquivo
+quando ele difere. Verifique o
 registro e os assets correspondentes antes de usar um par antigo hoje.
 
 ### Disponibilidade dos scripts instaladores

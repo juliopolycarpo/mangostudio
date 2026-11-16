@@ -17,8 +17,16 @@ verifies it against the release `SHA256SUMS`, and unpacks it into
 Every later run execs the real binary directly with your arguments and
 environment untouched, except for two markers — `MANGOSTUDIO_LAUNCHER` and
 `MANGOSTUDIO_LAUNCHER_PATH` — that let the binary tell a cargo install apart
-from any other. Canary launcher versions (`*-canary`) re-download and re-verify that versioned
-install on every run. This resolves the launcher’s exact version, not the newest
+from any other. Canary launcher versions (`*-canary`) check that versioned
+install on every run: one small request for the release's `SHA256SUMS`, compared
+with the archive digest recorded beside the install (`.archive-sha256`, written
+only after a verified, complete unpack). The archive is downloaded again only
+when the digests differ or the install is missing, incomplete or has no recorded
+digest. If that request fails and an install exists, the launcher warns and
+starts the installed build; with no install it fails as a first install does.
+Racing launchers serialize on a lock file in the install root. A refresh that
+cannot move a running install aside (a Windows hub holding its files) keeps the
+installed build and says so. This resolves the launcher’s exact version, not the newest
 canary release. See the [historical Cargo canary receipt](../../docs/reference/releasing.md#historical-cargo-canary-receipt)
 for the pre-2026-09-16 publication record.
 
