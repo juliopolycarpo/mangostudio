@@ -209,6 +209,30 @@ path = "/var/lib/mangostudio/database.sqlite"
 
 SQLite com WAL mode é adequado para deploys single-server. O arquivo de banco deve ser incluído em rotinas de backup regulares.
 
+O hub roda o banco em WAL mode e, depois que as migrações terminam, baixa `PRAGMA synchronous` de `FULL`
+para `NORMAL`. Em `NORMAL`, um commit é acrescentado ao write-ahead log sem fsync, e o log é sincronizado
+quando o SQLite faz o checkpoint dele no arquivo principal. Se o sistema de arquivos não der WAL mode ao
+hub, ele mantém `FULL` e registra `synchronous_kept_full`.
+
+O que uma falha custa depende do que falhou:
+
+- **O hub cai ou é encerrado à força.** Nada se perde: o sistema operacional ainda guarda as páginas
+  escritas.
+- **Queda de energia ou falha do sistema operacional.** Os últimos segundos de commits podem se perder: o
+  final de uma resposta em streaming (a próxima inicialização marca esse turno como interrompido) e as
+  sessões mais recentes (esses usuários entram de novo). O banco continua consistente, porque o SQLite
+  nunca aplica metade de um commit.
+- **Escritas que guardam um passo que o banco não consegue desfazer** são gravadas em `FULL`, e o fsync do
+  log também persiste todo commit anterior a elas. São o checkpoint que registra uma chamada de
+  ferramenta como em execução (qualquer ferramenta que não seja uma leitura simples), cada imagem gerada
+  concluída, o recibo gravado antes de um turno de agente externo ser enviado e o resultado de uma
+  geração de imagem avulsa. Isso estreita a janela em que uma queda de energia faz o hub executar esse
+  passo uma segunda vez; não a fecha. A ferramenta começa enquanto o marcador é gravado, então uma queda
+  nesses poucos milissegundos ainda mostra a chamada como não iniciada.
+
+As migrações rodam antes de a conexão ser rebaixada, então uma queda de energia durante uma atualização
+não pode manter as mudanças de uma migração e perder o registro de que ela rodou.
+
 ## Reverse Proxy
 
 ### nginx

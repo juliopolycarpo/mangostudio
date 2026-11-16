@@ -263,12 +263,27 @@ path = "/var/lib/mangostudio/database.sqlite"
 
 SQLite with WAL mode is suitable for single-server deployments. The database file should be backed up regularly.
 
-The hub opens the database with `PRAGMA synchronous = NORMAL`. A commit is appended to the write-ahead
-log without an fsync, and the log is synced when SQLite checkpoints it into the main file. Killing or
-crashing the hub loses nothing, because the operating system still holds the written pages. A power
-loss or an operating-system crash can drop the last few commits, and the database stays consistent.
-In practice that is the tail of a streaming reply, which the next start marks interrupted.
-Deploy on storage that survives power loss if you need every acknowledged write to persist.
+The hub runs the database in WAL mode and, once its migrations have finished, lowers `PRAGMA synchronous`
+from `FULL` to `NORMAL`. At `NORMAL` a commit is appended to the write-ahead log without an fsync, and
+the log is synced when SQLite checkpoints it into the main file. If the file system does not give the
+hub WAL mode, it keeps `FULL` and logs `synchronous_kept_full`.
+
+What a failure costs depends on what failed:
+
+- **The hub crashes or is killed.** Nothing is lost: the operating system still holds the written pages.
+- **Power loss or an operating-system crash.** The last few seconds of commits can be lost: the tail of a
+  streaming reply (the next start marks that turn interrupted) and the most recent sessions (those users
+  sign in again). The database stays consistent, because SQLite never applies half a commit.
+- **Writes that guard a step the database cannot undo** commit at `FULL`, and an fsync of the log also
+  persists every commit before it. They are the checkpoint that records a tool call as running (any
+  tool that is not a plain read), each finished generated image, the receipt written before an
+  external-agent turn is submitted, and the result of a standalone image generation. This narrows the
+  window in which a power loss lets the hub run such a step a second time; it does not close it. The
+  tool starts while its marker is being written, so a power loss in those few milliseconds still shows
+  the call as not started.
+
+Migrations run before the connection is lowered, so a power loss during an upgrade cannot keep a
+migration's changes and lose the record that it ran.
 
 ## Reverse Proxy
 

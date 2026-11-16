@@ -757,6 +757,8 @@ Seams (one line each, all fire-and-forget):
 Open these first:
 
 - `apps/api/src/db/database.ts`
+- `apps/api/src/db/durability.ts` (`relaxDurability` after migrations; `runDurably` for a write that
+  must survive power loss)
 - `apps/api/src/db/types.ts`
 - `apps/api/src/db/serializers.ts`
 - `apps/api/src/db/migrations/`

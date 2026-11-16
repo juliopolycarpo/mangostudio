@@ -316,8 +316,10 @@ schema-derived choices.
 ## Database
 
 SQLite via Kysely. The ordered registry in `apps/api/src/db/migrations/index.ts`
-is the source of truth for migrations. The hub runs the file database in WAL mode with
-`synchronous = NORMAL` (set in `apps/api/src/db/database.ts`); the durability trade-off is described in
+is the source of truth for migrations. The hub runs the file database in WAL mode
+(`apps/api/src/db/database.ts`) and lowers `synchronous` to `NORMAL` once its migrations have
+finished; writes that guard a step the database cannot undo commit at `FULL` through `runDurably`
+(`apps/api/src/db/durability.ts`). What a power loss can and cannot lose is described in
 [deployment](../operations/deployment.md#database). Table families include:
 
 - Core tables: `chats`, `messages`, `generated_images`, `chat_attachments`
