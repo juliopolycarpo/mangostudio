@@ -283,7 +283,12 @@ verifica os exports de compatibilidade e as escolhas derivadas dos schemas.
 ## Banco De Dados
 
 SQLite via Kysely. O registro ordenado em `apps/api/src/db/migrations/index.ts`
-é a fonte de verdade das migrações. As famílias de tabelas incluem:
+é a fonte de verdade das migrações. O hub roda o banco de arquivo em WAL mode
+(`apps/api/src/db/database.ts`) e baixa `synchronous` para `NORMAL` depois que as migrações terminam;
+escritas que guardam um passo que o banco não consegue desfazer, e revogações (tokens de pareamento,
+chaves de API, as requisições de autenticação que apagam ou trocam uma credencial), são gravadas em `FULL` por `runDurably` e
+`withFullDurability` (`apps/api/src/db/durability.ts`). O que uma queda de energia pode e não pode perder está em
+[deployment](../operations/deployment.md#banco-de-dados). As famílias de tabelas incluem:
 
 - Tabelas centrais: `chats`, `messages`, `generated_images`, `chat_attachments`
 - Tabelas de auth: schema padrão do Better Auth (5 tabelas)

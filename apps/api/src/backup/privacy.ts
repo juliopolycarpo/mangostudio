@@ -5,6 +5,8 @@ const PORTABLE_TABLES = new Set([
   'user',
   'chats',
   'messages',
+  // A turn running during the capture keeps its latest checkpoints here, not in `messages`.
+  'message_checkpoint_deltas',
   'generated_images',
   'chat_attachments',
   'user_app_settings',
@@ -54,6 +56,11 @@ export function redactBackupDatabase(db: Database, checkpoints: boolean): void {
   if (tables.has('chats'))
     db.exec('UPDATE chats SET lastProviderState=NULL, lastContextState=NULL');
   if (tables.has('messages')) db.exec('UPDATE messages SET providerState=NULL');
+  // A checkpoint delta carries provider state too; without the key the fold keeps the
+  // row's value, which is already null.
+  if (tables.has('message_checkpoint_deltas')) {
+    db.exec("UPDATE message_checkpoint_deltas SET delta=json_remove(delta, '$.providerState')");
+  }
   // First-run settings refer to these receipts. Keep their identity and verdict,
   // but neither retain private result snapshots nor claim old work is still live.
   if (tables.has('product_operations')) {

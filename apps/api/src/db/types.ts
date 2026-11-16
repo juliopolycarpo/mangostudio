@@ -75,6 +75,13 @@ interface MessagesTable {
   providerState: string | null; // opaque provider continuity JSON
 }
 
+interface MessageCheckpointDeltasTable {
+  messageId: string;
+  /** Order of application within the message; the writer counts up from 1. */
+  seq: number;
+  delta: string; // JSON-serialized CheckpointDelta
+}
+
 interface GeneratedImagesTable {
   id: string;
   userId: string;
@@ -597,6 +604,7 @@ export interface Database {
   user_agent_settings: UserAgentSettingsTable;
   mcp_servers: McpServersTable;
   chat_todos: ChatTodosTable;
+  message_checkpoint_deltas: MessageCheckpointDeltasTable;
   file_checkpoints: FileCheckpointsTable;
   message_uncheckpointed_sources: MessageUncheckpointedSourcesTable;
   environment_install_runs: EnvironmentInstallRunsTable;

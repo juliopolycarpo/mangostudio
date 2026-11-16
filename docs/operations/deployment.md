@@ -263,6 +263,35 @@ path = "/var/lib/mangostudio/database.sqlite"
 
 SQLite with WAL mode is suitable for single-server deployments. The database file should be backed up regularly.
 
+The hub runs the database in WAL mode and, once its migrations have finished, lowers `PRAGMA synchronous`
+from `FULL` to `NORMAL`. At `NORMAL` a commit is appended to the write-ahead log without an fsync, and
+the log is synced when SQLite checkpoints it into the main file. If the file system does not give the
+hub WAL mode, it keeps `FULL` and logs `synchronous_kept_full`.
+
+What a failure costs depends on what failed:
+
+- **The hub crashes or is killed.** Nothing is lost: the operating system still holds the written pages.
+- **Power loss or an operating-system crash.** Any commit from roughly the last 30 seconds (the
+  operating system's writeback interval) can be lost, unless it is one of the writes below. That is the
+  tail of a streaming reply (the next start marks that turn interrupted), recent sign-ins (those users
+  sign in again), settings changes and other ordinary edits. The database stays consistent, because
+  SQLite never applies half a commit.
+- **Always synced (`FULL`).** Two kinds of write commit at `FULL`, and an fsync of the log also persists
+  every commit before it:
+  - Tool side-effect markers: the checkpoint that records a tool call as running (any tool that is not
+    a plain read), each finished generated image, the receipt written before an external-agent turn is
+    submitted, and the result of a standalone image generation. This narrows the window in which a
+    power loss lets the hub run such a step a second time; it does not close it. The tool starts while
+    its marker is being written, so a power loss in those few milliseconds still shows the call as not
+    started.
+  - Revocations: replacing or revoking a runtime pairing token, revoking an API key, and the auth
+    requests that delete or rotate a credential (sign-out, revoking one or all sessions, changing or
+    resetting a password, updating or deleting an API key). Sign-in, sign-up and session reads stay at
+    `NORMAL`. A credential you were told is gone does not come back.
+
+Migrations run at `FULL`, before the connection is lowered, so they keep the same durability as before
+this change and the window in which a power loss can interrupt an upgrade is no larger than it was.
+
 ## Reverse Proxy
 
 ### nginx

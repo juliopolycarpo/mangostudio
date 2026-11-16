@@ -5,6 +5,7 @@ import {
   compactChatUseCase,
   summarizeToNewChatUseCase,
 } from '../../../../src/modules/chats/application/context-compaction';
+import { insertCheckpointDelta } from '../../../../src/modules/messages/infrastructure/message-checkpoint-deltas';
 import {
   getProvider,
   registerProvider,
@@ -90,5 +91,62 @@ describe('summarizeToNewChatUseCase realtime invalidation', () => {
     await summarizeToNewChatUseCase({ chatId, userId, model: modelId }, db);
 
     expect(bus.activityFramesFor(userId)).toHaveLength(1);
+  });
+});
+
+describe('compactChatUseCase during a generating turn', () => {
+  it('summarises the turn as its last checkpoint left it, not as its last full rewrite', async () => {
+    const db = getDb();
+    const modelId = `compaction-generating-${Date.now()}`;
+    const prompts: string[] = [];
+    previousOpenAICompatibleProvider = (() => {
+      try {
+        return getProvider('openai-compatible');
+      } catch {
+        return null;
+      }
+    })();
+    registerProvider({
+      providerType: 'openai-compatible',
+      generateText: (request) => {
+        prompts.push(request.prompt);
+        return Promise.resolve({ text: 'Summary.' });
+      },
+      listModels: () => Promise.resolve([]),
+      validateApiKey: () => Promise.resolve(),
+      resolveApiKey: () => Promise.resolve('test-key'),
+    });
+    const { userId, chatId } = await seedCompactableChat(modelId);
+    // The row holds the turn's first checkpoint; the rest of the answer is in deltas.
+    const messageId = `compaction-generating-turn-${chatId}`;
+    await db
+      .insertInto('messages')
+      .values({
+        id: messageId,
+        chatId,
+        role: 'ai',
+        text: 'The answer begins',
+        timestamp: Date.now() - 500,
+        isGenerating: 1,
+        interactionMode: 'agent',
+        parts: JSON.stringify([{ type: 'text', text: 'The answer begins' }]),
+      })
+      .execute();
+    await insertCheckpointDelta(
+      {
+        messageId,
+        seq: 1,
+        deltaJson: JSON.stringify({
+          text: ' and then keeps going to its end',
+          ops: [{ i: 0, append: ' and then keeps going to its end' }],
+        }),
+      },
+      db
+    );
+
+    await compactChatUseCase({ chatId, userId, model: modelId }, db);
+
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain('Assistant: The answer begins and then keeps going to its end');
   });
 });

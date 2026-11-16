@@ -16,7 +16,7 @@ use crate::error::{RemoteError, codes};
 use crate::session::{CallContext, HandlerGuard, Session};
 use crate::validate::{RPC_DISCOVER, ValidationError};
 
-use super::{Contract, check_params, check_result, decode};
+use super::{Contract, ReasonStyle, check_params, check_result, decode};
 
 /// Answers one request already past its schema and guard checks; erases
 /// the handler's own parameter and result types so [`ContractHandlers`] can
@@ -250,17 +250,14 @@ pub(super) fn serve(
 ) -> Result<ServeGuard, ValidationError> {
     let mut guards = Vec::with_capacity(handlers.handlers.len() + 1);
     if options.discover {
-        // Serialised once here, not per request: `rpc.discover` answers the
-        // same document every time, and a catalog that cannot serialise must
-        // fail this registration rather than every call to it — the same
-        // "nothing left behind to unregister" rule the TypeScript SDK follows
-        // by building its catalog before it registers any handler.
-        let catalog = serde_json::to_value(&contract.catalog).map_err(|error| ValidationError {
-            field: "catalog".to_string(),
-            received: error.to_string(),
-            expected: "a catalog that serialises to JSON".to_string(),
-        })?;
-        let catalog = Arc::new(catalog);
+        // The handler holds the contract's catalog, not a rendering of it:
+        // building the JSON document here would deep-copy the whole catalog
+        // for every connection (about 1 MiB and 18,000 allocations for a
+        // 2 MiB one) although a peer asks for it rarely or never. It is
+        // rendered per answer instead. A catalog is plain `Value`s and
+        // strings, which `serde_json` always serialises, so there is no
+        // registration-time failure to report.
+        let catalog = Arc::clone(&contract.catalog);
         guards.push(
             session.handle(RPC_DISCOVER, move |params: Value, _context| {
                 let catalog = Arc::clone(&catalog);
@@ -272,13 +269,22 @@ pub(super) fn serve(
                         )
                         .with_detail("method", RPC_DISCOVER.to_string()));
                     }
-                    Ok((*catalog).clone())
+                    serde_json::to_value(&*catalog).map_err(|error| {
+                        RemoteError::new(
+                            codes::INTERNAL,
+                            format!(
+                                "The catalog of \"{}\" did not serialise: {error}.",
+                                catalog.name
+                            ),
+                        )
+                        .with_detail("method", RPC_DISCOVER.to_string())
+                    })
                 }
             }),
         );
     }
     for (method, erased) in handlers.handlers {
-        let compiled = contract.method(&method).ok_or_else(|| ValidationError {
+        let (declared, compiled) = contract.method(&method).ok_or_else(|| ValidationError {
             field: "handlers".to_string(),
             received: method.clone(),
             expected: format!(
@@ -289,7 +295,7 @@ pub(super) fn serve(
         let policy = Arc::new(MethodPolicy {
             params_validator: Arc::clone(&compiled.params),
             result_validator: Arc::clone(&compiled.result),
-            capabilities: compiled.definition.capabilities.clone(),
+            capabilities: declared.capabilities.clone(),
             guard: options.guard.clone(),
             validate_results: options.validate_results,
         });
@@ -328,7 +334,12 @@ async fn answer(
     }
     let result = erased.call(&method, params, context).await?;
     if policy.validate_results {
-        check_result(&method, &policy.result_validator, &result)?;
+        check_result(
+            &method,
+            &policy.result_validator,
+            &result,
+            ReasonStyle::Quoted,
+        )?;
     }
     Ok(result)
 }

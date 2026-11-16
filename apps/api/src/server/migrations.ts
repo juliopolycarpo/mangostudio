@@ -6,6 +6,7 @@ import { type MigrationResult, Migrator } from 'kysely/migration';
 
 import { acquireCaptureLock } from '../backup/capture-lock';
 import { getDb } from '../db/database';
+import { relaxDurability } from '../db/durability';
 import { allMigrations } from '../db/migrations';
 import { getConfig } from '../lib/config';
 
@@ -54,7 +55,14 @@ export async function prepareToolchainDatabase(
   }
 }
 
-/** Migrate the database to the latest schema; exit(1) on failure. // Usage: await runMigrations() */
+/**
+ * Migrate the database to the latest schema; exit(1) on failure. Migrations run
+ * while the connection still syncs every commit, and only then does it drop to
+ * `synchronous = NORMAL`: Kysely's SQLite adapter does not wrap a migration in a
+ * transaction, so after a power loss at NORMAL a migration's DDL could survive
+ * without its bookkeeping row and the next start would run it again.
+ * // Usage: await runMigrations()
+ */
 export async function runMigrations(db = getDb()): Promise<void> {
   const { error, results } = await createMigrator(db).migrateToLatest();
   reportMigrationResults(results);
@@ -63,6 +71,7 @@ export async function runMigrations(db = getDb()): Promise<void> {
     console.error('[migrate] Migration failed:', error);
     process.exit(1);
   }
+  await relaxDurability(db);
 }
 
 /** Print a per-migration success/failure line. */

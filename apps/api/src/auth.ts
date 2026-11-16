@@ -6,21 +6,31 @@ import {
   type ApiKeyScope,
 } from '@mangostudio/shared/api-keys';
 import { betterAuth } from 'better-auth';
+import type { Kysely } from 'kysely';
 
 import { getDb } from './db/database';
+import type { Database } from './db/types';
 import { assertValidAuthSecret, getConfig } from './lib/config';
 
-function createAuthInstance() {
+/** Where Better Auth serves its endpoints; the route mounts the handler under it. */
+export const AUTH_BASE_PATH = '/api/auth';
+
+/**
+ * Builds a Better Auth instance over `db`. The app uses the memoized `getAuth()`
+ * over the shared database; a test passes its own database to look at how the
+ * library commits to it.
+ */
+export function createAuthInstance(db: Kysely<Database> = getDb()) {
   const config = getConfig();
   assertValidAuthSecret(config.auth.secret);
 
   return betterAuth({
     database: {
-      db: getDb(),
+      db,
       type: 'sqlite',
     },
 
-    basePath: '/api/auth',
+    basePath: AUTH_BASE_PATH,
 
     emailAndPassword: {
       enabled: true,

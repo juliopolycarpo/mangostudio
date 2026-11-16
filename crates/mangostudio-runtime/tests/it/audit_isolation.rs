@@ -87,7 +87,7 @@ async fn a_successful_call_records_outcome_ok() {
 ///
 /// Demonstrated to matter: swapping `Registry::implement`'s own
 /// `check_result` call for `ServeOptions::validate_results = true` (the
-/// refactor `crate::result_check`'s docblock exists to forbid) makes every
+/// refactor `Registry::implement`'s docs exist to forbid) makes every
 /// other test in this crate keep passing while this one starts failing,
 /// because that refactor validates only *after* `Contract::serve`'s own
 /// pipeline has already returned the unchecked value to this wrapper, which
@@ -127,6 +127,50 @@ async fn a_schema_invalid_result_is_never_recorded_as_ok() {
         "a schema-invalid result must never be recorded as Outcome::Ok"
     );
     assert_eq!(entries[0].code.as_deref(), Some(codes::INTERNAL));
+}
+
+/// The wire error for a schema-invalid result names the failing instance
+/// path and never quotes the result, since a result can hold data only the
+/// runtime has. The same shape the runtime has always reported, now produced
+/// by the contract's own compiled schema.
+#[tokio::test]
+async fn a_schema_invalid_result_names_its_path_and_masks_its_value() {
+    let secret = "CANARY-RESULT-5e1d";
+    let registry =
+        Registry::with_ports(Arc::new(RecordingAudit::new()) as _, Arc::new(SystemClock))
+            .implement(
+                "terminal.list",
+                move |_params: serde_json::Value, _context| async move {
+                    Ok::<_, mango_protocol::RemoteError>(json!({ "sessions": secret }))
+                },
+            );
+    let (hub, _runtime) =
+        serve_pair(registry, Arc::new(crate::support::GrantingAuthorization)).await;
+
+    let error = within("the request", hub.request("terminal.list", json!({})))
+        .await
+        .expect_err("a schema-invalid result must never reach the wire as success");
+
+    assert_eq!(error.code, codes::INTERNAL);
+    let details = error.details.clone().unwrap_or_default();
+    assert_eq!(
+        details.get("path"),
+        Some(&json!("/sessions")),
+        "expected details.path: /sessions | received: {details:?}"
+    );
+    assert_eq!(details.get("method"), Some(&json!("terminal.list")));
+    assert!(
+        error
+            .message
+            .starts_with("Result of \"terminal.list\" does not match the contract at /sessions: "),
+        "expected the message to name the method and /sessions | received: {}",
+        error.message
+    );
+    assert!(
+        !error.message.contains(secret) && !format!("{details:?}").contains(secret),
+        "expected the result value masked | received: {} {details:?}",
+        error.message
+    );
 }
 
 #[tokio::test]

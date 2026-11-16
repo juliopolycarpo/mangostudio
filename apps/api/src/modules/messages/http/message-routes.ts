@@ -20,6 +20,7 @@ import { createMessageUseCase } from '../application/create-message';
 import { listGalleryUseCase } from '../application/list-gallery';
 import { updateMessageUseCase } from '../application/update-message';
 import { InvalidGalleryCursorError } from '../domain/gallery-cursor';
+import { GeneratingMessageTextEditError } from '../domain/message-generating';
 import { MessageNotFoundError } from '../domain/message-ownership';
 
 export const messageRoutes = (app: Elysia) =>
@@ -90,7 +91,10 @@ export const messageRoutes = (app: Elysia) =>
         }
       })
 
-      /** Update a message in a chat owned by the user. */
+      /**
+       * Update a message in a chat owned by the user. A `text` patch on a message that is
+       * still generating answers 409 unless the patch also sets `isGenerating: false`.
+       */
       .put(
         '/:id',
         {
@@ -119,6 +123,10 @@ export const messageRoutes = (app: Elysia) =>
             if (err instanceof MessageNotFoundError) {
               set.status = 404;
               return { error: 'Message not found', code: ERROR_CODES.NOT_FOUND };
+            }
+            if (err instanceof GeneratingMessageTextEditError) {
+              set.status = 409;
+              return { error: err.message, code: ERROR_CODES.CONFLICT };
             }
             throw err;
           }

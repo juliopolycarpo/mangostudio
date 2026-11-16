@@ -17,6 +17,22 @@ let dbInstance: Kysely<Database> | null = null;
 const dbLogger = createDiagnosticLogger('db');
 
 /**
+ * Sets the connection pragmas the hub relies on.
+ *
+ * A file database runs in WAL mode. `synchronous` stays at SQLite's default,
+ * `FULL`, here: the hub lowers it with `relaxDurability` only after its
+ * migrations have finished (see `db/durability.ts`), because Kysely's SQLite
+ * adapter does not run a migration in a transaction and a lost bookkeeping row
+ * would make the next start re-run a migration that is not idempotent.
+ *
+ * @example applyConnectionPragmas(new Database(path), path);
+ */
+export function applyConnectionPragmas(sqlite: SQLiteDatabase, dbPath: string): void {
+  if (dbPath !== ':memory:') sqlite.exec('PRAGMA journal_mode = WAL;');
+  sqlite.exec('PRAGMA foreign_keys = ON;');
+}
+
+/**
  * Returns the singleton Kysely database instance.
  * Creates it on first call with WAL mode enabled.
  */
@@ -32,8 +48,7 @@ export function getDb(): Kysely<Database> {
     }
 
     const sqlite = new SQLiteDatabase(dbPath);
-    if (dbPath !== ':memory:') sqlite.exec('PRAGMA journal_mode = WAL;');
-    sqlite.exec('PRAGMA foreign_keys = ON;');
+    applyConnectionPragmas(sqlite, dbPath);
 
     dbInstance = new Kysely<Database>({
       dialect: createBunSqliteDialect(sqlite),

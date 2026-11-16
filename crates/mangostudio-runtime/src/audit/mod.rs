@@ -18,7 +18,7 @@
 //! pass applied to whatever survives that whitelist, which is not
 //! params-shape-aware at all. Building the whitelist blind, with no real
 //! method params to check it against, would risk exactly the leak this
-//! crate's other seams (`panic::catch_panics`, `result_check`) exist to
+//! crate's other seams (`panic::catch_panics`, the masked result check) exist to
 //! prevent; the redaction pass has no such dependency and is mirrored in
 //! full. The change that designs that whitelist against the implemented
 //! filesystem and command params also adds `params` to `AuditEntry`.

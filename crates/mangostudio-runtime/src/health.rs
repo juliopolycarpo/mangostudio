@@ -1109,7 +1109,6 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    use mangostudio_runtime_contract::catalog::method;
     use tokio_util::sync::CancellationToken;
 
     use super::{
@@ -1118,8 +1117,8 @@ mod tests {
     };
     use crate::blocking::{MAX_CONCURRENT_BLOCKING_TASKS, pool_saturation_test_lock, run_blocking};
     use crate::registry::Registry;
-    use crate::result_check::{check_result, compile_result_schema};
     use crate::runtime_home::RuntimeSlot;
+    use crate::serve::runtime_contract;
     // Every caller of these lives behind `#[cfg(unix)]` below (the `git`
     // probe tests write and run a real Unix shell script) — gating the
     // imports the same way keeps a Windows build from reporting them (and,
@@ -2052,9 +2051,8 @@ mod tests {
             .await
             .expect("a fresh host slot must answer");
 
-        let declared = method("runtime.health").expect("the catalog declares runtime.health");
-        let validator = compile_result_schema(&declared.result);
-        check_result("runtime.health", &validator, &result)
+        runtime_contract()
+            .check_result("runtime.health", &result)
             .expect("the real handler output must validate against its own schema");
 
         // A result missing a required field must be caught, not silently
@@ -2062,7 +2060,8 @@ mod tests {
         // claims to cover, not merely that the happy path exists.
         let mut corrupted = result.clone();
         corrupted.as_object_mut().unwrap().remove("allow");
-        let error = check_result("runtime.health", &validator, &corrupted)
+        let error = runtime_contract()
+            .check_result("runtime.health", &corrupted)
             .expect_err("dropping a required field must fail validation");
         assert!(error.message.contains("allow"));
     }

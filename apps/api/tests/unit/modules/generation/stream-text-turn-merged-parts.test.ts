@@ -12,9 +12,7 @@ import { describe, expect, it } from 'bun:test';
 
 import { mergeMessageParts } from '@mangostudio/shared/generation';
 import type { MessagePart } from '@mangostudio/shared/types';
-import type { Kysely } from 'kysely';
 
-import type { Database } from '../../../../src/db/types';
 import {
   emitAgentStreamEvent,
   type StreamTextTurnSession,
@@ -22,6 +20,7 @@ import {
 import type { StreamEvent } from '../../../../src/modules/generation/application/stream-text-turn-types';
 import {
   createTurnCheckpointPart,
+  type TurnCheckpointStore,
   TurnCheckpointWriter,
 } from '../../../../src/modules/generation/application/turn-checkpoint';
 import type { AgentEvent, ModelCapabilities } from '../../../../src/services/providers/types';
@@ -35,38 +34,23 @@ const CAPABILITIES: ModelCapabilities = {
 };
 
 interface RecordedCheckpointWrite {
-  readonly textBytes: number;
-  readonly partsBytes: number;
-  readonly partCount: number;
+  readonly kind: 'rewrite' | 'delta';
+  /** Characters handed to the store for this checkpoint. */
+  readonly bytes: number;
 }
 
-/** Named fake for the `messages` checkpoint update: records each row it would write. */
-class RecordingCheckpointDb {
+/** Named fake for the checkpoint store: records what each checkpoint would write. */
+class RecordingCheckpointStore implements TurnCheckpointStore {
   readonly writes: RecordedCheckpointWrite[] = [];
 
-  asKysely(): Kysely<Database> {
-    return this as unknown as Kysely<Database>;
+  rewriteRow(row: { text: string; partsJson: string }): Promise<void> {
+    this.writes.push({ kind: 'rewrite', bytes: row.text.length + row.partsJson.length });
+    return Promise.resolve();
   }
 
-  updateTable(table: string) {
-    if (table !== 'messages') throw new Error(`expected table: messages | received: ${table}`);
-    let values = { text: '', parts: '[]' };
-    const update = {
-      set: (next: { text: string; parts: string }) => {
-        values = next;
-        return update;
-      },
-      where: () => update,
-      execute: () => {
-        this.writes.push({
-          textBytes: values.text.length,
-          partsBytes: values.parts.length,
-          partCount: (JSON.parse(values.parts) as MessagePart[]).length,
-        });
-        return Promise.resolve();
-      },
-    };
-    return update;
+  appendDelta(_seq: number, deltaJson: string): Promise<void> {
+    this.writes.push({ kind: 'delta', bytes: deltaJson.length });
+    return Promise.resolve();
   }
 }
 
@@ -198,8 +182,8 @@ describe('emitAgentStreamEvent — streamed deltas extend the trailing part', ()
 });
 
 describe('emitAgentStreamEvent — checkpoint size with merged parts', () => {
-  it('writes each checkpoint at about the size of the answer so far', async () => {
-    const db = new RecordingCheckpointDb();
+  it('writes each checkpoint at about the size of the text it adds', async () => {
+    const store = new RecordingCheckpointStore();
     const session = makeSession();
     const checkpoint = createTurnCheckpointPart({
       turnId: 'turn-merged-parts',
@@ -210,7 +194,7 @@ describe('emitAgentStreamEvent — checkpoint size with merged parts', () => {
     });
     session.allParts.push(checkpoint);
     session.checkpointWriter = new TurnCheckpointWriter({
-      db: db.asKysely(),
+      store,
       chatId: session.chatId,
       messageId: 'turn-merged-parts',
       checkpoint,
@@ -223,17 +207,19 @@ describe('emitAgentStreamEvent — checkpoint size with merged parts', () => {
     await emitAll(session, textDeltas(16_384));
     await session.checkpointWriter.flush();
 
-    const last = db.writes.at(-1);
-    expect(db.writes).toHaveLength(128);
-    expect(last).toMatchObject({ textBytes: 65_536, partCount: 2 });
-    // Characters handed to the row update over the whole turn: 9.46M with
-    // merged parts, 36.93M with one part per delta.
-    const turnChars = db.writes.reduce((sum, write) => sum + write.textBytes + write.partsBytes, 0);
-    expect(turnChars).toBeLessThan(10_000_000);
-    // Parts carry the answer once plus the checkpoint summary, which keeps at
-    // most 8,000 characters of trailing text, plus fixed JSON overhead.
-    for (const write of db.writes) {
-      expect(write.partsBytes).toBeLessThan(write.textBytes + 8_000 + 1_024);
+    expect(store.writes).toHaveLength(128);
+    expect(store.writes.map((write) => write.kind)).toEqual([
+      'rewrite',
+      ...Array.from({ length: 127 }, () => 'delta' as const),
+    ]);
+    // Rewriting the row at every checkpoint handed it 9.46M characters over the
+    // turn (36.93M with one part per delta). A delta carries the new text twice
+    // (the message text and the part it extends) plus a fixed envelope, so the
+    // whole turn costs about twice the answer.
+    const turnChars = store.writes.reduce((sum, write) => sum + write.bytes, 0);
+    expect(turnChars).toBeLessThan(2 * 65_536 + 128 * 1_024);
+    for (const write of store.writes.slice(1)) {
+      expect(write.bytes).toBeLessThan(2 * 512 + 1_024);
     }
   });
 });

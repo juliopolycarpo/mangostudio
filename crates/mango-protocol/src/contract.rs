@@ -29,10 +29,11 @@ pub use client::ContractClient;
 pub use events::{ContractEvents, EventOptions, TypedEvent, TypedEventStream};
 pub use serve::{ContractHandlers, Guard, ServeGuard, ServeOptions};
 
-/// One method's declaration plus its compiled `params`/`result` validators.
+/// One method's compiled `params`/`result` validators, at the same index as
+/// its declaration in the contract's catalog. The declaration stays in the
+/// catalog: a copy here would hold every schema document a second time.
 #[derive(Debug)]
 struct CompiledMethod {
-    definition: CatalogMethod,
     params: Arc<Validator>,
     result: Arc<Validator>,
 }
@@ -61,7 +62,11 @@ struct CompiledMethod {
 /// ```
 #[derive(Debug)]
 pub struct Contract {
-    catalog: Catalog,
+    /// Shared, so a host that keeps its own parsed catalog (a process-wide
+    /// static, say) hands the contract that one copy
+    /// ([`Contract::from_shared_catalog`]) instead of a second.
+    catalog: Arc<Catalog>,
+    /// `methods[i]` holds the validators of `catalog.methods[i]`.
     methods: Vec<CompiledMethod>,
 }
 
@@ -110,6 +115,42 @@ impl Contract {
     /// assert_eq!(contract.catalog().name, "example.files");
     /// ```
     pub fn from_catalog(catalog: Catalog) -> Result<Self, ValidationError> {
+        compile(Arc::new(catalog))
+    }
+
+    /// [`Contract::from_catalog`] for a catalog the caller keeps using: the
+    /// contract holds this `Arc` instead of a copy, so a process that parsed
+    /// a large catalog once (a runtime's embedded one is about 2 MiB of JSON,
+    /// 1.5 MiB parsed) holds one copy of it, not two.
+    ///
+    /// This is a second constructor, not a wider parameter, because
+    /// `from_catalog` takes a concrete `Catalog`: that is what lets
+    /// `let catalog = serde_json::from_str(text)?; Contract::from_catalog(catalog)`
+    /// infer its type. Any `impl Into<Arc<Catalog>>` parameter would leave
+    /// that call ambiguous.
+    ///
+    /// # Errors
+    /// Returns [`ValidationError`] for the same reasons
+    /// [`ContractBuilder::build`] does.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use mango_protocol::Catalog;
+    /// use mango_protocol::contract::Contract;
+    ///
+    /// let text = include_str!(concat!(
+    ///     env!("CARGO_MANIFEST_DIR"),
+    ///     "/../../spec/fixtures/1/catalog-example.json"
+    /// ));
+    /// let catalog: Arc<Catalog> =
+    ///     Arc::new(serde_json::from_str(text).expect("the fixture is a valid catalog"));
+    /// let contract = Contract::from_shared_catalog(Arc::clone(&catalog)).expect("it compiles");
+    /// assert_eq!(contract.catalog(), *catalog);
+    /// ```
+    pub fn from_shared_catalog(catalog: Arc<Catalog>) -> Result<Self, ValidationError> {
         compile(catalog)
     }
 
@@ -119,7 +160,7 @@ impl Contract {
     /// clone of that proof, not a fresh check.
     #[must_use]
     pub fn catalog(&self) -> Catalog {
-        self.catalog.clone()
+        (*self.catalog).clone()
     }
 
     /// Validates `params` against `method`'s schema, then deserialises it.
@@ -173,7 +214,7 @@ impl Contract {
         method: &str,
         params: Value,
     ) -> Result<P, RemoteError> {
-        let compiled = self
+        let (_, compiled) = self
             .method(method)
             .ok_or_else(|| unsupported(&self.catalog.name, method))?;
         check_params(method, &compiled.params, &params)?;
@@ -316,8 +357,7 @@ impl Contract {
     ///
     /// # Errors
     /// Returns [`ValidationError`] when `handlers` names a method this
-    /// contract does not declare, or when `options.discover` is set and the
-    /// catalog does not serialise to JSON. Either way nothing is registered.
+    /// contract does not declare. Nothing is registered then.
     ///
     /// # Example
     ///
@@ -366,10 +406,71 @@ impl Contract {
         serve::serve(self, session, handlers, options)
     }
 
-    fn method(&self, name: &str) -> Option<&CompiledMethod> {
-        self.methods
+    /// Checks a handler's `result` against `method`'s `result` schema with
+    /// the validator this contract already compiled, for a server that must
+    /// run the check inside its own handler wrapper (to audit the outcome,
+    /// say) rather than after the handler settles, as
+    /// [`ServeOptions::validate_results`] does.
+    ///
+    /// Unlike [`ServeOptions::validate_results`], whose reason quotes the
+    /// offending value as jsonschema words it, the reason here never does: a
+    /// result can hold data only the server has, and this is the check for a
+    /// server that does not want that data in an `INTERNAL` message.
+    ///
+    /// # Errors
+    /// `METHOD_UNSUPPORTED` when `method` is not part of this contract.
+    /// `INTERNAL` when `result` violates the schema, as
+    /// `Result of "{method}" does not match the contract at {path}: {reason}.`
+    /// with `method`, `path` and `reason` details. `path` is an RFC 6901
+    /// pointer (`/` for the document root) that names the missing or
+    /// unexpected property itself for `required` and `additionalProperties`.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use mango_protocol::catalog::CatalogMethod;
+    /// use mango_protocol::contract::Contract;
+    /// use serde_json::json;
+    ///
+    /// let contract = Contract::builder("example", "1.0.0")
+    ///     .method(CatalogMethod {
+    ///         name: "terminal.list".into(),
+    ///         description: None,
+    ///         params: json!({ "type": "object" }),
+    ///         result: json!({
+    ///             "type": "object",
+    ///             "required": ["sessions"],
+    ///             "properties": { "sessions": { "type": "array" } },
+    ///         }),
+    ///         capabilities: vec![],
+    ///         deprecated: false,
+    ///     })
+    ///     .build()
+    ///     .expect("a valid contract");
+    ///
+    /// assert!(contract.check_result("terminal.list", &json!({ "sessions": [] })).is_ok());
+    /// let error = contract
+    ///     .check_result("terminal.list", &json!({ "sessions": "SECRET" }))
+    ///     .expect_err("sessions must be an array");
+    /// assert_eq!(error.code, "INTERNAL");
+    /// assert!(error.message.contains(" at /sessions: "));
+    /// assert!(!error.message.contains("SECRET"));
+    /// ```
+    pub fn check_result(&self, method: &str, result: &Value) -> Result<(), RemoteError> {
+        let (_, compiled) = self
+            .method(method)
+            .ok_or_else(|| unsupported(&self.catalog.name, method))?;
+        check_result(method, &compiled.result, result, ReasonStyle::Masked)
+    }
+
+    /// `name`'s declaration and its compiled validators.
+    fn method(&self, name: &str) -> Option<(&CatalogMethod, &CompiledMethod)> {
+        let index = self
+            .catalog
+            .methods
             .iter()
-            .find(|method| method.definition.name == name)
+            .position(|method| method.name == name)?;
+        Some((&self.catalog.methods[index], &self.methods[index]))
     }
 }
 
@@ -391,10 +492,29 @@ fn check_params(method: &str, validator: &Validator, params: &Value) -> Result<(
     Ok(())
 }
 
-/// Checks `result` against `method`'s `result` schema — [`ServeOptions`]'s
-/// `validate_results` opt-in, run after the handler settles.
-fn check_result(method: &str, validator: &Validator, result: &Value) -> Result<(), RemoteError> {
-    if let Some((path, reason)) = params::first_violation(validator, result) {
+/// How a result violation's `reason` words the offending value.
+#[derive(Clone, Copy)]
+enum ReasonStyle {
+    /// jsonschema's own message, which quotes the value.
+    Quoted,
+    /// The value redacted ([`Contract::check_result`]).
+    Masked,
+}
+
+/// Checks `result` against `method`'s `result` schema: [`ServeOptions`]'s
+/// `validate_results` opt-in (run after the handler settles, quoting the
+/// value) and [`Contract::check_result`] (masking it).
+fn check_result(
+    method: &str,
+    validator: &Validator,
+    result: &Value,
+    style: ReasonStyle,
+) -> Result<(), RemoteError> {
+    let violation = match style {
+        ReasonStyle::Quoted => params::first_violation(validator, result),
+        ReasonStyle::Masked => params::first_violation_masked(validator, result),
+    };
+    if let Some((path, reason)) = violation {
         return Err(RemoteError::new(
             codes::INTERNAL,
             format!("Result of \"{method}\" does not match the contract at {path}: {reason}."),
@@ -493,7 +613,7 @@ impl ContractBuilder {
     /// assert_eq!(error.field, "catalog.name");
     /// ```
     pub fn build(self) -> Result<Contract, ValidationError> {
-        compile(self.catalog)
+        compile(Arc::new(self.catalog))
     }
 }
 
@@ -504,7 +624,7 @@ impl ContractBuilder {
 /// [`ContractBuilder::build`] and [`Contract::from_catalog`] both funnel
 /// through, so declare-then-compile and deserialise-then-compile cannot drift
 /// apart.
-fn compile(catalog: Catalog) -> Result<Contract, ValidationError> {
+fn compile(catalog: Arc<Catalog>) -> Result<Contract, ValidationError> {
     catalog.validate()?;
     for (index, method) in catalog.methods.iter().enumerate() {
         assert_not_reserved(&format!("catalog.methods[{index}].name"), &method.name)?;
@@ -518,7 +638,6 @@ fn compile(catalog: Catalog) -> Result<Contract, ValidationError> {
         .enumerate()
         .map(|(index, method)| {
             Ok(CompiledMethod {
-                definition: method.clone(),
                 params: Arc::new(params::compile(
                     &format!("catalog.methods[{index}].params"),
                     &method.params,
@@ -561,6 +680,7 @@ mod tests {
     use crate::catalog::{CatalogEvent, CatalogMethod};
     use serde::Deserialize;
     use serde_json::{Value, json};
+    use std::sync::Arc;
 
     fn sample_method(name: &str, params: Value, result: Value) -> CatalogMethod {
         CatalogMethod {
@@ -624,6 +744,73 @@ mod tests {
         );
     }
 
+    /// `from_shared_catalog` keeps the caller's `Arc`, so the contract adds no
+    /// copy of the catalog, and method lookups read declarations from it.
+    #[test]
+    fn a_shared_catalog_is_held_not_copied() {
+        let catalog = Arc::new(example().catalog());
+        let contract = Contract::from_shared_catalog(Arc::clone(&catalog))
+            .expect("the example catalog compiles");
+        assert!(
+            Arc::ptr_eq(&contract.catalog, &catalog),
+            "expected the contract to hold the caller's catalog | received: a copy"
+        );
+        let ok: AddParams = contract
+            .parse_params("math.add", json!({ "a": 1, "b": 2 }))
+            .expect("math.add resolves through the shared catalog");
+        assert_eq!((ok.a, ok.b), (1.0, 2.0));
+    }
+
+    /// The reason `from_catalog` keeps a concrete `Catalog` parameter: the
+    /// catalog below is never annotated, and its type is inferred from the
+    /// call. A generic parameter would turn this into a compile error.
+    #[test]
+    fn from_catalog_infers_the_type_of_an_unannotated_catalog() {
+        let text = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../spec/fixtures/1/catalog-example.json"
+        ));
+        let catalog = serde_json::from_str(text).expect("the fixture is a valid catalog");
+        let contract = Contract::from_catalog(catalog).expect("the fixture compiles");
+        assert_eq!(contract.catalog().name, "example.files");
+    }
+
+    /// Serving with discover on hands the `rpc.discover` handler a share of
+    /// the contract's catalog, and renders no document of its own: a copy
+    /// would cost every connection about as much memory as the catalog.
+    #[tokio::test]
+    async fn serving_discover_shares_the_catalog_instead_of_rendering_it() {
+        use crate::frame::PeerInfo;
+        use crate::port::port_pair;
+        use crate::session::{Session, SessionOptions};
+
+        let contract = example();
+        let (port, _unused) = port_pair();
+        let peer = PeerInfo {
+            name: "probe".into(),
+            version: "0".into(),
+            role: "runtime".into(),
+        };
+        let (session, _driver) = Session::spawn(port, SessionOptions::new(peer));
+        let before = Arc::strong_count(&contract.catalog);
+
+        let guard = contract
+            .serve(&session, super::ContractHandlers::new(), Default::default())
+            .expect("serving no handlers always succeeds");
+        assert_eq!(
+            Arc::strong_count(&contract.catalog),
+            before + 1,
+            "expected the discover handler to hold one share of the catalog | received strong count {} (was {before})",
+            Arc::strong_count(&contract.catalog)
+        );
+        drop(guard);
+        assert_eq!(
+            Arc::strong_count(&contract.catalog),
+            before,
+            "expected unregistering to release the share"
+        );
+    }
+
     /// A contract's `catalog()` is published as a validated document, so every
     /// schema it embeds has to compile — not just the method ones. An event
     /// payload or a capability schema that only looks like JSON Schema would
@@ -648,6 +835,190 @@ mod tests {
             .build()
             .expect_err("a capability document that is not a schema");
         assert_eq!(error.field, "catalog.capabilities");
+    }
+
+    #[test]
+    fn check_result_accepts_a_conforming_result() {
+        example()
+            .check_result("text.echo", &json!({ "text": "hi" }))
+            .expect("a result that matches the schema");
+    }
+
+    /// The whole error shape, since a host's audit line and its peers read
+    /// the code, the message and each detail.
+    #[test]
+    fn check_result_names_the_path_and_masks_the_value() {
+        let secret = "CANARY-RESULT-5e1d";
+        let error = example()
+            .check_result("text.echo", &json!({ "text": 42, "extra": secret }))
+            .expect_err("text must be a string");
+        assert_eq!(error.code, "INTERNAL");
+        assert_eq!(
+            error.message,
+            "Result of \"text.echo\" does not match the contract at /text: \
+             value is not of type \"string\".",
+            "expected a masked message at /text | received: {}",
+            error.message,
+        );
+        let details = error.details.as_ref().expect("details");
+        assert_eq!(details.get("method"), Some(&json!("text.echo")));
+        assert_eq!(details.get("path"), Some(&json!("/text")));
+        assert_eq!(
+            details.get("reason"),
+            Some(&json!("value is not of type \"string\"")),
+        );
+        assert!(!format!("{error:?}").contains(secret));
+    }
+
+    #[test]
+    fn check_result_points_a_missing_property_at_the_property_itself() {
+        let error = example()
+            .check_result("text.echo", &json!({}))
+            .expect_err("text is required");
+        assert_eq!(
+            error.details.as_ref().and_then(|d| d.get("path")),
+            Some(&json!("/text"))
+        );
+    }
+
+    #[test]
+    fn check_result_points_a_root_violation_at_the_document_root() {
+        let error = example()
+            .check_result("math.add", &json!("not a number"))
+            .expect_err("a string is not a number");
+        assert_eq!(
+            error.details.as_ref().and_then(|d| d.get("path")),
+            Some(&json!("/"))
+        );
+    }
+
+    fn contract_with_result_schema(schema: Value) -> Contract {
+        Contract::builder("t", "1")
+            .method(sample_method(
+                "test.result",
+                json!({ "type": "object" }),
+                schema,
+            ))
+            .build()
+            .expect("the test schema compiles")
+    }
+
+    /// Property names that need RFC 6901 escaping, each as the raw name and
+    /// the token the pointer must carry.
+    const POINTER_TOKENS: [(&str, &str); 5] = [
+        ("a/b", "a~1b"),
+        ("a~b", "a~0b"),
+        ("a~/b", "a~0~1b"),
+        ("a~1b", "a~01b"),
+        ("", ""),
+    ];
+
+    /// `schema` and `result` as they are, and wrapped one array element deep
+    /// under an `outer/~` property, with the pointer prefix the wrapper adds.
+    fn at_root_and_nested(schema: Value, result: Value) -> [(Value, Value, &'static str); 2] {
+        [
+            (
+                json!({ "properties": { "outer/~": { "type": "array", "items": schema.clone() } } }),
+                json!({ "outer/~": [result.clone()] }),
+                "/outer~1~0/0",
+            ),
+            (schema, result, ""),
+        ]
+    }
+
+    #[test]
+    fn check_result_escapes_a_missing_property_name_in_its_path() {
+        for (property, token) in POINTER_TOKENS {
+            let schema = json!({ "type": "object", "required": [property] });
+            for (schema, result, prefix) in at_root_and_nested(schema, json!({})) {
+                let error = contract_with_result_schema(schema)
+                    .check_result("test.result", &result)
+                    .expect_err("a required property is missing");
+                let path = format!("{prefix}/{token}");
+                assert_eq!(error.code, "INTERNAL", "{error:?}");
+                assert_eq!(
+                    error.details.as_ref().and_then(|d| d.get("path")),
+                    Some(&json!(path)),
+                    "expected path {path} for required property {property:?}"
+                );
+                assert!(
+                    error.message.contains(&format!(" at {path}: ")),
+                    "{error:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn check_result_escapes_an_unexpected_property_name_in_its_path_and_masks_its_value() {
+        let secret = "CANARY-SECRET-9f3a";
+        for (property, token) in POINTER_TOKENS {
+            let schema = json!({
+                "type": "object",
+                "properties": { "known": {} },
+                "additionalProperties": false,
+            });
+            for (schema, result, prefix) in
+                at_root_and_nested(schema, json!({ (property): secret }))
+            {
+                let error = contract_with_result_schema(schema)
+                    .check_result("test.result", &result)
+                    .expect_err("an unexpected property is present");
+                let path = format!("{prefix}/{token}");
+                assert_eq!(error.code, "INTERNAL", "{error:?}");
+                assert_eq!(
+                    error.details.as_ref().and_then(|d| d.get("path")),
+                    Some(&json!(path)),
+                    "expected path {path} for unexpected property {property:?}"
+                );
+                assert!(
+                    error.message.contains(&format!(" at {path}: ")),
+                    "{error:?}"
+                );
+                // The pointer must land on the offending value itself, so a
+                // reader following it finds what the schema refused.
+                assert_eq!(
+                    result.pointer(&path),
+                    Some(&json!(secret)),
+                    "expected {path} to resolve to the unexpected property's value in {result}"
+                );
+                assert!(!format!("{error:?}").contains(secret), "{error:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn check_result_words_the_reason_for_each_keyword_the_runtime_reports() {
+        let missing =
+            contract_with_result_schema(json!({ "type": "object", "required": ["sessions"] }))
+                .check_result("test.result", &json!({}))
+                .expect_err("sessions is required");
+        assert_eq!(
+            missing.message,
+            "Result of \"test.result\" does not match the contract at /sessions: \
+             \"sessions\" is a required property."
+        );
+
+        let extra = contract_with_result_schema(json!({
+            "type": "object",
+            "properties": { "sessions": { "type": "array" } },
+            "additionalProperties": false,
+        }))
+        .check_result("test.result", &json!({ "sessionCount": 3 }))
+        .expect_err("sessionCount is not declared");
+        assert_eq!(
+            extra.message,
+            "Result of \"test.result\" does not match the contract at /sessionCount: \
+             Additional properties are not allowed ('sessionCount' was unexpected)."
+        );
+    }
+
+    #[test]
+    fn check_result_refuses_an_undeclared_method_with_method_unsupported() {
+        let error = example()
+            .check_result("math.multiply", &json!(1))
+            .expect_err("not part of the contract");
+        assert_eq!(error.code, "METHOD_UNSUPPORTED");
     }
 
     #[test]

@@ -274,6 +274,30 @@ async fn serves_typed_handlers_and_requests_through_a_typed_client() {
     assert_eq!(error.code, codes::METHOD_UNSUPPORTED);
 }
 
+/// `rpc.discover` renders the catalog per answer, so every answer has to carry
+/// the whole document, not just the first, and a contract built from a
+/// shared catalog has to answer with that catalog.
+#[tokio::test]
+async fn answers_every_rpc_discover_with_the_whole_shared_catalog() {
+    let (session_a, session_b) = sessions().await;
+    let catalog = Arc::new(example().catalog());
+    let contract =
+        Contract::from_shared_catalog(Arc::clone(&catalog)).expect("the example catalog compiles");
+    let _guard = contract
+        .serve(&session_b, plain_handlers(), ServeOptions::default())
+        .expect("both methods are declared");
+
+    for attempt in 1..=3 {
+        let discovered = within("rpc.discover", contract.client(&session_a).discover())
+            .await
+            .expect("the peer serves a contract");
+        assert_eq!(
+            discovered, *catalog,
+            "expected discover answer {attempt} to equal the shared catalog"
+        );
+    }
+}
+
 #[tokio::test]
 async fn answers_rpc_discover_with_the_served_catalog() {
     let (session_a, session_b) = sessions().await;
@@ -544,6 +568,18 @@ async fn validates_results_when_asked() {
     assert_eq!(
         error.details.as_ref().and_then(|d| d.get("path")),
         Some(&json!("/text"))
+    );
+    // `validate_results` words the reason as jsonschema does, which quotes
+    // the value; `Contract::check_result` is the masking check.
+    let reason = error
+        .details
+        .as_ref()
+        .and_then(|d| d.get("reason"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    assert!(
+        reason.contains("42"),
+        "expected validate_results to keep quoting the value | received reason: {reason:?}"
     );
 }
 

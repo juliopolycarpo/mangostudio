@@ -110,3 +110,69 @@ it('retains saved onboarding receipts without their private result snapshots', a
     await db.destroy();
   }
 });
+
+it('keeps the text of a turn running during capture but not the provider state its checkpoints carry', async () => {
+  const sqlite = new SQLiteDatabase(':memory:');
+  const db = new Kysely<Database>({ dialect: createBunSqliteDialect(sqlite) });
+  try {
+    const { error } = await new Migrator({
+      db,
+      provider: { getMigrations: () => Promise.resolve(allMigrations) },
+    }).migrateToLatest();
+    if (error) throw new Error('Backup privacy fixture migration failed.', { cause: error });
+    const now = new Date().toISOString();
+    await db
+      .insertInto('user')
+      .values({
+        id: 'u',
+        name: 'Fixture',
+        email: 'fixture@example.com',
+        emailVerified: 0,
+        image: null,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .execute();
+    await db
+      .insertInto('chats')
+      .values({ id: 'c', userId: 'u', title: 't', createdAt: 1, updatedAt: 1 } as never)
+      .execute();
+    await db
+      .insertInto('messages')
+      .values({
+        id: 'm',
+        chatId: 'c',
+        role: 'ai',
+        text: '',
+        timestamp: 1,
+        isGenerating: 1,
+        parts: '[]',
+        providerState: 'row-provider-state-secret',
+      } as never)
+      .execute();
+    await db
+      .insertInto('message_checkpoint_deltas')
+      .values({
+        messageId: 'm',
+        seq: 1,
+        delta: JSON.stringify({
+          text: 'partial answer',
+          providerState: 'delta-provider-state-secret',
+        }),
+      })
+      .execute();
+
+    redactBackupDatabase(sqlite, true);
+
+    const delta = await db
+      .selectFrom('message_checkpoint_deltas')
+      .select('delta')
+      .executeTakeFirstOrThrow();
+    expect(JSON.parse(delta.delta)).toEqual({ text: 'partial answer' });
+    const bytes = Buffer.from(sqlite.serialize());
+    expect(bytes.includes('delta-provider-state-secret')).toBe(false);
+    expect(bytes.includes('row-provider-state-secret')).toBe(false);
+  } finally {
+    await db.destroy();
+  }
+});

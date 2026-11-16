@@ -7,6 +7,7 @@ import {
 } from '@mangostudio/shared/api-keys';
 import { ERROR_CODES, type ErrorCode } from '@mangostudio/shared/errors';
 import { isAPIError } from 'better-auth/api';
+import type { Kysely } from 'kysely';
 
 import {
   type ApiKeyPluginApi,
@@ -14,6 +15,9 @@ import {
   getApiKeyApi,
   resolveApiKeyScope,
 } from '../../../auth';
+import { getDb } from '../../../db/database';
+import { withFullDurability } from '../../../db/durability';
+import type { Database } from '../../../db/types';
 
 const SECONDS_PER_DAY = 86_400;
 const userCreateTails = new Map<string, Promise<void>>();
@@ -132,7 +136,8 @@ export function createApiKey(
 export async function revokeApiKey(
   context: ApiKeyRequestContext,
   keyId: string,
-  api: ApiKeyPluginApi = getApiKeyApi()
+  api: ApiKeyPluginApi = getApiKeyApi(),
+  db: Kysely<Database> = getDb()
 ): Promise<void> {
   const records = await listOwnedRecords(context, api);
   if (!records.some((key) => key.id === keyId)) {
@@ -140,10 +145,15 @@ export async function revokeApiKey(
   }
 
   try {
-    const result = await api.deleteApiKey({
-      body: { keyId },
-      headers: context.headers,
-    });
+    // Durable: after a power loss a key the user was told is revoked must not work
+    // again. Better Auth deletes it on the shared connection, so the level is
+    // raised around the call rather than inside it.
+    const result = await withFullDurability(db, 'api_key_revoke', () =>
+      api.deleteApiKey({
+        body: { keyId },
+        headers: context.headers,
+      })
+    );
     if (!result.success) throw new Error('API key deletion did not succeed');
   } catch (error) {
     // The key may have been revoked between the owner check and deletion.
