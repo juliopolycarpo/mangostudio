@@ -50,6 +50,7 @@
     "./utils/dist-files": "./src/utils/dist-files.ts",
     "./utils/dial-deadline": "./src/utils/dial-deadline.ts",
     "./utils/net": "./src/utils/net.ts",
+    "./utils/delimited-text-splitter": "./src/utils/delimited-text-splitter.ts",
     "./process": "./src/process/index.ts",
     "./process/host": "./src/process/host.ts",
     "./runtime-env": "./src/runtime-env/index.ts",
