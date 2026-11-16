@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 
+import { Elysia } from 'elysia';
+
 import { HUB_IDLE_TIMEOUT_SECONDS, hubListenOptions } from '../../../src/lib/hub-connection-limits';
 import { createExternalAgentRoutes } from '../../../src/modules/external-agents/http/external-agent-routes';
 import { createExternalSessionRoutes } from '../../../src/modules/external-agents/http/external-session-routes';
@@ -119,5 +121,53 @@ describe('slow handlers behind the hub listener options', () => {
     },
     // The gap itself plus headroom for a loaded runner.
     SLOW_DEPENDENCY_MS + 8_000
+  );
+
+  it(
+    'still closes a parse: none route whose declared body never arrives',
+    async () => {
+      // The shape of the Better Auth passthrough: Elysia does not read the body,
+      // the handler does, after `beforeHandle`. A client that sends the headers
+      // of a POST with a body and then nothing must hit the listener's timeout,
+      // not the 255 s a running handler gets.
+      const app = new Elysia()
+        .use(handlerIdleTimeout)
+        .post('/raw-body', { parse: 'none' }, ({ request }) => request.text());
+      const listening = app.listen(hubListenOptions('127.0.0.1', 0));
+      stopServer = async () => {
+        await app.stop(true);
+      };
+
+      const startedAt = Date.now();
+      let closedAfterMs: number | null = null;
+      const closed = new Promise<void>((resolve) => {
+        void Bun.connect({
+          hostname: '127.0.0.1',
+          port: listening.server?.port ?? 0,
+          socket: {
+            open(socket) {
+              socket.write(
+                'POST /raw-body HTTP/1.1\r\nHost: hub.test\r\nContent-Type: application/json\r\nContent-Length: 20\r\n\r\n'
+              );
+            },
+            data() {},
+            close() {
+              closedAfterMs = Date.now() - startedAt;
+              resolve();
+            },
+            error() {},
+          },
+        });
+      });
+      // Bun's idle check lands about 12 s in; 16 s is the bound, not the target.
+      const closeBoundMs = 16_000;
+      await Promise.race([closed, Bun.sleep(closeBoundMs)]);
+
+      expect(
+        closedAfterMs,
+        `(slow-route-idle-timeout): expected the connection to close within ${closeBoundMs}ms of a declared body that never arrived | received: ${closedAfterMs === null ? `still open after ${closeBoundMs}ms` : `closed after ${closedAfterMs}ms`}`
+      ).not.toBeNull();
+    },
+    16_000 + 8_000
   );
 });

@@ -14,12 +14,15 @@ export const HUB_IDLE_TIMEOUT_SECONDS = 10;
 
 /**
  * The idle timeout a request gets while its handler runs, set by
- * `plugins/handler-idle-timeout.ts` once the body has been read, and put back to
+ * `plugins/handler-idle-timeout.ts` when the request has no unread body (none
+ * was sent, or Elysia has already read it), and put back to
  * `HUB_IDLE_TIMEOUT_SECONDS` as soon as the handler has produced its response.
+ * A route that reads the body itself after the hook (`parse: 'none'`) keeps
+ * the 10 s while that body is unread.
  *
  * The 10 s listener timeout exists to shed slow clients: one that trickles its
- * headers or body, or stops reading. While a handler is working the request is
- * complete and the silence is the hub's own, so Bun resetting it only turns a
+ * headers or body, or stops reading. While a handler is working on a complete
+ * request the silence is the hub's own, so Bun resetting it only turns a
  * slow answer into ECONNRESET while the work carries on. 255 s is Bun's maximum
  * rather than "disabled" (0): a handler that never answers on a peer that has
  * vanished still ends, and no route here waits that long for a whole answer.

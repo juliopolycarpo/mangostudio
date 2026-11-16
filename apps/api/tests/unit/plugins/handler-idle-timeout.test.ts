@@ -32,13 +32,17 @@ function serve(
 }
 
 function buildApp() {
-  return new Elysia({ prefix: '/api' })
-    .use(handlerIdleTimeout)
-    .get('/ok', () => 'ok')
-    .get('/boom', () => {
-      throw new Error('boom');
-    })
-    .post('/echo', ({ body }) => body);
+  return (
+    new Elysia({ prefix: '/api' })
+      .use(handlerIdleTimeout)
+      .get('/ok', () => 'ok')
+      .get('/boom', () => {
+        throw new Error('boom');
+      })
+      .post('/echo', ({ body }) => body)
+      // Like the Better Auth passthrough: the handler, not Elysia, reads the body.
+      .all('/raw', { parse: 'none' }, () => 'raw')
+  );
 }
 
 describe('handlerIdleTimeout', () => {
@@ -79,6 +83,33 @@ describe('handlerIdleTimeout', () => {
     expect(response.status).toBe(200);
     expect(server.calls[0]).toEqual({
       path: '/api/echo',
+      seconds: HUB_HANDLER_IDLE_TIMEOUT_SECONDS,
+    });
+  });
+
+  it('does not extend a parse: none route while its body is unread, but restores afterwards', async () => {
+    const server = new RecordingServer();
+    const response = await serve(
+      buildApp(),
+      server,
+      new Request('http://hub.test/api/raw', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'a@b.test' }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    // Only the restore: expected no call with the handler timeout while the body is unread.
+    expect(server.calls.map((call) => call.seconds)).toEqual([HUB_IDLE_TIMEOUT_SECONDS]);
+  });
+
+  it('extends a parse: none route that carries no body', async () => {
+    const server = new RecordingServer();
+    await serve(buildApp(), server, new Request('http://hub.test/api/raw'));
+
+    expect(server.calls[0]).toEqual({
+      path: '/api/raw',
       seconds: HUB_HANDLER_IDLE_TIMEOUT_SECONDS,
     });
   });
