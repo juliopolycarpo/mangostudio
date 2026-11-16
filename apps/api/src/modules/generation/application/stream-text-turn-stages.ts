@@ -64,7 +64,11 @@ import {
 } from './stream-text-turn-helpers';
 import type { StreamEvent, StreamTextTurnInput } from './stream-text-turn-types';
 import { parseToolArgs, stringifyToolResult } from './tool-result-utils';
-import { createTurnCheckpointPart, TurnCheckpointWriter } from './turn-checkpoint';
+import {
+  createDatabaseCheckpointStore,
+  createTurnCheckpointPart,
+  TurnCheckpointWriter,
+} from './turn-checkpoint';
 import { reconcileInterruptedMessageParts, sealUnresolvedToolCalls } from './turn-recovery';
 
 const TOOL_LOOP_EXHAUSTED_MESSAGE = 'The model exceeded the maximum number of tool interactions.';
@@ -267,7 +271,7 @@ export async function prepareStreamTextTurn(
     checkpointWriter: null as unknown as TurnCheckpointWriter,
   } satisfies StreamTextTurnSession;
   session.checkpointWriter = new TurnCheckpointWriter({
-    db,
+    store: createDatabaseCheckpointStore(db, aiMsgId),
     chatId,
     messageId: aiMsgId,
     checkpoint,

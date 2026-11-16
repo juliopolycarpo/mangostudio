@@ -72,6 +72,8 @@ build is still accepted (after every message of that timestamp for `asc`, before
 of it for `desc`); an empty or malformed cursor is rejected with a 400, and an unknown `order`
 with a 422 like any query the schema refuses.
 
+Update a message with `PUT /api/messages/:id` and `UpdateMessageBodySchema`. A `text` patch on a message whose turn is still generating answers 409 `CONFLICT`, because the turn's writer keeps extending the text it stored; send `isGenerating: false` in the same patch, or edit after the turn settles.
+
 Create a message with `POST /api/messages` and `CreateMessageBodySchema`: required `id`, `chatId`, `role`, `text`, and `timestamp`; use the shared chat schema for optional fields.
 
 ## Activity Endpoints

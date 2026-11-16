@@ -509,6 +509,7 @@ MANGO_API_KEY='mango_…' bun run scripts/examples/external-api-smoke.ts http://
 | `line-decoder.ts`            | Protocol NDJSON `LineDecoder`: ns per byte for large records in small pieces and for many short records, peak RSS               |
 | `rust-test-inventory.ts`     | Rust test inventory (libtest or nextest) by logical identity; diff two, total a log                                             |
 | `external-agent-boundary.ts` | Actual receipt hashing, admitted request ownership and event mapping; alternating Base/Head processes, raw timings and peak RSS |
+| `checkpoint-writes.ts`       | Hub streaming turns against a fake provider: bytes written to the SQLite main and WAL files, commits, fsyncs, CPU, peak RSS     |
 
 The benchmarks take any runtime binary, and they default to the newest of `target/release`,
 `target/release-fast` and `target/debug`. For an A/B on one machine, build with
@@ -638,6 +639,20 @@ peak RSS. A pass checks the frame count, so a decoder that drops records fails r
 git worktree add --detach ../base origin/main && (cd ../base && bun install --frozen-lockfile)
 bun run scripts/bench/line-decoder.ts ../base/packages/protocol/src/codec/ndjson.ts --runs 7
 bun run scripts/bench/line-decoder.ts packages/protocol/src/codec/ndjson.ts --runs 7
+```
+
+`checkpoint-writes.ts` starts a real hub under a throwaway home and streams fixed answers from a fake
+OpenAI-compatible provider (16K and 64K characters at 1 ms and 20 ms chunk pacing, and a turn of 20
+tool calls with 65 KB results). It reports the bytes the hub wrote to the SQLite main and `-wal`
+files, WAL commits and fsyncs (`--counts` runs a second pass under `strace`; these are exact and
+do not depend on host load), plus hub CPU and peak RSS. The hub refuses loopback provider addresses,
+so the fake provider listens on a global IPv6 address of the host. Compare revisions by pointing
+`--hub-dir` at each checkout; with a 1-minute load average above about 6, trust the byte and commit
+counts over CPU.
+
+```bash
+bun run scripts/bench/checkpoint-writes.ts --runs 3 --counts
+bun run scripts/bench/checkpoint-writes.ts --hub-dir ../base-checkout --scenario tools-20x65k --json
 ```
 
 `rust-test-inventory.ts` proves a Rust test-target consolidation or a runner change lost no case:

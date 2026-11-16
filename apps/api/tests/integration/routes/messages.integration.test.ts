@@ -537,4 +537,51 @@ describe('PUT /messages/:id', () => {
       .executeTakeFirst();
     expect(row?.text).toBe('Updated text');
   });
+
+  it('answers 409 to a text patch on a generating message and leaves the row alone', async () => {
+    const db = getDb();
+    const msgId = `generating-msg-${Date.now()}`;
+    await db
+      .insertInto('messages')
+      .values({
+        id: msgId,
+        chatId: TEST_CHAT.id,
+        role: 'ai',
+        text: 'Streaming so far',
+        timestamp: Date.now(),
+        isGenerating: 1,
+        interactionMode: 'chat',
+      })
+      .execute();
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, messageRoutes);
+    restoreAuth = restore;
+    const put = (body: object) =>
+      app.handle(
+        new Request(`http://localhost/messages/${msgId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+      );
+
+    const refused = await put({ text: 'Edited while streaming' });
+    const settled = await put({ text: 'Edited and settled', isGenerating: false });
+
+    const row = await db
+      .selectFrom('messages')
+      .select(['text', 'isGenerating'])
+      .where('id', '=', msgId)
+      .executeTakeFirst();
+    expect({
+      refused: refused.status,
+      code: ((await refused.json()) as { code?: string }).code,
+      settled: settled.status,
+      row,
+    }).toEqual({
+      refused: 409,
+      code: 'CONFLICT',
+      settled: 200,
+      row: { text: 'Edited and settled', isGenerating: 0 },
+    });
+  });
 });

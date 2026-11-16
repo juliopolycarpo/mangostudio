@@ -17,6 +17,10 @@ import type { Kysely, Transaction } from 'kysely';
 import type { Database } from '../../../db/types';
 import { generateId } from '../../../utils/id';
 import { linkAttachmentsToMessage } from '../../attachments/infrastructure/attachment-repository';
+import {
+  foldCheckpointDeltasIntoRows,
+  withCheckpointSnapshot,
+} from '../../messages/infrastructure/message-checkpoint-deltas';
 import { insertMessage } from '../../messages/infrastructure/message-repository';
 import { IMAGE_ABANDONED_ERROR, IMAGE_ABANDONED_ERROR_CODE } from './image-interruption';
 import type { ResolvedModel } from './resolve-model';
@@ -275,14 +279,31 @@ export async function interruptCheckpointedMessage(
     readonly reasonCode: TurnInterruptionReasonCode;
     readonly checkpointedBefore?: number;
   },
+  database: Kysely<Database>
+): Promise<boolean> {
+  // One transaction from the read to the write: the folded state is what gets
+  // persisted, so a live writer must not land a rewrite between the row read
+  // and the delta read.
+  return withCheckpointSnapshot(database, (db) => interruptCheckpointedMessageIn(input, db));
+}
+
+async function interruptCheckpointedMessageIn(
+  input: {
+    readonly messageId: string;
+    readonly reasonCode: TurnInterruptionReasonCode;
+    readonly checkpointedBefore?: number;
+  },
   db: Kysely<Database>
 ): Promise<boolean> {
-  const row = await db
+  const stored = await db
     .selectFrom('messages')
-    .select(['id', 'text', 'parts', 'providerState', 'isGenerating'])
+    .select(['id', 'text', 'parts', 'providerState', 'generationTime', 'isGenerating'])
     .where('id', '=', input.messageId)
     .executeTakeFirst();
-  if (row?.isGenerating !== 1) return false;
+  if (stored?.isGenerating !== 1) return false;
+  // A turn that died mid-stream left its last checkpoints as deltas over the row.
+  const [row] = await foldCheckpointDeltasIntoRows([stored], db);
+  if (!row) return false;
 
   const parsed = parseMessageParts(row.parts);
   const checkpoint = parsed.find(isTurnCheckpointPart);
@@ -311,6 +332,11 @@ export async function interruptCheckpointedMessage(
     .updateTable('messages')
     .set({
       ...(parsed.length > 0 ? { parts: JSON.stringify(parsed) } : {}),
+      // The row's own columns are the last full rewrite; the folded values are
+      // the turn's last checkpoint.
+      text: row.text,
+      providerState: row.providerState,
+      generationTime: row.generationTime,
       isGenerating: 0,
     })
     .where('id', '=', input.messageId)
@@ -637,23 +663,30 @@ function getOwnedRecoveryMessage(
   chatId: string,
   messageId: string,
   userId: string,
-  db: Kysely<Database> | Transaction<Database>
+  database: Kysely<Database> | Transaction<Database>
 ): Promise<OwnedRecoveryMessage | undefined> {
-  return db
-    .selectFrom('messages')
-    .innerJoin('chats', 'chats.id', 'messages.chatId')
-    .select([
-      'messages.id',
-      'messages.chatId',
-      'messages.text',
-      'messages.parts',
-      'messages.providerState',
-      'messages.isGenerating',
-    ])
-    .where('messages.id', '=', messageId)
-    .where('messages.chatId', '=', chatId)
-    .where('chats.userId', '=', userId)
-    .executeTakeFirst();
+  // A turn still generating is read as its last checkpoint left it (a cancel
+  // checks the checkpoint status); settled turns have no deltas.
+  return withCheckpointSnapshot(database, async (db) => {
+    const row = await db
+      .selectFrom('messages')
+      .innerJoin('chats', 'chats.id', 'messages.chatId')
+      .select([
+        'messages.id',
+        'messages.chatId',
+        'messages.text',
+        'messages.parts',
+        'messages.providerState',
+        'messages.isGenerating',
+      ])
+      .where('messages.id', '=', messageId)
+      .where('messages.chatId', '=', chatId)
+      .where('chats.userId', '=', userId)
+      .executeTakeFirst();
+    if (!row) return undefined;
+    const [folded] = await foldCheckpointDeltasIntoRows([row], db);
+    return folded;
+  });
 }
 
 export function reconcileInterruptedMessageParts(parts: MessagePart[]): void {

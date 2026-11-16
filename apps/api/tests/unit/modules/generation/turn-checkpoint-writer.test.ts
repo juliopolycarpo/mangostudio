@@ -2,15 +2,21 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:te
 
 import { isTurnCheckpointPart } from '@mangostudio/shared/turn-recovery';
 import type { MessagePart } from '@mangostudio/shared/types';
-import type { Kysely } from 'kysely';
 
 import { getDb } from '../../../../src/db/database';
-import type { Database } from '../../../../src/db/types';
 import {
   CHECKPOINT_TEXT_INTERVAL_CHARS,
+  createDatabaseCheckpointStore,
   createTurnCheckpointPart,
+  type TurnCheckpointStore,
   TurnCheckpointWriter,
 } from '../../../../src/modules/generation/application/turn-checkpoint';
+import {
+  type CheckpointDelta,
+  type CheckpointedContent,
+  foldCheckpointDeltas,
+  foldCheckpointDeltasIntoRows,
+} from '../../../../src/modules/messages/infrastructure/message-checkpoint-deltas';
 import { insertMessage } from '../../../../src/modules/messages/infrastructure/message-repository';
 import { insertTestChat, insertTestUser } from '../../../support/factories';
 
@@ -21,6 +27,10 @@ interface RecordedWrite {
   readonly checkpointedAt: number;
   readonly status: string;
   readonly reasonCode: string | undefined;
+  /** How the write reached the store: a full row or a delta. */
+  readonly kind: 'rewrite' | 'delta';
+  /** Characters handed to the store. */
+  readonly bytes: number;
 }
 
 interface PendingWrite {
@@ -30,15 +40,22 @@ interface PendingWrite {
 }
 
 /**
- * Named fake for the `messages` checkpoint update. A write that starts is
- * recorded with the serialized state it carries; while `hold()` is on it stays
- * in flight until released or failed.
+ * Named fake for the checkpoint store. A write that starts is recorded with the
+ * message it leaves behind (a delta folded over the stored state, as a reader
+ * would see it); while `hold()` is on it stays in flight until released or
+ * failed. A failed write leaves the stored state as it was.
  */
-class HeldCheckpointDb {
+class HeldCheckpointStore implements TurnCheckpointStore {
   readonly writes: RecordedWrite[] = [];
   readonly inFlight: PendingWrite[] = [];
   private holding = false;
   private failNext: Error | null = null;
+  private stored: CheckpointedContent = {
+    text: '',
+    parts: [],
+    providerState: null,
+    generationTime: null,
+  };
 
   hold(): void {
     this.holding = true;
@@ -57,22 +74,45 @@ class HeldCheckpointDb {
     while (this.inFlight.length > 0) this.releaseOldest();
   }
 
-  asKysely(): Kysely<Database> {
-    return this as unknown as Kysely<Database>;
+  rewriteRow(row: {
+    text: string;
+    partsJson: string;
+    providerState: string | null;
+    generationTime: string | null | undefined;
+  }): Promise<void> {
+    return this.start(
+      'rewrite',
+      {
+        text: row.text,
+        parts: JSON.parse(row.partsJson) as MessagePart[],
+        providerState: row.providerState,
+        generationTime: row.generationTime ?? null,
+      },
+      row.text.length + row.partsJson.length
+    );
   }
 
-  updateTable(table: string) {
-    if (table !== 'messages') throw new Error(`expected table: messages | received: ${table}`);
-    return new HeldUpdate(this);
+  appendDelta(_seq: number, deltaJson: string): Promise<void> {
+    return this.start(
+      'delta',
+      foldCheckpointDeltas(this.stored, [JSON.parse(deltaJson) as CheckpointDelta]),
+      deltaJson.length
+    );
   }
 
-  start(values: { text: string; parts: string }): Promise<void> {
-    const checkpoint = (JSON.parse(values.parts) as MessagePart[]).find(isTurnCheckpointPart);
-    if (!checkpoint) throw new Error('expected a turn_checkpoint part in the serialized parts');
+  private start(
+    kind: RecordedWrite['kind'],
+    next: CheckpointedContent,
+    bytes: number
+  ): Promise<void> {
+    const checkpoint = next.parts.find(isTurnCheckpointPart);
+    if (!checkpoint) throw new Error('expected a turn_checkpoint part in the stored parts');
     const write = {
-      text: values.text,
+      kind,
+      bytes,
+      text: next.text,
       sequence: checkpoint.sequence,
-      partCount: (JSON.parse(values.parts) as MessagePart[]).length,
+      partCount: next.parts.length,
       checkpointedAt: checkpoint.checkpointedAt,
       status: checkpoint.status,
       reasonCode: checkpoint.reasonCode,
@@ -81,29 +121,20 @@ class HeldCheckpointDb {
     const failure = this.failNext;
     this.failNext = null;
     if (failure) return Promise.reject(failure);
-    if (!this.holding) return Promise.resolve();
+    if (!this.holding) {
+      this.stored = next;
+      return Promise.resolve();
+    }
     return new Promise((resolve, reject) => {
-      this.inFlight.push({ write, release: resolve, fail: reject });
+      this.inFlight.push({
+        write,
+        release: () => {
+          this.stored = next;
+          resolve();
+        },
+        fail: reject,
+      });
     });
-  }
-}
-
-class HeldUpdate {
-  private values: { text: string; parts: string } = { text: '', parts: '[]' };
-
-  constructor(private readonly db: HeldCheckpointDb) {}
-
-  set(values: { text: string; parts: string }): this {
-    this.values = values;
-    return this;
-  }
-
-  where(): this {
-    return this;
-  }
-
-  execute(): Promise<void> {
-    return this.db.start(this.values);
   }
 }
 
@@ -123,7 +154,7 @@ class ManualDefer {
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 function setup() {
-  const db = new HeldCheckpointDb();
+  const store = new HeldCheckpointStore();
   const manual = new ManualDefer();
   const checkpoint = createTurnCheckpointPart({
     turnId: 'turn-1',
@@ -135,7 +166,7 @@ function setup() {
   const parts: MessagePart[] = [checkpoint];
   const state = { text: '', now: 1_000 };
   const writer = new TurnCheckpointWriter({
-    db: db.asKysely(),
+    store,
     chatId: 'chat-1',
     messageId: 'turn-1',
     checkpoint,
@@ -147,7 +178,7 @@ function setup() {
     state.text += 'x'.repeat(chars);
     parts.push({ type: 'text', text: 'x'.repeat(chars) });
   };
-  return { db, manual, checkpoint, parts, state, writer, append };
+  return { store, manual, checkpoint, parts, state, writer, append };
 }
 
 describe('TurnCheckpointWriter', () => {
@@ -160,14 +191,14 @@ describe('TurnCheckpointWriter', () => {
   });
 
   it('writes one snapshot with the latest state for many accepted best-effort calls', async () => {
-    const { db, manual, writer, append } = setup();
-    db.hold();
+    const { store, manual, writer, append } = setup();
+    store.hold();
 
     append(CHECKPOINT_TEXT_INTERVAL_CHARS);
     expect(await writer.checkpoint()).toBe(true);
     manual.fire();
     await tick();
-    expect(db.writes).toHaveLength(1);
+    expect(store.writes).toHaveLength(1);
 
     for (let call = 0; call < 256; call++) {
       append(CHECKPOINT_TEXT_INTERVAL_CHARS);
@@ -175,39 +206,39 @@ describe('TurnCheckpointWriter', () => {
     }
     manual.fire();
     await tick();
-    // The held write blocks the trailing one, which has not started or serialized.
-    expect(db.writes).toHaveLength(1);
+    // The held write blocks the trailing one, which has not started or been planned.
+    expect(store.writes).toHaveLength(1);
 
     const flushed = writer.flush();
-    db.releaseAll();
+    store.releaseAll();
     await flushed;
 
-    expect(db.writes).toHaveLength(2);
-    const latest = db.writes[1];
+    expect(store.writes).toHaveLength(2);
+    const latest = store.writes[1];
     expect(latest?.text.length).toBe(CHECKPOINT_TEXT_INTERVAL_CHARS * 257);
     expect(latest?.partCount).toBe(258);
   });
 
   it('counts every accepted best-effort call in the persisted sequence', async () => {
-    const { db, manual, writer, append } = setup();
-    db.hold();
+    const { store, manual, writer, append } = setup();
+    store.hold();
     for (let call = 0; call < 5; call++) {
       append(CHECKPOINT_TEXT_INTERVAL_CHARS);
       await writer.checkpoint();
       manual.fire();
     }
     const flushed = writer.flush();
-    db.releaseAll();
+    store.releaseAll();
     await flushed;
 
-    const sequences = db.writes.map((write) => write.sequence);
+    const sequences = store.writes.map((write) => write.sequence);
     expect(sequences[sequences.length - 1]).toBe(5);
     expect(sequences).toEqual([...sequences].sort((a, b) => a - b));
   });
 
   it('writes a forced checkpoint queued behind best-effort ones, in order and complete', async () => {
-    const { db, manual, writer, append } = setup();
-    db.hold();
+    const { store, manual, writer, append } = setup();
+    store.hold();
 
     append(CHECKPOINT_TEXT_INTERVAL_CHARS);
     await writer.checkpoint();
@@ -220,27 +251,27 @@ describe('TurnCheckpointWriter', () => {
     const forced = writer.checkpoint({ force: true });
     append(10);
     const secondForced = writer.checkpoint({ force: true });
-    db.releaseAll();
+    store.releaseAll();
 
     expect(await forced).toBe(true);
     expect(await secondForced).toBe(true);
     await writer.flush();
 
-    const texts = db.writes.map((write) => write.text.length);
+    const texts = store.writes.map((write) => write.text.length);
     expect(texts[0]).toBe(CHECKPOINT_TEXT_INTERVAL_CHARS);
     // Both forced calls land as their own writes carrying the state at call time.
     expect(texts.slice(-2)).toEqual([
       CHECKPOINT_TEXT_INTERVAL_CHARS * 2 + 10,
       CHECKPOINT_TEXT_INTERVAL_CHARS * 2 + 20,
     ]);
-    expect(db.writes.map((write) => write.sequence)).toEqual(
-      [...db.writes.map((write) => write.sequence)].sort((a, b) => a - b)
+    expect(store.writes.map((write) => write.sequence)).toEqual(
+      [...store.writes.map((write) => write.sequence)].sort((a, b) => a - b)
     );
   });
 
   it('never lets a stale forced snapshot land after newer best-effort state', async () => {
-    const { db, manual, writer, append } = setup();
-    db.hold();
+    const { store, manual, writer, append } = setup();
+    store.hold();
 
     append(CHECKPOINT_TEXT_INTERVAL_CHARS);
     await writer.checkpoint();
@@ -257,18 +288,18 @@ describe('TurnCheckpointWriter', () => {
     append(CHECKPOINT_TEXT_INTERVAL_CHARS);
     await writer.checkpoint();
     manual.fire();
-    db.releaseAll();
+    store.releaseAll();
     await forced;
     await writer.flush();
 
-    const lengths = db.writes.map((write) => write.text.length);
+    const lengths = store.writes.map((write) => write.text.length);
     expect(lengths).toEqual([...lengths].sort((a, b) => a - b));
     expect(lengths[lengths.length - 1]).toBe(CHECKPOINT_TEXT_INTERVAL_CHARS * 3 + 5);
   });
 
   it('lands the final state last and complete through prepareFinal', async () => {
-    const { db, manual, checkpoint, writer, append } = setup();
-    db.hold();
+    const { store, manual, checkpoint, writer, append } = setup();
+    store.hold();
     for (let call = 0; call < 10; call++) {
       append(CHECKPOINT_TEXT_INTERVAL_CHARS);
       await writer.checkpoint();
@@ -276,11 +307,11 @@ describe('TurnCheckpointWriter', () => {
     }
 
     const finalState = writer.prepareFinal('completed');
-    db.releaseAll();
+    store.releaseAll();
     const content = await finalState;
 
     // Everything accepted before the final is on disk before prepareFinal returns.
-    const last = db.writes[db.writes.length - 1];
+    const last = store.writes[store.writes.length - 1];
     expect(last?.text).toBe(content.text);
     expect(last?.text.length).toBe(CHECKPOINT_TEXT_INTERVAL_CHARS * 10);
     // prepareFinal itself adds the completed state on top of the 10 accepted calls.
@@ -290,18 +321,18 @@ describe('TurnCheckpointWriter', () => {
   });
 
   it('drains accepted best-effort text before an interrupted turn is finalized', async () => {
-    const { db, checkpoint, writer, append } = setup();
+    const { store, checkpoint, writer, append } = setup();
     for (let call = 0; call < 3; call++) {
       append(CHECKPOINT_TEXT_INTERVAL_CHARS);
       await writer.checkpoint();
     }
     // The wake-up never fired: the abort path goes straight to prepareFinal.
-    expect(db.writes).toHaveLength(0);
+    expect(store.writes).toHaveLength(0);
 
     const content = await writer.prepareFinal('interrupted', 'user_cancelled');
 
-    expect(db.writes).toHaveLength(1);
-    expect(db.writes[0]?.text).toBe(content.text);
+    expect(store.writes).toHaveLength(1);
+    expect(store.writes[0]?.text).toBe(content.text);
     expect(content.text.length).toBe(CHECKPOINT_TEXT_INTERVAL_CHARS * 3);
     expect(checkpoint.status).toBe('interrupted');
     expect(checkpoint.reasonCode).toBe('user_cancelled');
@@ -309,19 +340,19 @@ describe('TurnCheckpointWriter', () => {
   });
 
   it('reports a failed write as false and keeps later writes landing', async () => {
-    const { db, writer, append } = setup();
-    db.failNextWrite(new Error('disk full'));
+    const { store, writer, append } = setup();
+    store.failNextWrite(new Error('disk full'));
     append(10);
     expect(await writer.checkpoint({ force: true })).toBe(false);
 
     append(10);
     expect(await writer.checkpoint({ force: true })).toBe(true);
-    expect(db.writes.map((write) => write.text.length)).toEqual([10, 20]);
+    expect(store.writes.map((write) => write.text.length)).toEqual([10, 20]);
   });
 
   it('keeps a failed best-effort write from blocking the next one', async () => {
-    const { db, manual, writer, append } = setup();
-    db.failNextWrite(new Error('disk full'));
+    const { store, manual, writer, append } = setup();
+    store.failNextWrite(new Error('disk full'));
     append(CHECKPOINT_TEXT_INTERVAL_CHARS);
     await writer.checkpoint();
     manual.fire();
@@ -332,26 +363,26 @@ describe('TurnCheckpointWriter', () => {
     manual.fire();
     await writer.flush();
 
-    expect(db.writes.map((write) => write.text.length)).toEqual([
+    expect(store.writes.map((write) => write.text.length)).toEqual([
       CHECKPOINT_TEXT_INTERVAL_CHARS,
       CHECKPOINT_TEXT_INTERVAL_CHARS * 2,
     ]);
   });
 
   it('flush starts the trailing write without waiting for the deferred wake-up', async () => {
-    const { db, writer, append } = setup();
+    const { store, writer, append } = setup();
     append(CHECKPOINT_TEXT_INTERVAL_CHARS);
     await writer.checkpoint();
-    expect(db.writes).toHaveLength(0);
+    expect(store.writes).toHaveLength(0);
 
     await writer.flush();
-    expect(db.writes).toHaveLength(1);
-    expect(db.writes[0]?.text.length).toBe(CHECKPOINT_TEXT_INTERVAL_CHARS);
+    expect(store.writes).toHaveLength(1);
+    expect(store.writes[0]?.text.length).toBe(CHECKPOINT_TEXT_INTERVAL_CHARS);
   });
 
   it('keeps a flush barrier open until the forced write that superseded its snapshot lands', async () => {
-    const { db, manual, writer, append } = setup();
-    db.hold();
+    const { store, manual, writer, append } = setup();
+    store.hold();
 
     append(CHECKPOINT_TEXT_INTERVAL_CHARS);
     await writer.checkpoint();
@@ -368,45 +399,170 @@ describe('TurnCheckpointWriter', () => {
     append(5);
     const forced = writer.checkpoint({ force: true });
 
-    db.releaseOldest();
+    store.releaseOldest();
     await tick();
 
     // The forced write has started and is held: flush must still be waiting for it.
-    expect({ flushed, writesStarted: db.writes.length, inFlight: db.inFlight.length }).toEqual({
+    expect({
+      flushed,
+      writesStarted: store.writes.length,
+      inFlight: store.inFlight.length,
+    }).toEqual({
       flushed: false,
       writesStarted: 2,
       inFlight: 1,
     });
 
-    db.releaseAll();
+    store.releaseAll();
     await flush;
     expect(await forced).toBe(true);
-    expect(db.writes[db.writes.length - 1]?.text.length).toBe(
+    expect(store.writes[store.writes.length - 1]?.text.length).toBe(
       CHECKPOINT_TEXT_INTERVAL_CHARS * 2 + 5
     );
   });
 
   it('writes a status or reason code passed without force at call time', async () => {
-    const { db, checkpoint, writer, append } = setup();
+    const { store, checkpoint, writer, append } = setup();
     append(CHECKPOINT_TEXT_INTERVAL_CHARS);
 
     expect(await writer.checkpoint({ status: 'interrupted', reasonCode: 'user_cancelled' })).toBe(
       true
     );
 
-    expect(db.writes.map((write) => [write.status, write.reasonCode])).toEqual([
+    expect(store.writes.map((write) => [write.status, write.reasonCode])).toEqual([
       ['interrupted', 'user_cancelled'],
     ]);
     expect(checkpoint.status).toBe('interrupted');
   });
 
   it('skips calls below the throttle without scheduling a write', async () => {
-    const { db, manual, writer, append } = setup();
+    const { store, manual, writer, append } = setup();
     append(CHECKPOINT_TEXT_INTERVAL_CHARS - 1);
     expect(await writer.checkpoint()).toBe(false);
     manual.fire();
     await writer.flush();
-    expect(db.writes).toHaveLength(0);
+    expect(store.writes).toHaveLength(0);
+  });
+});
+
+describe('TurnCheckpointWriter write shape', () => {
+  beforeEach(() => {
+    spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    mock.restore();
+  });
+
+  const toolResult = (toolCallId: string, length: number): MessagePart => ({
+    type: 'tool_result',
+    toolCallId,
+    content: 'r'.repeat(length),
+  });
+
+  it('rewrites the row once, then writes only what each checkpoint added', async () => {
+    const { store, writer, append } = setup();
+    for (let call = 0; call < 4; call++) {
+      append(100);
+      expect(await writer.checkpoint({ force: true })).toBe(true);
+    }
+
+    expect(store.writes.map((write) => write.kind)).toEqual(['rewrite', 'delta', 'delta', 'delta']);
+    // 100 new characters travel with the delta, not the 400 stored so far.
+    for (const delta of store.writes.slice(1)) expect(delta.bytes).toBeLessThan(900);
+  });
+
+  it('stores a tool result once however many checkpoints follow it', async () => {
+    const { store, parts, writer } = setup();
+    const resultLength = 50_000;
+    for (let call = 0; call < 10; call++) {
+      parts.push(toolResult(`call-${call}`, resultLength));
+      expect(await writer.checkpoint({ force: true })).toBe(true);
+    }
+
+    const written = store.writes.reduce((sum, write) => sum + write.bytes, 0);
+    // Rewriting the row at each checkpoint would carry 55 results (2.75M characters).
+    expect(written).toBeGreaterThanOrEqual(10 * resultLength);
+    expect(written).toBeLessThan(10 * resultLength + 20_000);
+  });
+
+  it('does not send a result again when a later upsert replaces it with an equal copy', async () => {
+    const { store, parts, writer } = setup();
+    const content = 'r'.repeat(50_000);
+    parts.push({ type: 'tool_result', toolCallId: 'call-mixed', content });
+    expect(await writer.checkpoint({ force: true })).toBe(true);
+
+    // As in a mixed image batch: the progress sync wrote the result, a checkpoint
+    // landed, then the collector upserted it again as a new object.
+    parts[1] = { type: 'tool_result', toolCallId: 'call-mixed', content: `${content}` };
+    expect(await writer.checkpoint({ force: true })).toBe(true);
+
+    const [first, second] = store.writes;
+    expect(first?.bytes).toBeGreaterThanOrEqual(50_000);
+    expect(second?.kind).toBe('delta');
+    expect(second?.bytes).toBeLessThan(1_000);
+  });
+
+  it('rewrites the row after a failed write rather than leaving a gap in the deltas', async () => {
+    const { store, writer, append } = setup();
+    append(10);
+    expect(await writer.checkpoint({ force: true })).toBe(true);
+    store.failNextWrite(new Error('disk full'));
+    append(10);
+    expect(await writer.checkpoint({ force: true })).toBe(false);
+
+    append(10);
+    expect(await writer.checkpoint({ force: true })).toBe(true);
+
+    expect(store.writes.map((write) => [write.kind, write.text.length])).toEqual([
+      ['rewrite', 10],
+      ['delta', 20],
+      ['rewrite', 30],
+    ]);
+  });
+
+  it('drops a delta that was planned on top of a write which then failed', async () => {
+    const { store, writer, append } = setup();
+    store.hold();
+    append(10);
+    const first = writer.checkpoint({ force: true });
+    append(10);
+    const second = writer.checkpoint({ force: true });
+    append(10);
+    const third = writer.checkpoint({ force: true });
+    await tick();
+    // Only the first write (a full row) has started; the other two are deltas
+    // planned against it and waiting in the queue.
+    expect(store.inFlight).toHaveLength(1);
+    store.inFlight[0]?.fail(new Error('disk full'));
+
+    expect(await Promise.all([first, second, third])).toEqual([false, false, false]);
+    expect(store.writes).toHaveLength(1);
+
+    store.releaseAll();
+    append(10);
+    expect(await writer.checkpoint({ force: true })).toBe(true);
+    // The next write is a complete row, not a delta over the one that never landed.
+    expect(store.writes.map((write) => [write.kind, write.text.length])).toEqual([
+      ['rewrite', 10],
+      ['rewrite', 40],
+    ]);
+  });
+
+  it('writes a trailing text part that grows in place as an append', async () => {
+    const { store, parts, writer, state } = setup();
+    parts.push({ type: 'text', text: 'a'.repeat(5_000) });
+    state.text = 'a'.repeat(5_000);
+    await writer.checkpoint({ force: true });
+    (parts[1] as { text: string }).text += 'bc';
+    state.text += 'bc';
+    await writer.checkpoint({ force: true });
+
+    expect(store.writes.map((write) => [write.kind, write.text.length, write.partCount])).toEqual([
+      ['rewrite', 5_000, 2],
+      ['delta', 5_002, 2],
+    ]);
+    expect(store.writes[1]?.bytes).toBeLessThan(800);
   });
 });
 
@@ -444,7 +600,7 @@ async function setupDurable(options: { defer?: (run: () => void) => void } = {})
     getDb()
   );
   const writer = new TurnCheckpointWriter({
-    db: getDb(),
+    store: createDatabaseCheckpointStore(getDb(), turnId),
     chatId: chat.id,
     messageId: turnId,
     checkpoint,
@@ -456,21 +612,23 @@ async function setupDurable(options: { defer?: (run: () => void) => void } = {})
     state.text += 'x'.repeat(chars);
     parts.push({ type: 'text', text: 'x'.repeat(chars) });
   };
+  /** The row as a reader sees it: the stored columns with the checkpoint deltas folded in. */
   const readRow = async (): Promise<DurableRow> => {
-    const row = await getDb()
+    const stored = await getDb()
       .selectFrom('messages')
-      .select(['text', 'parts', 'isGenerating'])
+      .select(['id', 'text', 'parts', 'providerState', 'generationTime', 'isGenerating'])
       .where('id', '=', turnId)
       .executeTakeFirstOrThrow();
+    const [row] = await foldCheckpointDeltasIntoRows([stored], getDb());
     return {
-      text: row.text,
-      isGenerating: row.isGenerating,
-      parts: JSON.parse(row.parts ?? '[]') as MessagePart[],
+      text: row?.text ?? '',
+      isGenerating: row?.isGenerating ?? -1,
+      parts: JSON.parse(row?.parts ?? '[]') as MessagePart[],
     };
   };
   const finalize = () =>
     getDb().updateTable('messages').set({ isGenerating: 0 }).where('id', '=', turnId).execute();
-  return { checkpoint, writer, append, readRow, finalize };
+  return { checkpoint, writer, append, readRow, finalize, turnId };
 }
 
 describe('TurnCheckpointWriter on SQLite', () => {
@@ -504,6 +662,26 @@ describe('TurnCheckpointWriter on SQLite', () => {
     expect(row.isGenerating).toBe(0);
     expect(row.text).toBe('');
     expect(row.parts.find(isTurnCheckpointPart)?.sequence).toBe(0);
+  });
+
+  it('leaves no delta rows behind when a late checkpoint loses the race with finalize', async () => {
+    const { writer, append, finalize, turnId } = await setupDurable();
+    append(10);
+    await writer.checkpoint({ force: true });
+    append(10);
+    await writer.checkpoint({ force: true });
+    await finalize();
+
+    append(10);
+    await writer.checkpoint({ force: true });
+
+    // Scoped to this message: other tests in the process leave deltas of their own.
+    const left = await getDb()
+      .selectFrom('message_checkpoint_deltas')
+      .select(({ fn }) => fn.countAll<number>().as('count'))
+      .where('messageId', '=', turnId)
+      .executeTakeFirstOrThrow();
+    expect(left.count).toBe(0);
   });
 
   it('leaves the last forced state as the durable row when the turn crashes', async () => {

@@ -62,6 +62,7 @@ import { removeOrphanEnvironmentToolchains } from './061_remove_orphan_environme
 import { environmentToolchainRevision } from './062_environment_toolchain_revision';
 import { messagesOrderedReadIndexes } from './063_messages_ordered_read_indexes';
 import { chatsUserUpdatedIndex } from './064_chats_user_updated_index';
+import { messageCheckpointDeltas } from './065_message_checkpoint_deltas';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -128,4 +129,5 @@ export const allMigrations = {
   '062_environment_toolchain_revision': environmentToolchainRevision,
   '063_messages_ordered_read_indexes': messagesOrderedReadIndexes,
   '064_chats_user_updated_index': chatsUserUpdatedIndex,
+  '065_message_checkpoint_deltas': messageCheckpointDeltas,
 };
