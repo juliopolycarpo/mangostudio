@@ -106,4 +106,14 @@ describe('drainOperationStream reads of a frame split across chunks', () => {
 
     expect((await settle(pieces)).state).toBe('unresolved');
   });
+
+  it('settles unresolved when the body ends right after a done frame and the start of an oversized one', async () => {
+    // One piece holds the done frame and the oversized tail, then EOF. `push`
+    // returns the done frame; only the end-of-stream `finish` raises the refusal.
+    const piece = encoder.encode(
+      `${frame({ type: 'done', done: true })}data: ${'a'.repeat(SSE_FRAME_MAX_CHARS)}`
+    );
+
+    expect((await settle([piece])).state).toBe('unresolved');
+  });
 });

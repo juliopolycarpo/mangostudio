@@ -16,10 +16,32 @@ export interface DelimitedTextSplitterOptions {
   /**
    * What happens to a record longer than `maxRecordLength`. `truncate` keeps its
    * first `maxRecordLength` units and drops the rest, and the next record
-   * starts after the delimiter as usual. `refuse` throws a `RangeError` from
-   * `push` or `finish`, and every call after it throws the same error.
+   * starts after the delimiter as usual. `refuse` throws a
+   * {@link RecordTooLongError} (a `RangeError`) from `push` or `finish`, and every
+   * call after it throws the same error. Records completed in the read that
+   * overflowed are returned first; see `push`.
    */
   readonly onOverflow: 'truncate' | 'refuse';
+}
+
+/**
+ * What a `refuse` splitter throws for a record over the cap. It is a
+ * `RangeError`, so existing handlers still match, and it carries the lengths so
+ * a caller can report them or tell it from any other `RangeError`.
+ */
+export class RecordTooLongError extends RangeError {
+  /** Units of the record seen when it was refused; a lower bound when it never ended. */
+  readonly recordLength: number;
+  readonly maxRecordLength: number;
+
+  constructor(recordLength: number, maxRecordLength: number) {
+    super(
+      `(DelimitedTextSplitter): record length ${recordLength} exceeds the cap | expected at most ${maxRecordLength} characters before the delimiter`
+    );
+    this.name = 'RecordTooLongError';
+    this.recordLength = recordLength;
+    this.maxRecordLength = maxRecordLength;
+  }
 }
 
 /**
@@ -39,7 +61,7 @@ export class DelimitedTextSplitter {
   #seenLength = 0;
   /** The last `delimiter.length - 1` units seen: the part of a delimiter a read can end inside. */
   #tail = '';
-  #refusal: RangeError | undefined;
+  #refusal: RecordTooLongError | undefined;
 
   constructor(delimiter: string, options: DelimitedTextSplitterOptions) {
     if (delimiter.length === 0) {
@@ -55,10 +77,27 @@ export class DelimitedTextSplitter {
     this.#onOverflow = options.onOverflow;
   }
 
-  /** The records this read completed, in order, without their delimiter. */
+  /**
+   * The records this read completed, in order, without their delimiter. In
+   * `refuse` mode a read that completes records and then overflows returns
+   * those records, and the refusal is raised by the next `push` or `finish`; a
+   * read that completes none raises it at once. A refuse-mode caller must
+   * therefore call `finish()` at the end of the stream, even when it discards the
+   * value: otherwise a refusal held back by the last read never surfaces.
+   */
   push(text: string): string[] {
     if (this.#refusal) throw this.#refusal;
     const records: string[] = [];
+    try {
+      this.#split(text, records);
+    } catch (error) {
+      if (error !== this.#refusal || records.length === 0) throw error;
+    }
+    return records;
+  }
+
+  /** Appends the records `text` completes to `records`, and holds what it leaves unterminated. */
+  #split(text: string, records: string[]): void {
     let offset = 0;
 
     if (this.#seenLength > 0) {
@@ -66,7 +105,7 @@ export class DelimitedTextSplitter {
       const found = (this.#tail + text).indexOf(this.#delimiter);
       if (found === -1) {
         this.#hold(text);
-        return records;
+        return;
       }
       const tailLength = this.#tail.length;
       const recordLength = this.#seenLength - tailLength + found;
@@ -81,7 +120,6 @@ export class DelimitedTextSplitter {
       offset = found + this.#delimiter.length;
     }
     if (offset < text.length) this.#hold(offset === 0 ? text : text.slice(offset));
-    return records;
   }
 
   /** Ends the stream: the unterminated record, or `''` when there is none. */
@@ -132,10 +170,8 @@ export class DelimitedTextSplitter {
     return isHighSurrogate(cut.charCodeAt(cut.length - 1)) ? cut.slice(0, -1) : cut;
   }
 
-  #refuse(recordLength: number): RangeError {
-    this.#refusal = new RangeError(
-      `(DelimitedTextSplitter): record length ${recordLength} exceeds the cap | expected at most ${this.#maxRecordLength} characters before the delimiter`
-    );
+  #refuse(recordLength: number): RecordTooLongError {
+    this.#refusal = new RecordTooLongError(recordLength, this.#maxRecordLength);
     this.#reset();
     return this.#refusal;
   }
