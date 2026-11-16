@@ -296,13 +296,18 @@ build):
   checker proven equal to `Value.Check` by differential tests; both are larger than the
   saving justifies today.
 - **The first fenced code block loads one grammar and one theme.** The highlighter starts
-  empty; `preloadCodeLanguages(languages, theme)` loads the fence's own grammar (plus any
-  grammar it embeds) and the active theme, and a theme switch loads just the new theme. It
-  used to start from four themes and eight common grammars, so one `ts` block fetched about
+  empty; `preloadCodeLanguages(languages, theme)` loads the fence's own grammar and the active
+  theme, and a theme switch loads just the new theme. A `md` block is the one grammar that
+  highlights other languages inside it, so the renderer also reads the fences written inside
+  a markdown block and asks for those grammars. A fence counts only once its info line is
+  complete: while a reply streams, a fence opening of "ts" can be all that has arrived of "tsx", and
+  loading the wrong grammar is a wasted download. The highlighter used to start from four themes and eight common grammars, so one `ts` block fetched about
   1.2 MB raw in 22 requests. Shiki already runs on its JavaScript regex engine, so no
   Oniguruma WASM is involved. `MarkdownContent` also asks for the highlighter core as soon
-  as the source holds a fence, in parallel with the renderer chunk, which takes the first
-  block from three rounds to two.
+  as the source holds a fence with a complete info line that names a supported language (a
+  bare fence or an unsupported language never fetches it), in parallel with the renderer
+  chunk, which takes the first block from three rounds to two. The load report models it the
+  same way: renderer and highlighter in one round, then grammar and theme.
 
 `tests/browser-smoke/load-waterfall.spec.ts` watches the same first uses in a real browser
 (opt-in: `MANGO_LOAD_WATERFALL=1`, and `MANGO_LOAD_PROFILE=slow-4g` for a CDP throttle) and prints

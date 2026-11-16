@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useI18n } from '@/hooks/use-i18n';
 import { useTheme } from '@/hooks/use-theme';
+import { resolveLanguageId } from '@/lib/code-languages';
 import type { CodeThemeId } from '@/lib/code-themes';
 
 const CLIPBOARD_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
@@ -264,17 +265,38 @@ function parseMarkdown(parser: Marked, content: string): string {
 // Reused across calls; the lexer keeps no per-document state worth resetting.
 const codeLanguageLexer = new Marked({ gfm: true, breaks: true });
 
-function detectCodeLanguages(content: string): string[] {
-  if (!content) return [];
+// A markdown block can nest markdown blocks; stop descending past this.
+const MAX_EMBEDDED_MARKDOWN_DEPTH = 3;
 
+/**
+ * The fence languages in `content` that need a grammar, sorted. A fence counts
+ * once its info line is complete: while a reply streams, "```ts" can be all
+ * that has arrived of "```tsx", and loading the wrong grammar is a wasted
+ * download. A markdown block also counts the fences written inside it, because
+ * the markdown grammar highlights those with their own grammars.
+ */
+function detectCodeLanguages(content: string): string[] {
   const languages = new Set<string>();
+  collectCodeLanguages(content, languages, 0);
+  return [...languages].sort();
+}
+
+function collectCodeLanguages(content: string, languages: Set<string>, depth: number): void {
+  if (!content) return;
+
   // walkTokens recurses into list items and blockquotes, so fenced code nested
   // inside them still has its grammar preloaded for highlighting.
   // This callback is synchronous, so there are no pending token visits to await.
   void codeLanguageLexer.walkTokens(codeLanguageLexer.lexer(content), (token) => {
-    if (token.type === 'code' && 'lang' in token && token.lang) languages.add(token.lang);
+    if (token.type !== 'code' || !('lang' in token) || !token.lang) return;
+    // A fenced token's raw text is its opening line, so a newline after the info
+    // string says the line is complete. Without one the fence is still arriving.
+    if (!token.raw.includes('\n')) return;
+    languages.add(token.lang);
+    if (resolveLanguageId(token.lang) === 'markdown' && depth < MAX_EMBEDDED_MARKDOWN_DEPTH) {
+      collectCodeLanguages(token.text, languages, depth + 1);
+    }
   });
-  return [...languages].sort();
 }
 
 async function loadCodeHighlighter(

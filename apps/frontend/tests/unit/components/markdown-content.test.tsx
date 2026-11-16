@@ -381,6 +381,54 @@ describe('MarkdownContent — syntax highlighting', () => {
     });
   });
 
+  it('preloads the grammars of fences written inside a markdown block', async () => {
+    render(
+      <MarkdownContentRenderer content={'````md\n# Title\n\n```ts\nconst x = 1;\n```\n````'} />
+    );
+
+    await waitFor(() => {
+      expect(shiki.preloadCodeLanguages).toHaveBeenCalledWith(['md', 'ts'], 'one-dark-pro');
+    });
+  });
+
+  it('colours the nested fence once the embedded grammar arrives', async () => {
+    const preload = createDeferredPreload();
+    shiki.preloadCodeLanguages.mockReturnValue(preload.promise);
+    shiki.highlightCode.mockReturnValue(SHIKI_HTML);
+    const { container } = render(
+      <MarkdownContentRenderer content={'````md\n```ts\nlet a;\n```\n````'} />
+    );
+    expect(container.querySelector('span[style]')).not.toBeInTheDocument();
+
+    await act(async () => {
+      preload.resolvePreload(true);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(container.querySelector('span[style]')).toBeInTheDocument();
+    });
+  });
+
+  it('does not load a grammar for a fence whose info line is still streaming', async () => {
+    const { rerender } = render(<MarkdownContentRenderer content={'intro\n\n```ts'} isStreaming />);
+    // Let any effect that would start a preload run before asserting it did not.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(
+      shiki.preloadCodeLanguages,
+      `preloadCodeLanguages calls: ${JSON.stringify(shiki.preloadCodeLanguages.mock.calls)}`
+    ).not.toHaveBeenCalled();
+
+    rerender(<MarkdownContentRenderer content={'intro\n\n```tsx\nconst a = <b />;'} isStreaming />);
+
+    await waitFor(() => {
+      expect(shiki.preloadCodeLanguages).toHaveBeenCalledTimes(1);
+    });
+    expect(shiki.preloadCodeLanguages).toHaveBeenCalledWith(['tsx'], 'one-dark-pro');
+  });
+
   it('adds data-lang attribute to Shiki pre element', async () => {
     const preload = createDeferredPreload();
     shiki.preloadCodeLanguages.mockReturnValue(preload.promise);

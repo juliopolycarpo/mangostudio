@@ -1,11 +1,13 @@
 import { createBundledHighlighter, type HighlighterGeneric } from '@shikijs/core';
 import { createJavaScriptRegexEngine } from '@shikijs/engine-javascript';
 
+import { resolveLanguageId, type ShikiLanguageId } from '@/lib/code-languages';
 import type { CodeThemeId } from '@/lib/code-themes';
 import { createCheckedRenderers } from '@/lib/shiki-checked-render';
 
 export { CODE_THEMES, type CodeThemeId } from '@/lib/code-themes';
 
+// Checked against the id list in `code-languages.ts`: a language in one and not the other fails to compile.
 const SHIKI_LANGUAGES = {
   bash: () => import('@shikijs/langs/bash'),
   c: () => import('@shikijs/langs/c'),
@@ -30,7 +32,7 @@ const SHIKI_LANGUAGES = {
   typescript: () => import('@shikijs/langs/typescript'),
   xml: () => import('@shikijs/langs/xml'),
   yaml: () => import('@shikijs/langs/yaml'),
-} as const;
+} as const satisfies Record<ShikiLanguageId, () => Promise<unknown>>;
 
 const SHIKI_THEMES = {
   'github-dark-dimmed': () => import('@shikijs/themes/github-dark-dimmed'),
@@ -39,25 +41,6 @@ const SHIKI_THEMES = {
   'one-light': () => import('@shikijs/themes/one-light'),
 } as const;
 
-const LANGUAGE_ALIASES: Record<string, ShikiLanguageId> = {
-  'c++': 'cpp',
-  cs: 'csharp',
-  csh: 'csharp',
-  htm: 'html',
-  js: 'javascript',
-  md: 'markdown',
-  mjs: 'javascript',
-  ps1: 'powershell',
-  py: 'python',
-  rb: 'ruby',
-  sh: 'bash',
-  shell: 'bash',
-  ts: 'typescript',
-  yml: 'yaml',
-  zsh: 'bash',
-};
-
-type ShikiLanguageId = keyof typeof SHIKI_LANGUAGES;
 type MangoHighlighter = HighlighterGeneric<ShikiLanguageId, CodeThemeId>;
 
 const createMangoHighlighter = createBundledHighlighter({
@@ -78,7 +61,7 @@ const themeLoadPromises = new Map<CodeThemeId, Promise<void>>();
  * Each grammar and theme is its own chunk (the larger grammars and themes run
  * to tens of KB), and a first fenced block needs one theme and its own
  * language, so `preloadCodeLanguages` fetches exactly those. Starting from the
- * four themes and eight common grammars made one `ts` block cost twenty
+ * four themes and eight common grammars made one `ts` block cost 22
  * requests.
  */
 // Usage: await initHighlighter();
@@ -168,21 +151,7 @@ export function highlightLineTokens(
 }
 
 function resolveUniqueLanguageIds(languages: readonly string[]): ShikiLanguageId[] {
-  return [...new Set(languages.map(resolveLanguageId).filter(isLanguageId))];
-}
-
-function resolveLanguageId(lang: string): ShikiLanguageId | null {
-  const language = normalizeLanguage(lang);
-  if (isLanguageId(language)) return language;
-  return Object.hasOwn(LANGUAGE_ALIASES, language) ? (LANGUAGE_ALIASES[language] ?? null) : null;
-}
-
-function normalizeLanguage(lang: string): string {
-  return lang.trim().split(/\s+/)[0]?.toLowerCase() ?? '';
-}
-
-function isLanguageId(lang: string | null): lang is ShikiLanguageId {
-  return typeof lang === 'string' && Object.hasOwn(SHIKI_LANGUAGES, lang);
+  return [...new Set(languages.map(resolveLanguageId).filter((language) => language !== null))];
 }
 
 function isLanguageLoaded(highlighter: MangoHighlighter, language: ShikiLanguageId): boolean {
