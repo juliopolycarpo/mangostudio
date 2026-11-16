@@ -7,7 +7,7 @@
  * One file because each lazy binding is module-level and keeps its first result.
  */
 
-import { describe, expect, it, mock, spyOn } from 'bun:test';
+import { afterEach, describe, expect, it, mock, spyOn } from 'bun:test';
 
 import { en } from '@mangostudio/shared/i18n';
 import userEvent from '@testing-library/user-event';
@@ -66,6 +66,19 @@ const { LazyTerminalView } = await import('../../../src/features/terminal/LazyTe
 const { MarkdownContent } = await import('../../../src/components/MarkdownContent');
 const { LazyDiffViewer } = await import('../../../src/features/workspace/LazyDiffViewer');
 
+/** Date.now spies a test took over; restored after each test, so a failing assertion cannot leak one. */
+const controlledClocks: { mockRestore(): void }[] = [];
+
+function controlDateNow() {
+  const clock = spyOn(Date, 'now');
+  controlledClocks.push(clock);
+  return clock;
+}
+
+afterEach(() => {
+  for (const clock of controlledClocks.splice(0)) clock.mockRestore();
+});
+
 describe('a lazy chunk that cannot be fetched', () => {
   it('shows the terminal failure in place and recovers on Retry', async () => {
     const user = userEvent.setup();
@@ -80,7 +93,7 @@ describe('a lazy chunk that cannot be fetched', () => {
   });
 
   it('keeps markdown readable as plain text, and asks the network again only after the backoff', async () => {
-    const clock = spyOn(Date, 'now');
+    const clock = controlDateNow();
     const startedAt = Date.now();
     clock.mockImplementation(() => startedAt);
 
@@ -113,11 +126,10 @@ describe('a lazy chunk that cannot be fetched', () => {
     render(<MarkdownContent content="third message" />);
     expect(await screen.findByTestId('markdown-rendered')).toHaveTextContent('THIRD MESSAGE');
     expect(chunkState.markdownEvaluations, 'evaluations after the backoff').toBe(2);
-    clock.mockRestore();
   });
 
   it('heals a diff viewer on a later mount, without a Retry click, once the backoff passed', async () => {
-    const clock = spyOn(Date, 'now');
+    const clock = controlDateNow();
     const startedAt = Date.now();
     clock.mockImplementation(() => startedAt);
     const selection = { path: 'a.ts', staged: false, title: 'a.ts' };
@@ -132,6 +144,5 @@ describe('a lazy chunk that cannot be fetched', () => {
     render(<LazyDiffViewer chatId="chat-9" selection={selection} onClose={() => undefined} />);
 
     expect(await screen.findByTestId('diff-viewer-stub')).toHaveTextContent('chat-9');
-    clock.mockRestore();
   });
 });

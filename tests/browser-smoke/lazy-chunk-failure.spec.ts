@@ -155,7 +155,7 @@ test('after a hub upgrade the page offers one Reload, and never reloads by itsel
   const reload = page.getByRole('button', { name: 'Reload page' });
   await expect(reload).toHaveCount(1);
   await expect(page.getByTestId('stale-build-notice')).toContainText('MangoStudio was updated');
-  await expect(page.getByTestId('stale-build-notice')).toContainText('Text you typed is kept');
+  await expect(page.getByTestId('stale-build-notice')).toContainText('Your message draft is kept');
 
   // Give a reload loop time to show itself: it would count a second document.
   await page.waitForTimeout(2_000);
@@ -212,10 +212,24 @@ test('after a hub upgrade a tab showing only markdown gets the notice and stops 
 
   await expect(page.getByTestId('stale-build-notice')).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('[data-markdown-fallback="failed"]').first()).toBeVisible();
-  // Three rows share one failed attempt, and a stale build stops further requests.
-  await page.waitForTimeout(2_500);
+  // Three rows share one failed attempt.
   expect(
     chunkRequests.length,
     `expected the markdown chunk requested once for three messages | received: ${chunkRequests.length}`
+  ).toBe(1);
+
+  // Past the first 1 s backoff a row that mounts again would start a new
+  // attempt, unless the build is known to be stale. Leaving the chat and coming
+  // back remounts every row, so this is what proves the gate and not just the
+  // shared attempt.
+  await page.waitForTimeout(1_500);
+  await page.getByTestId('sidebar-new-chat').click();
+  await dismissWorkdirPicker(page, 2_000);
+  await page.getByRole('button', { name: title }).first().click();
+  await expect(page.locator('[data-markdown-fallback="failed"]').first()).toBeVisible();
+  await page.waitForTimeout(1_500);
+  expect(
+    chunkRequests.length,
+    `expected no new markdown chunk request once the build is stale | received: ${chunkRequests.length}`
   ).toBe(1);
 });

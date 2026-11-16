@@ -4242,7 +4242,7 @@ export const messages = {
       reload: 'Recarregar a página',
       staleTitle: 'O MangoStudio foi atualizado',
       staleHint:
-        'Esta aba executa uma versão anterior, cujos arquivos não existem mais. Recarregue a página para continuar. O texto digitado é mantido; uma resposta em andamento é interrompida (você pode retomá-la) e os anexos ainda não enviados são removidos.',
+        'Esta aba executa uma versão anterior, cujos arquivos não existem mais. Recarregue a página para continuar. O rascunho da sua mensagem é mantido e os anexos ainda não enviados são removidos. Uma resposta do MangoStudio em andamento é interrompida (você pode retomá-la); um agente externo continua trabalhando.',
     },
     bootstrap: {
       title: 'O MangoStudio não conseguiu terminar de carregar',
