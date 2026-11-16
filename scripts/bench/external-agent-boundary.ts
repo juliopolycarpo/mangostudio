@@ -158,7 +158,21 @@ async function capture(argv: string[], cwd = REPO_ROOT): Promise<string> {
   return stdout;
 }
 
-async function runSample(binary: string, sourceSha: string, test: string, rssPath: string) {
+/** Which side of the comparison a measured process belongs to. */
+type BoundaryRole = 'base' | 'head';
+
+export interface BoundaryBinary {
+  readonly binary: string;
+  readonly sourceSha: string;
+}
+
+async function runSample(
+  role: BoundaryRole,
+  binary: string,
+  sourceSha: string,
+  test: string,
+  rssPath: string
+) {
   const measureRss = process.platform === 'linux' && (await Bun.file('/usr/bin/time').exists());
   const argv = [binary, test, '--exact', '--ignored', '--nocapture', '--test-threads=1'];
   const stdout = await capture(
@@ -167,7 +181,64 @@ async function runSample(binary: string, sourceSha: string, test: string, rssPat
   const sample = parseBoundarySample(stdout, sourceSha);
   const measuredRss = measureRss ? Number((await readFile(rssPath, 'utf8')).trim()) : NaN;
   const peakRssKiB = Number.isSafeInteger(measuredRss) && measuredRss > 0 ? measuredRss : null;
-  return { ...sample, test, ns: sample.elapsedNs / sample.iterations, peakRssKiB };
+  return { ...sample, role, test, ns: sample.elapsedNs / sample.iterations, peakRssKiB };
+}
+
+export type RawBoundarySample = Awaited<ReturnType<typeof runSample>>;
+
+/**
+ * Runs every test `samples` times against both binaries, fresh process each
+ * time, alternating which side goes first. Each sample carries the `role` it was
+ * measured for, because `sourceSha` cannot tell the sides apart: two builds of
+ * one commit (a profile, flag or allocator experiment) share it.
+ * @example await collectBoundarySamples({ base, head, tests, samples: 30, rssPath });
+ */
+export async function collectBoundarySamples(options: {
+  base: BoundaryBinary;
+  head: BoundaryBinary;
+  tests: readonly string[];
+  samples: number;
+  rssPath: string;
+}): Promise<RawBoundarySample[]> {
+  const { base, head, tests, samples, rssPath } = options;
+  const raw: RawBoundarySample[] = [];
+  for (const test of tests) {
+    for (let index = 0; index < samples; index++) {
+      const order: readonly (readonly [BoundaryRole, BoundaryBinary])[] =
+        index % 2 === 0
+          ? [
+              ['base', base],
+              ['head', head],
+            ]
+          : [
+              ['head', head],
+              ['base', base],
+            ];
+      for (const [role, side] of order)
+        raw.push(await runSample(role, resolve(side.binary), side.sourceSha, test, rssPath));
+    }
+  }
+  return raw;
+}
+
+/**
+ * Splits raw samples into per-test base and head summaries by `role`, never by
+ * `sourceSha`: the same commit built twice must still compare as two sides.
+ * @example summarizeBoundaryComparison(['a::b'], raw);
+ */
+export function summarizeBoundaryComparison(
+  tests: readonly string[],
+  raw: readonly Pick<RawBoundarySample, 'role' | 'test' | 'ns' | 'peakRssKiB'>[]
+) {
+  return tests.map((test) => ({
+    test,
+    base: summarizeBoundarySamples(
+      raw.filter((sample) => sample.test === test && sample.role === 'base')
+    ),
+    head: summarizeBoundarySamples(
+      raw.filter((sample) => sample.test === test && sample.role === 'head')
+    ),
+  }));
 }
 
 async function binaryMetadata(binary: string, sourceSha: string) {
@@ -219,35 +290,15 @@ async function main() {
   if (tests.length === 0)
     throw new Error(`Expected a registered --case; received ${values['--case']}.`);
   const temp = await mkdtemp(join(tmpdir(), 'mango-boundary-bench-'));
-  const raw: Awaited<ReturnType<typeof runSample>>[] = [];
   try {
-    for (const test of tests) {
-      for (let index = 0; index < samples; index++) {
-        const order =
-          index % 2 === 0
-            ? [
-                [base, baseSha],
-                [head, headSha],
-              ]
-            : [
-                [head, headSha],
-                [base, baseSha],
-              ];
-        for (const [binary, sha] of order)
-          raw.push(
-            await runSample(resolve(binary as string), sha as string, test, join(temp, 'rss.txt'))
-          );
-      }
-    }
-    const summaries = tests.map((test) => ({
-      test,
-      base: summarizeBoundarySamples(
-        raw.filter((sample) => sample.test === test && sample.sourceSha === baseSha)
-      ),
-      head: summarizeBoundarySamples(
-        raw.filter((sample) => sample.test === test && sample.sourceSha === headSha)
-      ),
-    }));
+    const raw = await collectBoundarySamples({
+      base: { binary: base, sourceSha: baseSha },
+      head: { binary: head, sourceSha: headSha },
+      tests,
+      samples,
+      rssPath: join(temp, 'rss.txt'),
+    });
+    const summaries = summarizeBoundaryComparison(tests, raw);
     const receipt = {
       base: await binaryMetadata(resolve(base), baseSha),
       head: await binaryMetadata(resolve(head), headSha),

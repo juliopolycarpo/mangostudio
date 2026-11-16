@@ -1,8 +1,13 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import {
   BOUNDARY_CASES,
+  collectBoundarySamples,
   parseBoundarySample,
+  summarizeBoundaryComparison,
   summarizeBoundarySamples,
 } from '../bench/external-agent-boundary';
 
@@ -88,5 +93,63 @@ describe('owned boundary benchmark receipts', () => {
     expect(new Set(BOUNDARY_CASES).size).toBe(19);
     expect(BOUNDARY_CASES.filter((test) => test.includes('fingerprint_'))).toHaveLength(5);
     expect(BOUNDARY_CASES.filter((test) => test.includes('request_'))).toHaveLength(5);
+  });
+});
+
+/** A shell script standing in for a libtest binary: it ignores its arguments and prints one receipt. */
+function createFakeBoundaryBinary(directory: string, name: string, elapsedNs: number): string {
+  const path = join(directory, name);
+  writeFileSync(path, `#!/bin/sh\nprintf '%s\\n' '${receipt({ ...sample, elapsedNs }).trim()}'\n`);
+  chmodSync(path, 0o755);
+  return path;
+}
+
+describe.skipIf(process.platform === 'win32')('base and head comparison', () => {
+  let directory: string;
+
+  beforeEach(() => {
+    directory = mkdtempSync(join(tmpdir(), 'boundary-compare-'));
+  });
+
+  afterEach(() => {
+    rmSync(directory, { recursive: true, force: true });
+  });
+
+  it('keeps two builds of one commit apart instead of pooling them', async () => {
+    // Both binaries report the same source SHA: one commit, two builds. Per
+    // operation the fast one takes 100 ns and the slow one 500 ns.
+    const fast = createFakeBoundaryBinary(directory, 'fast', 1000);
+    const slow = createFakeBoundaryBinary(directory, 'slow', 5000);
+    const tests = ['external_agents::turns::benchmarks::fingerprint_ordinary'];
+
+    const raw = await collectBoundarySamples({
+      base: { binary: fast, sourceSha: SHA },
+      head: { binary: slow, sourceSha: SHA },
+      tests,
+      samples: 4,
+      rssPath: join(directory, 'rss.txt'),
+    });
+    const [summary] = summarizeBoundaryComparison(tests, raw);
+
+    expect(
+      { base: summary?.base.medianNs, head: summary?.head.medianNs },
+      'expected base and head medians from separate binaries: 100 and 500 | received pooled or swapped values'
+    ).toEqual({ base: 100, head: 500 });
+    expect({ base: summary?.base.count, head: summary?.head.count }).toEqual({ base: 4, head: 4 });
+  });
+
+  it('alternates which side runs first within a pair', async () => {
+    const first = createFakeBoundaryBinary(directory, 'first', 1000);
+    const second = createFakeBoundaryBinary(directory, 'second', 2000);
+
+    const raw = await collectBoundarySamples({
+      base: { binary: first, sourceSha: SHA },
+      head: { binary: second, sourceSha: SHA },
+      tests: ['external_agents::turns::benchmarks::fingerprint_ordinary'],
+      samples: 2,
+      rssPath: join(directory, 'rss.txt'),
+    });
+
+    expect(raw.map((entry) => entry.role)).toEqual(['base', 'head', 'head', 'base']);
   });
 });
