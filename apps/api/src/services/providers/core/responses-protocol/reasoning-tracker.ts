@@ -8,11 +8,12 @@
  * neutral `string` output lets both the text-streaming and agentic-turn
  * generators wrap it in their own event shape (`thinking` vs `reasoning_delta`).
  *
- * A reasoning item carries its summary as separate parts (`summary_index`), each
- * a paragraph of its own that usually opens with a bold title. The stream gives
- * only the text of each part, so the tracker appends a blank line to the first
- * text of every part after the first, the same join `extractReasoningFromCompleted`
- * uses. Without it the stored text reads "…end of one part.**Next title**…". The
+ * A reasoning item carries its summary as separate parts (`summary_index`), or its raw
+ * text as separate content parts (`content_index`), each a paragraph of its own that
+ * usually opens with a bold title. The stream gives only the text of each part, so the
+ * tracker prefixes a blank line to the first text of every part after the first, across
+ * reasoning items too: the same join `extractReasoningFromCompleted` uses, so the streamed
+ * text and the completed-response fallback read the same. Without it the stored text reads "…end of one part.**Next title**…". The
  * separator travels in the stream, ahead of the text it precedes, so what was
  * already streamed and checkpointed only ever grows by appending.
  */
@@ -35,17 +36,20 @@ export interface ResponsesReasoningTracker {
   consumeCompleted(response: Responses.Response): string | null;
 }
 
-/** Joins two summary parts, matching the join used for a completed response. */
-const SUMMARY_PART_SEPARATOR = '\n\n';
+/** Joins two reasoning parts, matching the join used for a completed response. */
+const REASONING_PART_SEPARATOR = '\n\n';
 
 /** Builds a reasoning tracker for a single Responses stream. */
 // Usage: const reasoning = createResponsesReasoningTracker();
 export function createResponsesReasoningTracker(): ResponsesReasoningTracker {
-  const seenSummaryDeltas = new Set<string>();
+  /** Summary parts (`item_id:summary_index`) whose text was streamed as deltas or emitted by a done event. */
+  const emittedSummaryParts = new Set<string>();
+  /** Raw text parts (`item_id:content_index`) whose text was streamed as deltas or emitted by a done event. */
+  const emittedRawParts = new Set<string>();
   let summaryEventsWereSeen = false;
   let thinkingWasEmitted = false;
-  /** The summary part whose text was emitted last, as `item_id:summary_index`. */
-  let lastEmittedSummaryPart: string | null = null;
+  /** The part whose text was emitted last, as `kind:item_id:index`. */
+  let lastEmittedPart: string | null = null;
 
   const emit = (text: string | undefined | null): string | null => {
     if (!text) return null;
@@ -53,17 +57,37 @@ export function createResponsesReasoningTracker(): ResponsesReasoningTracker {
     return text;
   };
 
-  /** Emits summary text, opening a new paragraph when it belongs to a different part. */
-  const emitSummary = (
+  /**
+   * Emits text of one part, opening a new paragraph when it belongs to a different part than
+   * the text emitted before it. Summary parts and raw text parts each form their own paragraphs.
+   */
+  const emitPart = (
+    kind: 'summary' | 'raw',
+    itemId: string,
+    partIndex: number,
+    text: string | undefined | null
+  ): string | null => {
+    if (!text) return null;
+    const part = `${kind}:${itemId}:${partIndex}`;
+    const separator = lastEmittedPart !== null && lastEmittedPart !== part;
+    lastEmittedPart = part;
+    return emit(separator ? `${REASONING_PART_SEPARATOR}${text}` : text);
+  };
+
+  /** Emits what a summary done event carries, once per part however many done events name it. */
+  const emitSummaryDone = (
     itemId: string,
     summaryIndex: number,
     text: string | undefined | null
   ): string | null => {
-    if (!text) return null;
-    const part = `${itemId}:${summaryIndex}`;
-    const separator = lastEmittedSummaryPart !== null && lastEmittedSummaryPart !== part;
-    lastEmittedSummaryPart = part;
-    return emit(separator ? `${SUMMARY_PART_SEPARATOR}${text}` : text);
+    const key = `${itemId}:${summaryIndex}`;
+    if (emittedSummaryParts.has(key)) return null;
+    const emitted = emitPart('summary', itemId, summaryIndex, text);
+    if (emitted !== null) {
+      emittedSummaryParts.add(key);
+      summaryEventsWereSeen = true;
+    }
+    return emitted;
   };
 
   return {
@@ -71,42 +95,42 @@ export function createResponsesReasoningTracker(): ResponsesReasoningTracker {
       switch (ev.type) {
         // Reasoning summary (preferred path).
         case 'response.reasoning_summary_text.delta': {
-          seenSummaryDeltas.add(`${ev.item_id}:${ev.summary_index}`);
+          emittedSummaryParts.add(`${ev.item_id}:${ev.summary_index}`);
           summaryEventsWereSeen = true;
-          return emitSummary(ev.item_id, ev.summary_index, ev.delta);
+          return emitPart('summary', ev.item_id, ev.summary_index, ev.delta);
         }
 
         // Raw reasoning text (fallback when no summary is streamed).
         case 'response.reasoning_text.delta': {
           if (summaryEventsWereSeen) return null;
-          return emit(ev.delta);
+          emittedRawParts.add(`${ev.item_id}:${ev.content_index}`);
+          return emitPart('raw', ev.item_id, ev.content_index, ev.delta);
         }
 
         // Summary done events (fallback if the matching delta never streamed).
-        case 'response.reasoning_summary_text.done': {
-          if (seenSummaryDeltas.has(`${ev.item_id}:${ev.summary_index}`)) return null;
-          return emitSummary(ev.item_id, ev.summary_index, ev.text);
-        }
+        case 'response.reasoning_summary_text.done':
+          return emitSummaryDone(ev.item_id, ev.summary_index, ev.text);
 
-        case 'response.reasoning_summary_part.done': {
-          if (seenSummaryDeltas.has(`${ev.item_id}:${ev.summary_index}`)) return null;
-          return emitSummary(ev.item_id, ev.summary_index, ev.part.text);
-        }
+        case 'response.reasoning_summary_part.done':
+          return emitSummaryDone(ev.item_id, ev.summary_index, ev.part.text);
 
         case 'response.reasoning_text.done': {
-          if (summaryEventsWereSeen || thinkingWasEmitted) return null;
-          return emit(ev.text);
+          const key = `${ev.item_id}:${ev.content_index}`;
+          if (summaryEventsWereSeen || emittedRawParts.has(key)) return null;
+          const emitted = emitPart('raw', ev.item_id, ev.content_index, ev.text);
+          if (emitted !== null) emittedRawParts.add(key);
+          return emitted;
         }
 
         // Answer text or a tool call ends the reasoning phase. The turn opens a new thinking
         // part for the next reasoning item, so its first text must not carry a separator.
         case 'response.output_text.delta': {
-          lastEmittedSummaryPart = null;
+          lastEmittedPart = null;
           return null;
         }
 
         case 'response.output_item.added': {
-          if (ev.item.type !== 'reasoning') lastEmittedSummaryPart = null;
+          if (ev.item.type !== 'reasoning') lastEmittedPart = null;
           return null;
         }
 

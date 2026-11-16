@@ -545,3 +545,163 @@ describe('createResponsesAgentAccumulator', () => {
     expect(accumulator.usageInputTokens).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Streamed reasoning and the completed-response fallback read the same
+// ---------------------------------------------------------------------------
+
+describe('streamed reasoning versus the completed-response fallback', () => {
+  const summaryDelta = (itemId: string, summaryIndex: number, delta: string) =>
+    event({
+      type: 'response.reasoning_summary_text.delta',
+      item_id: itemId,
+      summary_index: summaryIndex,
+      delta,
+    });
+  const summaryTextDone = (itemId: string, summaryIndex: number, text: string) =>
+    event({
+      type: 'response.reasoning_summary_text.done',
+      item_id: itemId,
+      summary_index: summaryIndex,
+      text,
+    });
+  const summaryPartDone = (itemId: string, summaryIndex: number, text: string) =>
+    event({
+      type: 'response.reasoning_summary_part.done',
+      item_id: itemId,
+      summary_index: summaryIndex,
+      part: { type: 'summary_text', text },
+    });
+  const rawDelta = (itemId: string, contentIndex: number, delta: string) =>
+    event({
+      type: 'response.reasoning_text.delta',
+      item_id: itemId,
+      content_index: contentIndex,
+      delta,
+    });
+  const rawDone = (itemId: string, contentIndex: number, text: string) =>
+    event({
+      type: 'response.reasoning_text.done',
+      item_id: itemId,
+      content_index: contentIndex,
+      text,
+    });
+  const summaryItem = (...texts: string[]) => ({
+    type: 'reasoning',
+    summary: texts.map((text) => ({ type: 'summary_text', text })),
+  });
+  const rawItem = (...texts: string[]) => ({
+    type: 'reasoning',
+    summary: [],
+    content: texts.map((text) => ({ type: 'reasoning_text', text })),
+  });
+
+  /** Everything a stream of these events would show a user, in order. */
+  const streamedText = (events: ResponseStreamEvent[]): string => {
+    const tracker = createResponsesReasoningTracker();
+    return events.map((ev) => tracker.consumeStreamEvent(ev) ?? '').join('');
+  };
+  const recoveredText = (...output: Array<Record<string, unknown>>): string | null =>
+    extractReasoningFromCompleted(completedResponse({ output }));
+  /** The recovered text of a response that must carry reasoning; a null there is the failure. */
+  const fallbackText = (...output: Array<Record<string, unknown>>): string => {
+    const recovered = recoveredText(...output);
+    if (recovered === null) {
+      throw new Error(
+        `expected reasoning recovered from ${output.length} output items | received: null`
+      );
+    }
+    return recovered;
+  };
+
+  it('reads the summary of every reasoning item when nothing streamed', () => {
+    const output = [summaryItem('A1.', 'A2.'), summaryItem('B1.')];
+
+    expect(fallbackText(...output)).toBe('A1.\n\nA2.\n\nB1.');
+  });
+
+  it('streams several reasoning items as the fallback reads them', () => {
+    const streamed = streamedText([
+      summaryDelta('rs_1', 0, 'A1.'),
+      summaryDelta('rs_1', 1, 'A2.'),
+      summaryDelta('rs_2', 0, 'B1.'),
+    ]);
+
+    expect(streamed).toBe(fallbackText(summaryItem('A1.', 'A2.'), summaryItem('B1.')));
+  });
+
+  it('reads raw text across content parts and reasoning items the same streamed and recovered', () => {
+    const output = [rawItem('A1.', 'A2.'), rawItem('B1.')];
+    const streamed = streamedText([
+      rawDelta('rs_1', 0, 'A'),
+      rawDelta('rs_1', 0, '1.'),
+      rawDelta('rs_1', 1, 'A2.'),
+      rawDelta('rs_2', 0, 'B1.'),
+    ]);
+
+    expect(streamed).toBe('A1.\n\nA2.\n\nB1.');
+    expect(streamed).toBe(fallbackText(...output));
+  });
+
+  it('reads raw text that only arrives in done events the same as the fallback', () => {
+    const streamed = streamedText([
+      rawDone('rs_1', 0, 'A1.'),
+      rawDone('rs_1', 1, 'A2.'),
+      rawDone('rs_2', 0, 'B1.'),
+    ]);
+
+    expect(streamed).toBe(fallbackText(rawItem('A1.', 'A2.'), rawItem('B1.')));
+  });
+
+  it('streams raw text for a part whose deltas never came after another part streamed', () => {
+    const streamed = streamedText([
+      rawDelta('rs_1', 0, 'A1.'),
+      rawDone('rs_1', 0, 'A1.'),
+      rawDone('rs_1', 1, 'A2.'),
+    ]);
+
+    expect(streamed).toBe('A1.\n\nA2.');
+  });
+
+  it('emits a part once when summary_text.done is followed by summary_part.done', () => {
+    const tracker = createResponsesReasoningTracker();
+
+    const emitted = [
+      summaryTextDone('rs_1', 0, 'Only part.'),
+      summaryPartDone('rs_1', 0, 'Only part.'),
+    ].map((ev) => tracker.consumeStreamEvent(ev));
+
+    expect(emitted).toEqual(['Only part.', null]);
+  });
+
+  it('emits each part once when both done events follow for several parts, as the fallback reads them', () => {
+    const streamed = streamedText([
+      summaryTextDone('rs_1', 0, 'A1.'),
+      summaryPartDone('rs_1', 0, 'A1.'),
+      summaryTextDone('rs_1', 1, 'A2.'),
+      summaryPartDone('rs_1', 1, 'A2.'),
+      summaryTextDone('rs_2', 0, 'B1.'),
+      summaryPartDone('rs_2', 0, 'B1.'),
+    ]);
+
+    expect(streamed).toBe(fallbackText(summaryItem('A1.', 'A2.'), summaryItem('B1.')));
+  });
+
+  it('does not repeat raw text after summaries arrived only as done events', () => {
+    const streamed = streamedText([
+      summaryTextDone('rs_1', 0, 'Summary.'),
+      rawDone('rs_1', 0, 'Raw.'),
+      rawDelta('rs_1', 0, 'Raw.'),
+    ]);
+
+    expect(streamed).toBe('Summary.');
+  });
+
+  it('prefers summaries over raw content across items, in the stream and in the fallback', () => {
+    expect(fallbackText(rawItem('Raw.'), summaryItem('Summary.'))).toBe('Summary.');
+  });
+
+  it('recovers nothing from a response with no reasoning items', () => {
+    expect(recoveredText({ type: 'message', content: [] })).toBeNull();
+  });
+});
