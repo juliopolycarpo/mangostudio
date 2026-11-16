@@ -25,6 +25,7 @@ use super::capability::{
 use super::grep_prefilter::LinePrefilter;
 use super::io::{check_cancel, io_error, path_error, read};
 use super::policy::{CompiledPolicy, PathPolicy};
+use crate::result_value::object;
 use crate::workspace::lexically_normalize;
 
 const MAX_PATTERN_UTF16_UNITS: usize = 1_000;
@@ -144,9 +145,15 @@ pub(super) fn glob(params: GlobParams, cancel: &CancellationToken) -> Result<Val
         ))
     })?;
 
-    Ok(
-        json!({ "pattern": params.pattern, "cwd": params.cwd, "matches": matches, "truncated": truncated }),
-    )
+    Ok(object([
+        ("pattern", Value::from(params.pattern)),
+        ("cwd", json!(params.cwd)),
+        (
+            "matches",
+            Value::Array(matches.into_iter().map(Value::String).collect()),
+        ),
+        ("truncated", Value::Bool(truncated)),
+    ]))
 }
 
 /// Searches regular, non-binary files with an interruptible ECMAScript RegExp.
@@ -297,13 +304,13 @@ pub(super) fn grep(params: GrepParams, cancel: &CancellationToken) -> Result<Val
         )));
     }
 
-    Ok(json!({
-        "pattern": params.pattern,
-        "path": params.input_path,
-        "matches": matches,
-        "filesScanned": files_scanned,
-        "truncated": truncated,
-    }))
+    Ok(object([
+        ("pattern", Value::from(params.pattern)),
+        ("path", Value::from(params.input_path)),
+        ("matches", Value::Array(matches)),
+        ("filesScanned", json!(files_scanned)),
+        ("truncated", Value::Bool(truncated)),
+    ]))
 }
 
 enum PathGlob {

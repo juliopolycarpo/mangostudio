@@ -28,6 +28,7 @@ use crate::json_size::serialized_len;
 use crate::ports::audit::lock;
 use crate::ports::authorization::consent_denial;
 use crate::registry::Registry;
+use crate::result_value::object;
 use crate::tool_argument::tool_argument;
 
 pub(super) const READ_MAX_BYTES: usize = 10 * 1024 * 1024;
@@ -265,7 +266,17 @@ impl Service {
                 base64::engine::general_purpose::STANDARD.encode(&observed.bytes)
             };
             let digest = ContentDigest::of(&observed.bytes);
-            let result = json!({"content":content,"path":params.input_path,"size":observed.bytes.len(),"sha256":digest.sha256,"totalLines":0,"startLine":1,"endLine":0,"truncated":false,"view":view});
+            let result = object([
+                ("content", Value::String(content)),
+                ("path", Value::from(params.input_path.as_str())),
+                ("size", Value::from(observed.bytes.len())),
+                ("sha256", Value::from(digest.sha256.as_str())),
+                ("totalLines", Value::from(0)),
+                ("startLine", Value::from(1)),
+                ("endLine", Value::from(0)),
+                ("truncated", Value::Bool(false)),
+                ("view", Value::from(view)),
+            ]);
             let result = response.preflight_read(result)?;
             lock(&self.state.ledger).record_read_digest(
                 &params.chat_id,
@@ -301,7 +312,16 @@ impl Service {
             text::format_window(&observed.bytes, start, maximum)
         };
         let digest = ContentDigest::of(&observed.bytes);
-        let result = json!({"content":window.content,"path":params.input_path,"size":observed.bytes.len(),"sha256":digest.sha256,"totalLines":total,"startLine":start,"endLine":window.end_line,"truncated":window.truncated});
+        let result = object([
+            ("content", Value::String(window.content)),
+            ("path", Value::from(params.input_path.as_str())),
+            ("size", Value::from(observed.bytes.len())),
+            ("sha256", Value::from(digest.sha256.as_str())),
+            ("totalLines", Value::from(total)),
+            ("startLine", Value::from(start)),
+            ("endLine", Value::from(window.end_line)),
+            ("truncated", Value::Bool(window.truncated)),
+        ]);
         let result = response.preflight_read(result)?;
         lock(&self.state.ledger).record_read_digest(
             &params.chat_id,
@@ -750,7 +770,10 @@ impl Service {
             } else {
                 list_bound(&policy, &params.resolved_path, &cancel, &list_error)?
             };
-            Ok(json!({"path":params.input_path,"entries":entries}))
+            Ok(object([
+                ("path", Value::from(params.input_path)),
+                ("entries", Value::Array(entries)),
+            ]))
         })
         .await
     }
@@ -1023,10 +1046,13 @@ pub(super) fn mutation_result(
     moved_to: Option<&Path>,
 ) -> Value {
     if !params.capture_snapshot {
-        return json!({"result":result,"mutations":[]});
+        return object([("result", result), ("mutations", Value::Array(Vec::new()))]);
     }
     let snapshot = snapshot_record(path, op, before, hash, moved_to);
-    json!({"result":result,"mutations":[snapshot]})
+    object([
+        ("result", result),
+        ("mutations", Value::Array(vec![snapshot])),
+    ])
 }
 
 /// Builds one `mutations[]` checkpoint record for a captured mutation.
@@ -1043,12 +1069,17 @@ pub(super) fn snapshot_record(
     after_hash: &str,
     moved_to: Option<&Path>,
 ) -> Value {
-    let mut snapshot =
-        json!({"path":path,"op":op,"before":before_json(before),"afterHash":after_hash});
+    // `before` carries the file's whole content in base64; it moves into the record.
+    let mut fields = vec![
+        ("path", json!(path)),
+        ("op", Value::from(op)),
+        ("before", before_json(before)),
+        ("afterHash", Value::from(after_hash)),
+    ];
     if let Some(to) = moved_to {
-        snapshot["movedTo"] = json!(to);
+        fields.push(("movedTo", json!(to)));
     }
-    snapshot
+    object(fields)
 }
 
 /// Describes a checkpoint's prior state: absent, or its full bytes and hash.
@@ -1062,7 +1093,14 @@ pub(super) fn before_json(before: Option<&[u8]>) -> Value {
     before.map_or_else(
         || json!({"exists":false}),
         |bytes| {
-            json!({"exists":true,"contentBase64":base64::engine::general_purpose::STANDARD.encode(bytes),"hash":io::sha256_hex(bytes)})
+            object([
+                ("exists", Value::Bool(true)),
+                (
+                    "contentBase64",
+                    Value::String(base64::engine::general_purpose::STANDARD.encode(bytes)),
+                ),
+                ("hash", Value::String(io::sha256_hex(bytes))),
+            ])
         },
     )
 }
@@ -1320,6 +1358,39 @@ mod tests {
                 "hash": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
             })
         );
+    }
+
+    #[test]
+    fn mutation_result_moves_the_result_it_wraps() {
+        let mutation: Mutation = serde_json::from_value(json!({
+            "chatId": "chat",
+            "captureSnapshot": true,
+        }))
+        .expect("a mutation with a snapshot request decodes");
+        let files = vec![json!({"path": "a"}), json!({"path": "b"})];
+        let files_at = files.as_ptr();
+        let result = object([("files", Value::Array(files))]);
+
+        let answer = mutation_result(
+            result,
+            &mutation,
+            Path::new("/a"),
+            "edit",
+            Some(b"abc"),
+            "after",
+            None,
+        );
+
+        let carried_at = answer["result"]["files"]
+            .as_array()
+            .expect("the wrapped result keeps its files array")
+            .as_ptr();
+        assert_eq!(
+            carried_at, files_at,
+            "expected the result's files array to move into the answer (buffer {files_at:p}) | \
+             received a copy at {carried_at:p}"
+        );
+        assert_eq!(answer["mutations"][0]["before"]["contentBase64"], "YWJj");
     }
 
     #[test]

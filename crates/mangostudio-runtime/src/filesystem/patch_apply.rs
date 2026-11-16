@@ -18,6 +18,7 @@ use super::{
     policy::CompiledPolicy,
     service::{Service, preflight_response, run_locked, snapshot_record},
 };
+use crate::result_value::object;
 use crate::tool_argument::tool_argument;
 use crate::{blocking::run_blocking, ports::audit::lock};
 
@@ -606,10 +607,27 @@ fn outcomes(
             }
         }
     }
+    Ok(patch_response(files, mutations))
+}
+
+/// The `fs.apply-patch` answer. `mutations` holds each file's prior content in base64, so both
+/// lists move into the result rather than being copied.
+fn patch_response(files: Vec<Value>, mutations: Vec<Value>) -> Value {
     let count = files.len();
-    Ok(
-        json!({"result":{"files":files,"summary":format!("{count} {} changed", if count == 1 { "file" } else { "files" })},"mutations":mutations}),
-    )
+    let summary = format!(
+        "{count} {} changed",
+        if count == 1 { "file" } else { "files" }
+    );
+    object([
+        (
+            "result",
+            object([
+                ("files", Value::Array(files)),
+                ("summary", Value::String(summary)),
+            ]),
+        ),
+        ("mutations", Value::Array(mutations)),
+    ])
 }
 
 fn preflight_mutation_response(
@@ -691,8 +709,7 @@ fn preflight_mutation_response(
             }
         }
     }
-    let count = files.len();
-    let result = json!({"result":{"files":files,"summary":format!("{count} {} changed", if count == 1 { "file" } else { "files" })},"mutations":mutations});
+    let result = patch_response(files, mutations);
     preflight_response(result, &response_id, response_limit_bytes, "patch").map(drop)
 }
 

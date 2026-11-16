@@ -10,6 +10,8 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use serde_json::{Value, json};
 
+use crate::result_value::object;
+
 /// Maximum raw bytes in one terminal output event.
 pub const CHUNK_MAX_BYTES: usize = 8 * 1024;
 /// Maximum unacknowledged bytes sent to a viewer.
@@ -31,7 +33,10 @@ pub struct OutputFrame {
 impl OutputFrame {
     fn data(bytes: &[u8]) -> Self {
         Self {
-            payload: json!({ "kind": "data", "data": STANDARD.encode(bytes) }),
+            payload: object([
+                ("kind", Value::from("data")),
+                ("data", Value::String(STANDARD.encode(bytes))),
+            ]),
             end: false,
         }
     }
