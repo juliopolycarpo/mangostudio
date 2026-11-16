@@ -82,6 +82,12 @@ impl FakeReleaseServer {
         self.register(path, 200, body, delay);
     }
 
+    /// Accept the request and never answer it, the way a stalled connection
+    /// looks to a client without a deadline. The handler thread ends on its own.
+    pub fn serve_hanging(&self, path: &str) {
+        self.register(path, 200, Vec::new(), Duration::from_secs(20));
+    }
+
     pub fn serve_status(&self, path: &str, status: u16) {
         self.register(path, status, Vec::new(), Duration::ZERO);
     }
@@ -135,16 +141,55 @@ impl Drop for FakeReleaseServer {
     }
 }
 
-/// A base URL nothing listens on: the port was free a moment ago and is closed
-/// again, so connecting is refused at once, the way an offline machine fails.
-pub fn unreachable_base_url() -> String {
-    let listener =
-        TcpListener::bind("127.0.0.1:0").expect("expected a loopback port to reserve and release");
-    let address = listener
-        .local_addr()
-        .expect("expected the reserved listener to report its address");
-    drop(listener);
-    format!("http://{address}")
+/// A host that accepts every connection and closes it unanswered, so a request
+/// fails at once the way it does on a dead network. Its listener stays bound
+/// for the life of the value: a port released and re-bound by a parallel test
+/// would turn the failure into someone else's server.
+pub struct ClosedConnectionServer {
+    address: SocketAddr,
+    stopping: Arc<AtomicBool>,
+    acceptor: Option<JoinHandle<()>>,
+}
+
+impl ClosedConnectionServer {
+    pub fn start() -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .expect("expected the closing server to bind a loopback port");
+        let address = listener
+            .local_addr()
+            .expect("expected the bound listener to report its address");
+        let stopping = Arc::new(AtomicBool::new(false));
+        let acceptor = {
+            let stopping = Arc::clone(&stopping);
+            thread::spawn(move || {
+                for stream in listener.incoming() {
+                    if stopping.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    drop(stream);
+                }
+            })
+        };
+        Self {
+            address,
+            stopping,
+            acceptor: Some(acceptor),
+        }
+    }
+
+    pub fn base_url(&self) -> String {
+        format!("http://{}", self.address)
+    }
+}
+
+impl Drop for ClosedConnectionServer {
+    fn drop(&mut self) {
+        self.stopping.store(true, Ordering::SeqCst);
+        let _ = TcpStream::connect(self.address);
+        if let Some(acceptor) = self.acceptor.take() {
+            let _ = acceptor.join();
+        }
+    }
 }
 
 fn answer(

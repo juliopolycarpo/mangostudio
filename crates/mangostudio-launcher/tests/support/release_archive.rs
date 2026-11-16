@@ -54,6 +54,43 @@ pub fn archive_with_binary(binary_body: &str) -> Vec<u8> {
         .into_inner()
 }
 
+/// An archive that unpacks fine but carries no hub binary.
+#[cfg(unix)]
+pub fn archive_without_binary() -> Vec<u8> {
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+
+    let mut builder = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::fast()));
+    let mut header = tar::Header::new_gnu();
+    header.set_size(3);
+    header.set_mode(0o644);
+    header.set_cksum();
+    builder
+        .append_data(&mut header, "README.md", &b"hi\n"[..])
+        .expect("expected the fixture entry to be appended to the tar archive");
+    builder
+        .into_inner()
+        .expect("expected the tar archive to finish")
+        .finish()
+        .expect("expected the gzip stream to finish")
+}
+
+#[cfg(windows)]
+pub fn archive_without_binary() -> Vec<u8> {
+    use std::io::Write;
+    use zip::write::{SimpleFileOptions, ZipWriter};
+
+    let mut writer = ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    writer
+        .start_file("README.md", SimpleFileOptions::default())
+        .and_then(|()| writer.write_all(b"hi\n").map_err(Into::into))
+        .expect("expected the fixture entry to be added to the zip archive");
+    writer
+        .finish()
+        .expect("expected the zip archive to finish")
+        .into_inner()
+}
+
 pub fn sha256_hex_of(bytes: &[u8]) -> String {
     let mut hex = String::new();
     for byte in Sha256::digest(bytes) {

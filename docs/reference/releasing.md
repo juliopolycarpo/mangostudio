@@ -1196,9 +1196,9 @@ launcher and a frozen `v<root>-canary` GitHub pre-release. This is historical
 evidence of that versioned pairing, not a promise that a current root version
 has a canary crate or that a launcher resolves the newest canary. The launcher
 constructs a release URL from its own exact crate version and makes three total
-download attempts (two retries); `*-canary` launchers compare the release's
-`SHA256SUMS` entry with the digest recorded beside that versioned install on
-every run and download the archive only when it differs. Recheck the registry and matching assets before using an
+download attempts (two retries); `*-canary` launchers behave like stable ones:
+a complete install of that exact version starts without a request, because a
+release never changes under its version. Recheck the registry and matching assets before using an
 old pairing today.
 
 ## Prerequisites
