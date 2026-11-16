@@ -306,4 +306,26 @@ describe('installer download', () => {
     expect(artifact.path).toBe(join(TEMP_DIR, 'installer.ps1'));
     expect(fixture.getWrittenPath()).toBe(join(TEMP_DIR, 'installer.ps1'));
   });
+
+  it('gives up on a host that never answers, instead of waiting forever', async () => {
+    // Named fake for a stalled host: the request stays pending until its signal aborts.
+    const stalledHostFetch = ((_url: unknown, init?: { signal?: AbortSignal }) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new Error('aborted by signal')));
+      })) as unknown as typeof fetch;
+    const downloader = createInstallerDownloader({
+      fetch: stalledHostFetch,
+      resolveHostname,
+      downloadTimeoutMs: 25,
+    });
+
+    await expect(
+      downloader.download({
+        url: 'https://example.test/install.sh',
+        interpreter: 'bash',
+        minBytes: 16,
+        maxBytes: 1024,
+      })
+    ).rejects.toThrow('Installer download refused: Request timed out.');
+  });
 });

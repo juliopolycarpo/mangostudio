@@ -21,11 +21,13 @@ import {
 import {
   buildAuthorizeUrl,
   exchangeAuthorizationCode,
+  type FetchLike,
   OAuthFlowError,
   type OAuthProviderProfile,
   OAuthReauthRequiredError,
   parseTokenBundle,
   refreshTokenGrant,
+  TOKEN_REQUEST_TIMEOUT_MS,
 } from '../../../../src/modules/connectors/infrastructure/oauth/token-client';
 import { createOAuthTokenService } from '../../../../src/modules/connectors/infrastructure/oauth/token-service';
 import type { SecretMetadataInput } from '../../../../src/services/secret-store/metadata';
@@ -193,6 +195,60 @@ describe('oauth core with a second provider profile', () => {
 
     await expect(refresh).rejects.toBeInstanceOf(AcmeReauthRequiredError);
     await expect(refresh).rejects.toBeInstanceOf(OAuthReauthRequiredError);
+  });
+
+  it('gives up on a token endpoint that never answers, with the profile flow error', async () => {
+    // Named fake for a stalled authorization server: pending until its signal aborts.
+    const stalledAuthServerFetch: FetchLike = (_input, init) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new Error('aborted by signal')));
+      });
+    const bundle = parseTokenBundle(
+      acmeProfile,
+      JSON.stringify({
+        version: 1,
+        accessToken: makeAcmeAccessToken(),
+        refreshToken: 'acme-refresh-1',
+        idToken: '',
+        expiresAt: Date.now() - 1,
+        workspaceId: 'ws-42',
+        tier: 'gold',
+      })
+    );
+
+    const refresh = refreshTokenGrant(acmeProfile, {
+      bundle,
+      authBaseUrl: AUTH_BASE_URL,
+      fetchImpl: stalledAuthServerFetch,
+      requestTimeoutMs: 20,
+    });
+    const exchange = exchangeAuthorizationCode(acmeProfile, {
+      code: 'code-1',
+      codeVerifier: 'verifier-1',
+      authBaseUrl: AUTH_BASE_URL,
+      fetchImpl: stalledAuthServerFetch,
+      requestTimeoutMs: 20,
+    });
+
+    await expect(refresh).rejects.toThrow('Could not reach the Acme authorization server.');
+    await expect(exchange).rejects.toThrow('Could not reach the Acme authorization server.');
+  });
+
+  it('sends every token request with a deadline signal even when no seam is given', async () => {
+    let deadlineSignal: AbortSignal | undefined;
+    await exchangeAuthorizationCode(acmeProfile, {
+      code: 'code-1',
+      codeVerifier: 'verifier-1',
+      authBaseUrl: AUTH_BASE_URL,
+      fetchImpl: (_input, init) => {
+        deadlineSignal = init?.signal ?? undefined;
+        return Promise.resolve(jsonResponse(makeAcmeTokenResponse()));
+      },
+    });
+
+    expect(deadlineSignal).toBeInstanceOf(AbortSignal);
+    expect(deadlineSignal?.aborted).toBe(false);
+    expect(TOKEN_REQUEST_TIMEOUT_MS).toBeGreaterThan(0);
   });
 
   it('round-trips a bundle and rejects one missing the profile identity', () => {

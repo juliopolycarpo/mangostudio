@@ -12,6 +12,14 @@ import { ERROR_CODES } from '@mangostudio/shared/errors';
 
 export type FetchLike = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
+/**
+ * How long the hub waits for a token endpoint to answer. Sign-in and refresh
+ * requests are tiny, so a slow answer is a stalled host, and an unbounded wait
+ * would hold whatever request needed the token (the usage routes refresh
+ * before they call out) open with nothing to say.
+ */
+export const TOKEN_REQUEST_TIMEOUT_MS = 30_000;
+
 /** OAuth flow failure surfaced to the user (bad code, malformed response, ...). */
 export class OAuthFlowError extends Error {
   readonly code: string = ERROR_CODES.VALIDATION;
@@ -169,7 +177,8 @@ async function requestToken(
   profile: OAuthProviderProfile<object>,
   authBaseUrl: string,
   params: Record<string, string>,
-  fetchImpl: FetchLike
+  fetchImpl: FetchLike,
+  requestTimeoutMs: number
 ): Promise<TokenEndpointResponse> {
   let response: Response;
   try {
@@ -177,6 +186,7 @@ async function requestToken(
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ client_id: profile.clientId, ...params }).toString(),
+      signal: AbortSignal.timeout(requestTimeoutMs),
     });
   } catch (error) {
     throw profile.createFlowError(`Could not reach the ${profile.label} authorization server.`, {
@@ -207,6 +217,8 @@ export async function exchangeAuthorizationCode<TIdentity extends object>(
     /** Must repeat the redirect URI the authorize request carried. */
     redirectUri?: string;
     fetchImpl?: FetchLike;
+    /** A seam for tests; production uses {@link TOKEN_REQUEST_TIMEOUT_MS}. */
+    requestTimeoutMs?: number;
   }
 ): Promise<OAuthTokenBundle<TIdentity>> {
   const tokens = await requestToken(
@@ -218,7 +230,8 @@ export async function exchangeAuthorizationCode<TIdentity extends object>(
       redirect_uri: options.redirectUri ?? profile.redirectUri,
       code_verifier: options.codeVerifier,
     },
-    options.fetchImpl ?? fetch
+    options.fetchImpl ?? fetch,
+    options.requestTimeoutMs ?? TOKEN_REQUEST_TIMEOUT_MS
   );
   return toTokenBundle(profile, tokens);
 }
@@ -230,6 +243,8 @@ export async function refreshTokenGrant<TIdentity extends object>(
     bundle: OAuthTokenBundle<TIdentity>;
     authBaseUrl: string;
     fetchImpl?: FetchLike;
+    /** A seam for tests; production uses {@link TOKEN_REQUEST_TIMEOUT_MS}. */
+    requestTimeoutMs?: number;
   }
 ): Promise<OAuthTokenBundle<TIdentity>> {
   const tokens = await requestToken(
@@ -239,7 +254,8 @@ export async function refreshTokenGrant<TIdentity extends object>(
       grant_type: 'refresh_token',
       refresh_token: options.bundle.refreshToken,
     },
-    options.fetchImpl ?? fetch
+    options.fetchImpl ?? fetch,
+    options.requestTimeoutMs ?? TOKEN_REQUEST_TIMEOUT_MS
   );
   return toTokenBundle(profile, tokens, options.bundle);
 }

@@ -7,6 +7,14 @@ import { safeFetchBytes, type SafeFetchDeps, SafeFetchError } from '../../../lib
 import type { DownloadedInstaller } from '../domain/install-recipes';
 
 const MAX_INSTALLER_REDIRECTS = 5;
+
+/**
+ * Wall-clock bound on fetching one installer script, redirects and body read
+ * included. Installers are small scripts, so two minutes is generous, and it
+ * keeps a stalled host from holding `POST /environments/install/prepare` open
+ * with nothing to answer.
+ */
+export const INSTALLER_DOWNLOAD_TIMEOUT_MS = 120_000;
 const INSPECTION_WINDOW_BYTES = 4096;
 
 /** Same shape a recipe declares per platform — the request is a `DownloadedInstaller` as-is. */
@@ -35,6 +43,7 @@ export class InstallerDownloadError extends Error {
 }
 
 interface InstallerDownloadDeps extends SafeFetchDeps {
+  readonly downloadTimeoutMs: number;
   readonly createTempDir: () => Promise<string>;
   readonly writeFile: (path: string, data: Uint8Array) => Promise<void>;
   readonly removeDir: (path: string) => Promise<void>;
@@ -42,6 +51,7 @@ interface InstallerDownloadDeps extends SafeFetchDeps {
 
 const defaultDeps: InstallerDownloadDeps = {
   fetch,
+  downloadTimeoutMs: INSTALLER_DOWNLOAD_TIMEOUT_MS,
   createTempDir: () => mkdtemp(join(tmpdir(), 'mangostudio-installer-')),
   writeFile: (path, data) => writeFile(path, data),
   removeDir: (path) => rm(path, { recursive: true, force: true }),
@@ -77,6 +87,7 @@ async function fetchInstallerBytes(
       {
         maxBytes: request.maxBytes,
         maxRedirects: MAX_INSTALLER_REDIRECTS,
+        timeoutMs: deps.downloadTimeoutMs,
         ...(signal && { signal }),
       },
       deps
