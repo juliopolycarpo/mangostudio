@@ -20,6 +20,14 @@ import {
 import { ROOT_DIR, WORKSPACES } from '../lib/config';
 import { readText } from './support/read-text';
 
+/** Spelled out here, not imported, so a rename or a dropped flag in the script fails the test. */
+const AUTOLOAD_DISABLED_FLAGS = [
+  '--no-compile-autoload-dotenv',
+  '--no-compile-autoload-bunfig',
+  '--no-compile-autoload-tsconfig',
+  '--no-compile-autoload-package-json',
+];
+
 describe('discardStandaloneReadme', () => {
   test('removes a stale README and keeps the staged binaries', () => {
     const outDir = mkdtempSync(join(tmpdir(), 'mangostudio-build-readme-'));
@@ -306,6 +314,7 @@ describe('build script', () => {
       '--trim',
       '--format=esm',
       '--sourcemap=external',
+      ...AUTOLOAD_DISABLED_FLAGS,
       '--minify',
     ]);
     expect(binaryCompileFlags('development')).toEqual([
@@ -313,7 +322,26 @@ describe('build script', () => {
       '--trim',
       '--format=esm',
       '--sourcemap=external',
+      ...AUTOLOAD_DISABLED_FLAGS,
     ]);
+  });
+
+  // The hub's configuration has one parser (apps/api/src/lib/config.ts). A
+  // compiled hub that also reads `.env` or `bunfig.toml` from the directory it
+  // happens to start in has a second one.
+  test.each([
+    ['production', 'native'],
+    ['development', 'native'],
+    ['production', 'bytecode'],
+    ['development', 'bytecode'],
+  ] as const)('%s %s compile never autoloads config from the working directory', (type, mode) => {
+    const flags = binaryCompileFlags(type, mode);
+
+    expect(
+      AUTOLOAD_DISABLED_FLAGS.filter((flag) => !flags.includes(flag)),
+      `expected every autoload opt-out in the ${type} ${mode} compile flags: ${AUTOLOAD_DISABLED_FLAGS.join(' ')} | received: ${flags.join(' ')}`
+    ).toEqual([]);
+    expect(flags.filter((flag) => /^--compile-autoload/.test(flag))).toEqual([]);
   });
 
   test('native compilation discovers hub sources without ambient root tests', () => {
@@ -342,6 +370,7 @@ describe('build script', () => {
       '--trim',
       '--format=esm',
       '--sourcemap=external',
+      ...AUTOLOAD_DISABLED_FLAGS,
       '--minify',
     ]);
     expect(binaryCompileFlags('development', 'bytecode')).not.toContain('--minify');

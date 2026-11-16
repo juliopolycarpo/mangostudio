@@ -308,6 +308,16 @@ at least 128 B and 5 %; fonts and images are never tried.
   manifest's second export, `embeddedFrontendEncodings`, maps an identity URL path to its
   copies. They are deliberately not keys of `embeddedFrontend`: every key there is a public
   route and a line in `doctor`'s file count.
+- **Compression cache.** Brotli 11 on the bundle takes about 10 s, and the step runs on every
+  build, `--reuse-frontend` included. `writeEmbedModules` therefore keeps the compressed bytes
+  under `.mango/out/embed/compression-cache/`, one file per coding and input, named by a SHA-256
+  of the encoder parameters, the running Bun revision and the input bytes. A hit is used only
+  after it decodes back to the input, so a damaged entry is recompressed. After each build,
+  entries it did not use are deleted, so the directory holds one bundle's worth. The cache
+  stores the encoder's output before the "worth shipping" decision, so it does not depend on
+  which copies end up embedded. `bun run clean` removes it with the rest of `.mango/out`. CI jobs
+  start from a fresh checkout and upload only `.mango/out/<platform>`, so the cache starts empty
+  there and changes nothing; it speeds up repeated local builds.
 - **Negotiation.** `apps/api/src/server/accept-encoding.ts` implements RFC 9110 §12.5.3: weights,
   `q=0`, `*`, `x-gzip`, case-insensitivity. No header or an empty one means identity. Highest
   weight wins and a tie goes to Brotli. An implicit identity never outranks a coding the client

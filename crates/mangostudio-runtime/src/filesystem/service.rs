@@ -1259,13 +1259,9 @@ mod tests {
     }
 
     fn assert_schema(method: &str, result: &Value) {
-        let schema = &mangostudio_runtime_contract::catalog::method(method)
-            .unwrap()
-            .result;
-        assert!(
-            crate::result_check::compile_result_schema(schema).is_valid(result),
-            "{method}: {result}"
-        );
+        if let Err(error) = crate::serve::runtime_contract().check_result(method, result) {
+            panic!("expected a valid {method} result | received {error}: {result}");
+        }
     }
 
     #[tokio::test]

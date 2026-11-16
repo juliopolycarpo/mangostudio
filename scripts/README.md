@@ -509,6 +509,28 @@ MANGO_API_KEY='mango_…' bun run scripts/examples/external-api-smoke.ts http://
 | `line-decoder.ts`            | Protocol NDJSON `LineDecoder`: ns per byte for large records in small pieces and for many short records, peak RSS               |
 | `rust-test-inventory.ts`     | Rust test inventory (libtest or nextest) by logical identity; diff two, total a log                                             |
 | `external-agent-boundary.ts` | Actual receipt hashing, admitted request ownership and event mapping; alternating Base/Head processes, raw timings and peak RSS |
+| `checkpoint-writes.ts`       | Hub streaming turns against a fake provider: bytes written to the SQLite main and WAL files, commits, fsyncs, CPU, peak RSS     |
+
+The benchmarks take any runtime binary, and they default to the newest of `target/release`,
+`target/release-fast` and `target/debug`. For an A/B on one machine, build with
+`cargo build --profile release-fast -p mangostudio-runtime --locked` instead of `--release`:
+`[profile.release-fast]` in the root `Cargo.toml` inherits the shipping profile (including its
+per-package `opt-level = "s"` overrides) with thin LTO and 16 codegen units. On linux-x64 the
+runtime builds in 140 s of wall time against 446 s for `--release` (1.5x the CPU time, so a
+4-core machine gains little). Against the shipping binary over interleaved runs, the `hello`
+median is 1-2 ms (2-5%) higher and the `grep.ts` medians are 0-6% higher on the 1000-file and
+large-file scenarios, so for those use it to find effects larger than about 10%. The small
+`grep.ts` scenarios differ more in relative terms: `files-1` +0.1 to +0.4 ms (up to +27% of
+1.5 ms) and `files-100` +1 to +2.3 ms (+6% to +14%). Measure those, a size, a peak RSS (the fast
+binary is 31% larger and its scan peaks 5 MiB higher), any smaller difference, and any number
+that goes into `docs/reference/tooling.md` with `--release`. With no binary argument, both
+scripts pick the most recently modified build among `target/release`, `target/release-fast`
+and `target/debug`, so a later debug build silently becomes the default: pass the binary
+explicitly for A/B runs. The chosen path and profile are printed at the start and recorded in
+the JSON (`grep.ts` per binary as `buildProfile`, the handshake as `build`). A `release-fast`
+binary is never packaged or published: the release scripts and workflows only build
+`--release`, and `scripts/tests/release-fast-profile.unit.test.ts` fails when any non-test file
+outside `scripts/bench/` names the profile.
 
 `external-agent-boundary.ts` runs ignored Rust libtests, so benchmarks are not part of the normal
 test gate. Build each revision's runtime libtest with `cargo test -p mangostudio-runtime --lib
@@ -524,6 +546,10 @@ bun scripts/bench/external-agent-boundary.ts --base-binary /path/base-libtest \
   --samples 30 --profile 'release, opt-level=3, lto=false, codegen-units=16' \
   --output boundary-receipt.json
 ```
+
+Base and Head are told apart by which binary produced a sample, not by SHA, so two builds of one
+commit (a profile, flag or allocator experiment) pass the same SHA to both flags and still compare
+as two sides.
 
 The receipt binds binary hashes and lockfile hashes to both revisions. Fixtures are built before
 timing. Linux RSS is the fresh process high-water mark, including those untimed fixtures; unsupported
@@ -591,11 +617,17 @@ configuration are refused; receipts contain paths and hashes rather than configu
 `grep.ts` drives `fs.grep` on the real runtime binary, one fresh child (and `MANGO_HOME`) per
 sample so peak RSS (`VmHWM`, Linux) belongs to that scenario alone. Each sample times only the
 request. `cancel` aborts a catastrophic match after 200 ms and reports the abort-to-answer
-latency. Run the same command on a base and a head binary on a quiet machine to compare them.
+latency. Run the same command on a base and a head binary on a quiet machine to compare them:
+several binaries rotate their run order (ABBA for two, so each leads equally often), and every sample records
+its match count and the runtime's `truncated` flag, because a time near 2,100 ms with `truncated`
+is a file that spent its 2 s budget, not a scan time. `--pattern` and `--ignore-case` change the
+pattern (the default has one required literal, which the runtime's literal prefilter uses).
 
 ```bash
 bun run scripts/bench/grep.ts target/release/mangostudio-runtime --runs 15
 bun run scripts/bench/grep.ts <binary> --scenario files-1000,cancel --json
+bun run scripts/bench/grep.ts base=<old> head=<new> --scenario large-file --large-mib 64 --runs 10
+bun run scripts/bench/grep.ts <binary> --scenario large-file --pattern '(\d+)-NEEDLE$' --ignore-case
 ```
 
 `line-decoder.ts` loads `LineDecoder` from the `ndjson.ts` path it is given, so a base checkout and
@@ -607,6 +639,20 @@ peak RSS. A pass checks the frame count, so a decoder that drops records fails r
 git worktree add --detach ../base origin/main && (cd ../base && bun install --frozen-lockfile)
 bun run scripts/bench/line-decoder.ts ../base/packages/protocol/src/codec/ndjson.ts --runs 7
 bun run scripts/bench/line-decoder.ts packages/protocol/src/codec/ndjson.ts --runs 7
+```
+
+`checkpoint-writes.ts` starts a real hub under a throwaway home and streams fixed answers from a fake
+OpenAI-compatible provider (16K and 64K characters at 1 ms and 20 ms chunk pacing, and a turn of 20
+tool calls with 65 KB results). It reports the bytes the hub wrote to the SQLite main and `-wal`
+files, WAL commits and fsyncs (`--counts` runs a second pass under `strace`; these are exact and
+do not depend on host load), plus hub CPU and peak RSS. The hub refuses loopback provider addresses,
+so the fake provider listens on a global IPv6 address of the host. Compare revisions by pointing
+`--hub-dir` at each checkout; with a 1-minute load average above about 6, trust the byte and commit
+counts over CPU.
+
+```bash
+bun run scripts/bench/checkpoint-writes.ts --runs 3 --counts
+bun run scripts/bench/checkpoint-writes.ts --hub-dir ../base-checkout --scenario tools-20x65k --json
 ```
 
 `rust-test-inventory.ts` proves a Rust test-target consolidation or a runner change lost no case:

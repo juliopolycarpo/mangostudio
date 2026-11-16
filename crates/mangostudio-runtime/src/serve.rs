@@ -6,19 +6,54 @@
 //! contract should say so — matching the TypeScript runtime, which never
 //! opts out either), `validate_results: false` (this crate's own result
 //! check runs inside [`crate::registry::Registry::implement`]'s wrapper
-//! instead — see [`crate::result_check`] for why), and `guard` set to a
+//! instead — see [`crate::registry::Registry::implement`] for why), and `guard` set to a
 //! [`crate::ports::authorization::AuthorizationGuard`] built from
 //! `authorization` and the registry's own [`Audit`]/[`crate::ports::clock::Clock`] ports.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use mango_protocol::contract::{Contract, ServeGuard, ServeOptions};
 use mango_protocol::session::Session;
 use mango_protocol::validate::ValidationError;
+use mangostudio_runtime_contract::catalog::shared_catalog;
 
 use crate::ports::audit::Audit;
 use crate::ports::authorization::{Authorization, AuthorizationGuard};
 use crate::registry::Registry;
+
+/// The embedded catalog compiled into a [`Contract`], once per process.
+///
+/// Every transport serves the same static catalog, so compiling it per
+/// connection (every `serve` supersession, every `connect` redial) only
+/// repeated the catalog validation and every schema compile. It is also the
+/// one holder of each method's compiled `result` schema:
+/// [`crate::registry::Registry::implement`] checks every handler's result
+/// with [`Contract::check_result`] on this contract.
+///
+/// # Panics
+/// Panics if the embedded catalog does not compile into a contract. That is a
+/// build-time fact about `catalog.json`, which
+/// `mangostudio-runtime-contract`'s own tests already hold.
+///
+/// # Example
+///
+/// ```
+/// use mangostudio_runtime::serve::runtime_contract;
+///
+/// assert!(std::ptr::eq(runtime_contract(), runtime_contract()));
+/// assert_eq!(runtime_contract().catalog().name, "mangostudio.runtime");
+/// ```
+pub fn runtime_contract() -> &'static Contract {
+    static CONTRACT: OnceLock<Contract> = OnceLock::new();
+    CONTRACT.get_or_init(|| {
+        // The shared handle: the contract holds the catalog the process
+        // already parsed, not a second copy.
+        Contract::from_shared_catalog(shared_catalog()).expect(
+            "the embedded catalog compiles into a contract; a change to the catalog that broke \
+             this would already fail mangostudio-runtime-contract's own build",
+        )
+    })
+}
 
 /// Registers `registry`'s handlers on `session` under `contract`, gated by
 /// an [`AuthorizationGuard`] built from `authorization` and `slot`.

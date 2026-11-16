@@ -151,7 +151,7 @@ export async function safeFetchBytes(
   }
 
   return {
-    bytes: await readBounded(response, options.maxBytes),
+    bytes: await readBounded(response, options, signal),
     contentType: response.headers.get('content-type'),
     url: resolvedUrl.href,
   };
@@ -229,8 +229,18 @@ async function followRedirects(
 /**
  * The combined signal cannot say which half fired, so the caller's own signal is
  * consulted first. A caller that cancelled deliberately should not be told its
- * request timed out — that reads as a fault in the remote host.
+ * request timed out — that reads as a fault in the remote host. Shared by the
+ * request and the body read, which the same deadline covers.
  */
+function abortFailure(
+  options: SafeFetchOptions,
+  signal: AbortSignal | undefined
+): SafeFetchError | null {
+  if (options.signal?.aborted) return new SafeFetchError('Request was cancelled.', 'cancelled');
+  if (signal?.aborted) return new SafeFetchError('Request timed out.');
+  return null;
+}
+
 async function requestOnce(
   deps: SafeFetchDeps,
   url: URL,
@@ -244,8 +254,8 @@ async function requestOnce(
       ...(options.headers && { headers: options.headers }),
     });
   } catch (error) {
-    if (options.signal?.aborted) throw new SafeFetchError('Request was cancelled.', 'cancelled');
-    if (signal?.aborted) throw new SafeFetchError('Request timed out.');
+    const abort = abortFailure(options, signal);
+    if (abort) throw abort;
     const detail = error instanceof Error ? error.message : 'Unknown network error.';
     throw new SafeFetchError(`Request failed: ${detail}`);
   }
@@ -299,7 +309,12 @@ function nextRedirectTarget(response: Response, currentUrl: URL): URL {
  * server lets us refuse before transferring anything, and it is not trusted
  * afterwards because a hostile one can understate or omit it.
  */
-async function readBounded(response: Response, maxBytes: number): Promise<Uint8Array> {
+async function readBounded(
+  response: Response,
+  options: SafeFetchOptions,
+  signal: AbortSignal | undefined
+): Promise<Uint8Array> {
+  const { maxBytes } = options;
   const declaredLength = Number(response.headers.get('content-length'));
   if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
     await discardBody(response);
@@ -329,6 +344,10 @@ async function readBounded(response: Response, maxBytes: number): Promise<Uint8A
     }
   } catch (error) {
     if (error instanceof SafeFetchError) throw error;
+    // The deadline and the caller's cancel reach the body stream as a generic
+    // read error, so name them rather than report a broken body.
+    const abort = abortFailure(options, signal);
+    if (abort) throw abort;
     throw new SafeFetchError('Response body could not be read.');
   } finally {
     reader.releaseLock();

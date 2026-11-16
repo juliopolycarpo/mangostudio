@@ -605,7 +605,6 @@ mod tests {
     use std::future::Future;
     use std::pin::Pin;
 
-    use mango_protocol::contract::Contract;
     use mango_protocol::frame::PeerInfo;
     use mango_protocol::port::port_pair;
     use mango_protocol::session::{Session as ProtocolSession, SessionOptions};
@@ -661,12 +660,15 @@ mod tests {
             ProtocolSession::spawn(runtime_port, SessionOptions::new(peer("runtime")));
         hub.ready().await.unwrap();
         runtime.ready().await.unwrap();
-        let contract =
-            Contract::from_catalog(mangostudio_runtime_contract::catalog::catalog().clone())
-                .unwrap();
-        crate::serve::serve(&contract, &runtime, registry, authorization, "remote")
-            .unwrap()
-            .persist();
+        crate::serve::serve(
+            crate::serve::runtime_contract(),
+            &runtime,
+            registry,
+            authorization,
+            "remote",
+        )
+        .unwrap()
+        .persist();
         (hub, runtime)
     }
 

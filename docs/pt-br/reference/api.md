@@ -73,6 +73,8 @@ lido como posição pela outra. Um timestamp numérico puro de uma build antiga 
 cursor vazio ou malformado é rejeitado com 400, e um `order` desconhecido com 422, como
 qualquer query que o schema recusa.
 
+Atualize uma mensagem com `PUT /api/messages/:id` e `UpdateMessageBodySchema`. Um patch de `text` em uma mensagem cujo turno ainda está gerando responde 409 `CONFLICT`, porque o escritor do turno continua estendendo o texto que gravou; envie `isGenerating: false` no mesmo patch ou edite depois que o turno terminar.
+
 Crie mensagens com `POST /api/messages` e `CreateMessageBodySchema`: `id`, `chatId`, `role`, `text` e `timestamp` obrigatórios; consulte o schema compartilhado de chat para campos opcionais.
 
 ## Endpoints De Atividade

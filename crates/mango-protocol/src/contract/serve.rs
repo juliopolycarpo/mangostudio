@@ -16,7 +16,7 @@ use crate::error::{RemoteError, codes};
 use crate::session::{CallContext, HandlerGuard, Session};
 use crate::validate::{RPC_DISCOVER, ValidationError};
 
-use super::{Contract, check_params, check_result, decode};
+use super::{Contract, ReasonStyle, check_params, check_result, decode};
 
 /// Answers one request already past its schema and guard checks; erases
 /// the handler's own parameter and result types so [`ContractHandlers`] can
@@ -334,7 +334,12 @@ async fn answer(
     }
     let result = erased.call(&method, params, context).await?;
     if policy.validate_results {
-        check_result(&method, &policy.result_validator, &result)?;
+        check_result(
+            &method,
+            &policy.result_validator,
+            &result,
+            ReasonStyle::Quoted,
+        )?;
     }
     Ok(result)
 }

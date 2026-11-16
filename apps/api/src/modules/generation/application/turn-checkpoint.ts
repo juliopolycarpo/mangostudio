@@ -20,6 +20,11 @@ import type { Kysely } from 'kysely';
 
 import type { Database } from '../../../db/types';
 import { logPersistenceError } from '../../../services/providers/core/continuation-logger';
+import {
+  insertCheckpointDelta,
+  rewriteCheckpointedRow,
+} from '../../messages/infrastructure/message-checkpoint-deltas';
+import { type CheckpointPlan, CheckpointPlanner } from './turn-checkpoint-delta';
 
 export const CHECKPOINT_TEXT_INTERVAL_CHARS = 512;
 export const CHECKPOINT_MAX_INTERVAL_MS = 1_000;
@@ -40,8 +45,36 @@ export interface TurnCheckpointContent {
   readonly generationTime?: string | null;
 }
 
+/** Where a checkpoint lands. The writer decides what to write; the store only writes it. */
+export interface TurnCheckpointStore {
+  /**
+   * Replaces the message's checkpointed columns with a full snapshot and drops
+   * the deltas that predate it, atomically.
+   */
+  rewriteRow(row: {
+    readonly text: string;
+    readonly partsJson: string;
+    readonly providerState: string | null;
+    readonly generationTime: string | null | undefined;
+  }): Promise<void>;
+  /** Adds what changed since the previous checkpoint; `seq` orders the deltas. */
+  appendDelta(seq: number, deltaJson: string): Promise<void>;
+}
+
+export function createDatabaseCheckpointStore(
+  db: Kysely<Database>,
+  messageId: string
+): TurnCheckpointStore {
+  return {
+    rewriteRow: (row) => rewriteCheckpointedRow({ messageId, ...row }, db),
+    appendDelta: async (seq, deltaJson) => {
+      await insertCheckpointDelta({ messageId, seq, deltaJson }, db);
+    },
+  };
+}
+
 interface TurnCheckpointWriterOptions {
-  readonly db: Kysely<Database>;
+  readonly store: TurnCheckpointStore;
   readonly chatId: string;
   readonly messageId: string;
   readonly checkpoint: TurnCheckpointPart;
@@ -64,15 +97,31 @@ function deferToMacrotask(run: () => void): void {
   setTimeout(run, 0);
 }
 
+/** A checkpoint planned against the live turn, waiting for its turn to be written. */
+interface PlannedWrite {
+  readonly plan: CheckpointPlan;
+  readonly providerState: string | null;
+  readonly generationTime: string | null | undefined;
+  /** Writes that had failed when this was planned; a delta planned before a later failure has a gap under it. */
+  readonly failuresAtPlan: number;
+}
+
 /**
  * Orders bounded checkpoint writes for one assistant row.
  *
  * Forced checkpoints (tool and provider boundaries) and `prepareFinal` are
- * required: each is serialized when it is called, written in call order, and
+ * required: each is planned when it is called, written in call order, and
  * never replaced. Text-delta checkpoints are best-effort: they only record
- * that the latest state is dirty, and one trailing write serializes that state
+ * that the latest state is dirty, and one trailing write plans that state
  * when it starts. A forced write supersedes a dirty best-effort snapshot
  * because it carries newer state.
+ *
+ * The first checkpoint rewrites the row. Every later one inserts a delta (see
+ * {@link CheckpointPlanner}): what the turn added since the previous
+ * checkpoint, so the bytes written grow with the turn, not with its square.
+ * A failed write drops back to rewriting the row, which does not depend on any
+ * earlier checkpoint having landed. Readers fold the deltas over the row
+ * (`foldCheckpointDeltasIntoRows`); finalizing the message removes them.
  *
  * @example
  * await writer.checkpoint(); // best-effort: accepted, written on a later tick
@@ -93,6 +142,9 @@ export class TurnCheckpointWriter {
    */
   private bestEffortTicket: object | null = null;
   private bestEffortTimerArmed = false;
+  private readonly planner = new CheckpointPlanner();
+  private nextDeltaSeq = 1;
+  private failedWrites = 0;
 
   constructor(private readonly options: TurnCheckpointWriterOptions) {
     this.now = options.now ?? Date.now;
@@ -167,9 +219,18 @@ export class TurnCheckpointWriter {
     // This write carries state at least as new as any snapshot still waiting.
     this.bestEffortDirty = false;
     this.bestEffortTicket = null;
-    refreshTurnCheckpointPart(this.options.checkpoint, content, now, options);
-    const serializedParts = JSON.stringify(content.parts);
-    return this.enqueueWrite(content, serializedParts);
+    advanceTurnCheckpoint(this.options.checkpoint, now);
+    applyCheckpointStatus(this.options.checkpoint, options);
+    return this.enqueueWrite(this.planWrite(content));
+  }
+
+  private planWrite(content: TurnCheckpointContent): PlannedWrite {
+    return {
+      plan: this.planner.plan(content),
+      providerState: content.providerState,
+      generationTime: content.generationTime,
+      failuresAtPlan: this.failedWrites,
+    };
   }
 
   private armBestEffortWrite(): void {
@@ -194,14 +255,12 @@ export class TurnCheckpointWriter {
       this.bestEffortTicket = null;
       if (!this.bestEffortDirty) return;
       this.bestEffortDirty = false;
-      const content = this.options.getContent();
-      summarizeTurnCheckpointPart(this.options.checkpoint, content, {});
-      await this.writeRow(content, JSON.stringify(content.parts));
+      await this.writePlanned(this.planWrite(this.options.getContent()));
     });
   }
 
-  private enqueueWrite(content: TurnCheckpointContent, serializedParts: string): Promise<boolean> {
-    const write = this.pendingWrite.then(() => this.writeRow(content, serializedParts));
+  private enqueueWrite(planned: PlannedWrite): Promise<boolean> {
+    const write = this.pendingWrite.then(() => this.writePlanned(planned));
     this.pendingWrite = write.then(() => undefined);
     return write;
   }
@@ -209,24 +268,28 @@ export class TurnCheckpointWriter {
   // Checkpointing is best effort: a failed write is logged and swallowed so a
   // transient DB error can neither abort the live turn nor reject every later
   // write chained onto the queue.
-  private async writeRow(
-    content: TurnCheckpointContent,
-    serializedParts: string
-  ): Promise<boolean> {
+  private async writePlanned(planned: PlannedWrite): Promise<boolean> {
+    // An earlier write failed after this delta was planned on top of it, so the
+    // delta would leave a gap. Skipping it is safe: the failure already reset the
+    // planner, and the next checkpoint rewrites the row.
+    if (planned.plan.kind === 'delta' && planned.failuresAtPlan !== this.failedWrites) {
+      return false;
+    }
     try {
-      await this.options.db
-        .updateTable('messages')
-        .set({
-          text: content.text,
-          parts: serializedParts,
-          providerState: content.providerState,
-          generationTime: content.generationTime,
-        })
-        .where('id', '=', this.options.messageId)
-        .where('isGenerating', '=', 1)
-        .execute();
+      if (planned.plan.kind === 'rebase') {
+        await this.options.store.rewriteRow({
+          text: planned.plan.text,
+          partsJson: planned.plan.partsJson,
+          providerState: planned.providerState,
+          generationTime: planned.generationTime,
+        });
+      } else {
+        await this.options.store.appendDelta(this.nextDeltaSeq++, planned.plan.deltaJson);
+      }
       return true;
     } catch (error) {
+      this.failedWrites += 1;
+      this.planner.reset();
       logPersistenceError({
         chatId: this.options.chatId,
         error: String(error),
@@ -301,6 +364,13 @@ function summarizeTurnCheckpointPart(
   checkpoint.todoSnapshot = getLatestTodoSnapshot(content.parts);
   checkpoint.completedCalls = collectCompletedCalls(content.parts);
   checkpoint.incompleteCalls = collectIncompleteCalls(content.parts);
+  applyCheckpointStatus(checkpoint, options);
+}
+
+function applyCheckpointStatus(
+  checkpoint: TurnCheckpointPart,
+  options: WriteTurnCheckpointOptions
+): void {
   if (options.status) checkpoint.status = options.status;
   if (options.reasonCode) checkpoint.reasonCode = options.reasonCode;
   if (checkpoint.status === 'completed') checkpoint.reasonCode = undefined;

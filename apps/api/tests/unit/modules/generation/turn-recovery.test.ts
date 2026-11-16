@@ -13,6 +13,7 @@ import {
   CHECKPOINT_MAX_INTERVAL_MS,
   CHECKPOINT_TEXT_INTERVAL_CHARS,
   classifyToolRetrySafety,
+  createDatabaseCheckpointStore,
   createTurnCheckpointPart,
   refreshTurnCheckpointPart,
   TurnCheckpointWriter,
@@ -88,7 +89,7 @@ describe('turn checkpoints', () => {
     );
 
     const writer = new TurnCheckpointWriter({
-      db: getDb(),
+      store: createDatabaseCheckpointStore(getDb(), turnId),
       chatId: chat.id,
       messageId: turnId,
       checkpoint: part,
@@ -991,3 +992,219 @@ describe('interrupted turn recovery', () => {
     expect(linkedAttachment.messageId).toBe(reserved.userMessageId);
   });
 });
+
+/**
+ * One tool-heavy turn run through the real writer against SQLite. `hardKill`
+ * stops it where a SIGKILL would: whatever the checkpoints landed is all that
+ * survives.
+ */
+async function runCheckpointedToolTurn(options: { toolCalls: number; resultLength: number }) {
+  const { user, chat } = await createOwnedChat();
+  const turnId = crypto.randomUUID();
+  const part = checkpoint(turnId);
+  const parts: MessagePart[] = [part];
+  const live = { text: '', providerState: null as string | null };
+  await insertMessage(
+    {
+      id: turnId,
+      chatId: chat.id,
+      role: 'ai',
+      text: '',
+      timestamp: Date.now(),
+      isGenerating: true,
+      interactionMode: 'agent',
+      parts: JSON.stringify(parts),
+    },
+    getDb()
+  );
+  const writer = new TurnCheckpointWriter({
+    store: createDatabaseCheckpointStore(getDb(), turnId),
+    chatId: chat.id,
+    messageId: turnId,
+    checkpoint: part,
+    getContent: () => ({ text: live.text, parts, providerState: live.providerState }),
+  });
+
+  const results: string[] = [];
+  parts.push({ type: 'text', text: '' });
+  for (let call = 0; call < options.toolCalls; call++) {
+    const content = `result-${call}-`.padEnd(options.resultLength, 'r');
+    results.push(content);
+    (parts.at(-1) as { text: string }).text += `Step ${call}. `;
+    live.text += `Step ${call}. `;
+    parts.push({
+      type: 'tool_call',
+      toolCallId: `call-${call}`,
+      name: 'read_file',
+      args: { call },
+    });
+    await writer.checkpoint({ force: true });
+    parts.push({ type: 'tool_result', toolCallId: `call-${call}`, content });
+    live.providerState = JSON.stringify({ cursor: call });
+    await writer.checkpoint({ force: true });
+    parts.push({ type: 'text', text: '' });
+  }
+  (parts.at(-1) as { text: string }).text += 'Streaming the rest';
+  live.text += 'Streaming the rest';
+  await writer.checkpoint({ force: true });
+  return { chat, user, turnId, parts, live, results, writer };
+}
+
+async function readRecovered(turnId: string) {
+  const row = await getDb()
+    .selectFrom('messages')
+    .select(['text', 'parts', 'providerState', 'isGenerating'])
+    .where('id', '=', turnId)
+    .executeTakeFirstOrThrow();
+  const recovered = JSON.parse(row.parts ?? '[]') as MessagePart[];
+  const summary = recovered.find(isTurnCheckpointPart);
+  return { row, recovered, summary };
+}
+
+describe('delta checkpoints and crash recovery', () => {
+  it('recovers the whole turn, uncapped, after a hard kill mid-stream', async () => {
+    const { chat, turnId, results, live } = await runCheckpointedToolTurn({
+      toolCalls: 6,
+      resultLength: 20_000,
+    });
+
+    // No flush, no finalize: the process is gone. The next boot reconciles.
+    expect(
+      await reconcileStaleTurns({ chatId: chat.id, reasonCode: 'server_restart' }, getDb())
+    ).toBe(1);
+
+    const { row, recovered, summary } = await readRecovered(turnId);
+    expect(row.isGenerating).toBe(0);
+    expect(row.text).toBe(live.text);
+    expect(row.providerState).toBe(live.providerState);
+    // Full-fidelity results survive: the 2,000-character cap applies to the summary only.
+    expect(
+      recovered
+        .filter((p) => p.type === 'tool_result')
+        .map((p) => (p as { content: string }).content)
+    ).toEqual(results);
+    expect(summary).toMatchObject({ status: 'interrupted', reasonCode: 'server_restart' });
+    expect(summary?.completedCalls).toHaveLength(6);
+    expect(summary?.completedCalls[0]?.result).toHaveLength(2_000);
+    expect(summary?.lastAssistantText).toContain('Streaming the rest');
+    expect(await deltaRowsFor(turnId)).toBe(0);
+  });
+
+  it('recovers the same message as a turn whose checkpoints rewrote the whole row', async () => {
+    const deltaTurn = await runCheckpointedToolTurn({ toolCalls: 4, resultLength: 5_000 });
+    // The reference row holds what a full rewrite at the last checkpoint stored.
+    const { chat } = await createOwnedChat();
+    const referenceId = crypto.randomUUID();
+    const referenceParts = JSON.parse(JSON.stringify(deltaTurn.parts)) as MessagePart[];
+    const referenceCheckpoint = referenceParts.find(isTurnCheckpointPart);
+    if (!referenceCheckpoint) throw new Error('expected a turn_checkpoint part in the live parts');
+    referenceCheckpoint.turnId = referenceId;
+    await insertMessage(
+      {
+        id: referenceId,
+        chatId: chat.id,
+        role: 'ai',
+        text: deltaTurn.live.text,
+        timestamp: Date.now(),
+        isGenerating: true,
+        interactionMode: 'agent',
+        parts: JSON.stringify(referenceParts),
+        providerState: deltaTurn.live.providerState,
+      },
+      getDb()
+    );
+
+    await reconcileStaleTurns({ chatId: deltaTurn.chat.id, reasonCode: 'server_restart' }, getDb());
+    await reconcileStaleTurns({ chatId: chat.id, reasonCode: 'server_restart' }, getDb());
+
+    const fromDeltas = await readRecovered(deltaTurn.turnId);
+    const fromRewrite = await readRecovered(referenceId);
+    // The reconcile clock and the per-turn id are the only legitimate differences.
+    const normalize = (parts: MessagePart[]) =>
+      parts.map((p) =>
+        p.type === 'turn_checkpoint' ? { ...p, turnId: '', checkpointedAt: 0, sequence: 0 } : p
+      );
+    expect(normalize(fromDeltas.recovered)).toEqual(normalize(fromRewrite.recovered));
+    expect(fromDeltas.row.text).toBe(fromRewrite.row.text);
+    expect(fromDeltas.row.providerState).toBe(fromRewrite.row.providerState);
+  });
+
+  it('keeps the recovery summary current after a hard kill at a tool boundary', async () => {
+    const { chat, turnId, parts, writer } = await runCheckpointedToolTurn({
+      toolCalls: 3,
+      resultLength: 3_000,
+    });
+    // A tool call starts, its boundary is checkpointed, and the process dies before the result.
+    parts.push({ type: 'tool_call', toolCallId: 'call-open', name: 'run_shell', args: {} });
+    await writer.checkpoint({ force: true });
+
+    await reconcileStaleTurns({ chatId: chat.id, reasonCode: 'server_restart' }, getDb());
+
+    const { summary } = await readRecovered(turnId);
+    expect(summary?.completedCalls.map((call) => call.callId)).toEqual([
+      'call-0',
+      'call-1',
+      'call-2',
+    ]);
+    expect(summary?.incompleteCalls.map((call) => call.callId)).toEqual(['call-open']);
+  });
+});
+
+describe('delta checkpoints and finalization', () => {
+  it('finalizes to the same row as a turn that never checkpointed', async () => {
+    const turn = await runCheckpointedToolTurn({ toolCalls: 3, resultLength: 4_000 });
+    const finalParts = JSON.parse(JSON.stringify(turn.parts)) as MessagePart[];
+    const plain = await createOwnedChat();
+    const plainId = crypto.randomUUID();
+    await insertMessage(
+      {
+        id: plainId,
+        chatId: plain.chat.id,
+        role: 'ai',
+        text: '',
+        timestamp: Date.now(),
+        isGenerating: true,
+        interactionMode: 'agent',
+        parts: '[]',
+      },
+      getDb()
+    );
+
+    const finalize = async (id: string, chatId: string, userId: string) => {
+      const done = await finalizeCheckpointedAiResponse(
+        {
+          id,
+          userId,
+          chatId,
+          text: turn.live.text,
+          parts: finalParts,
+          providerState: turn.live.providerState,
+          generationTime: '1.2s',
+          modelName: 'gpt-test',
+        },
+        getDb()
+      );
+      expect(done).toBe(true);
+      return getDb()
+        .selectFrom('messages')
+        .select(['text', 'parts', 'providerState', 'generationTime', 'modelName', 'isGenerating'])
+        .where('id', '=', id)
+        .executeTakeFirstOrThrow();
+    };
+
+    const afterCheckpoints = await finalize(turn.turnId, turn.chat.id, turn.user.id);
+    const withoutCheckpoints = await finalize(plainId, plain.chat.id, plain.user.id);
+
+    expect(afterCheckpoints).toEqual(withoutCheckpoints);
+    expect(await deltaRowsFor(turn.turnId)).toBe(0);
+  });
+});
+
+async function deltaRowsFor(messageId: string): Promise<number> {
+  const result = await getDb()
+    .selectFrom('message_checkpoint_deltas')
+    .select(({ fn }) => fn.countAll<number>().as('count'))
+    .where('messageId', '=', messageId)
+    .executeTakeFirstOrThrow();
+  return result.count;
+}

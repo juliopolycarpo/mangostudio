@@ -569,6 +569,18 @@ async fn validates_results_when_asked() {
         error.details.as_ref().and_then(|d| d.get("path")),
         Some(&json!("/text"))
     );
+    // `validate_results` words the reason as jsonschema does, which quotes
+    // the value; `Contract::check_result` is the masking check.
+    let reason = error
+        .details
+        .as_ref()
+        .and_then(|d| d.get("reason"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    assert!(
+        reason.contains("42"),
+        "expected validate_results to keep quoting the value | received reason: {reason:?}"
+    );
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]

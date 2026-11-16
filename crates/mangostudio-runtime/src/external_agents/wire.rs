@@ -3,7 +3,7 @@
 //! Mirrors `apps/shared/src/external-agents/schemas.ts`, which stays the single
 //! source of truth: the dispatcher validates every param against the embedded
 //! catalog before a handler runs, and every result against it before it leaves
-//! (`crate::result_check`). These types exist so the mapper and the supervisor
+//! (`mango_protocol::contract::Contract::check_result`). These types exist so the mapper and the supervisor
 //! agree on one shape rather than on hand-built JSON. They carry no bounds of
 //! their own: a bound lives in the schema, and a value the mapper produces past
 //! it is refused at the result gate rather than silently truncated here.
