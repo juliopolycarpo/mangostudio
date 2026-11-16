@@ -61,6 +61,7 @@ import { productOperations } from './060_product_operations';
 import { removeOrphanEnvironmentToolchains } from './061_remove_orphan_environment_toolchains';
 import { environmentToolchainRevision } from './062_environment_toolchain_revision';
 import { messagesOrderedReadIndexes } from './063_messages_ordered_read_indexes';
+import { chatsUserUpdatedIndex } from './064_chats_user_updated_index';
 import { messageCheckpointDeltas } from './065_message_checkpoint_deltas';
 
 export const allMigrations = {
@@ -127,5 +128,6 @@ export const allMigrations = {
   '061_remove_orphan_environment_toolchains': removeOrphanEnvironmentToolchains,
   '062_environment_toolchain_revision': environmentToolchainRevision,
   '063_messages_ordered_read_indexes': messagesOrderedReadIndexes,
+  '064_chats_user_updated_index': chatsUserUpdatedIndex,
   '065_message_checkpoint_deltas': messageCheckpointDeltas,
 };

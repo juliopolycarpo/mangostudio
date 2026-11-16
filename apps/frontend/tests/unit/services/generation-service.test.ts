@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, jest, mock, spyOn } from '
 import type { GenerateImageResponse, RespondStreamBody } from '@mangostudio/shared/generation';
 import { en } from '@mangostudio/shared/i18n';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
-import { externalSessionStartedChunk } from '@mangostudio/shared/streaming';
+import { externalSessionStartedChunk, SSE_FRAME_MAX_CHARS } from '@mangostudio/shared/streaming';
 
 import type * as ApiClient from '../../../src/lib/api-client';
 import { ExternalRefusalError } from '../../../src/lib/external-refusal-error';
@@ -214,6 +214,84 @@ describe('respondTextStream', () => {
     await respondTextStream(makeRequest(), onChunk);
 
     expect(chunks).toEqual([{ type: 'text', text: 'split', done: false }]);
+  });
+
+  it('delivers the same chunks for any read size as for one read', async () => {
+    const body =
+      'data: {"type":"thinking_start","done":false}\n' +
+      ': keep-alive\n\n' +
+      'data: not-json\n' +
+      'data: {"type":"text","text":"héllo 🥭 中文","done":false}\n' +
+      'data: {"type":"done","done":true}\n' +
+      'data: {"type":"text","text":"never delivered","done":false}';
+    const bytes = new TextEncoder().encode(body);
+    const whole = collectChunks();
+    fetchMock.mockResolvedValue(streamingResponse([body]));
+    await respondTextStream(makeRequest(), whole.onChunk);
+
+    // Byte reads of every size, so a boundary also falls inside a UTF-8 sequence.
+    for (const size of [1, 2, 3, 5, 16]) {
+      const pieces: Uint8Array[] = [];
+      for (let offset = 0; offset < bytes.byteLength; offset += size) {
+        pieces.push(bytes.slice(offset, offset + size));
+      }
+      const split = collectChunks();
+      fetchMock.mockResolvedValue(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              for (const piece of pieces) controller.enqueue(piece);
+              controller.close();
+            },
+          })
+        )
+      );
+      await respondTextStream(makeRequest(), split.onChunk);
+
+      expect({ size, chunks: split.chunks }).toEqual({ size, chunks: whole.chunks });
+    }
+    expect(whole.chunks.map((chunk) => chunk.type)).toEqual(['thinking_start', 'text', 'done']);
+  });
+
+  // The reader used to append each read to one string and split it again, so a
+  // line spanning n reads cost O(line * n): 1 MiB in 16-byte reads took several
+  // seconds. The bound separates linear from quadratic; it is no benchmark.
+  it('delivers a 1 MiB event read in 16-byte pieces within 2500 ms', async () => {
+    const line = `data: ${JSON.stringify({ type: 'text', text: 'a'.repeat(1024 * 1024), done: false })}\n`;
+    const bytes = new TextEncoder().encode(line);
+    let offset = 0;
+    fetchMock.mockResolvedValue(
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            if (offset >= bytes.byteLength) controller.close();
+            else controller.enqueue(bytes.slice(offset, (offset += 16)));
+          },
+        })
+      )
+    );
+    const { chunks, onChunk } = collectChunks();
+
+    const startedAt = performance.now();
+    await respondTextStream(makeRequest(), onChunk);
+    const elapsedMs = performance.now() - startedAt;
+
+    expect(chunks.map((chunk) => (chunk.type === 'text' ? chunk.text.length : chunk.type))).toEqual(
+      [1024 * 1024]
+    );
+    expect(elapsedMs).toBeLessThan(2500);
+  });
+
+  it(`rejects when one line outgrows ${SSE_FRAME_MAX_CHARS} characters`, async () => {
+    fetchMock.mockResolvedValue(
+      streamingResponse([`data: ${'a'.repeat(SSE_FRAME_MAX_CHARS)}`, '\n'])
+    );
+    const { chunks, onChunk } = collectChunks();
+
+    await expect(respondTextStream(makeRequest(), onChunk)).rejects.toThrow(
+      `record length ${SSE_FRAME_MAX_CHARS + 6} exceeds the cap`
+    );
+    expect(chunks).toEqual([]);
   });
 
   it('forwards error events through onChunk instead of throwing', async () => {

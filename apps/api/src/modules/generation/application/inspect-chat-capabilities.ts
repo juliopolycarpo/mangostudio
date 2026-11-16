@@ -33,7 +33,7 @@ import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/del
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import { extractContextInfo } from '../../chats/application/list-chats';
 import { getOwnedChatOrThrow } from '../../chats/domain/chat-ownership';
-import { getById } from '../../chats/infrastructure/chat-repository';
+import { getByIdWithState } from '../../chats/infrastructure/chat-repository';
 import { listMcpServerRows } from '../../mcp-servers/infrastructure/mcp-server-repository';
 import { listSkills } from '../../skills/application/skill-discovery';
 import { SKILL_TOOL_NAME } from '../../skills/domain/skill';
@@ -82,7 +82,7 @@ export async function inspectChatCapabilities(
   ]);
 
   const [chat, agentRuntime, appSettings, serverRows, skills] = await Promise.all([
-    getById(input.chatId, input.db),
+    getByIdWithState(input.chatId, input.db),
     resolveAgentRuntime({
       db: input.db,
       userId: input.userId,
