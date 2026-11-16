@@ -5,14 +5,14 @@
  * fresh database; it does not empty the OS page cache.
  * Example: bun scripts/bench/startup.ts <binary> --runs 20 --warmups 2 --resources --json
  */
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import { assertNoUnexpectedArguments, fatal, parseArgs } from '../lib/args';
 import { benchmarkCancellation, withBenchmarkCancellation } from '../lib/benchmark-cancellation';
 import { appendBenchmarkJournal, writeBenchmarkProgress } from '../lib/benchmark-journal';
-import { isolatedHubEnv, reserveEphemeralPort } from '../lib/hub-process';
+import { isolatedHubEnv, ownsServerState, reserveEphemeralPort } from '../lib/hub-process';
 import { summarizeLatencies } from '../lib/latency-stats';
 import { header, info, log } from '../lib/log';
 import { linuxProcessResourceUnits, type ProcessResourceUnits } from '../lib/process-resource-host';
@@ -61,43 +61,6 @@ function printHelp(): never {
   --json        Print only the JSON receipt
   --help        Show this help message`);
   process.exit(0);
-}
-
-/** Validates that an HTTP readiness answer belongs to this isolated child. Example: ownsStartupState(state, pid, port, spawnedAt). */
-export function ownsStartupState(
-  state: unknown,
-  pid: number,
-  port: number,
-  spawnedAt: number
-): boolean {
-  if (!state || typeof state !== 'object') return false;
-  const value = state as Record<string, unknown>;
-  return (
-    value.pid === pid &&
-    value.port === port &&
-    typeof value.startedAt === 'number' &&
-    Number.isFinite(value.startedAt) &&
-    value.startedAt >= spawnedAt
-  );
-}
-
-/** True once `home` holds the state file of the hub this benchmark spawned. Example: ownsServerState(home, pid, port, spawnedAt). */
-export async function ownsServerState(
-  home: string,
-  pid: number,
-  port: number,
-  spawnedAt: number
-): Promise<boolean> {
-  try {
-    return ownsStartupState(
-      JSON.parse(await readFile(join(home, '.mango/run/server.json'), 'utf8')),
-      pid,
-      port,
-      spawnedAt
-    );
-  } catch {
-    return false;
-  }
 }
 
 async function readPeakRssKb(pid: number): Promise<number | null> {

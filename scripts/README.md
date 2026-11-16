@@ -201,10 +201,16 @@ hash cache in `.mango/pass-stamps` means unchanged files are not read again. The
 `--compiler bytecode` uses `--bytecode --trim` with the same ESM, source maps and
 production minification, and retains all 8 cross-compilation targets.
 
-On a Linux host a native build compiles twice: once with `--aot-record-order`, then — after
-`scripts/lib/aot-order.ts` has run that binary through `scripts/lib/hub-workload.ts` and checked the
-file it wrote — with `--aot-order=<file>`. The file lives in `.mango/aot-order/<arch>/` and is
-rebuilt every time; it is never committed, because any code change invalidates it.
+On a Linux host a native build with `--production` (given explicitly) or `--require-aot-order`
+compiles twice: once with `--aot-record-order`, then — after `scripts/lib/aot-order.ts` has run that
+binary through `scripts/lib/hub-workload.ts` and checked the file it wrote — with
+`--aot-order=<file>`. A plain local, smoke or test build compiles once. The recording hub runs
+supervised (`ChildSupervisor`) with an allowlisted environment (`isolatedHubEnv` in
+`scripts/lib/hub-process.ts`, shared with the benchmarks), so a cancelled build leaves no hub or
+home behind. The build fails or warns if Bun prints its "is not an order file" warning. The order
+file lives in `.mango/aot-order/<arch>/hub.order` and is rebuilt every time (the recording binary
+beside it is deleted); it is never committed, because any code change invalidates it. Its SHA-256 is
+the compile receipt's `aotOrderSha256`.
 
 Native builds use the running compiler and its runtime, without downloading a
 cross-target Bun runtime; `--refresh-runtimes` has no effect on native builds.

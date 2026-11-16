@@ -21,7 +21,9 @@ import { rotatedOrder } from '../lib/bench-order';
 import { fetchRaw } from '../lib/content-encoding-smoke';
 import {
   createIsolatedHubHome,
+  guardIsolatedHub,
   isolatedHubEnv,
+  ownsServerState,
   removeIsolatedHubHome,
   reserveEphemeralPort,
 } from '../lib/hub-process';
@@ -29,7 +31,6 @@ import { runHubWorkload, type WorkloadResult } from '../lib/hub-workload';
 import { summarizeLatencies } from '../lib/latency-stats';
 import { header, info, log } from '../lib/log';
 import { assertBenchmarkPlatform } from './benchmark-platform';
-import { ownsServerState } from './startup';
 
 const READY_TIMEOUT_MS = 60_000;
 const POLL_INTERVAL_MS = 5;
@@ -144,6 +145,8 @@ async function measureCandidate(
     stdout: 'ignore',
     stderr: 'ignore',
   });
+  // A Ctrl-C must stop the hub's group and delete its home, not leave a listener behind.
+  const releaseGuard = guardIsolatedHub(child, home, `footprint hub ${label}`);
   try {
     let toHealthMs: number | null = null;
     while (performance.now() - startedAt < READY_TIMEOUT_MS && child.exitCode === null) {
@@ -226,6 +229,7 @@ async function measureCandidate(
       }
       await child.exited;
     }
+    releaseGuard();
     removeIsolatedHubHome(home);
   }
 }

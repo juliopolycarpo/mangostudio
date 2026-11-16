@@ -33,6 +33,7 @@
         "scripts/test-build.ts",
         "scripts/tests/**/*.test.ts",
         "scripts/tests/support/fake-recording-hub.ts",
+        "scripts/tests/support/record-order-runner.ts",
         "scripts/tests/support/fake-smoke-server.ts",
         "scripts/tests/support/fake-build-smoke-server.ts",
         "scripts/tests/support/fake-check-tool.ts",
