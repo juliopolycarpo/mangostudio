@@ -11,6 +11,7 @@ import {
   shellExitCode,
   TEST_HOME_KIND,
   TEST_HOME_PREFIX,
+  testChildEnv,
   type TestHomeChild,
   type TestHomeDependencies,
   testHomeEnv,
@@ -33,6 +34,18 @@ class FakeSignaledChild implements TestHomeChild, TestHomeDependencies {
   kill(signal: number): void {
     this.signals.push(signal);
   }
+}
+
+/** Records the environment a launched lane would start with, and exits cleanly. */
+class FakeEnvRecordingChild implements TestHomeChild, TestHomeDependencies {
+  readonly exited = Promise.resolve(0);
+  readonly signalCode = null;
+  readonly spawn = (_command: readonly string[], env: NodeJS.ProcessEnv) => {
+    this.env = env;
+    return this;
+  };
+  env: NodeJS.ProcessEnv = {};
+  kill(): void {}
 }
 
 /** A launch failure after receiving the real temporary home to clean up. */
@@ -135,6 +148,30 @@ describe('testHomeEnv', () => {
     expect(testHomeEnv(root, { BUN_INSTALL: '/opt/bun' }, host).BUN_INSTALL_CACHE_DIR).toBe(
       join('/opt/bun', 'install', 'cache')
     );
+  });
+});
+
+describe('testChildEnv', () => {
+  test('drops an exported VERSION and keeps the rest of the ambient environment', () => {
+    const env = testChildEnv(
+      '/tmp/mangostudio-test-home-a1b2c3',
+      { VERSION: '0.1.1-canary.50b10e9', PATH: '/usr/bin', MANGOSTUDIO_RUNTIME_BINARY: '/opt/rt' },
+      host
+    );
+
+    expect(
+      env.VERSION,
+      `expected VERSION: undefined | received: ${String(env.VERSION)} (a release stamp reached the lane)`
+    ).toBeUndefined();
+    expect(env.PATH).toBe('/usr/bin');
+    expect(env.MANGOSTUDIO_RUNTIME_BINARY).toBe('/opt/rt');
+    expect(env.HOME).toBe('/tmp/mangostudio-test-home-a1b2c3');
+  });
+
+  test('is a no-op for VERSION when none was exported', () => {
+    const env = testChildEnv('/tmp/mangostudio-test-home-a1b2c3', { PATH: '/usr/bin' }, host);
+
+    expect('VERSION' in env).toBe(false);
   });
 });
 
@@ -254,6 +291,21 @@ describe('runWithTestHome', () => {
     } finally {
       rmSync(outer, { recursive: true, force: true });
     }
+  });
+
+  test('starts the child without the VERSION the shell exported', async () => {
+    const child = new FakeEnvRecordingChild();
+
+    await runWithTestHome(
+      ['bun', 'fixture.ts'],
+      { ...process.env, VERSION: '0.1.1-canary.50b10e9' },
+      child
+    );
+
+    expect(
+      child.env.VERSION,
+      `expected the launched lane to have no VERSION | received: ${String(child.env.VERSION)}`
+    ).toBeUndefined();
   });
 
   test('passes the runtime binary and the pinned toolchain homes through', async () => {

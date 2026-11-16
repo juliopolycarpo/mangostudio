@@ -94,6 +94,33 @@ export function testHomeEnv(
   };
 }
 
+/**
+ * The whole environment a launched lane starts with: the ambient one, moved to
+ * the temporary home, without `VERSION`.
+ *
+ * `getVersion()` reads `VERSION`, which a release build stamps. A shell that
+ * left it exported after building a release hub would make every lane a
+ * release-build run: the hub refuses the source-built Local runtime as another
+ * release, doctor reports drift against its fixture runtime, and a peer at the
+ * exported version is offered no live update. The lanes are written for a dev
+ * build, and a test that needs a release version sets it itself. Only the lanes
+ * go through this launcher; a release job that runs one test file on purpose
+ * with `VERSION` set (the container smoke) calls `bun test` directly and keeps
+ * it.
+ *
+ * @example
+ * testChildEnv('/tmp/mangostudio-test-home-a1b2c3', { VERSION: '1.2.3', PATH: '/bin' }).VERSION;
+ * // => undefined
+ */
+export function testChildEnv(
+  root: string,
+  ambient: NodeJS.ProcessEnv = process.env,
+  host: TemporaryHomeHost = launcherHost(ambient)
+): NodeJS.ProcessEnv {
+  const { VERSION: _inheritedBuildVersion, ...rest } = ambient;
+  return { ...rest, ...testHomeEnv(root, ambient, host) };
+}
+
 /** Creates a fresh test home under the OS temp directory. */
 function createTestHome(host: TemporaryHomeHost = launcherHost()): string {
   return createTemporaryHome(TEST_HOME_KIND, host);
@@ -167,7 +194,7 @@ export async function runWithTestHome(
     const child = dependencies.spawn(
       // The same Bun that runs the launcher, not whatever PATH says next.
       [program === 'bun' ? process.execPath : program, ...args],
-      { ...ambient, ...testHomeEnv(root, ambient, host) }
+      testChildEnv(root, ambient, host)
     );
     for (const name of FORWARDED) {
       const forward = (): void => {
