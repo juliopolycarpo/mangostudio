@@ -27,7 +27,7 @@
  *   bun run scripts/bench/grep.ts <binary> --restricted  # capability walk, as under a path policy
  *   bun run scripts/bench/grep.ts <binary> --scenario large-file --pattern '(\d+)-NEEDLE$' --ignore-case
  *
- * Several binaries run in ABBA order. Each sample records the match count and the
+ * Several binaries rotate their run order (ABBA for two). Each sample records the match count and the
  * runtime's `truncated` flag: a time near 2,100 ms with `truncated` is a file that
  * ran out of its 2 s budget, not the scan time.
  */
@@ -44,7 +44,7 @@ import {
 } from '@mangostudio/shared/runtime-contract';
 
 import { fatal, parseArgs } from '../lib/args';
-import { abbaOrder } from '../lib/bench-order';
+import { rotatedOrder } from '../lib/bench-order';
 import { type LatencySummary, summarizeLatencies } from '../lib/latency-stats';
 import { header, info, log } from '../lib/log';
 
@@ -89,7 +89,7 @@ function printHelp(): never {
   log(`Usage: bun run scripts/bench/grep.ts [[label=]binary ...] [--runs N] [--warmup N] [--scenario a,b] [--large-mib N] [--pattern REGEX] [--ignore-case] [--restricted] [--json]
 
   [label=]binary   mangostudio-runtime executables; several are interleaved run by run,
-                   in ABBA order (the order flips on every odd run)
+                   in a rotating order (ABBA for two)
                    (default: newest of target/release, target/debug)
   --runs N         Measured runs per scenario (default 15)
   --warmup N       Untimed runs per binary before measuring (default 0)
@@ -337,7 +337,7 @@ async function environmentNotes(candidates: readonly Candidate[]) {
     binaries,
     pattern,
     ignoreCase,
-    order: 'ABBA: candidate order reversed on every odd run',
+    order: 'rotated every run: ABBA for two candidates',
     restricted,
   };
 }
@@ -419,11 +419,12 @@ try {
     );
     const samples = new Map<string, Sample[]>(candidates.map(({ label }) => [label, []]));
     const loadBefore = loadavg()[0] ?? 0;
-    // ABBA: the order flips every odd run, so neither binary always runs first
-    // and drift in machine load hits every binary alike. `run + warmup` keeps
-    // the first measured run on an even index whatever the warm-up count.
+    // The order rotates every run (ABBA for two binaries), so no binary always
+    // runs first and drift in machine load hits every binary alike. The index is
+    // the measured run number: the first measured run starts with the first
+    // binary whatever the warm-up count, and warm-ups (negative) rotate on their own.
     for (let run = -warmup; run < runs; run += 1) {
-      for (const { label, binary } of abbaOrder(candidates, run + warmup)) {
+      for (const { label, binary } of rotatedOrder(candidates, run)) {
         const home = join(scratch, `home-${scenario}-${label}-${run + warmup}`);
         const sample = await withRuntime(binary, home, (session, pid) =>
           scenario === 'cancel'
