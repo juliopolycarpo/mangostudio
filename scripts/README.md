@@ -525,6 +525,10 @@ bun scripts/bench/external-agent-boundary.ts --base-binary /path/base-libtest \
   --output boundary-receipt.json
 ```
 
+Base and Head are told apart by which binary produced a sample, not by SHA, so two builds of one
+commit (a profile, flag or allocator experiment) pass the same SHA to both flags and still compare
+as two sides.
+
 The receipt binds binary hashes and lockfile hashes to both revisions. Fixtures are built before
 timing. Linux RSS is the fresh process high-water mark, including those untimed fixtures; unsupported
 memory measurements stay null. These are function measurements, not vendor throughput or chat latency.
