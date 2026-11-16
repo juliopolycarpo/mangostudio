@@ -72,7 +72,7 @@ export function DiffViewer({
     let active = true;
     setHighlightReady(false);
     if (!language) return;
-    void preloadCodeLanguages([language]).then(
+    void preloadCodeLanguages([language], resolvedCodeTheme).then(
       () => {
         if (active) setHighlightReady(true);
       },
@@ -83,7 +83,7 @@ export function DiffViewer({
     return () => {
       active = false;
     };
-  }, [language]);
+  }, [language, resolvedCodeTheme]);
 
   return (
     <section

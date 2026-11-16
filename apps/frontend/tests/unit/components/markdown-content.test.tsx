@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 
+import userEvent from '@testing-library/user-event';
 import { act } from 'react';
 
+import { useTheme } from '../../../src/hooks/use-theme';
 import { stubClipboard } from '../../support/harness/clipboard';
 import { render, screen, waitFor } from '../../support/harness/render';
 import { advanceTimersByTimeAsync, useFakeTimers } from '../../support/harness/timers';
@@ -26,6 +28,27 @@ void mock.module('@/lib/shiki', () => ({
 // bind the components to the real highlighter.
 const { MarkdownContent } = await import('../../../src/components/MarkdownContent');
 const { MarkdownContentRenderer } = await import('../../../src/components/MarkdownContentRenderer');
+
+/** Switches the code theme the way the appearance settings do. */
+function CodeThemeSwitch() {
+  const { setConfig } = useTheme();
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        setConfig({
+          codeTheme: {
+            mode: 'manual',
+            darkTheme: 'github-dark-dimmed',
+            lightTheme: 'github-light',
+          },
+        })
+      }
+    >
+      switch code theme
+    </button>
+  );
+}
 
 function createPendingPreload(): Promise<boolean> {
   return new Promise(() => undefined);
@@ -269,6 +292,8 @@ describe('MarkdownContent — syntax highlighting', () => {
     '<pre class="shiki one-dark-pro" style="background-color:#282c34;color:#abb2bf"><code><span style="color:#c678dd">const</span><span style="color:#e5c07b"> x</span><span style="color:#56b6c2"> =</span><span style="color:#d19a66"> 1</span><span style="color:#abb2bf">;</span></code></pre>';
 
   beforeEach(() => {
+    // The theme switch below persists the chosen code theme; start each case on the default.
+    window.localStorage.clear();
     shiki.highlightCode.mockReset();
     shiki.highlightCode.mockReturnValue(null);
     shiki.preloadCodeLanguages.mockReset();
@@ -289,7 +314,7 @@ describe('MarkdownContent — syntax highlighting', () => {
     });
 
     await waitFor(() => {
-      expect(shiki.preloadCodeLanguages).toHaveBeenCalledWith(['typescript']);
+      expect(shiki.preloadCodeLanguages).toHaveBeenCalledWith(['typescript'], 'one-dark-pro');
       expect(container.querySelector('span[style]')).toBeInTheDocument();
     });
     expect(shiki.highlightCode).toHaveBeenLastCalledWith(
@@ -299,12 +324,60 @@ describe('MarkdownContent — syntax highlighting', () => {
     );
   });
 
+  it('keeps colouring with the loaded theme while a newly chosen one is on its way', async () => {
+    const user = userEvent.setup();
+    shiki.preloadCodeLanguages.mockResolvedValueOnce(true);
+    shiki.highlightCode.mockReturnValue(SHIKI_HTML);
+    render(
+      <>
+        <CodeThemeSwitch />
+        <MarkdownContentRenderer content={'```typescript\nconst x = 1;\n```'} />
+      </>
+    );
+    await waitFor(() =>
+      expect(shiki.highlightCode).toHaveBeenLastCalledWith(
+        'const x = 1;',
+        'typescript',
+        'one-dark-pro'
+      )
+    );
+
+    const nextTheme = createDeferredPreload();
+    shiki.preloadCodeLanguages.mockReturnValueOnce(nextTheme.promise);
+    await user.click(screen.getByRole('button', { name: 'switch code theme' }));
+
+    // Asked for the new theme with the same languages, and has not drawn with it yet.
+    await waitFor(() =>
+      expect(shiki.preloadCodeLanguages).toHaveBeenLastCalledWith(
+        ['typescript'],
+        'github-dark-dimmed'
+      )
+    );
+    expect(shiki.highlightCode).toHaveBeenLastCalledWith(
+      'const x = 1;',
+      'typescript',
+      'one-dark-pro'
+    );
+
+    await act(async () => {
+      nextTheme.resolvePreload(true);
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(shiki.highlightCode).toHaveBeenLastCalledWith(
+        'const x = 1;',
+        'typescript',
+        'github-dark-dimmed'
+      )
+    );
+  });
+
   it('preloads languages for code blocks nested inside list items', async () => {
     shiki.preloadCodeLanguages.mockReturnValue(createPendingPreload());
     render(<MarkdownContentRenderer content={'- step one\n\n  ```rust\n  fn main() {}\n  ```'} />);
 
     await waitFor(() => {
-      expect(shiki.preloadCodeLanguages).toHaveBeenCalledWith(['rust']);
+      expect(shiki.preloadCodeLanguages).toHaveBeenCalledWith(['rust'], 'one-dark-pro');
     });
   });
 

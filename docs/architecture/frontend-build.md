@@ -274,9 +274,12 @@ build):
   107, 100 and 105, but folded the small ones into the entry (+1.8, +2.0 and +6.3 KB Brotli
   eager), removed no round from any first use, and took the first code block from 22
   requests to 21, 21 and 20.
-- **The first fenced code block is bytes-bound, not round-bound.** One `ts` block loads the
-  eight common grammars and four themes (about 1.2 MB raw, 22 requests, three rounds).
-  Over a 150 ms, 1.6 Mbit/s profile the grammar round is most of the wait.
+- **The first fenced code block loads one grammar and one theme.** The highlighter starts
+  empty; `preloadCodeLanguages(languages, theme)` loads the fence's own grammar (plus any
+  grammar it embeds) and the active theme, and a theme switch loads just the new theme. It
+  used to start from four themes and eight common grammars, so one `ts` block fetched about
+  1.2 MB raw in 22 requests. Shiki already runs on its JavaScript regex engine, so no
+  Oniguruma WASM is involved.
 
 `tests/browser-smoke/load-waterfall.spec.ts` watches the same first uses in a real browser
 (opt-in: `MANGO_LOAD_WATERFALL=1`, and `MANGO_LOAD_PROFILE=slow-4g` for a CDP throttle) and prints

@@ -10,7 +10,7 @@ const CHECK_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" 
 
 interface CodeHighlighter {
   highlightCode: (code: string, lang: string, theme: CodeThemeId) => string | null;
-  preloadCodeLanguages: (languages: readonly string[]) => Promise<boolean>;
+  preloadCodeLanguages: (languages: readonly string[], theme: CodeThemeId) => Promise<boolean>;
 }
 
 export interface MarkdownContentProps {
@@ -36,6 +36,10 @@ export function MarkdownContentRenderer({
   const { resolvedCodeTheme } = useTheme();
   const [highlighter, setHighlighter] = useState<CodeHighlighter | null>(null);
   const [highlightVersion, setHighlightVersion] = useState(0);
+  // The theme the highlighter has actually loaded. Only that one can colour a
+  // block; while a newly chosen theme is on its way, blocks keep the previous
+  // colours rather than dropping to plain text.
+  const [loadedCodeTheme, setLoadedCodeTheme] = useState<CodeThemeId | null>(null);
   const resolvedCopyLabel = copyCodeLabel ?? t.chat.copyCode;
   const resolvedCopiedLabel = codeCopiedLabel ?? t.chat.codeCopied;
   // Key keeps the array identity stable while the language set is unchanged, so
@@ -46,13 +50,17 @@ export function MarkdownContentRenderer({
     [codeLanguageKey]
   );
 
-  useCodeHighlighter(codeLanguages, setHighlighter, setHighlightVersion);
+  useCodeHighlighter(codeLanguages, resolvedCodeTheme, {
+    setHighlighter,
+    setHighlightVersion,
+    setLoadedCodeTheme,
+  });
   useCopyCodeButtons(containerRef, resolvedCopyLabel, resolvedCopiedLabel);
 
   const parser = useMemo(
-    () => createParser(resolvedCodeTheme, resolvedCopyLabel, highlighter),
+    () => createParser(loadedCodeTheme ?? resolvedCodeTheme, resolvedCopyLabel, highlighter),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- The highlighter mutates in place when another language loads.
-    [resolvedCodeTheme, resolvedCopyLabel, highlighter, highlightVersion]
+    [loadedCodeTheme, resolvedCodeTheme, resolvedCopyLabel, highlighter, highlightVersion]
   );
   // The memo re-parses whenever content or parser changes (i.e. every streamed
   // chunk), so it already reflects the latest content without a second parse.
@@ -71,19 +79,26 @@ export function MarkdownContentRenderer({
   );
 }
 
+interface CodeHighlighterSetters {
+  readonly setHighlighter: (highlighter: CodeHighlighter) => void;
+  readonly setHighlightVersion: React.Dispatch<React.SetStateAction<number>>;
+  readonly setLoadedCodeTheme: (theme: CodeThemeId) => void;
+}
+
 function useCodeHighlighter(
   languages: readonly string[],
-  setHighlighter: (highlighter: CodeHighlighter) => void,
-  setHighlightVersion: React.Dispatch<React.SetStateAction<number>>
+  theme: CodeThemeId,
+  { setHighlighter, setHighlightVersion, setLoadedCodeTheme }: CodeHighlighterSetters
 ) {
   useEffect(() => {
     if (languages.length === 0) return;
 
     let cancelled = false;
-    void loadCodeHighlighter(languages).then(
+    void loadCodeHighlighter(languages, theme).then(
       (highlighter) => {
         if (cancelled) return;
         setHighlighter(highlighter);
+        setLoadedCodeTheme(theme);
         setHighlightVersion((version) => version + 1);
       },
       () => {
@@ -94,7 +109,7 @@ function useCodeHighlighter(
     return () => {
       cancelled = true;
     };
-  }, [languages, setHighlighter, setHighlightVersion]);
+  }, [languages, theme, setHighlighter, setHighlightVersion, setLoadedCodeTheme]);
 }
 
 function useCopyCodeButtons(
@@ -262,9 +277,12 @@ function detectCodeLanguages(content: string): string[] {
   return [...languages].sort();
 }
 
-async function loadCodeHighlighter(languages: readonly string[]): Promise<CodeHighlighter> {
+async function loadCodeHighlighter(
+  languages: readonly string[],
+  theme: CodeThemeId
+): Promise<CodeHighlighter> {
   const highlighter = await import('@/lib/shiki');
-  await highlighter.preloadCodeLanguages(languages);
+  await highlighter.preloadCodeLanguages(languages, theme);
   return highlighter;
 }
 

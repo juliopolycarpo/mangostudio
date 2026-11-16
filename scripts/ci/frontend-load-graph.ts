@@ -239,20 +239,27 @@ export interface LoadScenario {
   readonly steps: readonly { readonly from: string; readonly to: readonly string[] }[];
 }
 
-const SHIKI_COMMON_GRAMMARS = [
-  'typescript',
-  'javascript',
-  'tsx',
-  'jsx',
-  'json',
-  'bash',
-  'python',
-  'markdown',
-].map((name) => `@shikijs/langs/dist/${name}.mjs`);
+const shikiGrammar = (name: string): string => `@shikijs/langs/dist/${name}.mjs`;
+const shikiTheme = (name: string): string => `@shikijs/themes/dist/${name}.mjs`;
 
-const SHIKI_THEMES = ['github-dark-dimmed', 'github-light', 'one-dark-pro', 'one-light'].map(
-  (name) => `@shikijs/themes/dist/${name}.mjs`
-);
+/**
+ * A first fenced block loads the renderer, the highlighter core, then its own
+ * grammar and the active theme in parallel (the default dark theme here).
+ */
+function markdownCodeScenario(id: string, title: string, grammar: string): LoadScenario {
+  return {
+    id,
+    title,
+    steps: [
+      {
+        from: 'src/components/MarkdownContent.tsx',
+        to: ['src/components/MarkdownContentRenderer.tsx'],
+      },
+      { from: 'src/components/MarkdownContentRenderer.tsx', to: ['src/lib/shiki.ts'] },
+      { from: 'src/lib/shiki.ts', to: [shikiGrammar(grammar), shikiTheme('one-dark-pro')] },
+    ],
+  };
+}
 
 export const LOAD_SCENARIOS: readonly LoadScenario[] = [
   {
@@ -265,18 +272,8 @@ export const LOAD_SCENARIOS: readonly LoadScenario[] = [
       },
     ],
   },
-  {
-    id: 'markdown-code',
-    title: 'First markdown code block',
-    steps: [
-      {
-        from: 'src/components/MarkdownContent.tsx',
-        to: ['src/components/MarkdownContentRenderer.tsx'],
-      },
-      { from: 'src/components/MarkdownContentRenderer.tsx', to: ['src/lib/shiki.ts'] },
-      { from: 'src/lib/shiki.ts', to: [...SHIKI_COMMON_GRAMMARS, ...SHIKI_THEMES] },
-    ],
-  },
+  markdownCodeScenario('markdown-code', 'First markdown code block (ts)', 'typescript'),
+  markdownCodeScenario('markdown-code-bash', 'First markdown code block (bash)', 'bash'),
   {
     id: 'git-panel',
     title: 'Open the Git panel',

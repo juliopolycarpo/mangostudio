@@ -1,7 +1,7 @@
 import { createBundledHighlighter, type HighlighterGeneric } from '@shikijs/core';
 import { createJavaScriptRegexEngine } from '@shikijs/engine-javascript';
 
-import { CODE_THEMES, type CodeThemeId } from '@/lib/code-themes';
+import type { CodeThemeId } from '@/lib/code-themes';
 import { createCheckedRenderers } from '@/lib/shiki-checked-render';
 
 export { CODE_THEMES, type CodeThemeId } from '@/lib/code-themes';
@@ -39,17 +39,6 @@ const SHIKI_THEMES = {
   'one-light': () => import('@shikijs/themes/one-light'),
 } as const;
 
-const COMMON_LANGUAGES = [
-  'typescript',
-  'javascript',
-  'tsx',
-  'jsx',
-  'json',
-  'bash',
-  'python',
-  'markdown',
-] as const;
-
 const LANGUAGE_ALIASES: Record<string, ShikiLanguageId> = {
   'c++': 'cpp',
   cs: 'csharp',
@@ -81,13 +70,22 @@ let highlighterPromise: Promise<MangoHighlighter> | null = null;
 let highlighterInstance: MangoHighlighter | null = null;
 let checkedRenderers: ReturnType<typeof createCheckedRenderers> | null = null;
 const languageLoadPromises = new Map<ShikiLanguageId, Promise<void>>();
+const themeLoadPromises = new Map<CodeThemeId, Promise<void>>();
 
-/** Initializes the shared Shiki highlighter with the common chat languages. */
+/**
+ * Initializes the shared Shiki highlighter with no theme and no grammar.
+ *
+ * Each grammar and theme is its own chunk (the larger grammars and themes run
+ * to tens of KB), and a first fenced block needs one theme and its own
+ * language, so `preloadCodeLanguages` fetches exactly those. Starting from the
+ * four themes and eight common grammars made one `ts` block cost twenty
+ * requests.
+ */
 // Usage: await initHighlighter();
 export function initHighlighter(): Promise<MangoHighlighter> {
   highlighterPromise ??= createMangoHighlighter({
-    themes: [...CODE_THEMES],
-    langs: [...COMMON_LANGUAGES],
+    themes: [],
+    langs: [],
   }).then((highlighter) => {
     checkedRenderers = createCheckedRenderers(highlighter);
     highlighterInstance = highlighter;
@@ -97,14 +95,25 @@ export function initHighlighter(): Promise<MangoHighlighter> {
   return highlighterPromise;
 }
 
-/** Loads fenced-code languages before markdown is parsed for highlighting. */
-// Usage: await preloadCodeLanguages(['typescript', 'rust']);
-export async function preloadCodeLanguages(languages: readonly string[]): Promise<boolean> {
+/**
+ * Loads the fenced-code languages, and the theme they will be drawn in, before
+ * markdown is parsed for highlighting. Resolves `false` when none of the
+ * languages is one Shiki can highlight, in which case nothing is fetched.
+ * Switching the code theme later only needs another call with the new theme.
+ */
+// Usage: await preloadCodeLanguages(['typescript', 'rust'], 'one-dark-pro');
+export async function preloadCodeLanguages(
+  languages: readonly string[],
+  theme: CodeThemeId
+): Promise<boolean> {
   const languageIds = resolveUniqueLanguageIds(languages);
   if (languageIds.length === 0) return false;
 
   const highlighter = await initHighlighter();
-  await Promise.all(languageIds.map((language) => loadLanguageOnce(highlighter, language)));
+  await Promise.all([
+    loadThemeOnce(highlighter, theme),
+    ...languageIds.map((language) => loadLanguageOnce(highlighter, language)),
+  ]);
   return true;
 }
 
@@ -178,6 +187,19 @@ function isLanguageId(lang: string | null): lang is ShikiLanguageId {
 
 function isLanguageLoaded(highlighter: MangoHighlighter, language: ShikiLanguageId): boolean {
   return highlighter.getLoadedLanguages().includes(language);
+}
+
+function loadThemeOnce(highlighter: MangoHighlighter, theme: CodeThemeId): Promise<void> {
+  if (highlighter.getLoadedThemes().includes(theme)) return Promise.resolve();
+
+  const existing = themeLoadPromises.get(theme);
+  if (existing) return existing;
+
+  const loading = highlighter.loadTheme(theme).finally(() => {
+    themeLoadPromises.delete(theme);
+  });
+  themeLoadPromises.set(theme, loading);
+  return loading;
 }
 
 function loadLanguageOnce(highlighter: MangoHighlighter, language: ShikiLanguageId): Promise<void> {
