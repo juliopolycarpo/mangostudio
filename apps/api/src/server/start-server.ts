@@ -159,8 +159,11 @@ async function startServerWithLock(options: StartOptions): Promise<ServerHandle>
   return { port, host, stop };
 }
 
-/** Bind the server port, exiting with a clear message when it is already in use. */
-function listenOrExit(port: number, host: string): void {
+/**
+ * Bind the server port, exiting with a clear message when it is already in use.
+ * Exported so a test can pin the options the real listener receives.
+ */
+export function listenOrExit(port: number, host: string): void {
   try {
     app.listen(hubListenOptions(host, port));
   } catch (error) {
