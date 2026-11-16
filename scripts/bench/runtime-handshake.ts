@@ -58,6 +58,7 @@ import {
   recordBenchmarkCleanup,
   settleBenchmarkWork,
 } from './benchmark-child-scope';
+import { buildProfileOf, newestWorkspaceBuild } from './runtime-binary';
 import { runtimeVersion, RuntimeVersionError } from './runtime-version';
 
 /** Far above any budget the hub uses, so a slow sample is measured, not refused. */
@@ -96,20 +97,6 @@ function printHelp(): never {
   --json        Print only the JSON result
   --help        Show this help message`);
   process.exit(0);
-}
-
-/** The newest cargo build of the runtime in this checkout, or undefined. */
-async function newestWorkspaceBuild(): Promise<string | undefined> {
-  const candidates = ['release', 'release-fast', 'debug'].map((profile) =>
-    join(REPO_ROOT, 'target', profile, `mangostudio-runtime${EXE}`)
-  );
-  let newest: { path: string; mtimeMs: number } | undefined;
-  for (const path of candidates) {
-    const info = await stat(path).catch(() => undefined);
-    if (info && (!newest || info.mtimeMs > newest.mtimeMs))
-      newest = { path, mtimeMs: info.mtimeMs };
-  }
-  return newest?.path;
 }
 
 async function measureOnce(
@@ -295,15 +282,6 @@ async function environmentNotes(
   };
 }
 
-/** The cargo profile a `target/<profile>/` path names, or `unknown`. */
-function buildProfileOf(binary: string): string {
-  if (/[\\/]debug[\\/]/.test(binary)) return 'debug';
-  if (/[\\/]release[\\/]/.test(binary)) return 'release';
-  // Named apart so a result from the non-shipping profile never reads as a shipping one.
-  if (/[\\/]release-fast[\\/]/.test(binary)) return 'release-fast';
-  return 'unknown';
-}
-
 async function main(): Promise<void> {
   const { flags, values, positional } = parseArgs({
     booleanFlags: ['--fresh-copy', '--json', '--resources'],
@@ -312,7 +290,7 @@ async function main(): Promise<void> {
   if (flags['--help']) printHelp();
   const supplied = positional.shift();
   assertNoUnexpectedArguments(positional);
-  const binary = supplied ? resolve(supplied) : await newestWorkspaceBuild();
+  const binary = supplied ? resolve(supplied) : await newestWorkspaceBuild(REPO_ROOT);
   if (!binary)
     fatal('No runtime binary. Build one with `cargo build -p mangostudio-runtime --locked`.');
   if (!(await Bun.file(binary).exists())) fatal(`No such binary: ${binary}`);

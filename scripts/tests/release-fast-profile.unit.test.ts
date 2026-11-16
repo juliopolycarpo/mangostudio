@@ -47,11 +47,17 @@ describe('[profile.release-fast]', () => {
   });
 
   test('never reaches a packaging, release or workflow file', () => {
+    // Benchmarks and their docs may name the profile; so may tests (this file included).
+    const scripts = filesUnder('scripts').filter(
+      (file) =>
+        !file.startsWith('scripts/bench/') &&
+        !file.startsWith('scripts/tests/') &&
+        file !== 'scripts/README.md' &&
+        !/\.test\.[cm]?[jt]sx?$/.test(file)
+    );
     const files = [
       ...filesUnder('.github'),
-      ...filesUnder('scripts/release'),
-      'scripts/build-runtime.ts',
-      'scripts/lib/runtime-build.ts',
+      ...scripts,
       'Dockerfile',
       'Dockerfile.alpine',
       'crates/mangostudio-launcher/Cargo.toml',

@@ -41,11 +41,11 @@ import {
 import { fatal, parseArgs } from '../lib/args';
 import { type LatencySummary, summarizeLatencies } from '../lib/latency-stats';
 import { header, info, log } from '../lib/log';
+import { buildProfileOf, newestWorkspaceBuild } from './runtime-binary';
 
 const HANDSHAKE_CEILING_MS = 120_000;
 const REQUEST_TIMEOUT_MS = 120_000;
 const CANCEL_AFTER_MS = 200;
-const EXE = process.platform === 'win32' ? '.exe' : '';
 const REPO_ROOT = resolve(import.meta.dir, '../..');
 const SCENARIOS = ['files-1', 'files-100', 'files-1000', 'large-file', 'cancel'] as const;
 type Scenario = (typeof SCENARIOS)[number];
@@ -85,19 +85,6 @@ function printHelp(): never {
   --json           Print only the JSON result
   --help           Show this help message`);
   process.exit(0);
-}
-
-async function newestWorkspaceBuild(): Promise<string | undefined> {
-  const candidates = ['release', 'release-fast', 'debug'].map((profile) =>
-    join(REPO_ROOT, 'target', profile, `mangostudio-runtime${EXE}`)
-  );
-  let newest: { path: string; mtimeMs: number } | undefined;
-  for (const path of candidates) {
-    const info = await stat(path).catch(() => undefined);
-    if (info && (!newest || info.mtimeMs > newest.mtimeMs))
-      newest = { path, mtimeMs: info.mtimeMs };
-  }
-  return newest?.path;
 }
 
 async function readPeakRssKb(pid: number): Promise<number> {
@@ -298,6 +285,7 @@ async function environmentNotes(candidates: readonly Candidate[]) {
     candidates.map(async ({ label, binary }) => ({
       label,
       binary,
+      buildProfile: buildProfileOf(binary),
       binaryBytes: (await stat(binary)).size,
       runtimeVersion: (
         await Bun.spawn([binary, '--version'], { stdout: 'pipe' }).stdout.text()
@@ -323,7 +311,7 @@ if (flags['--help']) printHelp();
 
 const candidates: Candidate[] = positional.splice(0).map(parseCandidate);
 if (candidates.length === 0) {
-  const newest = await newestWorkspaceBuild();
+  const newest = await newestWorkspaceBuild(REPO_ROOT);
   if (!newest) {
     fatal(
       'No runtime binary. Build one with `cargo build --profile release-fast -p mangostudio-runtime --locked`.'
@@ -365,7 +353,7 @@ const restricted = flags['--restricted'] ?? false;
 if (!quiet) {
   header('fs.grep benchmark');
   info(
-    `${candidates.map(({ label, binary }) => `${label}=${binary}`).join(' vs ')} — ${runs} run(s) per scenario (after ${warmup} warm-up), interleaved: ${scenarios.join(', ')}`
+    `${candidates.map(({ label, binary }) => `${label}=${binary} (${buildProfileOf(binary)})`).join(' vs ')} — ${runs} run(s) per scenario (after ${warmup} warm-up), interleaved: ${scenarios.join(', ')}`
   );
 }
 

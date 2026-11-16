@@ -517,13 +517,18 @@ per-package `opt-level = "s"` overrides) with thin LTO and 16 codegen units. On 
 runtime builds in 140 s of wall time against 446 s for `--release` (1.5x the CPU time, so a
 4-core machine gains little). Against the shipping binary over interleaved runs, the `hello`
 median is 1-2 ms (2-5%) higher and the `grep.ts` medians are 0-6% higher on the 1000-file and
-large-file scenarios and 1-2 ms higher on the small ones, so use it to find effects larger than
-about 10%. Build `--release` when the claim is a size, a peak RSS (the fast binary is 31% larger
-and its scan peaks 5 MiB higher), a small difference, or a number that goes into
-`docs/reference/tooling.md`. A `release-fast` binary is never packaged or published: the
-release scripts and workflows only build `--release`, and
-`scripts/tests/release-fast-profile.unit.test.ts` fails when one of them names the profile.
-The handshake report labels such a binary `release-fast`.
+large-file scenarios, so for those use it to find effects larger than about 10%. The small
+`grep.ts` scenarios differ more in relative terms: `files-1` +0.1 to +0.4 ms (up to +27% of
+1.5 ms) and `files-100` +1 to +2.3 ms (+6% to +14%). Measure those, a size, a peak RSS (the fast
+binary is 31% larger and its scan peaks 5 MiB higher), any smaller difference, and any number
+that goes into `docs/reference/tooling.md` with `--release`. With no binary argument, both
+scripts pick the most recently modified build among `target/release`, `target/release-fast`
+and `target/debug`, so a later debug build silently becomes the default: pass the binary
+explicitly for A/B runs. The chosen path and profile are printed at the start and recorded in
+the JSON (`grep.ts` per binary as `buildProfile`, the handshake as `build`). A `release-fast`
+binary is never packaged or published: the release scripts and workflows only build
+`--release`, and `scripts/tests/release-fast-profile.unit.test.ts` fails when any non-test file
+outside `scripts/bench/` names the profile.
 
 `external-agent-boundary.ts` runs ignored Rust libtests, so benchmarks are not part of the normal
 test gate. Build each revision's runtime libtest with `cargo test -p mangostudio-runtime --lib
