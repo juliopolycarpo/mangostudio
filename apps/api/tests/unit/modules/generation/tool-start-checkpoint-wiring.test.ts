@@ -1,9 +1,11 @@
 /**
- * The tool loop asks its checkpoint writer for a durable commit exactly when a
- * tool that is not a plain read starts, in both the standard path and the path
- * that runs image generation beside other tools. The helper that decides is
- * covered in `tool-start-durability.test.ts`; this pins that the loop passes
- * its answer on, because a dropped flag would silently undo the guarantee.
+ * The tool loop hands the executor a `beforeToolStart` hook that commits the
+ * call's `running` state durably, in both the standard path and the path that
+ * runs image generation beside other tools. Which calls wait for it is decided by
+ * the executor (`tool-start-marker.test.ts`); this pins that the loop passes the
+ * hook on and that its own per-item checkpoints stay non-durable, because a
+ * dropped hook would silently undo the guarantee and a durable per-item write
+ * would add a second fsync per call.
  */
 import { afterEach, describe, expect, it, mock } from 'bun:test';
 
@@ -11,6 +13,7 @@ import type { ToolExecutionSnapshot } from '@mangostudio/shared/tool-executions'
 
 import { getDb } from '../../../../src/db/database';
 import * as realStandardToolExecution from '../../../../src/modules/generation/application/standard-tool-execution';
+import type { StandardToolExecutionContext } from '../../../../src/modules/generation/application/standard-tool-execution';
 import * as realTurnHelpers from '../../../../src/modules/generation/application/stream-text-turn-helpers';
 import type { StreamTextTurnSession } from '../../../../src/modules/generation/application/stream-text-turn-stages';
 import type { WriteTurnCheckpointOptions } from '../../../../src/modules/generation/application/turn-checkpoint';
@@ -26,9 +29,13 @@ const at = (status: ToolExecutionSnapshot['status']): ToolExecutionSnapshot => (
 
 /**
  * Named fake for the tool executor: announces each call as queued and running,
- * then finishes it, the way the real generator reports progress.
+ * waits on the start marker hook the way the real executor does for a call that
+ * is not a plain read, then finishes it.
  */
-async function* ScriptedToolProgress(calls: readonly Call[]) {
+async function* ScriptedToolProgress(
+  calls: readonly Call[],
+  context: Pick<StandardToolExecutionContext, 'beforeToolStart'>
+) {
   await Promise.resolve();
   for (const [callId, { name }] of calls) {
     yield {
@@ -39,6 +46,7 @@ async function* ScriptedToolProgress(calls: readonly Call[]) {
       kind: 'event',
       event: { type: 'tool_execution', callId, name, execution: at('running') },
     };
+    await context.beforeToolStart?.({ callId, name, execution: at('running') });
     yield {
       kind: 'execution',
       execution: {
@@ -69,7 +77,7 @@ class RecordingCheckpointWriter {
       durable: options.durable === true,
       running,
     });
-    return Promise.resolve(false);
+    return Promise.resolve(true);
   }
 }
 
@@ -78,7 +86,10 @@ async function runTurn(toolNames: string[]): Promise<RecordingCheckpointWriter['
     '../../../../src/modules/generation/application/standard-tool-execution',
     () => ({
       ...realStandardToolExecution,
-      executeStandardToolCallsWithProgress: (calls: readonly Call[]) => ScriptedToolProgress(calls),
+      executeStandardToolCallsWithProgress: (
+        calls: readonly Call[],
+        context: Pick<StandardToolExecutionContext, 'beforeToolStart'>
+      ) => ScriptedToolProgress(calls, context),
     })
   );
   // The image call is not what this file is about; its own durable checkpoints
@@ -154,30 +165,16 @@ afterEach(() => {
   mock.restore();
 });
 
-describe('runAgentToolLoop durable checkpoints', () => {
-  it('commits only the running state of a mutating tool durably', async () => {
+describe('runAgentToolLoop tool start marker', () => {
+  it('commits the running call durably through the hook, and nothing else durably', async () => {
     const requests = await runTurn(['run_shell']);
 
     const durable = requests.filter((request) => request.durable);
     expect(durable).toEqual([{ force: true, durable: true, running: ['run_shell'] }]);
   });
 
-  it('does not commit a read-only tool durably at any state', async () => {
-    const requests = await runTurn(['read_file']);
-
-    expect(requests.filter((request) => request.durable)).toEqual([]);
-  });
-
-  it('does the same for the tools that run beside an image generation', async () => {
-    const requests = await runTurn(['run_shell', 'read_file', 'generate_image']);
-
-    expect(requests.filter((request) => request.durable).map((request) => request.running)).toEqual(
-      [['run_shell']]
-    );
-  });
-
-  it('commits one durable checkpoint per mutating tool in a batch, and none for the read', async () => {
-    const requests = await runTurn(['run_shell', 'read_file', 'write_file']);
+  it('gives the tools that run beside an image generation the same hook', async () => {
+    const requests = await runTurn(['run_shell', 'write_file', 'generate_image']);
 
     expect(requests.filter((request) => request.durable).map((request) => request.running)).toEqual(
       [['run_shell'], ['write_file']]

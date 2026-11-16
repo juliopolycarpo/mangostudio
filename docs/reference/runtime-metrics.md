@@ -153,6 +153,65 @@ Every target grows by the same ~17.7 MB of bytecode (`bun build --compile` of th
 entry for the other seven targets). The external `.map` is unchanged in shape, and stack
 traces still resolve to original source lines.
 
+## Hub binary: embedded asset copies
+
+The embedded frontend used to carry an uncompressed copy of every hashed asset next to its gzip
+and Brotli copies. The uncompressed copy is now left out when a gzip copy exists (see
+`docs/architecture/frontend-build.md`), which only a client that accepts neither coding notices:
+browsers send br or gzip, so identity requests come from scripts, health checkers and some
+proxies.
+
+Measured with `scripts/bench/hub-footprint.ts` (seven interleaved rounds, a fresh isolated home per
+start, memory from `/proc/<pid>/status` 10 s after the first healthy `/api/health`, then after the
+request workload and after 1, 10 and 100 more identity requests for the largest script).
+linux-x64 glibc, Bun 1.4.5-canary, production hub, binaries on btrfs. The host load average was 15
+to 112 (other jobs), so no startup change is claimed.
+
+| Hub binary              |    Size (B) | Idle VmRSS (KB) | After workload (KB) | After +1 / +10 / +100 identity requests (KB) |
+| ----------------------- | ----------: | --------------: | ------------------: | -------------------------------------------- |
+| base                    | 102,137,608 |          69,124 |              75,552 | 75,564 / 75,548 / 74,940                     |
+| identity copies dropped |  96,218,888 |          70,184 |              75,672 | 75,684 / 75,524 / 75,572                     |
+
+The binary shrinks 5.8% (5.9 MB; the 113 length and `ETag` records the manifest now carries cost
+16 KB of that). Idle RSS is 1 MB higher at the median with overlapping ranges (68,504–69,364
+against 68,836–70,684 KB), and the footprint after 1, 10 and 100 identity requests for the
+largest script stays flat: the inflated body is cached, not allocated per request. Inflating on
+every request instead, without the cache, took about 10 ms per identity request for the 1.6 MB
+script (4 ms with it) and left the hub 4 MB larger after the same workload.
+
+The cache is sized from the build: the total decoded size of the assets whose identity copy was
+dropped, 5.86 MB today (113 files). That is the most this path can add to the process, reached
+only when identity clients fetch every one of them; a sweep inflates each asset once and the
+second pass inflates nothing. Measured with two full identity sweeps of all 132 hashed `.js` and
+`.css` files (`accept-encoding: identity`, five interleaved rounds, 5 s idle first):
+
+| Hub binary              | Idle VmRSS (KB) | After sweep 1 (KB) | After sweep 2 (KB) | Anon after sweep 1 / file after sweep 1 (KB) |
+| ----------------------- | --------------: | -----------------: | -----------------: | -------------------------------------------- |
+| base                    |          69,704 |             79,272 |             79,224 | 18,376 / 60,900                              |
+| identity copies dropped |          69,620 |             79,264 |             79,248 | 22,980 / 56,188                              |
+
+The sweep costs the same total memory either way: the 4.6 MB the hub now holds as decoded bodies
+is the 4.7 MB of mapped embedded pages it no longer touches, and the second sweep adds nothing.
+
+HEAD and `If-None-Match` for an asset without identity bytes are answered from the length and
+`ETag` the build recorded in the manifest, so neither inflates anything, even on a cold cache. br
+and gzip responses are byte for byte the embedded copies. `Range` is unchanged on the compiled
+hub: Bun slices a stored file, so base answers 206 for identity, gzip and br, and the decoded
+bytes are sliced by the server to give identity the same answers. Measured with a raw HTTP client
+against a base and a head hub, 19 identity requests (single, open-ended, suffix, clamped,
+unsatisfiable, multi-range and malformed `Range`, plus `If-None-Match`, HEAD and `If-Range`)
+gave identical statuses, lengths and headers, and `If-Range` with the strong tag, a weak tag and
+a date gave 206, 200 and 200 on both. gzip and br were identical for six `Range` shapes and HEAD.
+
+Reproduce, from a clean checkout of each revision (both builds on one filesystem):
+
+```bash
+bun run build --binary --hub-only --production
+cp .mango/out/linux-x64/mangostudio /path/on/disk/head-hub
+bun run scripts/bench/hub-footprint.ts --rounds 7 --idle-seconds 10 --workload \
+  --identity-checkpoints 1,10,100 base=/path/on/disk/base-hub head=/path/on/disk/head-hub
+```
+
 ## Build and validation baseline, 2026-10-08
 
 These observations use implementation source

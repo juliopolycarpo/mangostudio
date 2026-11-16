@@ -238,6 +238,66 @@ describe('buildResponsesAgentTurnInput', () => {
     ]);
   });
 
+  it('replays encrypted reasoning unchanged when the stored summary has several parts', () => {
+    const input = buildResponsesAgentTurnInput({
+      policy: CHATGPT_POLICY,
+      req: baseAgentRequest({
+        prompt: undefined,
+        history: [
+          { id: 'u1', role: 'user', text: 'Find docs' },
+          {
+            id: 'a1',
+            role: 'ai',
+            text: 'Done.',
+            parts: [
+              {
+                type: 'thinking',
+                text: '**First**\n\nfirst part.\n\n**Second**\n\nsecond part.',
+                encrypted_content: 'enc_reasoning_two_parts==',
+              } as unknown as NonNullable<AgentTurnRequest['history'][number]['parts']>[number],
+              { type: 'text', text: 'Done.' },
+            ],
+          },
+        ],
+      }),
+      previousResponseId: 'resp_ignored',
+    });
+
+    // The readable summary is display text: only the encrypted blob goes back, byte for byte.
+    expect(input).toEqual([
+      { role: 'user', content: 'Find docs' },
+      { type: 'reasoning', encrypted_content: 'enc_reasoning_two_parts==' },
+      { role: 'assistant', content: 'Done.' },
+    ]);
+  });
+
+  it('leaves the stored summary text out of an OpenAI replay entirely', () => {
+    const input = buildResponsesAgentTurnInput({
+      policy: OPENAI_POLICY,
+      req: baseAgentRequest({
+        prompt: undefined,
+        history: [
+          { id: 'u1', role: 'user', text: 'Find docs' },
+          {
+            id: 'a1',
+            role: 'ai',
+            text: 'Done.',
+            parts: [
+              { type: 'thinking', text: '**First**\n\nfirst part.\n\n**Second**\n\nsecond part.' },
+              { type: 'text', text: 'Done.' },
+            ],
+          },
+        ],
+      }),
+      previousResponseId: undefined,
+    });
+
+    expect(input).toEqual([
+      { role: 'user', content: 'Find docs' },
+      { role: 'assistant', content: 'Done.' },
+    ]);
+  });
+
   it('injects the system prompt as the first item and loop items before current input', () => {
     const input = buildResponsesAgentTurnInput({
       policy: CHATGPT_POLICY,

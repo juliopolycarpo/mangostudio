@@ -24,7 +24,8 @@ const RUNTIME_BARREL_IMPORT =
 function modulesReachingI18nBarrel(): string[] {
   const offenders: string[] = [];
   for (const path of new Glob('**/*.ts').scanSync(SRC)) {
-    const file = relative(SRC, join(SRC, path));
+    // `relative` answers with the host separator; `BARRELS` and the report speak `/`.
+    const file = relative(SRC, join(SRC, path)).replaceAll('\\', '/');
     if (BARRELS.has(file)) continue;
     if (RUNTIME_BARREL_IMPORT.test(readFileSync(join(SRC, path), 'utf8'))) offenders.push(file);
   }
