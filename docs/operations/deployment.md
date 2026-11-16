@@ -280,10 +280,13 @@ What a failure costs depends on what failed:
   every commit before it:
   - Tool side-effect markers: the checkpoint that records a tool call as running (any tool that is not
     a plain read), each finished generated image, the receipt written before an external-agent turn is
-    submitted, and the result of a standalone image generation. This narrows the window in which a
-    power loss lets the hub run such a step a second time; it does not close it. The tool starts while
-    its marker is being written, so a power loss in those few milliseconds still shows the call as not
-    started.
+    submitted, and the result of a standalone image generation. The hub waits for that checkpoint
+    before it starts the tool, so a crash or a power loss cannot leave a call that ran recorded as not
+    started. If the checkpoint cannot be written, the tool does not start and the model receives an
+    error. This covers image generation too. A call cancelled while its marker is being written does
+    not start and is normally stored as `cancelled`; if the hub crashes before that is saved,
+    recovery finds the `running` marker and reads the outcome as unknown. This costs one fsync per
+    such call.
   - Revocations: replacing or revoking a runtime pairing token, revoking an API key, and the auth
     requests that delete or rotate a credential (sign-out, revoking one or all sessions, changing or
     resetting a password, updating or deleting an API key). Sign-in, sign-up and session reads stay at

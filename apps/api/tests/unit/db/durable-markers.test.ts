@@ -17,6 +17,7 @@ import {
   transitionAttempt,
 } from '../../../src/modules/external-agents/infrastructure/external-turn-attempt-repository';
 import { createDatabaseCheckpointStore } from '../../../src/modules/generation/application/turn-checkpoint';
+import { insertMessage } from '../../../src/modules/messages/infrastructure/message-repository';
 import { runMigrations } from '../../../src/server/migrations';
 import {
   ObservedFileDatabase,
@@ -68,8 +69,33 @@ describe('the external-turn receipt', () => {
   });
 });
 
+/**
+ * A durable checkpoint is only stored for a row that is still generating, so the stores below
+ * need one. Foreign keys are off, so no chat is needed; the insert is forgotten so it is not
+ * mistaken for the write a test observes.
+ */
+async function seedGeneratingMessage(target: ObservedFileDatabase, id: string): Promise<void> {
+  await insertMessage(
+    {
+      id,
+      chatId: 'chat-1',
+      role: 'ai',
+      text: '',
+      timestamp: 1,
+      isGenerating: true,
+      interactionMode: 'agent',
+    },
+    target.db
+  );
+  target.forget();
+}
+
 describe('the database checkpoint store', () => {
   const row = { text: 'a', partsJson: '[]', providerState: null, generationTime: null };
+
+  beforeEach(async () => {
+    await seedGeneratingMessage(file, 'message-1');
+  });
 
   it('commits a durable delta at FULL and an ordinary one at NORMAL', async () => {
     const store = createDatabaseCheckpointStore(file.db, 'message-1');
@@ -116,7 +142,8 @@ describe('a database that was never relaxed', () => {
     const unrelaxed = new ObservedFileDatabase(unrelaxedDirectory);
     try {
       await runMigrationsWithoutRelaxing(unrelaxed);
-      unrelaxed.forget();
+      unrelaxed.sqlite.exec('PRAGMA foreign_keys = OFF');
+      await seedGeneratingMessage(unrelaxed, 'message-1');
 
       await createDatabaseCheckpointStore(unrelaxed.db, 'message-1').appendDelta(1, '{}', {
         durable: true,
