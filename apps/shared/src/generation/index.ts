@@ -4,7 +4,7 @@ export {
   DELEGATION_MAX_RETRIES,
 } from '../agentic-limits';
 export type { GeneratedMessage, GenerateImageResponse, GenerateTextResponse } from './contracts';
-export { mergeMessageParts } from './merge-message-parts';
+export { appendMergedMessagePart, mergeMessageParts } from './merge-message-parts';
 export {
   type ExternalTurnRequest,
   ExternalTurnRequestSchema,

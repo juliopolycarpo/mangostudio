@@ -5,6 +5,7 @@ import {
   type ExternalTurnTerminalReason,
   MAX_EXTERNAL_NOTICES_PER_TURN,
 } from '@mangostudio/shared/external-agents';
+import { mergeMessageParts } from '@mangostudio/shared/generation';
 import type { ExternalActivityPart, ExternalApprovalPart } from '@mangostudio/shared/types';
 
 import { ExternalTurnTranscript } from '../../../../src/modules/external-agents/domain/external-turn-transcript';
@@ -85,6 +86,17 @@ describe('ExternalTurnTranscript', () => {
       'thinking',
       'text',
     ]);
+  });
+
+  it('holds one part per run while deltas stream, already in merged form', () => {
+    const target = transcript();
+    feed(target, [
+      ...Array.from({ length: 1_024 }, () => ({ type: 'reasoning_delta' as const, text: 'r' })),
+      ...Array.from({ length: 1_024 }, () => ({ type: 'text_delta' as const, text: 'abcd' })),
+    ]);
+
+    expect(target.parts.map((part) => part.type)).toEqual(['external_turn', 'thinking', 'text']);
+    expect(JSON.stringify(mergeMessageParts(target.parts))).toBe(JSON.stringify(target.parts));
   });
 
   it('opens an empty thinking part when a reasoning phase starts', () => {

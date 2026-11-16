@@ -190,4 +190,58 @@ describe('runLegacyTextStream', () => {
       restricted: true,
     });
   });
+
+  it('keeps one part per text or thinking run instead of one per chunk', async () => {
+    await mockMessageRepository();
+    const { runLegacyTextStream } =
+      await import('../../../../src/modules/generation/application/stream-text-turn-stages');
+    const session = createSession([
+      { type: 'thinking', text: 'Read ', done: false },
+      { type: 'thinking', text: 'it.', done: false },
+      { type: 'text', text: 'Open', done: false },
+      { type: 'text', text: 'ing.', done: false },
+      { type: 'tool_call', toolCallId: 'tool-1', name: 'read_file', done: false },
+      { type: 'text', text: 'Done', done: false },
+      { type: 'text', text: '.', done: false },
+      { type: 'text', text: '', done: true },
+    ]);
+
+    const textEvents = [];
+    for await (const event of runLegacyTextStream(session)) {
+      if (event.type === 'text' || event.type === 'thinking') textEvents.push(event);
+    }
+
+    expect(session.allParts).toEqual([
+      { type: 'thinking', text: 'Read it.' },
+      { type: 'text', text: 'Opening.' },
+      { type: 'system_event', event: 'cursor_internal_tool_call', detail: 'read_file' },
+      { type: 'text', text: 'Done.' },
+    ]);
+    // Each chunk still reaches the client as its own SSE event.
+    expect(textEvents).toHaveLength(6);
+  });
+});
+
+describe('runSingleShotTextGeneration', () => {
+  afterEach(() => {
+    mock.restore();
+  });
+
+  it('records the whole answer as one text part', async () => {
+    await mockMessageRepository();
+    const { runSingleShotTextGeneration } =
+      await import('../../../../src/modules/generation/application/stream-text-turn-stages');
+    const session = createSession([]);
+    session.provider = {
+      ...session.provider,
+      generateText: () => Promise.resolve({ text: 'Whole answer.' }),
+    } as unknown as StreamTextTurnSession['provider'];
+
+    const events = [];
+    for await (const event of runSingleShotTextGeneration(session)) events.push(event);
+
+    expect(events).toEqual([{ type: 'text', text: 'Whole answer.' }]);
+    expect(session.allParts).toEqual([{ type: 'text', text: 'Whole answer.' }]);
+    expect(session.fullText).toBe('Whole answer.');
+  });
 });

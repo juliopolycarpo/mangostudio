@@ -79,8 +79,8 @@ const GEMINI_CAPABILITIES: ModelCapabilities = {
  * — every other boundary (`tool_call_started`, `tool_result`,
  * `assistant_text_delta`, `turn_completed`) already resets the flag.
  *
- * `session.allParts` itself never diverges: it is append-only, and
- * `mergeMessageParts` on the persisted side merges by adjacency, so the
+ * `session.allParts` itself never diverges: deltas join it under the same
+ * adjacency rule `mergeMessageParts` applies on the persisted side, so the
  * `continuation_transition` part pushed in between already keeps the two
  * reasoning runs apart on reload regardless of this flag. What the stale flag
  * breaks is the *live* SSE signal a client relies on to know a fresh segment

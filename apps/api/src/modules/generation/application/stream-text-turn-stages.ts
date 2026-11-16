@@ -1,6 +1,6 @@
 import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
 import { MAX_TOOL_ITERATIONS_DEFAULT } from '@mangostudio/shared/app-settings';
-import { mergeMessageParts } from '@mangostudio/shared/generation';
+import { appendMergedMessagePart, mergeMessageParts } from '@mangostudio/shared/generation';
 import type {
   ContinuationReasonCode,
   MessagePart,
@@ -441,7 +441,7 @@ export async function* emitAgentStreamEvent(
         loop.inThinkingSegment = true;
         yield { type: 'thinking_start' };
       }
-      session.allParts.push({ type: 'thinking', text: event.text });
+      appendMergedMessagePart(session.allParts, { type: 'thinking', text: event.text });
       yield { type: 'thinking', text: event.text };
       await checkpointTurn(session);
       break;
@@ -519,7 +519,7 @@ export async function* emitAgentStreamEvent(
     case 'assistant_text_delta':
       loop.inThinkingSegment = false;
       session.fullText += event.text;
-      session.allParts.push({ type: 'text', text: event.text });
+      appendMergedMessagePart(session.allParts, { type: 'text', text: event.text });
       yield { type: 'text', text: event.text };
       await checkpointTurn(session);
       break;
@@ -859,13 +859,13 @@ export async function* runLegacyTextStream(
         legacyInThinking = true;
         yield { type: 'thinking_start' };
       }
-      session.allParts.push({ type: 'thinking', text: chunk.text });
+      appendMergedMessagePart(session.allParts, { type: 'thinking', text: chunk.text });
       yield { type: 'thinking', text: chunk.text };
       await checkpointTurn(session);
     } else if (chunk.type === 'text' && chunk.text && !chunk.done) {
       legacyInThinking = false;
       session.fullText += chunk.text;
-      session.allParts.push({ type: 'text', text: chunk.text });
+      appendMergedMessagePart(session.allParts, { type: 'text', text: chunk.text });
       yield { type: 'text', text: chunk.text };
       await checkpointTurn(session);
     } else if (chunk.type === 'tool_call') {
@@ -925,7 +925,7 @@ export async function* runSingleShotTextGeneration(
 
   if (!signal?.aborted) {
     session.fullText = result.text;
-    session.allParts.push({ type: 'text', text: result.text });
+    appendMergedMessagePart(session.allParts, { type: 'text', text: result.text });
     yield { type: 'text', text: session.fullText };
     await checkpointTurn(session, true);
   }
