@@ -214,19 +214,19 @@ para `NORMAL`. Em `NORMAL`, um commit é acrescentado ao write-ahead log sem fsy
 quando o SQLite faz o checkpoint dele no arquivo principal. Se o sistema de arquivos não der WAL mode ao
 hub, ele mantém `FULL` e registra `synchronous_kept_full`.
 
-Toda conexão começa em `FULL` porque o hub define esse nível explicitamente depois de mudar para WAL, e
-não porque o SQLite o use por padrão. O macOS usa o SQLite da Apple, compilado com `NORMAL` como padrão em
-WAL, então uma conexão que abre um arquivo WAL ali rodaria as migrações abaixo de `FULL`.
+Toda conexão começa em `FULL`: o hub define esse nível explicitamente depois de mudar para WAL. O macOS usa
+o SQLite da Apple, cujo padrão em WAL é `NORMAL`, então uma conexão que abre um arquivo WAL ali rodaria as
+migrações abaixo de `FULL`.
 
-No macOS, o `fsync` só chega ao cache do disco; é o `F_FULLFSYNC` que chega ao armazenamento estável, e o
-SQLite só o usa em sincronizações comuns quando `PRAGMA fullfsync` está ligado. A build da Apple já o usa
-nos checkpoints (`checkpoint_fullfsync` vem ligado). Depois das migrações, o hub define `fullfsync = 1` no
+No macOS, o `fsync` chega só ao cache do disco. O `F_FULLFSYNC` chega ao armazenamento estável, e o SQLite
+só o usa em sincronizações comuns quando `PRAGMA fullfsync` está ligado; a build da Apple já o usa nos
+checkpoints (`checkpoint_fullfsync` vem ligado). Depois das migrações, o hub define `fullfsync = 1` no
 macOS, de modo que as escritas sempre sincronizadas abaixo sobrevivam a uma queda de energia, e não só a
-uma falha do sistema operacional. Isso não custa nada nos commits comuns, que não sincronizam em `NORMAL`.
-Em um runner macOS hospedado do GitHub, um commit em `FULL` levou cerca de 1,1 ms com a opção e 0,1 a
-0,2 ms sem ela (mediana de três execuções de 290 commits); discos físicos costumam pagar mais por uma
-descarga completa, e isso acontece uma vez por chamada de ferramenta que não seja uma leitura simples. As
-migrações mantêm o `fsync` simples.
+uma falha do sistema operacional. Commits em `NORMAL` não sincronizam, então escritas comuns não pagam
+nada; cada commit sempre sincronizado paga, uma vez por chamada de ferramenta que não seja uma leitura
+simples. Em um runner macOS hospedado do GitHub (disco virtual), a mediana de um commit em `FULL` foi de
+1,1 a 1,3 ms com a opção e de 0,1 a 0,2 ms sem ela, em três execuções de 290 commits. O tempo de descarga
+de um disco físico é diferente. As migrações mantêm o `fsync` simples.
 
 O que uma falha custa depende do que falhou:
 

@@ -268,18 +268,18 @@ from `FULL` to `NORMAL`. At `NORMAL` a commit is appended to the write-ahead log
 the log is synced when SQLite checkpoints it into the main file. If the file system does not give the
 hub WAL mode, it keeps `FULL` and logs `synchronous_kept_full`.
 
-Every connection starts at `FULL` because the hub sets it explicitly after switching to WAL, not because
-SQLite defaults to it. macOS links Apple's SQLite, which is built with a WAL default of `NORMAL`, so a
-connection that opens a WAL file there would otherwise run its migrations below `FULL`.
+Every connection starts at `FULL`: the hub sets it explicitly after switching to WAL. macOS links Apple's
+SQLite, whose WAL default is `NORMAL`, so a connection that opens a WAL file there would otherwise run its
+migrations below `FULL`.
 
-On macOS, `fsync` only reaches the drive's cache; `F_FULLFSYNC` is what reaches stable storage, and SQLite
-uses it for ordinary syncs only when `PRAGMA fullfsync` is on. Apple's build already uses it for
-checkpoints (`checkpoint_fullfsync` defaults to on). After the migrations the hub sets `fullfsync = 1` on
-macOS, so the always-synced writes below survive a power loss and not only an operating-system crash. It
-costs nothing for ordinary commits, which do not sync at `NORMAL`. On a GitHub-hosted macOS runner a `FULL`
-commit took about 1.1 ms with it and 0.1 to 0.2 ms without (median over three runs of 290 commits);
-physical drives usually pay more for a full flush, which is one such commit per tool call that is not a
-plain read. Migrations keep the plain `fsync`.
+On macOS, `fsync` reaches only the drive's cache. `F_FULLFSYNC` reaches stable storage, and SQLite uses it
+for ordinary syncs only when `PRAGMA fullfsync` is on; Apple's build already uses it for checkpoints
+(`checkpoint_fullfsync` defaults to on). After the migrations the hub sets `fullfsync = 1` on macOS, so the
+always-synced writes below survive a power loss and not only an operating-system crash. Commits at `NORMAL`
+do not sync, so ordinary writes pay nothing; each always-synced commit does, once per tool call that is not
+a plain read. On a GitHub-hosted macOS runner (a virtual disk) the median `FULL` commit took 1.1 to 1.3 ms
+with the flag and 0.1 to 0.2 ms without, in three runs of 290 commits. A physical drive's flush time
+differs. Migrations keep the plain `fsync`.
 
 What a failure costs depends on what failed:
 
