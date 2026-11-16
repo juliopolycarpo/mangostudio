@@ -397,9 +397,9 @@ pub struct RuntimeCapabilityManifest {
     /// Whether the GitHub CLI is on `PATH`, for `gh.exec` / `gh.mutate`.
     /// Absent means unavailable, not merely unannounced. In `hello` the
     /// runtime answers from its `PATH` walk without waiting for
-    /// `gh --version`, so `version` can be absent there and a `gh` that is on
-    /// `PATH` but cannot start still reads available; `runtime.health`
-    /// carries the probed answer.
+    /// `gh --version`, so `version` can be absent there and the first `hello`
+    /// for a `gh` that is on `PATH` but cannot start still reads available;
+    /// `runtime.health` carries the probed answer.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub gh: Option<GitAvailability>,
     /// Every feature key, explicitly. See the type's own docs.

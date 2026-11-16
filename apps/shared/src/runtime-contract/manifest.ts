@@ -52,10 +52,11 @@ export const RuntimeCapabilityManifestSchema = Type.Object({
    * which costs the whole connection to learn one optional tool is missing.
    *
    * In `hello`, a Rust runtime answers from its `PATH` walk and does not wait
-   * for `gh --version`: `version` can be absent, and a `gh` that is on `PATH`
-   * but cannot start reads `available: true`. `runtime.health` carries the
-   * probed answer, which the hub's next refresh adopts. Read `available` as
-   * "an executable `gh` is on `PATH`", not as "`gh` ran".
+   * for `gh --version`: `version` can be absent, and the first `hello` for a
+   * `gh` that is on `PATH` but cannot start reads `available: true`.
+   * `runtime.health` carries the probed answer, which the hub's next refresh
+   * adopts. Read `available` as "an executable `gh` is on `PATH`", not as
+   * "`gh` ran".
    */
   gh: Type.Optional(
     Type.Object({

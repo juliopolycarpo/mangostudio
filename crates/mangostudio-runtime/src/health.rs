@@ -783,9 +783,10 @@ enum GhProbeTiming {
 /// and git is consented to, with the version only when this process already
 /// learned it for that executable. [`probe_gh`] says the same thing after
 /// running `gh --version`, so `hello` and `runtime.health` differ for a `gh`
-/// that is on `PATH` but cannot start: `hello` says available until the
-/// background probe finishes and the hub's next `runtime.health` read says
-/// otherwise.
+/// that is on `PATH` but cannot start: the first `hello` for that file says
+/// available until the background probe finishes and the hub's next
+/// `runtime.health` read says otherwise. Later ones say unavailable, because
+/// this process remembers the failure for that exact file.
 ///
 /// A cache miss starts that probe without waiting for it, and a
 /// `runtime.health` that arrives meanwhile waits for it rather than starting
@@ -810,70 +811,108 @@ async fn gh_without_waiting(
     {
         return cached;
     }
+    // The last probe of this very file failed: say so instead of repeating
+    // the stale "available" on every connection. The probe still runs again,
+    // so a gh that was only briefly unwell is reported well by the next
+    // `hello`, and `runtime.health` clears the failure when it succeeds.
+    let known_broken = PROBE_FAILURES.last_failed(&gh_path, fingerprint.as_deref());
     start_background_version_probe("gh", gh_path, fingerprint);
     GitAvailability {
-        available: true,
+        available: !known_broken,
         version: None,
     }
 }
 
-/// `--version` runs started without anyone waiting for them, by resolved
-/// executable, each with the channel its outcome arrives on.
+/// The channel a background `--version` run reports its outcome on.
+type ProbeOutcome = tokio::sync::watch::Receiver<Option<GitAvailability>>;
+
+/// One `--version` run started without anyone waiting for it.
+struct InFlightProbe {
+    executable: PathBuf,
+    /// What the executable looked like when the run started. A run joins only
+    /// a caller that saw the same file: a binary replaced mid-run would
+    /// otherwise hand the old version to the new one.
+    fingerprint: Option<String>,
+    outcome: ProbeOutcome,
+    /// Callers blocked on `outcome` right now.
+    waiting: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl InFlightProbe {
+    fn is_for(&self, executable: &Path, fingerprint: Option<&str>) -> bool {
+        self.executable == executable && self.fingerprint.as_deref() == fingerprint
+    }
+}
+
+/// Counts one caller as waiting on a run for as long as it lives.
+struct Waiting(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+impl Waiting {
+    fn begin(counter: std::sync::Arc<std::sync::atomic::AtomicUsize>) -> Self {
+        counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Self(counter)
+    }
+}
+
+impl Drop for Waiting {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// The `--version` runs `hello` started in the background, by resolved
+/// executable and fingerprint.
 ///
 /// [`probe_cli`] joins a run instead of starting its own, and receives the
 /// run's outcome whether it succeeded or failed. Failures are not cached, so
 /// without this a `runtime.health` read right after `hello` would run a
 /// second child against a `gh` that hangs, and wait out the probe timeout
 /// twice.
-struct BackgroundProbes(
-    std::sync::Mutex<
-        Vec<(
-            PathBuf,
-            tokio::sync::watch::Receiver<Option<GitAvailability>>,
-        )>,
-    >,
-);
+struct BackgroundProbes(std::sync::Mutex<Vec<InFlightProbe>>);
 
 impl BackgroundProbes {
     const fn new() -> Self {
         Self(std::sync::Mutex::new(Vec::new()))
     }
 
-    fn entries(
-        &self,
-    ) -> std::sync::MutexGuard<
-        '_,
-        Vec<(
-            PathBuf,
-            tokio::sync::watch::Receiver<Option<GitAvailability>>,
-        )>,
-    > {
+    fn entries(&self) -> std::sync::MutexGuard<'_, Vec<InFlightProbe>> {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Registers a run for `executable`, unless one is already in flight.
+    /// Registers a run for this executable file, unless one is already in
+    /// flight for it.
     fn register(
         &self,
         executable: &Path,
+        fingerprint: Option<&str>,
     ) -> Option<tokio::sync::watch::Sender<Option<GitAvailability>>> {
         let mut entries = self.entries();
-        if entries.iter().any(|(path, _)| path == executable) {
+        if entries
+            .iter()
+            .any(|probe| probe.is_for(executable, fingerprint))
+        {
             return None;
         }
-        let (sender, receiver) = tokio::sync::watch::channel(None);
-        entries.push((executable.to_path_buf(), receiver));
+        let (sender, outcome) = tokio::sync::watch::channel(None);
+        entries.push(InFlightProbe {
+            executable: executable.to_path_buf(),
+            fingerprint: fingerprint.map(str::to_owned),
+            outcome,
+            waiting: std::sync::Arc::default(),
+        });
         Some(sender)
     }
 
-    fn remove(&self, executable: &Path) {
-        self.entries().retain(|(path, _)| path != executable);
+    fn remove(&self, executable: &Path, fingerprint: Option<&str>) {
+        self.entries()
+            .retain(|probe| !probe.is_for(executable, fingerprint));
     }
 
-    /// The outcome of the run in flight for `executable`; `None` when there
-    /// is none, or when it ended without reporting (its task was dropped), so
-    /// the caller probes for itself.
+    /// The outcome of the run in flight for this executable file; `None`
+    /// when there is none, or when it ended without reporting (its task was
+    /// dropped), so the caller probes for itself.
     ///
     /// # Errors
     /// [`GitProbeCancelled`] when `cancel` fired while waiting. The run keeps
@@ -881,22 +920,39 @@ impl BackgroundProbes {
     async fn outcome(
         &self,
         executable: &Path,
+        fingerprint: Option<&str>,
         cancel: &CancellationToken,
     ) -> Result<Option<GitAvailability>, GitProbeCancelled> {
-        let receiver = self
+        let joined = self
             .entries()
             .iter()
-            .find(|(path, _)| path == executable)
-            .map(|(_, receiver)| receiver.clone());
-        let Some(mut receiver) = receiver else {
+            .find(|probe| probe.is_for(executable, fingerprint))
+            .map(|probe| {
+                (
+                    probe.outcome.clone(),
+                    Waiting::begin(std::sync::Arc::clone(&probe.waiting)),
+                )
+            });
+        let Some((mut outcome, _waiting)) = joined else {
             return Ok(None);
         };
         tokio::select! {
             () = cancel.cancelled() => Err(GitProbeCancelled),
-            reported = receiver.wait_for(Option::is_some) => {
+            reported = outcome.wait_for(Option::is_some) => {
                 Ok(reported.ok().and_then(|reported| reported.clone()))
             }
         }
+    }
+
+    /// How many callers are waiting on the run in flight for this file, or
+    /// `None` when none is in flight. Lets a test release a fake `gh` only
+    /// once `runtime.health` is known to be waiting on it, without a sleep.
+    #[cfg(test)]
+    fn waiters(&self, executable: &Path, fingerprint: Option<&str>) -> Option<usize> {
+        self.entries()
+            .iter()
+            .find(|probe| probe.is_for(executable, fingerprint))
+            .map(|probe| probe.waiting.load(std::sync::atomic::Ordering::SeqCst))
     }
 }
 
@@ -905,11 +961,11 @@ static BACKGROUND_PROBES: BackgroundProbes = BackgroundProbes::new();
 
 /// Removes a background run's entry when its task ends, including when the
 /// task is dropped at shutdown or panics.
-struct BackgroundProbeEntry(PathBuf);
+struct BackgroundProbeEntry(PathBuf, Option<String>);
 
 impl Drop for BackgroundProbeEntry {
     fn drop(&mut self) {
-        BACKGROUND_PROBES.remove(&self.0);
+        BACKGROUND_PROBES.remove(&self.0, self.1.as_deref());
     }
 }
 
@@ -924,11 +980,15 @@ fn start_background_version_probe(
     executable: PathBuf,
     fingerprint: Option<String>,
 ) {
-    let Some(outcome) = BACKGROUND_PROBES.register(&executable) else {
+    let Some(outcome) = BACKGROUND_PROBES.register(&executable, fingerprint.as_deref()) else {
         return;
     };
+    // Created before the task, so a task dropped before its first poll (the
+    // runtime shutting down) still removes the entry instead of leaving
+    // `register` refusing this file for the life of the process.
+    let entry = BackgroundProbeEntry(executable.clone(), fingerprint.clone());
     tokio::spawn(async move {
-        let _entry = BackgroundProbeEntry(executable.clone());
+        let _entry = entry;
         let availability = run_version_probe(
             program,
             executable,
@@ -1016,28 +1076,43 @@ const MAX_ANNOUNCED_PROBE_FAILURES: usize = 128;
 /// card refresh. The hub keeps only a bounded tail of this process's stderr,
 /// so repeating the same line would evict the lines that tail exists for.
 /// Keyed on the failure's shape, not only its path: a CLI that starts timing
-/// out after exiting non-zero is a new fact and is announced again.
-struct ProbeFailureLog(std::sync::Mutex<std::collections::VecDeque<(PathBuf, ProbeFailure)>>);
+/// out after exiting non-zero is a new fact and is announced again, and so is
+/// the same failure from a replaced file.
+///
+/// It is also what `hello` consults before calling a `gh` available:
+/// [`ProbeFailureLog::last_failed`].
+struct ProbeFailureLog(std::sync::Mutex<std::collections::VecDeque<LoggedFailure>>);
+
+/// The last probe failure of one executable, and the file it came from.
+struct LoggedFailure {
+    executable: PathBuf,
+    fingerprint: Option<String>,
+    failure: ProbeFailure,
+}
 
 impl ProbeFailureLog {
     const fn new() -> Self {
         Self(std::sync::Mutex::new(std::collections::VecDeque::new()))
     }
 
-    fn entries(
-        &self,
-    ) -> std::sync::MutexGuard<'_, std::collections::VecDeque<(PathBuf, ProbeFailure)>> {
+    fn entries(&self) -> std::sync::MutexGuard<'_, std::collections::VecDeque<LoggedFailure>> {
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Records `failure` for `executable` and reports whether it differs
-    /// from the last one announced for that path.
-    fn is_new(&self, executable: &Path, failure: &ProbeFailure) -> bool {
+    /// Records `failure` for `executable` (the file `fingerprint` describes)
+    /// and reports whether it differs from the last one announced for that
+    /// path.
+    fn is_new(&self, executable: &Path, fingerprint: Option<&str>, failure: &ProbeFailure) -> bool {
         let mut entries = self.entries();
-        if let Some(index) = entries.iter().position(|(path, _)| path == executable) {
-            if entries[index].1 == *failure {
+        if let Some(index) = entries
+            .iter()
+            .position(|logged| logged.executable == executable)
+        {
+            if entries[index].fingerprint.as_deref() == fingerprint
+                && entries[index].failure == *failure
+            {
                 return false;
             }
             entries.remove(index);
@@ -1045,14 +1120,30 @@ impl ProbeFailureLog {
         if entries.len() >= MAX_ANNOUNCED_PROBE_FAILURES {
             entries.pop_front();
         }
-        entries.push_back((executable.to_path_buf(), failure.clone()));
+        entries.push_back(LoggedFailure {
+            executable: executable.to_path_buf(),
+            fingerprint: fingerprint.map(str::to_owned),
+            failure: failure.clone(),
+        });
         true
     }
 
-    /// Drops `executable`'s entry once it answers. Hygiene only: a success is
-    /// cached and short-circuits every later probe of the same binary.
+    /// Whether the latest completed probe of `executable` failed and the file
+    /// is still the one that failed: a repaired or replaced binary has a new
+    /// fingerprint, and a later success has forgotten the entry.
+    fn last_failed(&self, executable: &Path, fingerprint: Option<&str>) -> bool {
+        fingerprint.is_some()
+            && self.entries().iter().any(|logged| {
+                logged.executable == executable && logged.fingerprint.as_deref() == fingerprint
+            })
+    }
+
+    /// Drops `executable`'s entry once it answers. A success is cached and
+    /// short-circuits every later probe of the same binary; forgetting also
+    /// stops `hello` from reporting the earlier failure.
     fn forget(&self, executable: &Path) {
-        self.entries().retain(|(path, _)| path != executable);
+        self.entries()
+            .retain(|logged| logged.executable != executable);
     }
 }
 
@@ -1080,8 +1171,8 @@ impl ProbeDiagnostics<'_> {
     /// Writes one `version_probe_failed` line, unless the same failure was
     /// already announced for `executable`. The executable is named; the
     /// `PATH` that found it is not.
-    fn announce(self, executable: &Path, failure: &ProbeFailure) {
-        if !self.failures.is_new(executable, failure) {
+    fn announce(self, executable: &Path, fingerprint: Option<&str>, failure: &ProbeFailure) {
+        if !self.failures.is_new(executable, fingerprint, failure) {
             return;
         }
         let mut detail = serde_json::Map::new();
@@ -1162,7 +1253,10 @@ async fn probe_cli(
     // `hello` may already be running this very probe in the background: take
     // its outcome, failure included, instead of starting a second child that
     // would cost the same wait again.
-    if let Some(shared) = BACKGROUND_PROBES.outcome(&git_path, cancel).await? {
+    if let Some(shared) = BACKGROUND_PROBES
+        .outcome(&git_path, fingerprint.as_deref(), cancel)
+        .await?
+    {
         return Ok(shared);
     }
 
@@ -1178,7 +1272,7 @@ async fn run_version_probe(
     diagnostics: ProbeDiagnostics<'_>,
 ) -> Result<GitAvailability, GitProbeCancelled> {
     let budget = ChildBudget {
-        deadline: GIT_PROBE_TIMEOUT,
+        deadline: version_probe_timeout(),
         max_stdout_bytes: 4_096,
         max_stderr_bytes: 1_024,
     };
@@ -1209,19 +1303,42 @@ async fn run_version_probe(
                 exit_code: outcome.exit_code,
                 signal: outcome.signal,
             };
-            diagnostics.announce(&git_path, &failure);
+            diagnostics.announce(&git_path, fingerprint.as_deref(), &failure);
             Ok(unavailable_git())
         }
         Err(ChildRunError::TimedOut) => {
-            diagnostics.announce(&git_path, &ProbeFailure::TimedOut);
+            diagnostics.announce(&git_path, fingerprint.as_deref(), &ProbeFailure::TimedOut);
             Ok(unavailable_git())
         }
         Err(ChildRunError::SpawnFailed(error)) => {
-            diagnostics.announce(&git_path, &ProbeFailure::spawn_failed(&error));
+            diagnostics.announce(
+                &git_path,
+                fingerprint.as_deref(),
+                &ProbeFailure::spawn_failed(&error),
+            );
             Ok(unavailable_git())
         }
     }
 }
+
+/// The bound on one `--version` run: [`GIT_PROBE_TIMEOUT`], except in a test
+/// that shortened it to exercise a hang without waiting two seconds.
+fn version_probe_timeout() -> std::time::Duration {
+    #[cfg(test)]
+    if let Some(shortened) = *VERSION_PROBE_TIMEOUT_OVERRIDE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+    {
+        return shortened;
+    }
+    GIT_PROBE_TIMEOUT
+}
+
+/// A test's shortened [`version_probe_timeout`]. Process-wide, so only a test
+/// holding `git_probe_test_lock` may set it.
+#[cfg(test)]
+static VERSION_PROBE_TIMEOUT_OVERRIDE: std::sync::Mutex<Option<std::time::Duration>> =
+    std::sync::Mutex::new(None);
 
 /// `git version 2.51.0` becomes `Some("2.51.0")`. Mirrors
 /// `apps/runtime/src/manifest.ts`'s `parseGitVersion`: only the first line
@@ -2052,9 +2169,101 @@ mod tests {
         report["gh"].clone()
     }
 
+    /// Shell that blocks until `release` exists, for a fake `gh` whose
+    /// `--version` the test decides when to finish.
+    #[cfg(unix)]
+    fn wait_for_release(release: &Path) -> String {
+        format!("while [ ! -f {} ]; do sleep 0.02; done", release.display())
+    }
+
+    /// The fingerprint [`GIT_PROBE_CACHE`] and the in-flight registry key
+    /// `executable` by.
+    #[cfg(unix)]
+    fn fingerprint_now(executable: &Path) -> Option<String> {
+        crate::file_identity::fingerprint(executable)
+    }
+
+    /// Waits until `waiting` callers are blocked on the background probe of
+    /// `executable`. The state the tests release a fake `gh` on, so no test
+    /// depends on how long a probe takes.
+    #[cfg(unix)]
+    async fn wait_for_waiters(executable: &Path, waiting: usize) {
+        let fingerprint = fingerprint_now(executable);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        loop {
+            let seen = super::BACKGROUND_PROBES.waiters(executable, fingerprint.as_deref());
+            if seen == Some(waiting) {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "expected {waiting} caller(s) waiting on the background probe of {} | received: {seen:?}",
+                executable.display()
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    }
+
+    /// Waits until no background probe of `executable` is in flight.
+    #[cfg(unix)]
+    async fn wait_until_probe_ends(executable: &Path) {
+        let fingerprint = fingerprint_now(executable);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while super::BACKGROUND_PROBES
+            .waiters(executable, fingerprint.as_deref())
+            .is_some()
+        {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "expected the background probe of {} to end | received: still in flight",
+                executable.display()
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    }
+
+    /// Runs `runtime.health` on its own task, so a test can look at what it
+    /// is waiting for before it finishes.
+    #[cfg(unix)]
+    fn spawn_health_gh(
+        home: &Path,
+        path_var: &std::ffi::OsStr,
+    ) -> tokio::task::JoinHandle<serde_json::Value> {
+        let home = home.to_path_buf();
+        let path_var = path_var.to_os_string();
+        tokio::spawn(async move { health_gh(&home, &path_var).await })
+    }
+
+    /// Shortens [`super::version_probe_timeout`] until dropped. The caller
+    /// holds `git_probe_test_lock`, which is what makes a process-wide value
+    /// safe to set.
+    #[cfg(unix)]
+    struct ShortenedProbeTimeout;
+
+    #[cfg(unix)]
+    impl ShortenedProbeTimeout {
+        fn to(timeout: std::time::Duration) -> Self {
+            *super::VERSION_PROBE_TIMEOUT_OVERRIDE
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(timeout);
+            Self
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for ShortenedProbeTimeout {
+        fn drop(&mut self) {
+            *super::VERSION_PROBE_TIMEOUT_OVERRIDE
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        }
+    }
+
     /// `hello` must not wait for `gh --version`. This `gh` does not answer
-    /// until the test releases it, so a `hello` that waited would stall until
-    /// the probe timeout and report it absent.
+    /// until the test releases it, and only once `runtime.health` is waiting
+    /// on that very run, so the answer can only come from the run `hello`
+    /// started: a `hello` that waited would stall until the probe timeout,
+    /// and a `health` that ran its own `gh` would never join it.
     #[cfg(unix)]
     #[tokio::test]
     async fn hello_reports_gh_without_waiting_for_its_version_and_health_supplies_it() {
@@ -2063,14 +2272,15 @@ mod tests {
         let state = scratch_home("hello-gh-state");
         let log = state.join("runs");
         let release = state.join("release");
-        let (_dir, path_var) = recording_gh(
+        let (dir, path_var) = recording_gh(
             "hello-gh-slow",
             &log,
             &format!(
-                "while [ ! -f {} ]; do sleep 0.02; done\necho 'gh version 2.89.0 (2026-01-01)'",
-                release.display()
+                "{}\necho 'gh version 2.89.0 (2026-01-01)'",
+                wait_for_release(&release)
             ),
         );
+        let gh = dir.join("gh");
 
         let hello = hello_gh(&state, &path_var).await;
         assert!(
@@ -2078,10 +2288,11 @@ mod tests {
             "expected hello to report gh available without a version while --version runs | received: {hello:?}"
         );
 
+        let health = spawn_health_gh(&state, &path_var);
+        wait_for_waiters(&gh, 1).await;
         std::fs::write(&release, "").unwrap();
-        let health = health_gh(&state, &path_var).await;
         assert_eq!(
-            health,
+            health.await.expect("the health task must not panic"),
             serde_json::json!({ "available": true, "version": "2.89.0" }),
             "expected runtime.health to carry the probed version"
         );
@@ -2097,10 +2308,45 @@ mod tests {
         assert_eq!(invocation_count(&log), 1, "a cached version runs nothing");
     }
 
+    /// A `gh` that never answers: `hello` does not wait for it, and a
+    /// `runtime.health` after it waits for the one run's timeout, not for that
+    /// run's and then another of its own. The timeout is shortened through
+    /// [`ShortenedProbeTimeout`] so the hang costs a fraction of a second.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_hung_gh_costs_hello_and_health_one_probe_timeout_together() {
+        let _exclusive = git_probe_test_lock().lock().await;
+        invalidate_git_probe_cache();
+        let _short = ShortenedProbeTimeout::to(std::time::Duration::from_millis(300));
+        let state = scratch_home("hello-gh-hung-state");
+        let log = state.join("runs");
+        let (dir, path_var) = recording_gh("hello-gh-hung", &log, "exec sleep 30");
+        let gh = dir.join("gh");
+
+        let hello = hello_gh(&state, &path_var).await;
+        assert!(
+            hello.available && hello.version.is_none(),
+            "expected hello to answer without waiting for a hung gh | received: {hello:?}"
+        );
+
+        let health = spawn_health_gh(&state, &path_var);
+        wait_for_waiters(&gh, 1).await;
+        assert_eq!(
+            health.await.expect("the health task must not panic"),
+            serde_json::json!({ "available": false }),
+            "a hung gh is unavailable in runtime.health"
+        );
+        assert_eq!(
+            invocation_count(&log),
+            1,
+            "expected one gh run, so one timeout, for hello and health together"
+        );
+    }
+
     /// A background probe that fails is not cached, so health must receive
-    /// its outcome rather than run `gh` again. For a `gh` that hangs, a
-    /// second run would double the wait: two probe timeouts for one
-    /// `hello` followed by one `runtime.health`.
+    /// its outcome rather than run `gh` again. The run only ends once the test
+    /// releases it, after `runtime.health` is waiting on it: the outcome health
+    /// reports is the one `hello`'s run produced.
     #[cfg(unix)]
     #[tokio::test]
     async fn health_takes_the_failure_of_the_background_probe_without_a_second_run() {
@@ -2108,14 +2354,22 @@ mod tests {
         invalidate_git_probe_cache();
         let state = scratch_home("hello-gh-failing-state");
         let log = state.join("runs");
-        let (_dir, path_var) = recording_gh("hello-gh-failing", &log, "sleep 0.3\nexit 1");
+        let release = state.join("release");
+        let (dir, path_var) = recording_gh(
+            "hello-gh-failing",
+            &log,
+            &format!("{}\nexit 1", wait_for_release(&release)),
+        );
+        let gh = dir.join("gh");
 
         let hello = hello_gh(&state, &path_var).await;
         assert!(hello.available, "hello answers from the PATH walk");
 
-        let health = health_gh(&state, &path_var).await;
+        let health = spawn_health_gh(&state, &path_var);
+        wait_for_waiters(&gh, 1).await;
+        std::fs::write(&release, "").unwrap();
         assert_eq!(
-            health,
+            health.await.expect("the health task must not panic"),
             serde_json::json!({ "available": false }),
             "expected a gh that exits 1 to be unavailable in runtime.health"
         );
@@ -2126,11 +2380,75 @@ mod tests {
         );
     }
 
-    /// The price of not waiting: a `gh` that is on `PATH` but cannot start
-    /// reads available in `hello`, and `runtime.health` corrects it.
+    /// Health joins a run only for the file the run started on. A `gh`
+    /// replaced while the earlier one is still running is a different binary,
+    /// and the old run's version is not its version.
     #[cfg(unix)]
     #[tokio::test]
-    async fn a_gh_that_cannot_start_reads_available_in_hello_and_unavailable_in_health() {
+    async fn health_does_not_join_a_probe_of_a_gh_that_was_replaced_mid_run() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _exclusive = git_probe_test_lock().lock().await;
+        invalidate_git_probe_cache();
+        let state = scratch_home("hello-gh-replaced-state");
+        let log = state.join("runs");
+        let release = state.join("release");
+        let (dir, path_var) = recording_gh(
+            "hello-gh-replaced",
+            &log,
+            &format!("{}\necho 'gh version 1.0.0'", wait_for_release(&release)),
+        );
+        let gh = dir.join("gh");
+
+        let hello = hello_gh(&state, &path_var).await;
+        assert!(hello.available);
+        // The run `hello` started, with nobody waiting on it yet, and its gh
+        // actually executing: a replacement before that would be the file the
+        // run executes.
+        wait_for_waiters(&gh, 0).await;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        while invocation_count(&log) == 0 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "expected the first gh to start within 20 seconds | received: no invocation"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+
+        // A new file renamed over the old one: the running script keeps its
+        // own inode, and the path now names a different binary.
+        let replacement = dir.join("gh.new");
+        std::fs::write(
+            &replacement,
+            "#!/bin/sh\necho 'gh version 2.0.0 (replaced)'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&replacement, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::rename(&replacement, &gh).unwrap();
+
+        let health = tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            health_gh(&state, &path_var),
+        )
+        .await
+        .expect("expected health not to wait on the run of the replaced binary");
+        assert_eq!(
+            health,
+            serde_json::json!({ "available": true, "version": "2.0.0" }),
+            "expected the replacement's version, not the version of the run that started earlier"
+        );
+
+        // Let the first run finish so no fake gh outlives the test.
+        std::fs::write(&release, "").unwrap();
+    }
+
+    /// The price of not waiting: the first `hello` for a `gh` that is on
+    /// `PATH` but cannot start reads available, and `runtime.health` corrects
+    /// it. Every later `hello` for that file says what this process learned,
+    /// and a repaired `gh` (a new file) is believed again.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_gh_that_cannot_start_reads_available_once_and_then_unavailable_until_repaired() {
         use std::os::unix::fs::PermissionsExt;
 
         let _exclusive = git_probe_test_lock().lock().await;
@@ -2141,14 +2459,75 @@ mod tests {
         std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o700)).unwrap();
         let path_var = dir.as_os_str().to_os_string();
 
-        let hello = hello_gh(&dir, &path_var).await;
+        let first = hello_gh(&dir, &path_var).await;
         assert!(
-            hello.available,
-            "expected hello to report the gh found on PATH | received: {hello:?}"
+            first.available,
+            "expected the first hello to report the gh found on PATH | received: {first:?}"
         );
         assert_eq!(
             health_gh(&dir, &path_var).await,
             serde_json::json!({ "available": false })
+        );
+
+        wait_until_probe_ends(&gh).await;
+        let later = hello_gh(&dir, &path_var).await;
+        assert!(
+            !later.available,
+            "expected a later hello to report the gh this process saw fail | received: {later:?}"
+        );
+
+        // Replaced by a working one: a new file, so the failure no longer applies.
+        wait_until_probe_ends(&gh).await;
+        let repaired = dir.join("gh.new");
+        std::fs::write(&repaired, "#!/bin/sh\necho 'gh version 3.0.0'\n").unwrap();
+        std::fs::set_permissions(&repaired, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::rename(&repaired, &gh).unwrap();
+        let after_repair = hello_gh(&dir, &path_var).await;
+        assert!(
+            after_repair.available,
+            "expected a repaired gh to be believed again | received: {after_repair:?}"
+        );
+    }
+
+    /// A failure is not held against the same file forever: the probe `hello`
+    /// starts runs again, and a `runtime.health` that finds `gh` answering
+    /// clears what `hello` remembered.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_gh_that_answers_again_is_reported_available_by_the_next_hello() {
+        let _exclusive = git_probe_test_lock().lock().await;
+        invalidate_git_probe_cache();
+        let state = scratch_home("hello-gh-recovers-state");
+        let log = state.join("runs");
+        let code = state.join("exit-code");
+        std::fs::write(&code, "1").unwrap();
+        let (dir, path_var) = recording_gh(
+            "hello-gh-recovers",
+            &log,
+            &format!("exit \"$(cat {})\"", code.display()),
+        );
+        let gh = dir.join("gh");
+
+        // The first probe fails; from then on `hello` reports it.
+        assert!(hello_gh(&state, &path_var).await.available);
+        wait_until_probe_ends(&gh).await;
+        assert!(
+            !hello_gh(&state, &path_var).await.available,
+            "expected hello to report the failed gh as unavailable"
+        );
+        wait_until_probe_ends(&gh).await;
+
+        // The same file now answers.
+        std::fs::write(&code, "0").unwrap();
+        assert_eq!(
+            health_gh(&state, &path_var).await,
+            serde_json::json!({ "available": true }),
+            "expected health to find the gh answering"
+        );
+        let recovered = hello_gh(&state, &path_var).await;
+        assert!(
+            recovered.available,
+            "expected hello to stop reporting a failure that has passed | received: {recovered:?}"
         );
     }
 
