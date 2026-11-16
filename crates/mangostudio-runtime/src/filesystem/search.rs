@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use globset::GlobBuilder;
 use mango_protocol::error::{RemoteError, codes};
-use rquickjs::{CatchResultExt, Context, Function, Persistent, Runtime};
+use rquickjs::{CatchResultExt, Context, Function, Persistent, Runtime, context::intrinsic};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
@@ -755,6 +755,21 @@ fn regexp_flags(case_insensitive: bool) -> &'static str {
     if case_insensitive { "i" } else { "" }
 }
 
+/// A QuickJS context with only what a grep pattern needs: `eval` for the two
+/// scripts below, and the regular-expression compiler and `RegExp` itself. The
+/// pattern is data handed to `new RegExp`, so Date, JSON, Proxy, Promise,
+/// Map/Set, typed arrays and the rest of the standard library are never
+/// reachable from it, and the context is cheaper to build than
+/// `Context::full`. Lookbehind, named groups and Unicode property escapes live
+/// in the regular-expression compiler, not in a separate intrinsic.
+fn regexp_context(runtime: &Runtime) -> rquickjs::Result<Context> {
+    Context::custom::<(
+        intrinsic::Eval,
+        intrinsic::RegExpCompiler,
+        intrinsic::RegExp,
+    )>(runtime)
+}
+
 impl JavascriptRegex {
     fn new(
         pattern: &str,
@@ -779,7 +794,7 @@ impl JavascriptRegex {
         runtime.set_interrupt_handler(Some(Box::new(move || {
             interrupted_cancel.is_cancelled() || interrupted_deadline.should_interrupt()
         })));
-        let context = Context::full(&runtime)
+        let context = regexp_context(&runtime)
             .map_err(|error| RemoteError::new(codes::INTERNAL, error.to_string()))?;
         let source = serde_json::to_string(pattern).expect("a Rust string always serializes");
         let flags = serde_json::to_string(regexp_flags(case_insensitive))
@@ -1683,6 +1698,98 @@ mod tests {
         let regex = JavascriptRegex::new("^..$", false, token(), quickjs_heap_limit(4)).unwrap();
         regex.start_file_budget(GREP_FILE_BUDGET);
         assert!(matches!(regex.is_match("😀").unwrap(), JsMatch::Matched));
+    }
+
+    /// `typeof name` evaluated in the context grep builds its engine in.
+    fn typeof_in_regexp_context(name: &str) -> String {
+        let runtime = Runtime::new().unwrap();
+        let context = regexp_context(&runtime).unwrap();
+        context.with(|ctx| ctx.eval::<String, _>(format!("typeof {name}")).unwrap())
+    }
+
+    #[test]
+    fn the_regexp_context_exposes_regexp_and_none_of_the_optional_standard_library() {
+        for name in ["RegExp", "Object", "Array", "String", "Function"] {
+            assert_eq!(
+                typeof_in_regexp_context(name),
+                "function",
+                "expected `{name}` to be available to the engine's own scripts"
+            );
+        }
+        for name in [
+            "Date",
+            "JSON",
+            "Proxy",
+            "Promise",
+            "Map",
+            "Set",
+            "WeakRef",
+            "Uint8Array",
+            "DOMException",
+            "performance",
+        ] {
+            assert_eq!(
+                typeof_in_regexp_context(name),
+                "undefined",
+                "expected `{name}` to be absent from the grep engine's global object"
+            );
+        }
+    }
+
+    /// Every pattern feature a user can reach through `fs.grep` (it passes `i`
+    /// or no flag, never `u`) still compiles and matches in the slim context.
+    #[test]
+    fn the_regexp_context_still_runs_every_pattern_feature_grep_can_reach() {
+        let escaped_e_acute = format!("{}u00e9", '\\');
+        let cases: Vec<(String, bool, &str, bool)> = vec![
+            (
+                "(?<year>\\d{4})-(?<month>\\d\\d)".into(),
+                false,
+                "on 2026-11-16",
+                true,
+            ),
+            (
+                "(?<year>\\d{4})-(?<month>\\d\\d)".into(),
+                false,
+                "on 26-11-16",
+                false,
+            ),
+            ("(?<q>['\"])x\\k<q>".into(), false, "say \"x\"", true),
+            ("(?<q>['\"])x\\k<q>".into(), false, "say \"x'", false),
+            ("(a)\\1".into(), false, "baab", true),
+            ("(?<=id=)\\d+".into(), false, "id=5", true),
+            ("(?<=id=)\\d+".into(), false, "5", false),
+            ("(?<!id=)\\d+$".into(), false, "id=5", false),
+            ("(?<!id=)\\d+$".into(), false, "xid5", true),
+            ("foo(?=bar)".into(), false, "foobar", true),
+            ("foo(?!bar)".into(), false, "foobar", false),
+            ("a+?b".into(), false, "aaab", true),
+            // Without the `u` flag a property escape is the letter `p` and a literal brace pair.
+            ("\\p{L}".into(), false, "p{L}", true),
+            ("\\p{L}".into(), false, "\u{e9}", false),
+            (escaped_e_acute, false, "caf\u{e9}", true),
+            ("\u{3c3}".into(), true, "\u{3c2}", true),
+            ("NEEDLE".into(), true, "a needle", true),
+            ("[\\s\\S]\\b".into(), false, "ab", true),
+        ];
+        for (pattern, case_insensitive, line, expected) in cases {
+            let regex = JavascriptRegex::new(
+                &pattern,
+                case_insensitive,
+                token(),
+                quickjs_heap_limit(line.len()),
+            )
+            .unwrap_or_else(|error| {
+                panic!("pattern {pattern:?}: expected it to compile | received: {error:?}")
+            });
+            regex.start_file_budget(GREP_FILE_BUDGET);
+            let matched = matches!(regex.is_match(line).unwrap(), JsMatch::Matched);
+            assert_eq!(
+                matched, expected,
+                "pattern {pattern:?} (ignore case {case_insensitive}) over {line:?}: expected \
+                 test() = {expected}"
+            );
+        }
     }
 
     #[test]

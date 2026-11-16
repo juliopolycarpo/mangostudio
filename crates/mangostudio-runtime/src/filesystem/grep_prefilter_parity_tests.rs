@@ -1169,7 +1169,7 @@ fn invalid_utf8_is_searched_as_the_replacement_character_the_engine_sees() {
 /// Evaluates `new RegExp(pattern, flags).test(text)` in a bare QuickJS.
 fn quickjs_regexp_test(pattern: &str, flags: &str, text: &str) -> bool {
     let runtime = Runtime::new().unwrap();
-    let context = Context::full(&runtime).unwrap();
+    let context = regexp_context(&runtime).unwrap();
     let json = |value: &str| serde_json::to_string(value).unwrap();
     context.with(|ctx| {
         ctx.eval::<bool, _>(format!(
@@ -1199,6 +1199,27 @@ fn quickjs_folds_non_ascii_to_ascii_only_under_the_unicode_flag() {
         ("s", "iu", "\u{17f}", true),
         ("\u{212a}", "i", "K", false),
         ("σ", "i", "ς", true),
+    ] {
+        let received = quickjs_regexp_test(pattern, flags, text);
+        assert_eq!(
+            received, expected,
+            "pattern {pattern:?} flags {flags:?} text {text:?}: expected test() = {expected}"
+        );
+    }
+}
+
+/// Unicode property escapes and set operations are not reachable through
+/// `fs.grep` (it never passes `u` or `v`), but they must not depend on an
+/// intrinsic the slim context dropped, or a future flag would fail only there.
+#[test]
+fn unicode_property_escapes_run_in_the_regexp_only_context() {
+    for (pattern, flags, text, expected) in [
+        (r"^\p{L}+$", "u", "\u{e9}t\u{e9}", true),
+        (r"^\p{L}+$", "u", "a1", false),
+        (r"^\p{Script=Greek}$", "u", "\u{3c3}", true),
+        (r"^[\p{L}--[a-z]]$", "v", "\u{e9}", true),
+        (r"^[\p{L}--[a-z]]$", "v", "a", false),
+        (r"^\u{1F600}$", "u", "\u{1f600}", true),
     ] {
         let received = quickjs_regexp_test(pattern, flags, text);
         assert_eq!(
