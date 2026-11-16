@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import { getDb } from '../../../../src/db/database';
+import { GeneratingMessageTextEditError } from '../../../../src/modules/messages/domain/message-generating';
 import { insertCheckpointDelta } from '../../../../src/modules/messages/infrastructure/message-checkpoint-deltas';
 import {
   insertMessage,
@@ -156,21 +157,50 @@ describe('updateMessage on a generating turn', () => {
     });
   });
 
-  it('applies a text patch over the folded row and drops the deltas it would be appended to', async () => {
+  it('refuses a text-only patch while the turn generates and leaves the row and deltas untouched', async () => {
+    const { replyId } = await chatWithGeneratingReply();
+    const before = await storedRow(replyId);
+
+    const outcome = await updateMessage(replyId, { text: 'edited by hand' }, getDb()).catch(
+      (error: unknown) => error
+    );
+
+    expect({
+      error: outcome instanceof GeneratingMessageTextEditError,
+      row: await storedRow(replyId),
+      deltas: await deltaRows(replyId),
+    }).toEqual({ error: true, row: before, deltas: 1 });
+  });
+
+  it('applies a text patch that also settles the turn over the folded row', async () => {
     const { replyId } = await chatWithGeneratingReply();
 
-    await updateMessage(replyId, { text: 'edited by hand' }, getDb());
+    await updateMessage(replyId, { text: 'edited by hand', isGenerating: false }, getDb());
 
     const row = await storedRow(replyId);
     expect({
       text: row.text,
       parts: JSON.parse(row.parts ?? '[]'),
+      providerState: row.providerState,
       isGenerating: row.isGenerating,
       deltas: await deltaRows(replyId),
     }).toEqual({
       text: 'edited by hand',
-      // The patch only names `text`; parts keep what the turn had checkpointed.
+      // The patch names `text` only; parts and provider state keep what the turn had checkpointed.
       parts: [{ type: 'text', text: FOLDED }],
+      providerState: 'state-at-last-checkpoint',
+      isGenerating: 0,
+      deltas: 0,
+    });
+  });
+
+  it('still accepts a patch that keeps the turn generating when it does not touch text', async () => {
+    const { replyId } = await chatWithGeneratingReply();
+
+    await updateMessage(replyId, { generationTime: '1.5' }, getDb());
+
+    const row = await storedRow(replyId);
+    expect({ isGenerating: row.isGenerating, deltas: await deltaRows(replyId) }).toEqual({
       isGenerating: 1,
       deltas: 0,
     });
