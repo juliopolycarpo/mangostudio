@@ -1,15 +1,18 @@
-import { describe, expect, it } from 'bun:test';
+import { beforeEach, describe, expect, it } from 'bun:test';
 
 import type { ActivityEventInsert } from '../../../../src/db/types';
 import {
   recordActivities,
   recordActivity,
+  resetActivityRetentionSchedule,
 } from '../../../../src/modules/activity/application/record-activity';
-import type {
-  ActivityListFilter,
-  ActivityPage,
-  ActivityRepository,
+import {
+  ACTIVITY_RETENTION_INTERVAL_ROWS,
+  type ActivityListFilter,
+  type ActivityPage,
+  type ActivityRepository,
 } from '../../../../src/modules/activity/infrastructure/activity-repository';
+import { waitUntil } from '../../../support/wait-until';
 
 /** Named fake standing in for the real Kysely-backed repository. */
 class FakeActivityRepository implements ActivityRepository {
@@ -32,10 +35,19 @@ class FakeActivityRepository implements ActivityRepository {
     return Promise.resolve({ rows: [], hasMore: false });
   }
 
+  /** While set, each prune stays pending until {@link releasePrunes}. */
+  holdPrunes = false;
+  private readonly heldPrunes: (() => void)[] = [];
+
   prune(userId: string, _now: number): Promise<void> {
     if (this.pruneError) return Promise.reject(this.pruneError);
     this.prunedFor.push(userId);
-    return Promise.resolve();
+    if (!this.holdPrunes) return Promise.resolve();
+    return new Promise((resolve) => this.heldPrunes.push(resolve));
+  }
+
+  releasePrunes(): void {
+    for (const release of this.heldPrunes.splice(0)) release();
   }
 }
 
@@ -47,6 +59,95 @@ class FakePublisher {
     this.calledFor.push(userId);
   };
 }
+
+// The retention schedule is per account and per process; every test starts with all accounts due.
+beforeEach(resetActivityRetentionSchedule);
+
+describe('retention schedule', () => {
+  const entry = { kind: 'chat_created', payload: { title: 'Hi' } } as const;
+
+  async function write(repository: FakeActivityRepository, userId: string, count = 1) {
+    for (let index = 0; index < count; index++) {
+      await recordActivity({ userId, ...entry }, { repository, publish: () => undefined });
+    }
+  }
+
+  it('prunes on the first write of an account, then once per interval of rows', async () => {
+    const repository = new FakeActivityRepository();
+
+    await write(repository, 'user-1', ACTIVITY_RETENTION_INTERVAL_ROWS);
+    expect(repository.prunedFor).toEqual(['user-1']);
+
+    await write(repository, 'user-1');
+    expect(repository.prunedFor).toEqual(['user-1', 'user-1']);
+    expect(repository.inserted).toHaveLength(ACTIVITY_RETENTION_INTERVAL_ROWS + 1);
+  });
+
+  it('counts the rows of a batch, not the calls', async () => {
+    const repository = new FakeActivityRepository();
+    await write(repository, 'user-1');
+    const batch = Array.from({ length: ACTIVITY_RETENTION_INTERVAL_ROWS }, () => entry);
+
+    await recordActivities('user-1', batch, { repository, publish: () => undefined });
+
+    expect(repository.prunedFor).toEqual(['user-1', 'user-1']);
+  });
+
+  it('keeps one schedule per account', async () => {
+    const repository = new FakeActivityRepository();
+
+    await write(repository, 'user-1');
+    await write(repository, 'user-2');
+    await write(repository, 'user-1');
+
+    expect(repository.prunedFor).toEqual(['user-1', 'user-2']);
+  });
+
+  it('counts a row written while a pass is still running toward the next pass', async () => {
+    const repository = new FakeActivityRepository();
+    await write(repository, 'user-1', ACTIVITY_RETENTION_INTERVAL_ROWS);
+    repository.holdPrunes = true;
+
+    // The 50th row since the last pass makes this write due; its pass stays pending.
+    const due = recordActivity(
+      { userId: 'user-1', ...entry },
+      { repository, publish: () => undefined }
+    );
+    const during = recordActivity(
+      { userId: 'user-1', ...entry },
+      { repository, publish: () => undefined }
+    );
+    await waitUntil(
+      () => repository.inserted.length === ACTIVITY_RETENTION_INTERVAL_ROWS + 2,
+      'both writes inserted'
+    );
+    repository.releasePrunes();
+    await Promise.all([due, during]);
+    repository.holdPrunes = false;
+    const passesBefore = repository.prunedFor.length;
+
+    // The row written during the pass already counts, so 49 more rows make the next one due.
+    await write(repository, 'user-1', ACTIVITY_RETENTION_INTERVAL_ROWS - 1);
+
+    const passes = repository.prunedFor.length - passesBefore;
+    if (passes !== 1) {
+      throw new Error(
+        `expected passes after ${ACTIVITY_RETENTION_INTERVAL_ROWS - 1} more rows: 1 | received: ${passes}`
+      );
+    }
+  });
+
+  it('retries on the next write after a failed prune instead of waiting a full interval', async () => {
+    const repository = new FakeActivityRepository();
+    repository.pruneError = new Error('disk full');
+    await write(repository, 'user-1');
+    repository.pruneError = undefined;
+
+    await write(repository, 'user-1');
+
+    expect(repository.prunedFor).toEqual(['user-1']);
+  });
+});
 
 describe('recordActivity', () => {
   it('inserts a row with the expected columns, defaulting unset scope to null', async () => {

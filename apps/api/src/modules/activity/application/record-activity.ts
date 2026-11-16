@@ -5,6 +5,7 @@ import type { Database } from '../../../db/types';
 import { publishActivityInvalidation } from '../../../services/realtime/activity-invalidation';
 import { generateId } from '../../../utils/id';
 import {
+  ACTIVITY_RETENTION_INTERVAL_ROWS,
   type ActivityRepository,
   createActivityRepository,
 } from '../infrastructure/activity-repository';
@@ -114,10 +115,51 @@ async function writeActivities(
   // the feature.
   (deps.publish ?? publishActivityInvalidation)(userId);
 
+  if (!retentionDue(userId, rows.length)) return;
+
   // Pruned against the newest row written, so a batch carrying an injected
   // older `createdAt` cannot pull the retention cutoff backwards.
   const prunedAt = Math.max(...rows.map((row) => row.createdAt));
-  await repository.prune(userId, prunedAt).catch((error: unknown) => {
+  try {
+    await repository.prune(userId, prunedAt);
+  } catch (error: unknown) {
+    // Due again: the next write retries instead of waiting out another interval.
+    rowsSinceRetention.delete(userId);
     console.error('[activity] Could not prune the activity feed:', error);
-  });
+  }
+}
+
+/**
+ * Rows written per account since its last retention pass, in this process.
+ *
+ * A pass walks the account's index to the cap boundary and, once the feed is
+ * full, commits a delete of its own, so running it after every write doubled
+ * the commits of the write path. It now runs once per
+ * {@link ACTIVITY_RETENTION_INTERVAL_ROWS} rows and keeps that many fewer rows
+ * than the cap, so the feed stays under the cap between passes. The 90-day
+ * limit is applied by the same pass, so an expired row can outlive its cutoff
+ * by up to that many writes.
+ *
+ * An account with no entry is due, so the first write after a restart trims
+ * whatever the previous process left.
+ */
+const rowsSinceRetention = new Map<string, number>();
+
+/**
+ * Counts `written` rows and reports whether they make a pass due. A due pass
+ * restarts the count before it runs, not after: writes are not awaited by
+ * their callers, so a row written while the pass is still running must count
+ * toward the next one. Counting a row the running pass already saw is safe; it
+ * only brings the next pass forward.
+ */
+function retentionDue(userId: string, written: number): boolean {
+  const total = (rowsSinceRetention.get(userId) ?? ACTIVITY_RETENTION_INTERVAL_ROWS) + written;
+  const due = total >= ACTIVITY_RETENTION_INTERVAL_ROWS;
+  rowsSinceRetention.set(userId, due ? 0 : total);
+  return due;
+}
+
+/** Forgets every account's count, so the next write of each is due. For tests. */
+export function resetActivityRetentionSchedule(): void {
+  rowsSinceRetention.clear();
 }
