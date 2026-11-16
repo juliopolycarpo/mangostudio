@@ -215,6 +215,9 @@ export function useInstallStream({
           if ((await consume()) !== 'dropped') return;
         } catch (error) {
           if (disposed || (error instanceof Error && error.name === 'AbortError')) return;
+          // `readSseChunks` throws a RangeError for a line over the frame cap.
+          // The replay would send the same line again, so retrying is pointless.
+          if (error instanceof RangeError) break;
         }
 
         if (disposed || attempt === MAX_RECONNECT_ATTEMPTS) break;

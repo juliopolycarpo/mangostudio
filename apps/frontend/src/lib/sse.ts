@@ -13,32 +13,40 @@
  * own automatic batching, since an install script's output is already capped.
  */
 
+import { SSE_FRAME_MAX_CHARS } from '@mangostudio/shared/streaming';
+import { DelimitedTextSplitter } from '@mangostudio/shared/utils/delimited-text-splitter';
+
 const DATA_PREFIX = 'data: ';
 
 /**
  * The `data:` payloads in each chunk of an SSE body, in arrival order. Frames
- * without the prefix (comments, the keepalive) are dropped.
+ * without the prefix (comments, the keepalive) are dropped, and so is a final
+ * line the stream ended before terminating.
+ *
+ * A line longer than `SSE_FRAME_MAX_CHARS` rejects the generator, so the
+ * consumer sees a failed stream. The cap sits far above the longest line the
+ * hub writes here: an install log line is at most the run's 1 MiB capture
+ * limit, and about six times that once JSON-escaped.
  * // Usage: for await (const payloads of readSseChunks(reader)) …
  */
 export async function* readSseChunks(
   reader: ReadableStreamDefaultReader<Uint8Array>
 ): AsyncGenerator<string[]> {
   const decoder = new TextDecoder();
-  let buffer = '';
+  const lines = new DelimitedTextSplitter('\n', {
+    maxRecordLength: SSE_FRAME_MAX_CHARS,
+    onOverflow: 'refuse',
+  });
 
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
 
-    buffer += decoder.decode(value, { stream: true });
-    const parts = buffer.split('\n');
-    // The last element is whatever came after the final newline — an
-    // incomplete frame that has to wait for the next chunk.
-    buffer = parts.pop() ?? '';
-
+    // The splitter holds whatever came after the final newline, an incomplete
+    // frame that has to wait for the next chunk.
     const payloads: string[] = [];
-    for (const part of parts) {
-      if (part.startsWith(DATA_PREFIX)) payloads.push(part.slice(DATA_PREFIX.length));
+    for (const line of lines.push(decoder.decode(value, { stream: true }))) {
+      if (line.startsWith(DATA_PREFIX)) payloads.push(line.slice(DATA_PREFIX.length));
     }
     yield payloads;
   }

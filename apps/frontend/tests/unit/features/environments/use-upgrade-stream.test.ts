@@ -7,6 +7,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 
+import { SSE_FRAME_MAX_CHARS } from '@mangostudio/shared/streaming';
 import type { UpgradeStreamEvent } from '@mangostudio/shared/updates';
 import { act } from '@testing-library/react';
 
@@ -162,6 +163,22 @@ describe('useUpgradeStream', () => {
     expect(result.current.report).toBeNull();
     // The lines already read stay visible; only the outcome reads as failed.
     expect(result.current.lines.map((line) => line.text)).toEqual(['still going']);
+  });
+
+  it('reads as failed, naming the cap, when one line outgrows the frame cap', async () => {
+    fetchMock.mockResolvedValue(
+      streamingResponse([
+        sse([{ type: 'output', stream: 'stdout', line: 'before', done: false }]),
+        `data: ${'a'.repeat(SSE_FRAME_MAX_CHARS)}`,
+      ])
+    );
+
+    const { result } = renderHook(() => useUpgradeStream());
+    act(() => result.current.start({ channel: 'stable' }));
+
+    await waitFor(() => expect(result.current.phase).toBe('failed'));
+    expect(result.current.streamError).toContain(`record length ${SSE_FRAME_MAX_CHARS + 6}`);
+    expect(result.current.report).toBeNull();
   });
 
   it('surfaces a top-level SSEErrorEvent as failed with its own message', async () => {

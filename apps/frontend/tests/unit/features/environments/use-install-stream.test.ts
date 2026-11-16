@@ -9,6 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test';
 
 import type { InstallStreamEvent } from '@mangostudio/shared/environments';
+import { SSE_FRAME_MAX_CHARS } from '@mangostudio/shared/streaming';
 import { act } from '@testing-library/react';
 
 import {
@@ -232,6 +233,24 @@ describe('useInstallStream', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(result.current.streamError).toBe('Install log stream failed.');
     expect(result.current.lines.map((line) => line.text)).toEqual(['boom']);
+  });
+
+  it('fails once, without reconnecting, when one line outgrows the frame cap', async () => {
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(
+        streamingResponse([
+          sse([{ type: 'log', stream: 'stdout', line: 'before', done: false }]),
+          `data: ${'a'.repeat(SSE_FRAME_MAX_CHARS)}`,
+        ])
+      )
+    );
+
+    const { result } = renderHook(() => useInstallStream({ runId: 'run-6' }));
+
+    await waitFor(() => expect(result.current.phase).toBe('failed'));
+    // The replay would carry the same line again, so the hook must not retry.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.current.exit).toBeNull();
   });
 
   it('resets to idle when no run is active', () => {
