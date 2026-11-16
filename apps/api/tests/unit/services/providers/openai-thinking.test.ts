@@ -311,6 +311,10 @@ describe('streamWithResponsesAPI', () => {
     const thinkingChunks = chunks.filter((c) => c.type === 'thinking');
     expect(thinkingChunks.length).toBe(2);
     expect(thinkingChunks[0].text).toBe('First block.');
-    expect(thinkingChunks[1].text).toBe('Second block.');
+    // The second part opens a new paragraph, so the stored text never reads "block.Second".
+    expect(thinkingChunks[1].text).toBe('\n\nSecond block.');
+    expect(thinkingChunks.map((chunk) => chunk.text).join('')).toBe(
+      'First block.\n\nSecond block.'
+    );
   });
 });
