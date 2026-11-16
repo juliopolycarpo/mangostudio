@@ -1,7 +1,8 @@
 /**
  * The rail's panel bodies are lazy chunks. This file keeps what that adds to
  * the rail: a spinner while a body arrives, a warm-up from the dock button, and
- * a local failure state that a retry can clear.
+ * a local failure state that a retry can clear. The idle warm-up has its own
+ * file, `workspace-rail-idle-warmup.test.tsx`.
  *
  * Its own file because each lazy binding is module-level and keeps its first
  * result: the cases here need the first import to fail, or to be counted, and
@@ -99,19 +100,6 @@ describe('WorkspaceRail lazy panel bodies', () => {
 
     await user.click(screen.getByRole('button', { name: 'Show GitHub panel' }));
     expect(await screen.findByTestId('github-panel-content')).toBeInTheDocument();
-    expect(chunkState.githubEvaluations).toBe(1);
-  });
-
-  it('warms the other panels when the browser goes idle', async () => {
-    renderRail();
-    await screen.findByTestId('git-panel-content');
-    expect(idle.pending).toBe(1);
-    // Re-requested whenever the panel list is recomputed; every request carries the same timeout.
-    expect(new Set(idle.timeouts)).toEqual(new Set([3_000]));
-
-    await idle.runIdle();
-
-    // One evaluation whether the hover case above warmed it first or this warm-up did.
     expect(chunkState.githubEvaluations).toBe(1);
   });
 });
