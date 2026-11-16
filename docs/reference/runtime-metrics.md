@@ -164,7 +164,7 @@ and a missing file is the only build error. Bun does not check the `P <program s
 function indexes: a file with a wrong size, or indexes past the end of the program, compiles
 silently and places nothing (tested). So a stale file is prevented, not detected. The build records
 from the binary it is about to ship (`scripts/lib/aot-order.ts`), empties the order directory first,
-checks the file's shape itself, and scans the shipping compile's stderr for Bun's warning: a local
+checks only the header and that a function was recorded (a line kind it does not know is counted in the log and left to Bun, whose canary may add some), and scans the shipping compile's stderr for Bun's warning: a local
 build warns and ships without an order, a required one fails. Recordings of one binary were
 byte-identical across six runs.
 

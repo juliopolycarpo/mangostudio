@@ -74,12 +74,22 @@ export function aotOrderSkipReason(
 export interface AotOrderSummary {
   /** Number of `F` lines: the functions the recorded run executed. */
   readonly functionCount: number;
+  /** Lines of a kind this parser does not know (a newer Bun may add some); passed through. */
+  readonly unknownLineCount: number;
+  /** The distinct first tokens of those lines, sorted. */
+  readonly unknownLineKinds: readonly string[];
 }
 
+/** Line kinds Bun writes that the build has no use for: program size, entry and module names. */
+const DESCRIPTIVE_LINE_KINDS: ReadonlySet<string> = new Set(['P', 'E', 'M']);
+
 /**
- * Checks that `text` has the shape `--aot-order` reads and returns its summary. Throws, naming the
- * first line that is wrong, because Bun itself only warns and carries on without any order.
- * Example: parseAotOrder('aot-order v1\nP 39150\nF = 7066 b0 - 0:0 \n') // { functionCount: 1 }
+ * Checks only what the build relies on and returns the file's summary: the header, and at least one
+ * function line (an empty recording means the workload ran nothing). Every other line is Bun's to
+ * judge; a kind this parser does not know is counted and reported, not an error, because the order
+ * file comes from a floating Bun canary that may add lines, and Bun's own warning about a file it
+ * cannot use already fails a required build. Throws where Bun would only warn and carry on.
+ * Example: parseAotOrder('aot-order v1\nP 39150\nF = 7066 b0 - 0:0 \n') // { functionCount: 1, unknownLineCount: 0, unknownLineKinds: [] }
  */
 export function parseAotOrder(text: string): AotOrderSummary {
   const lines = text.split('\n').filter((line) => line.length > 0);
@@ -89,23 +99,22 @@ export function parseAotOrder(text: string): AotOrderSummary {
     );
   }
   let functionCount = 0;
+  let unknownLineCount = 0;
+  const unknownKinds = new Set<string>();
   for (const line of lines.slice(1)) {
-    // `P <program size>`, `E <entry module>` (newer Bun) and `M <index> <module>` describe the program; `F ...` is one function.
-    if (/^(?:P \d+|E \S+|M \d+ \S+)$/.test(line)) continue;
-    if (/^F (?:=|\d+) \d+ \S+ \S+ \S+ ?$/.test(line)) {
-      functionCount += 1;
-      continue;
+    const kind = line.split(' ', 1)[0] as string;
+    if (kind === 'F') functionCount += 1;
+    else if (!DESCRIPTIVE_LINE_KINDS.has(kind)) {
+      unknownLineCount += 1;
+      unknownKinds.add(kind);
     }
-    throw new Error(
-      `aot order: expected a "P <n>", "E <entry>", "M <n> <module>" or "F <...>" line | received: ${JSON.stringify(line)}`
-    );
   }
   if (functionCount === 0) {
     throw new Error(
       'aot order: expected at least one "F ..." line | received: none, so the run recorded no function'
     );
   }
-  return { functionCount };
+  return { functionCount, unknownLineCount, unknownLineKinds: [...unknownKinds].sort() };
 }
 
 /**
@@ -366,6 +375,11 @@ export async function compileWithAotOrder(
         steps.log(
           `   ${summary.functionCount} functions recorded in ${((steps.now() - startedAt) / 1000).toFixed(1)} s`
         );
+        if (summary.unknownLineCount > 0) {
+          steps.log(
+            `   ${summary.unknownLineCount} order-file lines of kind ${summary.unknownLineKinds.join(', ')} are unknown to this build and passed through to Bun`
+          );
+        }
       } catch (caught) {
         failure = caught instanceof Error ? caught.message : String(caught);
       }

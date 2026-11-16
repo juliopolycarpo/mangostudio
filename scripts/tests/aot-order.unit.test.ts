@@ -33,12 +33,14 @@ describe('parseAotOrder', () => {
   test('counts the functions of a multi-module program file', () => {
     expect(
       parseAotOrder('aot-order v1\nP 39150\nF = 7066 b0 - 0:0 \nF = 10562 b0 - 0:0 \n')
-    ).toEqual({ functionCount: 2 });
+    ).toEqual({ functionCount: 2, unknownLineCount: 0, unknownLineKinds: [] });
   });
 
   test('counts the functions of a single-module program file', () => {
     expect(parseAotOrder('aot-order v1\nM 0 entry.ts\nF 0 0 b0 - 1:1 \n')).toEqual({
       functionCount: 1,
+      unknownLineCount: 0,
+      unknownLineKinds: [],
     });
   });
 
@@ -46,7 +48,19 @@ describe('parseAotOrder', () => {
     // Written by Bun 1.4.5-canary.1+8b22022db, which CI installs.
     expect(parseAotOrder('aot-order v1\nE entry.ts\nM 0 entry.ts\nF 0 0 b0 - 1:1 \n')).toEqual({
       functionCount: 1,
+      unknownLineCount: 0,
+      unknownLineKinds: [],
     });
+  });
+
+  test('passes a line kind it does not know through, counted and named', () => {
+    expect(
+      parseAotOrder('aot-order v1\nP 1\nZ 9 new-kind\nF = 1 b0 - 0:0 \nQ x\nZ 10 again\n')
+    ).toEqual({ functionCount: 1, unknownLineCount: 3, unknownLineKinds: ['Q', 'Z'] });
+  });
+
+  test('leaves the shape of a function line to Bun', () => {
+    expect(parseAotOrder('aot-order v1\nF a different layout\n').functionCount).toBe(1);
   });
 
   test.each([
@@ -55,16 +69,6 @@ describe('parseAotOrder', () => {
       'another format version',
       'aot-order v2\nP 1\nF = 1 b0 - 0:0 \n',
       'expected first line "aot-order v1" | received: "aot-order v2"',
-    ],
-    [
-      'a line of no known kind',
-      'aot-order v1\nP 1\nX = 1 b0 - 0:0 \n',
-      'expected a "P <n>", "E <entry>", "M <n> <module>" or "F <...>" line | received: "X = 1 b0 - 0:0 "',
-    ],
-    [
-      'a function line with no index',
-      'aot-order v1\nP 1\nF = x b0 - 0:0 \n',
-      'received: "F = x b0 - 0:0 "',
     ],
     [
       'no recorded function',
@@ -195,7 +199,7 @@ describe('recordAotOrder', () => {
       },
     });
 
-    expect(summary).toEqual({ functionCount: 2 });
+    expect(summary).toEqual({ functionCount: 2, unknownLineCount: 0, unknownLineKinds: [] });
     expect(requested).toHaveLength(1);
     expect(requested[0]).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
   });
@@ -387,6 +391,8 @@ class FakeAotOrderSteps implements AotOrderSteps {
   recordingError: Error | null = null;
   /** What the compiler prints to stderr when it is given the order file. */
   shippingStderr = '';
+  /** Line kinds the recorded file reports as unknown to the parser. */
+  unknownLineKinds: string[] = [];
   /** What the order directory held when the recorder ran. */
   orderDirAtRecording: string[] = [];
   private compiles = 0;
@@ -418,7 +424,11 @@ class FakeAotOrderSteps implements AotOrderSteps {
     if (this.recordingError) return Promise.reject(this.recordingError);
     mkdirSync(this.orderDir, { recursive: true });
     writeFileSync(orderFile, 'recorded');
-    return Promise.resolve({ functionCount: 12 });
+    return Promise.resolve({
+      functionCount: 12,
+      unknownLineCount: this.unknownLineKinds.length,
+      unknownLineKinds: this.unknownLineKinds,
+    });
   }
 
   log(message: string): void {
@@ -472,6 +482,18 @@ describe('compileWithAotOrder', () => {
       `compile --aot-order=${join(orderDir, 'hub.order')} -> /out/mangostudio`,
     ]);
     expect(steps.logs.join('\n')).toContain('12 functions recorded in 2.5 s');
+    expect(steps.warnings).toEqual([]);
+  });
+
+  test('logs the line kinds of an order file it does not know, and still ships with it', async () => {
+    steps.unknownLineKinds = ['Q', 'Z'];
+
+    const result = await compileWithAotOrder(plan(), steps, '/out/mangostudio');
+
+    expect(result.ok).toBe(true);
+    expect(steps.logs.join('\n')).toContain(
+      '2 order-file lines of kind Q, Z are unknown to this build and passed through to Bun'
+    );
     expect(steps.warnings).toEqual([]);
   });
 

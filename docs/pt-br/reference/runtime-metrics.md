@@ -169,7 +169,7 @@ by it`, e um arquivo ausente é o único erro de build. O Bun não confere a lin
 programa>` nem os índices das funções: um arquivo com tamanho errado, ou com índices além do fim do
 programa, compila em silêncio e não posiciona nada (testado). Portanto um arquivo velho é evitado,
 não detectado. O build grava a partir do binário que vai distribuir (`scripts/lib/aot-order.ts`),
-esvazia antes o diretório da ordem, confere o formato do arquivo e procura o aviso do Bun no stderr
+esvazia antes o diretório da ordem, confere só o cabeçalho e que uma função foi gravada (um tipo de linha desconhecido é contado no log e deixado para o Bun, cujo canary pode acrescentar outros) e procura o aviso do Bun no stderr
 da compilação final: um build local avisa e distribui sem ordem, um build que exige a ordem falha.
 Gravações do mesmo binário foram idênticas byte a byte em seis execuções.
 
