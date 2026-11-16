@@ -697,8 +697,32 @@ describe('streamed reasoning versus the completed-response fallback', () => {
     expect(streamed).toBe('Summary.');
   });
 
-  it('prefers summaries over raw content across items, in the stream and in the fallback', () => {
+  it('applies the summary-over-raw rule in the fallback only; the stream cannot retract raw text', () => {
     expect(fallbackText(rawItem('Raw.'), summaryItem('Summary.'))).toBe('Summary.');
+    expect(streamedText([rawDelta('rs_1', 0, 'Raw.'), summaryDelta('rs_2', 0, 'Summary.')])).toBe(
+      'Raw.\n\nSummary.'
+    );
+  });
+
+  describe('a reasoning item that follows answer text or a tool call', () => {
+    const functionCallAdded = event({
+      type: 'response.output_item.added',
+      item: { type: 'function_call', id: 'fc_1' },
+    });
+    const answerText = event({ type: 'response.output_text.delta', delta: 'Answer.' });
+
+    it.each([
+      ['a function call', functionCallAdded],
+      ['answer text', answerText],
+    ])('opens the second raw item after %s without a separator', (_name, between) => {
+      const tracker = createResponsesReasoningTracker();
+
+      const emitted = [rawDelta('rs_1', 0, 'First.'), between, rawDelta('rs_2', 0, 'Second.')].map(
+        (ev) => tracker.consumeStreamEvent(ev)
+      );
+
+      expect(emitted).toEqual(['First.', null, 'Second.']);
+    });
   });
 
   it('recovers nothing from a response with no reasoning items', () => {

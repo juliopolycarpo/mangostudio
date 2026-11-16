@@ -12,8 +12,12 @@
  * text as separate content parts (`content_index`), each a paragraph of its own that
  * usually opens with a bold title. The stream gives only the text of each part, so the
  * tracker prefixes a blank line to the first text of every part after the first, across
- * reasoning items too: the same join `extractReasoningFromCompleted` uses, so the streamed
- * text and the completed-response fallback read the same. Without it the stored text reads "…end of one part.**Next title**…". The
+ * reasoning items too. That is the same join `extractReasoningFromCompleted` uses, so the
+ * streamed text and the completed-response fallback read the same whenever both paths see
+ * one kind of part. They can differ when a turn mixes kinds: the fallback prefers summaries
+ * over raw content, but raw text already streamed cannot be retracted, so the stream keeps
+ * it (and the fallback never runs after anything streamed). Without the separator the stored
+ * text reads "…end of one part.**Next title**…". The
  * separator travels in the stream, ahead of the text it precedes, so what was
  * already streamed and checkpointed only ever grows by appending.
  */
