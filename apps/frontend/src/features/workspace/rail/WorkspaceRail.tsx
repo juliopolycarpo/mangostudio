@@ -5,15 +5,27 @@ import {
   type WorkspacePanelSettings,
 } from '@mangostudio/shared/workspaces';
 import { PanelRightOpen } from 'lucide-react';
-import { type Ref, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type Ref,
+  Suspense,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { createPortal } from 'react-dom';
 
 import { EdgeResizeHandle } from '@/components/layout/EdgeResizeHandle';
+import { LazyChunkBoundary } from '@/components/layout/LazyChunkBoundary';
 import { Button } from '@/components/ui/Button';
 import { SELECTION_BAR } from '@/components/ui/selection-bar';
+import { Spinner } from '@/components/ui/Spinner';
 import { useChatTodos } from '@/features/chat/hooks/use-chat-todos';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { preloadWhenIdle } from '@/lib/idle-preload';
 
 import { getAvailableWorkspacePanels, type RailPanelDefinition } from './panel-registry';
 import { onRailPanelRequest } from './rail-panel-request';
@@ -63,6 +75,7 @@ export function WorkspaceRail({
   const [activePanelId, setActivePanelId] = useState<WorkspacePanelId | null>(
     () => availablePanels[0]?.id ?? null
   );
+  const shownPanelId = useDeferredValue(activePanelId);
   const [collapsed, setCollapsedState] = useState(() => readRailCollapsed(chatId));
   const [mobileOpen, setMobileOpen] = useState(false);
   const [width, setWidth] = useState(settings.width);
@@ -81,6 +94,17 @@ export function WorkspaceRail({
       setActivePanelId(availablePanels[0]?.id ?? null);
     }
   }, [activePanelId, availablePanels]);
+
+  // Warm the other panels' chunks once the page is quiet, so the first click
+  // on one is not a fetch. Hover and focus on the dock button still start it
+  // sooner; a data-saver preference leaves both to the click.
+  useEffect(
+    () =>
+      preloadWhenIdle(
+        availablePanels.flatMap((panel) => (panel.lazyBody ? [panel.lazyBody.preload] : []))
+      ),
+    [availablePanels]
+  );
 
   const closeMobile = useCallback(() => {
     setMobileOpen(false);
@@ -142,8 +166,13 @@ export function WorkspaceRail({
 
   const activePanel =
     availablePanels.find((panel) => panel.id === activePanelId) ?? availablePanels[0];
-  const activeTitle = panelTitles[activePanel.id];
-  const ActivePanelContent = activePanel.component;
+  // The dock answers a click at once; the body follows once its chunk is in,
+  // and the panel that was showing stays up until then.
+  const shownPanel = availablePanels.find((panel) => panel.id === shownPanelId) ?? activePanel;
+  const activeTitle = panelTitles[shownPanel.id];
+  const ActivePanelContent = shownPanel.component;
+  // Set while a chosen panel's body is still on its way and the previous one is up.
+  const loadingPanelId = shownPanel.id === activePanel.id ? null : activePanel.id;
   const panelContent = (
     closeMode: 'collapse' | 'close',
     onClose: () => void,
@@ -158,12 +187,24 @@ export function WorkspaceRail({
       }
       onClose={onClose}
     >
-      <ActivePanelContent
-        chatId={chatId}
-        workdir={workdir}
-        todos={todos}
-        environmentId={environmentId}
-      />
+      {/* Keyed by panel, so a failure in one panel's chunk does not follow the
+          person to the next one. */}
+      <Suspense
+        fallback={
+          <div className="flex h-full items-center justify-center">
+            <Spinner size="md" label={t.common.loading} />
+          </div>
+        }
+      >
+        <LazyChunkBoundary key={shownPanel.id} onRetry={() => shownPanel.lazyBody?.reset()}>
+          <ActivePanelContent
+            chatId={chatId}
+            workdir={workdir}
+            todos={todos}
+            environmentId={environmentId}
+          />
+        </LazyChunkBoundary>
+      </Suspense>
     </RailPanel>
   );
 
@@ -189,6 +230,7 @@ export function WorkspaceRail({
           panels={availablePanels}
           panelTitles={panelTitles}
           activePanelId={activePanel.id}
+          loadingPanelId={loadingPanelId}
           collapsed={collapsed}
           navigationLabel={t.workspace.sidePanelNavigation}
           switchLabel={t.workspace.sidePanelSwitch}
@@ -236,6 +278,7 @@ export function WorkspaceRail({
               panels={availablePanels}
               panelTitles={panelTitles}
               activePanelId={activePanel.id}
+              loadingPanelId={loadingPanelId}
               navigationLabel={t.workspace.sidePanelNavigation}
               switchLabel={t.workspace.sidePanelSwitch}
               onSelect={selectPanel}
@@ -254,6 +297,8 @@ interface PanelDockProps {
   readonly panels: readonly RailPanelDefinition[];
   readonly panelTitles: Readonly<Record<WorkspacePanelId, string>>;
   readonly activePanelId: WorkspacePanelId;
+  /** The chosen panel whose body has not replaced the previous one yet. */
+  readonly loadingPanelId?: WorkspacePanelId | null;
   /**
    * The rail is folded down to this strip, so no panel is on screen. Every icon
    * is idle then: the current-item mark (fill, accent bar, `aria-pressed`) says
@@ -270,6 +315,7 @@ function PanelDock({
   panels,
   panelTitles,
   activePanelId,
+  loadingPanelId = null,
   collapsed = false,
   navigationLabel,
   switchLabel,
@@ -291,8 +337,12 @@ function PanelDock({
             variant="subtle"
             size="icon"
             onClick={() => onSelect(panel.id)}
+            // Warm the chunk while the pointer or the keyboard is on its way to the click.
+            onPointerEnter={() => panel.lazyBody?.preload()}
+            onFocus={() => panel.lazyBody?.preload()}
             aria-label={switchLabel.replace('{panel}', title)}
             aria-pressed={active}
+            aria-busy={panel.id === loadingPanelId}
             title={title}
             // The current panel's mark is the shared selection bar, moved out to the
             // dock's own edge (`before:-left-2`) like the sidebar's current page: the

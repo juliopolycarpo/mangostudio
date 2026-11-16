@@ -4263,6 +4263,11 @@ export const messages: Messages = {
       hint: 'The link may be wrong, or the page may have moved.',
       home: 'Back to MangoStudio',
     },
+    lazyChunk: {
+      title: 'This panel could not be loaded',
+      hint: 'The connection may have dropped, or MangoStudio was updated while this tab was open. Try again, or reload the page.',
+      reload: 'Reload page',
+    },
     bootstrap: {
       title: 'MangoStudio could not finish loading',
       lead: 'One of the requests every page depends on was refused.',

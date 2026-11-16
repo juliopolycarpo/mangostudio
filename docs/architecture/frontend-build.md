@@ -278,6 +278,19 @@ build):
   eight common grammars and four themes (about 1.2 MB raw, 22 requests, three rounds).
   Over a 150 ms, 1.6 Mbit/s profile the grammar round is most of the wait.
 
+**Rail panel bodies are lazy.** `rail/panel-registry.ts` is imported by the command palette and
+the chat page, so the Git, GitHub and Todo bodies load through `retryableLazy`
+(`src/lib/retryable-lazy.ts`) instead of a static import: that took 117 KB raw (27 KB
+Brotli) out of the entry. The rail starts those imports on hover or focus of the dock
+button and, once the page is idle, for every available panel (`src/lib/idle-preload.ts`;
+skipped under `saveData`), so a click rarely waits. A panel switch keeps the previous body
+up while the new chunk arrives (`useDeferredValue`) and marks the dock button
+`aria-busy`: React holds a Suspense reveal back up to 300 ms after it commits a fallback,
+so a spinner flash made a cold click on a fast network about 300 ms slower than the fetch.
+`LazyChunkBoundary` keeps a failed chunk inside the rail with Retry and Reload; a plain
+`React.lazy` would cache the rejection and take the whole page down through the route's
+error component.
+
 `tests/browser-smoke/load-waterfall.spec.ts` watches the same first uses in a real browser
 (opt-in: `MANGO_LOAD_WATERFALL=1`, and `MANGO_LOAD_PROFILE=slow-4g` for a CDP throttle) and prints
 `LOAD_WATERFALL` lines from the page's Resource Timing entries.

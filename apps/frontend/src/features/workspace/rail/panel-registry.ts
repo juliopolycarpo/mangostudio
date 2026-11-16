@@ -9,11 +9,26 @@ import {
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 
-import { GithubPanel } from '@/features/github/components/GithubPanel';
 import { TerminalRailPanel } from '@/features/terminal/TerminalRailPanel';
+import { type RetryableLazy, retryableLazy } from '@/lib/retryable-lazy';
 
-import { GitPanel } from '../GitPanel';
-import { TodoRailPanel } from './TodoRailPanel';
+// The bodies of the panels that pull the most code (the repository view, the
+// GitHub review queue, the todo list) load the first time their panel is shown.
+// This registry is reachable from the command palette and the chat page, so a
+// static import here would put all of it in the entry chunk of every
+// authenticated route, whether or not the rail ever opens. The dock only needs
+// each panel's id, icon and availability to draw its buttons.
+const GitPanel = retryableLazy<RailPanelContentProps>(() =>
+  import('../GitPanel').then((module) => ({ default: module.GitPanel }))
+);
+const GithubPanel = retryableLazy<RailPanelContentProps>(() =>
+  import('@/features/github/components/GithubPanel').then((module) => ({
+    default: module.GithubPanel,
+  }))
+);
+const TodoRailPanel = retryableLazy<RailPanelContentProps>(() =>
+  import('./TodoRailPanel').then((module) => ({ default: module.TodoRailPanel }))
+);
 
 export interface RailPanelAvailabilityState {
   readonly chatId: string | null;
@@ -40,6 +55,12 @@ export interface RailPanelDefinition {
   readonly icon: LucideIcon;
   readonly availability: (state: RailPanelAvailabilityState) => boolean;
   readonly component: ComponentType<RailPanelContentProps>;
+  /**
+   * Present when `component` is fetched on first use: `preload` warms the chunk
+   * from a hover or focus on the dock button, `reset` lets a failed fetch be
+   * asked for again. Panels bundled with the entry have neither.
+   */
+  readonly lazyBody?: Pick<RetryableLazy<RailPanelContentProps>, 'preload' | 'reset'>;
 }
 
 export const WORKSPACE_PANEL_REGISTRY: readonly RailPanelDefinition[] = [
@@ -47,7 +68,8 @@ export const WORKSPACE_PANEL_REGISTRY: readonly RailPanelDefinition[] = [
     id: 'git',
     icon: FolderGit2,
     availability: ({ chatId, workdir }) => Boolean(chatId && workdir),
-    component: GitPanel,
+    component: GitPanel.Component,
+    lazyBody: GitPanel,
   },
   {
     // Available on `chatId` alone, unlike `git`. The panel's upper half is the
@@ -59,13 +81,15 @@ export const WORKSPACE_PANEL_REGISTRY: readonly RailPanelDefinition[] = [
     // `GitPullRequest` is what the rest of this codebase already uses for it.
     icon: GitPullRequest,
     availability: ({ chatId }) => Boolean(chatId),
-    component: GithubPanel,
+    component: GithubPanel.Component,
+    lazyBody: GithubPanel,
   },
   {
     id: 'todos',
     icon: ListTodo,
     availability: ({ chatId, todoCount }) => Boolean(chatId) && todoCount > 0,
-    component: TodoRailPanel,
+    component: TodoRailPanel.Component,
+    lazyBody: TodoRailPanel,
   },
   {
     id: 'terminal',
