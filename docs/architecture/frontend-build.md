@@ -284,6 +284,17 @@ build):
   107, 100 and 105, but folded the small ones into the entry (+1.8, +2.0 and +6.3 KB Brotli
   eager), removed no round from any first use, and took the first code block from 22
   requests to 21, 21 and 20.
+- **TypeBox `Value.Check` stays in the entry.** TypeBox is 108 KB of the entry (builders 43 KB,
+  the schema engine 27 KB, format 15 KB, `value` 14 KB, locale and system 7 KB). Stubbing
+  `typebox/value` out of its five importers in a throwaway build took the eager Brotli total
+  from 430,023 to 415,189 B (-14.8 KB, -63 KB raw), so the engine is worth about 15 KB. It
+  cannot leave without a replacement: the four eager importers (onboarding defaults, tool
+  subject keys, turn checkpoints, and the terminal wire parser through its barrel) validate
+  synchronously, the named import `{ Check }` does not tree-shake (430,241 B, the package has
+  no `sideEffects` field), and a lazy load would make a first `isTurnCheckpointPart` answer
+  wrongly. The options are validators generated at build time or a hand-written subset
+  checker proven equal to `Value.Check` by differential tests; both are larger than the
+  saving justifies today.
 - **The first fenced code block loads one grammar and one theme.** The highlighter starts
   empty; `preloadCodeLanguages(languages, theme)` loads the fence's own grammar (plus any
   grammar it embeds) and the active theme, and a theme switch loads just the new theme. It
