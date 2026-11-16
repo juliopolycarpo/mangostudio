@@ -6,6 +6,7 @@ import type { MessagePart } from '@mangostudio/shared/types';
 import { getDb } from '../../../../src/db/database';
 import {
   CHECKPOINT_TEXT_INTERVAL_CHARS,
+  type CheckpointWriteOptions,
   createDatabaseCheckpointStore,
   createTurnCheckpointPart,
   type TurnCheckpointStore,
@@ -31,6 +32,8 @@ interface RecordedWrite {
   readonly kind: 'rewrite' | 'delta';
   /** Characters handed to the store. */
   readonly bytes: number;
+  /** Whether the writer asked the store for a commit at synchronous = FULL. */
+  readonly durable: boolean;
 }
 
 interface PendingWrite {
@@ -74,12 +77,15 @@ class HeldCheckpointStore implements TurnCheckpointStore {
     while (this.inFlight.length > 0) this.releaseOldest();
   }
 
-  rewriteRow(row: {
-    text: string;
-    partsJson: string;
-    providerState: string | null;
-    generationTime: string | null | undefined;
-  }): Promise<void> {
+  rewriteRow(
+    row: {
+      text: string;
+      partsJson: string;
+      providerState: string | null;
+      generationTime: string | null | undefined;
+    },
+    options: CheckpointWriteOptions
+  ): Promise<void> {
     return this.start(
       'rewrite',
       {
@@ -88,28 +94,32 @@ class HeldCheckpointStore implements TurnCheckpointStore {
         providerState: row.providerState,
         generationTime: row.generationTime ?? null,
       },
-      row.text.length + row.partsJson.length
+      row.text.length + row.partsJson.length,
+      options.durable
     );
   }
 
-  appendDelta(_seq: number, deltaJson: string): Promise<void> {
+  appendDelta(_seq: number, deltaJson: string, options: CheckpointWriteOptions): Promise<void> {
     return this.start(
       'delta',
       foldCheckpointDeltas(this.stored, [JSON.parse(deltaJson) as CheckpointDelta]),
-      deltaJson.length
+      deltaJson.length,
+      options.durable
     );
   }
 
   private start(
     kind: RecordedWrite['kind'],
     next: CheckpointedContent,
-    bytes: number
+    bytes: number,
+    durable: boolean
   ): Promise<void> {
     const checkpoint = next.parts.find(isTurnCheckpointPart);
     if (!checkpoint) throw new Error('expected a turn_checkpoint part in the stored parts');
     const write = {
       kind,
       bytes,
+      durable,
       text: next.text,
       sequence: checkpoint.sequence,
       partCount: next.parts.length,
@@ -484,6 +494,43 @@ describe('TurnCheckpointWriter write shape', () => {
     // Rewriting the row at each checkpoint would carry 55 results (2.75M characters).
     expect(written).toBeGreaterThanOrEqual(10 * resultLength);
     expect(written).toBeLessThan(10 * resultLength + 20_000);
+  });
+
+  it('asks the store for a durable commit only for the checkpoint that requests one', async () => {
+    const { store, writer, parts } = setup();
+    expect(await writer.checkpoint({ force: true })).toBe(true);
+    parts.push({ type: 'tool_call', toolCallId: 'call-1', name: 'run_shell', args: {} });
+    expect(await writer.checkpoint({ durable: true })).toBe(true);
+    parts.push({ type: 'tool_result', toolCallId: 'call-1', content: 'ok' });
+    expect(await writer.checkpoint({ force: true })).toBe(true);
+
+    // The first write is a full row, the others deltas; only the second is durable.
+    expect(store.writes.map(({ kind, durable }) => ({ kind, durable }))).toEqual([
+      { kind: 'rewrite', durable: false },
+      { kind: 'delta', durable: true },
+      { kind: 'delta', durable: false },
+    ]);
+  });
+
+  it('writes a durable first checkpoint as a durable full row', async () => {
+    const { store, writer } = setup();
+
+    expect(await writer.checkpoint({ durable: true })).toBe(true);
+
+    expect(store.writes.map(({ kind, durable }) => ({ kind, durable }))).toEqual([
+      { kind: 'rewrite', durable: true },
+    ]);
+  });
+
+  it('writes a durable checkpoint even when the throttle would skip a best-effort one', async () => {
+    const { store, writer } = setup();
+    expect(await writer.checkpoint({ force: true })).toBe(true);
+
+    // Same instant, no new text: a best-effort call is skipped, a durable one is required.
+    expect(await writer.checkpoint()).toBe(false);
+    expect(await writer.checkpoint({ durable: true })).toBe(true);
+
+    expect(store.writes.map(({ durable }) => durable)).toEqual([false, true]);
   });
 
   it('does not send a result again when a later upsert replaces it with an equal copy', async () => {

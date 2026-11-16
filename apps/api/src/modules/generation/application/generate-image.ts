@@ -2,6 +2,7 @@ import type { GeneratedImageArtifact } from '@mangostudio/shared/chat';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import type { Kysely } from 'kysely';
 
+import { runDurably } from '../../../db/durability';
 import type { Database } from '../../../db/types';
 import { recordProviderTurn } from '../../../services/providers/core/provider-observability';
 import { warmProviderForRequest } from '../../../services/providers/core/provider-readiness';
@@ -132,26 +133,31 @@ export async function generateImage(
     },
   ];
 
-  await persistImageTurn(
-    {
-      userId: input.userId,
-      userMsgId,
-      aiMsgId,
-      chatId: input.chatId,
-      prompt: input.prompt,
-      referenceImageUrl: input.referenceImageUrl,
-      generatedImages: generatedImages.map((generatedImage) => ({
-        id: generatedImage.id,
-        imageUrl: generatedImage.imageUrl,
-        generationTime: generatedImage.generationTime ?? generationTime,
-        modelName: generatedImage.modelName ?? modelId,
-        createdAt: generatedImage.createdAt,
-      })),
-      styleParams,
-      userTimestamp: now,
-      aiTimestamp,
-    },
-    db
+  // Nothing is recorded before the provider call above, so this commit is the
+  // only record of a generation that was already paid for: durable, or a power
+  // loss leaves the user with no image and a retry that is charged again.
+  await runDurably(db, (conn) =>
+    persistImageTurn(
+      {
+        userId: input.userId,
+        userMsgId,
+        aiMsgId,
+        chatId: input.chatId,
+        prompt: input.prompt,
+        referenceImageUrl: input.referenceImageUrl,
+        generatedImages: generatedImages.map((generatedImage) => ({
+          id: generatedImage.id,
+          imageUrl: generatedImage.imageUrl,
+          generationTime: generatedImage.generationTime ?? generationTime,
+          modelName: generatedImage.modelName ?? modelId,
+          createdAt: generatedImage.createdAt,
+        })),
+        styleParams,
+        userTimestamp: now,
+        aiTimestamp,
+      },
+      conn
+    )
   );
   // `persistImageTurn` moves `updatedAt` inside its transaction, so the signal
   // waits until the transaction has committed. No feed row: the timeline tracks

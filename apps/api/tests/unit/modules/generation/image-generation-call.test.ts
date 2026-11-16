@@ -41,7 +41,11 @@ async function runImageCall(options: {
   reachedCount: number;
   count: number;
   aborted: boolean;
-}): Promise<{ allParts: MessagePart[]; events: Array<{ type: string }> }> {
+}): Promise<{
+  allParts: MessagePart[];
+  events: Array<{ type: string }>;
+  checkpoints: RecordedCheckpoint[];
+}> {
   const generator = new TruncatingImageGenerator(options.reachedCount);
   await mock.module('../../../../src/services/tools/builtin/generate-image', () => ({
     ...realGenerateImage,
@@ -56,6 +60,7 @@ async function runImageCall(options: {
   if (options.aborted) controller.abort('client_disconnect');
 
   const allParts: MessagePart[] = [];
+  const checkpoints: RecordedCheckpoint[] = [];
   const call = executeImageGenerationCall(
     'image-call-1',
     'generate_image',
@@ -68,6 +73,14 @@ async function runImageCall(options: {
       allParts,
       generatedImageArtifacts: [],
       nextToolResults: [],
+      checkpoint: (checkpointOptions) => {
+        checkpoints.push({
+          durable: checkpointOptions?.durable === true,
+          execution: toolCallExecution(allParts)?.status,
+          images: imageStatuses(allParts),
+        });
+        return Promise.resolve();
+      },
     }
   );
   const events: Array<{ type: string }> = [];
@@ -75,7 +88,14 @@ async function runImageCall(options: {
     events.push(event);
   }
 
-  return { allParts, events };
+  return { allParts, events, checkpoints };
+}
+
+/** The turn as it stood when the call asked for a checkpoint, and whether it asked for a durable one. */
+interface RecordedCheckpoint {
+  readonly durable: boolean;
+  readonly execution: string | undefined;
+  readonly images: string[];
 }
 
 function toolCallExecution(parts: MessagePart[]) {
@@ -151,5 +171,30 @@ describe('executeImageGenerationCall — abandoned images', () => {
     for (const event of failed) {
       expect(event).toMatchObject({ errorCode: 'image_generation_interrupted' });
     }
+  });
+});
+
+describe('executeImageGenerationCall — durable checkpoints', () => {
+  it('commits the running marker and each finished image durably, and nothing else', async () => {
+    const { checkpoints } = await runImageCall({ reachedCount: 2, count: 2, aborted: false });
+
+    const durable = checkpoints.filter((checkpoint) => checkpoint.durable);
+    expect(durable).toEqual([
+      // Awaited before the provider call: the record that a paid generation may be under way.
+      { durable: true, execution: 'running', images: [] },
+      // Each completed image is the paid result a lost record would make the model buy again.
+      { durable: true, execution: 'running', images: ['completed', 'generating'] },
+      { durable: true, execution: 'running', images: ['completed', 'completed'] },
+    ]);
+    // The queued announcement, the per-image start and the final settle stay ordinary writes.
+    expect(checkpoints.length - durable.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('does not make a failed image durable, since nothing was paid for or produced', async () => {
+    const { checkpoints } = await runImageCall({ reachedCount: 0, count: 1, aborted: true });
+
+    expect(checkpoints.filter((checkpoint) => checkpoint.durable)).toEqual([
+      { durable: true, execution: 'running', images: [] },
+    ]);
   });
 });
