@@ -79,12 +79,6 @@ http = "1"
 # them; that order is wire-visible, so it needs a real collator rather than a
 # byte comparison. Wrapped by `crate::library::collation`.
 icu_collator = "2.3"
-# This crate's own contact point with `jsonschema`, matching both
-# `mango-protocol`'s and `mangostudio-runtime-contract`'s compile options
-# exactly (draft 2020-12, offline, format assertions on): the result-check
-# gate has to run the same validator the peer contract crate embeds, with an
-# instance-path pointer neither of those crates exposes publicly.
-jsonschema.workspace = true
 # External-agent hosting (`external_agents/`): the SDK's harness and session traits
 # plus the three product targets. Stdio only: every harness speaks line-framed
 # stdio through this crate's own launcher, so neither `websocket` nor the SDK's
@@ -177,6 +171,11 @@ toml_parser = { version = "1.1", default-features = false, features = ["std"] }
 webpki-roots.workspace = true
 
 [dev-dependencies]
+# The external-agent tests compile a released product's JSON Schema with it
+# (`external_agents/product_tests.rs`, `adapter/map_tests.rs`). Nothing the
+# binary runs needs it directly: results are checked by the contract's own
+# validators (`Contract::check_result`).
+jsonschema.workspace = true
 # Only this crate's own tests use the spawn launcher, standing in for a hub
 # that execs this very binary and speaks to it over stdio — proving the real
 # `stdio` subcommand keeps stdout protocol-only end to end, not just in an
