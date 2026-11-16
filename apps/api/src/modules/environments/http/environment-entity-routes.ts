@@ -20,9 +20,9 @@ import {
   ApiErrorResponseSchema,
   ERROR_CODES,
 } from '@mangostudio/shared/errors';
-import type { SSEErrorEvent } from '@mangostudio/shared/streaming';
 import { Elysia, t } from 'elysia';
 
+import { sseResponse } from '../../../lib/sse-stream';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import type { EnvironmentService } from '../application/environment-service';
 import {
@@ -43,13 +43,6 @@ const runIdParams = t.Object({
   id: EnvironmentIdSchema,
   runId: t.String({ minLength: 1 }),
 });
-
-const KEEPALIVE_INTERVAL_MS = 15_000;
-const KEEPALIVE_BYTES = new TextEncoder().encode(': keepalive\n\n');
-
-function sseEvent(data: object): Uint8Array {
-  return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
-}
 
 function environmentError(error: unknown, set: { status?: number | string }): ApiErrorResponse {
   if (error instanceof EnvironmentServiceError) {
@@ -447,56 +440,7 @@ export function createEnvironmentEntityRoutes(
             return { error: 'Runtime install run not found.', code: ERROR_CODES.NOT_FOUND };
           }
 
-          const iterator = source[Symbol.asyncIterator]();
-          let disconnected = false;
-          const stream = new ReadableStream({
-            async start(controller) {
-              const heartbeat = setInterval(() => {
-                try {
-                  controller.enqueue(KEEPALIVE_BYTES);
-                } catch {
-                  // The client may already have disconnected.
-                }
-              }, KEEPALIVE_INTERVAL_MS);
-              try {
-                while (!disconnected) {
-                  const next = await iterator.next();
-                  if (next.done) break;
-                  controller.enqueue(sseEvent(next.value));
-                }
-              } catch (error) {
-                if (!disconnected) {
-                  const event: SSEErrorEvent = {
-                    type: 'error',
-                    error:
-                      error instanceof Error ? error.message : 'Runtime install log stream failed.',
-                    code: ERROR_CODES.INTERNAL,
-                    done: true,
-                  };
-                  controller.enqueue(sseEvent(event));
-                }
-              } finally {
-                clearInterval(heartbeat);
-                try {
-                  controller.close();
-                } catch {
-                  // The browser may have cancelled the stream.
-                }
-              }
-            },
-            async cancel() {
-              disconnected = true;
-              await iterator.return?.();
-            },
-          });
-
-          return new Response(stream, {
-            headers: {
-              'Content-Type': 'text/event-stream',
-              'Cache-Control': 'no-cache',
-              Connection: 'keep-alive',
-            },
-          });
+          return sseResponse(source, 'Runtime install log stream failed.');
         }
       )
   );
