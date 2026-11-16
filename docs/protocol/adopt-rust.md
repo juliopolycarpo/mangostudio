@@ -162,9 +162,10 @@ embeds before they return, so a malformed one is an `Err` there. A host that ser
 and is asked for a small part of it can use `Contract::from_shared_catalog_lazy(Arc<Catalog>)`
 instead: it checks names and the catalog's shape, and each method's `params` and `result` schema
 compiles on the first request that needs it (shared by every handler the contract serves). A
-schema that does not compile then answers that method `INTERNAL`, with `details.method` and
-`details.field` (such as `catalog.methods[3].result`), and never `INVALID_PARAMS`: the caller sent
-nothing wrong. Call `Contract::compile_all()` in a test, or once at start, to get the error the
+schema that does not compile then answers that method `INTERNAL`, with `details.method`,
+`details.field` (such as `catalog.methods[3].result`) and a shortened `details.reason`, and never
+`INVALID_PARAMS`: the caller sent nothing wrong. Until `compile_all()` has passed, `catalog()` and
+`rpc.discover` publish schemas nothing has checked. Call `Contract::compile_all()` in a test, or once at start, to get the error the
 eager constructors would have returned before a request finds it.
 
 A session bounds what the peer can make it hold, so a peer that opens requests and never cancels

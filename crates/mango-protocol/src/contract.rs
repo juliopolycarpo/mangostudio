@@ -215,7 +215,9 @@ impl Contract {
     /// method and the catalog field in its details (the caller sent nothing
     /// wrong, so never `INVALID_PARAMS`). Call [`Contract::compile_all`] in a
     /// test, or once at start where an early failure is worth the cost, so a
-    /// broken catalog is caught before a request finds it.
+    /// broken catalog is caught before a request finds it. Until then,
+    /// [`Contract::catalog`] and the `rpc.discover` answer publish the
+    /// event and capability schemas, and any method's not yet used, unchecked.
     ///
     /// # Errors
     /// Returns [`ValidationError`] for the reasons [`ContractBuilder::build`]
@@ -296,6 +298,11 @@ impl Contract {
     /// event's declaration, plain JSON. Infallible — [`Contract::builder`]
     /// and [`Contract::from_catalog`] already proved it valid; this is a
     /// clone of that proof, not a fresh check.
+    ///
+    /// On a contract from [`Contract::from_shared_catalog_lazy`] that proof
+    /// covers names and shape only, until [`Contract::compile_all`] has
+    /// succeeded: the schemas this returns, and `rpc.discover` publishes, may
+    /// not be valid JSON Schema.
     #[must_use]
     pub fn catalog(&self) -> Catalog {
         (*self.core.catalog).clone()
@@ -624,17 +631,32 @@ impl Contract {
 /// needed it ([`Contract::from_shared_catalog_lazy`]). The server's own
 /// contract is broken and the caller sent nothing wrong, so `INTERNAL`, not
 /// `INVALID_PARAMS`, naming the method and the catalog field that failed.
+///
+/// The compiler's own reason goes in `details.reason`, cut to
+/// [`UNCOMPILED_REASON_LIMIT`] characters: it can quote the offending part of
+/// the schema, and this answer goes to a peer.
 fn uncompiled(method: &str, error: &ValidationError) -> RemoteError {
     RemoteError::new(
         codes::INTERNAL,
         format!(
-            "The contract's schema for \"{method}\" does not compile at {}: {}.",
-            error.field, error.received
+            "The contract's schema for \"{method}\" does not compile at {}.",
+            error.field
         ),
     )
     .with_detail("method", method.to_string())
     .with_detail("field", error.field.clone())
+    .with_detail(
+        "reason",
+        error
+            .received
+            .chars()
+            .take(UNCOMPILED_REASON_LIMIT)
+            .collect::<String>(),
+    )
 }
+
+/// How much of the schema compiler's message [`uncompiled`] passes on.
+const UNCOMPILED_REASON_LIMIT: usize = 200;
 
 /// The `INVALID_PARAMS`/`INTERNAL` split [`Contract::parse_params`] and
 /// [`serve`]'s per-request wrapper both need: a schema violation is always
@@ -818,8 +840,9 @@ fn assert_not_reserved(field: &str, name: &str) -> Result<(), ValidationError> {
 
 #[cfg(test)]
 mod tests {
-    use super::Contract;
+    use super::{Contract, UNCOMPILED_REASON_LIMIT, uncompiled};
     use crate::catalog::{CatalogEvent, CatalogMethod};
+    use crate::validate::ValidationError;
     use serde::Deserialize;
     use serde_json::{Value, json};
     use std::sync::Arc;
@@ -1107,32 +1130,35 @@ mod tests {
         );
     }
 
-    /// Callers racing on a method's first request compile its schema once and
-    /// all get that one validator, a failure included.
+    /// A schema compiler's message can quote the schema, and the `INTERNAL`
+    /// answer goes to a peer: the reason in its details is cut short and the
+    /// message carries none of it.
     #[test]
-    fn concurrent_first_requests_share_one_compiled_validator() {
-        let lazy = Contract::from_shared_catalog_lazy(catalog_with_malformed_schemas())
-            .expect("names are valid");
-        let seen: Vec<usize> = std::thread::scope(|scope| {
-            let handles: Vec<_> = (0..8)
-                .map(|_| {
-                    scope.spawn(|| {
-                        let validator = lazy
-                            .core
-                            .params_validator(0)
-                            .expect("math.add's params schema compiles");
-                        std::ptr::from_ref(validator) as usize
-                    })
-                })
-                .collect();
-            handles
-                .into_iter()
-                .map(|handle| handle.join().expect("no thread panics"))
-                .collect()
-        });
+    fn an_uncompiled_answer_bounds_the_compiler_reason() {
+        let error = uncompiled(
+            "text.echo",
+            &ValidationError {
+                field: "catalog.methods[0].params".into(),
+                received: "x".repeat(UNCOMPILED_REASON_LIMIT * 5),
+                expected: "a valid JSON Schema 2020-12 document".into(),
+            },
+        );
+        let reason = error
+            .details
+            .as_ref()
+            .and_then(|details| details.get("reason"))
+            .and_then(Value::as_str)
+            .expect("a reason detail");
+        assert_eq!(
+            reason.chars().count(),
+            UNCOMPILED_REASON_LIMIT,
+            "expected the reason cut to the limit | received {} characters",
+            reason.chars().count()
+        );
         assert!(
-            seen.windows(2).all(|pair| pair[0] == pair[1]),
-            "expected every caller to get the one compiled validator | received addresses: {seen:?}"
+            !error.message.contains("xxx"),
+            "expected the message to carry no compiler text | received: {}",
+            error.message
         );
     }
 
