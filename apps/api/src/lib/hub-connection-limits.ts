@@ -13,6 +13,25 @@
 export const HUB_IDLE_TIMEOUT_SECONDS = 10;
 
 /**
+ * The idle timeout a request gets while its handler runs, set by
+ * `plugins/handler-idle-timeout.ts` once the body has been read, and put back to
+ * `HUB_IDLE_TIMEOUT_SECONDS` as soon as the handler has produced its response.
+ *
+ * The 10 s listener timeout exists to shed slow clients: one that trickles its
+ * headers or body, or stops reading. While a handler is working the request is
+ * complete and the silence is the hub's own, so Bun resetting it only turns a
+ * slow answer into ECONNRESET while the work carries on. 255 s is Bun's maximum
+ * rather than "disabled" (0): a handler that never answers on a peer that has
+ * vanished still ends, and no route here waits that long for a whole answer.
+ *
+ * This does not replace the SSE keepalive. A stream's handler returns its
+ * `Response` at once, so the timeout is back to 10 s while it streams, and the
+ * keepalive still has to beat inside that window (and inside intermediaries'
+ * own limits, see below).
+ */
+export const HUB_HANDLER_IDLE_TIMEOUT_SECONDS = 255;
+
+/**
  * The keepalive interval of every SSE route. It must stay under two limits: the
  * hub's idle timeout above (a 15 s beat let Bun reset install-log and upgrade
  * streams about 12 s into a quiet step), and intermediaries that drop idle
