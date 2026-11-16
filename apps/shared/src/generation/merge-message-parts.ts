@@ -28,29 +28,44 @@ function isMergeable(part: MessagePart): part is MergeableRun {
  */
 export function mergeMessageParts(parts: MessagePart[]): MessagePart[] {
   const merged: MessagePart[] = [];
-
-  for (const part of parts) {
-    if (!isMergeable(part)) {
-      merged.push(part);
-      continue;
-    }
-    // Prose with no text says nothing. Unlike `thinking`, no event opens an
-    // empty text phase, so an empty text part is noise rather than a signal.
-    if (part.type === 'text' && part.text === '') continue;
-
-    const previous = merged.at(-1);
-    if (!previous || !isMergeable(previous) || previous.type !== part.type) {
-      merged.push(part);
-      continue;
-    }
-    merged[merged.length - 1] = {
-      type: part.type,
-      text: previous.text + part.text,
-      ...mergeFlags(previous, part),
-    } as MergeableRun;
-  }
-
+  for (const part of parts) appendMergedMessagePart(merged, part);
   return merged;
+}
+
+/**
+ * Append one part to an already-merged list under the `mergeMessageParts`
+ * rule, so a list built one part at a time stays merged as it grows.
+ *
+ * A streaming turn uses this per delta: without it the in-flight row holds a
+ * part per token, and every checkpoint serializes all of them. Folding with
+ * this function is `mergeMessageParts`, so the merged result is the same
+ * whichever of the two built it.
+ *
+ * A joined run is a new object in the trailing slot. Neither `part` nor the
+ * part it joins is mutated, because callers' arrays (frontend state, a parsed
+ * row) may share those objects.
+ *
+ * Usage: appendMergedMessagePart(session.allParts, { type: 'text', text: delta })
+ */
+export function appendMergedMessagePart(merged: MessagePart[], part: MessagePart): void {
+  if (!isMergeable(part)) {
+    merged.push(part);
+    return;
+  }
+  // Prose with no text says nothing. Unlike `thinking`, no event opens an
+  // empty text phase, so an empty text part is noise rather than a signal.
+  if (part.type === 'text' && part.text === '') return;
+
+  const previous = merged.at(-1);
+  if (!previous || !isMergeable(previous) || previous.type !== part.type) {
+    merged.push(part);
+    return;
+  }
+  merged[merged.length - 1] = {
+    type: part.type,
+    text: previous.text + part.text,
+    ...mergeFlags(previous, part),
+  } as MergeableRun;
 }
 
 /** Everything a merged run has to carry besides its text. */
