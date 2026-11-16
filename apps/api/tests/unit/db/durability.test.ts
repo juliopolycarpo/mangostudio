@@ -29,14 +29,18 @@ import {
 let directory: string;
 let file: ObservedFileDatabase;
 
-/** Named fake for the connection's pragma surface, with the journal mode it will report. */
+/** Named fake for the connection's pragma surface, with the journal mode and level it will report. */
 class FakePragmaRunner implements PragmaRunner {
   readonly statementsRun: string[] = [];
 
-  constructor(private readonly journalMode: string | undefined) {}
+  constructor(
+    private readonly journalMode: string | undefined,
+    private readonly synchronous: number = FULL
+  ) {}
 
   read(statement: string): Promise<string | undefined> {
-    return Promise.resolve(statement === 'journal_mode' ? this.journalMode : undefined);
+    if (statement === 'journal_mode') return Promise.resolve(this.journalMode);
+    return Promise.resolve(statement === 'synchronous' ? String(this.synchronous) : undefined);
   }
 
   run(statement: string): Promise<void> {
@@ -225,18 +229,157 @@ describe('runDurably', () => {
     expect(warnings[0]).toContain('inside a transaction');
   });
 
-  it('says so when it is called with a Kysely derived from the relaxed connection', async () => {
+  it('raises a Kysely derived from the relaxed connection and puts the level back', async () => {
     file = new ObservedFileDatabase(directory);
     await relaxDurability(file.db);
-    const label = 'durability_test_loud_derived';
+    // `withTables` shares the one connection but is not the object `relaxDurability` saw.
+    const derived = file.db.withTables<Record<never, never>>();
+
+    let seen: number | undefined;
+    const warnings = await new DiagnosticWarnCapture().during(async () => {
+      await runDurably(derived, 'durability_test_derived', () => {
+        seen = file.level();
+        return Promise.resolve();
+      });
+    });
+
+    expect({ seen, warnings, after: file.level() }).toEqual({
+      seen: FULL,
+      warnings: [],
+      after: NORMAL,
+    });
+  });
+});
+
+/**
+ * A connection can start below FULL: Apple's SQLite lowers a connection to NORMAL when it
+ * enters WAL mode. These tests force the starting level, so Linux CI sees what macOS does.
+ */
+describe('a connection that starts below FULL', () => {
+  const OFF = 0;
+  const startAt = (level: number) => file.sqlite.exec(`PRAGMA synchronous = ${level}`);
+
+  it.each([
+    ['OFF', OFF],
+    ['NORMAL', NORMAL],
+    ['FULL', FULL],
+  ])('ends at NORMAL after relaxDurability when it started at %s', async (_name, started) => {
+    file = new ObservedFileDatabase(directory);
+    startAt(started);
+
+    const outcome = await relaxDurability(file.db);
+
+    expect({ outcome, synchronous: file.level() }).toEqual({
+      outcome: 'normal',
+      synchronous: NORMAL,
+    });
+  });
+
+  it('raises a database that is not in WAL mode to FULL, because that is the level it reports', async () => {
+    file = new ObservedFileDatabase(directory, { applyPragmas: false });
+    startAt(NORMAL);
+
+    let outcome: string | undefined;
+    await new DiagnosticWarnCapture().during(async () => {
+      outcome = await relaxDurability(file.db);
+    });
+
+    expect({ outcome, synchronous: file.level() }).toEqual({ outcome: 'full', synchronous: FULL });
+  });
+
+  it('raises a pragma-less database from the level a fake reports, and leaves FULL alone', async () => {
+    file = new ObservedFileDatabase(directory, { applyPragmas: false });
+    const lowered = new FakePragmaRunner('delete', NORMAL);
+    const alreadyFull = new FakePragmaRunner('delete', FULL);
+
+    await new DiagnosticWarnCapture().during(async () => {
+      await relaxDurability(file.db, lowered);
+      await relaxDurability(file.db, alreadyFull);
+    });
+
+    expect({ lowered: lowered.statementsRun, alreadyFull: alreadyFull.statementsRun }).toEqual({
+      lowered: ['synchronous = FULL'],
+      alreadyFull: [],
+    });
+  });
+
+  it.each([
+    ['NORMAL', NORMAL],
+    ['OFF', OFF],
+  ])(
+    'runDurably commits at FULL on a connection never relaxed that started at %s, then restores it',
+    async (_name, started) => {
+      file = new ObservedFileDatabase(directory);
+      startAt(started);
+      await sql`CREATE TABLE marker (v TEXT)`.execute(file.db);
+
+      const warnings = await new DiagnosticWarnCapture().during(() =>
+        runDurably(file.db, `durability_test_unrelaxed_start_${started}`, (conn) =>
+          sql`INSERT INTO marker VALUES ('written')`.execute(conn)
+        )
+      );
+
+      expect({
+        insertLevel: file.levelOf(/INSERT INTO marker/i),
+        after: file.level(),
+        warnings,
+      }).toEqual({ insertLevel: FULL, after: started, warnings: [] });
+    }
+  );
+
+  it('withFullDurability runs work at FULL on a connection never relaxed, then restores the level it found', async () => {
+    file = new ObservedFileDatabase(directory);
+    startAt(NORMAL);
+
+    const seen = await withFullDurability(file.db, 'durability_test_window_unrelaxed_start', () =>
+      Promise.resolve(file.level())
+    );
+
+    expect({ seen, after: file.level() }).toEqual({ seen: FULL, after: NORMAL });
+  });
+
+  it('keeps the level it found when two windows overlap, instead of restoring the first one raised', async () => {
+    file = new ObservedFileDatabase(directory);
+    startAt(NORMAL);
+    let releaseFirst: () => void = () => undefined;
+    const firstMayFinish = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    const first = withFullDurability(
+      file.db,
+      'durability_test_overlap_first',
+      () => firstMayFinish
+    );
+    const second = withFullDurability(file.db, 'durability_test_overlap_second', () =>
+      Promise.resolve()
+    );
+    await second;
+    const afterSecond = file.level();
+    releaseFirst();
+    await first;
+
+    expect({ afterSecond, afterBoth: file.level() }).toEqual({
+      afterSecond: FULL,
+      afterBoth: NORMAL,
+    });
+  });
+
+  it('says so for a transaction handle, which SQLite cannot raise', async () => {
+    file = new ObservedFileDatabase(directory);
+    startAt(NORMAL);
 
     const warnings = await new DiagnosticWarnCapture().during(() =>
-      runDurably(file.db.withTables<Record<never, never>>(), label, () => Promise.resolve())
+      file.db
+        .transaction()
+        .execute((trx) =>
+          runDurably(trx, 'durability_test_unrelaxed_transaction', () => Promise.resolve())
+        )
     );
 
     expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain(label);
-    expect(warnings[0]).toContain('not the relaxed connection');
+    expect(warnings[0]).toContain('durable_commit_not_raised');
+    expect(warnings[0]).toContain('inside a transaction');
   });
 });
 
