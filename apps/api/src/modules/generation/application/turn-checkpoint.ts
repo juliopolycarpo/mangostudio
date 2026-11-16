@@ -100,7 +100,6 @@ function deferToMacrotask(run: () => void): void {
 /** A checkpoint planned against the live turn, waiting for its turn to be written. */
 interface PlannedWrite {
   readonly plan: CheckpointPlan;
-  readonly text: string;
   readonly providerState: string | null;
   readonly generationTime: string | null | undefined;
   /** Writes that had failed when this was planned; a delta planned before a later failure has a gap under it. */
@@ -228,7 +227,6 @@ export class TurnCheckpointWriter {
   private planWrite(content: TurnCheckpointContent): PlannedWrite {
     return {
       plan: this.planner.plan(content),
-      text: content.text,
       providerState: content.providerState,
       generationTime: content.generationTime,
       failuresAtPlan: this.failedWrites,
@@ -280,7 +278,7 @@ export class TurnCheckpointWriter {
     try {
       if (planned.plan.kind === 'rebase') {
         await this.options.store.rewriteRow({
-          text: planned.text,
+          text: planned.plan.text,
           partsJson: planned.plan.partsJson,
           providerState: planned.providerState,
           generationTime: planned.generationTime,

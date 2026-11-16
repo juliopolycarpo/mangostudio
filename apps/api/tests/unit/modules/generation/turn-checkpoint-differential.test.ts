@@ -6,6 +6,10 @@
  * history readers must equal the reference; after a hard kill, crash
  * reconciliation must produce the same message from either.
  *
+ * The streamed text includes astral characters, and a chunk may end between the two
+ * halves of one, so the reference is the live turn without a trailing half pair: a
+ * checkpoint holds the half back until the rest arrives.
+ *
  * Failures print the seed and the step, so a case replays with that seed alone.
  */
 import { describe, expect, it, spyOn } from 'bun:test';
@@ -99,8 +103,36 @@ const toolCalls = (turn: LiveTurn) =>
     (p): p is Extract<MessagePart, { type: 'tool_call' }> => p.type === 'tool_call'
   );
 
+// Code unit numbers rather than literals, so no lone surrogate sits in this file's source.
+const HIGH_HALF = String.fromCharCode(0xd83d);
+const LOW_HALF = String.fromCharCode(0xde00);
+const ASTRAL = `${HIGH_HALF}${LOW_HALF}`;
+
+const endsInHighHalf = (text: string): boolean => /[\uD800-\uDBFF]$/.test(text);
+
+/**
+ * Streamed non-ASCII text. A chunk may end after the first half of an astral character;
+ * the next chunk then starts with the second half, as the provider's next frame would.
+ */
+const streamUnicodeStep: Step = (turn, random) => {
+  const pieces = Array.from({ length: 1 + Math.floor(random() * 4) }, () =>
+    pick(random, ['a', 'é', ASTRAL, 'ß'])
+  ).join('');
+  const chunk = `${endsInHighHalf(turn.text) ? LOW_HALF : ''}${pieces}${random() < 0.4 ? HIGH_HALF : ''}`;
+  turn.text += chunk;
+  appendMergedMessagePart(turn.parts, { type: 'text', text: chunk });
+};
+
+/** Before any other step the stream has delivered the rest of a split character. */
+function finishSplitCharacter(turn: LiveTurn): void {
+  if (!endsInHighHalf(turn.text)) return;
+  turn.text += LOW_HALF;
+  appendMergedMessagePart(turn.parts, { type: 'text', text: LOW_HALF });
+}
+
 /** The ways a streaming turn changes, each as the stream stages do it. */
 const STEPS: readonly Step[] = [
+  streamUnicodeStep,
   // Streamed text: the message text and the trailing text part grow together.
   (turn, random) => {
     const chunk = `${words(random, 1 + Math.floor(random() * 6))} `;
@@ -217,6 +249,16 @@ const STEPS: readonly Step[] = [
   },
 ];
 
+/** What a checkpoint may store of the live turn: no text ends in half a character. */
+const withoutHalfCharacter = (text: string): string => text.replace(/[\uD800-\uDBFF]$/, '');
+
+const settledParts = (parts: readonly MessagePart[]): MessagePart[] =>
+  parts.map((part) =>
+    part.type === 'text' || part.type === 'thinking'
+      ? { ...part, text: withoutHalfCharacter(part.text) }
+      : part
+  );
+
 const stripSummary = (parts: readonly MessagePart[]): MessagePart[] =>
   parts.map((part) => toCheckpointPart(part));
 
@@ -282,8 +324,8 @@ async function rewriteReference(replyId: string, turn: LiveTurn): Promise<void> 
   await getDb()
     .updateTable('messages')
     .set({
-      text: turn.text,
-      parts: JSON.stringify(turn.parts),
+      text: withoutHalfCharacter(turn.text),
+      parts: JSON.stringify(settledParts(turn.parts)),
       providerState: turn.providerState,
     })
     .where('id', '=', replyId)
@@ -330,7 +372,9 @@ async function runSeed(seed: number): Promise<void> {
   };
 
   for (let step = 0; step < STEPS_PER_SEED; step++) {
-    pick(random, STEPS)(turn, random, tag);
+    const change = pick(random, STEPS);
+    if (change !== streamUnicodeStep) finishSplitCharacter(turn);
+    change(turn, random, tag);
     const roll = random();
     if (roll < 0.08) store.failOnce();
     if (roll < 0.25) {
@@ -346,7 +390,9 @@ async function runSeed(seed: number): Promise<void> {
   store.clearFailure();
   expect(await writer.checkpoint({ force: true })).toBe(true);
   await compare(STEPS_PER_SEED);
-  pick(random, STEPS)(turn, random, tag);
+  const lastStep = pick(random, STEPS);
+  if (lastStep !== streamUnicodeStep) finishSplitCharacter(turn);
+  lastStep(turn, random, tag);
 
   // Recovery stamps the clock into the parts it seals; pin it so the two runs are comparable.
   const clock = spyOn(Date, 'now').mockReturnValue(Date.now() + 60_000);
