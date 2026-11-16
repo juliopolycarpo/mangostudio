@@ -61,6 +61,19 @@ describe('065_message_checkpoint_deltas', () => {
     expect(await schemaObject('trigger', TRIGGER)).toContain('AFTER UPDATE OF isGenerating');
   });
 
+  it('has the cleanup trigger on a fully migrated database', async () => {
+    const migrator = new Migrator({
+      db,
+      provider: { getMigrations: () => Promise.resolve(allMigrations) },
+    });
+    const { error } = await migrator.migrateToLatest();
+    if (error) throw new Error('expected every migration to apply', { cause: error });
+
+    // A later migration that rebuilds `messages` drops the trigger with the old table.
+    expect(await schemaObject('trigger', TRIGGER)).toContain('AFTER UPDATE OF isGenerating');
+    expect(await schemaObject('table', TABLE)).not.toBeNull();
+  });
+
   it('removes the table and the trigger on the way down', async () => {
     await migrateTo(TARGET);
 
