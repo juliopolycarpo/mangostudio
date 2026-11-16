@@ -11,7 +11,12 @@ import { join } from 'node:path';
 
 import { type Kysely, sql } from 'kysely';
 
-import { type PragmaRunner, relaxDurability, runDurably } from '../../../src/db/durability';
+import {
+  type PragmaRunner,
+  relaxDurability,
+  runDurably,
+  withFullDurability,
+} from '../../../src/db/durability';
 import type { Database } from '../../../src/db/types';
 import { runMigrations } from '../../../src/server/migrations';
 import { DiagnosticWarnCapture } from '../../support/diagnostic-warn-capture';
@@ -232,6 +237,101 @@ describe('runDurably', () => {
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain(label);
     expect(warnings[0]).toContain('not the relaxed connection');
+  });
+});
+
+describe('withFullDurability', () => {
+  it('runs work that uses the shared connection at FULL and restores NORMAL', async () => {
+    file = new ObservedFileDatabase(directory);
+    await relaxDurability(file.db);
+
+    const seen = await withFullDurability(file.db, 'durability_test_window', async () => {
+      await sql`SELECT 1`.execute(file.db);
+      return file.level();
+    });
+
+    expect({ seen, after: file.level() }).toEqual({ seen: FULL, after: NORMAL });
+  });
+
+  it('keeps FULL until the last of two overlapping callers is done', async () => {
+    file = new ObservedFileDatabase(directory);
+    await relaxDurability(file.db);
+    let releaseFirst: () => void = () => undefined;
+    const firstMayFinish = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    const first = withFullDurability(file.db, 'durability_test_first', () => firstMayFinish);
+    const second = withFullDurability(file.db, 'durability_test_second', () => Promise.resolve());
+    await second;
+    const afterSecond = file.level();
+    releaseFirst();
+    await first;
+
+    expect({ afterSecond, afterBoth: file.level() }).toEqual({
+      afterSecond: FULL,
+      afterBoth: NORMAL,
+    });
+  });
+
+  it('restores NORMAL and rethrows when the work fails', async () => {
+    file = new ObservedFileDatabase(directory);
+    await relaxDurability(file.db);
+    const failure = new Error('expected failure from the windowed work');
+
+    const outcome = await withFullDurability(file.db, 'durability_test_window_failure', () =>
+      Promise.reject(failure)
+    ).catch((error: unknown) => error);
+
+    expect({ outcome, synchronous: file.level() }).toEqual({
+      outcome: failure,
+      synchronous: NORMAL,
+    });
+  });
+
+  it('is not undone by a runDurably that finishes inside its window', async () => {
+    file = new ObservedFileDatabase(directory);
+    await relaxDurability(file.db);
+
+    const levelAfterInner = await withFullDurability(file.db, 'durability_test_outer', async () => {
+      await runDurably(file.db, 'durability_test_inner', (conn) => sql`SELECT 1`.execute(conn));
+      return file.level();
+    });
+
+    expect({ levelAfterInner, after: file.level() }).toEqual({
+      levelAfterInner: FULL,
+      after: NORMAL,
+    });
+  });
+
+  it('says so, and changes nothing, inside a transaction on a relaxed database', async () => {
+    file = new ObservedFileDatabase(directory);
+    await relaxDurability(file.db);
+    const before = pragmaStatements().length;
+
+    const warnings = await new DiagnosticWarnCapture().during(() =>
+      file.db
+        .transaction()
+        .execute((trx) =>
+          withFullDurability(trx, 'durability_test_window_in_transaction', () => Promise.resolve())
+        )
+    );
+
+    expect({
+      newPragmaStatements: pragmaStatements().length - before,
+      warned: warnings.length,
+    }).toEqual({
+      newPragmaStatements: 0,
+      warned: 1,
+    });
+  });
+
+  it('does not touch the pragma on a connection that is at FULL', async () => {
+    file = new ObservedFileDatabase(directory);
+
+    await withFullDurability(file.db, 'durability_test_window_unrelaxed', () => Promise.resolve());
+
+    expect(pragmaStatements()).toHaveLength(0);
   });
 });
 

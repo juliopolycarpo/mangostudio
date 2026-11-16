@@ -1,6 +1,7 @@
 import type { Kysely } from 'kysely';
 
 import { getDb } from '../../../db/database';
+import { runDurably } from '../../../db/durability';
 import type {
   Database,
   RuntimePairingTokenInsert,
@@ -95,17 +96,18 @@ export function createRuntimePairingRepository(
       };
       // Rotation is one transaction on purpose: a crash between the delete and
       // the insert would otherwise leave an environment that shows no token
-      // while the operator is holding the string the UI just printed.
-      await db()
-        .transaction()
-        .execute(async (transaction) => {
+      // while the operator is holding the string the UI just printed. It commits
+      // durably too: a power loss must not bring back the token it replaced.
+      await runDurably(db(), 'runtime_pairing_replace', (conn) =>
+        conn.transaction().execute(async (transaction) => {
           await transaction
             .deleteFrom('runtime_pairing_tokens')
             .where('userId', '=', input.userId)
             .where('environmentId', '=', input.environmentId)
             .execute();
           await transaction.insertInto('runtime_pairing_tokens').values(row).execute();
-        });
+        })
+      );
       return {
         id: input.id,
         userId: input.userId,
@@ -119,13 +121,16 @@ export function createRuntimePairingRepository(
 
     async revokeForEnvironment(userId, environmentId) {
       const update: RuntimePairingTokenUpdate = { revokedAt: Date.now() };
-      const result = await db()
-        .updateTable('runtime_pairing_tokens')
-        .set(update)
-        .where('userId', '=', userId)
-        .where('environmentId', '=', environmentId)
-        .where('revokedAt', 'is', null)
-        .executeTakeFirst();
+      // Durable: the user was told this token no longer works.
+      const result = await runDurably(db(), 'runtime_pairing_revoke', (conn) =>
+        conn
+          .updateTable('runtime_pairing_tokens')
+          .set(update)
+          .where('userId', '=', userId)
+          .where('environmentId', '=', environmentId)
+          .where('revokedAt', 'is', null)
+          .executeTakeFirst()
+      );
       return Number(result.numUpdatedRows);
     },
 
