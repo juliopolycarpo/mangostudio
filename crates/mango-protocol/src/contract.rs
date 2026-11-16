@@ -824,6 +824,7 @@ mod tests {
                     .check_result("test.result", &result)
                     .expect_err("a required property is missing");
                 let path = format!("{prefix}/{token}");
+                assert_eq!(error.code, "INTERNAL", "{error:?}");
                 assert_eq!(
                     error.details.as_ref().and_then(|d| d.get("path")),
                     Some(&json!(path)),
@@ -853,10 +854,22 @@ mod tests {
                     .check_result("test.result", &result)
                     .expect_err("an unexpected property is present");
                 let path = format!("{prefix}/{token}");
+                assert_eq!(error.code, "INTERNAL", "{error:?}");
                 assert_eq!(
                     error.details.as_ref().and_then(|d| d.get("path")),
                     Some(&json!(path)),
                     "expected path {path} for unexpected property {property:?}"
+                );
+                assert!(
+                    error.message.contains(&format!(" at {path}: ")),
+                    "{error:?}"
+                );
+                // The pointer must land on the offending value itself, so a
+                // reader following it finds what the schema refused.
+                assert_eq!(
+                    result.pointer(&path),
+                    Some(&json!(secret)),
+                    "expected {path} to resolve to the unexpected property's value in {result}"
                 );
                 assert!(!format!("{error:?}").contains(secret), "{error:?}");
             }
