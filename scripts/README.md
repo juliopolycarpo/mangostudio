@@ -506,6 +506,7 @@ MANGO_API_KEY='mango_…' bun run scripts/examples/external-api-smoke.ts http://
 | `startup.ts`                 | Median process-start → first healthy `GET /api/health` of a binary                                                              |
 | `runtime-handshake.ts`       | Runtime child over stdio: process start → `hello` → first request, min/median/p95/max                                           |
 | `grep.ts`                    | Runtime `fs.grep` over stdio: 1/100/1000 small files, a large file, peak RSS, cancel                                            |
+| `line-decoder.ts`            | Protocol NDJSON `LineDecoder`: ns per byte for large records in small pieces and for many short records, peak RSS               |
 | `rust-test-inventory.ts`     | Rust test inventory (libtest or nextest) by logical identity; diff two, total a log                                             |
 | `external-agent-boundary.ts` | Actual receipt hashing, admitted request ownership and event mapping; alternating Base/Head processes, raw timings and peak RSS |
 
@@ -595,6 +596,17 @@ latency. Run the same command on a base and a head binary on a quiet machine to 
 ```bash
 bun run scripts/bench/grep.ts target/release/mangostudio-runtime --runs 15
 bun run scripts/bench/grep.ts <binary> --scenario files-1000,cancel --json
+```
+
+`line-decoder.ts` loads `LineDecoder` from the `ndjson.ts` path it is given, so a base checkout and
+a head checkout run the same scenarios. Each scenario runs in a fresh `bun` child (one warm-up, then
+`--runs` timed passes) and prints one JSON line with min/median/p95/max per byte and the child's
+peak RSS. A pass checks the frame count, so a decoder that drops records fails rather than winning.
+
+```bash
+git worktree add --detach ../base origin/main && (cd ../base && bun install --frozen-lockfile)
+bun run scripts/bench/line-decoder.ts ../base/packages/protocol/src/codec/ndjson.ts --runs 7
+bun run scripts/bench/line-decoder.ts packages/protocol/src/codec/ndjson.ts --runs 7
 ```
 
 `rust-test-inventory.ts` proves a Rust test-target consolidation or a runner change lost no case:
