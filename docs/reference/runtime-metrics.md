@@ -133,9 +133,10 @@ fixtures.
 ## Hub binary: AOT function order
 
 The shipping hub is compiled with Bun's native `--aot` (see `docs/reference/releasing.md`); the
-bytecode section below is the explicit `--compiler bytecode` fallback. On Linux the build compiles
-the hub twice: once with `--aot-record-order`, then again with `--aot-order=<file>`, where the file
-is what the first binary wrote when it ran a fixed workload.
+bytecode section below is the explicit `--compiler bytecode` fallback. A Linux build that asks for it
+(`--production` or `--require-aot-order`; a plain local, smoke or test build does not) compiles the
+hub twice: once with `--aot-record-order`, then again with `--aot-order=<file>`, where the file is
+what the first binary wrote when it ran a fixed workload.
 
 `--aot-record-order` makes a binary write the order its functions first ran in when it exits with
 `BUN_AOT_ORDER_OUT` set; `--aot-order` lays the next compile out that way, so the code a hub touches
@@ -157,18 +158,52 @@ ran, so no startup change is claimed: median start to first healthy `/api/health
 base and 152 ms with the order, inside that noise.
 
 The file numbers functions by position, so it only works for the program it came from. One recorded
-from the previous build changed nothing (69.4 MB idle), and Bun does not say so: an empty, garbage
-or wrong-version file only prints "is not an order file", and a missing file is the only build
-error. Recordings of one binary were byte-identical across six runs. The build therefore records
-from the binary it is about to ship (`scripts/lib/aot-order.ts`), checks the file's shape itself, and
-never reuses a file from an earlier build. Recording takes the hub through `scripts/lib/hub-workload.ts`
-in a throwaway home on a loopback port under a 120 s deadline, and kills the hub whatever happens.
+from the previous build changed nothing (69.4 MB idle), and Bun says so only in some cases: an empty
+or garbage file prints `warn: --aot-order: <file> is not an order file. Nothing is placed by it`,
+and a missing file is the only build error. Bun does not check the `P <program size>` line or the
+function indexes: a file with a wrong size, or indexes past the end of the program, compiles
+silently and places nothing (tested). So a stale file is prevented, not detected. The build records
+from the binary it is about to ship (`scripts/lib/aot-order.ts`), empties the order directory first,
+checks the file's shape itself, and scans the shipping compile's stderr for Bun's warning: a local
+build warns and ships without an order, a required one fails. Recordings of one binary were
+byte-identical across six runs.
+
+Recording takes the hub through `scripts/lib/hub-workload.ts` in a throwaway home on a loopback port
+under a 120 s deadline. The hub runs with an allowlisted environment (`PATH`, locale, `TZ`, temp
+directories, plus the home and ports the recorder sets; no tokens, proxies, runtime override or
+update check), its state file must name the pid and port the recorder started before the workload
+runs, and a build cancelled by SIGINT, SIGTERM or SIGHUP stops the hub and removes its home. The
+recording binary and its source map (about 120 MB) are deleted after the shipping compile; the order
+file stays in `.mango/aot-order/<platform>/`, its SHA-256 is the `aotOrderSha256` of the hub's compile
+receipt (null when no order was applied), and the release distribution uploads it with the hub.
+
 It adds one extra compile and a run, about 8 s on a loaded host to a hub-only build that takes 15 to
 20 s. If recording fails the build warns and ships the hub without an order (about 10 MB more
-memory); `--require-aot-order`, which the release workflow passes, fails the build instead. Bun
-records on Linux only, so macOS and Windows hosts compile once and say so. Of the shipped targets
-the four Linux ones (x64 and arm64, glibc and musl) are built natively and record their own; only
-linux-x64 glibc has been measured.
+memory); `--require-aot-order` fails the build instead. The distribution build passes it for the
+platforms its `aot_order_platforms` input lists: every platform for a release and for pushes to
+main (daily Canary promotes those bundles), and linux-x64 only on pull requests, the hub their
+release dry run reuses. On those runs the added time is about 10 to 20 s on a Linux hub leg that
+finishes well before the 6 to 12 minute runtime jobs, so the critical path does not move. Bun records
+on Linux only, so macOS and Windows hosts compile once and say so. Of the shipped targets the four
+Linux ones (x64 and arm64, glibc and musl) are built natively and record their own; only linux-x64
+glibc has been measured.
+
+**What the recording covers.** The recording hub has no `mangostudio-runtime` beside it, because
+the hub jobs do not wait for the runtime jobs. The order therefore covers the hub's start-up and
+request paths, and a Local runtime launch that finds no binary. Measured on an installed layout
+(hub with its sibling runtime), idle RSS after 10 s, nine interleaved rounds:
+
+| Order recorded                 |        Idle VmRSS (KB) | After workload (KB) |
+| ------------------------------ | ---------------------: | ------------------: |
+| none                           |                 69,612 |              75,800 |
+| without a runtime (what ships) | 62,024 (61,240–63,020) |              67,920 |
+| with the sibling runtime       | 60,176 (59,908–61,808) |              66,588 |
+
+The no-order row is a single run; the two recorded rows are the nine-round medians. Recording with a
+runtime captured 5,683 functions against 5,526 and saves another 1.3 to 1.9 MB (about 3%) with
+disjoint ranges. Taking it would make the hub jobs wait for the runtime jobs (about 1 to 3 minutes
+on the release critical path) and need the musl runtime inside the Alpine container; that is
+tracked in [#2294](https://github.com/juliopolycarpo/mangostudio/issues/2294).
 
 Reproduce, from a clean checkout of each revision (both builds on one filesystem):
 
