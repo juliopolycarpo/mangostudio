@@ -64,3 +64,4 @@ export {
   SSEUserMessageIdEventSchema,
   StreamChunkSchema,
 } from './schemas';
+export { SSE_FRAME_MAX_CHARS } from './limits';
