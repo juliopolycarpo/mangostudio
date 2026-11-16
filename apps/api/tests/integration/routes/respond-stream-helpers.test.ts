@@ -95,13 +95,20 @@ describe('respond stream test helpers', () => {
     expect(() => capture.onInsert('activity_events', {})).toThrow('expected an array of rows');
   });
 
-  it('refuses retention deletion from unrelated tables', () => {
+  it('refuses deletion from unrelated tables', () => {
     const db = mockPassThroughDb('user-1')().getDb();
     const deleteFrom = db.deleteFrom as (table: string) => unknown;
 
     expect(() => deleteFrom('messages')).toThrow(
-      'stream database: expected activity_events deletion | received: messages'
+      'stream database: expected activity_events or message_checkpoint_deltas deletion | received: messages'
     );
+  });
+
+  it('accepts the delta cleanup a checkpoint rewrite issues', () => {
+    const db = mockPassThroughDb('user-1')().getDb();
+    const deleteFrom = db.deleteFrom as (table: string) => unknown;
+
+    expect(() => deleteFrom('message_checkpoint_deltas')).not.toThrow();
   });
 
   it('supports activity retention without returning a chat as an activity row', async () => {
