@@ -172,6 +172,24 @@ async function restoreNormal(db: Kysely<Database>): Promise<void> {
 }
 
 /**
+ * Restores `NORMAL` once the last caller of a window is done, deciding while it holds
+ * the connection. Kysely's connection lock does not hand the connection to waiters in
+ * order, so a restore queued behind other work can run after a new window has opened
+ * and raised the level; checking then, not when the restore was queued, is what stops
+ * it from lowering a window that is open.
+ */
+async function restoreUnlessWindowOpen(db: Kysely<Database>): Promise<void> {
+  try {
+    await db.connection().execute(async (conn) => {
+      if (!fullWindows.has(db)) await restoreNormal(conn);
+    });
+  } catch (error) {
+    // The connection stays at FULL, which is the safe side.
+    logger.warn('synchronous_restore_failed', { error: String(error) });
+  }
+}
+
+/**
  * Runs `work` with the connection at `FULL`, for code that has to use the shared
  * `db` itself. Better Auth's session and API key deletes are the case: they run
  * on the hub's one connection through an adapter this code cannot hand a
@@ -213,7 +231,7 @@ export async function withFullDurability<T>(
     window.depth -= 1;
     if (window.depth === 0) {
       fullWindows.delete(db);
-      await restoreNormal(db);
+      await restoreUnlessWindowOpen(db);
     }
   }
 }

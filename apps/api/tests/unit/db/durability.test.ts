@@ -335,6 +335,96 @@ describe('withFullDurability', () => {
   });
 });
 
+/** Holds the database's one connection, as a long running query would, until released. */
+function holdConnection(db: Kysely<Database>) {
+  let release: () => void = () => undefined;
+  let acquired: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const holding = new Promise<void>((resolve) => {
+    acquired = resolve;
+  });
+  const done = db.connection().execute(async () => {
+    acquired();
+    await gate;
+  });
+  return { holding, release, done };
+}
+
+const nextMacrotask = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+describe('withFullDurability windows that close and open around a busy connection', () => {
+  it('keeps FULL for a window that opens while the restore of the one before it is queued', async () => {
+    // The connection is free for a moment before the queued restore wakes: the second
+    // window's raise takes it in that gap, so the restore runs after the raise.
+    file = new ObservedFileDatabase(directory, { slowHandoff: true });
+    await relaxDurability(file.db);
+    await sql`CREATE TABLE marker (v TEXT)`.execute(file.db);
+    let finishFirst: () => void = () => undefined;
+    const firstMayFinish = new Promise<void>((resolve) => {
+      finishFirst = resolve;
+    });
+    let firstRaised: () => void = () => undefined;
+    const raised = new Promise<void>((resolve) => {
+      firstRaised = resolve;
+    });
+    const first = withFullDurability(file.db, 'durability_test_race_first', () => {
+      firstRaised();
+      return firstMayFinish;
+    });
+    await raised;
+
+    // The first window closes while something else holds the connection, so its restore waits.
+    const held = holdConnection(file.db);
+    await held.holding;
+    finishFirst();
+    await nextMacrotask();
+    let second: Promise<void> = Promise.resolve();
+    file.afterNextRelease(() => {
+      second = withFullDurability(file.db, 'durability_test_race_second', async () => {
+        // The window's caller does some work first (a handler reading its request), so the
+        // queued restore gets the connection before this write does.
+        await nextMacrotask();
+        await sql`INSERT INTO marker VALUES ('written in the second window')`.execute(file.db);
+      });
+    });
+    held.release();
+    await Promise.all([first, held.done]);
+    await second;
+
+    expect({
+      secondWriteLevel: file.levelOf(/INSERT INTO marker/i),
+      after: file.level(),
+    }).toEqual({ secondWriteLevel: FULL, after: NORMAL });
+  });
+
+  it('lets every caller rethrow a raise that fails, and a later window works', async () => {
+    file = new ObservedFileDatabase(directory);
+    await relaxDurability(file.db);
+    const failure = new Error('expected failure of the raise to FULL');
+    file.failNextStatement(/PRAGMA synchronous = FULL/i, failure);
+
+    const outcomes = await Promise.all([
+      withFullDurability(file.db, 'durability_test_raise_a', () => Promise.resolve('ran')).catch(
+        (error: unknown) => error
+      ),
+      withFullDurability(file.db, 'durability_test_raise_b', () => Promise.resolve('ran')).catch(
+        (error: unknown) => error
+      ),
+    ]);
+    const later = await withFullDurability(file.db, 'durability_test_raise_later', () =>
+      Promise.resolve(file.level())
+    );
+
+    expect({ outcomes, later, after: file.level() }).toEqual({
+      outcomes: [failure, failure],
+      later: FULL,
+      after: NORMAL,
+    });
+  });
+});
+
 describe('runMigrations', () => {
   it('applies every migration at FULL and lowers to NORMAL only after they finish', async () => {
     file = new ObservedFileDatabase(directory);
