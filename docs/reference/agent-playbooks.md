@@ -758,7 +758,8 @@ Open these first:
 
 - `apps/api/src/db/database.ts`
 - `apps/api/src/db/durability.ts` (`relaxDurability` after migrations; `runDurably` for a write that
-  must survive power loss)
+  must survive power loss; `withFullDurability` when the code that writes uses the shared `db` itself,
+  as Better Auth does)
 - `apps/api/src/db/types.ts`
 - `apps/api/src/db/serializers.ts`
 - `apps/api/src/db/migrations/`

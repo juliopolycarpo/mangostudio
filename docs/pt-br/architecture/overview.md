@@ -285,8 +285,9 @@ verifica os exports de compatibilidade e as escolhas derivadas dos schemas.
 SQLite via Kysely. O registro ordenado em `apps/api/src/db/migrations/index.ts`
 é a fonte de verdade das migrações. O hub roda o banco de arquivo em WAL mode
 (`apps/api/src/db/database.ts`) e baixa `synchronous` para `NORMAL` depois que as migrações terminam;
-escritas que guardam um passo que o banco não consegue desfazer são gravadas em `FULL` por
-`runDurably` (`apps/api/src/db/durability.ts`). O que uma queda de energia pode e não pode perder está em
+escritas que guardam um passo que o banco não consegue desfazer, e revogações (tokens de pareamento,
+chaves de API, toda requisição de autenticação), são gravadas em `FULL` por `runDurably` e
+`withFullDurability` (`apps/api/src/db/durability.ts`). O que uma queda de energia pode e não pode perder está em
 [deployment](../operations/deployment.md#banco-de-dados). As famílias de tabelas incluem:
 
 - Tabelas centrais: `chats`, `messages`, `generated_images`, `chat_attachments`
