@@ -206,6 +206,9 @@ export class CheckpointPlanner {
           part.isError === mark.isError &&
           part.content === mark.content
         ) {
+          // Equal under a different string object: hold the new one, so the next
+          // comparison of this result is a pointer check again, not a scan.
+          marks[i] = { ...mark, content: part.content };
           continue;
         }
       } else {

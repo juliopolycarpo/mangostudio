@@ -193,6 +193,26 @@ describe('CheckpointPlanner', () => {
     expect(store.deltaChars - before).toBeLessThan(200);
   });
 
+  it('still notices a changed result after an equal copy replaced the one it holds', () => {
+    const planner = new CheckpointPlanner();
+    const store = new ReplayedStore();
+    const { parts, live } = newTurn();
+    const content = 'r'.repeat(40_000);
+    parts.push({ type: 'tool_result', toolCallId: 'c1', content });
+    store.apply(planner.plan(live), live);
+
+    // The planner refreshes its mark to the new string object on an equal match; string
+    // identity is not observable from here, so this pins that the refresh keeps the value.
+    parts[1] = { type: 'tool_result', toolCallId: 'c1', content: `${content}` };
+    store.apply(planner.plan(live), live);
+    const afterCopy = store.deltaChars;
+    parts[1] = { type: 'tool_result', toolCallId: 'c1', content: `${content}`.slice(0, 39_999) };
+    store.apply(planner.plan(live), live);
+
+    expectStoreMatchesLive(store, live);
+    expect(store.deltaChars - afterCopy).toBeGreaterThan(39_000);
+  });
+
   it('writes a text part whose stored prefix changed, though its length did not', () => {
     const planner = new CheckpointPlanner();
     const store = new ReplayedStore();
