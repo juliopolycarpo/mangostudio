@@ -308,6 +308,23 @@ at least 128 B and 5 %; fonts and images are never tried.
   manifest's second export, `embeddedFrontendEncodings`, maps an identity URL path to its
   copies. They are deliberately not keys of `embeddedFrontend`: every key there is a public
   route and a line in `doctor`'s file count.
+- **No identity copy for hashed assets.** A file under `/assets/` that has a gzip copy is not
+  embedded uncompressed: its `embeddedFrontend` value is `null`, and a request that accepts no
+  stored coding inflates the gzip copy with `Bun.gunzipSync` (never `node:zlib`, which adds 184 KB
+  to the binary). The manifest's third export, `embeddedFrontendIdentity`, records each such
+  file's decoded length and its `ETag` (the hash of the original bytes, the tag a build that
+  embedded them would send), so HEAD and `If-None-Match` never inflate. A GET inflates once and
+  keeps the body in a cache shared by all assets and sized from the build to the total decoded
+  size of the dropped files (5.86 MB today). Identity-only clients (`curl` without
+  `--compressed`, health checkers) therefore cost one inflation per asset, and the memory
+  ceiling is that total however many requests arrive. A single `bytes=` `Range` is answered from
+  the decoded buffer (206, `Content-Range`, 416 when unsatisfiable) exactly as Bun answers it
+  over a stored file; anything else gets the whole body. Every gzip and Brotli copy is decoded
+  back to the original when it is produced, so a broken copy fails the build. Root files keep
+  their identity copy: the doctor reads `/build-info.json` from the manifest. Brotli-only files
+  and files without any copy keep identity too, because there is nothing to inflate. A manifest
+  that names a `null` file with no gzip copy or no recorded measurement is refused at
+  registration with a warning.
 - **Compression cache.** Brotli 11 on the bundle takes about 10 s, and the step runs on every
   build, `--reuse-frontend` included. `writeEmbedModules` therefore keeps the compressed bytes
   under `.mango/out/embed/compression-cache/`, one file per coding and input, named by a SHA-256

@@ -114,6 +114,9 @@ export async function deleteCheckpointDeltas(
  * deltas folded over the new row would repeat text. The delete runs even for a
  * turn's first rewrite, when nothing is expected to be there, so correctness
  * does not depend on this writer being the only one for the message.
+ *
+ * Resolves to whether a generating row was rewritten; `false` means the message
+ * was already finalized (or is gone) and nothing was stored.
  */
 export async function rewriteCheckpointedRow(
   input: {
@@ -124,9 +127,9 @@ export async function rewriteCheckpointedRow(
     readonly generationTime: string | null | undefined;
   },
   db: Kysely<Database>
-): Promise<void> {
-  await db.transaction().execute(async (trx) => {
-    await trx
+): Promise<boolean> {
+  return db.transaction().execute(async (trx) => {
+    const result = await trx
       .updateTable('messages')
       .set({
         text: input.text,
@@ -136,8 +139,9 @@ export async function rewriteCheckpointedRow(
       })
       .where('id', '=', input.messageId)
       .where('isGenerating', '=', 1)
-      .execute();
+      .executeTakeFirst();
     await deleteCheckpointDeltas(input.messageId, trx);
+    return result.numUpdatedRows > 0n;
   });
 }
 

@@ -214,6 +214,20 @@ para `NORMAL`. Em `NORMAL`, um commit é acrescentado ao write-ahead log sem fsy
 quando o SQLite faz o checkpoint dele no arquivo principal. Se o sistema de arquivos não der WAL mode ao
 hub, ele mantém `FULL` e registra `synchronous_kept_full`.
 
+Toda conexão começa em `FULL`: o hub define esse nível explicitamente depois de mudar para WAL. O macOS usa
+o SQLite da Apple, cujo padrão em WAL é `NORMAL`, então uma conexão que abre um arquivo WAL ali rodaria as
+migrações abaixo de `FULL`.
+
+No macOS, o `fsync` chega só ao cache do disco. O `F_FULLFSYNC` chega ao armazenamento estável, e o SQLite
+só o usa em sincronizações comuns quando `PRAGMA fullfsync` está ligado; a build da Apple já o usa nos
+checkpoints (`checkpoint_fullfsync` vem ligado). Depois das migrações, o hub define `fullfsync = 1` no
+macOS, de modo que as escritas sempre sincronizadas abaixo sobrevivam a uma queda de energia, e não só a
+uma falha do sistema operacional. Commits em `NORMAL` não sincronizam, então escritas comuns não pagam
+nada; cada commit sempre sincronizado paga, uma vez por chamada de ferramenta que não seja uma leitura
+simples. Em um runner macOS hospedado do GitHub (disco virtual), a mediana de um commit em `FULL` foi de
+1,1 a 1,3 ms com a opção e de 0,1 a 0,2 ms sem ela, em três execuções de 290 commits. O tempo de descarga
+de um disco físico é diferente. As migrações mantêm o `fsync` simples.
+
 O que uma falha custa depende do que falhou:
 
 - **O hub cai ou é encerrado à força.** Nada se perde: o sistema operacional ainda guarda as páginas
@@ -228,9 +242,13 @@ O que uma falha custa depende do que falhou:
   - Marcadores de efeito colateral de ferramenta: o checkpoint que registra uma chamada de ferramenta
     como em execução (qualquer ferramenta que não seja uma leitura simples), cada imagem gerada
     concluída, o recibo gravado antes de um turno de agente externo ser enviado e o resultado de uma
-    geração de imagem avulsa. Isso estreita a janela em que uma queda de energia faz o hub executar esse
-    passo uma segunda vez; não a fecha. A ferramenta começa enquanto o marcador é gravado, então uma
-    queda nesses poucos milissegundos ainda mostra a chamada como não iniciada.
+    geração de imagem avulsa. O hub espera esse checkpoint antes de iniciar a ferramenta, então uma queda
+    do processo ou de energia não deixa uma chamada que foi executada registrada como não iniciada. Se o
+    checkpoint não puder ser gravado, a ferramenta não inicia e o modelo recebe um erro. Isso vale também
+    para a geração de imagem. Uma chamada cancelada enquanto o marcador é gravado não inicia e
+    normalmente fica registrada como `cancelled`; se o hub cair antes de isso ser salvo, a recuperação
+    encontra o marcador `running` e trata o resultado como desconhecido. Isso custa um fsync por chamada
+    desse tipo.
   - Revogações: substituir ou revogar um token de pareamento do runtime, revogar uma chave de API e as
     requisições de autenticação que apagam ou trocam uma credencial (logout, revogar uma ou todas as
     sessões, trocar ou redefinir a senha, atualizar ou apagar uma chave de API). Login, cadastro e
