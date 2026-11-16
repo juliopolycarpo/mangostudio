@@ -583,6 +583,80 @@ async fn validates_results_when_asked() {
     );
 }
 
+/// A contract built with `from_shared_catalog_lazy` serves like an eager one,
+/// compiling each schema on the request that needs it. A schema that does not
+/// compile answers that method alone with `INTERNAL`, naming the method and
+/// the catalog field, never `INVALID_PARAMS`; the other methods still work.
+#[tokio::test]
+async fn serves_a_lazy_contract_and_answers_internal_for_a_schema_that_does_not_compile() {
+    let (session_a, session_b) = sessions().await;
+    let mut catalog = example().catalog();
+    let position = |name: &str| {
+        catalog
+            .methods
+            .iter()
+            .position(|declared| declared.name == name)
+            .expect("example declares the method")
+    };
+    let (echo, add) = (position("text.echo"), position("math.add"));
+    // `text.echo` fails in its result schema, `math.add` in its params.
+    catalog.methods[echo].result = json!({ "type": "not-a-type" });
+    catalog.methods[add].params = json!({ "type": "not-a-type" });
+    let contract = Contract::from_shared_catalog_lazy(Arc::new(catalog))
+        .expect("the names are valid and no schema is compiled yet");
+    let handlers = ContractHandlers::new()
+        .on("text.echo", |params: EchoParams, _context| async move {
+            Ok::<_, mango_protocol::error::RemoteError>(json!({ "text": params.text }))
+        })
+        .on("math.add", |params: AddParams, _context| async move {
+            Ok::<_, mango_protocol::error::RemoteError>(params.a + params.b)
+        });
+    let options = ServeOptions {
+        validate_results: true,
+        ..Default::default()
+    };
+    let _served = contract
+        .serve(&session_b, handlers, options)
+        .expect("both methods are declared");
+
+    // The params schema of text.echo is fine: the request is validated, the
+    // handler runs, and only the result schema fails, as INTERNAL.
+    let bad_params = within(
+        "text.echo with params that violate a schema that compiles",
+        session_a.request("text.echo", json!({})),
+    )
+    .await
+    .expect_err("text is required");
+    assert_eq!(bad_params.code, codes::INVALID_PARAMS);
+
+    let broken_result = within(
+        "text.echo with a result schema that does not compile",
+        session_a.request("text.echo", json!({ "text": "hi" })),
+    )
+    .await
+    .expect_err("the result schema does not compile");
+    assert_eq!(broken_result.code, codes::INTERNAL);
+    let details = broken_result.details.as_ref().expect("details");
+    assert_eq!(details.get("method"), Some(&json!("text.echo")));
+    assert_eq!(
+        details.get("field"),
+        Some(&json!(format!("catalog.methods[{echo}].result"))),
+        "expected the failing schema's field | received: {details:?}"
+    );
+
+    let broken_params = within(
+        "math.add with a params schema that does not compile",
+        session_a.request("math.add", json!({ "a": 1, "b": 2 })),
+    )
+    .await
+    .expect_err("the params schema does not compile");
+    assert_eq!(broken_params.code, codes::INTERNAL);
+    assert_eq!(
+        broken_params.details.as_ref().and_then(|d| d.get("field")),
+        Some(&json!(format!("catalog.methods[{add}].params")))
+    );
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 struct TickPayload {
     at: f64,

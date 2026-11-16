@@ -157,6 +157,16 @@ contract with `Contract::from_shared_catalog(Arc<Catalog>)`: the contract holds 
 instead of cloning it, and `rpc.discover` renders the document from it per answer, so serving a
 contract costs no per-connection copy of the catalog.
 
+`from_catalog`, `from_shared_catalog` and `ContractBuilder::build` compile every schema the catalog
+embeds before they return, so a malformed one is an `Err` there. A host that serves a large catalog
+and is asked for a small part of it can use `Contract::from_shared_catalog_lazy(Arc<Catalog>)`
+instead: it checks names and the catalog's shape, and each method's `params` and `result` schema
+compiles on the first request that needs it (shared by every handler the contract serves). A
+schema that does not compile then answers that method `INTERNAL`, with `details.method` and
+`details.field` (such as `catalog.methods[3].result`), and never `INVALID_PARAMS`: the caller sent
+nothing wrong. Call `Contract::compile_all()` in a test, or once at start, to get the error the
+eager constructors would have returned before a request finds it.
+
 A session bounds what the peer can make it hold, so a peer that opens requests and never cancels
 them cannot grow this side without limit:
 

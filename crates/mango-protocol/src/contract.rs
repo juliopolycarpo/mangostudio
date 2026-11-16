@@ -8,7 +8,7 @@
 //! handlers on a [`crate::session::Session`]; [`Contract::client`] and
 //! [`Contract::events`] call and publish through one.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use jsonschema::Validator;
 use serde::de::DeserializeOwned;
@@ -29,13 +29,61 @@ pub use client::ContractClient;
 pub use events::{ContractEvents, EventOptions, TypedEvent, TypedEventStream};
 pub use serve::{ContractHandlers, Guard, ServeGuard, ServeOptions};
 
-/// One method's compiled `params`/`result` validators, at the same index as
-/// its declaration in the contract's catalog. The declaration stays in the
+/// A schema compiled at most once, at the first request that needs it or by
+/// [`Contract::compile_all`]. The outcome is kept either way, so a schema
+/// that does not compile is not retried on every request.
+type CompiledSchema = OnceLock<Result<Validator, ValidationError>>;
+
+/// One method's `params`/`result` validators, at the same index as its
+/// declaration in the contract's catalog. The declaration stays in the
 /// catalog: a copy here would hold every schema document a second time.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct CompiledMethod {
-    params: Arc<Validator>,
-    result: Arc<Validator>,
+    params: CompiledSchema,
+    result: CompiledSchema,
+}
+
+/// What a [`Contract`] shares with every handler [`Contract::serve`]
+/// registers on it, so a validator compiled by one request is the one every
+/// later request, on any handler, uses.
+#[derive(Debug)]
+struct ContractCore {
+    /// Shared, so a host that keeps its own parsed catalog (a process-wide
+    /// static, say) hands the contract that one copy
+    /// ([`Contract::from_shared_catalog`]) instead of a second.
+    catalog: Arc<Catalog>,
+    /// `methods[i]` holds the validators of `catalog.methods[i]`.
+    methods: Vec<CompiledMethod>,
+}
+
+impl ContractCore {
+    /// The `params` validator of `catalog.methods[index]`, compiled now when
+    /// no request or [`Contract::compile_all`] has yet.
+    fn params_validator(&self, index: usize) -> Result<&Validator, &ValidationError> {
+        self.methods[index]
+            .params
+            .get_or_init(|| {
+                params::compile(
+                    &format!("catalog.methods[{index}].params"),
+                    &self.catalog.methods[index].params,
+                )
+            })
+            .as_ref()
+    }
+
+    /// The `result` validator of `catalog.methods[index]`; see
+    /// [`ContractCore::params_validator`].
+    fn result_validator(&self, index: usize) -> Result<&Validator, &ValidationError> {
+        self.methods[index]
+            .result
+            .get_or_init(|| {
+                params::compile(
+                    &format!("catalog.methods[{index}].result"),
+                    &self.catalog.methods[index].result,
+                )
+            })
+            .as_ref()
+    }
 }
 
 /// A validated, ready-to-serve application contract.
@@ -62,12 +110,7 @@ struct CompiledMethod {
 /// ```
 #[derive(Debug)]
 pub struct Contract {
-    /// Shared, so a host that keeps its own parsed catalog (a process-wide
-    /// static, say) hands the contract that one copy
-    /// ([`Contract::from_shared_catalog`]) instead of a second.
-    catalog: Arc<Catalog>,
-    /// `methods[i]` holds the validators of `catalog.methods[i]`.
-    methods: Vec<CompiledMethod>,
+    core: Arc<ContractCore>,
 }
 
 impl Contract {
@@ -115,7 +158,7 @@ impl Contract {
     /// assert_eq!(contract.catalog().name, "example.files");
     /// ```
     pub fn from_catalog(catalog: Catalog) -> Result<Self, ValidationError> {
-        compile(Arc::new(catalog))
+        Self::from_shared_catalog(Arc::new(catalog))
     }
 
     /// [`Contract::from_catalog`] for a catalog the caller keeps using: the
@@ -151,7 +194,102 @@ impl Contract {
     /// assert_eq!(contract.catalog(), *catalog);
     /// ```
     pub fn from_shared_catalog(catalog: Arc<Catalog>) -> Result<Self, ValidationError> {
+        let contract = Self::from_shared_catalog_lazy(catalog)?;
+        contract.compile_all()?;
+        Ok(contract)
+    }
+
+    /// [`Contract::from_shared_catalog`] without compiling the catalog's
+    /// schemas: each method's `params` and `result` schema compiles the first
+    /// time a request needs it, and event and capability schemas not at all.
+    /// Names and the catalog's shape are still checked here.
+    ///
+    /// For a process that serves a large catalog and is asked for a small
+    /// part of it. A runtime's embedded catalog holds 68 methods; a hub
+    /// calls a fraction of them, and compiling every schema first costs
+    /// about 8 ms and several MiB before the first request is answered.
+    ///
+    /// The price is where a malformed schema shows up. [`Contract::from_shared_catalog`]
+    /// reports it here, at construction. This constructor cannot: the first
+    /// request that reaches that schema is answered `INTERNAL`, with the
+    /// method and the catalog field in its details (the caller sent nothing
+    /// wrong, so never `INVALID_PARAMS`). Call [`Contract::compile_all`] in a
+    /// test, or once at start where an early failure is worth the cost, so a
+    /// broken catalog is caught before a request finds it.
+    ///
+    /// # Errors
+    /// Returns [`ValidationError`] for the reasons [`ContractBuilder::build`]
+    /// does, except an invalid JSON Schema document, which this does not
+    /// look at.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use mango_protocol::Catalog;
+    /// use mango_protocol::catalog::CatalogMethod;
+    /// use mango_protocol::contract::Contract;
+    /// use serde_json::json;
+    ///
+    /// let catalog = Arc::new(Catalog {
+    ///     name: "example".into(),
+    ///     version: "1.0.0".into(),
+    ///     description: None,
+    ///     protocol: None,
+    ///     methods: vec![CatalogMethod {
+    ///         name: "text.echo".into(),
+    ///         description: None,
+    ///         params: json!({ "type": "not-a-type" }),
+    ///         result: json!({ "type": "object" }),
+    ///         capabilities: vec![],
+    ///         deprecated: false,
+    ///     }],
+    ///     events: vec![],
+    ///     capabilities: None,
+    /// });
+    ///
+    /// assert!(Contract::from_shared_catalog(Arc::clone(&catalog)).is_err());
+    /// let contract = Contract::from_shared_catalog_lazy(catalog)
+    ///     .expect("the names are valid and no schema is compiled yet");
+    /// assert_eq!(
+    ///     contract.compile_all().unwrap_err().field,
+    ///     "catalog.methods[0].params"
+    /// );
+    /// ```
+    pub fn from_shared_catalog_lazy(catalog: Arc<Catalog>) -> Result<Self, ValidationError> {
         compile(catalog)
+    }
+
+    /// Compiles every schema the catalog embeds that is not compiled yet:
+    /// each method's `params` and `result`, each event's payload and the
+    /// capability document. Compiled method validators are kept for later
+    /// requests; the rest are checked and dropped. A cheap re-check on a
+    /// contract that [`Contract::from_catalog`], [`Contract::from_shared_catalog`]
+    /// or [`ContractBuilder::build`] already compiled.
+    ///
+    /// # Errors
+    /// The first schema that is not a valid JSON Schema 2020-12 document, in
+    /// catalog order (methods, then events, then capabilities), with the
+    /// `field` the eager constructors report for it, such as
+    /// `catalog.methods[3].result`.
+    pub fn compile_all(&self) -> Result<(), ValidationError> {
+        for index in 0..self.core.methods.len() {
+            self.core.params_validator(index).map_err(Clone::clone)?;
+            self.core.result_validator(index).map_err(Clone::clone)?;
+        }
+        // Event payloads and the capability document are compiled for their
+        // validity alone, not kept: nothing validates an outbound event
+        // against its payload schema yet, but `catalog()` publishes all of
+        // them as checked documents, so a malformed one has to fail here
+        // rather than reach a peer.
+        for (index, event) in self.core.catalog.events.iter().enumerate() {
+            params::compile(&format!("catalog.events[{index}].payload"), &event.payload)?;
+        }
+        if let Some(capabilities) = &self.core.catalog.capabilities {
+            params::compile("catalog.capabilities", capabilities)?;
+        }
+        Ok(())
     }
 
     /// The catalog document backing this contract: every method's and
@@ -160,7 +298,7 @@ impl Contract {
     /// clone of that proof, not a fresh check.
     #[must_use]
     pub fn catalog(&self) -> Catalog {
-        (*self.catalog).clone()
+        (*self.core.catalog).clone()
     }
 
     /// Validates `params` against `method`'s schema, then deserialises it.
@@ -214,10 +352,14 @@ impl Contract {
         method: &str,
         params: Value,
     ) -> Result<P, RemoteError> {
-        let (_, compiled) = self
-            .method(method)
-            .ok_or_else(|| unsupported(&self.catalog.name, method))?;
-        check_params(method, &compiled.params, &params)?;
+        let index = self
+            .method_index(method)
+            .ok_or_else(|| unsupported(&self.core.catalog.name, method))?;
+        let validator = self
+            .core
+            .params_validator(index)
+            .map_err(|error| uncompiled(method, error))?;
+        check_params(method, validator, &params)?;
         decode(method, params)
     }
 
@@ -457,21 +599,41 @@ impl Contract {
     /// assert!(!error.message.contains("SECRET"));
     /// ```
     pub fn check_result(&self, method: &str, result: &Value) -> Result<(), RemoteError> {
-        let (_, compiled) = self
-            .method(method)
-            .ok_or_else(|| unsupported(&self.catalog.name, method))?;
-        check_result(method, &compiled.result, result, ReasonStyle::Masked)
+        let index = self
+            .method_index(method)
+            .ok_or_else(|| unsupported(&self.core.catalog.name, method))?;
+        let validator = self
+            .core
+            .result_validator(index)
+            .map_err(|error| uncompiled(method, error))?;
+        check_result(method, validator, result, ReasonStyle::Masked)
     }
 
-    /// `name`'s declaration and its compiled validators.
-    fn method(&self, name: &str) -> Option<(&CatalogMethod, &CompiledMethod)> {
-        let index = self
+    /// The position of `name` in the catalog's methods, which is also the
+    /// position of its validators.
+    fn method_index(&self, name: &str) -> Option<usize> {
+        self.core
             .catalog
             .methods
             .iter()
-            .position(|method| method.name == name)?;
-        Some((&self.catalog.methods[index], &self.methods[index]))
+            .position(|method| method.name == name)
     }
+}
+
+/// The answer for a method whose schema did not compile when a request
+/// needed it ([`Contract::from_shared_catalog_lazy`]). The server's own
+/// contract is broken and the caller sent nothing wrong, so `INTERNAL`, not
+/// `INVALID_PARAMS`, naming the method and the catalog field that failed.
+fn uncompiled(method: &str, error: &ValidationError) -> RemoteError {
+    RemoteError::new(
+        codes::INTERNAL,
+        format!(
+            "The contract's schema for \"{method}\" does not compile at {}: {}.",
+            error.field, error.received
+        ),
+    )
+    .with_detail("method", method.to_string())
+    .with_detail("field", error.field.clone())
 }
 
 /// The `INVALID_PARAMS`/`INTERNAL` split [`Contract::parse_params`] and
@@ -613,17 +775,18 @@ impl ContractBuilder {
     /// assert_eq!(error.field, "catalog.name");
     /// ```
     pub fn build(self) -> Result<Contract, ValidationError> {
-        compile(Arc::new(self.catalog))
+        Contract::from_catalog(self.catalog)
     }
 }
 
 /// Checks names — [`Catalog::validate`]'s grammar, length and
 /// schema-document-shape rules, plus the reserved `rpc.` segment it does not
 /// know about, since that is a contract-level rule, not a wire-schema one —
-/// then compiles every schema the catalog embeds. The single path
-/// [`ContractBuilder::build`] and [`Contract::from_catalog`] both funnel
-/// through, so declare-then-compile and deserialise-then-compile cannot drift
-/// apart.
+/// and wraps the catalog with room for each method's validators, compiling
+/// none of them. [`ContractBuilder::build`], [`Contract::from_catalog`] and
+/// [`Contract::from_shared_catalog`] follow it with [`Contract::compile_all`];
+/// [`Contract::from_shared_catalog_lazy`] does not. One path for all four, so
+/// declare-then-compile and deserialise-then-compile cannot drift apart.
 fn compile(catalog: Arc<Catalog>) -> Result<Contract, ValidationError> {
     catalog.validate()?;
     for (index, method) in catalog.methods.iter().enumerate() {
@@ -635,32 +798,11 @@ fn compile(catalog: Arc<Catalog>) -> Result<Contract, ValidationError> {
     let methods = catalog
         .methods
         .iter()
-        .enumerate()
-        .map(|(index, method)| {
-            Ok(CompiledMethod {
-                params: Arc::new(params::compile(
-                    &format!("catalog.methods[{index}].params"),
-                    &method.params,
-                )?),
-                result: Arc::new(params::compile(
-                    &format!("catalog.methods[{index}].result"),
-                    &method.result,
-                )?),
-            })
-        })
-        .collect::<Result<Vec<_>, ValidationError>>()?;
-    // Event payloads and the capability document are compiled for their
-    // validity alone, not kept: nothing validates an outbound event against
-    // its payload schema yet, but `catalog()` publishes all of them as
-    // checked documents, so a malformed one has to fail here rather than
-    // reach a peer.
-    for (index, event) in catalog.events.iter().enumerate() {
-        params::compile(&format!("catalog.events[{index}].payload"), &event.payload)?;
-    }
-    if let Some(capabilities) = &catalog.capabilities {
-        params::compile("catalog.capabilities", capabilities)?;
-    }
-    Ok(Contract { catalog, methods })
+        .map(|_| CompiledMethod::default())
+        .collect();
+    Ok(Contract {
+        core: Arc::new(ContractCore { catalog, methods }),
+    })
 }
 
 fn assert_not_reserved(field: &str, name: &str) -> Result<(), ValidationError> {
@@ -752,7 +894,7 @@ mod tests {
         let contract = Contract::from_shared_catalog(Arc::clone(&catalog))
             .expect("the example catalog compiles");
         assert!(
-            Arc::ptr_eq(&contract.catalog, &catalog),
+            Arc::ptr_eq(&contract.core.catalog, &catalog),
             "expected the contract to hold the caller's catalog | received: a copy"
         );
         let ok: AddParams = contract
@@ -775,11 +917,13 @@ mod tests {
         assert_eq!(contract.catalog().name, "example.files");
     }
 
-    /// Serving with discover on hands the `rpc.discover` handler a share of
-    /// the contract's catalog, and renders no document of its own: a copy
-    /// would cost every connection about as much memory as the catalog.
+    /// Serving with discover on gives the `rpc.discover` handler exactly one
+    /// more share of the contract's catalog `Arc`, and unregistering gives it
+    /// back. That bounds what the handler holds on to the catalog's own
+    /// reference count; it does not by itself rule out a document cached
+    /// beside the `Arc`, which this count cannot see.
     #[tokio::test]
-    async fn serving_discover_shares_the_catalog_instead_of_rendering_it() {
+    async fn the_discover_handler_holds_one_share_of_the_catalog_until_unregistered() {
         use crate::frame::PeerInfo;
         use crate::port::port_pair;
         use crate::session::{Session, SessionOptions};
@@ -792,20 +936,20 @@ mod tests {
             role: "runtime".into(),
         };
         let (session, _driver) = Session::spawn(port, SessionOptions::new(peer));
-        let before = Arc::strong_count(&contract.catalog);
+        let before = Arc::strong_count(&contract.core.catalog);
 
         let guard = contract
             .serve(&session, super::ContractHandlers::new(), Default::default())
             .expect("serving no handlers always succeeds");
         assert_eq!(
-            Arc::strong_count(&contract.catalog),
+            Arc::strong_count(&contract.core.catalog),
             before + 1,
             "expected the discover handler to hold one share of the catalog | received strong count {} (was {before})",
-            Arc::strong_count(&contract.catalog)
+            Arc::strong_count(&contract.core.catalog)
         );
         drop(guard);
         assert_eq!(
-            Arc::strong_count(&contract.catalog),
+            Arc::strong_count(&contract.core.catalog),
             before,
             "expected unregistering to release the share"
         );
@@ -835,6 +979,161 @@ mod tests {
             .build()
             .expect_err("a capability document that is not a schema");
         assert_eq!(error.field, "catalog.capabilities");
+    }
+
+    /// Two methods whose schemas fail in different places, an event and a
+    /// capability document that also fail: `math.add` has a malformed `result`,
+    /// `text.echo` a malformed `params`.
+    fn catalog_with_malformed_schemas() -> Arc<crate::Catalog> {
+        let malformed = json!({ "type": "not-a-type" });
+        Arc::new(crate::Catalog {
+            name: "x".into(),
+            version: "1".into(),
+            description: None,
+            protocol: None,
+            methods: vec![
+                sample_method(
+                    "math.add",
+                    json!({
+                        "type": "object",
+                        "properties": { "a": { "type": "number" }, "b": { "type": "number" } },
+                        "required": ["a", "b"],
+                    }),
+                    malformed.clone(),
+                ),
+                sample_method("text.echo", malformed.clone(), json!({ "type": "object" })),
+            ],
+            events: vec![CatalogEvent {
+                topic: "text.tick".into(),
+                description: None,
+                payload: malformed.clone(),
+                stream: false,
+            }],
+            capabilities: Some(malformed),
+        })
+    }
+
+    /// The lazy constructor accepts what the eager one refuses, and
+    /// `compile_all` then reports exactly the error the eager constructor
+    /// reports, so a test that calls it catches what a first request would
+    /// otherwise find.
+    #[test]
+    fn compile_all_reports_what_the_eager_constructor_reports() {
+        let catalog = catalog_with_malformed_schemas();
+        let eager = Contract::from_shared_catalog(Arc::clone(&catalog))
+            .expect_err("the eager constructor refuses");
+        let lazy = Contract::from_shared_catalog_lazy(catalog)
+            .expect("names are valid; no schema is compiled yet");
+        let deferred = lazy.compile_all().expect_err("a schema is malformed");
+        assert_eq!(deferred.field, "catalog.methods[0].result");
+        assert_eq!(
+            deferred, eager,
+            "expected compile_all to report what from_shared_catalog reports"
+        );
+    }
+
+    /// The order the eager constructors always reported in: methods (params
+    /// then result), then events, then the capability document.
+    #[test]
+    fn compile_all_reports_methods_then_events_then_capabilities() {
+        let mut catalog = (*catalog_with_malformed_schemas()).clone();
+        catalog.methods.clear();
+        let lazy =
+            Contract::from_shared_catalog_lazy(Arc::new(catalog.clone())).expect("names are valid");
+        assert_eq!(
+            lazy.compile_all().unwrap_err().field,
+            "catalog.events[0].payload"
+        );
+
+        catalog.events.clear();
+        let lazy = Contract::from_shared_catalog_lazy(Arc::new(catalog)).expect("names are valid");
+        assert_eq!(
+            lazy.compile_all().unwrap_err().field,
+            "catalog.capabilities"
+        );
+    }
+
+    /// A lazy contract answers through a method whose own schemas compile,
+    /// whatever its neighbours' schemas are.
+    #[test]
+    fn a_lazy_contract_serves_a_method_whose_schemas_compile() {
+        let lazy = Contract::from_shared_catalog_lazy(catalog_with_malformed_schemas())
+            .expect("names are valid");
+        let ok: AddParams = lazy
+            .parse_params("math.add", json!({ "a": 1, "b": 2 }))
+            .expect("math.add's params schema compiles on first use");
+        assert_eq!((ok.a, ok.b), (1.0, 2.0));
+        let error = lazy
+            .parse_params::<AddParams>("math.add", json!({ "a": "one", "b": 2 }))
+            .expect_err("a string is not a number");
+        assert_eq!(error.code, "INVALID_PARAMS");
+    }
+
+    /// A params schema that does not compile answers `INTERNAL` naming the
+    /// method and the catalog field: the server's contract is broken, and the
+    /// caller sent nothing wrong.
+    #[test]
+    fn parse_params_answers_internal_for_a_params_schema_that_does_not_compile() {
+        let lazy = Contract::from_shared_catalog_lazy(catalog_with_malformed_schemas())
+            .expect("names are valid");
+        let error = lazy
+            .parse_params::<Value>("text.echo", json!({}))
+            .expect_err("text.echo's params schema does not compile");
+        assert_eq!(error.code, "INTERNAL");
+        let details = error.details.as_ref().expect("details");
+        assert_eq!(details.get("method"), Some(&json!("text.echo")));
+        assert_eq!(
+            details.get("field"),
+            Some(&json!("catalog.methods[1].params")),
+            "expected the failing schema's field | received: {details:?}"
+        );
+    }
+
+    /// The same for a result schema, through `check_result`.
+    #[test]
+    fn check_result_answers_internal_for_a_result_schema_that_does_not_compile() {
+        let lazy = Contract::from_shared_catalog_lazy(catalog_with_malformed_schemas())
+            .expect("names are valid");
+        let error = lazy
+            .check_result("math.add", &json!(3))
+            .expect_err("math.add's result schema does not compile");
+        assert_eq!(error.code, "INTERNAL");
+        let details = error.details.as_ref().expect("details");
+        assert_eq!(details.get("method"), Some(&json!("math.add")));
+        assert_eq!(
+            details.get("field"),
+            Some(&json!("catalog.methods[0].result")),
+            "expected the failing schema's field | received: {details:?}"
+        );
+    }
+
+    /// Callers racing on a method's first request compile its schema once and
+    /// all get that one validator, a failure included.
+    #[test]
+    fn concurrent_first_requests_share_one_compiled_validator() {
+        let lazy = Contract::from_shared_catalog_lazy(catalog_with_malformed_schemas())
+            .expect("names are valid");
+        let seen: Vec<usize> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| {
+                    scope.spawn(|| {
+                        let validator = lazy
+                            .core
+                            .params_validator(0)
+                            .expect("math.add's params schema compiles");
+                        std::ptr::from_ref(validator) as usize
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().expect("no thread panics"))
+                .collect()
+        });
+        assert!(
+            seen.windows(2).all(|pair| pair[0] == pair[1]),
+            "expected every caller to get the one compiled validator | received addresses: {seen:?}"
+        );
     }
 
     #[test]
