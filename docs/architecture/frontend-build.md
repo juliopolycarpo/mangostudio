@@ -255,11 +255,21 @@ serves), the images and fonts they reference, the largest eager modules and pack
 lazy chunk count, and for each first use of a feature (terminal, first fenced code block,
 Git and GitHub panels) how many rounds of requests and how many chunk requests it needs.
 `--budget` makes the Brotli total of the eager files a gate; `.github/workflows/build.yml`
-runs it after the production build, and the limit lives in
-`scripts/ci/frontend-bundle-budget.json` with a few KB of slack over the build it was set
-from, so lowering it after a real saving is a one-line change. When it fails, run the script
-without `--budget` and read "Largest eager modules": the usual cause is a static import
-that pulled a lazy module into the entry.
+runs it as the last step of the build job, so a miss still leaves the uploaded frontend to
+inspect. The limit lives in `scripts/ci/frontend-bundle-budget.json`, about 1% above the
+build it was set from. Rebuilding one commit with five Bun revisions (canaries from 5 to 16
+November and stable 1.4.4) moved the eager Brotli total by 276 B (429,761 to 430,037), so
+the slack is room for growth, not for bundler drift. The gate is for a large accidental
+eager import, not for policing a few KB.
+
+Whoever lands the change that grows the first load raises `eagerBrotliBytes` in that file in
+the same PR (a dependency bump, a feature that belongs in the first load); whoever lands a
+saving lowers it, so the gap stays small. The failure message prints the measured total,
+the limit, the overage, the Bun revision and both options. When growth was not intended, run
+the script without `--budget` and read "Largest eager modules": the usual cause is a static
+import that pulled a lazy module into the entry. A scenario that names a renamed module
+shows as a warning row under `--budget` instead of failing the build; update
+`LOAD_SCENARIOS` in the script.
 
 Traps the numbers above exposed (Bun 1.4.5-canary, measured in Chromium against a production
 build):
@@ -283,19 +293,47 @@ the chat page, so the Git, GitHub and Todo bodies load through `retryableLazy`
 (`src/lib/retryable-lazy.ts`) instead of a static import: that took 117 KB raw (27 KB
 Brotli) out of the entry. The rail starts those imports on hover or focus of the dock
 button and, once the page is idle, for every available panel (`src/lib/idle-preload.ts`;
-skipped under `saveData`), so a click rarely waits. A panel switch keeps the previous body
-up while the new chunk arrives (`useDeferredValue`) and marks the dock button
-`aria-busy`: React holds a Suspense reveal back up to 300 ms after it commits a fallback,
-so a spinner flash made a cold click on a fast network about 300 ms slower than the fetch.
-`LazyChunkBoundary` keeps a failed chunk local with Retry and Reload; a plain `React.lazy`
-would cache the rejection and take the whole page down through the route's error component.
-Every lazy chunk the app loads on first use (terminal, markdown renderer, diff viewer, the rail
-panels) goes through `retryableLazy` and that boundary; markdown degrades to its plain text
-instead of a panel. A failed `import()` does not say whether the network dropped or the hub
-was upgraded under the open tab (the hashed name now answers 404 for good), so on failure
-`isRunningStaleBuild` (`src/lib/stale-build.ts`) compares the entry bundle the tab loaded
-with the one the hub's `index.html` names now. When they differ the panel offers Reload only;
-nothing ever reloads by itself.
+skipped under `saveData`; hover and focus still start the chunk), so a click rarely waits.
+A switch on an open rail keeps the previous body up while the new chunk arrives (a React
+transition) and marks the dock button `aria-busy`; after one second it shows the spinner
+instead, so a slow fetch is visible. Opening a collapsed rail or the mobile drawer shows the
+requested panel at once, never the previous one first. React holds a Suspense reveal back up
+to 300 ms after it commits a fallback, so a spinner flash made a cold click on a fast network
+about 300 ms slower than the fetch.
+
+**Lazy chunk failures stay local.** `LazyChunkBoundary` keeps a failed chunk where it sits,
+with Retry and Reload; a plain `React.lazy` would cache the rejection and take the whole
+page down through the route's error component. These go through `retryableLazy` and that
+boundary: the rail panels, the terminal view, the diff viewer and the markdown renderer
+(which degrades to its plain text instead of a panel). Not through it:
+
+- Route `.lazy()` chunks (and the pop-out terminal, which imports `TerminalView` inside its
+  route chunk). A failure reaches the route's error component, `BootstrapErrorPanel`, which
+  probes for a stale build when the error is a chunk fetch failure, so the notice below
+  appears there too.
+- The pt-BR dictionary (`locale-dictionaries.ts`). A failed load already rendered English;
+  it now also probes for a stale build.
+- The optional WebGL renderer of the terminal (`terminal-webgl.ts`): a failed load keeps the
+  default renderer and shows nothing.
+
+Only a chunk that could not be fetched counts (the `TypeError` each browser raises:
+"Failed to fetch dynamically imported module", "error loading dynamically imported module",
+"Importing a module script failed"). A chunk that arrived and threw while it evaluated is a
+bug in that code and keeps its own error, which reaches the route's error component. A failed
+import is forgotten after a backoff (1 s, doubling to 30 s), so a view that mounts later
+heals without a click and a dead connection is not hammered; Retry asks at once.
+
+A failed `import()` does not say whether the network dropped or the hub was upgraded under
+the open tab (the hashed name now answers 404 for good). `staleBuildMonitor`
+(`src/lib/stale-build.ts`) compares the entry bundle the tab loaded with the one the hub's
+`index.html` names now, once for the whole page: failing surfaces share one probe, and a
+"not stale" answer is reused for 30 s or until a chunk loads. When the build is stale, retries
+stop (the files are gone), the failing surfaces say so, and one page-level notice
+(`StaleBuildNotice`) carries the single Reload. Nothing ever reloads by itself. Reloading
+keeps the typed composer text (it is mirrored to `sessionStorage` on every change), but it
+clears attachments that were not sent yet, and it stops a response that is streaming: the
+browser closing the stream aborts the turn with `client_disconnect`, and the reloaded page
+offers to resume the interrupted turn. The notice says so.
 
 `tests/browser-smoke/load-waterfall.spec.ts` watches the same first uses in a real browser
 (opt-in: `MANGO_LOAD_WATERFALL=1`, and `MANGO_LOAD_PROFILE=slow-4g` for a CDP throttle) and prints

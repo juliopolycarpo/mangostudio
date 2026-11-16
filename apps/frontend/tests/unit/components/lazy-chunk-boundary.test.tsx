@@ -8,11 +8,13 @@ import { describe, expect, it } from 'bun:test';
 
 import { en } from '@mangostudio/shared/i18n';
 import userEvent from '@testing-library/user-event';
-import { Component, type ReactNode, Suspense } from 'react';
+import { Component, type ReactNode, Suspense, useRef } from 'react';
 
 import { LazyChunkBoundary } from '../../../src/components/layout/LazyChunkBoundary';
+import { StaleBuildNotice } from '../../../src/components/layout/StaleBuildNotice';
 import { retryableLazy } from '../../../src/lib/retryable-lazy';
-import { render, screen, waitFor } from '../../support/harness/render';
+import { createStaleBuildMonitor, type StaleBuildMonitor } from '../../../src/lib/stale-build';
+import { act, render, screen, waitFor } from '../../support/harness/render';
 
 function Arrived() {
   return <p>panel body</p>;
@@ -73,6 +75,30 @@ describe('LazyChunkBoundary', () => {
     expect(fake.requests).toBe(2);
   });
 
+  it('moves focus to the panel region when Retry unmounts under the keyboard', async () => {
+    const user = userEvent.setup();
+    const lazyBody = retryableLazy(fakeChunkLoader(1).load);
+
+    render(
+      <LazyChunkBoundary onRetry={lazyBody.reset}>
+        <Suspense fallback={<p>loading</p>}>
+          <lazyBody.Component />
+        </Suspense>
+      </LazyChunkBoundary>
+    );
+    const retry = await screen.findByRole('button', { name: en.common.retry });
+    retry.focus();
+    await user.keyboard('{Enter}');
+    await screen.findByText('panel body');
+
+    expect(
+      document.activeElement,
+      `expected focus on the lazy-chunk region after Retry | received: ${
+        document.activeElement?.tagName ?? 'nothing'
+      }`
+    ).toBe(screen.getByTestId('lazy-chunk-region'));
+  });
+
   it('offers a page reload for the case where asking again cannot help', async () => {
     const lazyBody = retryableLazy(fakeChunkLoader(Number.POSITIVE_INFINITY).load);
 
@@ -109,61 +135,149 @@ describe('LazyChunkBoundary', () => {
   });
 });
 
-describe('LazyChunkBoundary after a hub upgrade', () => {
-  it('offers only Reload once the probe says this tab runs a stale build', async () => {
-    const lazyBody = retryableLazy(fakeChunkLoader(Number.POSITIVE_INFINITY).load);
+/** A tab that loaded `loaded`, with the hub's shell naming `shellEntry`; counts every shell fetch. */
+function fakeHub(loaded: string, shellEntry: string) {
+  const hub = {
+    shellFetches: 0,
+    monitor: createStaleBuildMonitor({
+      loadedEntryScript: () => loaded,
+      fetchShell: () => {
+        hub.shellFetches += 1;
+        return Promise.resolve(`<script type="module" src="${shellEntry}"></script>`);
+      },
+    }),
+  };
+  return hub;
+}
 
-    render(
-      <LazyChunkBoundary onRetry={lazyBody.reset} probeStaleBuild={() => Promise.resolve(true)}>
+const staleHub = () => fakeHub('/assets/main-aaaa1111.js', '/assets/main-bbbb2222.js');
+const currentHub = () => fakeHub('/assets/main-aaaa1111.js', '/assets/main-aaaa1111.js');
+
+function FailingSurface({ monitor, name }: { monitor: StaleBuildMonitor; name: string }) {
+  const lazyBody = useRef(retryableLazy(fakeChunkLoader(Number.POSITIVE_INFINITY).load)).current;
+  return (
+    <section aria-label={name}>
+      <LazyChunkBoundary onRetry={lazyBody.reset} monitor={monitor}>
         <Suspense fallback={null}>
           <lazyBody.Component />
         </Suspense>
       </LazyChunkBoundary>
+    </section>
+  );
+}
+
+describe('LazyChunkBoundary after a hub upgrade', () => {
+  it('drops Retry once the probe says this tab runs a stale build, and the notice carries the one Reload', async () => {
+    const hub = staleHub();
+
+    render(
+      <>
+        <FailingSurface monitor={hub.monitor} name="terminal" />
+        <StaleBuildNotice monitor={hub.monitor} />
+      </>
     );
 
     const alert = await screen.findByTestId('lazy-chunk-failure');
     await waitFor(() => expect(alert).toHaveTextContent(en.errors.lazyChunk.staleTitle));
     expect(screen.queryByRole('button', { name: en.common.retry })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: en.errors.lazyChunk.reload })).toBeInTheDocument();
+    expect(
+      screen.getAllByRole('button', { name: en.errors.lazyChunk.reload }),
+      'expected exactly one Reload on the page, in the notice'
+    ).toHaveLength(1);
+    expect(screen.getByTestId('stale-build-notice')).toContainElement(
+      screen.getByRole('button', { name: en.errors.lazyChunk.reload })
+    );
   });
 
-  it('keeps Retry while the probe cannot say the build is stale', async () => {
-    const lazyBody = retryableLazy(fakeChunkLoader(Number.POSITIVE_INFINITY).load);
+  it('shows one Reload and fetches index.html once for two surfaces failing together', async () => {
+    const hub = staleHub();
 
     render(
-      <LazyChunkBoundary onRetry={lazyBody.reset} probeStaleBuild={() => Promise.resolve(false)}>
-        <Suspense fallback={null}>
-          <lazyBody.Component />
-        </Suspense>
-      </LazyChunkBoundary>
+      <>
+        <FailingSurface monitor={hub.monitor} name="terminal" />
+        <FailingSurface monitor={hub.monitor} name="diff" />
+        <StaleBuildNotice monitor={hub.monitor} />
+      </>
+    );
+
+    await waitFor(() => expect(screen.getAllByTestId('lazy-chunk-failure')).toHaveLength(2));
+    await screen.findByTestId('stale-build-notice');
+    expect(screen.getAllByRole('button', { name: en.errors.lazyChunk.reload })).toHaveLength(1);
+    expect(hub.shellFetches, 'index.html fetches for two failing surfaces').toBe(1);
+  });
+
+  it('keeps Retry and the local Reload while the build is not stale', async () => {
+    const hub = currentHub();
+
+    render(
+      <>
+        <FailingSurface monitor={hub.monitor} name="terminal" />
+        <StaleBuildNotice monitor={hub.monitor} />
+      </>
     );
 
     await screen.findByTestId('lazy-chunk-failure');
+    await waitFor(() => expect(hub.shellFetches).toBe(1));
     expect(screen.getByRole('button', { name: en.common.retry })).toBeInTheDocument();
     expect(screen.getByTestId('lazy-chunk-failure')).toHaveTextContent(en.errors.lazyChunk.title);
+    expect(screen.queryByTestId('stale-build-notice')).not.toBeInTheDocument();
+  });
+
+  it('moves focus to the notice Reload when the probe removes the Retry button under the keyboard', async () => {
+    const hub = staleHub();
+    let resolveShell: (shell: string) => void = () => undefined;
+    const slowMonitor = createStaleBuildMonitor({
+      loadedEntryScript: () => '/assets/main-aaaa1111.js',
+      fetchShell: () =>
+        new Promise<string>((resolve) => {
+          resolveShell = resolve;
+        }),
+    });
+
+    render(
+      <>
+        <FailingSurface monitor={slowMonitor} name="terminal" />
+        <StaleBuildNotice monitor={slowMonitor} />
+      </>
+    );
+    const retry = await screen.findByRole('button', { name: en.common.retry });
+    retry.focus();
+    expect(retry).toHaveFocus();
+
+    await act(async () => {
+      resolveShell('<script type="module" src="/assets/main-bbbb2222.js"></script>');
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: en.errors.lazyChunk.reload })).toHaveFocus()
+    );
+    expect(hub.shellFetches).toBe(0);
   });
 });
 
 describe('LazyChunkBoundary with a graceful form', () => {
-  it('draws renderFailure instead of the panel and reports the failure once', async () => {
-    const fake = fakeChunkLoader(Number.POSITIVE_INFINITY);
-    const lazyBody = retryableLazy(fake.load);
-    const failures: string[] = [];
+  it('draws renderFailure instead of the panel, and still reports a stale build to the page', async () => {
+    const hub = staleHub();
+    const lazyBody = retryableLazy(fakeChunkLoader(Number.POSITIVE_INFINITY).load);
 
     render(
-      <LazyChunkBoundary
-        onRetry={lazyBody.reset}
-        onFailure={() => failures.push('failed')}
-        renderFailure={() => <p>plain text stays</p>}
-      >
-        <Suspense fallback={null}>
-          <lazyBody.Component />
-        </Suspense>
-      </LazyChunkBoundary>
+      <>
+        <LazyChunkBoundary
+          onRetry={lazyBody.reset}
+          monitor={hub.monitor}
+          renderFailure={() => <p>plain text stays</p>}
+        >
+          <Suspense fallback={null}>
+            <lazyBody.Component />
+          </Suspense>
+        </LazyChunkBoundary>
+        <StaleBuildNotice monitor={hub.monitor} />
+      </>
     );
 
     expect(await screen.findByText('plain text stays')).toBeInTheDocument();
     expect(screen.queryByTestId('lazy-chunk-failure')).not.toBeInTheDocument();
-    expect(failures).toEqual(['failed']);
+    expect(await screen.findByTestId('stale-build-notice')).toBeInTheDocument();
   });
 });

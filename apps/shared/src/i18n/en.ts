@@ -4269,7 +4269,7 @@ export const messages: Messages = {
       reload: 'Reload page',
       staleTitle: 'MangoStudio was updated',
       staleHint:
-        'This tab is running an older version, whose files are gone. Reload the page to continue.',
+        'This tab is running an older version, whose files are gone. Reload the page to continue. Text you typed is kept; a response that is running stops (you can resume it) and attachments not yet sent are cleared.',
     },
     bootstrap: {
       title: 'MangoStudio could not finish loading',

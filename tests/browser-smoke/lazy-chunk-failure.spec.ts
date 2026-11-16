@@ -58,9 +58,20 @@ test('markdown stays readable as plain text when its chunk cannot be fetched', a
   await seedChat(page, title, { workdir: tmpdir(), text: 'a **bold** claim' });
 
   await page.route(MARKDOWN_CHUNK, (route) => route.abort('failed'));
+  const chunkFailed = page.waitForEvent('requestfailed', (request) =>
+    MARKDOWN_CHUNK.test(request.url())
+  );
   await openNewestChat(page, title);
 
-  await expect(page.getByText('a **bold** claim')).toBeVisible({ timeout: 30_000 });
+  // The chunk request really failed, and the message shows the failure form of
+  // the fallback (the loading form reads the same text, so the marker is what
+  // tells them apart), with its line breaks kept.
+  await chunkFailed;
+  const fallback = page.locator('[data-markdown-fallback="failed"]', {
+    hasText: 'a **bold** claim',
+  });
+  await expect(fallback).toBeVisible({ timeout: 30_000 });
+  await expect(fallback).toHaveCSS('white-space', 'pre-wrap');
   await expect(page.getByText('MangoStudio could not finish loading')).toHaveCount(0);
   await expect(page.getByTestId('sidebar-new-chat')).toBeVisible();
 });
@@ -100,7 +111,20 @@ test('a diff viewer chunk that cannot be fetched fails in place and recovers on 
   }
 });
 
-test('after a hub upgrade the failure offers Reload only, and never reloads by itself', async ({
+/** The hub "was upgraded": its index.html now names another entry bundle. */
+async function routeUpgradedShell(page: Page, shellFetches: string[]): Promise<void> {
+  await page.route('**/index.html', async (route) => {
+    shellFetches.push(route.request().url());
+    const response = await route.fetch();
+    const body = (await response.text()).replace(
+      /\/assets\/main-[\w-]+\.js/,
+      '/assets/main-upgraded0.js'
+    );
+    await route.fulfill({ response, body });
+  });
+}
+
+test('after a hub upgrade the page offers one Reload, and never reloads by itself', async ({
   page,
 }) => {
   test.setTimeout(90_000);
@@ -113,16 +137,7 @@ test('after a hub upgrade the failure offers Reload only, and never reloads by i
   });
 
   await page.route(GITHUB_PANEL_CHUNK, (route) => route.abort('failed'));
-  // The hub "was upgraded": its index.html now names another entry bundle.
-  await page.route('**/index.html', async (route) => {
-    shellFetches.push(route.request().url());
-    const response = await route.fetch();
-    const body = (await response.text()).replace(
-      /\/assets\/main-[\w-]+\.js/,
-      '/assets/main-upgraded0.js'
-    );
-    await route.fulfill({ response, body });
-  });
+  await routeUpgradedShell(page, shellFetches);
 
   await page.goto('/');
   await dismissWorkdirPicker(page);
@@ -135,8 +150,12 @@ test('after a hub upgrade the failure offers Reload only, and never reloads by i
   const failure = page.getByTestId('lazy-chunk-failure');
   await expect(failure).toHaveAttribute('data-stale-build', 'true', { timeout: 15_000 });
   await expect(failure).toContainText('MangoStudio was updated');
-  await expect(failure.getByRole('button', { name: 'Retry' })).toHaveCount(0);
-  await expect(failure.getByRole('button', { name: 'Reload page' })).toBeVisible();
+  await expect(failure.getByRole('button')).toHaveCount(0);
+  // One Reload for the page, in the notice, not one per failing surface.
+  const reload = page.getByRole('button', { name: 'Reload page' });
+  await expect(reload).toHaveCount(1);
+  await expect(page.getByTestId('stale-build-notice')).toContainText('MangoStudio was updated');
+  await expect(page.getByTestId('stale-build-notice')).toContainText('Text you typed is kept');
 
   // Give a reload loop time to show itself: it would count a second document.
   await page.waitForTimeout(2_000);
@@ -144,9 +163,59 @@ test('after a hub upgrade the failure offers Reload only, and never reloads by i
     documentLoads,
     `expected one document load and no automatic reload | received: ${documentLoads} (shell probes: ${shellFetches.length})`
   ).toBe(1);
+  expect(
+    shellFetches.length,
+    `expected one index.html probe for the page | received: ${shellFetches.length}`
+  ).toBeLessThanOrEqual(2);
 
   await page.unroute('**/index.html');
   await page.unroute(GITHUB_PANEL_CHUNK);
-  await failure.getByRole('button', { name: 'Reload page' }).click();
+  await reload.click();
   await expect(page.getByTestId('github-panel')).toBeVisible({ timeout: 30_000 });
+});
+
+test('after a hub upgrade a tab showing only markdown gets the notice and stops asking for the chunk', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  const title = `lazy-markdown-stale-${Date.now()}`;
+  await seedChat(page, title, { workdir: tmpdir(), text: 'first **message**' });
+  for (const [index, text] of ['second', 'third'].entries()) {
+    const chats = (await (await page.request.get('/api/chats')).json()) as {
+      id: string;
+      title: string;
+    }[];
+    const chat = chats.find((candidate) => candidate.title === title);
+    expect(
+      chat,
+      `expected the seeded chat | received titles: ${chats.map((c) => c.title).join(', ')}`
+    ).toBeDefined();
+    await page.request.post('/api/messages', {
+      data: {
+        id: `${chat?.id}-extra-${index}`,
+        chatId: chat?.id,
+        role: 'user',
+        text,
+        timestamp: Date.now() + index + 1,
+        interactionMode: 'agent',
+      },
+    });
+  }
+
+  const chunkRequests: string[] = [];
+  page.on('request', (request) => {
+    if (MARKDOWN_CHUNK.test(request.url())) chunkRequests.push(request.url());
+  });
+  await page.route(MARKDOWN_CHUNK, (route) => route.abort('failed'));
+  await routeUpgradedShell(page, []);
+  await openNewestChat(page, title);
+
+  await expect(page.getByTestId('stale-build-notice')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('[data-markdown-fallback="failed"]').first()).toBeVisible();
+  // Three rows share one failed attempt, and a stale build stops further requests.
+  await page.waitForTimeout(2_500);
+  expect(
+    chunkRequests.length,
+    `expected the markdown chunk requested once for three messages | received: ${chunkRequests.length}`
+  ).toBe(1);
 });

@@ -1,6 +1,9 @@
 import type { Locale, Messages } from '@mangostudio/shared/i18n';
 import { messages as en } from '@mangostudio/shared/i18n/en';
 
+import { isChunkFetchFailure } from '@/lib/retryable-lazy';
+import { staleBuildMonitor } from '@/lib/stale-build';
+
 /** Where the user's language choice is persisted between visits. */
 export const LOCALE_STORAGE_KEY = 'mangostudio:locale';
 
@@ -117,6 +120,8 @@ export const localeDictionaries: LocaleDictionaryStore = createLocaleDictionaryS
   },
   onLoadError: (locale, error) => {
     console.warn(`[i18n] Could not load the "${locale}" dictionary; rendering "en".`, error);
+    // A dictionary chunk the hub no longer has is the same upgrade-under-an-open-tab case.
+    if (isChunkFetchFailure(error)) void staleBuildMonitor.check();
   },
 });
 

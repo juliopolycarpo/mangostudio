@@ -59,3 +59,76 @@ export async function isRunningStaleBuild(
     return false;
   }
 }
+
+/** How long a "not stale" answer is reused before the next failure asks the hub again. */
+const NOT_STALE_FRESH_MS = 30_000;
+
+export interface StaleBuildMonitor {
+  /**
+   * Whether the hub now serves a newer build than this tab. One probe is shared
+   * by every caller: a page with several failing surfaces, or a failed Retry
+   * after a failed Retry, fetches `index.html` once, not once per panel.
+   */
+  check(): Promise<boolean>;
+  /** The last answer, synchronously: `true` once a probe found the build stale. */
+  isStale(): boolean;
+  subscribe(listener: () => void): () => void;
+  /**
+   * A lazy chunk arrived, so the hub is serving what this tab asks for.
+   * Forgets a remembered "not stale", so the next failure probes again.
+   */
+  noteChunkLoaded(): void;
+}
+
+/**
+ * Shares one stale-build probe among every surface that can fail on a chunk.
+ *
+ * "Stale" is sticky: the hub has the new files and this tab's names are gone for
+ * good, so it stays true until the page reloads and the monitor starts over.
+ * "Not stale" is reused for 30 s or until a chunk loads, whichever comes first.
+ */
+export function createStaleBuildMonitor(
+  probe: BuildProbe,
+  now: () => number = () => Date.now()
+): StaleBuildMonitor {
+  let stale = false;
+  let shared: { readonly promise: Promise<boolean>; settledAt: number | null } | null = null;
+  const listeners = new Set<() => void>();
+
+  function startProbe(): Promise<boolean> {
+    const entry: NonNullable<typeof shared> = {
+      promise: isRunningStaleBuild(probe).then((isStale) => {
+        entry.settledAt = now();
+        if (isStale && !stale) {
+          stale = true;
+          for (const listener of listeners) listener();
+        }
+        return isStale;
+      }),
+      settledAt: null,
+    };
+    shared = entry;
+    return entry.promise;
+  }
+
+  return {
+    check() {
+      if (stale) return Promise.resolve(true);
+      const reusable =
+        shared !== null &&
+        (shared.settledAt === null || now() - shared.settledAt < NOT_STALE_FRESH_MS);
+      return reusable && shared ? shared.promise : startProbe();
+    },
+    isStale: () => stale,
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    noteChunkLoaded() {
+      if (shared?.settledAt != null) shared = null;
+    },
+  };
+}
+
+/** The tab's monitor: reads the real document and asks the real hub. */
+export const staleBuildMonitor: StaleBuildMonitor = createStaleBuildMonitor(browserBuildProbe());

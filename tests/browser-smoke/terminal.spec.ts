@@ -186,14 +186,25 @@ test('a terminal chunk that cannot be fetched fails in the panel and recovers on
   }
   await expect(railButton).toBeVisible({ timeout: 15_000 });
   if ((await railButton.getAttribute('aria-pressed')) !== 'true') await railButton.click();
+  const opened = page.waitForResponse(
+    (response) =>
+      response.url().endsWith('/api/terminals') && response.request().method() === 'POST'
+  );
   await page.getByRole('button', { name: 'New terminal' }).click();
+  // The session is opened server-side whether or not its view loads; close it
+  // when the test ends so no pty is left running behind the suite.
+  const { session } = (await (await opened).json()) as { session: { id: string } };
 
-  const failure = page.getByTestId('lazy-chunk-failure');
-  await expect(failure).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByTestId('sidebar-new-chat')).toBeVisible();
-  await expect(page.getByText('MangoStudio could not finish loading')).toHaveCount(0);
+  try {
+    const failure = page.getByTestId('lazy-chunk-failure');
+    await expect(failure).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('sidebar-new-chat')).toBeVisible();
+    await expect(page.getByText('MangoStudio could not finish loading')).toHaveCount(0);
 
-  await page.unroute(terminalChunk);
-  await failure.getByRole('button', { name: 'Retry' }).click();
-  await expect(page.getByTestId('terminal-view')).toBeVisible({ timeout: 30_000 });
+    await page.unroute(terminalChunk);
+    await failure.getByRole('button', { name: 'Retry' }).click();
+    await expect(page.getByTestId('terminal-view')).toBeVisible({ timeout: 30_000 });
+  } finally {
+    await page.request.delete(`/api/terminals/${session.id}`);
+  }
 });

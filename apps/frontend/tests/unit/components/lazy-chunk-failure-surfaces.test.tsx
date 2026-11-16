@@ -7,12 +7,12 @@
  * One file because each lazy binding is module-level and keeps its first result.
  */
 
-import { describe, expect, it, mock } from 'bun:test';
+import { describe, expect, it, mock, spyOn } from 'bun:test';
 
 import { en } from '@mangostudio/shared/i18n';
 import userEvent from '@testing-library/user-event';
 
-import { act, render, screen } from '../../support/harness/render';
+import { render, screen, waitFor } from '../../support/harness/render';
 
 const chunkState = {
   terminalFailuresLeft: 1,
@@ -79,38 +79,59 @@ describe('a lazy chunk that cannot be fetched', () => {
     expect(await screen.findByTestId('terminal-view-stub')).toHaveTextContent('session-1');
   });
 
-  it('keeps markdown readable as plain text, and the next mount asks the network again', async () => {
-    const first = render(<MarkdownContent content="hello **there**" />);
+  it('keeps markdown readable as plain text, and asks the network again only after the backoff', async () => {
+    const clock = spyOn(Date, 'now');
+    const startedAt = Date.now();
+    clock.mockImplementation(() => startedAt);
 
-    // The failure panel never appears: the text the person is reading stays.
-    expect(await screen.findByText('hello **there**')).toBeInTheDocument();
+    const first = render(<MarkdownContent content={'line one\n  indented'} />);
+
+    // The failure panel never appears: the text the person is reading stays,
+    // with its line breaks, and says it is the failure form (not the loading one).
+    const failedText = await waitFor(() => {
+      const failed = document.querySelector('[data-markdown-fallback="failed"]');
+      if (!failed) throw new Error('expected the failed markdown fallback | received: none yet');
+      return failed;
+    });
+    expect(failedText).toHaveTextContent('line one');
+    expect(failedText.className).toContain('whitespace-pre-wrap');
     expect(screen.queryByTestId('lazy-chunk-failure')).not.toBeInTheDocument();
     expect(chunkState.markdownEvaluations).toBe(1);
-    // React holds a Suspense reveal back for up to 300 ms, the failure included;
-    // wait it out so the boundary has caught it before this message goes away.
-    await act(async () => {
-      await Bun.sleep(500);
-    });
     first.unmount();
 
-    render(<MarkdownContent content="second message" />);
-    expect(await screen.findByTestId('markdown-rendered')).toHaveTextContent('SECOND MESSAGE');
-    expect(chunkState.markdownEvaluations).toBe(2);
+    // A message that mounts inside the backoff (a feed row scrolling back in)
+    // does not touch the network again.
+    const second = render(<MarkdownContent content="second message" />);
+    await waitFor(() =>
+      expect(document.querySelector('[data-markdown-fallback="failed"]')).not.toBeNull()
+    );
+    expect(chunkState.markdownEvaluations, 'evaluations inside the backoff').toBe(1);
+    second.unmount();
+
+    // Past the backoff the next mount asks again, and the renderer arrives.
+    clock.mockImplementation(() => startedAt + 5_000);
+    render(<MarkdownContent content="third message" />);
+    expect(await screen.findByTestId('markdown-rendered')).toHaveTextContent('THIRD MESSAGE');
+    expect(chunkState.markdownEvaluations, 'evaluations after the backoff').toBe(2);
+    clock.mockRestore();
   });
 
-  it('shows the diff viewer failure in place and recovers on Retry', async () => {
-    const user = userEvent.setup();
-    render(
-      <LazyDiffViewer
-        chatId="chat-9"
-        selection={{ path: 'a.ts', staged: false, title: 'a.ts' }}
-        onClose={() => undefined}
-      />
+  it('heals a diff viewer on a later mount, without a Retry click, once the backoff passed', async () => {
+    const clock = spyOn(Date, 'now');
+    const startedAt = Date.now();
+    clock.mockImplementation(() => startedAt);
+    const selection = { path: 'a.ts', staged: false, title: 'a.ts' };
+
+    const first = render(
+      <LazyDiffViewer chatId="chat-9" selection={selection} onClose={() => undefined} />
     );
-
     expect(await screen.findByTestId('lazy-chunk-failure')).toBeInTheDocument();
+    first.unmount();
 
-    await user.click(screen.getByRole('button', { name: en.common.retry }));
+    clock.mockImplementation(() => startedAt + 5_000);
+    render(<LazyDiffViewer chatId="chat-9" selection={selection} onClose={() => undefined} />);
+
     expect(await screen.findByTestId('diff-viewer-stub')).toHaveTextContent('chat-9');
+    clock.mockRestore();
   });
 });

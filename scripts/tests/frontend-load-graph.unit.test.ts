@@ -5,11 +5,13 @@ import { dirname, join } from 'node:path';
 
 import {
   brotliSize,
+  budgetSummary,
   budgetViolation,
   buildLoadGraphReport,
   bytesByOwner,
   chunkStats,
   eagerModules,
+  LOAD_SCENARIOS,
   type LoadGraphMetafile,
   type LoadScenario,
   measureEagerAssets,
@@ -237,11 +239,104 @@ describe('budget', () => {
     }
   );
 
+  const context = {
+    budgetPath: 'scripts/ci/frontend-bundle-budget.json',
+    bunRevision: '1.4.5+abc',
+  };
+
   test('a payload at the limit passes and one byte over fails, naming both numbers', () => {
-    expect(budgetViolation(eager, { eagerBrotliBytes: 4 })).toBeUndefined();
-    expect(budgetViolation(eager, { eagerBrotliBytes: 3 })).toContain(
-      'eager payload is 4 B Brotli over 1 files; budget is 3 B (over by 1 B)'
+    expect(budgetViolation(eager, { eagerBrotliBytes: 4 }, context)).toBeUndefined();
+    expect(budgetViolation(eager, { eagerBrotliBytes: 3 }, context)).toContain(
+      'eager payload is 4 B Brotli over 1 files; the budget in scripts/ci/frontend-bundle-budget.json is 3 B (over by 1 B)'
     );
+  });
+
+  test('the failure names the budget file, the Bun revision and both ways out', () => {
+    const message = budgetViolation(eager, { eagerBrotliBytes: 3 }, context) ?? '';
+    expect(message).toContain('built with Bun 1.4.5+abc');
+    expect(message).toContain(
+      'raise "eagerBrotliBytes" in scripts/ci/frontend-bundle-budget.json in this PR'
+    );
+    expect(message).toContain('run this script without --budget and read "Largest eager modules"');
+    // A dependency bump that grows the entry must not be told it is a lazy import.
+    expect(message).not.toContain('A static import pulled');
+  });
+
+  test('the pass line carries the spare bytes, the budget file and the Bun revision', () => {
+    expect(budgetSummary(eager, { eagerBrotliBytes: 10 }, context)).toBe(
+      'eager 4 B Brotli within the 10 B budget in scripts/ci/frontend-bundle-budget.json (6 B spare), built with Bun 1.4.5+abc'
+    );
+  });
+});
+
+describe('scenarios against a recorded build', () => {
+  // A trimmed copy of a real production metafile: every output, plus the inputs
+  // the scenarios name. It guards the scenario definitions against the shape
+  // Bun really emits, which the hand-built fixture above only imitates.
+  async function recordedMetafile(): Promise<LoadGraphMetafile> {
+    return (await Bun.file(
+      join(import.meta.dir, 'fixtures/frontend-load-graph-metafile.json')
+    ).json()) as LoadGraphMetafile;
+  }
+
+  /** The entry script: the one JS output Bun records for `src/main.tsx`. */
+  function entryOutputs(metafile: LoadGraphMetafile): Set<string> {
+    return new Set(
+      Object.entries(metafile.outputs)
+        .filter(
+          ([path, output]) =>
+            path.endsWith('.js') &&
+            (output as { entryPoint?: string }).entryPoint === 'src/main.tsx'
+        )
+        .map(([path]) => path.replace(/^\.\//, ''))
+    );
+  }
+
+  test.each(LOAD_SCENARIOS.map((scenario) => [scenario.id, scenario] as const))(
+    'scenario %s resolves against a real metafile',
+    async (_id, scenario) => {
+      const metafile = await recordedMetafile();
+      const result = resolveScenario(metafile, entryOutputs(metafile), scenario);
+      expect(result.id).toBe(scenario.id);
+      expect(result.requests, `requests for ${scenario.id}`).toBeGreaterThanOrEqual(0);
+    }
+  );
+
+  test('the terminal and code block scenarios fetch chunks', async () => {
+    const metafile = await recordedMetafile();
+    const byId = new Map(
+      LOAD_SCENARIOS.map((scenario) => [
+        scenario.id,
+        resolveScenario(metafile, entryOutputs(metafile), scenario),
+      ])
+    );
+    expect(byId.get('terminal')?.requests, 'terminal requests').toBeGreaterThan(0);
+    expect(byId.get('markdown-code')?.requests, 'markdown-code requests').toBeGreaterThan(0);
+  });
+
+  test('a renamed module is a collected problem under the budget gate and a throw otherwise', async () => {
+    const metafile = await recordedMetafile();
+    const renamed: LoadScenario = {
+      id: 'renamed',
+      title: 'Open the renamed view',
+      steps: [{ from: 'src/features/terminal/LazyTerminalViewRenamed.tsx', to: ['src/x.tsx'] }],
+    };
+    const dist = await mkdtemp(join(tmpdir(), 'frontend-load-graph-renamed-'));
+    try {
+      await writeFile(join(dist, 'index.html'), '<!doctype html>');
+      await expect(buildLoadGraphReport(dist, metafile, [renamed], 'throw')).rejects.toThrow(
+        'scenario "renamed": module src/features/terminal/LazyTerminalViewRenamed.tsx is not in the metafile'
+      );
+      const report = await buildLoadGraphReport(dist, metafile, [renamed], 'collect');
+      expect(report.scenarios).toEqual([]);
+      expect(report.scenarioProblems).toHaveLength(1);
+      const rendered = renderLoadGraphReport(report, 1);
+      expect(rendered).toContain('### Scenario problems');
+      expect(rendered).toContain('LOAD_SCENARIOS in scripts/ci/frontend-load-graph.ts');
+      expect(rendered).toContain('LazyTerminalViewRenamed.tsx');
+    } finally {
+      await rm(dist, { recursive: true, force: true });
+    }
   });
 });
 
