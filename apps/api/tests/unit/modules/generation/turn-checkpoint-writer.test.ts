@@ -628,7 +628,7 @@ async function setupDurable(options: { defer?: (run: () => void) => void } = {})
   };
   const finalize = () =>
     getDb().updateTable('messages').set({ isGenerating: 0 }).where('id', '=', turnId).execute();
-  return { checkpoint, writer, append, readRow, finalize };
+  return { checkpoint, writer, append, readRow, finalize, turnId };
 }
 
 describe('TurnCheckpointWriter on SQLite', () => {
@@ -665,7 +665,7 @@ describe('TurnCheckpointWriter on SQLite', () => {
   });
 
   it('leaves no delta rows behind when a late checkpoint loses the race with finalize', async () => {
-    const { writer, append, finalize } = await setupDurable();
+    const { writer, append, finalize, turnId } = await setupDurable();
     append(10);
     await writer.checkpoint({ force: true });
     append(10);
@@ -675,9 +675,11 @@ describe('TurnCheckpointWriter on SQLite', () => {
     append(10);
     await writer.checkpoint({ force: true });
 
+    // Scoped to this message: other tests in the process leave deltas of their own.
     const left = await getDb()
       .selectFrom('message_checkpoint_deltas')
       .select(({ fn }) => fn.countAll<number>().as('count'))
+      .where('messageId', '=', turnId)
       .executeTakeFirstOrThrow();
     expect(left.count).toBe(0);
   });
