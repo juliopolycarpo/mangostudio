@@ -85,7 +85,7 @@ interface RunSample {
 function printHelp(): never {
   log(`Usage: bun run scripts/bench/runtime-handshake.ts [binary] [--runs N] [--fresh-copy] [--build LABEL] [--warmups N] [--resources] [--output file] [--json]
 
-  [binary]      A mangostudio-runtime executable (default: newest of target/release, target/debug)
+  [binary]      A mangostudio-runtime executable (default: newest of target/release, target/release-fast, target/debug)
   --runs N      Measured runs (default 20)
   --fresh-copy  Run a new copy of the binary each time (first-execution cost)
   --build LABEL Build profile to report, for a binary outside target/ (e.g. a CI artifact)
@@ -100,7 +100,7 @@ function printHelp(): never {
 
 /** The newest cargo build of the runtime in this checkout, or undefined. */
 async function newestWorkspaceBuild(): Promise<string | undefined> {
-  const candidates = ['release', 'debug'].map((profile) =>
+  const candidates = ['release', 'release-fast', 'debug'].map((profile) =>
     join(REPO_ROOT, 'target', profile, `mangostudio-runtime${EXE}`)
   );
   let newest: { path: string; mtimeMs: number } | undefined;
@@ -299,6 +299,8 @@ async function environmentNotes(
 function buildProfileOf(binary: string): string {
   if (/[\\/]debug[\\/]/.test(binary)) return 'debug';
   if (/[\\/]release[\\/]/.test(binary)) return 'release';
+  // Named apart so a result from the non-shipping profile never reads as a shipping one.
+  if (/[\\/]release-fast[\\/]/.test(binary)) return 'release-fast';
   return 'unknown';
 }
 

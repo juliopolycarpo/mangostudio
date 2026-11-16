@@ -76,7 +76,7 @@ function printHelp(): never {
   log(`Usage: bun run scripts/bench/grep.ts [[label=]binary ...] [--runs N] [--warmup N] [--scenario a,b] [--large-mib N] [--restricted] [--json]
 
   [label=]binary   mangostudio-runtime executables; several are interleaved run by run
-                   (default: newest of target/release, target/debug)
+                   (default: newest of target/release, target/release-fast, target/debug)
   --runs N         Measured runs per scenario (default 15)
   --warmup N       Untimed runs per binary before measuring (default 0)
   --scenario LIST  Comma-separated subset of: ${SCENARIOS.join(', ')}
@@ -88,7 +88,7 @@ function printHelp(): never {
 }
 
 async function newestWorkspaceBuild(): Promise<string | undefined> {
-  const candidates = ['release', 'debug'].map((profile) =>
+  const candidates = ['release', 'release-fast', 'debug'].map((profile) =>
     join(REPO_ROOT, 'target', profile, `mangostudio-runtime${EXE}`)
   );
   let newest: { path: string; mtimeMs: number } | undefined;
@@ -326,7 +326,7 @@ if (candidates.length === 0) {
   const newest = await newestWorkspaceBuild();
   if (!newest) {
     fatal(
-      'No runtime binary. Build one with `cargo build --release -p mangostudio-runtime --locked`.'
+      'No runtime binary. Build one with `cargo build --profile release-fast -p mangostudio-runtime --locked`.'
     );
   }
   candidates.push({ label: 'binary', binary: newest });

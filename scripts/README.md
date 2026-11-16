@@ -509,6 +509,22 @@ MANGO_API_KEY='mango_…' bun run scripts/examples/external-api-smoke.ts http://
 | `rust-test-inventory.ts`     | Rust test inventory (libtest or nextest) by logical identity; diff two, total a log                                             |
 | `external-agent-boundary.ts` | Actual receipt hashing, admitted request ownership and event mapping; alternating Base/Head processes, raw timings and peak RSS |
 
+The benchmarks take any runtime binary, and they default to the newest of `target/release`,
+`target/release-fast` and `target/debug`. For an A/B on one machine, build with
+`cargo build --profile release-fast -p mangostudio-runtime --locked` instead of `--release`:
+`[profile.release-fast]` in the root `Cargo.toml` inherits the shipping profile (including its
+per-package `opt-level = "s"` overrides) with thin LTO and 16 codegen units. On linux-x64 the
+runtime builds in 140 s of wall time against 446 s for `--release` (1.5x the CPU time, so a
+4-core machine gains little). Against the shipping binary over interleaved runs, the `hello`
+median is 1-2 ms (2-5%) higher and the `grep.ts` medians are 0-6% higher on the 1000-file and
+large-file scenarios and 1-2 ms higher on the small ones, so use it to find effects larger than
+about 10%. Build `--release` when the claim is a size, a peak RSS (the fast binary is 31% larger
+and its scan peaks 5 MiB higher), a small difference, or a number that goes into
+`docs/reference/tooling.md`. A `release-fast` binary is never packaged or published: the
+release scripts and workflows only build `--release`, and
+`scripts/tests/release-fast-profile.unit.test.ts` fails when one of them names the profile.
+The handshake report labels such a binary `release-fast`.
+
 `external-agent-boundary.ts` runs ignored Rust libtests, so benchmarks are not part of the normal
 test gate. Build each revision's runtime libtest with `cargo test -p mangostudio-runtime --lib
 --release --locked --no-run --message-format=json` and `MANGOSTUDIO_BENCH_SOURCE_SHA` set to that
