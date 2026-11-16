@@ -29,10 +29,11 @@ pub use client::ContractClient;
 pub use events::{ContractEvents, EventOptions, TypedEvent, TypedEventStream};
 pub use serve::{ContractHandlers, Guard, ServeGuard, ServeOptions};
 
-/// One method's declaration plus its compiled `params`/`result` validators.
+/// One method's compiled `params`/`result` validators, at the same index as
+/// its declaration in the contract's catalog. The declaration stays in the
+/// catalog: a copy here would hold every schema document a second time.
 #[derive(Debug)]
 struct CompiledMethod {
-    definition: CatalogMethod,
     params: Arc<Validator>,
     result: Arc<Validator>,
 }
@@ -61,7 +62,11 @@ struct CompiledMethod {
 /// ```
 #[derive(Debug)]
 pub struct Contract {
-    catalog: Catalog,
+    /// Shared, so a host that keeps its own parsed catalog (a process-wide
+    /// static, say) hands the contract that one copy
+    /// ([`Contract::from_shared_catalog`]) instead of a second.
+    catalog: Arc<Catalog>,
+    /// `methods[i]` holds the validators of `catalog.methods[i]`.
     methods: Vec<CompiledMethod>,
 }
 
@@ -110,6 +115,42 @@ impl Contract {
     /// assert_eq!(contract.catalog().name, "example.files");
     /// ```
     pub fn from_catalog(catalog: Catalog) -> Result<Self, ValidationError> {
+        compile(Arc::new(catalog))
+    }
+
+    /// [`Contract::from_catalog`] for a catalog the caller keeps using: the
+    /// contract holds this `Arc` instead of a copy, so a process that parsed
+    /// a large catalog once (a runtime's embedded one is about 2 MiB of JSON,
+    /// 1.5 MiB parsed) holds one copy of it, not two.
+    ///
+    /// This is a second constructor, not a wider parameter, because
+    /// `from_catalog` takes a concrete `Catalog`: that is what lets
+    /// `let catalog = serde_json::from_str(text)?; Contract::from_catalog(catalog)`
+    /// infer its type. Any `impl Into<Arc<Catalog>>` parameter would leave
+    /// that call ambiguous.
+    ///
+    /// # Errors
+    /// Returns [`ValidationError`] for the same reasons
+    /// [`ContractBuilder::build`] does.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    ///
+    /// use mango_protocol::Catalog;
+    /// use mango_protocol::contract::Contract;
+    ///
+    /// let text = include_str!(concat!(
+    ///     env!("CARGO_MANIFEST_DIR"),
+    ///     "/../../spec/fixtures/1/catalog-example.json"
+    /// ));
+    /// let catalog: Arc<Catalog> =
+    ///     Arc::new(serde_json::from_str(text).expect("the fixture is a valid catalog"));
+    /// let contract = Contract::from_shared_catalog(Arc::clone(&catalog)).expect("it compiles");
+    /// assert_eq!(contract.catalog(), *catalog);
+    /// ```
+    pub fn from_shared_catalog(catalog: Arc<Catalog>) -> Result<Self, ValidationError> {
         compile(catalog)
     }
 
@@ -119,7 +160,7 @@ impl Contract {
     /// clone of that proof, not a fresh check.
     #[must_use]
     pub fn catalog(&self) -> Catalog {
-        self.catalog.clone()
+        (*self.catalog).clone()
     }
 
     /// Validates `params` against `method`'s schema, then deserialises it.
@@ -173,7 +214,7 @@ impl Contract {
         method: &str,
         params: Value,
     ) -> Result<P, RemoteError> {
-        let compiled = self
+        let (_, compiled) = self
             .method(method)
             .ok_or_else(|| unsupported(&self.catalog.name, method))?;
         check_params(method, &compiled.params, &params)?;
@@ -316,8 +357,7 @@ impl Contract {
     ///
     /// # Errors
     /// Returns [`ValidationError`] when `handlers` names a method this
-    /// contract does not declare, or when `options.discover` is set and the
-    /// catalog does not serialise to JSON. Either way nothing is registered.
+    /// contract does not declare. Nothing is registered then.
     ///
     /// # Example
     ///
@@ -366,10 +406,14 @@ impl Contract {
         serve::serve(self, session, handlers, options)
     }
 
-    fn method(&self, name: &str) -> Option<&CompiledMethod> {
-        self.methods
+    /// `name`'s declaration and its compiled validators.
+    fn method(&self, name: &str) -> Option<(&CatalogMethod, &CompiledMethod)> {
+        let index = self
+            .catalog
+            .methods
             .iter()
-            .find(|method| method.definition.name == name)
+            .position(|method| method.name == name)?;
+        Some((&self.catalog.methods[index], &self.methods[index]))
     }
 }
 
@@ -493,7 +537,7 @@ impl ContractBuilder {
     /// assert_eq!(error.field, "catalog.name");
     /// ```
     pub fn build(self) -> Result<Contract, ValidationError> {
-        compile(self.catalog)
+        compile(Arc::new(self.catalog))
     }
 }
 
@@ -504,7 +548,7 @@ impl ContractBuilder {
 /// [`ContractBuilder::build`] and [`Contract::from_catalog`] both funnel
 /// through, so declare-then-compile and deserialise-then-compile cannot drift
 /// apart.
-fn compile(catalog: Catalog) -> Result<Contract, ValidationError> {
+fn compile(catalog: Arc<Catalog>) -> Result<Contract, ValidationError> {
     catalog.validate()?;
     for (index, method) in catalog.methods.iter().enumerate() {
         assert_not_reserved(&format!("catalog.methods[{index}].name"), &method.name)?;
@@ -518,7 +562,6 @@ fn compile(catalog: Catalog) -> Result<Contract, ValidationError> {
         .enumerate()
         .map(|(index, method)| {
             Ok(CompiledMethod {
-                definition: method.clone(),
                 params: Arc::new(params::compile(
                     &format!("catalog.methods[{index}].params"),
                     &method.params,
@@ -561,6 +604,7 @@ mod tests {
     use crate::catalog::{CatalogEvent, CatalogMethod};
     use serde::Deserialize;
     use serde_json::{Value, json};
+    use std::sync::Arc;
 
     fn sample_method(name: &str, params: Value, result: Value) -> CatalogMethod {
         CatalogMethod {
@@ -621,6 +665,73 @@ mod tests {
         assert_eq!(
             error.details.as_ref().and_then(|d| d.get("path")),
             Some(&json!("/a"))
+        );
+    }
+
+    /// `from_shared_catalog` keeps the caller's `Arc`, so the contract adds no
+    /// copy of the catalog, and method lookups read declarations from it.
+    #[test]
+    fn a_shared_catalog_is_held_not_copied() {
+        let catalog = Arc::new(example().catalog());
+        let contract = Contract::from_shared_catalog(Arc::clone(&catalog))
+            .expect("the example catalog compiles");
+        assert!(
+            Arc::ptr_eq(&contract.catalog, &catalog),
+            "expected the contract to hold the caller's catalog | received: a copy"
+        );
+        let ok: AddParams = contract
+            .parse_params("math.add", json!({ "a": 1, "b": 2 }))
+            .expect("math.add resolves through the shared catalog");
+        assert_eq!((ok.a, ok.b), (1.0, 2.0));
+    }
+
+    /// The reason `from_catalog` keeps a concrete `Catalog` parameter: the
+    /// catalog below is never annotated, and its type is inferred from the
+    /// call. A generic parameter would turn this into a compile error.
+    #[test]
+    fn from_catalog_infers_the_type_of_an_unannotated_catalog() {
+        let text = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../spec/fixtures/1/catalog-example.json"
+        ));
+        let catalog = serde_json::from_str(text).expect("the fixture is a valid catalog");
+        let contract = Contract::from_catalog(catalog).expect("the fixture compiles");
+        assert_eq!(contract.catalog().name, "example.files");
+    }
+
+    /// Serving with discover on hands the `rpc.discover` handler a share of
+    /// the contract's catalog, and renders no document of its own: a copy
+    /// would cost every connection about as much memory as the catalog.
+    #[tokio::test]
+    async fn serving_discover_shares_the_catalog_instead_of_rendering_it() {
+        use crate::frame::PeerInfo;
+        use crate::port::port_pair;
+        use crate::session::{Session, SessionOptions};
+
+        let contract = example();
+        let (port, _unused) = port_pair();
+        let peer = PeerInfo {
+            name: "probe".into(),
+            version: "0".into(),
+            role: "runtime".into(),
+        };
+        let (session, _driver) = Session::spawn(port, SessionOptions::new(peer));
+        let before = Arc::strong_count(&contract.catalog);
+
+        let guard = contract
+            .serve(&session, super::ContractHandlers::new(), Default::default())
+            .expect("serving no handlers always succeeds");
+        assert_eq!(
+            Arc::strong_count(&contract.catalog),
+            before + 1,
+            "expected the discover handler to hold one share of the catalog | received strong count {} (was {before})",
+            Arc::strong_count(&contract.catalog)
+        );
+        drop(guard);
+        assert_eq!(
+            Arc::strong_count(&contract.catalog),
+            before,
+            "expected unregistering to release the share"
         );
     }
 

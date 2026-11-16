@@ -32,7 +32,7 @@ use mango_protocol::frame::Frame;
 use mango_protocol::frame::PeerInfo;
 use mango_protocol::port::{Port, PortTx, SendOutcome};
 use mango_protocol::session::{EventInput, Session, SessionClosure, SessionOptions};
-use mangostudio_runtime_contract::catalog::catalog;
+use mangostudio_runtime_contract::catalog::shared_catalog;
 use tokio_util::sync::CancellationToken;
 
 use crate::consent::authorization::ConsentAuthorization;
@@ -334,7 +334,9 @@ pub(crate) fn build_host_with_restart(
 fn runtime_contract() -> &'static Contract {
     static CONTRACT: OnceLock<Contract> = OnceLock::new();
     CONTRACT.get_or_init(|| {
-        Contract::from_catalog(catalog().clone()).expect(
+        // The shared handle: the contract holds the catalog the process
+        // already parsed, not a second copy.
+        Contract::from_shared_catalog(shared_catalog()).expect(
             "the embedded catalog compiles into a contract; a change to the catalog that broke \
              this would already fail mangostudio-runtime-contract's own build",
         )
@@ -551,7 +553,7 @@ mod tests {
 
     use super::{
         RUNTIME_HEARTBEAT_TOPIC, RUNTIME_PEER_NAME, RUNTIME_PEER_ROLE, build_host, heartbeat_loop,
-        runtime_contract, runtime_peer, start_session,
+        runtime_contract, runtime_peer, shared_catalog, start_session,
     };
     use crate::runtime_home::RuntimeSlot;
     use crate::test_support::scratch_path;
@@ -1150,6 +1152,22 @@ mod tests {
             ],
             "the production registry must match its implemented method families"
         );
+    }
+
+    /// The contract the runtime serves holds the process's one parsed
+    /// catalog instead of a clone of it: the static, the contract and this
+    /// handle are three owners of one allocation.
+    #[test]
+    fn the_runtime_contract_shares_the_process_catalog_instead_of_cloning_it() {
+        let contract = runtime_contract();
+        let shared = shared_catalog();
+        let owners = std::sync::Arc::strong_count(&shared);
+        assert!(
+            owners >= 3,
+            "expected the catalog static, the runtime contract and this handle to share one \
+             allocation (strong count >= 3) | received strong count {owners}"
+        );
+        assert_eq!(contract.catalog(), *shared);
     }
 
     #[test]
