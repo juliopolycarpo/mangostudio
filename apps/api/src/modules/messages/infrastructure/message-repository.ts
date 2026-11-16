@@ -13,6 +13,7 @@ import { listAttachmentsByMessageIds } from '../../attachments/infrastructure/at
 import { listGeneratedImagesByMessageIds } from '../../generated-images/infrastructure/generated-image-repository';
 import { type GalleryCursor, type GalleryEntry, tiedRowidCeiling } from '../domain/gallery-cursor';
 import { encodeTranscriptCursor, type TranscriptCursor } from '../domain/transcript-cursor';
+import { foldCheckpointDeltasIntoRows, withCheckpointSnapshot } from './message-checkpoint-deltas';
 import { decodeMessageParts, readMessageParts } from './message-parts-codec';
 
 export interface CreateMessageData {
@@ -248,40 +249,50 @@ export async function listByChatId(
   const newestFirst = opts.order === 'desc';
   const direction = newestFirst ? 'desc' : 'asc';
 
-  let q = db
-    .selectFrom('messages')
-    .selectAll()
-    .select(sql<number>`rowid`.as('rowid'))
-    .where('chatId', '=', chatId)
-    .orderBy('timestamp', direction)
-    .orderBy(sql`rowid`, direction);
+  const pageQuery = (from: Kysely<Database>) => {
+    let q = from
+      .selectFrom('messages')
+      .selectAll()
+      .select(sql<number>`rowid`.as('rowid'))
+      .where('chatId', '=', chatId)
+      .orderBy('timestamp', direction)
+      .orderBy(sql`rowid`, direction);
 
-  if (opts.cursor) {
-    const { timestamp, rowid } = opts.cursor;
-    q = q.where(
-      newestFirst
-        ? sql<boolean>`(timestamp, rowid) < (${timestamp}, ${rowid})`
-        : sql<boolean>`(timestamp, rowid) > (${timestamp}, ${rowid})`
+    if (opts.cursor) {
+      const { timestamp, rowid } = opts.cursor;
+      q = q.where(
+        newestFirst
+          ? sql<boolean>`(timestamp, rowid) < (${timestamp}, ${rowid})`
+          : sql<boolean>`(timestamp, rowid) > (${timestamp}, ${rowid})`
+      );
+    }
+    return q.limit(limit + 1);
+  };
+
+  // A row still generating is read as its last checkpoint left it, not as its
+  // last full rewrite. The page and those deltas are read together.
+  const { fetched, rows } = await withCheckpointSnapshot(db, async (snapshot) => {
+    const page = await pageQuery(snapshot).execute();
+    // The look-ahead row proves another page exists and is not part of this one.
+    const hasMore = page.length > limit;
+    if (hasMore) page.pop();
+    const folded = await foldCheckpointDeltasIntoRows(
+      page.map(({ rowid: _rowid, ...row }) => row),
+      snapshot
     );
-  }
+    return { fetched: { page, hasMore }, rows: folded };
+  });
 
-  const fetched = await q.limit(limit + 1).execute();
-
-  // The look-ahead row proves another page exists and is not part of this one.
-  // `fetched` is in query order, so its last row is the edge facing that page.
+  // `fetched.page` is in query order, so its last row is the edge facing the next page.
   let nextCursor: string | null = null;
-  if (fetched.length > limit) {
-    fetched.pop();
-    const edge = fetched.at(-1);
+  if (fetched.hasMore) {
+    const edge = fetched.page.at(-1);
     nextCursor = edge
       ? encodeTranscriptCursor({ timestamp: edge.timestamp, rowid: edge.rowid })
       : null;
   }
-  // A page is chronological whichever end it was cut from.
-  if (newestFirst) fetched.reverse();
-
-  // `rowid` is a paging detail and must not leak into the mapped message.
-  const rows = fetched.map(({ rowid: _rowid, ...row }) => row);
+  // A page is chronological whichever end it was cut from. `rows` is in query order too.
+  if (newestFirst) rows.reverse();
 
   const messageIds = rows.map((row) => row.id);
   const [generatedImagesByMessageId, attachmentsByMessageId] = await Promise.all([

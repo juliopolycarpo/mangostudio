@@ -66,6 +66,9 @@ Open these first:
 - `apps/api/src/modules/generation/application/resolve-model.ts`
 - `apps/api/src/modules/chats/` (ownership, chat repository)
 - `apps/api/src/modules/messages/` (message repository, persistence)
+- `apps/api/src/modules/generation/application/turn-checkpoint.ts` (a streaming turn's checkpoints:
+  one full row write, then deltas in `message_checkpoint_deltas`; every reader of a generating row
+  folds them through `foldCheckpointDeltasIntoRows`)
 - `apps/api/src/services/providers/core/continuation-envelope.ts`
 - `apps/api/src/services/providers/core/continuation-runtime.ts`
 - `apps/api/src/services/providers/core/context-policy.ts`
