@@ -1526,19 +1526,53 @@ mod tests {
         assert_eq!(fixture.installed_binary_body(), "binary one");
     }
 
+    /// Puts the install in a state where moving its directory aside fails.
+    /// On Windows that is what a running hub does, simulated with an exclusive
+    /// handle on the binary: renaming a directory with an open file inside
+    /// fails there, and Windows renames a directory over a plain file happily,
+    /// so a file in the way would not block anything. Elsewhere a regular
+    /// file at the move-aside path blocks it (a directory cannot replace a
+    /// non-directory) with no dependence on the user id.
+    struct ReplaceBlocker {
+        #[cfg(windows)]
+        _exclusive_handle: fs::File,
+    }
+
+    fn block_replace(fixture: &InstallFixture) -> ReplaceBlocker {
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            ReplaceBlocker {
+                _exclusive_handle: fs::OpenOptions::new()
+                    .read(true)
+                    .share_mode(0)
+                    .open(fixture.binary_path())
+                    .expect("expected an exclusive handle on the installed binary"),
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            fs::write(
+                fixture.release().rollback_path(&fixture.root.0),
+                "in the way",
+            )
+            .expect("expected the blocking file");
+            ReplaceBlocker {}
+        }
+    }
+
     #[test]
     fn a_blocked_replace_keeps_the_installed_build_and_downloads_nothing() {
         let fixture = InstallFixture::new();
         fixture.publish("binary one");
         fixture.lay_down_complete_install("old binary");
         fs::write(fixture.binary_path(), "bin").expect("expected a short binary");
-        // Block the move-aside target with a regular file: moving a directory
-        // onto it fails on every platform, with no dependence on the user id.
-        // On Windows the real cause is a running hub holding its files.
-        let blocker = fixture.release().rollback_path(&fixture.root.0);
-        fs::write(&blocker, "in the way").expect("expected the blocking file");
+        let blocker = block_replace(&fixture);
 
         let outcome = fixture.start();
+        // Release the block before reading the binary: an exclusive handle
+        // would refuse that read on Windows.
+        drop(blocker);
 
         assert!(
             matches!(&outcome, Ok(InstallStart::KeptInstalled { reason }) if reason.contains("cannot replace the install")),
@@ -1558,13 +1592,10 @@ mod tests {
         fixture.publish("binary one");
         fs::create_dir_all(fixture.install_dir()).expect("expected the install dir");
         fs::write(fixture.binary_path(), "").expect("expected an empty binary");
-        fs::write(
-            fixture.release().rollback_path(&fixture.root.0),
-            "in the way",
-        )
-        .expect("expected the blocking file");
+        let blocker = block_replace(&fixture);
 
         let outcome = fixture.start();
+        drop(blocker);
 
         assert!(
             matches!(&outcome, Err(message) if message.contains("cannot replace the install")),
