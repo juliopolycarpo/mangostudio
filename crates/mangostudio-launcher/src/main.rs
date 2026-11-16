@@ -1536,6 +1536,15 @@ mod tests {
     struct ReplaceBlocker {
         #[cfg(windows)]
         _exclusive_handle: fs::File,
+        #[cfg(not(windows))]
+        file_in_the_way: PathBuf,
+    }
+
+    impl Drop for ReplaceBlocker {
+        fn drop(&mut self) {
+            #[cfg(not(windows))]
+            let _ = fs::remove_file(&self.file_in_the_way);
+        }
     }
 
     fn block_replace(fixture: &InstallFixture) -> ReplaceBlocker {
@@ -1552,12 +1561,9 @@ mod tests {
         }
         #[cfg(not(windows))]
         {
-            fs::write(
-                fixture.release().rollback_path(&fixture.root.0),
-                "in the way",
-            )
-            .expect("expected the blocking file");
-            ReplaceBlocker {}
+            let file_in_the_way = fixture.release().rollback_path(&fixture.root.0);
+            fs::write(&file_in_the_way, "in the way").expect("expected the blocking file");
+            ReplaceBlocker { file_in_the_way }
         }
     }
 
