@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { readSourceFileBatches } from '../support/source-file-batches';
+import { scanSourcePaths } from '../support/source-scan';
 
 const API_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const DB_TYPES_RELATIVE_PATH = 'src/db/types.ts';
@@ -22,7 +23,7 @@ async function readApiSourceFiles() {
 }
 
 async function collectMatchingSourcePaths(pattern: string, paths: string[]) {
-  for await (const path of new Bun.Glob(pattern).scan({ cwd: API_ROOT, onlyFiles: true })) {
+  for (const path of await scanSourcePaths(API_ROOT, pattern)) {
     if (path === DB_TYPES_RELATIVE_PATH) continue;
 
     paths.push(path);
