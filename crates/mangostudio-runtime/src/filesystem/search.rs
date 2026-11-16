@@ -22,6 +22,7 @@ use super::capability::{
     BoundDir, bind_opened_directory, open_directory_if_present, open_existing_file,
     verify_opened_file,
 };
+use super::grep_prefilter::LinePrefilter;
 use super::io::{check_cancel, io_error, path_error, read};
 use super::policy::{CompiledPolicy, PathPolicy};
 use crate::workspace::lexically_normalize;
@@ -576,12 +577,22 @@ fn scan_bytes(
         return Ok(false);
     }
     let content = String::from_utf8_lossy(&bytes);
+    let prefilter = matcher.prefilter.clone();
     let regex = matcher.for_file(bytes.len())?;
     let matches_before_file = matches.len();
     let allowance = match_allowance(params, matches.len());
     let mut more_matches = false;
     let mut file_matches = 0usize;
-    for (index, line) in content.split('\n').enumerate() {
+    // The prefilter may yield no line at all, so cancellation is checked once
+    // before the loop as well as per line.
+    check_cancel(cancel)?;
+    // The lossy `content`, not the raw bytes, is what the engine sees, so the
+    // literal search runs on it too (a literal may contain U+FFFD).
+    let lines: Box<dyn Iterator<Item = (usize, &str)>> = match prefilter.as_deref() {
+        Some(prefilter) => Box::new(prefilter.candidate_lines(&content)),
+        None => Box::new(content.split('\n').enumerate()),
+    };
+    for (index, line) in lines {
         check_cancel(cancel)?;
         match regex.is_match(line)? {
             JsMatch::Matched if matches.len() < params.max_results && file_matches < allowance => {
@@ -632,6 +643,10 @@ struct GrepMatcher {
     cancel: CancellationToken,
     file_budget: Duration,
     engine: Option<JavascriptRegex>,
+    /// Lines without one of the pattern's required literals cannot match and
+    /// skip the engine; `None` when the pattern has no certain literal.
+    /// Shared so a scan can hold it beside the engine it borrows mutably.
+    prefilter: Option<Arc<LinePrefilter>>,
 }
 
 impl GrepMatcher {
@@ -658,8 +673,12 @@ impl GrepMatcher {
             cancel,
             file_budget,
             engine: None,
+            prefilter: None,
         };
         matcher.engine = Some(matcher.compile(quickjs_heap_limit(pattern.len()))?);
+        // Only once QuickJS accepted the pattern: the extractor assumes valid syntax.
+        matcher.prefilter =
+            LinePrefilter::for_pattern(pattern, regexp_flags(case_insensitive)).map(Arc::new);
         Ok(matcher)
     }
 
@@ -729,6 +748,13 @@ struct RegexInterruption {
     triggered: AtomicBool,
 }
 
+/// The flags of the `RegExp` every line is tested with. The literal prefilter
+/// is built from the same string and refuses any flag it was not written for,
+/// so a flag added here switches the prefilter off until the extractor learns it.
+fn regexp_flags(case_insensitive: bool) -> &'static str {
+    if case_insensitive { "i" } else { "" }
+}
+
 impl JavascriptRegex {
     fn new(
         pattern: &str,
@@ -755,9 +781,9 @@ impl JavascriptRegex {
         })));
         let context = Context::full(&runtime)
             .map_err(|error| RemoteError::new(codes::INTERNAL, error.to_string()))?;
-        let flags = if case_insensitive { "i" } else { "" };
         let source = serde_json::to_string(pattern).expect("a Rust string always serializes");
-        let flags = serde_json::to_string(flags).expect("a Rust string always serializes");
+        let flags = serde_json::to_string(regexp_flags(case_insensitive))
+            .expect("a Rust string always serializes");
         let test = context
             .with(|ctx| {
                 ctx.eval::<(), _>(format!(
@@ -1117,6 +1143,10 @@ fn dot_components_allowed(pattern: &str, path: &str) -> bool {
     }
     previous[path_components.len()]
 }
+
+#[cfg(test)]
+#[path = "grep_prefilter_parity_tests.rs"]
+mod prefilter_parity_tests;
 
 #[cfg(test)]
 mod tests {
