@@ -155,3 +155,141 @@ describe('recovery of a mutating tool killed before its result', () => {
     );
   });
 });
+
+describe('a start marker for a turn that was already finalized', () => {
+  let registrySnapshot: RegisteredTool[];
+  let toolStarts: string[];
+
+  beforeEach(() => {
+    toolStarts = [];
+    registrySnapshot = getAllTools().map((tool) => ({
+      definition: { ...tool.definition },
+      settings: { ...tool.settings, parameterDescriptors: [...tool.settings.parameterDescriptors] },
+      execute: tool.execute,
+      buildDefinition: tool.buildDefinition,
+    }));
+    clearRegistry();
+    registerTool({
+      definition: { name: TOOL_NAME, description: 'Stands in for a write', parameters: {} },
+      settings: {
+        title: TOOL_NAME,
+        description: 'Stands in for a write',
+        category: 'system',
+        enabledByDefault: true,
+        canDisable: true,
+        defaultParameters: {},
+        parameterDescriptors: [],
+      },
+      execute: () => {
+        toolStarts.push(TOOL_NAME);
+        return Promise.resolve({ ok: true });
+      },
+    });
+  });
+
+  afterEach(() => {
+    clearRegistry();
+    for (const tool of registrySnapshot) registerTool(tool);
+  });
+
+  /** A turn whose message row was already finalized, as after a stop or a restart reconcile. */
+  async function finalizedTurn() {
+    const user = await insertTestUser();
+    const chat = await insertTestChat(user.id);
+    const messageId = crypto.randomUUID();
+    const checkpoint = createTurnCheckpointPart({
+      turnId: messageId,
+      startedAt: Date.now(),
+      provider: 'openai',
+      modelName: 'gpt-test',
+      agentId: 'default',
+    });
+    const allParts: MessagePart[] = [
+      checkpoint,
+      {
+        type: 'tool_call',
+        toolCallId: CALL_ID,
+        name: TOOL_NAME,
+        args: {},
+        execution: { status: 'queued', source: 'builtin', queuedAt: 1 },
+      },
+    ];
+    await insertMessage(
+      {
+        id: messageId,
+        chatId: chat.id,
+        role: 'ai',
+        text: '',
+        timestamp: Date.now(),
+        isGenerating: false,
+        interactionMode: 'agent',
+        parts: JSON.stringify([checkpoint]),
+      },
+      getDb()
+    );
+    const session = {
+      allParts,
+      checkpointWriter: new TurnCheckpointWriter({
+        store: createDatabaseCheckpointStore(getDb(), messageId),
+        chatId: chat.id,
+        messageId,
+        checkpoint,
+        getContent: () => ({ text: '', parts: allParts, providerState: null }),
+      }),
+    };
+    return { user, chat, messageId, session };
+  }
+
+  it('does not start a mutating tool, since its marker was stored nowhere', async () => {
+    const { user, chat, session } = await finalizedTurn();
+
+    const items = [];
+    for await (const item of executeStandardToolCallsWithProgress(
+      [[CALL_ID, { name: TOOL_NAME, argsStr: '{}' }]],
+      {
+        userId: user.id,
+        chatId: chat.id,
+        environmentId: 'local',
+        settingsByToolName: new Map(),
+        allowedToolNames: new Set([TOOL_NAME]),
+        beforeToolStart: createToolStartMarkerWriter(session),
+      }
+    )) {
+      items.push(item);
+    }
+
+    expect(toolStarts).toEqual([]);
+    const execution = items.find((item) => item.kind === 'execution');
+    expect(execution?.kind === 'execution' && execution.execution.resultStr).toContain(
+      `Tool \\"${TOOL_NAME}\\" was not started`
+    );
+  });
+
+  it('reports a durable checkpoint on a finalized row as not stored, and a plain one as harmless', async () => {
+    const { session, messageId } = await finalizedTurn();
+    const before = await getDb()
+      .selectFrom('messages')
+      .select(['parts', 'isGenerating'])
+      .where('id', '=', messageId)
+      .executeTakeFirstOrThrow();
+
+    // The first checkpoint is a rewrite, the second a delta; both kinds must be refused.
+    const durableRewrite = await session.checkpointWriter.checkpoint({
+      force: true,
+      durable: true,
+    });
+    const durableDelta = await session.checkpointWriter.checkpoint({ force: true, durable: true });
+    // A text checkpoint that loses the race with finalization is not an error.
+    const plain = await session.checkpointWriter.checkpoint({ force: true });
+
+    expect(durableRewrite).toBe(false);
+    expect(durableDelta).toBe(false);
+    expect(plain).toBe(true);
+    const after = await getDb()
+      .selectFrom('messages')
+      .select(['parts', 'isGenerating'])
+      .where('id', '=', messageId)
+      .executeTakeFirstOrThrow();
+    expect(after).toEqual(before);
+  });
+});

@@ -74,19 +74,35 @@ export interface TurnCheckpointStore {
   appendDelta(seq: number, deltaJson: string, options: CheckpointWriteOptions): Promise<void>;
 }
 
+/**
+ * Stores checkpoints in the message row. Both writes only touch a row that is
+ * still generating, so one for a message that was already finalized stores
+ * nothing. A best-effort checkpoint that loses that race is harmless and stays
+ * silent. A durable one is a write-ahead record the caller is about to act on, so
+ * it throws rather than report a marker that was never stored.
+ */
 export function createDatabaseCheckpointStore(
   db: Kysely<Database>,
   messageId: string
 ): TurnCheckpointStore {
+  const requireStored = (stored: boolean, durable: boolean, write: string) => {
+    if (!stored && durable) {
+      throw new Error(
+        `durable checkpoint ${write} for message ${messageId} stored nothing | expected a generating message row`
+      );
+    }
+  };
   return {
-    rewriteRow: (row, { durable }) => {
+    rewriteRow: async (row, { durable }) => {
       const write = (conn: Kysely<Database>) => rewriteCheckpointedRow({ messageId, ...row }, conn);
-      return durable ? runDurably(db, 'turn_checkpoint_rewrite', write) : write(db);
+      const stored = await (durable ? runDurably(db, 'turn_checkpoint_rewrite', write) : write(db));
+      requireStored(stored, durable, 'rewrite');
     },
     appendDelta: async (seq, deltaJson, { durable }) => {
       const write = (conn: Kysely<Database>) =>
         insertCheckpointDelta({ messageId, seq, deltaJson }, conn);
-      await (durable ? runDurably(db, 'turn_checkpoint_delta', write) : write(db));
+      const stored = await (durable ? runDurably(db, 'turn_checkpoint_delta', write) : write(db));
+      requireStored(stored, durable, 'delta');
     },
   };
 }
