@@ -2,13 +2,15 @@ import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { scanSourcePaths } from '../../support/source-scan';
+
 const SRC_ROOT = fileURLToPath(new URL('../../../src', import.meta.url));
 const KEEPALIVE_SOURCE = 'lib/hub-connection-limits.ts';
 
 /** The files under `src` whose text matches `pattern`, as paths relative to `src`. */
 async function sourceFilesMatching(pattern: RegExp): Promise<string[]> {
   const matches: string[] = [];
-  for await (const path of new Bun.Glob('**/*.ts').scan({ cwd: SRC_ROOT, onlyFiles: true })) {
+  for (const path of await scanSourcePaths(SRC_ROOT, '**/*.ts')) {
     if (pattern.test(await Bun.file(join(SRC_ROOT, path)).text())) matches.push(path);
   }
   return matches.sort();
