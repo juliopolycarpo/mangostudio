@@ -6,6 +6,7 @@ import {
   createTextLineTee,
   MAX_MACHINE_STDOUT_LINE_BYTES,
 } from '../lib/native-command-output';
+import { countScanWork } from './support/scan-work';
 
 class FakeMachineOutputSink {
   readonly chunks: string[] = [];
@@ -179,22 +180,22 @@ describe('text line tee', () => {
   });
 
   // The loop used to search the whole pending text on every write; with the
-  // limit at 1 MiB, a 1 MiB line in 16-byte writes took seconds. The bound
-  // separates linear from quadratic; it is no benchmark.
-  it('passes a 1 MiB line written in 16-character pieces within 1500 ms', () => {
+  // limit at 1 MiB, a 1 MiB line in 16-byte writes searched about 3e10 units.
+  // Counted, not timed.
+  it('passes a 1 MiB line written in 16-character pieces by searching it once', () => {
     const text = `${'a'.repeat(1_048_576)}\n`;
     const sink = new FakeMachineOutputSink();
     const tee = createTextLineTee(sink.write, sink.report);
 
-    const startedAt = performance.now();
-    for (let offset = 0; offset < text.length; offset += 16) {
-      tee.write(text.slice(offset, offset + 16));
-    }
-    tee.end();
-    const elapsedMs = performance.now() - startedAt;
+    const units = countScanWork(() => {
+      for (let offset = 0; offset < text.length; offset += 16) {
+        tee.write(text.slice(offset, offset + 16));
+      }
+      tee.end();
+    });
 
     expect(sink.chunks.map((chunk) => chunk.length)).toEqual([1_048_577]);
     expect(sink.errors).toEqual([]);
-    expect(elapsedMs).toBeLessThan(1500);
+    expect(units).toBeLessThanOrEqual(3 * text.length);
   });
 });

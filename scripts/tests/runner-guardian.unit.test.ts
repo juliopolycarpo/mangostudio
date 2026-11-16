@@ -18,6 +18,7 @@ import {
 } from '../lib/runner-guardian';
 import { isAlive } from './support/process-liveness';
 import { forceKill, forceKillGroup, waitFor } from './support/process-tree';
+import { countScanWork } from './support/scan-work';
 
 // The pure parts of the guardian, pinned with named fakes: what the protocol
 // accepts, what is signalled and in which order, and how the runner's side
@@ -201,22 +202,23 @@ describe('LineBuffer', () => {
     expect(received[1]).toBe('group 4001');
   });
 
-  // The buffer used to split the whole held string on every read: a 1 MiB line
-  // in 16-byte reads took several seconds. The bound separates linear from
-  // quadratic; it is no benchmark.
-  test('holds a 1 MiB line read in 16-byte pieces within 1500 ms, and still finds the next command', () => {
+  // The buffer used to split the whole held string on every read, so a 1 MiB
+  // line in 16-byte reads searched about 3e10 units. Counted, not timed; the
+  // splitter's own linearity is proven in newline-splitter.unit.test.ts, this
+  // pins that the buffer goes through it.
+  test('holds a 1 MiB line read in 16-byte pieces by searching it once, and still finds the next command', () => {
     const stream = `${'x'.repeat(1024 * 1024)}\npid 4002\n`;
     const lines = new LineBuffer();
     const received: string[] = [];
 
-    const startedAt = performance.now();
-    for (let offset = 0; offset < stream.length; offset += 16) {
-      received.push(...lines.push(stream.slice(offset, offset + 16)));
-    }
-    const elapsedMs = performance.now() - startedAt;
+    const units = countScanWork(() => {
+      for (let offset = 0; offset < stream.length; offset += 16) {
+        received.push(...lines.push(stream.slice(offset, offset + 16)));
+      }
+    });
 
     expect(received.map((line) => line.length)).toEqual([GUARDIAN_LINE_MAX_CHARS, 8]);
-    expect(elapsedMs).toBeLessThan(1500);
+    expect(units).toBeLessThanOrEqual(3 * stream.length);
   });
 });
 

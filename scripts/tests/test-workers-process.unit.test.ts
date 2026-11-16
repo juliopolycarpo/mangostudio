@@ -998,26 +998,46 @@ describe('pumpLines', () => {
     expect(oneByteReads).toEqual(expected);
   });
 
-  it('reports a line over the limit once, with its length and the limit, and drains the rest', async () => {
-    let pulls = 0;
-    const stream = new ReadableStream<Uint8Array>({
-      pull(controller) {
-        pulls += 1;
-        if (pulls === 1) controller.enqueue(new TextEncoder().encode('fine\n'));
-        else if (pulls <= 5) controller.enqueue(new TextEncoder().encode('x'.repeat(4)));
-        else controller.close();
-      },
-    });
+  it('cuts a line over the limit, says so once with its length, and keeps relaying what follows', async () => {
+    // The long line spans three reads; a failure summary follows it.
     const lines: string[] = [];
 
-    await pumpLines(stream, (line) => lines.push(line), undefined, 10);
+    await pumpLines(
+      streamOf('fine\n', 'xxxx', 'xxxx', 'xxxx', '\nafter\n(fail) x\n', 'last'),
+      (line) => lines.push(line),
+      undefined,
+      10
+    );
 
     expect(lines).toEqual([
       'fine',
-      '(NewlineSplitter): line length 12 exceeds the cap | expected at most 10 characters before the newline',
+      'x'.repeat(10),
+      'Output line of 12 characters exceeds the 10-character limit; cut to the limit',
+      'after',
+      '(fail) x',
+      'last',
     ]);
-    // Every chunk was still read, so the child is never blocked on a full pipe.
-    expect(pulls).toBe(6);
+  });
+
+  it('says so once for each line it cuts, whatever the reads', async () => {
+    const lines: string[] = [];
+
+    await pumpLines(
+      streamOf(`${'a'.repeat(15)}\nok\n${'b'.repeat(11)}`, '\n', 'c'.repeat(30)),
+      (line) => lines.push(line),
+      undefined,
+      10
+    );
+
+    expect(lines).toEqual([
+      'a'.repeat(10),
+      'Output line of 15 characters exceeds the 10-character limit; cut to the limit',
+      'ok',
+      'b'.repeat(10),
+      'Output line of 11 characters exceeds the 10-character limit; cut to the limit',
+      'c'.repeat(10),
+      'Output line of 30 characters exceeds the 10-character limit; cut to the limit',
+    ]);
   });
 
   it('accepts a line of exactly the limit', async () => {
@@ -1033,10 +1053,9 @@ describe('pumpLines', () => {
     expect(lines).toEqual(['a'.repeat(10), 'b'.repeat(10)]);
   });
 
-  // The reader used to search the whole pending text on every read: a 1 MiB
-  // line in 16-byte reads took several seconds. The bound separates linear from
-  // quadratic; it is no benchmark.
-  it('delivers a 1 MiB line read in 16-byte pieces within 1500 ms', async () => {
+  // That the splitting is linear is proven where it lives, in
+  // newline-splitter.unit.test.ts; this only pins that a long line arrives whole.
+  it('delivers a 1 MiB line read in 16-byte pieces whole', async () => {
     const bytes = new TextEncoder().encode(`${'a'.repeat(1024 * 1024)}\n`);
     const everySixteen = Array.from(
       { length: Math.floor((bytes.byteLength - 1) / 16) },
@@ -1044,12 +1063,9 @@ describe('pumpLines', () => {
     );
     const lines: string[] = [];
 
-    const startedAt = performance.now();
     await pumpLines(streamOfByteCuts(bytes, everySixteen), (line) => lines.push(line));
-    const elapsedMs = performance.now() - startedAt;
 
     expect(lines.map((line) => line.length)).toEqual([1024 * 1024]);
-    expect(elapsedMs).toBeLessThan(1500);
   });
 });
 

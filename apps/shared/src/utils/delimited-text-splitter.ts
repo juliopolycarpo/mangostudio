@@ -8,6 +8,12 @@
  * reads took several seconds. This splitter searches only the new text (plus
  * the few characters a delimiter could straddle), keeps the tail as a list of
  * pieces, and joins it once when the record completes.
+ *
+ * `scripts/lib/newline-splitter.ts` is a copy of this, cut down to the `\n`
+ * delimiter: the scripts that run under the smoke matrix's `--no-install` may
+ * import nothing but builtins, so they cannot import this file.
+ * `scripts/tests/newline-splitter-parity.unit.test.ts` runs one oracle against
+ * both; change the behaviour of one and that test says what to change in the other.
  */
 
 export interface DelimitedTextSplitterOptions {

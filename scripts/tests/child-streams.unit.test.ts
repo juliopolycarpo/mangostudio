@@ -142,22 +142,26 @@ describe('scripts/lib/child-streams', () => {
       expect(result).toEqual({ kind: 'line', line: 'a'.repeat(10) });
     });
 
-    // The reader used to search the whole buffer on every read: a 1 MiB line in
-    // 16-byte reads took several seconds. The bound separates linear from
-    // quadratic; it is no benchmark.
-    test('reads a 1 MiB first line in 16-byte pieces within 1500 ms', async () => {
+    test('returns a complete first line even when the same read goes on past the limit', async () => {
+      // `hello\n` is whole and the rest has no newline yet: the caller asked for
+      // one line and has it, so the overflow behind it is not its concern.
+      const result = await readFirstLine(streamOf(`hello\n${'x'.repeat(30)}`), 5_000, 10);
+
+      expect(result).toEqual({ kind: 'line', line: 'hello' });
+    });
+
+    // That the splitting is linear is proven where it lives, in
+    // newline-splitter.unit.test.ts; this only pins that a long line arrives whole.
+    test('reads a 1 MiB first line in 16-byte pieces whole', async () => {
       const bytes = encoder.encode(`${'a'.repeat(1024 * 1024)}\n`);
       const pieces: Uint8Array[] = [];
       for (let offset = 0; offset < bytes.byteLength; offset += 16) {
         pieces.push(bytes.slice(offset, offset + 16));
       }
 
-      const startedAt = performance.now();
       const result = await readFirstLine(streamOf(...pieces), 30_000);
-      const elapsedMs = performance.now() - startedAt;
 
       expect(result.kind === 'line' ? result.line.length : result).toBe(1024 * 1024);
-      expect(elapsedMs).toBeLessThan(1500);
     });
 
     test('returns as soon as the record arrives rather than waiting out the budget', async () => {

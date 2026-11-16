@@ -2,7 +2,7 @@
 // its output line by line under the worker's name, and reports how it ended.
 // The verdict logic is in ./test-workers.ts and never sees a process.
 
-import { NewlineSplitter } from './newline-splitter';
+import { NewlineSplitter, type SplitLine } from './newline-splitter';
 import type { GuardedChild } from './runner-guardian';
 import { settleWorker, signalWorker, WORKER_TOKEN_ENV } from './test-worker-settle';
 import type { WorkerExit, WorkerHandle, WorkerPlan } from './test-workers';
@@ -138,10 +138,10 @@ const WORKER_LINE_MAX_CHARS = 1024 * 1024;
  * last line with no newline is delivered when the stream ends, or when `stop`
  * aborts: that cancels the reader, so a pipe nobody closes cannot keep it open.
  *
- * A line over `maxLineLength` is not held: `onLine` gets one message naming its
- * length and the limit instead, and the rest of the output is read and dropped.
- * The pipe is still drained, so a worker that never writes a newline is not
- * blocked on a full pipe.
+ * A line over `maxLineLength` is delivered cut to it, followed by one message
+ * naming its length and the limit, and the lines after it arrive as usual: a
+ * worker that prints one huge line still gets its failure summary through. The
+ * pipe is always drained, so a worker is never blocked on it.
  *
  * @example
  * await pumpLines(child.stderr, (line) => console.error(`[w1] ${line}`), stop.signal);
@@ -154,20 +154,19 @@ export async function pumpLines(
 ): Promise<void> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
-  const lines = new NewlineSplitter({ maxLineLength, onOverflow: 'refuse' });
-  let refused = false;
-  const deliver = (text: string): void => {
-    if (refused) return;
-    let completed: string[];
-    try {
-      completed = lines.push(text);
-    } catch (error) {
-      if (!(error instanceof RangeError)) throw error;
-      refused = true;
-      onLine(error.message);
-      return;
+  const lines = new NewlineSplitter({ maxLineLength, onOverflow: 'truncate' });
+  const reportCut = ({ length }: SplitLine): void => {
+    if (length > maxLineLength) {
+      onLine(
+        `Output line of ${length} characters exceeds the ${maxLineLength}-character limit; cut to the limit`
+      );
     }
-    for (const line of completed) onLine(line.replace(/\r$/, ''));
+  };
+  const deliver = (text: string): void => {
+    for (const record of lines.pushRecords(text)) {
+      onLine(record.line.replace(/\r$/, ''));
+      reportCut(record);
+    }
   };
   const cancel = (): void => {
     reader.cancel().catch(() => undefined);
@@ -188,8 +187,11 @@ export async function pumpLines(
     stop?.removeEventListener('abort', cancel);
   }
   // The tail is not CR-trimmed: no newline ended it.
-  const rest = refused ? '' : lines.finish();
-  if (rest) onLine(rest);
+  const rest = lines.finishRecord();
+  if (rest.length > 0) {
+    onLine(rest.line);
+    reportCut(rest);
+  }
 }
 
 const stdSinks: LineSinks = {

@@ -1,114 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 
-import { NewlineSplitter, type NewlineSplitterOptions } from '../lib/newline-splitter';
-
-/** What a caller can observe from one `push` or `finish`. */
-type Observed = { readonly lines: readonly string[] } | { readonly refused: true };
-
-function observe(call: () => readonly string[]): Observed {
-  try {
-    return { lines: call() };
-  } catch (error) {
-    if (error instanceof RangeError) return { refused: true };
-    throw error;
-  }
-}
-
-/** Feeds the splitter `pushes`, then finishes it. A refusal ends the run: it is its last entry. */
-function feed(splitter: NewlineSplitter, pushes: readonly string[]): Observed[] {
-  const observed: Observed[] = [];
-  for (const piece of pushes) {
-    const outcome = observe(() => splitter.push(piece));
-    observed.push(outcome);
-    if ('refused' in outcome) return observed;
-  }
-  observed.push(observe(() => [splitter.finish()]));
-  return observed;
-}
-
-function cutToCap(line: string, maxLineLength: number): string {
-  if (line.length <= maxLineLength) return line;
-  const cut = line.slice(0, maxLineLength);
-  const last = cut.charCodeAt(cut.length - 1);
-  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
-}
-
-/**
- * What the splitter must report, computed from the whole stream instead of
- * incrementally: split it at every newline, hand each push the lines whose
- * newline it carried, and measure the unterminated rest at `finish`. A line over
- * the cap refuses at the push that proves it: the one that completes it, or the
- * one after which the held text is already over the cap.
- */
-function expected(
-  stream: string,
-  pushes: readonly string[],
-  options: NewlineSplitterOptions
-): Observed[] {
-  const parts = stream.split('\n');
-  const rest = parts.pop() ?? '';
-  const lineEnds: number[] = [];
-  let end = 0;
-  for (const part of parts) {
-    end += part.length;
-    lineEnds.push(end);
-    end += 1;
-  }
-
-  const observed: Observed[] = [];
-  let consumed = 0;
-  let next = 0;
-  for (const piece of pushes) {
-    consumed += piece.length;
-    const completed: string[] = [];
-    let refused = false;
-    for (; next < parts.length && (lineEnds[next] ?? Infinity) < consumed; next += 1) {
-      const text = parts[next] ?? '';
-      if (options.onOverflow === 'refuse' && text.length > options.maxLineLength) refused = true;
-      completed.push(cutToCap(text, options.maxLineLength));
-    }
-    const openStart = next > 0 ? (lineEnds[next - 1] ?? 0) + 1 : 0;
-    if (options.onOverflow === 'refuse' && consumed - openStart > options.maxLineLength) {
-      refused = true;
-    }
-    if (refused) return [...observed, { refused: true }];
-    observed.push({ lines: completed });
-  }
-  if (options.onOverflow === 'refuse' && rest.length > options.maxLineLength) {
-    return [...observed, { refused: true }];
-  }
-  observed.push({ lines: [cutToCap(rest, options.maxLineLength)] });
-  return observed;
-}
-
-/** A small deterministic generator, so a failing case names the seed that reproduces it. */
-function seeded(seed: number): () => number {
-  let state = seed >>> 0;
-  return () => {
-    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
-    return state / 0x1_0000_0000;
-  };
-}
-
-const ALPHABET = ['a', 'b', '\n', '\n', '\r', '🥭', 'é'] as const;
-
-function randomStream(random: () => number, length: number): string {
-  let out = '';
-  for (let index = 0; index < length; index += 1) {
-    out += ALPHABET[Math.floor(random() * ALPHABET.length)];
-  }
-  return out;
-}
-
-function chunked(stream: string, sizes: () => number): string[] {
-  const pieces: string[] = [];
-  for (let offset = 0; offset < stream.length;) {
-    const size = Math.max(1, sizes());
-    pieces.push(stream.slice(offset, offset + size));
-    offset += size;
-  }
-  return pieces;
-}
+import { NewlineSplitter, type SplitLine } from '../lib/newline-splitter';
+import { cutToCap, expected, feed, oracleCases } from './support/newline-oracle';
+import { countScanWork } from './support/scan-work';
 
 function observeError(call: () => unknown): RangeError {
   try {
@@ -118,6 +12,41 @@ function observeError(call: () => unknown): RangeError {
     throw error;
   }
   throw new Error('expected a RangeError | received: no error');
+}
+
+/**
+ * The reader this splitter replaces, kept as the quadratic reference the work
+ * counter must catch: one string, every read appended and the whole string
+ * searched again.
+ */
+class AccumulatingLineReader {
+  private pending = '';
+
+  push(text: string): string[] {
+    this.pending += text;
+    const lines: string[] = [];
+    let newline = this.pending.indexOf('\n');
+    while (newline !== -1) {
+      lines.push(this.pending.slice(0, newline));
+      this.pending = this.pending.slice(newline + 1);
+      newline = this.pending.indexOf('\n');
+    }
+    return lines;
+  }
+}
+
+/** Feeds `lineLength` characters and a newline in `pieceLength`-character pushes; returns the work counted. */
+function scanWorkOfOneLine(
+  reader: { push(text: string): unknown },
+  lineLength: number,
+  pieceLength: number
+): number {
+  const stream = `${'a'.repeat(lineLength)}\n`;
+  return countScanWork(() => {
+    for (let offset = 0; offset < stream.length; offset += pieceLength) {
+      reader.push(stream.slice(offset, offset + pieceLength));
+    }
+  });
 }
 
 describe('NewlineSplitter', () => {
@@ -141,23 +70,14 @@ describe('NewlineSplitter', () => {
   it('matches splitting the whole stream for every chunking of random streams', () => {
     // Per push and on finish, for each overflow mode. A failure names the seed,
     // mode and chunk sizes that reproduce it.
-    const random = seeded(0x5eed);
-    for (let seed = 0; seed < 600; seed += 1) {
-      const stream = randomStream(random, Math.floor(random() * 60));
-      const options: NewlineSplitterOptions = {
-        maxLineLength: [3, 8, 1000][seed % 3] ?? 3,
-        onOverflow: seed % 2 === 0 ? 'truncate' : 'refuse',
-      };
-      const maxPiece = 1 + (seed % 7);
-      const pushes = chunked(stream, () => Math.ceil(random() * maxPiece));
-
+    for (const { seed, stream, pushes, options } of oracleCases(600)) {
       const received = feed(new NewlineSplitter(options), pushes);
 
       expect({ seed, options, pushes, received }).toEqual({
         seed,
         options,
         pushes,
-        received: expected(stream, pushes, options),
+        received: expected(stream, pushes, options, 'deferred'),
       });
     }
   });
@@ -165,7 +85,7 @@ describe('NewlineSplitter', () => {
   it('matches splitting the whole stream when the stream is cut in two at every position', () => {
     const stream = 'ab\ncd\n\nef\n🥭gh\n';
     for (const onOverflow of ['truncate', 'refuse'] as const) {
-      const options: NewlineSplitterOptions = { maxLineLength: 3, onOverflow };
+      const options = { maxLineLength: 3, onOverflow } as const;
       for (let cut = 0; cut <= stream.length; cut += 1) {
         const pushes = [stream.slice(0, cut), stream.slice(cut)];
 
@@ -174,7 +94,7 @@ describe('NewlineSplitter', () => {
         expect({ onOverflow, cut, received }).toEqual({
           onOverflow,
           cut,
-          received: expected(stream, pushes, options),
+          received: expected(stream, pushes, options, 'deferred'),
         });
       }
     }
@@ -208,6 +128,30 @@ describe('NewlineSplitter', () => {
       expect(observeError(() => splitter.finish())).toBe(refusal);
     });
 
+    it('returns the lines a read completed before its tail overflowed, then refuses on the next call', () => {
+      const splitter = new NewlineSplitter({ maxLineLength: 4, onOverflow: 'refuse' });
+
+      expect(splitter.push('ok1\nok2\nabcdefgh')).toEqual(['ok1', 'ok2']);
+
+      expect(observeError(() => splitter.push('')).message).toContain('line length 8 exceeds');
+    });
+
+    it('returns the lines before a completed line that is over the cap, then refuses on finish', () => {
+      const splitter = new NewlineSplitter({ maxLineLength: 4, onOverflow: 'refuse' });
+
+      expect(splitter.push('ok\nabcdefgh\nlater\n')).toEqual(['ok']);
+
+      expect(observeError(() => splitter.finish()).message).toContain('line length 8 exceeds');
+    });
+
+    it('refuses at once when the read completed no line before the overflow', () => {
+      const splitter = new NewlineSplitter({ maxLineLength: 4, onOverflow: 'refuse' });
+
+      expect(observeError(() => splitter.push('abcdefgh\nok\n')).message).toContain(
+        'line length 8 exceeds'
+      );
+    });
+
     it('accepts a line of exactly the cap', () => {
       const splitter = new NewlineSplitter({ maxLineLength: 4, onOverflow: 'refuse' });
 
@@ -224,35 +168,79 @@ describe('NewlineSplitter', () => {
     });
   });
 
-  describe('cost of a line that spans many pushes', () => {
-    // The old readers took 3 to 10 s for the 16-byte case (n = 65 536 pushes) on
-    // the machine this was written on. The bound is generous: it separates
-    // linear from quadratic, it does not benchmark.
-    const BOUND_MS = 1_500;
+  describe('records', () => {
+    it('carry the length a line had before the cap, so a cut line differs from one exactly at the cap', () => {
+      const splitter = new NewlineSplitter({ maxLineLength: 4, onOverflow: 'truncate' });
+
+      expect(splitter.pushRecords('abcd\nabcdefg\nab')).toEqual([
+        { line: 'abcd', length: 4 },
+        { line: 'abcd', length: 7 },
+      ]);
+      expect(splitter.finishRecord()).toEqual({ line: 'ab', length: 2 });
+    });
+
+    it('carry the whole length of a line that spans reads, and of a cut surrogate pair', () => {
+      const splitter = new NewlineSplitter({ maxLineLength: 3, onOverflow: 'truncate' });
+
+      expect(splitter.pushRecords('ab🥭')).toEqual([]);
+      expect(splitter.pushRecords('xyz\n')).toEqual([{ line: 'ab', length: 7 }]);
+    });
+
+    it('match the lengths of splitting the whole stream, for every chunking of random streams', () => {
+      for (const { seed, stream, pushes, options } of oracleCases(300)) {
+        if (options.onOverflow !== 'truncate') continue;
+        const splitter = new NewlineSplitter(options);
+
+        const received: SplitLine[] = [];
+        for (const piece of pushes) received.push(...splitter.pushRecords(piece));
+        received.push(splitter.finishRecord());
+
+        expect({ seed, pushes, received }).toEqual({
+          seed,
+          pushes,
+          received: stream.split('\n').map((line) => ({
+            line: cutToCap(line, options.maxLineLength),
+            length: line.length,
+          })),
+        });
+      }
+    });
+  });
+
+  describe('work on a line that spans many pushes', () => {
+    // Counted, not timed: the units searched or joined, not the milliseconds
+    // they took. The old readers searched the pending line on every read, so a
+    // 1 MiB line in 16-character pushes cost about 3.4e10 units; this splitter
+    // searches each unit once and joins the line once.
     const LINE_LENGTH = 1024 * 1024;
 
-    for (const pieceLength of [16, 4096]) {
-      it(`splits a 1 MiB line fed in ${pieceLength}-character pushes within ${BOUND_MS} ms`, () => {
-        const stream = `${'a'.repeat(LINE_LENGTH)}\ntail`;
-        const splitter = new NewlineSplitter({
-          maxLineLength: 2 * LINE_LENGTH,
-          onOverflow: 'refuse',
-        });
-        const lines: string[] = [];
-
-        const startedAt = performance.now();
-        for (let offset = 0; offset < stream.length; offset += pieceLength) {
-          lines.push(...splitter.push(stream.slice(offset, offset + pieceLength)));
-        }
-        const elapsedMs = performance.now() - startedAt;
-
-        expect({ lengths: lines.map((line) => line.length), rest: splitter.finish() }).toEqual({
-          lengths: [LINE_LENGTH],
-          rest: 'tail',
-        });
-        expect(elapsedMs).toBeLessThan(BOUND_MS);
+    it('searches and joins at most 3 times the input for a 1 MiB line fed in 16-character pushes', () => {
+      const splitter = new NewlineSplitter({
+        maxLineLength: 2 * LINE_LENGTH,
+        onOverflow: 'refuse',
       });
-    }
+
+      const units = scanWorkOfOneLine(splitter, LINE_LENGTH, 16);
+
+      expect(units).toBeLessThanOrEqual(3 * (LINE_LENGTH + 1));
+    });
+
+    it('does the same in truncate mode, where the cap drops the rest', () => {
+      const splitter = new NewlineSplitter({ maxLineLength: 64, onOverflow: 'truncate' });
+
+      const units = scanWorkOfOneLine(splitter, LINE_LENGTH, 16);
+
+      expect(units).toBeLessThanOrEqual(3 * (LINE_LENGTH + 1));
+    });
+
+    it('counts the work of the accumulating reader as quadratic, so the guard can fail', () => {
+      // 64 KiB keeps the reference quick: its work is about (n / 16) * n / 2 units.
+      const length = 64 * 1024;
+
+      const units = scanWorkOfOneLine(new AccumulatingLineReader(), length, 16);
+
+      expect(units).toBeGreaterThan(100 * (length + 1));
+    });
 
     it('keeps the first cap characters of a line that never ends (2 MB pushed through)', () => {
       const splitter = new NewlineSplitter({ maxLineLength: 64, onOverflow: 'truncate' });
