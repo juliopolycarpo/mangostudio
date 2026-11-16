@@ -152,6 +152,11 @@ let theirs = Contract::from_catalog(catalog)?; // the peer's document, checked l
 `discover` fails with `METHOD_UNSUPPORTED` against a peer that serves no contract, and with
 `INVALID_REQUEST` against a wire 1.0 peer, which cannot have meant the method.
 
+A host that keeps its own parsed catalog for the process (a large embedded one, say) builds its
+contract with `Contract::from_shared_catalog(Arc<Catalog>)`: the contract holds that one copy
+instead of cloning it, and `rpc.discover` renders the document from it per answer, so serving a
+contract costs no per-connection copy of the catalog.
+
 A session bounds what the peer can make it hold, so a peer that opens requests and never cancels
 them cannot grow this side without limit:
 

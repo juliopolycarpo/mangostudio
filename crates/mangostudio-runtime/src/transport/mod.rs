@@ -539,6 +539,7 @@ mod tests {
     };
     use crate::runtime_home::RuntimeSlot;
     use crate::test_support::scratch_path;
+    use mangostudio_runtime_contract::catalog::shared_catalog;
 
     /// An audit sink that takes `delay` to record a commit: the work that
     /// still runs inside the handler task after the handler returned, before
@@ -1134,6 +1135,22 @@ mod tests {
             ],
             "the production registry must match its implemented method families"
         );
+    }
+
+    /// The contract the runtime serves holds the process's one parsed
+    /// catalog instead of a clone of it: the static, the contract and this
+    /// handle are three owners of one allocation.
+    #[test]
+    fn the_runtime_contract_shares_the_process_catalog_instead_of_cloning_it() {
+        let contract = runtime_contract();
+        let shared = shared_catalog();
+        let owners = std::sync::Arc::strong_count(&shared);
+        assert!(
+            owners >= 3,
+            "expected the catalog static, the runtime contract and this handle to share one \
+             allocation (strong count >= 3) | received strong count {owners}"
+        );
+        assert_eq!(contract.catalog(), *shared);
     }
 
     #[test]

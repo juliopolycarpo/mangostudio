@@ -15,7 +15,7 @@ use std::sync::{Arc, OnceLock};
 use mango_protocol::contract::{Contract, ServeGuard, ServeOptions};
 use mango_protocol::session::Session;
 use mango_protocol::validate::ValidationError;
-use mangostudio_runtime_contract::catalog::catalog;
+use mangostudio_runtime_contract::catalog::shared_catalog;
 
 use crate::ports::audit::Audit;
 use crate::ports::authorization::{Authorization, AuthorizationGuard};
@@ -46,7 +46,9 @@ use crate::registry::Registry;
 pub fn runtime_contract() -> &'static Contract {
     static CONTRACT: OnceLock<Contract> = OnceLock::new();
     CONTRACT.get_or_init(|| {
-        Contract::from_catalog(catalog().clone()).expect(
+        // The shared handle: the contract holds the catalog the process
+        // already parsed, not a second copy.
+        Contract::from_shared_catalog(shared_catalog()).expect(
             "the embedded catalog compiles into a contract; a change to the catalog that broke \
              this would already fail mangostudio-runtime-contract's own build",
         )

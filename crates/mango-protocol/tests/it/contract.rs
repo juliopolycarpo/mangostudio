@@ -274,6 +274,30 @@ async fn serves_typed_handlers_and_requests_through_a_typed_client() {
     assert_eq!(error.code, codes::METHOD_UNSUPPORTED);
 }
 
+/// `rpc.discover` renders the catalog per answer, so every answer has to carry
+/// the whole document, not just the first, and a contract built from a
+/// shared catalog has to answer with that catalog.
+#[tokio::test]
+async fn answers_every_rpc_discover_with_the_whole_shared_catalog() {
+    let (session_a, session_b) = sessions().await;
+    let catalog = Arc::new(example().catalog());
+    let contract =
+        Contract::from_shared_catalog(Arc::clone(&catalog)).expect("the example catalog compiles");
+    let _guard = contract
+        .serve(&session_b, plain_handlers(), ServeOptions::default())
+        .expect("both methods are declared");
+
+    for attempt in 1..=3 {
+        let discovered = within("rpc.discover", contract.client(&session_a).discover())
+            .await
+            .expect("the peer serves a contract");
+        assert_eq!(
+            discovered, *catalog,
+            "expected discover answer {attempt} to equal the shared catalog"
+        );
+    }
+}
+
 #[tokio::test]
 async fn answers_rpc_discover_with_the_served_catalog() {
     let (session_a, session_b) = sessions().await;
