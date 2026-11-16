@@ -617,7 +617,7 @@ describe('TurnCheckpointWriter write shape', () => {
 
     // The durable marker lands as a durable full row of the turn as it is when the
     // write runs; the ordinary delta behind it is dropped; the checkpoint after that
-    // rewrites again, because the planner no longer trusts what it planned.
+    // is a delta over the re-planned row.
     expect({
       outcomes,
       next,
@@ -628,8 +628,52 @@ describe('TurnCheckpointWriter write shape', () => {
       writes: [
         ['rewrite', false, 10],
         ['rewrite', true, 30],
-        ['rewrite', false, 40],
+        ['delta', false, 40],
       ],
+    });
+  });
+
+  it('drops a delta planned while a re-planned rewrite was in flight when a second one supersedes it', async () => {
+    const { store, writer, append, state } = setup();
+    store.hold();
+    append(10);
+    const first = writer.checkpoint({ force: true });
+    append(10);
+    const firstMarker = writer.checkpoint({ durable: true });
+    append(10);
+    const secondMarker = writer.checkpoint({ durable: true });
+    await tick();
+    // The first write fails: the first marker, planned as a delta on top of it, is
+    // planned again as a rewrite and goes in flight.
+    store.inFlight[0]?.fail(new Error('disk full'));
+    await tick();
+    // The failed write stays listed; the second entry is the re-planned rewrite.
+    expect(store.inFlight).toHaveLength(2);
+    // Planned against the re-planned rewrite, while it is in flight.
+    append(10);
+    const late = writer.checkpoint({ force: true });
+    store.releaseAll();
+
+    const outcomes = await Promise.all([first, firstMarker, secondMarker, late]);
+
+    // The second marker was planned before the first was planned again, so it is planned
+    // again too, as a rewrite of the live turn (40 characters). The late delta was
+    // planned against the state that rewrite replaced and its text is already in it:
+    // folded over it, the row would hold 50 characters of a 40 character turn.
+    expect({
+      outcomes,
+      writes: store.writes.map((write) => [write.kind, write.durable, write.text.length]),
+      stored: store.writes.at(-1)?.text.length,
+      live: state.text.length,
+    }).toEqual({
+      outcomes: [false, true, true, false],
+      writes: [
+        ['rewrite', false, 10],
+        ['rewrite', true, 30],
+        ['rewrite', true, 40],
+      ],
+      stored: 40,
+      live: 40,
     });
   });
 

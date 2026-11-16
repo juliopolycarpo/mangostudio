@@ -128,6 +128,12 @@ interface PlannedWrite {
   readonly generationTime: string | null | undefined;
   /** Writes that had failed when this was planned; a delta planned before a later failure has a gap under it. */
   readonly failuresAtPlan: number;
+  /**
+   * Durable rewrites that had been planned again when this was planned. A re-planned
+   * rewrite carries the live turn as it was when it ran, which includes everything
+   * planned before it, so such a write is superseded.
+   */
+  readonly replansAtPlan: number;
   readonly durable: boolean;
 }
 
@@ -170,6 +176,7 @@ export class TurnCheckpointWriter {
   private readonly planner = new CheckpointPlanner();
   private nextDeltaSeq = 1;
   private failedWrites = 0;
+  private replannedRewrites = 0;
 
   constructor(private readonly options: TurnCheckpointWriterOptions) {
     this.now = options.now ?? Date.now;
@@ -256,6 +263,7 @@ export class TurnCheckpointWriter {
       providerState: content.providerState,
       generationTime: content.generationTime,
       failuresAtPlan: this.failedWrites,
+      replansAtPlan: this.replannedRewrites,
       durable,
     };
   }
@@ -297,18 +305,25 @@ export class TurnCheckpointWriter {
   // write chained onto the queue.
   private async writePlanned(queued: PlannedWrite): Promise<boolean> {
     let planned = queued;
-    let replannedAsRewrite = false;
-    // An earlier write failed after this delta was planned on top of it, so the
-    // delta would leave a gap. An ordinary checkpoint skips it: the failure already
-    // reset the planner, and the next checkpoint rewrites the row. A durable one
-    // (the record that a tool call or paid image is under way) must not be dropped,
-    // as a full rewrite never was: it is planned again against the live turn, as a
-    // rewrite that no earlier write has to have landed for.
-    if (planned.plan.kind === 'delta' && planned.failuresAtPlan !== this.failedWrites) {
+    // Two things make a queued write unsafe to write as planned:
+    //  - An earlier write failed after this delta was planned on top of it, so the
+    //    delta would leave a gap.
+    //  - A durable write was planned again after this one was planned. That rewrite
+    //    holds the live turn as of when it ran, so a delta planned before it would be
+    //    folded over content that already contains its text, and a rewrite planned
+    //    before it would put older content back.
+    // An ordinary checkpoint is skipped in both cases: the next one rewrites the row
+    // or follows the re-planned one. A durable one (the record that a tool call or a
+    // paid image is under way) must not be dropped, as a full rewrite never was: it is
+    // planned again against the live turn as a rewrite that nothing earlier has to
+    // have landed for. Planning it again supersedes whatever was planned before it.
+    const gap = planned.plan.kind === 'delta' && planned.failuresAtPlan !== this.failedWrites;
+    const superseded = planned.replansAtPlan !== this.replannedRewrites;
+    if (gap || superseded) {
       if (!planned.durable) return false;
+      this.replannedRewrites += 1;
       this.planner.reset();
       planned = this.planWrite(this.options.getContent(), true);
-      replannedAsRewrite = true;
     }
     try {
       if (planned.plan.kind === 'rebase') {
@@ -326,10 +341,6 @@ export class TurnCheckpointWriter {
           durable: planned.durable,
         });
       }
-      // Writes planned while this one waited were planned against a planner state this
-      // rewrite replaced. Forget it, so the next checkpoint rewrites the row rather than
-      // extending a state the row may no longer hold.
-      if (replannedAsRewrite) this.planner.reset();
       return true;
     } catch (error) {
       this.failedWrites += 1;
