@@ -947,7 +947,7 @@ impl BackgroundProbes {
     /// How many callers are waiting on the run in flight for this file, or
     /// `None` when none is in flight. Lets a test release a fake `gh` only
     /// once `runtime.health` is known to be waiting on it, without a sleep.
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     fn waiters(&self, executable: &Path, fingerprint: Option<&str>) -> Option<usize> {
         self.entries()
             .iter()
