@@ -6,6 +6,8 @@
 // `node:`/`bun` builtins. `scripts/tests/smoke-dependencies.unit.test.ts`
 // enforces that by walking the transitive import graph.
 
+import { NewlineSplitter } from './newline-splitter';
+
 /** A stream being drained in the background by {@link pumpStream}. */
 export interface PumpedStream {
   /** Resolves once the stream ends. */
@@ -43,6 +45,9 @@ export function pumpStream(stream: ReadableStream<Uint8Array>): PumpedStream {
   return { done, text: () => text };
 }
 
+/** The longest first line {@link readFirstLine} holds, in characters. */
+const FIRST_LINE_MAX_CHARS = 1024 * 1024;
+
 /** How {@link readFirstLine} stopped reading. */
 export type FirstLineResult =
   /** A newline-terminated record arrived; `line` excludes the newline. */
@@ -59,13 +64,18 @@ export type FirstLineResult =
  * versus a child that died or closed the pipe — so they are reported
  * separately, and whatever was buffered comes back with them.
  *
+ * A first line over `maxLineLength` rejects with an error naming its length
+ * and the limit: a child that never ends its first line would otherwise grow
+ * the buffer until the timeout.
+ *
  * @example
  * const result = await readFirstLine(child.stdout, 10_000);
  * if (result.kind !== 'line') console.error(`no frame: ${result.kind}`);
  */
 export async function readFirstLine(
   stream: ReadableStream<Uint8Array>,
-  timeoutMs: number
+  timeoutMs: number,
+  maxLineLength: number = FIRST_LINE_MAX_CHARS
 ): Promise<FirstLineResult> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
@@ -75,16 +85,15 @@ export async function readFirstLine(
   const deadline = new Promise<null>((resolve) => {
     timer = setTimeout(() => resolve(null), timeoutMs);
   });
-  let buffered = '';
+  const lines = new NewlineSplitter({ maxLineLength, onOverflow: 'refuse' });
 
   try {
     while (true) {
       const chunk = await Promise.race([reader.read(), deadline]);
-      if (!chunk) return { kind: 'timeout', partial: buffered + decoder.decode() };
-      if (chunk.done) return { kind: 'eof', partial: buffered + decoder.decode() };
-      buffered += decoder.decode(chunk.value, { stream: true });
-      const newline = buffered.indexOf('\n');
-      if (newline !== -1) return { kind: 'line', line: buffered.slice(0, newline) };
+      if (!chunk) return { kind: 'timeout', partial: lines.finish() + decoder.decode() };
+      if (chunk.done) return { kind: 'eof', partial: lines.finish() + decoder.decode() };
+      const [line] = lines.push(decoder.decode(chunk.value, { stream: true }));
+      if (line !== undefined) return { kind: 'line', line };
     }
   } finally {
     clearTimeout(timer);

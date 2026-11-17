@@ -17,6 +17,7 @@
         "$TURBO_ROOT$/scripts/lib/test-worker-process.ts",
         "$TURBO_ROOT$/scripts/lib/test-worker-settle.ts",
         "$TURBO_ROOT$/scripts/lib/runner-guardian.ts",
+        "$TURBO_ROOT$/scripts/lib/newline-splitter.ts",
         "$TURBO_ROOT$/scripts/lib/junit-report.ts",
         "$TURBO_ROOT$/scripts/lib/test-lanes.ts",
         "$TURBO_ROOT$/scripts/lib/test-lane-weights.ts",

@@ -64,9 +64,11 @@ describe('native command machine stdout', () => {
     });
     expect(result.exitCode).toBe(0);
     expect(result.settlement.empty).toBe(true);
-    expect(result.errors).toContain(
-      'Output line exceeds 1 MiB; expected bounded text reporter lines'
-    );
+    expect(result.errors).toEqual([
+      expect.stringMatching(
+        /^Output line of \d{7,} characters exceeds the 1048576-character limit; expected bounded text reporter lines$/
+      ),
+    ]);
   });
 
   it('keeps default text rejection for oversized single-line output', async () => {
@@ -85,9 +87,11 @@ describe('native command machine stdout', () => {
     });
     expect(result.exitCode).toBe(0);
     expect(result.settlement.empty).toBe(true);
-    expect(result.errors).toContain(
-      'Output line exceeds 1 MiB; expected bounded text reporter lines'
-    );
+    expect(result.errors).toEqual([
+      expect.stringMatching(
+        /^Output line of \d{7,} characters exceeds the 1048576-character limit; expected bounded text reporter lines$/
+      ),
+    ]);
   });
   it('captures complete oversized metadata only with an explicit bounded machine stdout limit', async () => {
     const root = await mkdtemp(join(tmpdir(), 'native-machine-output-'));
