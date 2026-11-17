@@ -270,7 +270,9 @@ hub WAL mode, it keeps `FULL` and logs `synchronous_kept_full`.
 
 Every connection starts at `FULL`: the hub sets it explicitly after switching to WAL. macOS links Apple's
 SQLite, whose WAL default is `NORMAL`, so a connection that opens a WAL file there would otherwise run its
-migrations below `FULL`.
+migrations below `FULL`. The pending migrations apply as one transaction: a failed or interrupted
+upgrade leaves the schema and its migration records as they were, and a successful one costs a single
+fsync.
 
 On macOS, `fsync` reaches only the drive's cache. `F_FULLFSYNC` reaches stable storage, and SQLite uses it
 for ordinary syncs only when `PRAGMA fullfsync` is on; Apple's build already uses it for checkpoints

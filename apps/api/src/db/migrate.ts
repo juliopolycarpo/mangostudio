@@ -24,14 +24,19 @@ async function migrateToLatest(): Promise<void> {
 
   results?.forEach((it) => {
     if (it.status === 'Success') {
-      console.warn(`[migrate] ✓ "${it.migrationName}" executed successfully`);
+      // The batch is one transaction: on failure these ran but were rolled back with it.
+      console.warn(
+        error
+          ? `[migrate] ↩ "${it.migrationName}" rolled back with the batch`
+          : `[migrate] ✓ "${it.migrationName}" executed successfully`
+      );
     } else if (it.status === 'Error') {
       console.error(`[migrate] ✗ Failed to execute "${it.migrationName}"`);
     }
   });
 
   if (error) {
-    console.error('[migrate] Migration failed:', error);
+    console.error('[migrate] Migration failed, batch rolled back:', error);
     await closeDb();
     process.exit(1);
   }

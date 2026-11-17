@@ -3,7 +3,9 @@
  *
  * A connection opens at `synchronous = FULL` (set explicitly by
  * `applyConnectionPragmas`, because the library default differs on macOS): every
- * commit is fsynced. The hub lowers it to `NORMAL` once its migrations have finished
+ * commit is fsynced. The pending migrations commit as one transaction, so they pay
+ * that fsync once, and their schema is on disk before the hub serves. The hub then
+ * lowers it to `NORMAL` once its migrations have finished
  * ({@link relaxDurability}), so a streaming turn's checkpoints stop paying an
  * fsync each. At `NORMAL` the WAL is synced when SQLite checkpoints it, not on
  * every commit. A hub crash or kill loses nothing, because the OS still holds
