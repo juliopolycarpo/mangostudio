@@ -1,4 +1,13 @@
-import { codeToHtml, codeToTokensBase, type HighlighterCore } from '@shikijs/core';
+import {
+  codeToHast,
+  type CodeToHastOptions,
+  codeToTokens,
+  codeToTokensBase,
+  hastToHtml,
+  type HighlighterCore,
+  type ThemedToken,
+  tokensToHast,
+} from '@shikijs/core';
 
 type Grammar = ReturnType<HighlighterCore['getLanguage']>;
 
@@ -9,13 +18,27 @@ class IncompleteTokenizationError extends Error {
   }
 }
 
+export interface CheckedRenderers {
+  readonly codeToTokensBase: HighlighterCore['codeToTokensBase'];
+  /**
+   * Serializes each line of tokens the caller already holds to its own `<span class="line">`, so
+   * a block that grows keeps the HTML of the lines it has and draws only the new ones.
+   */
+  readonly tokenLinesToHtml: (tokens: ThemedToken[][], options: TokensToHtmlOptions) => string[];
+  /** Wraps serialized lines in the `<pre><code>` Shiki draws around a block. */
+  readonly htmlFromLines: (lines: readonly string[], options: TokensToHtmlOptions) => string;
+}
+
+interface TokensToHtmlOptions {
+  readonly lang: string;
+  readonly theme: string;
+}
+
 /**
  * Rejects partial tokenization before Shiki turns it into apparently complete output.
- * Example: createCheckedRenderers(highlighter).codeToHtml(code, options).
+ * Example: createCheckedRenderers(highlighter).codeToTokensBase(code, options).
  */
-export function createCheckedRenderers(
-  highlighter: HighlighterCore
-): Pick<HighlighterCore, 'codeToHtml' | 'codeToTokensBase'> {
+export function createCheckedRenderers(highlighter: HighlighterCore): CheckedRenderers {
   const grammars = new WeakMap<Grammar, Grammar>();
   const primitive = {
     ...highlighter,
@@ -36,7 +59,45 @@ export function createCheckedRenderers(
   };
 
   return {
-    codeToHtml: (code, options) => codeToHtml(primitive, code, options),
     codeToTokensBase: (code, options) => codeToTokensBase(primitive, code, options),
+    tokenLinesToHtml: (tokens, options) => {
+      const code = codeElementOf(buildHast(tokens, options));
+      return code.children.flatMap((child) =>
+        child.type === 'element' ? [hastToHtml({ type: 'root', children: [child] })] : []
+      );
+    },
+    htmlFromLines: (lines, options) => {
+      const frame = hastToHtml(buildHast([], options));
+      // The frame of an empty block is `<pre ...><code></code></pre>`, so the first `</code>` is its own.
+      const insertAt = frame.indexOf('</code>');
+      return `${frame.slice(0, insertAt)}${lines.join('\n')}${frame.slice(insertAt)}`;
+    },
   };
+
+  function buildHast(tokens: ThemedToken[][], options: TokensToHtmlOptions) {
+    const theme = primitive.getTheme(options.theme);
+    const context = {
+      meta: {},
+      options,
+      // No transformer runs here, so the source is never read; the context only has to be whole.
+      source: '',
+      codeToHast: (code: string, hastOptions: CodeToHastOptions) =>
+        codeToHast(primitive, code, hastOptions),
+      codeToTokens: (code: string, tokenOptions: Parameters<typeof codeToTokens>[2]) =>
+        codeToTokens(primitive, code, tokenOptions),
+    };
+    return tokensToHast(
+      tokens,
+      { ...options, fg: theme.fg, bg: theme.bg, themeName: theme.name },
+      context
+    );
+  }
+}
+
+/** The `<code>` element of Shiki's `<pre><code>` tree. */
+function codeElementOf(root: ReturnType<typeof tokensToHast>) {
+  const pre = root.children[0];
+  const code = pre?.type === 'element' ? pre.children[0] : undefined;
+  if (code?.type !== 'element') throw new Error('Shiki produced no <pre><code> tree');
+  return code;
 }

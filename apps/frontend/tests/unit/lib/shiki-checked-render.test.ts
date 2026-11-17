@@ -54,10 +54,16 @@ describe('checked Shiki renderer', () => {
         Date.now = unchangedClock;
         for (const theme of CODE_THEMES) {
           const options = { lang: language, theme, tokenizeTimeLimit: 500 };
+          const checkedTokens = checked.codeToTokensBase(source, options);
           observations.push({
-            checkedHtml: checked.codeToHtml(source, options),
-            rawHtml: highlighter.codeToHtml(source, options),
-            checkedTokens: checked.codeToTokensBase(source, options),
+            // Serialized line by line and framed again, as a growing block is; without
+            // whitespace merging, which the token path does not do.
+            checkedHtml: checked.htmlFromLines(
+              checked.tokenLinesToHtml(checkedTokens, options),
+              options
+            ),
+            rawHtml: highlighter.codeToHtml(source, { ...options, mergeWhitespaces: false }),
+            checkedTokens,
             rawTokens: highlighter.codeToTokensBase(source, options),
           });
         }

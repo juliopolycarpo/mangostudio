@@ -1,6 +1,12 @@
-import { createBundledHighlighter, type HighlighterGeneric } from '@shikijs/core';
+import {
+  createBundledHighlighter,
+  type HighlighterGeneric,
+  splitLines,
+  type ThemedToken,
+} from '@shikijs/core';
 import { createJavaScriptRegexEngine } from '@shikijs/engine-javascript';
 
+import { countHighlightableLines } from '@/lib/code-highlight-limits';
 import { resolveLanguageId, type ShikiLanguageId } from '@/lib/code-languages';
 import type { CodeThemeId } from '@/lib/code-themes';
 import { createCheckedRenderers } from '@/lib/shiki-checked-render';
@@ -100,7 +106,15 @@ export async function preloadCodeLanguages(
   return true;
 }
 
-/** Returns highlighted HTML when the highlighter and language are ready. */
+/**
+ * Returns highlighted HTML when the highlighter and language are ready, or `null`
+ * when the caller should show the escaped source.
+ *
+ * Lines are tokenized only up to the budget in `code-highlight-limits`, which is checked
+ * before tokenizing: the line that would exceed it and every line after it are drawn plain.
+ * They stay plain even if later lines are cheap, because the grammar state after a skipped
+ * line is unknown, and colouring what follows from a guessed state could look right and be wrong.
+ */
 // Usage: const html = highlightCode('const x = 1;', 'ts', 'one-dark-pro');
 export function highlightCode(code: string, lang: string, theme: CodeThemeId): string | null {
   const language = resolveLanguageId(lang);
@@ -108,12 +122,38 @@ export function highlightCode(code: string, lang: string, theme: CodeThemeId): s
   if (!isLanguageLoaded(highlighterInstance, language)) return null;
 
   try {
-    return (
-      checkedRenderers?.codeToHtml(code, { lang: language, theme, tokenizeTimeLimit: 500 }) ?? null
-    );
+    return renderHighlightedBlock(code, language, theme);
   } catch {
     return null;
   }
+}
+
+function renderHighlightedBlock(
+  code: string,
+  language: ShikiLanguageId,
+  theme: CodeThemeId
+): string | null {
+  if (!checkedRenderers) return null;
+  const renderers = checkedRenderers;
+  const lines = splitLines(code);
+  const highlightable = countHighlightableLines(code, language);
+  // Nothing to colour: the caller's escaped source is the same text without the empty wrapper.
+  if (highlightable === 0) return null;
+
+  const tokens: ThemedToken[][] = renderers.codeToTokensBase(
+    lines
+      .slice(0, highlightable)
+      .map(([text]) => text)
+      .join('\n'),
+    { lang: language, theme, tokenizeTimeLimit: 500 }
+  );
+  // Lines past the budget are drawn plain, as one uncoloured token each.
+  for (let index = tokens.length; index < lines.length; index++) {
+    const text = lines[index]?.[0] ?? '';
+    tokens.push(text ? [{ content: text, offset: 0 }] : []);
+  }
+  const htmlOptions = { lang: language, theme };
+  return renderers.htmlFromLines(renderers.tokenLinesToHtml(tokens, htmlOptions), htmlOptions);
 }
 
 export interface HighlightToken {
@@ -126,6 +166,8 @@ export interface HighlightToken {
  * Returns safe token data for a SINGLE line, for code surfaces that render
  * their own line chrome. Only the first line of `line` is tokenized, so callers
  * must split multi-line input themselves.
+ * A line over `code-highlight-limits` returns `null`, so a diff keeps colouring its
+ * other lines.
  * Example: highlightLineTokens('const value = 1;', 'ts', 'one-dark-pro').
  */
 export function highlightLineTokens(
@@ -136,6 +178,7 @@ export function highlightLineTokens(
   const language = resolveLanguageId(lang);
   if (!highlighterInstance || !language) return null;
   if (!isLanguageLoaded(highlighterInstance, language)) return null;
+  if (countHighlightableLines(line, language) < 1) return null;
 
   try {
     return (
