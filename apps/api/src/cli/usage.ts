@@ -31,7 +31,9 @@ Commands:
   restart             Restart the server the way it was started: through
                       the service when one is installed, else as a new
                       background instance.
-  killserver          Force-kill the running server.
+  killserver [--force]
+                      Force-kill the running server. --force skips the check that
+                      the recorded PID is MangoStudio (for a PID it cannot confirm).
   service <action> [host|port|host:port] [--json]
                       Keep the server running across logout and reboot.
                       Actions: install, uninstall, status, start, stop,

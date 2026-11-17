@@ -2,11 +2,22 @@
  * Abstraction over OS process signals so commands stay testable without
  * sending real signals. Cross-platform via Node/Bun's process.kill mapping.
  */
+import { readProcessStartMs } from '../lib/process-start-time';
+import { readProcessStartToken } from '../lib/process-start-token';
+import {
+  classifyStateProcess,
+  type ServerState,
+  type StateProcessProbe,
+} from '../lib/server-state';
 import { CliError } from './errors';
 
-export interface ProcessController {
+export interface ProcessController extends StateProcessProbe {
   /** True when the pid refers to a live process. */
   isAlive(pid: number): boolean;
+  /** When the process started (epoch ms); `undefined` when the platform query failed. */
+  startTimeMs(pid: number): Promise<number | undefined>;
+  /** The process's start token, comparable for equality; `undefined` when the query failed. */
+  startToken(pid: number): Promise<string | undefined>;
   /** Request graceful termination (SIGTERM). */
   terminate(pid: number): void;
   /** Force termination (SIGKILL). */
@@ -24,6 +35,8 @@ export interface WaitOptions {
 export function createProcessController(): ProcessController {
   return {
     isAlive,
+    startTimeMs: readProcessStartMs,
+    startToken: readProcessStartToken,
     terminate: (pid) => signal(pid, 'SIGTERM'),
     kill: (pid) => signal(pid, 'SIGKILL'),
   };
@@ -60,16 +73,62 @@ export interface StopDeps {
   readonly controller: ProcessController;
   readonly now: () => number;
   readonly sleep: (ms: number) => Promise<void>;
+  /** Picks the manual-stop command a refusal names; the real platform when omitted. */
+  readonly platform?: NodeJS.Platform;
 }
 
 /**
- * Terminate a pid and wait for it to go, raising `message` if it outlives the
- * stop budget. The message is the caller's, since what to do next differs —
- * restart tells the user to serve again, install tells them the unit is
- * already registered and waiting for the port.
- * // Usage: await stopPidOrThrow(d, state.pid, `PID ${state.pid} did not stop.`)
+ * What a person can type to end `pid` themselves, for the refusal below.
+ *
+ * @example
+ * manualStopCommand(4242, 'linux'); // 'kill 4242'
  */
-export async function stopPidOrThrow(d: StopDeps, pid: number, message: string): Promise<void> {
+export function manualStopCommand(pid: number, platform: NodeJS.Platform): string {
+  return platform === 'win32' ? `taskkill /PID ${pid} /F` : `kill ${pid}`;
+}
+
+/**
+ * Refuse to signal the pid a state file names unless it is the hub. The state file outlives a
+ * crashed hub, and the OS may have given its pid to someone's editor or shell, so every signal
+ * to a recorded pid passes through here.
+ *
+ * - a different start token: a recycled pid, never signalled;
+ * - identity not provable (older hub without a token, unreadable start time): refuse and name the
+ *   command that stops it by hand, and `killserver --force`, rather than kill on a guess.
+ *   Deleting the state file is not offered as a way out: the hub may be running.
+ * // Usage: await assertSignalsReachHub(controller, state)
+ */
+export async function assertSignalsReachHub(
+  controller: ProcessController,
+  state: ServerState,
+  platform: NodeJS.Platform = process.platform
+): Promise<void> {
+  const kind = await classifyStateProcess(state, controller);
+  if (kind === 'hub') return;
+  if (kind === 'stale') {
+    throw new CliError(
+      `PID ${state.pid} is no longer the MangoStudio hub (another process now uses it), so no signal was sent.`
+    );
+  }
+  throw new CliError(
+    `Cannot confirm PID ${state.pid} is MangoStudio, so no signal was sent. If it is the hub, stop it with "${manualStopCommand(state.pid, platform)}" or run "mangostudio killserver --force".`
+  );
+}
+
+/**
+ * Terminate the hub a state file names and wait for it to go, raising `message` if it outlives
+ * the stop budget. The message is the caller's, since what to do next differs — restart tells
+ * the user to serve again, install tells them the unit is already registered and waiting for the
+ * port. Throws before signalling when the pid is not provably the hub.
+ * // Usage: await stopPidOrThrow(d, state, `PID ${state.pid} did not stop.`)
+ */
+export async function stopPidOrThrow(
+  d: StopDeps,
+  state: ServerState,
+  message: string
+): Promise<void> {
+  const pid = state.pid;
+  await assertSignalsReachHub(d.controller, state, d.platform);
   d.controller.terminate(pid);
   const stopped = await waitForExit(d.controller, pid, {
     timeoutMs: STOP_TIMEOUT_MS,

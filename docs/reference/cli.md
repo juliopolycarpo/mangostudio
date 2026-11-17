@@ -28,35 +28,35 @@ commands introduced after that stable release.
 
 ## Commands
 
-| Command                                                                                                               | Description                                                                                  |
-| --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `mangostudio`                                                                                                         | Print help and the command list.                                                             |
-| `setup [host\|port\|host:port] [--service\|--no-service] [--no-open]`                                                 | Take a fresh install to a running hub and open it in a browser.                              |
-| `serve [host\|port\|host:port]`                                                                                       | Start the server in the foreground (default `localhost:3001`).                               |
-| `serve [host\|port\|host:port] -d`                                                                                    | Start the server in the background (detached) and return.                                    |
-| `status`                                                                                                              | Show whether a server is running, its URL, launch mode, and health.                          |
-| `status --json`                                                                                                       | Emit the shared hub status document instead of plain text.                                   |
-| `stop`                                                                                                                | Gracefully stop the running server (SIGTERM).                                                |
-| `restart`                                                                                                             | Restart the running server the way it was started.                                           |
-| `killserver`                                                                                                          | Force-kill the running server (SIGKILL).                                                     |
-| `service <action> [host\|port\|host:port] [--json]`                                                                   | Keep the server running across logout and reboot.                                            |
-| `logs [-f] [-n <count>]`                                                                                              | Print the tail of the server log; `-f` follows it.                                           |
-| `open`                                                                                                                | Open the running server in the default browser.                                              |
-| `doctor`                                                                                                              | Run environment and configuration diagnostics.                                               |
-| `doctor --all`                                                                                                        | Include ChatGPT connector checks even without a configured connector.                        |
-| `doctor --chatgpt-refresh`                                                                                            | Perform a live ChatGPT token refresh probe (rotates the stored refresh token).               |
-| `doctor --probe`                                                                                                      | Actively connect to each enabled MCP server (spawns children / hits URLs).                   |
-| `doctor --env` / `--library`                                                                                          | Limit extra sections to environments and/or library (core checks always run).                |
-| `doctor --json`                                                                                                       | Emit structured JSON (checks, warning/failure counts).                                       |
-| `env [runtimes\|agents] [--json]`                                                                                     | Report runtimes, version managers, and agent CLIs (read-only).                               |
-| `env install <recipe> [--environment <id>] [--version <spec>]`                                                        | Run an install recipe on this machine (`--environment` is currently always refused).         |
-| `env update <recipe> [--environment <id>]`                                                                            | Same as `env install`, restricted to update recipes.                                         |
-| `env toolchain [node\|bun <path\|auto>] [--environment <id>] [--user <email>]`                                        | Show or set which Node and Bun spawned processes run with on an environment.                 |
-| `library [locations] [--json]`                                                                                        | Library coverage matrix and location health (read-only).                                     |
-| `library --kind <kind>`                                                                                               | Filter resources by kind (`skill`, `subagent`, etc.).                                        |
-| `library --divergent`                                                                                                 | List only resources whose copies disagree across locations.                                  |
-| `upgrade [--check] [--yes] [--stable \| --canary [<sha7>] \| --version <x.y.z>] [--rollback] [--no-restart] [--json]` | Upgrade this install, or hand off to the package manager that owns it. `update` is an alias. |
-| `version`, `--version`, `-v`                                                                                          | Print the embedded MangoStudio version.                                                      |
+| Command                                                                                                               | Description                                                                                              |
+| --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `mangostudio`                                                                                                         | Print help and the command list.                                                                         |
+| `setup [host\|port\|host:port] [--service\|--no-service] [--no-open]`                                                 | Take a fresh install to a running hub and open it in a browser.                                          |
+| `serve [host\|port\|host:port]`                                                                                       | Start the server in the foreground (default `localhost:3001`).                                           |
+| `serve [host\|port\|host:port] -d`                                                                                    | Start the server in the background (detached) and return.                                                |
+| `status`                                                                                                              | Show whether a server is running, its URL, launch mode, and health.                                      |
+| `status --json`                                                                                                       | Emit the shared hub status document instead of plain text.                                               |
+| `stop`                                                                                                                | Gracefully stop the running server (SIGTERM).                                                            |
+| `restart`                                                                                                             | Restart the running server the way it was started.                                                       |
+| `killserver [--force]`                                                                                                | Force-kill the running server (SIGKILL). `--force` skips the check that the recorded PID is MangoStudio. |
+| `service <action> [host\|port\|host:port] [--json]`                                                                   | Keep the server running across logout and reboot.                                                        |
+| `logs [-f] [-n <count>]`                                                                                              | Print the tail of the server log; `-f` follows it.                                                       |
+| `open`                                                                                                                | Open the running server in the default browser.                                                          |
+| `doctor`                                                                                                              | Run environment and configuration diagnostics.                                                           |
+| `doctor --all`                                                                                                        | Include ChatGPT connector checks even without a configured connector.                                    |
+| `doctor --chatgpt-refresh`                                                                                            | Perform a live ChatGPT token refresh probe (rotates the stored refresh token).                           |
+| `doctor --probe`                                                                                                      | Actively connect to each enabled MCP server (spawns children / hits URLs).                               |
+| `doctor --env` / `--library`                                                                                          | Limit extra sections to environments and/or library (core checks always run).                            |
+| `doctor --json`                                                                                                       | Emit structured JSON (checks, warning/failure counts).                                                   |
+| `env [runtimes\|agents] [--json]`                                                                                     | Report runtimes, version managers, and agent CLIs (read-only).                                           |
+| `env install <recipe> [--environment <id>] [--version <spec>]`                                                        | Run an install recipe on this machine (`--environment` is currently always refused).                     |
+| `env update <recipe> [--environment <id>]`                                                                            | Same as `env install`, restricted to update recipes.                                                     |
+| `env toolchain [node\|bun <path\|auto>] [--environment <id>] [--user <email>]`                                        | Show or set which Node and Bun spawned processes run with on an environment.                             |
+| `library [locations] [--json]`                                                                                        | Library coverage matrix and location health (read-only).                                                 |
+| `library --kind <kind>`                                                                                               | Filter resources by kind (`skill`, `subagent`, etc.).                                                    |
+| `library --divergent`                                                                                                 | List only resources whose copies disagree across locations.                                              |
+| `upgrade [--check] [--yes] [--stable \| --canary [<sha7>] \| --version <x.y.z>] [--rollback] [--no-restart] [--json]` | Upgrade this install, or hand off to the package manager that owns it. `update` is an alias.             |
+| `version`, `--version`, `-v`                                                                                          | Print the embedded MangoStudio version.                                                                  |
 
 `-d` / `--detach` and the positional host/port target may be combined in any
 order, e.g. `mangostudio serve 127.0.0.1:3000 -d`.
@@ -611,11 +611,28 @@ advanced debugging use `MANGO_CHATGPT_AUTH_BASE_URL` and `MANGO_CHATGPT_BASE_URL
 
 Only one server may run at a time. On startup the server writes a state file at
 `~/.mango/run/server.json`
-(`{ pid, port, host, startedAt, logFile, version, buildInfo, frontendDir, service }`)
+(`{ pid, port, host, startedAt, logFile, version, buildInfo, frontendDir, service, startToken }`)
 once the port is bound, and removes it on graceful shutdown. A second
 `serve` / `serve -d` reads that file and refuses to start if the recorded
 process is still alive. A state file whose process has died is treated as stale
 and cleaned up automatically.
+
+The file also records `startToken`, the server's own process start token (on
+Linux the boot id plus the process start tick, on macOS the `ps -o lstart=`
+text, on Windows the `StartTime` ticks, added a moment after startup because the
+query is slow there). `stop`, `killserver`, `restart` and `service install`
+compare it for equality with the token of the recorded PID before they signal it,
+so they never signal an unrelated process that reused the PID. A different token
+means the file is stale and it is removed. No wall-clock time is compared, so a
+clock step cannot change the answer.
+
+If the token cannot be compared (a server from an older release, a Windows
+server in its first moments, an unreadable query), the commands refuse instead of
+guessing, and the message gives the exact command for that platform (`kill <pid>`,
+or `taskkill /PID <pid> /F` on Windows). `mangostudio killserver --force` skips the
+check and kills the recorded PID; it still refuses a PID of 1 or below. Read-only
+commands (`status`, `open`, `doctor`, `backup`) only check that the PID is alive
+and never remove the file because of an identity verdict.
 
 ## Runtime files
 

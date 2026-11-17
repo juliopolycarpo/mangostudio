@@ -616,12 +616,38 @@ class FakeToolchainService {
   }
 }
 
+/** Refuses every pin the way a failed probe does: fixed message, raw text in `diagnostic`. */
+class UnreachableToolchainService extends FakeToolchainService {
+  override update(): Promise<ToolchainSelection> {
+    return Promise.reject(
+      new EnvironmentServiceError('Cannot verify node installations right now.', 503, {
+        reason: 'toolchain-probe-failed',
+        diagnostic: 'ssh exited 255: Connection refused',
+      })
+    );
+  }
+}
+
 describe('runEnvToolchain', () => {
   const deps = (service: FakeToolchainService, lines: string[]): Partial<EnvToolchainDeps> => ({
     service,
     prepareDatabase: () => Promise.resolve(),
     resolveUserId: () => Promise.resolve('user-1'),
     log: (line) => lines.push(line),
+  });
+
+  // The HTTP route keeps the diagnostic in the hub log; the CLI operator is on
+  // the hub machine and has no other way to read it.
+  it('appends the service diagnostic to the CLI error message', async () => {
+    const failure = await runEnvToolchain(
+      { subcommand: 'toolchain', runtime: 'node', choice: '/opt/node', json: false },
+      deps(new UnreachableToolchainService(), [])
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(CliError);
+    expect((failure as CliError).message).toBe(
+      'Cannot verify node installations right now. (ssh exited 255: Connection refused)'
+    );
   });
 
   it('prints the automatic selection for the local environment when nothing is pinned', async () => {

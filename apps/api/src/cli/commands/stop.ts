@@ -6,10 +6,8 @@
 
 import { runServerStopCommand, type ServerShutdownDeps } from '../server-shutdown';
 
-export interface StopDeps extends ServerShutdownDeps {
-  /** Host OS; injected so the Windows path is testable on any CI host. */
-  platform: NodeJS.Platform;
-}
+/** `platform` (host OS) is injected so the Windows path is testable on any CI host. */
+export type StopDeps = ServerShutdownDeps;
 
 const STOP_TIMEOUT_MS = 10_000;
 const POLL_INTERVAL_MS = 200;
@@ -24,7 +22,7 @@ const POLL_INTERVAL_MS = 200;
 export async function runStop(deps: Partial<StopDeps> = {}): Promise<void> {
   const { platform = process.platform, ...shutdownDeps } = deps;
   await runServerStopCommand({
-    deps: shutdownDeps,
+    deps: { ...shutdownDeps, platform },
     signal: 'terminate',
     timeoutMs: STOP_TIMEOUT_MS,
     intervalMs: POLL_INTERVAL_MS,

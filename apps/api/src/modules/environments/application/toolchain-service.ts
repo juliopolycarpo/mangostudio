@@ -21,8 +21,9 @@ import {
 } from '@mangostudio/shared/environments';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 
+import { isEnvironmentUnavailable } from '../../../lib/environment-unavailable';
 import { publishEnvironmentInvalidation } from '../../../services/realtime/environment-invalidation';
-import { EnvironmentServiceError } from '../domain/environment-error';
+import { diagnosticOf, EnvironmentServiceError } from '../domain/environment-error';
 import {
   type EnvironmentToolchainRepository,
   environmentToolchainRepository,
@@ -93,13 +94,17 @@ async function assertKnownPath(
   try {
     status = await probing.getRuntimeStatus({ userId, environmentId }, runtime);
   } catch (error) {
+    // A connect failure keeps its type so the route boundary answers it with
+    // the fixed text and reason; wrapping it here would put the manager's raw
+    // diagnostic (hub paths, variable names) into the message.
+    if (isEnvironmentUnavailable(error)) throw error;
     // A machine that cannot be asked is unavailable, not an invalid request:
     // the path may well be right, and 422 would send the user to fix a value
     // when the fix is bringing the environment back.
-    const detail = error instanceof Error ? error.message : String(error);
     throw new EnvironmentServiceError(
-      `Cannot verify ${runtime} installations on "${environmentId}": ${detail}`,
-      503
+      `Cannot verify ${runtime} installations on "${environmentId}" right now. Try again when the environment is reachable. Details are in the hub log.`,
+      503,
+      { reason: 'toolchain-probe-failed', environmentId, diagnostic: diagnosticOf(error) }
     );
   }
   const known = status?.installations.map((installation) => installation.path) ?? [];

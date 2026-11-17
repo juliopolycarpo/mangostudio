@@ -63,12 +63,25 @@ export class SafeFetchError extends Error {
   readonly kind: SafeFetchErrorKind;
   /** The HTTP status, on `kind: 'http'` only. */
   readonly status?: number;
+  /**
+   * Set only when `message` embeds text from the resolver, socket or address
+   * policy (resolved addresses, errno, hostnames). A caller that forwards the
+   * message to a client must replace it when this is present; every other
+   * message is a constant written in this module and is safe to pass on.
+   */
+  readonly rawDetail?: string;
 
-  constructor(message: string, kind: SafeFetchErrorKind = 'network', status?: number) {
+  constructor(
+    message: string,
+    kind: SafeFetchErrorKind = 'network',
+    status?: number,
+    rawDetail?: string
+  ) {
     super(message);
     this.name = 'SafeFetchError';
     this.kind = kind;
     if (status !== undefined) this.status = status;
+    if (rawDetail !== undefined) this.rawDetail = rawDetail;
   }
 }
 
@@ -257,7 +270,7 @@ async function requestOnce(
     const abort = abortFailure(options, signal);
     if (abort) throw abort;
     const detail = error instanceof Error ? error.message : 'Unknown network error.';
-    throw new SafeFetchError(`Request failed: ${detail}`);
+    throw new SafeFetchError(`Request failed: ${detail}`, 'network', undefined, detail);
   }
 }
 
@@ -273,7 +286,12 @@ async function assertAllowedAddress(deps: SafeFetchDeps, url: URL): Promise<void
     // policy never got as far as judging an address. Callers with a local
     // fallback depend on that difference, which is why it is read from the
     // error's own reason rather than from the sentence it produced.
-    throw new SafeFetchError(`Host was refused: ${detail}`, addressFailureKind(error));
+    throw new SafeFetchError(
+      `Host was refused: ${detail}`,
+      addressFailureKind(error),
+      undefined,
+      detail
+    );
   }
 }
 

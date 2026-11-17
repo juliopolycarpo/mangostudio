@@ -801,7 +801,7 @@ async function defaultStopHub(input: { state: ServerState; launch: HubLaunchMode
     if (!stopped) throw new Error(timeoutMessage);
     return;
   }
-  await stopPidOrThrow({ controller, now: Date.now, sleep }, input.state.pid, timeoutMessage);
+  await stopPidOrThrow({ controller, now: Date.now, sleep }, input.state, timeoutMessage);
 }
 
 /**
@@ -823,7 +823,7 @@ async function defaultRestartHub(input: {
   const controller = createProcessController();
   await stopPidOrThrow(
     { controller, now: Date.now, sleep },
-    input.state.pid,
+    input.state,
     `MangoStudio (PID ${input.state.pid}) did not stop within 10s.`
   );
   await spawnDetached(

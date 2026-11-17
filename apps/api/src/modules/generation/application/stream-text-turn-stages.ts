@@ -1128,7 +1128,7 @@ export async function* finalizeTurnError(
   // HTTP routes use; the diagnostic (paths, usernames) stays in the hub log.
   const unavailable = isEnvironmentUnavailable(error) ? error : undefined;
   const message = unavailable ? environmentUnavailableText(unavailable) : rawMessage;
-  const code = unavailable ? ERROR_CODES.PROVIDER_ERROR : getErrorCode(error);
+  const code = unavailable ? ERROR_CODES.ENVIRONMENT_UNAVAILABLE : getErrorCode(error);
   streamTextTurnLogger.error('turn_failed', { chatId, message: rawMessage });
 
   if (!executionState.durableProviderState) {

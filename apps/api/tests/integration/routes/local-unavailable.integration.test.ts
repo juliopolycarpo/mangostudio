@@ -1,6 +1,6 @@
 /**
  * Every route that needs an environment answers an unreachable one the same
- * way: 503, `PROVIDER_ERROR`, a fixed message and `details.reason`, with the
+ * way: 503, `ENVIRONMENT_UNAVAILABLE`, a fixed message and `details.reason`, with the
  * connection manager's own text kept out of the body.
  *
  * Only a connect failure the manager raised maps. A runtime that sends
@@ -45,7 +45,7 @@ import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-
  * environment variable that fixes it. None of it may reach an HTTP client.
  */
 const LEAKY_DIAGNOSTIC =
-  'No mangostudio-runtime binary was found; searched /home/alice/mango/target/debug/mangostudio-runtime. Set MANGOSTUDIO_RUNTIME_BINARY to a runtime binary.';
+  'No mangostudio-runtime binary was found; searched /home/alice/mango/target/debug/mangostudio-runtime. Set MANGOSTUDIO_RUNTIME_BINARY to a runtime binary. connect ENOENT /run/user/1000/mango-runtime.sock (pid 48213)\n    at connectRuntime (/home/alice/mango/apps/api/src/connect.ts:42:11)';
 
 function refuseLocalConnect(): Promise<never> {
   return Promise.reject(new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, LEAKY_DIAGNOSTIC));
@@ -130,7 +130,7 @@ function request(route: LocalReachingRoute): Request {
 
 describe('routes that reach an unavailable Local environment', () => {
   it.each(LOCAL_REACHING_ROUTES.map((route) => [`${route.method} ${route.path('<chat>')}`, route]))(
-    '%s answers 503 PROVIDER_ERROR without the diagnostic',
+    '%s answers 503 ENVIRONMENT_UNAVAILABLE without the diagnostic',
     async (label, route) => {
       const response = await app.handle(request(route as LocalReachingRoute));
       const text = await response.text();
@@ -145,8 +145,11 @@ describe('routes that reach an unavailable Local environment', () => {
         Value.Check(ApiErrorResponseSchema, body),
         `(${label}): expected an ApiErrorResponse body | received: ${text}`
       ).toBe(true);
-      expect(body, `(${label}): expected code PROVIDER_ERROR | received: ${text}`).toMatchObject({
-        code: 'PROVIDER_ERROR',
+      expect(
+        body,
+        `(${label}): expected code ENVIRONMENT_UNAVAILABLE | received: ${text}`
+      ).toMatchObject({
+        code: 'ENVIRONMENT_UNAVAILABLE',
       });
       const reason = (body as { details?: { reason?: string } }).details?.reason ?? '';
       expect(
@@ -155,8 +158,8 @@ describe('routes that reach an unavailable Local environment', () => {
       ).toBe(true);
       expect(
         text,
-        `(${label}): expected no hub path, user name or MANGOSTUDIO_ variable in the body | received: ${text}`
-      ).not.toMatch(/\/home\/|alice|MANGOSTUDIO_/);
+        `(${label}): expected no hub path, socket path, pid, stack frame, user name or MANGOSTUDIO_ variable in the body | received: ${text}`
+      ).not.toMatch(/\/home\/|\/run\/|\.sock|\bpid\b|48213|\n|\bat \w+ \(|alice|MANGOSTUDIO_/);
     }
   );
 
@@ -333,7 +336,7 @@ class UnreachableEnvironmentProgress implements AsyncIterable<object>, AsyncIter
 }
 
 describe('unavailable environment on an SSE stream', () => {
-  it('ends with one SSEErrorEvent carrying PROVIDER_ERROR and the fixed text', async () => {
+  it('ends with one SSEErrorEvent carrying ENVIRONMENT_UNAVAILABLE and the fixed text', async () => {
     const text = await sseResponse(new UnreachableEnvironmentProgress(), 'Stream failed.').text();
     const frames = text
       .split('\n\n')
@@ -342,12 +345,12 @@ describe('unavailable environment on an SSE stream', () => {
 
     expect(
       frames,
-      `(sse): expected one error event {type:'error', code:'PROVIDER_ERROR', done:true} with the fixed text | received: ${text}`
+      `(sse): expected one error event {type:'error', code:'ENVIRONMENT_UNAVAILABLE', done:true} with the fixed text | received: ${text}`
     ).toEqual([
       {
         type: 'error',
         error: 'The runtime for this environment is not installed on the hub.',
-        code: 'PROVIDER_ERROR',
+        code: 'ENVIRONMENT_UNAVAILABLE',
         done: true,
       },
     ]);

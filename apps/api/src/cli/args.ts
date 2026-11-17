@@ -64,6 +64,11 @@ export interface EnvArgs {
   version?: string;
 }
 
+export interface KillServerArgs {
+  /** Skip the check that the recorded pid is the hub (a pid at or below 1 is still refused). */
+  force: boolean;
+}
+
 export interface StatusArgs {
   /** Emit the shared hub status document instead of plain text. */
   json: boolean;
@@ -249,6 +254,19 @@ export function parseStatusArgs(rest: string[]): StatusArgs {
     throw new CliError(`Unknown option for status: ${arg}`);
   }
   return { json };
+}
+
+/** Parse `killserver` args: optional --force. // Usage: parseKillServerArgs(['--force']) */
+export function parseKillServerArgs(rest: string[]): KillServerArgs {
+  let force = false;
+  for (const arg of rest) {
+    if (arg === '--force') {
+      force = true;
+      continue;
+    }
+    throw new CliError(`Unknown option for killserver: ${arg}`);
+  }
+  return { force };
 }
 
 /** Parse `service` args: an action, an install target, --json. // Usage: parseServiceArgs(['install', 'lan:3000']) */

@@ -45,6 +45,11 @@ const PUBLISHED: [ErrorCode, string, string][] = [
   ['CONFLICT', 'https://mangostudio.dev/problems/conflict', 'Conflict'],
   ['OPERATION_EXPIRED', 'https://mangostudio.dev/problems/operation-expired', 'Operation expired'],
   ['PROVIDER_ERROR', 'https://mangostudio.dev/problems/provider-error', 'Provider error'],
+  [
+    'ENVIRONMENT_UNAVAILABLE',
+    'https://mangostudio.dev/problems/environment-unavailable',
+    'Environment unavailable',
+  ],
   ['GENERATION_EMPTY', 'https://mangostudio.dev/problems/generation-empty', 'Empty generation'],
   ['OWNERSHIP', 'https://mangostudio.dev/problems/ownership', 'Not the owner'],
   ['RATE_LIMITED', 'https://mangostudio.dev/problems/rate-limited', 'Too many requests'],

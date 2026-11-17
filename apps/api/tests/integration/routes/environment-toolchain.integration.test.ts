@@ -20,6 +20,7 @@ import { TableNode } from 'kysely';
 import { acquireToolchainCredentialLock } from '../../../src/backup/capture-lock';
 import { runEnvToolchain } from '../../../src/cli/commands/env';
 import { getDb } from '../../../src/db/database';
+import { EnvironmentUnavailableError } from '../../../src/lib/environment-unavailable';
 import { createEnvironmentService } from '../../../src/modules/environments/application/environment-service';
 import type {
   EnvironmentProbingService,
@@ -705,6 +706,43 @@ describe('environment toolchain route', () => {
     expect(response.status).toBe(422);
     expect(payload.error).toContain('expected one of: /opt/node/bin/node');
     expect(payload.error).toContain('received: /tmp/evil');
+  });
+
+  it('answers 503 ENVIRONMENT_UNAVAILABLE without the connect diagnostic when the machine cannot be probed', async () => {
+    const leakyDiagnostic =
+      'connect ENOENT /run/user/1000/mango-runtime.sock (pid 48213); set MANGOSTUDIO_RUNTIME_BINARY under /home/alice/mango';
+    const { app, repository } = createTestApp({}, [], () =>
+      Promise.reject(new EnvironmentUnavailableError('start-failed', leakyDiagnostic))
+    );
+    await repository.create({
+      id: 'dev-box',
+      userId: TEST_USER.id,
+      name: 'Dev box',
+      transportKind: 'stdio',
+      config: {},
+      enabled: true,
+    });
+
+    const response = await app.handle(
+      new Request(
+        'http://localhost/environments/dev-box/toolchain',
+        jsonRequest('PUT', { node: '/opt/node/bin/node' })
+      )
+    );
+    const text = await response.text();
+
+    expect(
+      response.status,
+      `(PUT toolchain): expected status 503 | received: ${response.status} ${text}`
+    ).toBe(503);
+    expect(JSON.parse(text)).toMatchObject({
+      code: 'ENVIRONMENT_UNAVAILABLE',
+      details: { reason: 'start-failed' },
+    });
+    expect(
+      text,
+      `(PUT toolchain): expected no socket path, pid, hub path or variable name in the body | received: ${text}`
+    ).not.toMatch(/\/run\/|\.sock|\bpid\b|\/home\/|MANGOSTUDIO_/);
   });
 
   it('accepts a selection for the local environment', async () => {

@@ -18,6 +18,7 @@ import type { Kysely } from 'kysely';
 
 import { getDb } from '../../../../src/db/database';
 import type { Database } from '../../../../src/db/types';
+import { EnvironmentUnavailableError } from '../../../../src/lib/environment-unavailable';
 import { getChatMessagesUseCase } from '../../../../src/modules/chats/application/get-chat-messages';
 import type { OwnedChatRecord } from '../../../../src/modules/chats/infrastructure/chat-repository';
 import { createExternalApprovalRegistry } from '../../../../src/modules/external-agents/application/external-approval-registry';
@@ -1489,6 +1490,22 @@ describe('the native review action', () => {
     expect(repoRootCalls).toEqual([
       { workdir: '/work/repo', selection: { userId, environmentId: 'local' } },
     ]);
+  });
+
+  it('reports a connect failure as environment-unreachable with its reason and fixed text', async () => {
+    const { stream } = reviewHarness({
+      repoRootFailure: () =>
+        new EnvironmentUnavailableError('backing-off', 'connect ENOENT /run/x.sock (pid 4821)'),
+    });
+
+    const result = await stream(reviewInput(), getDb());
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure).toEqual({
+      kind: 'environment-unreachable',
+      message: 'The environment is unavailable; a new connection attempt is allowed shortly.',
+      reason: 'backing-off',
+    });
   });
 
   it('reports an unreachable machine as unavailable rather than as no repository', async () => {
