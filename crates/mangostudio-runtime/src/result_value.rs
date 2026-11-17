@@ -53,6 +53,22 @@ pub(crate) fn object(fields: impl IntoIterator<Item = (&'static str, Value)>) ->
     )
 }
 
+/// Asserts two values serialize to the same bytes. `Value` equality ignores key order, and the
+/// runtime build keeps insertion order (`serde_json/preserve_order` is enabled through
+/// `agent-client-protocol-schema`), so a reordered field changes the wire without failing `assert_eq!`.
+#[cfg(test)]
+macro_rules! assert_wire_eq {
+    ($actual:expr, $expected:expr, $($message:tt)+) => {
+        assert_eq!(
+            serde_json::to_string(&$actual).expect("the actual value serializes"),
+            serde_json::to_string(&$expected).expect("the expected value serializes"),
+            $($message)+
+        )
+    };
+}
+#[cfg(test)]
+pub(crate) use assert_wire_eq;
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -138,6 +154,25 @@ mod tests {
         let unserializable = std::collections::BTreeMap::from([((1, 2), "pair")]);
 
         assert!(into_value(unserializable).is_err());
+    }
+
+    #[test]
+    #[should_panic(expected = "reordered")]
+    fn the_wire_assertion_fails_on_a_reordered_field() {
+        let built = object([("b", Value::from(1)), ("a", Value::from(2))]);
+
+        assert_wire_eq!(built, json!({"a": 2, "b": 1}), "reordered");
+    }
+
+    #[test]
+    fn an_object_keeps_the_order_its_fields_were_given_in() {
+        let built = object([("b", Value::from(1)), ("a", Value::from(2))]);
+
+        assert_eq!(
+            built.to_string(),
+            r#"{"b":1,"a":2}"#,
+            "expected insertion order on the wire | received {built}"
+        );
     }
 
     #[test]

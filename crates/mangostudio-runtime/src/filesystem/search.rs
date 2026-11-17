@@ -1173,6 +1173,7 @@ mod prefilter_parity_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::result_value::assert_wire_eq;
     use crate::test_support::scratch_dir;
 
     fn token() -> CancellationToken {
@@ -1538,7 +1539,7 @@ mod tests {
         let root = scratch_dir("filesystem-search-whole-results");
         fs::write(root.join("match.txt"), "one\nneedle two\n").unwrap();
 
-        assert_eq!(
+        assert_wire_eq!(
             glob(glob_params(&root, "*.txt"), &token()).unwrap(),
             json!({
                 "pattern": "*.txt",
@@ -1548,7 +1549,7 @@ mod tests {
             }),
             "expected the whole fs.glob answer | received a different object"
         );
-        assert_eq!(
+        assert_wire_eq!(
             grep(grep_params(&root, "needle"), &token()).unwrap(),
             json!({
                 "pattern": "needle",

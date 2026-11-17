@@ -376,6 +376,7 @@ impl TerminalFlow {
 
 #[cfg(test)]
 mod tests {
+    use crate::result_value::assert_wire_eq;
     use base64::Engine;
 
     use super::{
@@ -404,7 +405,7 @@ mod tests {
     fn a_data_frame_carries_exactly_its_kind_and_base64_bytes() {
         let frame = OutputFrame::data(b"hello");
 
-        assert_eq!(
+        assert_wire_eq!(
             frame.payload,
             serde_json::json!({ "kind": "data", "data": "aGVsbG8=" }),
             "expected a data frame payload of kind and base64 data | received a different object"

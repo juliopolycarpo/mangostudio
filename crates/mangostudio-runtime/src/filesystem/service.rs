@@ -1196,6 +1196,7 @@ pub(crate) fn register(registry: Registry, consent: ConsentSource) -> Registry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::result_value::assert_wire_eq;
     use crate::runtime_home::RuntimeSlot;
     use crate::test_support::{ScratchDir, scratch_dir};
 
@@ -1375,7 +1376,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(
+        assert_wire_eq!(
             text,
             json!({
                 "content": "     1\tabc", "path": "file", "size": 3, "sha256": sha256,
@@ -1394,7 +1395,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(
+        assert_wire_eq!(
             bytes,
             json!({
                 "content": "YWJj", "path": "file", "size": 3, "sha256": sha256,
@@ -1411,7 +1412,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(
+        assert_wire_eq!(
             listed,
             json!({"path": ".", "entries": [{"name": "file", "type": "file"}]}),
             "expected the whole fs.list-directory answer | received a different object"
@@ -1420,7 +1421,7 @@ mod tests {
 
     #[test]
     fn snapshot_record_pins_every_field_of_an_edit_and_a_move() {
-        assert_eq!(
+        assert_wire_eq!(
             snapshot_record(
                 Path::new("/a"),
                 "move",
@@ -1429,11 +1430,12 @@ mod tests {
                 Some(Path::new("/b"))
             ),
             json!({
-                "path": "/a", "op": "move", "afterHash": "after", "movedTo": "/b",
+                "path": "/a", "op": "move",
                 "before": {
                     "exists": true, "contentBase64": "YWJj",
                     "hash": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
                 },
+                "afterHash": "after", "movedTo": "/b",
             }),
             "expected every field of a move's snapshot record | received a different object"
         );

@@ -883,6 +883,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::result_value::assert_wire_eq;
     use crate::{
         consent::source::ConsentSource,
         filesystem::{
@@ -1230,7 +1231,7 @@ mod tests {
     #[test]
     fn patch_response_pins_the_summary_wording_and_both_lists() {
         let one = patch_response(vec![json!({"path": "a"})], vec![json!({"op": "edit"})]);
-        assert_eq!(
+        assert_wire_eq!(
             one,
             json!({
                 "result": {"files": [{"path": "a"}], "summary": "1 file changed"},
@@ -1240,7 +1241,7 @@ mod tests {
         );
 
         let none = patch_response(Vec::new(), Vec::new());
-        assert_eq!(
+        assert_wire_eq!(
             none,
             json!({"result": {"files": [], "summary": "0 files changed"}, "mutations": []}),
             "expected a plural summary for no files | received a different object"
