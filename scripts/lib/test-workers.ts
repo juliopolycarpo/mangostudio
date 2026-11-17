@@ -310,10 +310,9 @@ export function planWorkers(
       files: own,
       reportPath,
       settle: spec.settle,
-      env: (spec.settle ? { [WORKER_TOKEN_ENV]: crypto.randomUUID() } : {}) as Record<
-        string,
-        string
-      >,
+      // Every worker carries a token, settling or not: the end-of-worker sweep
+      // only signals a group in which it finds a process holding it.
+      env: { [WORKER_TOKEN_ENV]: crypto.randomUUID() },
     };
   });
 }
@@ -333,6 +332,12 @@ export interface WorkerHandle {
    * processes it left running (and has killed). Empty is a worker that settled.
    */
   settle?(): Promise<readonly Leftover[]>;
+  /**
+   * Once `exited` has settled: why the cleanup after the worker's exit could not
+   * be done (for example a pid that is no group id), or null. It is reported as
+   * its own failure and leaves the worker's own result standing.
+   */
+  endProblem?(): string | null;
 }
 
 /** Starts a worker process; the real one is `startWorkerProcess`. */
@@ -352,6 +357,8 @@ export interface WorkerRun {
   readonly leftovers: readonly Leftover[];
   /** Why the check for leftovers could not be made. */
   readonly settleError: string | null;
+  /** Why the cleanup after the worker's exit failed; see `WorkerHandle.endProblem`. */
+  readonly endProblem?: string | null;
 }
 
 export interface RunWorkersOptions {
@@ -382,7 +389,7 @@ async function runWorker(
   const began = performance.now();
   const settle = (
     partial: Pick<WorkerRun, 'exit' | 'startError' | 'cancelled'> &
-      Partial<Pick<WorkerRun, 'leftovers' | 'settleError'>>
+      Partial<Pick<WorkerRun, 'leftovers' | 'settleError' | 'endProblem'>>
   ): WorkerRun => ({
     plan,
     leftovers: [],
@@ -417,18 +424,32 @@ async function runWorker(
     const exit = await handle.exited;
     ended = true;
     clearTimeout(escalation);
+    const endProblem = handle.endProblem?.() ?? null;
     if (!handle.settle) {
       return settle({
         exit,
         startError: null,
         cancelled,
+        endProblem,
         settleError: plan.settle ? 'worker requested settlement but provided no guard' : null,
       });
     }
     try {
-      return settle({ exit, startError: null, cancelled, leftovers: await handle.settle() });
+      return settle({
+        exit,
+        startError: null,
+        cancelled,
+        endProblem,
+        leftovers: await handle.settle(),
+      });
     } catch (caught) {
-      return settle({ exit, startError: null, cancelled, settleError: errorText(caught) });
+      return settle({
+        exit,
+        startError: null,
+        cancelled,
+        endProblem,
+        settleError: errorText(caught),
+      });
     }
   } catch (caught) {
     return settle({ exit: null, startError: errorText(caught), cancelled });
@@ -746,6 +767,11 @@ export function judgeWorkers(input: JudgeInput): LaneVerdict {
     if (exit) failures.push(exit);
     const unsettled = settlementProblem(run);
     if (unsettled) failures.push(unsettled);
+    if (run.endProblem) {
+      failures.push(
+        `${workerName(run.plan)} could not be cleaned up after it exited | ${run.endProblem}`
+      );
+    }
     const report = readWorkerReport(run, input.readReport, failures);
     if (!report) continue;
     reports.push(report);

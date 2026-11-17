@@ -4,11 +4,13 @@ import {
   findLeftovers,
   killProcessGroup,
   type Leftover,
+  noteWorkerPausers,
   PODMAN_PAUSE_COMMAND,
   type ProcessEntry,
   type ProcessTable,
   settleWorker,
   signalWorker,
+  sweepWorker,
   WORKER_TOKEN_ENV,
   type WorkerIdentity,
 } from '../lib/test-worker-settle';
@@ -213,7 +215,7 @@ describe('killProcessGroup', () => {
     (pgid) => {
       const host = new SignalHost([]);
       expect(() => killProcessGroup(pgid, 'SIGKILL', host.sendSignal)).toThrow(
-        'expected a process group id that is an integer greater than 1 | received:'
+        'expected worker pid: integer > 1 | received:'
       );
       expect(host.sent).toEqual([]);
     }
@@ -222,6 +224,110 @@ describe('killProcessGroup', () => {
   it('is what signalWorker uses, so a worker with a bad group id signals no group', () => {
     const host = new SignalHost([]);
     expect(() => signalWorker({ pgid: 0, token: '' }, 'SIGTERM', host)).toThrow('received: 0');
+    expect(host.sent).toEqual([]);
+  });
+});
+
+describe('sweepWorker', () => {
+  const TOKEN_ENV = `${WORKER_TOKEN_ENV}=${WHO.token}`;
+  const sweep = (host: SignalHost) =>
+    sweepWorker(WHO, { table: host.table, sendSignal: host.sendSignal, label: 'w2' });
+
+  it('signals nothing for an empty group', () => {
+    const host = new SignalHost([entry({ pid: 9000, pgid: 9000, environ: 'A=1' })]);
+    expect(sweep(host)).toEqual([]);
+    expect(host.sent).toEqual([]);
+  });
+
+  it('signals nothing to a group a tokenless stranger holds, and notes it', () => {
+    const host = new SignalHost([entry({ pid: 4000, pgid: 4000, command: 'job', environ: 'A=1' })]);
+    expect(sweep(host)).toEqual([
+      "w2: group 4000 is held by 1 process(es) without the worker's token (pid 4000); nothing signalled",
+    ]);
+    expect(host.sent).toEqual([]);
+  });
+
+  it('SIGKILLs the group when a token-carrying survivor is in it, and escaped carriers by pid', () => {
+    const host = new SignalHost([
+      entry({ pid: 4100, pgid: 4000, environ: TOKEN_ENV }),
+      entry({ pid: 4200, pgid: 4200, environ: TOKEN_ENV }),
+      entry({ pid: 4300, pgid: 4300, environ: 'A=1' }),
+    ]);
+    sweep(host);
+    expect(host.sent).toEqual([
+      { pid: -4000, signal: 'SIGKILL' },
+      { pid: 4200, signal: 'SIGKILL' },
+    ]);
+  });
+
+  it('trusts the group alone where the table cannot read any environment (ps)', () => {
+    const host = new SignalHost([entry({ pid: 4100, pgid: 4000 })]);
+    sweep(host);
+    expect(host.sent).toEqual([{ pid: -4000, signal: 'SIGKILL' }]);
+  });
+
+  it('lets the group alone decide for a caller that has no token', () => {
+    const host = new SignalHost([entry({ pid: 4100, pgid: 4000, environ: 'A=1' })]);
+    sweepWorker(
+      { pgid: 4000, token: '' },
+      { table: host.table, sendSignal: host.sendSignal, label: 'w' }
+    );
+    expect(host.sent).toEqual([{ pid: -4000, signal: 'SIGKILL' }]);
+  });
+
+  it('refuses a worker pid that is no group id before reading the table', () => {
+    const host = new SignalHost([]);
+    expect(() => sweepWorker({ pgid: 1, token: 't' }, { table: host.table, label: 'w' })).toThrow(
+      'expected worker pid: integer > 1 | received: 1'
+    );
+    expect(host.reads).toBe(0);
+  });
+
+  it('spares a group holding a podman pause process and kills its token-carrying members by pid', () => {
+    const host = new SignalHost([
+      entry({
+        pid: 4050,
+        pgid: 4000,
+        sid: 4000,
+        startedAt: '5',
+        command: PODMAN_PAUSE_COMMAND,
+        environ: `PWD=/w\n${TOKEN_ENV}`,
+      }),
+      entry({ pid: 4100, pgid: 4000, environ: TOKEN_ENV }),
+    ]);
+    const notes = sweep(host);
+    expect(host.sent).toEqual([{ pid: 4100, signal: 'SIGKILL' }]);
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain('shares worker group: true, session: true');
+    expect(notes[0]).toContain('group SIGKILL skipped, members killed by pid');
+  });
+
+  it('signals the group as usual when the pause process lives outside it, and still names it', () => {
+    const host = new SignalHost([
+      entry({ pid: 4100, pgid: 4000, environ: TOKEN_ENV }),
+      entry({ pid: 7000, pgid: 7000, command: PODMAN_PAUSE_COMMAND, environ: TOKEN_ENV }),
+    ]);
+    const notes = sweep(host);
+    expect(host.sent).toEqual([{ pid: -4000, signal: 'SIGKILL' }]);
+    expect(notes[0]).toContain('pid 7000 pgid 7000');
+    expect(notes[0]).toContain('shares worker group: false');
+  });
+});
+
+describe('noteWorkerPausers', () => {
+  it('names a pause process carrying the token and signals nothing', () => {
+    const host = new SignalHost([
+      entry({
+        pid: 7100,
+        pgid: 7100,
+        command: PODMAN_PAUSE_COMMAND,
+        environ: `PWD=/w\nSECRET=x\n${WORKER_TOKEN_ENV}=${WHO.token}`,
+      }),
+    ]);
+    const notes = noteWorkerPausers(WHO, { table: host.table, label: 'w2' });
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain('PWD=/w');
+    expect(notes[0]).not.toContain('SECRET');
     expect(host.sent).toEqual([]);
   });
 });

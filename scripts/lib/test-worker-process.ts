@@ -5,9 +5,11 @@
 import { NewlineSplitter, type SplitLine } from './newline-splitter';
 import type { GuardedChild } from './runner-guardian';
 import {
-  killProcessGroup,
+  noteWorkerPausers,
+  type ProcessTable,
   settleWorker,
   signalWorker,
+  sweepWorker,
   WORKER_TOKEN_ENV,
 } from './test-worker-settle';
 import type { WorkerExit, WorkerHandle, WorkerPlan } from './test-workers';
@@ -78,6 +80,8 @@ interface WorkerSpawnOptions {
 export interface WorkerHost {
   readonly platform?: NodeJS.Platform;
   readonly sendSignal?: (pid: number, signal: NodeJS.Signals) => void;
+  /** The process table the end-of-worker sweep reads; the machine's by default. */
+  readonly table?: ProcessTable;
 }
 
 /**
@@ -248,8 +252,11 @@ export function startWorkerProcess(
   spawn: SpawnWorker = spawnWorkerChild,
   host: WorkerHost = {}
 ): WorkerHandle {
-  const { platform = process.platform, sendSignal = process.kill } = host;
+  const { platform = process.platform, sendSignal = process.kill, table } = host;
   const leadsGroup = platform !== 'win32';
+  const token = plan.env[WORKER_TOKEN_ENV];
+  // Why the sweep after the worker's exit failed, if it did; see `exited` below.
+  let endProblem: string | null = null;
   const child = spawn({
     cmd: [...plan.argv],
     cwd: plan.cwd,
@@ -302,10 +309,23 @@ export function startWorkerProcess(
     await Promise.all(pumps);
     clearTimeout(grace);
     // A worker that settles proves its group empty in `settle`, which reports
-    // what it had to kill. Any other worker's group is reaped here, so a stray
-    // child neither survives the worker nor holds the lane's pipes.
-    // A pid that is no group id throws here and surfaces as the worker's start error.
-    if (leadsGroup && !plan.settle) killProcessGroup(child.pid, 'SIGKILL', sendSignal);
+    // what it had to kill. Any other worker's group is swept here, so a stray
+    // child neither survives the worker nor holds the lane's pipes. The sweep
+    // signals only a group the process table shows a token-carrying member in
+    // (the worker's id is free once it is reaped). A failure of it is the
+    // lane's cleanup problem, reported by name beside the worker's own result.
+    if (leadsGroup && token) {
+      const who = { pgid: child.pid, token };
+      const label = `${plan.laneId} worker ${plan.index}/${plan.count}`;
+      try {
+        const notes = plan.settle
+          ? noteWorkerPausers(who, { table, label })
+          : sweepWorker(who, { table, sendSignal, label });
+        for (const note of notes) sinks.out(prefix + note);
+      } catch (caught) {
+        endProblem = caught instanceof Error ? caught.message : String(caught);
+      }
+    }
     // On the abandon path Bun may never have populated exitCode/signalCode; we
     // have already sent SIGKILL, so report that when the handle reported
     // neither — keeping WorkerExit's "exactly one set" contract without
@@ -316,16 +336,16 @@ export function startWorkerProcess(
     return { exitCode: child.exitCode, signal: synthesizeKill ? 'SIGKILL' : child.signalCode };
   })();
 
-  const token = plan.env[WORKER_TOKEN_ENV];
   let signalError: { readonly cause: unknown } | undefined;
   return {
     exited,
+    endProblem: () => endProblem,
     kill: (signal) => {
       if (!leadsGroup) {
         child.kill(signal);
       } else {
         try {
-          signalWorker({ pgid: child.pid, token: token ?? '' }, signal, { sendSignal });
+          signalWorker({ pgid: child.pid, token: token ?? '' }, signal, { sendSignal, table });
         } catch (caught) {
           // Keep the escalation timer alive. Settlement retries the table and
           // reports the signaling failure after cleaning up what it can find.
@@ -344,7 +364,7 @@ export function startWorkerProcess(
       }
     },
     settle:
-      leadsGroup && token
+      leadsGroup && plan.settle && token
         ? async () => {
             const leftovers = await settleWorker({ who: { pgid: child.pid, token } });
             if (signalError) throw signalError.cause;

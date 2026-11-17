@@ -209,6 +209,11 @@ export const withLeftovers =
   (inner: StartWorker, leftovers: readonly Leftover[]): StartWorker =>
   (plan) => ({ ...inner(plan), settle: () => Promise.resolve(leftovers) });
 
+/** The same worker, whose cleanup after its exit failed for `reason`. */
+export const withEndProblem =
+  (inner: StartWorker, reason: string): StartWorker =>
+  (plan) => ({ ...inner(plan), endProblem: () => reason });
+
 /** The same worker, whose settlement check cannot read the process table. */
 export const withUnreadableProcessTable =
   (inner: StartWorker, reason: string): StartWorker =>

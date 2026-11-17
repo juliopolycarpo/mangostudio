@@ -805,14 +805,23 @@ is omitted on this path so Bun cannot kill the evidence before the check.
 Podman's rootless pause process, whose whole command line is exactly
 `catatonit -P`, is not a leftover: the first `podman` call of a user starts it,
 it is meant to outlive that call, and it inherits the calling worker's
-environment token. The check neither reports nor signals it.
+environment token. The check neither reports nor signals it, and prints one note
+per ignored process (pid, group, session, start time, and only its `PWD` and `_`)
+so a run can say what started podman. The exemption relies on the process being
+podman's own state: that holds only while `catatonit -P` is the exact command
+line, and it does not hold for a pause process in the worker's own group, which a
+group SIGKILL would take with it. When one shares the group, the sweep sends no
+group signal and kills the token-carrying members by pid instead.
 
 On POSIX every worker of every lane, settling or not, leads a process group of
 its own. A test that signals its own group (`process.kill(0, ...)`) ends that one
 worker, which the lane reports by name, instead of the lane runner and `bun run`.
 Cancellation signals the worker's group, and the group is SIGKILLed once the
-worker has exited, so a stray child cannot outlive it. Only a settling lane
-reports such a child instead of killing it silently. Group ids are validated
+worker has exited, so a stray child cannot outlive it, but only when the process
+table shows a live member of that group carrying the worker's token: a group id
+is free once its leader is reaped, so an empty group, or one a stranger without
+the token now holds, gets no signal. Only a settling lane reports such a child
+instead of killing it silently. Group ids are validated
 (an integer above 1) before a negative-pid kill. Windows has no process groups and
 keeps its plain child.
 
