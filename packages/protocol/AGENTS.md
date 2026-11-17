@@ -55,6 +55,14 @@ path filters scoped to `crates/mango-protocol/**`; launcher-only changes must no
 protocol changelog or masquerade as wire-contract changes. The fuzz crate remains an excluded
 nightly workspace with its own lockfile.
 
+## Socket tests
+
+`listenIpc` and `listen_ipc` preserve a public socket path on close, so a test that listens leaves a
+file behind unless it removes it. Take addresses from `tests/support/socket-address.ts`
+(`useSocketTestHome`): they live in a per-run temp directory, are removed after every case even when it
+fails, and the suite fails naming any socket file of this process left behind. In Rust use
+`TestAddress` in `tests/it/transport_ipc.rs`. Never build a test address with `ipcPath` directly.
+
 ## Resolving from the workspace, publishing from a build
 
 `exports` points at `src/`, like every other workspace here. Nothing in the Turbo graph builds
