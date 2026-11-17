@@ -65,7 +65,7 @@
     "@mangostudio/api": "workspace:*",
     "@mangostudio/protocol": "workspace:*",
     "@mangostudio/shared": "workspace:*",
-    "@playwright/test": "^1.65.0",
+    "@playwright/test": "^1.65.1",
     "@types/bun": "catalog:",
     "@typescript/typescript6": "6.0.2",
     "ajv": "^8.20.0",
