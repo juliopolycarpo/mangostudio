@@ -89,4 +89,24 @@ describe('pushRuntimeBinary', () => {
       })
     ).rejects.toBeInstanceOf(RuntimePushError);
   });
+
+  // A client-facing line classifies the command's own output instead of reading
+  // the error's message, which embeds it.
+  it('carries the failed command output apart from the message', async () => {
+    const runner: RuntimeCommandRunner = () =>
+      Promise.resolve({ stdout: '', stderr: ' mkdir: Permission denied \n', exitCode: 1 });
+
+    const failure: unknown = await pushRuntimeBinary({
+      runner,
+      slot: 'remote',
+      version: '1.2.3',
+      bytes: new Uint8Array([1]),
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(RuntimePushError);
+    expect((failure as RuntimePushError).remote).toEqual({
+      exitCode: 1,
+      output: 'mkdir: Permission denied',
+    });
+  });
 });

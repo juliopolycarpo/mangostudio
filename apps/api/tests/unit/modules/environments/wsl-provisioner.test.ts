@@ -675,6 +675,11 @@ describe('WslProvisioner', () => {
     await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(
       /source checkout.*bun run build:runtime --platform linux-x64 --dev --zig --rustup --out \/repo\/\.mango\/out`/s
     );
+    // The typed error lets a client-facing line name the build without the hub's path.
+    await expect(provisioner.ensure('Ubuntu')).rejects.toMatchObject({
+      name: 'WslDevBuildError',
+      platformId: 'linux-x64',
+    });
     // A release URL or a cache path would be a dead end here; neither is offered.
     expect(requested).toEqual([]);
   });
@@ -694,6 +699,10 @@ describe('WslProvisioner', () => {
     await expect(provisioner.ensure('Ubuntu')).rejects.toThrow(
       /reports version 0\.1\.1 rather than dev\. .*has to report version dev; build one with `bun run build:runtime --platform linux-x64 --dev/s
     );
+    await expect(provisioner.ensure('Ubuntu')).rejects.toMatchObject({
+      name: 'WslDevBuildError',
+      platformId: 'linux-x64',
+    });
   });
 
   it('passes the distribution name through as data, never as script', async () => {
