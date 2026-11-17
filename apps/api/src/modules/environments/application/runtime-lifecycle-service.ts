@@ -56,7 +56,11 @@ import {
   buildServiceInstallCommand,
   RESOLVE_RUNTIME_PATH,
 } from '../domain/remote-bootstrap-commands';
-import { classifyRemoteFailure, type RemoteFailureReason } from '../domain/remote-failure';
+import {
+  classifyRemoteFailure,
+  type RemoteFailureReason,
+  RemoteStepError,
+} from '../domain/remote-failure';
 import {
   buildRuntimeLifecycleView,
   canUpdateOverLiveConnection,
@@ -146,6 +150,12 @@ export function failureLineFor(error: unknown, runId: string, environmentId: str
     reason,
     // The logger keeps an error's name and message; the peer's code is neither.
     ...(error instanceof RemoteError && { code: error.code }),
+    // A classified step message describes the cause without quoting the command,
+    // so the log gets the output itself.
+    ...(error instanceof RemoteStepError && {
+      exitCode: error.remote.exitCode,
+      output: error.remote.output,
+    }),
     error,
   });
   return line;
@@ -167,6 +177,11 @@ function describeRunFailure(error: unknown): { reason: RunFailureReason; line: s
       reason: 'runtime-push-failed',
       line: 'The runtime could not be copied to the machine. Check the machine, then try again. Details are in the hub log.',
     };
+  }
+  if (error instanceof RemoteStepError) {
+    // The step name is the hub's own; the cause is classified from the output.
+    const { reason, message } = classifyRemoteFailure(error.remote);
+    return { reason, line: `${error.step} failed. ${message}` };
   }
   // Before WslProvisioningError, which it extends.
   if (error instanceof WslDevBuildError) {
@@ -1410,7 +1425,7 @@ export async function runPairedBootstrap(
   });
   signal.throwIfAborted();
   if (setupResult.exitCode !== 0) {
-    throw new Error(sshStepFailure('Recording consent', body.ssh, setupResult));
+    throw sshStepFailure('Recording consent', body.ssh, setupResult);
   }
 
   // Issued only now: an earlier mint would be a live credential for a machine
@@ -1427,7 +1442,7 @@ export async function runPairedBootstrap(
     });
     signal.throwIfAborted();
     if (bootstrapResult.exitCode !== 0) {
-      throw new Error(sshStepFailure('Pairing', body.ssh, bootstrapResult));
+      throw sshStepFailure('Pairing', body.ssh, bootstrapResult);
     }
 
     say('Installing the service that keeps it connected.');
@@ -1491,19 +1506,21 @@ export async function runPairedBootstrap(
 }
 
 /**
- * One sentence for a bootstrap step that exited non-zero, using 013's
- * classifier so an auth refusal, an unverified host key and a missing binary
- * each say what to do instead of sharing one "the command failed".
+ * The error for a bootstrap step that exited non-zero. Its message is the
+ * operator's sentence from 013's classifier, which embeds the command's output
+ * and goes to the hub log; the run's line is built from `remote` instead (see
+ * {@link failureLineFor}), so an auth refusal, an unverified host key and a
+ * missing binary each say what to do without the output reaching the stream.
  */
 function sshStepFailure(
   step: string,
   config: SshEnvironmentConfig,
   result: RuntimeCommandResult
-): string {
+): RemoteStepError {
   const stderr = result.stderr.trim();
   const reason = classifySshFailure({ stderr, exitCode: result.exitCode });
   const described = describeSshFailure(reason, config, stderr || result.stdout.trim());
-  return `${step} failed: ${described}`;
+  return new RemoteStepError(step, `${step} failed: ${described}`, remoteOutputOf(result));
 }
 
 async function waitForRuntimeDialIn(
