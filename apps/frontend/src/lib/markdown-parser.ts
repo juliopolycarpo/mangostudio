@@ -7,6 +7,8 @@ export const CLIPBOARD_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" f
 export interface CodeHighlighter {
   highlightCode: (code: string, lang: string, theme: CodeThemeId) => string | null;
   preloadCodeLanguages: (languages: readonly string[], theme: CodeThemeId) => Promise<boolean>;
+  /** True when a block stopped once on the tokenizer's time limit and may be asked for again; absent on a highlighter that never stops. */
+  isHighlightRetryPending?: (code: string, lang: string, theme: CodeThemeId) => boolean;
   /** Frees the per-block state kept while a message streams; absent on a highlighter without any. */
   releaseHighlightSessions?: () => void;
 }

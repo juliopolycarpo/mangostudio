@@ -4,13 +4,14 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useI18n } from '@/hooks/use-i18n';
 import { useTheme } from '@/hooks/use-theme';
 import type { CodeThemeId } from '@/lib/code-themes';
+import { retryStoppedHighlights } from '@/lib/highlight-retry';
 import {
   BlockDomMirror,
   IncrementalBlockRenderer,
   IncrementalLexer,
   type MarkdownTokens,
 } from '@/lib/markdown-blocks';
-import { detectCodeLanguages } from '@/lib/markdown-code-languages';
+import { collectCodeFences, detectCodeLanguages } from '@/lib/markdown-code-languages';
 import {
   CLIPBOARD_ICON,
   type CodeHighlighter,
@@ -73,6 +74,14 @@ export function MarkdownContentRenderer({
   );
   const blocks = useMarkdownBlocks(tokens, parser);
   useBlocksInContainer(containerRef, blocks);
+  useRetryStoppedHighlights({
+    tokens,
+    parser,
+    highlighter,
+    theme: loadedCodeTheme ?? resolvedCodeTheme,
+    isStreaming,
+    onRecovered: () => setHighlightVersion((version) => version + 1),
+  });
 
   // No React children and no `dangerouslySetInnerHTML`: the blocks are written into the
   // element by `useBlocksInContainer`, which replaces only the blocks a chunk changed.
@@ -129,6 +138,52 @@ function useReleaseSessionsWhenStreamEnds(
     if (wasStreaming.current && !isStreaming) highlighter?.releaseHighlightSessions?.();
     wasStreaming.current = isStreaming;
   }, [isStreaming, highlighter]);
+}
+
+interface StoppedHighlightRetry {
+  readonly tokens: MarkdownTokens;
+  /** The parser that rendered the blocks on screen: a new one is a new render, whose stops are new. */
+  readonly parser: Marked;
+  readonly highlighter: CodeHighlighter | null;
+  readonly theme: CodeThemeId;
+  readonly isStreaming: boolean;
+  readonly onRecovered: () => void;
+}
+
+/**
+ * Draws a block again once, after yielding, when the highlighter stopped it on its time limit.
+ * A cold grammar compiles its rules inside the first block that uses them, so that block can
+ * stop on a slow or busy machine and tokenize in milliseconds right after; nothing else would
+ * render it again, because a finished message does not change.
+ *
+ * Not while streaming: the next chunk renders the growing block anyway, and the stream's end
+ * runs this with the final content. A content or theme change cancels what is pending, and so
+ * does unmount. The highlighter keeps the per-block count that stops at two attempts.
+ */
+function useRetryStoppedHighlights({
+  tokens,
+  parser,
+  highlighter,
+  theme,
+  isStreaming,
+  onRecovered,
+}: StoppedHighlightRetry) {
+  // The latest callback, without making a new render of the parent cancel a pending retry.
+  const onRecoveredRef = useRef(onRecovered);
+  useEffect(() => {
+    onRecoveredRef.current = onRecovered;
+  });
+
+  useEffect(() => {
+    if (isStreaming || !highlighter?.isHighlightRetryPending) return;
+    const { isHighlightRetryPending, highlightCode } = highlighter;
+    const retries = collectCodeFences(tokens.tokens)
+      .filter((fence) => isHighlightRetryPending(fence.text, fence.lang, theme))
+      .map((fence) => () => highlightCode(fence.text, fence.lang, theme) !== null);
+    if (retries.length === 0) return;
+    return retryStoppedHighlights(retries, () => onRecoveredRef.current());
+    // `parser` is not read: it marks a render, and the stops it left are read from the highlighter.
+  }, [tokens, parser, highlighter, theme, isStreaming]);
 }
 
 function useCopyCodeButtons(

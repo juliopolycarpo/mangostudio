@@ -8,8 +8,13 @@ import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
 import { useTheme } from '@/hooks/use-theme';
 import type { CodeThemeId } from '@/lib/code-themes';
+import { retryStoppedHighlights } from '@/lib/highlight-retry';
 import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
-import { highlightLineTokens, preloadCodeLanguages } from '@/lib/shiki';
+import {
+  highlightLineTokens,
+  isLineHighlightRetryPending,
+  preloadCodeLanguages,
+} from '@/lib/shiki';
 import { cn } from '@/lib/utils';
 
 import { FilePathLabel } from './components/FilePathLabel';
@@ -175,10 +180,23 @@ const DiffLineRow = memo(function DiffLineRow({
 }) {
   // Tokenizing is synchronous Shiki work per line; a large diff re-runs it for
   // every row on any parent re-render without this.
+  // `retries` counts the times a stopped line was asked for again; each one reads the line anew.
+  const [retries, setRetries] = useState(0);
   const highlighted = useMemo(
     () => (language ? highlightLineTokens(line.content || ' ', language, theme) : null),
-    [line.content, language, theme]
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `retries` only forces a new read.
+    [line.content, language, theme, retries]
   );
+  // A line the tokenizer stopped on its time limit is asked for once more after yielding: the
+  // first line of a cold grammar pays the rule compile, and later lines tokenize in milliseconds.
+  useEffect(() => {
+    if (highlighted || !language) return;
+    const text = line.content || ' ';
+    if (!isLineHighlightRetryPending(text, language, theme)) return;
+    return retryStoppedHighlights([() => highlightLineTokens(text, language, theme) !== null], () =>
+      setRetries((count) => count + 1)
+    );
+  }, [highlighted, line.content, language, theme]);
   const tone = {
     addition: 'bg-success-subtle',
     deletion: 'bg-danger-subtle',
