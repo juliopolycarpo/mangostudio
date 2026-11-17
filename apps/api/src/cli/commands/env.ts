@@ -405,7 +405,13 @@ export async function runEnvToolchain(
     try {
       selection = await d.service.update(userId, environmentId, { [args.runtime]: args.choice });
     } catch (error) {
-      if (error instanceof EnvironmentServiceError) throw new CliError(error.message);
+      // The operator is on the hub machine, so the diagnostic the HTTP route
+      // keeps in the log belongs on their terminal.
+      if (error instanceof EnvironmentServiceError) {
+        throw new CliError(
+          error.diagnostic === undefined ? error.message : `${error.message} (${error.diagnostic})`
+        );
+      }
       throw error;
     } finally {
       await release?.();

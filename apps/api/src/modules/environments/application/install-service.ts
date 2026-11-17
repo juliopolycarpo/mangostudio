@@ -25,6 +25,7 @@ import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { isExternalAgentTargetId } from '@mangostudio/shared/external-agents';
 
 import { getConfig } from '../../../lib/config';
+import { createDiagnosticLogger } from '../../../lib/logger';
 import { getInstallLogPath } from '../../../lib/mango-paths';
 import { assertRequestedProfileId, resolveActiveProfileId } from '../../../lib/profile-context';
 import { isStandaloneExecutable } from '../../../lib/runtime-paths';
@@ -60,6 +61,8 @@ import {
   type ProbeScope,
 } from './probing-service';
 import { type ToolchainService, toolchainService } from './toolchain-service';
+
+const logger = createDiagnosticLogger('install-service');
 
 const PREPARATION_TTL_MS = 10 * 60 * 1000;
 const MAX_RECENT_STREAMS = 20;
@@ -719,6 +722,11 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
       // throw here is an unexpected execution failure — not evidence that the
       // installer never started. Recording `spawn-failed` would make the audit
       // trail wrong in exactly the case where it has to be trusted.
+      logger.error('install_execution_failed', {
+        runId: active.runId,
+        environmentId: scope.environmentId,
+        error,
+      });
       await recordTerminal(active, {
         finishedAt: deps.now(),
         exitCode: null,
@@ -727,7 +735,9 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
       });
       active.stream.publish({
         type: 'error',
-        error: error instanceof Error ? error.message : 'Install execution failed.',
+        // Fixed text: an unexpected throw can carry hub paths or a driver's own
+        // wording. The detail stays in the hub log.
+        error: 'Install execution failed. Check the hub log, then try again.',
         code: ERROR_CODES.INTERNAL,
         done: true,
       });

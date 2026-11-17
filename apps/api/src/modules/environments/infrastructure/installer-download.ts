@@ -3,10 +3,28 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { safeFetchBytes, type SafeFetchDeps, SafeFetchError } from '../../../lib/safe-fetch';
+import { createDiagnosticLogger } from '../../../lib/logger';
+import {
+  safeFetchBytes,
+  type SafeFetchDeps,
+  SafeFetchError,
+  type SafeFetchErrorKind,
+} from '../../../lib/safe-fetch';
 import type { DownloadedInstaller } from '../domain/install-recipes';
 
 const MAX_INSTALLER_REDIRECTS = 5;
+
+const logger = createDiagnosticLogger('installer-download');
+
+/**
+ * The two fetch failures whose own text embeds what the resolver or socket said
+ * (resolved addresses, errno, hostnames). Every other kind has a constant
+ * message authored in `safe-fetch`, so it passes through.
+ */
+const INSTALLER_REFUSAL_OVERRIDES: Readonly<Partial<Record<SafeFetchErrorKind, string>>> = {
+  'address-refused': 'the hub refused the installer host. Check the hub network policy.',
+  network: 'the installer host could not be reached. Check the hub connection and try again.',
+};
 
 /**
  * Wall-clock bound on fetching one installer script, redirects and body read
@@ -101,7 +119,16 @@ async function fetchInstallerBytes(
       throw new InstallerDownloadError('Installer download was cancelled.');
     }
     if (error instanceof SafeFetchError) {
-      throw new InstallerDownloadError(`Installer download refused: ${error.message}`);
+      // The fetch layer's text names resolved addresses and socket errors. It
+      // goes to the log; the 502 body carries a fixed sentence per failure kind.
+      logger.warn('download_refused', {
+        url: request.url,
+        kind: error.kind,
+        detail: error.message,
+      });
+      throw new InstallerDownloadError(
+        `Installer download refused: ${INSTALLER_REFUSAL_OVERRIDES[error.kind] ?? error.message}`
+      );
     }
     throw error;
   }

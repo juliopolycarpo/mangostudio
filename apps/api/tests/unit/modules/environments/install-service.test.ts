@@ -898,6 +898,8 @@ describe('install service', () => {
     );
 
     expect(events.at(-1)).toMatchObject({ type: 'error', done: true });
+    // Regression: the thrown error's own text used to be the event's message.
+    expect(JSON.stringify(events.at(-1))).not.toContain('runner exploded');
     // `spawn-failed` would assert the installer never ran, which this failure
     // does not establish.
     expect(memory.runs.get('exploded-run')).toMatchObject({

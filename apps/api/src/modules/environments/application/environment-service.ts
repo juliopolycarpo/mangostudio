@@ -9,6 +9,7 @@ import {
   DEFAULT_TOOLCHAIN_SELECTION,
   LOCAL_ENVIRONMENT_ID,
   LOCAL_ENVIRONMENT_NAME,
+  type SshEnvironmentConfig,
 } from '@mangostudio/shared/environments';
 
 import { acquireToolchainCredentialLock } from '../../../backup/capture-lock';
@@ -27,8 +28,8 @@ import {
 import type { SecretStore } from '../../../services/secret-store/store';
 import { bunSecretStore } from '../../../services/secret-store/store';
 import { assertEnvironmentConfig, environmentConfigFor } from '../domain/environment-config';
-import { EnvironmentServiceError } from '../domain/environment-error';
-import { runtimeRemoveSlotBytesScript } from '../domain/runtime-push';
+import { diagnosticOf, EnvironmentServiceError } from '../domain/environment-error';
+import { type RuntimeCommandRunner, runtimeRemoveSlotBytesScript } from '../domain/runtime-push';
 import {
   type EnvironmentRecord,
   type EnvironmentRepository,
@@ -122,25 +123,43 @@ export interface EnvironmentRuntimeEffects {
   removeRuntimeBytes(record: EnvironmentRecord): Promise<void>;
 }
 
-const defaultEnvironmentRuntimeEffects: EnvironmentRuntimeEffects = {
-  hasActiveInstall: (userId, id) => runtimeLifecycleService.hasActiveInstall(userId, id),
-  cancelActiveRun: (userId, id) => runtimeLifecycleService.cancelForEnvironment(userId, id),
-  async removeRuntimeBytes(record) {
-    if (record.transportKind === 'wsl') {
-      await wslProvisioner.removeSlotBytes(environmentConfigFor('wsl', record.config).distro);
-      return;
-    }
-    if (record.transportKind !== 'ssh') return;
-    const config = environmentConfigFor('ssh', record.config);
-    const remote = await createSshCommandRunner(config)(runtimeRemoveSlotBytesScript('remote'));
-    if (remote.exitCode !== 0) {
-      throw new EnvironmentServiceError(
-        `Could not remove the runtime from "${config.host}": ${remote.stderr.trim() || remote.stdout.trim() || `exit ${remote.exitCode}`}`,
-        503
-      );
-    }
-  },
-};
+/**
+ * What a client is told when byte removal fails, whatever the transport. The
+ * stderr, host and paths behind it go to the log through `diagnostic`.
+ */
+const RUNTIME_REMOVAL_FAILED_MESSAGE =
+  'The runtime could not be removed from the machine, so the environment was kept. Check that the machine is reachable and try again, or delete the environment without removing the runtime.';
+
+/**
+ * Builds the default effects. The SSH runner is a parameter so the remote
+ * removal path can be covered without a reachable host.
+ */
+export function createEnvironmentRuntimeEffects(
+  sshRunnerFor: (config: SshEnvironmentConfig) => RuntimeCommandRunner = createSshCommandRunner
+): EnvironmentRuntimeEffects {
+  return {
+    hasActiveInstall: (userId, id) => runtimeLifecycleService.hasActiveInstall(userId, id),
+    cancelActiveRun: (userId, id) => runtimeLifecycleService.cancelForEnvironment(userId, id),
+    async removeRuntimeBytes(record) {
+      if (record.transportKind === 'wsl') {
+        await wslProvisioner.removeSlotBytes(environmentConfigFor('wsl', record.config).distro);
+        return;
+      }
+      if (record.transportKind !== 'ssh') return;
+      const config = environmentConfigFor('ssh', record.config);
+      const remote = await sshRunnerFor(config)(runtimeRemoveSlotBytesScript('remote'));
+      if (remote.exitCode !== 0) {
+        throw new EnvironmentServiceError(RUNTIME_REMOVAL_FAILED_MESSAGE, 503, {
+          reason: 'runtime-removal-failed',
+          environmentId: record.id,
+          diagnostic: `Could not remove the runtime from "${config.host}": ${remote.stderr.trim() || remote.stdout.trim() || `exit ${remote.exitCode}`}`,
+        });
+      }
+    },
+  };
+}
+
+const defaultEnvironmentRuntimeEffects = createEnvironmentRuntimeEffects();
 
 /** Told when a user took an environment away; see {@link onEnvironmentWithdrawn}. */
 export type EnvironmentWithdrawnListener = (userId: string, environmentId: string) => void;
@@ -179,6 +198,22 @@ function notifyEnvironmentWithdrawn(userId: string, environmentId: string): void
   }
 }
 
+/**
+ * A token the hub could not store. The secret store's own text can name the
+ * keychain backend or a path, so the client gets a fixed message and the text
+ * goes to the log. A secret-store outage is 503; anything else stays 400.
+ */
+function tokenStorageFailure(environmentId: string, error: unknown): EnvironmentServiceError {
+  const status = statusForTokenPersistFailure(error);
+  return new EnvironmentServiceError(
+    status === 503
+      ? "The hub could not store the runtime token because its secret storage is unavailable. Check the hub's keychain or credential manager and try again."
+      : 'The runtime token could not be stored. Check the token and try again.',
+    status,
+    { reason: 'token-storage-failed', environmentId, diagnostic: diagnosticOf(error) }
+  );
+}
+
 export function createEnvironmentService(
   repository: EnvironmentRepository = environmentRepository,
   manager: RuntimeConnectionManager = getRuntimeConnectionManager(),
@@ -205,8 +240,9 @@ export function createEnvironmentService(
       return await acquireToolchainCredentialLock(credentialDatabasePath(), userId, id, 'edit');
     } catch (error) {
       throw new EnvironmentServiceError(
-        error instanceof Error ? error.message : String(error),
-        409
+        'The runtime token for this environment is being changed or backed up. Try again in a moment.',
+        409,
+        { reason: 'token-edit-locked', environmentId: id, diagnostic: diagnosticOf(error) }
       );
     }
   }
@@ -273,10 +309,7 @@ export function createEnvironmentService(
             await persistRuntimeToken(userId, record.id, token, secretStore);
           } catch (error) {
             await repository.remove(userId, record.id);
-            throw new EnvironmentServiceError(
-              error instanceof Error ? error.message : String(error),
-              statusForTokenPersistFailure(error)
-            );
+            throw tokenStorageFailure(record.id, error);
           }
         }
 
@@ -344,10 +377,7 @@ export function createEnvironmentService(
                 allowInstalls: current.allowInstalls,
               });
             }
-            throw new EnvironmentServiceError(
-              error instanceof Error ? error.message : String(error),
-              statusForTokenPersistFailure(error)
-            );
+            throw tokenStorageFailure(id, error);
           }
         }
 
@@ -422,10 +452,11 @@ export function createEnvironmentService(
           await runtimeEffects.removeRuntimeBytes(existing);
         } catch (error) {
           if (error instanceof EnvironmentServiceError) throw error;
-          throw new EnvironmentServiceError(
-            error instanceof Error ? error.message : String(error),
-            503
-          );
+          throw new EnvironmentServiceError(RUNTIME_REMOVAL_FAILED_MESSAGE, 503, {
+            reason: 'runtime-removal-failed',
+            environmentId: id,
+            diagnostic: diagnosticOf(error),
+          });
         }
       }
 
@@ -465,8 +496,9 @@ export function createEnvironmentService(
         // with the fixed text instead of a 409 carrying the manager's diagnostic.
         if (isEnvironmentUnavailable(error)) throw error;
         throw new EnvironmentServiceError(
-          error instanceof Error ? error.message : String(error),
-          409
+          'The environment could not be connected. Check its configuration and that the machine is reachable, then try again.',
+          409,
+          { reason: 'connect-failed', environmentId: id, diagnostic: diagnosticOf(error) }
         );
       }
       const record = await requireRecord(userId, id);

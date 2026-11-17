@@ -307,6 +307,41 @@ describe('installer download', () => {
     expect(fixture.getWrittenPath()).toBe(join(TEMP_DIR, 'installer.ps1'));
   });
 
+  // Regression: the fetch layer's own text (resolved address, socket error) went
+  // into the message the install route sends as a 502 body.
+  it('keeps the transport error text out of the refusal message', async () => {
+    const leakyHostFetch = (() =>
+      Promise.reject(
+        new Error('connect ECONNREFUSED 10.1.2.3:443 (pid 48213) at /home/alice/mango/net.ts:42:11')
+      )) as unknown as typeof fetch;
+    const downloader = createInstallerDownloader({
+      fetch: leakyHostFetch,
+      resolveHostname,
+      downloadTimeoutMs: 1000,
+    });
+
+    const failure = await downloader
+      .download({
+        url: 'https://example.test/install.sh',
+        interpreter: 'bash',
+        minBytes: 16,
+        maxBytes: 1024,
+      })
+      .then(
+        () => null,
+        (error: unknown) => error
+      );
+
+    expect(failure).toBeInstanceOf(Error);
+    const message = (failure as Error).message;
+    for (const leaked of ['10.1.2.3', 'ECONNREFUSED', '48213', '/home/alice']) {
+      expect(
+        message,
+        `(installer refusal): expected no "${leaked}" | received: ${message}`
+      ).not.toContain(leaked);
+    }
+  });
+
   it('gives up on a host that never answers, instead of waiting forever', async () => {
     // Named fake for a stalled host: the request stays pending until its signal aborts.
     const stalledHostFetch = ((_url: unknown, init?: { signal?: AbortSignal }) =>
@@ -326,6 +361,8 @@ describe('installer download', () => {
         minBytes: 16,
         maxBytes: 1024,
       })
-    ).rejects.toThrow('Installer download refused: Request timed out.');
+    ).rejects.toThrow(
+      'Installer download refused: the installer host could not be reached. Check the hub connection and try again.'
+    );
   });
 });
