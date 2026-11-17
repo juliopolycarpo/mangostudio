@@ -6,12 +6,17 @@
  * declare it first is what turns a shared vocabulary into an import cycle.
  */
 
+import type { RemoteFailureReason } from './remote-failure';
+
 /** Why a refusal happened, in the classes a client can act on. Sent as `details.reason`. */
 export type EnvironmentServiceFailureReason =
-  /** The hub could not remove the runtime bytes from the machine. */
+  | RemoteFailureReason
+  /** The hub could not remove the runtime bytes from the machine (not an SSH failure). */
   | 'runtime-removal-failed'
   /** The per-environment token edit lock is held by something else. */
   | 'token-edit-locked'
+  /** The credential lock files are unsafe or unreadable; the hub operator must fix them. */
+  | 'token-lock-failed'
   /** The hub could not store the runtime token. */
   | 'token-storage-failed'
   /** The environment could not be reached to connect it. */

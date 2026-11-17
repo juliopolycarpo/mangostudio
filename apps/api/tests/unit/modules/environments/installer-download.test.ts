@@ -361,8 +361,56 @@ describe('installer download', () => {
         minBytes: 16,
         maxBytes: 1024,
       })
-    ).rejects.toThrow(
-      'Installer download refused: the installer host could not be reached. Check the hub connection and try again.'
+    ).rejects.toThrow('Installer download refused: Request timed out.');
+  });
+
+  // Regression: a timeout is a constant message, not host detail; it must not be
+  // rewritten as "could not be resolved or connected".
+  it('keeps the constant timeout message instead of the unreachable-host copy', async () => {
+    const stalledHostFetch = ((_url: unknown, init?: { signal?: AbortSignal }) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new Error('aborted by signal')));
+      })) as unknown as typeof fetch;
+    const downloader = createInstallerDownloader({
+      fetch: stalledHostFetch,
+      resolveHostname,
+      downloadTimeoutMs: 25,
+    });
+
+    const failure = await downloader
+      .download({
+        url: 'https://example.test/install.sh',
+        interpreter: 'bash',
+        minBytes: 16,
+        maxBytes: 1024,
+      })
+      .catch((error: unknown) => error);
+
+    expect((failure as Error).message).not.toContain('could not resolve or connect');
+  });
+
+  it('replaces the address-policy text of a refused host, keeping the cause class', async () => {
+    const fixture = createDownloaderWithFetch(((_input: Parameters<typeof fetch>[0]) =>
+      Promise.resolve(
+        new Response(null, {
+          status: 302,
+          headers: { location: 'https://169.254.169.254/latest/meta-data/' },
+        })
+      )) as unknown as typeof fetch);
+
+    const failure = await fixture.downloader
+      .download({
+        url: 'https://example.test/install.sh',
+        interpreter: 'bash',
+        minBytes: 16,
+        maxBytes: 1024,
+      })
+      .catch((error: unknown) => error);
+
+    const message = (failure as Error).message;
+    expect(message).toBe(
+      'Installer download refused: the hub refused the installer host. Check the hub network policy. Details are in the hub log.'
     );
+    expect(message).not.toContain('169.254');
   });
 });

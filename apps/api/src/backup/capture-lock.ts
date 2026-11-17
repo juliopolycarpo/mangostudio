@@ -3,6 +3,23 @@ import { createHash } from 'node:crypto';
 import { chmod, lstat, mkdir, realpath } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
+/**
+ * A refusal this module words itself. Its messages name the lock's purpose and
+ * (for the toolchain lock) the environment id, never a filesystem path, so a
+ * caller may show one. Anything else thrown while locking is a raw errno error
+ * that names a path.
+ */
+export class CaptureLockError extends Error {
+  constructor(
+    message: string,
+    /** `busy`: another holder, retry later. `unsafe-path`: the files need fixing by hand. */
+    readonly kind: 'busy' | 'unsafe-path'
+  ) {
+    super(message);
+    this.name = 'CaptureLockError';
+  }
+}
+
 async function existingEntry(path: string) {
   try {
     return await lstat(path);
@@ -18,7 +35,7 @@ async function canonicalDatabasePath(path: string, purpose: string): Promise<str
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     if ((await existingEntry(path))?.isSymbolicLink()) {
-      throw new Error(`${purpose} refuses a dangling database symlink.`);
+      throw new CaptureLockError(`${purpose} refuses a dangling database symlink.`, 'unsafe-path');
     }
     const parent = dirname(path);
     await mkdir(parent, { recursive: true, mode: 0o700 });
@@ -36,12 +53,18 @@ async function acquireDatabaseSidecarLock(
   const canonical = await canonicalDatabasePath(databasePath, purpose);
   const database = await existingEntry(canonical);
   if (database && (!database.isFile() || database.nlink !== 1)) {
-    throw new Error(`${purpose} requires a single-link regular database file.`);
+    throw new CaptureLockError(
+      `${purpose} requires a single-link regular database file.`,
+      'unsafe-path'
+    );
   }
   const path = `${canonical}.${suffix}.sqlite`;
   const sidecar = await existingEntry(path);
   if (sidecar && (!sidecar.isFile() || sidecar.nlink !== 1)) {
-    throw new Error(`${purpose} requires a single-link regular lock file.`);
+    throw new CaptureLockError(
+      `${purpose} requires a single-link regular lock file.`,
+      'unsafe-path'
+    );
   }
 
   let db: Database | undefined;
@@ -53,7 +76,7 @@ async function acquireDatabaseSidecarLock(
     if (!sidecar) await chmod(path, 0o600);
   } catch {
     db?.close();
-    throw new Error(busyMessage);
+    throw new CaptureLockError(busyMessage, 'busy');
   }
   const locked = db;
   return () => {

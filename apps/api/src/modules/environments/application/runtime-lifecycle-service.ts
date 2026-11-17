@@ -39,6 +39,11 @@ import {
 
 import { getConfig, getHomeMangoDir, getVersion, isDevelopmentVersion } from '../../../lib/config';
 import {
+  environmentUnavailableText,
+  isEnvironmentUnavailable,
+} from '../../../lib/environment-unavailable';
+import { createDiagnosticLogger } from '../../../lib/logger';
+import {
   getRuntimeConnectionManager,
   type RuntimeConnectionManager,
 } from '../../../services/runtime-client/runtime-connection-manager';
@@ -86,6 +91,35 @@ import {
 import { type RuntimePairingService, runtimePairingService } from './runtime-pairing-service';
 
 const MAX_RECENT_STREAMS = 20;
+
+const logger = createDiagnosticLogger('runtime-lifecycle');
+
+/**
+ * The stderr line a failed run publishes. Errors this module's collaborators
+ * word themselves for the operator (provisioning, push, release fetch, a
+ * lifecycle refusal) pass through; a connect refusal gets its fixed per-reason
+ * copy; anything else is the hub's own error and keeps its text in the log.
+ */
+export function failureLineFor(error: unknown, runId: string, environmentId: string): string {
+  // Checked before RemoteError, which it extends: the hub wrote this text.
+  if (isEnvironmentUnavailable(error)) {
+    logger.warn('run_failed', { runId, environmentId, error });
+    return environmentUnavailableText(error);
+  }
+  if (
+    // A refusal the runtime itself sent, such as a digest mismatch on an update.
+    error instanceof RemoteError ||
+    error instanceof WslProvisioningError ||
+    error instanceof RuntimePushError ||
+    error instanceof RuntimeAssetLoadError ||
+    error instanceof RuntimeLifecycleUnavailableError ||
+    error instanceof RuntimeLifecycleConflictError
+  ) {
+    return error.message;
+  }
+  logger.warn('run_failed', { runId, environmentId, error });
+  return 'The runtime action failed. Details are in the hub log.';
+}
 
 interface EventBuffer {
   readonly events: InstallStreamEvent[];
@@ -477,7 +511,7 @@ export function createRuntimeLifecycleService(
         stream.publish({
           type: 'log',
           stream: 'stderr',
-          line: error instanceof Error ? error.message : String(error),
+          line: failureLineFor(error, runId, environmentId),
           done: false,
         });
         finish(run, 'failed', 1);
@@ -689,17 +723,10 @@ export function createRuntimeLifecycleService(
             finish(run, 'cancelled', null);
             return;
           }
-          const detail =
-            error instanceof WslProvisioningError ||
-            error instanceof RuntimePushError ||
-            error instanceof RuntimeAssetLoadError ||
-            error instanceof Error
-              ? error.message
-              : String(error);
           stream.publish({
             type: 'log',
             stream: 'stderr',
-            line: detail,
+            line: failureLineFor(error, runId, environmentId),
             done: false,
           });
           finish(run, 'failed', 1);
@@ -812,7 +839,7 @@ export function createRuntimeLifecycleService(
           run.stream.publish({
             type: 'log',
             stream: 'stderr',
-            line: error instanceof Error ? error.message : String(error),
+            line: failureLineFor(error, run.runId, environmentId),
             done: false,
           });
           finish(run, 'failed', 1);

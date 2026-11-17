@@ -102,7 +102,7 @@ async function assertKnownPath(
     // the path may well be right, and 422 would send the user to fix a value
     // when the fix is bringing the environment back.
     throw new EnvironmentServiceError(
-      `Cannot verify ${runtime} installations on "${environmentId}" right now. Try again when the environment is reachable.`,
+      `Cannot verify ${runtime} installations on "${environmentId}" right now. Try again when the environment is reachable. Details are in the hub log.`,
       503,
       { reason: 'toolchain-probe-failed', environmentId, diagnostic: diagnosticOf(error) }
     );

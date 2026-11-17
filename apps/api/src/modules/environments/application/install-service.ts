@@ -636,11 +636,16 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
           }
         }
       } catch (error) {
-        const detail = error instanceof Error ? error.message : 'Unknown probe failure.';
+        // The probe's own text can name hub paths or a driver's wording; the
+        // run log is read by the client, so it gets fixed copy and the log gets the rest.
+        logger.warn('post_install_probe_failed', {
+          environmentId: scope.environmentId,
+          error,
+        });
         stream.publish({
           type: 'log',
           stream: 'system',
-          line: `Post-install probe failed: ${detail}`,
+          line: 'Post-install probe failed. Details are in the hub log.',
           done: false,
         });
       }
@@ -661,11 +666,11 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     try {
       await deps.repository.complete(active.runId, active.userId, active.profileId, result);
     } catch (error) {
-      const detail = error instanceof Error ? error.message : 'Unknown persistence failure.';
+      logger.warn('install_audit_row_not_updated', { runId: active.runId, error });
       active.stream.publish({
         type: 'log',
         stream: 'system',
-        line: `Install audit row was not updated: ${detail}`,
+        line: 'Install audit row was not updated. Details are in the hub log.',
         done: false,
       });
     }
@@ -737,7 +742,7 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
         type: 'error',
         // Fixed text: an unexpected throw can carry hub paths or a driver's own
         // wording. The detail stays in the hub log.
-        error: 'Install execution failed. Check the hub log, then try again.',
+        error: 'Install execution failed. Details are in the hub log.',
         code: ERROR_CODES.INTERNAL,
         done: true,
       });

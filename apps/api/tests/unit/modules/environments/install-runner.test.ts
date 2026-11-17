@@ -12,6 +12,7 @@ import {
   type RuntimeInstallRunResult,
 } from '@mangostudio/shared/runtime-contract';
 
+import { EnvironmentUnavailableError } from '../../../../src/lib/environment-unavailable';
 import {
   createInstallRunner,
   type InstallLogLine,
@@ -250,7 +251,36 @@ describe('install relay', () => {
     const result = await runner.run(COMMAND, { onLog: (event) => events.push(event) });
 
     expect(result.status).toBe('spawn-failed');
-    expect(events).toEqual([{ stream: 'system', line: 'Environment "ubuntu" is disabled.' }]);
+    // The thrown text stays in the hub log; the run's stream gets fixed copy.
+    expect(events).toEqual([
+      {
+        stream: 'system',
+        line: 'The environment could not be reached. Details are in the hub log.',
+      },
+    ]);
+  });
+
+  it('uses the fixed per-reason text for a connect refusal', async () => {
+    const events: InstallLogLine[] = [];
+    const runner = createInstallRunner({
+      resolveClient: () =>
+        Promise.reject(
+          new EnvironmentUnavailableError(
+            'binary-missing',
+            'No binary; searched /home/alice/mango/target/debug/mangostudio-runtime.'
+          )
+        ),
+      now: () => 1_700_000_000_000,
+    });
+
+    await runner.run(COMMAND, { onLog: (event) => events.push(event) });
+
+    expect(events).toEqual([
+      {
+        stream: 'system',
+        line: 'The runtime for this environment is not installed on the hub.',
+      },
+    ]);
   });
 
   it('does not claim an installer never started when the link dropped mid-run', async () => {
@@ -264,7 +294,9 @@ describe('install relay', () => {
     // `spawn-failed` would be a claim about the far side that the hub cannot
     // make once the request was accepted.
     expect(result.status).toBe('failed');
-    expect(events).toEqual([{ stream: 'system', line: 'Runtime went away.' }]);
+    expect(events).toEqual([
+      { stream: 'system', line: 'Install execution failed. Details are in the hub log.' },
+    ]);
   });
 
   it('omits the toolchain for a peer that does not advertise it', async () => {
