@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 use toml::Table;
 
 /// Packages built with `opt-level = "s"`: the JSON Schema validator family, then the network,
-/// TLS, parsing, adapter and protocol crates the runtime spends its time waiting on.
+/// TLS, parsing, adapter and contract crates the runtime spends its time waiting on.
 const SIZE_OPTIMISED: &[&str] = &[
     "agent-client-protocol-schema",
     "aho-corasick",
@@ -31,7 +31,6 @@ const SIZE_OPTIMISED: &[&str] = &[
     "mango-agent-acp",
     "mango-agent-claude",
     "mango-agent-codex",
-    "mango-protocol",
     "mangostudio-runtime-contract",
     "referencing",
     "regex-automata",
@@ -54,6 +53,9 @@ const SIZE_OPTIMISED: &[&str] = &[
 /// - `mangostudio-runtime`: `fs.grep`'s walk and `fs.list-directory` run in its code. At `s` the
 ///   1,000-file grep measured about 9% slower.
 /// - `mango-external-agents`: its per-character text bounding ran 66% slower at `s`.
+/// - `mango-protocol`: frame encode and decode for every request and response. At `s` a multi-MiB
+///   answer (an 8 MiB `fs.list-directory`, a 50,000-entry `fs.glob`) took 3% to 4% longer, and the
+///   small-event and error paths in the external-agent boundary benchmark 4% to 5%.
 /// - `memchr`: the line and literal scans under `fs.grep`.
 /// - `serde_json`, `tokio`: every request and response passes through them.
 /// - `rquickjs-sys`: C built by cc-rs, which reads the optimisation level from the package
@@ -61,6 +63,7 @@ const SIZE_OPTIMISED: &[&str] = &[
 const SPEED_CRITICAL: &[&str] = &[
     "mangostudio-runtime",
     "mango-external-agents",
+    "mango-protocol",
     "memchr",
     "serde_json",
     "tokio",

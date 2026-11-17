@@ -110,11 +110,11 @@ opt-level = "s"
 
 # Size over speed for the code a runtime call runs rarely or spends waiting on
 # I/O: MCP, HTTP and TLS clients, WebSocket framing, URL and TOML parsing,
-# collation, the external-agent adapters and the protocol and contract crates.
+# collation, the external-agent adapters and the runtime contract.
 # Measured on linux-x64 (docs/reference/runtime-metrics.md): the stripped runtime
-# shrinks 15% with `fs.grep`, `hello` and `fs.list-directory` within noise.
+# shrinks 11% with `fs.grep`, `hello` and `fs.list-directory` within noise.
 # The packages that run per line or per byte stay at 3 (`mangostudio-runtime`,
-# `mango-external-agents`, `memchr`, `serde_json`, `tokio`) and so does QuickJS
+# `mango-external-agents`, `mango-protocol`, `memchr`, `serde_json`, `tokio`) and so does QuickJS
 # (`rquickjs-sys`): cc-rs takes its C optimisation level from the package
 # profile, so `s` there would build the regex engine with `-Os`. The
 # `release_profile` integration test pins both lists.
@@ -171,8 +171,6 @@ opt-level = "s"
 [profile.release.package.mango-agent-claude]
 opt-level = "s"
 [profile.release.package.mango-agent-codex]
-opt-level = "s"
-[profile.release.package.mango-protocol]
 opt-level = "s"
 [profile.release.package.mangostudio-runtime-contract]
 opt-level = "s"

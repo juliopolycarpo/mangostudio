@@ -17,23 +17,29 @@ comparison and validator replay are recorded in [#2126](https://github.com/julio
 
 ### Size-optimised dependencies
 
-Twenty-nine more packages build with `opt-level = "s"`: the MCP, HTTP, TLS and WebSocket clients
+Twenty-eight more packages build with `opt-level = "s"`: the MCP, HTTP, TLS and WebSocket clients
 (`rmcp`, `reqwest`, `hyper`, `hyper-util`, `rustls`, `rustls-webpki`, `tungstenite`,
 `tokio-tungstenite`, `sse-stream`), URL, TOML, collation and time parsing, the three external-agent
-adapters and their protocol schema, `mango-protocol`, the runtime contract, `cap-std` and
+adapters and their protocol schema, the runtime contract, `cap-std` and
 `cap-primitives`, `globset`, and the regex engine crates (`aho-corasick`, `regex-automata`,
 `regex-syntax`). The packages that run per request or per line stay at 3: `mangostudio-runtime`,
-`mango-external-agents`, `memchr`, `serde_json`, `tokio`, and QuickJS (`rquickjs-sys`, C built by
+`mango-external-agents`, `mango-protocol`, `memchr`, `serde_json`, `tokio`, and QuickJS (`rquickjs-sys`, C built by
 cc-rs, which reads its optimisation level from the package profile, so `s` there would compile the
 regex engine `fs.grep` runs with `-Os`). `crates/mangostudio-runtime/tests/it/release_profile.rs`
 pins both lists.
 
-Two things were measured and rejected, so the list stops here:
+Three things were measured and rejected, so the list stops here:
 
 - `mangostudio-runtime` itself at `s` takes the stripped binary from 23.8 MB to 19.4 MB, and
   `fs.grep` over 1,000 files slows by 7% (paired median +7.2 ms on 106 ms, 6 of 41 pairs faster).
   Its per-file work is in that crate. A `[profile.release.package.mangostudio-runtime]` table also
   left the symbol table in the stripped binary (+5.4 MB), so the test refuses that table.
+- `mango-protocol` at `s` takes the stripped binary from 23.8 MB to 22.4 MB, but frame encode and
+  decode for a multi-MiB answer slows by 3% to 4% (an 8 MiB `fs.list-directory`: paired median
+  +122 ms on 3,431 ms, 11 of 61 pairs faster; a 50,000-entry `fs.glob`: +5.5 ms on 141 ms, 20 of
+  61), and the small-event and error paths of the external-agent boundary by 4% to 5%
+  (`text_4096`, `reasoning_4096`, `remote_error`; +10 to +34 ns). With the package at 3 those
+  differences are gone.
 - `aho-corasick`, `regex-automata` and `regex-syntax` at `s` cost nothing measurable on `fs.grep`
   (the prefilter and the pattern analysis use them), so they stay on the list.
 
@@ -41,17 +47,36 @@ Linux x64, glibc, `cargo build --release --locked -p mangostudio-runtime`, strip
 
 | Build              | Stripped bytes | vs. main |
 | ------------------ | -------------: | -------: |
-| main               |     28,021,696 |        — |
-| 29 packages at `s` |     23,772,832 |   −15.2% |
+| main               |     26,828,656 |        — |
+| 28 packages at `s` |     23,843,792 |   −11.1% |
 
 `fs.grep`, median ms, 61 interleaved runs per binary (`scripts/bench/grep.ts`, binaries pinned
 to eight CPUs, one fixture build per run, host load 0.3 to 1.5), default pattern:
 
-| Scenario   |  main | 29 packages at `s` | paired median delta (pairs where `s` was faster) |
+| Scenario   |  main | 28 packages at `s` | paired median delta (pairs where `s` was faster) |
 | ---------- | ----: | -----------------: | ------------------------------------------------ |
-| files-100  |  10.5 |               11.1 | +0.5 ms (26 of 61)                               |
-| files-1000 | 105.2 |              106.7 | +1.5 ms (21 of 61)                               |
-| large-file |  29.6 |               29.6 | +0.2 ms (25 of 61)                               |
+| files-100  |   9.9 |               10.0 | +0.1 ms (29 of 61)                               |
+| files-1000 | 104.1 |              103.1 | -1.0 ms (35 of 61)                               |
+| large-file |  29.4 |               29.6 | +0.2 ms (28 of 61)                               |
+
+`fs.glob` and the protocol round trip (`scripts/bench/runtime-requests.ts`, 61 interleaved runs per
+binary, eight pinned CPUs, one fresh runtime per run, host load 1 to 6). A run times a fixed batch;
+the paired delta is 28 packages at `s` minus main per run:
+
+| Scenario (batch)                                   |  main | 28 at `s` | paired median delta (pairs where `s` was faster) |
+| -------------------------------------------------- | ----: | --------: | ------------------------------------------------ |
+| `glob-patterns` (16 patterns over 20,000 files)    | 505.1 |     510.7 | -0.4 ms (62 of 121)                              |
+| `glob-large-list` (`**/*` over 50,000 files)       | 140.1 |     138.4 | -0.7 ms (33 of 61)                               |
+| `rpc-small` (2,000 `runtime.health`)               | 1,460 |     1,429 | -22.7 ms (42 of 61)                              |
+| `rpc-small-read` (1,000 `fs.read-file`, 1 KiB)     | 408.5 |     407.6 | -4.4 ms (34 of 61)                               |
+| `rpc-large-result` (5 listings of 8 MiB)           | 3,456 |     3,468 | +12.2 ms (28 of 61)                              |
+| `rpc-large-params` (5 `fs.write-file`, 8 MiB each) | 883.5 |     882.5 | +1.3 ms (29 of 61)                               |
+
+External-agent boundary (`scripts/bench/external-agent-boundary.ts`, 31 fresh processes per case and
+side, lto off, 16 CGUs): the 19 case medians differ by -6% to +5% and the sign flips between repeated
+series for every case but one. `fingerprint_ordinary` is slower by 65 ns on 1,740 ns (26 of 31
+pairs) in every series; no moved package is on its path (`serde_json` and `sha2` over a runtime
+type), so it is not attributed to the list.
 
 Patterns that always enter QuickJS (no required literal, or the literal on every line) differ by
 −1.4% to −0.5% across 41 runs, inside the paired spread of ±25 to ±60 ms. `hello` (40.2 vs
@@ -65,7 +90,12 @@ CARGO_TARGET_DIR=target/head cargo build --release --locked -p mangostudio-runti
 bun run scripts/bench/grep.ts main=target/main/release/mangostudio-runtime \
   head=target/head/release/mangostudio-runtime --runs 61 --warmup 3 \
   --scenario files-100,files-1000,large-file --large-mib 16
+bun run scripts/bench/runtime-requests.ts main=target/main/release/mangostudio-runtime \
+  head=target/head/release/mangostudio-runtime --runs 61 --warmup 3
 ```
+
+For the boundary benchmark, build both libtests as `scripts/README.md` describes. The script keeps
+the sides apart by role, so it also compares two builds of one commit.
 
 Local comparison on linux-x64 (`cargo build --release --locked -p mangostudio-runtime`, a
 full rebuild each time on a shared 28-thread machine with `CARGO_BUILD_JOBS=8`, so treat the
