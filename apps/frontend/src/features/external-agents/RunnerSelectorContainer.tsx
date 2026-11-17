@@ -18,7 +18,7 @@ import { useState } from 'react';
 
 import { RunnerSelector } from '@/components/layout/RunnerSelector';
 import { useToast } from '@/components/ui/Toast';
-import { lazyExternalDisclosureDialog } from '@/features/chat/components/LazyExternalDisclosureDialog';
+import { ExternalDisclosureDialog } from '@/features/chat/components/ExternalDisclosureDialog';
 import { useChatHasTurns } from '@/features/chat/hooks/use-chat-has-turns';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
@@ -157,8 +157,7 @@ export function RunnerSelectorContainer() {
       ) : null}
 
       {pendingDisclosure ? (
-        <lazyExternalDisclosureDialog.Overlay
-          onLoadFailed={() => setPendingDisclosure(null)}
+        <ExternalDisclosureDialog
           targetId={pendingDisclosure.descriptor.targetId}
           permissionLevel={normalizePermissionLevel(app.runnerPermissions.level).value}
           busy={isAccepting}

@@ -14,6 +14,7 @@ import { AnimatePresence } from 'motion/react';
 import { createLazyOverlay } from '@/components/layout/LazyOverlay';
 
 import type { ConnectedPaletteProps } from './ConnectedPalette';
+import { PaletteFrame } from './PaletteFrame';
 
 const connectedPalette = createLazyOverlay<ConnectedPaletteProps>(() =>
   import('./ConnectedPalette').then((module) => ({ default: module.ConnectedPalette }))
@@ -31,7 +32,16 @@ export interface CommandPaletteHostProps {
 export function CommandPaletteHost({ open, onClose }: CommandPaletteHostProps) {
   return (
     <AnimatePresence>
-      {open ? <connectedPalette.Overlay onClose={onClose} onLoadFailed={onClose} /> : null}
+      {open ? (
+        // The frame is eager: it owns the input from the first commit, so keys
+        // typed while the results chunk is still in flight land here, not in the
+        // page behind. Only the results are lazy.
+        <PaletteFrame onClose={onClose}>
+          {(frame) => (
+            <connectedPalette.Overlay {...frame} onClose={onClose} onLoadFailed={onClose} />
+          )}
+        </PaletteFrame>
+      ) : null}
     </AnimatePresence>
   );
 }

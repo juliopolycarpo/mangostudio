@@ -323,16 +323,20 @@ to 300 ms after it commits a fallback, so a spinner flash made a cold click on a
 about 300 ms slower than the fetch.
 
 **Dialogs and popover bodies are lazy.** Anything shown only after a click or a chord is a
-chunk, not entry weight: the command palette with its registry, the capability inspector and
-MCP menu bodies, the native-session picker, the third-party notice and the machine upgrade
-dialog together took about 14.6 KB Brotli out of the entry. The chip or button that
-opens one stays eager and warms the chunk on hover or focus (the palette on the chord's
-modifier key). `createLazyOverlay` (`components/layout/LazyOverlay.tsx`) is the pattern: the
-owner keeps its `open` state and mounts `Overlay` only while open, `onLoadFailed` closes it, and
-a chunk that cannot be fetched raises a toast instead of a dead click. Do not use it for
-something drawn at first paint or opened by the app itself on a first visit: the folder picker
-opens on its own for a chat with no folder, so it stays eager, and a lazy chat-feed card would
-pop in after a round trip.
+chunk, not entry weight: the command palette's results and registry, the capability inspector
+and MCP menu bodies, the native-session picker and the machine upgrade dialog together took
+about 11.6 KB Brotli out of the entry. The chip or button that opens one stays eager and warms
+the chunk on hover or focus (the palette on the chord's modifier key). `createLazyOverlay`
+(`components/layout/LazyOverlay.tsx`) is the pattern: the owner keeps its `open` state and
+mounts `Overlay` only while open, `onLoadFailed` closes it, and a chunk that cannot be fetched
+raises a toast instead of a dead click. Three things stay eager on purpose. The folder picker
+opens on its own for a chat with no folder, and a lazy chat-feed card would pop in after a
+round trip. The third-party notice costs under 1 KB Brotli, and its send-time gate has no
+sensible answer to a failed fetch: declining silently would drop a send the person asked for.
+And the palette's frame (`PaletteFrame`: backdrop, panel and the search input, about 1.3 KB)
+owns focus and the keys from the first commit, so characters typed while the results chunk is
+in flight stay in the input and become the results' initial query rather than reaching the
+composer. Until the results mount, Enter and the navigation keys are swallowed; Escape closes.
 
 **Lazy chunk failures stay local.** `LazyChunkBoundary` keeps a failed chunk where it sits,
 with Retry and Reload; a plain `React.lazy` would cache the rejection and take the whole
