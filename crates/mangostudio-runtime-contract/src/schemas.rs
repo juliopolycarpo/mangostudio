@@ -10,7 +10,7 @@
 //! Every compile option mirrors `mango-protocol/src/contract/params.rs`
 //! exactly (draft 2020-12, offline, format assertions on): the dispatcher in
 //! `crates/mangostudio-runtime` compiles the same catalog through
-//! [`mango_protocol::contract::Contract::from_catalog`], and a corpus that
+//! [`mango_protocol::contract::Contract::from_shared_catalog_lazy`], and a corpus that
 //! gated a validator built with different options would not be testing what
 //! the dispatcher actually runs.
 

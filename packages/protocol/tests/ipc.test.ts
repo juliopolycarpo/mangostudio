@@ -23,15 +23,15 @@ import {
 } from '../src/testing/conformance';
 import { rejectionOf } from '../src/testing/rejection';
 import { connectIpc, ipcPath, ipcSocketPort, listenIpc } from '../src/transports/ipc';
+import { useSocketTestHome } from './support/socket-address';
 
 const WINDOWS = process.platform === 'win32';
 
-let addresses = 0;
+const sockets = useSocketTestHome('protocol-test');
 
 /** A fresh address per connection, so parallel cases never share a listener. */
 function nextPath(): string {
-  addresses += 1;
-  return ipcPath(`mango-protocol-test-${process.pid}-${addresses}`);
+  return sockets.nextAddress();
 }
 
 /** The port of the next accepted connection. */
