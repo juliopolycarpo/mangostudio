@@ -96,6 +96,15 @@ describe('labeler coverage', () => {
     expect(depsSection).toContain('- "bun.lock"');
   });
 
+  test('classifies the cargo-deny policy file as a dependency change', () => {
+    const labeler = readText('.github/labeler.yml');
+
+    // A PR touching only deny.toml (an advisory ignore or duplicate skip) must
+    // still get a type label, or the classification gate fails.
+    const depsSection = extractLabelSection(labeler, '"type: dependencies":', '"type: test":');
+    expect(depsSection).toContain('- "deny.toml"');
+  });
+
   test('keeps build manifests out of the dependencies label', () => {
     const labeler = readText('.github/labeler.yml');
 
