@@ -49,7 +49,7 @@ const NON_REVOKING_AUTH_PATHS: ReadonlySet<string> = new Set([
 
 let directory: string;
 let file: ObservedFileDatabase;
-let migrated: MigratedDatabaseTemplate;
+let migrated: MigratedDatabaseTemplate | undefined;
 
 // Migrating a fresh file costs one fsync per statement (see MigratedDatabaseTemplate), seconds
 // per test on a Windows runner. Migrate once and give each test a copy.
@@ -58,11 +58,12 @@ beforeAll(async () => {
 }, 120_000);
 
 afterAll(() => {
-  migrated.dispose();
+  migrated?.dispose();
 });
 
 beforeEach(async () => {
   directory = mkdtempSync(join(tmpdir(), 'auth-durability-'));
+  if (!migrated) throw new Error('expected the migrated template from beforeAll | received: none');
   migrated.copyInto(directory);
   file = new ObservedFileDatabase(directory);
   await relaxDurability(file.db);

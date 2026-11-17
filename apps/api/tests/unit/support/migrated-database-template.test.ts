@@ -9,7 +9,7 @@ import { allMigrations } from '../../../src/db/migrations';
 import { MigratedDatabaseTemplate } from '../../support/migrated-database-template';
 import { ObservedFileDatabase } from '../../support/observed-file-database';
 
-let template: MigratedDatabaseTemplate;
+let template: MigratedDatabaseTemplate | undefined;
 let directories: string[];
 let opened: ObservedFileDatabase[];
 
@@ -18,7 +18,7 @@ beforeAll(async () => {
 }, 120_000);
 
 afterAll(() => {
-  template.dispose();
+  template?.dispose();
 });
 
 beforeEach(() => {
@@ -34,6 +34,7 @@ afterEach(async () => {
 function openCopy(): ObservedFileDatabase {
   const directory = mkdtempSync(join(tmpdir(), 'migrated-template-copy-'));
   directories.push(directory);
+  if (!template) throw new Error('expected the migrated template from beforeAll | received: none');
   template.copyInto(directory);
   const database = new ObservedFileDatabase(directory);
   opened.push(database);
@@ -73,14 +74,19 @@ describe('MigratedDatabaseTemplate', () => {
 
   it('removes its directory on dispose', async () => {
     const disposable = await MigratedDatabaseTemplate.create('migrated-template-dispose');
-    const directory = mkdtempSync(join(tmpdir(), 'migrated-template-dispose-copy-'));
-    directories.push(directory);
-    disposable.copyInto(directory);
-    const copiedFile = join(directory, 'database.sqlite');
-    expect(existsSync(copiedFile), `expected a copy at ${copiedFile}`).toBe(true);
+    try {
+      const directory = mkdtempSync(join(tmpdir(), 'migrated-template-dispose-copy-'));
+      directories.push(directory);
+      disposable.copyInto(directory);
+      const copiedFile = join(directory, 'database.sqlite');
+      expect(existsSync(copiedFile), `expected a copy at ${copiedFile}`).toBe(true);
 
-    disposable.dispose();
+      disposable.dispose();
 
-    expect(() => disposable.copyInto(directory)).toThrow(/ENOENT|no such file/i);
+      expect(() => disposable.copyInto(directory)).toThrow(/ENOENT|no such file/i);
+    } finally {
+      // Idempotent: removes the template when an assertion above failed before dispose().
+      disposable.dispose();
+    }
   }, 120_000);
 });

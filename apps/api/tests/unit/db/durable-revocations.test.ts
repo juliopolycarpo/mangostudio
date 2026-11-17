@@ -25,7 +25,7 @@ import {
 
 let directory: string;
 let file: ObservedFileDatabase;
-let migrated: MigratedDatabaseTemplate;
+let migrated: MigratedDatabaseTemplate | undefined;
 
 // Migrating a fresh file costs one fsync per statement (see MigratedDatabaseTemplate), which
 // timed this hook out on a Windows runner. Migrate once and give each test a copy.
@@ -34,11 +34,12 @@ beforeAll(async () => {
 }, 120_000);
 
 afterAll(() => {
-  migrated.dispose();
+  migrated?.dispose();
 });
 
 beforeEach(async () => {
   directory = mkdtempSync(join(tmpdir(), 'durable-revocations-'));
+  if (!migrated) throw new Error('expected the migrated template from beforeAll | received: none');
   migrated.copyInto(directory);
   file = new ObservedFileDatabase(directory);
   // `runMigrations` lowers the level on its own connection; this connection starts at FULL.

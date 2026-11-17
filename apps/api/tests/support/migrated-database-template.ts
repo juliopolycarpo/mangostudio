@@ -21,18 +21,21 @@ export class MigratedDatabaseTemplate {
   static async create(prefix: string): Promise<MigratedDatabaseTemplate> {
     const directory = mkdtempSync(join(tmpdir(), `${prefix}-template-`));
     const template = new MigratedDatabaseTemplate(directory);
-    const source = new ObservedFileDatabase(directory);
     try {
-      await runMigrations(source.db);
+      const source = new ObservedFileDatabase(directory);
+      try {
+        await runMigrations(source.db);
+      } finally {
+        // Closing the last connection checkpoints the WAL into the main file that gets copied.
+        // It also has to precede any removal: Windows refuses to delete a file that is open.
+        await source.destroy();
+      }
+      template.assertCheckpointed();
+      return template;
     } catch (error) {
       template.dispose();
       throw error;
-    } finally {
-      // Closing the last connection checkpoints the WAL into the main file that gets copied.
-      await source.destroy();
     }
-    template.assertCheckpointed();
-    return template;
   }
 
   /** Puts a copy of the migrated database at `<directory>/database.sqlite`. */
