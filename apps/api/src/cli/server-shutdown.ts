@@ -1,6 +1,12 @@
-import { isStateLive, readState, removeState } from '../lib/server-state';
+import { classifyStateProcess, readState, removeState } from '../lib/server-state';
+import { CliError } from './errors';
 import { writeError, writeLine } from './output';
-import { createProcessController, type ProcessController, waitForExit } from './process-control';
+import {
+  assertSignalsReachHub,
+  createProcessController,
+  type ProcessController,
+  waitForExit,
+} from './process-control';
 import { sleep } from './sleep';
 
 export interface ServerShutdownDeps {
@@ -12,6 +18,8 @@ export interface ServerShutdownDeps {
   exit: (code: number) => void;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
+  /** Picks the manual-stop command a refusal names (`kill` or `taskkill`). */
+  platform: NodeJS.Platform;
 }
 
 interface RunServerStopCommandOptions {
@@ -31,6 +39,11 @@ interface RunServerStopCommandOptions {
    * or a `serve` right after may already have written a successor's.
    */
   removeStateWhenStopped?: boolean;
+  /**
+   * `killserver --force`: trust the state file's pid without comparing start tokens. A dead pid
+   * is still "no instance", and a pid at or below 1 is still refused.
+   */
+  skipIdentityCheck?: boolean;
 }
 
 function resolveServerShutdownDeps(
@@ -45,6 +58,7 @@ function resolveServerShutdownDeps(
     exit: deps.exit ?? ((code) => process.exit(code)),
     now: deps.now ?? Date.now,
     sleep: deps.sleep ?? sleep,
+    platform: deps.platform ?? process.platform,
   };
 }
 
@@ -65,11 +79,17 @@ export async function runServerStopCommand({
   failureMessage,
   removeStateAfterSignal = false,
   removeStateWhenStopped = false,
+  skipIdentityCheck = false,
 }: RunServerStopCommandOptions): Promise<void> {
   const d = resolveServerShutdownDeps(deps);
   const state = await d.readState();
 
-  if (!state || !isStateLive(state, (pid) => d.controller.isAlive(pid))) {
+  const dead = state !== null && !d.controller.isAlive(state.pid);
+  const stale =
+    state !== null &&
+    !skipIdentityCheck &&
+    (await classifyStateProcess(state, d.controller)) === 'stale';
+  if (!state || dead || stale) {
     if (state) {
       await d.removeState();
     }
@@ -77,6 +97,12 @@ export async function runServerStopCommand({
     return;
   }
 
+  // Alive, but is it the hub? An unconfirmed pid throws here, before any signal.
+  if (skipIdentityCheck) {
+    if (!Number.isSafeInteger(state.pid) || state.pid < 2) {
+      throw new CliError(`Refusing to signal PID ${state.pid}: expected a PID above 1.`);
+    }
+  } else await assertSignalsReachHub(d.controller, state, d.platform);
   d.controller[signal](state.pid);
   const stopped = await waitForExit(d.controller, state.pid, {
     timeoutMs,

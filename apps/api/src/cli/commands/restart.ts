@@ -6,7 +6,12 @@
 
 import type { UserServiceManager } from '@mangostudio/shared/machine/service';
 
-import { isStateLive, readState, removeState, type ServerState } from '../../lib/server-state';
+import {
+  classifyStateProcess,
+  readState,
+  removeState,
+  type ServerState,
+} from '../../lib/server-state';
 import {
   createHubServiceManager,
   currentHubExecutable,
@@ -36,6 +41,8 @@ export interface RestartDeps {
   log: (msg: string) => void;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
+  /** Picks the manual-stop command a refusal names (`kill` or `taskkill`). */
+  platform: NodeJS.Platform;
   /** What a unit (or a respawned detached instance) would run right now. */
   executable: () => HubExecutable;
   /**
@@ -52,7 +59,9 @@ const COMEBACK_TIMEOUT_MS = 20_000;
 export async function runRestart(deps: Partial<RestartDeps> = {}): Promise<void> {
   const d = resolveDeps(deps);
   const state = await d.readState();
-  const alive = state !== null && isStateLive(state, (pid) => d.controller.isAlive(pid));
+  // A recycled pid (token mismatch) reads as no instance, like a dead one; an unconfirmed pid
+  // goes on to `stopPidOrThrow`, which refuses it.
+  const alive = state !== null && (await classifyStateProcess(state, d.controller)) !== 'stale';
 
   if (!state || !alive) {
     if (state) await d.removeState();
@@ -99,7 +108,7 @@ async function startInstalledService(d: Required<RestartDeps>): Promise<void> {
 async function restartDetached(state: ServerState, d: Required<RestartDeps>): Promise<void> {
   await stopPidOrThrow(
     d,
-    state.pid,
+    state,
     `MangoStudio (PID ${state.pid}) did not stop within 10s; try "mangostudio killserver" and then "mangostudio serve -d".`
   );
   const result = await d.spawnDetached(
@@ -155,6 +164,7 @@ function resolveDeps(deps: Partial<RestartDeps>): Required<RestartDeps> {
     log: deps.log ?? writeLine,
     now: deps.now ?? Date.now,
     sleep: deps.sleep ?? sleep,
+    platform: deps.platform ?? process.platform,
     executable: deps.executable ?? (() => currentHubExecutable()),
     launcherPath: deps.launcherPath ?? currentLauncherPath,
   };
