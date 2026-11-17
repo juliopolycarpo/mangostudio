@@ -6,6 +6,7 @@
 // The recorder starts a hub with an allowlisted environment, so the behaviour comes from the file
 // `<BUN_AOT_ORDER_OUT>.mode` (default `records`):
 //   records      write a well-formed order file, exit 0 (default)
+//   private      the same file, readable by its owner only
 //   silent-exit  exit 0 without writing a file
 //   malformed    write a file Bun would ignore with a warning
 //   crash        exit 3 before listening
@@ -58,8 +59,10 @@ if (mode === 'no-health') {
     );
   }
   process.on('SIGTERM', () => {
-    if (mode === 'records' && out) {
-      writeFileSync(out, 'aot-order v1\nP 100\nF = 7 b0 - 0:0 \nF = 3 b0 - 0:0 \n');
+    if ((mode === 'records' || mode === 'private') && out) {
+      writeFileSync(out, 'aot-order v1\nP 100\nF = 7 b0 - 0:0 \nF = 3 b0 - 0:0 \n', {
+        mode: mode === 'private' ? 0o600 : 0o644,
+      });
     } else if (mode === 'malformed' && out) {
       writeFileSync(out, 'not an order file\n');
     }

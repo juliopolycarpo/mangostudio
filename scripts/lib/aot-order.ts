@@ -17,7 +17,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import {
@@ -213,6 +213,9 @@ export async function recordAotOrder(
           `aot order: expected the recording hub to write ${orderFile} on exit | received: no file (exit ${exited}). Hub stderr:\n${await stderr}`
         );
       }
+      // The musl legs build in a container as root, and the file the hub writes is not readable
+      // by the runner user that uploads it afterwards. A function order holds no secret.
+      chmodSync(orderFile, 0o644);
       return parseAotOrder(readFileSync(orderFile, 'utf8'));
     })();
     // The deadline rejects while `run` may still be awaiting a request; the finally block below

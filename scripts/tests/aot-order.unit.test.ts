@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
@@ -229,6 +230,17 @@ describe.skipIf(process.platform === 'win32')('recordAotOrder', () => {
     expect(summary).toEqual({ functionCount: 2, unknownLineCount: 0, unknownLineKinds: [] });
     expect(requested).toHaveLength(1);
     expect(requested[0]).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+  });
+
+  test('leaves the order file readable by others when the hub wrote it private', async () => {
+    fakeHubMode('private');
+
+    await recordAotOrder(FAKE_HUB, orderFile, { workload: noWorkload });
+
+    const mode = statSync(orderFile).mode & 0o777;
+    expect(mode, `aot order: expected ${orderFile} mode 644 | received: ${mode.toString(8)}`).toBe(
+      0o644
+    );
   });
 
   test('keeps the hub inside a throwaway home, on loopback, and deletes the home afterwards', async () => {
