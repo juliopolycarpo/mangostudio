@@ -20,11 +20,11 @@ describe('countHighlightableLines', () => {
   });
 
   it('colours ordinary code up to the character cap and no further', () => {
-    // 72 characters a line: 55,000 / 72 leaves 753 lines inside the TypeScript cap.
+    // 72 characters and a line break: 80,000 / 73 leaves 1,095 lines inside the TypeScript cap.
     const source =
       'export const someReasonablyNamedConstant = computeTheValue(argumentOne);\n'.repeat(10_000);
-    expect(countHighlightableLines(source, 'typescript')).toBe(753);
-    expect(countHighlightableLines(source.slice(0, 55_000), 'typescript')).toBeGreaterThan(700);
+    expect(countHighlightableLines(source, 'typescript')).toBe(1095);
+    expect(countHighlightableLines(source.slice(0, 80_000), 'typescript')).toBeGreaterThan(1000);
   });
 
   it('stops 5,000 lines of five 47-character words long before the end', () => {
@@ -37,7 +37,7 @@ describe('countHighlightableLines', () => {
   it('stops 5,000 lines of 253 characters on YAML long before the end', () => {
     // 3.7 s before the cap.
     const lines = countHighlightableLines(`${'k: v '.repeat(50)}\n`.repeat(5000), 'yaml');
-    expect(lines, 'lines coloured out of 5,000').toBeLessThan(400);
+    expect(lines, 'lines coloured out of 5,000').toBeLessThan(500);
   });
 
   it('accepts a word at the budget and refuses one character more', () => {
@@ -137,15 +137,65 @@ describe('countHighlightableLines', () => {
 describe('embedded grammars', () => {
   const WORD = words(1540);
 
-  it('limits markdown, html and php by the strictest grammar they embed', () => {
+  it('limits php and ruby by the strictest grammar they embed throughout', () => {
     // 1,540² is far under the default budget and far over the script one.
     expect(countHighlightableLines(WORD, 'python')).toBe(1);
-    expect(countHighlightableLines(WORD, 'markdown'), 'word in markdown (embeds typescript)').toBe(
-      0
-    );
-    expect(countHighlightableLines(WORD, 'html'), 'word in html (embeds javascript)').toBe(0);
     expect(countHighlightableLines(WORD, 'php'), 'word in php (embeds javascript)').toBe(0);
     expect(countHighlightableLines(WORD, 'ruby'), 'word in ruby (embeds cpp)').toBe(0);
+  });
+
+  it('limits a word in a markdown fence or an html script by that fence language', () => {
+    const fenced = (lang: string) => `# Title\n\n\`\`\`${lang}\nconst a = 1;\n${WORD}\n\`\`\`\n`;
+    expect(countHighlightableLines(fenced('ts'), 'markdown'), 'word in a ts fence').toBe(4);
+    expect(countHighlightableLines(fenced('python'), 'markdown'), 'word in a python fence').toBe(7);
+    expect(countHighlightableLines(fenced('unknown'), 'markdown'), 'unknown fence').toBe(7);
+    const script = `<p>hi</p>\n<script>\nlet a = 1;\n${WORD}\n</script>\n`;
+    expect(countHighlightableLines(script, 'html'), 'word in a script element').toBe(3);
+    expect(countHighlightableLines(script.replace(/script/g, 'style'), 'html')).toBe(6);
+  });
+
+  it('colours a 600-line markdown document without fences in full', () => {
+    const document =
+      `## Notes\n\n| a${' '.repeat(60)}| b |\n- item with \`code\` and a [link](https://example.com)\n`.repeat(
+        150
+      );
+    expect(document.split('\n').length).toBe(601);
+    expect(countHighlightableLines(document, 'markdown')).toBe(601);
+  });
+
+  it('stops a markdown document inside a large cpp fence where the cpp cap says', () => {
+    const cpp = 'std::vector<int> values = compute(items, count);\n';
+    const document = `# T\n\n\`\`\`cpp\n${cpp.repeat(2000)}\`\`\`\n`;
+    // 32,000 characters at 49 a line: 3 lines before the fence body, then 652 of the body.
+    const lines = countHighlightableLines(document, 'markdown');
+    expect(lines, 'lines coloured out of 2,004').toBeGreaterThan(600);
+    expect(lines).toBeLessThan(700);
+    // The same body in a ts fence has a 2.5x larger cap.
+    const ts = `# T\n\n\`\`\`ts\n${'const a = compute(items, count);\n'.repeat(4000)}\`\`\`\n`;
+    expect(countHighlightableLines(ts, 'markdown')).toBeGreaterThan(2300);
+  });
+
+  it('returns to the markdown rate once a fence closes', () => {
+    // 300 cpp lines use 46% of the cpp cap, and 1,500 prose lines 33% of the markdown cap; had the
+    // fence stayed open the prose would be charged at the cpp rate and pass the cap.
+    const cpp = 'std::vector<int> values = compute(items, count);\n'.repeat(300);
+    const prose = 'plain prose line here\n'.repeat(1500);
+    for (const [open, close] of [
+      ['```cpp', '```'],
+      ['~~~cpp', '~~~'],
+      ['```cpp', '````'],
+    ] as const) {
+      const document = `${open}\n${cpp}${close}\n${prose}`;
+      expect(
+        countHighlightableLines(document, 'markdown'),
+        `fence ${open} closed by ${close}`
+      ).toBe(document.split('\n').length);
+    }
+    const unclosed = `\`\`\`cpp\n${cpp}\`\`\`js\n${prose}`;
+    expect(
+      countHighlightableLines(unclosed, 'markdown'),
+      'a fence line with an info string does not close'
+    ).toBeLessThan(unclosed.split('\n').length);
   });
 
   it('charges lines on a grammar that embeds a line-cost one', () => {

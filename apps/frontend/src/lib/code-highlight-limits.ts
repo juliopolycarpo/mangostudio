@@ -1,4 +1,4 @@
-import type { ShikiLanguageId } from '@/lib/code-languages';
+import { resolveLanguageId, type ShikiLanguageId } from '@/lib/code-languages';
 
 /**
  * How much of a code block the highlighter may tokenize before the rest is drawn plain.
@@ -25,7 +25,12 @@ import type { ShikiLanguageId } from '@/lib/code-languages';
  * Size. Linear cost is unbounded by shape: 5,000 lines of five 31-character words took 10 s in
  * TypeScript. `maxCharacters` caps the characters coloured per block, set from the slowest
  * measured content of the grammar (microseconds per character, ordinary and dense code) so that the
- * coloured part costs about 250 ms: TypeScript family 4.5 us/char, C++ 12, YAML 2.9, JSON 0.4.
+ * coloured part costs about 360 ms: TypeScript family 4.5 us/char, C++ 12, YAML 2.9, JSON 0.4.
+ * The two limits are separate for a grammar that embeds others. The quadratic budget takes the
+ * strictest embedded profile, because one long word in an embedded fence is enough to freeze.
+ * The per-character cap is the host's own, except in the regions found in the same pass (a
+ * markdown fence with a shipped language, a `<script>` or `<style>` in HTML), charged at that
+ * language's rate. PHP, Ruby and XML are charged at their own rate throughout.
  *
  * Both limits end the same way: a block is coloured up to the first line that would pass either,
  * and that line and the rest are drawn plain.
@@ -38,7 +43,7 @@ const LINE_COST_DIVISOR = 16;
 interface CostProfile {
   /** Units of cost, roughly 50 ms of tokenizing on the grammar's slowest shape. */
   readonly budget: number;
-  /** Characters of source, line breaks included, that may be coloured: about 250 ms. */
+  /** Characters of source, line breaks included, that may be coloured: about 360 ms. */
   readonly maxCharacters: number;
   readonly countsWordRuns: boolean;
   readonly countsLineLength: boolean;
@@ -47,35 +52,35 @@ interface CostProfile {
 /** TypeScript family and C#: 300,000 units is about 46 ms of the slowest shape. */
 const SCRIPT_PROFILE: CostProfile = {
   budget: 300_000,
-  maxCharacters: 55_000,
+  maxCharacters: 80_000,
   countsWordRuns: true,
   countsLineLength: false,
 };
 /** C++ is about twice as slow per unit and drops sharply past 400 characters. */
 const CPP_PROFILE: CostProfile = {
   budget: 170_000,
-  maxCharacters: 20_000,
+  maxCharacters: 32_000,
   countsWordRuns: true,
   countsLineLength: false,
 };
 /** YAML and Java: the line is the unit, so a word inside it is not charged twice. */
 const LINE_PROFILE: CostProfile = {
   budget: 300_000,
-  maxCharacters: 80_000,
+  maxCharacters: 115_000,
   countsWordRuns: false,
   countsLineLength: true,
 };
 /** Most other grammars measured at least 8x cheaper per unit, and linear in line length. */
 const DEFAULT_PROFILE: CostProfile = {
   budget: 2_400_000,
-  maxCharacters: 70_000,
+  maxCharacters: 100_000,
   countsWordRuns: true,
   countsLineLength: false,
 };
 /** JSON and XML: 0.2 to 0.4 us/char, even minified. */
 const CHEAP_PROFILE: CostProfile = {
   budget: 2_400_000,
-  maxCharacters: 600_000,
+  maxCharacters: 870_000,
   countsWordRuns: true,
   countsLineLength: false,
 };
@@ -146,6 +151,66 @@ export const EMBEDDED_LANGUAGES: Partial<Record<ShikiLanguageId, readonly ShikiL
   xml: ['java'],
 };
 
+/** Opens and closes the regions of an HTML or markdown source line by line; null for the rest. */
+interface RegionTracker {
+  /** The profile of the lines that follow: the host's, or that of the region they are in. */
+  profile: CostProfile;
+  /** Called with each finished line, line break excluded. */
+  readonly afterLine: (line: string) => void;
+}
+
+const MARKDOWN_FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*([^\s`]*)[^`]*$/;
+const MARKDOWN_FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/;
+const HTML_REGION_OPEN = /<(script|style)\b/i;
+const HTML_REGION_CLOSE = /<\/(script|style)\b/i;
+
+function createRegionTracker(language: ShikiLanguageId): RegionTracker | null {
+  const host = ownProfile(language);
+  if (language === 'markdown') {
+    let fence: string | null = null;
+    const tracker: RegionTracker = {
+      profile: host,
+      afterLine(line) {
+        if (fence === null) {
+          const open = MARKDOWN_FENCE.exec(line);
+          if (!open) return;
+          fence = open[1] ?? '';
+          const fenced = resolveLanguageId(open[2] ?? '');
+          tracker.profile = fenced ? ownProfile(fenced) : host;
+          return;
+        }
+        const close = MARKDOWN_FENCE_CLOSE.exec(line);
+        if (close && close[1]?.[0] === fence[0] && (close[1]?.length ?? 0) >= fence.length) {
+          fence = null;
+          tracker.profile = host;
+        }
+      },
+    };
+    return tracker;
+  }
+  if (language === 'html') {
+    let inside = false;
+    const tracker: RegionTracker = {
+      profile: host,
+      afterLine(line) {
+        if (inside) {
+          if (HTML_REGION_CLOSE.test(line)) {
+            inside = false;
+            tracker.profile = host;
+          }
+          return;
+        }
+        const open = HTML_REGION_OPEN.exec(line);
+        if (!open || HTML_REGION_CLOSE.test(line.slice(open.index))) return;
+        inside = true;
+        tracker.profile = ownProfile(open[1]?.toLowerCase() === 'style' ? 'css' : 'javascript');
+      },
+    };
+    return tracker;
+  }
+  return null;
+}
+
 const resolvedProfiles = new Map<ShikiLanguageId, CostProfile>();
 
 /** The strictest of a grammar's own profile and those of every grammar it embeds, directly or not. */
@@ -155,21 +220,26 @@ function profileOf(language: ShikiLanguageId): CostProfile {
 
   const seen = new Set<ShikiLanguageId>();
   const pending: ShikiLanguageId[] = [language];
-  let profile = OWN_PROFILES[language] ?? DEFAULT_PROFILE;
+  let profile = ownProfile(language);
   for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
     if (seen.has(next)) continue;
     seen.add(next);
     pending.push(...(EMBEDDED_LANGUAGES[next] ?? []));
-    profile = strictest(profile, OWN_PROFILES[next] ?? DEFAULT_PROFILE);
+    profile = strictest(profile, ownProfile(next));
   }
   resolvedProfiles.set(language, profile);
   return profile;
 }
 
+function ownProfile(language: ShikiLanguageId): CostProfile {
+  return OWN_PROFILES[language] ?? DEFAULT_PROFILE;
+}
+
+/** Merges the quadratic terms only; the character cap stays the left (host) profile's own. */
 function strictest(left: CostProfile, right: CostProfile): CostProfile {
   return {
     budget: Math.min(left.budget, right.budget),
-    maxCharacters: Math.min(left.maxCharacters, right.maxCharacters),
+    maxCharacters: left.maxCharacters,
     countsWordRuns: left.countsWordRuns || right.countsWordRuns,
     countsLineLength: left.countsLineLength || right.countsLineLength,
   };
@@ -184,10 +254,14 @@ function strictest(left: CostProfile, right: CostProfile): CostProfile {
  * Example: countHighlightableLines(`a\n${'x'.repeat(5000)}`, 'typescript') === 1.
  */
 export function countHighlightableLines(source: string, language: ShikiLanguageId): number {
-  const profile = profileOf(language);
-  let spent = 0; // Finished lines.
-  let spentCharacters = 0; // Finished lines, line breaks included.
-  let lineSpent = 0; // Finished runs of the current line.
+  const regions = createRegionTracker(language);
+  const strict = regions ? null : profileOf(language);
+  let profile = strict ?? regions?.profile ?? DEFAULT_PROFILE;
+  // Both limits are fractions of the active profile's, so lines of different regions add up.
+  let spent = 0; // Quadratic cost of finished lines, in budgets.
+  let spentCharacters = 0; // Characters of finished lines, in character caps.
+  let lineSpent = 0; // Finished runs of the current line, in cost units.
+  let lineStart = 0;
   let lineLength = 0;
   let wordLength = 0;
   let blankLength = 0;
@@ -198,8 +272,15 @@ export function countHighlightableLines(source: string, language: ShikiLanguageI
     if (code === 13 && source.charCodeAt(index + 1) === 10) continue; // Half of a `\r\n` break.
     if (code === 10) {
       spent +=
-        lineSpent + runsCost(wordLength, blankLength, profile) + lineCost(lineLength, profile);
-      spentCharacters += lineLength + 1;
+        (lineSpent + runsCost(wordLength, blankLength, profile) + lineCost(lineLength, profile)) /
+        profile.budget;
+      spentCharacters += (lineLength + 1) / profile.maxCharacters;
+      if (regions) {
+        const lineEnd = source.charCodeAt(index - 1) === 13 ? index - 1 : index;
+        regions.afterLine(source.slice(lineStart, lineEnd));
+        profile = regions.profile;
+      }
+      lineStart = index + 1;
       lineSpent = 0;
       lineLength = 0;
       wordLength = 0;
@@ -223,7 +304,7 @@ export function countHighlightableLines(source: string, language: ShikiLanguageI
       blankLength = 0;
     }
 
-    if (spentCharacters + lineLength > profile.maxCharacters) return lineIndex;
+    if (spentCharacters + lineLength / profile.maxCharacters > 1) return lineIndex;
     if (
       wordLength > FREE_RUN_LENGTH ||
       blankLength > FREE_RUN_LENGTH ||
@@ -231,7 +312,7 @@ export function countHighlightableLines(source: string, language: ShikiLanguageI
     ) {
       const pending =
         lineSpent + runsCost(wordLength, blankLength, profile) + lineCost(lineLength, profile);
-      if (spent + pending > profile.budget) return lineIndex;
+      if (spent + pending / profile.budget > 1) return lineIndex;
     }
   }
   return lineIndex + 1;
