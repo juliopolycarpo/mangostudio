@@ -1,5 +1,5 @@
 import type { Message, MessagesPage } from '@mangostudio/shared/chat';
-import { type InfiniteData, replaceEqualDeep } from '@tanstack/react-query';
+import type { InfiniteData } from '@tanstack/react-query';
 
 /**
  * The shape of the transcript's cache entry.
@@ -76,48 +76,6 @@ export async function loadOlderPage(
   const latest = readCache() ?? started;
   if (latest.pages.at(-1)?.nextCursor !== cursor) return latest;
   return { pages: [...latest.pages, page], pageParams: [...latest.pageParams, cursor] };
-}
-
-/**
- * The transcript query's `structuralSharing`: the library default's result, found
- * without walking every row.
- *
- * The default (`replaceEqualDeep`) visits every row of a changed page on each
- * write. A streamed turn writes once per chunk, and the writers hand back every
- * untouched page and row as the same object, so that walk is almost all
- * identity checks that cost time proportional to the loaded history. Here a
- * page or row that is already `===` to its predecessor is kept without a look,
- * and only a row or page that differs (the live row, or anything a refetch
- * returns as new objects) is deep-compared, so a refetch still gives back the
- * old objects for rows that did not change.
- *
- * @example
- * useInfiniteQuery({ ...options, structuralSharing: shareTranscriptStructure });
- */
-export function shareTranscriptStructure(previous: unknown, next: unknown): unknown {
-  const before = previous as MessagesCache | undefined;
-  const after = next as MessagesCache;
-  if (before === undefined || before === after) return after;
-  const pages = after.pages.map((page, index) => shareTranscriptPage(before.pages[index], page));
-  const pageParams = replaceEqualDeep(before.pageParams, after.pageParams);
-  const unchanged =
-    pages.length === before.pages.length &&
-    pages.every((page, index) => page === before.pages[index]) &&
-    pageParams === before.pageParams;
-  return unchanged ? before : { ...after, pages, pageParams };
-}
-
-function shareTranscriptPage(before: MessagesPage | undefined, page: MessagesPage): MessagesPage {
-  if (before === undefined || before === page) return before ?? page;
-  const { messages: beforeRows, ...beforeRest } = before;
-  const { messages: rows, ...rest } = page;
-  const sharedRest = replaceEqualDeep(beforeRest, rest);
-  const sharedRows = rows.map((row, index) => replaceEqualDeep(beforeRows[index], row));
-  const unchanged =
-    sharedRest === beforeRest &&
-    sharedRows.length === beforeRows.length &&
-    sharedRows.every((row, index) => row === beforeRows[index]);
-  return unchanged ? before : { ...sharedRest, messages: sharedRows };
 }
 
 /**
