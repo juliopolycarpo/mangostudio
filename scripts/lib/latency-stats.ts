@@ -61,3 +61,45 @@ function medianOf(sorted: readonly number[]): number {
 function round(value: number): number {
   return Math.round(value * 10) / 10;
 }
+
+export interface PairedComparison {
+  readonly pairs: number;
+  /** Median of `candidate - baseline` per pair; positive means the candidate was slower. */
+  readonly medianDelta: number;
+  readonly candidateFaster: number;
+  readonly baselineFaster: number;
+  readonly ties: number;
+}
+
+/**
+ * Compares two sample sets run by run. Sample `i` of each set was measured in the
+ * same interleaved round, so the per-pair difference cancels slow drift in host
+ * load that two independent medians would absorb as signal.
+ *
+ * @example
+ * pairedComparison([10, 10, 10], [11, 9, 12]); // medianDelta 1, candidateFaster 1, baselineFaster 2
+ */
+export function pairedComparison(
+  baseline: readonly number[],
+  candidate: readonly number[]
+): PairedComparison {
+  if (baseline.length === 0 || baseline.length !== candidate.length) {
+    throw new Error(
+      `expected two non-empty sample sets of equal length | received: ${baseline.length} baseline and ${candidate.length} candidate samples`
+    );
+  }
+  const deltas = candidate.map((value, index) => value - (baseline[index] as number));
+  if (deltas.some((delta) => !Number.isFinite(delta))) {
+    throw new Error(
+      `expected finite samples | received: baseline [${baseline.join(', ')}], candidate [${candidate.join(', ')}]`
+    );
+  }
+  const sorted = [...deltas].sort((left, right) => left - right);
+  return {
+    pairs: deltas.length,
+    medianDelta: Math.round(medianOf(sorted) * 1000) / 1000,
+    candidateFaster: deltas.filter((delta) => delta < 0).length,
+    baselineFaster: deltas.filter((delta) => delta > 0).length,
+    ties: deltas.filter((delta) => delta === 0).length,
+  };
+}

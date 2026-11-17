@@ -1,5 +1,6 @@
-import { Suspense } from 'react';
+import { Suspense, useEffect } from 'react';
 
+import { preloadCodeHighlighterFor } from '@/lib/code-highlighter-preload';
 import { retryableLazy } from '@/lib/retryable-lazy';
 
 import { LazyChunkBoundary } from './layout/LazyChunkBoundary';
@@ -22,6 +23,8 @@ const markdownRenderer = retryableLazy<MarkdownContentProps>(() =>
  */
 // Usage: <MarkdownContent content={message.text} />;
 export function MarkdownContent(props: MarkdownContentProps) {
+  const { content } = props;
+  useEffect(() => preloadCodeHighlighterFor(content), [content]);
   return (
     <LazyChunkBoundary
       onRetry={markdownRenderer.reset}

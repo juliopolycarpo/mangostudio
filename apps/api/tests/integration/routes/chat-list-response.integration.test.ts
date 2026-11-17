@@ -311,9 +311,12 @@ describe('GET /chats wire parity', () => {
     await seedRepresentativeChats(user, 'headers');
 
     const response = await authenticatedApp(user).handle(new Request('http://localhost/chats'));
-    await response.arrayBuffer();
+    const bytes = await response.arrayBuffer();
 
+    // The length is declared (the response-compression plugin reads only bodies
+    // whose size is known); every other header is what `Response.json` sent.
     expect(Object.fromEntries(response.headers.entries())).toEqual({
+      'content-length': String(bytes.byteLength),
       'content-type': 'application/json;charset=utf-8',
       'x-parity-probe': 'kept',
     });

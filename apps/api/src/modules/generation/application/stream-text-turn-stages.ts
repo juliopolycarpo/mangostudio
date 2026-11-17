@@ -55,10 +55,10 @@ import {
 } from './standard-tool-execution';
 import {
   collectToolExecutionResult,
+  createToolStartMarkerWriter,
   executeImageGenerationCall,
   finalizeDanglingToolExecutions,
   handleTurnCompleted,
-  recordsIrreversibleToolStart,
   synchronizeToolProgressForCheckpoint,
   upsertToolCallPart,
   upsertToolResultPart,
@@ -288,12 +288,12 @@ export async function prepareStreamTextTurn(
   return session;
 }
 
-async function checkpointTurn(
+function checkpointTurn(
   session: StreamTextTurnSession,
   force = false,
   durable = false
-): Promise<void> {
-  await session.checkpointWriter.checkpoint({ force, durable });
+): Promise<boolean> {
+  return session.checkpointWriter.checkpoint({ force, durable });
 }
 
 /**
@@ -629,6 +629,7 @@ async function* executePendingToolCalls(
     state: delegationState,
   });
 
+  const beforeToolStart = createToolStartMarkerWriter(session);
   const hasImageGenerationCall = pendingCallEntries.some(
     ([, call]) => call.name === GENERATE_IMAGE_TOOL_NAME
   );
@@ -646,6 +647,7 @@ async function* executePendingToolCalls(
       delegationRuntime,
       db,
       signal,
+      beforeToolStart,
     })) {
       synchronizeToolProgressForCheckpoint(item, session.allParts);
       yield* collectToolExecutionResult(item, {
@@ -653,9 +655,8 @@ async function* executePendingToolCalls(
         nextToolResults,
         includeSubagentTrace: multiAgentSettings.traceVisibility !== 'off',
       });
-      // The call is already running while this lands: durable narrows the window
-      // in which a power loss leaves it recorded as not started.
-      await checkpointTurn(session, true, recordsIrreversibleToolStart(item));
+      // The durable `running` marker was written by `beforeToolStart`, ahead of the tool.
+      await checkpointTurn(session, true);
     }
     return;
   }
@@ -683,9 +684,10 @@ async function* executePendingToolCalls(
             delegationRuntime,
             db,
             signal,
+            beforeToolStart,
           })) {
             synchronizeToolProgressForCheckpoint(item, session.allParts);
-            await checkpointTurn(session, true, recordsIrreversibleToolStart(item));
+            await checkpointTurn(session, true);
             nonImageResultEntries.push(item);
           }
         })()

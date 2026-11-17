@@ -149,6 +149,7 @@ mod probe_cache;
 pub mod probing;
 pub mod registry;
 mod release;
+mod result_value;
 pub mod runtime_home;
 pub mod serve;
 pub mod setup;

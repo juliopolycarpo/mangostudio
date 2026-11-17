@@ -14,6 +14,12 @@ import { basename, isAbsolute, join } from 'node:path';
 import { frontendBuildCacheArguments } from '@mangostudio/shared/frontend-build/host';
 
 import {
+  aotOrderSkipReason,
+  type CompileOutcome,
+  compileWithAotOrder,
+  recordAotOrder,
+} from './lib/aot-order';
+import {
   binaryBuildTargets,
   binaryCompileDefines,
   binaryCompileFlags,
@@ -64,6 +70,10 @@ interface BinaryBuildOptions {
   compiler: BinaryCompilerMode;
   hubOnly: boolean;
   reuseFrontend: boolean;
+  /** Fail instead of shipping a hub without a recorded AOT function order. */
+  requireAotOrder: boolean;
+  /** Record an AOT function order for the hub: `--production` or `--require-aot-order` asked for it. */
+  recordAotOrder: boolean;
   dryRun: boolean;
   onlyPlatform?: string;
   /**
@@ -100,10 +110,14 @@ Binary flags:
   --compiler <mode>   native (default, host target only) or bytecode (cross-compilation fallback)
   --hub-only          Compile a native hub and write its compiler receipt for later pairing
   --reuse-frontend    Use the current source's prepared frontend and build stamp
+  --require-aot-order Record the hub's AOT function order and fail when it cannot be recorded or
+                      applied (Linux only). With --production alone a failure only warns; a plain
+                      build does not record
   --platform <id>     Limit binary output to one target (example: linux-x64)
   --runtime-dir <dir> Stage prebuilt cargo runtimes from <dir>/<platform-id>/ (env: RUNTIME_DIR);
                       without it, only the host target's runtime is built (cargo build)
-  --production        Use production binary settings (default)
+  --production        Use production binary settings (the default) and, when given explicitly,
+                      record the hub's AOT function order
   --development       Use development binary settings
   --dry-run           Preview the build without writing artifacts
   --refresh-runtimes  Re-download the channel Bun runtimes instead of reusing the cache
@@ -192,51 +206,82 @@ async function compileBinary(
   outfile: string,
   options: BinaryBuildOptions,
   context: { buildTime: string; buildInfo: BuildStamp; crossRuntimePath?: string }
-): Promise<boolean> {
-  const args = [
-    'build',
-    // Native AOT needs a project for the generated entry outside the API
-    // tree. That project excludes ambient root tests. Bytecode uses the root project.
-    '--tsconfig-override',
-    binaryCompileTsconfig(options.compiler),
-    entry,
-    '--compile',
-    '--target',
-    target.target,
-    '--outfile',
-    outfile,
-    ...binaryCompileDefines({
-      buildTime: context.buildTime,
-      buildInfo: context.buildInfo,
-      buildType: options.buildType,
-      version: options.version,
-      platformId: target.arch,
-    }),
-    ...binaryCompileFlags(options.buildType, options.compiler),
-  ];
+): Promise<{ ok: boolean; aotOrderSha256: string | null }> {
+  const compileWith = async (
+    extraFlags: readonly string[],
+    output: string
+  ): Promise<CompileOutcome> => {
+    const args = [
+      'build',
+      // Native AOT needs a project for the generated entry outside the API
+      // tree. That project excludes ambient root tests. Bytecode uses the root project.
+      '--tsconfig-override',
+      binaryCompileTsconfig(options.compiler),
+      entry,
+      '--compile',
+      '--target',
+      target.target,
+      '--outfile',
+      output,
+      ...binaryCompileDefines({
+        buildTime: context.buildTime,
+        buildInfo: context.buildInfo,
+        buildType: options.buildType,
+        version: options.version,
+        platformId: target.arch,
+      }),
+      ...binaryCompileFlags(options.buildType, options.compiler),
+      ...extraFlags,
+    ];
 
-  // Supplying the target's Bun keeps `--compile` from resolving a download by
-  // version, which no channel build can satisfy.
-  if (context.crossRuntimePath) {
-    args.push('--compile-executable-path', context.crossRuntimePath);
-  }
+    // Supplying the target's Bun keeps `--compile` from resolving a download by
+    // version, which no channel build can satisfy.
+    if (context.crossRuntimePath) {
+      args.push('--compile-executable-path', context.crossRuntimePath);
+    }
 
-  const compileRoot = options.compiler === 'native' ? join(ROOT_DIR, 'apps/api') : ROOT_DIR;
-  if (options.compiler === 'native') args.push('--root', compileRoot);
+    const compileRoot = options.compiler === 'native' ? join(ROOT_DIR, 'apps/api') : ROOT_DIR;
+    if (options.compiler === 'native') args.push('--root', compileRoot);
 
-  const { stdout, stderr, exitCode } = await captureCommand([process.execPath, ...args], {
-    cwd: compileRoot,
-  });
+    const { stdout, stderr, exitCode } = await captureCommand([process.execPath, ...args], {
+      cwd: compileRoot,
+    });
+    if (exitCode !== 0) {
+      console.error(`❌ Failed to build ${basename(output)} for ${target.arch}:`);
+      if (stderr.trim()) console.error(stderr.trim());
+    }
+    return { ok: exitCode === 0, stdout, stderr };
+  };
 
-  if (exitCode !== 0) {
-    console.error(`❌ Failed to build ${basename(outfile)} for ${target.arch}:`);
-    if (stderr.trim()) console.error(stderr.trim());
-    return false;
+  // The order file numbers functions by position, so only one recorded from the exact program
+  // about to ship lines up: the recording binary is this same compile with the recorder on.
+  const compiled = await compileWithAotOrder(
+    {
+      target: target.arch,
+      skipReason: context.crossRuntimePath
+        ? 'the target cannot run on this host, so nothing can record it'
+        : aotOrderSkipReason(options.compiler, process.platform, options.recordAotOrder),
+      required: options.requireAotOrder,
+      orderDir: join(ROOT_DIR, '.mango', 'aot-order', target.arch),
+      binaryName: target.name,
+    },
+    {
+      compile: compileWith,
+      record: recordAotOrder,
+      log: (message) => console.log(message),
+      warn: (message) => console.warn(message),
+      now: () => performance.now(),
+    },
+    outfile
+  );
+  if (!compiled.ok) {
+    if (compiled.failure) console.error(`❌ ${compiled.failure}`);
+    return { ok: false, aotOrderSha256: null };
   }
 
   console.log(`✅ Successfully built ${basename(outfile)} for ${target.arch}`);
-  if (stdout.trim()) console.log(stdout.trim());
-  return true;
+  if (compiled.stdout.trim()) console.log(compiled.stdout.trim());
+  return { ok: true, aotOrderSha256: compiled.orderSha256 };
 }
 
 /**
@@ -351,7 +396,8 @@ async function buildStandaloneTarget(
       }),
       runtimeSource ? stageRuntime(target, runtimeSource, runtimePath, options.version) : true,
     ]);
-    if (compiled.some((succeeded) => !succeeded)) {
+    const [hub, runtimeStaged] = compiled;
+    if (!hub.ok || !runtimeStaged) {
       return false;
     }
 
@@ -364,6 +410,9 @@ async function buildStandaloneTarget(
       version: options.version,
       buildType: options.buildType,
       builtAt: context.buildTime,
+      // The order file is an input of the compile; its hash lets a release hub be explained and
+      // rebuilt (the file travels with the hub artifact).
+      aotOrderSha256: hub.aotOrderSha256,
     });
 
     return true;
@@ -657,6 +706,7 @@ const { workspaces, flags, values, positional, usedDefaultSelection } = parseArg
     '--dry-run',
     '--refresh-runtimes',
     '--reuse-frontend',
+    '--require-aot-order',
     '--hub-only',
   ],
   valueFlags: ['--platform', '--runtime-dir', '--compiler'],
@@ -686,12 +736,13 @@ if (
     refreshRuntimes ||
     hubOnly ||
     flags['--reuse-frontend'] ||
+    flags['--require-aot-order'] ||
     values['--platform'] ||
     values['--runtime-dir'] ||
     values['--compiler'])
 ) {
   fatal(
-    '`--platform`, `--runtime-dir`, `--compiler`, `--production`, `--development`, `--refresh-runtimes`, `--reuse-frontend`, and `--hub-only` require `--binary`.'
+    '`--platform`, `--runtime-dir`, `--compiler`, `--production`, `--development`, `--refresh-runtimes`, `--reuse-frontend`, `--require-aot-order`, and `--hub-only` require `--binary`.'
   );
 }
 
@@ -716,6 +767,10 @@ if (isBinaryBuild) {
     compiler,
     hubOnly,
     reuseFrontend: flags['--reuse-frontend'] ?? false,
+    requireAotOrder: flags['--require-aot-order'] ?? false,
+    // Recording costs a second compile and a hub run, so only an explicit production build or a
+    // required order pays for it; a plain local, smoke or test build does not.
+    recordAotOrder: isProductionBuild || (flags['--require-aot-order'] ?? false),
     dryRun: flags['--dry-run'] ?? process.env.DRY_RUN === '1',
     onlyPlatform: values['--platform'] ?? process.env.ONLY_PLATFORM,
     runtimeDir: resolveRuntimeDir(values['--runtime-dir'] ?? process.env.RUNTIME_DIR),

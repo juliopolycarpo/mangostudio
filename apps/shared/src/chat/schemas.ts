@@ -8,6 +8,7 @@ import {
   ExternalVendorIdSchema,
 } from '../external-agents/choices';
 import { OperationIdSchema } from '../operations';
+import { PAGE_LIMIT_DEFAULT, PAGE_LIMIT_MAX } from './page-limit';
 
 const InteractionModeSchema = Type.Union([
   Type.Literal('chat'),
@@ -298,7 +299,13 @@ export type MessagesOrder = Static<typeof MessagesOrderSchema>;
 
 /** Query of `GET /api/chats/:id/messages`. */
 export const ListChatMessagesQuerySchema = Type.Object({
-  limit: Type.Optional(Type.String()),
+  /**
+   * Rows per page, 1 to `PAGE_LIMIT_MAX`; `PAGE_LIMIT_DEFAULT` when absent. A value outside
+   * that range or not an integer is refused with a 422, like the other paged routes.
+   */
+  limit: Type.Optional(
+    Type.Integer({ minimum: 1, maximum: PAGE_LIMIT_MAX, default: PAGE_LIMIT_DEFAULT })
+  ),
   /**
    * The `nextCursor` of the previous page, passed back unchanged. The value is
    * opaque: it encodes the position of the row at the edge of that page facing

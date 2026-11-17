@@ -18,6 +18,7 @@ use super::{
     policy::CompiledPolicy,
     service::{Service, preflight_response, run_locked, snapshot_record},
 };
+use crate::result_value::object;
 use crate::tool_argument::tool_argument;
 use crate::{blocking::run_blocking, ports::audit::lock};
 
@@ -606,10 +607,27 @@ fn outcomes(
             }
         }
     }
+    Ok(patch_response(files, mutations))
+}
+
+/// The `fs.apply-patch` answer. `mutations` holds each file's prior content in base64, so both
+/// lists move into the result rather than being copied.
+fn patch_response(files: Vec<Value>, mutations: Vec<Value>) -> Value {
     let count = files.len();
-    Ok(
-        json!({"result":{"files":files,"summary":format!("{count} {} changed", if count == 1 { "file" } else { "files" })},"mutations":mutations}),
-    )
+    let summary = format!(
+        "{count} {} changed",
+        if count == 1 { "file" } else { "files" }
+    );
+    object([
+        (
+            "result",
+            object([
+                ("files", Value::Array(files)),
+                ("summary", Value::String(summary)),
+            ]),
+        ),
+        ("mutations", Value::Array(mutations)),
+    ])
 }
 
 fn preflight_mutation_response(
@@ -691,8 +709,7 @@ fn preflight_mutation_response(
             }
         }
     }
-    let count = files.len();
-    let result = json!({"result":{"files":files,"summary":format!("{count} {} changed", if count == 1 { "file" } else { "files" })},"mutations":mutations});
+    let result = patch_response(files, mutations);
     preflight_response(result, &response_id, response_limit_bytes, "patch").map(drop)
 }
 
@@ -866,6 +883,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::result_value::assert_wire_eq;
     use crate::{
         consent::source::ConsentSource,
         filesystem::{
@@ -1208,6 +1226,26 @@ mod tests {
         assert_eq!(error.code, codes::FRAME_TOO_LARGE);
         assert_eq!(error.details.as_ref().unwrap()["limitBytes"], 4_096);
         assert!(paths.iter().all(|path| !path.exists()));
+    }
+
+    #[test]
+    fn patch_response_pins_the_summary_wording_and_both_lists() {
+        let one = patch_response(vec![json!({"path": "a"})], vec![json!({"op": "edit"})]);
+        assert_wire_eq!(
+            one,
+            json!({
+                "result": {"files": [{"path": "a"}], "summary": "1 file changed"},
+                "mutations": [{"op": "edit"}],
+            }),
+            "expected a singular summary for one file | received a different object"
+        );
+
+        let none = patch_response(Vec::new(), Vec::new());
+        assert_wire_eq!(
+            none,
+            json!({"result": {"files": [], "summary": "0 files changed"}, "mutations": []}),
+            "expected a plural summary for no files | received a different object"
+        );
     }
 
     #[test]

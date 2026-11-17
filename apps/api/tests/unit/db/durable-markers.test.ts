@@ -4,19 +4,21 @@
  * writes next to them do not. The level is read from the connection after each
  * statement, so each assertion names the write that ran at it.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import { copyFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { Migrator } from 'kysely/migration';
 
+import { relaxDurability } from '../../../src/db/durability';
 import { allMigrations } from '../../../src/db/migrations';
 import {
   insertAttempt,
   transitionAttempt,
 } from '../../../src/modules/external-agents/infrastructure/external-turn-attempt-repository';
 import { createDatabaseCheckpointStore } from '../../../src/modules/generation/application/turn-checkpoint';
+import { insertMessage } from '../../../src/modules/messages/infrastructure/message-repository';
 import { runMigrations } from '../../../src/server/migrations';
 import {
   ObservedFileDatabase,
@@ -26,11 +28,35 @@ import {
 
 let directory: string;
 let file: ObservedFileDatabase;
+let migratedTemplateDirectory: string;
+
+// Every migration commits at synchronous = FULL, so migrating a fresh file costs one fsync per
+// statement: seconds on a Windows runner, enough to time out a hook under load. Migrate once and
+// give each test a copy of the finished file.
+beforeAll(async () => {
+  migratedTemplateDirectory = mkdtempSync(join(tmpdir(), 'durable-markers-template-'));
+  const template = new ObservedFileDatabase(migratedTemplateDirectory);
+  try {
+    await runMigrations(template.db);
+  } finally {
+    // Closing the last connection checkpoints the WAL into the file that gets copied.
+    await template.destroy();
+  }
+}, 120_000);
+
+afterAll(() => {
+  rmSync(migratedTemplateDirectory, { recursive: true, force: true });
+});
 
 beforeEach(async () => {
   directory = mkdtempSync(join(tmpdir(), 'durable-markers-'));
+  copyFileSync(
+    join(migratedTemplateDirectory, 'database.sqlite'),
+    join(directory, 'database.sqlite')
+  );
   file = new ObservedFileDatabase(directory);
-  await runMigrations(file.db);
+  // `runMigrations` lowers the level on its own connection; this connection starts at FULL.
+  await relaxDurability(file.db);
   // These tests look at pragma levels, not at relations: no chat or message rows are seeded.
   file.sqlite.exec('PRAGMA foreign_keys = OFF');
   file.forget();
@@ -68,8 +94,33 @@ describe('the external-turn receipt', () => {
   });
 });
 
+/**
+ * A durable checkpoint is only stored for a row that is still generating, so the stores below
+ * need one. Foreign keys are off, so no chat is needed; the insert is forgotten so it is not
+ * mistaken for the write a test observes.
+ */
+async function seedGeneratingMessage(target: ObservedFileDatabase, id: string): Promise<void> {
+  await insertMessage(
+    {
+      id,
+      chatId: 'chat-1',
+      role: 'ai',
+      text: '',
+      timestamp: 1,
+      isGenerating: true,
+      interactionMode: 'agent',
+    },
+    target.db
+  );
+  target.forget();
+}
+
 describe('the database checkpoint store', () => {
   const row = { text: 'a', partsJson: '[]', providerState: null, generationTime: null };
+
+  beforeEach(async () => {
+    await seedGeneratingMessage(file, 'message-1');
+  });
 
   it('commits a durable delta at FULL and an ordinary one at NORMAL', async () => {
     const store = createDatabaseCheckpointStore(file.db, 'message-1');
@@ -116,7 +167,8 @@ describe('a database that was never relaxed', () => {
     const unrelaxed = new ObservedFileDatabase(unrelaxedDirectory);
     try {
       await runMigrationsWithoutRelaxing(unrelaxed);
-      unrelaxed.forget();
+      unrelaxed.sqlite.exec('PRAGMA foreign_keys = OFF');
+      await seedGeneratingMessage(unrelaxed, 'message-1');
 
       await createDatabaseCheckpointStore(unrelaxed.db, 'message-1').appendDelta(1, '{}', {
         durable: true,

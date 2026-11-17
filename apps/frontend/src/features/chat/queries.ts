@@ -193,7 +193,7 @@ export const messageKeys = {
   list: (chatId: string) => [...messageKeys.lists(), chatId] as const,
 };
 
-const MESSAGES_PAGE_SIZE = '50';
+const MESSAGES_PAGE_SIZE = 50;
 
 /**
  * Reads one transcript page from the newest end: the newest page for a `null`
