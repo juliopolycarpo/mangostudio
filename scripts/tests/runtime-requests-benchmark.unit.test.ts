@@ -5,7 +5,6 @@ import { join } from 'node:path';
 
 import {
   GLOB_PATTERNS,
-  listingEntryName,
   parseCandidate,
   prepareWorkload,
   REQUEST_SCENARIOS,
@@ -30,14 +29,6 @@ describe('runtime-requests benchmark fixtures', () => {
     expect(text.length).toBeGreaterThanOrEqual(1_000);
     expect(text.length % 81).toBe(0);
     expect(text.endsWith('\n')).toBe(true);
-  });
-
-  it('names listing entries uniquely at the JSON size the scenario budgets for', () => {
-    const entry = JSON.stringify({ name: listingEntryName(7), type: 'file' });
-
-    // The entry plus the comma between array items is the 68 bytes ENTRY_JSON_BYTES assumes.
-    expect(entry.length + 1).toBe(68);
-    expect(listingEntryName(7)).not.toBe(listingEntryName(8));
   });
 
   it('keeps glob patterns distinct so no compile is measured twice', () => {

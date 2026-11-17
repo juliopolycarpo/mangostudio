@@ -7,7 +7,6 @@ use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use jsonschema::Validator;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -16,7 +15,7 @@ use crate::error::{RemoteError, codes};
 use crate::session::{CallContext, HandlerGuard, Session};
 use crate::validate::{RPC_DISCOVER, ValidationError};
 
-use super::{Contract, ReasonStyle, check_params, check_result, decode};
+use super::{Contract, ContractCore, ReasonStyle, check_params, check_result, decode, uncompiled};
 
 /// Answers one request already past its schema and guard checks; erases
 /// the handler's own parameter and result types so [`ContractHandlers`] can
@@ -56,7 +55,7 @@ where
                 let future = (self.handler)(params, context);
                 Box::pin(async move {
                     let result = future.await?;
-                    serde_json::to_value(result).map_err(|error| {
+                    into_value(result).map_err(|error| {
                         RemoteError::new(
                             codes::INTERNAL,
                             format!("Result of \"{method}\" failed to serialise: {error}."),
@@ -232,16 +231,19 @@ impl ServeGuard {
 /// bundled so the per-request closure and [`answer`] each take one argument
 /// for it instead of five.
 struct MethodPolicy {
-    params_validator: Arc<Validator>,
-    result_validator: Arc<Validator>,
+    /// The contract's shared state and this method's position in it: the
+    /// validators may not be compiled yet, and the first request that needs
+    /// one compiles it for every handler.
+    core: Arc<ContractCore>,
+    index: usize,
     capabilities: Vec<String>,
     guard: Option<Arc<dyn Guard>>,
     validate_results: bool,
 }
 
 /// [`Contract::serve`]'s implementation, a free function so it can reach
-/// `contract`'s private [`CompiledMethod`] fields without a public accessor
-/// that would otherwise exist for this alone.
+/// `contract`'s private [`ContractCore`] without a public accessor that
+/// would otherwise exist for this alone.
 pub(super) fn serve(
     contract: &Contract,
     session: &Session,
@@ -257,7 +259,7 @@ pub(super) fn serve(
         // rendered per answer instead. A catalog is plain `Value`s and
         // strings, which `serde_json` always serialises, so there is no
         // registration-time failure to report.
-        let catalog = Arc::clone(&contract.catalog);
+        let catalog = Arc::clone(&contract.core.catalog);
         guards.push(
             session.handle(RPC_DISCOVER, move |params: Value, _context| {
                 let catalog = Arc::clone(&catalog);
@@ -284,18 +286,20 @@ pub(super) fn serve(
         );
     }
     for (method, erased) in handlers.handlers {
-        let (declared, compiled) = contract.method(&method).ok_or_else(|| ValidationError {
-            field: "handlers".to_string(),
-            received: method.clone(),
-            expected: format!(
-                "a method declared by contract \"{}\"",
-                contract.catalog.name
-            ),
-        })?;
+        let index = contract
+            .method_index(&method)
+            .ok_or_else(|| ValidationError {
+                field: "handlers".to_string(),
+                received: method.clone(),
+                expected: format!(
+                    "a method declared by contract \"{}\"",
+                    contract.core.catalog.name
+                ),
+            })?;
         let policy = Arc::new(MethodPolicy {
-            params_validator: Arc::clone(&compiled.params),
-            result_validator: Arc::clone(&compiled.result),
-            capabilities: declared.capabilities.clone(),
+            core: Arc::clone(&contract.core),
+            index,
+            capabilities: contract.core.catalog.methods[index].capabilities.clone(),
             guard: options.guard.clone(),
             validate_results: options.validate_results,
         });
@@ -326,20 +330,104 @@ async fn answer(
     erased: Arc<dyn ErasedHandler>,
     policy: Arc<MethodPolicy>,
 ) -> Result<Value, RemoteError> {
-    check_params(&method, &policy.params_validator, &params)?;
+    let params_validator = policy
+        .core
+        .params_validator(policy.index)
+        .map_err(|error| uncompiled(&method, error))?;
+    check_params(&method, params_validator, &params)?;
     if let Some(guard) = &policy.guard {
         guard
             .check(&method, &params, &policy.capabilities, &context)
             .await?;
     }
+    // Resolved before the handler runs, not after: a handler with side
+    // effects must never run for a request that can only end in `INTERNAL`,
+    // or its caller cannot tell whether the effect happened.
+    let result_validator = if policy.validate_results {
+        Some(
+            policy
+                .core
+                .result_validator(policy.index)
+                .map_err(|error| uncompiled(&method, error))?,
+        )
+    } else {
+        None
+    };
     let result = erased.call(&method, params, context).await?;
-    if policy.validate_results {
-        check_result(
-            &method,
-            &policy.result_validator,
-            &result,
-            ReasonStyle::Quoted,
-        )?;
+    if let Some(result_validator) = result_validator {
+        check_result(&method, result_validator, &result, ReasonStyle::Quoted)?;
     }
     Ok(result)
+}
+
+/// `result` as a `Value`: moved as it is when it already is one, serialized otherwise.
+///
+/// `serde_json::to_value` has no shortcut for a `Value`, so a handler registered with `Value` as its
+/// result type (the usual case for a host that builds its answers as JSON) had its whole answer
+/// allocated a second time here, on every request.
+///
+/// # Example
+///
+/// ```ignore
+/// let value = into_value(json!({"entries": [1, 2, 3]}))?; // moved, not copied
+/// let value = into_value(vec![1, 2, 3])?; // serialized
+/// ```
+fn into_value<R: Serialize + 'static>(result: R) -> serde_json::Result<Value> {
+    let mut slot = Some(result);
+    if let Some(value) = (&mut slot as &mut dyn std::any::Any).downcast_mut::<Option<Value>>() {
+        return Ok(value.take().expect("the slot was filled just above"));
+    }
+    serde_json::to_value(slot.take().expect("the slot was filled just above"))
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn a_value_result_keeps_the_buffer_it_was_built_in() {
+        let entries = vec![json!({"name": "a"}), json!({"name": "b"})];
+        let built_at = entries.as_ptr();
+
+        let value = into_value(Value::Array(entries)).expect("a Value converts");
+
+        let carried_at = value.as_array().expect("an array stays an array").as_ptr();
+        assert_eq!(
+            carried_at, built_at,
+            "expected a Value result to be returned as built (buffer {built_at:p}) | \
+             received a copy at {carried_at:p}"
+        );
+    }
+
+    #[test]
+    fn a_typed_result_is_serialized() {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Answer {
+            file_count: u32,
+            names: Vec<&'static str>,
+        }
+
+        let value = into_value(Answer {
+            file_count: 2,
+            names: vec!["a", "b"],
+        })
+        .expect("a struct serializes");
+
+        assert_eq!(
+            value,
+            json!({"fileCount": 2, "names": ["a", "b"]}),
+            "expected the typed result as its serde form | received a different value"
+        );
+    }
+
+    #[test]
+    fn a_result_that_cannot_serialize_is_an_error_not_a_panic() {
+        // A map keyed by something other than a string has no JSON form.
+        let unserializable = std::collections::BTreeMap::from([((1, 2), "pair")]);
+
+        assert!(into_value(unserializable).is_err());
+    }
 }

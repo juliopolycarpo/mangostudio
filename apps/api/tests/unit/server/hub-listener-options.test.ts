@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { app } from '../../../src/app';
 import { hubListenOptions } from '../../../src/lib/hub-connection-limits';
 import { listenOrExit } from '../../../src/server/start-server';
+import { scanSourcePaths } from '../../support/source-scan';
 
 const SRC_ROOT = fileURLToPath(new URL('../../../src', import.meta.url));
 
@@ -30,7 +31,7 @@ describe('the hub listener', () => {
     // `hubListenOptions` carries. (The OAuth loopback `Bun.serve` is a separate,
     // short-lived listener, not the hub.)
     const listenCalls: string[] = [];
-    for await (const path of new Bun.Glob('**/*.ts').scan({ cwd: SRC_ROOT, onlyFiles: true })) {
+    for (const path of await scanSourcePaths(SRC_ROOT, '**/*.ts')) {
       const text = await Bun.file(join(SRC_ROOT, path)).text();
       for (const line of text.split('\n')) {
         if (/\bapp\.listen\(/.test(line) && !line.trimStart().startsWith('*')) {

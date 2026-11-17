@@ -1043,7 +1043,7 @@ target unavailable.
 
 `crates/mangostudio-runtime/src/external_agents/` hosts the same ten methods over the published
 External Agents SDK (`mango-external-agents`, `mango-agent-claude`, `mango-agent-codex` and
-`mango-agent-acp`, pinned exactly at 0.9.0). The SDK owns vendor protocols, harness lifecycle and
+`mango-agent-acp`, pinned exactly at 0.10.0). The SDK owns vendor protocols, harness lifecycle and
 the idle-turn bound; the runtime owns authorized launch, scratch, consent, the session cap, the
 per-turn payload budget and hard deadline, and the one mapper from SDK types to this wire.
 
@@ -1084,6 +1084,15 @@ and `Error::Launch` for every other failure. Through 0.8.0 the version probes re
 reads the answer. The runtime's test launchers use the SDK's `FakeLauncher::missing_program()` for
 a missing CLI and `FakeLauncher::refusing_launches(..)` for one that will not start: an unqueued
 `FakeLauncher::new()` launch is a `Launch` now.
+
+SDK 0.10.0 writes every JSON-RPC frame with its members in one fixed order (`jsonrpc`, `id`,
+`method`, `params`) in every build, where it used to sort them in a build without
+`serde_json/preserve_order`. The runtime build already had that feature (the ACP schema crate turns
+it on), so its frames keep their bytes; nothing here reads a frame's member order, only substrings
+such as `session/prompt`. The same release makes the Claude prompt line and `--mcp-config` file
+fixed-order and passes a `--json-schema` text through as written. The runtime sets no schema, no MCP
+server and no `native` configuration, so none of those paths run. The stdio link now refuses a
+message holding a line break before writing, which compact JSON frames never do.
 
 `EventKind::StructuredOutput`, which the SDK emits only when a host passes a JSON schema to a
 Claude turn, has no wire event; the runtime passes none and the mapper drops it explicitly.

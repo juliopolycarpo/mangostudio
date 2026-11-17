@@ -19,8 +19,9 @@ import type {
 } from '@mangostudio/shared/updates';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { useI18n } from '@/hooks/use-i18n';
 import { getApiBaseUrl } from '@/lib/api-base-url';
-import { readSseChunks } from '@/lib/sse';
+import { readSseChunks, SseFrameTooLongError } from '@/lib/sse';
 import { ApiError } from '@/lib/utils';
 
 import { type MachineActionRefusal, refusalOrThrow } from '../api';
@@ -87,11 +88,16 @@ async function readJsonBody(response: Response): Promise<unknown> {
 
 type SetState = (updater: (previous: UseUpgradeStreamState) => UseUpgradeStreamState) => void;
 
-/** One connection attempt: a pre-stream refusal, a thrown failure, or an SSE stream read to its end. */
+/**
+ * One connection attempt: a pre-stream refusal, a thrown failure, or an SSE
+ * stream read to its end. `frameTooLongMessage` is the localized text shown when
+ * the body has a line over the reader's cap.
+ */
 async function run(
   controller: AbortController,
   body: MachineUpgradeBody,
-  setState: SetState
+  setState: SetState,
+  frameTooLongMessage: string
 ): Promise<void> {
   let response: Response;
   try {
@@ -175,7 +181,13 @@ async function run(
     if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
       return;
     }
-    const message = error instanceof Error ? error.message : String(error);
+    // The reader's own text names a character count; the dialog shows the localized one.
+    const message =
+      error instanceof SseFrameTooLongError
+        ? frameTooLongMessage
+        : error instanceof Error
+          ? error.message
+          : String(error);
     setState((previous) => ({ ...previous, phase: 'failed', streamError: message }));
     return;
   } finally {
@@ -193,6 +205,8 @@ async function run(
 export function useUpgradeStream(): UseUpgradeStreamResult {
   const [state, setState] = useState<UseUpgradeStreamState>(IDLE_STATE);
   const controllerRef = useRef<AbortController | null>(null);
+  const { t } = useI18n();
+  const frameTooLongMessage = t.environments.machine.update.streamFrameTooLong;
 
   useEffect(() => {
     return () => {
@@ -207,18 +221,21 @@ export function useUpgradeStream(): UseUpgradeStreamResult {
     setState(IDLE_STATE);
   }, []);
 
-  const start = useCallback((body: MachineUpgradeBody) => {
-    // One connection attempt per dialog open; a second `start()` while one is
-    // already live is a no-op rather than a second in-flight upgrade.
-    if (controllerRef.current) return;
-    const controller = new AbortController();
-    controllerRef.current = controller;
-    setState({ ...IDLE_STATE, phase: 'connecting' });
+  const start = useCallback(
+    (body: MachineUpgradeBody) => {
+      // One connection attempt per dialog open; a second `start()` while one is
+      // already live is a no-op rather than a second in-flight upgrade.
+      if (controllerRef.current) return;
+      const controller = new AbortController();
+      controllerRef.current = controller;
+      setState({ ...IDLE_STATE, phase: 'connecting' });
 
-    void run(controller, body, setState).finally(() => {
-      if (controllerRef.current === controller) controllerRef.current = null;
-    });
-  }, []);
+      void run(controller, body, setState, frameTooLongMessage).finally(() => {
+        if (controllerRef.current === controller) controllerRef.current = null;
+      });
+    },
+    [frameTooLongMessage]
+  );
 
   return { ...state, start, reset };
 }

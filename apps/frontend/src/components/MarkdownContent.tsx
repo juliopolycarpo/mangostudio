@@ -1,4 +1,6 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
+
+import { preloadCodeHighlighterFor } from '@/lib/code-highlighter-preload';
 
 import type { MarkdownContentProps } from './MarkdownContentRenderer';
 
@@ -11,6 +13,8 @@ const LazyMarkdownContentRenderer = lazy(() =>
 /** Lazy-loads markdown parsing so chat routes do not pull it into startup JS. */
 // Usage: <MarkdownContent content={message.text} />;
 export function MarkdownContent(props: MarkdownContentProps) {
+  const { content } = props;
+  useEffect(() => preloadCodeHighlighterFor(content), [content]);
   return (
     <Suspense fallback={<MarkdownContentFallback {...props} />}>
       <LazyMarkdownContentRenderer {...props} />

@@ -1316,9 +1316,9 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "mango-agent-acp"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26ae3f408a10e0bffa7d2351ebf1c1c0eae106f574ae83d6036158ce62e1fd43"
+checksum = "2b40eabe3b3bd100e2649607b0a24165c9236a0940b93291868a57afa6c505ec"
 dependencies = [
  "agent-client-protocol-schema",
  "async-trait",
@@ -1332,23 +1332,24 @@ dependencies = [
 
 [[package]]
 name = "mango-agent-claude"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27c697017137d10b72e5069f5c18da8f18b7034fb38199895fae1ece1018683e"
+checksum = "9206f9ce61f60390fbc7444f1b3b855d831f5ef4fe7ac5967cb0830e2cc0d2d5"
 dependencies = [
  "async-trait",
  "mango-external-agents",
  "nix",
  "ring",
+ "serde",
  "serde_json",
  "tokio",
 ]
 
 [[package]]
 name = "mango-agent-codex"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "95b3687b6faae3d0c3e779fde845ea20eea394c8c1394673db152f007320f582"
+checksum = "39aecfbed4bea61bee70cd0651f7773b7b26cacd937f271bf99e6003bd35f326"
 dependencies = [
  "async-trait",
  "mango-external-agents",
@@ -1360,9 +1361,9 @@ dependencies = [
 
 [[package]]
 name = "mango-external-agents"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42e220968187b6718a9da8aa7979aac7f7f983b02906b9c92faa59ce6ed8e692"
+checksum = "e4028dc2cd2a43d2f1542d6a1394c836176715ff898195ebd6d41c3f0506f9ee"
 dependencies = [
  "async-trait",
  "ring",

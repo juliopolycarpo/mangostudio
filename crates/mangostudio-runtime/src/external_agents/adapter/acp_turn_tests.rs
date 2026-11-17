@@ -373,3 +373,42 @@ async fn an_acp_tool_call_is_named_by_the_agent_when_it_sends_a_name_and_by_its_
     rig.close().await;
     fixtures::reaped(&launcher).await;
 }
+
+/// The member order of the frames the SDK writes to an ACP agent: `jsonrpc`, `id`, `method`, then
+/// `params`. SDK 0.10.0 writes that order in every build; before it, the order followed whether
+/// `serde_json/preserve_order` was on, which this runtime's build gets from the ACP schema crate.
+/// A change to either side shows up here as other bytes on the wire.
+#[tokio::test]
+async fn frames_to_an_acp_agent_keep_jsonrpc_id_method_params_order() {
+    let launcher = Arc::new(FakeLauncher::new());
+    launcher.push(FakeAcpAgent::new().process());
+    let mut rig = Rig::new(launcher.clone(), wire::TargetId::Cursor, fixtures::limits()).await;
+    rig.open().await;
+    rig.turn("order").await.expect("the turn starts");
+    rig.through("completed").await;
+    let written = launcher.written();
+    rig.close().await;
+    fixtures::reaped(&launcher).await;
+
+    for method in ["initialize", "session/new", "session/prompt"] {
+        let needle = format!("\"method\":\"{method}\"");
+        let frame = written
+            .iter()
+            .find(|line| line.contains(&needle))
+            .unwrap_or_else(|| panic!("expected a {method} frame | received {written:?}"));
+        let positions: Vec<Option<usize>> = ["\"jsonrpc\"", "\"id\"", "\"method\"", "\"params\""]
+            .iter()
+            .map(|member| frame.find(member))
+            .collect();
+        let ordered = positions.iter().all(Option::is_some)
+            && positions.windows(2).all(|pair| pair[0] < pair[1]);
+        assert!(
+            ordered,
+            "expected members jsonrpc < id < method < params in the {method} frame | received {frame}"
+        );
+        assert!(
+            frame.starts_with("{\"jsonrpc\":\"2.0\",\"id\":"),
+            "expected the frame to open with the jsonrpc and id members | received {frame}"
+        );
+    }
+}

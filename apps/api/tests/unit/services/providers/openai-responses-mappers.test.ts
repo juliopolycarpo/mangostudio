@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'bun:test';
 
+import { appendMergedMessagePart } from '@mangostudio/shared/generation';
+import type { MessagePart } from '@mangostudio/shared/types';
 import type { Responses } from 'openai/resources/responses/responses';
 
-import type { ResponseStreamEvent } from '../../../../src/services/providers/openai/normalizers';
+import { CheckpointPlanner } from '../../../../src/modules/generation/application/turn-checkpoint-delta';
+import { foldCheckpointDeltas } from '../../../../src/modules/messages/infrastructure/message-checkpoint-deltas';
+import {
+  extractReasoningFromCompleted,
+  type ResponseStreamEvent,
+} from '../../../../src/services/providers/openai/normalizers';
 import { createResponsesAgentAccumulator } from '../../../../src/services/providers/openai/responses-agent-accumulator';
 import { createResponsesReasoningTracker } from '../../../../src/services/providers/openai/responses-reasoning-tracker';
 import type { AgentEvent } from '../../../../src/services/providers/types';
@@ -103,6 +110,213 @@ describe('createResponsesReasoningTracker', () => {
         })
       )
     ).toBe('Part text.');
+  });
+
+  describe('summary parts', () => {
+    const summaryDelta = (itemId: string, summaryIndex: number, delta: string) =>
+      event({
+        type: 'response.reasoning_summary_text.delta',
+        item_id: itemId,
+        summary_index: summaryIndex,
+        delta,
+      });
+
+    it('opens each later summary part with a blank line, once, ahead of its first text', () => {
+      const tracker = createResponsesReasoningTracker();
+
+      const streamed = [
+        summaryDelta('item1', 0, '**Plan**'),
+        summaryDelta('item1', 0, ' end of first part.'),
+        summaryDelta('item1', 1, '**Check**'),
+        summaryDelta('item1', 1, ' end of second part.'),
+        summaryDelta('item1', 2, '**Answer**'),
+      ].map((ev) => tracker.consumeStreamEvent(ev));
+
+      expect(streamed).toEqual([
+        '**Plan**',
+        ' end of first part.',
+        '\n\n**Check**',
+        ' end of second part.',
+        '\n\n**Answer**',
+      ]);
+    });
+
+    it('joins streamed parts the way a completed response joins them', () => {
+      const tracker = createResponsesReasoningTracker();
+      const streamed = [
+        summaryDelta('item1', 0, 'First part.'),
+        summaryDelta('item1', 1, 'Second part.'),
+      ]
+        .map((ev) => tracker.consumeStreamEvent(ev))
+        .join('');
+
+      const completed = extractReasoningFromCompleted(
+        completedResponse({
+          output: [
+            {
+              type: 'reasoning',
+              summary: [
+                { type: 'summary_text', text: 'First part.' },
+                { type: 'summary_text', text: 'Second part.' },
+              ],
+            },
+          ],
+        })
+      );
+
+      expect(streamed).toBe(completed ?? '');
+    });
+
+    it('leaves a single summary part, and its done event, exactly as streamed', () => {
+      const tracker = createResponsesReasoningTracker();
+
+      const streamed = [
+        summaryDelta('item1', 0, 'Only '),
+        summaryDelta('item1', 0, 'part.'),
+        event({
+          type: 'response.reasoning_summary_text.done',
+          item_id: 'item1',
+          summary_index: 0,
+          text: 'Only part.',
+        }),
+      ].map((ev) => tracker.consumeStreamEvent(ev));
+
+      expect(streamed).toEqual(['Only ', 'part.', null]);
+    });
+
+    it('separates a part recovered from its done events, and one from a second reasoning item', () => {
+      const tracker = createResponsesReasoningTracker();
+
+      expect(tracker.consumeStreamEvent(summaryDelta('item1', 0, 'First.'))).toBe('First.');
+      expect(
+        tracker.consumeStreamEvent(
+          event({
+            type: 'response.reasoning_summary_text.done',
+            item_id: 'item1',
+            summary_index: 1,
+            text: 'Second.',
+          })
+        )
+      ).toBe('\n\nSecond.');
+      expect(
+        tracker.consumeStreamEvent(
+          event({
+            type: 'response.reasoning_summary_part.done',
+            item_id: 'item2',
+            summary_index: 0,
+            part: { text: 'Third.' },
+          })
+        )
+      ).toBe('\n\nThird.');
+    });
+
+    it('starts a reasoning item that follows answer text without a separator', () => {
+      const tracker = createResponsesReasoningTracker();
+
+      const streamed = [
+        summaryDelta('rs_1', 0, 'First thought.'),
+        event({
+          type: 'response.output_item.added',
+          item: { type: 'message', id: 'msg_1' },
+        }),
+        event({ type: 'response.output_text.delta', delta: 'Answer.' }),
+        event({
+          type: 'response.output_item.added',
+          item: { type: 'reasoning', id: 'rs_2' },
+        }),
+        summaryDelta('rs_2', 0, 'Second thought.'),
+        summaryDelta('rs_2', 1, 'Second thought, part two.'),
+      ].map((ev) => tracker.consumeStreamEvent(ev));
+
+      expect(streamed).toEqual([
+        'First thought.',
+        null,
+        null,
+        null,
+        'Second thought.',
+        '\n\nSecond thought, part two.',
+      ]);
+    });
+
+    it('starts a reasoning item that follows a function call without a separator', () => {
+      const tracker = createResponsesReasoningTracker();
+
+      const streamed = [
+        summaryDelta('rs_1', 0, 'First thought.'),
+        event({
+          type: 'response.output_item.added',
+          item: { type: 'function_call', id: 'fc_1', call_id: 'call_1', name: 'search' },
+        }),
+        event({
+          type: 'response.output_item.added',
+          item: { type: 'reasoning', id: 'rs_2' },
+        }),
+        summaryDelta('rs_2', 0, 'Second thought.'),
+      ].map((ev) => tracker.consumeStreamEvent(ev));
+
+      expect(streamed).toEqual(['First thought.', null, null, 'Second thought.']);
+    });
+
+    it('keeps the separator between two reasoning items with nothing between them', () => {
+      const tracker = createResponsesReasoningTracker();
+
+      const streamed = [
+        summaryDelta('rs_1', 0, 'First thought.'),
+        event({
+          type: 'response.output_item.added',
+          item: { type: 'reasoning', id: 'rs_2' },
+        }),
+        summaryDelta('rs_2', 0, 'Second thought.'),
+      ].map((ev) => tracker.consumeStreamEvent(ev));
+
+      expect(streamed).toEqual(['First thought.', null, '\n\nSecond thought.']);
+    });
+
+    it('does not open a paragraph for an empty delta', () => {
+      const tracker = createResponsesReasoningTracker();
+
+      expect(tracker.consumeStreamEvent(summaryDelta('item1', 0, 'First.'))).toBe('First.');
+      expect(tracker.consumeStreamEvent(summaryDelta('item1', 1, ''))).toBeNull();
+      expect(tracker.consumeStreamEvent(summaryDelta('item1', 1, 'Second.'))).toBe('\n\nSecond.');
+    });
+
+    it('lets a checkpoint store the stream by appending only', () => {
+      const tracker = createResponsesReasoningTracker();
+      const planner = new CheckpointPlanner();
+      const parts: MessagePart[] = [];
+      let stored = foldCheckpointDeltas(
+        { text: '', parts: [], providerState: null, generationTime: null },
+        []
+      );
+      const checkpointAfter = (ev: ResponseStreamEvent) => {
+        const text = tracker.consumeStreamEvent(ev);
+        if (text) appendMergedMessagePart(parts, { type: 'thinking', text });
+        const plan = planner.plan({ text: '', parts, providerState: null });
+        if (plan.kind === 'rebase') {
+          stored = {
+            text: plan.text,
+            parts: JSON.parse(plan.partsJson) as MessagePart[],
+            providerState: null,
+            generationTime: null,
+          };
+          return plan;
+        }
+        stored = foldCheckpointDeltas(stored, [JSON.parse(plan.deltaJson)]);
+        return plan;
+      };
+
+      checkpointAfter(summaryDelta('item1', 0, 'First part.'));
+      const secondPartPlan = checkpointAfter(summaryDelta('item1', 1, 'Second part.'));
+
+      // The separator rides in the second part's append; the first part's stored text is untouched.
+      expect(secondPartPlan.kind).toBe('delta');
+      if (secondPartPlan.kind === 'delta') {
+        expect(JSON.parse(secondPartPlan.deltaJson)).toMatchObject({
+          ops: [{ i: 0, append: '\n\nSecond part.' }],
+        });
+      }
+      expect(stored.parts).toEqual([{ type: 'thinking', text: 'First part.\n\nSecond part.' }]);
+    });
   });
 
   it('emits reasoning_text.done only when nothing else was emitted', () => {
@@ -241,6 +455,46 @@ describe('createResponsesAgentAccumulator', () => {
     ]);
   });
 
+  it('separates summary parts in reasoning deltas and leaves the replayable output items untouched', () => {
+    const accumulator = createResponsesAgentAccumulator();
+    const reasoningItem = {
+      type: 'reasoning',
+      id: 'rs_1',
+      encrypted_content: 'enc_blob==',
+      summary: [
+        { type: 'summary_text', text: 'First part.' },
+        { type: 'summary_text', text: 'Second part.' },
+      ],
+    };
+
+    const events = mapAll(accumulator, [
+      event({
+        type: 'response.reasoning_summary_text.delta',
+        item_id: 'rs_1',
+        summary_index: 0,
+        delta: 'First part.',
+      }),
+      event({
+        type: 'response.reasoning_summary_text.delta',
+        item_id: 'rs_1',
+        summary_index: 1,
+        delta: 'Second part.',
+      }),
+      event({
+        type: 'response.completed',
+        response: { id: 'resp_two_parts', output: [structuredClone(reasoningItem)] },
+      }),
+    ]);
+
+    expect(events).toEqual([
+      { type: 'reasoning_delta', text: 'First part.' },
+      { type: 'reasoning_delta', text: '\n\nSecond part.' },
+    ]);
+    // What a stateless replay sends back to the provider is the item as received, byte for byte.
+    expect(accumulator.outputItems).toEqual([reasoningItem]);
+    expect(JSON.stringify(accumulator.outputItems)).toBe(JSON.stringify([reasoningItem]));
+  });
+
   it('captures response id and input-token usage on completion', () => {
     const accumulator = createResponsesAgentAccumulator();
 
@@ -289,5 +543,189 @@ describe('createResponsesAgentAccumulator', () => {
     );
 
     expect(accumulator.usageInputTokens).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Streamed reasoning and the completed-response fallback read the same
+// ---------------------------------------------------------------------------
+
+describe('streamed reasoning versus the completed-response fallback', () => {
+  const summaryDelta = (itemId: string, summaryIndex: number, delta: string) =>
+    event({
+      type: 'response.reasoning_summary_text.delta',
+      item_id: itemId,
+      summary_index: summaryIndex,
+      delta,
+    });
+  const summaryTextDone = (itemId: string, summaryIndex: number, text: string) =>
+    event({
+      type: 'response.reasoning_summary_text.done',
+      item_id: itemId,
+      summary_index: summaryIndex,
+      text,
+    });
+  const summaryPartDone = (itemId: string, summaryIndex: number, text: string) =>
+    event({
+      type: 'response.reasoning_summary_part.done',
+      item_id: itemId,
+      summary_index: summaryIndex,
+      part: { type: 'summary_text', text },
+    });
+  const rawDelta = (itemId: string, contentIndex: number, delta: string) =>
+    event({
+      type: 'response.reasoning_text.delta',
+      item_id: itemId,
+      content_index: contentIndex,
+      delta,
+    });
+  const rawDone = (itemId: string, contentIndex: number, text: string) =>
+    event({
+      type: 'response.reasoning_text.done',
+      item_id: itemId,
+      content_index: contentIndex,
+      text,
+    });
+  const summaryItem = (...texts: string[]) => ({
+    type: 'reasoning',
+    summary: texts.map((text) => ({ type: 'summary_text', text })),
+  });
+  const rawItem = (...texts: string[]) => ({
+    type: 'reasoning',
+    summary: [],
+    content: texts.map((text) => ({ type: 'reasoning_text', text })),
+  });
+
+  /** Everything a stream of these events would show a user, in order. */
+  const streamedText = (events: ResponseStreamEvent[]): string => {
+    const tracker = createResponsesReasoningTracker();
+    return events.map((ev) => tracker.consumeStreamEvent(ev) ?? '').join('');
+  };
+  const recoveredText = (...output: Array<Record<string, unknown>>): string | null =>
+    extractReasoningFromCompleted(completedResponse({ output }));
+  /** The recovered text of a response that must carry reasoning; a null there is the failure. */
+  const fallbackText = (...output: Array<Record<string, unknown>>): string => {
+    const recovered = recoveredText(...output);
+    if (recovered === null) {
+      throw new Error(
+        `expected reasoning recovered from ${output.length} output items | received: null`
+      );
+    }
+    return recovered;
+  };
+
+  it('reads the summary of every reasoning item when nothing streamed', () => {
+    const output = [summaryItem('A1.', 'A2.'), summaryItem('B1.')];
+
+    expect(fallbackText(...output)).toBe('A1.\n\nA2.\n\nB1.');
+  });
+
+  it('streams several reasoning items as the fallback reads them', () => {
+    const streamed = streamedText([
+      summaryDelta('rs_1', 0, 'A1.'),
+      summaryDelta('rs_1', 1, 'A2.'),
+      summaryDelta('rs_2', 0, 'B1.'),
+    ]);
+
+    expect(streamed).toBe(fallbackText(summaryItem('A1.', 'A2.'), summaryItem('B1.')));
+  });
+
+  it('reads raw text across content parts and reasoning items the same streamed and recovered', () => {
+    const output = [rawItem('A1.', 'A2.'), rawItem('B1.')];
+    const streamed = streamedText([
+      rawDelta('rs_1', 0, 'A'),
+      rawDelta('rs_1', 0, '1.'),
+      rawDelta('rs_1', 1, 'A2.'),
+      rawDelta('rs_2', 0, 'B1.'),
+    ]);
+
+    expect(streamed).toBe('A1.\n\nA2.\n\nB1.');
+    expect(streamed).toBe(fallbackText(...output));
+  });
+
+  it('reads raw text that only arrives in done events the same as the fallback', () => {
+    const streamed = streamedText([
+      rawDone('rs_1', 0, 'A1.'),
+      rawDone('rs_1', 1, 'A2.'),
+      rawDone('rs_2', 0, 'B1.'),
+    ]);
+
+    expect(streamed).toBe(fallbackText(rawItem('A1.', 'A2.'), rawItem('B1.')));
+  });
+
+  it('streams raw text for a part whose deltas never came after another part streamed', () => {
+    const streamed = streamedText([
+      rawDelta('rs_1', 0, 'A1.'),
+      rawDone('rs_1', 0, 'A1.'),
+      rawDone('rs_1', 1, 'A2.'),
+    ]);
+
+    expect(streamed).toBe('A1.\n\nA2.');
+  });
+
+  it('emits a part once when summary_text.done is followed by summary_part.done', () => {
+    const tracker = createResponsesReasoningTracker();
+
+    const emitted = [
+      summaryTextDone('rs_1', 0, 'Only part.'),
+      summaryPartDone('rs_1', 0, 'Only part.'),
+    ].map((ev) => tracker.consumeStreamEvent(ev));
+
+    expect(emitted).toEqual(['Only part.', null]);
+  });
+
+  it('emits each part once when both done events follow for several parts, as the fallback reads them', () => {
+    const streamed = streamedText([
+      summaryTextDone('rs_1', 0, 'A1.'),
+      summaryPartDone('rs_1', 0, 'A1.'),
+      summaryTextDone('rs_1', 1, 'A2.'),
+      summaryPartDone('rs_1', 1, 'A2.'),
+      summaryTextDone('rs_2', 0, 'B1.'),
+      summaryPartDone('rs_2', 0, 'B1.'),
+    ]);
+
+    expect(streamed).toBe(fallbackText(summaryItem('A1.', 'A2.'), summaryItem('B1.')));
+  });
+
+  it('does not repeat raw text after summaries arrived only as done events', () => {
+    const streamed = streamedText([
+      summaryTextDone('rs_1', 0, 'Summary.'),
+      rawDone('rs_1', 0, 'Raw.'),
+      rawDelta('rs_1', 0, 'Raw.'),
+    ]);
+
+    expect(streamed).toBe('Summary.');
+  });
+
+  it('applies the summary-over-raw rule in the fallback only; the stream cannot retract raw text', () => {
+    expect(fallbackText(rawItem('Raw.'), summaryItem('Summary.'))).toBe('Summary.');
+    expect(streamedText([rawDelta('rs_1', 0, 'Raw.'), summaryDelta('rs_2', 0, 'Summary.')])).toBe(
+      'Raw.\n\nSummary.'
+    );
+  });
+
+  describe('a reasoning item that follows answer text or a tool call', () => {
+    const functionCallAdded = event({
+      type: 'response.output_item.added',
+      item: { type: 'function_call', id: 'fc_1' },
+    });
+    const answerText = event({ type: 'response.output_text.delta', delta: 'Answer.' });
+
+    it.each([
+      ['a function call', functionCallAdded],
+      ['answer text', answerText],
+    ])('opens the second raw item after %s without a separator', (_name, between) => {
+      const tracker = createResponsesReasoningTracker();
+
+      const emitted = [rawDelta('rs_1', 0, 'First.'), between, rawDelta('rs_2', 0, 'Second.')].map(
+        (ev) => tracker.consumeStreamEvent(ev)
+      );
+
+      expect(emitted).toEqual(['First.', null, 'Second.']);
+    });
+  });
+
+  it('recovers nothing from a response with no reasoning items', () => {
+    expect(recoveredText({ type: 'message', content: [] })).toBeNull();
   });
 });

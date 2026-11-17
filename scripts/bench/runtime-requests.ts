@@ -4,8 +4,8 @@
  * Measures runtime request paths that `grep.ts` does not reach: `fs.glob`
  * (glob compilation and matching over a large tree, and a large file list as
  * the answer) and the protocol round trip (frame encode and decode, params and
- * result validation) with small and with multi-MiB payloads: `fs.write-file`
- * for params, `fs.list-directory` for the result.
+ * result validation) with small requests and a multi-MiB `fs.write-file` params.
+ * Large results (`fs.list-directory`, `fs.read-file`) are `runtime-results.ts`.
  *
  * Each measured run starts a fresh runtime child per binary, makes one untimed
  * request so lazy initialisation is not charged, then times a fixed batch of
@@ -44,7 +44,6 @@ export const REQUEST_SCENARIOS = [
   'glob-large-list',
   'rpc-small',
   'rpc-small-read',
-  'rpc-large-result',
   'rpc-large-params',
 ] as const;
 export type RequestScenario = (typeof REQUEST_SCENARIOS)[number];
@@ -68,14 +67,6 @@ export const GLOB_PATTERNS: readonly string[] = [
   '**/*.js',
   '**/mod-9/*.rs',
 ];
-
-/** JSON bytes of one `fs.list-directory` entry for a `listingEntryName` file. */
-const ENTRY_JSON_BYTES = 68;
-
-/** A 41-character file name, unique per index. */
-export function listingEntryName(index: number): string {
-  return `listing-entry-${String(index).padStart(8, '0')}-padding-padding.txt`;
-}
 
 const EXTENSIONS = ['ts', 'tsx', 'md', 'json', 'rs'] as const;
 
@@ -213,33 +204,6 @@ export async function prepareWorkload(
         },
       };
     }
-    case 'rpc-large-result': {
-      // fs.read-file caps its answer near 256 KiB, so a multi-MiB result comes from a
-      // directory listing: one `{name, type}` entry is 68 bytes of JSON.
-      const root = join(scratch, 'large-listing');
-      await mkdir(root, { recursive: true });
-      const entries = Math.floor((sizes.payloadMiB * MIB) / ENTRY_JSON_BYTES);
-      for (let index = 0; index < entries; index += 1) {
-        await writeFile(join(root, listingEntryName(index)), '');
-      }
-      return {
-        callsPerSample: 5,
-        runBatch: async (session) => {
-          for (let call = 0; call < 5; call += 1) {
-            const result = await request(session, 'fs.list-directory', {
-              inputPath: root,
-              resolvedPath: root,
-            });
-            expectField(
-              result,
-              'entries',
-              (listed) => Array.isArray(listed) && listed.length === entries,
-              `${entries} entries`
-            );
-          }
-        },
-      };
-    }
     case 'rpc-large-params': {
       const content = textOfSize(sizes.payloadMiB * MIB);
       // The runtime refuses to overwrite a file it has not read, so every call
@@ -351,7 +315,7 @@ function printHelp(): never {
   --runs N         Measured runs per scenario (default 15)
   --warmup N       Untimed runs per binary before measuring (default 0)
   --scenario LIST  Comma-separated subset of: ${REQUEST_SCENARIOS.join(', ')}
-  --payload-mib N  Size of the rpc-large-* payloads (default 8, at most 9)
+  --payload-mib N  Size of the rpc-large-params payload (default 8, at most 9)
   --json           Print only the JSON result
   --help           Show this help message`);
   process.exit(0);
@@ -379,7 +343,7 @@ async function main() {
     fatal(`\`--runs\` must be a positive integer | received: ${values['--runs']}`);
   if (!Number.isInteger(warmup) || warmup < 0)
     fatal(`\`--warmup\` must be a non-negative integer | received: ${values['--warmup']}`);
-  // fs.read-file refuses text above 10 MiB, so a larger payload would measure an error.
+  // The runtime refuses text above 10 MiB, so a larger payload would measure an error.
   if (!Number.isInteger(payloadMiB) || payloadMiB < 1 || payloadMiB > 9) {
     fatal(
       `\`--payload-mib\` must be an integer from 1 to 9 | received: ${values['--payload-mib']}`
