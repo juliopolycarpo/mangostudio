@@ -66,6 +66,7 @@ import {
   ToolPolicyError,
 } from './tool-execution-lifecycle';
 import { errorToToolMessage, parseToolArgs, stringifyToolResult } from './tool-result-utils';
+import { classifyToolRetrySafety } from './turn-checkpoint';
 
 interface StandardToolExecution {
   callId: string;
@@ -144,6 +145,14 @@ export type ToolExecutionProgressItem =
   | { kind: 'event'; event: ToolStreamEvent }
   | { kind: 'execution'; execution: StandardToolExecution };
 
+/** A call that has just moved to `running` and is about to start. */
+export interface ToolStartMarker {
+  callId: string;
+  name: string;
+  /** The `running` snapshot the call's lifecycle holds. */
+  execution: ToolExecutionSnapshot;
+}
+
 export interface StandardToolExecutionContext {
   userId: string;
   chatId: string;
@@ -159,6 +168,13 @@ export interface StandardToolExecutionContext {
   signal?: AbortSignal;
   /** Mid-flight progress (subagent + MCP elicitation) into the SSE turn. */
   onEvent?: (event: ToolStreamEvent) => void;
+  /**
+   * Awaited after a call that is not a plain read (`classifyToolRetrySafety`) moves to
+   * `running` and before it starts. It must resolve only once that `running` state is
+   * committed durably, so a crash cannot leave a call that ran recorded as not started.
+   * A rejection means the marker could not be written: the call fails and never starts.
+   */
+  beforeToolStart?: (call: ToolStartMarker) => Promise<void>;
 }
 
 type PreparedStandardToolCall =
@@ -243,6 +259,7 @@ async function executeStandardToolCall(
   try {
     const prepared = await prepareStandardToolCall(name, context);
     lifecycle.transition('running');
+    await recordToolStartBeforeRunning(name, callId, lifecycle, context);
     if (prepared.kind === 'mcp') {
       // Builtins record themselves from `executeTool`, off their declared
       // metadata. MCP tools never become a `RegisteredTool`, so this is the
@@ -361,6 +378,26 @@ async function executeStandardToolCall(
     ...(shapedResult.questionPart ? { questionPart: shapedResult.questionPart } : {}),
     ...(shapedResult.todoPart ? { todoPart: shapedResult.todoPart } : {}),
   };
+}
+
+/**
+ * Waits for the write-ahead `running` marker of a call that may change something,
+ * so the tool never starts ahead of its record. Read-only calls skip it. The turn
+ * signal is checked on both sides of the wait: a cancel that lands while the marker
+ * is being written must not start the tool. That leaves a `running` marker for a
+ * call that never ran, which recovery reads as an unknown outcome and the model
+ * verifies, the safe direction.
+ */
+async function recordToolStartBeforeRunning(
+  name: string,
+  callId: string,
+  lifecycle: ToolExecutionLifecycle,
+  context: StandardToolExecutionContext
+): Promise<void> {
+  if (!context.beforeToolStart || classifyToolRetrySafety(name) === 'safe_read') return;
+  context.signal?.throwIfAborted();
+  await context.beforeToolStart({ callId, name, execution: lifecycle.current });
+  context.signal?.throwIfAborted();
 }
 
 function shapeToolExecutionResult(

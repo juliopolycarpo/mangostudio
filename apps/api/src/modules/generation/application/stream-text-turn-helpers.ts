@@ -41,7 +41,7 @@ import {
 import type { EffectiveToolSettings } from '../../../services/tools/types';
 import type { PersistedGeneratedImageInput } from '../infrastructure/conversation-persistence';
 import { IMAGE_ABANDONED_ERROR, IMAGE_ABANDONED_ERROR_CODE } from './image-interruption';
-import type { ToolExecutionProgressItem } from './standard-tool-execution';
+import type { ToolExecutionProgressItem, ToolStartMarker } from './standard-tool-execution';
 import type { StreamEvent } from './stream-text-turn-types';
 import {
   classifyToolExecutionFailure,
@@ -50,7 +50,7 @@ import {
   ToolPolicyError,
 } from './tool-execution-lifecycle';
 import { errorToToolMessage, parseToolArgs, stringifyToolResult } from './tool-result-utils';
-import { classifyToolRetrySafety } from './turn-checkpoint';
+import type { TurnCheckpointWriter } from './turn-checkpoint';
 
 /** Accumulators a completed tool execution writes into for the turn. */
 interface ToolResultSink {
@@ -135,13 +135,31 @@ export function* collectToolExecutionResult(
   });
 }
 
+/**
+ * The executor announces every call as queued and then runs ahead of the turn, which writes a
+ * checkpoint per progress item. A call's start marker (`createToolStartMarkerWriter`) can
+ * therefore put `running` into the parts before the turn reaches that call's queued item, and
+ * projecting the older snapshot would store a call that is running as queued again.
+ */
+function isStaleQueuedSnapshot(event: ToolExecutionTransitionEvent, parts: MessagePart[]): boolean {
+  if (event.execution.status !== 'queued') return false;
+  const current = parts.find(
+    (part) => part.type === 'tool_call' && part.toolCallId === event.callId
+  );
+  return (
+    current?.type === 'tool_call' &&
+    current.execution !== undefined &&
+    current.execution.status !== 'queued'
+  );
+}
+
 export function synchronizeToolProgressForCheckpoint(
   item: ToolExecutionProgressItem,
   parts: MessagePart[]
 ): void {
   if (item.kind === 'event') {
     const event = item.event;
-    if (event.type === 'tool_execution') {
+    if (event.type === 'tool_execution' && !isStaleQueuedSnapshot(event, parts)) {
       upsertToolCallPart(parts, {
         type: 'tool_call',
         toolCallId: event.callId,
@@ -178,21 +196,33 @@ export function synchronizeToolProgressForCheckpoint(
 }
 
 /**
- * Whether checkpointing this item records a call starting that the hub must not
- * run a second time after a power loss: a tool that is not a plain read
- * (`classifyToolRetrySafety`) moving to `running`. Recovery treats a call whose
- * last surviving state is `queued` as not started and lets the model run it
- * again, so this marker is the one write worth an fsync. Read-only tools, other
- * transitions and results are not: a lost result reads as an unknown outcome,
- * which recovery handles by asking the model to verify.
+ * The write-ahead record a tool that is not a plain read waits for before it starts.
+ * It projects the call's `running` snapshot into the turn, then commits a checkpoint
+ * at `synchronous = FULL`, so a crash or a power loss cannot leave the call stored as
+ * not started after it ran (recovery would let the model run it again). Each call
+ * waits for its own marker on the checkpoint writer's queue; the queue never waits on
+ * a tool, so parallel calls cannot deadlock and read-only calls never enter it.
  *
- * @example
- * await checkpointTurn(session, { durable: recordsIrreversibleToolStart(item) });
+ * A marker that could not be written rejects: the tool must not run unrecorded, and
+ * the model gets an error it can act on instead of a repeat it cannot detect.
  */
-export function recordsIrreversibleToolStart(item: ToolExecutionProgressItem): boolean {
-  if (item.kind !== 'event' || item.event.type !== 'tool_execution') return false;
-  const { name, execution } = item.event;
-  return execution.status === 'running' && classifyToolRetrySafety(name) !== 'safe_read';
+export function createToolStartMarkerWriter(session: {
+  allParts: MessagePart[];
+  checkpointWriter: Pick<TurnCheckpointWriter, 'checkpoint'>;
+}): (call: ToolStartMarker) => Promise<void> {
+  return async ({ callId, name, execution }) => {
+    synchronizeToolProgressForCheckpoint(
+      { kind: 'event', event: { type: 'tool_execution', callId, name, execution } },
+      session.allParts
+    );
+    const written = await session.checkpointWriter.checkpoint({ force: true, durable: true });
+    if (!written) throw new Error(toolStartMarkerFailedMessage(name));
+  };
+}
+
+/** What the model is told when a call's running marker could not be stored and the call was not started. */
+function toolStartMarkerFailedMessage(name: string): string {
+  return `Tool "${name}" was not started: its running marker could not be saved, so a restart could not tell whether it ran.`;
 }
 
 /** Context an image-generation tool call needs beyond its own identifiers. */
@@ -204,8 +234,11 @@ interface ImageGenerationCallContext {
   allParts: MessagePart[];
   generatedImageArtifacts: PersistedGeneratedImageInput[];
   nextToolResults: NonNullable<AgentTurnRequest['toolResults']>;
-  /** Writes a required checkpoint; `durable` commits it at `synchronous = FULL`. */
-  checkpoint?: (options?: { durable?: boolean }) => Promise<void>;
+  /**
+   * Writes a required checkpoint; `durable` commits it at `synchronous = FULL`.
+   * Resolves to whether it was stored.
+   */
+  checkpoint?: (options?: { durable?: boolean }) => Promise<boolean>;
 }
 
 /**
@@ -267,8 +300,14 @@ export async function* executeImageGenerationCall(
     toolCallPart.execution = lifecycle.current;
     yield* drainLifecycleEvents(lifecycleEvents);
     // Awaited before the provider call below, so a durable write here is a real
-    // write-ahead record that a paid generation may be under way.
-    await ctx.checkpoint?.({ durable: true });
+    // write-ahead record that a paid generation may be under way. Same rule as
+    // `createToolStartMarkerWriter`: no stored marker, or a cancel while it was being
+    // written, and nothing is generated.
+    ctx.signal?.throwIfAborted();
+    if ((await ctx.checkpoint?.({ durable: true })) === false) {
+      throw new Error(toolStartMarkerFailedMessage(name));
+    }
+    ctx.signal?.throwIfAborted();
 
     const plan = createGenerateImageToolPlan(args, {
       toolCallId: callId,

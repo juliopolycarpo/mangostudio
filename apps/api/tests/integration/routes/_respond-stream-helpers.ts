@@ -248,6 +248,25 @@ function defaultSelectFrom(
       : makeChain(makeStreamChatRow(userId, overrides));
 }
 
+/**
+ * Answers the one raw statement a durable checkpoint write issues against a database that is not
+ * the relaxed connection (`PRAGMA synchronous`), as already at FULL. Without it the write fails
+ * and a tool that waits for its running marker never starts.
+ */
+const FullSynchronousExecutor = {
+  transformQuery: (node: unknown) => node,
+  compileQuery: (node: unknown) => {
+    const statement = (node as { sqlFragments?: readonly string[] }).sqlFragments?.join('');
+    if (statement !== 'PRAGMA synchronous') {
+      throw new Error(
+        `stream database: expected PRAGMA synchronous | received ${statement ?? JSON.stringify(node)}`
+      );
+    }
+    return { sql: statement, parameters: [], query: node };
+  },
+  executeQuery: () => Promise.resolve({ rows: [{ synchronous: 2 }] }),
+};
+
 /** Builds a stream DB with empty activity and assistant-row capture. Example: createTestStreamDb({ userId: 'u1' }). */
 export function createTestStreamDb(options: TestStreamDbOptions): Record<string, unknown> {
   const insertedMessages = options.insertedMessages ?? [];
@@ -258,11 +277,15 @@ export function createTestStreamDb(options: TestStreamDbOptions): Record<string,
     insertInto: (table: string) => createInsertCapture(table, insertedMessages, options.onInsert),
     updateTable: (table: string) => createUpdateCapture(table, insertedMessages, chatSetCalls),
     deleteFrom(table: string) {
-      if (table !== 'activity_events') {
-        throw new Error(`stream database: expected activity_events deletion | received: ${table}`);
+      // A checkpoint rewrite also clears the turn's deltas.
+      if (table !== 'activity_events' && table !== 'message_checkpoint_deltas') {
+        throw new Error(
+          `stream database: expected activity_events or message_checkpoint_deltas deletion | received: ${table}`
+        );
       }
       return makeChain({ numDeletedRows: 0n });
     },
+    getExecutor: () => FullSynchronousExecutor,
   };
   db.transaction = () => ({
     execute: (callback: (trx: Record<string, unknown>) => unknown) => callback(db),
@@ -442,6 +465,12 @@ function createInsertCapture(
       onInsert?.(table, values);
       return { execute: () => Promise.resolve() };
     },
+    // `insertCheckpointDelta` inserts from a select, so there are no values to capture.
+    columns: () => ({
+      expression: () => ({
+        executeTakeFirst: () => Promise.resolve({ numInsertedOrUpdatedRows: 1n }),
+      }),
+    }),
   };
 }
 
