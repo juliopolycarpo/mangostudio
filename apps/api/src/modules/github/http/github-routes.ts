@@ -58,6 +58,7 @@ import {
 import { Elysia } from 'elysia';
 
 import { getDb } from '../../../db/database';
+import { environmentUnavailableResponse } from '../../../lib/environment-unavailable';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
   chatAccessDenied,
@@ -321,6 +322,9 @@ async function guard<T>(
 }
 
 function githubFailure(error: unknown, set: { status?: number | string }): ApiErrorResponse {
+  const unavailable = environmentUnavailableResponse(error, set);
+  if (unavailable) return unavailable;
+
   if (error instanceof GhCliError) {
     // A cancelled request is the client hanging up, not a server fault worth logging.
     if (!error.aborted) {

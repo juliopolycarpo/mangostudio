@@ -54,6 +54,10 @@ import type { Kysely } from 'kysely';
 import Value from 'typebox/value';
 
 import type { Database } from '../../../db/types';
+import {
+  environmentUnavailableText,
+  isEnvironmentUnavailable,
+} from '../../../lib/environment-unavailable';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { publishActivityInvalidation } from '../../../services/realtime/activity-invalidation';
 import { isRequestNotSent } from '../../../services/runtime-client/request-not-sent';
@@ -366,8 +370,20 @@ function terminalReasonForCallFailure(error: unknown): ExternalTurnTerminalReaso
   return 'vendor-error';
 }
 
-function vendorErrorFrom(error: unknown, code: string): ExternalAgentError {
-  const message = error instanceof Error ? error.message : 'Unknown error';
+/**
+ * The error a failed turn stores and streams. A connect failure (a reopen that
+ * could not reach the environment) contributes its fixed text: the stored error
+ * is read back by the client, and the manager's own message can name hub paths.
+ *
+ * @example
+ * vendorErrorFrom(new Error('boom'), 'turn-start'); // { code: 'turn-start', message: 'boom' }
+ */
+export function vendorErrorFrom(error: unknown, code: string): ExternalAgentError {
+  const message = isEnvironmentUnavailable(error)
+    ? environmentUnavailableText(error)
+    : error instanceof Error
+      ? error.message
+      : 'Unknown error';
   return { code, message: message.slice(0, 2_048) };
 }
 

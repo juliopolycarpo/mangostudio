@@ -322,15 +322,46 @@ requested panel at once, never the previous one first. React holds a Suspense re
 to 300 ms after it commits a fallback, so a spinner flash made a cold click on a fast network
 about 300 ms slower than the fetch.
 
-`LazyChunkBoundary` keeps a failed chunk inside the rail with Retry and Reload; a plain
-`React.lazy` would cache the rejection and take the whole page down through the route's
-error component. Only a chunk that could not be fetched counts (the `TypeError` each browser
-raises: "Failed to fetch dynamically imported module", "error loading dynamically imported
-module", "Importing a module script failed"). A chunk that arrived and threw while it
-evaluated is a bug in that code and keeps its own error, which reaches the route's error
-component. A failed import is forgotten after a backoff (1 s, doubling to 30 s), so a view
-that mounts later heals without a click, and a dead connection is not hammered; Retry asks at
-once.
+**Lazy chunk failures stay local.** `LazyChunkBoundary` keeps a failed chunk where it sits,
+with Retry and Reload; a plain `React.lazy` would cache the rejection and take the whole
+page down through the route's error component. These go through `retryableLazy` and that
+boundary: the rail panels, the terminal view, the diff viewer and the markdown renderer
+(which degrades to its plain text instead of a panel). Not through it:
+
+- Route `.lazy()` chunks (and the pop-out terminal, which imports `TerminalView` inside its
+  route chunk). A failure reaches the route's error component, `BootstrapErrorPanel`, which
+  probes for a stale build when the error is a chunk fetch failure, so the notice below
+  appears there too.
+- The pt-BR dictionary (`locale-dictionaries.ts`). A failed load already rendered English;
+  it now also probes for a stale build.
+- The optional WebGL renderer of the terminal (`terminal-webgl.ts`): a failed load keeps the
+  default renderer and shows nothing.
+
+Only a chunk that could not be fetched counts (the `TypeError` each browser raises:
+"Failed to fetch dynamically imported module", "error loading dynamically imported module",
+"Importing a module script failed"). A chunk that arrived and threw while it evaluated is a
+bug in that code and keeps its own error, which reaches the route's error component. A failed
+import is forgotten after a backoff (1 s, doubling to 30 s), so a view that mounts later
+heals without a click and a dead connection is not hammered; Retry asks at once.
+
+A failed `import()` does not say whether the network dropped or the hub was upgraded under
+the open tab (the hashed name now answers 404 for good). `staleBuildMonitor`
+(`src/lib/stale-build.ts`) compares the entry bundle the tab loaded with the one the hub's
+`index.html` names now, once for the whole page: failing surfaces share one probe.
+A probe has three outcomes. `current` is reused for 30 s or until a chunk loads. `unknown` (the
+hub did not answer within 5 s, or answered with a shell that names no entry) is never
+reused: during an upgrade restart the chunk fetch and the probe both fail while the hub is
+down, so the next failure probes again, and so does the hub coming back (the realtime
+socket's `subscribed` ack after a reconnect, or the browser's `online` event), which is how
+a tab that only shows messages and has no Retry to press still learns about the new build.
+When the build is `stale`, retries stop (the files are gone), the failing surfaces say so,
+and one page-level notice (`StaleBuildNotice`) carries the single Reload. Nothing ever
+reloads by itself. Reloading keeps the composer draft (it is mirrored to `sessionStorage` on
+every change; other text fields, such as the commit message, are not kept), but it clears
+attachments that were not sent yet, and it stops a MangoStudio response that is streaming:
+the browser closing the stream aborts the turn with `client_disconnect`, and the reloaded
+page offers to resume the interrupted turn. An external agent's turn is not stopped: the hub
+keeps running and persisting it when the live stream goes away. The notice says both.
 
 `tests/browser-smoke/load-waterfall.spec.ts` watches the same first uses in a real browser
 (opt-in: `MANGO_LOAD_WATERFALL=1`, and `MANGO_LOAD_PROFILE=slow-4g` for a CDP throttle) and prints

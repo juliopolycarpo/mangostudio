@@ -6,6 +6,7 @@ import { ListDirectoryQuerySchema, ValidatePathBodySchema } from '@mangostudio/s
 import { Elysia } from 'elysia';
 
 import { getDb } from '../../../db/database';
+import { environmentUnavailableResponse } from '../../../lib/environment-unavailable';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { getOwnedChat } from '../../chats/infrastructure/chat-repository';
 import { environmentRepository } from '../../environments/infrastructure/environment-repository';
@@ -36,6 +37,9 @@ function handleDirectoryBrowserError(
         break;
     }
   }
+
+  const unavailable = environmentUnavailableResponse(error, set);
+  if (unavailable) return unavailable;
 
   console.error('[workspace] Unexpected directory browsing error:', error);
   set.status = 500;

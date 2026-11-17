@@ -2,6 +2,7 @@ import { RemoteError } from '@mangostudio/protocol';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { RuntimeGitExecResult } from '@mangostudio/shared/runtime-contract';
 
+import { isEnvironmentUnavailable } from '../../../lib/environment-unavailable';
 import { getRuntimeClient } from '../../../services/runtime-client';
 import {
   detailBoolean,
@@ -111,6 +112,9 @@ export async function runGit(
       { signal: options.signal }
     );
   } catch (error) {
+    // A connect refusal happened before anything was sent; keep its type so the
+    // route can answer 503 instead of a generic Git failure.
+    if (isEnvironmentUnavailable(error)) throw error;
     throw mapGitFailure(args, error);
   }
   if (result.incomplete) {

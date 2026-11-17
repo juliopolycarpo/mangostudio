@@ -30,7 +30,7 @@ function childPids(pid: number): number[] {
     .decode(listed.stdout)
     .split('\n')
     .map((line) => Number(line.trim()))
-    .filter((child) => Number.isInteger(child) && child > 0);
+    .filter((child) => Number.isInteger(child) && child > 1);
 }
 
 describe('CLI commands that reach Local', () => {

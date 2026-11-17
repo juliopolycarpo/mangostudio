@@ -260,3 +260,41 @@ describe('isChunkFetchFailure', () => {
     });
   }
 });
+
+describe('retryableLazy on a stale build', () => {
+  it('makes no new request once the hub is known to have been upgraded', async () => {
+    const fake = fakeChunkLoader(Number.POSITIVE_INFINITY);
+    const clock = new ManualClock();
+    let stale = false;
+    const lazyHello = retryableLazy(fake.load, {
+      now: clock.now,
+      backoffMs: () => 1_000,
+      staleBuild: { isStale: () => stale, noteChunkLoaded: () => undefined },
+    });
+
+    lazyHello.preload();
+    await Bun.sleep(0);
+    expect(fake.requests).toBe(1);
+
+    stale = true;
+    clock.advance(60_000);
+    lazyHello.preload();
+    lazyHello.reset();
+    lazyHello.preload();
+    await Bun.sleep(0);
+
+    expect(fake.requests, 'requests after the build was found stale').toBe(1);
+  });
+
+  it('tells the monitor when a chunk arrives', async () => {
+    const loaded: string[] = [];
+    const lazyHello = retryableLazy(fakeChunkLoader(0).load, {
+      staleBuild: { isStale: () => false, noteChunkLoaded: () => loaded.push('loaded') },
+    });
+
+    lazyHello.preload();
+    await Bun.sleep(0);
+
+    expect(loaded).toEqual(['loaded']);
+  });
+});

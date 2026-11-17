@@ -4,13 +4,14 @@
  * The two failures that are not hub faults have to read the same on the
  * resource routes and the settings routes, because a user switching tabs is
  * looking at one machine either way: an environment whose runtime does not do
- * library work is a 422, and one the hub cannot reach right now is the 503 the
- * environment routes already return for that code — neither is logged.
+ * library work is a 422, and one the hub cannot reach right now is the 503
+ * `environmentUnavailableResponse` gives every route — neither is logged here
+ * (the connection manager logs the connect attempt itself).
  */
 
-import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 
+import { environmentUnavailableResponse } from '../../../lib/environment-unavailable';
 import { LibraryFeatureUnavailableError } from '../domain/library-feature-error';
 
 export function handleLibraryError(
@@ -23,10 +24,8 @@ export function handleLibraryError(
     set.status = 422;
     return { error: error.message, code: ERROR_CODES.VALIDATION };
   }
-  if (error instanceof RemoteError && error.code === RESERVED_ERROR_CODES.UNAVAILABLE) {
-    set.status = 503;
-    return { error: error.message, code: ERROR_CODES.PROVIDER_ERROR };
-  }
+  const unavailable = environmentUnavailableResponse(error, set);
+  if (unavailable) return unavailable;
   console.error(`${logPrefix} Unexpected error:`, error);
   set.status = 500;
   return { error: unexpectedMessage, code: ERROR_CODES.INTERNAL };

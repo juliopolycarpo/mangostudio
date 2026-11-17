@@ -1,5 +1,7 @@
 import { type ComponentType, createElement, lazy, type ReactNode, useState } from 'react';
 
+import { type StaleBuildMonitor, staleBuildMonitor } from '@/lib/stale-build';
+
 /**
  * What a `retryableLazy` import throws when its chunk cannot be fetched:
  * offline, or a 404 for a hashed name the hub no longer has after an upgrade
@@ -62,6 +64,12 @@ export interface RetryableLazyOptions {
   readonly backoffMs?: (consecutiveFailures: number) => number;
   /** Clock for the backoff; tests replace it. */
   readonly now?: () => number;
+  /**
+   * Where "the hub was upgraded" is known. Once the build is stale the chunk
+   * names this tab asks for are gone for good, so no retry is attempted; a chunk
+   * that loads tells the monitor the hub is serving this tab's files.
+   */
+  readonly staleBuild?: Pick<StaleBuildMonitor, 'isStale' | 'noteChunkLoaded'>;
 }
 
 /** 1 s after the first failure, doubling to 30 s: a recovered connection heals, a dead one is not hammered. */
@@ -106,7 +114,11 @@ function LazyHost<Props extends object>({ binding, componentProps }: LazyHostPro
  */
 export function retryableLazy<Props extends object>(
   load: () => Promise<{ default: (props: Props) => ReactNode }>,
-  { backoffMs = defaultBackoffMs, now = Date.now }: RetryableLazyOptions = {}
+  {
+    backoffMs = defaultBackoffMs,
+    now = () => Date.now(),
+    staleBuild = staleBuildMonitor,
+  }: RetryableLazyOptions = {}
 ): RetryableLazy<Props> {
   // `lazy` wants a `ComponentType`; a function component taking `Props` is one.
   type Loaded = { default: ComponentType<Props> };
@@ -126,6 +138,7 @@ export function retryableLazy<Props extends object>(
       (module) => {
         loadedComponent = module.default;
         consecutiveFailures = 0;
+        staleBuild.noteChunkLoaded();
         return module;
       },
       (error: unknown): never => {
@@ -149,9 +162,9 @@ export function retryableLazy<Props extends object>(
 
   /** The attempt a new mount should use: the current one, or a fresh one once its failure has aged out. */
   const attemptForMount = (): Attempt => {
-    if (current.failedAt !== null && now() - current.failedAt >= backoffMs(consecutiveFailures)) {
-      current = createAttempt();
-    }
+    const failureAgedOut =
+      current.failedAt !== null && now() - current.failedAt >= backoffMs(consecutiveFailures);
+    if (failureAgedOut && !staleBuild.isStale()) current = createAttempt();
     return current;
   };
 
@@ -166,7 +179,7 @@ export function retryableLazy<Props extends object>(
       begin(attemptForMount()).catch(() => undefined);
     },
     reset() {
-      if (current.failedAt !== null) current = createAttempt();
+      if (current.failedAt !== null && !staleBuild.isStale()) current = createAttempt();
     },
   };
 }

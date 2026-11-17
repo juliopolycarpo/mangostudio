@@ -1,5 +1,6 @@
 import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
 import { MAX_TOOL_ITERATIONS_DEFAULT } from '@mangostudio/shared/app-settings';
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { appendMergedMessagePart, mergeMessageParts } from '@mangostudio/shared/generation';
 import type {
   ContinuationReasonCode,
@@ -10,6 +11,10 @@ import type {
 import type { Kysely } from 'kysely';
 
 import type { Database } from '../../../db/types';
+import {
+  environmentUnavailableText,
+  isEnvironmentUnavailable,
+} from '../../../lib/environment-unavailable';
 import { getErrorCode } from '../../../lib/error-code';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import {
@@ -1118,9 +1123,13 @@ export async function* finalizeTurnError(
     return;
   }
 
-  const message = error instanceof Error ? error.message : 'Stream generation failed';
-  const code = getErrorCode(error);
-  streamTextTurnLogger.error('turn_failed', { chatId, message });
+  const rawMessage = error instanceof Error ? error.message : 'Stream generation failed';
+  // An unreachable environment is persisted and streamed with the fixed text the
+  // HTTP routes use; the diagnostic (paths, usernames) stays in the hub log.
+  const unavailable = isEnvironmentUnavailable(error) ? error : undefined;
+  const message = unavailable ? environmentUnavailableText(unavailable) : rawMessage;
+  const code = unavailable ? ERROR_CODES.PROVIDER_ERROR : getErrorCode(error);
+  streamTextTurnLogger.error('turn_failed', { chatId, message: rawMessage });
 
   if (!executionState.durableProviderState) {
     await db

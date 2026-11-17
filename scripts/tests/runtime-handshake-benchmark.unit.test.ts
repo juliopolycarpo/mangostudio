@@ -90,6 +90,8 @@ await Bun.write(join(root, 'version-home'), process.env.HOME);
 await Bun.write(join(root, 'stall-reached'), String(process.pid));
 while (!(await Bun.file(join(root, 'cancel-now')).exists())) await Bun.sleep(5);
 const benchmarkPid = Number(await Bun.file(join(root, 'benchmark-pid')).text());
+// pid 0 is this fixture's own group and -1 everyone: refuse them before signalling.
+if (!Number.isSafeInteger(benchmarkPid) || benchmarkPid < 2) throw new Error('expected benchmark pid > 1 | received: ' + benchmarkPid);
 process.kill(benchmarkPid, 'SIGTERM');
 while (!(await Bun.file(join(root, 'finish-now')).exists())) await Bun.sleep(5);
 `

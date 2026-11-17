@@ -920,13 +920,22 @@ export function createExternalSessionManager(
       // Concurrently: each close can spend the full call timeout on a runtime
       // that stopped answering, and serializing them would add that to shutdown
       // once per chat while later vendor processes have not been asked to stop.
-      await Promise.all(
+      // Settled, not raced: a reap that rejects must not return control while the
+      // others still run, because shutdown closes the database right after this.
+      const results = await Promise.allSettled(
         // Shutdown keeps continuation: the vendor conversation is still the one
         // this chat resumes when the hub comes back.
         [...new Set([...sessions.keys(), ...holds.keys()])].map((chatId) =>
           reap(chatId, reason, true, false, shutdownCloseWaitMs)
         )
       );
+      const failures = results.flatMap((result) =>
+        result.status === 'rejected' ? [result.reason as unknown] : []
+      );
+      if (failures.length === 1) throw failures[0];
+      if (failures.length > 1) {
+        throw new AggregateError(failures, 'Several external session reaps failed at shutdown.');
+      }
     },
 
     liveSessionCount() {

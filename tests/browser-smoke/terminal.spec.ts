@@ -164,3 +164,47 @@ test('terminal session survives renderer fallback, remounts and pop-out takeover
   });
   expect(consoleErrors).toEqual([]);
 });
+
+/**
+ * The xterm chunk loads when a session is first shown. If it cannot be
+ * fetched, the failure stays in the panel with Retry; before, it replaced the
+ * whole page with "MangoStudio could not finish loading".
+ */
+test('a terminal chunk that cannot be fetched fails in the panel and recovers on retry', async ({
+  page,
+}) => {
+  test.setTimeout(90_000);
+  const terminalChunk = /\/assets\/chunk-TerminalView-[^/]*\.js$/;
+  await page.route(terminalChunk, (route) => route.abort('failed'));
+
+  await page.goto('/');
+  await dismissWorkdirPicker(page);
+  const railButton = page.getByRole('button', { name: 'Show Terminal panel' });
+  if (!(await railButton.isVisible())) {
+    await page.getByTestId('sidebar-new-chat').click();
+    await dismissWorkdirPicker(page);
+  }
+  await expect(railButton).toBeVisible({ timeout: 15_000 });
+  if ((await railButton.getAttribute('aria-pressed')) !== 'true') await railButton.click();
+  const opened = page.waitForResponse(
+    (response) =>
+      response.url().endsWith('/api/terminals') && response.request().method() === 'POST'
+  );
+  await page.getByRole('button', { name: 'New terminal' }).click();
+  // The session is opened server-side whether or not its view loads; close it
+  // when the test ends so no pty is left running behind the suite.
+  const { session } = (await (await opened).json()) as { session: { id: string } };
+
+  try {
+    const failure = page.getByTestId('lazy-chunk-failure');
+    await expect(failure).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('sidebar-new-chat')).toBeVisible();
+    await expect(page.getByText('MangoStudio could not finish loading')).toHaveCount(0);
+
+    await page.unroute(terminalChunk);
+    await failure.getByRole('button', { name: 'Retry' }).click();
+    await expect(page.getByTestId('terminal-view')).toBeVisible({ timeout: 30_000 });
+  } finally {
+    await page.request.delete(`/api/terminals/${session.id}`);
+  }
+});

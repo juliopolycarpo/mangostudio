@@ -15,6 +15,7 @@ import {
   SIGNALS_LOG,
   waitFor,
 } from '../../tests/support/process-tree';
+import { signalPid } from '../../tests/support/signal-pid';
 import { captureFixtureCommand } from '../testing/capture-process';
 import { runCapture } from './support';
 
@@ -95,12 +96,12 @@ describe('QA captured subprocess ownership', () => {
           `expected captured child and grandchild PIDs | received: ${JSON.stringify([child, grandchild])}`
         );
       }
-      process.kill(child, 'SIGSTOP');
+      signalPid(child, 'SIGSTOP');
       try {
         await waitFor(() => readProcessState(child) === 'T', 10_000);
         expect(readProcessState(child), `state of stopped child ${child}`).toBe('T');
         // The stopped parent cannot reap the grandchild while the census runs.
-        process.kill(grandchild, 'SIGKILL');
+        signalPid(grandchild, 'SIGKILL');
         await waitFor(() => readProcessState(grandchild) === 'Z', 10_000);
         expect(readProcessState(grandchild), `state of captured grandchild ${grandchild}`).toBe(
           'Z'
@@ -108,7 +109,7 @@ describe('QA captured subprocess ownership', () => {
         await expectNoLiveProcesses([grandchild]);
         expect(isAlive(child), `expected stopped parent ${child} to remain live`).toBe(true);
       } finally {
-        process.kill(child, 'SIGCONT');
+        signalPid(child, 'SIGCONT');
       }
     },
     PROCESS_TEST_TIMEOUT_MS

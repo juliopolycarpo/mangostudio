@@ -29,6 +29,7 @@ import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs
 import { join } from 'node:path';
 
 import { runCommand, runParallel, type RunResult } from '../../lib/exec';
+import { assertSignalablePid, parsePidText } from './signal-pid';
 
 const FIXTURE = import.meta.path;
 
@@ -125,7 +126,7 @@ export function findGuardianPids(runnerPid: number): number[] {
   for (const row of table) {
     const [pid, ppid, ...command] = row.trim().split(/\s+/);
     if (Number(ppid) === runnerPid && command.join(' ').includes('runner-guardian.ts')) {
-      pids.push(Number(pid));
+      pids.push(parsePidText(pid ?? ''));
     }
   }
   return pids;
@@ -158,8 +159,12 @@ export function readReadyPids(dir: string): ReadyPids | undefined {
   }
 }
 
-/** Kills a pid and ignores that it may already be gone (test cleanup only). */
+/**
+ * Kills a pid and ignores that it may already be gone (test cleanup only). A pid that is not
+ * above 1 throws instead: it would signal the caller's own group or every process.
+ */
 export function forceKill(pid: number): void {
+  assertSignalablePid(pid);
   try {
     process.kill(pid, 'SIGKILL');
   } catch {
@@ -171,8 +176,9 @@ export function forceKill(pid: number): void {
 export function readGrandchildPid(dir: string): number | undefined {
   const file = join(dir, GRANDCHILD_UP);
   if (!existsSync(file)) return undefined;
-  const pid = Number(readFileSync(file, 'utf8'));
-  return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+  // The fake writes the file in two steps, so an empty read means "not yet", not pid 0.
+  const raw = readFileSync(file, 'utf8');
+  return raw === '' ? undefined : parsePidText(raw);
 }
 
 /** Every worker pid that logged a start, for cleanup after a failed test. */
@@ -180,15 +186,19 @@ export function readWorkerPids(dir: string): number[] {
   const file = join(dir, WORKERS_LOG);
   if (!existsSync(file)) return [];
   const pids: number[] = [];
-  for (const line of readFileSync(file, 'utf8').split('\n')) {
+  // Only whole lines count: the last piece after the final newline may be a line still being written.
+  const lines = readFileSync(file, 'utf8').split('\n');
+  lines.pop();
+  for (const line of lines) {
     const [, event, pid] = line.split(' ');
-    if (event === 'start' && pid) pids.push(Number(pid));
+    if (event === 'start') pids.push(parsePidText(pid ?? ''));
   }
   return pids;
 }
 
 /** Kills a whole process group (POSIX only); a missing group is the wanted state. */
 export function forceKillGroup(pid: number): void {
+  assertSignalablePid(pid);
   try {
     process.kill(-pid, 'SIGKILL');
   } catch {

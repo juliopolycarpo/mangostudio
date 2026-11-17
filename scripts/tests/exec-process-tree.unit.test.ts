@@ -25,6 +25,7 @@ import {
   waitFor,
   WORKERS_LOG,
 } from './support/process-tree';
+import { signalPid, signalPidGroup } from './support/signal-pid';
 
 // A cancelled runner has to take everything it started with it. These tests run
 // the fakes from `support/process-tree.ts` as real processes and look at which
@@ -240,13 +241,13 @@ describe('cancelling a runner', () => {
   test.skipIf(IS_WINDOWS)('counts a stopped parent and excludes its unreaped zombie', async () => {
     startRunner();
     const { child, grandchild } = await readyPids();
-    process.kill(child, 'SIGSTOP');
+    signalPid(child, 'SIGSTOP');
     try {
       await waitFor(() => readProcessState(child) === 'T', READY_TIMEOUT_MS);
       expectValue(`state of stopped child ${child}`, 'T', readProcessState(child));
 
       // Hold the parent stopped so the kernel retains the exited child's state.
-      process.kill(grandchild, 'SIGKILL');
+      signalPid(grandchild, 'SIGKILL');
       await waitFor(() => readProcessState(grandchild) === 'Z', READY_TIMEOUT_MS);
       expectValue(`state of unreaped grandchild ${grandchild}`, 'Z', readProcessState(grandchild));
 
@@ -254,7 +255,7 @@ describe('cancelling a runner', () => {
       expectValue('live fixture grandchild PIDs', '', liveGrandchildren.join(','));
       expectValue(`stopped fixture parent ${child} is alive`, true, isAlive(child));
     } finally {
-      process.kill(child, 'SIGCONT');
+      signalPid(child, 'SIGCONT');
     }
   });
 
@@ -437,7 +438,7 @@ describe('cancelling a runner', () => {
       const runner = startRunner([], true);
       const pids = await readyPids();
 
-      process.kill(-runner.pid, 'SIGINT');
+      signalPidGroup(runner.pid, 'SIGINT');
       await runner.exited;
       await expectNothingLeft(pids);
 
@@ -463,7 +464,7 @@ describe('cancelling a runner', () => {
       });
       const pids = await readyPids();
 
-      process.kill(-runner.pid, 'SIGINT');
+      signalPidGroup(runner.pid, 'SIGINT');
       await runner.exited;
       await expectNothingLeft(pids);
 
@@ -579,7 +580,7 @@ describe.skipIf(IS_WINDOWS)('SIGKILL of the runner', () => {
     await readyPids();
     const guardian = await guardianOf(runner);
 
-    for (const name of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.kill(guardian, name);
+    for (const name of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) signalPid(guardian, name);
     await Bun.sleep(300);
 
     expectGuarded('guardian running after SIGINT, SIGTERM and SIGHUP', true, isAlive(guardian));

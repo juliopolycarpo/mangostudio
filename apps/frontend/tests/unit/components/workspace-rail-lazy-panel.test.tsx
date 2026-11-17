@@ -83,6 +83,13 @@ describe('WorkspaceRail lazy panel bodies', () => {
 
     expect(await screen.findByTestId('git-panel-content')).toHaveTextContent('chat-1');
     expect(screen.queryByTestId('lazy-chunk-failure')).not.toBeInTheDocument();
+    // The rail's Suspense sits outside the boundary; focus must still land in the panel region.
+    expect(
+      document.activeElement,
+      `expected focus in the panel region after Retry | received: ${
+        document.activeElement?.tagName ?? 'nothing'
+      }`
+    ).toBe(screen.getByTestId('lazy-chunk-region'));
   });
 
   it('starts a panel chunk when the pointer reaches its dock button, before the click', async () => {

@@ -14,16 +14,17 @@ import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
 import { readText } from './support/read-text';
+import { assertSignalablePid, signalPid } from './support/signal-pid';
 
 const scratchRoots: string[] = [];
 const spawnedServers = new Set<number>();
 
 afterEach(() => {
-  for (const pid of spawnedServers) {
-    if (isAlive(pid)) process.kill(pid, 'SIGKILL');
-  }
-  spawnedServers.clear();
   for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+  const pids = [...spawnedServers];
+  spawnedServers.clear();
+  // signalPid refuses pid 0 (this test's own group) and 1: `isAlive(0)` is true.
+  for (const pid of pids) if (isAlive(pid)) signalPid(pid, 'SIGKILL');
 });
 
 function isAlive(pid: number): boolean {
@@ -135,7 +136,7 @@ describe('test-build foreground server cleanup', () => {
       const startup = events.find(({ event }) => event === 'startup');
       expect(startup, `${stdout}${stderr}`).toBeDefined();
       if (!startup) throw new Error(`Expected the fake hub to start; output: ${stdout}${stderr}`);
-      spawnedServers.add(startup.pid);
+      spawnedServers.add(assertSignalablePid(startup.pid));
       expect(code, `${stdout}${stderr}`).toBe(1);
       expect(stderr).toContain('/api/health content-type is not JSON');
       // An assertion verdict names itself; a stack would bury it in the CI log.

@@ -13,6 +13,7 @@ import type { ApiErrorResponse } from '@mangostudio/shared/errors';
 import { Elysia, t } from 'elysia';
 
 import { getDb } from '../../../db/database';
+import { environmentUnavailableResponse } from '../../../lib/environment-unavailable';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
   createAgentProfile,
@@ -32,6 +33,9 @@ function handleAgentSettingsError(
     set.status = error.status;
     return { error: error.message, code: error.code };
   }
+
+  const unavailable = environmentUnavailableResponse(error, set);
+  if (unavailable) return unavailable;
 
   set.status = 500;
   return { error: 'Unexpected agent settings error.', code: 'INTERNAL' };
