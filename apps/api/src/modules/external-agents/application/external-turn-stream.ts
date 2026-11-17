@@ -35,6 +35,7 @@ import {
 import type { Kysely } from 'kysely';
 
 import type { Database } from '../../../db/types';
+import { SSE_KEEPALIVE_FRAME, SSE_KEEPALIVE_INTERVAL_MS } from '../../../lib/hub-connection-limits';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import type {
   ExternalAgentAttachmentRefusal,
@@ -47,7 +48,6 @@ import {
 import { ChatAttachmentNotFoundError } from '../../attachments/infrastructure/attachment-repository';
 import { getOwnedChat, type OwnedChatRecord } from '../../chats/infrastructure/chat-repository';
 import { findActiveTurnByChat } from '../../generation/application/active-turn-registry';
-import { KEEPALIVE_INTERVAL_MS } from '../../generation/application/sse-keepalive';
 import { getRepoRoot } from '../../git/application/git-status-service';
 import { openFailureCodeFor, openRefusalFor } from '../domain/external-open-refusal';
 import { turnErrorRemedyFor } from '../domain/external-turn-error-remedy';
@@ -64,8 +64,6 @@ import {
 import { requiresWorkspaceTrust } from './external-workspace-trust';
 
 const logger = createDiagnosticLogger('external-turn-stream');
-
-const KEEPALIVE_BYTES = new TextEncoder().encode(': keepalive\n\n');
 
 function sseEvent(data: object): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
@@ -525,7 +523,7 @@ function openStream(
       };
       const send = (chunk: StreamChunk) => enqueue(sseEvent(chunk));
 
-      const heartbeat = setInterval(() => enqueue(KEEPALIVE_BYTES), KEEPALIVE_INTERVAL_MS);
+      const heartbeat = setInterval(() => enqueue(SSE_KEEPALIVE_FRAME), SSE_KEEPALIVE_INTERVAL_MS);
 
       try {
         const result = await controller.start(

@@ -6,7 +6,8 @@ import type {
   GenerateImageResponse,
   RespondStreamBody,
 } from '@mangostudio/shared/generation';
-import type { StreamChunk } from '@mangostudio/shared/streaming';
+import { SSE_FRAME_MAX_CHARS, type StreamChunk } from '@mangostudio/shared/streaming';
+import { DelimitedTextSplitter } from '@mangostudio/shared/utils/delimited-text-splitter';
 
 import { getApiBaseUrl } from '../lib/api-base-url';
 import { client } from '../lib/api-client';
@@ -158,18 +159,20 @@ async function postStream(
   if (!response.body) throw new ApiError(null);
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
-  let buffer = '';
+  // A line over the cap makes `push` (or `finish`, after the last read) throw,
+  // so the call rejects like any other failed read. A final line without its
+  // `\n` is never delivered.
+  const splitter = new DelimitedTextSplitter('\n', {
+    maxRecordLength: SSE_FRAME_MAX_CHARS,
+    onOverflow: 'refuse',
+  });
 
   try {
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-
-      for (const line of lines) {
+      for (const line of splitter.push(decoder.decode(value, { stream: true }))) {
         if (line.startsWith('data: ')) {
           let chunk: StreamChunk;
           try {
@@ -182,6 +185,10 @@ async function postStream(
         }
       }
     }
+    // Raises a refusal that came with the last read's lines, which `push` held
+    // back to return them. The caller must not report success for a body whose
+    // last line was dropped; the unterminated line `finish` returns is discarded.
+    splitter.finish();
   } finally {
     reader.releaseLock();
   }

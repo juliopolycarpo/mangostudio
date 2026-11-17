@@ -107,4 +107,20 @@ describe('workspace panel registry', () => {
 
     expect(panels.map(({ id }) => id)).toEqual([]);
   });
+
+  // The registry is imported by the command palette and the chat page, so a
+  // panel whose body is bundled here ships to every authenticated route. These
+  // three load on first use; the terminal body is already a lazy view of its own.
+  it('loads the Git, GitHub and Todo bodies on first use, with a way to warm and reset each', () => {
+    const lazyIds = WORKSPACE_PANEL_REGISTRY.filter(({ lazyBody }) => lazyBody !== undefined).map(
+      ({ id }) => id
+    );
+
+    expect(lazyIds.sort()).toEqual(['git', 'github', 'todos']);
+    for (const panel of WORKSPACE_PANEL_REGISTRY) {
+      if (panel.lazyBody === undefined) continue;
+      expect(typeof panel.lazyBody.preload).toBe('function');
+      expect(typeof panel.lazyBody.reset).toBe('function');
+    }
+  });
 });

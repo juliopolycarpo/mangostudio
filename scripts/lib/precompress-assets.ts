@@ -13,10 +13,19 @@
  * neither wants sidecars.
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
-import { brotliCompressSync, constants } from 'node:zlib';
+import { brotliCompressSync, brotliDecompressSync, constants, gunzipSync } from 'node:zlib';
 
+import { contentEtag } from '@mangostudio/api/internal/lib/http-cache';
 import { distFilePath } from '@mangostudio/shared/utils/dist-files';
 
 /** Codings a variant can be stored in. Order is the server's tie-break preference. */
@@ -57,6 +66,7 @@ const MIN_SAVING_RATIO = 0.05;
  */
 const GZIP_LEVEL = 9;
 const BROTLI_QUALITY = 11;
+const BROTLI_MODE = constants.BROTLI_MODE_GENERIC;
 
 export interface PrecompressedVariant {
   /** URL path of the identity file this variant encodes ('/assets/main-x.js'). */
@@ -65,6 +75,12 @@ export interface PrecompressedVariant {
   /** Absolute path of the stored variant. */
   filePath: string;
   originalBytes: number;
+  /**
+   * The strong `ETag` an identity response of the original bytes carries, spelled by the
+   * server's own `contentEtag`. The manifest records it for a file whose identity copy is
+   * left out, so the server can answer a conditional request without inflating.
+   */
+  originalEtag: string;
   compressedBytes: number;
 }
 
@@ -82,7 +98,7 @@ export function compress(coding: VariantCoding, bytes: Uint8Array<ArrayBuffer>):
   // out-of-range quality without complaint: this is not validated for us.
   return brotliCompressSync(bytes, {
     params: {
-      [constants.BROTLI_PARAM_MODE]: constants.BROTLI_MODE_GENERIC,
+      [constants.BROTLI_PARAM_MODE]: BROTLI_MODE,
       [constants.BROTLI_PARAM_QUALITY]: BROTLI_QUALITY,
       [constants.BROTLI_PARAM_SIZE_HINT]: bytes.byteLength,
     },
@@ -111,14 +127,23 @@ export function isWorthwhile(originalBytes: number, compressedBytes: number): bo
 export function writePrecompressedVariants(
   distDir: string,
   variantsDir: string,
-  urlPaths: readonly string[]
+  urlPaths: readonly string[],
+  options: PrecompressOptions = {}
 ): PrecompressedVariant[] {
+  const { cacheDir, compressor = compress } = options;
+  const usedCacheKeys = new Set<string>();
   const variants: PrecompressedVariant[] = [];
   for (const urlPath of urlPaths) {
     if (!isCompressible(urlPath)) continue;
     const original = new Uint8Array(readFileSync(distFilePath(distDir, urlPath)));
+    // Same verdict `isWorthwhile` would give, reached before compressing, so a
+    // tiny file costs neither a compressor call nor a cache entry.
+    if (original.byteLength < MIN_INPUT_BYTES) continue;
+    const originalEtag = contentEtag(original);
     for (const coding of VARIANT_CODINGS) {
-      const compressed = compress(coding, original);
+      const compressed = cacheDir
+        ? compressThroughCache(cacheDir, coding, original, urlPath, compressor, usedCacheKeys)
+        : compressVerified(coding, original, urlPath, compressor);
       if (!isWorthwhile(original.byteLength, compressed.byteLength)) continue;
       const filePath = distFilePath(
         join(variantsDir, coding),
@@ -131,9 +156,132 @@ export function writePrecompressedVariants(
         coding,
         filePath,
         originalBytes: original.byteLength,
+        originalEtag,
         compressedBytes: compressed.byteLength,
       });
     }
   }
+  if (cacheDir) pruneCache(cacheDir, usedCacheKeys);
   return variants;
+}
+
+export interface PrecompressOptions {
+  /**
+   * A directory that outlives the build, holding compressed output by content
+   * hash. Brotli 11 on the bundle is ~11 s, and an unchanged file compresses to
+   * the same bytes, so a rebuild reads the copy back instead of redoing it.
+   * Unset: every file is compressed every time.
+   */
+  cacheDir?: string;
+  /** The compressor, replaceable so a test can count calls. Defaults to {@link compress}. */
+  compressor?: (coding: VariantCoding, bytes: Uint8Array<ArrayBuffer>) => Uint8Array;
+}
+
+/**
+ * The cache key for one (coding, bytes) pair. It names everything the output
+ * is a function of: the coding, every encoder parameter {@link compress} sets
+ * (built from the same constants, so changing one retires old entries), and the
+ * Bun build that ships the zlib and Brotli code (an upgrade can change the
+ * bytes), then the input.
+ */
+function cacheKey(coding: VariantCoding, bytes: Uint8Array): string {
+  const parameters =
+    coding === 'gzip'
+      ? `level=${GZIP_LEVEL}`
+      : `quality=${BROTLI_QUALITY},mode=${BROTLI_MODE},sizeHint=input`;
+  const hasher = new Bun.CryptoHasher('sha256');
+  hasher.update(`${coding}:${parameters}:${Bun.revision}\0`);
+  hasher.update(bytes);
+  return `${coding}-${hasher.digest('hex')}`;
+}
+
+/** True when `compressed` decodes back to exactly `original`. */
+function roundTrips(coding: VariantCoding, compressed: Uint8Array, original: Uint8Array): boolean {
+  try {
+    const decoded = coding === 'gzip' ? gunzipSync(compressed) : brotliDecompressSync(compressed);
+    return Buffer.compare(decoded, original) === 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Compresses `original` and proves the output decodes back to it, so a broken
+ * copy fails the build here and not a request later. The server inflates the
+ * gzip copy of a hashed asset in place of identity bytes, and a Brotli copy is
+ * what browsers receive, so neither can be trusted unchecked.
+ *
+ * Runs on every fresh compression, cached or not; a cache hit is verified on
+ * read instead (see {@link compressThroughCache}).
+ */
+function compressVerified(
+  coding: VariantCoding,
+  original: Uint8Array<ArrayBuffer>,
+  urlPath: string,
+  compressor: NonNullable<PrecompressOptions['compressor']>
+): Uint8Array {
+  const compressed = compressor(coding, original);
+  if (!roundTrips(coding, compressed, original)) {
+    throw new Error(
+      `precompress ${urlPath}: the ${coding} copy (${compressed.byteLength} bytes) does not ` +
+        `decode back to the ${original.byteLength} original bytes; refusing to embed it`
+    );
+  }
+  return compressed;
+}
+
+/**
+ * Returns the cached copy of `original` as `coding`, compressing and storing it
+ * on a miss.
+ *
+ * A hit is trusted only after it decodes back to the input. The key already
+ * says what the entry should contain; the decode answers the other question,
+ * whether the file on disk still does (a truncated write, bit rot, a hand
+ * edit), and a bad entry would ship a broken asset inside the binary. It needs
+ * no sidecar to go stale, and costs tens of milliseconds for the whole bundle
+ * against seconds of Brotli. A stored output hash would be a little cheaper
+ * and prove less: it would catch damage to the file but not a wrong entry.
+ */
+function compressThroughCache(
+  cacheDir: string,
+  coding: VariantCoding,
+  original: Uint8Array<ArrayBuffer>,
+  urlPath: string,
+  compressor: NonNullable<PrecompressOptions['compressor']>,
+  usedKeys: Set<string>
+): Uint8Array {
+  const key = cacheKey(coding, original);
+  usedKeys.add(key);
+  const cachedPath = join(cacheDir, key);
+  const cached = readCachedEntry(cachedPath);
+  if (cached && roundTrips(coding, cached, original)) return cached;
+  // Verified before it is stored, so a bad output never becomes a cache entry.
+  const compressed = compressVerified(coding, original, urlPath, compressor);
+  mkdirSync(cacheDir, { recursive: true });
+  // Written under a temporary name and renamed, so an interrupted build never
+  // leaves a half-written entry under the real key.
+  const pendingPath = `${cachedPath}.${process.pid}.tmp`;
+  writeFileSync(pendingPath, compressed);
+  renameSync(pendingPath, cachedPath);
+  return compressed;
+}
+
+/** The stored bytes, or `undefined` when there is no readable entry (a miss, not an error). */
+function readCachedEntry(cachedPath: string): Uint8Array | undefined {
+  try {
+    return new Uint8Array(readFileSync(cachedPath));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Drops entries this build did not use, so the cache holds one build's worth,
+ * not every build's. Also sweeps `.tmp` files an interrupted build left behind.
+ */
+function pruneCache(cacheDir: string, usedKeys: ReadonlySet<string>): void {
+  if (!existsSync(cacheDir)) return;
+  for (const name of readdirSync(cacheDir)) {
+    if (!usedKeys.has(name)) rmSync(join(cacheDir, name), { force: true });
+  }
 }

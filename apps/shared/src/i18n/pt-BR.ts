@@ -2918,6 +2918,8 @@ export const messages = {
           },
         },
         streamEnded: 'A conexão caiu antes da atualização terminar.',
+        streamFrameTooLong:
+          'A saída da atualização tem uma linha longa demais para exibir, então foi interrompida.',
       },
     },
     // Nomes próprios de produtos — iguais em todos os idiomas, mas centralizados
@@ -3687,6 +3689,8 @@ export const messages = {
       linesDropped: '{count} linhas antigas foram descartadas.',
       startError: 'Não foi possível iniciar a instalação.',
       streamError: 'A conexão com o console de instalação caiu.',
+      streamFrameTooLong:
+        'A saída da instalação tem uma linha longa demais para exibir, então foi interrompida.',
       reconnecting: 'Reconectando ao console…',
       unsupported: 'Esta instalação não é suportada nesta plataforma.',
       missingRequirements: 'Instale antes: {requirements}',
@@ -4235,6 +4239,11 @@ export const messages = {
       title: 'Página não encontrada',
       hint: 'O link pode estar errado, ou a página pode ter mudado de lugar.',
       home: 'Voltar ao MangoStudio',
+    },
+    lazyChunk: {
+      title: 'Não foi possível carregar este painel',
+      hint: 'A conexão pode ter caído, ou o MangoStudio foi atualizado com esta aba aberta. Tente de novo ou recarregue a página.',
+      reload: 'Recarregar a página',
     },
     bootstrap: {
       title: 'O MangoStudio não conseguiu terminar de carregar',

@@ -15,6 +15,107 @@ The `jsonschema`, `jsonschema-regex`, `jsonschema-value`, `referencing`, and `fa
 use `opt-level = "s"`. The measurements below predate those overrides. The stripped Linux x64
 comparison and validator replay are recorded in [#2126](https://github.com/juliopolycarpo/mangostudio/pull/2126).
 
+### Size-optimised dependencies
+
+Twenty-eight more packages build with `opt-level = "s"`: the MCP, HTTP, TLS and WebSocket clients
+(`rmcp`, `reqwest`, `hyper`, `hyper-util`, `rustls`, `rustls-webpki`, `tungstenite`,
+`tokio-tungstenite`, `sse-stream`), URL, TOML, collation and time parsing, the three external-agent
+adapters and their protocol schema, the runtime contract, `cap-std` and
+`cap-primitives`, `globset`, and the regex engine crates (`aho-corasick`, `regex-automata`,
+`regex-syntax`). The packages that run per request or per line stay at 3: `mangostudio-runtime`,
+`mango-external-agents`, `mango-protocol`, `memchr`, `serde_json`, `tokio`, and QuickJS (`rquickjs-sys`, C built by
+cc-rs, which reads its optimisation level from the package profile, so `s` there would compile the
+regex engine `fs.grep` runs with `-Os`). `crates/mangostudio-runtime/tests/it/release_profile.rs`
+pins both lists.
+
+Three things were measured and rejected, so the list stops here:
+
+- `mangostudio-runtime` itself at `s` takes the stripped binary from 23.8 MB to 19.4 MB, and
+  `fs.grep` over 1,000 files slows by 7% (paired median +7.2 ms on 106 ms, 6 of 41 pairs faster).
+  Its per-file work is in that crate. A `[profile.release.package.mangostudio-runtime]` table also
+  left the symbol table in the stripped binary (+5.4 MB), so the test refuses that table.
+- `mango-protocol` at `s` takes the stripped binary from 23.8 MB to 22.3 MB, but still slows the
+  large-answer and per-request paths after large results stopped being copied. Against a build with
+  the package at 3, over two series of 61 runs each: an `fs.list-directory` over 120,000 entries
+  +7% (+22.0 and +19.5 ms on about 300 ms, 5 and 7 pairs faster), a 50,000-entry `fs.glob`
+  +3.9% and +2.9%, 2,000 `runtime.health` round trips +1.1% and +2.2%, and the event mapping of
+  `text_4096` and `reasoning_4096` in the external-agent boundary benchmark +4% (about 9 ns).
+- `aho-corasick`, `regex-automata` and `regex-syntax` at `s` cost nothing measurable on `fs.grep`
+  (the prefilter and the pattern analysis use them), so they stay on the list.
+
+Linux x64, glibc, `cargo build --release --locked -p mangostudio-runtime`, stripped:
+
+| Build              | Stripped bytes | vs. main |
+| ------------------ | -------------: | -------: |
+| main               |     26,763,512 |        — |
+| 28 packages at `s` |     23,790,136 |   −11.1% |
+
+`fs.grep`, median ms, 61 interleaved runs per binary (`scripts/bench/grep.ts`, binaries pinned
+to eight CPUs, one fixture build per run, host load 0.3 to 1.5), default pattern:
+
+| Scenario   |  main | 28 packages at `s` | paired median delta (pairs where `s` was faster) |
+| ---------- | ----: | -----------------: | ------------------------------------------------ |
+| files-100  |   9.9 |               10.0 | +0.1 ms (29 of 61)                               |
+| files-1000 | 104.1 |              103.1 | -1.0 ms (35 of 61)                               |
+| large-file |  29.4 |               29.6 | +0.2 ms (28 of 61)                               |
+
+`fs.glob` and the protocol round trip (`scripts/bench/runtime-requests.ts`, 61 interleaved runs per
+binary, eight pinned CPUs, one fresh runtime per run, host load 1 to 6). A run times a fixed batch;
+the paired delta is 28 packages at `s` minus main per run:
+
+| Scenario (batch)                                   |  main | 28 at `s` | paired median delta (pairs where `s` was faster) |
+| -------------------------------------------------- | ----: | --------: | ------------------------------------------------ |
+| `glob-patterns` (16 patterns over 20,000 files)    | 505.1 |     510.7 | -0.4 ms (62 of 121)                              |
+| `glob-large-list` (`**/*` over 50,000 files)       | 140.1 |     138.4 | -0.7 ms (33 of 61)                               |
+| `rpc-small` (2,000 `runtime.health`)               | 1,460 |     1,429 | -22.7 ms (42 of 61)                              |
+| `rpc-small-read` (1,000 `fs.read-file`, 1 KiB)     | 408.5 |     407.6 | -4.4 ms (34 of 61)                               |
+| `rpc-large-params` (5 `fs.write-file`, 8 MiB each) | 883.5 |     882.5 | +1.3 ms (29 of 61)                               |
+
+External-agent boundary (`scripts/bench/external-agent-boundary.ts`, 31 fresh processes per case and
+side, lto off, 16 CGUs): the 19 case medians differ by -6% to +5% and the sign flips between repeated
+series for every case but one. `fingerprint_ordinary` is slower by 65 ns on 1,740 ns (26 of 31
+pairs) in every series; no moved package is on its path (`serde_json` and `sha2` over a runtime
+type), so it is not attributed to the list.
+
+The tables above predate the large-result copy removal and were measured against `f0ba7cc99`.
+Re-measured against `5c0e2f72f` with the same 28 packages (two series of 61 runs, paired median
+delta in ms, pairs where `s` was faster in parentheses; boundary cases 101 samples):
+
+| Scenario                                    |           series 1 |           series 2 |
+| ------------------------------------------- | -----------------: | -----------------: |
+| `fs.list-directory`, 120,000 entries (~300) |     -6.0 (36 / 61) |     +0.7 (27 / 61) |
+| `glob-large-list` (~105)                    |     +0.2 (30 / 61) |     +0.7 (29 / 61) |
+| `rpc-small` (~1,385)                        |    +13.2 (23 / 61) |     -0.9 (31 / 61) |
+| `text_4096` boundary (~231 ns)              | +3.7 ns (21 / 101) | +4.2 ns (12 / 101) |
+| `reasoning_4096` boundary (~230 ns)         | +4.4 ns (11 / 101) | +4.8 ns (21 / 101) |
+| `remote_error` boundary (~848 ns)           | +2.6 ns (44 / 101) | +0.2 ns (50 / 101) |
+
+The two event-mapping cases are 4 ns slower (1.6% to 2.1%) in both series. They run in
+`mangostudio-runtime` and `mango-external-agents`, both at 3, and the same cases were 4% to 5%
+faster in the earlier comparison, so I read this as code layout and not as a cost of the list.
+
+Patterns that always enter QuickJS (no required literal, or the literal on every line) differ by
+−1.4% to −0.5% across 41 runs, inside the paired spread of ±25 to ±60 ms. `hello` (40.2 vs
+40.4 ms) and five `fs.list-directory` calls over 20,000 entries (158.9 vs 157.1 ms median per call)
+are unchanged. To compare a change to the list, build both revisions and run the bench on the
+binaries:
+
+```sh
+CARGO_TARGET_DIR=target/main cargo build --release --locked -p mangostudio-runtime   # on main
+CARGO_TARGET_DIR=target/head cargo build --release --locked -p mangostudio-runtime   # on the branch
+bun run scripts/bench/grep.ts main=target/main/release/mangostudio-runtime \
+  head=target/head/release/mangostudio-runtime --runs 61 --warmup 3 \
+  --scenario files-100,files-1000,large-file --large-mib 16
+bun run scripts/bench/runtime-requests.ts main=target/main/release/mangostudio-runtime \
+  head=target/head/release/mangostudio-runtime --runs 61 --warmup 3
+bun run scripts/bench/runtime-results.ts main=target/main/release/mangostudio-runtime \
+  head=target/head/release/mangostudio-runtime --runs 61 --warmup 3 \
+  --scenario list-directory --entries 120000
+```
+
+For the boundary benchmark, build both libtests as `scripts/README.md` describes. The script keeps
+the sides apart by role, so it also compares two builds of one commit.
+
 Local comparison on linux-x64 (`cargo build --release --locked -p mangostudio-runtime`, a
 full rebuild each time on a shared 28-thread machine with `CARGO_BUILD_JOBS=8`, so treat the
 times as relative):
@@ -130,6 +231,97 @@ The TypeScript runtime's removal is most of the production TS deletions; its beh
 into the Rust production lines, and its compatibility coverage into Rust tests and frozen
 fixtures.
 
+## Hub binary: AOT function order
+
+The shipping hub is compiled with Bun's native `--aot` (see `docs/reference/releasing.md`); the
+bytecode section below is the explicit `--compiler bytecode` fallback. A Linux build that asks for it
+(`--production` or `--require-aot-order`; a plain local, smoke or test build does not) compiles the
+hub twice: once with `--aot-record-order`, then again with `--aot-order=<file>`, where the file is
+what the first binary wrote when it ran a fixed workload.
+
+`--aot-record-order` makes a binary write the order its functions first ran in when it exits with
+`BUN_AOT_ORDER_OUT` set; `--aot-order` lays the next compile out that way, so the code a hub touches
+while starting and serving sits together and the rest is not paged in. The binary is the same size.
+
+Measured with `scripts/bench/hub-footprint.ts`: seven interleaved rounds, a fresh isolated home per
+start, memory read from `/proc/<pid>/status` after 10 s idle and again 3 s after a workload (sign up
+and in, list chats five times, fetch `/` and the largest script as br, gzip and identity). linux-x64
+glibc, Bun 1.4.5-canary, production hub with the embedded frontend, binaries on btrfs (on tmpfs the
+executable's pages count as `RssShmem` instead of `RssFile`; the totals match).
+
+| Variant        | Binary size (B) | Idle VmRSS (KB) | Idle range (KB) | After workload (KB) |
+| -------------- | --------------: | --------------: | --------------: | ------------------: |
+| base           |     102,137,608 |          69,296 |   69,056–69,740 |              75,744 |
+| function order |     102,137,608 |          59,404 |   59,072–59,920 |              66,044 |
+
+Idle RSS falls 14.3% and RSS after the workload 12.8%. The host load average was 10 to 18 while this
+ran, so no startup change is claimed: median start to first healthy `/api/health` was 143 ms for the
+base and 152 ms with the order, inside that noise.
+
+The file numbers functions by position, so it only works for the program it came from. One recorded
+from the previous build changed nothing (69.4 MB idle), and Bun says so only in some cases: an empty
+or garbage file prints `warn: --aot-order: <file> is not an order file. Nothing is placed by it`,
+and a missing file is the only build error. Bun does not check the `P <program size>` line or the
+function indexes: a file with a wrong size, or indexes past the end of the program, compiles
+silently and places nothing (tested). So a stale file is prevented, not detected. The build records
+from the binary it is about to ship (`scripts/lib/aot-order.ts`), empties the order directory first,
+checks only the header and that a function was recorded (a line kind it does not know is counted in the log and left to Bun, whose canary may add some), and scans the shipping compile's stderr for Bun's warning: a local
+build warns and ships without an order, a required one fails. Recordings of one binary were
+byte-identical across six runs.
+
+Recording takes the hub through `scripts/lib/hub-workload.ts` in a throwaway home on a loopback port
+under a 120 s deadline. The hub runs with an allowlisted environment (`PATH`, locale, `TZ`, temp
+directories, plus the home and ports the recorder sets; no tokens, proxies, runtime override or
+update check), its state file must name the pid and port the recorder started before the workload
+runs, and a build cancelled by SIGINT, SIGTERM or SIGHUP stops the hub and removes its home. The
+recording binary and its source map (about 120 MB) are deleted after the shipping compile; the order
+file stays in `.mango/aot-order/<platform>/`, its SHA-256 is the `aotOrderSha256` of the hub's compile
+receipt (null when no order was applied), and the release distribution uploads it with the hub.
+
+It adds one extra compile and a run, about 8 s on a loaded host to a hub-only build that takes 15 to
+20 s. If recording fails the build warns and ships the hub without an order (about 10 MB more
+memory); `--require-aot-order` fails the build instead. The distribution build passes it for the
+platforms its `aot_order_platforms` input lists: every platform for a release and for pushes to
+main (daily Canary promotes those bundles), and linux-x64 only on pull requests, the hub their
+release dry run reuses. On those runs the added time is about 5 s measured locally (14 s against 9 s for a plain hub-only build; allow more on a runner) on a Linux hub leg that
+finishes well before the 6 to 12 minute runtime jobs, so the critical path does not move. Bun records
+on Linux only, so macOS and Windows hosts compile once and say so. Of the shipped targets the four
+Linux ones (x64 and arm64, glibc and musl) are built natively and record their own; only linux-x64
+glibc has been measured.
+
+**What the recording covers.** The recording hub has no `mangostudio-runtime` beside it, because
+the hub jobs do not wait for the runtime jobs. The order therefore covers the hub's start-up and
+request paths, and a Local runtime launch that finds no binary. Measured on an installed layout
+(hub with its sibling runtime), idle RSS after 10 s, nine interleaved rounds:
+
+| Order recorded                 |        Idle VmRSS (KB) | After workload (KB) |
+| ------------------------------ | ---------------------: | ------------------: |
+| none                           |                 69,612 |              75,800 |
+| without a runtime (what ships) | 62,024 (61,240–63,020) |              67,920 |
+| with the sibling runtime       | 60,176 (59,908–61,808) |              66,588 |
+
+The no-order row is a single run; the two recorded rows are the nine-round medians. Recording with a
+runtime captured 5,683 functions against 5,526 and saves another 1.3 to 1.9 MB (about 3%) with
+disjoint ranges. Taking it would make the hub jobs wait for the runtime jobs (about 1 to 3 minutes
+on the release critical path) and need the musl runtime inside the Alpine container; that is
+tracked in [#2294](https://github.com/juliopolycarpo/mangostudio/issues/2294).
+
+Reproduce, from a clean checkout of each revision (both builds on one filesystem):
+
+```bash
+bun run build --binary --hub-only --production
+cp .mango/out/linux-x64/mangostudio /path/on/disk/head-hub
+bun run scripts/bench/hub-footprint.ts --rounds 5 --idle-seconds 10 --workload \
+  base=/path/on/disk/base-hub head=/path/on/disk/head-hub
+```
+
+**Not shipped.** `--no-compile-function-source` produced a byte-identical binary: with
+`--sourcemap=external` function source is already `[native code]`. `compile.trim.remove` for
+`webassembly`, `inspector`, `profiler`, `intl-segmenter`, `ffi` and `native-addons` took 5.1 MB
+(5.01%) off the base hub and passed the binary smoke, but it has no effect on memory, is only
+reachable through `Bun.build`, and a removed feature fails with `ERR_FEATURE_REMOVED` at first use
+rather than at build time.
+
 ## Hub binary: bytecode
 
 The hub is not a cargo build, but it ships beside the runtime, so its startup and size are
@@ -152,6 +344,65 @@ median of 15 runs of `scripts/bench/startup.ts`; `--version` is the median of 20
 Every target grows by the same ~17.7 MB of bytecode (`bun build --compile` of the same embed
 entry for the other seven targets). The external `.map` is unchanged in shape, and stack
 traces still resolve to original source lines.
+
+## Hub binary: embedded asset copies
+
+The embedded frontend used to carry an uncompressed copy of every hashed asset next to its gzip
+and Brotli copies. The uncompressed copy is now left out when a gzip copy exists (see
+`docs/architecture/frontend-build.md`), which only a client that accepts neither coding notices:
+browsers send br or gzip, so identity requests come from scripts, health checkers and some
+proxies.
+
+Measured with `scripts/bench/hub-footprint.ts` (seven interleaved rounds, a fresh isolated home per
+start, memory from `/proc/<pid>/status` 10 s after the first healthy `/api/health`, then after the
+request workload and after 1, 10 and 100 more identity requests for the largest script).
+linux-x64 glibc, Bun 1.4.5-canary, production hub, binaries on btrfs. The host load average was 15
+to 112 (other jobs), so no startup change is claimed.
+
+| Hub binary              |    Size (B) | Idle VmRSS (KB) | After workload (KB) | After +1 / +10 / +100 identity requests (KB) |
+| ----------------------- | ----------: | --------------: | ------------------: | -------------------------------------------- |
+| base                    | 102,137,608 |          69,124 |              75,552 | 75,564 / 75,548 / 74,940                     |
+| identity copies dropped |  96,218,888 |          70,184 |              75,672 | 75,684 / 75,524 / 75,572                     |
+
+The binary shrinks 5.8% (5.9 MB; the 113 length and `ETag` records the manifest now carries cost
+16 KB of that). Idle RSS is 1 MB higher at the median with overlapping ranges (68,504–69,364
+against 68,836–70,684 KB), and the footprint after 1, 10 and 100 identity requests for the
+largest script stays flat: the inflated body is cached, not allocated per request. Inflating on
+every request instead, without the cache, took about 10 ms per identity request for the 1.6 MB
+script (4 ms with it) and left the hub 4 MB larger after the same workload.
+
+The cache is sized from the build: the total decoded size of the assets whose identity copy was
+dropped, 5.86 MB today (113 files). That is the most this path can add to the process, reached
+only when identity clients fetch every one of them; a sweep inflates each asset once and the
+second pass inflates nothing. Measured with two full identity sweeps of all 132 hashed `.js` and
+`.css` files (`accept-encoding: identity`, five interleaved rounds, 5 s idle first):
+
+| Hub binary              | Idle VmRSS (KB) | After sweep 1 (KB) | After sweep 2 (KB) | Anon after sweep 1 / file after sweep 1 (KB) |
+| ----------------------- | --------------: | -----------------: | -----------------: | -------------------------------------------- |
+| base                    |          69,704 |             79,272 |             79,224 | 18,376 / 60,900                              |
+| identity copies dropped |          69,620 |             79,264 |             79,248 | 22,980 / 56,188                              |
+
+The sweep costs the same total memory either way: the 4.6 MB the hub now holds as decoded bodies
+is the 4.7 MB of mapped embedded pages it no longer touches, and the second sweep adds nothing.
+
+HEAD and `If-None-Match` for an asset without identity bytes are answered from the length and
+`ETag` the build recorded in the manifest, so neither inflates anything, even on a cold cache. br
+and gzip responses are byte for byte the embedded copies. `Range` is unchanged on the compiled
+hub: Bun slices a stored file, so base answers 206 for identity, gzip and br, and the decoded
+bytes are sliced by the server to give identity the same answers. Measured with a raw HTTP client
+against a base and a head hub, 19 identity requests (single, open-ended, suffix, clamped,
+unsatisfiable, multi-range and malformed `Range`, plus `If-None-Match`, HEAD and `If-Range`)
+gave identical statuses, lengths and headers, and `If-Range` with the strong tag, a weak tag and
+a date gave 206, 200 and 200 on both. gzip and br were identical for six `Range` shapes and HEAD.
+
+Reproduce, from a clean checkout of each revision (both builds on one filesystem):
+
+```bash
+bun run build --binary --hub-only --production
+cp .mango/out/linux-x64/mangostudio /path/on/disk/head-hub
+bun run scripts/bench/hub-footprint.ts --rounds 7 --idle-seconds 10 --workload \
+  --identity-checkpoints 1,10,100 base=/path/on/disk/base-hub head=/path/on/disk/head-hub
+```
 
 ## Build and validation baseline, 2026-10-08
 

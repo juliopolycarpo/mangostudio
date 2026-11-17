@@ -12,6 +12,7 @@ import { type Elysia, t } from 'elysia';
 
 import { getDb } from '../../../db/database';
 import { getErrorCode } from '../../../lib/error-code';
+import { SSE_KEEPALIVE_FRAME, SSE_KEEPALIVE_INTERVAL_MS } from '../../../lib/hub-connection-limits';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
   getProvider,
@@ -51,7 +52,6 @@ import {
   type ResolvedRunnerAgent,
   resolveRunnerAgentProfile,
 } from '../application/resolve-runner-agent';
-import { KEEPALIVE_INTERVAL_MS } from '../application/sse-keepalive';
 import { type StreamEvent, streamTextTurn } from '../application/stream-text-turn';
 import {
   assertTextTurnHasContent,
@@ -70,8 +70,6 @@ import { modelUnavailableResponse } from './model-unavailable-response';
 function sseEvent(data: object): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(data)}\n\n`);
 }
-
-const KEEPALIVE_BYTES = new TextEncoder().encode(': keepalive\n\n');
 
 function toSsePayload(event: StreamEvent): object {
   switch (event.type) {
@@ -480,11 +478,11 @@ async function respondStream(
     async start(controller) {
       const heartbeat = setInterval(() => {
         try {
-          controller.enqueue(KEEPALIVE_BYTES);
+          controller.enqueue(SSE_KEEPALIVE_FRAME);
         } catch {
           // Controller may already be closed
         }
-      }, KEEPALIVE_INTERVAL_MS);
+      }, SSE_KEEPALIVE_INTERVAL_MS);
 
       try {
         for await (const event of streamTextTurn(

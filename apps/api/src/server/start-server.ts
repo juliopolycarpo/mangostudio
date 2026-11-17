@@ -16,6 +16,7 @@ import {
   isTestRuntime,
   reloadSecretEnv,
 } from '../lib/config';
+import { hubListenOptions } from '../lib/hub-connection-limits';
 import { ensureRuntimeDirs } from '../lib/mango-paths';
 import { getSourceFrontendDir } from '../lib/runtime-paths';
 import { removeState, type ServerState, writeState } from '../lib/server-state';
@@ -158,13 +159,13 @@ async function startServerWithLock(options: StartOptions): Promise<ServerHandle>
   return { port, host, stop };
 }
 
-/** Bind the server port, exiting with a clear message when it is already in use. */
-function listenOrExit(port: number, host: string): void {
+/**
+ * Bind the server port, exiting with a clear message when it is already in use.
+ * Exported so a test can pin the options the real listener receives.
+ */
+export function listenOrExit(port: number, host: string): void {
   try {
-    // reusePort:false (Elysia defaults it to true) so a port already held by
-    // another process raises EADDRINUSE instead of silently load-balancing —
-    // this server is single-instance and a collision must fail loudly.
-    app.listen({ hostname: host, port, reusePort: false });
+    app.listen(hubListenOptions(host, port));
   } catch (error) {
     if (isAddressInUse(error)) {
       console.error(`[api] Address ${host}:${port} is already in use.`);

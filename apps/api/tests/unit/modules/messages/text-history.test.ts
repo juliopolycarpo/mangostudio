@@ -9,6 +9,14 @@
 import { describe, expect, it } from 'bun:test';
 
 import type { InteractionMode } from '@mangostudio/shared/types';
+import type {
+  KyselyPlugin,
+  PluginTransformQueryArgs,
+  PluginTransformResultArgs,
+  QueryResult,
+  RootOperationNode,
+  UnknownRow,
+} from 'kysely';
 
 import { getDb } from '../../../../src/db/database';
 import {
@@ -131,5 +139,165 @@ describe('text history ordering across rows sharing a timestamp', () => {
       history.map((turn) => turn.text),
       EXPECTED_WINDOW
     );
+  });
+});
+
+/** Named fake: records every row SQLite hands back to Kysely, before any mapping. */
+class SelectedRowsCapture implements KyselyPlugin {
+  readonly rows: Record<string, unknown>[] = [];
+
+  transformQuery(args: PluginTransformQueryArgs): RootOperationNode {
+    return args.node;
+  }
+
+  transformResult(args: PluginTransformResultArgs): Promise<QueryResult<UnknownRow>> {
+    this.rows.push(...args.result.rows);
+    return Promise.resolve(args.result);
+  }
+}
+
+describe('text history compaction boundary', () => {
+  const BIG_TOOL_RESULT = 'r'.repeat(20_000);
+  const TOOL_RESULT_PARTS = JSON.stringify([
+    { type: 'tool_result', toolCallId: 'c1', content: BIG_TOOL_RESULT },
+  ]);
+  const COMPACTED_PARTS = JSON.stringify([{ type: 'system_event', event: 'chat_compacted' }]);
+  const HANDOFF_PARTS = JSON.stringify([{ type: 'system_event', event: 'summary_handoff' }]);
+  // Names a boundary event in prose without being a boundary.
+  const PROSE_MENTION_PARTS = JSON.stringify([
+    { type: 'text', text: 'the summary_handoff and chat_compacted events, quoted' },
+    { type: 'system_event', event: 'tool_notice' },
+  ]);
+
+  /** Inserts one agent turn per entry, in order, and returns their ids. */
+  async function seedTurns(
+    turns: readonly { text: string; parts: string | null }[]
+  ): Promise<{ chatId: string; ids: string[] }> {
+    const user = await insertTestUser();
+    const chat = await insertTestChat(user.id);
+    const ids: string[] = [];
+    for (const turn of turns) {
+      sequence += 1;
+      const id = `boundary-${chat.id}-${sequence}`;
+      ids.push(id);
+      await getDb()
+        .insertInto('messages')
+        .values({
+          id,
+          chatId: chat.id,
+          role: 'ai',
+          text: turn.text,
+          timestamp: Date.now() + sequence,
+          isGenerating: 0,
+          interactionMode: 'agent',
+          parts: turn.parts,
+        })
+        .execute();
+    }
+    return { chatId: chat.id, ids };
+  }
+
+  it('copies parts out of SQLite only for rows that name a boundary event', async () => {
+    const { chatId } = await seedTurns([
+      { text: 'tool turn', parts: TOOL_RESULT_PARTS },
+      { text: 'boundary', parts: COMPACTED_PARTS },
+      { text: 'after', parts: TOOL_RESULT_PARTS },
+      { text: 'prose', parts: PROSE_MENTION_PARTS },
+      { text: 'plain', parts: null },
+    ]);
+    const capture = new SelectedRowsCapture();
+
+    await loadHistory(chatId, {}, getDb().withPlugin(capture));
+
+    const received = capture.rows.map((row) => row.parts);
+    // Newest first, as SQLite returns them: plain, prose, after, boundary, tool turn.
+    const expected = [null, PROSE_MENTION_PARTS, null, COMPACTED_PARTS, null];
+    if (JSON.stringify(received) !== JSON.stringify(expected)) {
+      throw new Error(
+        `expected selected parts lengths: [null,${PROSE_MENTION_PARTS.length},null,${COMPACTED_PARTS.length},null] | received lengths: ${JSON.stringify(
+          received.map((parts) => (typeof parts === 'string' ? parts.length : parts))
+        )}`
+      );
+    }
+  });
+
+  // Rich history decodes every row's parts, so it is the reference for where
+  // the text history must start.
+  it.each([
+    [
+      'a compaction boundary',
+      [
+        { text: 'before', parts: TOOL_RESULT_PARTS },
+        { text: 'boundary', parts: COMPACTED_PARTS },
+        { text: 'after', parts: TOOL_RESULT_PARTS },
+      ],
+    ],
+    [
+      'a summary handoff boundary',
+      [
+        { text: 'old', parts: null },
+        { text: 'handoff', parts: HANDOFF_PARTS },
+      ],
+    ],
+    [
+      'a row that names the events in prose only',
+      [
+        { text: 'earlier', parts: TOOL_RESULT_PARTS },
+        { text: 'prose', parts: PROSE_MENTION_PARTS },
+      ],
+    ],
+    [
+      'a corrupt cell that names an event',
+      [
+        { text: 'earlier', parts: null },
+        { text: 'corrupt', parts: '[{"type":"system_event","event":"chat_compacted"' },
+        { text: 'later', parts: TOOL_RESULT_PARTS },
+      ],
+    ],
+    [
+      'a corrupt cell before a boundary',
+      [
+        { text: 'corrupt', parts: '{not json' },
+        { text: 'boundary', parts: HANDOFF_PARTS },
+        { text: 'after', parts: null },
+      ],
+    ],
+    [
+      'no parts at all',
+      [
+        { text: 'one', parts: null },
+        { text: 'two', parts: null },
+      ],
+    ],
+  ])('starts where the rich history starts with %s', async (_label, turns) => {
+    const { chatId } = await seedTurns(turns);
+
+    const history = await loadHistory(chatId, {}, getDb());
+    const rich = await loadRichHistory(chatId, {}, getDb());
+
+    expect(history.map((turn) => turn.id)).toEqual(rich.map((turn) => turn.id));
+    expect(history.map((turn) => turn.text)).toEqual(rich.map((turn) => turn.text));
+  });
+
+  it('starts where the rich history starts under a limit and excluded ids', async () => {
+    const { chatId, ids } = await seedTurns([
+      { text: 'first boundary', parts: COMPACTED_PARTS },
+      { text: 'middle', parts: TOOL_RESULT_PARTS },
+      { text: 'second boundary', parts: HANDOFF_PARTS },
+      { text: 'after', parts: TOOL_RESULT_PARTS },
+      { text: 'newest', parts: null },
+    ]);
+    const options = { limit: 4, excludeIds: [ids[2] as string] };
+
+    const history = await loadHistory(chatId, options, getDb());
+    const rich = await loadRichHistory(chatId, options, getDb());
+
+    expect(history.map((turn) => turn.text)).toEqual([
+      'first boundary',
+      'middle',
+      'after',
+      'newest',
+    ]);
+    expect(history.map((turn) => turn.id)).toEqual(rich.map((turn) => turn.id));
   });
 });

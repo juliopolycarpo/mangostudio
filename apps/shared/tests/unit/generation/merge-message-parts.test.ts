@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'bun:test';
 
-import { mergeMessageParts } from '../../../src/generation';
+import { appendMergedMessagePart, mergeMessageParts } from '../../../src/generation';
 import type { MessagePart } from '../../../src/types/agent-events';
 
 describe('mergeMessageParts — interleaved thinking segments', () => {
@@ -196,5 +196,87 @@ describe('mergeMessageParts — an empty reasoning phase', () => {
     ];
 
     expect(mergeMessageParts(input)).toEqual(input);
+  });
+});
+
+function buildPartByPart(parts: MessagePart[]): MessagePart[] {
+  const built: MessagePart[] = [];
+  for (const part of parts) appendMergedMessagePart(built, part);
+  return built;
+}
+
+/**
+ * A streaming turn builds its parts with `appendMergedMessagePart`, one delta
+ * at a time, and finalizes them with `mergeMessageParts`. The stored row is
+ * only unchanged if both produce the same bytes from the same deltas.
+ */
+describe('appendMergedMessagePart', () => {
+  it('builds byte-identical output to mergeMessageParts over a mixed delta stream', () => {
+    const deltas: MessagePart[] = [
+      { type: 'thinking', text: '' },
+      { type: 'thinking', text: 'Look ' },
+      { type: 'thinking', text: 'first.', redacted: true },
+      { type: 'text', text: '' },
+      { type: 'text', text: 'Calling ' },
+      { type: 'text', text: 'a tool.' },
+      { type: 'tool_call', toolCallId: 'c1', name: 'grep', args: { pattern: 'x' } },
+      { type: 'tool_result', toolCallId: 'c1', content: 'none' },
+      { type: 'thinking', text: 'Nothing.' },
+      { type: 'text', text: 'Done', incomplete: true },
+      { type: 'text', text: '.' },
+      { type: 'system_event', event: 'cursor_internal_tool_call', detail: 'read_file' },
+      { type: 'text', text: 'After.' },
+    ];
+
+    const built = buildPartByPart(deltas);
+    const merged = mergeMessageParts(deltas);
+
+    expect(JSON.stringify(built)).toBe(JSON.stringify(merged));
+    expect(JSON.stringify(mergeMessageParts(built))).toBe(JSON.stringify(merged));
+  });
+
+  it('holds one part after many same-kind deltas', () => {
+    const parts: MessagePart[] = [];
+    for (let index = 0; index < 4_096; index++) {
+      appendMergedMessagePart(parts, { type: 'text', text: 'abcd' });
+    }
+
+    expect(parts.map((part) => part.type)).toEqual(['text']);
+    expect(parts[0]).toEqual({ type: 'text', text: 'abcd'.repeat(4_096) });
+  });
+
+  it('starts a new run after a part of another kind', () => {
+    const parts: MessagePart[] = [{ type: 'text', text: 'Before' }];
+    appendMergedMessagePart(parts, { type: 'thinking', text: 'Hmm' });
+    appendMergedMessagePart(parts, { type: 'text', text: 'After' });
+    appendMergedMessagePart(parts, { type: 'text', text: ' more' });
+
+    expect(parts).toEqual([
+      { type: 'text', text: 'Before' },
+      { type: 'thinking', text: 'Hmm' },
+      { type: 'text', text: 'After more' },
+    ]);
+  });
+
+  it('keeps redacted on the run and takes incomplete from the newest part', () => {
+    const parts: MessagePart[] = [];
+    appendMergedMessagePart(parts, {
+      type: 'thinking',
+      text: 'a',
+      redacted: true,
+      incomplete: true,
+    });
+    appendMergedMessagePart(parts, { type: 'thinking', text: 'b' });
+
+    expect(parts).toEqual([{ type: 'thinking', text: 'ab', redacted: true }]);
+  });
+
+  it('replaces the trailing run instead of mutating a part another array shares', () => {
+    const shared: MessagePart = { type: 'text', text: 'shared' };
+    const parts: MessagePart[] = [shared];
+    appendMergedMessagePart(parts, { type: 'text', text: ' tail' });
+
+    expect(shared).toEqual({ type: 'text', text: 'shared' });
+    expect(parts).toEqual([{ type: 'text', text: 'shared tail' }]);
   });
 });

@@ -3,7 +3,14 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { getDb } from '../../../../src/db/database';
 import type { ActivityEventInsert } from '../../../../src/db/types';
 import {
+  recordActivity,
+  resetActivityRetentionSchedule,
+} from '../../../../src/modules/activity/application/record-activity';
+import {
+  ACTIVITY_MAX_ROWS_PER_USER,
+  ACTIVITY_RETENTION_INTERVAL_ROWS,
   ACTIVITY_RETENTION_MS,
+  ACTIVITY_ROWS_KEPT_BY_PRUNE,
   createActivityRepository,
 } from '../../../../src/modules/activity/infrastructure/activity-repository';
 
@@ -129,5 +136,75 @@ describe('activity repository', () => {
     // Strictly-older-than-cutoff is pruned; the row exactly at the cutoff and
     // the fresher row survive (`deleteFrom(... '<', cutoff)`).
     expect(page.rows.map((r) => r.id).sort()).toEqual(['evt-at-cutoff', 'evt-fresh']);
+  });
+});
+
+describe('activity retention cap', () => {
+  // Real time: the recorder stamps its rows with `Date.now()`, after the seeded ones.
+  const NOW = Date.now();
+
+  /** Inserts `count` rows for `user`, ids `evt-00000`.., one per millisecond ending at `NOW`. */
+  async function seedRows(
+    user: string,
+    count: number,
+    createdAtOf = (index: number) => NOW - count + index
+  ) {
+    const rows = Array.from({ length: count }, (_, index) =>
+      row({
+        id: `evt-${String(index).padStart(5, '0')}`,
+        userId: user,
+        createdAt: createdAtOf(index),
+      })
+    );
+    // Chunked: SQLite caps the bound parameters of one statement.
+    for (let start = 0; start < rows.length; start += 500) {
+      await createActivityRepository(getDb()).insertMany(rows.slice(start, start + 500));
+    }
+  }
+
+  async function idsOf(user: string): Promise<string[]> {
+    const rows = await getDb()
+      .selectFrom('activity_events')
+      .select('id')
+      .where('userId', '=', user)
+      .orderBy('createdAt', 'asc')
+      .orderBy('id', 'asc')
+      .execute();
+    return rows.map((r) => r.id);
+  }
+
+  it('keeps exactly the newest rows a pass retains, splitting a createdAt tie by id', async () => {
+    const user = userId();
+    const total = ACTIVITY_ROWS_KEPT_BY_PRUNE + 10;
+    // The ten oldest rows and the next ten share one createdAt, as a batch does,
+    // so the boundary falls inside a tie.
+    await seedRows(user, total, (index) => (index < 20 ? NOW - total : NOW - total + index));
+
+    await createActivityRepository(getDb()).prune(user, NOW);
+
+    const kept = await idsOf(user);
+    expect(kept).toHaveLength(ACTIVITY_ROWS_KEPT_BY_PRUNE);
+    expect(kept[0]).toBe('evt-00010');
+  });
+
+  it('never lets single-row writes take the feed past the cap', async () => {
+    const user = userId();
+    resetActivityRetentionSchedule();
+    await seedRows(user, ACTIVITY_MAX_ROWS_PER_USER - 5);
+
+    let largest = 0;
+    for (let write = 0; write < 3 * ACTIVITY_RETENTION_INTERVAL_ROWS; write++) {
+      await recordActivity(
+        { userId: user, kind: 'chat_created', payload: { title: `write ${write}` } },
+        { db: getDb(), publish: () => undefined }
+      );
+      largest = Math.max(largest, (await idsOf(user)).length);
+    }
+
+    if (largest > ACTIVITY_MAX_ROWS_PER_USER) {
+      throw new Error(
+        `expected feed rows: <= ${ACTIVITY_MAX_ROWS_PER_USER} | received: ${largest}`
+      );
+    }
   });
 });

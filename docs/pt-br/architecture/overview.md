@@ -283,7 +283,12 @@ verifica os exports de compatibilidade e as escolhas derivadas dos schemas.
 ## Banco De Dados
 
 SQLite via Kysely. O registro ordenado em `apps/api/src/db/migrations/index.ts`
-é a fonte de verdade das migrações. As famílias de tabelas incluem:
+é a fonte de verdade das migrações. O hub roda o banco de arquivo em WAL mode
+(`apps/api/src/db/database.ts`) e baixa `synchronous` para `NORMAL` depois que as migrações terminam;
+escritas que guardam um passo que o banco não consegue desfazer, e revogações (tokens de pareamento,
+chaves de API, as requisições de autenticação que apagam ou trocam uma credencial), são gravadas em `FULL` por `runDurably` e
+`withFullDurability` (`apps/api/src/db/durability.ts`). O que uma queda de energia pode e não pode perder está em
+[deployment](../operations/deployment.md#banco-de-dados). As famílias de tabelas incluem:
 
 - Tabelas centrais: `chats`, `messages`, `generated_images`, `chat_attachments`
 - Tabelas de auth: schema padrão do Better Auth (5 tabelas)
@@ -293,6 +298,6 @@ Colunas usam `camelCase`; tabelas usam `snake_case`. Aliases tipados do Kysely s
 
 ## Build Standalone
 
-`bun run build:binary` compila o hub com AOT nativo do Bun, remoção de recursos não usados do runtime, ESM e source maps externos; em produção também aplica minificação. Isso usa `--aot` do Bun, não o AOT do Elysia. O frontend é embarcado e o `mangostudio-runtime` construído com cargo fica ao lado do hub. A compilação nativa exige o SO, arquitetura e libc do Bun em execução. O CI gera os 8 alvos em hosts correspondentes, usando Alpine para musl, depois verifica e agrega os pares. `--compiler bytecode` explícito mantém a compilação cruzada com runtimes Rust pré-construídos (`--runtime-dir`); veja [releasing.md](../reference/releasing.md#como-o-binário-do-runtime-é-construído). O banco de dados usa `~/.mango/database.sqlite` por padrão.
+`bun run build:binary` compila o hub com AOT nativo do Bun, remoção de recursos não usados do runtime, ESM e source maps externos; em produção também aplica minificação. Isso usa `--aot` do Bun, não o AOT do Elysia. Um build Linux de produção ou com `--require-aot-order` repete a compilação com uma ordem de funções gravada do mesmo programa (`--aot-order`). O frontend é embarcado e o `mangostudio-runtime` construído com cargo fica ao lado do hub. A compilação nativa exige o SO, arquitetura e libc do Bun em execução. O CI gera os 8 alvos em hosts correspondentes, usando Alpine para musl, depois verifica e agrega os pares. `--compiler bytecode` explícito mantém a compilação cruzada com runtimes Rust pré-construídos (`--runtime-dir`); veja [releasing.md](../reference/releasing.md#como-o-binário-do-runtime-é-construído). O banco de dados usa `~/.mango/database.sqlite` por padrão.
 
 Cada runtime é um binário nativo construído com LTO fat e `panic = "unwind"` (o isolamento de panics dos handlers depende disso): alvos Linux gnu linkam no piso glibc 2.17, alvos musl são estáticos, o Windows linka o runtime C do MSVC estaticamente, e todo binário informa a versão da release gravada nele. Os assets da release, inclusive os binários do runtime, estão num `SHA256SUMS` com attestation; [runtime-metrics.md](../reference/runtime-metrics.md) registra os tamanhos.

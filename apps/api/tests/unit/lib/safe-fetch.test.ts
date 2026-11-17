@@ -229,6 +229,33 @@ describe('safeFetchBytes', () => {
     ).rejects.toThrow('timed out');
   });
 
+  it('reports a deadline that fires during the body read as a timeout', async () => {
+    // Named fake for a host that sends headers and a first chunk, then stalls until aborted.
+    const stalledBodyHost = {
+      fetch: ((_input: Parameters<typeof fetch>[0], init?: RequestInit) =>
+        Promise.resolve(
+          new Response(
+            new ReadableStream<Uint8Array>({
+              start(controller) {
+                controller.enqueue(new Uint8Array([1, 2, 3]));
+                init?.signal?.addEventListener('abort', () =>
+                  controller.error(new Error('aborted'))
+                );
+              },
+            })
+          )
+        )) as unknown as typeof fetch,
+    };
+
+    await expect(
+      safeFetchBytes(
+        'https://example.test/file',
+        { ...limits, timeoutMs: 20 },
+        { fetch: stalledBodyHost.fetch, resolveHostname: publicResolver }
+      )
+    ).rejects.toThrow('Request timed out.');
+  });
+
   it("calls a caller's own abort a cancellation rather than a timeout", async () => {
     // Both arrive as one combined signal, and a caller that stopped the request
     // itself should not be told the far end was slow.

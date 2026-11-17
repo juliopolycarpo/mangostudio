@@ -9,6 +9,7 @@
 
 import { type Kysely, sql } from 'kysely';
 
+import { runDurably } from '../../../db/durability';
 import type {
   Database,
   ExternalTurnAttemptInsert,
@@ -21,6 +22,11 @@ import type {
  * Records an attempt before it is submitted. Always `acceptance-unknown`: the
  * hub cannot know yet whether the runtime will receive it.
  *
+ * The receipt is committed durably (`runDurably`): after a power loss a hub that
+ * finds no receipt would treat the prompt as never sent, and a retry could hand a
+ * vendor CLI the same instruction twice. Every later transition only narrows what
+ * an `acceptance-unknown` receipt already says, so those stay ordinary writes.
+ *
  * @example
  * await insertAttempt({ id, messageId, chatId, ..., createdAt: now, updatedAt: now }, db);
  */
@@ -28,10 +34,12 @@ export async function insertAttempt(
   row: Omit<ExternalTurnAttemptInsert, 'state' | 'nativeTurnId' | 'terminalReason'>,
   db: Kysely<Database>
 ): Promise<void> {
-  await db
-    .insertInto('external_turn_attempts')
-    .values({ ...row, state: 'acceptance-unknown', nativeTurnId: null, terminalReason: null })
-    .execute();
+  await runDurably(db, 'external_turn_attempt', (conn) =>
+    conn
+      .insertInto('external_turn_attempts')
+      .values({ ...row, state: 'acceptance-unknown', nativeTurnId: null, terminalReason: null })
+      .execute()
+  );
 }
 
 /**

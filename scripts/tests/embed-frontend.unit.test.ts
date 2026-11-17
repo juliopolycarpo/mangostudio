@@ -1,5 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -38,7 +46,7 @@ describe('renderFrontendManifestModule', () => {
     expect(source).toContain(
       `import f0 from ${JSON.stringify(join(distDir, 'assets', 'index-AbCd1234.js'))} with { type: 'file' };`
     );
-    expect(source).toContain('export const embeddedFrontend: Record<string, string> = {');
+    expect(source).toContain('export const embeddedFrontend: Record<string, string | null> = {');
     expect(source).toContain('"/index.html": f3 as unknown as string,');
     expect(source).toContain('"/assets/nested/font.woff2": f1 as unknown as string,');
   });
@@ -53,6 +61,7 @@ describe('renderFrontendManifestModule variants', () => {
         coding: 'br',
         filePath: '/out/variants/br/assets/index-AbCd1234.js.br',
         originalBytes: 1000,
+        originalEtag: '"1a2b3c"',
         compressedBytes: 300,
       },
       {
@@ -60,6 +69,7 @@ describe('renderFrontendManifestModule variants', () => {
         coding: 'gzip',
         filePath: '/out/variants/gzip/assets/index-AbCd1234.js.gz',
         originalBytes: 1000,
+        originalEtag: '"1a2b3c"',
         compressedBytes: 350,
       },
     ]);
@@ -81,6 +91,82 @@ describe('renderFrontendManifestModule variants', () => {
     expect(routes).not.toContain('v0');
   });
 
+  const gzipCopy = (urlPath: string) => ({
+    urlPath,
+    coding: 'gzip' as const,
+    filePath: `/out/variants/gzip${urlPath}.gz`,
+    originalBytes: 1000,
+    originalEtag: '"1a2b3c"',
+    compressedBytes: 350,
+  });
+  const brotliCopy = (urlPath: string) => ({
+    urlPath,
+    coding: 'br' as const,
+    filePath: `/out/variants/br${urlPath}.br`,
+    originalBytes: 1000,
+    originalEtag: '"1a2b3c"',
+    compressedBytes: 300,
+  });
+
+  test('leaves the identity bytes out of a hashed asset that has a gzip copy', () => {
+    const source = renderFrontendManifestModule(distDir, listDistFiles(distDir), [
+      brotliCopy('/assets/index-AbCd1234.js'),
+      gzipCopy('/assets/index-AbCd1234.js'),
+    ]);
+
+    // The key stays, so the route and the doctor's file count do not change.
+    expect(source).toContain('"/assets/index-AbCd1234.js": null,');
+    expect(source).not.toContain(JSON.stringify(join(distDir, 'assets', 'index-AbCd1234.js')));
+  });
+
+  test('records the length and ETag of every file whose identity bytes were left out', () => {
+    const source = renderFrontendManifestModule(distDir, listDistFiles(distDir), [
+      brotliCopy('/assets/index-AbCd1234.js'),
+      gzipCopy('/assets/index-AbCd1234.js'),
+      gzipCopy('/index.html'),
+    ]);
+
+    const table = source.slice(source.indexOf('export const embeddedFrontendIdentity'));
+    expect(table).toContain('"/assets/index-AbCd1234.js": { bytes: 1000, etag: "\\"1a2b3c\\"" },');
+    // A file that kept its identity bytes needs no measurement: the server stats the embedded file.
+    expect(table).not.toContain('/index.html');
+  });
+
+  test('every null manifest entry has a measurement, and nothing else does', () => {
+    const urlPaths = listDistFiles(distDir);
+    const source = renderFrontendManifestModule(distDir, urlPaths, [
+      gzipCopy('/assets/index-AbCd1234.js'),
+      gzipCopy('/index.html'),
+    ]);
+
+    const routes = source.slice(
+      source.indexOf('export const embeddedFrontend:'),
+      source.indexOf('export const embeddedFrontendEncodings')
+    );
+    const nullKeys = [...routes.matchAll(/^ {2}("[^"]+"): null,$/gm)].map((match) => match[1]);
+    const table = source.slice(source.indexOf('export const embeddedFrontendIdentity'));
+    const measuredKeys = [...table.matchAll(/^ {2}("[^"]+"): \{ bytes:/gm)].map(
+      (match) => match[1]
+    );
+
+    expect(measuredKeys).toEqual(nullKeys);
+    expect(nullKeys).toEqual(['"/assets/index-AbCd1234.js"']);
+  });
+
+  test('keeps identity where the server could not inflate it', () => {
+    // Brotli only: no gzip copy to inflate. Root file: the doctor reads /build-info.json from the manifest.
+    const source = renderFrontendManifestModule(distDir, listDistFiles(distDir), [
+      brotliCopy('/assets/index-AbCd1234.js'),
+      gzipCopy('/index.html'),
+      gzipCopy('/build-info.json'),
+    ]);
+
+    expect(source).toContain(JSON.stringify(join(distDir, 'assets', 'index-AbCd1234.js')));
+    expect(source).toContain(JSON.stringify(join(distDir, 'index.html')));
+    expect(source).toContain(JSON.stringify(join(distDir, 'build-info.json')));
+    expect(source).not.toContain(': null,');
+  });
+
   test('emits an empty encodings table when nothing was compressed', () => {
     const source = renderFrontendManifestModule(distDir, listDistFiles(distDir));
 
@@ -97,13 +183,11 @@ describe('renderEmbedEntryModule', () => {
       '/repo/apps/api/src/index.ts'
     );
 
-    const registerIndex = source.indexOf(
-      'registerEmbeddedFrontend(embeddedFrontend, embeddedFrontendEncodings);'
-    );
+    const registration =
+      'registerEmbeddedFrontend(embeddedFrontend, embeddedFrontendEncodings, embeddedFrontendIdentity);';
+    const registerIndex = source.indexOf(registration);
     const bootIndex = source.indexOf('await import("/repo/apps/api/src/index.ts");');
-    expect(source).toContain(
-      'registerEmbeddedFrontend(embeddedFrontend, embeddedFrontendEncodings);'
-    );
+    expect(source).toContain(registration);
     expect(registerIndex).toBeGreaterThan(-1);
     expect(bootIndex).toBeGreaterThan(registerIndex);
   });
@@ -143,6 +227,15 @@ describe('writeEmbedModules', () => {
     const manifest = readFileSync(result.manifestPath, 'utf8');
     expect(manifest).toContain('"/assets/big-AbCd1234.js": { "br": v');
     expect(listDistFiles(distDir)).toHaveLength(5);
+    // Guard: a hashed asset with a gzip copy must not embed its identity bytes again. It keeps its
+    // route (`null` value) and its file stays out of the compiled binary (no import of it).
+    expect(manifest).toContain('"/assets/big-AbCd1234.js": null,');
+    // The manifest writes each path as a string literal, so compare the literal: on Windows the
+    // raw path's backslashes never appear unescaped, and a raw comparison would pass or fail for
+    // the wrong reason.
+    expect(manifest).not.toContain(JSON.stringify(join(distDir, 'assets', 'big-AbCd1234.js')));
+    // `index-AbCd1234.js` is below the compression threshold: no copy, so identity stays.
+    expect(manifest).toContain(JSON.stringify(join(distDir, 'assets', 'index-AbCd1234.js')));
   });
 
   test('drops variants left behind by an earlier build', () => {
@@ -162,6 +255,32 @@ describe('writeEmbedModules', () => {
     expect(second.variantCount).toBe(0);
     expect(existsSync(join(embedDir, 'variants'))).toBe(false);
     expect(readFileSync(second.manifestPath, 'utf8')).not.toContain('big-AbCd1234');
+  });
+
+  test('keeps compressed output between builds while clearing the variants directory', () => {
+    const options = {
+      distDir,
+      embedDir,
+      registryModulePath: '/repo/apps/api/src/server/embedded-frontend.ts',
+      apiEntryPath: '/repo/apps/api/src/index.ts',
+    };
+    writeFileSync(
+      join(distDir, 'assets', 'big-AbCd1234.js'),
+      'console.log("big chunk");\n'.repeat(80)
+    );
+    const first = writeEmbedModules(options);
+    const cacheDir = join(embedDir, 'compression-cache');
+    const cachedAfterFirst = readdirSync(cacheDir).sort();
+    expect(
+      cachedAfterFirst.length,
+      `expected cache entries after the first build: br + gzip of the 2 KB chunk | received: ${cachedAfterFirst}`
+    ).toBe(2);
+
+    const second = writeEmbedModules(options);
+
+    expect(readdirSync(cacheDir).sort()).toEqual(cachedAfterFirst);
+    expect(second.variantCount).toBe(first.variantCount);
+    expect(second.variantBytes).toBe(first.variantBytes);
   });
 
   // The binary has no disk fallback, so an unservable manifest has to stop the

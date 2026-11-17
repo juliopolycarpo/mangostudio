@@ -4,15 +4,16 @@
 //! string, against a schema that declares it an `integer`, and nothing
 //! caught it before a reviewer did.
 //!
-//! [`crate::result_check`] already refuses a handler's *result* that drifts
-//! from the contract, applied inside [`crate::registry::Registry::implement`]
+//! [`mango_protocol::contract::Contract::check_result`] already refuses a
+//! handler's *result* that drifts from the contract, applied inside
+//! [`crate::registry::Registry::implement`]
 //! before the audit port ever records `ok`. Nothing did the same for an
 //! event a publisher hands to [`Session::emit`] directly — [`checked_emit`]
 //! is that missing check, applied at the one place every event this crate
 //! sends already passes through: `crate::transport::heartbeat_loop`, today,
 //! and whatever topic a later plan adds.
 //!
-//! Unlike [`crate::result_check::check_result`], a failed check here has no
+//! Unlike a result check, a failed check here has no
 //! caller waiting on a wire response to carry it: an event is this
 //! runtime's own broadcast, not an answer to somebody's request. So there
 //! is no `RemoteError` to construct — [`checked_emit`] returns a plain

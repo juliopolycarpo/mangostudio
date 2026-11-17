@@ -6,16 +6,14 @@
 #![allow(dead_code, unused_imports)]
 
 use std::future::Future;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 use std::time::Duration;
 
-use mango_protocol::contract::Contract;
 use mango_protocol::frame::PeerInfo;
 use mango_protocol::port::port_pair;
 use mango_protocol::session::{Session, SessionOptions};
 use mangostudio_runtime::ports::authorization::Authorization;
 use mangostudio_runtime::registry::Registry;
-use mangostudio_runtime_contract::catalog::catalog;
 use serde_json::{Value, json};
 
 pub mod collecting_log;
@@ -79,12 +77,6 @@ pub async fn open_pair_with_runtime_options(runtime_options: SessionOptions) -> 
     (hub, runtime)
 }
 
-/// The embedded catalog compiled once per test binary, rather than once per
-/// test.
-static CONTRACT: LazyLock<Contract> = LazyLock::new(|| {
-    Contract::from_catalog(catalog().clone()).expect("the embedded catalog compiles")
-});
-
 /// [`open_pair`], then serves `registry` on the runtime side behind
 /// `authorization` as the `host` slot, so a test can go straight to issuing
 /// requests from the returned hub.
@@ -107,9 +99,17 @@ pub async fn serve_pair_with_runtime_options(
     runtime_options: SessionOptions,
 ) -> (Session, Session) {
     let (hub, runtime) = open_pair_with_runtime_options(runtime_options).await;
-    mangostudio_runtime::serve::serve(&CONTRACT, &runtime, registry, authorization, "host")
-        .expect("every method a test registry implements is declared by the catalog")
-        .persist();
+    // The process-wide contract: the one `Registry::implement` checks results
+    // with, so a test binary compiles the embedded catalog once.
+    mangostudio_runtime::serve::serve(
+        mangostudio_runtime::serve::runtime_contract(),
+        &runtime,
+        registry,
+        authorization,
+        "host",
+    )
+    .expect("every method a test registry implements is declared by the catalog")
+    .persist();
     (hub, runtime)
 }
 

@@ -82,7 +82,7 @@ const reportedCells = new Set<string>();
  *
  * Usage: warnCorruptMessageParts('msg-1', decoded.shape)
  */
-export function warnCorruptMessageParts(messageId: string, shape: CorruptPartsShape): void {
+function warnCorruptMessageParts(messageId: string, shape: CorruptPartsShape): void {
   const key = `${messageId}|${shape.reason}|${shape.bytes}`;
   if (reportedCells.has(key)) return;
   if (reportedCells.size >= REPORTED_CELLS_LIMIT) reportedCells.clear();
@@ -95,16 +95,14 @@ export function warnCorruptMessageParts(messageId: string, shape: CorruptPartsSh
  * is logged against the message id and degrades to `undefined`, which callers
  * already treat as "no structured parts, use `text`". Other rows are unaffected.
  *
- * Pass `quiet` when the caller's row was already decoded and logged upstream.
- *
  * Usage: readMessageParts({ id: row.id, parts: row.parts }) // MessagePart[] | undefined
  */
-export function readMessageParts(
-  row: { id: string; parts: string | null },
-  options: { quiet?: boolean } = {}
-): MessagePart[] | undefined {
+export function readMessageParts(row: {
+  id: string;
+  parts: string | null;
+}): MessagePart[] | undefined {
   const decoded = decodeMessageParts(row.parts);
   if (decoded.kind === 'ok') return decoded.parts;
-  if (decoded.kind === 'corrupt' && !options.quiet) warnCorruptMessageParts(row.id, decoded.shape);
+  if (decoded.kind === 'corrupt') warnCorruptMessageParts(row.id, decoded.shape);
   return undefined;
 }

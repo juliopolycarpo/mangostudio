@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Writable } from 'node:stream';
 
-import { ownsStartupState } from '../bench/startup';
+import { ownsStartupState } from '../lib/hub-process';
 import {
   type NativeProcess,
   runNativeCommand,
@@ -35,28 +35,25 @@ class DiscardedBenchmarkOutput extends Writable {
 
 /** A local executable which succeeds once after warmup, then rejects its next startup. */
 class FakeStartupBinary {
-  readonly environment: Record<string, string>;
   constructor(
     private readonly directory: string,
-    stall = false
-  ) {
-    this.environment = {
-      BENCHMARK_FIXTURE_ROOT: directory,
-      BENCHMARK_FIXTURE_STALL: String(stall),
-    };
-  }
+    private readonly stall = false
+  ) {}
 
   async create(): Promise<string> {
     const binary = join(this.directory, 'fake-startup-binary');
+    // The benchmark gives the hub an allowlisted environment, so the fixture finds its directory
+    // from its own location and its mode from a marker file, not from environment variables.
+    if (this.stall) await writeFile(join(this.directory, 'stall-enabled'), 'true');
     await writeFile(
       binary,
       `#!/usr/bin/env bun
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 const home = process.env.HOME;
-const fixtureRoot = process.env.BENCHMARK_FIXTURE_ROOT;
-const stall = process.env.BENCHMARK_FIXTURE_STALL === 'true';
-if (fixtureRoot) await Bun.write(join(fixtureRoot, 'runtime-home'), home);
+const fixtureRoot = import.meta.dir;
+const stall = await Bun.file(join(fixtureRoot, 'stall-enabled')).exists();
+await Bun.write(join(fixtureRoot, 'runtime-home'), home);
 const counterPath = join(home, 'startup-counter');
 const count = Number(await Bun.file(counterPath).text().catch(() => '0')) + 1;
 await Bun.write(counterPath, String(count));
@@ -90,8 +87,8 @@ class FakeHeldOutputHub {
 import { mkdir, writeFile } from 'node:fs/promises';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-const root = process.env.BENCHMARK_FIXTURE_ROOT;
-const leaf = Bun.spawn([process.execPath, '-e', "import {join} from 'node:path'; import {rename} from 'node:fs/promises'; const root=process.env.BENCHMARK_FIXTURE_ROOT; await Bun.write(join(root,'leaf-pid-tmp'),String(process.pid)); await rename(join(root,'leaf-pid-tmp'),join(root,'leaf-pid')); while (!(await Bun.file(join(root,'leaf-release')).exists())) await Bun.sleep(5);"], { stdout:'inherit', stderr:'inherit', env:{...process.env,BUN_FEATURE_FLAG_NO_ORPHANS:'0'} });
+const root = import.meta.dir;
+const leaf = Bun.spawn([process.execPath, '-e', "import {join} from 'node:path'; import {rename} from 'node:fs/promises'; const root=process.env.BENCHMARK_FIXTURE_ROOT; await Bun.write(join(root,'leaf-pid-tmp'),String(process.pid)); await rename(join(root,'leaf-pid-tmp'),join(root,'leaf-pid')); while (!(await Bun.file(join(root,'leaf-release')).exists())) await Bun.sleep(5);"], { stdout:'inherit', stderr:'inherit', env:{...process.env,BENCHMARK_FIXTURE_ROOT:root,BUN_FEATURE_FLAG_NO_ORPHANS:'0'} });
 while (!(await Bun.file(join(root,'allow-ready')).exists())) await Bun.sleep(5);
 const port = Number(process.argv.at(-1));
 const server = Bun.serve({hostname:'127.0.0.1',port,fetch:()=>Response.json({status:'ok'})});
@@ -131,7 +128,7 @@ describe.skipIf(process.platform === 'win32')('startup benchmark receipts', () =
         ],
         root: ROOT,
         out: directory,
-        env: fixtureChildEnvironment({ ...process.env, ...fixture.environment, ...monitor.env }),
+        env: fixtureChildEnvironment({ ...process.env, ...monitor.env }),
         timeoutSeconds: 10,
         pollIntervalMs: 20,
         settleMs: 500,
@@ -181,7 +178,7 @@ describe.skipIf(process.platform === 'win32')('startup benchmark receipts', () =
         ],
         root: ROOT,
         out: directory,
-        env: fixtureChildEnvironment({ ...process.env, ...fixture.environment, ...monitor.env }),
+        env: fixtureChildEnvironment({ ...process.env, ...monitor.env }),
         timeoutSeconds: 10,
         pollIntervalMs: 20,
         settleMs: 500,
@@ -216,7 +213,7 @@ describe.skipIf(process.platform === 'win32')('startup benchmark receipts', () =
       command: [process.execPath, 'scripts/bench/startup.ts', binary, '--runs', '1', '--json'],
       root: ROOT,
       out: directory,
-      env: fixtureChildEnvironment({ ...process.env, BENCHMARK_FIXTURE_ROOT: directory }),
+      env: fixtureChildEnvironment({ ...process.env }),
       // Allow separate fixture phases and the final settlement window.
       timeoutSeconds: 20,
       pollIntervalMs: 20,
@@ -310,7 +307,7 @@ describe.skipIf(process.platform === 'win32')('startup benchmark receipts', () =
       ],
       root: ROOT,
       out: directory,
-      env: fixtureChildEnvironment({ ...process.env, ...fixture.environment }),
+      env: fixtureChildEnvironment({ ...process.env }),
       timeoutSeconds: 20,
       pollIntervalMs: 20,
       stream: new DiscardedBenchmarkOutput(),
@@ -365,7 +362,7 @@ describe.skipIf(process.platform === 'win32')('startup benchmark receipts', () =
       ],
       root: ROOT,
       out: directory,
-      env: fixtureChildEnvironment({ ...process.env, ...fixture.environment }),
+      env: fixtureChildEnvironment({ ...process.env }),
       timeoutSeconds: 8,
       pollIntervalMs: 20,
       stream: new DiscardedBenchmarkOutput(),

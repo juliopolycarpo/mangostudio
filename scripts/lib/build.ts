@@ -95,6 +95,23 @@ export function binaryCompileDefines(context: BinaryCompileDefines): string[] {
 }
 
 /**
+ * Keeps the compiled hub from reading configuration out of whatever directory
+ * it is started in. Hub configuration has one parser, `apps/api/src/lib/config.ts`,
+ * which reads `config.toml` and the `.env` beside it. A `.env` in the working
+ * directory is a second reader that lands in the process environment, so it
+ * outranks both of those. Of the four, `.env` is the one Bun reads by default under
+ * `--trim` (`bunfig.toml`, `tsconfig.json` and `package.json` are off), but
+ * all four are spelled out so a changed Bun default or a dropped `--trim`
+ * cannot turn one on silently.
+ */
+const COMPILE_AUTOLOAD_DISABLED_FLAGS = [
+  '--no-compile-autoload-dotenv',
+  '--no-compile-autoload-bunfig',
+  '--no-compile-autoload-tsconfig',
+  '--no-compile-autoload-package-json',
+] as const;
+
+/**
  * Compile native machine code with unused runtime features trimmed. Bytecode is
  * an explicit fallback that can cross-compile and retains ESM for top-level await.
  * @example binaryCompileFlags('production', 'native')
@@ -108,6 +125,7 @@ export function binaryCompileFlags(
     '--trim',
     '--format=esm',
     '--sourcemap=external',
+    ...COMPILE_AUTOLOAD_DISABLED_FLAGS,
   ];
   if (buildType === 'production') flags.push('--minify');
   return flags;

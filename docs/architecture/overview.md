@@ -316,7 +316,12 @@ schema-derived choices.
 ## Database
 
 SQLite via Kysely. The ordered registry in `apps/api/src/db/migrations/index.ts`
-is the source of truth for migrations. Table families include:
+is the source of truth for migrations. The hub runs the file database in WAL mode
+(`apps/api/src/db/database.ts`) and lowers `synchronous` to `NORMAL` once its migrations have
+finished; writes that guard a step the database cannot undo, and revocations (pairing tokens, API keys,
+the auth requests that delete or rotate a credential), commit at `FULL` through `runDurably` and `withFullDurability`
+(`apps/api/src/db/durability.ts`). What a power loss can and cannot lose is described in
+[deployment](../operations/deployment.md#database). Table families include:
 
 - Core tables: `chats`, `messages`, `generated_images`, `chat_attachments`
 - Auth tables: Better Auth standard schema (5 tables)
@@ -326,6 +331,6 @@ Columns use `camelCase`, tables use `snake_case`. Kysely type aliases: `<Entity>
 
 ## Standalone Build
 
-`bun run build:binary` compiles the hub with Bun native AOT, runtime trimming, ESM and external source maps; production also minifies it. This uses Bun's `--aot`, not Elysia AOT. The frontend is embedded and the cargo-built `mangostudio-runtime` is staged beside the hub. Native compilation requires the running Bun's OS, architecture and libc. CI builds all 8 targets on matching hosts, using Alpine for musl, then verifies and aggregates the pairs. Explicit `--compiler bytecode` retains cross-compilation with prebuilt Rust runtimes (`--runtime-dir`); see [releasing.md](../reference/releasing.md#how-the-runtime-binary-is-built). Database defaults to `~/.mango/database.sqlite`.
+`bun run build:binary` compiles the hub with Bun native AOT, runtime trimming, ESM and external source maps; production also minifies it. This uses Bun's `--aot`, not Elysia AOT. A Linux production or `--require-aot-order` build repeats the compile with a function order recorded from the same program (`--aot-order`). The frontend is embedded and the cargo-built `mangostudio-runtime` is staged beside the hub. Native compilation requires the running Bun's OS, architecture and libc. CI builds all 8 targets on matching hosts, using Alpine for musl, then verifies and aggregates the pairs. Explicit `--compiler bytecode` retains cross-compilation with prebuilt Rust runtimes (`--runtime-dir`); see [releasing.md](../reference/releasing.md#how-the-runtime-binary-is-built). Database defaults to `~/.mango/database.sqlite`.
 
 Each runtime is a native binary built with fat LTO and `panic = "unwind"` (handler panic isolation depends on it): gnu Linux targets link at the glibc 2.17 floor, musl targets are static, Windows links the MSVC C runtime statically, and every binary reports the release version it was stamped with. Release assets, runtime binaries included, are listed in an attested `SHA256SUMS`; [runtime-metrics.md](../reference/runtime-metrics.md) records their sizes.

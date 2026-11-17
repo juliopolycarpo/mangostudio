@@ -25,6 +25,11 @@
  *   bun run scripts/bench/grep.ts <binary> --scenario files-1000,cancel --json
  *   bun run scripts/bench/grep.ts <binary> --large-mib 64
  *   bun run scripts/bench/grep.ts <binary> --restricted  # capability walk, as under a path policy
+ *   bun run scripts/bench/grep.ts <binary> --scenario large-file --pattern '(\d+)-NEEDLE$' --ignore-case
+ *
+ * Several binaries rotate their run order (ABBA for two). Each sample records the match count and the
+ * runtime's `truncated` flag: a time near 2,100 ms with `truncated` is a file that
+ * ran out of its 2 s budget, not the scan time.
  */
 
 import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
@@ -39,19 +44,25 @@ import {
 } from '@mangostudio/shared/runtime-contract';
 
 import { fatal, parseArgs } from '../lib/args';
+import { rotatedOrder } from '../lib/bench-order';
 import { type LatencySummary, summarizeLatencies } from '../lib/latency-stats';
 import { header, info, log } from '../lib/log';
+import { buildProfileOf, newestWorkspaceBuild } from './runtime-binary';
 
 const HANDSHAKE_CEILING_MS = 120_000;
 const REQUEST_TIMEOUT_MS = 120_000;
 const CANCEL_AFTER_MS = 200;
-const EXE = process.platform === 'win32' ? '.exe' : '';
 const REPO_ROOT = resolve(import.meta.dir, '../..');
 const SCENARIOS = ['files-1', 'files-100', 'files-1000', 'large-file', 'cancel'] as const;
 type Scenario = (typeof SCENARIOS)[number];
 
-/** Captures and a lookbehind, so the pattern is not a literal a fast path could take. */
-const PATTERN = String.raw`(?<=id=)(\d+)-needle$`;
+/**
+ * A lookbehind and a capture, so QuickJS has to run it, with one required literal
+ * (`-needle`) the runtime's prefilter can search for. A line in a large file has
+ * `brown fox` but not `-needle`: `--pattern 'brown fox.*-needle$'` puts the literal on
+ * every line (no prefilter gain) and `--pattern '(\d+)$'` has none at all.
+ */
+const DEFAULT_PATTERN = String.raw`(?<=id=)(\d+)-needle$`;
 const SMALL_FILE_LINES = 40;
 const LARGE_FILLER = 'the quick brown fox jumps over the lazy dog id=12345 and again id=6 needle';
 const LARGE_HIT = 'the quick brown fox jumps over the lazy dog id=12345 and again id=6-needle';
@@ -65,6 +76,8 @@ interface Sample {
   readonly peakRssKb: number;
   readonly matches: number;
   readonly filesScanned: number;
+  /** The runtime's `truncated` flag: a limit was hit or a file ran out of its time budget. */
+  readonly truncated: boolean;
 }
 
 interface Fixture {
@@ -73,31 +86,21 @@ interface Fixture {
 }
 
 function printHelp(): never {
-  log(`Usage: bun run scripts/bench/grep.ts [[label=]binary ...] [--runs N] [--warmup N] [--scenario a,b] [--large-mib N] [--restricted] [--json]
+  log(`Usage: bun run scripts/bench/grep.ts [[label=]binary ...] [--runs N] [--warmup N] [--scenario a,b] [--large-mib N] [--pattern REGEX] [--ignore-case] [--restricted] [--json]
 
-  [label=]binary   mangostudio-runtime executables; several are interleaved run by run
-                   (default: newest of target/release, target/debug)
+  [label=]binary   mangostudio-runtime executables; several are interleaved run by run,
+                   in a rotating order (ABBA for two)
+                   (default: newest of target/release, target/release-fast, target/debug)
   --runs N         Measured runs per scenario (default 15)
   --warmup N       Untimed runs per binary before measuring (default 0)
   --scenario LIST  Comma-separated subset of: ${SCENARIOS.join(', ')}
   --large-mib N    Size of the large-file fixture (default 32)
+  --pattern REGEX  Pattern for every scenario but \`cancel\` (default: a lookbehind with one literal)
+  --ignore-case    Send \`caseInsensitive: true\`
   --restricted     Send a path policy, as a restricted chat does (capability walk and reads)
   --json           Print only the JSON result
   --help           Show this help message`);
   process.exit(0);
-}
-
-async function newestWorkspaceBuild(): Promise<string | undefined> {
-  const candidates = ['release', 'debug'].map((profile) =>
-    join(REPO_ROOT, 'target', profile, `mangostudio-runtime${EXE}`)
-  );
-  let newest: { path: string; mtimeMs: number } | undefined;
-  for (const path of candidates) {
-    const info = await stat(path).catch(() => undefined);
-    if (info && (!newest || info.mtimeMs > newest.mtimeMs))
-      newest = { path, mtimeMs: info.mtimeMs };
-  }
-  return newest?.path;
 }
 
 async function readPeakRssKb(pid: number): Promise<number> {
@@ -155,7 +158,8 @@ function grepParams(
   fixture: Fixture,
   pattern: string,
   maxFileSizeBytes: number,
-  restrictedTo: string | undefined
+  restrictedTo: string | undefined,
+  caseInsensitive: boolean
 ) {
   return {
     ...(restrictedTo
@@ -170,7 +174,7 @@ function grepParams(
     pattern,
     inputPath: fixture.path,
     resolvedPath: fixture.path,
-    caseInsensitive: false,
+    caseInsensitive,
     maxResults: 10_000_000,
     maxMatchesPerFile: 10_000_000,
     maxFileSizeBytes,
@@ -213,6 +217,7 @@ async function withRuntime<T>(
 interface GrepResult {
   readonly matches: readonly unknown[];
   readonly filesScanned: number;
+  readonly truncated: boolean;
 }
 
 async function timedGrep(
@@ -230,6 +235,7 @@ async function timedGrep(
     peakRssKb: await readPeakRssKb(pid),
     matches: result.matches.length,
     filesScanned: result.filesScanned,
+    truncated: result.truncated,
   };
 }
 
@@ -264,7 +270,13 @@ async function cancelledGrep(
       `expected the aborted grep to end with ${RESERVED_ERROR_CODES.CANCELLED} | received: ${String(code)}: ${reason}`
     );
   }
-  return { elapsedMs, peakRssKb: await readPeakRssKb(pid), matches: 0, filesScanned: 0 };
+  return {
+    elapsedMs,
+    peakRssKb: await readPeakRssKb(pid),
+    matches: 0,
+    filesScanned: 0,
+    truncated: false,
+  };
 }
 
 /** Nearest-rank quartiles, so the IQR names measured samples like the summary does. */
@@ -298,6 +310,7 @@ async function environmentNotes(candidates: readonly Candidate[]) {
     candidates.map(async ({ label, binary }) => ({
       label,
       binary,
+      buildProfile: buildProfileOf(binary),
       binaryBytes: (await stat(binary)).size,
       runtimeVersion: (
         await Bun.spawn([binary, '--version'], { stdout: 'pipe' }).stdout.text()
@@ -310,23 +323,27 @@ async function environmentNotes(candidates: readonly Candidate[]) {
     memoryGiB: Math.round(totalmem() / 2 ** 30),
     bun: Bun.version,
     binaries,
-    pattern: PATTERN,
+    pattern,
+    ignoreCase,
+    order: 'rotated every run: ABBA for two candidates',
     restricted,
   };
 }
 
 const { flags, values, positional } = parseArgs({
-  booleanFlags: ['--json', '--restricted'],
-  valueFlags: ['--runs', '--warmup', '--scenario', '--large-mib'],
+  booleanFlags: ['--json', '--restricted', '--ignore-case'],
+  valueFlags: ['--runs', '--warmup', '--scenario', '--large-mib', '--pattern'],
 });
 if (flags['--help']) printHelp();
+const pattern = values['--pattern'] ?? DEFAULT_PATTERN;
+const ignoreCase = flags['--ignore-case'] ?? false;
 
 const candidates: Candidate[] = positional.splice(0).map(parseCandidate);
 if (candidates.length === 0) {
-  const newest = await newestWorkspaceBuild();
+  const newest = await newestWorkspaceBuild(REPO_ROOT);
   if (!newest) {
     fatal(
-      'No runtime binary. Build one with `cargo build --release -p mangostudio-runtime --locked`.'
+      'No runtime binary. Build one with `cargo build --profile release-fast -p mangostudio-runtime --locked`.'
     );
   }
   candidates.push({ label: 'binary', binary: newest });
@@ -365,7 +382,7 @@ const restricted = flags['--restricted'] ?? false;
 if (!quiet) {
   header('fs.grep benchmark');
   info(
-    `${candidates.map(({ label, binary }) => `${label}=${binary}`).join(' vs ')} — ${runs} run(s) per scenario (after ${warmup} warm-up), interleaved: ${scenarios.join(', ')}`
+    `${candidates.map(({ label, binary }) => `${label}=${binary} (${buildProfileOf(binary)})`).join(' vs ')} — ${runs} run(s) per scenario (after ${warmup} warm-up), interleaved: ${scenarios.join(', ')}`
   );
 }
 
@@ -383,15 +400,19 @@ try {
     const fixture = await fixtures[scenario]();
     const params = grepParams(
       fixture,
-      scenario === 'cancel' ? '^(a+)+$' : PATTERN,
+      scenario === 'cancel' ? '^(a+)+$' : pattern,
       Math.max(fixture.bytes, 1) + 1,
-      restricted ? scratch : undefined
+      restricted ? scratch : undefined,
+      ignoreCase
     );
     const samples = new Map<string, Sample[]>(candidates.map(({ label }) => [label, []]));
     const loadBefore = loadavg()[0] ?? 0;
-    // Interleaved (A B A B ...) so drift in machine load hits every binary alike.
+    // The order rotates every run (ABBA for two binaries), so no binary always
+    // runs first and drift in machine load hits every binary alike. The index is
+    // the measured run number: the first measured run starts with the first
+    // binary whatever the warm-up count, and warm-ups (negative) rotate on their own.
     for (let run = -warmup; run < runs; run += 1) {
-      for (const { label, binary } of candidates) {
+      for (const { label, binary } of rotatedOrder(candidates, run)) {
         const home = join(scratch, `home-${scenario}-${label}-${run + warmup}`);
         const sample = await withRuntime(binary, home, (session, pid) =>
           scenario === 'cancel'
@@ -401,7 +422,10 @@ try {
         if (run < 0) continue;
         samples.get(label)?.push(sample);
         if (!quiet) {
-          info(`  ${scenario} ${label} run ${run + 1}/${runs}: ${sample.elapsedMs.toFixed(1)} ms`);
+          // `truncated` with a ~2,000 ms time is the runtime's per-file budget, not the scan.
+          info(
+            `  ${scenario} ${label} run ${run + 1}/${runs}: ${sample.elapsedMs.toFixed(1)} ms, ${sample.matches} match(es)${sample.truncated ? ', truncated' : ''}`
+          );
         }
       }
     }
@@ -424,6 +448,8 @@ try {
             }
           : {}),
         rawElapsedMs: own.map((sample) => Math.round(sample.elapsedMs * 10) / 10),
+        rawMatches: own.map((sample) => sample.matches),
+        rawTruncated: own.map((sample) => sample.truncated),
         rawPeakRssKb: own.map((sample) => sample.peakRssKb),
       };
     }

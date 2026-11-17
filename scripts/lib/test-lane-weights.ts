@@ -68,6 +68,8 @@ const API_INTEGRATION_LANE_WEIGHTS: FileWeights = {
   'tests/integration/routes/realtime-routes.integration.test.ts': 4,
   'tests/integration/routes/respond-stream-mcp-interactive.integration.test.ts': 5,
   'tests/integration/routes/terminal-socket.integration.test.ts': 25,
+  'tests/integration/server/slow-route-idle-timeout.integration.test.ts': 30,
+  'tests/integration/server/sse-stream-idle-timeout.integration.test.ts': 15,
   'tests/integration/server/start-server.integration.test.ts': 15,
   'tests/integration/services/rust-command-compat.integration.test.ts': 5,
   'tests/integration/services/rust-runtime-library-propagation.integration.test.ts': 10,

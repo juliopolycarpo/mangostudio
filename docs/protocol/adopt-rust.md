@@ -152,6 +152,25 @@ let theirs = Contract::from_catalog(catalog)?; // the peer's document, checked l
 `discover` fails with `METHOD_UNSUPPORTED` against a peer that serves no contract, and with
 `INVALID_REQUEST` against a wire 1.0 peer, which cannot have meant the method.
 
+A host that keeps its own parsed catalog for the process (a large embedded one, say) builds its
+contract with `Contract::from_shared_catalog(Arc<Catalog>)`: the contract holds that one copy
+instead of cloning it, and `rpc.discover` renders the document from it per answer, so serving a
+contract costs no per-connection copy of the catalog.
+
+`from_catalog`, `from_shared_catalog` and `ContractBuilder::build` compile every schema the catalog
+embeds before they return, so a malformed one is an `Err` there. A host that serves a large catalog
+and is asked for a small part of it can use `Contract::from_shared_catalog_lazy(Arc<Catalog>)`
+instead: it checks names and the catalog's shape, and each method's `params` and `result` schema
+compiles on the first request that needs it (shared by every handler the contract serves). A
+schema that does not compile then answers that method `INTERNAL`, with `details.method`,
+`details.field` (such as `catalog.methods[3].result`) and a shortened `details.reason`, and never
+`INVALID_PARAMS`: the caller sent nothing wrong. A method's schema failure is reported before its handler runs, never after: `serve`
+resolves the `result` schema ahead of the handler when `validate_results` is on, and a host that
+calls `check_result` itself calls `ensure_result_schema(method)` first, so a handler with side
+effects does not run for a request that can only end in `INTERNAL`. Until `compile_all()` has passed, `catalog()` and
+`rpc.discover` publish schemas nothing has checked. Call `Contract::compile_all()` in a test, or once at start, to get the error the
+eager constructors would have returned before a request finds it.
+
 A session bounds what the peer can make it hold, so a peer that opens requests and never cancels
 them cannot grow this side without limit:
 

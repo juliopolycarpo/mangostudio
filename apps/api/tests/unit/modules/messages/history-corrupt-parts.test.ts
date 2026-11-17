@@ -12,6 +12,7 @@ import {
   loadRichHistory,
 } from '../../../../src/modules/messages/infrastructure/message-repository';
 import { buildOpenAIResponsesReplay } from '../../../../src/services/providers/core/replay-builder';
+import { DiagnosticWarnCapture } from '../../../support/diagnostic-warn-capture';
 import { insertTestChat, insertTestUser } from '../../../support/factories';
 
 let sequence = 0;
@@ -83,5 +84,56 @@ describe('history with one corrupt parts cell', () => {
     const toolItems = items.filter((item) => 'type' in item);
     expect(toolItems).toEqual([]);
     expect(items.map((item) => item.role)).toEqual(['user', 'assistant', 'user']);
+  });
+});
+
+/**
+ * The corrupt-parts warning comes from the read that uses a row's parts. Text
+ * history sends `text` only and does not even select most `parts` cells, so it
+ * reports nothing; rich history replays the parts and reports the cell.
+ */
+describe('corrupt parts warning on history reads', () => {
+  function warningsFor(lines: readonly string[], messageId: string): string[] {
+    return lines.filter(
+      (line) => line.includes('corrupt_message_parts') && line.includes(messageId)
+    );
+  }
+
+  it.each([
+    ['without a boundary event name', '{not json'],
+    ['naming a boundary event', '[{"type":"system_event","event":"chat_compacted"'],
+  ])('text history stays silent for a corrupt cell %s', async (_label, corruptParts) => {
+    const user = await insertTestUser();
+    const chat = await insertTestChat(user.id);
+    const corruptId = `text-silent-${chat.id}`;
+    await insertTurn(chat.id, `u-${chat.id}`, 'user', null);
+    await insertTurn(chat.id, corruptId, 'ai', corruptParts);
+
+    let history: Awaited<ReturnType<typeof loadHistory>> = [];
+    const lines = await new DiagnosticWarnCapture().during(async () => {
+      history = await loadHistory(chat.id, {}, getDb());
+    });
+
+    expect(history.map((turn) => turn.id)).toEqual([`u-${chat.id}`, corruptId]);
+    expect(warningsFor(lines, corruptId)).toEqual([]);
+  });
+
+  it('rich history reports the corrupt cell once by message id', async () => {
+    const user = await insertTestUser();
+    const chat = await insertTestChat(user.id);
+    const corruptId = `rich-warns-${chat.id}`;
+    await insertTurn(chat.id, `u-${chat.id}`, 'user', null);
+    await insertTurn(chat.id, corruptId, 'ai', '{not json');
+
+    const lines = await new DiagnosticWarnCapture().during(() =>
+      loadRichHistory(chat.id, {}, getDb())
+    );
+
+    const warnings = warningsFor(lines, corruptId);
+    if (warnings.length !== 1) {
+      throw new Error(
+        `expected corrupt_message_parts warnings for ${corruptId}: 1 | received: ${JSON.stringify(lines)}`
+      );
+    }
   });
 });

@@ -66,6 +66,9 @@ Open these first:
 - `apps/api/src/modules/generation/application/resolve-model.ts`
 - `apps/api/src/modules/chats/` (ownership, chat repository)
 - `apps/api/src/modules/messages/` (message repository, persistence)
+- `apps/api/src/modules/generation/application/turn-checkpoint.ts` (a streaming turn's checkpoints:
+  one full row write, then deltas in `message_checkpoint_deltas`; every reader of a generating row
+  folds them through `foldCheckpointDeltasIntoRows`)
 - `apps/api/src/services/providers/core/continuation-envelope.ts`
 - `apps/api/src/services/providers/core/continuation-runtime.ts`
 - `apps/api/src/services/providers/core/context-policy.ts`
@@ -754,6 +757,9 @@ Seams (one line each, all fire-and-forget):
 Open these first:
 
 - `apps/api/src/db/database.ts`
+- `apps/api/src/db/durability.ts` (`relaxDurability` after migrations; `runDurably` for a write that
+  must survive power loss; `withFullDurability` when the code that writes uses the shared `db` itself,
+  as Better Auth does)
 - `apps/api/src/db/types.ts`
 - `apps/api/src/db/serializers.ts`
 - `apps/api/src/db/migrations/`
@@ -815,6 +821,7 @@ Open these first:
 - `apps/api/src/server/embedded-frontend.ts`
 - `scripts/lib/embed-frontend.ts` (binary embedding) and `scripts/test-build.ts`
 - `scripts/ci/frontend-bundle-report.ts` (per-chunk size diff against a saved baseline)
+- `scripts/ci/frontend-load-graph.ts` (eager payload, per-feature first-use rounds, eager-size budget)
 - `scripts/lib/test-lanes.ts` (the lane registry, not just `package.json`)
 
 `docs/architecture/frontend-build.md` carries the measured traps for this section (bundler,

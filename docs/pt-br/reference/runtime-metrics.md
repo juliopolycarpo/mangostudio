@@ -134,6 +134,99 @@ A remoção do runtime TypeScript é a maior parte das deleções de TypeScript 
 comportamento dele foi para as linhas de Rust em production, e a cobertura de compatibilidade
 para testes Rust e fixtures congeladas.
 
+## Binário do hub: ordem de funções AOT
+
+O hub de distribuição é compilado com o `--aot` nativo do Bun (veja `docs/reference/releasing.md`);
+a seção de bytecode abaixo é o fallback explícito `--compiler bytecode`. Um build Linux que pede
+a ordem (`--production` ou `--require-aot-order`; um build local simples, de smoke ou de teste não
+pede) compila o hub duas vezes: uma com `--aot-record-order` e outra com `--aot-order=<arquivo>`,
+onde o arquivo é o que o primeiro binário escreveu ao executar uma carga de trabalho fixa.
+
+`--aot-record-order` faz o binário escrever a ordem em que suas funções rodaram pela primeira vez
+quando termina com `BUN_AOT_ORDER_OUT` definido; `--aot-order` organiza a compilação seguinte nessa
+ordem, de modo que o código que o hub toca ao iniciar e servir fica junto e o resto não é paginado.
+O binário tem o mesmo tamanho.
+
+Medido com `scripts/bench/hub-footprint.ts`: sete rodadas intercaladas, um home isolado novo por
+início, memória lida de `/proc/<pid>/status` após 10 s ocioso e de novo 3 s depois de uma carga
+(cadastro e login, listar chats cinco vezes, buscar `/` e o maior script em br, gzip e identity).
+linux-x64 glibc, Bun 1.4.5-canary, hub de production com o frontend embarcado, binários em btrfs
+(em tmpfs as páginas do executável contam como `RssShmem` em vez de `RssFile`; os totais coincidem).
+
+| Variante         | Tamanho do binário (B) | VmRSS ocioso (KB) | Faixa ociosa (KB) | Após a carga (KB) |
+| ---------------- | ---------------------: | ----------------: | ----------------: | ----------------: |
+| base             |            102.137.608 |            69.296 |     69.056–69.740 |            75.744 |
+| ordem de funções |            102.137.608 |            59.404 |     59.072–59.920 |            66.044 |
+
+O RSS ocioso cai 14,3% e o RSS após a carga 12,8%. A carga média do host ficou entre 10 e 18
+durante a medição, então nenhuma mudança de inicialização é afirmada: a mediana do início até o
+primeiro `/api/health` saudável foi 143 ms na base e 152 ms com a ordem, dentro desse ruído.
+
+O arquivo numera as funções por posição, então só funciona para o programa de onde veio. Um
+gravado no build anterior não mudou nada (69,4 MB ocioso), e o Bun só avisa em alguns casos: um
+arquivo vazio ou lixo imprime `warn: --aot-order: <arquivo> is not an order file. Nothing is placed
+by it`, e um arquivo ausente é o único erro de build. O Bun não confere a linha `P <tamanho do
+programa>` nem os índices das funções: um arquivo com tamanho errado, ou com índices além do fim do
+programa, compila em silêncio e não posiciona nada (testado). Portanto um arquivo velho é evitado,
+não detectado. O build grava a partir do binário que vai distribuir (`scripts/lib/aot-order.ts`),
+esvazia antes o diretório da ordem, confere só o cabeçalho e que uma função foi gravada (um tipo de linha desconhecido é contado no log e deixado para o Bun, cujo canary pode acrescentar outros) e procura o aviso do Bun no stderr
+da compilação final: um build local avisa e distribui sem ordem, um build que exige a ordem falha.
+Gravações do mesmo binário foram idênticas byte a byte em seis execuções.
+
+A gravação leva o hub pela `scripts/lib/hub-workload.ts` em um home descartável numa porta de
+loopback, com limite de 120 s. O hub roda com um ambiente em lista de permissão (`PATH`, locale,
+`TZ`, diretórios temporários, mais o home e as portas que o gravador define; sem tokens, proxies,
+sobrescrita do runtime nem verificação de atualização), seu arquivo de estado precisa nomear o pid
+e a porta que o gravador iniciou antes da carga, e um build cancelado por SIGINT, SIGTERM ou SIGHUP
+para o hub e remove o home dele. O binário de gravação e seu source map (cerca de 120 MB) são
+apagados após a compilação final; o arquivo de ordem fica em `.mango/aot-order/<plataforma>/`, seu
+SHA-256 é o `aotOrderSha256` do recibo de compilação do hub (nulo quando nenhuma ordem foi aplicada)
+e a distribuição de release o envia junto com o hub.
+
+Isso adiciona uma compilação extra e uma execução, cerca de 8 s num host carregado, a um build só do
+hub que leva de 15 a 20 s. Se a gravação falha, o build avisa e distribui o hub sem ordem (cerca de
+10 MB a mais de memória); `--require-aot-order` faz o build falhar. O build de distribuição passa
+essa flag para as plataformas listadas na entrada `aot_order_platforms`: todas em um release e em
+pushes para a main (o Canary diário promove esses pacotes), e só linux-x64 em pull requests, o hub
+que o dry run de release reaproveita. Nessas execuções o tempo adicionado é de cerca de 5 s medidos localmente (14 s contra 9 s num build só do hub sem gravação; conte mais num runner) numa etapa
+de hub Linux que termina bem antes dos 6 a 12 minutos dos jobs de runtime, então o caminho crítico
+não muda. O Bun grava só no Linux, então hosts macOS e Windows compilam uma vez e dizem isso. Dos
+alvos distribuídos, os quatro Linux (x64 e arm64, glibc e musl) são construídos nativamente e
+gravam a própria ordem; só o linux-x64 glibc foi medido.
+
+**O que a gravação cobre.** O hub de gravação não tem `mangostudio-runtime` ao lado, porque os jobs
+do hub não esperam os jobs do runtime. A ordem cobre, portanto, o início e os caminhos de requisição
+do hub, e um lançamento do runtime Local que não encontra binário. Medido num layout instalado (hub
+com o runtime irmão), RSS ocioso após 10 s, nove rodadas intercaladas:
+
+| Ordem gravada                     |      VmRSS ocioso (KB) | Após a carga (KB) |
+| --------------------------------- | ---------------------: | ----------------: |
+| nenhuma                           |                 69.612 |            75.800 |
+| sem runtime (o que é distribuído) | 62.024 (61.240–63.020) |            67.920 |
+| com o runtime irmão               | 60.176 (59.908–61.808) |            66.588 |
+
+A linha sem ordem é uma execução única; as duas linhas gravadas são medianas de nove rodadas.
+Gravar com o runtime capturou 5.683 funções contra 5.526 e economiza mais 1,3 a 1,9 MB (cerca de
+3%), com faixas disjuntas. Adotar isso faria os jobs do hub esperarem os jobs do runtime (cerca de 1
+a 3 minutos no caminho crítico do release) e exigiria o runtime musl dentro do contêiner Alpine;
+isso é acompanhado em [#2294](https://github.com/juliopolycarpo/mangostudio/issues/2294).
+
+Para reproduzir, a partir de um checkout limpo de cada revisão (ambos os builds no mesmo sistema de
+arquivos):
+
+```bash
+bun run build --binary --hub-only --production
+cp .mango/out/linux-x64/mangostudio /caminho/no/disco/head-hub
+bun run scripts/bench/hub-footprint.ts --rounds 5 --idle-seconds 10 --workload \
+  base=/caminho/no/disco/base-hub head=/caminho/no/disco/head-hub
+```
+
+**Não distribuído.** `--no-compile-function-source` produziu um binário idêntico byte a byte: com
+`--sourcemap=external` o código-fonte das funções já é `[native code]`. `compile.trim.remove` para
+`webassembly`, `inspector`, `profiler`, `intl-segmenter`, `ffi` e `native-addons` tirou 5,1 MB
+(5,01%) do hub base e passou no smoke do binário, mas não tem efeito na memória, só é acessível por
+`Bun.build`, e um recurso removido falha com `ERR_FEATURE_REMOVED` no primeiro uso, não no build.
+
 ## Binário do hub: bytecode
 
 O hub não é um build do cargo, mas é distribuído ao lado do runtime, então seu tempo de
@@ -157,6 +250,59 @@ mediana de 15 execuções de `scripts/bench/startup.ts`; `--version` é a median
 Todos os alvos crescem os mesmos ~17,7 MB de bytecode (`bun build --compile` do mesmo entry
 embutido para os outros sete alvos). O `.map` externo mantém o formato, e os stack traces
 continuam apontando para as linhas do código original.
+
+## Binário do hub: cópias de assets embutidas
+
+O frontend embutido carregava uma cópia sem compressão de cada asset com hash ao lado das cópias
+gzip e Brotli. Agora essa cópia fica de fora quando existe uma cópia gzip (veja
+`docs/architecture/frontend-build.md`), o que só um cliente que não aceita nenhuma das duas
+codificações percebe: navegadores enviam br ou gzip, então requisições sem codificação vêm de
+scripts, verificadores de saúde e alguns proxies.
+
+Medido com `scripts/bench/hub-footprint.ts` (sete rodadas intercaladas, um home isolado novo por
+início, memória de `/proc/<pid>/status` 10 s depois do primeiro `/api/health` saudável, depois da
+carga de requisições e depois de mais 1, 10 e 100 requisições sem codificação para o maior
+script). linux-x64 glibc, Bun 1.4.5-canary, hub de produção, binários em btrfs. A carga média do
+host ficou entre 15 e 112 (outros jobs), então nenhuma mudança de inicialização é afirmada.
+
+| Binário do hub                   | Tamanho (B) | VmRSS ocioso (KB) | Após a carga (KB) | Após +1 / +10 / +100 requisições sem codificação (KB) |
+| -------------------------------- | ----------: | ----------------: | ----------------: | ----------------------------------------------------- |
+| base                             | 102,137,608 |            69,124 |            75,552 | 75,564 / 75,548 / 74,940                              |
+| cópias sem codificação removidas |  96,218,888 |            70,184 |            75,672 | 75,684 / 75,524 / 75,572                              |
+
+O binário encolhe 5,8% (5,9 MB; os 113 registros de tamanho e `ETag` do manifesto custam 16 KB
+disso). O RSS ocioso fica 1 MB maior na mediana, com faixas que se sobrepõem (68.504–69.364 contra
+68.836–70.684 KB), e o consumo após 1, 10 e 100 requisições para o maior script continua estável:
+o corpo descomprimido fica em cache, não é alocado por requisição. Descomprimir a cada requisição,
+sem o cache, levou cerca de 10 ms por requisição para o script de 1,6 MB (4 ms com ele) e deixou o
+hub 4 MB maior após a mesma carga.
+
+O cache é dimensionado a partir do build: o tamanho decodificado total dos assets cuja cópia sem
+codificação foi removida, 5,86 MB hoje (113 arquivos). É o máximo que esse caminho pode somar ao
+processo, atingido só se clientes sem codificação buscarem todos eles; uma varredura descomprime
+cada asset uma vez e a segunda passada não descomprime nada. Medido com duas varreduras completas
+sem codificação (`accept-encoding: identity`) de todos os 132 arquivos `.js` e `.css` com hash,
+cinco rodadas intercaladas, 5 s ocioso antes:
+
+| Binário do hub   | VmRSS ocioso (KB) | Após a varredura 1 (KB) | Após a varredura 2 (KB) | Anon / arquivo após a varredura 1 (KB) |
+| ---------------- | ----------------: | ----------------------: | ----------------------: | -------------------------------------- |
+| base             |            69,704 |                  79,272 |                  79,224 | 18,376 / 60,900                        |
+| cópias removidas |            69,620 |                  79,264 |                  79,248 | 22,980 / 56,188                        |
+
+A varredura custa a mesma memória total nos dois casos: os 4,6 MB que o hub passa a manter como
+corpos decodificados são os 4,7 MB de páginas embutidas mapeadas que ele deixa de tocar, e a
+segunda varredura não soma nada.
+
+HEAD e `If-None-Match` para um asset sem bytes sem codificação são respondidos com o tamanho e o
+`ETag` que o build registrou no manifesto, então nenhum dos dois descomprime nada, nem com o cache
+frio. As respostas br e gzip são byte a byte as cópias embutidas. `Range` não muda no hub
+compilado: o Bun fatia um arquivo armazenado, então a base responde 206 para identity, gzip e br,
+e o servidor fatia os bytes decodificados para dar as mesmas respostas a identity. Medido com um
+cliente HTTP cru contra um hub base e um hub novo, 19 requisições identity (`Range` simples,
+aberto, sufixo, limitado, insatisfazível, múltiplo e malformado, mais `If-None-Match`, HEAD e
+`If-Range`) deram status, tamanhos e cabeçalhos idênticos, e `If-Range` com o tag forte, um tag
+fraco e uma data deu 206, 200 e 200 nos dois. gzip e br foram idênticos em seis formas de `Range`
+e em HEAD.
 
 ## Como medir de novo
 

@@ -611,6 +611,31 @@ async fn fake_pty_covers_open_attach_write_resize_ack_detach_and_close() {
         })
         .unwrap();
     assert_eq!(attached["scrollback"], "aGVsbG8=");
+    // Pins the whole attach answer: field names, value types and the null exit fields.
+    let mut fields: Vec<&str> = attached
+        .as_object()
+        .expect("attach answers with an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    fields.sort_unstable();
+    assert_eq!(
+        fields,
+        [
+            "cols",
+            "exitCode",
+            "rows",
+            "scrollback",
+            "sessionId",
+            "signal",
+            "status"
+        ],
+        "expected the attach answer's field set | received {attached}"
+    );
+    assert_eq!(attached["sessionId"], "terminal-1");
+    assert_eq!(attached["status"], "running");
+    assert!(attached["exitCode"].is_null() && attached["signal"].is_null());
+    assert!(attached["cols"].is_u64() && attached["rows"].is_u64());
     service
         .write(WriteParams {
             session_id: "terminal-1".into(),

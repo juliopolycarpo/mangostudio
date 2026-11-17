@@ -7,6 +7,7 @@ import { StringDecoder } from 'node:string_decoder';
 import {
   assertMachineStdoutLimit,
   createMachineStdoutCapture,
+  createTextLineTee,
   type MachineStdoutCapture,
 } from './native-command-output';
 
@@ -481,7 +482,14 @@ export async function runNativeCommand(
     machine?: MachineStdoutCapture
   ): void => {
     const decoder = new StringDecoder('utf8');
-    let pending = '';
+    const lines = createTextLineTee(
+      (text) => {
+        combined.write(text);
+      },
+      (message) => {
+        errors.push(message);
+      }
+    );
     source.on('data', (chunk: Buffer) => {
       writer.write(chunk);
       stream.write(chunk);
@@ -489,26 +497,15 @@ export async function runNativeCommand(
         machine.write(chunk);
         return;
       }
-      pending += decoder.write(chunk);
-      let newline = pending.indexOf('\n');
-      while (newline !== -1) {
-        combined.write(pending.slice(0, newline + 1));
-        pending = pending.slice(newline + 1);
-        newline = pending.indexOf('\n');
-      }
-      if (pending.length > 1_048_576) {
-        errors.push('Output line exceeds 1 MiB; expected bounded text reporter lines');
-        combined.write(`${pending}\n`);
-        pending = '';
-      }
+      lines.write(decoder.write(chunk));
     });
     source.on('end', () => {
       if (machine) {
         machine.end();
         return;
       }
-      pending += decoder.end();
-      if (pending) combined.write(`${pending}\n`);
+      lines.write(decoder.end());
+      lines.end();
     });
   };
   const machineStdout =

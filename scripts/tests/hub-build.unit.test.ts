@@ -30,6 +30,7 @@ const record: HubBuildRecord = {
   version: '1.0.0',
   buildType: 'production',
   builtAt: '2026-10-29T00:00:00.000Z',
+  aotOrderSha256: 'f'.repeat(64),
   hubSha256: 'd'.repeat(64),
   hubSize: 100,
   runtimeSha256: 'e'.repeat(64),
@@ -52,6 +53,8 @@ describe('parseHubBuildRecord', () => {
     ['compilerRevision', 'short', 'hub build compilerRevision: full Bun revision'],
     ['compilerSha256', 'short', 'hub build compilerSha256: SHA256'],
     ['hubSha256', 'short', 'hub build hubSha256: SHA256'],
+    ['aotOrderSha256', 'short', 'hub build aotOrderSha256: SHA256 or null'],
+    ['aotOrderSha256', undefined, 'hub build aotOrderSha256: SHA256 or null'],
     ['runtimeSha256', 'short', 'hub build runtimeSha256: SHA256'],
     ['sourceSha', 'short', 'hub build sourceSha: full Git SHA or unknown'],
     ['gitDirty', 'false', 'hub build gitDirty: boolean or unknown'],
@@ -66,6 +69,10 @@ describe('parseHubBuildRecord', () => {
     expect(() => parseHubBuildRecord({ ...record, [field as string]: value })).toThrow(
       `expected ${shape} | received: ${String(value)}`
     );
+  });
+
+  test('accepts a hub laid out without an AOT order', () => {
+    expect(parseHubBuildRecord({ ...record, aotOrderSha256: null }).aotOrderSha256).toBeNull();
   });
 
   test.each([null, [], 'record'].map((value) => [value] as const))(
@@ -174,7 +181,10 @@ test('compiler receipts bind the native hub before a runtime exists', () => {
       version: record.version,
       buildType: 'production',
       builtAt: record.builtAt,
+      aotOrderSha256: 'a1'.repeat(32),
     });
+    // The order file is an input of the compile, so the receipt names it.
+    expect(compiled.aotOrderSha256).toBe('a1'.repeat(32));
     expect(readHubCompileRecord(root, target)).toEqual(compiled);
     expect(compiled).not.toHaveProperty('runtimeSha256');
     expect(readHubBuildRecords(root)).toEqual([]);

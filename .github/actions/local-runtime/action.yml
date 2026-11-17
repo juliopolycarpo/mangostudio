@@ -64,8 +64,12 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        binary="${RUNNER_TEMP}/local-runtime/mangostudio-runtime"
-        fake="${RUNNER_TEMP}/local-runtime/fake_cursor_agent"
+        # On Windows, MSYS bash lets `-f` and `cp` find `name` for `name.exe`,
+        # but the exported path is read by Bun, which needs the real file name.
+        suffix=""
+        if [ "${RUNNER_OS}" = "Windows" ]; then suffix=".exe"; fi
+        binary="${RUNNER_TEMP}/local-runtime/mangostudio-runtime${suffix}"
+        fake="${RUNNER_TEMP}/local-runtime/fake_cursor_agent${suffix}"
         if [ ! -f "$binary" ]; then
           echo "::error::No Local runtime binary at ${binary}; the hub cannot start Local without it."
           exit 1

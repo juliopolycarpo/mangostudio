@@ -1,6 +1,6 @@
 import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
 import { MAX_TOOL_ITERATIONS_DEFAULT } from '@mangostudio/shared/app-settings';
-import { mergeMessageParts } from '@mangostudio/shared/generation';
+import { appendMergedMessagePart, mergeMessageParts } from '@mangostudio/shared/generation';
 import type {
   ContinuationReasonCode,
   MessagePart,
@@ -55,6 +55,7 @@ import {
 } from './standard-tool-execution';
 import {
   collectToolExecutionResult,
+  createToolStartMarkerWriter,
   executeImageGenerationCall,
   finalizeDanglingToolExecutions,
   handleTurnCompleted,
@@ -64,7 +65,11 @@ import {
 } from './stream-text-turn-helpers';
 import type { StreamEvent, StreamTextTurnInput } from './stream-text-turn-types';
 import { parseToolArgs, stringifyToolResult } from './tool-result-utils';
-import { createTurnCheckpointPart, TurnCheckpointWriter } from './turn-checkpoint';
+import {
+  createDatabaseCheckpointStore,
+  createTurnCheckpointPart,
+  TurnCheckpointWriter,
+} from './turn-checkpoint';
 import { reconcileInterruptedMessageParts, sealUnresolvedToolCalls } from './turn-recovery';
 
 const TOOL_LOOP_EXHAUSTED_MESSAGE = 'The model exceeded the maximum number of tool interactions.';
@@ -267,7 +272,7 @@ export async function prepareStreamTextTurn(
     checkpointWriter: null as unknown as TurnCheckpointWriter,
   } satisfies StreamTextTurnSession;
   session.checkpointWriter = new TurnCheckpointWriter({
-    db,
+    store: createDatabaseCheckpointStore(db, aiMsgId),
     chatId,
     messageId: aiMsgId,
     checkpoint,
@@ -283,8 +288,12 @@ export async function prepareStreamTextTurn(
   return session;
 }
 
-async function checkpointTurn(session: StreamTextTurnSession, force = false): Promise<void> {
-  await session.checkpointWriter.checkpoint({ force });
+function checkpointTurn(
+  session: StreamTextTurnSession,
+  force = false,
+  durable = false
+): Promise<boolean> {
+  return session.checkpointWriter.checkpoint({ force, durable });
 }
 
 /**
@@ -441,7 +450,7 @@ export async function* emitAgentStreamEvent(
         loop.inThinkingSegment = true;
         yield { type: 'thinking_start' };
       }
-      session.allParts.push({ type: 'thinking', text: event.text });
+      appendMergedMessagePart(session.allParts, { type: 'thinking', text: event.text });
       yield { type: 'thinking', text: event.text };
       await checkpointTurn(session);
       break;
@@ -519,7 +528,7 @@ export async function* emitAgentStreamEvent(
     case 'assistant_text_delta':
       loop.inThinkingSegment = false;
       session.fullText += event.text;
-      session.allParts.push({ type: 'text', text: event.text });
+      appendMergedMessagePart(session.allParts, { type: 'text', text: event.text });
       yield { type: 'text', text: event.text };
       await checkpointTurn(session);
       break;
@@ -620,6 +629,7 @@ async function* executePendingToolCalls(
     state: delegationState,
   });
 
+  const beforeToolStart = createToolStartMarkerWriter(session);
   const hasImageGenerationCall = pendingCallEntries.some(
     ([, call]) => call.name === GENERATE_IMAGE_TOOL_NAME
   );
@@ -637,6 +647,7 @@ async function* executePendingToolCalls(
       delegationRuntime,
       db,
       signal,
+      beforeToolStart,
     })) {
       synchronizeToolProgressForCheckpoint(item, session.allParts);
       yield* collectToolExecutionResult(item, {
@@ -644,6 +655,7 @@ async function* executePendingToolCalls(
         nextToolResults,
         includeSubagentTrace: multiAgentSettings.traceVisibility !== 'off',
       });
+      // The durable `running` marker was written by `beforeToolStart`, ahead of the tool.
       await checkpointTurn(session, true);
     }
     return;
@@ -672,6 +684,7 @@ async function* executePendingToolCalls(
             delegationRuntime,
             db,
             signal,
+            beforeToolStart,
           })) {
             synchronizeToolProgressForCheckpoint(item, session.allParts);
             await checkpointTurn(session, true);
@@ -689,7 +702,7 @@ async function* executePendingToolCalls(
       allParts: session.allParts,
       generatedImageArtifacts: session.generatedImageArtifacts,
       nextToolResults,
-      checkpoint: () => checkpointTurn(session, true),
+      checkpoint: (options) => checkpointTurn(session, true, options?.durable === true),
     });
   }
 
@@ -859,13 +872,13 @@ export async function* runLegacyTextStream(
         legacyInThinking = true;
         yield { type: 'thinking_start' };
       }
-      session.allParts.push({ type: 'thinking', text: chunk.text });
+      appendMergedMessagePart(session.allParts, { type: 'thinking', text: chunk.text });
       yield { type: 'thinking', text: chunk.text };
       await checkpointTurn(session);
     } else if (chunk.type === 'text' && chunk.text && !chunk.done) {
       legacyInThinking = false;
       session.fullText += chunk.text;
-      session.allParts.push({ type: 'text', text: chunk.text });
+      appendMergedMessagePart(session.allParts, { type: 'text', text: chunk.text });
       yield { type: 'text', text: chunk.text };
       await checkpointTurn(session);
     } else if (chunk.type === 'tool_call') {
@@ -925,7 +938,7 @@ export async function* runSingleShotTextGeneration(
 
   if (!signal?.aborted) {
     session.fullText = result.text;
-    session.allParts.push({ type: 'text', text: result.text });
+    appendMergedMessagePart(session.allParts, { type: 'text', text: result.text });
     yield { type: 'text', text: session.fullText };
     await checkpointTurn(session, true);
   }

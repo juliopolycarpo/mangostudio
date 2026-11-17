@@ -3,6 +3,10 @@ name: Native Bun qualification
 # Full native suites are an explicit qualification, not a second suite on
 # every PR. Changes to this producer or its workflow tools qualify both the
 # untouched base and the candidate. Dispatch qualifies any selected branch.
+# A daily scheduled run qualifies main alone (candidate side only, so it costs
+# one set of native jobs, not two) and keeps one tracking issue: opened or
+# commented on when it fails, closed on the next green run. It is skipped when
+# main has not moved since the last successful scheduled run.
 on:
   pull_request:
     branches: [main]
@@ -17,10 +21,24 @@ on:
       - scripts/lib/zip-archive.ts
       - scripts/tests/actions-lint.unit.test.ts
       - scripts/tests/zip-archive.unit.test.ts
+  schedule:
+    - cron: "43 8 * * *"
   workflow_dispatch:
     inputs:
       baseline_sha:
         description: Optional full source SHA to record as an unrepaired baseline
+        type: string
+        default: ""
+      dry_run:
+        description: Log the tracking-issue action instead of performing it
+        type: boolean
+        default: false
+      rehearse:
+        description: >-
+          Skip the native jobs and report this verdict to the tracking issue (failure or success)
+          to exercise the issue paths. A branch run tracks its own issue, never main's; on main
+          it needs dry_run, so a rehearsal cannot touch the real issue. A dispatch without a
+          rehearsal never writes an issue.
         type: string
         default: ""
 
@@ -37,9 +55,13 @@ jobs:
     runs-on: ubuntu-latest
     # Bun setup can wait four minutes for a republished canary asset.
     timeout-minutes: 9
+    permissions:
+      contents: read
+      actions: read # list the last successful scheduled run for the skip decision
     outputs:
       matrix: ${{ steps.sources.outputs.matrix }}
       tooling: ${{ steps.sources.outputs.tooling }}
+      skip: ${{ steps.gate.outputs.skip }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -47,6 +69,15 @@ jobs:
           persist-credentials: false
 
       - uses: $/.github/actions/setup-bun
+
+      # Only a scheduled run can be redundant: pull requests and dispatches
+      # were asked for. Later jobs read `skip` and stop.
+      - id: gate
+        name: Skip a scheduled run when main has not moved
+        if: ${{ github.event_name == 'schedule' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bun scripts/ci/native-platform-watch.ts gate
 
       - id: sources
         name: Select the candidate and optional baseline
@@ -71,6 +102,8 @@ jobs:
   qualify:
     name: Native ${{ matrix.source.name }} (${{ matrix.os }})
     needs: [sources]
+    # A rehearsal exercises the issue paths without paying for native jobs.
+    if: ${{ needs.sources.outputs.skip != 'true' && !inputs.rehearse }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.sources.outputs.matrix) }}
@@ -162,3 +195,42 @@ jobs:
             !evidence/targets/**
           if-no-files-found: error
           retention-days: 14
+
+  report:
+    name: Report scheduled native result
+    needs: [sources, qualify]
+    # Only a scheduled run or a rehearsal writes the issue: a failed manual dispatch on a
+    # branch would leave an issue nobody closes. A skipped scheduled run has no verdict.
+    if: ${{ always() && needs.sources.outputs.skip != 'true' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.rehearse != '')) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    permissions:
+      contents: read
+      actions: read # name the failing jobs of this run
+      issues: write # open, comment on and close the tracking issue
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: $/.github/actions/setup-bun
+
+      # A job that hits its timeout is reported as cancelled and must be reported; a run
+      # cancelled by a person makes cancelled() true and is left alone.
+      - name: Open, update or close the tracking issue
+        if: ${{ !cancelled() }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SOURCES_RESULT: ${{ needs.sources.result }}
+          QUALIFY_RESULT: ${{ needs.qualify.result }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          REHEARSE: ${{ inputs.rehearse }}
+        run: |
+          # A failed source resolution is a failed run, not a skipped one.
+          verdict="$QUALIFY_RESULT"
+          if [ "$SOURCES_RESULT" != "success" ]; then verdict="$SOURCES_RESULT"; fi
+          args=(report --verdict "$verdict")
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          if [ -n "$REHEARSE" ]; then args+=(--rehearse "$REHEARSE"); fi
+          bun scripts/ci/native-platform-watch.ts "${args[@]}"

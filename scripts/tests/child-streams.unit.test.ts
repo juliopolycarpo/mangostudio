@@ -89,6 +89,81 @@ describe('scripts/lib/child-streams', () => {
       expect(hung.kind).toBe('timeout');
     });
 
+    test('reports what splitting the whole stream reports, however the bytes are cut', async () => {
+      const cases = [
+        { text: 'café ✓ \u{1f96d}\r\nrest\n', expected: 'café ✓ \u{1f96d}\r' },
+        { text: '\nafter an empty first line', expected: '' },
+      ];
+      for (const { text, expected } of cases) {
+        const bytes = encoder.encode(text);
+        for (let cut = 0; cut <= bytes.byteLength; cut += 1) {
+          const result = await readFirstLine(
+            streamOf(bytes.slice(0, cut), bytes.slice(cut)),
+            5_000
+          );
+          expect({ text, cut, result }).toEqual({
+            text,
+            cut,
+            result: { kind: 'line', line: expected },
+          });
+        }
+        const oneByteReads = Array.from({ length: bytes.byteLength }, (_, at) =>
+          bytes.slice(at, at + 1)
+        );
+        expect(await readFirstLine(streamOf(...oneByteReads), 5_000)).toEqual({
+          kind: 'line',
+          line: expected,
+        });
+      }
+      const unterminated = encoder.encode('café \u{1f96d}');
+      for (let cut = 0; cut <= unterminated.byteLength; cut += 1) {
+        const result = await readFirstLine(
+          streamOf(unterminated.slice(0, cut), unterminated.slice(cut)),
+          5_000
+        );
+        expect({ cut, result }).toEqual({
+          cut,
+          result: { kind: 'eof', partial: 'café \u{1f96d}' },
+        });
+      }
+    });
+
+    test('rejects with the length and the limit when the first line outgrows the limit', async () => {
+      const outcome = readFirstLine(streamOf('abcd', 'efgh', 'ijkl'), 5_000, 10);
+
+      await expect(outcome).rejects.toThrow(
+        '(NewlineSplitter): line length 12 exceeds the cap | expected at most 10 characters before the newline'
+      );
+    });
+
+    test('accepts a first line of exactly the limit', async () => {
+      const result = await readFirstLine(streamOf('a'.repeat(10), '\nrest'), 5_000, 10);
+
+      expect(result).toEqual({ kind: 'line', line: 'a'.repeat(10) });
+    });
+
+    test('returns a complete first line even when the same read goes on past the limit', async () => {
+      // `hello\n` is whole and the rest has no newline yet: the caller asked for
+      // one line and has it, so the overflow behind it is not its concern.
+      const result = await readFirstLine(streamOf(`hello\n${'x'.repeat(30)}`), 5_000, 10);
+
+      expect(result).toEqual({ kind: 'line', line: 'hello' });
+    });
+
+    // That the splitting is linear is proven where it lives, in
+    // newline-splitter.unit.test.ts; this only pins that a long line arrives whole.
+    test('reads a 1 MiB first line in 16-byte pieces whole', async () => {
+      const bytes = encoder.encode(`${'a'.repeat(1024 * 1024)}\n`);
+      const pieces: Uint8Array[] = [];
+      for (let offset = 0; offset < bytes.byteLength; offset += 16) {
+        pieces.push(bytes.slice(offset, offset + 16));
+      }
+
+      const result = await readFirstLine(streamOf(...pieces), 30_000);
+
+      expect(result.kind === 'line' ? result.line.length : result).toBe(1024 * 1024);
+    });
+
     test('returns as soon as the record arrives rather than waiting out the budget', async () => {
       const startedAt = Date.now();
       const result = await readFirstLine(streamOf('ready\n'), 30_000);

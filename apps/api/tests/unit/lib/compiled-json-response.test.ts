@@ -69,6 +69,7 @@ describe('createJsonResponseEncoder', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toBe('application/json;charset=utf-8');
     expect(await response.text()).toBe(JSON.stringify(value));
+    expect(response.headers.get('content-length')).toBe(String(JSON.stringify(value).length));
   });
 
   it('compiles the check and the mirror once, on the first call only', () => {

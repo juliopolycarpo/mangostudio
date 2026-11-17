@@ -108,6 +108,91 @@ opt-level = "s"
 [profile.release.package.fancy-regex]
 opt-level = "s"
 
+# Size over speed for the code a runtime call runs rarely or spends waiting on
+# I/O: MCP, HTTP and TLS clients, WebSocket framing, URL and TOML parsing,
+# collation, the external-agent adapters and the runtime contract.
+# Measured on linux-x64 (docs/reference/runtime-metrics.md): the stripped runtime
+# shrinks 11% with `fs.grep`, `hello` and `fs.list-directory` within noise.
+# The packages that run per line or per byte stay at 3 (`mangostudio-runtime`,
+# `mango-external-agents`, `mango-protocol`, `memchr`, `serde_json`, `tokio`) and so does QuickJS
+# (`rquickjs-sys`): cc-rs takes its C optimisation level from the package
+# profile, so `s` there would build the regex engine with `-Os`. The
+# `release_profile` integration test pins both lists.
+[profile.release.package.rmcp]
+opt-level = "s"
+[profile.release.package.reqwest]
+opt-level = "s"
+[profile.release.package.hyper]
+opt-level = "s"
+[profile.release.package.hyper-util]
+opt-level = "s"
+[profile.release.package.rustls]
+opt-level = "s"
+[profile.release.package.rustls-webpki]
+opt-level = "s"
+[profile.release.package.tungstenite]
+opt-level = "s"
+[profile.release.package.tokio-tungstenite]
+opt-level = "s"
+[profile.release.package.sse-stream]
+opt-level = "s"
+[profile.release.package.url]
+opt-level = "s"
+[profile.release.package.idna]
+opt-level = "s"
+[profile.release.package.toml]
+opt-level = "s"
+[profile.release.package.toml_parser]
+opt-level = "s"
+[profile.release.package.icu_collator]
+opt-level = "s"
+[profile.release.package.icu_normalizer]
+opt-level = "s"
+[profile.release.package.chrono]
+opt-level = "s"
+[profile.release.package.globset]
+opt-level = "s"
+[profile.release.package.aho-corasick]
+opt-level = "s"
+[profile.release.package.regex-automata]
+opt-level = "s"
+[profile.release.package.regex-syntax]
+opt-level = "s"
+[profile.release.package.cap-primitives]
+opt-level = "s"
+[profile.release.package.cap-std]
+opt-level = "s"
+[profile.release.package.serde_with]
+opt-level = "s"
+[profile.release.package.agent-client-protocol-schema]
+opt-level = "s"
+[profile.release.package.mango-agent-acp]
+opt-level = "s"
+[profile.release.package.mango-agent-claude]
+opt-level = "s"
+[profile.release.package.mango-agent-codex]
+opt-level = "s"
+[profile.release.package.mangostudio-runtime-contract]
+opt-level = "s"
+
+# For local release builds and benchmarks, never for a binary that ships:
+# `cargo build --profile release-fast -p mangostudio-runtime` writes to
+# `target/release-fast/`. Thin LTO with 16 codegen units cuts the runtime build
+# from ~450 s to ~140 s of wall time on linux-x64 (28 cores; CPU time rises from
+# ~910 s to ~1360 s, so a small machine gains little) and keeps the per-package
+# overrides above. The binary is ~31% larger than the shipping one (37.0 against
+# 28.2 MB) and benchmarks a few percent slower, so nothing that packages,
+# publishes or stages a runtime may use it: `scripts/build-runtime.ts` and the
+# release workflows build `--release`, and
+# `scripts/tests/release-fast-profile.unit.test.ts` fails if a release file names
+# this profile. CI's `light` runtime build is separate: it sets
+# `CARGO_PROFILE_RELEASE_LTO=off` through the environment so its cache key
+# differs from the shipping one.
+[profile.release-fast]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+
 # Line tables keep file:line in panics and backtraces, which is all the debug
 # info the workspace needs; dependencies drop theirs. Measured on linux-x64 (30
 # cores, `cargo build --workspace --all-targets`): the cold build falls from
@@ -116,9 +201,54 @@ opt-level = "s"
 # `profile.test` inherits all of this. For a stepping debugger, override
 # locally with `CARGO_PROFILE_DEV_DEBUG=full`, which reaches only the workspace
 # crates: the package override below outranks it, so dependencies also need
-# `--config 'profile.dev.package."*".debug="full"'`.
+# `--config 'profile.dev.package."*".debug="full"'`. The seven crates raised to
+# opt-level 1 below show variables as optimized out; to step through one, add
+# `--config 'profile.dev.package.<name>.opt-level=0'`.
 [profile.dev]
 debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+# API tests and the CI test shards spawn a debug `mangostudio-runtime`. Its
+# `hello` compiles the contract's JSON Schemas and parses the catalog, which at
+# opt-level 0 takes ~190 ms per spawn (release: ~40 ms). These dependencies run
+# the work, so they build at opt-level 1: `hello` falls to ~66 ms, and the three
+# runtime-spawning API integration files (`rust-runtime-qualification`,
+# `spawn-runtime-child`, `rust-runtime-library-propagation`) take ~48 s instead
+# of ~54 s.
+# Leaving one out costs `hello` 33-64 ms (jsonschema, referencing,
+# jsonschema-value, fancy-regex, serde_json) or 5-8 ms (regex-automata,
+# regex-syntax); jsonschema-regex and regex are within noise, so they stay at 0.
+# Re-run the leave-one-out when startup changes.
+#
+# Measured on linux-x64 (28 cores) against the unchanged profile, as CPU
+# seconds (user + sys), because other work shared the host:
+# - `cargo nextest run --workspace --all-targets --all-features`, cold: ~750 s
+#   to ~930 s. `cargo clippy` is unchanged (~230 s): crates only get checked.
+# - `target/` stays at ~3.4 GB; the debug runtime goes from 137 to 131 MB.
+#
+# Two alternatives were measured and rejected:
+# - opt-level 2 gives the same `hello` for ~1400 s of cold test-build CPU.
+# - `package."*"` at opt-level 1 is ~16 ms faster per spawn but also compiles
+#   every proc macro and build script at opt-level 1 (a package glob outranks
+#   `profile.dev.build-override`), taking cold CPU to ~1450 s for the test build
+#   and ~560 s for clippy.
+#
+# Workspace crates stay at opt-level 0 so editing them keeps the fast rebuild:
+# at opt-level 2, `mango-protocol` and `mangostudio-runtime-contract` took ~19 s
+# each to compile instead of 3 s and 1 s, and they add only 2-4 ms to `hello`.
+[profile.dev.package.jsonschema]
+opt-level = 1
+[profile.dev.package.jsonschema-value]
+opt-level = 1
+[profile.dev.package.referencing]
+opt-level = 1
+[profile.dev.package.fancy-regex]
+opt-level = 1
+[profile.dev.package.serde_json]
+opt-level = 1
+[profile.dev.package.regex-automata]
+opt-level = 1
+[profile.dev.package.regex-syntax]
+opt-level = 1

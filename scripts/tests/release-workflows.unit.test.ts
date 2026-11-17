@@ -446,6 +446,22 @@ describe('release workflow binary gate', () => {
     expect(hub).toContain('runs-on: $' + '{{ matrix.runner }}');
     expect(hub.match(/--hub-only/g)).toHaveLength(2);
     expect(hub).toContain('--reuse-frontend');
+    // A listed hub leg, glibc and Alpine, fails rather than ship without the AOT function order
+    // recorded from itself; the flag comes from one selection step, so the two builds cannot
+    // disagree. macOS and Windows legs skip recording, which is not a failure.
+    expect(hub.match(/--hub-only [^\n]*\$\{AOT_ORDER_FLAG:\+"\$AOT_ORDER_FLAG"\}/g)).toHaveLength(
+      2
+    );
+    expect(hub).not.toContain('--reuse-frontend --require-aot-order');
+    expect(hub).toContain('AOT_ORDER_PLATFORMS: $' + '{{ inputs.aot_order_platforms }}');
+    expect(hub).toContain('.mango/aot-order/$' + '{{ matrix.platform }}/hub.order');
+    // A release records every hub; a PR only the one its dry run reuses.
+    expect(extractJobBlock(readText('.github/workflows/release.yml'), 'build')).toContain(
+      'aot_order_platforms: all'
+    );
+    expect(readText('.github/workflows/ci.yml')).toContain(
+      'aot_order_platforms: $' + "{{ github.event_name == 'pull_request' && 'linux-x64' || 'all' }}"
+    );
     expect(hub).toContain('oven/bun:$' + '{BUN_CHANNEL}-alpine');
     expect(hub).toContain('bun install --frozen-lockfile');
     expect(build).toContain('needs: [hub, runtime, runtime-version]');

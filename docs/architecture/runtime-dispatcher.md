@@ -34,10 +34,17 @@ wrapped a handler's result check _inside_ the audit-recording wrapper
 (`gateHandlers(checkResults(handlers), deps)`), not through the SDK's own post-handler option.
 
 `crates/mangostudio-runtime::registry::Registry::implement` does the same thing: the closure it
-registers checks the handler's serialised result against the method's `result` schema, using its
-own compiled `jsonschema::Validator` (`result_check::compile_result_schema`), before it ever
-records anything through its `Audit` port. `ServeOptions::validate_results` stays `false` for
-every call this crate makes to `Contract::serve`.
+registers checks the handler's serialised result against the method's `result` schema before it
+ever records anything through its `Audit` port. The check is
+`mango_protocol::contract::Contract::check_result` on the process-wide
+`mangostudio_runtime::serve::runtime_contract()`, so each `result` schema is compiled once, by the
+contract that serves it, and the runtime holds no validator of its own. That contract compiles
+lazily: a method's `params` and `result` schemas compile on the first request that needs them, so
+start-up does not pay for the methods a hub never calls. A schema that does not compile would
+answer `INTERNAL` for its method, which is why the `every_schema_in_the_embedded_catalog_compiles`
+unit test calls `Contract::compile_all()` and fails the build first.
+`ServeOptions::validate_results` stays `false` for every call this crate makes to
+`Contract::serve`.
 
 **This crate always validates a result, in every build**, unlike the retired TypeScript runtime,
 which turned the check off in `NODE_ENV === "production"` on the reasoning
@@ -56,20 +63,20 @@ source), details `{ method, path, reason }`, and `path` computed the same way: t
 JSON pointer, with `/{property}` appended when the failing keyword is `required` or
 `additionalProperties`, defaulting to `/` for a root violation. `result-check.ts` needed no
 `additionalProperties` special case of its own because TypeBox's `instancePath` already points at
-an unexpected property directly; `jsonschema`'s does not (it points at the container), so this
-crate appends the property itself — the same reason
-`mango_protocol::contract::params::first_violation` carries the identical special case. Getting
-this wrong is silent: 48 of the catalog's result schemas are closed
+an unexpected property directly; `jsonschema`'s does not (it points at the container), so
+`mango_protocol::contract::params::first_violation` appends the property itself, and
+`Contract::check_result` reports that path. Getting this wrong is silent: 48 of the catalog's result schemas are closed
 (`additionalProperties: false`), and a Rust struct that grows a field its schema does not declare
 would otherwise report `path: "/"` instead of naming the extra field.
 
 `reason` is rendered with `jsonschema::ValidationError::masked()`, not the validator's default
 `Display`. The default embeds the offending instance in the message (`"sensitive data" is not of
 type "string"`) — exactly what a handler's own result must never carry onto an `INTERNAL`
-message, since a result can hold a file's contents or a shell command's output. This is a
-deliberate divergence from `mango_protocol::contract`'s own `params`/`result` checks, which use
-the unmasked message: reasonable there, since `params` is a value the caller already sent back to
-itself, not one this runtime is the sole holder of.
+message, since a result can hold a file's contents or a shell command's output.
+`Contract::check_result` masks it for that reason. `ServeOptions::validate_results` and the
+`params` check keep the unmasked message, which suits `params` (a value the caller already sent
+back to itself) but is not what a server holding the result wants on the wire; this crate never
+turns `validate_results` on.
 
 ## Panic isolation
 
@@ -286,7 +293,7 @@ proves the relocated-home and runtime-local-override behavior against the compil
 | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `contract.test.ts` — unregistered method answers `METHOD_UNSUPPORTED`                                | `mango-protocol`'s own `session/dispatch.rs` behaviour, relied on by `crates/mangostudio-runtime/tests/it/dispatch.rs::an_unknown_method_and_a_known_unimplemented_method_answer_byte_identical_errors` |
 | `contract.test.ts` — `rpc.discover` answers the catalog                                              | `crates/mangostudio-runtime/tests/it/dispatch.rs::rpc_discover_still_answers_the_full_catalog_with_an_empty_registry`                                                                                   |
-| `result-check.test.ts` — wire shape of a malformed result                                            | `crates/mangostudio-runtime/src/result_check.rs`'s unit tests                                                                                                                                           |
+| `result-check.test.ts` — wire shape of a malformed result                                            | `crates/mango-protocol/src/contract.rs`'s `check_result_*` tests and `crates/mangostudio-runtime/tests/it/audit_isolation.rs::a_schema_invalid_result_names_its_path_and_masks_its_value`               |
 | `consent-gate.test.ts` — `consentDenial` message/detail shape                                        | `crates/mangostudio-runtime/src/ports/authorization.rs`'s unit tests                                                                                                                                    |
 | `consent-gate.test.ts` — a zero-capability method passes with nothing granted                        | `crates/mangostudio-runtime/tests/it/consent.rs::a_zero_capability_method_passes_even_under_the_denying_default`                                                                                        |
 | `consent-gate.test.ts` — a capability-bearing method is denied and recorded                          | `crates/mangostudio-runtime/tests/it/consent.rs::denying_authorization_refuses_a_capability_bearing_method_and_records_it`                                                                              |

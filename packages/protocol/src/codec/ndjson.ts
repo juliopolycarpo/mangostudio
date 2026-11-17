@@ -188,8 +188,13 @@ export function decodeLine(line: string | Uint8Array, options?: FrameLimitOption
  */
 export class LineDecoder {
   readonly #limit: number;
+  /**
+   * The unterminated record so far is `#pending.subarray(0, #pendingLength)`.
+   * The buffer grows by doubling, so a record fed in n pieces costs O(record)
+   * copying in total, not the O(record * n) of a fresh buffer per push.
+   */
   #pending: Uint8Array = EMPTY_BYTES;
-  #searched = 0;
+  #pendingLength = 0;
   #refusal: CodecError | undefined;
 
   constructor(options?: FrameLimitOptions) {
@@ -200,24 +205,23 @@ export class LineDecoder {
   push(chunk: Uint8Array | string): LineDecoderOutcome {
     if (this.#refusal !== undefined) return { frames: [], error: this.#refusal };
     const bytes = typeof chunk === 'string' ? encoder.encode(chunk) : chunk;
-    this.#pending = concat(this.#pending, bytes);
-    return this.#drain(false);
-  }
-
-  /** Ends the stream: a final record without a terminator is still decoded. */
-  finish(): LineDecoderOutcome {
-    if (this.#refusal !== undefined) return { frames: [], error: this.#refusal };
-    return this.#drain(true);
-  }
-
-  #drain(final: boolean): LineDecoderOutcome {
     const frames: Frame[] = [];
+    let start = 0;
     for (;;) {
-      const newline = this.#pending.indexOf(LINE_FEED, this.#searched);
+      // Only the new bytes are scanned: the buffered ones hold no `\n`.
+      const newline = bytes.indexOf(LINE_FEED, start);
       if (newline === -1) break;
-      const record = this.#pending.subarray(0, newline);
-      this.#pending = this.#pending.subarray(newline + 1);
-      this.#searched = 0;
+      let record: Uint8Array;
+      if (this.#pendingLength === 0) {
+        // A record wholly inside this chunk is decoded in place. Decoding
+        // finishes before `push` returns, so the caller's chunk is not held.
+        record = bytes.subarray(start, newline);
+      } else {
+        this.#append(bytes.subarray(start, newline));
+        record = this.#pending.subarray(0, this.#pendingLength);
+        this.#clearPending();
+      }
+      start = newline + 1;
       // The size check runs before #consume's blank check, not after: a
       // completed blank line must refuse exactly when the same bytes, still
       // partial (no `\n` yet), already would have below. Checking blankness
@@ -231,25 +235,59 @@ export class LineDecoder {
       const error = this.#consume(content, frames);
       if (error !== undefined) return { frames, error };
     }
-    this.#searched = this.#pending.byteLength;
-    if (final) {
-      const rest = stripCarriageReturn(this.#pending);
-      this.#pending = EMPTY_BYTES;
-      this.#searched = 0;
-      const error = this.#consume(rest, frames);
-      return error === undefined ? { frames } : { frames, error };
-    }
+    // Copied, not referenced: the caller may reuse its chunk after `push`.
+    if (start < bytes.byteLength) this.#append(start === 0 ? bytes : bytes.subarray(start));
     // Measured without the `\r` a CRLF terminator will leave behind, the way
     // the completed-line check above and the Rust decoder both measure: a
     // buffer that is one byte over only because it ends in `\r` is still a
     // line within the limit whose `\n` is in the next chunk. Measuring the
     // raw buffer here made the identical bytes decode or refuse depending on
     // where the chunk boundary happened to fall.
-    const partial = stripCarriageReturn(this.#pending);
-    if (partial.byteLength > this.#limit) {
-      return { frames, error: this.#refuse(partial.byteLength, true) };
+    const endsInCarriageReturn =
+      this.#pendingLength > 0 && this.#pending[this.#pendingLength - 1] === CARRIAGE_RETURN;
+    const partial = this.#pendingLength - (endsInCarriageReturn ? 1 : 0);
+    if (partial > this.#limit) {
+      return { frames, error: this.#refuse(partial, true) };
     }
     return { frames };
+  }
+
+  /** Ends the stream: a final record without a terminator is still decoded. */
+  finish(): LineDecoderOutcome {
+    if (this.#refusal !== undefined) return { frames: [], error: this.#refusal };
+    const frames: Frame[] = [];
+    const rest = stripCarriageReturn(this.#pending.subarray(0, this.#pendingLength));
+    this.#clearPending();
+    const error = this.#consume(rest, frames);
+    return error === undefined ? { frames } : { frames, error };
+  }
+
+  /** Appends to the unterminated record, growing its buffer by doubling. */
+  #append(bytes: Uint8Array): void {
+    if (bytes.byteLength === 0) return;
+    const needed = this.#pendingLength + bytes.byteLength;
+    if (needed > this.#pending.byteLength) {
+      // Doubling stops at the most a record can hold without `push` refusing
+      // it (the limit plus a CRLF's `\r`), so a frame near a 16 MiB limit
+      // never asks for a 32 MiB buffer.
+      const ceiling = Math.max(needed, this.#limit + 1);
+      const doubled = Math.max(needed, this.#pending.byteLength * 2, 256);
+      const grown = new Uint8Array(Math.min(doubled, ceiling));
+      grown.set(this.#pending.subarray(0, this.#pendingLength), 0);
+      this.#pending = grown;
+    }
+    this.#pending.set(bytes, this.#pendingLength);
+    this.#pendingLength = needed;
+  }
+
+  /**
+   * Drops the unterminated record. The buffer is released rather than reused,
+   * so an idle port does not pin the largest frame it ever read, and a view
+   * taken before this call is never overwritten.
+   */
+  #clearPending(): void {
+    this.#pending = EMPTY_BYTES;
+    this.#pendingLength = 0;
   }
 
   /**
@@ -281,16 +319,7 @@ export class LineDecoder {
       `${measured} ${byteLength} bytes; expected at most ${this.#limit}`
     );
     this.#refusal = refusal;
-    this.#pending = EMPTY_BYTES;
-    this.#searched = 0;
+    this.#clearPending();
     return refusal;
   }
-}
-
-function concat(left: Uint8Array, right: Uint8Array): Uint8Array {
-  if (left.byteLength === 0) return right.slice();
-  const out = new Uint8Array(left.byteLength + right.byteLength);
-  out.set(left, 0);
-  out.set(right, left.byteLength);
-  return out;
 }

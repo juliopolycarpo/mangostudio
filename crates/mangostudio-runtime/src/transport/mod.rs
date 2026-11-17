@@ -27,12 +27,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
-use mango_protocol::contract::Contract;
 use mango_protocol::frame::Frame;
 use mango_protocol::frame::PeerInfo;
 use mango_protocol::port::{Port, PortTx, SendOutcome};
 use mango_protocol::session::{EventInput, Session, SessionClosure, SessionOptions};
-use mangostudio_runtime_contract::catalog::catalog;
 use tokio_util::sync::CancellationToken;
 
 use crate::consent::authorization::ConsentAuthorization;
@@ -43,6 +41,7 @@ use crate::ports::clock::SystemClock;
 use crate::ports::wall_clock::{SystemWallClock, epoch_millis};
 use crate::registry::Registry;
 use crate::runtime_home::{RuntimeSlot, slot_audit_log_path};
+use crate::serve::runtime_contract;
 
 /// This binary's role on the wire, announced in every `hello`.
 pub const RUNTIME_PEER_ROLE: &str = "runtime";
@@ -326,21 +325,6 @@ pub(crate) fn build_host_with_restart(
     }
 }
 
-/// The embedded catalog compiled into a [`Contract`], once per process.
-///
-/// Every transport serves the same static catalog, so compiling it per
-/// connection (every `serve` supersession, every `connect` redial) only
-/// repeated the catalog validation and every schema compile.
-fn runtime_contract() -> &'static Contract {
-    static CONTRACT: OnceLock<Contract> = OnceLock::new();
-    CONTRACT.get_or_init(|| {
-        Contract::from_catalog(catalog().clone()).expect(
-            "the embedded catalog compiles into a contract; a change to the catalog that broke \
-             this would already fail mangostudio-runtime-contract's own build",
-        )
-    })
-}
-
 /// [`crate::health::build_capability_manifest`], shaped as the `Map`
 /// [`mango_protocol::session::SessionOptions::with_capabilities`] wants.
 ///
@@ -555,6 +539,7 @@ mod tests {
     };
     use crate::runtime_home::RuntimeSlot;
     use crate::test_support::scratch_path;
+    use mangostudio_runtime_contract::catalog::shared_catalog;
 
     /// An audit sink that takes `delay` to record a commit: the work that
     /// still runs inside the handler task after the handler returned, before
@@ -1152,11 +1137,27 @@ mod tests {
         );
     }
 
+    /// The contract the runtime serves holds the process's one parsed
+    /// catalog instead of a clone of it: the static, the contract and this
+    /// handle are three owners of one allocation.
     #[test]
-    fn the_runtime_contract_is_compiled_once_per_process() {
+    fn the_runtime_contract_shares_the_process_catalog_instead_of_cloning_it() {
+        let contract = runtime_contract();
+        let shared = shared_catalog();
+        let owners = std::sync::Arc::strong_count(&shared);
+        assert!(
+            owners >= 3,
+            "expected the catalog static, the runtime contract and this handle to share one \
+             allocation (strong count >= 3) | received strong count {owners}"
+        );
+        assert_eq!(contract.catalog(), *shared);
+    }
+
+    #[test]
+    fn the_runtime_contract_is_built_once_per_process() {
         assert!(
             std::ptr::eq(runtime_contract(), runtime_contract()),
-            "expected every transport to share one compiled contract, got two instances"
+            "expected every transport to share one contract, got two instances"
         );
     }
 }

@@ -7,6 +7,7 @@
 #![cfg(feature = "tokio")]
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use mango_protocol::catalog::{Catalog, CatalogEvent, CatalogMethod};
 use mango_protocol::contract::{Contract, ContractHandlers, EventOptions, ServeOptions};
@@ -272,6 +273,30 @@ async fn serves_typed_handlers_and_requests_through_a_typed_client() {
     .await
     .expect_err("the handler was unregistered");
     assert_eq!(error.code, codes::METHOD_UNSUPPORTED);
+}
+
+/// `rpc.discover` renders the catalog per answer, so every answer has to carry
+/// the whole document, not just the first, and a contract built from a
+/// shared catalog has to answer with that catalog.
+#[tokio::test]
+async fn answers_every_rpc_discover_with_the_whole_shared_catalog() {
+    let (session_a, session_b) = sessions().await;
+    let catalog = Arc::new(example().catalog());
+    let contract =
+        Contract::from_shared_catalog(Arc::clone(&catalog)).expect("the example catalog compiles");
+    let _guard = contract
+        .serve(&session_b, plain_handlers(), ServeOptions::default())
+        .expect("both methods are declared");
+
+    for attempt in 1..=3 {
+        let discovered = within("rpc.discover", contract.client(&session_a).discover())
+            .await
+            .expect("the peer serves a contract");
+        assert_eq!(
+            discovered, *catalog,
+            "expected discover answer {attempt} to equal the shared catalog"
+        );
+    }
 }
 
 #[tokio::test]
@@ -545,6 +570,165 @@ async fn validates_results_when_asked() {
         error.details.as_ref().and_then(|d| d.get("path")),
         Some(&json!("/text"))
     );
+    // `validate_results` words the reason as jsonschema does, which quotes
+    // the value; `Contract::check_result` is the masking check.
+    let reason = error
+        .details
+        .as_ref()
+        .and_then(|d| d.get("reason"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    assert!(
+        reason.contains("42"),
+        "expected validate_results to keep quoting the value | received reason: {reason:?}"
+    );
+}
+
+/// A handler that counts how often it ran, so a test can say a handler never
+/// ran at all. Clones share the one count.
+#[derive(Clone, Default)]
+struct HandlerCalls(Arc<AtomicUsize>);
+
+impl HandlerCalls {
+    fn record(&self) {
+        self.0.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn count(&self) -> usize {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
+/// A contract built with `from_shared_catalog_lazy` serves like an eager one,
+/// compiling each schema on the request that needs it. A schema that does not
+/// compile answers that method alone with `INTERNAL`, naming the method and
+/// the catalog field, never `INVALID_PARAMS`; the other methods still work.
+/// The handler of a method whose schema is broken never runs: a broken result
+/// schema is found before the handler, not after its effects.
+#[tokio::test]
+async fn serves_a_lazy_contract_and_answers_internal_for_a_schema_that_does_not_compile() {
+    let (session_a, session_b) = sessions().await;
+    let mut catalog = example().catalog();
+    let position = |name: &str| {
+        catalog
+            .methods
+            .iter()
+            .position(|declared| declared.name == name)
+            .expect("example declares the method")
+    };
+    let (echo, add) = (position("text.echo"), position("math.add"));
+    // `text.echo` fails in its result schema, `math.add` in its params.
+    catalog.methods[echo].result = json!({ "type": "not-a-type" });
+    catalog.methods[add].params = json!({ "type": "not-a-type" });
+    let contract = Contract::from_shared_catalog_lazy(Arc::new(catalog))
+        .expect("the names are valid and no schema is compiled yet");
+    let (echo_calls, add_calls) = (HandlerCalls::default(), HandlerCalls::default());
+    let (echo_seen, add_seen) = (echo_calls.clone(), add_calls.clone());
+    let handlers =
+        ContractHandlers::new()
+            .on("text.echo", move |params: EchoParams, _context| {
+                echo_seen.record();
+                async move {
+                    Ok::<_, mango_protocol::error::RemoteError>(json!({ "text": params.text }))
+                }
+            })
+            .on("math.add", move |params: AddParams, _context| {
+                add_seen.record();
+                async move { Ok::<_, mango_protocol::error::RemoteError>(params.a + params.b) }
+            });
+    let options = ServeOptions {
+        validate_results: true,
+        ..Default::default()
+    };
+    let _served = contract
+        .serve(&session_b, handlers, options)
+        .expect("both methods are declared");
+
+    // The params schema of text.echo is fine, so a request that violates it
+    // is refused as INVALID_PARAMS before any handler runs.
+    let bad_params = within(
+        "text.echo with params that violate a schema that compiles",
+        session_a.request("text.echo", json!({})),
+    )
+    .await
+    .expect_err("text is required");
+    assert_eq!(bad_params.code, codes::INVALID_PARAMS);
+
+    // A valid request to a method whose result schema does not compile is
+    // answered INTERNAL without the handler running.
+    let broken_result = within(
+        "text.echo with a result schema that does not compile",
+        session_a.request("text.echo", json!({ "text": "hi" })),
+    )
+    .await
+    .expect_err("the result schema does not compile");
+    assert_eq!(broken_result.code, codes::INTERNAL);
+    assert_eq!(
+        echo_calls.count(),
+        0,
+        "expected the text.echo handler not to run when its result schema does not compile | received {} run(s)",
+        echo_calls.count()
+    );
+    let details = broken_result.details.as_ref().expect("details");
+    assert_eq!(details.get("method"), Some(&json!("text.echo")));
+    assert_eq!(
+        details.get("field"),
+        Some(&json!(format!("catalog.methods[{echo}].result"))),
+        "expected the failing schema's field | received: {details:?}"
+    );
+
+    let broken_params = within(
+        "math.add with a params schema that does not compile",
+        session_a.request("math.add", json!({ "a": 1, "b": 2 })),
+    )
+    .await
+    .expect_err("the params schema does not compile");
+    assert_eq!(broken_params.code, codes::INTERNAL);
+    assert_eq!(
+        broken_params.details.as_ref().and_then(|d| d.get("field")),
+        Some(&json!(format!("catalog.methods[{add}].params")))
+    );
+    assert_eq!(
+        add_calls.count(),
+        0,
+        "expected the math.add handler not to run when its params schema does not compile | received {} run(s)",
+        add_calls.count()
+    );
+}
+
+/// Without `validate_results` nothing reads the result schema, so a method
+/// whose result schema does not compile still runs its handler and answers
+/// with its result: the check is the one thing this option asks for.
+#[tokio::test]
+async fn a_lazy_contract_runs_the_handler_when_results_are_not_validated() {
+    let (session_a, session_b) = sessions().await;
+    let mut catalog = example().catalog();
+    let echo = catalog
+        .methods
+        .iter()
+        .position(|declared| declared.name == "text.echo")
+        .expect("example declares text.echo");
+    catalog.methods[echo].result = json!({ "type": "not-a-type" });
+    let contract = Contract::from_shared_catalog_lazy(Arc::new(catalog))
+        .expect("the names are valid and no schema is compiled yet");
+    let calls = HandlerCalls::default();
+    let seen = calls.clone();
+    let handlers = ContractHandlers::new().on("text.echo", move |params: EchoParams, _context| {
+        seen.record();
+        async move { Ok::<_, mango_protocol::error::RemoteError>(json!({ "text": params.text })) }
+    });
+    let _served = contract
+        .serve(&session_b, handlers, ServeOptions::default())
+        .expect("text.echo is declared");
+
+    let answer = within(
+        "text.echo without result validation",
+        session_a.request("text.echo", json!({ "text": "hi" })),
+    )
+    .await
+    .expect("nothing reads the broken result schema");
+    assert_eq!(answer, json!({ "text": "hi" }));
+    assert_eq!(calls.count(), 1);
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]

@@ -23,12 +23,13 @@
 //!   with `METHOD_UNSUPPORTED` — byte-identical to a method the catalog does
 //!   not know at all. This crate never invents a second wire code for
 //!   "known but unimplemented".
-//! - [`result_check`] — validates a handler's result against the contract
-//!   before it is serialised, from *inside* the audit-recording wrapper
-//!   rather than via [`mango_protocol::contract::ServeOptions::validate_results`].
-//!   See the module docs for why the placement matters and why this crate
-//!   always runs the check, unlike the TypeScript runtime's
-//!   production opt-out.
+//!   [`registry::Registry::implement`] also validates each handler's result
+//!   against the contract (`mango_protocol::contract::Contract::check_result`
+//!   on [`serve::runtime_contract`]) from *inside* the audit-recording
+//!   wrapper rather than via
+//!   [`mango_protocol::contract::ServeOptions::validate_results`]. Its docs
+//!   say why the placement matters and why this crate always runs the
+//!   check, unlike the TypeScript runtime's production opt-out.
 //! - [`mod@panic`] — catches a panic inside a guard's or a handler's own future
 //!   before it can reach `mango_protocol`'s dispatcher, which would otherwise
 //!   put the raw panic payload on the wire, verbatim and unredacted.
@@ -148,7 +149,7 @@ mod probe_cache;
 pub mod probing;
 pub mod registry;
 mod release;
-pub mod result_check;
+mod result_value;
 pub mod runtime_home;
 pub mod serve;
 pub mod setup;

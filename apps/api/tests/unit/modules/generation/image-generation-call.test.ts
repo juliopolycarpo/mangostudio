@@ -16,13 +16,21 @@ registerTools();
  * having said nothing at all about the images it never reached.
  */
 class TruncatingImageGenerator {
-  constructor(private readonly reachedCount: number) {}
+  /** Plans the provider was asked to generate, so a test can say nothing was started. */
+  readonly plans: Array<{ prompt: string; imageIds: string[] }> = [];
+
+  constructor(
+    private readonly reachedCount: number,
+    /** Called when the generator stops early, standing in for the turn being stopped mid-batch. */
+    private readonly stopTurn: () => void
+  ) {}
 
   generate = async function* (
     this: TruncatingImageGenerator,
     plan: { prompt: string; imageIds: string[] }
   ): AsyncGenerator<GenerateImageToolOutcome> {
     await Promise.resolve();
+    this.plans.push(plan);
     for (const imageId of plan.imageIds.slice(0, this.reachedCount)) {
       yield {
         type: 'completed',
@@ -34,15 +42,31 @@ class TruncatingImageGenerator {
         createdAt: Date.now(),
       };
     }
+    if (this.reachedCount < plan.imageIds.length) this.stopTurn();
   };
 }
 
 async function runImageCall(options: {
   reachedCount: number;
   count: number;
+  /** The turn is stopped while the batch is being generated. */
   aborted: boolean;
-}): Promise<{ allParts: MessagePart[]; events: Array<{ type: string }> }> {
-  const generator = new TruncatingImageGenerator(options.reachedCount);
+  /** What a durable checkpoint answers; the running marker is the first one. */
+  durableCheckpointStored?: boolean;
+  /** Runs when the durable running marker is requested, e.g. to stop the turn while it is written. */
+  onDurableCheckpoint?: (controller: AbortController) => void;
+  /** Stops the turn before the call starts. */
+  abortedBeforeStart?: boolean;
+}): Promise<{
+  allParts: MessagePart[];
+  events: Array<{ type: string }>;
+  checkpoints: RecordedCheckpoint[];
+  generator: TruncatingImageGenerator;
+}> {
+  const controller = new AbortController();
+  const generator = new TruncatingImageGenerator(options.reachedCount, () => {
+    if (options.aborted) controller.abort('client_disconnect');
+  });
   await mock.module('../../../../src/services/tools/builtin/generate-image', () => ({
     ...realGenerateImage,
     generateImagesForToolPlan: generator.generate.bind(generator),
@@ -52,10 +76,10 @@ async function runImageCall(options: {
   const { executeImageGenerationCall } =
     await import('../../../../src/modules/generation/application/stream-text-turn-helpers');
 
-  const controller = new AbortController();
-  if (options.aborted) controller.abort('client_disconnect');
+  if (options.abortedBeforeStart) controller.abort('client_disconnect');
 
   const allParts: MessagePart[] = [];
+  const checkpoints: RecordedCheckpoint[] = [];
   const call = executeImageGenerationCall(
     'image-call-1',
     'generate_image',
@@ -68,6 +92,17 @@ async function runImageCall(options: {
       allParts,
       generatedImageArtifacts: [],
       nextToolResults: [],
+      checkpoint: (checkpointOptions) => {
+        checkpoints.push({
+          durable: checkpointOptions?.durable === true,
+          execution: toolCallExecution(allParts)?.status,
+          images: imageStatuses(allParts),
+        });
+        if (checkpointOptions?.durable) options.onDurableCheckpoint?.(controller);
+        return Promise.resolve(
+          checkpointOptions?.durable === true ? (options.durableCheckpointStored ?? true) : true
+        );
+      },
     }
   );
   const events: Array<{ type: string }> = [];
@@ -75,7 +110,14 @@ async function runImageCall(options: {
     events.push(event);
   }
 
-  return { allParts, events };
+  return { allParts, events, checkpoints, generator };
+}
+
+/** The turn as it stood when the call asked for a checkpoint, and whether it asked for a durable one. */
+interface RecordedCheckpoint {
+  readonly durable: boolean;
+  readonly execution: string | undefined;
+  readonly images: string[];
 }
 
 function toolCallExecution(parts: MessagePart[]) {
@@ -151,5 +193,81 @@ describe('executeImageGenerationCall — abandoned images', () => {
     for (const event of failed) {
       expect(event).toMatchObject({ errorCode: 'image_generation_interrupted' });
     }
+  });
+});
+
+describe('executeImageGenerationCall — durable checkpoints', () => {
+  it('commits the running marker and each finished image durably, and nothing else', async () => {
+    const { checkpoints } = await runImageCall({ reachedCount: 2, count: 2, aborted: false });
+
+    const durable = checkpoints.filter((checkpoint) => checkpoint.durable);
+    expect(durable).toEqual([
+      // Awaited before the provider call: the record that a paid generation may be under way.
+      { durable: true, execution: 'running', images: [] },
+      // Each completed image is the paid result a lost record would make the model buy again.
+      { durable: true, execution: 'running', images: ['completed', 'generating'] },
+      { durable: true, execution: 'running', images: ['completed', 'completed'] },
+    ]);
+    // The queued announcement, the per-image start and the final settle stay ordinary writes.
+    expect(checkpoints.length - durable.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('does not make a failed image durable, since nothing was paid for or produced', async () => {
+    const { checkpoints } = await runImageCall({ reachedCount: 0, count: 1, aborted: true });
+
+    expect(checkpoints.filter((checkpoint) => checkpoint.durable)).toEqual([
+      { durable: true, execution: 'running', images: [] },
+    ]);
+  });
+});
+
+describe('executeImageGenerationCall — running marker gates the generation', () => {
+  it('does not generate when the running marker could not be stored', async () => {
+    const { allParts, generator, events } = await runImageCall({
+      reachedCount: 2,
+      count: 2,
+      aborted: false,
+      durableCheckpointStored: false,
+    });
+
+    expect(generator.plans).toEqual([]);
+    expect(allParts.filter((part) => part.type === 'generated_image')).toEqual([]);
+    expect(events.some((event) => event.type === 'image_generation_started')).toBe(false);
+    expect(toolCallExecution(allParts)).toMatchObject({
+      status: 'failed',
+      reasonCode: 'execution_error',
+    });
+    const result = allParts.find((part) => part.type === 'tool_result');
+    expect(result).toMatchObject({ isError: true });
+    expect(result?.type === 'tool_result' ? result.content : '').toContain(
+      'Tool \\"generate_image\\" was not started'
+    );
+  });
+
+  it('does not generate when the turn is stopped while the marker is being written', async () => {
+    const { allParts, generator } = await runImageCall({
+      reachedCount: 2,
+      count: 2,
+      aborted: false,
+      onDurableCheckpoint: (controller) => controller.abort('client_disconnect'),
+    });
+
+    expect(generator.plans).toEqual([]);
+    expect(toolCallExecution(allParts)).toMatchObject({
+      status: 'cancelled',
+      reasonCode: 'user_cancelled',
+    });
+  });
+
+  it('does not write a marker for a turn stopped before the call began', async () => {
+    const { checkpoints, generator } = await runImageCall({
+      reachedCount: 2,
+      count: 2,
+      aborted: false,
+      abortedBeforeStart: true,
+    });
+
+    expect(generator.plans).toEqual([]);
+    expect(checkpoints.filter((checkpoint) => checkpoint.durable)).toEqual([]);
   });
 });

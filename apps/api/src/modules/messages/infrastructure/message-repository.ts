@@ -12,12 +12,14 @@ import type { Database } from '../../../db/types';
 import { listAttachmentsByMessageIds } from '../../attachments/infrastructure/attachment-repository';
 import { listGeneratedImagesByMessageIds } from '../../generated-images/infrastructure/generated-image-repository';
 import { type GalleryCursor, type GalleryEntry, tiedRowidCeiling } from '../domain/gallery-cursor';
+import { GeneratingMessageTextEditError } from '../domain/message-generating';
 import { encodeTranscriptCursor, type TranscriptCursor } from '../domain/transcript-cursor';
 import {
-  decodeMessageParts,
-  readMessageParts,
-  warnCorruptMessageParts,
-} from './message-parts-codec';
+  deleteCheckpointDeltas,
+  foldCheckpointDeltasIntoRows,
+  withCheckpointSnapshot,
+} from './message-checkpoint-deltas';
+import { decodeMessageParts, readMessageParts } from './message-parts-codec';
 
 export interface CreateMessageData {
   id: string;
@@ -139,20 +141,31 @@ function mapMessage(
 }
 
 /**
- * Every row this returns was decoded here, so this is where a corrupt `parts`
- * cell on a history read is logged once; the callers below decode quietly.
+ * `parts` as the text history selects it: the stored cell when it names a
+ * context boundary event, `NULL` otherwise. Text history reads `parts` only to
+ * find that boundary, and a tool result can run to tens of KB, so the other
+ * cells stay inside SQLite instead of being copied out and parsed for nothing.
+ * The substring test only narrows the candidates; a row that names an event in
+ * prose is still decoded and rejected by {@link sliceRowsAfterCompactionBoundary}.
+ *
+ * A generating row always carries its cell: its checkpoint deltas fold over it
+ * (see {@link foldCheckpointDeltasIntoRows}), and the fold needs the base.
  */
-function sliceRowsAfterCompactionBoundary<T extends { id: string; parts: string | null }>(
-  rows: T[]
-): T[] {
+const boundaryCandidateParts = sql<string | null>`CASE WHEN isGenerating = 1 OR ${sql.join(
+  [...CONTEXT_BOUNDARY_EVENTS].map((event) => sql`instr(parts, ${event}) > 0`),
+  sql` OR `
+)} THEN parts END`;
+
+/**
+ * Drops the rows older than the newest context boundary. A corrupt `parts`
+ * cell cannot mark a boundary, so it is skipped without a warning here: the
+ * read that actually uses a row's parts (the transcript page, the rich
+ * history) is the one that reports it.
+ */
+function sliceRowsAfterCompactionBoundary<T extends { parts: string | null }>(rows: T[]): T[] {
   for (let index = rows.length - 1; index >= 0; index--) {
     const decoded = decodeMessageParts(rows[index].parts);
-    if (decoded.kind === 'corrupt') {
-      // Fall back to the full history window for this row.
-      warnCorruptMessageParts(rows[index].id, decoded.shape);
-      continue;
-    }
-    if (decoded.kind === 'absent') continue;
+    if (decoded.kind !== 'ok') continue;
 
     const hasBoundary = decoded.parts.some(
       (part) => part.type === 'system_event' && CONTEXT_BOUNDARY_EVENTS.has(part.event)
@@ -212,7 +225,52 @@ export async function updateMessage(
 
   if (Object.keys(updates).length === 0) return;
 
-  await db.updateTable('messages').set(updates).where('id', '=', id).execute();
+  // Only these columns are shaped by a generating turn's checkpoint deltas.
+  const touchesCheckpointed =
+    'text' in updates ||
+    'parts' in updates ||
+    'providerState' in updates ||
+    'generationTime' in updates ||
+    'isGenerating' in updates;
+  if (!touchesCheckpointed) {
+    await db.updateTable('messages').set(updates).where('id', '=', id).execute();
+    return;
+  }
+
+  // A generating row's columns are its last full rewrite; its newer content is in
+  // the deltas. Fold them into the row first, then apply the patch on top and drop
+  // them, so that neither clearing `isGenerating` (which deletes the deltas) nor
+  // editing `text` (which deltas would otherwise be appended to) loses or garbles
+  // what the turn had checkpointed.
+  await withCheckpointSnapshot(db, async (trx) => {
+    const stored = await trx
+      .selectFrom('messages')
+      .select(['id', 'text', 'parts', 'providerState', 'generationTime', 'isGenerating'])
+      .where('id', '=', id)
+      .executeTakeFirst();
+    let merged: typeof updates = updates;
+    // The live writer holds its own view of the stored text and appends deltas to it, so
+    // an edit that leaves the turn generating would be extended with the old content's
+    // continuation. Refuse it; an edit that also settles the turn is safe, because the
+    // writer's next delta is guarded on `isGenerating = 1`.
+    if (stored?.isGenerating === 1 && 'text' in updates && updates.isGenerating !== 0) {
+      throw new GeneratingMessageTextEditError(id);
+    }
+    if (stored?.isGenerating === 1) {
+      const [folded] = await foldCheckpointDeltasIntoRows([stored], trx);
+      if (folded && folded !== stored) {
+        merged = {
+          text: folded.text,
+          parts: folded.parts,
+          providerState: folded.providerState,
+          generationTime: folded.generationTime ?? null,
+          ...updates,
+        };
+        await deleteCheckpointDeltas(id, trx);
+      }
+    }
+    await trx.updateTable('messages').set(merged).where('id', '=', id).execute();
+  });
 }
 
 /**
@@ -244,40 +302,50 @@ export async function listByChatId(
   const newestFirst = opts.order === 'desc';
   const direction = newestFirst ? 'desc' : 'asc';
 
-  let q = db
-    .selectFrom('messages')
-    .selectAll()
-    .select(sql<number>`rowid`.as('rowid'))
-    .where('chatId', '=', chatId)
-    .orderBy('timestamp', direction)
-    .orderBy(sql`rowid`, direction);
+  const pageQuery = (from: Kysely<Database>) => {
+    let q = from
+      .selectFrom('messages')
+      .selectAll()
+      .select(sql<number>`rowid`.as('rowid'))
+      .where('chatId', '=', chatId)
+      .orderBy('timestamp', direction)
+      .orderBy(sql`rowid`, direction);
 
-  if (opts.cursor) {
-    const { timestamp, rowid } = opts.cursor;
-    q = q.where(
-      newestFirst
-        ? sql<boolean>`(timestamp, rowid) < (${timestamp}, ${rowid})`
-        : sql<boolean>`(timestamp, rowid) > (${timestamp}, ${rowid})`
+    if (opts.cursor) {
+      const { timestamp, rowid } = opts.cursor;
+      q = q.where(
+        newestFirst
+          ? sql<boolean>`(timestamp, rowid) < (${timestamp}, ${rowid})`
+          : sql<boolean>`(timestamp, rowid) > (${timestamp}, ${rowid})`
+      );
+    }
+    return q.limit(limit + 1);
+  };
+
+  // A row still generating is read as its last checkpoint left it, not as its
+  // last full rewrite. The page and those deltas are read together.
+  const { fetched, rows } = await withCheckpointSnapshot(db, async (snapshot) => {
+    const page = await pageQuery(snapshot).execute();
+    // The look-ahead row proves another page exists and is not part of this one.
+    const hasMore = page.length > limit;
+    if (hasMore) page.pop();
+    const folded = await foldCheckpointDeltasIntoRows(
+      page.map(({ rowid: _rowid, ...row }) => row),
+      snapshot
     );
-  }
+    return { fetched: { page, hasMore }, rows: folded };
+  });
 
-  const fetched = await q.limit(limit + 1).execute();
-
-  // The look-ahead row proves another page exists and is not part of this one.
-  // `fetched` is in query order, so its last row is the edge facing that page.
+  // `fetched.page` is in query order, so its last row is the edge facing the next page.
   let nextCursor: string | null = null;
-  if (fetched.length > limit) {
-    fetched.pop();
-    const edge = fetched.at(-1);
+  if (fetched.hasMore) {
+    const edge = fetched.page.at(-1);
     nextCursor = edge
       ? encodeTranscriptCursor({ timestamp: edge.timestamp, rowid: edge.rowid })
       : null;
   }
-  // A page is chronological whichever end it was cut from.
-  if (newestFirst) fetched.reverse();
-
-  // `rowid` is a paging detail and must not leak into the mapped message.
-  const rows = fetched.map(({ rowid: _rowid, ...row }) => row);
+  // A page is chronological whichever end it was cut from. `rows` is in query order too.
+  if (newestFirst) rows.reverse();
 
   const messageIds = rows.map((row) => row.id);
   const [generatedImagesByMessageId, attachmentsByMessageId] = await Promise.all([
@@ -304,51 +372,68 @@ export async function listByChatId(
  * The newest rows are taken `timestamp DESC, rowid DESC`: a limit that splits
  * rows sharing a timestamp keeps the newest of them, and the reversed window
  * reads in insertion order.
+ *
+ * Only boundary candidates carry `parts` (see {@link boundaryCandidateParts});
+ * the turns returned are text, so a corrupt cell is not reported from here.
+ *
+ * A row still generating is read as its last checkpoint left it: its stored
+ * `text` is only as new as the turn's last full rewrite. A second turn in the
+ * same chat, `POST /respond` and compaction all reach such a row, and
+ * compaction would bake the stale text into its summary for good.
  */
 export async function loadHistory(
   chatId: string,
   opts: ListHistoryOptions,
   db: Kysely<Database>
 ): Promise<SimpleTurn[]> {
-  let q = db
-    .selectFrom('messages')
-    .select(['id', 'role', 'text', 'parts'])
-    .where('chatId', '=', chatId)
-    .where('interactionMode', '!=', 'image')
-    .orderBy('timestamp', 'desc')
-    .orderBy(sql`rowid`, 'desc')
-    .limit(opts.limit ?? 200);
-
   const excludedIds = collectExcludedIds(opts);
-  if (excludedIds.length > 0) {
-    q = q.where('id', 'not in', excludedIds);
-  }
+  const rows = await withCheckpointSnapshot(db, async (snapshot) => {
+    let q = snapshot
+      .selectFrom('messages')
+      .select([
+        'id',
+        'role',
+        'text',
+        'isGenerating',
+        sql<string | null>`NULL`.as('providerState'),
+        boundaryCandidateParts.as('parts'),
+      ])
+      .where('chatId', '=', chatId)
+      .where('interactionMode', '!=', 'image')
+      .orderBy('timestamp', 'desc')
+      .orderBy(sql`rowid`, 'desc')
+      .limit(opts.limit ?? 200);
+    if (excludedIds.length > 0) q = q.where('id', 'not in', excludedIds);
+    return foldCheckpointDeltasIntoRows(await q.execute(), snapshot);
+  });
 
-  const rows = sliceRowsAfterCompactionBoundary((await q.execute()).reverse());
-  return rows.map((row) => ({ id: row.id, role: row.role, text: row.text }));
+  return sliceRowsAfterCompactionBoundary(rows.reverse()).map((row) => ({
+    id: row.id,
+    role: row.role,
+    text: row.text,
+  }));
 }
 
-/** Same text-history predicate as {@link loadHistory}. */
+/** Same text-history predicate as {@link loadHistory}, and the same fold of a generating row. */
 export async function loadRichHistory(
   chatId: string,
   opts: ListHistoryOptions,
   db: Kysely<Database>
 ): Promise<RichTurn[]> {
-  let q = db
-    .selectFrom('messages')
-    .select(['id', 'role', 'text', 'parts', 'providerState', 'modelName'])
-    .where('chatId', '=', chatId)
-    .where('interactionMode', '!=', 'image')
-    .orderBy('timestamp', 'desc')
-    .orderBy(sql`rowid`, 'desc')
-    .limit(opts.limit ?? 200);
-
   const excludedIds = collectExcludedIds(opts);
-  if (excludedIds.length > 0) {
-    q = q.where('id', 'not in', excludedIds);
-  }
-
-  const rows = sliceRowsAfterCompactionBoundary((await q.execute()).reverse());
+  const fetched = await withCheckpointSnapshot(db, async (snapshot) => {
+    let q = snapshot
+      .selectFrom('messages')
+      .select(['id', 'role', 'text', 'parts', 'providerState', 'modelName', 'isGenerating'])
+      .where('chatId', '=', chatId)
+      .where('interactionMode', '!=', 'image')
+      .orderBy('timestamp', 'desc')
+      .orderBy(sql`rowid`, 'desc')
+      .limit(opts.limit ?? 200);
+    if (excludedIds.length > 0) q = q.where('id', 'not in', excludedIds);
+    return foldCheckpointDeltasIntoRows(await q.execute(), snapshot);
+  });
+  const rows = sliceRowsAfterCompactionBoundary(fetched.reverse());
 
   // A corrupt message stays in the history as plain text (`parts` undefined): its
   // `text` is the same denormalized copy `loadHistory` sends, and dropping the
@@ -357,7 +442,7 @@ export async function loadRichHistory(
     id: row.id,
     role: row.role,
     text: row.text,
-    parts: readMessageParts(row, { quiet: true }),
+    parts: readMessageParts(row),
     providerState: row.providerState ?? null,
     modelName: row.modelName ?? null,
   }));

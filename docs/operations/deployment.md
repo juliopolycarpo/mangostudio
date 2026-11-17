@@ -263,6 +263,51 @@ path = "/var/lib/mangostudio/database.sqlite"
 
 SQLite with WAL mode is suitable for single-server deployments. The database file should be backed up regularly.
 
+The hub runs the database in WAL mode and, once its migrations have finished, lowers `PRAGMA synchronous`
+from `FULL` to `NORMAL`. At `NORMAL` a commit is appended to the write-ahead log without an fsync, and
+the log is synced when SQLite checkpoints it into the main file. If the file system does not give the
+hub WAL mode, it keeps `FULL` and logs `synchronous_kept_full`.
+
+Every connection starts at `FULL`: the hub sets it explicitly after switching to WAL. macOS links Apple's
+SQLite, whose WAL default is `NORMAL`, so a connection that opens a WAL file there would otherwise run its
+migrations below `FULL`.
+
+On macOS, `fsync` reaches only the drive's cache. `F_FULLFSYNC` reaches stable storage, and SQLite uses it
+for ordinary syncs only when `PRAGMA fullfsync` is on; Apple's build already uses it for checkpoints
+(`checkpoint_fullfsync` defaults to on). After the migrations the hub sets `fullfsync = 1` on macOS, so the
+always-synced writes below survive a power loss and not only an operating-system crash. Commits at `NORMAL`
+do not sync, so ordinary writes pay nothing; each always-synced commit does, once per tool call that is not
+a plain read. On a GitHub-hosted macOS runner (a virtual disk) the median `FULL` commit took 1.1 to 1.3 ms
+with the flag and 0.1 to 0.2 ms without, in three runs of 290 commits. A physical drive's flush time
+differs. Migrations keep the plain `fsync`.
+
+What a failure costs depends on what failed:
+
+- **The hub crashes or is killed.** Nothing is lost: the operating system still holds the written pages.
+- **Power loss or an operating-system crash.** Any commit from roughly the last 30 seconds (the
+  operating system's writeback interval) can be lost, unless it is one of the writes below. That is the
+  tail of a streaming reply (the next start marks that turn interrupted), recent sign-ins (those users
+  sign in again), settings changes and other ordinary edits. The database stays consistent, because
+  SQLite never applies half a commit.
+- **Always synced (`FULL`).** Two kinds of write commit at `FULL`, and an fsync of the log also persists
+  every commit before it:
+  - Tool side-effect markers: the checkpoint that records a tool call as running (any tool that is not
+    a plain read), each finished generated image, the receipt written before an external-agent turn is
+    submitted, and the result of a standalone image generation. The hub waits for that checkpoint
+    before it starts the tool, so a crash or a power loss cannot leave a call that ran recorded as not
+    started. If the checkpoint cannot be written, the tool does not start and the model receives an
+    error. This covers image generation too. A call cancelled while its marker is being written does
+    not start and is normally stored as `cancelled`; if the hub crashes before that is saved,
+    recovery finds the `running` marker and reads the outcome as unknown. This costs one fsync per
+    such call.
+  - Revocations: replacing or revoking a runtime pairing token, revoking an API key, and the auth
+    requests that delete or rotate a credential (sign-out, revoking one or all sessions, changing or
+    resetting a password, updating or deleting an API key). Sign-in, sign-up and session reads stay at
+    `NORMAL`. A credential you were told is gone does not come back.
+
+Migrations run at `FULL`, before the connection is lowered, so they keep the same durability as before
+this change and the window in which a power loss can interrupt an upgrade is no larger than it was.
+
 ## Reverse Proxy
 
 ### nginx

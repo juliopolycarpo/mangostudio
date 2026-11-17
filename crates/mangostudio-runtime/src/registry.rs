@@ -21,7 +21,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use crate::abandoned_call::{AbandonAudit, AbandonedCall, CallParts};
-use mango_protocol::contract::ContractHandlers;
+use mango_protocol::contract::{Contract, ContractHandlers};
 use mango_protocol::error::{RemoteError, codes};
 use mango_protocol::session::CallContext;
 use mangostudio_runtime_contract::catalog::{catalog, method};
@@ -33,7 +33,8 @@ use crate::panic::catch_panics;
 use crate::ports::audit::{Audit, AuditEntry, NoopAudit, Outcome};
 use crate::ports::clock::{Clock, SystemClock};
 use crate::ports::exclusivity::{CallExclusivity, NoExclusivity};
-use crate::result_check::{cached_result_validator, check_result};
+use crate::result_value::into_value;
+use crate::serve::runtime_contract;
 
 /// Whether a method name is implemented, declared but not implemented, or
 /// not part of the contract at all. Diagnostic only: every case other than
@@ -69,6 +70,10 @@ pub struct Registry {
     audit: Arc<dyn Audit>,
     clock: Arc<dyn Clock>,
     exclusivity: Arc<dyn CallExclusivity>,
+    /// The contract every handler's result is checked against:
+    /// [`runtime_contract`], except in a test that needs a contract whose
+    /// schemas are broken ([`Registry::with_contract`]).
+    contract: &'static Contract,
 }
 
 /// Releases a request claim when its future is aborted before the normal
@@ -125,19 +130,49 @@ impl Registry {
             audit,
             clock,
             exclusivity,
+            contract: runtime_contract(),
         }
+    }
+
+    /// Checks results against `contract` instead of [`runtime_contract`].
+    /// For a test of what a handler's wrapper does when the contract's own
+    /// schema is broken, which the embedded catalog never is.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn with_contract(mut self, contract: &'static Contract) -> Self {
+        self.contract = contract;
+        self
     }
 
     /// Registers `handler` for `method`, wrapped so that, in order: a panic
     /// anywhere in `handler`'s own future becomes a bounded, redacted
     /// `INTERNAL` error (see [`crate::panic`]); a successful result is
     /// checked against the contract's schema before this registry records
-    /// anything (see [`crate::result_check`]); and the outcome — `Ok`,
+    /// anything (see below); and the outcome — `Ok`,
     /// `Error`, or the panic case — is recorded through this registry's
     /// [`Audit`] port only once all of that has already happened. This
     /// mirrors `apps/runtime/src/consent-gate.ts`'s `gateHandlers` composed
     /// with `checkResults`: the audit line reflects whether the *checked*
     /// result was valid, never the handler's raw, unchecked return value.
+    ///
+    /// The result check is [`mango_protocol::contract::Contract::check_result`]
+    /// on [`crate::serve::runtime_contract`], the one compiled copy of each
+    /// `result` schema. It runs here, in every build, and not through
+    /// `ServeOptions::validate_results`: that option runs after the handler
+    /// settles, by which time the audit port would already have recorded
+    /// `Ok` for a result the schema refuses. `check_result` also masks the
+    /// checked value in its `reason`, because a result can hold a file's
+    /// contents or a command's output that an `INTERNAL` message must not
+    /// echo. The TypeScript runtime turned its check off in production; this
+    /// crate never does, since a Rust peer is exactly the other language
+    /// the contract exists to keep honest.
+    ///
+    /// The contract compiles a `result` schema on the first call that needs
+    /// it, so this wrapper resolves it
+    /// ([`mango_protocol::contract::Contract::ensure_result_schema`]) before
+    /// it decodes `P` or runs the handler. A schema that does not compile
+    /// answers `INTERNAL` with the handler never having run, never after its
+    /// effects.
     ///
     /// `P` and `R` need not match the method's declared schema exactly:
     /// [`mango_protocol::contract::Contract::serve`] validates the wire
@@ -226,12 +261,11 @@ impl Registry {
         Fut: Future<Output = Result<R, RemoteError>> + Send + 'static,
     {
         let method_name = method_name.into();
-        let declared = method(&method_name).unwrap_or_else(|| {
-            panic!(
-                "\"{method_name}\" is not declared by the embedded catalog; a registry may only \
-                 implement a method its own contract knows about"
-            )
-        });
+        assert!(
+            method(&method_name).is_some(),
+            "\"{method_name}\" is not declared by the embedded catalog; a registry may only \
+             implement a method its own contract knows about"
+        );
         assert!(
             !self
                 .implemented
@@ -249,11 +283,11 @@ impl Registry {
              would silently shadow the first handler, and implemented_methods() would report \
              the name twice"
         );
-        let validator = cached_result_validator(&method_name, &declared.result);
         let handler = Arc::new(handler);
         let audit = Arc::clone(&self.audit);
         let clock = Arc::clone(&self.clock);
         let exclusivity = Arc::clone(&self.exclusivity);
+        let contract = self.contract;
 
         self.implemented.push(method_name.clone());
         self.handlers = self.handlers.on(
@@ -265,7 +299,6 @@ impl Registry {
             move |params: Value, context: CallContext| {
                 let method_name = method_name.clone();
                 let handler = Arc::clone(&handler);
-                let validator = Arc::clone(&validator);
                 let audit = Arc::clone(&audit);
                 let clock = Arc::clone(&clock);
                 let exclusivity = Arc::clone(&exclusivity);
@@ -301,6 +334,15 @@ impl Registry {
                     let recorded: Result<Value, RemoteError> = catch_panics({
                         let method_name = method_name.clone();
                         async move {
+                            // The contract compiles a method's `result` schema
+                            // on first use. Resolved before the handler runs,
+                            // not at the check below: a handler with side
+                            // effects must not run for a call that can only
+                            // end in `INTERNAL`, or its caller cannot tell
+                            // whether the effect happened. Inside this
+                            // block, so the audit line and the claim release
+                            // below still see the failure.
+                            contract.ensure_result_schema(&method_name)?;
                             let params: P = serde_json::from_value(params).map_err(|error| {
                                 RemoteError::new(
                                     codes::INTERNAL,
@@ -312,8 +354,13 @@ impl Registry {
                                 .with_detail("method", method_name.clone())
                             })?;
                             match handler(params, context).await {
-                                Ok(result) => match serde_json::to_value(result) {
-                                    Ok(value) => check_result(&method_name, &validator, &value)
+                                Ok(result) => match into_value(result) {
+                                    // The contract's compiled `result` schema,
+                                    // checked here rather than through
+                                    // `ServeOptions::validate_results` so the audit
+                                    // line records a failed check.
+                                    Ok(value) => contract
+                                        .check_result(&method_name, &value)
                                         .map(|()| value),
                                     Err(error) => Err(RemoteError::new(
                                         codes::INTERNAL,
@@ -476,6 +523,116 @@ mod tests {
             "homeDir": "/home/mango", "shells": [], "git": { "available": false },
             "lastError": null,
         })
+    }
+
+    /// A handler that counts how often it ran. Clones share the one count.
+    #[derive(Clone, Default)]
+    struct HandlerCalls(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+    impl HandlerCalls {
+        fn record(&self) {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+
+        fn count(&self) -> usize {
+            self.0.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    /// The embedded catalog with `runtime.health`'s `result` schema replaced
+    /// by one that is not valid JSON Schema, as a lazy contract. Leaked: a
+    /// registry holds its contract for `'static`.
+    fn contract_with_a_broken_health_result_schema() -> &'static mango_protocol::contract::Contract
+    {
+        let mut broken = mangostudio_runtime_contract::catalog::catalog().clone();
+        let health = broken
+            .methods
+            .iter_mut()
+            .find(|declared| declared.name == "runtime.health")
+            .expect("the embedded catalog declares runtime.health");
+        health.result = json!({ "type": "not-a-type" });
+        Box::leak(Box::new(
+            mango_protocol::contract::Contract::from_shared_catalog_lazy(std::sync::Arc::new(
+                broken,
+            ))
+            .expect("names are valid and no schema is compiled yet"),
+        ))
+    }
+
+    /// A registered handler whose method has a `result` schema that does not
+    /// compile is not run: the call answers `INTERNAL` naming the method and
+    /// the field, because a handler with side effects that ran first would
+    /// leave its caller unable to tell whether the effect happened.
+    #[tokio::test]
+    async fn a_handler_does_not_run_when_its_result_schema_does_not_compile() {
+        use mango_protocol::frame::PeerInfo;
+        use mango_protocol::port::port_pair;
+        use mango_protocol::session::{Session, SessionOptions};
+
+        let peer = |role: &str| PeerInfo {
+            name: format!("registry-test-{role}"),
+            version: "0.0.0".into(),
+            role: role.into(),
+        };
+        let contract = contract_with_a_broken_health_result_schema();
+        let calls = HandlerCalls::default();
+        let seen = calls.clone();
+        let registry = Registry::new().with_contract(contract).implement(
+            "runtime.health",
+            move |_params: Value, _context| {
+                seen.record();
+                async move { Ok::<_, mango_protocol::RemoteError>(health_result()) }
+            },
+        );
+
+        let (hub_port, runtime_port) = port_pair();
+        let (hub, _hub_driver) = Session::spawn(hub_port, SessionOptions::new(peer("hub")));
+        let (runtime, _runtime_driver) =
+            Session::spawn(runtime_port, SessionOptions::new(peer("runtime")));
+        hub.ready().await.expect("the hub side handshakes");
+        runtime.ready().await.expect("the runtime side handshakes");
+        crate::serve::serve(
+            contract,
+            &runtime,
+            registry,
+            std::sync::Arc::new(crate::ports::authorization::DenyingAuthorization),
+            "host",
+        )
+        .expect("runtime.health is declared")
+        .persist();
+
+        let error = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            hub.request("runtime.health", json!({})),
+        )
+        .await
+        .expect("expected an answer within 10 s | received: none")
+        .expect_err("the result schema does not compile");
+        let details = error.details.as_ref();
+        assert_eq!(
+            (
+                error.code.as_str(),
+                details.and_then(|d| d.get("method")),
+                details.and_then(|d| d.get("field")),
+                calls.count()
+            ),
+            (
+                "INTERNAL",
+                Some(&json!("runtime.health")),
+                Some(&json!(format!(
+                    "catalog.methods[{}].result",
+                    contract
+                        .catalog()
+                        .methods
+                        .iter()
+                        .position(|declared| declared.name == "runtime.health")
+                        .expect("declared")
+                ))),
+                0
+            ),
+            "expected (code, method, field, handler runs) = INTERNAL for runtime.health, 0 runs | received error {error:?} and {} run(s)",
+            calls.count()
+        );
     }
 
     #[test]
