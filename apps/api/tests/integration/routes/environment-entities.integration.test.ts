@@ -1935,21 +1935,40 @@ describe('environment entity routes', () => {
       await connectUntilListening(() => manager.connect(TEST_USER.id, 'http-refused-update'));
       await manager.refreshManifest(TEST_USER.id, 'http-refused-update');
 
-      const started = await app.handle(
-        new Request(
-          'http://localhost/environments/http-refused-update/runtime/install',
-          jsonRequest('POST', { action: 'upgrade' })
-        )
-      );
-      expect(started.status).toBe(200);
-      const { runId } = (await started.json()) as { runId: string };
-      const log = await app.handle(
-        new Request(`http://localhost/environments/http-refused-update/runtime/runs/${runId}/log`)
-      );
-      const body = await log.text();
+      let body = '';
+      const logged = await new DiagnosticWarnCapture().during(async () => {
+        const started = await app.handle(
+          new Request(
+            'http://localhost/environments/http-refused-update/runtime/install',
+            jsonRequest('POST', { action: 'upgrade' })
+          )
+        );
+        expect(started.status).toBe(200);
+        const { runId } = (await started.json()) as { runId: string };
+        const log = await app.handle(
+          new Request(`http://localhost/environments/http-refused-update/runtime/runs/${runId}/log`)
+        );
+        body = await log.text();
+      });
 
       expect(body).toContain('"status":"failed"');
-      expect(body).toContain('digest mismatch');
+      // The runtime's own refusal text is not trusted onto the stream: the stream
+      // names the code, and the hub log keeps the digest mismatch the runtime reported.
+      expect(body).toContain(
+        'The runtime reported an error (RUNTIME_UPDATE_REFUSED). Details are in the hub log.'
+      );
+      expect(
+        body.includes('digest mismatch'),
+        `(refused update): expected a stream without the runtime's text | received: ${body}`
+      ).toBe(false);
+      expectHubLogEntry(logged, 'run_failed', {
+        fields: {
+          environmentId: 'http-refused-update',
+          reason: 'runtime-error',
+          code: 'RUNTIME_UPDATE_REFUSED',
+        },
+        fragment: 'digest mismatch',
+      });
       // Nothing published: `current` never existed on this slot, so a swap would
       // have created it.
       expect(await publishedAt(peer.publishedBinaryPath(getVersion()))).toBe('absent');
