@@ -14,8 +14,9 @@ import type {
 } from '@mangostudio/shared/environments';
 import { useEffect, useEffectEvent, useState } from 'react';
 
+import { useI18n } from '@/hooks/use-i18n';
 import { getApiBaseUrl } from '@/lib/api-base-url';
-import { readSseChunks } from '@/lib/sse';
+import { readSseChunks, SseFrameTooLongError } from '@/lib/sse';
 
 /**
  * Roughly the server's 1 MiB output budget at a typical line length. The cap is
@@ -97,6 +98,8 @@ export function useInstallStream({
   // could leave behind, and no commit-order gap an effect-synced ref would open.
   const emitProbe = useEffectEvent((event: InstallProbeEvent) => onProbe?.(event));
   const emitExit = useEffectEvent((event: InstallExitEvent) => onExit?.(event));
+  const { t } = useI18n();
+  const frameTooLongMessage = useEffectEvent(() => t.environments.install.streamFrameTooLong);
 
   useEffect(() => {
     if (!runId) {
@@ -215,6 +218,19 @@ export function useInstallStream({
           if ((await consume()) !== 'dropped') return;
         } catch (error) {
           if (disposed || (error instanceof Error && error.name === 'AbortError')) return;
+          if (error instanceof SseFrameTooLongError) {
+            // The replay would send the same line again, so retrying is pointless,
+            // and the generic "connection dropped" text would be wrong.
+            // Read outside the updater: an effect event may not run during render.
+            const message = frameTooLongMessage();
+            setState((previous) => ({
+              ...previous,
+              phase: 'failed',
+              reconnecting: false,
+              streamError: message,
+            }));
+            return;
+          }
         }
 
         if (disposed || attempt === MAX_RECONNECT_ATTEMPTS) break;

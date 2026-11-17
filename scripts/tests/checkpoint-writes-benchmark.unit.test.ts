@@ -13,6 +13,7 @@ import {
   SCENARIOS,
   startFakeProvider,
   summarizeScenario,
+  summarizeTimedAndTracedRuns,
 } from '../bench/checkpoint-writes';
 
 const DATABASE = '/home/bench/hub/database.sqlite';
@@ -325,5 +326,26 @@ describe('summarizeScenario', () => {
     expect(formatSummaryRow(summary)).toBe(
       'tools | 2x2 | 25 (10-40) | 100 (100-100) | 2.50 (1.00-4.00) | 2.50 (1.00-4.00) | 100 (100-100) | 2.00 (2.00-2.00) | 10 (10-10) | 11 (11-11)'
     );
+  });
+
+  describe('summarizeTimedAndTracedRuns', () => {
+    const counts = { walBytes: 4 * MIB, mainBytes: 0, commits: 20, walFsyncs: 22, mainFsyncs: 0 };
+    const timedRuns = [{ scenario: 'tools', turns: [turn(10, 1), turn(30, 3)] }];
+
+    it('summarizes timing alone when no traced run exists, as without --counts', () => {
+      const summary = summarizeTimedAndTracedRuns(timedRuns, []);
+
+      expect(summary.perTurn.wallMs).toMatchObject({ n: 2, min: 10, max: 30 });
+      expect(summary.counts).toBeUndefined();
+    });
+
+    it('takes timing from the untraced runs and counts from the traced ones', () => {
+      const tracedRuns = [{ scenario: 'tools', turns: [turn(900, 9), turn(900, 9)], counts }];
+
+      const summary = summarizeTimedAndTracedRuns(timedRuns, tracedRuns);
+
+      expect(summary.perTurn.wallMs).toMatchObject({ n: 2, min: 10, max: 30 });
+      expect(summary.counts?.commits.median).toBe(10);
+    });
   });
 });

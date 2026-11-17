@@ -294,6 +294,23 @@ describe('respondTextStream', () => {
     expect(chunks).toEqual([]);
   });
 
+  it('rejects when the body ends right after a valid line and the start of an oversized one', async () => {
+    // One piece holds both: `push` returns the valid line, and only the
+    // end-of-stream `finish` raises the refusal, so a dropped terminal line
+    // cannot read as a successful call.
+    fetchMock.mockResolvedValue(
+      streamingResponse([
+        `data: {"type":"error","error":"boom","done":true}\ndata: ${'a'.repeat(SSE_FRAME_MAX_CHARS)}`,
+      ])
+    );
+    const { chunks, onChunk } = collectChunks();
+
+    await expect(respondTextStream(makeRequest(), onChunk)).rejects.toThrow(
+      `record length ${SSE_FRAME_MAX_CHARS + 6} exceeds the cap`
+    );
+    expect(chunks.map((chunk) => chunk.type)).toEqual(['error']);
+  });
+
   it('forwards error events through onChunk instead of throwing', async () => {
     fetchMock.mockResolvedValue(
       streamingResponse(['data: {"type":"error","error":"boom","done":false}\n'])

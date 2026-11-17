@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { brotliDecompressSync, gunzipSync } from 'node:zlib';
 
+import { contentEtag } from '@mangostudio/api/internal/lib/http-cache';
 import { listDistFiles } from '@mangostudio/shared/utils/dist-files';
 
 import {
@@ -125,6 +126,35 @@ describe('writePrecompressedVariants', () => {
     }
   });
 
+  test('records the length and server ETag of the original bytes on every variant', () => {
+    const variants = writePrecompressedVariants(distDir, variantsDir, listDistFiles(distDir));
+
+    for (const variant of variants) {
+      const identity = readFileSync(join(distDir, ...variant.urlPath.split('/').filter(Boolean)));
+      expect(variant.originalBytes).toBe(identity.byteLength);
+      expect(variant.originalEtag).toBe(contentEtag(identity));
+    }
+  });
+
+  test.each(['gzip', 'br'] as const)(
+    'fails the build when a freshly produced %s copy does not decode to the original',
+    (brokenCoding) => {
+      // Truncated: a plausible-looking, smaller output that is not the file.
+      const truncating = (coding: VariantCoding, bytes: Uint8Array<ArrayBuffer>): Uint8Array =>
+        coding === brokenCoding ? compress(coding, bytes).subarray(0, 20) : compress(coding, bytes);
+
+      expect(() =>
+        writePrecompressedVariants(distDir, variantsDir, listDistFiles(distDir), {
+          compressor: truncating,
+        })
+      ).toThrow(
+        new RegExp(
+          `precompress /assets/main-AbCd1234\\.js: the ${brokenCoding} copy \\(20 bytes\\) does not decode back to the ${Buffer.byteLength(COMPRESSIBLE_JS)} original bytes`
+        )
+      );
+    }
+  );
+
   test('never writes into the dist directory', () => {
     const before = listDistFiles(distDir);
     writePrecompressedVariants(distDir, variantsDir, before);
@@ -244,6 +274,20 @@ describe('writePrecompressedVariants with a compression cache', () => {
       const decoded = variant.coding === 'gzip' ? gunzipSync(stored) : brotliDecompressSync(stored);
       expect(Buffer.from(decoded).equals(identity)).toBe(true);
     }
+  });
+
+  test('fails on a broken fresh copy and does not cache it', () => {
+    const urlPaths = listDistFiles(distDir);
+    const truncating = (coding: VariantCoding, bytes: Uint8Array<ArrayBuffer>): Uint8Array =>
+      compress(coding, bytes).subarray(0, 20);
+
+    expect(() =>
+      writePrecompressedVariants(distDir, variantsDir, urlPaths, {
+        cacheDir,
+        compressor: truncating,
+      })
+    ).toThrow(/does not decode back to the \d+ original bytes; refusing to embed it/);
+    expect(readdirSync(cacheDir)).toEqual([]);
   });
 
   test('drops cache entries the build no longer uses', () => {

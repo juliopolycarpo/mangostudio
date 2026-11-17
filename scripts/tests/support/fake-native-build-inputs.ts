@@ -54,7 +54,7 @@ export class FakeNativeBuildInputs {
     );
     this.write(
       'apps/api/src/server/embedded-frontend.ts',
-      'export function registerEmbeddedFrontend(_files: Record<string, string>, _encodings: Record<string, Record<string, string>>) {}\n'
+      'export function registerEmbeddedFrontend(_files: Record<string, string | null>, _encodings: Record<string, Record<string, string>>, _identity: Record<string, { bytes: number; etag: string }>) {}\n'
     );
     this.write('apps/frontend/dist/index.html', '<html>packaging fixture</html>');
     this.write(
