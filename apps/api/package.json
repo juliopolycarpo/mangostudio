@@ -39,7 +39,7 @@
     "exact-mirror": "1.2.7",
     "file-type": "^22.3.0",
     "kysely": "^0.29.9",
-    "openai": "^7.56.0",
+    "openai": "^7.57.0",
     "typebox": "catalog:"
   },
   "devDependencies": {
