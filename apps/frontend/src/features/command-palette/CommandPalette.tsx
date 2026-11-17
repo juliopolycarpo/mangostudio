@@ -13,45 +13,51 @@
  * actually wants from a grouped list, and is also what keeps focus inside: no
  * key path here yields it back to the page underneath.
  *
+ * Two halves. `PaletteFrame` (eager) owns the input, focus and Escape;
+ * `PaletteResults` (this file's lazy half) owns the ranking, the rows and the
+ * navigation keys, and reads the query from the frame. `CommandPalette` joins
+ * them for callers that have no reason to split.
+ *
  * Presentational on purpose: it takes the registry and a close callback, so its
  * behaviour is testable without a router, a query client or the app context.
  */
 
-import { ArrowRightToLine, ArrowUpDown, Search, SearchX } from 'lucide-react';
-import * as motion from 'motion/react-m';
+import { ArrowRightToLine, ArrowUpDown, SearchX } from 'lucide-react';
 import {
+  type KeyboardEvent,
   memo,
   type ReactNode,
   useCallback,
   useDeferredValue,
   useEffect,
-  useId,
   useMemo,
-  useRef,
   useState,
 } from 'react';
 
-import { DIALOG_SURFACE_CLASS } from '@/components/ui/Dialog';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { KbdHint, ReturnKey } from '@/components/ui/KbdHint';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { StatusDot } from '@/components/ui/StatusDot';
-import { onFocusTrapEngaged } from '@/hooks/use-focus-trap';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
-import { useMotionPresets } from '@/lib/motion/use-motion-presets';
 import { cn } from '@/lib/utils';
 
 import type { CommandItem } from './lib/command-item';
 import { activeCommandIndex, rankCommands } from './lib/match';
+import { PaletteFrame, type PaletteFrameState } from './PaletteFrame';
 
 export interface CommandPaletteProps {
   readonly items: readonly CommandItem[];
   /** True while a lazily-mounted source is still answering. */
   readonly isLoading?: boolean;
   readonly onClose: () => void;
+}
+
+export interface PaletteResultsProps extends PaletteFrameState {
+  readonly items: readonly CommandItem[];
+  readonly isLoading?: boolean;
 }
 
 /**
@@ -65,11 +71,24 @@ export const CommandPalette = memo(function CommandPalette({
   isLoading = false,
   onClose,
 }: CommandPaletteProps) {
+  return (
+    <PaletteFrame onClose={onClose}>
+      {(frame) => <PaletteResults {...frame} items={items} isLoading={isLoading} />}
+    </PaletteFrame>
+  );
+});
+
+/** The ranked list and its keys; mounted inside a `PaletteFrame`. */
+export const PaletteResults = memo(function PaletteResults({
+  items,
+  isLoading = false,
+  query,
+  listId,
+  keyHandlerRef,
+  onActiveIdChange,
+}: PaletteResultsProps) {
   const { t } = useI18n();
   const labels = t.commandPalette;
-  const listId = useId();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [query, setQuery] = useState('');
   /**
    * The command id the user pinned, or null for "wherever the ranking says".
    *
@@ -77,9 +96,15 @@ export const CommandPalette = memo(function CommandPalette({
    * while sources load: discovery finishing inserts runner rows, and a numeric
    * pin would keep its offset while the command under it changed — arming Enter
    * on a row the user never chose.
+   *
+   * It remembers the query it was pinned under: typing releases the cursor back
+   * to the ranking, so each new query lands on its own best match rather than on
+   * wherever the last one left. Keyed by query instead of cleared by the input's
+   * change handler, because the input lives in the frame.
    */
-  const [pinnedId, setPinnedId] = useState<string | null>(null);
-  const { dialogPanel } = useMotionPresets();
+  const [pin, setPin] = useState<{ readonly id: string; readonly query: string } | null>(null);
+  const pinnedId = pin?.query === query ? pin.id : null;
+  const setPinnedId = useCallback((id: string) => setPin({ id, query }), [query]);
 
   // Deferred for the same reason the sidebar's search is: every keystroke
   // rescores the whole registry, and the input must not wait for it.
@@ -105,40 +130,12 @@ export const CommandPalette = memo(function CommandPalette({
   const activeItem = safeIndex >= 0 ? flat[safeIndex] : undefined;
   const activeId = activeItem ? optionId(listId, activeItem) : undefined;
 
-  // Focus lands on the input and stays there; where it came from is restored on
-  // close, so dismissing puts the user back on the control they opened it from
-  // rather than at the top of the document.
-  //
-  // Unless something else has taken focus by then. A row that opens another
-  // overlay — the workdir picker — closes the palette and mounts the picker in
-  // one batch, but `AnimatePresence` keeps this component mounted through its
-  // exit animation, so this cleanup runs ~160ms *after* the picker's focus trap
-  // has already focused itself. Restoring unconditionally would then pull focus
-  // out of the dialog that just opened and park it on the pre-palette trigger,
-  // behind a modal. The input node is captured here rather than read from the
-  // ref in the cleanup: refs detach during the mutation phase, so by the time
-  // this passive cleanup runs `inputRef.current` is already null.
+  // The input is the frame's, so the highlighted row is reported up for its
+  // `aria-activedescendant`.
   useEffect(() => {
-    const previouslyFocused = document.activeElement as HTMLElement | null;
-    const input = inputRef.current;
-    input?.focus();
-    return () => {
-      const active = document.activeElement;
-      // `body` (or nothing) is where a browser parks focus when the focused
-      // input is removed; happy-dom leaves it on the detached input instead.
-      // Both mean "still ours".
-      if (active && active !== input && active !== document.body) return;
-      previouslyFocused?.focus?.();
-    };
-  }, []);
-
-  // A trapped dialog that opens while the palette is up takes focus and the
-  // keyboard from it — an external send can raise a trust or disclosure gate at
-  // any moment — but the palette paints over it at `z-[60]`, so typing would
-  // stop affecting the only overlay the user can see. Yield to it. Opening the
-  // palette over a gate that is *already* up is the case this must not touch,
-  // and it does not: only a newly engaged trap notifies.
-  useEffect(() => onFocusTrapEngaged(onClose), [onClose]);
+    onActiveIdChange(activeId);
+    return () => onActiveIdChange(undefined);
+  }, [activeId, onActiveIdChange]);
 
   // `block: 'nearest'` so arrowing down the list scrolls by a row rather than
   // recentering on every step. Optional call: happy-dom has no layout, and a
@@ -155,7 +152,7 @@ export const CommandPalette = memo(function CommandPalette({
       if (flat.length === 0) return;
       setPinnedId(flat[(from + delta + flat.length) % flat.length].id);
     },
-    [flat, from]
+    [flat, from, setPinnedId]
   );
 
   /** First row of the section after (or before) the active one. */
@@ -169,15 +166,10 @@ export const CommandPalette = memo(function CommandPalette({
       const next = (current + delta + sectionStarts.length) % sectionStarts.length;
       setPinnedId(flat[sectionStarts[next]].id);
     },
-    [flat, sectionStarts, from]
+    [flat, sectionStarts, from, setPinnedId]
   );
 
-  const onKeyDown = (event: React.KeyboardEvent) => {
-    // An IME candidate list uses the same keys; the keystroke belongs to it.
-    // Both signals, as in `isModChord`: some browsers report an active
-    // composition only through the legacy `keyCode`, and there Enter would
-    // commit a candidate *and* run a command.
-    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+  const onKeyDown = (event: KeyboardEvent) => {
     switch (event.key) {
       case 'ArrowDown':
         event.preventDefault();
@@ -215,131 +207,86 @@ export const CommandPalette = memo(function CommandPalette({
         // resolves it against the live ranking and releases it if that ranking
         // no longer holds the row — the same rule the render uses.
         const item = query === deferredQuery ? activeItem : liveCommand(items, query, pinnedId);
-        if (!item) return;
+        // Swallowed even with nothing to run: Enter in the palette must never
+        // fall through to the page behind it.
         event.preventDefault();
-        void item.run();
+        if (item) void item.run();
         return;
       }
-      case 'Escape':
-        event.preventDefault();
-        onClose();
-        return;
       default:
     }
   };
 
+  // Registered after every render so the frame always calls the handler that
+  // closes over this render's ranking; cleared on unmount so the frame goes back
+  // to swallowing these keys.
+  useEffect(() => {
+    keyHandlerRef.current = onKeyDown;
+    return () => {
+      keyHandlerRef.current = null;
+    };
+  });
+
   const showEmpty = !isLoading && flat.length === 0;
 
   return (
-    // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- the backdrop only dismisses; Escape on the dialog is its keyboard equivalent.
-    <div
-      className="fixed inset-0 z-[60] flex items-start justify-center bg-scrim px-4 pt-[10vh]"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <motion.div
-        // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- This custom dialog owns its focus and dismissal behavior.
-        role="dialog"
-        aria-modal="true"
-        aria-label={labels.title}
-        onKeyDown={onKeyDown}
-        // The input is the only focusable node in the panel, so a press on any
-        // other part of it — a heading, the footer hints, the padding beside the
-        // input — would hand focus to `document.body`. `body` is an ancestor of
-        // this element, so every later keystroke would bypass `onKeyDown` and
-        // the palette would go dead to the keyboard until the input was clicked
-        // again. Suppressing the default focus move keeps the caret where every
-        // key path here expects it.
-        onMouseDown={(event) => {
-          if (event.target !== inputRef.current) event.preventDefault();
-        }}
-        {...dialogPanel}
-        className={cn('flex w-full max-w-2xl flex-col overflow-hidden', DIALOG_SURFACE_CLASS)}
-        data-testid="command-palette"
-      >
-        <div className="flex h-12 items-center gap-3 border-b border-stroke px-4">
-          <Search size={ICON_MD} aria-hidden="true" className="shrink-0 text-fg-muted" />
-          <input
-            ref={inputRef}
-            type="text"
-            role="combobox"
-            aria-expanded="true"
-            aria-controls={listId}
-            aria-activedescendant={activeId}
-            aria-label={labels.title}
-            autoComplete="off"
-            spellCheck={false}
-            value={query}
-            onChange={(event) => {
-              setQuery(event.target.value);
-              // Releases the cursor back to the ranking, so each new query lands
-              // on its own best match rather than on wherever the last one left.
-              setPinnedId(null);
-            }}
-            placeholder={labels.placeholder}
-            className="min-w-0 flex-1 bg-transparent text-sm text-fg outline-none placeholder:text-fg-subtle"
-          />
-          <KbdHint keys={labels.keys.escape} />
-        </div>
-
-        <div className="app-scrollbar max-h-[55vh] min-h-0 overflow-y-auto py-2">
-          <div
-            id={listId}
-            // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The custom listbox renders rich options a native select cannot contain.
-            role="listbox"
-            aria-label={labels.title}
-          >
-            {groups.map((group, groupIndex) => (
-              // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- `group` is the role ARIA defines for a listbox's own sections; `<fieldset>` groups form controls and is not a valid listbox child.
-              <div key={group.section} role="group" aria-labelledby={`${listId}-${group.section}`}>
-                <MicroLabel as="div" id={`${listId}-${group.section}`} className="px-4 pb-1 pt-2">
-                  {labels.sections[group.section]}
-                </MicroLabel>
-                {group.items.map((item, itemIndex) => {
-                  const index = sectionStarts[groupIndex] + itemIndex;
-                  return (
-                    <CommandRow
-                      key={item.id}
-                      id={optionId(listId, item)}
-                      item={item}
-                      active={index === safeIndex}
-                      onActivate={() => setPinnedId(item.id)}
-                    />
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-
-          {isLoading ? (
-            <div className="space-y-2 px-4 py-3" data-testid="command-palette-skeleton">
-              <Skeleton className="h-4 w-2/3" />
-              <Skeleton className="h-4 w-1/2" />
+    <>
+      <div className="app-scrollbar max-h-[55vh] min-h-0 overflow-y-auto py-2">
+        <div
+          id={listId}
+          // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The custom listbox renders rich options a native select cannot contain.
+          role="listbox"
+          aria-label={labels.title}
+        >
+          {groups.map((group, groupIndex) => (
+            // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- `group` is the role ARIA defines for a listbox's own sections; `<fieldset>` groups form controls and is not a valid listbox child.
+            <div key={group.section} role="group" aria-labelledby={`${listId}-${group.section}`}>
+              <MicroLabel as="div" id={`${listId}-${group.section}`} className="px-4 pb-1 pt-2">
+                {labels.sections[group.section]}
+              </MicroLabel>
+              {group.items.map((item, itemIndex) => {
+                const index = sectionStarts[groupIndex] + itemIndex;
+                return (
+                  <CommandRow
+                    key={item.id}
+                    id={optionId(listId, item)}
+                    item={item}
+                    active={index === safeIndex}
+                    onActivate={() => setPinnedId(item.id)}
+                  />
+                );
+              })}
             </div>
-          ) : null}
-
-          {showEmpty ? (
-            <EmptyState
-              icon={<SearchX size={ICON_LG} />}
-              title={formatMessage(t.common.noResultsFor, { query: deferredQuery.trim() })}
-              hint={labels.emptyHint}
-            />
-          ) : null}
+          ))}
         </div>
 
-        {/* Keyboard hints: a touch screen has neither arrows nor Tab, so the
-            footer is not drawn on a coarse pointer. The keys are icons, like
-            Return: `↑↓` and `⇥` as text glyphs render hairline-thin and about
-            half the size of the arrow beside them, which left the keycap
-            looking empty. */}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-stroke px-4 py-2 text-xs text-fg-muted pointer-coarse:hidden">
-          <FooterHint keys={<ArrowUpDown size={ICON_SM} />} label={labels.hints.navigate} />
-          <FooterHint keys={<ReturnKey />} label={labels.hints.run} />
-          <FooterHint keys={<ArrowRightToLine size={ICON_SM} />} label={labels.hints.sections} />
-        </div>
-      </motion.div>
-    </div>
+        {isLoading ? (
+          <div className="space-y-2 px-4 py-3" data-testid="command-palette-skeleton">
+            <Skeleton className="h-4 w-2/3" />
+            <Skeleton className="h-4 w-1/2" />
+          </div>
+        ) : null}
+
+        {showEmpty ? (
+          <EmptyState
+            icon={<SearchX size={ICON_LG} />}
+            title={formatMessage(t.common.noResultsFor, { query: deferredQuery.trim() })}
+            hint={labels.emptyHint}
+          />
+        ) : null}
+      </div>
+
+      {/* Keyboard hints: a touch screen has neither arrows nor Tab, so the
+          footer is not drawn on a coarse pointer. The keys are icons, like
+          Return: `↑↓` and `⇥` as text glyphs render hairline-thin and about
+          half the size of the arrow beside them, which left the keycap
+          looking empty. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-stroke px-4 py-2 text-xs text-fg-muted pointer-coarse:hidden">
+        <FooterHint keys={<ArrowUpDown size={ICON_SM} />} label={labels.hints.navigate} />
+        <FooterHint keys={<ReturnKey />} label={labels.hints.run} />
+        <FooterHint keys={<ArrowRightToLine size={ICON_SM} />} label={labels.hints.sections} />
+      </div>
+    </>
   );
 });
 

@@ -318,7 +318,8 @@ describe('MachinePage', () => {
 
     const card = await screen.findByTestId('machine-update-card');
     await user.click(within(card).getByTestId('machine-update-card-action'));
-    const dialog = screen.getByRole('dialog', { name: 'Upgrade to 0.1.1?' });
+    // The dialog is a lazy chunk: it arrives after the click.
+    const dialog = await screen.findByRole('dialog', { name: 'Upgrade to 0.1.1?' });
     await user.click(within(dialog).getByRole('button', { name: 'Upgrade' }));
 
     await waitFor(() => {
@@ -363,7 +364,7 @@ describe('MachinePage', () => {
 
     const card = await screen.findByTestId('machine-update-card');
     await user.click(within(card).getByTestId('machine-update-card-action'));
-    const confirmDialog = screen.getByRole('dialog', { name: 'Upgrade to 0.1.1?' });
+    const confirmDialog = await screen.findByRole('dialog', { name: 'Upgrade to 0.1.1?' });
     await user.click(within(confirmDialog).getByRole('button', { name: 'Upgrade' }));
 
     // The confirm step's dialog unmounts once `confirmed` flips; the progress
