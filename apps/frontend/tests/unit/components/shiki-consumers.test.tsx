@@ -129,6 +129,23 @@ describe('actual consumers of checked highlighting', () => {
     await waitFor(() => expect(clipboard).toHaveBeenCalledWith(source));
   });
 
+  it('colours a code block while its fence is still open and the message is streaming', async () => {
+    const open =
+      '```typescript\nconst first = 1;\nfunction second(value: number) {\n  return value';
+    const { container, rerender } = render(<MarkdownContentRenderer content={open} isStreaming />);
+    await waitFor(() =>
+      expect(container.querySelector('pre[data-lang="typescript"]')).toHaveClass('shiki')
+    );
+
+    rerender(<MarkdownContentRenderer content={`${open} + 1;\n}`} isStreaming />);
+    const coloured = container.querySelectorAll('pre.shiki span[style*="color"]');
+    expect(
+      coloured.length,
+      'coloured spans in a streamed block whose closing fence has not arrived'
+    ).toBeGreaterThan(5);
+    expect(container.querySelector('pre.shiki')?.textContent).toContain('return value + 1;');
+  });
+
   it('keeps escaped source and its copy control for a block over the highlight limits, without tokenizing it', async () => {
     const tokenizer = countRealTokenizerCalls();
     const source = `<script>alert("café & 漢字")</script> ${'x'.repeat(16_384)}\nsecond line <tag>`;

@@ -1,5 +1,7 @@
 import {
   createBundledHighlighter,
+  getLastGrammarState,
+  type GrammarState,
   type HighlighterGeneric,
   splitLines,
   type ThemedToken,
@@ -58,6 +60,68 @@ const createMangoHighlighter = createBundledHighlighter({
 let highlighterPromise: Promise<MangoHighlighter> | null = null;
 let highlighterInstance: MangoHighlighter | null = null;
 let checkedRenderers: ReturnType<typeof createCheckedRenderers> | null = null;
+/**
+ * The last few highlighted blocks, so a streamed message does not re-render every closed block
+ * on each chunk: the whole message is re-parsed per chunk, and a block that has not changed has
+ * the same HTML. Most recently used last; only successful results are kept, because a `null`
+ * means the language was not loaded yet and the next call may succeed.
+ */
+const HIGHLIGHT_CACHE_ENTRIES = 16;
+const highlightCache = new Map<string, string>();
+
+function highlightCacheKey(language: ShikiLanguageId, theme: CodeThemeId, code: string): string {
+  return `${language}\0${theme}\0${code}`;
+}
+
+/**
+ * A block being tokenized as it grows. A streamed message is re-parsed whole on every chunk, so
+ * a block arrives as a longer and longer prefix of itself; tokenizing it from line one each time
+ * is quadratic over the stream (39 s for 2,000 lines in 200 chunks). A session keeps the HTML
+ * of the lines that are complete and the grammar state after the last of them, so a chunk only
+ * tokenizes and serializes its new lines plus the unfinished last one.
+ */
+interface HighlightSession {
+  readonly language: ShikiLanguageId;
+  readonly theme: CodeThemeId;
+  /** The source of the completed lines, each with its line break: a prefix of every later chunk. */
+  completedSource: string;
+  /** One serialized line per completed line. */
+  readonly completedHtml: string[];
+  /** The grammar state after the last completed line; undefined before the first. */
+  state: GrammarState | undefined;
+}
+
+const HIGHLIGHT_SESSION_COUNT = 4;
+/** Most recently used last. */
+const highlightSessions: HighlightSession[] = [];
+
+function takeHighlightSession(
+  language: ShikiLanguageId,
+  theme: CodeThemeId,
+  code: string
+): HighlightSession {
+  const index = highlightSessions.findIndex(
+    (session) =>
+      session.language === language &&
+      session.theme === theme &&
+      code.startsWith(session.completedSource)
+  );
+  // The longest matching prefix would be ideal, but two blocks sharing a prefix is rare and the
+  // worst case is only a re-tokenization from the shared lines.
+  const session: HighlightSession = (index === -1
+    ? undefined
+    : highlightSessions.splice(index, 1)[0]) ?? {
+    language,
+    theme,
+    completedSource: '',
+    completedHtml: [],
+    state: undefined,
+  };
+  highlightSessions.push(session);
+  if (highlightSessions.length > HIGHLIGHT_SESSION_COUNT) highlightSessions.shift();
+  return session;
+}
+
 const languageLoadPromises = new Map<ShikiLanguageId, Promise<void>>();
 const themeLoadPromises = new Map<CodeThemeId, Promise<void>>();
 
@@ -114,6 +178,9 @@ export async function preloadCodeLanguages(
  * before tokenizing: the line that would exceed it and every line after it are drawn plain.
  * They stay plain even if later lines are cheap, because the grammar state after a skipped
  * line is unknown, and colouring what follows from a guessed state could look right and be wrong.
+ *
+ * A block that is a longer prefix of an earlier call (a streaming message) only tokenizes its
+ * new lines; see `HighlightSession`.
  */
 // Usage: const html = highlightCode('const x = 1;', 'ts', 'one-dark-pro');
 export function highlightCode(code: string, lang: string, theme: CodeThemeId): string | null {
@@ -121,8 +188,23 @@ export function highlightCode(code: string, lang: string, theme: CodeThemeId): s
   if (!highlighterInstance || !language) return null;
   if (!isLanguageLoaded(highlighterInstance, language)) return null;
 
+  const key = highlightCacheKey(language, theme, code);
+  const cached = highlightCache.get(key);
+  if (cached !== undefined) {
+    highlightCache.delete(key);
+    highlightCache.set(key, cached);
+    return cached;
+  }
+
   try {
-    return renderHighlightedBlock(code, language, theme);
+    const html = renderHighlightedBlock(code, language, theme);
+    if (html === null) return null;
+    highlightCache.set(key, html);
+    if (highlightCache.size > HIGHLIGHT_CACHE_ENTRIES) {
+      const oldest = highlightCache.keys().next().value;
+      if (oldest !== undefined) highlightCache.delete(oldest);
+    }
+    return html;
   } catch {
     return null;
   }
@@ -133,27 +215,54 @@ function renderHighlightedBlock(
   language: ShikiLanguageId,
   theme: CodeThemeId
 ): string | null {
-  if (!checkedRenderers) return null;
+  if (!checkedRenderers || !highlighterInstance) return null;
   const renderers = checkedRenderers;
+  const instance = highlighterInstance;
+  const tokenize = (text: string, state: GrammarState | undefined) =>
+    renderers.codeToTokensBase(text, {
+      lang: language,
+      theme,
+      grammarState: state,
+      tokenizeTimeLimit: 500,
+    });
+
   const lines = splitLines(code);
   const highlightable = countHighlightableLines(code, language);
   // Nothing to colour: the caller's escaped source is the same text without the empty wrapper.
   if (highlightable === 0) return null;
+  // Every line but the last has its line break, so its tokens are final.
+  const completeCount = Math.min(lines.length - 1, highlightable);
+  const session = takeHighlightSession(language, theme, code);
 
-  const tokens: ThemedToken[][] = renderers.codeToTokensBase(
-    lines
-      .slice(0, highlightable)
-      .map(([text]) => text)
-      .join('\n'),
-    { lang: language, theme, tokenizeTimeLimit: 500 }
-  );
-  // Lines past the budget are drawn plain, as one uncoloured token each.
-  for (let index = tokens.length; index < lines.length; index++) {
-    const text = lines[index]?.[0] ?? '';
-    tokens.push(text ? [{ content: text, offset: 0 }] : []);
-  }
   const htmlOptions = { lang: language, theme };
-  return renderers.htmlFromLines(renderers.tokenLinesToHtml(tokens, htmlOptions), htmlOptions);
+
+  // A throw below leaves the session as it was: it is only updated once its lines exist.
+  if (session.completedHtml.length < completeCount) {
+    const newLines = lines.slice(session.completedHtml.length, completeCount);
+    const tokens = tokenize(newLines.map(([text]) => text).join('\n'), session.state);
+    session.completedHtml.push(...renderers.tokenLinesToHtml(tokens, htmlOptions));
+    session.state = getLastGrammarState(instance, tokens);
+    session.completedSource = code.slice(0, lines[completeCount]?.[1]);
+  }
+
+  // Lines after the completed ones are drawn again on every call: the last line may still be
+  // arriving, so it is tokenized from the saved state and not kept; lines past the budget are plain.
+  const openTokens: ThemedToken[][] = [];
+  if (highlightable > completeCount) {
+    openTokens.push(...tokenize(lines[completeCount]?.[0] ?? '', session.state));
+  }
+  for (
+    let index = session.completedHtml.length + openTokens.length;
+    index < lines.length;
+    index++
+  ) {
+    const text = lines[index]?.[0] ?? '';
+    openTokens.push(text ? [{ content: text, offset: 0 }] : []);
+  }
+  return renderers.htmlFromLines(
+    [...session.completedHtml, ...renderers.tokenLinesToHtml(openTokens, htmlOptions)],
+    htmlOptions
+  );
 }
 
 export interface HighlightToken {
@@ -222,6 +331,9 @@ function loadLanguageOnce(highlighter: MangoHighlighter, language: ShikiLanguage
 
   const loading = highlighter.loadLanguage(language).finally(() => {
     languageLoadPromises.delete(language);
+    // A block may embed this grammar (a python fence in markdown), so earlier HTML is stale.
+    highlightCache.clear();
+    highlightSessions.length = 0;
   });
   languageLoadPromises.set(language, loading);
   return loading;
