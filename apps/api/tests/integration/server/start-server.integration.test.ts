@@ -502,6 +502,50 @@ describe('startServer via __serve', () => {
   );
 
   it.skipIf(process.platform === 'win32')(
+    'releases the capture lock and reports the error when closing the database fails',
+    async () => {
+      if (!fixture) throw new Error('Expected a managed process fixture.');
+      const running = fixture;
+      const entry = fileURLToPath(
+        new URL('../../support/fixtures/failing-database-close-stop.ts', import.meta.url)
+      );
+      const database = join(running.tempDir, 'failed-database-close.sqlite');
+      const child = running.spawn({
+        cmd: ['bun', entry],
+        env: {
+          ...serverEnv(running.tempDir, running.port),
+          DATABASE_PATH: database,
+          BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
+        },
+      });
+      try {
+        await running.waitUntilReady(
+          () => child.exitCode !== null || running.diagnostics().includes('shutdown-fixture: stop'),
+          { label: 'stop outcome after a failed database close', timeoutMs: START_TIMEOUT_MS }
+        );
+        expect(running.diagnostics()).toContain(
+          'shutdown-fixture: stop rejected with: fixture database close failed'
+        );
+        const ownership = await acquireCaptureLock(database).then(
+          async (release) => {
+            await release();
+            return 'capture lock released';
+          },
+          (error: unknown) =>
+            `expected the capture lock released after a failed database close | received: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+        );
+        expect(ownership).toBe('capture lock released');
+      } finally {
+        child.kill('SIGUSR2');
+      }
+      expect(await running.waitForExit()).toBe(0);
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  it.skipIf(process.platform === 'win32')(
     'keeps the capture lock after HTTP closes until detached product work settles',
     async () => {
       if (!fixture) throw new Error('Expected a managed process fixture.');

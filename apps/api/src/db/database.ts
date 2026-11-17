@@ -16,6 +16,8 @@ import type { Database } from './types';
 let dbInstance: Kysely<Database> | null = null;
 /** The handle behind `dbInstance`, kept so `closeDb` can release the file itself. */
 let sqliteHandle: SQLiteDatabase | null = null;
+/** The close under way, so a concurrent `closeDb` waits for it instead of returning early. */
+let closeInFlight: Promise<void> | null = null;
 const dbLogger = createDiagnosticLogger('db');
 
 /**
@@ -69,16 +71,50 @@ export function getDb(): Kysely<Database> {
 
 /**
  * Gracefully closes the database connection.
+ *
+ * A call made while a close is in flight returns that close, so it settles only once the file
+ * is released and with the same result.
  */
-export async function closeDb(): Promise<void> {
-  if (dbInstance) {
-    await dbInstance.destroy();
-    // Kysely opens its driver on the first query and closes the database only if it did, so
-    // an instance that never ran one would keep the file open. Windows cannot move or delete
-    // an open database file (backup restore, upgrade), so close the handle explicitly.
-    sqliteHandle?.close(true);
-    sqliteHandle = null;
-    dbInstance = null;
-    dbLogger.info('closed');
+export function closeDb(): Promise<void> {
+  if (closeInFlight) return closeInFlight;
+  const instance = dbInstance;
+  const handle = sqliteHandle;
+  if (!instance) return Promise.resolve();
+  // Forget the singleton before closing: if the driver close throws, the next `getDb` must
+  // open a new connection instead of returning this half-closed one, and a second `closeDb`
+  // must not try to close it again. The error still reaches the caller.
+  dbInstance = null;
+  sqliteHandle = null;
+  closeInFlight = closeConnection(instance, handle).finally(() => {
+    closeInFlight = null;
+  });
+  return closeInFlight;
+}
+
+async function closeConnection(
+  instance: Kysely<Database>,
+  handle: SQLiteDatabase | null
+): Promise<void> {
+  const destroyFailures: unknown[] = [];
+  try {
+    await instance.destroy();
+  } catch (error) {
+    destroyFailures.push(error);
   }
+  // Kysely opens its driver on the first query and closes the database only if it did, so
+  // an instance that never ran one would keep the file open. Windows cannot move or delete
+  // an open database file (backup restore, upgrade), so close the handle explicitly, even
+  // when `destroy` failed.
+  try {
+    handle?.close(true);
+  } catch (error) {
+    if (destroyFailures.length === 0) throw error;
+    // Both closes failed: report both rather than let the second hide the first.
+    throw new AggregateError(
+      [...destroyFailures, error],
+      'Database close failed: both the Kysely destroy and the SQLite handle close threw.'
+    );
+  }
+  if (destroyFailures.length > 0) throw destroyFailures[0];
+  dbLogger.info('closed');
 }

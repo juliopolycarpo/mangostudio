@@ -213,44 +213,75 @@ function logRunning(host: string, port: number, devFrontend: boolean): void {
  * file, and close the database.
  */
 async function gracefulStop(): Promise<void> {
+  // A failed step must not skip the ones after it: each runs, its error is kept, and the first
+  // error (all of them, when several) rejects the stop once every step has had its turn.
+  const failures: unknown[] = [];
+  const attempt = async (step: () => unknown): Promise<void> => {
+    try {
+      await step();
+    } catch (error) {
+      failures.push(error);
+    }
+  };
+
   // Stop admission immediately, but drain concurrently: active streams and
   // WebSocket close handlers may depend on the session/runtime cleanup below.
   // Observe a rejection now and report it after cleanup, without releasing
   // data ownership before HTTP writers have settled.
   const httpStopped = drainHttp();
-  await staleTurnReconcileSweep?.stop();
+  const sweep = staleTurnReconcileSweep;
   staleTurnReconcileSweep = null;
-  stopTerminalIdleReaper?.();
+  await attempt(() => sweep?.stop());
+  const idleReaperStop = stopTerminalIdleReaper;
   stopTerminalIdleReaper = null;
-  stopUpdateChecks?.();
+  await attempt(() => idleReaperStop?.());
+  const updateChecksStop = stopUpdateChecks;
   stopUpdateChecks = null;
+  await attempt(() => updateChecksStop?.());
   // Before the runtime connections close, so each session gets a real close
   // rather than a dropped socket, and no vendor process outlives the hub.
-  await externalSessionManager.reapAll('hub-restarted');
-  await flushObservabilitySnapshot();
-  await closeAllMcpClients();
+  await attempt(() => externalSessionManager.reapAll('hub-restarted'));
+  await attempt(flushObservabilitySnapshot);
+  await attempt(closeAllMcpClients);
   // Also before the runtime connections close, for the same reason: a live
   // terminal session gets a real `terminal.close` instead of the connection
   // simply dropping out from under it.
-  await terminalSessionService.closeAll();
+  await attempt(() => terminalSessionService.closeAll());
   try {
     await shutdownRuntimeConnections();
   } catch (error) {
     console.warn('[api] Runtime connection teardown failed during shutdown:', error);
   }
   // After the connections close, so a scope withdrawn while they closed is still reaped.
-  stopRuntimeScopeReaps?.();
+  const scopeReapsStop = stopRuntimeScopeReaps;
   stopRuntimeScopeReaps = null;
+  await attempt(() => scopeReapsStop?.());
   const httpStopError = await httpStopped;
+  if (httpStopError) failures.push(httpStopError);
   // Keyed turns can outlive their HTTP acknowledgements and still write receipts.
-  if (!httpStopError) await drainProductOperationWork();
-  await removeState();
+  let writersMayBeLive = httpStopError !== undefined;
+  if (!writersMayBeLive) {
+    try {
+      await drainProductOperationWork();
+    } catch (error) {
+      writersMayBeLive = true;
+      failures.push(error);
+    }
+  }
+  await attempt(removeState);
   // A failed drain does not prove writers settled. Retain the database and
   // capture ownership until the process exits, rather than unlock live data.
-  if (httpStopError) throw httpStopError;
-  await closeDb();
-  await releaseCaptureLock?.();
-  releaseCaptureLock = undefined;
+  if (!writersMayBeLive) {
+    await attempt(closeDb);
+    // The lock must go even when the database close failed: it only guards data this process
+    // no longer writes, and `closeDb` has already dropped its connection.
+    const release = releaseCaptureLock;
+    releaseCaptureLock = undefined;
+    await attempt(() => release?.());
+  }
+  if (failures.length === 1) throw failures[0];
+  if (failures.length > 1)
+    throw new AggregateError(failures, 'Server shutdown had several failures.');
 }
 
 /** Gate new traffic now; keep a drain failure observable after resource cleanup. */

@@ -584,6 +584,58 @@ describe('external session manager', () => {
     expect(runtime.calls.closeTimeoutMs).toEqual([10_000, 5_000]);
   });
 
+  it('settles every reap at shutdown before it reports the one that failed', async () => {
+    // Shutdown closes the database right after `reapAll`, so a rejected reap must not return
+    // control while another chat's runtime close is still in flight.
+    const runtime = createFakeExternalRuntime();
+    type CloseResult = Awaited<ReturnType<typeof runtime.client.externalAgents.close>>;
+    const closeHeld = Promise.withResolvers<CloseResult>();
+    const closeThatStaysOpen = (): Promise<CloseResult> => closeHeld.promise;
+    const heldCloseExternalAgents = {
+      ...runtime.client.externalAgents,
+      close: closeThatStaysOpen,
+    };
+    // A proxy keeps every other member of the fake client, getters included.
+    const client = new Proxy(runtime.client, {
+      get: (target, property) =>
+        property === 'externalAgents' ? heldCloseExternalAgents : Reflect.get(target, property),
+    });
+    const manager = createExternalSessionManager({
+      resolveRuntimeClient: () => Promise.resolve(client),
+      newSessionId: () => 'session-held',
+      now: () => 1_000,
+    });
+    await manager.ensureSession(baseInput());
+    const failingChatId = `${chatId}-hold-only`;
+    manager.holdChat(
+      { chatId: failingChatId, userId, environmentId: 'local', targetId: 'codex' },
+      () => {
+        throw new Error('hold notice failed');
+      }
+    );
+
+    let settled = false;
+    const reaped = manager.reapAll('hub-restarted').then(
+      () => {
+        settled = true;
+      },
+      (error: unknown) => {
+        settled = true;
+        throw error;
+      }
+    );
+    reaped.catch(() => undefined);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    if (settled) {
+      throw new Error(
+        'expected reapAll to wait for the held runtime close | received: settled while a close was in flight'
+      );
+    }
+
+    closeHeld.resolve({ ok: true } as CloseResult);
+    await expect(reaped).rejects.toThrow('hold notice failed');
+  });
+
   it('tells the live turn when the runtime connection drops, and keeps the continuation', async () => {
     const runtime = createFakeExternalRuntime();
     const manager = managerFor(runtime);
