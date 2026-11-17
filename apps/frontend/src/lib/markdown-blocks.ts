@@ -297,14 +297,27 @@ function isFenceClosed(raw: string): boolean {
 
 type Definitions = Record<string, { href?: string; title?: string } | undefined>;
 
-/** The link reference map the lexer builds from `def` tokens: the first definition of a label wins. */
-function definitionsOf(tokens: readonly Token[]): Definitions {
+/**
+ * The link reference map the lexer builds from `def` tokens: the first definition of a label
+ * wins. Definitions inside a quote or a list item count too: marked's nested lexing registers
+ * them in the same map, and the walk is in document order so "first" means the same thing.
+ */
+export function definitionsOf(tokens: readonly Token[]): Definitions {
   const links: Definitions = Object.create(null) as Definitions;
-  for (const token of tokens) {
-    if (token.type !== 'def') continue;
-    links[token.tag as string] ??= { href: token.href as string, title: token.title as string };
-  }
+  collectDefinitions(tokens, links);
   return links;
+}
+
+function collectDefinitions(tokens: readonly Token[], links: Definitions): void {
+  for (const token of tokens) {
+    if (token.type === 'def') {
+      links[token.tag as string] ??= { href: token.href as string, title: token.title as string };
+    } else if (token.type === 'blockquote') {
+      collectDefinitions(token.tokens ?? [], links);
+    } else if (token.type === 'list') {
+      for (const item of token.items) collectDefinitions(item.tokens, links);
+    }
+  }
 }
 
 function sameDefinitions(left: Definitions, right: Definitions): boolean {

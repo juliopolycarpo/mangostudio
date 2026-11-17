@@ -8,6 +8,7 @@ import type { Marked } from 'marked';
 import { SHIKI_LANGUAGE_IDS } from '../../../src/lib/code-languages';
 import {
   BlockDomMirror,
+  definitionsOf,
   IncrementalBlockRenderer,
   IncrementalLexer,
   stableBoundary,
@@ -153,6 +154,12 @@ const CRAFTED_DOCUMENTS: Readonly<Record<string, string>> = {
     'emoji 😀 and 𝒳 mathematical\n\n- 🎉 item\n\n```ts\nconst s = "😀";\n```\n\n> 🧪 quote\n',
   'many blank lines': 'a\n\n\n\n\nb\n\n\n\n```\nc\n\n\n\n```\n\n\n\n',
   'blockquote with nested list and code': '> - a\n>   > b\n>\n> ```\n> code\n> ```\n\nafter\n',
+  'definition nested in a quote, used before and after':
+    'Use [q] early.\n\n> [q]: /quoted "T"\n\nmid [q]\n\n> note\n> [r]: /r\n\nlate [q] [r]\n',
+  'definition nested in a list item and in the tail':
+    '- [l]: /l\n\n  text [l]\n\nafter [l] [m]\n\n1. item\n   > [m]: /m\n\nend [m]\n',
+  'nested definition repeats a top-level label':
+    '[d]: /first\n\n> [d]: /second\n\nuse [d]\n\n- [d]: /third\n\nuse [d] again\n',
   'footnote-like syntax': 'Text[^1] here.\n\n[^1]: The note.\n\nMore text.\n',
   'strikethrough, autolinks, hard breaks':
     '~~gone~~ www.example.com and <https://a.example>\nsecond line  \nthird\n',
@@ -325,6 +332,57 @@ describe('IncrementalMarkdown', () => {
 
       expect(engine.lastStats?.fullReason).toBe('new-reference-definition');
       expect(html).toContain('<a href="https://docs.example"');
+    });
+
+    it('keeps lexing the tail after a definition nested in a quote or a list item', () => {
+      for (const opening of ['> [q]: /x\n\n', '- [q]: /x\n\n', '> - [q]: /x\n\n']) {
+        const engine = new IncrementalMarkdown(newParser());
+        engine.blocks(opening);
+        const reasons: (string | null | undefined)[] = [];
+        let text = opening;
+        for (let index = 0; index < 20; index++) {
+          text += `para ${index} [q]\n\n`;
+          engine.blocks(text);
+          reasons.push(engine.lastStats.mode);
+        }
+        // Everything after the opening is a tail update; none falls back to the whole text.
+        expect({ opening, modes: [...new Set(reasons)] }).toEqual({ opening, modes: ['tail'] });
+      }
+    });
+
+    it('treats a definition added to the tail inside a quote as a new definition', () => {
+      const engine = new IncrementalMarkdown(newParser());
+      engine.blocks('See [n].\n\nmiddle\n\n');
+      const html = engine.blocks('See [n].\n\nmiddle\n\n> [n]: /nested\n\n').join('');
+
+      expect(engine.lastStats.fullReason).toBe('new-reference-definition');
+      expect(html).toContain('<a href="/nested"');
+    });
+  });
+
+  describe('definitionsOf', () => {
+    it('collects definitions from quotes and list items in document order, first one winning', () => {
+      const tokens = Lexer.lex(
+        '[a]: /top\n\n> [b]: /quoted\n> [a]: /second\n\n- [c]: /listed\n\n  > [d]: /deep\n',
+        MARKDOWN_LEXER_OPTIONS
+      );
+
+      expect(definitionsOf(tokens)).toEqual({
+        a: { href: '/top', title: undefined },
+        b: { href: '/quoted', title: undefined },
+        c: { href: '/listed', title: undefined },
+        d: { href: '/deep', title: undefined },
+      });
+    });
+
+    it('matches the map the lexer itself builds for the same text', () => {
+      const lexer = new Lexer(MARKDOWN_LEXER_OPTIONS);
+      const text = '> [x]: /1 "t"\n\n- [y]: /2\n- item\n\n[x]: /3\n';
+      const tokens = lexer.lex(text);
+
+      const fromLexer: unknown = Object.entries(lexer.tokens.links);
+
+      expect<unknown>(Object.entries(definitionsOf(tokens))).toEqual(fromLexer);
     });
 
     it('lexes the whole text again when the text is not an extension of the last one', () => {
