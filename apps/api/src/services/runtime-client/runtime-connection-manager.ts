@@ -25,6 +25,7 @@ import Value from 'typebox/value';
 
 import { raceAgainstAbort } from '../../lib/abort-race';
 import { getVersion, isDevelopmentVersion } from '../../lib/config';
+import { RETRY_AFTER_SECONDS_DETAIL } from '../../lib/environment-unavailable';
 import { createDiagnosticLogger } from '../../lib/logger';
 import { resolveRuntimeLaunchCommand, RuntimeBinaryNotFoundError } from '../../lib/runtime-paths';
 import {
@@ -382,6 +383,22 @@ function describeBackoff(environmentId: string, entry: RuntimeConnectionEntry): 
   return `Environment "${environmentId}" is unavailable; the next connection attempt is allowed in ${seconds}s.`;
 }
 
+/**
+ * The refusal for a connect attempt made inside the backoff window. When a
+ * retry is scheduled it carries the wait, so the HTTP layer can send
+ * `Retry-After`; a latched environment (infinite deadline) has none to give.
+ */
+function backoffUnavailable(environmentId: string, entry: RuntimeConnectionEntry): RemoteError {
+  const message = describeBackoff(environmentId, entry);
+  if (entry.retryAfterMs === Number.POSITIVE_INFINITY) {
+    return new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, message);
+  }
+  const seconds = Math.max(1, Math.ceil((entry.retryAfterMs - Date.now()) / 1_000));
+  return new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, message, {
+    [RETRY_AFTER_SECONDS_DETAIL]: seconds,
+  });
+}
+
 function unavailable(message: string): RemoteError {
   return new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, message);
 }
@@ -620,7 +637,7 @@ export class RuntimeConnectionManager {
       entry.failureCount = 0;
       entry.retryAfterMs = 0;
     } else if (Date.now() < entry.retryAfterMs) {
-      throw unavailable(describeBackoff(environmentId, entry));
+      throw backoffUnavailable(environmentId, entry);
     }
     const revision = ++entry.revision;
     const abort = new AbortController();

@@ -8,9 +8,9 @@
  * environment routes already return for that code — neither is logged.
  */
 
-import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 
+import { environmentUnavailableResponse } from '../../../lib/environment-unavailable';
 import { LibraryFeatureUnavailableError } from '../domain/library-feature-error';
 
 export function handleLibraryError(
@@ -23,10 +23,8 @@ export function handleLibraryError(
     set.status = 422;
     return { error: error.message, code: ERROR_CODES.VALIDATION };
   }
-  if (error instanceof RemoteError && error.code === RESERVED_ERROR_CODES.UNAVAILABLE) {
-    set.status = 503;
-    return { error: error.message, code: ERROR_CODES.PROVIDER_ERROR };
-  }
+  const unavailable = environmentUnavailableResponse(error, set);
+  if (unavailable) return unavailable;
   console.error(`${logPrefix} Unexpected error:`, error);
   set.status = 500;
   return { error: unexpectedMessage, code: ERROR_CODES.INTERNAL };
