@@ -10,12 +10,12 @@ export interface BuildProbe {
 }
 
 /** How long the shell probe waits for the hub; a hub mid-restart can accept a connection and say nothing. */
-const SHELL_PROBE_TIMEOUT_MS = 5_000;
+export const SHELL_PROBE_TIMEOUT_MS = 5_000;
 
 /** The content-hashed entry bundle `index.html` points at. */
 const ENTRY_SCRIPT_PATTERN = /\/assets\/main-[\w-]+\.js/;
 
-function browserBuildProbe(): BuildProbe {
+export function browserBuildProbe(): BuildProbe {
   return {
     loadedEntryScript: () => {
       for (const script of document.querySelectorAll<HTMLScriptElement>('script[type="module"]')) {
@@ -25,12 +25,20 @@ function browserBuildProbe(): BuildProbe {
       return null;
     },
     fetchShell: async () => {
-      const response = await fetch('/index.html', {
-        cache: 'no-store',
-        signal: AbortSignal.timeout(SHELL_PROBE_TIMEOUT_MS),
-      });
-      if (!response.ok) throw new Error(`GET /index.html answered ${response.status}`);
-      return response.text();
+      // A timer plus AbortController rather than AbortSignal.timeout, so a test can
+      // advance the clock past it.
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), SHELL_PROBE_TIMEOUT_MS);
+      try {
+        const response = await fetch('/index.html', {
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error(`GET /index.html answered ${response.status}`);
+        return await response.text();
+      } finally {
+        clearTimeout(timer);
+      }
     },
   };
 }

@@ -1,10 +1,17 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 
 import {
+  browserBuildProbe,
   type BuildProbe,
   createStaleBuildMonitor,
   probeBuildFreshness,
+  SHELL_PROBE_TIMEOUT_MS,
 } from '../../../src/lib/stale-build';
+import {
+  advanceTimersByTimeAsync,
+  restoreRealTimers,
+  useFakeTimers,
+} from '../../support/harness/timers';
 
 const shellNaming = (entry: string) =>
   `<!doctype html><script src="/config.js"></script><script type="module" crossorigin src="${entry}"></script>`;
@@ -61,22 +68,41 @@ describe('the browser probe', () => {
     globalThis.fetch = realFetch;
   });
 
-  it('puts a timeout on the shell fetch, and reads a timeout as unknown', async () => {
+  it('gives up on a hub that accepts the request and never answers, then probes again next time', async () => {
     document.head.append(script);
-    const signals: (AbortSignal | null | undefined)[] = [];
-    const timedOutFetch = (_input: unknown, init?: RequestInit): Promise<Response> => {
-      signals.push(init?.signal);
-      return Promise.reject(new DOMException('The operation timed out.', 'TimeoutError'));
+    const requests: string[] = [];
+    /** A hub mid-restart: takes the request, says nothing, and only the abort ends it. */
+    const silentHubFetch = (input: unknown, init?: RequestInit): Promise<Response> => {
+      requests.push(String(input));
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () =>
+          reject(new DOMException('The operation was aborted.', 'AbortError'))
+        );
+      });
     };
-    globalThis.fetch = timedOutFetch as unknown as typeof fetch;
+    globalThis.fetch = silentHubFetch as unknown as typeof fetch;
+    useFakeTimers();
+    try {
+      const monitor = createStaleBuildMonitor(browserBuildProbe());
+      const first = monitor.check();
+      let settled = false;
+      void first.then(() => {
+        settled = true;
+      });
 
-    expect(await probeBuildFreshness()).toBe('unknown');
+      await advanceTimersByTimeAsync(SHELL_PROBE_TIMEOUT_MS - 1);
+      expect(settled, 'probe settled before the timeout').toBe(false);
+      await advanceTimersByTimeAsync(1);
 
-    expect(signals, 'signals passed to fetch').toHaveLength(1);
-    expect(
-      signals[0] instanceof AbortSignal && !signals[0].aborted,
-      `expected a live AbortSignal on the shell fetch | received: ${signals[0] === undefined || signals[0] === null ? String(signals[0]) : `aborted=${signals[0].aborted}`}`
-    ).toBe(true);
+      expect(await first, 'answer of a probe that timed out').toBe(false);
+      expect(settled, 'probe settled after the timeout').toBe(true);
+      void monitor.check();
+      expect(requests, 'shell requests after a timed-out probe and a second check()').toHaveLength(
+        2
+      );
+    } finally {
+      await restoreRealTimers();
+    }
   });
 });
 
