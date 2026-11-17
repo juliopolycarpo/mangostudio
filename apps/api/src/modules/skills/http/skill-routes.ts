@@ -4,6 +4,7 @@ import { UpdateSkillSettingsBodySchema } from '@mangostudio/shared/skills';
 import { Elysia, t } from 'elysia';
 
 import { getDb } from '../../../db/database';
+import { environmentUnavailableResponse } from '../../../lib/environment-unavailable';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { listSkillSettings, updateSkillSetting } from '../application/skill-settings-service';
 import { SkillError } from '../domain/skill';
@@ -16,6 +17,9 @@ function handleSkillSettingsError(
     set.status = error.status;
     return { error: error.message, code: error.code };
   }
+
+  const unavailable = environmentUnavailableResponse(error, set);
+  if (unavailable) return unavailable;
 
   console.error('[skills] Unexpected error:', error);
   set.status = 500;

@@ -25,7 +25,10 @@ import Value from 'typebox/value';
 
 import { raceAgainstAbort } from '../../lib/abort-race';
 import { getVersion, isDevelopmentVersion } from '../../lib/config';
-import { RETRY_AFTER_SECONDS_DETAIL } from '../../lib/environment-unavailable';
+import {
+  EnvironmentUnavailableError,
+  type EnvironmentUnavailableReason,
+} from '../../lib/environment-unavailable';
 import { createDiagnosticLogger } from '../../lib/logger';
 import { resolveRuntimeLaunchCommand, RuntimeBinaryNotFoundError } from '../../lib/runtime-paths';
 import {
@@ -272,7 +275,7 @@ const MAX_RECONNECT_ATTEMPTS = 5;
  * refusal is not a fault that goes away on its own in seconds, and every retry
  * is a dial the holder's runtime has to answer.
  */
-const BOUND_ELSEWHERE_RETRY_MS = 60_000;
+export const BOUND_ELSEWHERE_RETRY_MS = 60_000;
 
 /**
  * True when the runtime closed the handshake with the already-bound code.
@@ -388,19 +391,29 @@ function describeBackoff(environmentId: string, entry: RuntimeConnectionEntry): 
  * retry is scheduled it carries the wait, so the HTTP layer can send
  * `Retry-After`; a latched environment (infinite deadline) has none to give.
  */
-function backoffUnavailable(environmentId: string, entry: RuntimeConnectionEntry): RemoteError {
+function backoffUnavailable(
+  environmentId: string,
+  entry: RuntimeConnectionEntry
+): EnvironmentUnavailableError {
   const message = describeBackoff(environmentId, entry);
   if (entry.retryAfterMs === Number.POSITIVE_INFINITY) {
-    return new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, message);
+    return new EnvironmentUnavailableError('stopped-retrying', message);
   }
-  const seconds = Math.max(1, Math.ceil((entry.retryAfterMs - Date.now()) / 1_000));
-  return new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, message, {
-    [RETRY_AFTER_SECONDS_DETAIL]: seconds,
+  return new EnvironmentUnavailableError('backing-off', message, {
+    retryAfterSeconds: (entry.retryAfterMs - Date.now()) / 1_000,
   });
 }
 
-function unavailable(message: string): RemoteError {
-  return new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, message);
+/**
+ * Every refusal this manager raises is a connect-time failure: nothing has been
+ * sent to the runtime, so callers (and the HTTP layer) may treat it as safe to
+ * retry. Runtime-sent `UNAVAILABLE` errors are deliberately a different type.
+ */
+function unavailable(
+  message: string,
+  reason: EnvironmentUnavailableReason = 'unavailable'
+): EnvironmentUnavailableError {
+  return new EnvironmentUnavailableError(reason, message);
 }
 
 /**
@@ -409,10 +422,16 @@ function unavailable(message: string): RemoteError {
  * is thrown. The specific cause is preserved separately on the connection
  * status, which is what the Environments UI reads.
  */
-function normalizeUnavailable(error: unknown): RemoteError {
-  return error instanceof RemoteError && error.code === RESERVED_ERROR_CODES.UNAVAILABLE
-    ? error
-    : unavailable(error instanceof Error ? error.message : String(error));
+function normalizeUnavailable(error: unknown): EnvironmentUnavailableError {
+  if (error instanceof EnvironmentUnavailableError) return error;
+  const details = error instanceof RemoteError ? error.details : undefined;
+  const reason: EnvironmentUnavailableReason =
+    details?.localFailureReason === 'binary-missing' ? 'binary-missing' : 'start-failed';
+  return new EnvironmentUnavailableError(
+    reason,
+    error instanceof Error ? error.message : String(error),
+    { details }
+  );
 }
 
 /**
@@ -1289,7 +1308,7 @@ export class RuntimeConnectionManager {
     revision: number,
     environmentId: string,
     error: RemoteError
-  ): RemoteError {
+  ): EnvironmentUnavailableError {
     if (entry.revision === revision) {
       entry.connection = undefined;
       entry.retryAfterMs = Date.now() + BOUND_ELSEWHERE_RETRY_MS;
@@ -1302,10 +1321,11 @@ export class RuntimeConnectionManager {
       this.#publish(userId);
     }
     const retrySeconds = BOUND_ELSEWHERE_RETRY_MS / 1_000;
-    return new RemoteError(
-      RESERVED_ERROR_CODES.UNAVAILABLE,
+    return new EnvironmentUnavailableError(
+      'bound-elsewhere',
       `Environment "${environmentId}" was refused: its runtime is already bound to another environment record (close code ${RUNTIME_ALREADY_BOUND_CLOSE_CODE}); expected no live connection from another record. Retrying in ${retrySeconds}s; disconnect or remove the other record to use this one. (${error.message})`,
-      { ...error.details, environmentId }
+      // The wait is the manager's own, never a value a peer put in `details`.
+      { details: { ...error.details, environmentId }, retryAfterSeconds: retrySeconds }
     );
   }
 

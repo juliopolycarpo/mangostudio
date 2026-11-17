@@ -14,7 +14,7 @@
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { SSEErrorEvent } from '@mangostudio/shared/streaming';
 
-import { isEnvironmentUnavailable } from './environment-unavailable';
+import { environmentUnavailableResponse } from './environment-unavailable';
 import { SSE_KEEPALIVE_FRAME, SSE_KEEPALIVE_INTERVAL_MS } from './hub-connection-limits';
 
 const ENCODER = new TextEncoder();
@@ -52,16 +52,17 @@ export function sseResponse<T extends object>(
         }
       } catch (error) {
         if (!disconnected) {
-          const event: SSEErrorEvent = {
-            type: 'error',
-            error: error instanceof Error ? error.message : errorMessage,
-            // An unreachable environment is the same recoverable condition the
-            // JSON routes answer 503 for; it keeps their code on the stream.
-            code: isEnvironmentUnavailable(error)
-              ? ERROR_CODES.PROVIDER_ERROR
-              : ERROR_CODES.INTERNAL,
-            done: true,
-          };
+          // An unreachable environment is the same recoverable condition the
+          // JSON routes answer 503 for; it keeps their fixed text and code.
+          const unavailable = environmentUnavailableResponse(error, {});
+          const event: SSEErrorEvent = unavailable
+            ? { type: 'error', error: unavailable.error, code: unavailable.code, done: true }
+            : {
+                type: 'error',
+                error: error instanceof Error ? error.message : errorMessage,
+                code: ERROR_CODES.INTERNAL,
+                done: true,
+              };
           controller.enqueue(sseEvent(event));
         }
       } finally {
