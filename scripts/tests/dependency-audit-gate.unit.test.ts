@@ -48,7 +48,14 @@ describe('mandatory dependency audit', () => {
     expect(job.if).toBeUndefined();
     expect(job['continue-on-error']).toBeUndefined();
     const commands = job.steps?.filter((step) => step.run);
-    expect(commands).toEqual([{ name: 'Audit bun.lock', run: 'bun audit --audit-level=moderate' }]);
+    // The only ignore is the picomatch ReDoS with no fixed release (#2365); a
+    // new ignore must be added here deliberately, never by widening the level.
+    expect(commands).toEqual([
+      {
+        name: 'Audit bun.lock',
+        run: 'bun audit --audit-level=moderate --ignore=GHSA-fc5q-39xc-vjpf',
+      },
+    ]);
     expect(readText('.github/workflows/dependency-audit.yml')).toContain(
       'persist-credentials: false'
     );
