@@ -502,7 +502,11 @@ describe('IncrementalMarkdown', () => {
           }
         }
         for (const anchor of scratch.querySelectorAll('a')) {
-          expect(anchor.getAttribute('href')?.toLowerCase().startsWith('javascript:')).toBe(false);
+          // An allowlist, not a denylist: a script-capable scheme this test did not think of
+          // (`data:`, `vbscript:`) must fail it too.
+          expect(anchor.getAttribute('href') ?? '').toMatch(
+            /^(?:https?:|mailto:|#|\/|\.{0,2}\/|$)/i
+          );
         }
         expect(html).toBe(parser.parse(attack, { async: false }));
       }
