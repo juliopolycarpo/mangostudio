@@ -256,7 +256,10 @@ async function waitForHealth(
   hub: Bun.Subprocess,
   identity: HubIdentity
 ): Promise<void> {
-  while (hub.exitCode === null) {
+  // A hub killed by a signal has `exitCode === null` and a `signalCode`, so the exit code alone
+  // never ends this loop after `recordAotOrder` SIGKILLs the group: it would keep requesting
+  // `/api/health` for as long as the process lives, into whatever test spies on `fetch` next.
+  while (hub.exitCode === null && hub.signalCode === null) {
     try {
       const response = await fetch(url, { signal: AbortSignal.timeout(1000) });
       await response.text();
@@ -275,7 +278,7 @@ async function waitForHealth(
     await Bun.sleep(50);
   }
   throw new Error(
-    `aot order: expected ${url} to answer 200 before the hub exited | received: hub exit ${hub.exitCode}`
+    `aot order: expected ${url} to answer 200 before the hub exited | received: hub exit ${hub.exitCode ?? `signal ${hub.signalCode}`}`
   );
 }
 

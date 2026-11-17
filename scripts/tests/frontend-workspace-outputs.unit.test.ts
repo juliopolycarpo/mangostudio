@@ -15,9 +15,28 @@ import { join } from 'node:path';
 import { ROOT_DIR } from '../lib/config';
 import {
   buildWithCleanFrontendOutputs,
+  type DirectoryIdentity,
   directoryIdentity,
   isSameDirectory,
 } from '../lib/frontend-workspace-outputs';
+
+/**
+ * Stands in for the filesystem's identity read. It names the first directory it sees and every
+ * later one with an id that differs only in the low bits, above 2^53, where a Number rounds the
+ * two to one value. A guard comparing Numbers would take the later directory for the first.
+ */
+class FakeNeighbouringIdentities {
+  static readonly FIRST: DirectoryIdentity = { dev: 1n, ino: 2n ** 60n };
+  static readonly LATER: DirectoryIdentity = { dev: 1n, ino: 2n ** 60n + 1n };
+  readonly paths: string[] = [];
+
+  read = (path: string): DirectoryIdentity | undefined => {
+    this.paths.push(path);
+    return this.paths.length === 1
+      ? FakeNeighbouringIdentities.FIRST
+      : FakeNeighbouringIdentities.LATER;
+  };
+}
 
 class FakeFrontendWorkspace {
   readonly root = mkdtempSync(join(tmpdir(), 'mango-frontend-workspace-'));
@@ -250,6 +269,43 @@ describe('frontend workspace cache outputs', () => {
 });
 
 describe('directory identity', () => {
+  test("leaves a competing build's dist alone when its id differs only below 2^53 precision", async () => {
+    const identities = new FakeNeighbouringIdentities();
+    expect(Number(FakeNeighbouringIdentities.FIRST.ino)).toBe(
+      Number(FakeNeighbouringIdentities.LATER.ino)
+    );
+
+    const exitCode = await buildWithCleanFrontendOutputs(
+      workspace.root,
+      workspace.publishFromCompiler,
+      identities.read
+    );
+
+    expect(exitCode).toBe(9);
+    expect(
+      readFileSync(workspace.entry, 'utf8'),
+      `(${workspace.dist}): expected the competing build's entry to survive | received it removed as if owned`
+    ).toBe('compiler entry');
+    expect(readFileSync(workspace.metafile, 'utf8')).toBe('compiler metafile');
+    // One read when the empty directory is made, one when settling: dist cannot vanish in between.
+    expect(identities.paths).toEqual([workspace.dist, workspace.dist]);
+  });
+
+  test('restores the previous pair when dist is gone at settle time', async () => {
+    const removeDist = (): number => {
+      rmSync(workspace.dist, { recursive: true });
+      return 3;
+    };
+
+    expect(await buildWithCleanFrontendOutputs(workspace.root, removeDist)).toBe(3);
+    expect(readFileSync(workspace.entry, 'utf8')).toBe('previous entry');
+    expect(readFileSync(workspace.metafile, 'utf8')).toBe('previous metafile');
+  });
+
+  test('reads a missing directory as undefined, not as an error', () => {
+    expect(directoryIdentity(join(workspace.frontend, 'absent'))).toBeUndefined();
+  });
+
   test('keeps neighbouring inodes above 2^53 apart, as a Number would not', () => {
     const above = 2n ** 60n;
     // Both round to the same double, which is how two NTFS directories looked like one.
@@ -265,6 +321,7 @@ describe('directory identity', () => {
 
   test('reads the identity of a real directory as BigInts and tells it from a replacement', () => {
     const first = directoryIdentity(workspace.dist);
+    if (!first) throw new Error(`(${workspace.dist}): expected an identity | received undefined`);
     expect(typeof first.ino, `(${workspace.dist}): expected a bigint inode`).toBe('bigint');
     renameSync(workspace.dist, join(workspace.frontend, 'moved-dist'));
     mkdirSync(workspace.dist);

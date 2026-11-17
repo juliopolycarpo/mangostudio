@@ -18,6 +18,7 @@ import { resolve } from 'node:path';
 
 import { fatal, parseArgs } from '../lib/args';
 import { rotatedOrder } from '../lib/bench-order';
+import { childEnd } from '../lib/child-end';
 import { fetchRaw } from '../lib/content-encoding-smoke';
 import {
   createIsolatedHubHome,
@@ -149,7 +150,7 @@ async function measureCandidate(
   const releaseGuard = guardIsolatedHub(child, home, `footprint hub ${label}`);
   try {
     let toHealthMs: number | null = null;
-    while (performance.now() - startedAt < READY_TIMEOUT_MS && child.exitCode === null) {
+    while (performance.now() - startedAt < READY_TIMEOUT_MS && childEnd(child) === null) {
       try {
         const response = await fetch(`http://127.0.0.1:${port}/api/health`, {
           signal: AbortSignal.timeout(1000),
@@ -166,7 +167,7 @@ async function measureCandidate(
     }
     if (toHealthMs === null) {
       throw new Error(
-        `${label}: expected HTTP 200 and matching state within ${READY_TIMEOUT_MS} ms | received ${child.exitCode === null ? 'not ready' : `exit ${child.exitCode}`}`
+        `${label}: expected HTTP 200 and matching state within ${READY_TIMEOUT_MS} ms | received ${childEnd(child) ?? 'not ready'}`
       );
     }
     const atHealth = await readMemory(child.pid);
