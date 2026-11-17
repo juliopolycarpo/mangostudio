@@ -62,7 +62,7 @@ describe('server-state', () => {
     expect(await readState(path)).toBeNull();
   });
 
-  it.each([0, 1, -1, 1.5])(
+  it.each([0, 1, -1, 1.5, 2 ** 53 + 1, 1e300])(
     'returns null when the recorded pid is %p: stop and killserver would signal it',
     async (pid) => {
       // kill(0) is the caller's group, kill(-1) every process the user owns.
