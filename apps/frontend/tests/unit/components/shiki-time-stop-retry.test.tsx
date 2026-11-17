@@ -46,11 +46,15 @@ afterEach(() => {
 /**
  * Reports `stoppedEarly` for the first `stops` tokenizer calls and lets the rest finish: a
  * cold grammar that stops the block that pays for its compile and not the ones after it.
+ * `alsoStopOn` lists later calls (1-based) that stop as well: a machine that gets busy again.
  */
 class ColdGrammar {
   calls = 0;
 
-  constructor(private readonly stops: number) {}
+  constructor(
+    private readonly stops: number,
+    private readonly alsoStopOn: readonly number[] = []
+  ) {}
 
   install(): this {
     const grammar = highlighter.getLanguage('typescript');
@@ -58,7 +62,8 @@ class ColdGrammar {
     const tokenizer = spyOn(grammar, 'tokenizeLine2').mockImplementation(
       (...args: Parameters<typeof original>) => {
         this.calls++;
-        return { ...original.apply(grammar, args), stoppedEarly: this.calls <= this.stops };
+        const stops = this.calls <= this.stops || this.alsoStopOn.includes(this.calls);
+        return { ...original.apply(grammar, args), stoppedEarly: stops };
       }
     );
     restore = () => tokenizer.mockRestore();
@@ -207,11 +212,28 @@ describe('a diff line stopped by a cold grammar', () => {
     expect(scheduler.pending, 'retries waiting for an idle moment').toBe(1);
 
     await scheduler.runIdle();
-    expect(grammar.calls, 'tokenize attempts after the retry').toBeGreaterThanOrEqual(2);
+    expect(grammar.calls, 'tokenize attempts after the retry').toBe(2);
     expect(
       container.querySelectorAll('code span').length,
       'token spans after the retry'
     ).toBeGreaterThan(1);
+  });
+
+  it('draws the retry result without tokenizing the line again, so a busy machine cannot loop it', async () => {
+    const scheduler = installIdleScheduler();
+    // Call 3 would stop: it is the redraw after the retry, which must not tokenize at all.
+    const grammar = new ColdGrammar(1, [3]).install();
+    const { container } = showDiff('const busyAgainDiffLine = 10;');
+    await settleFirstDraw();
+    await scheduler.runIdle();
+    await settleFirstDraw();
+
+    expect(grammar.calls, 'tokenize attempts for a line that recovered').toBe(2);
+    expect(
+      container.querySelectorAll('code span').length,
+      'token spans of the recovered line'
+    ).toBeGreaterThan(1);
+    expect(scheduler.pending, 'retries scheduled after the recovery').toBe(0);
   });
 
   it('stays plain, and is not tried a third time, when the retry stops too', async () => {

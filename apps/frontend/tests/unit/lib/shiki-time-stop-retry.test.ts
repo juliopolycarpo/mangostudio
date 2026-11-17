@@ -8,6 +8,7 @@ import {
   isLineHighlightRetryPending,
   observeTokenizedLines,
   preloadCodeLanguages,
+  setTimeStopClock,
 } from '@/lib/shiki';
 
 import {
@@ -28,6 +29,7 @@ beforeAll(async () => {
 });
 
 afterEach(() => {
+  setTimeStopClock(null);
   restore?.();
   restore = undefined;
 });
@@ -108,8 +110,81 @@ describe('a block the tokenizer stopped on its time limit', () => {
     expect(isHighlightRetryPending(other, LANGUAGE, THEME), 'other block pending').toBe(false);
   });
 
+  it('is given up, not retried again, when it stops after it had recovered', () => {
+    const attempts = countTokenizeAttempts();
+    const source = 'const recoveredThenBusy = 11;';
+    stoppedBlock(source);
+    expect(settledBlock(source)).toContain('class="shiki');
+    // Sixteen other blocks push the recovered one out of the result cache.
+    for (let index = 0; index < 16; index++) settledBlock(`const evictor${index} = ${index};`);
+    const before = attempts.count;
+
+    expect(stoppedBlock(source), 'html of a stop after recovery').toBeNull();
+    expect(
+      isHighlightRetryPending(source, LANGUAGE, THEME),
+      'retry pending after a stop that followed a recovery'
+    ).toBe(false);
+    expect(settledBlock(source), 'html of the next attempt').toBeNull();
+    expect(attempts.count - before, 'tokenize attempts after the recovery').toBe(1);
+  });
+
   it('is not pending for a language the highlighter cannot draw', () => {
     expect(isHighlightRetryPending('x', 'not-a-real-language', THEME)).toBe(false);
+  });
+});
+
+/** A clock the test moves by hand, for what expires on `performance.now` time. */
+class HandClock {
+  private nowMs = 1_000_000;
+  now = (): number => this.nowMs;
+  advance(ms: number): void {
+    this.nowMs += ms;
+  }
+}
+
+describe('a block that stopped twice', () => {
+  it('is given a fresh pair of attempts once the give-up has expired', () => {
+    const clock = new HandClock();
+    setTimeStopClock(clock.now);
+    const attempts = countTokenizeAttempts();
+    const source = 'const stoppedInABusyWindow = 12;';
+    stoppedBlock(source);
+    stoppedBlock(source);
+    expect(attempts.count, 'tokenize attempts after two stops').toBe(2);
+
+    clock.advance(29_999);
+    expect(settledBlock(source), 'html 1 ms before the give-up expires').toBeNull();
+    expect(attempts.count, 'tokenize attempts 1 ms before the give-up expires').toBe(2);
+
+    clock.advance(1);
+    expect(settledBlock(source), 'html once the give-up has expired').toContain('class="shiki');
+    expect(attempts.count, 'tokenize attempts once the give-up has expired').toBe(3);
+  });
+
+  it('starts over as retry-pending when it stops again after the expiry', () => {
+    const clock = new HandClock();
+    setTimeStopClock(clock.now);
+    const source = 'const stoppedAgainAfterExpiry = 13;';
+    stoppedBlock(source);
+    stoppedBlock(source);
+    clock.advance(30_000);
+
+    stoppedBlock(source);
+    expect(isHighlightRetryPending(source, LANGUAGE, THEME), 'retry pending after expiry').toBe(
+      true
+    );
+  });
+
+  it('gives a diff line a fresh pair of attempts after the expiry too', () => {
+    const clock = new HandClock();
+    setTimeStopClock(clock.now);
+    const line = 'const lineStoppedInABusyWindow = 14;';
+    stoppedLine(line);
+    stoppedLine(line);
+    expect(settledLine(line), 'tokens before the give-up expires').toBeNull();
+
+    clock.advance(30_000);
+    expect(settledLine(line)?.length, 'tokens once the give-up has expired').toBeGreaterThan(1);
   });
 });
 
