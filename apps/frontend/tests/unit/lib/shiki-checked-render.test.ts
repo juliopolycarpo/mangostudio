@@ -99,11 +99,13 @@ describe('checked Shiki renderer', () => {
     );
     const shiki = highlighter.codeToHtml(source, options);
 
-    const textOf = (html: string) =>
-      html
-        .replace(/<[^>]+>/g, '')
-        .replaceAll('&#x3C;', '<')
-        .replaceAll('&#x26;', '&');
+    // The DOM parser decodes entities and drops tags; stripping tags with a regex would not be a
+    // faithful reading of what the browser shows.
+    const textOf = (html: string) => {
+      const holder = document.createElement('div');
+      holder.innerHTML = html;
+      return holder.textContent;
+    };
     // Shiki's own HTML merges a whitespace-only token into the next one; ours keeps it as a
     // token. Both are drawn identically, so compare the coloured tokens with their blanks removed.
     const colouredTokens = (html: string) =>
