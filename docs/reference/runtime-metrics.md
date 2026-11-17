@@ -34,12 +34,12 @@ Three things were measured and rejected, so the list stops here:
   `fs.grep` over 1,000 files slows by 7% (paired median +7.2 ms on 106 ms, 6 of 41 pairs faster).
   Its per-file work is in that crate. A `[profile.release.package.mangostudio-runtime]` table also
   left the symbol table in the stripped binary (+5.4 MB), so the test refuses that table.
-- `mango-protocol` at `s` takes the stripped binary from 23.8 MB to 22.4 MB, but frame encode and
-  decode for a multi-MiB answer slows by 3% to 4% (an 8 MiB `fs.list-directory`: paired median
-  +122 ms on 3,431 ms, 11 of 61 pairs faster; a 50,000-entry `fs.glob`: +5.5 ms on 141 ms, 20 of
-  61), and the small-event and error paths of the external-agent boundary by 4% to 5%
-  (`text_4096`, `reasoning_4096`, `remote_error`; +10 to +34 ns). With the package at 3 those
-  differences are gone.
+- `mango-protocol` at `s` takes the stripped binary from 23.8 MB to 22.3 MB, but still slows the
+  large-answer and per-request paths after large results stopped being copied. Against a build with
+  the package at 3, over two series of 61 runs each: an `fs.list-directory` over 120,000 entries
+  +7% (+22.0 and +19.5 ms on about 300 ms, 5 and 7 pairs faster), a 50,000-entry `fs.glob`
+  +3.9% and +2.9%, 2,000 `runtime.health` round trips +1.1% and +2.2%, and the event mapping of
+  `text_4096` and `reasoning_4096` in the external-agent boundary benchmark +4% (about 9 ns).
 - `aho-corasick`, `regex-automata` and `regex-syntax` at `s` cost nothing measurable on `fs.grep`
   (the prefilter and the pattern analysis use them), so they stay on the list.
 
@@ -47,8 +47,8 @@ Linux x64, glibc, `cargo build --release --locked -p mangostudio-runtime`, strip
 
 | Build              | Stripped bytes | vs. main |
 | ------------------ | -------------: | -------: |
-| main               |     26,828,656 |        — |
-| 28 packages at `s` |     23,843,792 |   −11.1% |
+| main               |     26,763,512 |        — |
+| 28 packages at `s` |     23,790,136 |   −11.1% |
 
 `fs.grep`, median ms, 61 interleaved runs per binary (`scripts/bench/grep.ts`, binaries pinned
 to eight CPUs, one fixture build per run, host load 0.3 to 1.5), default pattern:
@@ -69,7 +69,6 @@ the paired delta is 28 packages at `s` minus main per run:
 | `glob-large-list` (`**/*` over 50,000 files)       | 140.1 |     138.4 | -0.7 ms (33 of 61)                               |
 | `rpc-small` (2,000 `runtime.health`)               | 1,460 |     1,429 | -22.7 ms (42 of 61)                              |
 | `rpc-small-read` (1,000 `fs.read-file`, 1 KiB)     | 408.5 |     407.6 | -4.4 ms (34 of 61)                               |
-| `rpc-large-result` (5 listings of 8 MiB)           | 3,456 |     3,468 | +12.2 ms (28 of 61)                              |
 | `rpc-large-params` (5 `fs.write-file`, 8 MiB each) | 883.5 |     882.5 | +1.3 ms (29 of 61)                               |
 
 External-agent boundary (`scripts/bench/external-agent-boundary.ts`, 31 fresh processes per case and
@@ -77,6 +76,23 @@ side, lto off, 16 CGUs): the 19 case medians differ by -6% to +5% and the sign f
 series for every case but one. `fingerprint_ordinary` is slower by 65 ns on 1,740 ns (26 of 31
 pairs) in every series; no moved package is on its path (`serde_json` and `sha2` over a runtime
 type), so it is not attributed to the list.
+
+The tables above predate the large-result copy removal and were measured against `f0ba7cc99`.
+Re-measured against `5c0e2f72f` with the same 28 packages (two series of 61 runs, paired median
+delta in ms, pairs where `s` was faster in parentheses; boundary cases 101 samples):
+
+| Scenario                                    |           series 1 |           series 2 |
+| ------------------------------------------- | -----------------: | -----------------: |
+| `fs.list-directory`, 120,000 entries (~300) |     -6.0 (36 / 61) |     +0.7 (27 / 61) |
+| `glob-large-list` (~105)                    |     +0.2 (30 / 61) |     +0.7 (29 / 61) |
+| `rpc-small` (~1,385)                        |    +13.2 (23 / 61) |     -0.9 (31 / 61) |
+| `text_4096` boundary (~231 ns)              | +3.7 ns (21 / 101) | +4.2 ns (12 / 101) |
+| `reasoning_4096` boundary (~230 ns)         | +4.4 ns (11 / 101) | +4.8 ns (21 / 101) |
+| `remote_error` boundary (~848 ns)           | +2.6 ns (44 / 101) | +0.2 ns (50 / 101) |
+
+The two event-mapping cases are 4 ns slower (1.6% to 2.1%) in both series. They run in
+`mangostudio-runtime` and `mango-external-agents`, both at 3, and the same cases were 4% to 5%
+faster in the earlier comparison, so I read this as code layout and not as a cost of the list.
 
 Patterns that always enter QuickJS (no required literal, or the literal on every line) differ by
 −1.4% to −0.5% across 41 runs, inside the paired spread of ±25 to ±60 ms. `hello` (40.2 vs
@@ -92,6 +108,9 @@ bun run scripts/bench/grep.ts main=target/main/release/mangostudio-runtime \
   --scenario files-100,files-1000,large-file --large-mib 16
 bun run scripts/bench/runtime-requests.ts main=target/main/release/mangostudio-runtime \
   head=target/head/release/mangostudio-runtime --runs 61 --warmup 3
+bun run scripts/bench/runtime-results.ts main=target/main/release/mangostudio-runtime \
+  head=target/head/release/mangostudio-runtime --runs 61 --warmup 3 \
+  --scenario list-directory --entries 120000
 ```
 
 For the boundary benchmark, build both libtests as `scripts/README.md` describes. The script keeps
