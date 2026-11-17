@@ -25,35 +25,30 @@ interface ReasoningItemWithContent {
 // ---------------------------------------------------------------------------
 
 /**
- * Extracts reasoning text from a completed response payload.
- * Tries summary array first, then falls back to reasoning content array.
+ * Extracts reasoning text from a completed response payload, across every reasoning item.
+ * Uses the summary parts when any item has them, otherwise the raw reasoning content parts.
+ * Parts are joined with a blank line, as the stream tracker does: the two must read the same.
  */
 export function extractReasoningFromCompleted(response: Responses.Response): string | null {
-  const output = response.output ?? [];
+  const reasoningItems = (response.output ?? []).filter((item) => item.type === 'reasoning');
 
-  for (const item of output) {
-    if (item.type !== 'reasoning') continue;
+  const summaryParts = reasoningItems.flatMap((item) =>
+    Array.isArray(item.summary) ? item.summary.filter((s) => s.text).map((s) => s.text) : []
+  );
+  if (summaryParts.length > 0) return summaryParts.join('\n\n');
 
-    // Try summary array first
-    if (Array.isArray(item.summary)) {
-      const texts = item.summary.filter((s) => s.text).map((s) => s.text);
-      if (texts.length > 0) return texts.join('\n\n');
-    }
-
-    // Fallback: reasoning content array (not modeled by SDK types)
+  // Fallback: reasoning content array (not modeled by SDK types)
+  const contentParts = reasoningItems.flatMap((item) => {
     const extended = item as ReasoningItemWithContent;
-    if (Array.isArray(extended.content)) {
-      const texts = extended.content
-        .filter(
-          (c): c is { type: string; text: string } =>
-            c.type === 'reasoning_text' && typeof c.text === 'string'
-        )
-        .map((c) => c.text);
-      if (texts.length > 0) return texts.join('\n\n');
-    }
-  }
-
-  return null;
+    if (!Array.isArray(extended.content)) return [];
+    return extended.content
+      .filter(
+        (c): c is { type: string; text: string } =>
+          c.type === 'reasoning_text' && typeof c.text === 'string'
+      )
+      .map((c) => c.text);
+  });
+  return contentParts.length > 0 ? contentParts.join('\n\n') : null;
 }
 
 // ---------------------------------------------------------------------------

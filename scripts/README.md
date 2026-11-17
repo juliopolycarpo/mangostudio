@@ -28,8 +28,8 @@ scripts/
 ├── changelog.ts      git-cliff wrapper: init/preview/release (bun run changelog)
 ├── changelog-separators.ts
 │                     Repair historical release separators only (--check for read-only validation)
-├── bench/            Hermetic performance measurement (startup.ts, runtime-handshake.ts, grep.ts, library-walk.ts + its fixture plans)
-├── ci/               Dependency-free workflow steps (gate evaluation, distribution identity, cross-runtime fetch, test-shard and timings merge, Rust lane relevance and qualification selection)
+├── bench/            Hermetic performance measurement (startup.ts, runtime-handshake.ts, grep.ts, runtime-results.ts, library-walk.ts + its fixture plans)
+├── ci/               Dependency-free workflow steps (gate evaluation, distribution identity, cross-runtime fetch, test-shard and timings merge, Rust lane relevance and qualification selection, frontend bundle report and first-load budget)
 ├── lib/              Shared toolkit (see below)
 ├── examples/         Runnable maintainer samples (dependency-free Bun scripts)
 ├── install/          Canonical installers (install.sh, install.ps1): staged by current release automation and embedded in the hub binary
@@ -200,6 +200,17 @@ hash cache in `.mango/pass-stamps` means unchanged files are not read again. The
 --sourcemap=external` and production `--minify`. It does not enable Elysia AOT.
 `--compiler bytecode` uses `--bytecode --trim` with the same ESM, source maps and
 production minification, and retains all 8 cross-compilation targets.
+
+On a Linux host a native build with `--production` (given explicitly) or `--require-aot-order`
+compiles twice: once with `--aot-record-order`, then — after `scripts/lib/aot-order.ts` has run that
+binary through `scripts/lib/hub-workload.ts` and checked the file it wrote — with
+`--aot-order=<file>`. A plain local, smoke or test build compiles once. The recording hub runs
+supervised (`ChildSupervisor`) with an allowlisted environment (`isolatedHubEnv` in
+`scripts/lib/hub-process.ts`, shared with the benchmarks), so a cancelled build leaves no hub or
+home behind. The build fails or warns if Bun prints its "is not an order file" warning. The order
+file lives in `.mango/aot-order/<arch>/hub.order` and is rebuilt every time (the recording binary
+beside it is deleted); it is never committed, because any code change invalidates it. Its SHA-256 is
+the compile receipt's `aotOrderSha256`.
 
 Native builds use the running compiler and its runtime, without downloading a
 cross-target Bun runtime; `--refresh-runtimes` has no effect on native builds.
@@ -501,15 +512,19 @@ MANGO_API_KEY='mango_…' bun run scripts/examples/external-api-smoke.ts http://
 
 ## bench/ — hermetic performance measurement
 
-| Script                       | Purpose                                                                                                                         |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `startup.ts`                 | Median process-start → first healthy `GET /api/health` of a binary                                                              |
-| `runtime-handshake.ts`       | Runtime child over stdio: process start → `hello` → first request, min/median/p95/max                                           |
-| `grep.ts`                    | Runtime `fs.grep` over stdio: 1/100/1000 small files, a large file, peak RSS, cancel                                            |
-| `line-decoder.ts`            | Protocol NDJSON `LineDecoder`: ns per byte for large records in small pieces and for many short records, peak RSS               |
-| `rust-test-inventory.ts`     | Rust test inventory (libtest or nextest) by logical identity; diff two, total a log                                             |
-| `external-agent-boundary.ts` | Actual receipt hashing, admitted request ownership and event mapping; alternating Base/Head processes, raw timings and peak RSS |
-| `checkpoint-writes.ts`       | Hub streaming turns against a fake provider: bytes written to the SQLite main and WAL files, commits, fsyncs, CPU, peak RSS     |
+| Script                       | Purpose                                                                                                                               |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `startup.ts`                 | Median process-start → first healthy `GET /api/health` of a binary                                                                    |
+| `hub-footprint.ts`           | Compiled hubs side by side: binary size, start → first healthy `/api/health`, idle and post-workload RSS (Linux `/proc`)              |
+| `runtime-handshake.ts`       | Runtime child over stdio: process start → `hello` → first request, min/median/p95/max                                                 |
+| `grep.ts`                    | Runtime `fs.grep` over stdio: 1/100/1000 small files, a large file, peak RSS, cancel                                                  |
+| `runtime-results.ts`         | Runtime `fs.list-directory` and `fs.read-file` over stdio, and start → first answer; peak RSS, answer digest compared across binaries |
+| `runtime-requests.ts`        | Runtime `fs.glob` and small-request and large-params round trips over one session; paired median delta and pairs won                  |
+| `line-decoder.ts`            | Protocol NDJSON `LineDecoder`: ns per byte for large records in small pieces and for many short records, peak RSS                     |
+| `rust-test-inventory.ts`     | Rust test inventory (libtest or nextest) by logical identity; diff two, total a log                                                   |
+| `external-agent-boundary.ts` | Actual receipt hashing, admitted request ownership and event mapping; alternating Base/Head processes, raw timings and peak RSS       |
+| `checkpoint-writes.ts`       | Hub streaming turns against a fake provider: bytes written to the SQLite main and WAL files, commits, fsyncs, CPU, peak RSS           |
+| `api-json-compression.ts`    | Hub JSON responses: raw/gzip/zstd/Brotli sizes and compress time, break-even link speed, hub CPU and latency by peer address          |
 
 The benchmarks take any runtime binary, and they default to the newest of `target/release`,
 `target/release-fast` and `target/debug`. For an A/B on one machine, build with
@@ -568,6 +583,18 @@ module-load time are visible rather than buried under migration work.
 
 Compare two binaries by building both and running the same command against
 each; a startup claim is only worth as much as its median and spread.
+
+`hub-footprint.ts` starts each `label=binary` once per round in rotated order, each in a fresh
+isolated home, and reads `VmRSS`, `RssAnon`, `RssFile`, `RssShmem` and `VmHWM` from
+`/proc/<pid>/status`. `--idle-seconds` waits before the idle read; `--workload` signs in, lists
+chats and fetches the page and its largest script as br, gzip and identity, then reads memory
+after a 3 s settle. Keep both binaries on one filesystem (an executable on tmpfs counts as
+`RssShmem`) and run it while the host is quiet: the load average is saved per row.
+
+```bash
+bun run scripts/bench/hub-footprint.ts --rounds 10 --idle-seconds 10 --workload \
+  base=../base/.mango/out/linux-x64/mangostudio head=.mango/out/linux-x64/mangostudio
+```
 
 `runtime-handshake.ts` spawns `mangostudio-runtime --stdio` through the protocol SDK's
 launcher, exchanges `hello` as the hub does and asks for `runtime.health`, with a fresh
@@ -630,6 +657,18 @@ bun run scripts/bench/grep.ts base=<old> head=<new> --scenario large-file --larg
 bun run scripts/bench/grep.ts <binary> --scenario large-file --pattern '(\d+)-NEEDLE$' --ignore-case
 ```
 
+`runtime-results.ts` measures the calls whose answer is large: `fs.list-directory` over `--entries`
+files, `fs.read-file` of a `--read-mib` text file, and `hello` (child start to the first
+`runtime.health` answer). Like `grep.ts` it uses one fresh child per sample, rotates the run order
+of several binaries and reports peak RSS. It also hashes each answer as the client parsed it and
+stops when two binaries disagree, so a speed comparison never spans different results. Pin the CPU
+for a quiet comparison.
+
+```bash
+taskset -c 4,5 bun run scripts/bench/runtime-results.ts base=<old> head=<new> --runs 31 --warmup 2
+bun run scripts/bench/runtime-results.ts <binary> --scenario list-directory --entries 50000 --json
+```
+
 `line-decoder.ts` loads `LineDecoder` from the `ndjson.ts` path it is given, so a base checkout and
 a head checkout run the same scenarios. Each scenario runs in a fresh `bun` child (one warm-up, then
 `--runs` timed passes) and prints one JSON line with min/median/p95/max per byte and the child's
@@ -653,6 +692,19 @@ counts over CPU.
 ```bash
 bun run scripts/bench/checkpoint-writes.ts --runs 3 --counts
 bun run scripts/bench/checkpoint-writes.ts --hub-dir ../base-checkout --scenario tools-20x65k --json
+```
+
+`api-json-compression.ts` seeds a throwaway hub with a realistic transcript (tool results are slices
+of this repository's sources) and a chat list. `sizes` reports raw and compressed bytes and compress
+time per endpoint plus the link speed below which compressing wins; `serve` measures hub CPU and
+latency per request over loopback and over the host's own LAN address (a real non-loopback peer), with
+and without `Accept-Encoding: gzip`. The hub's rate limiter allows 600 requests a minute per address,
+so keep `--runs` x `--requests` x 2 below that. Brotli is a size reference only (`node:zlib`, never in the
+hub).
+
+```bash
+bun run scripts/bench/api-json-compression.ts sizes --runs 30
+bun run scripts/bench/api-json-compression.ts serve --runs 9 --requests 20 --hub-dir ../base-checkout
 ```
 
 `rust-test-inventory.ts` proves a Rust test-target consolidation or a runner change lost no case:

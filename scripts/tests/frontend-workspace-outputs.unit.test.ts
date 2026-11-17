@@ -13,7 +13,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
-import { buildWithCleanFrontendOutputs } from '../lib/frontend-workspace-outputs';
+import {
+  buildWithCleanFrontendOutputs,
+  directoryIdentity,
+  isSameDirectory,
+} from '../lib/frontend-workspace-outputs';
 
 class FakeFrontendWorkspace {
   readonly root = mkdtempSync(join(tmpdir(), 'mango-frontend-workspace-'));
@@ -242,5 +246,32 @@ describe('frontend workspace cache outputs', () => {
 
     expect(readFileSync(workspace.entry, 'utf8')).toBe('previous entry');
     expect(await buildWithCleanFrontendOutputs(workspace.root, workspace.restoreFromCache)).toBe(0);
+  });
+});
+
+describe('directory identity', () => {
+  test('keeps neighbouring inodes above 2^53 apart, as a Number would not', () => {
+    const above = 2n ** 60n;
+    // Both round to the same double, which is how two NTFS directories looked like one.
+    expect(Number(above)).toBe(Number(above + 1n));
+
+    expect(
+      isSameDirectory({ dev: 1n, ino: above }, { dev: 1n, ino: above + 1n }),
+      'expected inodes 2^60 and 2^60+1 to name different directories'
+    ).toBe(false);
+    expect(isSameDirectory({ dev: 1n, ino: above }, { dev: 1n, ino: above })).toBe(true);
+    expect(isSameDirectory({ dev: 1n, ino: above }, { dev: 2n, ino: above })).toBe(false);
+  });
+
+  test('reads the identity of a real directory as BigInts and tells it from a replacement', () => {
+    const first = directoryIdentity(workspace.dist);
+    expect(typeof first.ino, `(${workspace.dist}): expected a bigint inode`).toBe('bigint');
+    renameSync(workspace.dist, join(workspace.frontend, 'moved-dist'));
+    mkdirSync(workspace.dist);
+
+    expect(isSameDirectory(first, directoryIdentity(join(workspace.frontend, 'moved-dist')))).toBe(
+      true
+    );
+    expect(isSameDirectory(first, directoryIdentity(workspace.dist))).toBe(false);
   });
 });

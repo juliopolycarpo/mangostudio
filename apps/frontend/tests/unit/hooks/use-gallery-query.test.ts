@@ -43,7 +43,7 @@ describe('gallery queries', () => {
     const queryFn = getQueryFn();
     const data = await queryFn({ pageParam: null } as never);
 
-    expect(mockGetImages).toHaveBeenCalledWith({ query: { limit: '20' } });
+    expect(mockGetImages).toHaveBeenCalledWith({ query: { limit: 20 } });
     expect(data).toEqual({ items: [], nextCursor: null });
   });
 
@@ -54,7 +54,7 @@ describe('gallery queries', () => {
     await queryFn({ pageParam: 'cursor-2' } as never);
 
     expect(mockGetImages).toHaveBeenCalledWith({
-      query: { cursor: 'cursor-2', limit: '20' },
+      query: { cursor: 'cursor-2', limit: 20 },
     });
   });
 

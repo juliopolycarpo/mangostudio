@@ -10,6 +10,8 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use serde_json::{Value, json};
 
+use crate::result_value::object;
+
 /// Maximum raw bytes in one terminal output event.
 pub const CHUNK_MAX_BYTES: usize = 8 * 1024;
 /// Maximum unacknowledged bytes sent to a viewer.
@@ -31,7 +33,10 @@ pub struct OutputFrame {
 impl OutputFrame {
     fn data(bytes: &[u8]) -> Self {
         Self {
-            payload: json!({ "kind": "data", "data": STANDARD.encode(bytes) }),
+            payload: object([
+                ("kind", Value::from("data")),
+                ("data", Value::String(STANDARD.encode(bytes))),
+            ]),
             end: false,
         }
     }
@@ -371,6 +376,7 @@ impl TerminalFlow {
 
 #[cfg(test)]
 mod tests {
+    use crate::result_value::assert_wire_eq;
     use base64::Engine;
 
     use super::{
@@ -393,6 +399,18 @@ mod tests {
         assert!(ring.is_empty());
         assert_eq!(ring.take_dropped(), 0);
         assert!(ByteRing::new(0).unwrap_err().contains("positive"));
+    }
+
+    #[test]
+    fn a_data_frame_carries_exactly_its_kind_and_base64_bytes() {
+        let frame = OutputFrame::data(b"hello");
+
+        assert_wire_eq!(
+            frame.payload,
+            serde_json::json!({ "kind": "data", "data": "aGVsbG8=" }),
+            "expected a data frame payload of kind and base64 data | received a different object"
+        );
+        assert!(!frame.end, "expected a data frame not to end the stream");
     }
 
     #[test]

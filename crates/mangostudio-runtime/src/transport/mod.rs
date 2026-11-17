@@ -1154,10 +1154,10 @@ mod tests {
     }
 
     #[test]
-    fn the_runtime_contract_is_compiled_once_per_process() {
+    fn the_runtime_contract_is_built_once_per_process() {
         assert!(
             std::ptr::eq(runtime_contract(), runtime_contract()),
-            "expected every transport to share one compiled contract, got two instances"
+            "expected every transport to share one contract, got two instances"
         );
     }
 }
