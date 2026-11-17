@@ -8,6 +8,7 @@
 // MANGOSTUDIO_FAKE_WORKER_MODES is JSON keyed by worker index, e.g. {"2":"exit1"}:
 //   pass (default)  report, exit 0        exit1      failing report, exit 1
 //   no-report       exit 0 with no report sigkill    kills itself with SIGKILL
+//   kill-own-group  SIGKILLs process group 0, the way a test that signals "its own group" does
 //   hang            waits for a signal; writes MANGOSTUDIO_FAKE_PID_DIR/worker-<i>.pid first
 //   grandchild      report, exit 0 — but first leaves a child holding stdout and stderr open
 //                   (its pid in MANGOSTUDIO_FAKE_PID_DIR/grandchild-<i>.pid)
@@ -42,6 +43,7 @@ type Mode =
   | 'exit1'
   | 'no-report'
   | 'sigkill'
+  | 'kill-own-group'
   | 'hang'
   | 'grandchild'
   | 'leak'
@@ -80,6 +82,9 @@ async function main(argv: readonly string[]): Promise<void> {
   );
 
   if (mode === 'sigkill') process.kill(process.pid, 'SIGKILL');
+  // A test that signals pid 0 reaches its whole process group: the worker's own
+  // when the lane gave it one, the runner's and `bun run`'s when it did not.
+  if (mode === 'kill-own-group') process.kill(0, 'SIGKILL');
   if (mode === 'hang-session-pipes') {
     process.on('SIGTERM', () => undefined);
     const dir = process.env.MANGOSTUDIO_FAKE_PID_DIR as string;

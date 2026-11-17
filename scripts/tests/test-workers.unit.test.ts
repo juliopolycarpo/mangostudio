@@ -40,6 +40,7 @@ import {
   shardOf,
   silentWorker,
   unstartableWorker,
+  withEndProblem,
   withLeftovers,
   withUnreadableProcessTable,
   withWorker,
@@ -207,10 +208,13 @@ describe('planWorkers', () => {
     const tokens = settling.map((plan) => plan.env[WORKER_TOKEN_ENV]);
     expect(tokens.every((token) => typeof token === 'string' && token.length > 8)).toBe(true);
     expect(new Set(tokens).size).toBe(4);
+    // A worker that does not settle still carries a token: the end-of-worker
+    // sweep signals a group only when it finds a process holding it.
     for (const plan of plans) {
       expect(plan.settle).toBe(false);
-      expect(plan.env).toEqual({});
+      expect(Object.keys(plan.env)).toEqual([WORKER_TOKEN_ENV]);
     }
+    expect(new Set(plans.map((plan) => plan.env[WORKER_TOKEN_ENV])).size).toBe(plans.length);
   });
 
   it('starts every worker with --no-orphans so a killed launcher takes its bun test with it', () => {
@@ -769,6 +773,22 @@ describe('a worker that leaves a process behind fails the lane', () => {
     );
     expect(verdict.failures[0]).toContain('received: 7 (pid 5000: runtime 0;');
     expect(verdict.failures[0]).toContain('pid 5004: runtime 4; and 2 more)');
+  });
+
+  it('reports a failed cleanup as its own failure and keeps the worker’s result', async () => {
+    const disk = new FakeReportDisk();
+    const reason = 'test workers: expected worker pid: integer > 1 | received: 0';
+    const verdict = await judgeFakeLane(
+      lane,
+      2,
+      withEndProblem(healthyWorker(lane, disk), reason),
+      disk
+    );
+    expect(verdict.failures).toEqual([
+      `api-unit worker 1/2 could not be cleaned up after it exited | ${reason}`,
+      `api-unit worker 2/2 could not be cleaned up after it exited | ${reason}`,
+    ]);
+    expect(verdict.workers.map((worker) => worker.ended)).toEqual(['exit 0', 'exit 0']);
   });
 
   it('passes a worker that settled', async () => {
