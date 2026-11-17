@@ -28,7 +28,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",
-    "@better-auth/api-key": "1.7.22",
+    "@better-auth/api-key": "1.7.23",
     "@elysia/cors": "2.0.0-rc.1",
     "@elysia/openapi": "2.0.0-rc.1",
     "@google/genai": "^3.2.0",
