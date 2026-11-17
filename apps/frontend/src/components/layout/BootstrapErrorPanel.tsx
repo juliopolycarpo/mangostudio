@@ -17,7 +17,7 @@
 
 import { useRouter } from '@tanstack/react-router';
 import { CircleX } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -25,6 +25,8 @@ import { isRateLimited, type ShellResponsibility } from '@/features/bootstrap/sh
 import { useI18n } from '@/hooks/use-i18n';
 import { formatList, formatMessage } from '@/lib/i18n-format';
 import { ICON_LG } from '@/lib/icon-sizes';
+import { isChunkFetchFailure } from '@/lib/retryable-lazy';
+import { staleBuildMonitor } from '@/lib/stale-build';
 
 /**
  * The raw line shown beneath the headline. The router types a boundary's error
@@ -79,6 +81,11 @@ export function BootstrapErrorPanel({
   // Re-runs the route's own loader chain by default, so a transient refusal is
   // repaired in place rather than by making the person reload.
   const retry = onRetry ?? (() => router.invalidate());
+  // A route chunk that cannot be fetched after the hub was upgraded under this
+  // tab lands here too; the probe raises the page-level reload notice.
+  useEffect(() => {
+    if (isChunkFetchFailure(error)) void staleBuildMonitor.check();
+  }, [error]);
   const failedItems = failed.map((responsibility) => s.responsibilities[responsibility]);
 
   return (

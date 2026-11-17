@@ -4241,9 +4241,12 @@ export const messages = {
       home: 'Voltar ao MangoStudio',
     },
     lazyChunk: {
-      title: 'Não foi possível carregar este painel',
+      title: 'Não foi possível carregar esta visualização',
       hint: 'A conexão pode ter caído, ou o MangoStudio foi atualizado com esta aba aberta. Tente de novo ou recarregue a página.',
       reload: 'Recarregar a página',
+      staleTitle: 'O MangoStudio foi atualizado',
+      staleHint:
+        'Esta aba executa uma versão anterior, cujos arquivos não existem mais. Recarregue a página para continuar. O rascunho da sua mensagem é mantido e os anexos ainda não enviados são removidos. Uma resposta do MangoStudio em andamento é interrompida (você pode retomá-la); um agente externo continua trabalhando.',
     },
     bootstrap: {
       title: 'O MangoStudio não conseguiu terminar de carregar',
