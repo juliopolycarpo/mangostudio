@@ -11,7 +11,7 @@
 //   crash        exit 3 before listening
 //   no-health    stay alive without ever listening, and ignore SIGTERM
 //   no-state     answer health but never write the state file: a stranger on the port looks like this
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const port = Number(process.argv[3]);
@@ -20,8 +20,12 @@ const modeFile = `${out}.mode`;
 const mode = out && existsSync(modeFile) ? readFileSync(modeFile, 'utf8').trim() : 'records';
 
 if (out) {
-  writeFileSync(`${out}.pid`, String(process.pid));
+  // The pid file is the test's "hub is up" signal, so it appears last and whole: a test that
+  // kills the hub the moment it sees the pid must find the environment file already there, and
+  // must never read a pid file that exists but is still empty.
   writeFileSync(`${out}.env.json`, JSON.stringify(process.env));
+  writeFileSync(`${out}.pid.partial`, String(process.pid));
+  renameSync(`${out}.pid.partial`, `${out}.pid`);
 }
 
 if (mode === 'crash') {

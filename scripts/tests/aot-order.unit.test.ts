@@ -295,6 +295,12 @@ describe.skipIf(process.platform === 'win32')('recordAotOrder', () => {
     });
     // The test, not the clock, decides when the ceiling is reached: only once the hub is up.
     await waitForFile(`${orderFile}.pid`);
+    // The deadline kills the hub at once, so everything read below must already be on disk.
+    expect(
+      existsSync(`${orderFile}.env.json`),
+      'the fake hub writes its environment file before the pid file that signals it is up'
+    ).toBe(true);
+    expect(Number(readFileSync(`${orderFile}.pid`, 'utf8'))).toBeGreaterThan(1);
     deadline.expire();
 
     await expect(recording).rejects.toThrow(
