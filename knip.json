@@ -15,6 +15,7 @@
         "scripts/bench/library-walk.ts",
         "scripts/bench/line-decoder.ts",
         "scripts/bench/checkpoint-writes.ts",
+        "scripts/bench/api-json-compression.ts",
         "scripts/ci/{distribution-identity,evaluate-gate,frontend-bundle-report,native-bun-qualification,verify-cross-runtimes}.ts",
         "scripts/ci/qualify-canary-source.ts",
         "scripts/ci/select-canary-source.ts",
