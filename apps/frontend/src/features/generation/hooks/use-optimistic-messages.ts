@@ -5,6 +5,8 @@ import { useCallback } from 'react';
 import { messageKeys } from '@/features/chat/queries';
 import type { MessagesCache } from '@/features/chat/transcript-pages';
 
+import { patchMessageInCache } from '../message-cache-patch';
+
 /**
  * Provides optimistic cache mutations for in-flight message updates.
  *
@@ -62,16 +64,9 @@ export function useOptimisticMessages() {
 
   const updateOptimisticMessage = useCallback(
     (chatId: string, msgId: string, updates: Partial<Message>) => {
-      queryClient.setQueryData<MessagesCache>(messageKeys.list(chatId), (oldData) => {
-        if (!oldData) return oldData;
-
-        const newPages = oldData.pages.map((page) => ({
-          ...page,
-          messages: page.messages.map((m) => (m.id === msgId ? { ...m, ...updates } : m)),
-        }));
-
-        return { ...oldData, pages: newPages };
-      });
+      queryClient.setQueryData<MessagesCache>(messageKeys.list(chatId), (oldData) =>
+        patchMessageInCache(oldData, msgId, updates)
+      );
     },
     [queryClient]
   );
