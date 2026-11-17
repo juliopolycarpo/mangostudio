@@ -55,11 +55,33 @@ export function fakeCliEnvironment(
 /**
  * Remove a directory a fake CLI ran from. On Windows the fixture is a compiled
  * executable, and the system can keep it locked for a moment after the child
- * exits, so a single `rm` fails with EBUSY; the removal retries.
+ * exits, so a single `rm` fails with EBUSY; the removal retries for up to `deadlineMs`. Bun's
+ * `rmSync` does not honour `maxRetries`, so the loop is here.
  * @example try { run(directory); } finally { removeFakeCliDirectory(directory); }
  */
-export function removeFakeCliDirectory(directory: string): void {
-  rmSync(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+export function removeFakeCliDirectory(
+  directory: string,
+  options: {
+    remove?: (directory: string) => void;
+    deadlineMs?: number;
+    retryDelayMs?: number;
+  } = {}
+): void {
+  const remove =
+    options.remove ?? ((target: string) => rmSync(target, { recursive: true, force: true }));
+  const deadline = Date.now() + (options.deadlineMs ?? 10_000);
+  const retryDelayMs = options.retryDelayMs ?? 100;
+  for (;;) {
+    try {
+      remove(directory);
+      return;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      const transient = code === 'EBUSY' || code === 'EPERM' || code === 'ENOTEMPTY';
+      if (!transient || Date.now() >= deadline) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, retryDelayMs);
+    }
+  }
 }
 
 /**

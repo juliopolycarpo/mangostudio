@@ -2,6 +2,28 @@ import { Database } from 'bun:sqlite';
 import { lstatSync, mkdirSync, mkdtempSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
+/** Which directory a path named at one moment: device and inode, exact. */
+export interface DirectoryIdentity {
+  readonly dev: bigint;
+  readonly ino: bigint;
+}
+
+/**
+ * Reads a directory's identity as BigInts. NTFS file IDs carry a sequence number in their high
+ * bits and pass 2^53 once an MFT record has been reused a few dozen times, so as a number two
+ * neighbouring directories can round to the same value and look like one.
+ * Example: directoryIdentity('apps/frontend/dist') // { dev: 2049n, ino: 1311n }
+ */
+export function directoryIdentity(path: string): DirectoryIdentity {
+  const { dev, ino } = lstatSync(path, { bigint: true });
+  return { dev, ino };
+}
+
+/** True when both identities name the same directory. */
+export function isSameDirectory(a: DirectoryIdentity, b: DirectoryIdentity): boolean {
+  return a.dev === b.dev && a.ino === b.ino;
+}
+
 /**
  * Give a cache replay an empty frontend output tree and retain the previous
  * bundle and metafile until the workspace build succeeds.
@@ -38,7 +60,7 @@ export async function buildWithCleanFrontendOutputs(
 
     const backup = mkdtempSync(join(frontend, '.dist-backup-'));
     const previous = new Map<string, string>();
-    let emptyDist: ReturnType<typeof lstatSync> | undefined;
+    let emptyDist: DirectoryIdentity | undefined;
     let complete = false;
     const settle = (): void => {
       process.off('exit', settle);
@@ -48,7 +70,7 @@ export async function buildWithCleanFrontendOutputs(
           // A replay writes inside our directory. A compiler publish replaces
           // it, and its separate metafile publication can still fail.
           const ownsDist =
-            emptyDist && current?.dev === emptyDist.dev && current.ino === emptyDist.ino;
+            emptyDist && current && isSameDirectory(emptyDist, directoryIdentity(dist));
           if (ownsDist) {
             rmSync(dist, { recursive: true, force: true });
             rmSync(metafile, { recursive: true, force: true });
@@ -90,7 +112,7 @@ export async function buildWithCleanFrontendOutputs(
         }
       }
       mkdirSync(dist);
-      emptyDist = lstatSync(dist);
+      emptyDist = directoryIdentity(dist);
       const exitCode = await build();
       if (exitCode !== 0) return exitCode;
       requireOutputs('expected frontend build output');

@@ -35,7 +35,8 @@ describe('parseCandidates', () => {
   it('splits label=path and resolves the path', () => {
     expect(parseCandidates(['base=./a/mangostudio', 'head=/tmp/b=c'])).toEqual([
       { label: 'base', binary: resolve('./a/mangostudio') },
-      { label: 'head', binary: '/tmp/b=c' },
+      // An absolute path stays itself, but Windows adds the current drive to a rooted one.
+      { label: 'head', binary: resolve('/tmp/b=c') },
     ]);
   });
 
