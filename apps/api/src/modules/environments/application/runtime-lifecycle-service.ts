@@ -80,12 +80,14 @@ import {
   runtimeDigestSidecarPath,
 } from '../domain/runtime-release-fetch';
 import { classifySshFailure, describeSshFailure } from '../domain/ssh-failure';
+import { localRuntimeBuildCommand, localRuntimeBuildPath } from '../domain/wsl-runtime-release';
 import {
   type EnvironmentRecord,
   environmentRepository,
 } from '../infrastructure/environment-repository';
 import { createSshCommandRunner } from '../infrastructure/ssh-command-runner';
 import {
+  WslDevBuildError,
   type WslProvisioner,
   wslProvisioner,
   WslProvisioningError,
@@ -106,6 +108,8 @@ export type RunFailureReason =
   | 'environment-unavailable'
   | 'runtime-push-failed'
   | 'wsl-provisioning-failed'
+  /** A source checkout has no Linux runtime of the right version for the distribution. */
+  | 'wsl-dev-build-required'
   /** The hub could not reach the release host. */
   | 'release-unreachable'
   /** The release answered, or its bytes could not be read or verified. */
@@ -161,6 +165,20 @@ function describeRunFailure(error: unknown): { reason: RunFailureReason; line: s
     return {
       reason: 'runtime-push-failed',
       line: 'The runtime could not be copied to the machine. Check the machine, then try again. Details are in the hub log.',
+    };
+  }
+  // Before WslProvisioningError, which it extends.
+  if (error instanceof WslDevBuildError) {
+    // The build command is a fixed script with the platform id, which the hub
+    // detected from a closed set. `--out` is relative to the repository root,
+    // where the command runs, so the hub's own directory never appears.
+    const command = localRuntimeBuildCommand(
+      error.platformId,
+      localRuntimeBuildPath('.', error.platformId)
+    );
+    return {
+      reason: 'wsl-dev-build-required',
+      line: `This MangoStudio runs from a source checkout and needs its own Linux runtime in the WSL distribution. From the repository root run \`${command}\`, then connect again. Details are in the hub log.`,
     };
   }
   if (error instanceof WslProvisioningError) {

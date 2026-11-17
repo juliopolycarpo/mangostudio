@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { join } from 'node:path';
 
 import { RemoteError } from '@mangostudio/protocol';
 import { DEFAULT_SSH_RUNTIME_PATH, type RuntimeSetupBody } from '@mangostudio/shared/environments';
@@ -20,7 +21,10 @@ import {
   RuntimePushError,
 } from '../../../../src/modules/environments/domain/runtime-push';
 import { RuntimeAssetLoadError } from '../../../../src/modules/environments/domain/runtime-release-fetch';
-import { WslProvisioningError } from '../../../../src/modules/environments/infrastructure/wsl-provisioner';
+import {
+  WslDevBuildError,
+  WslProvisioningError,
+} from '../../../../src/modules/environments/infrastructure/wsl-provisioner';
 import { DiagnosticWarnCapture, expectHubLogEntry } from '../../../support/diagnostic-warn-capture';
 
 function ok(stdout = ''): RuntimeCommandResult {
@@ -249,6 +253,8 @@ describe('pushRuntimeOverSsh', () => {
 describe('failureLineFor', () => {
   const HUB_PATH = '/home/alice/.mango/runtime/cache/linux-x64.tmp';
   const WSL_PATH = 'C:\\Users\\alice\\AppData\\Local\\wsl.exe';
+  // `--out` is relative to the repository root, so the line carries no hub path.
+  const DEV_BUILD_LINE = `This MangoStudio runs from a source checkout and needs its own Linux runtime in the WSL distribution. From the repository root run \`bun run build:runtime --platform linux-x64 --dev --zig --rustup --out ${join('.mango', 'out')}\`, then connect again. Details are in the hub log.`;
 
   // Regression: any thrown error's text reached the run's stderr stream.
   it('replaces the text of an error the hub did not word for the user', () => {
@@ -297,6 +303,25 @@ describe('failureLineFor', () => {
       'wsl-provisioning-failed',
       WSL_PATH,
       'The runtime could not be set up in the WSL distribution. Check that the distribution starts, then try again. Details are in the hub log.',
+    ],
+    // Regression: this hint was lost when every WslProvisioningError became the
+    // generic sentence. The line names the build, never the hub's own path.
+    [
+      'a checkout whose WSL runtime reports the wrong version',
+      new WslDevBuildError(
+        `The runtime installed in "Ubuntu" reports version 0.1.1 rather than dev. build one with \`bun run build:runtime --out ${HUB_PATH}\`.`,
+        'linux-x64'
+      ),
+      'wsl-dev-build-required',
+      HUB_PATH,
+      DEV_BUILD_LINE,
+    ],
+    [
+      'a checkout with no local WSL runtime build',
+      new WslDevBuildError(`No runtime at ${HUB_PATH}; build one.`, 'linux-x64'),
+      'wsl-dev-build-required',
+      HUB_PATH,
+      DEV_BUILD_LINE,
     ],
     [
       'a push error without a command result',
