@@ -119,9 +119,18 @@ describe('runtime target mapping', () => {
     ).toEqual(['D:\\a\\ (1 occurrence)', 'E:/tools/cargo-home (1 occurrence)']);
   });
 
-  test('resolves the Cargo home from CARGO_HOME, then HOME', () => {
-    expect(resolveCargoHome({ CARGO_HOME: '/opt/cargo', HOME: '/home/a' })).toBe('/opt/cargo');
-    expect(resolveCargoHome({ HOME: '/home/a' })).toBe('/home/a/.cargo');
+  test('resolves the Cargo home from CARGO_HOME, then HOME, or USERPROFILE on Windows', () => {
+    expect(
+      resolveCargoHome({ CARGO_HOME: '/opt/cargo', HOME: '/home/a' }, 'linux'),
+      'CARGO_HOME wins'
+    ).toBe('/opt/cargo');
+    expect(resolveCargoHome({ HOME: '/home/a', USERPROFILE: 'C:\\Users\\b' }, 'linux')).toBe(
+      join('/home/a', '.cargo')
+    );
+    // Git Bash sets HOME on Windows, but Cargo reads USERPROFILE there.
+    expect(resolveCargoHome({ HOME: '/c/Users/b', USERPROFILE: 'C:\\Users\\b' }, 'win32')).toBe(
+      join('C:\\Users\\b', '.cargo')
+    );
   });
 
   test('flags build paths left in a binary and names each one', () => {

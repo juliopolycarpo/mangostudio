@@ -165,13 +165,19 @@ export function cargoRuntimeBuildCommand(
   ];
 }
 
-/** Where crate sources and git checkouts live: `CARGO_HOME`, else `~/.cargo`. */
+/**
+ * Where crate sources and git checkouts live: `CARGO_HOME`, else `~/.cargo`. On Windows Cargo
+ * takes the home directory from `USERPROFILE` and ignores `HOME`, which Git Bash sets to a
+ * different spelling, so the order differs by platform.
+ */
 export function resolveCargoHome(
-  env: Readonly<Record<string, string | undefined>> = process.env
+  env: Readonly<Record<string, string | undefined>> = process.env,
+  platform: NodeJS.Platform = process.platform
 ): string {
   const configured = env.CARGO_HOME?.trim();
   if (configured) return configured;
-  return join(env.HOME ?? env.USERPROFILE ?? homedir(), '.cargo');
+  const home = platform === 'win32' ? env.USERPROFILE : env.HOME;
+  return join(home?.trim() || homedir(), '.cargo');
 }
 
 /** What a remapped Cargo home reads as in panic locations and strings. */
