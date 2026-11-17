@@ -308,6 +308,16 @@ build):
   bare fence or an unsupported language never fetches it), in parallel with the renderer
   chunk, which takes the first block from three rounds to two. The load report models it the
   same way: renderer and highlighter in one round, then grammar and theme.
+- **A streaming reply is lexed and rendered per block, not per chunk.** `markdown-blocks.ts`
+  keeps the tokens of the settled prefix (everything before the last blank line that no list,
+  indented code, open fence or HTML block can continue across), re-lexes only the tail with
+  marked's own lexer, and renders only tokens it has not rendered before. `BlockDomMirror`
+  writes the changed middle range of the container, so settled blocks keep their DOM nodes
+  (selection, copy-button state). A chunk falls back to a full lex when the text is not an
+  append, when the tail changes the link reference definitions (footnote-style `[^1]:` counts),
+  when a top-level `text` token appears, or when the token raws do not add up to the source.
+  The property test in `markdown-blocks.test.ts` pins every streamed prefix to the
+  from-scratch render. `bun scripts/bench/markdown-stream.ts` measures it.
 
 **Rail panel bodies are lazy.** `rail/panel-registry.ts` is imported by the command palette and
 the chat page, so the Git, GitHub and Todo bodies load through `retryableLazy`

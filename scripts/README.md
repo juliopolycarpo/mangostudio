@@ -512,20 +512,21 @@ MANGO_API_KEY='mango_…' bun run scripts/examples/external-api-smoke.ts http://
 
 ## bench/ — hermetic performance measurement
 
-| Script                       | Purpose                                                                                                                                          |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `startup.ts`                 | Median process-start → first healthy `GET /api/health` of a binary                                                                               |
-| `hub-footprint.ts`           | Compiled hubs side by side: binary size, start → first healthy `/api/health`, idle and post-workload RSS (Linux `/proc`)                         |
-| `runtime-handshake.ts`       | Runtime child over stdio: process start → `hello` → first request, min/median/p95/max                                                            |
-| `grep.ts`                    | Runtime `fs.grep` over stdio: 1/100/1000 small files, a large file, peak RSS, cancel                                                             |
-| `runtime-results.ts`         | Runtime `fs.list-directory` and `fs.read-file` over stdio, and start → first answer; peak RSS, answer digest compared across binaries            |
-| `runtime-requests.ts`        | Runtime `fs.glob` and small-request and large-params round trips over one session; paired median delta and pairs won                             |
-| `line-decoder.ts`            | Protocol NDJSON `LineDecoder`: ns per byte for large records in small pieces and for many short records, peak RSS                                |
-| `rust-test-inventory.ts`     | Rust test inventory (libtest or nextest) by logical identity; diff two, total a log                                                              |
-| `external-agent-boundary.ts` | Actual receipt hashing, admitted request ownership and event mapping; alternating Base/Head processes, raw timings and peak RSS                  |
-| `checkpoint-writes.ts`       | Hub streaming turns against a fake provider: bytes written to the SQLite main and WAL files, commits, fsyncs, CPU, peak RSS                      |
-| `api-json-compression.ts`    | Hub JSON responses: raw/gzip/zstd/Brotli sizes and compress time, break-even link speed, hub CPU and latency by peer address                     |
-| `stream-reducer.ts`          | Frontend stream reducer and transcript-cache patch for 500/2,000/8,000 chunks of text, reasoning and subagent text: time, growth, heap, identity |
+| Script                       | Purpose                                                                                                                                                   |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `startup.ts`                 | Median process-start → first healthy `GET /api/health` of a binary                                                                                        |
+| `hub-footprint.ts`           | Compiled hubs side by side: binary size, start → first healthy `/api/health`, idle and post-workload RSS (Linux `/proc`)                                  |
+| `runtime-handshake.ts`       | Runtime child over stdio: process start → `hello` → first request, min/median/p95/max                                                                     |
+| `grep.ts`                    | Runtime `fs.grep` over stdio: 1/100/1000 small files, a large file, peak RSS, cancel                                                                      |
+| `runtime-results.ts`         | Runtime `fs.list-directory` and `fs.read-file` over stdio, and start → first answer; peak RSS, answer digest compared across binaries                     |
+| `runtime-requests.ts`        | Runtime `fs.glob` and small-request and large-params round trips over one session; paired median delta and pairs won                                      |
+| `line-decoder.ts`            | Protocol NDJSON `LineDecoder`: ns per byte for large records in small pieces and for many short records, peak RSS                                         |
+| `rust-test-inventory.ts`     | Rust test inventory (libtest or nextest) by logical identity; diff two, total a log                                                                       |
+| `external-agent-boundary.ts` | Actual receipt hashing, admitted request ownership and event mapping; alternating Base/Head processes, raw timings and peak RSS                           |
+| `checkpoint-writes.ts`       | Hub streaming turns against a fake provider: bytes written to the SQLite main and WAL files, commits, fsyncs, CPU, peak RSS                               |
+| `api-json-compression.ts`    | Hub JSON responses: raw/gzip/zstd/Brotli sizes and compress time, break-even link speed, hub CPU and latency by peer address                              |
+| `stream-reducer.ts`          | Frontend stream reducer and transcript-cache patch for 500/2,000/8,000 chunks of text, reasoning and subagent text: time, growth, heap, identity          |
+| `markdown-stream.ts`         | Chat markdown renderer per streamed chunk (200/2,000 chunks of a long mixed answer): whole parse versus incremental lex and render, lex/render/scan split |
 
 The benchmarks take any runtime binary, and they default to the newest of `target/release`,
 `target/release-fast` and `target/debug`. For an A/B on one machine, build with
@@ -708,6 +709,18 @@ text per chunk).
 ```bash
 bun run scripts/bench/stream-reducer.ts --runs 7 --history 200
 bun run scripts/bench/stream-reducer.ts --frontend-dir ../base/apps/frontend --kind text --json
+```
+
+`markdown-stream.ts` measures the work the chat's markdown renderer does per streamed chunk
+(everything but the DOM step): the whole-text parse plus the second lex for the fence languages that
+the renderer ran before it was incremental, against `IncrementalLexer` and `IncrementalBlockRenderer`,
+over one long mixed answer cut into 200 and 2,000 chunks. It prints total, median, p95, worst and
+the mean of the first and last 50 chunks, and splits the whole strategy into lexing, rendering the
+tokens and the language scan. Each pass checks the incremental output against a whole parse, so a
+faster wrong answer exits with an error instead of a number.
+
+```bash
+bun run scripts/bench/markdown-stream.ts --runs 3 --chunks 200,2000 --chars 120000
 ```
 
 `api-json-compression.ts` seeds a throwaway hub with a realistic transcript (tool results are slices
