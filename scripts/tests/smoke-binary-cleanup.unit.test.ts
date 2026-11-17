@@ -12,6 +12,8 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
+import { assertSignalablePid, signalPid } from './support/signal-pid';
+
 // scripts/release/smoke-binary.sh is a bash helper that boots a POSIX
 // executable; the fake server below is a shebang script. Linux and macOS only.
 const ON_WINDOWS = process.platform === 'win32';
@@ -39,11 +41,11 @@ const scratchRoots: string[] = [];
 const spawnedServers = new Set<number>();
 
 afterEach(() => {
-  for (const pid of spawnedServers) {
-    if (isAlive(pid)) process.kill(pid, 'SIGKILL');
-  }
-  spawnedServers.clear();
   for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+  const pids = [...spawnedServers];
+  spawnedServers.clear();
+  // signalPid refuses pid 0 (this test's own group) and 1: `isAlive(0)` is true.
+  for (const pid of pids) if (isAlive(pid)) signalPid(pid, 'SIGKILL');
 });
 
 /**
@@ -241,7 +243,7 @@ describe('scripts/release/smoke-binary.sh server cleanup', () => {
       expect(stdout).toContain('served /api/health, / and /assets/index-fake.js');
 
       const startup = startupOf(events);
-      spawnedServers.add(startup.pid);
+      spawnedServers.add(assertSignalablePid(startup.pid));
       expect(startup.args).toEqual(['serve', String(port)]);
       expect(startup.apiHost).toBeNull();
       expect(startup.defaultApiHost).toBeNull();
