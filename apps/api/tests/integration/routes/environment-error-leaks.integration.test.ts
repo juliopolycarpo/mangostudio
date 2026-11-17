@@ -598,7 +598,13 @@ describe('environment routes keep diagnostics out of error bodies', () => {
         `(${label}): expected a service_refusal log line | received: ${logged.join(' ; ')}`
       ).toBeDefined();
       expect(line).toContain('"environmentId":"leak-');
-      expect(line).toContain(leakCase.logged ?? '48213');
+      // The log line is JSON, so compare the fragment as JSON encodes it: a Windows path's
+      // backslashes are doubled there.
+      const loggedFragment = JSON.stringify(leakCase.logged ?? '48213').slice(1, -1);
+      expect(
+        line,
+        `(${label}): expected the log line to carry "${loggedFragment}" | received: ${line}`
+      ).toContain(loggedFragment);
     });
   }
 });
