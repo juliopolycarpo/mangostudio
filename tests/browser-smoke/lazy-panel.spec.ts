@@ -1,5 +1,6 @@
-import { expect, test } from '@playwright/test';
+import { expect, test as base } from '@playwright/test';
 
+import { newSignedInContext } from './support/own-account';
 import { dismissWorkdirPicker } from './support/workdir-picker';
 
 /**
@@ -9,6 +10,26 @@ import { dismissWorkdirPicker } from './support/workdir-picker';
  * chat around it keeps working, and Retry goes back to the network.
  */
 const GITHUB_PANEL_CHUNK = /\/assets\/chunk-GithubPanel-[^/]*\.js$/;
+
+/**
+ * Every test gets a page on an account made for it. `github-panel.spec.ts`
+ * leaves the shared account with the GitHub panel switched off, and both tests
+ * here need its dock button.
+ */
+const test = base.extend({
+  page: async ({ browser }, use, testInfo) => {
+    const context = await newSignedInContext(
+      browser,
+      'lazy-panel',
+      `${Date.now()}-${testInfo.workerIndex}-${testInfo.retry}`
+    );
+    try {
+      await use(await context.newPage());
+    } finally {
+      await context.close();
+    }
+  },
+});
 
 test('a rail panel whose chunk cannot be fetched fails inside the rail and recovers on retry', async ({
   page,
@@ -80,11 +101,16 @@ test('choosing a panel whose chunk is slow keeps the current panel up, marks the
 
   // An unbound chat opens on GitHub, whose body is held: the rail shows its
   // spinner. Terminal's rail panel is part of the entry, so it shows at once.
+  // Identified by the rail's title, not by a terminal control: where the Local
+  // runtime is shared (the CI smoke project) the panel says terminals are
+  // unavailable and has no "New terminal" button, but it is still the panel up.
+  const rail = page.getByRole('complementary', { name: 'Agent side panel' });
+  const terminalTitle = rail.getByRole('heading', { level: 2, name: 'Terminal' });
   const terminalButton = page.getByRole('button', { name: 'Show Terminal panel' });
   await expect(terminalButton).toBeVisible({ timeout: 15_000 });
   await terminalButton.click();
   await expect(terminalButton).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByRole('button', { name: 'New terminal' })).toBeVisible();
+  await expect(terminalTitle).toBeVisible();
 
   const githubButton = page.getByRole('button', { name: 'Show GitHub panel' });
   await githubButton.click();
@@ -93,14 +119,13 @@ test('choosing a panel whose chunk is slow keeps the current panel up, marks the
   // button says it is busy, with no spinner flashed over the panel.
   await expect(githubButton).toHaveAttribute('aria-pressed', 'true');
   await expect(githubButton).toHaveAttribute('aria-busy', 'true');
-  await expect(page.getByRole('button', { name: 'New terminal' })).toBeVisible();
+  await expect(terminalTitle).toBeVisible();
   await expect(page.getByTestId('github-panel')).toHaveCount(0);
 
   // Held for longer than a second, the old panel gives way to a spinner so a
   // slow fetch is visible and announced, not only a highlight on the dock.
-  const rail = page.getByRole('complementary', { name: 'Agent side panel' });
   await expect(rail.getByRole('status')).toBeVisible({ timeout: 5_000 });
-  await expect(page.getByRole('button', { name: 'New terminal' })).toHaveCount(0);
+  await expect(terminalTitle).toHaveCount(0);
 
   releaseChunk();
   await expect(page.getByTestId('github-panel')).toBeVisible({ timeout: 30_000 });
