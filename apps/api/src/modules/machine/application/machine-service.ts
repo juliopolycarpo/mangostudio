@@ -268,8 +268,7 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
   // time makes sense for it to run.
   let upgradeInFlight = false;
 
-  const liveState = (): Promise<ServerState | null> =>
-    readLiveState(d.readState, (pid) => d.controller.isAlive(pid));
+  const liveState = (): Promise<ServerState | null> => readLiveState(d.readState, d.controller);
 
   /** Assemble the action inputs around a service status already in hand. */
   const actionsInputFrom = (

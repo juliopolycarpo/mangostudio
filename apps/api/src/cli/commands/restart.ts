@@ -52,7 +52,7 @@ const COMEBACK_TIMEOUT_MS = 20_000;
 export async function runRestart(deps: Partial<RestartDeps> = {}): Promise<void> {
   const d = resolveDeps(deps);
   const state = await d.readState();
-  const alive = state !== null && isStateLive(state, (pid) => d.controller.isAlive(pid));
+  const alive = state !== null && (await isStateLive(state, d.controller));
 
   if (!state || !alive) {
     if (state) await d.removeState();
@@ -99,7 +99,7 @@ async function startInstalledService(d: Required<RestartDeps>): Promise<void> {
 async function restartDetached(state: ServerState, d: Required<RestartDeps>): Promise<void> {
   await stopPidOrThrow(
     d,
-    state.pid,
+    state,
     `MangoStudio (PID ${state.pid}) did not stop within 10s; try "mangostudio killserver" and then "mangostudio serve -d".`
   );
   const result = await d.spawnDetached(

@@ -46,7 +46,7 @@ export async function runStatus(
 ): Promise<void> {
   const d = resolveDeps(deps);
   const state = await d.readState();
-  const alive = state !== null && isStateLive(state, (pid) => d.controller.isAlive(pid));
+  const alive = state !== null && (await isStateLive(state, d.controller));
 
   if (!state || !alive) {
     if (state) {

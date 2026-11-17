@@ -105,7 +105,7 @@ function reportIgnoredTarget(args: SetupArgs, state: ServerState, d: Required<Se
 async function probeHub(d: Required<SetupDeps>): Promise<HubProbe> {
   const state = await d.readState();
   if (!state) return { kind: 'absent' };
-  if (!isStateLive(state, (pid) => d.controller.isAlive(pid))) {
+  if (!(await isStateLive(state, d.controller))) {
     await d.removeState();
     return { kind: 'absent' };
   }

@@ -22,7 +22,7 @@ export interface OpenDeps {
 export async function runOpen(deps: Partial<OpenDeps> = {}): Promise<void> {
   const d = resolveDeps(deps);
   const state = await d.readState();
-  if (!state || !isStateLive(state, (pid) => d.controller.isAlive(pid))) {
+  if (!state || !(await isStateLive(state, d.controller))) {
     if (state) await d.removeState();
     throw new CliError('MangoStudio is not running. Start it with "mangostudio serve -d".');
   }

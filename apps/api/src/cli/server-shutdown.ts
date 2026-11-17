@@ -1,6 +1,11 @@
-import { isStateLive, readState, removeState } from '../lib/server-state';
+import { classifyStateProcess, readState, removeState } from '../lib/server-state';
 import { writeError, writeLine } from './output';
-import { createProcessController, type ProcessController, waitForExit } from './process-control';
+import {
+  assertSignalsReachHub,
+  createProcessController,
+  type ProcessController,
+  waitForExit,
+} from './process-control';
 import { sleep } from './sleep';
 
 export interface ServerShutdownDeps {
@@ -69,7 +74,7 @@ export async function runServerStopCommand({
   const d = resolveServerShutdownDeps(deps);
   const state = await d.readState();
 
-  if (!state || !isStateLive(state, (pid) => d.controller.isAlive(pid))) {
+  if (!state || (await classifyStateProcess(state, d.controller)) === 'stale') {
     if (state) {
       await d.removeState();
     }
@@ -77,6 +82,8 @@ export async function runServerStopCommand({
     return;
   }
 
+  // Alive, but is it the hub? An unconfirmed pid throws here, before any signal.
+  await assertSignalsReachHub(d.controller, state);
   d.controller[signal](state.pid);
   const stopped = await waitForExit(d.controller, state.pid, {
     timeoutMs,

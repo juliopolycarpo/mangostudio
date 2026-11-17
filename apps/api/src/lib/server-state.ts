@@ -70,24 +70,75 @@ export async function removeState(path: string = getPidFilePath()): Promise<void
   await rm(path, { force: true });
 }
 
-/** True when the recorded pid is currently alive. // Usage: isStateLive(state, isAlive) */
-export function isStateLive(state: ServerState, isAlive: (pid: number) => boolean): boolean {
-  return isAlive(state.pid);
+/** What the CLI needs to ask about the pid a state file names. */
+export interface StateProcessProbe {
+  isAlive(pid: number): boolean;
+  /**
+   * When the process started, epoch ms; `undefined` when the platform query failed.
+   * A probe without it cannot tell a recycled pid from the hub (unit-test fakes).
+   */
+  startTimeMs?(pid: number): Promise<number | undefined>;
 }
 
 /**
- * The state file only when a hub is actually behind it. A file surviving a
- * SIGKILL (or any crash that skips cleanup) still names a pid, but that pid
- * can already belong to an unrelated, recycled process — every caller that
- * asks "is a hub running?" has to pair the read with the liveness check, so
- * the pair lives here rather than at each call site.
- * // Usage: await readLiveState(readState, controller.isAlive)
+ * - `hub`: alive, and it started no later than the state file says the hub did.
+ * - `stale`: dead, or alive but started after the hub wrote its state, so it is
+ *   an unrelated process that reused the pid.
+ * - `unconfirmed`: alive, but its start time could not be read.
+ */
+export type StateProcess = 'hub' | 'stale' | 'unconfirmed';
+
+/**
+ * Slack between the process start and the `startedAt` the hub stamped, for clock
+ * granularity (`ps` and `/proc` resolve to a second or less). The comparison is
+ * one-sided: the hub starts before it writes the file, and a process that reuses
+ * its pid can only start after the hub has died, so a start later than
+ * `startedAt` plus this slack is never the hub.
+ */
+export const START_TIME_TOLERANCE_MS = 5_000;
+
+/**
+ * Classify the process a state file names. A file surviving a SIGKILL or a crash
+ * still names a pid that the OS may have given to an editor or a shell; liveness
+ * alone cannot see that, so the start time decides. It needs no cooperation from
+ * the hub, which is the point: a hung hub never answers a health probe, yet
+ * `killserver` must still be able to stop it.
+ * // Usage: await classifyStateProcess(state, controller) // → 'hub'
+ */
+export async function classifyStateProcess(
+  state: ServerState,
+  probe: StateProcessProbe
+): Promise<StateProcess> {
+  if (!probe.isAlive(state.pid)) return 'stale';
+  if (!probe.startTimeMs) return 'hub';
+  const startedMs = await probe.startTimeMs(state.pid);
+  if (startedMs === undefined) return 'unconfirmed';
+  return startedMs > state.startedAt + START_TIME_TOLERANCE_MS ? 'stale' : 'hub';
+}
+
+/**
+ * True unless the state file is stale. `unconfirmed` counts as live: a caller that only
+ * reads or refuses (status, open, serve, backup) keeps today's answer, and a caller that
+ * signals must not rely on this: it asks {@link classifyStateProcess} and refuses.
+ * // Usage: await isStateLive(state, controller)
+ */
+export async function isStateLive(state: ServerState, probe: StateProcessProbe): Promise<boolean> {
+  return (await classifyStateProcess(state, probe)) !== 'stale';
+}
+
+/**
+ * The state file only when a hub may be behind it. A file surviving a SIGKILL (or
+ * any crash that skips cleanup) still names a pid, but that pid can already belong
+ * to an unrelated, recycled process — every caller that asks "is a hub running?"
+ * has to pair the read with the identity check, so the pair lives here rather than
+ * at each call site.
+ * // Usage: await readLiveState(readState, controller)
  */
 export async function readLiveState(
   read: () => Promise<ServerState | null>,
-  isAlive: (pid: number) => boolean
+  probe: StateProcessProbe
 ): Promise<ServerState | null> {
   const state = await read();
   if (!state) return null;
-  return isStateLive(state, isAlive) ? state : null;
+  return (await isStateLive(state, probe)) ? state : null;
 }

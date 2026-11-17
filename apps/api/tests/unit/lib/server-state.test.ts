@@ -5,11 +5,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
+  classifyStateProcess,
   isStateLive,
   readLiveState,
   readState,
   removeState,
   type ServerState,
+  START_TIME_TOLERANCE_MS,
   writeState,
 } from '../../../src/lib/server-state';
 
@@ -101,47 +103,75 @@ describe('server-state', () => {
     expect(existsSync(path)).toBe(false);
   });
 
-  it('isStateLive reflects the liveness probe result', () => {
+  it('isStateLive reflects the liveness probe result', async () => {
     const state = makeState({ pid: 99 });
 
-    expect(isStateLive(state, (pid) => pid === 99)).toBe(true);
-    expect(isStateLive(state, () => false)).toBe(false);
+    expect(await isStateLive(state, { isAlive: (pid) => pid === 99 })).toBe(true);
+    expect(await isStateLive(state, { isAlive: () => false })).toBe(false);
   });
 });
 
 describe('readLiveState', () => {
   it('returns the state when its pid is alive', async () => {
     const state = makeState();
-    expect(
-      await readLiveState(
-        () => Promise.resolve(state),
-        () => true
-      )
-    ).toBe(state);
+    expect(await readLiveState(() => Promise.resolve(state), { isAlive: () => true })).toBe(state);
   });
 
   it('returns null for a state file left behind by a crash', async () => {
     // The file still names a pid, but that pid can already belong to an
     // unrelated, recycled process — a caller must not treat it as a live hub.
     expect(
-      await readLiveState(
-        () => Promise.resolve(makeState()),
-        () => false
-      )
+      await readLiveState(() => Promise.resolve(makeState()), { isAlive: () => false })
     ).toBeNull();
   });
 
   it('returns null when there is no state file, without consulting isAlive', async () => {
     let asked = 0;
-    const result = await readLiveState(
-      () => Promise.resolve(null),
-      () => {
+    const result = await readLiveState(() => Promise.resolve(null), {
+      isAlive: () => {
         asked += 1;
         return true;
-      }
-    );
+      },
+    });
 
     expect(result).toBeNull();
     expect(asked).toBe(0);
+  });
+});
+
+describe('classifyStateProcess', () => {
+  const STARTED_AT = 1_700_000_000_000;
+  const state = makeState({ startedAt: STARTED_AT });
+  const probe = (startMs: number | undefined, alive = true) => ({
+    isAlive: () => alive,
+    startTimeMs: () => Promise.resolve(startMs),
+  });
+
+  it('is stale when the pid is dead', async () => {
+    expect(await classifyStateProcess(state, probe(STARTED_AT, false))).toBe('stale');
+  });
+
+  it('is the hub when it started before the state was written', async () => {
+    expect(await classifyStateProcess(state, probe(STARTED_AT - 3_000))).toBe('hub');
+  });
+
+  it('allows the clock granularity of ps and /proc', async () => {
+    expect(await classifyStateProcess(state, probe(STARTED_AT + START_TIME_TOLERANCE_MS))).toBe(
+      'hub'
+    );
+  });
+
+  it('is stale when the process started after the hub wrote its state', async () => {
+    expect(await classifyStateProcess(state, probe(STARTED_AT + START_TIME_TOLERANCE_MS + 1))).toBe(
+      'stale'
+    );
+  });
+
+  it('is unconfirmed when the start time cannot be read', async () => {
+    expect(await classifyStateProcess(state, probe(undefined))).toBe('unconfirmed');
+  });
+
+  it('trusts liveness alone when the probe has no start time to offer', async () => {
+    expect(await classifyStateProcess(state, { isAlive: () => true })).toBe('hub');
   });
 });

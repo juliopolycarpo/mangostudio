@@ -27,7 +27,7 @@ export function parseBackupArgs(args: string[]): CaptureOptions {
 /** Capture configured user data only after the running Hub has stopped. */
 export async function runBackup(options: CaptureOptions): Promise<void> {
   const state = await readState();
-  if (state && isStateLive(state, createProcessController().isAlive)) {
+  if (state && (await isStateLive(state, createProcessController()))) {
     throw new CliError('Stop the Hub and external data writers before backup.');
   }
   if (options.includeSecrets) {

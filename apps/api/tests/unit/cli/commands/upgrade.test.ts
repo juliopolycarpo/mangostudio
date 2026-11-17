@@ -100,7 +100,12 @@ function baseDeps(
     deps: {
       service,
       readState: () => Promise.resolve(null),
-      controller: { isAlive: () => false, terminate: () => undefined, kill: () => undefined },
+      controller: {
+        isAlive: () => false,
+        startTimeMs: () => Promise.resolve(0),
+        terminate: () => undefined,
+        kill: () => undefined,
+      },
       isInteractive: () => false,
       confirm: () => Promise.resolve(false),
       log: (msg) => lines.push(msg),
@@ -265,7 +270,12 @@ describe('runUpgrade unconfirmed', () => {
     const { deps } = baseDeps(service, {
       isInteractive: () => true,
       readState: () => Promise.resolve(liveState),
-      controller: { isAlive: () => true, terminate: () => undefined, kill: () => undefined },
+      controller: {
+        isAlive: () => true,
+        startTimeMs: () => Promise.resolve(0),
+        terminate: () => undefined,
+        kill: () => undefined,
+      },
       confirm: (q) => {
         confirmCalls.push(q);
         return Promise.resolve(true);
@@ -293,7 +303,12 @@ describe('runUpgrade unconfirmed', () => {
     const { deps } = baseDeps(service, {
       isInteractive: () => true,
       readState: () => Promise.resolve(liveState),
-      controller: { isAlive: () => true, terminate: () => undefined, kill: () => undefined },
+      controller: {
+        isAlive: () => true,
+        startTimeMs: () => Promise.resolve(0),
+        terminate: () => undefined,
+        kill: () => undefined,
+      },
       confirm: () => {
         calls += 1;
         // Yes to the upgrade, no to the restart.
