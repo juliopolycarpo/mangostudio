@@ -13,6 +13,9 @@ import { createBunSqliteDialect } from '../../src/db/bun-sqlite-dialect';
 import { applyConnectionPragmas } from '../../src/db/database';
 import type { Database } from '../../src/db/types';
 
+/** The file an {@link ObservedFileDatabase} opens inside the directory it is given. */
+export const DATABASE_FILE_NAME = 'database.sqlite';
+
 /** `PRAGMA synchronous` answers with the numeric level. */
 export const SYNCHRONOUS_NORMAL = 1;
 export const SYNCHRONOUS_FULL = 2;
@@ -88,7 +91,7 @@ export class ObservedFileDatabase {
   private afterRelease: (() => void) | null = null;
 
   constructor(directory: string, options: { applyPragmas?: boolean; slowHandoff?: boolean } = {}) {
-    const path = join(directory, 'database.sqlite');
+    const path = join(directory, DATABASE_FILE_NAME);
     this.sqlite = new SQLiteDatabase(path);
     if (options.applyPragmas !== false) applyConnectionPragmas(this.sqlite, path);
     const dialect = createBunSqliteDialect(this.failingOnRequest(this.sqlite));

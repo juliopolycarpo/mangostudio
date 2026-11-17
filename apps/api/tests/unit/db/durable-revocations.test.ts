@@ -4,7 +4,7 @@
  * come back. The level is read from the connection after each statement, so each
  * assertion names the write that ran at it.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,10 +12,11 @@ import { join } from 'node:path';
 import { sql } from 'kysely';
 
 import type { ApiKeyPluginApi, ApiKeyPluginRecord } from '../../../src/auth';
+import { relaxDurability } from '../../../src/db/durability';
 import { revokeApiKey } from '../../../src/modules/api-keys/application/api-key-service';
 import { createRuntimePairingRepository } from '../../../src/modules/environments/infrastructure/runtime-pairing-repository';
 import { handleAuthRequest } from '../../../src/routes/auth';
-import { runMigrations } from '../../../src/server/migrations';
+import { MigratedDatabaseTemplate } from '../../support/migrated-database-template';
 import {
   ObservedFileDatabase,
   SYNCHRONOUS_FULL as FULL,
@@ -24,11 +25,25 @@ import {
 
 let directory: string;
 let file: ObservedFileDatabase;
+let migrated: MigratedDatabaseTemplate | undefined;
+
+// Migrating a fresh file costs one fsync per statement (see MigratedDatabaseTemplate), which
+// timed this hook out on a Windows runner. Migrate once and give each test a copy.
+beforeAll(async () => {
+  migrated = await MigratedDatabaseTemplate.create('durable-revocations');
+}, 120_000);
+
+afterAll(() => {
+  migrated?.dispose();
+});
 
 beforeEach(async () => {
   directory = mkdtempSync(join(tmpdir(), 'durable-revocations-'));
+  if (!migrated) throw new Error('expected the migrated template from beforeAll | received: none');
+  migrated.copyInto(directory);
   file = new ObservedFileDatabase(directory);
-  await runMigrations(file.db);
+  // `runMigrations` lowers the level on its own connection; this connection starts at FULL.
+  await relaxDurability(file.db);
   // These tests look at pragma levels, not at relations: no users or environments are seeded.
   file.sqlite.exec('PRAGMA foreign_keys = OFF');
   file.sqlite.exec('CREATE TABLE credential_scratch (id TEXT PRIMARY KEY)');

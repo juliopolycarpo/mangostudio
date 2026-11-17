@@ -5,7 +5,7 @@
  * statement, so each assertion names the write that ran at it.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
-import { copyFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -19,7 +19,7 @@ import {
 } from '../../../src/modules/external-agents/infrastructure/external-turn-attempt-repository';
 import { createDatabaseCheckpointStore } from '../../../src/modules/generation/application/turn-checkpoint';
 import { insertMessage } from '../../../src/modules/messages/infrastructure/message-repository';
-import { runMigrations } from '../../../src/server/migrations';
+import { MigratedDatabaseTemplate } from '../../support/migrated-database-template';
 import {
   ObservedFileDatabase,
   SYNCHRONOUS_FULL as FULL,
@@ -28,32 +28,22 @@ import {
 
 let directory: string;
 let file: ObservedFileDatabase;
-let migratedTemplateDirectory: string;
+let migrated: MigratedDatabaseTemplate | undefined;
 
-// Every migration commits at synchronous = FULL, so migrating a fresh file costs one fsync per
-// statement: seconds on a Windows runner, enough to time out a hook under load. Migrate once and
-// give each test a copy of the finished file.
+// Migrating a fresh file costs one fsync per statement (see MigratedDatabaseTemplate), so
+// migrate once and give each test a copy of the finished file.
 beforeAll(async () => {
-  migratedTemplateDirectory = mkdtempSync(join(tmpdir(), 'durable-markers-template-'));
-  const template = new ObservedFileDatabase(migratedTemplateDirectory);
-  try {
-    await runMigrations(template.db);
-  } finally {
-    // Closing the last connection checkpoints the WAL into the file that gets copied.
-    await template.destroy();
-  }
+  migrated = await MigratedDatabaseTemplate.create('durable-markers');
 }, 120_000);
 
 afterAll(() => {
-  rmSync(migratedTemplateDirectory, { recursive: true, force: true });
+  migrated?.dispose();
 });
 
 beforeEach(async () => {
   directory = mkdtempSync(join(tmpdir(), 'durable-markers-'));
-  copyFileSync(
-    join(migratedTemplateDirectory, 'database.sqlite'),
-    join(directory, 'database.sqlite')
-  );
+  if (!migrated) throw new Error('expected the migrated template from beforeAll | received: none');
+  migrated.copyInto(directory);
   file = new ObservedFileDatabase(directory);
   // `runMigrations` lowers the level on its own connection; this connection starts at FULL.
   await relaxDurability(file.db);

@@ -3,7 +3,7 @@
  * checked against the installed Better Auth and its plugins and against the library
  * itself running on a file database.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,7 +15,7 @@ import {
   handleAuthRequest,
   isCredentialRevokingRequest,
 } from '../../../src/routes/auth';
-import { runMigrations } from '../../../src/server/migrations';
+import { MigratedDatabaseTemplate } from '../../support/migrated-database-template';
 import {
   ObservedFileDatabase,
   SYNCHRONOUS_FULL as FULL,
@@ -49,11 +49,23 @@ const NON_REVOKING_AUTH_PATHS: ReadonlySet<string> = new Set([
 
 let directory: string;
 let file: ObservedFileDatabase;
+let migrated: MigratedDatabaseTemplate | undefined;
+
+// Migrating a fresh file costs one fsync per statement (see MigratedDatabaseTemplate), seconds
+// per test on a Windows runner. Migrate once and give each test a copy.
+beforeAll(async () => {
+  migrated = await MigratedDatabaseTemplate.create('auth-durability');
+}, 120_000);
+
+afterAll(() => {
+  migrated?.dispose();
+});
 
 beforeEach(async () => {
   directory = mkdtempSync(join(tmpdir(), 'auth-durability-'));
+  if (!migrated) throw new Error('expected the migrated template from beforeAll | received: none');
+  migrated.copyInto(directory);
   file = new ObservedFileDatabase(directory);
-  await runMigrations(file.db);
   await relaxDurability(file.db);
   file.forget();
 });
