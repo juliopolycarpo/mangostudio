@@ -94,14 +94,28 @@ describe('patchMessageInCache', () => {
     expect(next?.pages[0]).toBe(cache.pages[0]);
   });
 
-  it('matches the previous full-map updater over random caches and patches', () => {
-    let seed = 20_251_117;
-    const random = () => {
-      seed = (seed * 1_664_525 + 1_013_904_223) % 4_294_967_296;
-      return seed / 4_294_967_296;
-    };
-    for (let round = 0; round < 200; round += 1) {
-      const pageCount = 1 + Math.floor(random() * 3);
+  it('returns a cache with no pages as the same object', () => {
+    const cache = makeCache();
+
+    expect(patchMessageInCache(cache, 'm0', { text: 'x' })).toBe(cache);
+  });
+
+  it('patches only the first match, newest page and page end first, when an id repeats', () => {
+    const newest = [makeMessage('dup', 'newest-a'), makeMessage('dup', 'newest-b')];
+    const older = [makeMessage('dup', 'older')];
+    const cache = makeCache(newest, older);
+
+    const next = patchMessageInCache(cache, 'dup', { text: 'patched' });
+
+    expect(next?.pages[0]?.messages.map((row) => row.text)).toEqual(['newest-a', 'patched']);
+    expect(next?.pages[0]?.messages[0]).toBe(newest[0]);
+    expect(next?.pages[1]).toBe(cache.pages[1]);
+  });
+
+  it('matches the previous full-map updater on unique ids and keeps everything else by identity', () => {
+    const random = createRandom(20_251_117);
+    for (let round = 0; round < 300; round += 1) {
+      const pageCount = Math.floor(random() * 4);
       let nextId = 0;
       const pages = Array.from({ length: pageCount }, () =>
         Array.from({ length: Math.floor(random() * 5) }, () => makeMessage(`m${nextId++}`))
@@ -114,9 +128,63 @@ describe('patchMessageInCache', () => {
         ...(random() < 0.3 ? { id: `renamed-${round}` } : {}),
       };
 
-      expect(patchMessageInCache(cache, targetId, updates)).toEqual(
-        referencePatchMessageInCache(cache, targetId, updates)
+      const next = patchMessageInCache(cache, targetId, updates);
+
+      expect(next).toEqual(referencePatchMessageInCache(cache, targetId, updates));
+      expectUntouchedByIdentity(cache, next, targetId);
+    }
+  });
+
+  it('patches exactly one row when ids repeat across random pages', () => {
+    const random = createRandom(7);
+    for (let round = 0; round < 300; round += 1) {
+      const pages = Array.from({ length: 1 + Math.floor(random() * 3) }, (_, pageIndex) =>
+        Array.from({ length: 1 + Math.floor(random() * 4) }, (_, rowIndex) =>
+          // A small id pool, so repeats are common.
+          makeMessage(`id${Math.floor(random() * 3)}`, `p${pageIndex}r${rowIndex}`)
+        )
       );
+      const cache = makeCache(...pages);
+      const targetId = `id${Math.floor(random() * 3)}`;
+
+      const next = patchMessageInCache(cache, targetId, { text: 'patched' });
+
+      const patched = next?.pages
+        .flatMap((page) => page.messages)
+        .filter((row) => row.text === 'patched');
+      const holds = pages.some((rows) => rows.some((row) => row.id === targetId));
+      expect(patched?.length).toBe(holds ? 1 : 0);
+      expectUntouchedByIdentity(cache, next, targetId);
     }
   });
 });
+
+function createRandom(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state = (state * 1_664_525 + 1_013_904_223) % 4_294_967_296;
+    return state / 4_294_967_296;
+  };
+}
+
+/** Every row and page the patch did not rewrite is the same object; at most one row and its page are new. */
+function expectUntouchedByIdentity(
+  before: MessagesCache,
+  after: MessagesCache | undefined,
+  targetId: string
+): void {
+  if (!after) throw new Error('expected a cache | received: undefined');
+  let replacedRows = 0;
+  before.pages.forEach((page, pageIndex) => {
+    const nextPage = after.pages[pageIndex];
+    if (nextPage === page) return;
+    expect(nextPage?.messages.length).toBe(page.messages.length);
+    page.messages.forEach((row, rowIndex) => {
+      const nextRow = nextPage?.messages[rowIndex];
+      if (nextRow === row) return;
+      replacedRows += 1;
+      expect(`${row.id}`).toBe(targetId);
+    });
+  });
+  expect(replacedRows).toBeLessThanOrEqual(1);
+}

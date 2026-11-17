@@ -3,14 +3,19 @@ import type { Message } from '@mangostudio/shared/chat';
 import type { MessagesCache } from '@/features/chat/transcript-pages';
 
 /**
- * Merges `updates` into the one message `messageId` names, keeping the identity
- * of everything the patch does not touch.
+ * Merges `updates` into the one message `messageId` names, copying only what the
+ * patch touches.
  *
  * A streamed turn patches the same row once per chunk. Only the page holding
- * that row, its `messages` array and the row itself are new objects, so the
- * other pages and every other row keep their reference and a memoized row
- * above the live one is skipped instead of re-rendered. A cache that does not
- * hold the id comes back as the same object.
+ * that row, its `messages` array and the row itself are new objects; every
+ * other page and row is the same object, so the write costs one page copy
+ * instead of a rebuild of the whole transcript. (Skipped renders are not the
+ * gain: the query's structural sharing already hands old row objects back.) A
+ * cache that does not hold the id comes back as the same object.
+ *
+ * Row ids are unique across the loaded pages, so only the first match is
+ * patched: the newest page is searched first and each page from its end, where
+ * the live row is. A duplicated id patches that one row and leaves the other.
  *
  * @example
  * queryClient.setQueryData(key, (cache) => patchMessageInCache(cache, 'msg-1', { text: 'hi' }));
