@@ -8,7 +8,7 @@ import { access, readFile } from 'node:fs/promises';
  */
 import { join } from 'node:path';
 
-import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
+import { isReservedErrorCode, RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import type {
   EnvironmentTransportKind,
   InstallStreamEvent,
@@ -55,6 +55,7 @@ import {
   buildServiceInstallCommand,
   RESOLVE_RUNTIME_PATH,
 } from '../domain/remote-bootstrap-commands';
+import { classifyRemoteFailure, type RemoteFailureReason } from '../domain/remote-failure';
 import {
   buildRuntimeLifecycleView,
   canUpdateOverLiveConnection,
@@ -63,6 +64,7 @@ import {
 import { streamRuntimeUpdate } from '../domain/runtime-live-update';
 import {
   pushRuntimeBinary,
+  remoteOutputOf,
   type RuntimeCommandResult,
   type RuntimeCommandRunner,
   RuntimePushError,
@@ -78,12 +80,14 @@ import {
   runtimeDigestSidecarPath,
 } from '../domain/runtime-release-fetch';
 import { classifySshFailure, describeSshFailure } from '../domain/ssh-failure';
+import { localRuntimeBuildCommand, localRuntimeBuildPath } from '../domain/wsl-runtime-release';
 import {
   type EnvironmentRecord,
   environmentRepository,
 } from '../infrastructure/environment-repository';
 import { createSshCommandRunner } from '../infrastructure/ssh-command-runner';
 import {
+  WslDevBuildError,
   type WslProvisioner,
   wslProvisioner,
   WslProvisioningError,
@@ -95,30 +99,115 @@ const MAX_RECENT_STREAMS = 20;
 const logger = createDiagnosticLogger('runtime-lifecycle');
 
 /**
- * The stderr line a failed run publishes. Errors this module's collaborators
- * word themselves for the operator (provisioning, push, release fetch, a
- * lifecycle refusal) pass through; a connect refusal gets its fixed per-reason
- * copy; anything else is the hub's own error and keeps its text in the log.
+ * Why a run failed, in the classes a client can tell apart. Logged as `reason`
+ * beside the raw error; the stream carries only the fixed copy for it.
+ */
+export type RunFailureReason =
+  | RemoteFailureReason
+  /** A connect refusal; its own per-reason copy names the cause. */
+  | 'environment-unavailable'
+  | 'runtime-push-failed'
+  | 'wsl-provisioning-failed'
+  /** A source checkout has no Linux runtime of the right version for the distribution. */
+  | 'wsl-dev-build-required'
+  /** The hub could not reach the release host. */
+  | 'release-unreachable'
+  /** The release answered, or its bytes could not be read or verified. */
+  | 'release-unavailable'
+  /** The connected runtime answered with an error. */
+  | 'runtime-error'
+  | 'run-failed';
+
+/**
+ * The stderr line a failed run publishes. Every class below is the hub's own
+ * (or the connected machine's) error text, which embeds filesystem paths, remote
+ * stderr or driver wording, so the stream gets fixed copy and the hub log gets
+ * the error with the run and environment id. Only a lifecycle refusal, whose
+ * text this module writes as a fixed sentence, passes through. The runtime's
+ * `RemoteError` text is not trusted either: the hub builds the same class for
+ * its own connect and transport failures.
+ *
+ * @example
+ * failureLineFor(new RuntimePushError('Could not probe "h": /home/a/.ssh: denied'), 'r', 'e');
+ * // 'The runtime could not be copied to the machine. Check the machine, then try again. Details are in the hub log.'
  */
 export function failureLineFor(error: unknown, runId: string, environmentId: string): string {
-  // Checked before RemoteError, which it extends: the hub wrote this text.
-  if (isEnvironmentUnavailable(error)) {
-    logger.warn('run_failed', { runId, environmentId, error });
-    return environmentUnavailableText(error);
-  }
   if (
-    // A refusal the runtime itself sent, such as a digest mismatch on an update.
-    error instanceof RemoteError ||
-    error instanceof WslProvisioningError ||
-    error instanceof RuntimePushError ||
-    error instanceof RuntimeAssetLoadError ||
     error instanceof RuntimeLifecycleUnavailableError ||
     error instanceof RuntimeLifecycleConflictError
   ) {
     return error.message;
   }
-  logger.warn('run_failed', { runId, environmentId, error });
-  return 'The runtime action failed. Details are in the hub log.';
+  const { reason, line } = describeRunFailure(error);
+  logger.warn('run_failed', {
+    runId,
+    environmentId,
+    reason,
+    // The logger keeps an error's name and message; the peer's code is neither.
+    ...(error instanceof RemoteError && { code: error.code }),
+    error,
+  });
+  return line;
+}
+
+function describeRunFailure(error: unknown): { reason: RunFailureReason; line: string } {
+  // Checked before RemoteError, which it extends.
+  if (isEnvironmentUnavailable(error)) {
+    return { reason: 'environment-unavailable', line: environmentUnavailableText(error) };
+  }
+  if (error instanceof RuntimePushError) {
+    // A failed command's own output is classified the way an SSH removal is;
+    // an error without one (a probe the hub could not parse) gets the push copy.
+    if (error.remote) {
+      const { reason, message } = classifyRemoteFailure(error.remote);
+      return { reason, line: message };
+    }
+    return {
+      reason: 'runtime-push-failed',
+      line: 'The runtime could not be copied to the machine. Check the machine, then try again. Details are in the hub log.',
+    };
+  }
+  // Before WslProvisioningError, which it extends.
+  if (error instanceof WslDevBuildError) {
+    // The build command is a fixed script with the platform id, which the hub
+    // detected from a closed set. `--out` is relative to the repository root,
+    // where the command runs, so the hub's own directory never appears.
+    const command = localRuntimeBuildCommand(
+      error.platformId,
+      localRuntimeBuildPath('.', error.platformId)
+    );
+    return {
+      reason: 'wsl-dev-build-required',
+      line: `This MangoStudio runs from a source checkout and needs its own Linux runtime in the WSL distribution. From the repository root run \`${command}\`, then connect again. Details are in the hub log.`,
+    };
+  }
+  if (error instanceof WslProvisioningError) {
+    return {
+      reason: 'wsl-provisioning-failed',
+      line: 'The runtime could not be set up in the WSL distribution. Check that the distribution starts, then try again. Details are in the hub log.',
+    };
+  }
+  if (error instanceof RuntimeAssetLoadError) {
+    return error.unreachable
+      ? {
+          reason: 'release-unreachable',
+          line: "The hub could not reach the release host to download the runtime. Check the hub's network, then try again. Details are in the hub log.",
+        }
+      : {
+          reason: 'release-unavailable',
+          line: 'The runtime for this release could not be loaded or verified. Details are in the hub log.',
+        };
+  }
+  if (error instanceof RemoteError) {
+    // Only a code this repo defines is shown: it is a stable constant, where an
+    // unknown code is text the other end chose.
+    const known = isReservedErrorCode(error.code) || error.code === RUNTIME_UPDATE_REFUSED;
+    return {
+      reason: 'runtime-error',
+      line: `The runtime reported an error${known ? ` (${error.code})` : ''}. Details are in the hub log.`,
+    };
+  }
+  return { reason: 'run-failed', line: 'The runtime action failed. Details are in the hub log.' };
 }
 
 interface EventBuffer {
@@ -475,10 +564,20 @@ export function createRuntimeLifecycleService(
         }
 
         if (!asset.cached) {
+          // A path is the product of a successful download, so those lines keep
+          // it; a failed write stages nothing, and the hub's directory layout
+          // is only worth the log.
+          logger.warn('runtime_cache_write_failed', {
+            runId,
+            environmentId,
+            reason: 'cache-write-failed',
+            cacheDir: runtimeCacheDir(staged.version),
+            stagedPath: staged.path,
+          });
           stream.publish({
             type: 'log',
             stream: 'stderr',
-            line: `Verified ${staged.assetName} but could not write it to ${runtimeCacheDir(staged.version)}. Nothing is staged at ${staged.path}; check that the cache directory is writable and retry.`,
+            line: `Verified ${staged.assetName} but the hub could not write it to its runtime cache, so nothing is staged. Check that the hub's cache directory is writable and retry. Details are in the hub log.`,
             done: false,
           });
           finish(run, 'failed', 1);
@@ -1175,7 +1274,8 @@ export async function pushRuntimeOverSsh(
   if (signal.aborted || probe.signal) return;
   if (probe.exitCode !== 0) {
     throw new RuntimePushError(
-      `Could not probe "${host}": ${probe.stderr.trim() || probe.stdout.trim() || `exit ${probe.exitCode}`}`
+      `Could not probe "${host}": ${probe.stderr.trim() || probe.stdout.trim() || `exit ${probe.exitCode}`}`,
+      { remote: remoteOutputOf(probe) }
     );
   }
   const platformProbe = parsePlatformProbe(probe.stdout);

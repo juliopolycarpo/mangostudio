@@ -666,7 +666,11 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     try {
       await deps.repository.complete(active.runId, active.userId, active.profileId, result);
     } catch (error) {
-      logger.warn('install_audit_row_not_updated', { runId: active.runId, error });
+      logger.warn('install_audit_row_not_updated', {
+        runId: active.runId,
+        environmentId: active.environmentId,
+        error,
+      });
       active.stream.publish({
         type: 'log',
         stream: 'system',
@@ -699,6 +703,9 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
         },
         {
           signal: active.abortController.signal,
+          // The installer's own stdout and stderr, relayed as is: it is the output
+          // of the command this user approved on the machine they chose, and the
+          // run is useless to them without it. Hub-internal lines get fixed copy.
           onLog: (event) => {
             active.stream.publish({
               type: 'log',

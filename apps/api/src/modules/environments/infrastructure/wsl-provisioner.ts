@@ -102,6 +102,21 @@ export class WslProvisioningError extends Error {
 }
 
 /**
+ * A source checkout's Linux runtime is missing or reports the wrong version.
+ * The fix is a build command the developer runs, so a client-facing line can
+ * name it from `platformId` alone; `message` also carries the hub's own paths.
+ */
+export class WslDevBuildError extends WslProvisioningError {
+  constructor(
+    message: string,
+    readonly platformId: LinuxPlatformId
+  ) {
+    super(message);
+    this.name = 'WslDevBuildError';
+  }
+}
+
+/**
  * Failing to *reach* the release, as opposed to reaching one that has nothing
  * to offer. Only this one has an offline answer worth printing.
  *
@@ -372,6 +387,7 @@ async function install(
         );
       if (isDevelopmentVersion(version) && message.includes('reports version')) {
         message = `${message} A checkout's runtime has to report version dev; build one with \`${localRuntimeBuildCommand(platformId, deps.localBuildPath(platformId))}\`.`;
+        throw new WslDevBuildError(message, platformId);
       }
       throw new WslProvisioningError(message);
     }
@@ -576,11 +592,12 @@ async function loadLocalBuild(
   const bytes = await deps.readBytes(path);
   if (bytes) return bytes;
 
-  throw new WslProvisioningError(
+  throw new WslDevBuildError(
     'This MangoStudio runs from a source checkout, so no release carries a Linux runtime ' +
       `to install. Build one from the repository root with \`${localRuntimeBuildCommand(platformId, path)}\` ` +
       `and connect again, or put a runtime that reports version dev at ${DISTRO_RUNTIME_PATH} ` +
-      `inside "${distro}" yourself.`
+      `inside "${distro}" yourself.`,
+    platformId
   );
 }
 
