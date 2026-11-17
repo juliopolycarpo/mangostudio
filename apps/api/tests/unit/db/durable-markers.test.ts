@@ -4,13 +4,14 @@
  * writes next to them do not. The level is read from the connection after each
  * statement, so each assertion names the write that ran at it.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import { copyFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { Migrator } from 'kysely/migration';
 
+import { relaxDurability } from '../../../src/db/durability';
 import { allMigrations } from '../../../src/db/migrations';
 import {
   insertAttempt,
@@ -27,11 +28,35 @@ import {
 
 let directory: string;
 let file: ObservedFileDatabase;
+let migratedTemplateDirectory: string;
+
+// Every migration commits at synchronous = FULL, so migrating a fresh file costs one fsync per
+// statement: seconds on a Windows runner, enough to time out a hook under load. Migrate once and
+// give each test a copy of the finished file.
+beforeAll(async () => {
+  migratedTemplateDirectory = mkdtempSync(join(tmpdir(), 'durable-markers-template-'));
+  const template = new ObservedFileDatabase(migratedTemplateDirectory);
+  try {
+    await runMigrations(template.db);
+  } finally {
+    // Closing the last connection checkpoints the WAL into the file that gets copied.
+    await template.destroy();
+  }
+}, 120_000);
+
+afterAll(() => {
+  rmSync(migratedTemplateDirectory, { recursive: true, force: true });
+});
 
 beforeEach(async () => {
   directory = mkdtempSync(join(tmpdir(), 'durable-markers-'));
+  copyFileSync(
+    join(migratedTemplateDirectory, 'database.sqlite'),
+    join(directory, 'database.sqlite')
+  );
   file = new ObservedFileDatabase(directory);
-  await runMigrations(file.db);
+  // `runMigrations` lowers the level on its own connection; this connection starts at FULL.
+  await relaxDurability(file.db);
   // These tests look at pragma levels, not at relations: no chat or message rows are seeded.
   file.sqlite.exec('PRAGMA foreign_keys = OFF');
   file.forget();
