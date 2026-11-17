@@ -49,6 +49,7 @@ import { errorHandler } from './plugins/error-handler';
 import { handlerIdleTimeout } from './plugins/handler-idle-timeout';
 import { rateLimit } from './plugins/rate-limit';
 import { classifyRateLimit } from './plugins/rate-limit-policy';
+import { responseCompression } from './plugins/response-compression';
 import { authRoutes } from './routes/auth';
 import { createGeneratedImageRoutes } from './routes/generated-images';
 import { settingsRoutes } from './routes/settings';
@@ -75,6 +76,9 @@ const api = new Elysia({ prefix: '/api' })
   .use(handlerIdleTimeout)
   // Centralized error handling
   .use(errorHandler)
+  // gzip for large JSON answers to non-loopback peers; see the plugin for the
+  // rules. Registered after the error handler so error bodies are already final.
+  .use(responseCompression())
   // Rate limiting with per-route-group buckets. `classifyRateLimit` routes
   // health and auth into their own generous buckets, key-authenticated traffic
   // into `api-key`, and everything else into the baseline `general` bucket.
