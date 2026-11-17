@@ -18,7 +18,7 @@
  * - GET only (HEAD and conditional answers keep their headers), 2xx only,
  *   nothing already carrying a `Content-Encoding`, nothing marked `no-transform`.
  * - Between {@link COMPRESSION_MIN_BYTES} and {@link COMPRESSION_MAX_BYTES}.
- *   `Bun.gzipSync` blocks the event loop (25 to 50 ms for 5 MB), so a body over
+ *   `Bun.gzipSync` blocks the event loop (about 4 ms per 0.5 MB), so a body over
  *   the ceiling goes out as identity rather than stalling every other request.
  * - The socket peer, never a forwarded header, decides "remote". A hub behind a
  *   reverse proxy sees the proxy's loopback address and sends identity; the
@@ -27,7 +27,7 @@
  * gzip only: browsers send `Accept-Encoding: gzip, deflate` without `br` or
  * `zstd` to a plain-HTTP address, and Bun has no native Brotli encoder.
  * Level 1 was chosen from `scripts/bench/api-json-compression.ts`: it wins
- * end to end on any link below roughly 440 Mbit/s for a 500 KB transcript page,
+ * end to end on any link below roughly 450 to 600 Mbit/s for a 500 KB transcript page,
  * where level 6 only breaks even below about 160 Mbit/s.
  */
 
@@ -41,9 +41,12 @@ import { resolveStatus } from './error-negotiation';
 export const COMPRESSION_MIN_BYTES = 8 * 1024;
 
 /**
- * Above this the body goes out as identity. Level 1 takes about 4 ms for
- * 0.5 MB and 25 to 50 ms for 5 MB, all of it on the event loop; 2 MiB keeps one
- * response under roughly 20 ms.
+ * Above this the body goes out as identity. Level 1 takes about 4 ms per
+ * 0.5 MB, all of it on the event loop; 2 MiB keeps one response under roughly
+ * 20 ms. A transcript page holds at most 100 messages (`PAGE_LIMIT_MAX`) and a
+ * seeded 100-message page measures about 1 MB, so the ceiling is rarely reached:
+ * only a page whose messages average more than about 20 KB, such as one full of
+ * large tool results, goes out as identity.
  */
 export const COMPRESSION_MAX_BYTES = 2 * 1024 * 1024;
 

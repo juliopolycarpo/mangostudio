@@ -42,9 +42,9 @@ const EMAIL = 'bench@example.test';
 const PASSWORD = 'api-json-bench-password-123';
 const CLOCK_TICKS_PER_SECOND = 100;
 
-/** The `limit` the frontend asks for (`MESSAGES_PAGE_SIZE`), and a deliberately large page. */
+/** The `limit` the frontend asks for (`MESSAGES_PAGE_SIZE`), and the route's maximum (`PAGE_LIMIT_MAX`). */
 const FRONTEND_PAGE = 50;
-const LARGE_PAGE = 500;
+const LARGE_PAGE = 100;
 
 /** One response worth measuring: a name for the table and the path to GET. */
 export interface Endpoint {
@@ -623,7 +623,7 @@ async function main(): Promise<void> {
     if (mode === 'sizes') {
       const endpoints: Endpoint[] = [
         { name: `messages page, limit=${FRONTEND_PAGE} (frontend)`, path: messages(FRONTEND_PAGE) },
-        { name: `messages page, limit=${LARGE_PAGE}`, path: messages(LARGE_PAGE) },
+        { name: `messages page, limit=${LARGE_PAGE} (maximum)`, path: messages(LARGE_PAGE) },
         { name: `chat list, ${chats} chats`, path: '/api/chats/' },
         { name: `gallery page, ${FRONTEND_PAGE} images`, path: '/api/messages/images' },
         { name: 'settings: models', path: '/api/settings/models' },

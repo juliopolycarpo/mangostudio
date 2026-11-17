@@ -243,7 +243,7 @@ under `/api` are compressed per request by `apps/api/src/plugins/response-compre
 only when that can pay:
 
 - **Allowlist.** Only the routes in `COMPRESSED_API_ROUTES` (`apps/api/src/app.ts`) are
-  considered: the chat transcript page (505 KB for the frontend's 50 messages), the chat list
+  considered: the chat transcript page (about 500 KB for the frontend's 50 messages), the chat list
   (373 KB for 1000 chats), the gallery page and tool settings (15 KB). Every other response stays
   identity until someone adds its route there. A route earns a place by returning a large body
   that carries user content and no credential.
@@ -256,7 +256,9 @@ only when that can pay:
   `gzip`. Browsers send `gzip, deflate` without `br` or `zstd` to a plain-HTTP address, and Bun has
   no native Brotli encoder, so gzip (`Bun.gzipSync`, level 1) is the only coding. Never
   `node:zlib`: it adds 184 KB to the binary. `Bun.gzipSync` runs on the event loop (about 3 to 4 ms for
-  0.5 MB, 25 to 50 ms for 5 MB), so a body over the 2 MiB ceiling goes out as identity.
+  0.5 MB), so a body over the 2 MiB ceiling goes out as identity. A transcript page is capped at
+  100 messages and measures about 1 MB when seeded with realistic transcripts, so only a page of
+  very large tool results (an average above roughly 20 KB a message) reaches the ceiling.
 - **Never.** Streams and other media types (SSE, files, the Better Auth passthrough), a response
   that already has `Content-Encoding` or `Cache-Control: no-transform`, HEAD, 304 and errors. A
   strong `ETag` is weakened when the body is encoded. `Vary: Accept-Encoding` is added to every
