@@ -39,10 +39,49 @@ describe('shiki highlighter', () => {
     expect(shiki.highlightCode('const x = 1;', 'ts', 'one-dark-pro')).toBeNull();
   });
 
+  it('starts with no theme and no grammar loaded', async () => {
+    const shiki = await loadShiki();
+
+    const highlighter = await shiki.initHighlighter();
+
+    expect(highlighter.getLoadedThemes()).toEqual([]);
+    expect(highlighter.getLoadedLanguages()).not.toContain('typescript');
+  });
+
+  it('loads the requested theme and language, and no other of either', async () => {
+    const shiki = await loadShiki();
+
+    await shiki.preloadCodeLanguages(['ts'], 'one-dark-pro');
+    const highlighter = await shiki.initHighlighter();
+
+    expect(highlighter.getLoadedThemes()).toEqual(['one-dark-pro']);
+    expect(highlighter.getLoadedLanguages()).toContain('typescript');
+    for (const untouched of ['python', 'bash', 'markdown', 'rust', 'json']) {
+      expect(
+        highlighter.getLoadedLanguages(),
+        `language ${untouched} was not requested`
+      ).not.toContain(untouched);
+    }
+  });
+
+  it('loads a second theme only when it is asked for', async () => {
+    const shiki = await loadShiki();
+    const highlighter = await shiki.initHighlighter();
+    expect(highlighter.getLoadedThemes()).not.toContain('github-light');
+
+    await shiki.preloadCodeLanguages(['ts'], 'github-light');
+
+    expect(highlighter.getLoadedThemes()).toEqual(
+      expect.arrayContaining(['one-dark-pro', 'github-light'])
+    );
+    const html = completeRender(() => shiki.highlightCode('const x = 1;', 'ts', 'github-light'));
+    expect(html).toContain('shiki');
+  });
+
   it('highlights common language aliases after preload', async () => {
     const shiki = await loadShiki();
 
-    await shiki.preloadCodeLanguages(['ts']);
+    await shiki.preloadCodeLanguages(['ts'], 'one-dark-pro');
     const html = completeRender(() => shiki.highlightCode('const x = 1;', 'ts', 'one-dark-pro'));
 
     expect(html).toContain('shiki');
@@ -52,7 +91,7 @@ describe('shiki highlighter', () => {
   it('loads supported uncommon languages on demand', async () => {
     const shiki = await loadShiki();
 
-    await shiki.preloadCodeLanguages(['rust']);
+    await shiki.preloadCodeLanguages(['rust'], 'one-dark-pro');
     const html = completeRender(() => shiki.highlightCode('fn main() {}', 'rust', 'one-dark-pro'));
 
     expect(html).toContain('shiki');
@@ -62,7 +101,9 @@ describe('shiki highlighter', () => {
   it('ignores unsupported languages without initializing the highlighter', async () => {
     const shiki = await loadShiki();
 
-    await expect(shiki.preloadCodeLanguages(['not-a-real-language'])).resolves.toBe(false);
+    await expect(shiki.preloadCodeLanguages(['not-a-real-language'], 'one-dark-pro')).resolves.toBe(
+      false
+    );
     expect(shiki.highlightCode('x', 'not-a-real-language', 'one-dark-pro')).toBeNull();
   });
 });

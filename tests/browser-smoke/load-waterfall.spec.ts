@@ -165,23 +165,30 @@ test('first load of the chat page', async ({ browser }) => {
   await context.close();
 });
 
-test('first markdown code block', async ({ browser }) => {
-  test.setTimeout(120_000);
-  const context = await contextWithChat(
-    browser,
-    `waterfall-md-${Date.now()}`,
-    'Here:\n\n```ts\nconst answer: number = 42;\n```\n'
-  );
-  const page = await context.newPage();
-  await throttle(page);
-  await page.goto('/');
-  await dismissWorkdirPicker(page, 2_000);
-  await expect(page.getByTestId('sidebar-new-chat')).toBeVisible({ timeout: 60_000 });
-  const shellAt = await now(page);
-  await expect(page.locator('pre.shiki').first()).toBeVisible({ timeout: 90_000 });
-  await report(page, 'markdown-code-block', 0, await now(page), { shellMs: Math.round(shellAt) });
-  await context.close();
-});
+const MARKDOWN_BLOCKS = [
+  { lang: 'ts', source: 'const answer: number = 42;', feature: 'markdown-code-block' },
+  { lang: 'bash', source: 'echo "hello" | tr a-z A-Z', feature: 'markdown-code-block-bash' },
+] as const;
+
+for (const { lang, source, feature } of MARKDOWN_BLOCKS) {
+  test(`first markdown code block (${lang})`, async ({ browser }) => {
+    test.setTimeout(120_000);
+    const context = await contextWithChat(
+      browser,
+      `waterfall-md-${lang}-${Date.now()}`,
+      `Here:\n\n\`\`\`${lang}\n${source}\n\`\`\`\n`
+    );
+    const page = await context.newPage();
+    await throttle(page);
+    await page.goto('/');
+    await dismissWorkdirPicker(page, 2_000);
+    await expect(page.getByTestId('sidebar-new-chat')).toBeVisible({ timeout: 60_000 });
+    const shellAt = await now(page);
+    await expect(page.locator('pre.shiki').first()).toBeVisible({ timeout: 90_000 });
+    await report(page, feature, 0, await now(page), { shellMs: Math.round(shellAt) });
+    await context.close();
+  });
+}
 
 test('open a terminal', async ({ browser }) => {
   test.setTimeout(120_000);

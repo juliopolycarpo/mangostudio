@@ -17,16 +17,34 @@ static NEXT_ADDRESS: AtomicU64 = AtomicU64::new(0);
 
 /// An address no other case in this run is using. A conformance run opens one
 /// connection per case, and a Windows pipe name is global to the machine.
-fn address() -> String {
-    let unique = NEXT_ADDRESS.fetch_add(1, Ordering::Relaxed);
-    let name = format!("mango-conformance-{}-{unique}", std::process::id());
-    if cfg!(windows) {
-        format!(r"\\.\pipe\{name}")
-    } else {
-        std::env::temp_dir()
-            .join(format!("{name}.sock"))
-            .display()
-            .to_string()
+///
+/// `listen_ipc` preserves the socket file on close, so the guard removes it when
+/// the case ends, including when the case panics. A named pipe has no file.
+struct TestAddress {
+    path: String,
+}
+
+impl TestAddress {
+    fn new() -> Self {
+        let unique = NEXT_ADDRESS.fetch_add(1, Ordering::Relaxed);
+        let name = format!("mango-conformance-{}-{unique}", std::process::id());
+        let path = if cfg!(windows) {
+            format!(r"\\.\pipe\{name}")
+        } else {
+            std::env::temp_dir()
+                .join(format!("{name}.sock"))
+                .display()
+                .to_string()
+        };
+        Self { path }
+    }
+}
+
+impl Drop for TestAddress {
+    fn drop(&mut self) {
+        if !cfg!(windows) {
+            let _ = std::fs::remove_file(&self.path);
+        }
     }
 }
 
@@ -36,6 +54,7 @@ struct SocketPair {
     driver_a: Option<JoinHandle<SessionClosure>>,
     driver_b: Option<JoinHandle<SessionClosure>>,
     listener: Option<IpcListener>,
+    _address: TestAddress,
 }
 
 impl ConformancePair for SocketPair {
@@ -99,6 +118,7 @@ struct RawSocket {
     driver: Option<JoinHandle<SessionClosure>>,
     peer: Option<RawClient>,
     listener: Option<IpcListener>,
+    _address: TestAddress,
 }
 
 impl RawConnection for RawSocket {
@@ -138,7 +158,8 @@ impl Fixture for IpcFixture {
     type Raw = RawSocket;
 
     async fn connect(&self, a: SessionOptions, b: SessionOptions) -> SocketPair {
-        let path = address();
+        let address = TestAddress::new();
+        let path = address.path.clone();
         let mut listener = listen_ipc(&path).await.expect("the address is free");
 
         // The dial has to be in flight before `accept` is awaited: a named
@@ -162,6 +183,7 @@ impl Fixture for IpcFixture {
             driver_a: Some(driver_a),
             driver_b: Some(driver_b),
             listener: Some(listener),
+            _address: address,
         }
     }
 
@@ -176,7 +198,8 @@ impl Fixture for IpcFixture {
     }
 
     async fn connect_raw(&self, a: SessionOptions) -> RawSocket {
-        let path = address();
+        let address = TestAddress::new();
+        let path = address.path.clone();
         let mut listener = listen_ipc(&path).await.expect("the address is free");
         let dialling = tokio::spawn({
             let path = path.clone();
@@ -191,6 +214,7 @@ impl Fixture for IpcFixture {
             driver: Some(driver),
             peer: Some(peer),
             listener: Some(listener),
+            _address: address,
         }
     }
 }
@@ -198,4 +222,22 @@ impl Fixture for IpcFixture {
 #[tokio::test]
 async fn the_local_socket_behaves_like_a_mango_transport() {
     run_conformance_suite(&IpcFixture).await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_test_address_removes_its_socket_file_when_dropped() {
+    let address = TestAddress::new();
+    let path = address.path.clone();
+    let listener = listen_ipc(&path).await.expect("the address is free");
+    listener.close().await;
+    assert!(
+        std::path::Path::new(&path).exists(),
+        "{path}: expected the preserved socket file to exist after close"
+    );
+    drop(address);
+    assert!(
+        !std::path::Path::new(&path).exists(),
+        "{path}: expected the socket file removed when the TestAddress dropped"
+    );
 }

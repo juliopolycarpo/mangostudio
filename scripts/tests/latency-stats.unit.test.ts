@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { nearestRank, summarizeLatencies } from '../lib/latency-stats';
+import { nearestRank, pairedComparison, summarizeLatencies } from '../lib/latency-stats';
 
 describe('scripts/lib/latency-stats', () => {
   it('summarizes an odd sample set regardless of input order', () => {
@@ -33,6 +33,25 @@ describe('scripts/lib/latency-stats', () => {
   it('names a sample that is not a duration', () => {
     expect(() => summarizeLatencies([3, Number.NaN])).toThrow(
       'expected finite, non-negative timing samples in ms | received: NaN in [3, NaN]'
+    );
+  });
+
+  it('pairs samples by run and counts which side won each pair', () => {
+    expect(pairedComparison([10, 10, 10, 10], [11, 9, 12, 10])).toEqual({
+      pairs: 4,
+      medianDelta: 0.5,
+      candidateFaster: 1,
+      baselineFaster: 2,
+      ties: 1,
+    });
+  });
+
+  it('refuses sample sets that cannot be paired', () => {
+    expect(() => pairedComparison([1, 2], [1])).toThrow(
+      'expected two non-empty sample sets of equal length | received: 2 baseline and 1 candidate samples'
+    );
+    expect(() => pairedComparison([1], [Number.NaN])).toThrow(
+      'expected finite samples | received: baseline [1], candidate [NaN]'
     );
   });
 });

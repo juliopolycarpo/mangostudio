@@ -167,7 +167,12 @@ function manualDeadline(): { timer: DeadlineTimer; expire: () => void } {
   };
 }
 
-describe('recordAotOrder', () => {
+// Recording is a Linux-only build step: `aotOrderSkipReason` refuses every other host, and the
+// recorder itself needs POSIX behaviour Windows lacks (it spawns an executable script, stops the hub
+// with a catchable SIGTERM so it writes its file, and kills its process group with `kill(-pid)`).
+// Windows therefore never reaches `recordAotOrder`; the refusal is covered on every host by the
+// `aotOrderSkipReason` and `compileWithAotOrder` tests.
+describe.skipIf(process.platform === 'win32')('recordAotOrder', () => {
   let workDir: string;
   let orderFile: string;
   const noWorkload = (): Promise<void> => Promise.resolve();
@@ -419,7 +424,8 @@ class FakeAotOrderSteps implements AotOrderSteps {
   record(recordingBinary: string, orderFile: string): Promise<AotOrderSummary> {
     this.calls.push(`record ${recordingBinary} -> ${orderFile}`);
     this.orderDirAtRecording = existsSync(this.orderDir)
-      ? [...new Bun.Glob('**/*').scanSync(this.orderDir)]
+      ? // Glob yields native separators; list with `/` so the expectation reads the same everywhere.
+        [...new Bun.Glob('**/*').scanSync(this.orderDir)].map((path) => path.replaceAll('\\', '/'))
       : [];
     if (this.recordingError) return Promise.reject(this.recordingError);
     mkdirSync(this.orderDir, { recursive: true });

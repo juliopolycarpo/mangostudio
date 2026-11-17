@@ -25,6 +25,7 @@ use super::capability::{
 use super::grep_prefilter::LinePrefilter;
 use super::io::{check_cancel, io_error, path_error, read};
 use super::policy::{CompiledPolicy, PathPolicy};
+use crate::result_value::object;
 use crate::workspace::lexically_normalize;
 
 const MAX_PATTERN_UTF16_UNITS: usize = 1_000;
@@ -144,9 +145,15 @@ pub(super) fn glob(params: GlobParams, cancel: &CancellationToken) -> Result<Val
         ))
     })?;
 
-    Ok(
-        json!({ "pattern": params.pattern, "cwd": params.cwd, "matches": matches, "truncated": truncated }),
-    )
+    Ok(object([
+        ("pattern", Value::from(params.pattern)),
+        ("cwd", json!(params.cwd)),
+        (
+            "matches",
+            Value::Array(matches.into_iter().map(Value::String).collect()),
+        ),
+        ("truncated", Value::Bool(truncated)),
+    ]))
 }
 
 /// Searches regular, non-binary files with an interruptible ECMAScript RegExp.
@@ -297,13 +304,13 @@ pub(super) fn grep(params: GrepParams, cancel: &CancellationToken) -> Result<Val
         )));
     }
 
-    Ok(json!({
-        "pattern": params.pattern,
-        "path": params.input_path,
-        "matches": matches,
-        "filesScanned": files_scanned,
-        "truncated": truncated,
-    }))
+    Ok(object([
+        ("pattern", Value::from(params.pattern)),
+        ("path", Value::from(params.input_path)),
+        ("matches", Value::Array(matches)),
+        ("filesScanned", json!(files_scanned)),
+        ("truncated", Value::Bool(truncated)),
+    ]))
 }
 
 enum PathGlob {
@@ -1166,6 +1173,7 @@ mod prefilter_parity_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::result_value::assert_wire_eq;
     use crate::test_support::scratch_dir;
 
     fn token() -> CancellationToken {
@@ -1524,6 +1532,34 @@ mod tests {
         params.path_policy = policy;
         let error = grep(params, &token()).unwrap_err();
         assert_eq!(error.details.unwrap()["kind"], "path_access");
+    }
+
+    #[test]
+    fn glob_and_grep_answer_with_exactly_their_documented_fields() {
+        let root = scratch_dir("filesystem-search-whole-results");
+        fs::write(root.join("match.txt"), "one\nneedle two\n").unwrap();
+
+        assert_wire_eq!(
+            glob(glob_params(&root, "*.txt"), &token()).unwrap(),
+            json!({
+                "pattern": "*.txt",
+                "cwd": root.to_string_lossy(),
+                "matches": ["match.txt"],
+                "truncated": false,
+            }),
+            "expected the whole fs.glob answer | received a different object"
+        );
+        assert_wire_eq!(
+            grep(grep_params(&root, "needle"), &token()).unwrap(),
+            json!({
+                "pattern": "needle",
+                "path": ".",
+                "matches": [{"file": "match.txt", "line": 2, "text": "needle two"}],
+                "filesScanned": 1,
+                "truncated": false,
+            }),
+            "expected the whole fs.grep answer | received a different object"
+        );
     }
 
     #[test]

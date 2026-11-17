@@ -284,9 +284,30 @@ build):
   107, 100 and 105, but folded the small ones into the entry (+1.8, +2.0 and +6.3 KB Brotli
   eager), removed no round from any first use, and took the first code block from 22
   requests to 21, 21 and 20.
-- **The first fenced code block is bytes-bound, not round-bound.** One `ts` block loads the
-  eight common grammars and four themes (about 1.2 MB raw, 22 requests, three rounds).
-  Over a 150 ms, 1.6 Mbit/s profile the grammar round is most of the wait.
+- **TypeBox `Value.Check` stays in the entry.** TypeBox is 108 KB of the entry (builders 43 KB,
+  the schema engine 27 KB, format 15 KB, `value` 14 KB, locale and system 7 KB). Stubbing
+  `typebox/value` out of its five importers in a throwaway build took the eager Brotli total
+  from 430,023 to 415,189 B (-14.8 KB, -63 KB raw), so the engine is worth about 15 KB. It
+  cannot leave without a replacement: the four eager importers (onboarding defaults, tool
+  subject keys, turn checkpoints, and the terminal wire parser through its barrel) validate
+  synchronously, the named import `{ Check }` does not tree-shake (430,241 B, the package has
+  no `sideEffects` field), and a lazy load would make a first `isTurnCheckpointPart` answer
+  wrongly. The options are validators generated at build time or a hand-written subset
+  checker proven equal to `Value.Check` by differential tests; both are larger than the
+  saving justifies today.
+- **The first fenced code block loads one grammar and one theme.** The highlighter starts
+  empty; `preloadCodeLanguages(languages, theme)` loads the fence's own grammar and the active
+  theme, and a theme switch loads just the new theme. A `md` block is the one grammar that
+  highlights other languages inside it, so the renderer also reads the fences written inside
+  a markdown block and asks for those grammars. A fence counts only once its info line is
+  complete: while a reply streams, a fence opening of "ts" can be all that has arrived of "tsx", and
+  loading the wrong grammar is a wasted download. The highlighter used to start from four themes and eight common grammars, so one `ts` block fetched about
+  1.2 MB raw in 22 requests. Shiki already runs on its JavaScript regex engine, so no
+  Oniguruma WASM is involved. `MarkdownContent` also asks for the highlighter core as soon
+  as the source holds a fence with a complete info line that names a supported language (a
+  bare fence or an unsupported language never fetches it), in parallel with the renderer
+  chunk, which takes the first block from three rounds to two. The load report models it the
+  same way: renderer and highlighter in one round, then grammar and theme.
 
 `tests/browser-smoke/load-waterfall.spec.ts` watches the same first uses in a real browser
 (opt-in: `MANGO_LOAD_WATERFALL=1`, and `MANGO_LOAD_PROFILE=slow-4g` for a CDP throttle) and prints
@@ -346,7 +367,7 @@ a real port; extend it rather than adding another `handle()`-driven case.
 ### Precompressed representations (embedded mode only)
 
 The binary ships a gzip and a Brotli copy of every compressible text asset, and the server
-picks one from `Accept-Encoding`. It never compresses a response: the CPU cost is paid once, at
+picks one from `Accept-Encoding`. It never compresses an asset response (API JSON is a separate case, see `hub-runtime.md`): the CPU cost is paid once, at
 build time, by `scripts/lib/precompress-assets.ts` (gzip level 9, Brotli quality 11 in generic
 mode, both deterministic). A file gets a copy only if it is a text format (`.js`, `.css`,
 `.html`, `.json`, `.svg`, `.webmanifest`, `.txt`, `.xml`), is at least 256 B, and the copy saves

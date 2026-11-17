@@ -12,6 +12,29 @@ import {
 import { erroredHealthResponse, FakeHealthEndpoint } from './support/fake-health-endpoint';
 import { stubProcessPlatform } from './support/process-platform';
 
+/**
+ * A `fetch` that answers from a fixed list, one entry per call: a Response is returned, an Error
+ * rejects. Owned by the test that builds it, so no other caller in the process can consume an
+ * entry, as one could with a spy on the global `fetch`.
+ */
+class FakeHealthSequence {
+  calls = 0;
+  constructor(private readonly answers: readonly (Response | Error)[]) {}
+
+  fetch = (): Promise<Response> => {
+    const answer = this.answers[this.calls];
+    this.calls += 1;
+    if (answer === undefined) {
+      return Promise.reject(
+        new Error(
+          `expected at most ${this.answers.length} health requests | received: ${this.calls}`
+        )
+      );
+    }
+    return answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer);
+  };
+}
+
 describe('scripts/lib/wait-for-health', () => {
   describe('budget constants', () => {
     test('default budget matches scripts/release/wait-for-health.sh nominal total seconds', () => {
@@ -105,43 +128,64 @@ describe('scripts/lib/wait-for-health', () => {
     });
 
     test('retries non-2xx headers when the response body has already errored', async () => {
-      fetchSpy
-        .mockResolvedValueOnce(erroredHealthResponse(503))
-        .mockResolvedValueOnce(new Response('ready', { status: 200 }));
+      const health = new FakeHealthSequence([
+        erroredHealthResponse(503),
+        new Response('ready', { status: 200 }),
+      ]);
 
       await waitForServerReady('http://localhost:1/api/health', {
-        budgetMs: 1_000,
+        // The cases below end as soon as the fake answers 2xx, so a wide budget costs nothing.
+        budgetMs: 30_000,
         intervalMs: 10,
+        fetch: health.fetch,
       });
 
-      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(health.calls).toBe(2);
     });
 
     test('retries through non-2xx responses until the server reports 2xx', async () => {
-      fetchSpy
-        .mockResolvedValueOnce(new Response('not ready', { status: 503 }))
-        .mockResolvedValueOnce(new Response('still booting', { status: 500 }))
-        .mockResolvedValueOnce(new Response('{"status":"ok"}', { status: 200 }));
+      const health = new FakeHealthSequence([
+        new Response('not ready', { status: 503 }),
+        new Response('still booting', { status: 500 }),
+        new Response('{"status":"ok"}', { status: 200 }),
+      ]);
 
       await waitForServerReady('http://localhost:1/api/health', {
-        budgetMs: 1_000,
+        budgetMs: 30_000,
         intervalMs: 10,
+        fetch: health.fetch,
       });
 
-      expect(fetchSpy).toHaveBeenCalledTimes(3);
+      expect(health.calls).toBe(3);
     });
 
     test('retries through connection errors until the server reports 2xx', async () => {
-      fetchSpy
-        .mockRejectedValueOnce(new Error('ECONNREFUSED 127.0.0.1:1'))
-        .mockResolvedValueOnce(new Response('{"status":"ok"}', { status: 200 }));
+      const health = new FakeHealthSequence([
+        new Error('ECONNREFUSED 127.0.0.1:1'),
+        new Response('{"status":"ok"}', { status: 200 }),
+      ]);
 
       await waitForServerReady('http://localhost:1/api/health', {
-        budgetMs: 1_000,
+        budgetMs: 30_000,
         intervalMs: 10,
+        fetch: health.fetch,
       });
 
-      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(health.calls).toBe(2);
+    });
+
+    test('asks the fetch it was given, not the global one a leaked caller could be using', async () => {
+      const health = new FakeHealthSequence([new Response('ok', { status: 200 })]);
+      fetchSpy.mockRejectedValue(new Error('the global fetch must not be called'));
+
+      await waitForServerReady('http://localhost:1/api/health', {
+        budgetMs: 30_000,
+        intervalMs: 10,
+        fetch: health.fetch,
+      });
+
+      expect(health.calls).toBe(1);
+      expect(fetchSpy).not.toHaveBeenCalled();
     });
 
     test('throws with the URL and elapsed budget when the server never becomes ready', async () => {
