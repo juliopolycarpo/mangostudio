@@ -251,6 +251,9 @@ target's standard library first. Both paths stamp the release version in at
 compile time (`MANGOSTUDIO_RELEASE_VERSION`) — or `dev` with `--dev`, the version a
 source checkout's hub accepts — and check each binary's header —
 and its `--version`, when this machine can run it — before it is staged.
+Both paths also pass `--config` with a `--remap-path-prefix` that rewrites the
+builder's Cargo home to `/cargo`, and reject a staged runtime that still contains
+a `.cargo/registry/` path, a `/home/runner/` path or this machine's Cargo home.
 `docs/reference/releasing.md` records the per-target toolchains and the floor.
 
 ### Build backups and smoke commands

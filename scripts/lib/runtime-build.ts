@@ -5,6 +5,7 @@
 // legs run `scripts/build-runtime.ts` with `bun --no-install`.
 
 import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 
 import {
@@ -146,7 +147,7 @@ function runtimeTargetOs(platform: ReleasePlatformId): RuntimeOs {
  */
 export function cargoRuntimeBuildCommand(
   platform: ReleasePlatformId,
-  options: { readonly zig: boolean }
+  options: { readonly zig: boolean; readonly cargoHome?: string }
 ): string[] {
   const spec = RUNTIME_TARGETS[platform];
   const zig = options.zig && spec.os === 'linux';
@@ -160,7 +161,45 @@ export function cargoRuntimeBuildCommand(
     RUNTIME_CARGO_PACKAGE,
     '--target',
     target,
+    ...remapCargoHomeConfigArgs(options.cargoHome ?? resolveCargoHome()),
   ];
+}
+
+/** Where crate sources and git checkouts live: `CARGO_HOME`, else `~/.cargo`. */
+export function resolveCargoHome(
+  env: Readonly<Record<string, string | undefined>> = process.env
+): string {
+  const configured = env.CARGO_HOME?.trim();
+  if (configured) return configured;
+  return join(env.HOME ?? env.USERPROFILE ?? homedir(), '.cargo');
+}
+
+/** What a remapped Cargo home reads as in panic locations and strings. */
+const CARGO_HOME_REMAP_TARGET = '/cargo';
+
+/**
+ * `--config` arguments that add `--remap-path-prefix=<cargoHome>=/cargo` to the
+ * target's rustc flags, so a panic location reads
+ * `/cargo/registry/src/index.crates.io-<hash>/tokio-1.x/src/…` rather than the
+ * builder's home directory.
+ *
+ * It goes through a `target.'cfg(all())'` table because rustflags from
+ * matching `cfg()` tables are concatenated: `RUSTFLAGS` or
+ * `CARGO_ENCODED_RUSTFLAGS` would replace the Windows `+crt-static` flag in
+ * `.cargo/config.toml`, and `[build] rustflags` would also reach dev builds
+ * and debugger paths. With `--target` set, build scripts and proc macros
+ * (host artifacts) are not affected. The value depends on the builder's Cargo
+ * home only, which is stable between runs of one machine, so caches keep
+ * their keys. The workspace root needs no remap: cargo hands rustc workspace
+ * sources by relative path.
+ *
+ * @example
+ * remapCargoHomeConfigArgs('/home/me/.cargo');
+ * // → ['--config', `target.'cfg(all())'.rustflags=["--remap-path-prefix=/home/me/.cargo=/cargo"]`]
+ */
+function remapCargoHomeConfigArgs(cargoHome: string): string[] {
+  const flag = `--remap-path-prefix=${cargoHome}=${CARGO_HOME_REMAP_TARGET}`;
+  return ['--config', `target.'cfg(all())'.rustflags=[${JSON.stringify(flag)}]`];
 }
 
 /**
@@ -389,6 +428,42 @@ export function runtimeVersionProblem(stdout: string, expected: string): string 
     : `expected --version: ${expected} | received: ${reported || '(empty)'}`;
 }
 
+/**
+ * Strings that mark a builder's directory inside a binary. The first three
+ * match any builder's Cargo registry or a GitHub runner home without knowing
+ * the machine (a prebuilt runtime is verified on a different machine than it
+ * was built on); the last is this machine's own Cargo home when it is a
+ * custom one such as `/usr/local/cargo`.
+ */
+export function buildPathNeedles(cargoHome: string = resolveCargoHome()): string[] {
+  const needles = ['.cargo/registry/', '.cargo\\registry\\', '/home/runner/'];
+  if (cargoHome.length >= 8 && cargoHome !== CARGO_HOME_REMAP_TARGET) needles.push(cargoHome);
+  return needles;
+}
+
+/**
+ * One problem per needle found in the binary's bytes, naming the path and how
+ * often it appears. A leaked build path discloses the builder's home or CI
+ * layout and costs bytes in every panic location.
+ *
+ * @example
+ * embeddedBuildPathProblems(Buffer.from('/home/runner/.cargo/registry/x'), ['/home/runner/']);
+ * // → ['expected no build path in the binary | received: /home/runner/ (1 occurrence)']
+ */
+export function embeddedBuildPathProblems(bytes: Buffer, needles: readonly string[]): string[] {
+  const problems: string[] = [];
+  for (const needle of needles) {
+    let count = 0;
+    for (let at = bytes.indexOf(needle); at !== -1; at = bytes.indexOf(needle, at + 1)) count++;
+    if (count > 0) {
+      problems.push(
+        `expected no build path in the binary (remap it with --remap-path-prefix) | received: ${needle} (${count} occurrence${count === 1 ? '' : 's'})`
+      );
+    }
+  }
+  return problems;
+}
+
 export interface RuntimeVerification {
   /** `null` when the file is not a recognisable executable at all. */
   readonly header: ExecutableHeader | null;
@@ -418,16 +493,19 @@ export async function verifyRuntimeBinary(
 ): Promise<RuntimeVerification> {
   const { path, target, version, hostPlatform, enforceGlibcFloor } = options;
   let header: ExecutableHeader;
+  let bytes: Buffer;
   try {
-    header = readExecutableHeader(readFileSync(path));
+    bytes = readFileSync(path);
+    header = readExecutableHeader(bytes);
   } catch (caught) {
     const reason = caught instanceof Error ? caught.message : String(caught);
     return { header: null, reportedVersion: null, problems: [`${path}: ${reason}`] };
   }
 
-  const problems = runtimeHeaderProblems(target.arch, header, { enforceGlibcFloor }).map(
-    (problem) => `${path}: ${problem}`
-  );
+  const problems = [
+    ...runtimeHeaderProblems(target.arch, header, { enforceGlibcFloor }),
+    ...embeddedBuildPathProblems(bytes, buildPathNeedles()),
+  ].map((problem) => `${path}: ${problem}`);
   if (!canRunOnHost(target.arch, hostPlatform)) {
     return { header, reportedVersion: null, problems };
   }
