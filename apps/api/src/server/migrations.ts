@@ -56,29 +56,42 @@ export async function prepareToolchainDatabase(
 }
 
 /**
- * Migrate the database to the latest schema; exit(1) on failure. Migrations run
- * while the connection still syncs every commit, and only then does it drop to
- * `synchronous = NORMAL`: Kysely's SQLite adapter does not wrap a migration in a
- * transaction, so after a power loss at NORMAL a migration's DDL could survive
- * without its bookkeeping row and the next start would run it again.
+ * Migrate the database to the latest schema; exit(1) on failure. The pending
+ * migrations run as one transaction (the Bun SQLite dialect reports transactional
+ * DDL), so a failure, crash or power loss leaves the schema and the
+ * `kysely_migration` rows exactly as they were before the batch. They run while
+ * the connection still syncs every commit, and only then does it drop to
+ * `synchronous = NORMAL`: at `FULL` the whole batch costs one fsync, and the
+ * committed schema is on disk before the hub serves a request.
  * // Usage: await runMigrations()
  */
 export async function runMigrations(db = getDb()): Promise<void> {
   const { error, results } = await createMigrator(db).migrateToLatest();
-  reportMigrationResults(results);
+  reportMigrationResults(results, error !== undefined);
 
   if (error) {
-    console.error('[migrate] Migration failed:', error);
+    console.error('[migrate] Migration failed, batch rolled back:', error);
     process.exit(1);
   }
   await relaxDurability(db);
 }
 
-/** Print a per-migration success/failure line. */
-function reportMigrationResults(results: MigrationResult[] | undefined): void {
+/**
+ * Print a per-migration success/failure line. When the batch failed, the migrations
+ * Kysely reports as `Success` ran inside the transaction that was rolled back, so
+ * they are reported as rolled back rather than applied.
+ */
+function reportMigrationResults(
+  results: MigrationResult[] | undefined,
+  batchFailed: boolean
+): void {
   results?.forEach((it) => {
     if (it.status === 'Success') {
-      console.warn(`[migrate] ✓ "${it.migrationName}"`);
+      console.warn(
+        batchFailed
+          ? `[migrate] ↩ "${it.migrationName}" rolled back with the batch`
+          : `[migrate] ✓ "${it.migrationName}"`
+      );
     } else if (it.status === 'Error') {
       console.error(`[migrate] ✗ "${it.migrationName}" failed`);
     }

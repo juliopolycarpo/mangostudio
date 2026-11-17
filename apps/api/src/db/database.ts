@@ -26,9 +26,12 @@ const dbLogger = createDiagnosticLogger('db');
  * A file database runs in WAL mode. `synchronous` is set to `FULL` here, after
  * the WAL switch, instead of trusting the library default: the hub lowers it with
  * `relaxDurability` only after its migrations have finished (see
- * `db/durability.ts`), because Kysely's SQLite adapter does not run a migration
- * in a transaction and a lost bookkeeping row would make the next start re-run a
- * migration that is not idempotent. The default is not `FULL` everywhere: macOS
+ * `db/durability.ts`). The pending migrations commit as one transaction (the
+ * dialect reports transactional DDL), so a crash or power loss can no longer leave
+ * DDL without its bookkeeping row: the batch is there in full or not at all. `FULL`
+ * stays for the migrations because it now costs one fsync for the whole batch and
+ * puts the committed schema on disk before the hub serves a request. The default is
+ * not `FULL` everywhere: macOS
  * links Apple's SQLite, built with `SQLITE_DEFAULT_WAL_SYNCHRONOUS=1`, so a
  * connection that enters WAL mode, or opens a file already in it (every restart),
  * reads `NORMAL`. Setting the level after the switch holds on every build.
