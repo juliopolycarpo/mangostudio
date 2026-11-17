@@ -12,8 +12,8 @@ import { Button } from '@/components/ui/Button';
 import { useI18n } from '@/hooks/use-i18n';
 
 import { upgradeRefusalReasonLabel } from '../format';
+import { lazyUpgradeDialog } from './LazyUpgradeDialog';
 import { RefusalNotice } from './RefusalNotice';
-import { UpgradeDialog } from './UpgradeDialog';
 
 interface UpdateActionProps {
   readonly status: MachineUpdateStatus;
@@ -43,13 +43,21 @@ export function UpdateAction({
 
   return (
     <>
-      <Button variant="primary" size="sm" onClick={() => setDialogOpen(true)} data-testid={testId}>
+      <Button
+        variant="primary"
+        size="sm"
+        onClick={() => setDialogOpen(true)}
+        onPointerEnter={lazyUpgradeDialog.preload}
+        onFocus={lazyUpgradeDialog.preload}
+        data-testid={testId}
+      >
         {m.upgrade}
       </Button>
       {dialogOpen && (
-        <UpgradeDialog
+        <lazyUpgradeDialog.Overlay
           status={status}
           onClose={() => setDialogOpen(false)}
+          onLoadFailed={() => setDialogOpen(false)}
           onUpgraded={onUpgraded}
         />
       )}

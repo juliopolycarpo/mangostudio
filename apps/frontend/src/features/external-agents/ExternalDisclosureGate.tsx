@@ -18,7 +18,7 @@ import { normalizePermissionLevel } from '@mangostudio/shared/external-agents/va
 import { useCallback, useEffect, useState } from 'react';
 
 import { useToast } from '@/components/ui/Toast';
-import { ExternalDisclosureDialog } from '@/features/chat/components/ExternalDisclosureDialog';
+import { lazyExternalDisclosureDialog } from '@/features/chat/components/LazyExternalDisclosureDialog';
 import { useI18n } from '@/hooks/use-i18n';
 
 import {
@@ -70,7 +70,9 @@ export function ExternalDisclosureGate({ permissionLevel }: ExternalDisclosureGa
   };
 
   return (
-    <ExternalDisclosureDialog
+    <lazyExternalDisclosureDialog.Overlay
+      // The chunk did not arrive: settle the send as declined, as Cancel would.
+      onLoadFailed={decline}
       targetId={request.targetId}
       // Normalized, because the stored value is whatever a chat was last saved
       // with and an unrecognized one resolves to the restrictive level rather

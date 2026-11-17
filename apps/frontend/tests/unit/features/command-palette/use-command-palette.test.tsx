@@ -44,6 +44,14 @@ describe('useCommandPalette', () => {
     expect(dispatchChord({ ctrlKey: false, metaKey: false }).defaultPrevented).toBe(false);
   });
 
+  it('leaves the modifier key alone while it warms the palette chunk', () => {
+    const { result } = renderHook(() => useCommandPalette());
+    // Starting the lazy chunk on the modifier must not claim the event or open anything.
+    const modifier = dispatchChord({ key: 'Control', ctrlKey: true });
+    expect(modifier.defaultPrevented, 'modifier keydown prevented').toBe(false);
+    expect(result.current.isOpen, 'palette open after the modifier alone').toBe(false);
+  });
+
   it('treats a held key as one press rather than a flicker', () => {
     const { result } = renderHook(() => useCommandPalette());
     dispatchChord();

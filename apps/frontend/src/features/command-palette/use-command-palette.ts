@@ -11,6 +11,8 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { isCommandPaletteShortcut } from '@/lib/keyboard';
 
+import { preloadCommandPalette } from './CommandPaletteHost';
+
 export interface CommandPaletteState {
   readonly isOpen: boolean;
   readonly open: () => void;
@@ -25,6 +27,9 @@ export function useCommandPalette(): CommandPaletteState {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      // The chord's modifier goes down before the K: start the palette's chunk
+      // then, so it is usually in by the time the K lands.
+      if (event.key === 'Control' || event.key === 'Meta') preloadCommandPalette();
       // An auto-repeating chord is one press, not a stream of toggles.
       if (event.repeat || !isCommandPaletteShortcut(event)) return;
       event.preventDefault();

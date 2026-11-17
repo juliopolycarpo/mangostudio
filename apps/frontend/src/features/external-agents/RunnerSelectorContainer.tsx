@@ -18,7 +18,7 @@ import { useState } from 'react';
 
 import { RunnerSelector } from '@/components/layout/RunnerSelector';
 import { useToast } from '@/components/ui/Toast';
-import { ExternalDisclosureDialog } from '@/features/chat/components/ExternalDisclosureDialog';
+import { lazyExternalDisclosureDialog } from '@/features/chat/components/LazyExternalDisclosureDialog';
 import { useChatHasTurns } from '@/features/chat/hooks/use-chat-has-turns';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { useI18n } from '@/hooks/use-i18n';
@@ -26,7 +26,7 @@ import { useApp } from '@/lib/app-context';
 import { ApiError } from '@/lib/utils';
 import { adoptExternalSession, forkChatWithRunner } from '@/services/external-agent-service';
 
-import { ExternalSessionPicker } from './ExternalSessionPicker';
+import { lazyExternalSessionPicker } from './LazyExternalSessionPicker';
 import { useExternalAgents } from './useExternalAgents';
 import { useExternalDisclosures } from './useExternalDisclosures';
 
@@ -143,7 +143,8 @@ export function RunnerSelectorContainer() {
       />
 
       {isPickingSession && app.currentEnvironmentId ? (
-        <ExternalSessionPicker
+        <lazyExternalSessionPicker.Overlay
+          onLoadFailed={() => setPickingSession(false)}
           environmentId={app.currentEnvironmentId}
           environmentName={environmentName}
           {...(app.currentWorkdir ? { workspacePath: app.currentWorkdir } : {})}
@@ -156,7 +157,8 @@ export function RunnerSelectorContainer() {
       ) : null}
 
       {pendingDisclosure ? (
-        <ExternalDisclosureDialog
+        <lazyExternalDisclosureDialog.Overlay
+          onLoadFailed={() => setPendingDisclosure(null)}
           targetId={pendingDisclosure.descriptor.targetId}
           permissionLevel={normalizePermissionLevel(app.runnerPermissions.level).value}
           busy={isAccepting}

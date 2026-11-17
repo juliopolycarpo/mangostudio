@@ -322,11 +322,24 @@ requested panel at once, never the previous one first. React holds a Suspense re
 to 300 ms after it commits a fallback, so a spinner flash made a cold click on a fast network
 about 300 ms slower than the fetch.
 
+**Dialogs and popover bodies are lazy.** Anything shown only after a click or a chord is a
+chunk, not entry weight: the command palette with its registry, the capability inspector and
+MCP menu bodies, the native-session picker, the third-party notice and the machine upgrade
+dialog together took about 14.6 KB Brotli out of the entry. The chip or button that
+opens one stays eager and warms the chunk on hover or focus (the palette on the chord's
+modifier key). `createLazyOverlay` (`components/layout/LazyOverlay.tsx`) is the pattern: the
+owner keeps its `open` state and mounts `Overlay` only while open, `onLoadFailed` closes it, and
+a chunk that cannot be fetched raises a toast instead of a dead click. Do not use it for
+something drawn at first paint or opened by the app itself on a first visit: the folder picker
+opens on its own for a chat with no folder, so it stays eager, and a lazy chat-feed card would
+pop in after a round trip.
+
 **Lazy chunk failures stay local.** `LazyChunkBoundary` keeps a failed chunk where it sits,
 with Retry and Reload; a plain `React.lazy` would cache the rejection and take the whole
 page down through the route's error component. These go through `retryableLazy` and that
-boundary: the rail panels, the terminal view, the diff viewer and the markdown renderer
-(which degrades to its plain text instead of a panel). Not through it:
+boundary: the rail panels, the terminal view, the diff viewer, the markdown renderer
+(which degrades to its plain text instead of a panel) and the lazy overlays above (a toast
+and a closed overlay). Not through it:
 
 - Route `.lazy()` chunks (and the pop-out terminal, which imports `TerminalView` inside its
   route chunk). A failure reaches the route's error component, `BootstrapErrorPanel`, which
