@@ -7,6 +7,8 @@ import {
   ListChatMessagesQuerySchema,
   type MessagesPage,
   MessagesPageSchema,
+  PAGE_LIMIT_DEFAULT,
+  PAGE_LIMIT_MAX,
   SummarizeToNewChatBodySchema,
   UpdateChatBodySchema,
 } from '@mangostudio/shared/chat';
@@ -21,7 +23,7 @@ import { type Elysia, t } from 'elysia';
 import { getDb } from '../../../db/database';
 import { createJsonResponseEncoder } from '../../../lib/compiled-json-response';
 import { requireAuth } from '../../../plugins/auth-middleware';
-import { parseQueryInt } from '../../../utils/query';
+import { parsePageLimit } from '../../../utils/query';
 import { NoModelAvailableError } from '../../generation/application/resolve-model';
 import { modelUnavailableResponse } from '../../generation/http/model-unavailable-response';
 import { InvalidTranscriptCursorError } from '../../messages/domain/transcript-cursor';
@@ -283,7 +285,10 @@ export const chatRoutes = (app: Elysia) =>
                 chatId: params.id,
                 userId: user?.id ?? '',
                 cursor: query.cursor,
-                limit: query.limit ? parseQueryInt(query.limit, 50) : undefined,
+                limit: parsePageLimit(query.limit, {
+                  fallback: PAGE_LIMIT_DEFAULT,
+                  max: PAGE_LIMIT_MAX,
+                }),
                 order: query.order,
               },
               getDb()

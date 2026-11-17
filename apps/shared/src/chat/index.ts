@@ -7,6 +7,7 @@ export {
 } from './gallery-page';
 export { type Message, MessagePartSchema, MessageSchema } from './message';
 export { type MessagesPage, MessagesPageSchema } from './messages-page';
+export { PAGE_LIMIT_DEFAULT, PAGE_LIMIT_MAX } from './page-limit';
 export {
   type Chat,
   type ChatAttachment,

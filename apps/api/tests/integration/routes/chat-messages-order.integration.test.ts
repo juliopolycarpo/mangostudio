@@ -178,7 +178,7 @@ describe('GET /chats/:id/messages?order=desc', () => {
     expect(pages.at(-1)?.nextCursor).toBeNull();
   });
 
-  it.each([[1], [7], [13], [47], [60], [119], [120], [500]])(
+  it.each([[1], [7], [13], [47], [60], [99], [100]])(
     'reads each row exactly once with a page size of %d across the ties',
     async (limit) => {
       const chatId = await newChat();

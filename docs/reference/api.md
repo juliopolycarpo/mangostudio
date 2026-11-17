@@ -59,7 +59,7 @@ There is no mounted `GET /api/chats/:id` route. Read chat metadata from the auth
 | `POST` | `/api/messages`               | Yes  | Create a message        |
 
 `GET` pages the transcript (`MessagesPage` from `@mangostudio/shared/chat`). Query:
-`limit` (default 50), `cursor`, and `order` — `asc` (the default) reads from the oldest
+`limit` (default 50, at most 100: a larger value is clamped, and a zero, negative or non-integer one is ignored), `cursor`, and `order` — `asc` (the default) reads from the oldest
 message, `desc` from the newest. A page is chronological, oldest message first, in both
 orders: `order` picks which window of the transcript the page is, and `nextCursor` names the
 edge of the page that faces the messages not read yet (its last message for `asc`, its

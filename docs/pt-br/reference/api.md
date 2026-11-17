@@ -60,7 +60,7 @@ Não há rota montada `GET /api/chats/:id`. Leia os metadados na lista autentica
 | `POST` | `/api/messages`               | Sim  | Criar uma mensagem       |
 
 O `GET` pagina a transcrição (`MessagesPage` de `@mangostudio/shared/chat`). Query: `limit`
-(padrão 50), `cursor` e `order` — `asc` (o padrão) lê a partir da mensagem mais antiga, `desc`
+(padrão 50, no máximo 100: um valor maior é limitado a 100, e um valor zero, negativo ou não inteiro é ignorado), `cursor` e `order` — `asc` (o padrão) lê a partir da mensagem mais antiga, `desc`
 a partir da mais nova. Em ambas as ordens a página é cronológica, da mais antiga para a mais
 nova: `order` escolhe qual janela da transcrição a página é, e `nextCursor` aponta a borda da
 página voltada para as mensagens ainda não lidas (a última mensagem em `asc`, a primeira em

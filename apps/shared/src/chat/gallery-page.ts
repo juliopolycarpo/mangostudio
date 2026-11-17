@@ -4,6 +4,10 @@ import type { GalleryItem } from '../types/gallery';
 
 /** Query of `GET /api/messages/images`. */
 export const ListGalleryQuerySchema = Type.Object({
+  /**
+   * Rows per page, as decimal text. Above `PAGE_LIMIT_MAX` it is clamped to it; a value
+   * that is not a positive integer is ignored and the page is `PAGE_LIMIT_DEFAULT` rows.
+   */
   limit: Type.Optional(Type.String()),
   /**
    * The `nextCursor` of the previous page, passed back unchanged. The value is
