@@ -292,8 +292,12 @@ function collectCodeLanguages(content: string, languages: Set<string>, depth: nu
     // A fenced token's raw text is its opening line, so a newline after the info
     // string says the line is complete. Without one the fence is still arriving.
     if (!token.raw.includes('\n')) return;
-    languages.add(token.lang);
-    if (resolveLanguageId(token.lang) === 'markdown' && depth < MAX_EMBEDDED_MARKDOWN_DEPTH) {
+    // Collect the grammar id, not the info string: a fence the highlighter has no
+    // grammar for must not start the Shiki chunk, and `ts` and `typescript` are one grammar.
+    const language = resolveLanguageId(token.lang);
+    if (language === null) return;
+    languages.add(language);
+    if (language === 'markdown' && depth < MAX_EMBEDDED_MARKDOWN_DEPTH) {
       collectCodeLanguages(token.text, languages, depth + 1);
     }
   });

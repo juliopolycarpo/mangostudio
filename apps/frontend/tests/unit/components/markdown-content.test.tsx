@@ -387,7 +387,10 @@ describe('MarkdownContent — syntax highlighting', () => {
     );
 
     await waitFor(() => {
-      expect(shiki.preloadCodeLanguages).toHaveBeenCalledWith(['md', 'ts'], 'one-dark-pro');
+      expect(shiki.preloadCodeLanguages).toHaveBeenCalledWith(
+        ['markdown', 'typescript'],
+        'one-dark-pro'
+      );
     });
   });
 
@@ -455,6 +458,37 @@ describe('MarkdownContent — syntax highlighting', () => {
     expect(container.querySelector('pre')).toBeInTheDocument();
     expect(container.querySelector('pre > code')).toBeInTheDocument();
     expect(container.querySelector('span[style]')).not.toBeInTheDocument();
+  });
+
+  it('never loads the highlighter for a message whose fences have no grammar', async () => {
+    const content = [
+      '```vue\n<template />\n```',
+      '```diff\n-a\n+b\n```',
+      '```mystery\nx\n```',
+    ].join('\n\n');
+    render(<MarkdownContentRenderer content={content} />);
+    // Let the effect that would import the highlighter run before asserting it did not.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(
+      shiki.preloadCodeLanguages,
+      `preloadCodeLanguages calls for vue, diff and unknown fences: ${JSON.stringify(shiki.preloadCodeLanguages.mock.calls)} | expected: none`
+    ).not.toHaveBeenCalled();
+  });
+
+  it('asks for one grammar when ts and typescript fences share a message', async () => {
+    render(
+      <MarkdownContentRenderer
+        content={'```ts\nlet a = 1;\n```\n\n```typescript\nlet b = 2;\n```'}
+      />
+    );
+
+    await waitFor(() => {
+      expect(shiki.preloadCodeLanguages).toHaveBeenCalledTimes(1);
+    });
+    expect(shiki.preloadCodeLanguages).toHaveBeenCalledWith(['typescript'], 'one-dark-pro');
   });
 
   it('renders plain code block when no language is specified', () => {
