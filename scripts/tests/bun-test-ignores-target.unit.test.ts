@@ -34,7 +34,7 @@ describe('bun test discovery', () => {
       writeCase(root, 'packages/protocol/tests/real.test.ts');
       writeCase(root, 'target/semver-checks/git-x/abc123/packages/protocol/tests/stale.test.ts');
 
-      const run = Bun.spawnSync(['bun', 'test', 'packages/protocol'], {
+      const run = Bun.spawnSync([process.execPath, 'test', 'packages/protocol'], {
         cwd: root,
         stdout: 'pipe',
         stderr: 'pipe',

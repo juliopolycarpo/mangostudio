@@ -24,11 +24,16 @@ export const WIN32_READY_BUDGET_MS = 60_000;
 /** Delay between probes in milliseconds. */
 export const POLL_INTERVAL_MS = 500;
 
+/** The part of `fetch` a probe uses, so a test can hand in a fake without the rest of its surface. */
+type HealthRequest = (url: string, init: { signal: AbortSignal }) => Promise<Response>;
+
 export interface WaitForServerReadyOptions {
   /** Total time to wait before throwing. Overrides the platform default. */
   budgetMs?: number;
   /** Delay between probes. Overrides `POLL_INTERVAL_MS`. */
   intervalMs?: number;
+  /** The request function. Defaults to the global `fetch`, read on every probe. */
+  fetch?: HealthRequest;
 }
 
 /**
@@ -62,7 +67,7 @@ export async function waitForServerReady(
 
   try {
     while (performance.now() < deadline) {
-      if (await probeServerReady(url, controller.signal)) return;
+      if (await probeServerReady(url, controller.signal, options.fetch ?? fetch)) return;
       const remainingMs = Math.max(0, deadline - performance.now());
       await Bun.sleep(Math.min(intervalMs, remainingMs));
     }
@@ -75,10 +80,14 @@ export async function waitForServerReady(
 }
 
 /** Check status without retaining a response body or an unbounded request. */
-async function probeServerReady(url: string, signal: AbortSignal): Promise<boolean> {
+async function probeServerReady(
+  url: string,
+  signal: AbortSignal,
+  request: HealthRequest
+): Promise<boolean> {
   let response: Response;
   try {
-    response = await fetch(url, { signal });
+    response = await request(url, { signal });
   } catch {
     // Connection refused / reset / EAI_AGAIN — server is not ready yet.
     return false;
