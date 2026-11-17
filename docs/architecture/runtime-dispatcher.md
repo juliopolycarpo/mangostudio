@@ -38,7 +38,11 @@ registers checks the handler's serialised result against the method's `result` s
 ever records anything through its `Audit` port. The check is
 `mango_protocol::contract::Contract::check_result` on the process-wide
 `mangostudio_runtime::serve::runtime_contract()`, so each `result` schema is compiled once, by the
-contract that serves it, and the runtime holds no validator of its own.
+contract that serves it, and the runtime holds no validator of its own. That contract compiles
+lazily: a method's `params` and `result` schemas compile on the first request that needs them, so
+start-up does not pay for the methods a hub never calls. A schema that does not compile would
+answer `INTERNAL` for its method, which is why the `every_schema_in_the_embedded_catalog_compiles`
+unit test calls `Contract::compile_all()` and fails the build first.
 `ServeOptions::validate_results` stays `false` for every call this crate makes to
 `Contract::serve`.
 

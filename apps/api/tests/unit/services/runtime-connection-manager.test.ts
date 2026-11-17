@@ -2207,6 +2207,43 @@ describe('RuntimeConnectionManager', () => {
     expect(publishes).toBe(0);
   });
 
+  it('adopts the probed gh that follows a version-less hello, and publishes the change', async () => {
+    // A Rust runtime answers `hello` from its PATH walk without running
+    // `gh --version`: a gh that is on PATH but cannot start reads available
+    // until `runtime.health` says what the probe found.
+    const hello = capabilityManifestFromHealth({ ...HEALTH_REPORT, gh: { available: true } });
+    const probed: RuntimeHealthReport[] = [
+      { ...HEALTH_REPORT, gh: { available: true, version: '2.89.0' } },
+      { ...HEALTH_REPORT, gh: { available: false } },
+    ];
+    let next = 0;
+    const probe = healthProbe(hello, () => Promise.resolve(probed[next++] ?? HEALTH_REPORT));
+    let publishes = 0;
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: {
+        stdio: () => Promise.resolve({ client: probe.client, close: () => undefined }),
+      },
+      publish: () => {
+        publishes += 1;
+      },
+    });
+
+    // A consenting peer is asked for its health at connect (to list its
+    // external agents), so the first probed answer arrives with the connect.
+    await manager.connect('user-1', 'devbox');
+    expect(manager.getStatus('user-1', 'devbox').manifest?.gh).toEqual({
+      available: true,
+      version: '2.89.0',
+    });
+
+    // The second answer says the gh that hello reported cannot start.
+    publishes = 0;
+    await manager.refreshManifest('user-1', 'devbox');
+    expect(manager.getStatus('user-1', 'devbox').manifest?.gh).toEqual({ available: false });
+    expect(publishes).toBe(1);
+  });
+
   it('does not re-ask a peer that just failed to answer', async () => {
     const probe = healthProbe(TEST_MANIFEST, () =>
       Promise.reject(new RemoteError('TIMEOUT', 'no answer'))

@@ -24,6 +24,11 @@ export interface HubCompileRecord {
   readonly version: string;
   readonly buildType: string;
   readonly builtAt: string;
+  /**
+   * SHA-256 of the AOT function order file the hub was laid out by, or null when none was applied.
+   * The file is an input of the compile; this ties the hub to it.
+   */
+  readonly aotOrderSha256: string | null;
   readonly hubSha256: string;
   readonly hubSize: number;
 }
@@ -35,7 +40,14 @@ export interface HubBuildRecord extends HubCompileRecord {
 
 type HubBuildStamp = Pick<
   HubCompileRecord,
-  'target' | 'compilerMode' | 'sourceSha' | 'gitDirty' | 'version' | 'buildType' | 'builtAt'
+  | 'target'
+  | 'compilerMode'
+  | 'sourceSha'
+  | 'gitDirty'
+  | 'version'
+  | 'buildType'
+  | 'builtAt'
+  | 'aotOrderSha256'
 >;
 
 function parseHubCompileRecord(value: unknown): HubCompileRecord {
@@ -90,6 +102,15 @@ function parseHubCompileRecord(value: unknown): HubCompileRecord {
   ) {
     throw new Error(
       `expected hub build builtAt: ISO date string | received: ${String(row.builtAt)}`
+    );
+  }
+  const aotOrderSha256: unknown = row.aotOrderSha256;
+  if (
+    aotOrderSha256 !== null &&
+    (typeof aotOrderSha256 !== 'string' || !/^[a-f\d]{64}$/.test(aotOrderSha256))
+  ) {
+    throw new Error(
+      `expected hub build aotOrderSha256: SHA256 or null | received: ${typeof aotOrderSha256 === 'string' ? aotOrderSha256 : typeof aotOrderSha256}`
     );
   }
   if (typeof row.hubSize !== 'number' || !Number.isSafeInteger(row.hubSize) || row.hubSize <= 0) {

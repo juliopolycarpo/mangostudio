@@ -174,6 +174,10 @@ jobs:
       # immutable inputs daily Canary promotes, so retain those uploads there.
       publication_bundles: ${{ github.event_name != 'pull_request' }}
       runtime_profile: ${{ github.event_name == 'pull_request' && 'light' || 'shipping' }}
+      # A PR records the order for the one hub its release dry run reuses, so a change that breaks
+      # recording fails there; every main push records all of them, since daily Canary promotes
+      # those bundles.
+      aot_order_platforms: ${{ github.event_name == 'pull_request' && 'linux-x64' || 'all' }}
       cache: true
       frontend_artifact: ${{ needs.build.outputs.artifact }}
       frontend_bun_revision: ${{ needs.build.outputs.bun_revision }}

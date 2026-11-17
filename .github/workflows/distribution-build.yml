@@ -43,6 +43,13 @@ on:
         description: Runtime artifact profile; light is accepted only on pull_request.
         type: string
         default: shipping
+      aot_order_platforms:
+        description: >-
+          Platform ids, space separated, or "all", whose hub is compiled with a function order
+          recorded from itself and fails rather than ship without one. Recording costs one extra
+          compile and a hub run on Linux legs; other platforms and unlisted ones skip it.
+        type: string
+        default: ""
     outputs:
       version:
         description: Version embedded into the distribution.
@@ -235,13 +242,27 @@ jobs:
         env:
           PRODUCER_BUN_REVISION: ${{ inputs.frontend_bun_revision }}
         run: bun ./scripts/ci/frontend-artifact.ts verify --bun-revision "$PRODUCER_BUN_REVISION"
+      - name: Select AOT function order recording
+        id: aot
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          AOT_ORDER_PLATFORMS: ${{ inputs.aot_order_platforms }}
+        # A listed hub records its order and fails without it; macOS and Windows legs skip
+        # recording whatever is listed, which is not a failure.
+        run: |
+          flag=""
+          case " $AOT_ORDER_PLATFORMS " in
+            *" all "* | *" $PLATFORM "*) flag="--require-aot-order" ;;
+          esac
+          echo "flag=$flag" >> "$GITHUB_OUTPUT"
       - name: Build native hub
         if: ${{ !matrix.musl }}
         env:
           PLATFORM: ${{ matrix.platform }}
           VERSION: ${{ inputs.version }}
           GITHUB_TOKEN: ${{ github.token }}
-        run: bun run build --binary --hub-only --platform "$PLATFORM" --reuse-frontend
+          AOT_ORDER_FLAG: ${{ steps.aot.outputs.flag }}
+        run: bun run build --binary --hub-only --platform "$PLATFORM" --reuse-frontend ${AOT_ORDER_FLAG:+"$AOT_ORDER_FLAG"}
       - name: Build native musl hub in Alpine
         if: ${{ matrix.musl }}
         env:
@@ -250,13 +271,14 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           FRONTEND_ARTIFACT: ${{ inputs.frontend_artifact }}
           PRODUCER_BUN_REVISION: ${{ inputs.frontend_bun_revision }}
+          AOT_ORDER_FLAG: ${{ steps.aot.outputs.flag }}
         # No glibc install runs in these legs. Bun and the frozen dependency
         # install both run in Alpine on the matching host architecture.
         run: |
           set -euo pipefail
           BUN_CHANNEL="$(tr -d '\r\n' < .bun-version)"
           docker run --rm -v "$PWD:/workspace" -w /workspace \
-            -e VERSION -e PLATFORM -e GITHUB_TOKEN -e FRONTEND_ARTIFACT -e PRODUCER_BUN_REVISION \
+            -e VERSION -e PLATFORM -e GITHUB_TOKEN -e FRONTEND_ARTIFACT -e PRODUCER_BUN_REVISION -e AOT_ORDER_FLAG \
             "oven/bun:${BUN_CHANNEL}-alpine" sh -ec '
               apk add --no-cache git bash libstdc++ libgcc
               git config --global --add safe.directory /workspace
@@ -264,7 +286,7 @@ jobs:
               if [ -n "$FRONTEND_ARTIFACT" ]; then
                 bun ./scripts/ci/frontend-artifact.ts verify --bun-revision "$PRODUCER_BUN_REVISION"
               fi
-              bun run build --binary --hub-only --platform "$PLATFORM" --reuse-frontend
+              bun run build --binary --hub-only --platform "$PLATFORM" --reuse-frontend ${AOT_ORDER_FLAG:+"$AOT_ORDER_FLAG"}
             '
       - name: Upload native hub and compiler receipt
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -273,6 +295,7 @@ jobs:
           path: |
             .mango/out/${{ matrix.platform }}
             .mango/hub-compiles/${{ matrix.platform }}.json
+            .mango/aot-order/${{ matrix.platform }}/hub.order
           include-hidden-files: true
           retention-days: ${{ inputs.retention_days }}
           overwrite: false
