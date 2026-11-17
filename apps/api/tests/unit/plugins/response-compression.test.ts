@@ -14,8 +14,8 @@ import { networkInterfaces } from 'node:os';
 import { Elysia } from 'elysia';
 
 import {
+  COMPRESSION_MAX_BYTES,
   COMPRESSION_MIN_BYTES,
-  NEVER_COMPRESSED_PREFIXES,
   responseCompression,
 } from '../../../src/plugins/response-compression';
 
@@ -30,10 +30,30 @@ const LARGE_PAYLOAD = {
 const SMALL_PAYLOAD = { ok: true, note: 'tiny' };
 const LARGE_JSON_BYTES = JSON.stringify(LARGE_PAYLOAD).length;
 
+/** Allowlisted routes; everything else the app below serves must stay identity. */
+const ALLOWED_ROUTES = [
+  '/api/large',
+  '/api/list',
+  '/api/small',
+  '/api/stream',
+  '/api/encoded',
+  '/api/no-transform',
+  '/api/failing',
+  '/api/etagged',
+  '/api/created',
+  '/api/json-response',
+  '/api/huge',
+  '/api/items/:id',
+];
+
+/** A body just past the ceiling, still valid JSON. */
+const HUGE_PAYLOAD = { blob: 'a'.repeat(COMPRESSION_MAX_BYTES + 1024) };
+
 function buildApp() {
   return new Elysia({ prefix: '/api' })
     .use(
       responseCompression({
+        routes: ALLOWED_ROUTES,
         peerAddress: (request) => request.headers.get(PEER_HEADER) ?? undefined,
       })
     )
@@ -64,6 +84,14 @@ function buildApp() {
       set.headers.etag = '"abc123"';
       return LARGE_PAYLOAD;
     })
+    .get('/created', ({ set }) => {
+      set.status = 'Created';
+      return LARGE_PAYLOAD;
+    })
+    .get('/json-response', () => Response.json(LARGE_PAYLOAD))
+    .get('/huge', () => HUGE_PAYLOAD)
+    .get('/items/:id', () => LARGE_PAYLOAD)
+    .get('/unlisted', () => LARGE_PAYLOAD)
     .get('/auth/session', () => LARGE_PAYLOAD)
     .get('/api-keys', () => LARGE_PAYLOAD)
     .get('/environments/pairing', () => LARGE_PAYLOAD)
@@ -217,25 +245,52 @@ describe('response compression', () => {
   });
 
   it.each([
+    '/unlisted',
     '/auth/session',
     '/api-keys',
     '/environments/pairing',
     '/settings/connectors',
     '/settings/secrets/gemini',
-  ])('opts credential-bearing path %s out of compression', async (path) => {
+  ])('never compresses %s: a large body on a route that is not on the allowlist', async (path) => {
     const response = await remoteClient().request(path);
     expect(response.headers.get('content-encoding')).toBeNull();
+    expect(response.headers.get('vary')).toBe('Origin');
     expect(await response.json()).toEqual(LARGE_PAYLOAD);
   });
 
-  it('lists exactly the credential prefixes the routes above exercise', () => {
-    expect([...NEVER_COMPRESSED_PREFIXES].sort()).toEqual([
-      '/api/api-keys',
-      '/api/auth',
-      '/api/environments',
-      '/api/settings/connectors',
-      '/api/settings/secrets',
-    ]);
+  it('matches the registered pattern, not the concrete path', async () => {
+    const response = await remoteClient().request('/items/42');
+    expect(response.headers.get('content-encoding')).toBe('gzip');
+  });
+
+  it('compresses a JSON Response a route encoded itself, keeping its status and bytes', async () => {
+    const response = await remoteClient().request('/json-response');
+    expect(response.headers.get('content-encoding')).toBe('gzip');
+    expect(response.headers.get('content-type')).toContain('application/json');
+    expect(response.headers.get('vary')).toBe('Origin, Accept-Encoding');
+    const body = JSON.parse(new TextDecoder().decode(Bun.gunzipSync(await response.arrayBuffer())));
+    expect(body).toEqual(LARGE_PAYLOAD);
+  });
+
+  it('keeps the string status the route set instead of falling back to 200', async () => {
+    const response = await remoteClient().request('/created');
+    expect(response.status).toBe(201);
+    expect(response.headers.get('content-encoding')).toBe('gzip');
+  });
+
+  it('sends identity for a body over the ceiling, with the same bytes', async () => {
+    const response = await remoteClient().request('/huge');
+    expect(response.headers.get('content-encoding')).toBeNull();
+    expect(response.headers.get('vary')).toBe('Origin, Accept-Encoding');
+    expect(((await response.json()) as { blob: string }).blob.length).toBe(
+      HUGE_PAYLOAD.blob.length
+    );
+  });
+
+  it('keeps the exact bytes and JSON type below the threshold', async () => {
+    const response = await remoteClient().request('/small');
+    expect(await response.text()).toBe(JSON.stringify(SMALL_PAYLOAD));
+    expect(response.headers.get('content-type')).toContain('application/json');
   });
 });
 
@@ -244,26 +299,30 @@ describe('response compression through a real socket', () => {
     .flat()
     .find((entry) => entry?.family === 'IPv4' && !entry.internal)?.address;
 
-  it('uses the socket peer: identity over loopback, gzip from the host LAN address', async () => {
-    // No `peerAddress` override: this is the default wiring to `server.requestIP`.
+  /** No `peerAddress` override: this is the default wiring to `server.requestIP`. */
+  function listenOnAllInterfaces(): number {
     const app = new Elysia({ prefix: '/api' })
-      .use(responseCompression())
+      .use(responseCompression({ routes: ['/api/large'] }))
       .get('/large', () => LARGE_PAYLOAD)
       .listen({ port: 0, hostname: '0.0.0.0' });
     apps.push(app as unknown as App);
-    const port = app.server?.port;
+    return app.server?.port as number;
+  }
 
-    const viaLoopback = await fetch(`http://127.0.0.1:${port}/api/large`, {
+  function getGzip(host: string, port: number): Promise<Response> {
+    return fetch(`http://${host}:${port}/api/large`, {
       headers: { 'accept-encoding': 'gzip' },
       decompress: false,
     } as RequestInit);
+  }
+
+  it('sends identity to the loopback peer', async () => {
+    const viaLoopback = await getGzip('127.0.0.1', listenOnAllInterfaces());
     expect(viaLoopback.headers.get('content-encoding')).toBeNull();
+  });
 
-    if (lanAddress === undefined) return; // A host with no external interface cannot show the remote half.
-    const viaLan = await fetch(`http://${lanAddress}:${port}/api/large`, {
-      headers: { 'accept-encoding': 'gzip' },
-      decompress: false,
-    } as RequestInit);
+  it.skipIf(lanAddress === undefined)('sends gzip to the host LAN address', async () => {
+    const viaLan = await getGzip(lanAddress as string, listenOnAllInterfaces());
     expect(viaLan.headers.get('content-encoding')).toBe('gzip');
   });
 });

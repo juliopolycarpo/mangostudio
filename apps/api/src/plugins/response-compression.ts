@@ -1,21 +1,26 @@
 /**
- * gzip for large JSON API responses sent to a peer that is not this machine.
+ * gzip for the few large JSON API responses sent to a peer that is not this machine.
  *
  * Loopback is the default deployment, and there compression only spends CPU:
  * the bytes never leave the host. A hub served with `--host` to a LAN is where
  * it pays, so the peer decides. The rules are narrow on purpose:
  *
- * - Only a plain handler value (an object or array Elysia would serialize as
- *   JSON) is touched. A `Response` — the SSE streams, the Better Auth
- *   passthrough, file bodies, anything a route already shaped — is never
- *   re-encoded, so a stream cannot be buffered here.
+ * - An allowlist of route patterns, declared where the plugin is mounted. A new
+ *   route is never compressed until someone decides it should be: a body that
+ *   echoes a credential next to caller-chosen text is exposed to BREACH-style
+ *   length attacks once compressed, and an opt-out list fails open for the next
+ *   such route. See `docs/architecture/hub-runtime.md`.
+ * - A plain handler value, or a JSON `Response` a route encoded itself (the chat
+ *   list does). Streams and other media types (SSE, files, the Better Auth
+ *   passthrough) are never read, so nothing is buffered here.
  * - GET only (HEAD and conditional answers keep their headers), 2xx only,
  *   nothing already carrying a `Content-Encoding`, nothing marked `no-transform`.
+ * - Between {@link COMPRESSION_MIN_BYTES} and {@link COMPRESSION_MAX_BYTES}.
+ *   `Bun.gzipSync` blocks the event loop (25 to 50 ms for 5 MB), so a body over
+ *   the ceiling goes out as identity rather than stalling every other request.
  * - The socket peer, never a forwarded header, decides "remote". A hub behind a
  *   reverse proxy sees the proxy's loopback address and sends identity; the
  *   proxy owns compression there.
- * - Routes that issue or echo credentials are opted out ({@link NEVER_COMPRESSED_PREFIXES}).
- *   See `docs/architecture/frontend-build.md` for the BREACH reasoning.
  *
  * gzip only: browsers send `Accept-Encoding: gzip, deflate` without `br` or
  * `zstd` to a plain-HTTP address, and Bun has no native Brotli encoder.
@@ -33,24 +38,22 @@ import { resolveStatus } from './error-negotiation';
 /** Below this the saving is a few hundred bytes and not worth a `Vary` split. */
 export const COMPRESSION_MIN_BYTES = 8 * 1024;
 
+/**
+ * Above this the body goes out as identity. Level 1 takes about 4 ms for
+ * 0.5 MB and 25 to 50 ms for 5 MB, all of it on the event loop; 2 MiB keeps one
+ * response under roughly 20 ms.
+ */
+export const COMPRESSION_MAX_BYTES = 2 * 1024 * 1024;
+
 /** Fastest zlib level: the best break-even link speed in the benchmark. */
 export const COMPRESSION_GZIP_LEVEL = 1;
 
-/**
- * Path prefixes whose responses carry or echo credentials: session tokens, API
- * keys shown once, runtime pairing tokens, OAuth authorize URLs, connector
- * secrets. Compressing a body that mixes such a value with request-chosen text
- * lets an observer infer the secret from the compressed length (BREACH).
- */
-export const NEVER_COMPRESSED_PREFIXES: readonly string[] = [
-  '/api/auth',
-  '/api/api-keys',
-  '/api/environments',
-  '/api/settings/connectors',
-  '/api/settings/secrets',
-];
-
 export interface ResponseCompressionOptions {
+  /**
+   * Route patterns (e.g. `/api/chats/:id/messages`, `:name` is one segment)
+   * whose responses may be compressed. A trailing slash is ignored.
+   */
+  readonly routes: readonly string[];
   /**
    * The address of the socket peer, or undefined when unknown. Defaults to
    * Bun's `server.requestIP`. Unknown counts as local: refusing to compress is
@@ -69,10 +72,24 @@ const defaultPeerAddress: NonNullable<ResponseCompressionOptions['peerAddress']>
   server
 ) => server?.requestIP(request)?.address;
 
-function isCredentialPath(pathname: string): boolean {
-  return NEVER_COMPRESSED_PREFIXES.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
-  );
+function stripTrailingSlash(path: string): string {
+  return path.length > 1 && path.endsWith('/') ? path.slice(0, -1) : path;
+}
+
+/**
+ * A pattern such as `/api/chats/:id/messages` as an anchored matcher: `:name`
+ * stands for one path segment. The request path is matched rather than the
+ * router's pattern because Elysia leaves the pattern undefined for routes
+ * declared inside a `group`.
+ */
+function patternMatcher(pattern: string): RegExp {
+  const source = stripTrailingSlash(pattern)
+    .split('/')
+    .map((segment) =>
+      segment.startsWith(':') ? '[^/]+' : segment.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    )
+    .join('/');
+  return new RegExp(`^${source}$`);
 }
 
 function isPlainJsonValue(value: unknown): value is object {
@@ -92,61 +109,100 @@ function headerValue(headers: Record<string, unknown>, name: string): string | u
 }
 
 /** Weaken a strong validator: the gzip bytes are not the identity bytes it named. */
-function weakenEtag(headers: Record<string, unknown>): void {
-  for (const key of Object.keys(headers)) {
-    if (key.toLowerCase() !== 'etag') continue;
-    const value = String(headers[key]);
-    if (!value.startsWith('W/')) headers[key] = `W/${value}`;
-  }
+function weakenEtag(etag: string): string {
+  return etag.startsWith('W/') ? etag : `W/${etag}`;
 }
 
-export function responseCompression(options: ResponseCompressionOptions = {}) {
-  const peerAddress = options.peerAddress ?? defaultPeerAddress;
-  // Unnamed on purpose: each mount may inject its own `peerAddress`, and Elysia
-  // deduplicates named plugins.
-  return new Elysia().mapResponse('plugin', ({ request, server, set, responseValue }) => {
-    if (request.method !== 'GET') return undefined;
-    if (!isPlainJsonValue(responseValue)) return undefined;
-    const code = resolveStatus(responseValue, set);
-    if (code !== null && (code < 200 || code >= 300)) return undefined;
-    if (isCredentialPath(new URL(request.url).pathname)) return undefined;
-
-    const peer = peerAddress(request, server as PeerSource | null);
-    if (peer === undefined || isLoopback(peer)) return undefined;
-
-    const headers = set.headers as Record<string, unknown>;
-    if (headerValue(headers, 'content-encoding') !== undefined) return undefined;
-    if (/\bno-transform\b/i.test(headerValue(headers, 'cache-control') ?? '')) return undefined;
-    const contentType = headerValue(headers, 'content-type');
-    if (contentType !== undefined && !/^application\/json\b/i.test(contentType)) return undefined;
-
-    // Whether this response may be encoded depends on the request's header from
-    // here on, so every cache must key on it, whichever way this request goes.
-    varyOnAcceptEncoding(headers);
-    if (negotiateEncoding(request.headers.get('accept-encoding'), ['gzip']) !== 'gzip') {
-      return undefined;
-    }
-
-    let json: string;
-    try {
-      json = JSON.stringify(responseValue);
-    } catch {
-      return undefined; // Let the framework's own serializer report it.
-    }
-    const raw = Buffer.from(json);
-    if (raw.byteLength < COMPRESSION_MIN_BYTES) return undefined;
-
-    const packed = Bun.gzipSync(raw, { level: COMPRESSION_GZIP_LEVEL });
-    weakenEtag(headers);
-    return new Response(packed, {
-      status: typeof set.status === 'number' ? set.status : 200,
-      headers: {
-        'content-type': contentType ?? 'application/json',
-        'content-encoding': 'gzip',
-        'content-length': String(packed.byteLength),
-        vary: String(headerValue(headers, 'vary')),
-        ...(headerValue(headers, 'etag') ? { etag: headerValue(headers, 'etag') as string } : {}),
-      },
-    });
+/** The headers a `Response` a route built carries, as a plain record. */
+function responseHeaders(response: Response): Record<string, string> {
+  const headers: Record<string, string> = {};
+  response.headers.forEach((value, key) => {
+    headers[key] = value;
   });
+  return headers;
+}
+
+export function responseCompression(options: ResponseCompressionOptions) {
+  const peerAddress = options.peerAddress ?? defaultPeerAddress;
+  const matchers = options.routes.map(patternMatcher);
+  // Unnamed on purpose: each mount injects its own allowlist, and Elysia
+  // deduplicates named plugins.
+  return new Elysia().mapResponse(
+    'plugin',
+    async ({ request, path, server, set, responseValue }) => {
+      if (request.method !== 'GET') return undefined;
+      if (!matchers.some((matcher) => matcher.test(stripTrailingSlash(path)))) return undefined;
+
+      const fromRoute = responseValue instanceof Response ? responseValue : null;
+      if (fromRoute === null && !isPlainJsonValue(responseValue)) return undefined;
+      if (fromRoute !== null) {
+        // A route's own `Response` is read only when it is a finished JSON body.
+        const type = fromRoute.headers.get('content-type') ?? '';
+        if (!/^application\/json\b/i.test(type) || fromRoute.body === null) return undefined;
+        if (fromRoute.headers.has('content-encoding')) return undefined;
+        if (/\bno-transform\b/i.test(fromRoute.headers.get('cache-control') ?? ''))
+          return undefined;
+      }
+
+      const code = fromRoute ? fromRoute.status : (resolveStatus(responseValue, set) ?? 200);
+      if (code < 200 || code >= 300) return undefined;
+
+      const peer = peerAddress(request, server as PeerSource | null);
+      if (peer === undefined || isLoopback(peer)) return undefined;
+
+      const headers = set.headers as Record<string, unknown>;
+      if (fromRoute === null) {
+        if (headerValue(headers, 'content-encoding') !== undefined) return undefined;
+        if (/\bno-transform\b/i.test(headerValue(headers, 'cache-control') ?? '')) return undefined;
+        const type = headerValue(headers, 'content-type');
+        if (type !== undefined && !/^application\/json\b/i.test(type)) return undefined;
+      }
+
+      // Whether this response may be encoded depends on the request's header from
+      // here on, so every cache must key on it, whichever way this request goes.
+      // The route's own `Vary` (if it built a Response) joins the accumulated one.
+      const routeVary = fromRoute?.headers.get('vary');
+      if (routeVary) {
+        headers.vary = [headerValue(headers, 'vary'), routeVary].filter(Boolean).join(', ');
+      }
+      varyOnAcceptEncoding(headers);
+      if (negotiateEncoding(request.headers.get('accept-encoding'), ['gzip']) !== 'gzip') {
+        return undefined;
+      }
+
+      let raw: Uint8Array<ArrayBuffer>;
+      if (fromRoute !== null) {
+        raw = new Uint8Array(await fromRoute.arrayBuffer());
+      } else {
+        try {
+          raw = new TextEncoder().encode(JSON.stringify(responseValue)) as Uint8Array<ArrayBuffer>;
+        } catch {
+          return undefined; // Let the framework's own serializer report it.
+        }
+      }
+
+      const outgoing: Record<string, string> = {
+        ...(fromRoute ? responseHeaders(fromRoute) : {}),
+        'content-type': fromRoute?.headers.get('content-type') ?? 'application/json',
+      };
+      outgoing.vary = headerValue(headers, 'vary') as string;
+      const etag = fromRoute?.headers.get('etag') ?? headerValue(headers, 'etag');
+
+      // Already read the body, so a skip below returns it unchanged rather than
+      // serializing a second time.
+      const asIdentity = () => {
+        if (etag !== undefined) outgoing.etag = etag;
+        return new Response(raw, { status: code, headers: outgoing });
+      };
+      if (raw.byteLength < COMPRESSION_MIN_BYTES || raw.byteLength > COMPRESSION_MAX_BYTES) {
+        return asIdentity();
+      }
+
+      const packed = Bun.gzipSync(raw, { level: COMPRESSION_GZIP_LEVEL });
+      if (etag !== undefined) outgoing.etag = weakenEtag(etag);
+      outgoing['content-encoding'] = 'gzip';
+      outgoing['content-length'] = String(packed.byteLength);
+      return new Response(packed, { status: code, headers: outgoing });
+    }
+  );
 }
