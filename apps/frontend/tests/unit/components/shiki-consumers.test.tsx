@@ -22,6 +22,24 @@ const { DiffViewer } = await import('../../../src/features/workspace/DiffViewer'
 let highlighter: Awaited<ReturnType<typeof initHighlighter>>;
 let restore: (() => void) | undefined;
 
+/** The body of the streaming case's fence as it stands before its closing fence and last chunk arrive. */
+const STREAMED_OPEN_BODY = 'const first = 1;\nfunction second(value: number) {\n  return value';
+
+/**
+ * Sources tokenized once, with a frozen clock, before any case runs. The JavaScript regex engine
+ * compiles a grammar rule the first time a line reaches it, so a case that is the first to use
+ * `function`, a parameter type or `return` pays that compile inside its own tokenize call: about
+ * 140 ms on an idle machine, and past the product's 500 ms `tokenizeTimeLimit` when the machine is
+ * busy. The tokenizer then stops, the block stays plain and no later render colours it, so
+ * `waitFor` never sees `shiki`, however long it waits. Every case that expects colour from the
+ * real tokenizer has its constructs listed here, so what it checks is the consumer and not
+ * the speed of the runner.
+ */
+const REAL_TOKENIZER_WARMUP_SOURCES = [
+  'const value = 42;',
+  `${STREAMED_OPEN_BODY} + 1;\n}`,
+] as const;
+
 beforeAll(async () => {
   await preloadCodeLanguages(['ts'], 'one-dark-pro');
   highlighter = await initHighlighter();
@@ -32,7 +50,9 @@ beforeAll(async () => {
     // These tests isolate consumer behavior; cold cooperative stops have their own matrix.
     Date.now = unchangedClock;
     for (const theme of CODE_THEMES) {
-      highlighter.codeToHtml('const value = 42;', { lang: 'typescript', theme });
+      for (const source of REAL_TOKENIZER_WARMUP_SOURCES) {
+        highlighter.codeToHtml(source, { lang: 'typescript', theme });
+      }
     }
   } finally {
     Date.now = realNow;
@@ -130,8 +150,7 @@ describe('actual consumers of checked highlighting', () => {
   });
 
   it('colours a code block while its fence is still open and the message is streaming', async () => {
-    const open =
-      '```typescript\nconst first = 1;\nfunction second(value: number) {\n  return value';
+    const open = `\`\`\`typescript\n${STREAMED_OPEN_BODY}`;
     const { container, rerender } = render(<MarkdownContentRenderer content={open} isStreaming />);
     await waitFor(() =>
       expect(container.querySelector('pre[data-lang="typescript"]')).toHaveClass('shiki')
