@@ -79,7 +79,7 @@ function statusFor(code: ExternalNativeSessionRefusalCode): number {
 function errorCodeFor(code: ExternalNativeSessionRefusalCode): string {
   switch (code) {
     case 'unreachable':
-      return ERROR_CODES.PROVIDER_ERROR;
+      return ERROR_CODES.ENVIRONMENT_UNAVAILABLE;
     case 'isolation-unproven':
       return ERROR_CODES.PERMISSION_DENIED;
     case 'stale':

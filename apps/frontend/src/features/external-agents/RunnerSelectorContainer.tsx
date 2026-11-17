@@ -200,7 +200,7 @@ export function RunnerSelectorContainer() {
  * to the server's own sentence: that text is written for an operator reading a
  * log, not for someone mid-click.
  */
-function adoptionMessage(code: string | null | undefined, t: Messages): string {
+export function adoptionMessage(code: string | null | undefined, t: Messages): string {
   const labels = t.externalAgents.sessions;
   switch (code) {
     case ERROR_CODES.CONFLICT:
@@ -209,7 +209,7 @@ function adoptionMessage(code: string | null | undefined, t: Messages): string {
       return labels.heldSession;
     case ERROR_CODES.PERMISSION_DENIED:
       return labels.isolationUnproven;
-    case ERROR_CODES.PROVIDER_ERROR:
+    case ERROR_CODES.ENVIRONMENT_UNAVAILABLE:
       return labels.unreachable;
     default:
       return labels.adoptFailed;

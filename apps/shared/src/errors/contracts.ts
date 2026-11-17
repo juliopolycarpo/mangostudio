@@ -9,6 +9,17 @@ export const ERROR_CODES = {
   CONFLICT: 'CONFLICT',
   OPERATION_EXPIRED: 'OPERATION_EXPIRED',
   PROVIDER_ERROR: 'PROVIDER_ERROR',
+  /**
+   * The environment a request targets could not be reached: its runtime is not
+   * installed, failed to start, is backing off after a failure, or is disabled.
+   * Always sent with 503 and `details.reason`, and with `Retry-After` when the
+   * hub has scheduled the next connect attempt.
+   *
+   * Its own code, apart from `PROVIDER_ERROR`, so a client can tell "this
+   * machine is offline, wait or pick another" from "a model or connector
+   * provider rejected the call".
+   */
+  ENVIRONMENT_UNAVAILABLE: 'ENVIRONMENT_UNAVAILABLE',
   GENERATION_EMPTY: 'GENERATION_EMPTY',
   OWNERSHIP: 'OWNERSHIP',
   RATE_LIMITED: 'RATE_LIMITED',

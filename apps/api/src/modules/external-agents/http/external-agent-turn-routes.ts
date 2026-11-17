@@ -375,7 +375,7 @@ export function createExternalAgentTurnRoutes(
           set.status = 503;
           return {
             error: 'Could not reach the machine this chat runs on.',
-            code: ERROR_CODES.PROVIDER_ERROR,
+            code: ERROR_CODES.ENVIRONMENT_UNAVAILABLE,
           };
         }
 

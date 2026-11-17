@@ -114,7 +114,7 @@ export function environmentUnavailableResponse(
   }
   return {
     error: environmentUnavailableText(error),
-    code: ERROR_CODES.PROVIDER_ERROR,
+    code: ERROR_CODES.ENVIRONMENT_UNAVAILABLE,
     details: { reason: error.reason },
   };
 }

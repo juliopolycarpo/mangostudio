@@ -724,7 +724,7 @@ describe('environment entity routes', () => {
     expect(response.status).toBe(503);
     const body = await response.json();
     expect(body).toMatchObject({
-      code: 'PROVIDER_ERROR',
+      code: 'ENVIRONMENT_UNAVAILABLE',
       error: 'The environment is unavailable.',
       details: { reason: 'unavailable' },
     });
