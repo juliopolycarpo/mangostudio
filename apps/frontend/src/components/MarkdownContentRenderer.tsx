@@ -1,20 +1,24 @@
-import { Marked, Renderer } from 'marked';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import type { Marked } from 'marked';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import { useI18n } from '@/hooks/use-i18n';
 import { useTheme } from '@/hooks/use-theme';
-import { resolveLanguageId } from '@/lib/code-languages';
 import type { CodeThemeId } from '@/lib/code-themes';
+import {
+  BlockDomMirror,
+  IncrementalBlockRenderer,
+  IncrementalLexer,
+  type MarkdownTokens,
+} from '@/lib/markdown-blocks';
+import { detectCodeLanguages } from '@/lib/markdown-code-languages';
+import {
+  CLIPBOARD_ICON,
+  type CodeHighlighter,
+  createParser,
+  MARKDOWN_LEXER_OPTIONS,
+} from '@/lib/markdown-parser';
 
-const CLIPBOARD_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
 const CHECK_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
-
-interface CodeHighlighter {
-  highlightCode: (code: string, lang: string, theme: CodeThemeId) => string | null;
-  preloadCodeLanguages: (languages: readonly string[], theme: CodeThemeId) => Promise<boolean>;
-  /** Frees the per-block state kept while a message streams; absent on a highlighter without any. */
-  releaseHighlightSessions?: () => void;
-}
 
 export interface MarkdownContentProps {
   content: string;
@@ -47,7 +51,8 @@ export function MarkdownContentRenderer({
   const resolvedCopiedLabel = codeCopiedLabel ?? t.chat.codeCopied;
   // Key keeps the array identity stable while the language set is unchanged, so
   // streaming new content does not re-fire the highlighter effect every chunk.
-  const codeLanguageKey = useMemo(() => detectCodeLanguages(content).join('\n'), [content]);
+  const tokens = useMarkdownTokens(content);
+  const codeLanguageKey = useMemo(() => detectCodeLanguages(tokens.tokens).join('\n'), [tokens]);
   const codeLanguages = useMemo(
     () => (codeLanguageKey ? codeLanguageKey.split('\n') : []),
     [codeLanguageKey]
@@ -66,19 +71,17 @@ export function MarkdownContentRenderer({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- The highlighter mutates in place when another language loads.
     [loadedCodeTheme, resolvedCodeTheme, resolvedCopyLabel, highlighter, highlightVersion]
   );
-  // The memo re-parses whenever content or parser changes (i.e. every streamed
-  // chunk), so it already reflects the latest content without a second parse.
-  const renderedHtml = useParsedMarkdown(content, parser);
+  const blocks = useMarkdownBlocks(tokens, parser);
+  useBlocksInContainer(containerRef, blocks);
 
+  // No React children and no `dangerouslySetInnerHTML`: the blocks are written into the
+  // element by `useBlocksInContainer`, which replaces only the blocks a chunk changed.
+  // The HTML itself comes from `createParser`'s renderer, which emits a fixed tag set and
+  // escapes raw HTML; that is the only path from message text to the DOM.
   return (
     <div
       ref={containerRef}
       className={`markdown-content ${isStreaming ? 'markdown-content--streaming ' : ''}${className ?? ''}`}
-      // HTML is produced by `marked` with a custom renderer that only emits
-      // a fixed tag set and escapes raw HTML; rendering as HTML is required
-      // to surface Shiki-highlighted code blocks and safe link elements.
-      // eslint-disable-next-line react/no-danger -- sanitized markdown is rendered as HTML here
-      dangerouslySetInnerHTML={{ __html: renderedHtml }}
     />
   );
 }
@@ -148,174 +151,44 @@ function useCopyCodeButtons(
   }, [containerRef, copyCodeLabel, codeCopiedLabel]);
 }
 
-function useParsedMarkdown(content: string, parser: Marked): string {
-  return useMemo(() => parseMarkdown(parser, content), [content, parser]);
-}
-
-function createParser(
-  theme: CodeThemeId,
-  copyCodeLabel: string,
-  highlighter: CodeHighlighter | null
-): Marked {
-  return new Marked({
-    gfm: true,
-    breaks: true,
-    renderer: createRenderer(theme, copyCodeLabel, highlighter),
-  });
-}
-
-function createRenderer(
-  theme: CodeThemeId,
-  copyCodeLabel: string,
-  highlighter: CodeHighlighter | null
-): Renderer {
-  const renderer = new Renderer();
-  renderer.link = renderLink;
-  renderer.image = renderImage;
-  renderer.html = (token) => escapeHtml('text' in token ? token.text : '');
-  renderer.code = (token) => renderCode(token.text, token.lang, theme, copyCodeLabel, highlighter);
-  renderer.table = renderTable;
-  return renderer;
+/**
+ * The top-level tokens of `content`. The lexer keeps the previous text's tokens and lexes only
+ * what a longer text can have changed, so a streamed chunk costs the tail, not the message.
+ * Both the language scan and the renderer read these, so the text is lexed once.
+ */
+function useMarkdownTokens(content: string): MarkdownTokens {
+  const lexer = useMemo(() => new IncrementalLexer(MARKDOWN_LEXER_OPTIONS), []);
+  return useMemo(() => lexer.update(content), [lexer, content]);
 }
 
 /**
- * Seats a table in a box that scrolls sideways when its columns need more room
- * than the bubble has. Scrolling the `<table>` itself would mean
- * `display: block`, which shrink-wraps a narrow table and strips its table
- * semantics from some screen readers; a wrapper leaves the table a table.
- *
- * `this` is the renderer `marked` runs the call on, which carries the `parser`
- * the default `table` needs — a copy bound to the one built here would have
- * none. // Usage: renderer.table = renderTable
+ * The HTML of each top-level block. A new parser (another theme, a language that just loaded)
+ * starts a new renderer, so nothing rendered by the old one is reused.
  */
-function renderTable(this: Renderer, token: Parameters<Renderer['table']>[0]): string {
-  return `<div class="markdown-table-scroll">${Renderer.prototype.table.call(this, token)}</div>`;
+function useMarkdownBlocks(tokens: MarkdownTokens, parser: Marked): readonly string[] {
+  const renderer = useMemo(() => new IncrementalBlockRenderer(parser), [parser]);
+  return useMemo(() => renderer.render(tokens), [renderer, tokens]);
 }
 
 /**
- * Renders a link whose href *and* body are both inert.
- *
- * Child tokens are flattened to their source text and escaped: the result is
- * interpolated into the same `dangerouslySetInnerHTML` string as everything
- * else, so unescaped label text is live markup — `[x<img src=y onerror=…>](…)`
- * is a script-execution path that a safe href does nothing to close.
- * // Usage: renderLink({ href: 'https://a.example', tokens: [] })
+ * Writes `blocks` into the container before paint, replacing only the blocks that differ from
+ * the last write. A streamed chunk therefore touches the tail block's nodes and leaves the
+ * rest of the message, and any selection inside it, alone.
  */
-function renderLink({ href, title, tokens }: Parameters<Renderer['link']>[0]): string {
-  const text =
-    tokens
-      ?.map((token): string =>
-        escapeMarkdownText('text' in token ? (token.text as string) : token.raw)
-      )
-      .join('') ?? '';
-  const safeHref = safeMarkdownUrl(href);
-  const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
-  return `<a href="${escapeHtml(safeHref)}" target="_blank" rel="noopener noreferrer"${titleAttr}>${text}</a>`;
-}
-
-function renderImage({ href, title, text }: Parameters<Renderer['image']>[0]): string {
-  const safeHref = safeMarkdownUrl(href);
-  const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
-  const body = text || safeHref;
-  return `<a href="${escapeHtml(safeHref)}" target="_blank" rel="noopener noreferrer" class="markdown-image-link"${titleAttr}>${escapeHtml(body)}</a>`;
-}
-
-// Schemes the chat renderer may turn into a clickable target. Anything else
-// (javascript:, data:, vbscript:, …) is neutralized to a harmless anchor.
-const SAFE_LINK_PROTOCOLS = new Set(['http:', 'https:', 'mailto:']);
-const UNSAFE_URL_FALLBACK = '#';
-// Base only used to resolve scheme-less relative hrefs so they classify as safe;
-// the original href is always what gets rendered, never this base.
-const RELATIVE_URL_BASE = 'https://markdown.invalid/';
-
-/**
- * Returns `href` when it is a safe link target, otherwise '#'.
- *
- * Parsing with the WHATWG `URL` API strips smuggled tabs/newlines and
- * normalizes scheme casing, so only http(s)/mailto absolute URLs and
- * scheme-less relative URLs survive. // Usage: safeMarkdownUrl('javascript:alert(1)') === '#'
- */
-function safeMarkdownUrl(href: string | null | undefined): string {
-  if (!href) return UNSAFE_URL_FALLBACK;
-  let protocol: string;
-  try {
-    protocol = new URL(href, RELATIVE_URL_BASE).protocol;
-  } catch {
-    return UNSAFE_URL_FALLBACK;
-  }
-  return SAFE_LINK_PROTOCOLS.has(protocol) ? href : UNSAFE_URL_FALLBACK;
-}
-
-function renderCode(
-  text: string,
-  lang: string | undefined,
-  theme: CodeThemeId,
-  copyCodeLabel: string,
-  highlighter: CodeHighlighter | null
-): string {
-  const safeLang = lang ?? '';
-  const highlighted = safeLang ? highlighter?.highlightCode(text, safeLang, theme) : null;
-  if (highlighted) return renderHighlightedCode(highlighted, safeLang, copyCodeLabel);
-
-  return renderPlainCode(text, safeLang, copyCodeLabel);
-}
-
-function renderHighlightedCode(html: string, lang: string, copyCodeLabel: string): string {
-  return html
-    .replace('<pre ', `<pre data-lang="${escapeHtml(lang)}" `)
-    .replace('</pre>', `${copyButton(copyCodeLabel)}</pre>`);
-}
-
-function renderPlainCode(text: string, lang: string, copyCodeLabel: string): string {
-  const langClass = lang ? ` class="language-${escapeHtml(lang)}"` : '';
-  const langAttr = lang ? ` data-lang="${escapeHtml(lang)}"` : '';
-  return `<pre${langAttr}><code${langClass}>${escapeHtml(text)}</code>${copyButton(copyCodeLabel)}</pre>`;
-}
-
-function parseMarkdown(parser: Marked, content: string): string {
-  if (!content) return '';
-  return parser.parse(content, { async: false });
-}
-
-// Reused across calls; the lexer keeps no per-document state worth resetting.
-const codeLanguageLexer = new Marked({ gfm: true, breaks: true });
-
-// A markdown block can nest markdown blocks; stop descending past this.
-const MAX_EMBEDDED_MARKDOWN_DEPTH = 3;
-
-/**
- * The fence languages in `content` that need a grammar, sorted. A fence counts
- * once its info line is complete: while a reply streams, "```ts" can be all
- * that has arrived of "```tsx", and loading the wrong grammar is a wasted
- * download. A markdown block also counts the fences written inside it, because
- * the markdown grammar highlights those with their own grammars.
- */
-function detectCodeLanguages(content: string): string[] {
-  const languages = new Set<string>();
-  collectCodeLanguages(content, languages, 0);
-  return [...languages].sort();
-}
-
-function collectCodeLanguages(content: string, languages: Set<string>, depth: number): void {
-  if (!content) return;
-
-  // walkTokens recurses into list items and blockquotes, so fenced code nested
-  // inside them still has its grammar preloaded for highlighting.
-  // This callback is synchronous, so there are no pending token visits to await.
-  void codeLanguageLexer.walkTokens(codeLanguageLexer.lexer(content), (token) => {
-    if (token.type !== 'code' || !('lang' in token) || !token.lang) return;
-    // A fenced token's raw text is its opening line, so a newline after the info
-    // string says the line is complete. Without one the fence is still arriving.
-    if (!token.raw.includes('\n')) return;
-    // Collect the grammar id, not the info string: a fence the highlighter has no
-    // grammar for must not start the Shiki chunk, and `ts` and `typescript` are one grammar.
-    const language = resolveLanguageId(token.lang);
-    if (language === null) return;
-    languages.add(language);
-    if (language === 'markdown' && depth < MAX_EMBEDDED_MARKDOWN_DEPTH) {
-      collectCodeLanguages(token.text, languages, depth + 1);
+function useBlocksInContainer(
+  containerRef: React.RefObject<HTMLDivElement | null>,
+  blocks: readonly string[]
+) {
+  const mirrorRef = useRef<BlockDomMirror | null>(null);
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    if (mirrorRef.current?.container !== container) {
+      container.replaceChildren();
+      mirrorRef.current = new BlockDomMirror(container);
     }
-  });
+    mirrorRef.current.sync(blocks);
+  }, [containerRef, blocks]);
 }
 
 async function loadCodeHighlighter(
@@ -405,43 +278,4 @@ function resetCopyButton(button: Element, copyCodeLabel: string) {
   button.innerHTML = CLIPBOARD_ICON;
   button.setAttribute('aria-label', copyCodeLabel);
   button.classList.remove('copy-code-btn--copied');
-}
-
-function copyButton(ariaLabel: string): string {
-  return `<button class="copy-code-btn" type="button" aria-label="${escapeHtml(ariaLabel)}">${CLIPBOARD_ICON}</button>`;
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
-
-/** An `&` the source did not already spend on an entity of its own. */
-const UNENCODED_AMPERSAND = /&(?!#?\w+;)/g;
-
-/**
- * Escapes markup in text markdown handed over already-decoded, leaving an
- * entity the source wrote alone.
- *
- * The strict `escapeHtml` is right for a value MangoStudio built — an href, a
- * title, a code body. It is wrong for markdown's own text, which reaches the
- * renderer with its entities intact: re-escaping the `&` in `&amp;` renders
- * the entity rather than the character, so `[a &amp; b](…)` read `a &amp; b`
- * on screen while the same source outside a link read `a & b`. `<`, `>`, `"`
- * and `'` are still escaped unconditionally, so nothing here can open a tag;
- * a decoded entity is a text node either way.
- *
- * Usage: escapeMarkdownText('a &amp; <b>') === 'a &amp; &lt;b&gt;'
- */
-function escapeMarkdownText(value: string): string {
-  return value
-    .replace(UNENCODED_AMPERSAND, '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
 }
