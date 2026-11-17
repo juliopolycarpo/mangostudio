@@ -62,7 +62,7 @@ const STATUS_PRESENTATION: Record<McpServerStatus, StatusPresentation> = {
 };
 
 export function McpServerCard({ server, onEdit, onDelete }: McpServerCardProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.mcp;
 
   const [toolsOpen, setToolsOpen] = useState(false);

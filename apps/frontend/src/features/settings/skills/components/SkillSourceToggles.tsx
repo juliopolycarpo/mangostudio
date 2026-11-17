@@ -29,7 +29,7 @@ interface SkillSourceTogglesProps {
 const SOURCE_KEYS: SkillSourceKey[] = ['agents', 'claude'];
 
 export function SkillSourceToggles({ sources }: SkillSourceTogglesProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.skills;
   const { mutate, isPending } = useToggleSkillSource();
   const rescan = useRescanLibrary();

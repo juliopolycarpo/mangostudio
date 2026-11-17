@@ -55,7 +55,7 @@ export function FirstChatStep({
   onWritingChange,
   onGoToFolder,
 }: FirstChatStepProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('onboarding');
   const s = t.onboarding.chat;
   const queryClient = useQueryClient();
   const [prompt, setPrompt] = useState(state.turnOperation?.prompt ?? s.defaultPrompt);

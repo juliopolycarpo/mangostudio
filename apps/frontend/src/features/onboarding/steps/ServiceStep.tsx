@@ -34,7 +34,7 @@ import { StepFrame } from '../StepFrame';
  * thing this page knows.
  */
 function ServiceState({ service }: { readonly service: MachineStatus['service'] }) {
-  const { t } = useI18n();
+  const { t } = useI18n('onboarding');
   const s = t.onboarding.service;
 
   if (service.error) {
@@ -71,7 +71,7 @@ function ServiceState({ service }: { readonly service: MachineStatus['service'] 
 }
 
 export function ServiceStep() {
-  const { t } = useI18n();
+  const { t } = useI18n('onboarding');
   const s = t.onboarding.service;
   const machine = useMachineStatus();
   const change = useChangeMachineServiceMutation();

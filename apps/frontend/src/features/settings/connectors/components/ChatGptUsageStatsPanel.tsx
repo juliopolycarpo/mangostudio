@@ -183,7 +183,7 @@ function StatsBody({
  * metrics card; the stats snapshot is polled in the background.
  */
 export function ChatGptUsageStatsPanel({ connectorId }: { connectorId: string }) {
-  const { t, locale } = useI18n();
+  const { t, locale } = useI18n('settings');
   const s = t.settings.connectors;
   const statsQuery = useQuery({
     queryKey: statsQueryKey(connectorId),

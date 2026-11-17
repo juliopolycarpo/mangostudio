@@ -143,7 +143,7 @@ function UsageSummary(props: {
 }
 
 export function MetricsSettingsPage() {
-  const { t, locale } = useI18n();
+  const { t, locale } = useI18n('settings');
   const { data, error, isLoading, isFetching, refetch } = useQuery(
     observabilityMetricsQueryOptions()
   );

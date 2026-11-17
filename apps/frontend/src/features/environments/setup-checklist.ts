@@ -15,7 +15,7 @@ import type {
   RuntimeId,
   RuntimeStatus,
 } from '@mangostudio/shared/environments';
-import type { Messages } from '@mangostudio/shared/i18n';
+import type { CoreMessages } from '@mangostudio/shared/i18n';
 import type { MachineStatus } from '@mangostudio/shared/machine';
 
 import { formatMessage } from '@/lib/i18n-format';
@@ -70,7 +70,7 @@ function isNodeOutdated(status: RuntimeStatus | undefined): boolean {
 }
 
 function gitRemedy(
-  t: Messages,
+  t: CoreMessages,
   recipes: readonly InstallRecipePreview[],
   platform: string
 ): SetupRemedy {
@@ -107,7 +107,7 @@ function effectiveRuntime(
 }
 
 function gitRow(
-  t: Messages,
+  t: CoreMessages,
   runtimes: readonly RuntimeStatus[],
   recipes: readonly InstallRecipePreview[],
   platform: string
@@ -123,7 +123,7 @@ function gitRow(
 }
 
 function nodeRemedy(
-  t: Messages,
+  t: CoreMessages,
   status: RuntimeStatus | undefined,
   installed: boolean,
   recipes: readonly InstallRecipePreview[]
@@ -157,7 +157,7 @@ function nodeRemedy(
 }
 
 function nodeRow(
-  t: Messages,
+  t: CoreMessages,
   runtimes: readonly RuntimeStatus[],
   recipes: readonly InstallRecipePreview[]
 ): SetupRow {
@@ -172,7 +172,7 @@ function nodeRow(
   };
 }
 
-function bunRow(t: Messages, runtimes: readonly RuntimeStatus[]): SetupRow {
+function bunRow(t: CoreMessages, runtimes: readonly RuntimeStatus[]): SetupRow {
   const { installed } = effectiveRuntime(runtimes, 'bun');
   return {
     id: 'bun',
@@ -185,7 +185,7 @@ function bunRow(t: Messages, runtimes: readonly RuntimeStatus[]): SetupRow {
   };
 }
 
-function agentRow(t: Messages, agents: readonly AgentCliStatus[]): SetupRow {
+function agentRow(t: CoreMessages, agents: readonly AgentCliStatus[]): SetupRow {
   const ready = agents.some((agent) => agent.effective && agent.authenticated);
   return {
     id: 'agent',
@@ -202,7 +202,7 @@ function agentRow(t: Messages, agents: readonly AgentCliStatus[]): SetupRow {
   };
 }
 
-function hubServiceRow(t: Messages, machine: MachineStatus | undefined): SetupRow {
+function hubServiceRow(t: CoreMessages, machine: MachineStatus | undefined): SetupRow {
   const running = Boolean(machine?.service.installed && machine.service.running);
   return {
     id: 'hub-service',
@@ -227,7 +227,7 @@ function hubServiceRow(t: Messages, machine: MachineStatus | undefined): SetupRo
  * text rather than guessing.
  */
 export function buildSetupRows(
-  t: Messages,
+  t: CoreMessages,
   runtimes: readonly RuntimeStatus[],
   agents: readonly AgentCliStatus[],
   recipes: readonly InstallRecipePreview[],

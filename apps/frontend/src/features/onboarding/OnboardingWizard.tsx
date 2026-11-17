@@ -55,7 +55,7 @@ interface OnboardingWizardProps {
 }
 
 export function OnboardingWizard({ onDone }: OnboardingWizardProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('onboarding');
   const s = t.onboarding;
   const progress = useOnboardingProgress();
   const { signOut, isSigningOut } = useSignOut();

@@ -7,14 +7,14 @@
  */
 
 import type { Environment } from '@mangostudio/shared/environments';
-import type { Messages } from '@mangostudio/shared/i18n';
+import type { CoreMessages } from '@mangostudio/shared/i18n';
 import { MonitorCog } from 'lucide-react';
 
 import type { CommandItem } from '@/features/command-palette/lib/command-item';
 
 export interface EnvironmentCommandParams {
   readonly environments: readonly Environment[];
-  readonly t: Messages;
+  readonly t: CoreMessages;
   readonly onSelect: (environmentId: string) => void;
 }
 

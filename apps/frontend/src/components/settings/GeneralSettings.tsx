@@ -117,7 +117,7 @@ export function GeneralSettings({
   setChatSidebarWidth,
   addRecentWorkdir,
 }: GeneralSettingsProps) {
-  const { t, locale, setLocale } = useI18n();
+  const { t, locale, setLocale } = useI18n('settings');
   const s = t.settings.general;
   const workspace = t.workspace;
   const panelLabels: Readonly<Record<WorkspacePanelId, string>> = {
@@ -437,7 +437,7 @@ function WidthRow({
   resetLabel: string;
   onReset: () => void;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const workspace = t.workspace;
   const isDefault = width === defaultWidth;
 

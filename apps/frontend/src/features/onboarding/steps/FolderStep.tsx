@@ -29,7 +29,7 @@ interface FolderStepProps {
 }
 
 export function FolderStep({ state, onChange, isSaving }: FolderStepProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('onboarding');
   const s = t.onboarding.folder;
   const [isPickerOpen, setPickerOpen] = useState(false);
   const environments = useEnvironmentEntitiesQuery();

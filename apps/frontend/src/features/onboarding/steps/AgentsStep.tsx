@@ -73,7 +73,7 @@ function IdentityDot({ dotClassName }: { readonly dotClassName: string }) {
 }
 
 export function AgentsStep({ environmentId, state, onChange, isSaving }: AgentsStepProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('onboarding');
   const s = t.onboarding.agents;
   const groupName = useId();
   const external = useExternalAgents(environmentId);
@@ -181,7 +181,7 @@ function AgentOption({
   readonly checked: boolean;
   readonly onSelect: () => void;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n('onboarding');
   const s = t.onboarding.agents;
   const selectable = externalAgentSelectable(agent);
   const signedOut = agent.authState === 'signed-out';

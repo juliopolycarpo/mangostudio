@@ -38,7 +38,7 @@ function statusLabel(status: string, s: ConnectorMessages): string {
  * expires. Spent and expired credits drop to `fg-subtle` as the reset history.
  */
 export function ChatGptResetCreditList({ credits }: { credits: ChatGptResetCredit[] }) {
-  const { t, locale } = useI18n();
+  const { t, locale } = useI18n('settings');
   const s = t.settings.connectors;
   const now = Date.now();
 

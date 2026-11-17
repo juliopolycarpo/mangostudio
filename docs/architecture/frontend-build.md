@@ -361,6 +361,9 @@ and a closed overlay). Not through it:
   appears there too.
 - The pt-BR dictionary (`locale-dictionaries.ts`). A failed load already rendered English;
   it now also probes for a stale build.
+- The English `settings` and `onboarding` namespaces (`en-settings`, `en-onboarding`), one chunk
+  each, loaded by the owning route's `loader`. A failure throws to the route's error component
+  and is replayed for one second so React's re-render does not refetch on every pass.
 - The optional WebGL renderer of the terminal (`terminal-webgl.ts`): a failed load keeps the
   default renderer and shows nothing.
 

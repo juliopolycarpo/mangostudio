@@ -8,12 +8,14 @@
  * shouts at 20% teaches people to ignore it at 95%.
  */
 
+import type { CoreMessages } from '@mangostudio/shared/i18n';
+
 import { ContextUsageChip } from '@/components/ui/ContextUsageChip';
 import type { ContextInfo } from '@/features/generation/types';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 
-type ContextLabels = ReturnType<typeof useI18n>['t']['chat']['context'];
+type ContextLabels = CoreMessages['chat']['context'];
 
 /** Every mode the tracker can report, named rather than leaked as its id. */
 function modeLabel(mode: ContextInfo['mode'], labels: ContextLabels): string {

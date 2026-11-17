@@ -40,7 +40,7 @@ export function GitSettingsPage({
   resetCommitMessageSystemPrompt,
   setCommitMessageMaxDiffKb,
 }: GitSettingsPageProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const labels = t.settings.git;
   const commitMessageLabels = labels.commitMessages;
   const { catalog } = useModelCatalog();

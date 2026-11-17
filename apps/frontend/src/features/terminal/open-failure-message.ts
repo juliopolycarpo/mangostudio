@@ -1,5 +1,5 @@
 import { ERROR_CODES } from '@mangostudio/shared/errors';
-import type { Messages } from '@mangostudio/shared/i18n';
+import type { CoreMessages } from '@mangostudio/shared/i18n';
 import {
   type TerminalRefusalReason,
   TerminalRefusalReasonSchema,
@@ -36,7 +36,7 @@ function refusalReason(error: unknown): TerminalRefusalReason | null {
  * @example
  * openMutation.mutate(body, { onError: (error) => toast(openFailureMessage(t, error), 'error') });
  */
-export function openFailureMessage(t: Messages, error: unknown): string {
+export function openFailureMessage(t: CoreMessages, error: unknown): string {
   const reason = refusalReason(error);
   return reason ? unavailableMessage(t, reason) : t.terminal.openFailed;
 }

@@ -27,7 +27,7 @@ import type {
   ExternalApprovalRouting,
   ExternalPermissionLevel,
 } from '@mangostudio/shared/external-agents';
-import type { Messages } from '@mangostudio/shared/i18n';
+import type { CoreMessages, Messages } from '@mangostudio/shared/i18n';
 import { useEffect, useRef } from 'react';
 
 import { ChipSelect } from '@/components/ui/ChipSelect';
@@ -88,7 +88,7 @@ function modelLabel(candidate: { id: string; displayName?: string | undefined })
  */
 function effortLabel(
   candidate: { id: string; displayName?: string | undefined },
-  t: Messages
+  t: CoreMessages
 ): string {
   if (candidate.displayName && candidate.displayName !== candidate.id) return candidate.displayName;
   const known = KNOWN_EFFORT_LABELS[candidate.id as keyof typeof KNOWN_EFFORT_LABELS];

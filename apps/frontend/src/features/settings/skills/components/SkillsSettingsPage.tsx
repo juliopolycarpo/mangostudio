@@ -18,7 +18,7 @@ import { SkillRow } from './SkillRow';
 import { SkillSourceToggles } from './SkillSourceToggles';
 
 export function SkillsSettingsPage() {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.skills;
   const { skills, sources, isLoading, error, refetch } = useSkillSettings();
 

@@ -28,6 +28,7 @@ import type {
   ExternalPermissionLevel,
   ExternalThreadUsage,
 } from '@mangostudio/shared/external-agents';
+import type { CoreMessages } from '@mangostudio/shared/i18n';
 import type { ProviderType, ReasoningEffort } from '@mangostudio/shared/types';
 import { ChevronDown } from 'lucide-react';
 import { Fragment, type ReactNode, useState } from 'react';
@@ -163,11 +164,7 @@ function SummaryContext({ info }: { info: ContextInfo }) {
  *
  * Expanded, the model chip is on screen right under it, so only the folder stays.
  */
-function summaryText(
-  props: ComposerChipRowProps,
-  t: ReturnType<typeof useI18n>['t'],
-  expanded: boolean
-): string {
+function summaryText(props: ComposerChipRowProps, t: CoreMessages, expanded: boolean): string {
   const folder = workdirLabel(props.workdir);
   if (expanded) return folder ?? '';
   // `??` is not enough: `activeModel` is `''` before a catalog loads, and an
@@ -180,7 +177,7 @@ function summaryText(
   return folder ? `${model} · ${folder}` : model;
 }
 
-function buildChips(props: ComposerChipRowProps, t: ReturnType<typeof useI18n>['t']): Chip[] {
+function buildChips(props: ComposerChipRowProps, t: CoreMessages): Chip[] {
   const chips: Chip[] = [];
   const labels = t.chat.input;
 

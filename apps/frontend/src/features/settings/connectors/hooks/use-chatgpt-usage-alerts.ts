@@ -38,7 +38,7 @@ function readStoredThreshold(): UsageAlertThreshold {
 }
 
 export function useChatGptUsageAlerts(connectors: Connector[]) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const { toast } = useToast();
   const [threshold, setThreshold] = useState<UsageAlertThreshold>(readStoredThreshold);
 

@@ -26,7 +26,7 @@ interface McpServerResourcesProps {
 }
 
 export function McpServerResources({ server }: McpServerResourcesProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.mcp.resources;
 
   const resourcesQuery = useQuery(mcpServerResourcesQueryOptions(server.id));

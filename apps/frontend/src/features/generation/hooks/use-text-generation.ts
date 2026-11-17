@@ -25,6 +25,7 @@ import type {
   RespondStreamBody,
   ToolIntent,
 } from '@mangostudio/shared/generation';
+import type { CoreMessages } from '@mangostudio/shared/i18n';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 import { ACTIVITY_TOPIC } from '@mangostudio/shared/realtime';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
@@ -96,10 +97,7 @@ function deprecatedProviderRefusal(error: unknown): ModelUnavailableDetails | un
  * as `requiredVersion` when the descriptor knew one; without it the selector's
  * fallback keeps the sentence readable rather than printing a literal placeholder.
  */
-function unavailableReasonText(
-  error: unknown,
-  t: ReturnType<typeof useI18n>['t']
-): string | undefined {
+function unavailableReasonText(error: unknown, t: CoreMessages): string | undefined {
   if (!(error instanceof ApiError)) return undefined;
   const reason = error.details?.unavailableReason;
   if (!reason || !isExternalAgentUnavailableReason(reason)) return undefined;

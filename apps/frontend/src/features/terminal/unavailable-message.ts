@@ -1,4 +1,4 @@
-import type { Messages } from '@mangostudio/shared/i18n';
+import type { CoreMessages } from '@mangostudio/shared/i18n';
 import type { TerminalRefusalReason } from '@mangostudio/shared/terminal';
 
 /**
@@ -9,7 +9,7 @@ import type { TerminalRefusalReason } from '@mangostudio/shared/terminal';
  * @example
  * unavailableMessage(t, availability.reason ?? 'unavailable');
  */
-export function unavailableMessage(t: Messages, reason: TerminalRefusalReason): string {
+export function unavailableMessage(t: CoreMessages, reason: TerminalRefusalReason): string {
   switch (reason) {
     case 'disabled':
       return t.terminal.unavailable.disabled;
@@ -36,7 +36,7 @@ export function unavailableMessage(t: Messages, reason: TerminalRefusalReason): 
  * @example
  * <Callout title={unavailableTitle(t, reason)} />
  */
-export function unavailableTitle(t: Messages, reason: TerminalRefusalReason): string {
+export function unavailableTitle(t: CoreMessages, reason: TerminalRefusalReason): string {
   return reason === 'limit' ? t.terminal.unavailableTitleLimit : t.terminal.unavailableTitle;
 }
 

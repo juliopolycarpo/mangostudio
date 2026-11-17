@@ -1,3 +1,4 @@
+import type { CoreMessages } from '@mangostudio/shared/i18n';
 import type { TerminalExit, TerminalNotice } from '@mangostudio/shared/terminal';
 import { ClipboardAddon } from '@xterm/addon-clipboard';
 import { FitAddon } from '@xterm/addon-fit';
@@ -264,10 +265,7 @@ export function TerminalView({ sessionId, onExit, createSocket, resolveUrl }: Te
  * @example
  * const message = closedStatusMessage(t, 'not-found'); // the session is gone
  */
-function closedStatusMessage(
-  t: ReturnType<typeof useI18n>['t'],
-  status: TerminalSocketStatus
-): string | null {
+function closedStatusMessage(t: CoreMessages, status: TerminalSocketStatus): string | null {
   switch (status) {
     case 'gone':
       return t.terminal.disconnected;
@@ -280,7 +278,7 @@ function closedStatusMessage(
   }
 }
 
-function noticeMessage(t: ReturnType<typeof useI18n>['t'], notice: TerminalNotice): string {
+function noticeMessage(t: CoreMessages, notice: TerminalNotice): string {
   switch (notice.kind) {
     // Which hop discarded the bytes is the relay's business, not the viewer's:
     // both read as a gap in the output, and both name how big it was.

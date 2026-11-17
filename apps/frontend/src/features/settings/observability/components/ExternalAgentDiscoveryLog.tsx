@@ -29,7 +29,7 @@ import { useApp } from '@/lib/app-context';
 import { formatTimestamp } from '../utils';
 
 export function ExternalAgentDiscoveryLog() {
-  const { t, locale } = useI18n();
+  const { t, locale } = useI18n('settings');
   const app = useApp();
   // `currentEnvironmentId` is derived from the open chat, and Settings is not a
   // chat. Without a fallback the query never runs for a user with no chats — a

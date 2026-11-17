@@ -57,7 +57,7 @@ export function ConnectorRow({
   onDelete,
   onReauthenticated,
 }: ConnectorRowProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.connectors;
   const isReadOnlyShared = isReadOnlySharedConnector(c);
   const isChatGpt = c.provider === 'chatgpt';

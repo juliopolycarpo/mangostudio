@@ -10,6 +10,7 @@
  * whole answer.
  */
 
+import type { CoreMessages } from '@mangostudio/shared/i18n';
 import type { LibraryLocationStatus } from '@mangostudio/shared/library';
 import {
   Check,
@@ -147,7 +148,7 @@ function locationPath(
 function cellTitle(
   cell: Cell,
   locations: readonly LibraryLocationStatus[],
-  l: ReturnType<typeof useI18n>['t']['library'],
+  l: CoreMessages['library'],
   locale: string
 ): string {
   if (cell.state === 'absent') return l.tooltip.absent;

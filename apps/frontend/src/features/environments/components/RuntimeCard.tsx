@@ -12,7 +12,7 @@ import type {
   RuntimeStatus,
 } from '@mangostudio/shared/environments';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
-import type { Messages } from '@mangostudio/shared/i18n';
+import type { CoreMessages, Messages } from '@mangostudio/shared/i18n';
 
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
@@ -284,7 +284,7 @@ function runtimeSubtitle(
  */
 function renderManagedElsewhere(
   source: PathSource,
-  t: Messages,
+  t: CoreMessages,
   resolve: IdentityResolver
 ): React.ReactNode {
   // "Managed by {manager}" cannot carry a bare "the system" grammatically in

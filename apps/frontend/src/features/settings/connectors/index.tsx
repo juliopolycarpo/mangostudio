@@ -25,7 +25,7 @@ interface ConnectorsSettingsProps {
 }
 
 export function ConnectorsSettings({ modelCatalog, reloadModelCatalog }: ConnectorsSettingsProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const { toast } = useToast();
   const s = t.settings.connectors;
 

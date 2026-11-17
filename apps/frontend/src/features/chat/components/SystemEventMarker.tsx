@@ -1,4 +1,5 @@
 import { isExternalAgentTargetId } from '@mangostudio/shared/external-agents/values';
+import type { CoreMessages } from '@mangostudio/shared/i18n';
 
 import { useI18n } from '@/hooks/use-i18n';
 
@@ -13,10 +14,7 @@ type Severity = 'info' | 'error';
  * falls back to the raw id rather than to an empty sentence — it is a short
  * MangoStudio identifier, not vendor text, so rendering it is safe.
  */
-function externalVendorLabel(
-  targetId: string | undefined,
-  t: ReturnType<typeof useI18n>['t']
-): string {
+function externalVendorLabel(targetId: string | undefined, t: CoreMessages): string {
   if (targetId && isExternalAgentTargetId(targetId)) return t.externalAgents.target[targetId];
   return targetId ?? '';
 }
@@ -24,7 +22,7 @@ function externalVendorLabel(
 function resolveLabel(
   event: string,
   detail: string | undefined,
-  t: ReturnType<typeof useI18n>['t']
+  t: CoreMessages
 ): { label: string; severity: Severity } {
   switch (event) {
     case 'cursor_lost':

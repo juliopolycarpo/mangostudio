@@ -91,7 +91,7 @@ function PathListField({
   ariaLabel: string;
   hint?: string;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.tools.pathList;
 
   const items = isPathListItemArray(value) ? value : [];
@@ -247,7 +247,7 @@ export function ToolParameterField({
   disabled,
 }: ToolParameterFieldProps) {
   const fieldId = useId();
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const { catalog } = useModelCatalog();
 
   const imageModels = useMemo(() => {

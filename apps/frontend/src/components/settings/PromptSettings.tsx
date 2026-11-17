@@ -32,7 +32,7 @@ export function PromptSettings({
   onAddCustomRule,
   onRemoveCustomRule,
 }: PromptSettingsProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.prompts;
 
   const handleUpdateAgentsMd = useCallback(

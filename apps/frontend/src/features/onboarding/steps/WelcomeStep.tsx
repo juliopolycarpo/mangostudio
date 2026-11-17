@@ -13,7 +13,7 @@ import { ICON_MD } from '@/lib/icon-sizes';
 import { StepFrame } from '../StepFrame';
 
 export function WelcomeStep() {
-  const { t } = useI18n();
+  const { t } = useI18n('onboarding');
   const s = t.onboarding.welcome;
   const points = [
     { key: 'folder', Icon: FolderTree, text: s.folderPoint },

@@ -14,7 +14,7 @@
  * same contradiction and there is no session narrowing it down.
  */
 
-import type { Messages } from '@mangostudio/shared/i18n';
+import type { CoreMessages, Messages } from '@mangostudio/shared/i18n';
 import type { LibraryTargetId, ResourceKind } from '@mangostudio/shared/library';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
@@ -121,7 +121,7 @@ type CardLabels = Messages['home']['skills'];
  * more languages than English, and a locale cannot fix a sentence it was handed
  * a noun to slot into.
  */
-function cardLabels(t: Messages, kind: ResourceKind | undefined): CardLabels {
+function cardLabels(t: CoreMessages, kind: ResourceKind | undefined): CardLabels {
   return kind === 'skill' ? t.home.skills : t.home.library;
 }
 

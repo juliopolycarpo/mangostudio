@@ -28,7 +28,7 @@ interface CreateApiKeyDialogProps {
 }
 
 export function CreateApiKeyDialog({ onClose }: CreateApiKeyDialogProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.externalApi;
   const labels = s.createDialog;
   const reveal = s.reveal;

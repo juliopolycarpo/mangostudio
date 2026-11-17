@@ -61,7 +61,7 @@ function BackToProviders({ label }: { label: string }) {
 
 export function ProviderSettingsPage() {
   const { provider } = useParams({ from: '/_authenticated/settings/providers/$provider' });
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const { descriptor, isLoading, error, refetch } = useProviderSettings(provider);
   const s = t.settings.providers;
 
@@ -130,7 +130,7 @@ function ProviderSettingsEditor({
   descriptor,
   providerName,
 }: ProviderSettingsEditorProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const { toast } = useToast();
   const updateMutation = useUpdateProviderSettings(provider);
   const s = t.settings.providers;

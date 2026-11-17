@@ -46,8 +46,14 @@ describe.each(Object.entries(dictionaries))('%s copy rules', (_locale, messages)
 
 describe('dictionary parity', () => {
   it('keeps en and pt-BR on exactly the same keys', () => {
-    const enKeys = leaves(en as Tree).map(([path]) => path);
-    const ptKeys = leaves(ptBR as Tree).map(([path]) => path);
+    // Sorted: `en` is assembled from its eager part and the deferred namespaces,
+    // so its top-level order differs from pt-BR's single file. The key set is the contract.
+    const enKeys = leaves(en as Tree)
+      .map(([path]) => path)
+      .sort();
+    const ptKeys = leaves(ptBR as Tree)
+      .map(([path]) => path)
+      .sort();
     expect(enKeys).toEqual(ptKeys);
   });
 });

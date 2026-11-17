@@ -60,7 +60,7 @@ export function AddConnectorModal({
   onOAuthSuccess,
   onClose,
 }: AddConnectorModalProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.connectors;
   const isChatGpt = form.provider === 'chatgpt';
   const chatGptOAuth = useChatGptOAuth({

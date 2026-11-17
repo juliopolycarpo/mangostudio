@@ -23,7 +23,7 @@ import type {
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
 import { TOOLCHAIN_RUNTIME_IDS } from '@mangostudio/shared/environments/values';
-import type { Messages } from '@mangostudio/shared/i18n';
+import type { CoreMessages } from '@mangostudio/shared/i18n';
 import type { ToolIdentityKind } from '@mangostudio/shared/tool-identity';
 import { toolSubjectKey } from '@mangostudio/shared/tool-identity';
 
@@ -52,7 +52,7 @@ const PATH_INDEX_PARAMS = new Set(['effectivePathIndex', 'shadowedPathIndex']);
  * Falls back to the raw id so an id added to the contract before its translation
  * degrades to something readable instead of blank.
  */
-export function displayName(t: Messages, id: string): string {
+export function displayName(t: CoreMessages, id: string): string {
   return (t.environments.names as Record<string, string | undefined>)[id] ?? id;
 }
 
@@ -68,7 +68,7 @@ export type ToolNameLookup = (subjectKey: string) => string | undefined;
  * behaviour exactly.
  */
 function toolDisplayName(
-  t: Messages,
+  t: CoreMessages,
   kind: ToolIdentityKind,
   id: string,
   lookup?: ToolNameLookup
@@ -81,11 +81,11 @@ export function pathPosition(pathIndex: number): number {
   return pathIndex + 1;
 }
 
-export function ltsLabel(t: Messages, status: LtsStatus): string {
+export function ltsLabel(t: CoreMessages, status: LtsStatus): string {
   return t.environments.lts[status];
 }
 
-export function healthLabel(t: Messages, health: RuntimeHealth): string {
+export function healthLabel(t: CoreMessages, health: RuntimeHealth): string {
   return t.environments.status[health];
 }
 
@@ -94,7 +94,7 @@ export function healthLabel(t: Messages, health: RuntimeHealth): string {
  * output did not parse, which every surface renders as a label rather than
  * interpolating an empty value — the one place that decision lives.
  */
-export function versionLabel(t: Messages, version: string | null): string {
+export function versionLabel(t: CoreMessages, version: string | null): string {
   return version ?? t.environments.versionUnknown;
 }
 
@@ -103,12 +103,12 @@ export function versionLabel(t: Messages, version: string | null): string {
  * phrase already names the field, so prefixing `Version` would read as
  * "Version unknown version".
  */
-export function prefixedVersionLabel(t: Messages, version: string | null): string {
+export function prefixedVersionLabel(t: CoreMessages, version: string | null): string {
   const value = versionLabel(t, version);
   return version === null ? value : `${t.environments.agents.versionLabel} ${value}`;
 }
 
-export function guardReasonLabel(t: Messages, reason: InstallGuardReason): string {
+export function guardReasonLabel(t: CoreMessages, reason: InstallGuardReason): string {
   return t.environments.install.guardBlocked[reason];
 }
 
@@ -118,7 +118,7 @@ export function guardReasonLabel(t: Messages, reason: InstallGuardReason): strin
  * an `ltsStatus` param becomes its translated label.
  */
 export function describeFinding(
-  t: Messages,
+  t: CoreMessages,
   finding: RuntimeFinding,
   lookup?: ToolNameLookup
 ): string {
@@ -478,7 +478,12 @@ export function runtimeNameList(resolve: IdentityResolver, ids: readonly string[
  *
  * `index` is zero-based; what the user reads is not.
  */
-export function chainStepLabel(t: Messages, index: number, count: number, name: string): string {
+export function chainStepLabel(
+  t: CoreMessages,
+  index: number,
+  count: number,
+  name: string
+): string {
   return formatMessage(t.environments.install.chainStep, {
     index: String(index + 1),
     count: String(count),
@@ -487,7 +492,7 @@ export function chainStepLabel(t: Messages, index: number, count: number, name: 
 }
 
 /** Where an installation's binary came from, read straight off `pathSource`. */
-export function pathSourceLabel(t: Messages, source: PathSource | undefined): string {
+export function pathSourceLabel(t: CoreMessages, source: PathSource | undefined): string {
   return t.environments.pathSources[source ?? 'system'];
 }
 
@@ -675,7 +680,7 @@ export function nodeUpdateAffordance(
  * chosen at the call site before this function is reached.
  */
 export function pathSourceManagerName(
-  t: Messages,
+  t: CoreMessages,
   resolve: IdentityResolver,
   source: PathSource
 ): string {
@@ -704,7 +709,7 @@ export function toolchainRuntimeId(id: RuntimeStatus['id']): ToolchainRuntimeId 
  * at all.
  */
 export function toolchainProcessLine(
-  t: Messages,
+  t: CoreMessages,
   resolve: IdentityResolver,
   status: RuntimeStatus,
   selection: ToolchainChoice
@@ -745,7 +750,7 @@ export function toolchainProcessLine(
  * disappearing, so the line never silently drops one half of the pair.
  */
 export function toolchainSummary(
-  t: Messages,
+  t: CoreMessages,
   statuses: readonly RuntimeStatus[] | undefined
 ): string | undefined {
   if (statuses === undefined) return undefined;

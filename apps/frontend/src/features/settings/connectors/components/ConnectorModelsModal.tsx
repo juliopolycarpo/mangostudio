@@ -54,7 +54,7 @@ export function ConnectorModelsModal({
   onToggleModel,
   onClose,
 }: ConnectorModelsModalProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.connectors;
 
   const discoveredText = modelCatalog.discoveredTextModels.filter(

@@ -109,7 +109,7 @@ function UsageWindowBar({
  * countdowns, plus reset-credit and pay-as-you-go credit lines when present.
  */
 export function ChatGptUsageMeter({ usage }: { usage: ChatGptUsageSnapshot }) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.connectors;
   const now = Date.now();
 

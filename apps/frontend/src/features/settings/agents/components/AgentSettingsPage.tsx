@@ -35,7 +35,7 @@ import { AgentList } from './AgentList';
 const NEW_AGENT_ID = 'user:new-agent' as const;
 
 export function AgentSettingsPage() {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const labels = t.settings.agents;

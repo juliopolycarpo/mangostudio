@@ -14,7 +14,7 @@
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
-import type { Messages } from '@mangostudio/shared/i18n';
+import type { LoadedMessages } from '@mangostudio/shared/i18n';
 import {
   FolderOpen,
   GitPullRequest,
@@ -35,7 +35,7 @@ interface QuotaRefreshAction {
 }
 
 export interface ActionCommandParams {
-  readonly t: Messages;
+  readonly t: LoadedMessages<'settings'>;
   /** Primary agent profiles — the ones a chat can actually be handed to. */
   readonly agents: readonly AgentProfile[];
   /** Discovery's answer for the current environment; unusable ones are dropped. */

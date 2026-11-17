@@ -1,3 +1,4 @@
+import type { CoreMessages } from '@mangostudio/shared/i18n';
 import type { ContinuationReasonCode, ProviderType } from '@mangostudio/shared/types';
 
 import { useI18n } from '@/hooks/use-i18n';
@@ -14,10 +15,7 @@ interface ContinuationEventMarkerProps {
   recovered: boolean;
 }
 
-function resolveTitleTemplate(
-  reasonCode: ContinuationReasonCode,
-  t: ReturnType<typeof useI18n>['t']
-): string {
+function resolveTitleTemplate(reasonCode: ContinuationReasonCode, t: CoreMessages): string {
   const titles = t.chat.continuation.title;
   switch (reasonCode) {
     case 'provider_changed':

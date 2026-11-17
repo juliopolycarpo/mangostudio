@@ -2,7 +2,7 @@ import type {
   ExternalAgentRemedy,
   ExternalAgentUnavailableReason,
 } from '@mangostudio/shared/external-agents';
-import type { Messages } from '@mangostudio/shared/i18n';
+import type { CoreMessages } from '@mangostudio/shared/i18n';
 
 /**
  * The sentence for an unavailable reason, with `{version}` filled in.
@@ -18,7 +18,7 @@ import type { Messages } from '@mangostudio/shared/i18n';
  */
 export function externalUnavailableText(
   reason: ExternalAgentUnavailableReason,
-  t: Messages,
+  t: CoreMessages,
   requiredVersion?: string
 ): string {
   const version = requiredVersion ?? t.externalAgents.selector.unknownVersion;
@@ -43,7 +43,7 @@ export function externalRefusalLine(
     readonly remedy?: ExternalAgentRemedy | undefined;
     readonly requiredVersion?: string | undefined;
   },
-  t: Messages
+  t: CoreMessages
 ): string {
   const sentence = externalUnavailableText(refusal.unavailableReason, t, refusal.requiredVersion);
   const remedy = refusal.remedy;

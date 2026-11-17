@@ -149,7 +149,7 @@ export function Header({
               icon={<Settings size={ICON_MD} />}
               onSelect={() => pick(onNavigateToSettings)}
             >
-              {t.settings.title}
+              {t.common.settings}
             </MenuItem>
             {session?.user ? (
               <>

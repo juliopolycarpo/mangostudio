@@ -49,7 +49,7 @@ export function McpServerForm({
   onSubmit,
   onClose,
 }: McpServerFormProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.mcp;
   const environments = useEnvironmentEntitiesQuery();
 

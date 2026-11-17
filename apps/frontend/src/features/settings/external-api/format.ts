@@ -1,5 +1,5 @@
 import { API_KEY_PREFIX, type ApiKeyScope, type ApiKeySummary } from '@mangostudio/shared/api-keys';
-import type { Locale, Messages } from '@mangostudio/shared/i18n';
+import type { LoadedMessages, Locale } from '@mangostudio/shared/i18n';
 
 const dateFormatterCache = new Map<string, Intl.DateTimeFormat>();
 
@@ -44,14 +44,14 @@ export function isKeyActive(key: ApiKeySummary, now = Date.now()): boolean {
   return !isKeyExpired(key, now);
 }
 
-export function scopeLabel(t: Messages, scope: ApiKeyScope): string {
+export function scopeLabel(t: LoadedMessages<'settings'>, scope: ApiKeyScope): string {
   return t.settings.externalApi.scope[scope];
 }
 
-export function scopeHint(t: Messages, scope: ApiKeyScope): string {
+export function scopeHint(t: LoadedMessages<'settings'>, scope: ApiKeyScope): string {
   return t.settings.externalApi.scopeHint[scope];
 }
 
-export function displayKeyName(t: Messages, name: string | null): string {
+export function displayKeyName(t: LoadedMessages<'settings'>, name: string | null): string {
   return name?.trim() ? name : t.settings.externalApi.unnamed;
 }

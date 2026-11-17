@@ -29,7 +29,7 @@ function buildToolSettingsName(serverSlug: string, toolName: string): string {
 }
 
 export function McpServerTools({ server }: McpServerToolsProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.mcp;
 
   const toolsQuery = useQuery(mcpServerToolsQueryOptions(server.id));
