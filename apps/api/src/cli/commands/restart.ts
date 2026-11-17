@@ -41,6 +41,8 @@ export interface RestartDeps {
   log: (msg: string) => void;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
+  /** Picks the manual-stop command a refusal names (`kill` or `taskkill`). */
+  platform: NodeJS.Platform;
   /** What a unit (or a respawned detached instance) would run right now. */
   executable: () => HubExecutable;
   /**
@@ -162,6 +164,7 @@ function resolveDeps(deps: Partial<RestartDeps>): Required<RestartDeps> {
     log: deps.log ?? writeLine,
     now: deps.now ?? Date.now,
     sleep: deps.sleep ?? sleep,
+    platform: deps.platform ?? process.platform,
     executable: deps.executable ?? (() => currentHubExecutable()),
     launcherPath: deps.launcherPath ?? currentLauncherPath,
   };

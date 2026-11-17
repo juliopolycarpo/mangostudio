@@ -18,6 +18,8 @@ export interface ServerShutdownDeps {
   exit: (code: number) => void;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
+  /** Picks the manual-stop command a refusal names (`kill` or `taskkill`). */
+  platform: NodeJS.Platform;
 }
 
 interface RunServerStopCommandOptions {
@@ -56,6 +58,7 @@ function resolveServerShutdownDeps(
     exit: deps.exit ?? ((code) => process.exit(code)),
     now: deps.now ?? Date.now,
     sleep: deps.sleep ?? sleep,
+    platform: deps.platform ?? process.platform,
   };
 }
 
@@ -99,7 +102,7 @@ export async function runServerStopCommand({
     if (!Number.isSafeInteger(state.pid) || state.pid < 2) {
       throw new CliError(`Refusing to signal PID ${state.pid}: expected a PID above 1.`);
     }
-  } else await assertSignalsReachHub(d.controller, state);
+  } else await assertSignalsReachHub(d.controller, state, d.platform);
   d.controller[signal](state.pid);
   const stopped = await waitForExit(d.controller, state.pid, {
     timeoutMs,

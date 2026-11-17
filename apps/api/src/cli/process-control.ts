@@ -73,6 +73,8 @@ export interface StopDeps {
   readonly controller: ProcessController;
   readonly now: () => number;
   readonly sleep: (ms: number) => Promise<void>;
+  /** Picks the manual-stop command a refusal names; the real platform when omitted. */
+  readonly platform?: NodeJS.Platform;
 }
 
 /**
@@ -126,7 +128,7 @@ export async function stopPidOrThrow(
   message: string
 ): Promise<void> {
   const pid = state.pid;
-  await assertSignalsReachHub(d.controller, state);
+  await assertSignalsReachHub(d.controller, state, d.platform);
   d.controller.terminate(pid);
   const stopped = await waitForExit(d.controller, pid, {
     timeoutMs: STOP_TIMEOUT_MS,

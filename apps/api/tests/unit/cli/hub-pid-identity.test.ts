@@ -92,16 +92,25 @@ function stateFile(state: ServerState) {
   };
 }
 
+/** Named fake platforms, so the wording of each is asserted on every host. */
+const POSIX_PLATFORM: NodeJS.Platform = 'linux';
+const WINDOWS_PLATFORM: NodeJS.Platform = 'win32';
+const MANUAL_STOP_BY_PLATFORM = [
+  [POSIX_PLATFORM, `kill ${HUB_PID}`],
+  [WINDOWS_PLATFORM, `taskkill /PID ${HUB_PID} /F`],
+] as const;
+
 type Command = 'stop' | 'killserver' | 'restart' | 'service install';
 
 /** Runs the command against `controller`; resolves with the lines it logged. */
 async function runCommand(
   command: Command,
   controller: FakeProcessController,
-  fileState: ServerState = STATE
+  fileState: ServerState = STATE,
+  platform: NodeJS.Platform = POSIX_PLATFORM
 ): Promise<string[]> {
   const lines: string[] = [];
-  const common = { controller, log: (msg: string) => lines.push(msg), ...clock() };
+  const common = { controller, platform, log: (msg: string) => lines.push(msg), ...clock() };
   const { readState, removeState } = stateFile(fileState);
   const state = { readState, removeState };
   switch (command) {
@@ -141,7 +150,6 @@ async function runCommand(
             pointer: 'current',
           }),
           logFile: () => '/home/test/.mango/logs/service.log',
-          platform: 'linux',
           env: { PATH: '/usr/bin' },
         }
       );
@@ -275,36 +283,40 @@ describe('the hub itself', () => {
 });
 
 describe('a pid whose identity cannot be read', () => {
-  it.each(['stop', 'killserver'] as const)(
-    '%s refuses, naming the pid and the way out',
-    async (command) => {
-      const controller = stoppable(new FakeProcessController());
-      controller.hideStartTime(HUB_PID);
+  it.each(
+    (['stop', 'killserver'] as const).flatMap((command) =>
+      MANUAL_STOP_BY_PLATFORM.map(([platform, manual]) => [command, platform, manual] as const)
+    )
+  )('%s on %s refuses, naming the pid and the way out', async (command, platform, manual) => {
+    const controller = stoppable(new FakeProcessController());
+    controller.hideStartTime(HUB_PID);
 
-      const outcome = await outcomeOf(runCommand(command, controller));
+    const outcome = await outcomeOf(runCommand(command, controller, STATE, platform));
 
-      expect(signalsOf(controller)).toEqual([]);
-      expect(outcome).toContain(`Cannot confirm PID ${HUB_PID} is MangoStudio`);
-      expect(outcome).toContain(`kill ${HUB_PID}`);
-      expect(outcome).toContain('killserver --force');
-      expect(outcome, 'deleting the state file must not be the first suggestion').not.toContain(
-        'delete'
-      );
-    }
-  );
+    expect(signalsOf(controller)).toEqual([]);
+    expect(outcome).toContain(`Cannot confirm PID ${HUB_PID} is MangoStudio`);
+    expect(outcome).toContain(`"${manual}"`);
+    expect(outcome).toContain('killserver --force');
+    expect(outcome, 'deleting the state file must not be the first suggestion').not.toContain(
+      'delete'
+    );
+  });
 
-  it('restart and service install refuse with the same message', async () => {
-    for (const command of ['restart', 'service install'] as const) {
-      const controller = stoppable(new FakeProcessController());
-      controller.hideStartTime(HUB_PID);
+  it.each(
+    (['restart', 'service install'] as const).flatMap((command) =>
+      MANUAL_STOP_BY_PLATFORM.map(([platform, manual]) => [command, platform, manual] as const)
+    )
+  )('%s on %s refuses with the same message', async (command, platform, manual) => {
+    const controller = stoppable(new FakeProcessController());
+    controller.hideStartTime(HUB_PID);
 
-      const outcome = await outcomeOf(runCommand(command, controller));
+    const outcome = await outcomeOf(runCommand(command, controller, STATE, platform));
 
-      expect(signalsOf(controller), `${command}: expected no signal`).toEqual([]);
-      expect(outcome, `${command}: expected a refusal`).toContain(
-        `Cannot confirm PID ${HUB_PID} is MangoStudio`
-      );
-    }
+    expect(signalsOf(controller), `${command}: expected no signal`).toEqual([]);
+    expect(outcome, `${command}: expected a refusal`).toContain(
+      `Cannot confirm PID ${HUB_PID} is MangoStudio`
+    );
+    expect(outcome).toContain(`"${manual}"`);
   });
 
   it('names the Windows command on Windows', () => {
