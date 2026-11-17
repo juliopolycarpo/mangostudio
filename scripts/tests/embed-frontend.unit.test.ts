@@ -230,9 +230,12 @@ describe('writeEmbedModules', () => {
     // Guard: a hashed asset with a gzip copy must not embed its identity bytes again. It keeps its
     // route (`null` value) and its file stays out of the compiled binary (no import of it).
     expect(manifest).toContain('"/assets/big-AbCd1234.js": null,');
-    expect(manifest).not.toContain(join(distDir, 'assets', 'big-AbCd1234.js'));
+    // The manifest writes each path as a string literal, so compare the literal: on Windows the
+    // raw path's backslashes never appear unescaped, and a raw comparison would pass or fail for
+    // the wrong reason.
+    expect(manifest).not.toContain(JSON.stringify(join(distDir, 'assets', 'big-AbCd1234.js')));
     // `index-AbCd1234.js` is below the compression threshold: no copy, so identity stays.
-    expect(manifest).toContain(join(distDir, 'assets', 'index-AbCd1234.js'));
+    expect(manifest).toContain(JSON.stringify(join(distDir, 'assets', 'index-AbCd1234.js')));
   });
 
   test('drops variants left behind by an earlier build', () => {
