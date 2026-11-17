@@ -154,22 +154,34 @@ export type RemoveTree = (path: string) => void;
 
 const removeTreeSync: RemoveTree = (path) => rmSync(path, { recursive: true, force: true });
 
-interface FileIdentity {
-  readonly dev: number;
-  readonly ino: number;
+/**
+ * Device and inode of a path, exact. NTFS file IDs pass 2^53 once an MFT record has been reused
+ * a few dozen times, so as Numbers two neighbouring directories can round to one value and a
+ * build would take another build's `dist` for its own.
+ */
+export interface FileIdentity {
+  readonly dev: bigint;
+  readonly ino: bigint;
 }
 
-function fileIdentity(path: string): FileIdentity | undefined {
+/** Reads a path's identity, or undefined when it cannot be read. Replaceable in tests. */
+export type ReadFileIdentity = (path: string) => FileIdentity | undefined;
+
+const readFileIdentity: ReadFileIdentity = (path) => {
   try {
-    const stat = statSync(path);
+    const stat = statSync(path, { bigint: true });
     return { dev: stat.dev, ino: stat.ino };
   } catch {
     return undefined;
   }
-}
+};
 
-function isFileIdentity(path: string, expected: FileIdentity): boolean {
-  const actual = fileIdentity(path);
+function isFileIdentity(
+  path: string,
+  expected: FileIdentity,
+  readIdentity: ReadFileIdentity
+): boolean {
+  const actual = readIdentity(path);
   return actual?.dev === expected.dev && actual.ino === expected.ino;
 }
 
@@ -368,7 +380,8 @@ export async function writeBuildState(outputDir: string, state: BuildState): Pro
  *
  * `removeTree` is the rollback's removal of a failed bundle, injectable so a
  * test can make that one step fail on every platform (a read-only directory
- * does not stop a removal on Windows).
+ * does not stop a removal on Windows). `readIdentity` is how the rollback tells its own
+ * published `dist` from a newer build's; a test hands in ids a Number cannot tell apart.
  *
  * @example
  * await publishDist(stagedDist, DIST, async () => rm(metafilePath, { force: true }));
@@ -377,7 +390,8 @@ export async function publishDist(
   stagedDist: string,
   dist: string,
   finalize?: () => Promise<void>,
-  removeTree: RemoveTree = removeTreeSync
+  removeTree: RemoveTree = removeTreeSync,
+  readIdentity: ReadFileIdentity = readFileIdentity
 ): Promise<void> {
   const backupDist = trackTempPath(join(dirname(dist), `.dist-backup-${Bun.randomUUIDv7()}`), {
     restoreTo: dist,
@@ -401,12 +415,14 @@ export async function publishDist(
   try {
     renameSync(stagedDist, dist);
     published = true;
-    publishedIdentity = fileIdentity(dist);
+    publishedIdentity = readIdentity(dist);
     if (finalize) await finalize();
   } catch (publishError) {
     const rollbackErrors: unknown[] = [];
     const ownsPublishedDist =
-      published && publishedIdentity !== undefined && isFileIdentity(dist, publishedIdentity);
+      published &&
+      publishedIdentity !== undefined &&
+      isFileIdentity(dist, publishedIdentity, readIdentity);
     if (ownsPublishedDist) {
       try {
         removeTree(dist);

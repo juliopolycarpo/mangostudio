@@ -14,24 +14,33 @@ export interface DirectoryIdentity {
  * neighbouring directories can round to the same value and look like one.
  * Example: directoryIdentity('apps/frontend/dist') // { dev: 2049n, ino: 1311n }
  */
-export function directoryIdentity(path: string): DirectoryIdentity {
-  const { dev, ino } = lstatSync(path, { bigint: true });
-  return { dev, ino };
+export function directoryIdentity(path: string): DirectoryIdentity | undefined {
+  const stat = lstatSync(path, { bigint: true, throwIfNoEntry: false });
+  return stat && { dev: stat.dev, ino: stat.ino };
 }
 
+/** Reads a directory's identity, or undefined when the path is gone. Replaceable in tests. */
+export type ReadDirectoryIdentity = typeof directoryIdentity;
+
 /** True when both identities name the same directory. */
-export function isSameDirectory(a: DirectoryIdentity, b: DirectoryIdentity): boolean {
-  return a.dev === b.dev && a.ino === b.ino;
+export function isSameDirectory(
+  a: DirectoryIdentity | undefined,
+  b: DirectoryIdentity | undefined
+): boolean {
+  return a !== undefined && a.dev === b?.dev && a.ino === b.ino;
 }
 
 /**
  * Give a cache replay an empty frontend output tree and retain the previous
  * bundle and metafile until the workspace build succeeds.
+ * `readIdentity` tells our empty directory from a competing build's; tests inject ids a Number
+ * cannot tell apart.
  * @example await buildWithCleanFrontendOutputs(root, () => runWorkspaceBuild());
  */
 export async function buildWithCleanFrontendOutputs(
   root: string,
-  build: () => number | Promise<number>
+  build: () => number | Promise<number>,
+  readIdentity: ReadDirectoryIdentity = directoryIdentity
 ): Promise<number> {
   const frontend = join(root, 'apps/frontend');
   const metadata = join(root, '.mango');
@@ -66,11 +75,12 @@ export async function buildWithCleanFrontendOutputs(
       process.off('exit', settle);
       try {
         if (!complete) {
-          const current = lstatSync(dist, { throwIfNoEntry: false });
+          // One read decides everything: `dist` can vanish between two reads, and
+          // a missing one must take the restore branch, not throw ENOENT.
+          const current = readIdentity(dist);
           // A replay writes inside our directory. A compiler publish replaces
           // it, and its separate metafile publication can still fail.
-          const ownsDist =
-            emptyDist && current && isSameDirectory(emptyDist, directoryIdentity(dist));
+          const ownsDist = isSameDirectory(emptyDist, current);
           if (ownsDist) {
             rmSync(dist, { recursive: true, force: true });
             rmSync(metafile, { recursive: true, force: true });
@@ -112,7 +122,7 @@ export async function buildWithCleanFrontendOutputs(
         }
       }
       mkdirSync(dist);
-      emptyDist = directoryIdentity(dist);
+      emptyDist = readIdentity(dist);
       const exitCode = await build();
       if (exitCode !== 0) return exitCode;
       requireOutputs('expected frontend build output');
