@@ -44,7 +44,12 @@ function isServerState(value: unknown): value is ServerState {
   }
   const state = value as Record<string, unknown>;
   return (
+    // The CLI signals this pid (`stop`, `killserver`, `restart`). A hand-edited or damaged file
+    // naming 0, 1 or a negative number would reach kill(0) (this group), kill(-1) (every process
+    // the user owns) or init, so such a file is "no instance".
     typeof state.pid === 'number' &&
+    Number.isSafeInteger(state.pid) &&
+    state.pid > 1 &&
     typeof state.port === 'number' &&
     typeof state.host === 'string'
   );
