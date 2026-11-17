@@ -173,7 +173,13 @@ export class ObservedFileDatabase {
     this.observed.length = 0;
   }
 
-  destroy(): Promise<void> {
-    return this.db.destroy();
+  /**
+   * Closes the database file. Kysely opens the driver on the first query only, so a test
+   * that never ran one leaves `destroy()` with nothing to close, and the handle would keep
+   * the file locked: Windows refuses to delete a directory that holds it.
+   */
+  async destroy(): Promise<void> {
+    await this.db.destroy();
+    this.sqlite.close(true);
   }
 }

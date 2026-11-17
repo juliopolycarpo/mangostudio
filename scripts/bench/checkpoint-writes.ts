@@ -868,6 +868,21 @@ export function summarizeScenario(runs: readonly ScenarioRun[]): ScenarioSummary
   };
 }
 
+/**
+ * Timing comes from the untraced runs, counts from the traced ones. A run without
+ * `--counts` has no traced runs, and summarizing an empty list throws on its empty
+ * timing samples, so the traced half is only summarized when it exists.
+ */
+export function summarizeTimedAndTracedRuns(
+  timedRuns: readonly ScenarioRun[],
+  tracedRuns: readonly ScenarioRun[]
+): ScenarioSummary {
+  const timed = summarizeScenario(timedRuns);
+  if (tracedRuns.length === 0) return timed;
+  const { counts } = summarizeScenario(tracedRuns);
+  return counts ? { ...timed, counts } : timed;
+}
+
 const spread = (summary: LatencySummary, digits = 1) =>
   `${summary.median.toFixed(digits)} (${summary.min.toFixed(digits)}-${summary.max.toFixed(digits)})`;
 
@@ -983,12 +998,7 @@ async function main(): Promise<void> {
     const tracedRuns = traced.map(
       (run) => run.find((entry) => entry.scenario === scenario.name) as ScenarioRun
     );
-    // Timing comes from the untraced runs, counts from the traced ones.
-    const withCounts = summarizeScenario([...tracedRuns]);
-    const withoutCounts = summarizeScenario(timedRuns);
-    return tracedRuns.length > 0
-      ? { ...withoutCounts, ...(withCounts.counts ? { counts: withCounts.counts } : {}) }
-      : withoutCounts;
+    return summarizeTimedAndTracedRuns(timedRuns, tracedRuns);
   });
   const result = {
     hub: base.hubBinary ?? `${hubDir} (source)`,

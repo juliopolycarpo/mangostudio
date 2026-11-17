@@ -228,6 +228,30 @@ describe('checkpoint delta lifetime', () => {
     expect({ written, rows: await deltaCount(id) }).toEqual({ written: false, rows: 0 });
   });
 
+  it('reports whether a rewrite stored a row: yes while generating, no once finalized', async () => {
+    const { id } = await generatingMessage();
+    const rewrite = (text: string) =>
+      rewriteCheckpointedRow(
+        {
+          messageId: id,
+          text,
+          partsJson: JSON.stringify([{ type: 'text', text }]),
+          providerState: null,
+          generationTime: undefined,
+        },
+        getDb()
+      );
+
+    const whileGenerating = await rewrite('first');
+    await getDb().updateTable('messages').set({ isGenerating: 0 }).where('id', '=', id).execute();
+    const afterFinalized = await rewrite('late');
+
+    expect({ whileGenerating, afterFinalized }).toEqual({
+      whileGenerating: true,
+      afterFinalized: false,
+    });
+  });
+
   it('drops the deltas when a rewrite replaces the row they were written over', async () => {
     const { id } = await generatingMessage();
     for (const seq of [0, 1, 2]) {
