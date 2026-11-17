@@ -18,6 +18,10 @@ minimumReleaseAge = 259200
 [test]
 # Keep the compiled fake CLI launcher available across test files in one worker.
 preload = ["./scripts/tests/support/fake-cli-preload.ts"]
+# Never collect tests from build output. `cargo semver-checks` leaves a full
+# baseline checkout under target/semver-checks, and a path filter such as
+# `packages/protocol` matches inside it.
+pathIgnorePatterns = ["**/target/**"]
 
 [lint]
 ignorePatterns = [
