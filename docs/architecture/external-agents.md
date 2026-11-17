@@ -1043,7 +1043,7 @@ target unavailable.
 
 `crates/mangostudio-runtime/src/external_agents/` hosts the same ten methods over the published
 External Agents SDK (`mango-external-agents`, `mango-agent-claude`, `mango-agent-codex` and
-`mango-agent-acp`, pinned exactly at 0.10.0). The SDK owns vendor protocols, harness lifecycle and
+`mango-agent-acp`, pinned exactly at 0.11.0). The SDK owns vendor protocols, harness lifecycle and
 the idle-turn bound; the runtime owns authorized launch, scratch, consent, the session cap, the
 per-turn payload budget and hard deadline, and the one mapper from SDK types to this wire.
 
@@ -1093,6 +1093,18 @@ such as `session/prompt`. The same release makes the Claude prompt line and `--m
 fixed-order and passes a `--json-schema` text through as written. The runtime sets no schema, no MCP
 server and no `native` configuration, so none of those paths run. The stdio link now refuses a
 message holding a line break before writing, which compact JSON frames never do.
+
+SDK 0.11.0 caps the activities one turn holds open at 1,024. A turn that starts more closes every
+activity it reported, then ends with an `error` event coded `codex-activity-overflow`,
+`claude-activity-overflow` or `acp-activity-overflow`, whose message names the limit and the count
+reached. The mapper forwards the code and message as they are (`retryable: false`), and the hub
+shows them like any other vendor failure; only `acp-auth-required` carries a remedy. The same
+release makes a lost process reaper an `Error::Teardown` from the SDK's own launcher. The runtime
+does not use that launcher: its guarded launcher already answers a failed OS wait with
+`Error::Teardown` and an owner that vanished before publishing the exit with `Error::Closed`, never
+an empty status. The SDK's own RFC 3339 reader for ACP session listing now refuses a Unicode-minus
+offset and text over 128 bytes, so such a session is listed without a timestamp; the mapper already
+treats `updated_at` as optional.
 
 `EventKind::StructuredOutput`, which the SDK emits only when a host passes a JSON schema to a
 Claude turn, has no wire event; the runtime passes none and the mapper drops it explicitly.

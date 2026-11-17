@@ -9,6 +9,8 @@ mod session;
 mod abandoned_start_tests;
 #[cfg(test)]
 mod acp_turn_tests;
+#[cfg(test)]
+mod activity_overflow_tests;
 mod backend;
 #[cfg(test)]
 mod claude_stop_tests;

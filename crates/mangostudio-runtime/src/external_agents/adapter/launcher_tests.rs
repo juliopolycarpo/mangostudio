@@ -68,6 +68,39 @@ async fn a_started_child_that_will_not_end_is_a_teardown_not_a_launch_failure() 
     }
 }
 
+/// SDK 0.11 reports a lost process reaper as an error rather than an empty exit status. This
+/// launcher's owner task is that reaper: when it is gone before it published the target's exit,
+/// `wait` is an error naming the missing owner, never a status and never a hang.
+#[tokio::test]
+async fn a_wait_whose_process_owner_is_gone_is_closed_not_an_exit_status() {
+    let (interrupt_tx, _interrupts) = mpsc::channel(1);
+    let (_terminal_tx, terminal) = watch::channel(None);
+    let (exit_tx, exit) = watch::channel(None);
+    let control = GuardedControl {
+        pid: Some(4242),
+        tail: StderrTail::with_capacity(0),
+        kill: CancellationToken::new(),
+        interrupts: interrupt_tx,
+        terminal,
+        exit,
+        _lease: Arc::new(Lease {
+            _guard: CancellationToken::new().drop_guard(),
+        }),
+    };
+    drop(exit_tx);
+
+    let received = tokio::time::timeout(BOUND, control.wait())
+        .await
+        .expect("expected wait to answer once the owner is gone | received a hang");
+    assert!(
+        matches!(
+            &received,
+            Err(Error::Closed { subject }) if *subject == "external-agent process owner"
+        ),
+        "expected Error::Closed for the external-agent process owner | received {received:?}"
+    );
+}
+
 /// A start that failed keeps its own error only when the child's tree is proven gone.
 #[test]
 fn a_failed_start_with_a_proven_empty_tree_keeps_the_start_error() {
