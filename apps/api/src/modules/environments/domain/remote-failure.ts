@@ -58,6 +58,28 @@ const CAUSE_MESSAGES: Readonly<
 };
 
 /**
+ * A step of a hub-driven remote sequence whose command exited non-zero.
+ *
+ * `message` is worded for the hub operator and embeds the command's output, so
+ * it belongs in the hub log. A client-facing line is built from `step` and a
+ * {@link classifyRemoteFailure} of `remote`, never from `message`.
+ *
+ * @example
+ * throw new RemoteStepError('Pairing', 'Pairing failed: …', { exitCode: 255, output: stderr });
+ */
+export class RemoteStepError extends Error {
+  constructor(
+    /** The hub's own name for the step, such as `Pairing`. Never remote text. */
+    readonly step: string,
+    message: string,
+    readonly remote: { readonly exitCode: number; readonly output: string }
+  ) {
+    super(message);
+    this.name = 'RemoteStepError';
+  }
+}
+
+/**
  * @example
  * classifyRemoteFailure({ exitCode: 255, output: 'Host key verification failed.' });
  * // { reason: 'host-key-mismatch', message: "The machine's SSH host key …" }

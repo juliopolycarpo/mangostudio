@@ -12,13 +12,17 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 
 import type { RuntimePairedBootstrapBody } from '@mangostudio/shared/environments';
 
-import { runPairedBootstrap } from '../../../../src/modules/environments/application/runtime-lifecycle-service';
+import {
+  failureLineFor,
+  runPairedBootstrap,
+} from '../../../../src/modules/environments/application/runtime-lifecycle-service';
 import type { RuntimePairingService } from '../../../../src/modules/environments/application/runtime-pairing-service';
 import type {
   RuntimeCommandOptions,
   RuntimeCommandResult,
 } from '../../../../src/modules/environments/domain/runtime-push';
 import type { RuntimeConnectionManager } from '../../../../src/services/runtime-client/runtime-connection-manager';
+import { DiagnosticWarnCapture, expectHubLogEntry } from '../../../support/diagnostic-warn-capture';
 
 const HOST = 'vps.example.test';
 const ENDPOINT = 'wss://hub.example.com/api/runtime';
@@ -174,6 +178,62 @@ describe('runPairedBootstrap', () => {
 
     await expect(runPairedBootstrap(input({ runner }))).rejects.toThrow(/known_hosts/);
   });
+
+  // Regression (#2370): a failed consent or pairing step was a plain Error, so the
+  // run's line fell back to "The runtime action failed" and lost the cause the
+  // classifier had found. The stderr (a path here) must still stay out of the line.
+  const STEP_FAILURES = [
+    {
+      step: 'consent',
+      overrides: {
+        setup: {
+          stdout: '',
+          stderr: 'Permission denied (publickey) for /home/alice/.ssh/id_ed25519',
+          exitCode: 255,
+        },
+      },
+      expectedLine:
+        'Recording consent failed. The machine rejected the SSH credentials. Check the user name and identity file on the environment, then try again. Details are in the hub log.',
+      fragment: '/home/alice/.ssh/id_ed25519',
+    },
+    {
+      step: 'pairing',
+      overrides: {
+        connect: {
+          stdout: '',
+          stderr: 'mkdir: cannot create directory /home/alice/.mango: Permission denied',
+          exitCode: 1,
+        },
+      },
+      expectedLine:
+        "Pairing failed. The machine refused the operation: permission denied for the SSH user. Check the owner and permissions of the runtime directory in that user's home, then try again. Details are in the hub log.",
+      fragment: '/home/alice/.mango',
+    },
+  ] as const;
+
+  for (const failure of STEP_FAILURES) {
+    it(`gives a failed ${failure.step} step its classified line and logs the stderr`, async () => {
+      const runner = fakeRunner([], failure.overrides);
+      const error: unknown = await runPairedBootstrap(input({ runner })).catch(
+        (caught: unknown) => caught
+      );
+
+      let line = '';
+      const logged = await new DiagnosticWarnCapture().during(() => {
+        line = failureLineFor(error, 'run-3', 'vps');
+      });
+
+      expect(line).toBe(failure.expectedLine);
+      expect(
+        line.includes(failure.fragment),
+        `(${failure.step}): expected a line without "${failure.fragment}" | received: ${line}`
+      ).toBe(false);
+      expectHubLogEntry(logged, 'run_failed', {
+        fields: { runId: 'run-3', environmentId: 'vps' },
+        fragment: failure.fragment,
+      });
+    });
+  }
 
   it('revokes the pairing credential when the pairing step itself fails', async () => {
     const calls: RunnerCall[] = [];
