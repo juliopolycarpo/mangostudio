@@ -188,14 +188,14 @@ export function responseCompression(options: ResponseCompressionOptions) {
       outgoing.vary = headerValue(headers, 'vary') as string;
       const etag = fromRoute?.headers.get('etag') ?? headerValue(headers, 'etag');
 
-      // Already read the body, so a skip below returns it unchanged rather than
-      // serializing a second time.
-      const asIdentity = () => {
+      if (raw.byteLength < COMPRESSION_MIN_BYTES || raw.byteLength > COMPRESSION_MAX_BYTES) {
+        // A plain value is left to Elysia's own serializer, so the identity
+        // answer is byte for byte what it would have been; that costs a second
+        // stringify, on allowlisted routes only. A route's own `Response` was
+        // already read, so it is rebuilt with the headers it carried.
+        if (fromRoute === null) return undefined;
         if (etag !== undefined) outgoing.etag = etag;
         return new Response(raw, { status: code, headers: outgoing });
-      };
-      if (raw.byteLength < COMPRESSION_MIN_BYTES || raw.byteLength > COMPRESSION_MAX_BYTES) {
-        return asIdentity();
       }
 
       const packed = Bun.gzipSync(raw, { level: COMPRESSION_GZIP_LEVEL });

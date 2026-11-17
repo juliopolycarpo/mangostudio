@@ -15,6 +15,7 @@ import { networkInterfaces } from 'node:os';
 import { PROBLEM_JSON_ACCEPT, PROBLEM_JSON_MEDIA_TYPE } from '@mangostudio/shared/errors';
 
 import { app, COMPRESSED_API_ROUTES } from '../../../src/app';
+import { getDb } from '../../../src/db/database';
 import { insertTestChat } from '../../support/factories';
 import { listenOnEphemeralPort } from '../../support/listen-ephemeral';
 
@@ -26,6 +27,7 @@ const CHAT_COUNT = 120;
 
 let port = 0;
 let cookie = '';
+let smallChatId = '';
 
 beforeAll(async () => {
   port = await listenOnEphemeralPort(app);
@@ -44,6 +46,20 @@ beforeAll(async () => {
     .getSetCookie()
     .map((value) => value.split(';', 1)[0])
     .join('; ');
+  // A transcript far below the threshold, on an allowlisted route that returns a plain value.
+  smallChatId = (await insertTestChat(body.user.id, { title: 'Small transcript' })).id;
+  await getDb()
+    .insertInto('messages')
+    .values({
+      id: `${smallChatId}-m1`,
+      chatId: smallChatId,
+      role: 'user',
+      text: 'hello',
+      timestamp: 1_700_000_000_000,
+      isGenerating: 0,
+      interactionMode: 'chat',
+    })
+    .execute();
   for (let index = 0; index < CHAT_COUNT; index += 1) {
     await insertTestChat(body.user.id, { title: `A chat about topic number ${index}` });
   }
@@ -83,7 +99,18 @@ describe.skipIf(lanAddress === undefined)('the composed app, seen from another m
     const chats = JSON.parse(
       new TextDecoder().decode(Bun.gunzipSync(await response.arrayBuffer()))
     );
-    expect(chats).toHaveLength(CHAT_COUNT);
+    expect(chats).toHaveLength(CHAT_COUNT + 1);
+  });
+
+  it('leaves a below-threshold allowlisted answer byte for byte as Elysia serializes it', async () => {
+    const path = `/api/chats/${smallChatId}/messages`;
+    // The loopback answer never enters the plugin's compression path: it is Elysia's own output.
+    const own = await get('127.0.0.1', path);
+    const viaPlugin = await get(remote, path);
+    expect(viaPlugin.status).toBe(own.status);
+    expect(viaPlugin.headers.get('content-encoding')).toBeNull();
+    expect(viaPlugin.headers.get('content-type')).toBe(own.headers.get('content-type'));
+    expect(await viaPlugin.text()).toBe(await own.text());
   });
 
   it('answers an unknown route with the negotiated problem document, uncompressed', async () => {
@@ -107,6 +134,6 @@ describe('the composed app, seen from the same machine', () => {
     const response = await get('127.0.0.1', '/api/chats');
     expect(response.status).toBe(200);
     expect(response.headers.get('content-encoding')).toBeNull();
-    expect(((await response.json()) as unknown[]).length).toBe(CHAT_COUNT);
+    expect(((await response.json()) as unknown[]).length).toBe(CHAT_COUNT + 1);
   });
 });
