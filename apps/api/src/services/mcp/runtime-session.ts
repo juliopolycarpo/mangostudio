@@ -21,6 +21,10 @@ import {
   type RuntimeMcpSessionEvent,
 } from '@mangostudio/shared/runtime-contract';
 
+import {
+  environmentUnavailableText,
+  isEnvironmentUnavailable,
+} from '../../lib/environment-unavailable';
 import { environmentRepository } from '../../modules/environments/infrastructure/environment-repository';
 import type { RuntimeClient } from '../runtime-client/runtime-client';
 import { getRuntimeClient } from '../runtime-client/runtime-connection-manager';
@@ -101,8 +105,13 @@ async function resolveRuntime(
   try {
     return await getRuntimeClient(userId, config.environmentId);
   } catch (error) {
+    // The status endpoint serves this message to the client, so a connect
+    // failure contributes its fixed text; the manager already logged the detail.
+    const reason = isEnvironmentUnavailable(error)
+      ? environmentUnavailableText(error)
+      : messageOf(error);
     throw new McpConnectionError(
-      `MCP server "${config.slug}" runs on environment "${config.environmentId}", which is unavailable: ${messageOf(error)}`,
+      `MCP server "${config.slug}" runs on environment "${config.environmentId}", which is unavailable: ${reason}`,
       { cause: error }
     );
   }

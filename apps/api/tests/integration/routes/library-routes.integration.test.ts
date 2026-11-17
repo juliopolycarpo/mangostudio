@@ -3,7 +3,6 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import { DEFAULT_APP_SETTINGS, withLibraryLocations } from '@mangostudio/shared/app-settings';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type {
@@ -17,6 +16,7 @@ import { listLibraryTargetDescriptors } from '@mangostudio/shared/library/host';
 import { DEFAULT_PROFILE_ID } from '@mangostudio/shared/profiles';
 
 import { getDb } from '../../../src/db/database';
+import { EnvironmentUnavailableError } from '../../../src/lib/environment-unavailable';
 import { discoverLibraryResources } from '../../../src/modules/library/application/library-discovery';
 import { LibraryFeatureUnavailableError } from '../../../src/modules/library/domain/library-feature-error';
 import {
@@ -565,7 +565,7 @@ describe('library routes', () => {
     const { service } = createService();
     service.discover = () =>
       Promise.reject(
-        new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'Environment "remote-box" was not found.')
+        new EnvironmentUnavailableError('unavailable', 'Environment "remote-box" was not found.')
       );
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, createLibraryRoutes(service));
     restoreAuth = restore;
@@ -577,7 +577,9 @@ describe('library routes', () => {
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({
       code: 'PROVIDER_ERROR',
-      error: 'Environment "remote-box" was not found.',
+      // The fixed text for the reason, not the manager's own wording.
+      error: 'The environment is unavailable.',
+      details: { reason: 'unavailable' },
     });
   });
 

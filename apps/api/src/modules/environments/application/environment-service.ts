@@ -13,6 +13,7 @@ import {
 
 import { acquireToolchainCredentialLock } from '../../../backup/capture-lock';
 import { getConfig } from '../../../lib/config';
+import { isEnvironmentUnavailable } from '../../../lib/environment-unavailable';
 import { publishEnvironmentInvalidation } from '../../../services/realtime/environment-invalidation';
 import {
   getRuntimeConnectionManager,
@@ -460,6 +461,9 @@ export function createEnvironmentService(
         if (!(await findRecord(userId, id))) {
           throw new EnvironmentServiceError(`Environment "${id}" was not found.`, 404);
         }
+        // A refused or failed connect keeps its type, so the route answers 503
+        // with the fixed text instead of a 409 carrying the manager's diagnostic.
+        if (isEnvironmentUnavailable(error)) throw error;
         throw new EnvironmentServiceError(
           error instanceof Error ? error.message : String(error),
           409

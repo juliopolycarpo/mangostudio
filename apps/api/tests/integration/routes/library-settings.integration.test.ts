@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 
-import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import type {
   ConceptComparison,
   LibraryTargetId,
   SettingsSnapshot,
 } from '@mangostudio/shared/library';
 
+import { EnvironmentUnavailableError } from '../../../src/lib/environment-unavailable';
 import type { LibraryScope } from '../../../src/modules/library/application/environment-library-service';
 import {
   createSettingsRoutes,
@@ -132,7 +132,7 @@ describe('library settings routes', () => {
       createSettingsRoutes({
         ...service,
         compare: () =>
-          Promise.reject(new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'Environment offline.')),
+          Promise.reject(new EnvironmentUnavailableError('start-failed', 'Environment offline.')),
       })
     );
     restoreAuth = restore;

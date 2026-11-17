@@ -22,6 +22,7 @@ import {
 } from '@mangostudio/shared/errors';
 import { Elysia, t } from 'elysia';
 
+import { environmentUnavailableResponse } from '../../../lib/environment-unavailable';
 import { sseResponse } from '../../../lib/sse-stream';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import type { EnvironmentService } from '../application/environment-service';
@@ -75,6 +76,8 @@ function environmentError(error: unknown, set: { status?: number | string }): Ap
     set.status = 409;
     return { error: error.message, code: ERROR_CODES.CONFLICT };
   }
+  const unavailable = environmentUnavailableResponse(error, set);
+  if (unavailable) return unavailable;
   throw error;
 }
 
@@ -236,6 +239,7 @@ export function createEnvironmentEntityRoutes(
             200: EnvironmentSchema,
             404: ApiErrorResponseSchema,
             409: ApiErrorResponseSchema,
+            503: ApiErrorResponseSchema,
           },
         },
         async ({ params, user, set }) => {

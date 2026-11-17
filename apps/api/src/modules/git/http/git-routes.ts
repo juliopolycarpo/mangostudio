@@ -50,6 +50,7 @@ import {
 import { Elysia } from 'elysia';
 
 import { getDb } from '../../../db/database';
+import { environmentUnavailableResponse } from '../../../lib/environment-unavailable';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import {
@@ -102,6 +103,9 @@ import { GitCliError } from '../infrastructure/git-cli';
 type RouteResult<T> = T | ApiErrorResponse;
 
 function gitCommandError(error: unknown, set: { status?: number | string }): ApiErrorResponse {
+  const unavailable = environmentUnavailableResponse(error, set);
+  if (unavailable) return unavailable;
+
   // A cancelled request is the client hanging up, not a server fault worth logging.
   if (error instanceof GitCliError && !error.aborted) {
     console.error('[git] command failed', {

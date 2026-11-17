@@ -14,6 +14,7 @@ import { RemoteError } from '@mangostudio/protocol';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { RuntimeGhExecResult } from '@mangostudio/shared/runtime-contract';
 
+import { isEnvironmentUnavailable } from '../../../lib/environment-unavailable';
 import { getRuntimeClient } from '../../../services/runtime-client';
 import {
   detailBoolean,
@@ -173,6 +174,8 @@ export async function runGh(
       { signal: options.signal }
     );
   } catch (error) {
+    // Connect refusals keep their type so the route can answer 503.
+    if (isEnvironmentUnavailable(error)) throw error;
     throw mapGhFailure(args, error);
   }
   // Every caller parses this output as JSON and believes the answer. A capture
