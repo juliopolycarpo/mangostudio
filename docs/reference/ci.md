@@ -405,9 +405,18 @@ three hosts. It is skipped when `main` has not moved since the last successful s
 run (`scripts/ci/native-platform-watch.ts gate`). After the jobs finish, the `report` job,
 the only one with `issues: write`, opens a `type: ci` issue naming the failing jobs and the
 run URL, or comments on the open one rather than opening a second, and closes it with a
-comment on the next green run. `workflow_dispatch` accepts `dry_run` (log the issue action
-only) and `rehearse` (`failure` or `success`: skip the native jobs and report that verdict).
-A run on another ref tracks its own issue and never touches the one for `main`.
+comment on the next green run. A native job that reaches its timeout is reported by Actions
+as `cancelled`, so a cancelled job counts as a failure and is listed; a run cancelled by a
+person skips the report step and leaves the issue alone.
+
+Only scheduled runs and rehearsals write the issue; a manual dispatch of the native
+qualification reports nothing, so a branch never leaves an issue behind. `workflow_dispatch`
+accepts `dry_run` (log the issue action only) and `rehearse` (`failure` or `success`: skip
+the native jobs and report that verdict). A rehearsal on another ref tracks its own issue and
+never touches the one for `main`; on `main` it is refused unless `dry_run` is set.
+
+GitHub disables scheduled workflows in a repository with no activity for 60 days. If the daily
+run stops appearing, re-enable it in the Actions tab.
 
 To qualify a branch after rebasing it, dispatch the workflow at that branch:
 
@@ -468,7 +477,9 @@ local hardware and live vendors require their own evidence.
 `windows-pr-tests.yml` runs the API unit lane (`bun run --filter @mangostudio/api test:unit`)
 and the root scripts lane (`bun run test:scripts:workers`) on `windows-latest` after the
 frozen install of `setup-mango`, for pull requests touching `apps/api/**`, `apps/shared/**`,
-`scripts/**` or `packages/**`. It is advisory: it is not in the
+`scripts/**` or `packages/**`, and the inputs that change what runs on Windows: `bun.lock`,
+`package.json`, `.bun-version`, `crates/**`, the `setup-mango` and `local-runtime` actions
+and the workflow file. It is advisory: it is not in the
 [required contexts](#branch-protection--required-checks) and no aggregate gate lists it in
 `needs`, so a starved runner delays the signal but never a merge. A superseded push cancels the
 earlier run. There is no macOS pull-request job; the scheduled native run covers macOS.

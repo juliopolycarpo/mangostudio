@@ -7,7 +7,10 @@ import type { NativeWatchApi, TrackingIssue } from './api';
 const NATIVE_WORKFLOW_FILE = 'native-bun-qualification.yml';
 const BOT_LOGIN = 'github-actions[bot]';
 const ISSUE_LABELS = ['type: ci', 'status: needs triage'] as const;
-const FAILING_CONCLUSIONS = new Set(['failure', 'timed_out']);
+// A job that reaches its job-level timeout is reported as cancelled, so a hang
+// is a failure here. A run cancelled by a person never reaches the report: the
+// workflow skips that step under cancelled().
+const FAILING_CONCLUSIONS = new Set(['failure', 'cancelled', 'timed_out']);
 
 export type NativeVerdict = 'success' | 'failure' | 'cancelled' | 'skipped';
 
@@ -75,7 +78,10 @@ export interface ReportOptions {
   sha: string;
   runId: number;
   runUrl: string;
+  /** `cancelled` means a job timed out; see FAILING_CONCLUSIONS. */
   verdict: NativeVerdict;
+  /** The triggering event: only a schedule (or a rehearsal) writes the tracking issue. */
+  event: string;
   /** Log every mutation instead of performing it. */
   dryRun: boolean;
   /** Pretend the run failed or passed without native jobs, to exercise the issue paths. */
@@ -107,8 +113,10 @@ function issueBody(options: ReportOptions, failing: readonly string[]): string {
 
 /**
  * Apply a run's verdict to the tracking issue: open it (or comment on the open
- * one) after a failure, comment and close it after a pass, leave it alone when
- * the run was cancelled or skipped.
+ * one) after a failure or a timed-out job, comment and close it after a pass,
+ * leave it alone when the run was skipped. A manual dispatch reports nothing
+ * (its branch and its issue would outlive each other), and a rehearsal on main
+ * must be a dry run so it cannot touch the real issue.
  * @example await reportNativeResult({ api, ref: 'refs/heads/main', sha, runId, runUrl, verdict: 'failure', dryRun: false });
  */
 export async function reportNativeResult(options: ReportOptions): Promise<void> {
@@ -120,9 +128,18 @@ export async function reportNativeResult(options: ReportOptions): Promise<void> 
       log(description);
     }
   };
-  const verdict = options.rehearsal === undefined ? options.verdict : options.rehearsal;
-  if (verdict === 'cancelled' || verdict === 'skipped') {
-    log(`run ${verdict}; the tracking issue is left as it is`);
+  if (options.rehearsal !== undefined && options.ref === 'refs/heads/main' && !options.dryRun) {
+    throw new Error(
+      `Invalid rehearsal ${options.rehearsal} on refs/heads/main without a dry run; expected a branch ref or dry_run`
+    );
+  }
+  if (options.event !== 'schedule' && options.rehearsal === undefined) {
+    log(`${options.event} run; only scheduled runs and rehearsals report`);
+    return;
+  }
+  const verdict = options.rehearsal ?? options.verdict;
+  if (verdict === 'skipped') {
+    log('run skipped; the tracking issue is left as it is');
     return;
   }
   const open = ownedIssues(await options.api.listOpenIssues(ISSUE_LABELS[0]), options.ref);
@@ -141,6 +158,8 @@ export async function reportNativeResult(options: ReportOptions): Promise<void> 
     return;
   }
 
+  // `cancelled` reaches here only for a timed-out job; a person cancelling the
+  // run skips the report step, so both fall through to the failure path.
   const failing = await failingJobLines(options);
   const [existing] = open;
   if (existing === undefined) {

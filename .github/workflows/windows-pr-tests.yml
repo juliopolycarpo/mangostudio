@@ -20,6 +20,13 @@ on:
       - apps/shared/**
       - scripts/**
       - packages/**
+      # Inputs that change what runs on Windows without touching the four trees above.
+      - bun.lock
+      - package.json
+      - .bun-version
+      - crates/**
+      - .github/actions/setup-mango/**
+      - .github/actions/local-runtime/**
       - .github/workflows/windows-pr-tests.yml
 
 permissions:

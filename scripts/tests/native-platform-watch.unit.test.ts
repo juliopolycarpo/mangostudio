@@ -15,6 +15,7 @@ import { workflowFiles } from './support/workflow-files';
 const SHA_A = 'a'.repeat(40);
 const SHA_B = 'b'.repeat(40);
 const MAIN = 'refs/heads/main';
+const BRANCH = 'refs/heads/ci/probe';
 const RUN_URL = 'https://github.com/owner/repo/actions/runs/7';
 
 function report(
@@ -29,6 +30,7 @@ function report(
     runId: 7,
     runUrl: RUN_URL,
     verdict: 'failure',
+    event: 'schedule',
     dryRun: false,
     log: (line) => lines.push(line),
     ...overrides,
@@ -41,7 +43,7 @@ function failingApi(): FakeNativeWatchApi {
   api.jobs = [
     { name: 'Native candidate (windows-latest)', conclusion: 'failure' },
     { name: 'Native candidate (macos-latest)', conclusion: 'success' },
-    { name: 'Native candidate (ubuntu-latest)', conclusion: 'timed_out' },
+    { name: 'Native candidate (ubuntu-latest)', conclusion: 'failure' },
     { name: 'Report scheduled native result', conclusion: null },
   ];
   return api;
@@ -85,7 +87,7 @@ describe('reportNativeResult', () => {
     const body = api.issues[0].body;
     expect(body).toContain(trackingMarker(MAIN));
     expect(body).toContain('- Native candidate (windows-latest): failure');
-    expect(body).toContain('- Native candidate (ubuntu-latest): timed_out');
+    expect(body).toContain('- Native candidate (ubuntu-latest): failure');
     expect(body).not.toContain('macos-latest');
     expect(body).not.toContain('Report scheduled native result');
     expect(body).toContain(RUN_URL);
@@ -122,15 +124,61 @@ describe('reportNativeResult', () => {
     expect(api.calls).toEqual([]);
   });
 
-  test.each(['cancelled', 'skipped'] as const)(
-    'a %s run leaves the issue alone',
-    async (verdict) => {
-      const api = failingApi();
-      await report(api);
-      await report(api, { verdict });
-      expect(api.calls).toHaveLength(1);
-    }
-  );
+  test('a skipped run leaves the issue alone', async () => {
+    const api = failingApi();
+    await report(api);
+    await report(api, { verdict: 'skipped' });
+    expect(api.calls).toHaveLength(1);
+  });
+
+  // Verified on a real run: a job that reaches timeout-minutes concludes as
+  // cancelled, and so does the run, while a downstream job still runs.
+  test('a timed-out job (reported as cancelled) opens an issue that lists it', async () => {
+    const api = new FakeNativeWatchApi();
+    api.jobs = [
+      { name: 'Native candidate (windows-latest)', conclusion: 'cancelled' },
+      { name: 'Native candidate (macos-latest)', conclusion: 'success' },
+      { name: 'Report scheduled native result', conclusion: null },
+    ];
+    await report(api, { verdict: 'cancelled' });
+    expect(api.calls).toEqual([expect.stringContaining('create #100')]);
+    expect(api.issues[0].body).toContain('- Native candidate (windows-latest): cancelled');
+    expect(api.issues[0].body).not.toContain('macos-latest');
+  });
+
+  test('a manual dispatch reports nothing, failed or green', async () => {
+    const api = failingApi();
+    await report(api, { event: 'workflow_dispatch', ref: BRANCH });
+    await report(api, { event: 'workflow_dispatch', verdict: 'success' });
+    expect(api.calls).toEqual([]);
+  });
+
+  test('a rehearsal reports from a manual dispatch on a branch', async () => {
+    const api = new FakeNativeWatchApi();
+    await report(api, { event: 'workflow_dispatch', ref: BRANCH, rehearsal: 'failure' });
+    expect(api.calls).toEqual([expect.stringContaining('failing on ci/probe')]);
+  });
+
+  test('a rehearsal on main without a dry run is refused before it touches any issue', async () => {
+    const api = new FakeNativeWatchApi();
+    api.issues = [{ number: 5, body: trackingMarker(MAIN), author: 'github-actions[bot]' }];
+    await expect(report(api, { event: 'workflow_dispatch', rehearsal: 'success' })).rejects.toThrow(
+      'Invalid rehearsal success on refs/heads/main without a dry run'
+    );
+    expect(api.calls).toEqual([]);
+  });
+
+  test('a rehearsal on main with a dry run only logs', async () => {
+    const api = new FakeNativeWatchApi();
+    api.issues = [{ number: 5, body: trackingMarker(MAIN), author: 'github-actions[bot]' }];
+    const lines = await report(api, {
+      event: 'workflow_dispatch',
+      rehearsal: 'success',
+      dryRun: true,
+    });
+    expect(api.calls).toEqual([]);
+    expect(lines.join('\n')).toContain('dry run: would comment on and close issue #5');
+  });
 
   test('ignores issues from other authors, other refs and unmarked bodies', async () => {
     const api = failingApi();
@@ -159,14 +207,14 @@ describe('reportNativeResult', () => {
 
   test('a failure rehearsal opens the issue without any native job', async () => {
     const api = new FakeNativeWatchApi();
-    await report(api, { verdict: 'success', rehearsal: 'failure' });
+    await report(api, { verdict: 'success', rehearsal: 'failure', ref: BRANCH });
     expect(api.issues[0].body).toContain('rehearsal: no native job ran');
   });
 
   test('a success rehearsal closes the issue a failure rehearsal opened', async () => {
     const api = new FakeNativeWatchApi();
-    await report(api, { rehearsal: 'failure' });
-    await report(api, { rehearsal: 'success' });
+    await report(api, { rehearsal: 'failure', ref: BRANCH });
+    await report(api, { rehearsal: 'success', ref: BRANCH });
     expect(api.issues).toEqual([]);
   });
 });
@@ -265,11 +313,37 @@ describe('workflow wiring', () => {
     expect(writers).toEqual(['report']);
   });
 
+  test('only a schedule or a rehearsal reports, and a person-cancelled run does not', () => {
+    const workflow = load('.github/workflows/native-bun-qualification.yml') as {
+      jobs: Record<string, { if?: string; steps?: { name?: string; if?: string }[] }>;
+    };
+    const report = workflow.jobs.report;
+    expect(report.if).toContain("github.event_name == 'schedule'");
+    expect(report.if).toContain("inputs.rehearse != ''");
+    expect(report.if).not.toContain("!= 'pull_request'");
+    const step = report.steps?.find((candidate) => candidate.name?.startsWith('Open, update'));
+    expect(step?.if, 'a timed-out job is cancelled, so only cancelled() may skip the report').toBe(
+      '$' + '{{ !cancelled() }}'
+    );
+  });
+
   test('the Windows pull-request workflow is path-filtered and sits behind no gate', () => {
     const file = '.github/workflows/windows-pr-tests.yml';
     const workflow = load(file);
     const paths = (workflow.on.pull_request as { paths: string[] }).paths;
-    for (const required of ['apps/api/**', 'apps/shared/**', 'scripts/**', 'packages/**']) {
+    for (const required of [
+      'apps/api/**',
+      'apps/shared/**',
+      'scripts/**',
+      'packages/**',
+      'bun.lock',
+      'package.json',
+      '.bun-version',
+      'crates/**',
+      '.github/actions/setup-mango/**',
+      '.github/actions/local-runtime/**',
+      '.github/workflows/windows-pr-tests.yml',
+    ]) {
       expect(paths, `${file} paths`).toContain(required);
     }
     expect(Object.values(workflow.jobs).map((job) => job['runs-on'])).toEqual(['windows-latest']);

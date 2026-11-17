@@ -36,7 +36,9 @@ on:
       rehearse:
         description: >-
           Skip the native jobs and report this verdict to the tracking issue (failure or success)
-          to exercise the issue paths. A branch run tracks its own issue, never main's.
+          to exercise the issue paths. A branch run tracks its own issue, never main's; on main
+          it needs dry_run, so a rehearsal cannot touch the real issue. A dispatch without a
+          rehearsal never writes an issue.
         type: string
         default: ""
 
@@ -197,8 +199,9 @@ jobs:
   report:
     name: Report scheduled native result
     needs: [sources, qualify]
-    # Pull requests never write issues. A skipped scheduled run has no verdict.
-    if: ${{ always() && github.event_name != 'pull_request' && needs.sources.outputs.skip != 'true' }}
+    # Only a scheduled run or a rehearsal writes the issue: a failed manual dispatch on a
+    # branch would leave an issue nobody closes. A skipped scheduled run has no verdict.
+    if: ${{ always() && needs.sources.outputs.skip != 'true' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.rehearse != '')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 9
     permissions:
@@ -213,7 +216,10 @@ jobs:
 
       - uses: $/.github/actions/setup-bun
 
+      # A job that hits its timeout is reported as cancelled and must be reported; a run
+      # cancelled by a person makes cancelled() true and is left alone.
       - name: Open, update or close the tracking issue
+        if: ${{ !cancelled() }}
         env:
           GITHUB_TOKEN: ${{ github.token }}
           SOURCES_RESULT: ${{ needs.sources.result }}

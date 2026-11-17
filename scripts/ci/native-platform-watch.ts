@@ -92,6 +92,7 @@ async function main(): Promise<void> {
     sha,
     runId,
     runUrl: `${requiredEnvironment('GITHUB_SERVER_URL')}/${repository}/actions/runs/${runId}`,
+    event: requiredEnvironment('GITHUB_EVENT_NAME'),
     verdict: parseNativeVerdict(command.verdict),
     dryRun: command.dryRun,
     rehearsal: command.rehearsal,
