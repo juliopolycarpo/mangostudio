@@ -13,7 +13,7 @@ export const galleryListQueryOptions = () =>
   infiniteQueryOptions({
     queryKey: galleryKeys.lists(),
     queryFn: async ({ pageParam }: { pageParam: string | null }) => {
-      const query = pageParam ? { cursor: pageParam, limit: '20' } : { limit: '20' };
+      const query = pageParam ? { cursor: pageParam, limit: 20 } : { limit: 20 };
       const { data, error } = await client.api.messages.images.get({ query });
       if (error) throw new ApiError(error.value);
       return data satisfies GalleryPage;

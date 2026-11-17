@@ -23,8 +23,10 @@ let highlighter: Awaited<ReturnType<typeof initHighlighter>>;
 let restore: (() => void) | undefined;
 
 beforeAll(async () => {
-  await preloadCodeLanguages(['ts']);
+  await preloadCodeLanguages(['ts'], 'one-dark-pro');
   highlighter = await initHighlighter();
+  // The cases below colour every theme, and only the requested one is loaded by default.
+  for (const theme of CODE_THEMES) await highlighter.loadTheme(theme);
   const realNow = Date.now;
   try {
     // These tests isolate consumer behavior; cold cooperative stops have their own matrix.

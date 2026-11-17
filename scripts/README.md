@@ -523,6 +523,7 @@ MANGO_API_KEY='mango_…' bun run scripts/examples/external-api-smoke.ts http://
 | `rust-test-inventory.ts`     | Rust test inventory (libtest or nextest) by logical identity; diff two, total a log                                                   |
 | `external-agent-boundary.ts` | Actual receipt hashing, admitted request ownership and event mapping; alternating Base/Head processes, raw timings and peak RSS       |
 | `checkpoint-writes.ts`       | Hub streaming turns against a fake provider: bytes written to the SQLite main and WAL files, commits, fsyncs, CPU, peak RSS           |
+| `api-json-compression.ts`    | Hub JSON responses: raw/gzip/zstd/Brotli sizes and compress time, break-even link speed, hub CPU and latency by peer address          |
 
 The benchmarks take any runtime binary, and they default to the newest of `target/release`,
 `target/release-fast` and `target/debug`. For an A/B on one machine, build with
@@ -690,6 +691,19 @@ counts over CPU.
 ```bash
 bun run scripts/bench/checkpoint-writes.ts --runs 3 --counts
 bun run scripts/bench/checkpoint-writes.ts --hub-dir ../base-checkout --scenario tools-20x65k --json
+```
+
+`api-json-compression.ts` seeds a throwaway hub with a realistic transcript (tool results are slices
+of this repository's sources) and a chat list. `sizes` reports raw and compressed bytes and compress
+time per endpoint plus the link speed below which compressing wins; `serve` measures hub CPU and
+latency per request over loopback and over the host's own LAN address (a real non-loopback peer), with
+and without `Accept-Encoding: gzip`. The hub's rate limiter allows 600 requests a minute per address,
+so keep `--runs` x `--requests` x 2 below that. Brotli is a size reference only (`node:zlib`, never in the
+hub).
+
+```bash
+bun run scripts/bench/api-json-compression.ts sizes --runs 30
+bun run scripts/bench/api-json-compression.ts serve --runs 9 --requests 20 --hub-dir ../base-checkout
 ```
 
 `rust-test-inventory.ts` proves a Rust test-target consolidation or a runner change lost no case:
