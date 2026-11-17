@@ -7,8 +7,8 @@ import { ensureBunCrossRuntime, hostReleasePlatform } from '../lib/bun-cross-run
 import { settleCrossRuntimeResolutions } from '../lib/cross-runtime-settlement';
 import { ALL_BINARY_TARGETS } from '../lib/release-targets';
 
-const BUN_RELEASES_URL_PREFIX = 'https://github.com/oven-sh/bun/releases/';
-const CHECKSUM_LISTING_URL = `${BUN_RELEASES_URL_PREFIX}download/canary/SHASUMS256.txt`;
+const CHECKSUM_LISTING_URL =
+  'https://github.com/oven-sh/bun/releases/download/canary/SHASUMS256.txt';
 
 /** Refuses the real resolver's checksum request without network I/O. */
 class FakeChecksumFailure {
@@ -163,23 +163,12 @@ describe('settleCrossRuntimeResolutions', () => {
     try {
       const originalFailure = await firstFailure;
       expect((originalFailure as Error).message).toContain('Checksum download failed (503');
-      // The spy replaces the process-wide fetch, so a request another test left running lands
-      // here too (it was seen as two extra requests under load). Count the one this resolver owns
-      // and name the rest.
-      const checksumRequests = network.requests.filter((url) => url === CHECKSUM_LISTING_URL);
+      // The spy replaces the process-wide fetch, so a stray caller anywhere in this worker lands
+      // here: the resolver's one checksum request must be the only request.
       expect(
-        checksumRequests,
-        `expected one checksum listing request | received: ${network.requests.join(', ')}`
-      ).toHaveLength(1);
-      // Nothing else may reach a Bun release URL. The one stray caller found so far was the AOT
-      // recorder's health loop, which kept polling after its hub was killed.
-      const otherReleaseRequests = network.requests.filter(
-        (url) => url.startsWith(BUN_RELEASES_URL_PREFIX) && url !== CHECKSUM_LISTING_URL
-      );
-      expect(
-        otherReleaseRequests,
-        `expected no request to ${BUN_RELEASES_URL_PREFIX} besides the checksum listing | received: ${otherReleaseRequests.join(', ')}`
-      ).toEqual([]);
+        network.requests,
+        `expected requests: [${CHECKSUM_LISTING_URL}] | received: [${network.requests.join(', ')}]`
+      ).toEqual([CHECKSUM_LISTING_URL]);
       await Bun.sleep(0);
       expect(existsSync(cacheDir), 'expected verification cache to outlive held sibling').toBe(
         true
