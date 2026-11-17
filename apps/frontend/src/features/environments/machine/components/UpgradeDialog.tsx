@@ -30,7 +30,7 @@ import { useUpgradeStream, type UseUpgradeStreamResult } from '../hooks/use-upgr
 import { invalidateMachineUpdate } from '../queries';
 import { RefusalNotice } from './RefusalNotice';
 
-interface UpgradeDialogProps {
+export interface UpgradeDialogProps {
   readonly status: MachineUpdateStatus;
   readonly onClose: () => void;
   /** Called once, only when the stream's own report says `outcome: 'upgraded'`. */

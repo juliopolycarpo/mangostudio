@@ -6,13 +6,16 @@ import { join } from 'node:path';
 import { readExecutableHeader } from '../lib/executable-header';
 import { ALL_BINARY_TARGETS, type ReleasePlatformId } from '../lib/release-targets';
 import {
+  buildPathNeedles,
   canRunOnHost,
   cargoRuntimeBuildCommand,
   cargoRuntimeOutputPath,
   cargoTargetDir,
+  embeddedBuildPathProblems,
   GLIBC_FLOOR,
   hostPlatformId,
   prebuiltRuntimePath,
+  resolveCargoHome,
   resolveRuntimeSource,
   runtimeBuildHint,
   runtimeBuildVersion,
@@ -49,7 +52,7 @@ describe('runtime target mapping', () => {
   });
 
   test('pins the glibc floor on gnu zig builds only', () => {
-    expect(cargoRuntimeBuildCommand('linux-arm64', { zig: true })).toEqual([
+    expect(cargoRuntimeBuildCommand('linux-arm64', { zig: true }).slice(0, 8)).toEqual([
       'cargo',
       'zigbuild',
       '--release',
@@ -62,7 +65,7 @@ describe('runtime target mapping', () => {
     expect(cargoRuntimeBuildCommand('linux-x64-musl', { zig: true }).slice(1)).toContain(
       'x86_64-unknown-linux-musl'
     );
-    expect(cargoRuntimeBuildCommand('linux-x64', { zig: false })).toEqual([
+    expect(cargoRuntimeBuildCommand('linux-x64', { zig: false }).slice(0, 8)).toEqual([
       'cargo',
       'build',
       '--release',
@@ -74,6 +77,80 @@ describe('runtime target mapping', () => {
     ]);
     // zig is a Linux linker here; macOS and Windows keep their native toolchains.
     expect(cargoRuntimeBuildCommand('darwin-arm64', { zig: true })[1]).toBe('build');
+  });
+
+  test('remaps the Cargo home through a cfg(all()) rustflags table that keeps the Windows flag', () => {
+    const command = cargoRuntimeBuildCommand('windows-x64', {
+      zig: false,
+      cargoHome: '/home/ci/.cargo',
+    });
+    expect(command.slice(-2)).toEqual([
+      '--config',
+      `target.'cfg(all())'.rustflags=["--remap-path-prefix=/home/ci/.cargo=/cargo"]`,
+    ]);
+    expect(command.join(' ')).not.toContain('RUSTFLAGS');
+  });
+
+  test.each([
+    ['a Windows home', String.raw`C:\Users\runneradmin\.cargo`],
+    ['a home with spaces', '/home/Ana Maria/.cargo'],
+    ['a home with a single quote', "/home/o'brien/.cargo"],
+    ['a home with a double quote and a Windows path', String.raw`D:\"odd"\.cargo`],
+  ])('the remap argument for %s parses as TOML into one exact rustc flag', (_name, home) => {
+    const command = cargoRuntimeBuildCommand('windows-x64', { zig: false, cargoHome: home });
+    expect(command.at(-2)).toBe('--config');
+    const parsed = Bun.TOML.parse(command.at(-1) as string) as {
+      target: Record<string, { rustflags: string[] }>;
+    };
+    expect(parsed.target['cfg(all())']?.rustflags).toEqual([`--remap-path-prefix=${home}=/cargo`]);
+  });
+
+  test('flags a Windows-shaped binary that embeds either spelling of the builder paths', () => {
+    const needles = buildPathNeedles(String.raw`E:\tools\cargo-home`);
+    const registry = Buffer.from(
+      String.raw`C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.0\src\lib.rs`
+    );
+    expect(
+      embeddedBuildPathProblems(registry, needles).map((p) => p.split('received: ')[1])
+    ).toEqual(['.cargo\\registry\\ (1 occurrence)', '\\Users\\runneradmin\\ (1 occurrence)']);
+    const customHome = Buffer.from('E:/tools/cargo-home/registry/src/x D:\\a\\repo\\repo\\x.rs');
+    expect(
+      embeddedBuildPathProblems(customHome, needles).map((p) => p.split('received: ')[1])
+    ).toEqual(['D:\\a\\ (1 occurrence)', 'E:/tools/cargo-home (1 occurrence)']);
+  });
+
+  test('resolves the Cargo home from CARGO_HOME, then HOME, or USERPROFILE on Windows', () => {
+    expect(
+      resolveCargoHome({ CARGO_HOME: '/opt/cargo', HOME: '/home/a' }, 'linux'),
+      'CARGO_HOME wins'
+    ).toBe('/opt/cargo');
+    expect(resolveCargoHome({ HOME: '/home/a', USERPROFILE: 'C:\\Users\\b' }, 'linux')).toBe(
+      join('/home/a', '.cargo')
+    );
+    // Git Bash sets HOME on Windows, but Cargo reads USERPROFILE there.
+    expect(resolveCargoHome({ HOME: '/c/Users/b', USERPROFILE: 'C:\\Users\\b' }, 'win32')).toBe(
+      join('C:\\Users\\b', '.cargo')
+    );
+  });
+
+  test('flags build paths left in a binary and names each one', () => {
+    const leaked = Buffer.from(
+      'x /home/runner/.cargo/registry/src/a/b.rs y /home/runner/.cargo/registry/src/c'
+    );
+    expect(embeddedBuildPathProblems(leaked, buildPathNeedles('/usr/local/cargo'))).toEqual([
+      'expected no build path in the binary (remap it with --remap-path-prefix) | received: .cargo/registry/ (2 occurrences)',
+      'expected no build path in the binary (remap it with --remap-path-prefix) | received: /home/runner/ (2 occurrences)',
+    ]);
+    const remapped = Buffer.from(
+      '/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio/src/x.rs'
+    );
+    expect(embeddedBuildPathProblems(remapped, buildPathNeedles('/usr/local/cargo'))).toEqual([]);
+    expect(
+      embeddedBuildPathProblems(
+        Buffer.from('at /usr/local/cargo/registry'),
+        buildPathNeedles('/usr/local/cargo')
+      )
+    ).toHaveLength(1);
   });
 
   test('glibc floor matches what the Bun hub already requires', () => {
@@ -311,6 +388,27 @@ describe('runtime version check', () => {
       expect(result.header).toBeNull();
       expect(result.problems).toEqual([
         `${path}: expected an executable of at least 64 bytes (ELF, Mach-O, or PE32+) | received: 12 bytes`,
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('verifyRuntimeBinary rejects a binary that embeds a Cargo registry path', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'runtime-verify-'));
+    try {
+      const path = join(dir, 'mangostudio-runtime.exe');
+      const leak = '/home/builder/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/tokio/x.rs';
+      writeFileSync(path, Buffer.concat([fakePe('arm64'), Buffer.from(leak)]));
+      const result = await verifyRuntimeBinary({
+        path,
+        target: target('windows-arm64'),
+        version: '0.1.1',
+        hostPlatform: 'linux-x64',
+        enforceGlibcFloor: true,
+      });
+      expect(result.problems).toEqual([
+        `${path}: expected no build path in the binary (remap it with --remap-path-prefix) | received: .cargo/registry/ (1 occurrence)`,
       ]);
     } finally {
       rmSync(dir, { recursive: true, force: true });

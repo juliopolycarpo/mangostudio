@@ -26,7 +26,7 @@ import { useApp } from '@/lib/app-context';
 import { ApiError } from '@/lib/utils';
 import { adoptExternalSession, forkChatWithRunner } from '@/services/external-agent-service';
 
-import { ExternalSessionPicker } from './ExternalSessionPicker';
+import { lazyExternalSessionPicker } from './LazyExternalSessionPicker';
 import { useExternalAgents } from './useExternalAgents';
 import { useExternalDisclosures } from './useExternalDisclosures';
 
@@ -143,7 +143,8 @@ export function RunnerSelectorContainer() {
       />
 
       {isPickingSession && app.currentEnvironmentId ? (
-        <ExternalSessionPicker
+        <lazyExternalSessionPicker.Overlay
+          onLoadFailed={() => setPickingSession(false)}
           environmentId={app.currentEnvironmentId}
           environmentName={environmentName}
           {...(app.currentWorkdir ? { workspacePath: app.currentWorkdir } : {})}

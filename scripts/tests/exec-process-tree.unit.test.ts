@@ -22,6 +22,8 @@ import {
   RELEASE_FILE,
   sessionOf,
   SIGNALS_LOG,
+  STOP_ANNOUNCED_FILE,
+  STOP_LISTENER_ARMED_FILE,
   waitFor,
   WORKERS_LOG,
 } from './support/process-tree';
@@ -680,6 +682,18 @@ describe.skipIf(IS_WINDOWS)('a runner that signalled its children and then went 
     return runner;
   }
 
+  /** A runner whose children ignore SIGTERM and that marks when it told its guardian about the stop. */
+  function startAnnouncingRunner(): RunnerProcess {
+    const runner = Bun.spawn(fixtureCommand('runner-announcing', dir), {
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+      env: fakeEnv(),
+    });
+    spawned.push(runner);
+    return runner;
+  }
+
   async function expectBothGone(pids: ReadyPids): Promise<void> {
     await waitFor(() => !isAlive(pids.child) && !isAlive(pids.grandchild), KILL_BOUND_MS);
     const left = [pids.child, pids.grandchild].filter((pid) => isAlive(pid));
@@ -709,12 +723,26 @@ describe.skipIf(IS_WINDOWS)('a runner that signalled its children and then went 
   test(
     'SIGKILL during the grace that follows a SIGTERM adds no second SIGTERM, then SIGKILLs the survivors',
     async () => {
-      const runner = startRunner(['child', 'ignore', 'ignore']);
+      const runner = startAnnouncingRunner();
       const pids = await readyPids();
       await guardianOf(runner);
+      // A SIGTERM that beats the marker listener would leave no marker to wait for.
+      const armed = await waitFor(
+        () => existsSync(join(dir, STOP_LISTENER_ARMED_FILE)),
+        READY_TIMEOUT_MS
+      );
+      expectGuarded('runner armed its stop marker before the SIGTERM', true, armed);
 
       runner.kill('SIGTERM');
-      await waitFor(() => signalDeliveries() === ONE_SIGTERM_EACH, READY_TIMEOUT_MS);
+      // The children having logged their SIGTERM is not enough: the runner signals
+      // them and only then tells its guardian, and a SIGKILL in between leaves the
+      // guardian to send the second SIGTERM this test forbids. The marker is
+      // written after the runner told it, so the SIGKILL lands in the grace.
+      const announced = await waitFor(
+        () => existsSync(join(dir, STOP_ANNOUNCED_FILE)) && signalDeliveries() === ONE_SIGTERM_EACH,
+        READY_TIMEOUT_MS
+      );
+      expectGuarded('runner announced its stop and each child logged one SIGTERM', true, announced);
       runner.kill('SIGKILL');
       await runner.exited;
 
