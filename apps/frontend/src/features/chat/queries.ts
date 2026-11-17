@@ -19,7 +19,12 @@ import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidatio
 import { ApiError } from '@/lib/utils';
 
 import { invalidateChatCapabilities } from './hooks/capability-invalidation';
-import { catchUpNewestPages, loadOlderPage, type MessagesCache } from './transcript-pages';
+import {
+  catchUpNewestPages,
+  loadOlderPage,
+  type MessagesCache,
+  shareTranscriptStructure,
+} from './transcript-pages';
 import { takeBackgroundRun } from './transcript-read-ahead';
 
 // ---------------------------------------------------------------------------
@@ -271,6 +276,8 @@ export const messagesQueryOptions = (chatId: string) =>
     networkMode: 'online',
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
+    // A streamed turn writes this entry once per chunk; see the function.
+    structuralSharing: shareTranscriptStructure,
   });
 
 export function useMessagesQuery(chatId: string | null) {
