@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'bun:test';
+import { resolve } from 'node:path';
 
 import {
   type BenchedCache,
   buildChunks,
   countIdentityChanges,
+  createPlainStore,
   legacyPatchMessageInCache,
   median,
   runStream,
@@ -15,6 +17,14 @@ import {
  * A reducer that appends each chunk's text to a one-part message: the same
  * shape of update as the shipped reducer, without importing the frontend.
  */
+/** Replaces only the newest page and the named row, like `patchMessageInCache`. */
+const replaceNewestPageRow: StreamModules['patch'] = (cache, messageId, updates) => {
+  const page = cache.pages[0];
+  if (!page) return cache;
+  const messages = page.messages.map((m) => (m.id === messageId ? { ...m, ...updates } : m));
+  return { ...cache, pages: [{ ...page, messages }, ...cache.pages.slice(1)] };
+};
+
 const appendingFakeModules: StreamModules = {
   createState: () => ({ aiMessageUpdate: null, text: '' }) as never,
   reduce: (state, chunk) => {
@@ -27,14 +37,9 @@ const appendingFakeModules: StreamModules = {
       },
     } as never;
   },
-  patch: (cache, messageId, updates) => {
-    // Replaces only the newest page and the named row, like `patchMessageInCache`.
-    const page = cache.pages[0];
-    if (!page) return cache;
-    const messages = page.messages.map((m) => (m.id === messageId ? { ...m, ...updates } : m));
-    return { ...cache, pages: [{ ...page, messages }, ...cache.pages.slice(1)] };
-  },
+  patch: replaceNewestPageRow,
   patchSource: 'module',
+  openStore: (history) => createPlainStore(replaceNewestPageRow, history),
 };
 
 describe('buildChunks', () => {
@@ -148,10 +153,40 @@ describe('runStream with a fake appending reducer', () => {
       ...appendingFakeModules,
       patch: legacyPatchMessageInCache,
       patchSource: 'legacy',
+      openStore: (history) => createPlainStore(legacyPatchMessageInCache, history),
     };
 
     const run = runStream(legacyModules, 'text', 60, 5);
 
     expect(run.identity.pages).toBe(2);
+  });
+});
+
+describe('stream-reducer bench through the app query client', () => {
+  it.each(['app', 'off'])('prints one JSON line per scenario with sharing %s', (sharing) => {
+    const child = Bun.spawnSync(
+      [
+        process.execPath,
+        resolve(import.meta.dir, '../bench/stream-reducer.ts'),
+        ...['--runs', '1', '--chunks', '30', '--history', '3', '--kind', 'text,subagent_text'],
+        ...['--sharing', sharing, '--json'],
+      ],
+      { stdout: 'pipe', stderr: 'pipe' }
+    );
+
+    expect(child.exitCode).toBe(0);
+    const lines = child.stdout.toString().trim().split('\n');
+    expect(lines).toHaveLength(2);
+    const summary = JSON.parse(lines[0] as string) as {
+      kind: string;
+      chunks: number;
+      sharing: string;
+      identityChangesPerChunk: { siblingMessages: number; olderPageMessages: number };
+    };
+    expect(summary).toMatchObject({ kind: 'text', chunks: 30, sharing });
+    expect(summary.identityChangesPerChunk).toMatchObject({
+      siblingMessages: 0,
+      olderPageMessages: 0,
+    });
   });
 });

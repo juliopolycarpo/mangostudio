@@ -74,6 +74,30 @@ export interface StreamModules {
     updates: Record<string, unknown>
   ) => BenchedCache;
   readonly patchSource: 'module' | 'legacy';
+  /** Where the patched cache lives: the app's own query client, or a plain variable. */
+  readonly openStore: (history: number, sharing: StructuralSharing) => CacheStore;
+}
+
+/** How the transcript query merges written data: the app's default, or switched off. */
+export type StructuralSharing = 'app' | 'off';
+
+/** The transcript cache as a stream writes it: one patch per chunk, read back as a whole. */
+export interface CacheStore {
+  read(): BenchedCache;
+  write(messageId: string, updates: Record<string, unknown>): void;
+  close(): void;
+}
+
+/** A store that is just a variable, for tests and for measuring the patch without a query client. */
+export function createPlainStore(patch: StreamModules['patch'], history: number): CacheStore {
+  let cache = seedCache(history);
+  return {
+    read: () => cache,
+    write: (messageId, updates) => {
+      cache = patch(cache, messageId, updates);
+    },
+    close: () => undefined,
+  };
 }
 
 /** The chunks a turn of `kind` streams after its opening chunk, `count` of them. */
@@ -199,35 +223,37 @@ export interface StreamRun {
 function applyChunk(
   modules: StreamModules,
   state: BenchedState,
-  cache: BenchedCache,
+  store: CacheStore,
   chunk: Record<string, unknown>
-): { state: BenchedState; cache: BenchedCache } {
+): BenchedState {
   const nextState = modules.reduce(state, chunk, { pendingSubagentName: 'Subagent' });
   const update = nextState.aiMessageUpdate;
-  const nextCache = update ? modules.patch(cache, update.targetMessageId, update.patch) : cache;
-  return { state: nextState, cache: nextCache };
+  if (update) store.write(update.targetMessageId, update.patch);
+  return nextState;
 }
 
-/** One pass: the whole stream through reducer and cache patch, timed per chunk. */
+/** One pass: the whole stream through reducer and cache write, timed per chunk. */
 export function runStream(
   modules: StreamModules,
   kind: StreamKind,
   chunkCount: number,
-  history: number
+  history: number,
+  sharing: StructuralSharing = 'app'
 ): StreamRun {
   const options = { userMessageId: 'message-user', aiMessageId: LIVE_MESSAGE_ID };
-  const start = (): { state: BenchedState; cache: BenchedCache } => {
+  const start = (): { state: BenchedState; store: CacheStore } => {
     let state = modules.createState(options);
-    let cache = seedCache(history);
-    for (const chunk of openingChunks(kind))
-      ({ state, cache } = applyChunk(modules, state, cache, chunk));
-    return { state, cache };
+    const store = modules.openStore(history, sharing);
+    for (const chunk of openingChunks(kind)) state = applyChunk(modules, state, store, chunk);
+    return { state, store };
   };
   const chunks = buildChunks(kind, chunkCount + 1);
   const finalChunk = chunks.pop() as Record<string, unknown>;
 
-  // Reducer alone, to separate its cost from the cache patch.
-  let reducerState = start().state;
+  // Reducer alone, to separate its cost from the cache write.
+  const reducerRun = start();
+  let reducerState = reducerRun.state;
+  reducerRun.store.close();
   const reducerStartedAt = Bun.nanoseconds();
   for (const chunk of chunks) {
     reducerState = modules.reduce(reducerState, chunk, { pendingSubagentName: 'Subagent' });
@@ -236,12 +262,13 @@ export function runStream(
 
   Bun.gc(true);
   const heapBefore = process.memoryUsage().heapUsed;
-  let { state, cache } = start();
+  const run = start();
+  let state = run.state;
   const durationsNs: number[] = [];
   const startedAt = Bun.nanoseconds();
   for (const chunk of chunks) {
     const chunkStartedAt = Bun.nanoseconds();
-    ({ state, cache } = applyChunk(modules, state, cache, chunk));
+    state = applyChunk(modules, state, run.store, chunk);
     durationsNs.push(Bun.nanoseconds() - chunkStartedAt);
   }
   const totalMs = (Bun.nanoseconds() - startedAt) / 1e6;
@@ -251,7 +278,10 @@ export function runStream(
   const meanUs = (window: readonly number[]) =>
     window.reduce((sum, ns) => sum + ns, 0) / window.length / 1e3;
   const windowSize = Math.min(WINDOW, durationsNs.length);
-  const identity = countIdentityChanges(cache, applyChunk(modules, state, cache, finalChunk).cache);
+  const before = run.store.read();
+  applyChunk(modules, state, run.store, finalChunk);
+  const identity = countIdentityChanges(before, run.store.read());
+  run.store.close();
   return {
     totalMs,
     reducerOnlyMs,
@@ -290,15 +320,68 @@ async function loadModules(frontendDir: string): Promise<StreamModules> {
         ) => BenchedCache | undefined;
       })
     : null;
+  const patch: StreamModules['patch'] = patchModule
+    ? (cache, messageId, updates) =>
+        patchModule.patchMessageInCache(cache, messageId, updates) as BenchedCache
+    : legacyPatchMessageInCache;
+
+  // The app's own client and transcript query options, with one observer
+  // subscribed like the open chat's `useInfiniteQuery`. A write then pays what
+  // the app pays: the updater, structural sharing, the cache event fan-out
+  // (including the capability-invalidation subscriber) and the observer result.
+  const frontendSrc = resolve(frontendDir, 'src');
+  const { queryClient } = (await import(resolve(frontendSrc, 'lib/query-client.ts'))) as {
+    queryClient: QueryClientLike;
+  };
+  const { messagesQueryOptions } = (await import(
+    resolve(frontendSrc, 'features/chat/queries.ts')
+  )) as {
+    messagesQueryOptions: (chatId: string) => { queryKey: readonly unknown[] };
+  };
+  const { InfiniteQueryObserver } = (await import(
+    Bun.resolveSync('@tanstack/react-query', frontendDir)
+  )) as { InfiniteQueryObserver: new (client: QueryClientLike, options: unknown) => ObserverLike };
+  let storeCount = 0;
+  const openStore = (history: number, sharing: StructuralSharing): CacheStore => {
+    storeCount += 1;
+    const queryOptions = {
+      ...messagesQueryOptions(`chat-bench-${storeCount}`),
+      // Seeded data is fresh for the whole pass, so subscribing starts no fetch.
+      staleTime: Number.POSITIVE_INFINITY,
+      ...(sharing === 'off' ? { structuralSharing: false } : {}),
+    };
+    queryClient.setQueryData(queryOptions.queryKey, seedCache(history));
+    const observer = new InfiniteQueryObserver(queryClient, queryOptions);
+    const unsubscribe = observer.subscribe(() => undefined);
+    return {
+      read: () => queryClient.getQueryData(queryOptions.queryKey) as BenchedCache,
+      write: (messageId, updates) => {
+        queryClient.setQueryData(queryOptions.queryKey, (old: BenchedCache | undefined) =>
+          old ? patch(old, messageId, updates) : old
+        );
+      },
+      close: () => {
+        unsubscribe();
+        queryClient.removeQueries({ queryKey: queryOptions.queryKey });
+      },
+    };
+  };
   return {
     createState: reducer.createTextGenerationStreamState,
     reduce: reducer.reduceTextGenerationStreamChunk,
-    patch: patchModule
-      ? (cache, messageId, updates) =>
-          patchModule.patchMessageInCache(cache, messageId, updates) as BenchedCache
-      : legacyPatchMessageInCache,
+    patch,
     patchSource: patchModule ? 'module' : 'legacy',
+    openStore,
   };
+}
+
+interface QueryClientLike {
+  setQueryData(key: readonly unknown[], updater: unknown): unknown;
+  getQueryData(key: readonly unknown[]): unknown;
+  removeQueries(filters: { queryKey: readonly unknown[] }): void;
+}
+interface ObserverLike {
+  subscribe(listener: () => void): () => void;
 }
 
 function round(value: number, digits = 2): number {
@@ -309,13 +392,14 @@ function round(value: number, digits = 2): number {
 function printHelp(): never {
   log(`Usage:
   bun run scripts/bench/stream-reducer.ts [--frontend-dir apps/frontend] [--runs N]
-    [--kind a,b] [--chunks 500,2000,8000] [--history N] [--json]
+    [--kind a,b] [--chunks 500,2000,8000] [--history N] [--sharing app|off] [--json]
 
   --frontend-dir  A checkout's apps/frontend (default: this checkout)
   --runs          Timed passes per scenario, after one warm-up (default 5)
   --kind          Comma-separated subset of: ${STREAM_KINDS.join(', ')}
   --chunks        Comma-separated chunk counts (default ${DEFAULT_CHUNK_COUNTS.join(',')})
   --history       Settled rows above the live turn on each of two pages (default 50)
+  --sharing       The transcript query's structuralSharing: the app's default or off (default app)
   --json          One JSON line per scenario instead of a table`);
   process.exit(0);
 }
@@ -332,7 +416,7 @@ function parsePositiveIntegers(flag: string, raw: string): number[] {
 
 if (import.meta.main) {
   const { values, positional, flags } = parseArgs({
-    valueFlags: ['--frontend-dir', '--runs', '--kind', '--chunks', '--history'],
+    valueFlags: ['--frontend-dir', '--runs', '--kind', '--chunks', '--history', '--sharing'],
     booleanFlags: ['--json'],
   });
   if (flags['--help']) printHelp();
@@ -348,20 +432,29 @@ if (import.meta.main) {
     }
     return kind as StreamKind;
   });
+  const sharing = values['--sharing'] ?? 'app';
+  if (sharing !== 'app' && sharing !== 'off') {
+    fatal(`expected \`--sharing\` app or off | received: ${sharing}`);
+  }
   const modules = await loadModules(resolve(values['--frontend-dir'] ?? 'apps/frontend'));
   if (!flags['--json']) {
-    log(`cache patch: ${modules.patchSource} | history: ${history} rows x 2 pages | runs: ${runs}`);
+    log(
+      `cache patch: ${modules.patchSource} | sharing: ${sharing} | history: ${history} rows x 2 pages | runs: ${runs}`
+    );
     log('kind           chunks  total ms  reducer ms  first us  last us  last/first  heap MiB');
   }
   for (const kind of kinds) {
     for (const count of counts) {
-      runStream(modules, kind, count, history);
-      const passes = Array.from({ length: runs }, () => runStream(modules, kind, count, history));
+      runStream(modules, kind, count, history, sharing);
+      const passes = Array.from({ length: runs }, () =>
+        runStream(modules, kind, count, history, sharing)
+      );
       const pick = (select: (run: StreamRun) => number) => median(passes.map(select));
       const summary = {
         kind,
         chunks: count,
         patchSource: modules.patchSource,
+        sharing,
         totalMs: round(pick((run) => run.totalMs)),
         reducerOnlyMs: round(pick((run) => run.reducerOnlyMs)),
         firstUsPerChunk: round(pick((run) => run.firstUsPerChunk)),
