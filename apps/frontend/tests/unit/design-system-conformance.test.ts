@@ -280,6 +280,19 @@ describe('design system conformance', () => {
     [12, 'a.tsx', `const c = 'hover:scale-105';`],
     [13, 'a.tsx', `const c = <EmptyState icon={<Icon size={24} />} />;`],
     [14, 'a.tsx', `const c = 'p-2.5';`],
+    // The other branches of each needle's alternation: a needle that lost one would still pass
+    // on the first sample of its rule.
+    [4, 'a.tsx', `const c = 'shadow';`],
+    [4, 'a.tsx', `const c = 'drop-shadow-md';`],
+    [5, 'a.tsx', `const c = 'text-[14px]';`],
+    [6, 'a.tsx', `const c = 'font-light';`],
+    [7, 'a.tsx', `const c = 'tracking-wide';`],
+    [9, 'a.tsx', `const c = 'text-blue-600';`],
+    [10, 'a.tsx', `const c = 'bg-[rgba(0,0,0,0.5)]';`],
+    [10, 'a.tsx', `const c = 'bg-[var(--color-surface)]';`],
+    [11, 'a.tsx', `const c = 'text-white';`],
+    [12, 'a.tsx', `const c = 'transition-all';`],
+    [14, 'a.tsx', `const c = 'p-3.5';`],
     [3, 'a.css', `.a { @apply rounded-2xl; }`],
     // A comment is blanked to spaces before the scan, and a space ends the class token.
     [3, 'a.tsx', `const c = 'rounded/* retired */';`],
