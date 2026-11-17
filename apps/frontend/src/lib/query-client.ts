@@ -1,11 +1,16 @@
 import { QueryClient } from '@tanstack/react-query';
 
 import { registerCapabilityInvalidationSources } from '@/features/chat/hooks/capability-invalidation';
+import { queryRetryDelay, shouldRetryQuery } from '@/lib/environment-unavailable';
 
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: 1,
+      // One retry, except where the hub says an environment will not come back
+      // by itself; a transient `ENVIRONMENT_UNAVAILABLE` waits for the hub's own
+      // backoff instead of landing inside it. See `@/lib/environment-unavailable`.
+      retry: shouldRetryQuery,
+      retryDelay: queryRetryDelay,
       refetchOnWindowFocus: false,
       refetchOnReconnect: true,
       // Every polled query in the app (observability at 5s, runtime health at

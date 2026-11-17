@@ -576,7 +576,7 @@ describe('library routes', () => {
 
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({
-      code: 'PROVIDER_ERROR',
+      code: 'ENVIRONMENT_UNAVAILABLE',
       // The fixed text for the reason, not the manager's own wording.
       error: 'The environment is unavailable.',
       details: { reason: 'unavailable' },

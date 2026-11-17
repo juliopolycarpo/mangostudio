@@ -45,6 +45,11 @@ import type { Kysely } from 'kysely';
 
 import { getDb } from '../../../db/database';
 import type { Database } from '../../../db/types';
+import {
+  type EnvironmentUnavailableReason,
+  environmentUnavailableText,
+  isEnvironmentUnavailable,
+} from '../../../lib/environment-unavailable';
 import { getRuntimeClient, type RuntimeClient } from '../../../services/runtime-client';
 import { generateId } from '../../../utils/id';
 import { toPublicChat } from '../../chats/application/public-chat';
@@ -88,8 +93,14 @@ const ADOPTION_LOOKUP_PAGES = 4;
 export const EXTERNAL_SESSION_ADOPTED_EVENT = 'external_session_adopted';
 
 export type ExternalNativeSessionRefusalCode =
-  /** The environment could not be reached, or is not this user's. */
+  /**
+   * The connection manager refused or failed to connect: offline, deleted or
+   * not this user's. All three read the same, so nothing leaks about other
+   * users' environments. Carries `reason`.
+   */
   | 'unreachable'
+  /** Resolving the runtime client failed for a cause the manager did not classify. */
+  | 'resolve-failed'
   /** The target is not installed, signed out, or otherwise unavailable there. */
   | 'unavailable'
   /** The adapter has no session listing at all. */
@@ -107,6 +118,8 @@ interface Refusal {
   readonly ok: false;
   readonly code: ExternalNativeSessionRefusalCode;
   readonly message: string;
+  /** Why the environment was unreachable; set only for `unreachable`. */
+  readonly reason?: EnvironmentUnavailableReason;
 }
 
 export type ExternalNativeSessionListing =
@@ -184,12 +197,21 @@ export function createExternalNativeSessionService(
     let client: RuntimeClient;
     try {
       client = await resolveRuntimeClient(userId, environmentId);
-    } catch {
+    } catch (error) {
       // One answer for "offline", "deleted" and "somebody else's", so the
-      // response discloses nothing about environments this user cannot see.
+      // response discloses nothing about environments this user cannot see: the
+      // manager raises the same error type for all three, with a fixed text.
+      if (isEnvironmentUnavailable(error)) {
+        return {
+          ok: false,
+          code: 'unreachable',
+          message: environmentUnavailableText(error),
+          reason: error.reason,
+        };
+      }
       return {
         ok: false,
-        code: 'unreachable',
+        code: 'resolve-failed',
         message: 'Could not reach the machine those sessions live on.',
       };
     }

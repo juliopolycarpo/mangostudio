@@ -6,6 +6,7 @@ import type { ExternalAgentSteerResult } from '@mangostudio/shared/external-agen
 import { EXTERNAL_WORKSPACE_TRUST_VERSION } from '@mangostudio/shared/external-agents';
 
 import { getDb } from '../../../src/db/database';
+import { EnvironmentUnavailableError } from '../../../src/lib/environment-unavailable';
 import { getAppSettings } from '../../../src/modules/app-settings/application/app-settings-service';
 import { AppSettingsConflict } from '../../../src/modules/app-settings/domain/app-settings-conflict';
 import type { AnswerExternalApprovalResult } from '../../../src/modules/external-agents/application/external-approval-registry';
@@ -565,8 +566,33 @@ describe('trusting a workspace for an external agent', () => {
     );
 
     expect(response.status).toBe(503);
+    // An error the manager did not classify keeps the generic answer.
+    expect(await response.json()).toMatchObject({ code: 'PROVIDER_ERROR' });
     const settings = await getAppSettings(getDb(), user.id);
     expect(settings.externalAgentSettings.workspaceTrust).toEqual([]);
+  });
+
+  it('answers ENVIRONMENT_UNAVAILABLE with the reason when the manager refused the connect', async () => {
+    const cursorChatId = await insertExternalChat('/work/repo', 'cursor');
+    const app = mount(anyController(), {
+      resolveRuntimeClient: () =>
+        Promise.reject(new EnvironmentUnavailableError('stopped-retrying', 'raw /run/x.sock')),
+    });
+
+    const response = await app.handle(
+      post(`/chats/${cursorChatId}/external-agent/trust-workspace`, trustBody())
+    );
+    const text = await response.text();
+
+    expect(
+      response.status,
+      `(trust-workspace): expected status 503 | received: ${response.status} ${text}`
+    ).toBe(503);
+    expect(JSON.parse(text)).toMatchObject({
+      code: 'ENVIRONMENT_UNAVAILABLE',
+      details: { reason: 'stopped-retrying' },
+    });
+    expect(text).not.toContain('/run/x.sock');
   });
 });
 

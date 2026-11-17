@@ -18,6 +18,7 @@ export const EXTERNAL_PREFLIGHT_STATUS = {
   conflict: 409,
   unsupported: 409,
   unavailable: 503,
+  'environment-unreachable': 503,
   validation: 400,
   // Not 409: nothing about the request is wrong, and nothing about it will
   // change. What is missing is a decision only the user can make, which the
@@ -39,6 +40,7 @@ export const EXTERNAL_PREFLIGHT_CODE = {
   conflict: ERROR_CODES.CONFLICT,
   unsupported: ERROR_CODES.UNSUPPORTED,
   unavailable: ERROR_CODES.PROVIDER_ERROR,
+  'environment-unreachable': ERROR_CODES.ENVIRONMENT_UNAVAILABLE,
   validation: ERROR_CODES.VALIDATION,
   'workspace-trust': ERROR_CODES.EXTERNAL_WORKSPACE_UNTRUSTED,
   'isolation-unproven': ERROR_CODES.EXTERNAL_ISOLATION_UNPROVEN,
@@ -69,6 +71,9 @@ export function externalPreflightDetails(
   }
   if (failure.kind === 'disclosure-required') {
     return { details: { targetId: failure.targetId, environmentId: failure.environmentId } };
+  }
+  if (failure.kind === 'environment-unreachable') {
+    return { details: { reason: failure.reason } };
   }
   if (failure.kind === 'unsupported' && failure.unavailableReason) {
     // Structured so the client renders its own sentence and the matching

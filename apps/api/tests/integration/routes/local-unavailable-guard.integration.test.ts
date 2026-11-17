@@ -127,4 +127,36 @@ describe('every parameterless GET route with Local unavailable', () => {
       `(Local unavailable): expected no GET route to answer 5xx other than 503 | received: ${failures.join(' ; ')}`
     ).toEqual([]);
   });
+
+  it('answers every 503 with ENVIRONMENT_UNAVAILABLE, a reason and no internal detail', async () => {
+    const { restore } = createAuthenticatedApiTestApp(user);
+    restoreAuth = restore;
+
+    const paths = await parameterlessGetPaths();
+    const failures: string[] = [];
+    let unavailableAnswers = 0;
+    for (const path of paths) {
+      const response = await app.handle(new Request(`http://localhost${path}`));
+      if (response.status !== 503) continue;
+      unavailableAnswers += 1;
+      const text = await response.text();
+      const body = JSON.parse(text) as { code?: string; details?: { reason?: string } };
+      if (
+        body.code !== 'ENVIRONMENT_UNAVAILABLE' ||
+        typeof body.details?.reason !== 'string' ||
+        /\/home\/|\.sock|\bpid\b|\n|\bat \w+ \(/.test(text)
+      ) {
+        failures.push(`GET ${path} -> 503 ${text}`);
+      }
+    }
+
+    expect(
+      unavailableAnswers,
+      '(Local unavailable): expected the OpenAPI inventory to include routes that answer 503'
+    ).toBeGreaterThan(3);
+    expect(
+      failures,
+      `(Local unavailable): expected every 503 to be {code: ENVIRONMENT_UNAVAILABLE, details.reason} without a path, pid or stack | received: ${failures.join(' ; ')}`
+    ).toEqual([]);
+  });
 });

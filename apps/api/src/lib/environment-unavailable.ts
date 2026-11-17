@@ -114,7 +114,14 @@ export function environmentUnavailableResponse(
   }
   return {
     error: environmentUnavailableText(error),
-    code: ERROR_CODES.PROVIDER_ERROR,
-    details: { reason: error.reason },
+    code: ERROR_CODES.ENVIRONMENT_UNAVAILABLE,
+    // The wait also travels in the body: the browser client reads errors from
+    // the body only, and a retry delay is useless if it cannot see it.
+    details: {
+      reason: error.reason,
+      ...(error.retryAfterSeconds === undefined
+        ? {}
+        : { retryAfterSeconds: String(error.retryAfterSeconds) }),
+    },
   };
 }

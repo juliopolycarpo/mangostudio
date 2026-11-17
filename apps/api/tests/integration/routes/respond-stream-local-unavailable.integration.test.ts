@@ -1,6 +1,6 @@
 /**
  * A text turn whose environment cannot be reached answers the way every other
- * route does: the fixed 503 text and `PROVIDER_ERROR`, never the connection
+ * route does: the fixed 503 text and `ENVIRONMENT_UNAVAILABLE`, never the connection
  * manager's diagnostic. `POST /respond/stream` resolves the environment inside
  * the stream, so the failure arrives as an `SSEErrorEvent` after the response
  * has started. (`POST /respond` makes one tool-less call and never contacts an
@@ -124,7 +124,7 @@ function post(path: string): Request {
 }
 
 describe('text turn with the environment unavailable', () => {
-  it('POST /respond/stream ends with one SSEErrorEvent carrying the fixed text and PROVIDER_ERROR', async () => {
+  it('POST /respond/stream ends with one SSEErrorEvent carrying the fixed text and ENVIRONMENT_UNAVAILABLE', async () => {
     const { app, restore } = createAuthenticatedApiTestApp(user, errorHandler, respondStreamRoutes);
     restoreAuth = restore;
 
@@ -135,12 +135,12 @@ describe('text turn with the environment unavailable', () => {
 
     expect(
       response.status === 200 ? errors : [{ httpStatus: response.status, text }],
-      `(POST /respond/stream): expected an SSE error event {code:'PROVIDER_ERROR'} without the diagnostic | received: ${response.status} ${text}`
+      `(POST /respond/stream): expected an SSE error event {code:'ENVIRONMENT_UNAVAILABLE'} without the diagnostic | received: ${response.status} ${text}`
     ).toEqual([
       {
         type: 'error',
         error: 'The runtime for this environment is not installed on the hub.',
-        code: ERROR_CODES.PROVIDER_ERROR,
+        code: ERROR_CODES.ENVIRONMENT_UNAVAILABLE,
         done: true,
       },
     ]);
