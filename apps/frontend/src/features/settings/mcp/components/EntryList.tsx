@@ -38,7 +38,7 @@ export function EntryList<T>({
   onAdd,
   onRemove,
 }: EntryListProps<T>) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.mcp;
 
   return (

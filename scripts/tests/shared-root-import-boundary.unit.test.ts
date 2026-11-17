@@ -107,6 +107,8 @@ describe('shared root Bun boundary', () => {
   it.each([
     '@mangostudio/shared/i18n',
     '@mangostudio/shared/i18n/en',
+    '@mangostudio/shared/i18n/en-settings',
+    '@mangostudio/shared/i18n/en-onboarding',
     '@mangostudio/shared/i18n/pt-BR',
   ])('preserves the production locale restriction for %s', (specifier) => {
     const result = lintSource('apps/frontend/src/forbidden-locale.ts', `import '${specifier}';`);
@@ -122,6 +124,25 @@ describe('shared root Bun boundary', () => {
     const result = lintSource(path, "import '@mangostudio/shared/i18n/en';");
     expect(result.exitCode, result.output).toBe(0);
   });
+
+  it.each(['en-settings', 'en-onboarding'])(
+    'lets locale-dictionaries load the deferred %s namespace, and no other source file',
+    (name) => {
+      const specifier = `@mangostudio/shared/i18n/${name}`;
+      const allowed = lintSource(
+        'apps/frontend/src/lib/locale-dictionaries.ts',
+        `import '${specifier}';`
+      );
+      expect(allowed.exitCode, allowed.output).toBe(0);
+
+      const refused = lintSource(
+        'apps/frontend/src/features/settings/forbidden.ts',
+        `import '${specifier}';`
+      );
+      expect(refused.exitCode, refused.output).toBe(1);
+      expect(refused.output).toContain('Locale dictionaries are i18n plumbing');
+    }
+  );
 
   it('preserves the allowed locale names and Eden root types', () => {
     const result = lintSource(

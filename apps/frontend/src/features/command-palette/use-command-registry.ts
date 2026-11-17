@@ -47,7 +47,7 @@ export interface CommandRegistry {
  */
 export function useCommandRegistry(onRun: () => void): CommandRegistry {
   const app = useApp();
-  const { t, locale } = useI18n();
+  const { t, locale } = useI18n('settings');
   const navigate = useNavigate();
   const { resolvedTheme, setConfig } = useTheme();
   // `currentEnvironmentId` is null exactly when no chat exists, and a null id

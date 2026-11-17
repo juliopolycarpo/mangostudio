@@ -1,3 +1,4 @@
+import type { CoreMessages } from '@mangostudio/shared/i18n';
 import type { MessagePart } from '@mangostudio/shared/types';
 import { type ComponentProps, useState } from 'react';
 
@@ -11,7 +12,7 @@ import { formatMessage } from '@/lib/i18n-format';
 import { DisclosureChevron } from '../DisclosureChevron';
 
 type SubagentTracePartValue = Extract<MessagePart, { type: 'subagent_trace' }>;
-type FeedLabels = ReturnType<typeof useI18n>['t']['chat']['feed'];
+type FeedLabels = CoreMessages['chat']['feed'];
 type BadgeVariant = NonNullable<ComponentProps<typeof Badge>['variant']>;
 
 /** How a finished or running delegation reads at a glance, beside its word. */

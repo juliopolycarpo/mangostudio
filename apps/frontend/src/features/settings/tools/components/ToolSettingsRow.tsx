@@ -3,7 +3,7 @@
  * switch that turns it on, and the parameters it exposes underneath.
  */
 
-import type { Messages } from '@mangostudio/shared/i18n';
+import type { LoadedMessages, Messages } from '@mangostudio/shared/i18n';
 import type {
   ToolSettingsDescriptor,
   ToolSettingsListResponse,
@@ -47,10 +47,7 @@ const TOOL_TEXT_KEYS = {
   grep: 'grep',
 } as const satisfies Record<string, keyof Messages['settings']['tools']['toolNames']>;
 
-function getTranslatedToolText(
-  descriptor: ToolSettingsDescriptor,
-  t: ReturnType<typeof useI18n>['t']
-) {
+function getTranslatedToolText(descriptor: ToolSettingsDescriptor, t: LoadedMessages<'settings'>) {
   const s = t.settings.tools;
   const key = Object.hasOwn(TOOL_TEXT_KEYS, descriptor.name)
     ? TOOL_TEXT_KEYS[descriptor.name as keyof typeof TOOL_TEXT_KEYS]
@@ -60,7 +57,7 @@ function getTranslatedToolText(
 }
 
 export function ToolSettingsRow({ descriptor }: ToolSettingsRowProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.tools;
   const queryClient = useQueryClient();
   const { mutateAsync, isPending: isMutationPending } = useUpdateToolSetting();

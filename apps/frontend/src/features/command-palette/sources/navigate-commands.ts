@@ -6,7 +6,7 @@
  * one appears without anybody remembering this file exists.
  */
 
-import type { Messages } from '@mangostudio/shared/i18n';
+import type { LoadedMessages } from '@mangostudio/shared/i18n';
 import type { LinkProps } from '@tanstack/react-router';
 import { House, Image, LayoutGrid, MessageSquare, MonitorCog, Settings } from 'lucide-react';
 
@@ -15,7 +15,7 @@ import type { CommandItem } from '@/features/command-palette/lib/command-item';
 import { environmentNavEntries } from '@/features/environments/environments-nav';
 
 export interface NavigateCommandParams {
-  readonly t: Messages;
+  readonly t: LoadedMessages<'settings'>;
   readonly navigate: (to: LinkProps['to']) => void;
 }
 
@@ -40,7 +40,7 @@ export function navigateCommands({ t, navigate }: NavigateCommandParams): Comman
     ...settingsNavGroups(t.settings).flatMap((group) =>
       group.entries.map((entry) => ({
         to: entry.to,
-        label: `${t.settings.title} · ${entry.label}`,
+        label: `${t.common.settings} · ${entry.label}`,
         // The heading a page sits under, searchable but not shown: typing
         // "observability" should reach Logs and Metrics, neither of which says
         // that word anywhere a user can see.

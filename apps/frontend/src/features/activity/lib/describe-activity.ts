@@ -11,7 +11,7 @@
  */
 
 import type { ActivityEvent } from '@mangostudio/shared/activity';
-import type { Messages } from '@mangostudio/shared/i18n';
+import type { CoreMessages } from '@mangostudio/shared/i18n';
 import type { LibraryTargetId, ResourceKind } from '@mangostudio/shared/library';
 import {
   Bot,
@@ -56,13 +56,13 @@ const PROPAGATION_ICONS: Record<ResourceKind, LucideIcon> = {
   hook: Webhook,
 };
 
-function targetName(t: Messages, targetId: string): string {
+function targetName(t: CoreMessages, targetId: string): string {
   return t.library.targets[targetId as LibraryTargetId] ?? targetId;
 }
 
 export function describeActivity(
   event: ActivityEvent,
-  t: Messages,
+  t: CoreMessages,
   locale: string
 ): ActivityDescription {
   const labels = t.home.activity;

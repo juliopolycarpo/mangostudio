@@ -13,7 +13,7 @@ import type {
   ExternalNativeSession,
 } from '@mangostudio/shared/external-agents';
 import { normalizePermissionLevel } from '@mangostudio/shared/external-agents/values';
-import type { Messages } from '@mangostudio/shared/i18n';
+import type { CoreMessages } from '@mangostudio/shared/i18n';
 import { useState } from 'react';
 
 import { RunnerSelector } from '@/components/layout/RunnerSelector';
@@ -201,7 +201,7 @@ export function RunnerSelectorContainer() {
  * to the server's own sentence: that text is written for an operator reading a
  * log, not for someone mid-click.
  */
-export function adoptionMessage(code: string | null | undefined, t: Messages): string {
+export function adoptionMessage(code: string | null | undefined, t: CoreMessages): string {
   const labels = t.externalAgents.sessions;
   switch (code) {
     case ERROR_CODES.CONFLICT:

@@ -23,7 +23,7 @@ interface ChatGptResetCreditActionProps {
  * a confirmation dialog because redeeming spends an irreversible perk.
  */
 export function ChatGptResetCreditAction({ connector, onRedeemed }: ChatGptResetCreditActionProps) {
-  const { t, locale } = useI18n();
+  const { t, locale } = useI18n('settings');
   const plural = usePlural();
   const { toast } = useToast();
   const s = t.settings.connectors;

@@ -31,7 +31,7 @@ import { formatMessage } from '@/lib/i18n-format';
 import { ICON_LG } from '@/lib/icon-sizes';
 
 export function ExternalAgentSettingsPage() {
-  const { t, locale } = useI18n();
+  const { t, locale } = useI18n('settings');
   const { toast } = useToast();
   const disclosures = useExternalDisclosures();
   const labels = t.externalAgents.disclosure;
@@ -101,7 +101,7 @@ interface DisclosureRowProps {
 }
 
 function DisclosureRow({ targetId, acknowledgedAt, locale, busy, onRevoke }: DisclosureRowProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const labels = t.externalAgents.disclosure;
   // A row the client has no vendor name for is still a consent on record, so it
   // is shown under its stored id rather than hidden. A target this build does

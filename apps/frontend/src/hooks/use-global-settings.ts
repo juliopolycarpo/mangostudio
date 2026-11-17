@@ -146,7 +146,7 @@ export function useGlobalSettings() {
       // newer value on screen, and telling the user it was rolled back would
       // send them looking for an edit that is still there.
       toast(
-        restoredSettings ? t.settings.autoSave.errorRevertedToast : t.settings.autoSave.errorToast,
+        restoredSettings ? t.errors.settingsSaveReverted : t.errors.settingsSaveFailed,
         'error'
       );
       if (context?.write.isLatest()) {
@@ -253,7 +253,7 @@ export function useGlobalSettings() {
       )
     ) {
       rollbackRef.current = null;
-      throw new ApiError({ error: t.settings.autoSave.errorToast, code: 'CONFLICT' });
+      throw new ApiError({ error: t.errors.settingsSaveFailed, code: 'CONFLICT' });
     }
     const promise = mutateAsync({
       patch: appSettingsPatchExcludingProfiles(pendingSettings.settings),
@@ -286,7 +286,7 @@ export function useGlobalSettings() {
       if (queryClient.getQueryState(appSettingsKeys.current())?.isInvalidated) {
         // A conflict refresh is pending or failed. Do not build another whole
         // field from that rejected cache, including consent writes callers await.
-        toast(t.settings.autoSave.errorToast, 'error');
+        toast(t.errors.settingsSaveFailed, 'error');
         void queryClient
           .fetchQuery({ ...appSettingsQueryOptions(), staleTime: 0 })
           .catch(() => undefined);
@@ -361,7 +361,7 @@ export function useGlobalSettings() {
   const saveSettingsNow = useCallback(
     async (updater: (current: AppSettings) => AppSettings) => {
       if (!saveSettings(updater)) {
-        throw new ApiError({ error: t.settings.autoSave.errorToast, code: 'CONFLICT' });
+        throw new ApiError({ error: t.errors.settingsSaveFailed, code: 'CONFLICT' });
       }
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);

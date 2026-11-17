@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils';
  * carries the state and the word repeats it, so colour is never the signal.
  */
 export function SettingsSaveIndicator() {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const status = useAppSettingsSaveStatus();
 
   if (status === 'idle') return null;

@@ -42,7 +42,7 @@ export function ContextSettings({
   setPreferredSummaryModel,
   setProviderCompactionEnabled,
 }: ContextSettingsProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.context;
 
   const missingModelOption =

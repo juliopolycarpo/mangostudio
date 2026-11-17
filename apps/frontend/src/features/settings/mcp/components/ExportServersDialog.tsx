@@ -21,7 +21,7 @@ interface ExportServersDialogProps {
 }
 
 export function ExportServersDialog({ servers, onClose }: ExportServersDialogProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.mcp;
   const { toast } = useToast();
   const { copy } = useClipboard();

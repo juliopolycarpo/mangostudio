@@ -33,7 +33,7 @@ import { McpServerForm } from './McpServerForm';
 type FormMode = { kind: 'add' } | { kind: 'edit'; server: McpServer };
 
 export function McpSettingsPage() {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.mcp;
   const { toast } = useToast();
 

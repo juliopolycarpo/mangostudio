@@ -26,7 +26,7 @@ export function ReasoningSettingsSection({
   form,
   onChange,
 }: ReasoningSettingsSectionProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.providers;
 
   const efforts = EFFORT_DISPLAY_ORDER.filter((effort) =>

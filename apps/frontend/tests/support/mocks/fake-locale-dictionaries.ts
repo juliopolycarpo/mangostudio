@@ -2,18 +2,29 @@
  * Test doubles for the locale dictionary loading in `src/lib/locale-dictionaries`.
  *
  * - `inMemoryLocaleDictionaries` is what the render harness hands to every
- *   `I18nProvider`: both dictionaries already in memory, so a test that stores
- *   `pt-BR` and renders can assert synchronously, as it could when both
- *   dictionaries were bundled eagerly.
+ *   `I18nProvider`: both dictionaries already in memory, deferred namespaces
+ *   included, so a test that stores `pt-BR` and renders can assert
+ *   synchronously, as it could when both dictionaries were bundled eagerly.
  * - `createFakeDictionaryLoader` stands in for one chunk's dynamic `import()`:
  *   each call is pending until the test settles it, like a network fetch.
+ * - `englishWithoutDeferredNamespaces` is the eager English dictionary as the
+ *   entry chunk ships it, and `createFakeNamespaceLoaders` the pending chunks
+ *   of the namespaces it leaves out.
  */
 
-import { en, type Locale, type Messages, ptBR } from '@mangostudio/shared/i18n';
+import {
+  type CoreMessages,
+  type DeferredNamespace,
+  en,
+  type Locale,
+  type Messages,
+  ptBR,
+} from '@mangostudio/shared/i18n';
 
-import type {
-  LocaleDictionaryStore,
-  ResolvedDictionary,
+import {
+  carriesNamespaces,
+  type LocaleDictionaryStore,
+  type ResolvedDictionary,
 } from '../../../src/lib/locale-dictionaries';
 
 const dictionaries: Record<Locale, Messages> = { en, 'pt-BR': ptBR };
@@ -22,23 +33,46 @@ function resolvedInMemory(locale: Locale): ResolvedDictionary {
   return { locale, messages: dictionaries[locale] };
 }
 
-/** A store whose every dictionary is already loaded. */
+/** The dictionary the in-memory store was last told is on screen; the store itself is shared by every test. */
+let shownInMemory: ResolvedDictionary | null = null;
+
+/** A store whose every dictionary is already loaded, deferred namespaces included. */
 export const inMemoryLocaleDictionaries: LocaleDictionaryStore = {
   load: (locale) => Promise.resolve(resolvedInMemory(locale)),
   resolved: resolvedInMemory,
+  show: (dictionary) => {
+    shownInMemory = dictionary;
+  },
+  shown: () => shownInMemory,
+  namespaces: (dictionary, namespaces) =>
+    carriesNamespaces(dictionary.messages, namespaces) ? dictionary.messages : null,
+  loadNamespaces: (dictionary, namespaces) =>
+    carriesNamespaces(dictionary.messages, namespaces)
+      ? Promise.resolve(dictionary.messages)
+      : Promise.reject(
+          new Error(
+            `expected the in-memory "${dictionary.locale}" dictionary to carry ${namespaces.join(', ')} | received a dictionary without it`
+          )
+        ),
 };
 
-interface PendingLoad {
-  resolve: (messages: Messages) => void;
+/** The English dictionary the entry chunk ships: every namespace but the deferred ones. */
+export const englishWithoutDeferredNamespaces: CoreMessages = (() => {
+  const { settings: _settings, onboarding: _onboarding, ...core } = en;
+  return core;
+})();
+
+interface PendingLoad<Value> {
+  resolve: (value: Value) => void;
   reject: (error: unknown) => void;
 }
 
 /** One chunk's loader, settled by the test; `calls` counts the requests made. */
-export interface FakeDictionaryLoader {
-  load: () => Promise<Messages>;
+export interface FakeDictionaryLoader<Value = Messages> {
+  load: () => Promise<Value>;
   readonly calls: number;
-  /** Settles the oldest pending request with `messages`. */
-  resolveNext: (messages: Messages) => void;
+  /** Settles the oldest pending request with `value`. */
+  resolveNext: (value: Value) => void;
   /** Fails the oldest pending request with `error`. */
   rejectNext: (error: unknown) => void;
 }
@@ -54,11 +88,11 @@ export interface FakeDictionaryLoader {
  * ptLoader.resolveNext(ptBR);
  * ```
  */
-export function createFakeDictionaryLoader(): FakeDictionaryLoader {
-  const pending: PendingLoad[] = [];
+export function createFakeDictionaryLoader<Value = Messages>(): FakeDictionaryLoader<Value> {
+  const pending: PendingLoad<Value>[] = [];
   let calls = 0;
 
-  function next(): PendingLoad {
+  function next(): PendingLoad<Value> {
     const request = pending.shift();
     if (!request) {
       throw new Error(
@@ -71,14 +105,37 @@ export function createFakeDictionaryLoader(): FakeDictionaryLoader {
   return {
     load: () => {
       calls += 1;
-      return new Promise<Messages>((resolve, reject) => {
+      return new Promise<Value>((resolve, reject) => {
         pending.push({ resolve, reject });
       });
     },
     get calls() {
       return calls;
     },
-    resolveNext: (messages) => next().resolve(messages),
+    resolveNext: (value) => next().resolve(value),
     rejectNext: (error) => next().reject(error),
+  };
+}
+
+/** The chunk loaders of every deferred namespace of the eager locale, settled by the test. */
+export type FakeNamespaceLoaders = {
+  [Namespace in DeferredNamespace]: FakeDictionaryLoader<Pick<Messages, Namespace>>;
+};
+
+/**
+ * One pending loader per deferred namespace; hand `eagerNamespaces` to
+ * `createLocaleDictionaryStore`, and settle a chunk with `settings.resolveNext({ settings: en.settings })`.
+ */
+export function createFakeNamespaceLoaders(): FakeNamespaceLoaders & {
+  readonly eagerNamespaces: {
+    [Namespace in DeferredNamespace]: () => Promise<Pick<Messages, Namespace>>;
+  };
+} {
+  const settings = createFakeDictionaryLoader<Pick<Messages, 'settings'>>();
+  const onboarding = createFakeDictionaryLoader<Pick<Messages, 'onboarding'>>();
+  return {
+    settings,
+    onboarding,
+    eagerNamespaces: { settings: settings.load, onboarding: onboarding.load },
   };
 }

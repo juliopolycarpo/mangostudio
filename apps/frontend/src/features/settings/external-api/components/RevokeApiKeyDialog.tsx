@@ -18,7 +18,7 @@ export function RevokeApiKeyDialog({
   onConfirm,
   onCancel,
 }: RevokeApiKeyDialogProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.externalApi.revoke;
 
   return (

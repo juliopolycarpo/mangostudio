@@ -21,7 +21,7 @@ import { ProviderSettingsRow } from './ProviderSettingsRow';
  * names. `overflow-hidden` clips each row's hover fill to the card's corners.
  */
 export function ProviderSettingsMenu() {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.providers;
   const { providers, isLoading, error, refetch } = useProviderSettingsList();
 

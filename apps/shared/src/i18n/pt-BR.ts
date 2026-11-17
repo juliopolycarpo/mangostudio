@@ -562,14 +562,10 @@ export const messages = {
   },
 
   settings: {
-    title: 'Configurações',
     autoSave: {
       saving: 'Salvando…',
       saved: 'Salvo',
       error: 'Não salvo',
-      errorToast: 'Não foi possível salvar as configurações.',
-      errorRevertedToast:
-        'Não foi possível salvar as configurações. Sua última alteração foi revertida.',
     },
     groups: {
       general: 'Preferências',
@@ -2141,6 +2137,9 @@ export const messages = {
     retry: 'Tentar novamente',
     noResultsFor: 'Nenhum resultado para “{query}”',
     contextIndicator: 'Indicador de uso de contexto',
+    // Named by the sidebar, the account menu and the palette, which render before
+    // the `settings` namespace is loaded.
+    settings: 'Configurações',
     settingsNavigation: 'Navegação de configurações',
     openMenu: 'Abrir menu',
     closeMenu: 'Fechar menu',
@@ -4235,6 +4234,11 @@ export const messages = {
     textGenerationFailed: 'Falha ao obter uma resposta. Tente novamente.',
     imageGenerationFailed: 'Falha ao gerar imagem. Tente novamente.',
     imageGenerationInterrupted: 'O turno foi interrompido antes desta imagem ser gerada.',
+    // Autosave can fail from any page that toggles a setting, so these stay out of the
+    // deferred `settings` namespace.
+    settingsSaveFailed: 'Não foi possível salvar as configurações.',
+    settingsSaveReverted:
+      'Não foi possível salvar as configurações. Sua última alteração foi revertida.',
     notFound: {
       title: 'Página não encontrada',
       hint: 'O link pode estar errado, ou a página pode ter mudado de lugar.',

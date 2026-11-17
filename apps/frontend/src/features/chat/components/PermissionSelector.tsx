@@ -39,6 +39,7 @@ import {
   externalPresetFor,
   externalPresetPair,
 } from '@mangostudio/shared/external-agents/values';
+import type { CoreMessages } from '@mangostudio/shared/i18n';
 import { AlertTriangle, Check, ChevronDown, Shield } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -280,7 +281,7 @@ function unattendedWarning(
     level: ExternalPermissionLevel,
     routing: ExternalApprovalRouting
   ) => ExternalSupportedConfiguration | undefined,
-  labels: ReturnType<typeof useI18n>['t']['externalAgents']['permission']
+  labels: CoreMessages['externalAgents']['permission']
 ): string | null {
   if (!find(pair.level, pair.routing)?.unattended) return null;
   return pair.routing === 'auto-review'
@@ -367,7 +368,7 @@ function Option({
  */
 function reasonText(
   configuration: ExternalSupportedConfiguration | undefined,
-  t: ReturnType<typeof useI18n>['t']
+  t: CoreMessages
 ): string | null {
   if (!configuration || configuration.supported) return null;
   const key = configuration.unsupportedReasonKey?.split('.').at(-1);

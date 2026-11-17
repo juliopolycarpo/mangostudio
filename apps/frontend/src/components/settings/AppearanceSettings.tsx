@@ -85,7 +85,7 @@ const DIFF_PREVIEW_MODES = ['expanded', 'collapsed', 'collapse_older'] as const;
  * card, then code theme and file change previews.
  */
 export function AppearanceSettings() {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const { config, setConfig } = useTheme();
   const { chatDisplaySettings, setDiffPreviewsEnabled, setDiffPreviewMode } = useGlobalSettings();
   const s = t.settings.appearance;

@@ -23,7 +23,7 @@ interface ChatGptMetricsCardProps {
  * connector pill. The panels are divided by hairlines inside the one card.
  */
 export function ChatGptMetricsCard({ connector: c, onRedeemed }: ChatGptMetricsCardProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.connectors;
   const account = c.accountLabel ?? c.maskedSuffix ?? s.chatgptAccountUnknown;
   const planLabel = formatPlan(c.planType, s);

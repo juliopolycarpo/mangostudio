@@ -9,6 +9,7 @@
  */
 
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
+import type { CoreMessages } from '@mangostudio/shared/i18n';
 import type { LibraryLocationId, RemovalPreviewRequest } from '@mangostudio/shared/library';
 import { useMemo } from 'react';
 
@@ -253,7 +254,7 @@ export function RemovalWizard({
   );
 }
 
-function stepLabel(l: ReturnType<typeof useI18n>['t']['library'], step: RemovalStep): string {
+function stepLabel(l: CoreMessages['library'], step: RemovalStep): string {
   switch (step) {
     case 'locations':
       return l.removal.stepLocations;

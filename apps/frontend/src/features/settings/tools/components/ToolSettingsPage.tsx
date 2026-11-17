@@ -32,7 +32,7 @@ export function ToolSettingsPage({
   maxToolIterations,
   setMaxToolIterations,
 }: ToolSettingsPageProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const { descriptors, isLoading, error, refetch } = useToolSettings();
   const s = t.settings.tools;
 

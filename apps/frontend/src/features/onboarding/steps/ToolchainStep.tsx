@@ -35,7 +35,7 @@ function plainVersion(version: string): string {
 }
 
 export function ToolchainStep({ environmentId }: { readonly environmentId: string }) {
-  const { t } = useI18n();
+  const { t } = useI18n('onboarding');
   const s = t.onboarding.toolchain;
   const { resolve } = useToolIdentities();
   const [runtimes, recipes] = useQueries({

@@ -488,7 +488,7 @@ describe('useGlobalSettings', () => {
         DEFAULT_APP_SETTINGS.promptSettings.textSystemPrompt
       )
     );
-    expect(screen.getByText(en.settings.autoSave.errorRevertedToast)).toBeTruthy();
+    expect(screen.getByText(en.errors.settingsSaveReverted)).toBeTruthy();
   });
 
   /**
@@ -670,11 +670,11 @@ describe('useGlobalSettings', () => {
       // The older PUT fails after a newer one has already been submitted.
       act(() => settlePut[0]?.(failedPut()));
 
-      await waitFor(() => expect(screen.getByText(en.settings.autoSave.errorToast)).toBeTruthy());
+      await waitFor(() => expect(screen.getByText(en.errors.settingsSaveFailed)).toBeTruthy());
       // Nothing was reverted — the newer value is still on screen — so telling
       // the user it was would send them looking for an edit that is still there.
       expect(result.current.promptSettings.textSystemPrompt).toBe('second');
-      expect(screen.queryByText(en.settings.autoSave.errorRevertedToast)).toBeNull();
+      expect(screen.queryByText(en.errors.settingsSaveReverted)).toBeNull();
     });
 
     it('does not refetch over a newer edit when a superseded save conflicts', async () => {

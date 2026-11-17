@@ -5,7 +5,7 @@
  */
 
 import type { InstallGuardReason } from '@mangostudio/shared/environments';
-import type { Messages } from '@mangostudio/shared/i18n';
+import type { CoreMessages } from '@mangostudio/shared/i18n';
 import type {
   HubHealth,
   HubLaunchMode,
@@ -23,11 +23,11 @@ import { formatMessage } from '@/lib/i18n-format';
 
 import { guardReasonLabel } from '../format';
 
-export function launchModeLabel(t: Messages, launch: HubLaunchMode): string {
+export function launchModeLabel(t: CoreMessages, launch: HubLaunchMode): string {
   return t.environments.machine.hub.launch[launch];
 }
 
-export function hubHealthLabel(t: Messages, health: HubHealth): string {
+export function hubHealthLabel(t: CoreMessages, health: HubHealth): string {
   return t.environments.machine.hub.health[health];
 }
 
@@ -46,7 +46,7 @@ export const HUB_HEALTH_TONE: Record<
   unprobed: { badge: 'neutral', text: 'text-fg-muted' },
 };
 
-export function supervisorLabel(t: Messages, platform: UserServicePlatform): string {
+export function supervisorLabel(t: CoreMessages, platform: UserServicePlatform): string {
   return t.environments.machine.service.supervisor[platform];
 }
 
@@ -55,14 +55,14 @@ export function supervisorLabel(t: Messages, platform: UserServicePlatform): str
  * and services; a guard reason the machine page has no sentence for falls back
  * to the install wording, which at least names the check.
  */
-export function machineGuardReasonLabel(t: Messages, reason: InstallGuardReason): string {
+export function machineGuardReasonLabel(t: CoreMessages, reason: InstallGuardReason): string {
   const specific = t.environments.machine.actions.guard as Partial<
     Record<InstallGuardReason, string>
   >;
   return specific[reason] ?? guardReasonLabel(t, reason);
 }
 
-function actionReasonLabel(t: Messages, reason: MachineActionReason): string {
+function actionReasonLabel(t: CoreMessages, reason: MachineActionReason): string {
   return t.environments.machine.actions.reasons[reason];
 }
 
@@ -73,7 +73,7 @@ function actionReasonLabel(t: Messages, reason: MachineActionReason): string {
  * stays with the caller.
  */
 function refusalLines(
-  t: Messages,
+  t: CoreMessages,
   reason: MachineActionReason | null,
   guardReasons: readonly InstallGuardReason[]
 ): string[] {
@@ -90,7 +90,7 @@ function refusalLines(
  * // Usage: refusalMessage(t, { reason: 'foreground', reasons: [] })
  */
 export function refusalMessage(
-  t: Messages,
+  t: CoreMessages,
   refusal: {
     readonly reason: MachineActionReason | null;
     readonly reasons: readonly InstallGuardReason[];
@@ -109,7 +109,7 @@ export function refusalMessage(
  * available action has nothing to explain, so the list is empty.
  */
 export function actionRefusalLines(
-  t: Messages,
+  t: CoreMessages,
   status: Pick<MachineStatus, 'actions'>,
   action: keyof Omit<MachineStatus['actions'], 'guard'>
 ): string[] {
@@ -119,12 +119,12 @@ export function actionRefusalLines(
 }
 
 /** Which tool owns the running binary, worded for a reader rather than a wire id. */
-export function installedViaManagerLabel(t: Messages, manager: InstallManager): string {
+export function installedViaManagerLabel(t: CoreMessages, manager: InstallManager): string {
   return t.environments.machine.update.manager[manager];
 }
 
 /** Why the hub refuses to upgrade itself, for a `POST /machine/upgrade` 409 or a `refused` report. */
-export function upgradeRefusalReasonLabel(t: Messages, reason: UpgradeRefusalReason): string {
+export function upgradeRefusalReasonLabel(t: CoreMessages, reason: UpgradeRefusalReason): string {
   return t.environments.machine.update.refusalReasons[reason];
 }
 
@@ -138,7 +138,7 @@ export function upgradeRefusalReasonLabel(t: Messages, reason: UpgradeRefusalRea
  * `status.check?.error` themselves (a `title` attribute, say) alongside this.
  */
 export function updateLatestLabel(
-  t: Messages,
+  t: CoreMessages,
   status: Pick<MachineUpdateStatus, 'checksEnabled' | 'check'>
 ): string {
   const m = t.environments.machine.update;

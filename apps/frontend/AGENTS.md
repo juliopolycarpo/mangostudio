@@ -19,7 +19,7 @@ For per-task file maps, use `docs/reference/agent-playbooks.md`.
 
 - Keep using TanStack Router; do not introduce `react-router-dom`.
 - Keep using Eden Treaty + TanStack Query for normal API access. Use direct `fetch` only in service modules when streaming, uploads, or browser-native APIs require it.
-- Do not hardcode user-visible strings. Use `useI18n()` with keys from `apps/shared/src/i18n/pt-BR.ts` and `apps/shared/src/i18n/en.ts`.
+- Do not hardcode user-visible strings. Use `useI18n()` with keys from `apps/shared/src/i18n/pt-BR.ts` and `apps/shared/src/i18n/en.ts`. The `settings` and `onboarding` namespaces are deferred: name them (`useI18n('settings')`), load them in the owning route's `loader`, and keep anything the first paint reads in an eager namespace (`docs/architecture/i18n.md`).
 - Prefer existing UI primitives in `src/components/ui/` before creating new ones.
 - Read `docs/design/` before UI work. Off-system classes fail `tests/unit/design-system-conformance.test.ts`; a deliberate exception goes in its `ALLOWED` map with the reason.
 - Keep business logic in hooks and services; routes and components should mostly compose them.

@@ -33,7 +33,7 @@ export function ConnectorList({
   onDeleteConnector,
   onReauthenticatedConnector,
 }: ConnectorListProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.connectors;
   const hasChatGpt = connectors.some((c) => c.provider === 'chatgpt');
   // The empty state carries its own Add, so the header's is not drawn beside it.

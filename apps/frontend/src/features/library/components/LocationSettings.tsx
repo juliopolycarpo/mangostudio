@@ -8,6 +8,7 @@
  * matrix's silence mean "there is nothing there".
  */
 
+import type { CoreMessages } from '@mangostudio/shared/i18n';
 import type { LibraryLocationStatus } from '@mangostudio/shared/library';
 import { Lock } from 'lucide-react';
 
@@ -124,10 +125,7 @@ function LocationRow({
  * there is anything in it. `unsupported` comes first because a location with no
  * path on this platform can never answer any of the other questions.
  */
-function describeStatus(
-  l: ReturnType<typeof useI18n>['t']['library'],
-  status: LibraryLocationStatus
-): string {
+function describeStatus(l: CoreMessages['library'], status: LibraryLocationStatus): string {
   const targets = status.targetIds.map((targetId) => l.targets[targetId]).join(', ');
   if (status.path === null) return `${targets} · ${l.locationSettings.unsupported}`;
   if (!status.exists) return `${targets} · ${l.locationSettings.missing}`;

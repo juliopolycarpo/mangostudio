@@ -26,7 +26,7 @@ const VARIANT: Record<
 };
 
 export function StepStatusChip({ status }: { readonly status: OnboardingStepStatus }) {
-  const { t } = useI18n();
+  const { t } = useI18n('onboarding');
 
   return (
     <Badge data-status={status} variant={VARIANT[status]}>

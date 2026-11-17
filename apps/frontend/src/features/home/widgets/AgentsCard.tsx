@@ -13,7 +13,7 @@ import type {
   ExternalAgentDescriptor,
   ExternalAgentTargetId,
 } from '@mangostudio/shared/external-agents';
-import type { Messages } from '@mangostudio/shared/i18n';
+import type { CoreMessages, Messages } from '@mangostudio/shared/i18n';
 import { Link } from '@tanstack/react-router';
 
 import { Badge } from '@/components/ui/Badge';
@@ -176,7 +176,7 @@ function displayVersion(version: string, name: string): string {
  * signed out — are spelled out here rather than falling through to "sign-in
  * state unknown", which would read as "fine" for an agent that is not.
  */
-function availabilityNote(descriptor: ExternalAgentDescriptor, t: Messages): string {
+function availabilityNote(descriptor: ExternalAgentDescriptor, t: CoreMessages): string {
   const labels = t.externalAgents;
   if (descriptor.unavailableReason) return labels.unavailable[descriptor.unavailableReason];
   if (!descriptor.installed) return labels.unavailable['not-installed'];

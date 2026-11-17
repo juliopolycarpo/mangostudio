@@ -20,7 +20,7 @@ import { ExternalAgentDiscoveryLog } from './ExternalAgentDiscoveryLog';
 import { ObservabilityPageActions } from './ObservabilityPageActions';
 
 export function LogsSettingsPage() {
-  const { t, locale } = useI18n();
+  const { t, locale } = useI18n('settings');
   const { data, error, isLoading, isFetching, refetch } = useQuery(observabilityLogsQueryOptions());
   const labels = t.settings.logs;
   const operationLabels: Record<ProviderProbeOperation, string> = {

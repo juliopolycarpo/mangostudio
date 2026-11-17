@@ -20,7 +20,7 @@ interface SkillRowProps {
 }
 
 export function SkillRow({ descriptor }: SkillRowProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.skills;
   const { mutateAsync } = useUpdateSkillSetting();
   const unavailableHintId = useId();

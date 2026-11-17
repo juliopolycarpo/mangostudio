@@ -9,7 +9,7 @@ export const Route = createLazyFileRoute('/_authenticated/settings')({
 });
 
 function SettingsLayout() {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   useSettingsRealtimeInvalidation();
 
   return (
@@ -18,7 +18,7 @@ function SettingsLayout() {
         {/* The visible heading is the page's own (`SettingsPage`): the nav says
             where you are, the heading says what the page is. This one names the
             surface for a screen reader. */}
-        <h1 className="sr-only">{t.settings.title}</h1>
+        <h1 className="sr-only">{t.common.settings}</h1>
         {/* The nav is a column beside the content once there is width for it,
             and stacks above it below `lg`, where it collapses itself. */}
         <div className="grid gap-6 lg:grid-cols-[14rem_minmax(0,1fr)] lg:gap-8">

@@ -209,7 +209,7 @@ export function Sidebar({
     { page: 'studio', icon: Image, label: t.studio.title },
     { page: 'gallery', icon: LayoutGrid, label: t.gallery.title },
     { page: 'environments', icon: MonitorCog, label: t.environments.nav },
-    { page: 'settings', icon: Settings, label: t.settings.title },
+    { page: 'settings', icon: Settings, label: t.common.settings },
   ] as const;
   // Only the environments entry carries one today; a map rather than a
   // conditional at each call site so the two nav renders below cannot drift on

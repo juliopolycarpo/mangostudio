@@ -12,12 +12,18 @@
 import { AnimatePresence } from 'motion/react';
 
 import { createLazyOverlay } from '@/components/layout/LazyOverlay';
+import { preloadNamespaces } from '@/lib/locale-dictionaries';
 
 import type { ConnectedPaletteProps } from './ConnectedPalette';
 import { PaletteFrame } from './PaletteFrame';
 
+// The registry lists every settings page, so the `settings` namespace travels with the
+// chunk: results mount only once both are here, and until then the overlay's Suspense
+// boundary renders nothing while the eager frame keeps the input.
 const connectedPalette = createLazyOverlay<ConnectedPaletteProps>(() =>
-  import('./ConnectedPalette').then((module) => ({ default: module.ConnectedPalette }))
+  Promise.all([import('./ConnectedPalette'), preloadNamespaces(['settings'])]).then(([module]) => ({
+    default: module.ConnectedPalette,
+  }))
 );
 
 /** Starts fetching the palette's chunk; safe to call any number of times. */

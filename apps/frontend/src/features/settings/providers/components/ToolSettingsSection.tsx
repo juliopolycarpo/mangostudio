@@ -28,7 +28,7 @@ export function ToolSettingsSection({
   form,
   onChange,
 }: ToolSettingsSectionProps) {
-  const { t, locale } = useI18n();
+  const { t, locale } = useI18n('settings');
   const s = t.settings.providers;
 
   return (

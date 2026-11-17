@@ -9,7 +9,7 @@
  */
 
 import type { ActivityEvent } from '@mangostudio/shared/activity';
-import type { Messages } from '@mangostudio/shared/i18n';
+import type { CoreMessages } from '@mangostudio/shared/i18n';
 
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import type { StatusDotTone } from '@/components/ui/StatusDot';
@@ -104,7 +104,15 @@ export function ActivityFeed({
   );
 }
 
-function ActivityRow({ event, locale, t }: { event: ActivityEvent; locale: string; t: Messages }) {
+function ActivityRow({
+  event,
+  locale,
+  t,
+}: {
+  event: ActivityEvent;
+  locale: string;
+  t: CoreMessages;
+}) {
   const { text, icon: Icon, tone } = describeActivity(event, t, locale);
   const when = formatRelativeTime(event.createdAt, locale);
   return (

@@ -28,7 +28,7 @@ export function ChatGptPromoChip({
   connectorId: string;
   message: string;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const [dismissedMessage, setDismissedMessage] = useState(() => readDismissedMessage(connectorId));
 
   if (dismissedMessage === message) return null;

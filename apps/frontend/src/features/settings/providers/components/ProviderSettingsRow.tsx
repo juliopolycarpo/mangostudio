@@ -25,7 +25,7 @@ interface ProviderSettingsRowProps {
  * name's line and wrap under it on a narrow screen, so a row is two lines.
  */
 export function ProviderSettingsRow({ descriptor }: ProviderSettingsRowProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.providers;
   const providerName = t.providers[descriptor.provider] ?? descriptor.displayName;
   const efforts = descriptor.reasoning.supportedEfforts

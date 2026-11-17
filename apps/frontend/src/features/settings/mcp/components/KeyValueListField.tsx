@@ -30,7 +30,7 @@ export function KeyValueListField({
   onChange,
   secretValues = false,
 }: KeyValueListFieldProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.mcp;
 
   const updateEntry = (index: number, patch: Partial<KeyValueEntry>) => {

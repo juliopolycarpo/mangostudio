@@ -48,7 +48,7 @@ type Step =
   | { kind: 'summary'; summary: McpPortabilityApplyResponse };
 
 export function ImportServersDialog({ onClose }: ImportServersDialogProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.mcp;
   const [sourceKind, setSourceKind] = useState<SourceKind>('file');
   const [path, setPath] = useState('');
@@ -249,7 +249,7 @@ interface SourceStepProps {
 }
 
 function SourceStep(props: SourceStepProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.mcp;
   const sourceOptions: { value: SourceKind; label: string }[] = [
     { value: 'file', label: s.portability.sourceFile },
@@ -328,7 +328,7 @@ function PreviewStep({
   onReplaceTarget,
   onSecretValue,
 }: PreviewStepProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.mcp;
   if (entries.length === 0) {
     return <EmptyState title={s.import.emptyPreview} className="min-h-0 py-4" />;
@@ -526,7 +526,7 @@ function formatReplaceBlockedBySlug(
 }
 
 function SummaryStep({ summary }: { summary: McpPortabilityApplyResponse }) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.mcp.portability;
   const values = [
     s.summaryAdded.replace('{count}', String(summary.added)),

@@ -2,6 +2,7 @@ import { createFileRoute, redirect } from '@tanstack/react-router';
 
 import { BootstrapErrorPanel } from '@/components/layout/BootstrapErrorPanel';
 import { appSettingsQueryOptions } from '@/features/settings/app/queries';
+import { preloadNamespaces } from '@/lib/locale-dictionaries';
 import { safeRedirect } from '@/lib/safe-redirect';
 
 /**
@@ -28,6 +29,14 @@ export const Route = createFileRoute('/welcome')({
       redirect({ to: '/login', search: { redirect: location.href }, throw: true });
     }
   },
-  loader: ({ context: { queryClient } }) => queryClient.ensureQueryData(appSettingsQueryOptions()),
+  // The wizard's strings are the `onboarding` namespace, which is not in the entry chunk;
+  // it loads next to the settings record and the lazy route chunk.
+  loader: async ({ context: { queryClient } }) => {
+    const [settings] = await Promise.all([
+      queryClient.ensureQueryData(appSettingsQueryOptions()),
+      preloadNamespaces(['onboarding']),
+    ]);
+    return settings;
+  },
   errorComponent: BootstrapErrorPanel,
 });

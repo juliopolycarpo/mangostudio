@@ -18,7 +18,7 @@ import {
   EXTERNAL_AGENT_CAPACITY_CODE,
   isExternalAgentKindCode,
 } from '@mangostudio/shared/external-agents/values';
-import type { Messages } from '@mangostudio/shared/i18n';
+import type { CoreMessages } from '@mangostudio/shared/i18n';
 import { ScanSearch } from 'lucide-react';
 import { useState } from 'react';
 
@@ -97,7 +97,7 @@ export function ExternalReviewAction({ chatId, hasChanges }: ExternalReviewActio
  * decided rather than one this component guessed. Anything else falls back to
  * the server's message, and only then to a neutral failure.
  */
-function reviewFailureMessage(error: unknown, t: Messages): string {
+function reviewFailureMessage(error: unknown, t: CoreMessages): string {
   const labels = t.externalAgents.review;
   // A refusal for a state of the agent says what the transcript's card says: the selector's words
   // and what to do about it, not the hub's generic sentence.

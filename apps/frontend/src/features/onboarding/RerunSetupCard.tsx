@@ -19,7 +19,7 @@ import { ICON_MD } from '@/lib/icon-sizes';
 import { useOnboardingProgress } from './use-onboarding-progress';
 
 export function RerunSetupCard() {
-  const { t } = useI18n();
+  const { t } = useI18n('onboarding');
   const s = t.onboarding.reenter;
   const navigate = useNavigate();
   const progress = useOnboardingProgress();

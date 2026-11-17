@@ -47,7 +47,7 @@ const LIST_DESKTOP = 'lg:block lg:max-h-[calc(100dvh-6rem)] lg:overflow-y-auto';
  * each visit.
  */
 export function SettingsNav() {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const [open, setOpen] = useState(false);
   const listId = useId();
   const groups = settingsNavGroups(t.settings);
@@ -79,10 +79,10 @@ export function SettingsNav() {
         <span className="flex min-w-0 items-baseline gap-1.5">
           {currentLabel ? (
             <span aria-hidden="true" className="shrink-0 font-normal text-fg-subtle">
-              {t.settings.title}:
+              {t.common.settings}:
             </span>
           ) : null}
-          <span className="truncate">{currentLabel ?? t.settings.title}</span>
+          <span className="truncate">{currentLabel ?? t.common.settings}</span>
         </span>
         <ChevronDown size={ICON_MD} className="shrink-0 text-fg-muted" />
       </button>

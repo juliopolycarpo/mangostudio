@@ -31,7 +31,7 @@ export function CacheSettingsSection({
   form,
   onChange,
 }: CacheSettingsSectionProps) {
-  const { t } = useI18n();
+  const { t } = useI18n('settings');
   const s = t.settings.providers;
 
   return (
