@@ -221,6 +221,8 @@ max-files-changed: 2999
           # applied as an auto-label by .github/dependabot.yml. See issue #381.
           - "package.json"
           - "bun.lock"
+          # cargo-deny's dependency policy: advisory ignores and duplicate skips.
+          - "deny.toml"
 
 "type: test":
   - changed-files:
