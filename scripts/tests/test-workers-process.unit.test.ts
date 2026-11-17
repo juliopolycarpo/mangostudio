@@ -957,6 +957,116 @@ describe('pumpLines', () => {
     await pumpLines(stream, (line) => lines.push(line));
     expect(lines).toEqual(['é']);
   });
+
+  /** The lines a whole-stream reader reports: complete ones CR-trimmed, the unterminated rest as is. */
+  function linesOfWholeStream(bytes: Uint8Array): string[] {
+    const parts = new TextDecoder().decode(bytes).split('\n');
+    const rest = parts.pop() ?? '';
+    const lines = parts.map((line) => line.replace(/\r$/, ''));
+    return rest === '' ? lines : [...lines, rest];
+  }
+
+  function streamOfByteCuts(
+    bytes: Uint8Array,
+    cuts: readonly number[]
+  ): ReadableStream<Uint8Array> {
+    return new ReadableStream({
+      start(controller) {
+        let start = 0;
+        for (const cut of [...cuts, bytes.byteLength]) {
+          controller.enqueue(bytes.slice(start, cut));
+          start = cut;
+        }
+        controller.close();
+      },
+    });
+  }
+
+  it('reports the same lines as splitting the whole stream, however the bytes are cut', async () => {
+    // 2, 3 and 4 byte characters, CRLF, a blank line and an unterminated rest.
+    const bytes = new TextEncoder().encode('café\r\n✓ ok\n\n\u{1f96d}\r\nlast\r');
+    const expected = linesOfWholeStream(bytes);
+
+    for (let cut = 0; cut <= bytes.byteLength; cut += 1) {
+      const lines: string[] = [];
+      await pumpLines(streamOfByteCuts(bytes, [cut]), (line) => lines.push(line));
+      expect({ cut, lines }).toEqual({ cut, lines: expected });
+    }
+    const oneByteReads: string[] = [];
+    const everyByte = Array.from({ length: bytes.byteLength - 1 }, (_, index) => index + 1);
+    await pumpLines(streamOfByteCuts(bytes, everyByte), (line) => oneByteReads.push(line));
+    expect(oneByteReads).toEqual(expected);
+  });
+
+  it('cuts a line over the limit, says so once with its length, and keeps relaying what follows', async () => {
+    // The long line spans three reads; a failure summary follows it.
+    const lines: string[] = [];
+
+    await pumpLines(
+      streamOf('fine\n', 'xxxx', 'xxxx', 'xxxx', '\nafter\n(fail) x\n', 'last'),
+      (line) => lines.push(line),
+      undefined,
+      10
+    );
+
+    expect(lines).toEqual([
+      'fine',
+      'x'.repeat(10),
+      'Output line of 12 characters exceeds the 10-character limit; cut to the limit',
+      'after',
+      '(fail) x',
+      'last',
+    ]);
+  });
+
+  it('says so once for each line it cuts, whatever the reads', async () => {
+    const lines: string[] = [];
+
+    await pumpLines(
+      streamOf(`${'a'.repeat(15)}\nok\n${'b'.repeat(11)}`, '\n', 'c'.repeat(30)),
+      (line) => lines.push(line),
+      undefined,
+      10
+    );
+
+    expect(lines).toEqual([
+      'a'.repeat(10),
+      'Output line of 15 characters exceeds the 10-character limit; cut to the limit',
+      'ok',
+      'b'.repeat(10),
+      'Output line of 11 characters exceeds the 10-character limit; cut to the limit',
+      'c'.repeat(10),
+      'Output line of 30 characters exceeds the 10-character limit; cut to the limit',
+    ]);
+  });
+
+  it('accepts a line of exactly the limit', async () => {
+    const lines: string[] = [];
+
+    await pumpLines(
+      streamOf('a'.repeat(10), '\n', 'b'.repeat(10)),
+      (line) => lines.push(line),
+      undefined,
+      10
+    );
+
+    expect(lines).toEqual(['a'.repeat(10), 'b'.repeat(10)]);
+  });
+
+  // That the splitting is linear is proven where it lives, in
+  // newline-splitter.unit.test.ts; this only pins that a long line arrives whole.
+  it('delivers a 1 MiB line read in 16-byte pieces whole', async () => {
+    const bytes = new TextEncoder().encode(`${'a'.repeat(1024 * 1024)}\n`);
+    const everySixteen = Array.from(
+      { length: Math.floor((bytes.byteLength - 1) / 16) },
+      (_, index) => (index + 1) * 16
+    );
+    const lines: string[] = [];
+
+    await pumpLines(streamOfByteCuts(bytes, everySixteen), (line) => lines.push(line));
+
+    expect(lines.map((line) => line.length)).toEqual([1024 * 1024]);
+  });
 });
 
 describe('workerEnvironment', () => {

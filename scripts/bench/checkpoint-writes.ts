@@ -45,6 +45,7 @@ import { loadavg } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import { assertNoUnexpectedArguments, fatal, parseArgs } from '../lib/args';
+import { childEnd } from '../lib/child-end';
 import { type LatencySummary, summarizeLatencies } from '../lib/latency-stats';
 import { header, info, log } from '../lib/log';
 
@@ -540,7 +541,7 @@ async function startHub(options: HubOptions): Promise<RunningHub> {
   });
   const base = `http://127.0.0.1:${port}`;
   const deadline = performance.now() + 120_000;
-  while (performance.now() < deadline && child.exitCode === null) {
+  while (performance.now() < deadline && childEnd(child) === null) {
     try {
       const response = await fetch(`${base}/api/health`, { signal: AbortSignal.timeout(1000) });
       await response.text();
@@ -550,9 +551,11 @@ async function startHub(options: HubOptions): Promise<RunningHub> {
     }
     await Bun.sleep(50);
   }
-  if (child.exitCode !== null || performance.now() >= deadline) {
+  if (childEnd(child) !== null || performance.now() >= deadline) {
     child.kill('SIGKILL');
-    fatal(`hub did not become healthy within 120 s; see ${join(home, 'hub.log')}`);
+    fatal(
+      `hub did not become healthy within 120 s | received: ${childEnd(child) ?? 'still starting'}; see ${join(home, 'hub.log')}`
+    );
   }
   // Under strace the hub is strace's child: measure and stop the tracee, not the tracer.
   const hubPid = options.trace ? tracedChildPid(child.pid) : child.pid;

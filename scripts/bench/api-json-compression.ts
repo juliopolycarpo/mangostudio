@@ -33,6 +33,7 @@ import { brotliCompressSync, constants as zlibConstants } from 'node:zlib';
 
 import { assertNoUnexpectedArguments, fatal, parseArgs } from '../lib/args';
 import { rotatedOrder } from '../lib/bench-order';
+import { childEnd } from '../lib/child-end';
 import { type LatencySummary, summarizeLatencies } from '../lib/latency-stats';
 import { header, info, log } from '../lib/log';
 
@@ -219,7 +220,7 @@ async function startHub(options: HubOptions): Promise<RunningHub> {
     }
   );
   const deadline = performance.now() + 120_000;
-  while (performance.now() < deadline && child.exitCode === null) {
+  while (performance.now() < deadline && childEnd(child) === null) {
     try {
       const response = await fetch(`http://127.0.0.1:${port}/api/health`, {
         signal: AbortSignal.timeout(1000),
@@ -231,9 +232,11 @@ async function startHub(options: HubOptions): Promise<RunningHub> {
     }
     await Bun.sleep(50);
   }
-  if (child.exitCode !== null || performance.now() >= deadline) {
+  if (childEnd(child) !== null || performance.now() >= deadline) {
     child.kill('SIGKILL');
-    fatal(`hub did not become healthy within 120 s | see ${logPath}`);
+    fatal(
+      `hub did not become healthy within 120 s | received: ${childEnd(child) ?? 'still starting'}; see ${logPath}`
+    );
   }
   return {
     pid: child.pid,

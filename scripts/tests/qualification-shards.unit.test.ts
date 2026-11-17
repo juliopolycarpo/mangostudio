@@ -313,9 +313,15 @@ describe('qualification runtime artifact handoff', () => {
     );
     expect(verify?.if).toBeUndefined();
     expect(verify?.run).toContain(
-      `binary="${SHELL}RUNNER_TEMP}/local-runtime/mangostudio-runtime"`
+      `binary="${SHELL}RUNNER_TEMP}/local-runtime/mangostudio-runtime${SHELL}suffix}"`
     );
-    expect(verify?.run).toContain(`fake="${SHELL}RUNNER_TEMP}/local-runtime/fake_cursor_agent"`);
+    expect(verify?.run).toContain(
+      `fake="${SHELL}RUNNER_TEMP}/local-runtime/fake_cursor_agent${SHELL}suffix}"`
+    );
+    // Windows needs the real file name for Bun; the suffix is empty elsewhere.
+    expect(verify?.run).toContain(
+      `if [ "${SHELL}RUNNER_OS}" = "Windows" ]; then suffix=".exe"; fi`
+    );
     expect(verify?.run).toContain(`echo "MANGOSTUDIO_RUNTIME_BINARY=${SHELL}binary}"`);
     expect(verify?.run).toContain(`echo "MANGOSTUDIO_FAKE_CURSOR_AGENT=${SHELL}fake}"`);
     expect(verify?.run).toContain('>> "$GITHUB_ENV"');

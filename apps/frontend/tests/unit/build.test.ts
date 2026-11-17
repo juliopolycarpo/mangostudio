@@ -8,6 +8,7 @@ import { createTailwindInputs, readSourceInventory } from '@mangostudio/shared/f
 import { BUILD_STATE_FILE } from '@mangostudio/shared/utils/dist-files';
 
 import {
+  type FileIdentity,
   publishDist,
   removeTempPaths,
   resolveApiUrlOverride,
@@ -65,7 +66,61 @@ class RefusingRemoval {
   };
 }
 
+/**
+ * Names the first read of `dist` and every later one with an id that differs only in the low
+ * bits, above 2^53, where a Number rounds both to one value.
+ */
+class FakeNeighbouringIdentities {
+  static readonly FIRST: FileIdentity = { dev: 1n, ino: 2n ** 60n };
+  static readonly LATER: FileIdentity = { dev: 1n, ino: 2n ** 60n + 1n };
+  reads = 0;
+
+  readonly read = (): FileIdentity => {
+    this.reads += 1;
+    return this.reads === 1 ? FakeNeighbouringIdentities.FIRST : FakeNeighbouringIdentities.LATER;
+  };
+}
+
 describe('publishDist', () => {
+  test('does not roll back a dist whose id differs from the published one below 2^53 precision', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'frontend-publish-'));
+    const staged = join(root, 'staged');
+    const dist = join(root, 'dist');
+    try {
+      await mkdir(staged);
+      await mkdir(dist);
+      await writeFile(join(staged, 'index.html'), 'new');
+      await writeFile(join(dist, 'index.html'), 'old');
+      const identities = new FakeNeighbouringIdentities();
+      const removal = new RefusingRemoval();
+      expect(Number(FakeNeighbouringIdentities.FIRST.ino)).toBe(
+        Number(FakeNeighbouringIdentities.LATER.ino)
+      );
+
+      await expect(
+        publishDist(
+          staged,
+          dist,
+          () => Promise.reject(new Error('sidecar failed')),
+          removal.remove,
+          identities.read
+        )
+      ).rejects.toThrow('sidecar failed');
+
+      if (removal.attempts.length !== 0) {
+        throw new Error(
+          `expected rollback removals of a dist another build owns: 0 | received: ${JSON.stringify(removal.attempts)}`
+        );
+      }
+      expect(await readFile(join(dist, 'index.html'), 'utf8')).toBe('new');
+      expect((await readdir(root)).filter((entry) => entry.startsWith('.dist-backup-'))).toEqual(
+        []
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test('replaces the previous directory and removes files absent from the new build', async () => {
     const root = await mkdtemp(join(tmpdir(), 'frontend-publish-'));
     const staged = join(root, 'staged');

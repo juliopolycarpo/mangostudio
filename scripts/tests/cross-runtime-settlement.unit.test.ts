@@ -163,14 +163,12 @@ describe('settleCrossRuntimeResolutions', () => {
     try {
       const originalFailure = await firstFailure;
       expect((originalFailure as Error).message).toContain('Checksum download failed (503');
-      // The spy replaces the process-wide fetch, so a request another test left running lands
-      // here too (it was seen as two extra requests under load). Count the one this resolver owns
-      // and name the rest.
-      const checksumRequests = network.requests.filter((url) => url === CHECKSUM_LISTING_URL);
+      // The spy replaces the process-wide fetch, so a stray caller anywhere in this worker lands
+      // here: the resolver's one checksum request must be the only request.
       expect(
-        checksumRequests,
-        `expected one checksum listing request | received: ${network.requests.join(', ')}`
-      ).toHaveLength(1);
+        network.requests,
+        `expected requests: [${CHECKSUM_LISTING_URL}] | received: [${network.requests.join(', ')}]`
+      ).toEqual([CHECKSUM_LISTING_URL]);
       await Bun.sleep(0);
       expect(existsSync(cacheDir), 'expected verification cache to outlive held sibling').toBe(
         true

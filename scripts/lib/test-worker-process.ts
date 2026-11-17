@@ -2,6 +2,7 @@
 // its output line by line under the worker's name, and reports how it ended.
 // The verdict logic is in ./test-workers.ts and never sees a process.
 
+import { NewlineSplitter, type SplitLine } from './newline-splitter';
 import type { GuardedChild } from './runner-guardian';
 import { settleWorker, signalWorker, WORKER_TOKEN_ENV } from './test-worker-settle';
 import type { WorkerExit, WorkerHandle, WorkerPlan } from './test-workers';
@@ -129,10 +130,18 @@ export function guardWorkerSpawn(
   };
 }
 
+/** The longest worker output line {@link pumpLines} holds, in characters. */
+const WORKER_LINE_MAX_CHARS = 1024 * 1024;
+
 /**
  * Reads `stream` and hands over each complete line (without its newline). A
  * last line with no newline is delivered when the stream ends, or when `stop`
  * aborts: that cancels the reader, so a pipe nobody closes cannot keep it open.
+ *
+ * A line over `maxLineLength` is delivered cut to it, followed by one message
+ * naming its length and the limit, and the lines after it arrive as usual: a
+ * worker that prints one huge line still gets its failure summary through. The
+ * pipe is always drained, so a worker is never blocked on it.
  *
  * @example
  * await pumpLines(child.stderr, (line) => console.error(`[w1] ${line}`), stop.signal);
@@ -140,18 +149,23 @@ export function guardWorkerSpawn(
 export async function pumpLines(
   stream: ReadableStream<Uint8Array>,
   onLine: (line: string) => void,
-  stop?: AbortSignal
+  stop?: AbortSignal,
+  maxLineLength: number = WORKER_LINE_MAX_CHARS
 ): Promise<void> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
-  let pending = '';
+  const lines = new NewlineSplitter({ maxLineLength, onOverflow: 'truncate' });
+  const reportCut = ({ length }: SplitLine): void => {
+    if (length > maxLineLength) {
+      onLine(
+        `Output line of ${length} characters exceeds the ${maxLineLength}-character limit; cut to the limit`
+      );
+    }
+  };
   const deliver = (text: string): void => {
-    pending += text;
-    let newline = pending.indexOf('\n');
-    while (newline !== -1) {
-      onLine(pending.slice(0, newline).replace(/\r$/, ''));
-      pending = pending.slice(newline + 1);
-      newline = pending.indexOf('\n');
+    for (const record of lines.pushRecords(text)) {
+      onLine(record.line.replace(/\r$/, ''));
+      reportCut(record);
     }
   };
   const cancel = (): void => {
@@ -172,7 +186,12 @@ export async function pumpLines(
   } finally {
     stop?.removeEventListener('abort', cancel);
   }
-  if (pending) onLine(pending);
+  // The tail is not CR-trimmed: no newline ended it.
+  const rest = lines.finishRecord();
+  if (rest.length > 0) {
+    onLine(rest.line);
+    reportCut(rest);
+  }
 }
 
 const stdSinks: LineSinks = {

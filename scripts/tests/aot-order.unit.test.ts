@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
@@ -150,6 +150,28 @@ async function waitUntilDead(pid: number, timeoutMs = 10_000): Promise<void> {
   }
 }
 
+/** Counts requests a hub that never listens would refuse, so a test can see when they stop. */
+class FakeHealthRequests {
+  count = 0;
+
+  // `typeof fetch` also carries `preconnect`, which the spy needs to accept this fake.
+  readonly request = Object.assign(
+    (): Promise<Response> => {
+      this.count += 1;
+      return Promise.reject(new Error('ECONNREFUSED: fake hub is not listening'));
+    },
+    { preconnect: globalThis.fetch.preconnect }
+  );
+}
+
+async function waitUntil(condition: () => boolean, what: string): Promise<void> {
+  const until = Date.now() + 5000;
+  while (!condition()) {
+    if (Date.now() > until) throw new Error(`expected ${what} within 5000 ms | received: none`);
+    await Bun.sleep(10);
+  }
+}
+
 /** A recording ceiling the test fires by hand, so no test races a hub's start-up against a clock. */
 function manualDeadline(): { timer: DeadlineTimer; expire: () => void } {
   let expire: (() => void) | undefined;
@@ -282,6 +304,34 @@ describe.skipIf(process.platform === 'win32')('recordAotOrder', () => {
     const env = JSON.parse(readFileSync(`${orderFile}.env.json`, 'utf8')) as Record<string, string>;
     await waitUntilDead(pid);
     expect(existsSync(env.MANGO_HOME as string)).toBe(false);
+  });
+
+  test('stops asking the hub for health once the deadline has killed it', async () => {
+    fakeHubMode('no-health');
+    const deadline = manualDeadline();
+    const healthRequests = new FakeHealthRequests();
+    const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(healthRequests.request);
+    try {
+      const recording = recordAotOrder(FAKE_HUB, orderFile, {
+        workload: noWorkload,
+        setDeadline: deadline.timer,
+      });
+      await waitForFile(`${orderFile}.pid`);
+      await waitUntil(() => healthRequests.count > 0, 'a first health request');
+      deadline.expire();
+      await expect(recording).rejects.toThrow('expected the recording run to finish');
+
+      // Let any request already in flight settle, then watch for new ones.
+      await Bun.sleep(150);
+      const settled = healthRequests.count;
+      await Bun.sleep(300);
+      expect(
+        healthRequests.count,
+        `expected no health requests after the hub was killed: ${settled} | received: ${healthRequests.count}`
+      ).toBe(settled);
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 
   test('does not take a healthy answer for the hub it started when the state file is not its own', async () => {
