@@ -14,7 +14,7 @@
  * `Response`. What Elysia would have done is repeated here, in the same order
  * and with the same packages: a compiled `Check` against the same schema, the
  * `exact-mirror` clean that drops keys the schema does not declare, then
- * `Response.json`. A value that fails the check throws Elysia's own response
+ * a `Response` with its length declared. A value that fails the check throws Elysia's own response
  * `ValidationError`, with errors listed by `typebox/value` as Elysia lists
  * them, so the error handler answers exactly as before.
  *
@@ -68,6 +68,14 @@ export function createJsonResponseEncoder<Schema extends TSchema>(
     if (!check.Check(value)) {
       throw new ValidationError('response', value, () => Errors(schema, value), schema);
     }
-    return Response.json(clean(value));
+    // Serialized here, not by `Response.json`, so the answer declares its length:
+    // the response-compression plugin reads only bodies whose size is known.
+    const body = new TextEncoder().encode(JSON.stringify(clean(value)));
+    return new Response(body, {
+      headers: {
+        'content-type': 'application/json;charset=utf-8',
+        'content-length': String(body.byteLength),
+      },
+    });
   };
 }

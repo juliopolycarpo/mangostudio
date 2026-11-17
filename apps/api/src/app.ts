@@ -49,6 +49,7 @@ import { errorHandler } from './plugins/error-handler';
 import { handlerIdleTimeout } from './plugins/handler-idle-timeout';
 import { rateLimit } from './plugins/rate-limit';
 import { classifyRateLimit } from './plugins/rate-limit-policy';
+import { responseCompression } from './plugins/response-compression';
 import { authRoutes } from './routes/auth';
 import { createGeneratedImageRoutes } from './routes/generated-images';
 import { settingsRoutes } from './routes/settings';
@@ -65,6 +66,24 @@ const IMAGES_DIR = getConfig().images.dir;
 const requestLogger = createDiagnosticLogger('request');
 
 /**
+ * The only API routes whose responses may be gzipped. A route earns a place by
+ * returning a large body (sizes from `scripts/bench/api-json-compression.ts`)
+ * that carries user content and no credential. It never goes the other way: a
+ * new route stays uncompressed until it is added here, so a response that
+ * echoes a secret next to caller-chosen text is not exposed to BREACH by default.
+ */
+export const COMPRESSED_API_ROUTES: readonly string[] = [
+  // Transcript page: about 505 KB for the frontend's 50 messages.
+  '/api/chats/:id/messages',
+  // Chat list: about 373 KB for 1000 chats.
+  '/api/chats',
+  // Gallery page of generated images.
+  '/api/messages/images',
+  // Tool settings: about 15 KB.
+  '/api/settings/tools',
+];
+
+/**
  * Base API instance with /api prefix.
  * Separating this ensures Eden Treaty correctly identifies /api as a namespace.
  */
@@ -75,6 +94,10 @@ const api = new Elysia({ prefix: '/api' })
   .use(handlerIdleTimeout)
   // Centralized error handling
   .use(errorHandler)
+  // gzip for the routes in `COMPRESSED_API_ROUTES`, to non-loopback peers only;
+  // see the plugin for the rules. Registered after the error handler so error
+  // bodies are already final.
+  .use(responseCompression({ routes: COMPRESSED_API_ROUTES }))
   // Rate limiting with per-route-group buckets. `classifyRateLimit` routes
   // health and auth into their own generous buckets, key-authenticated traffic
   // into `api-key`, and everything else into the baseline `general` bucket.

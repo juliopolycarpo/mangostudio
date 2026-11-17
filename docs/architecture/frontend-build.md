@@ -346,7 +346,7 @@ a real port; extend it rather than adding another `handle()`-driven case.
 ### Precompressed representations (embedded mode only)
 
 The binary ships a gzip and a Brotli copy of every compressible text asset, and the server
-picks one from `Accept-Encoding`. It never compresses a response: the CPU cost is paid once, at
+picks one from `Accept-Encoding`. It never compresses an asset response (API JSON is a separate case, see `hub-runtime.md`): the CPU cost is paid once, at
 build time, by `scripts/lib/precompress-assets.ts` (gzip level 9, Brotli quality 11 in generic
 mode, both deterministic). A file gets a copy only if it is a text format (`.js`, `.css`,
 `.html`, `.json`, `.svg`, `.webmanifest`, `.txt`, `.xml`), is at least 256 B, and the copy saves
