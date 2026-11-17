@@ -476,7 +476,8 @@ describe('install service', () => {
       line: 'Post-install probe failed. Details are in the hub log.',
       done: false,
     });
-    // Regression (#2340): the probe's own text, with a hub path, used to be the line.
+    // Guard, not a regression test: #2339 already fixed the line. The log entry
+    // below is what #2340 adds coverage for.
     expect(
       JSON.stringify(events).includes('/home/alice'),
       `(probe): expected a stream without the hub path | received: ${JSON.stringify(events)}`
@@ -973,7 +974,8 @@ describe('install service', () => {
       line: 'Install audit row was not updated. Details are in the hub log.',
       done: false,
     });
-    // Regression (#2340): the database error used to follow the colon in this line.
+    // Guard, not a regression test: #2339 already fixed the line. The log entry
+    // below, now with the environment id, is what #2340 adds.
     expect(
       JSON.stringify(events).includes('SQLITE_BUSY'),
       `(audit row): expected a stream without the SQL error | received: ${JSON.stringify(events)}`

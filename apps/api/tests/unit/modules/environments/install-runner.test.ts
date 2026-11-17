@@ -300,8 +300,9 @@ describe('install relay', () => {
     ]);
   });
 
-  // Regression (#2340): the hub's own error text names paths and driver wording,
-  // and it must reach the hub log with the run and environment id, not the stream.
+  // Guards, not regression tests: #2339 already moved this text off the stream.
+  // The hub's own error text names paths and driver wording, so it must reach
+  // the hub log with the run and environment id and stay out of the stream.
   describe('keeps hub-internal detail out of the run stream', () => {
     const HUB_DETAIL = "EACCES: permission denied, open '/home/alice/.mango/runtime/install.sock'";
 
