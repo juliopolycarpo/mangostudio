@@ -23,6 +23,7 @@ import {
   sessionOf,
   SIGNALS_LOG,
   STOP_ANNOUNCED_FILE,
+  STOP_LISTENER_ARMED_FILE,
   waitFor,
   WORKERS_LOG,
 } from './support/process-tree';
@@ -725,6 +726,12 @@ describe.skipIf(IS_WINDOWS)('a runner that signalled its children and then went 
       const runner = startAnnouncingRunner();
       const pids = await readyPids();
       await guardianOf(runner);
+      // A SIGTERM that beats the marker listener would leave no marker to wait for.
+      const armed = await waitFor(
+        () => existsSync(join(dir, STOP_LISTENER_ARMED_FILE)),
+        READY_TIMEOUT_MS
+      );
+      expectGuarded('runner armed its stop marker before the SIGTERM', true, armed);
 
       runner.kill('SIGTERM');
       // The children having logged their SIGTERM is not enough: the runner signals

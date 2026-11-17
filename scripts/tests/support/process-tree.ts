@@ -57,6 +57,9 @@ const GRANDCHILD_UP = 'grandchild-up';
 /** Written by the `runner-announcing` role once its SIGTERM handling has told the guardian. */
 export const STOP_ANNOUNCED_FILE = 'stop-announced';
 
+/** Written by the `runner-announcing` role once the listener that writes {@link STOP_ANNOUNCED_FILE} exists. */
+export const STOP_LISTENER_ARMED_FILE = 'stop-listener-armed';
+
 /** The file whose existence lets the workers finish. */
 export const RELEASE_FILE = 'release';
 
@@ -251,6 +254,8 @@ async function runFakeAnnouncingRunner(dir: string): Promise<number> {
   // The supervisor installs its handlers when it adopts the child it just spawned.
   await waitFor(() => process.listenerCount('SIGTERM') > 0, FAKE_LIFETIME_MS);
   process.on('SIGTERM', () => writeFileSync(join(dir, STOP_ANNOUNCED_FILE), 'announced'));
+  // A SIGTERM sent before the listener exists would leave no marker; the test waits for this one.
+  writeFileSync(join(dir, STOP_LISTENER_ARMED_FILE), 'armed');
   return running;
 }
 
