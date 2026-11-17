@@ -49,6 +49,14 @@ export interface LocaleDictionaryStore {
   /** The settled dictionary for `locale`, or `null` while it is not loaded yet. */
   resolved(locale: Locale): ResolvedDictionary | null;
   /**
+   * Records the dictionary the provider renders. It can differ from the stored
+   * choice: a failed Portuguese load at startup renders English while `pt-BR`
+   * stays saved, and a retry can make `pt-BR` loadable without the screen moving.
+   */
+  show(dictionary: ResolvedDictionary): void;
+  /** The dictionary last passed to `show`, or `null` before the provider has rendered one. */
+  shown(): ResolvedDictionary | null;
+  /**
    * `dictionary` with the named deferred namespaces, or `null` while one is
    * still loading. The same arguments return the same object, so the result is
    * safe in a dependency list.
@@ -294,7 +302,15 @@ export function createLocaleDictionaryStore(
     return promise;
   }
 
-  return { load, resolved, namespaces, loadNamespaces };
+  let shownDictionary: ResolvedDictionary | null = null;
+  function show(dictionary: ResolvedDictionary): void {
+    shownDictionary = dictionary;
+  }
+  function shown(): ResolvedDictionary | null {
+    return shownDictionary;
+  }
+
+  return { load, resolved, show, shown, namespaces, loadNamespaces };
 }
 
 /**
@@ -356,9 +372,15 @@ export function preloadStartupLocale(
  * Loads deferred namespaces for the locale on screen, so a route or flow that
  * reads them renders its text on the first commit instead of suspending. Run it
  * from the route's `loader`: TanStack fetches the route's lazy component
- * alongside, so the namespace arrives with the chunk that reads it. The stored
- * choice is the locale the provider renders (a switch writes it first), and a
- * failed locale load resolves to English here exactly as it does there.
+ * alongside, so the namespace arrives with the chunk that reads it.
+ *
+ * It covers two dictionaries: the one the provider renders, and the stored
+ * choice (a switch writes it before the provider moves). They differ after a
+ * Portuguese chunk failed at startup: English is on screen while `pt-BR` stays
+ * saved and may load fine on a later call. Loading only the stored locale would
+ * leave the English namespace unloaded and suspend the route that just finished
+ * its loader. When they are the same dictionary, it is one load.
+ *
  * Rejects when a namespace chunk cannot be fetched, which reaches the route's
  * error component like any route chunk.
  *
@@ -368,6 +390,8 @@ export async function preloadNamespaces(
   namespaces: readonly DeferredNamespace[],
   store: LocaleDictionaryStore = localeDictionaries
 ): Promise<void> {
-  const dictionary = await store.load(detectLocale());
-  await store.loadNamespaces(dictionary, namespaces);
+  const stored = await store.load(detectLocale());
+  const shown = store.shown();
+  const targets = shown && shown.messages !== stored.messages ? [shown, stored] : [stored];
+  await Promise.all(targets.map((dictionary) => store.loadNamespaces(dictionary, namespaces)));
 }

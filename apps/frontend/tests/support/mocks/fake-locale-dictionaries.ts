@@ -33,10 +33,17 @@ function resolvedInMemory(locale: Locale): ResolvedDictionary {
   return { locale, messages: dictionaries[locale] };
 }
 
+/** The dictionary the in-memory store was last told is on screen; the store itself is shared by every test. */
+let shownInMemory: ResolvedDictionary | null = null;
+
 /** A store whose every dictionary is already loaded, deferred namespaces included. */
 export const inMemoryLocaleDictionaries: LocaleDictionaryStore = {
   load: (locale) => Promise.resolve(resolvedInMemory(locale)),
   resolved: resolvedInMemory,
+  show: (dictionary) => {
+    shownInMemory = dictionary;
+  },
+  shown: () => shownInMemory,
   namespaces: (dictionary, namespaces) =>
     carriesNamespaces(dictionary.messages, namespaces) ? dictionary.messages : null,
   loadNamespaces: (dictionary, namespaces) =>

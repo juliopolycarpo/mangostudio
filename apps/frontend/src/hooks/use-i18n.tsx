@@ -82,6 +82,10 @@ export function I18nProvider({ children, dictionaries = localeDictionaries }: I1
   useLayoutEffect(() => {
     if (renderedLocale) document.documentElement.lang = renderedLocale;
   }, [renderedLocale]);
+  // Routes preload namespaces for what is on screen, which can differ from the saved locale.
+  useLayoutEffect(() => {
+    if (active) dictionaries.show(active);
+  }, [active, dictionaries]);
 
   const changeLocale = useCallback(
     (next: Locale) => {

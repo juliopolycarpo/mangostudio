@@ -10,13 +10,14 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 
 import { en, ptBR } from '@mangostudio/shared/i18n';
 import { act, render, screen } from '@testing-library/react';
-import { Component, type ReactNode, Suspense } from 'react';
+import { Component, type ReactNode, Suspense, useState } from 'react';
 
 import { I18nProvider, useI18n } from '../../../src/hooks/use-i18n';
 import {
   createLocaleDictionaryStore,
   LOCALE_STORAGE_KEY,
   type LocaleDictionaryStore,
+  preloadNamespaces,
 } from '../../../src/lib/locale-dictionaries';
 import {
   createFakeDictionaryLoader,
@@ -247,6 +248,81 @@ describe('switching locale on a screen that reads a deferred namespace', () => {
 
     expect(shown()).toEqual({ text: en.settings.tabs.general, locale: 'en', fallback: false });
     expect(localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('en');
+  });
+});
+
+describe('a saved locale whose chunk failed at startup', () => {
+  /** A shell that mounts the settings screen on demand, like navigating to /settings. */
+  function ShellWithSettingsRoute() {
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <button type="button" onClick={() => setOpen(true)}>
+          open-settings
+        </button>
+        {open ? (
+          <Suspense fallback={<SettingsFallback />}>
+            <SettingsProbe />
+          </Suspense>
+        ) : null}
+      </>
+    );
+  }
+
+  it('preloads the English namespace the provider shows, so opening /settings does not suspend', async () => {
+    localStorage.setItem(LOCALE_STORAGE_KEY, 'pt-BR');
+    const { store, namespaceChunks, ptLoader } = storeWithFakeChunks();
+    await act(async () => {
+      render(
+        <I18nProvider dictionaries={store}>
+          <ShellWithSettingsRoute />
+        </I18nProvider>
+      );
+      await Promise.resolve();
+    });
+    // The Portuguese chunk fails: English renders while `pt-BR` stays saved.
+    ptLoader.rejectNext(new Error('pt-BR chunk 404'));
+    await settle();
+    expect(document.documentElement.lang).toBe('en');
+    expect(localStorage.getItem(LOCALE_STORAGE_KEY)).toBe('pt-BR');
+
+    // Opening /settings later: the route's loader runs, and now the Portuguese chunk loads.
+    const preloading = preloadNamespaces(['settings'], store);
+    ptLoader.resolveNext(ptBR);
+    await settle();
+    namespaceChunks.settings.resolveNext({ settings: en.settings });
+    await preloading;
+    await act(async () => {
+      screen.getByRole('button', { name: 'open-settings' }).click();
+      await Promise.resolve();
+    });
+
+    expect(
+      shown(),
+      'expected the English settings text on the first commit after the loader, with no Suspense fallback'
+    ).toEqual({ text: en.settings.tabs.general, locale: 'en', fallback: false });
+  });
+
+  it('loads one dictionary, not two, when the screen and the saved locale agree', async () => {
+    localStorage.setItem(LOCALE_STORAGE_KEY, 'pt-BR');
+    const { store, namespaceChunks, ptLoader } = storeWithFakeChunks();
+    await act(async () => {
+      render(
+        <I18nProvider dictionaries={store}>
+          <ShellWithSettingsRoute />
+        </I18nProvider>
+      );
+      await Promise.resolve();
+    });
+    ptLoader.resolveNext(ptBR);
+    await settle();
+
+    await preloadNamespaces(['settings'], store);
+
+    expect(
+      namespaceChunks.settings.calls,
+      `expected English settings chunk requests while pt-BR is shown and saved: 0 | received: ${namespaceChunks.settings.calls}`
+    ).toBe(0);
   });
 });
 
