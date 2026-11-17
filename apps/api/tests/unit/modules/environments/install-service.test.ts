@@ -464,7 +464,7 @@ describe('install service', () => {
     expect(events).toContainEqual({
       type: 'log',
       stream: 'system',
-      line: 'Post-install probe failed: runtime probe exploded',
+      line: 'Post-install probe failed. Details are in the hub log.',
       done: false,
     });
     expect(events.filter((event) => event.type === 'probe').map((event) => event.target)).toEqual([
@@ -898,6 +898,8 @@ describe('install service', () => {
     );
 
     expect(events.at(-1)).toMatchObject({ type: 'error', done: true });
+    // Regression: the thrown error's own text used to be the event's message.
+    expect(JSON.stringify(events.at(-1))).not.toContain('runner exploded');
     // `spawn-failed` would assert the installer never ran, which this failure
     // does not establish.
     expect(memory.runs.get('exploded-run')).toMatchObject({
@@ -947,7 +949,7 @@ describe('install service', () => {
     expect(events).toContainEqual({
       type: 'log',
       stream: 'system',
-      line: 'Install audit row was not updated: database is locked',
+      line: 'Install audit row was not updated. Details are in the hub log.',
       done: false,
     });
     expect(events.at(-1)).toMatchObject({ type: 'exit', code: 0, status: 'succeeded', done: true });

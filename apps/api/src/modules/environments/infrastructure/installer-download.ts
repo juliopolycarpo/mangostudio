@@ -3,10 +3,26 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { createDiagnosticLogger } from '../../../lib/logger';
 import { safeFetchBytes, type SafeFetchDeps, SafeFetchError } from '../../../lib/safe-fetch';
 import type { DownloadedInstaller } from '../domain/install-recipes';
 
 const MAX_INSTALLER_REDIRECTS = 5;
+
+const logger = createDiagnosticLogger('installer-download');
+
+/**
+ * Replacement text for a fetch failure whose message embeds what the resolver
+ * or socket said. `safe-fetch` marks exactly those with `rawDetail`; every other
+ * message is a constant it wrote itself ("Request timed out.", an HTTP status)
+ * and passes through unchanged.
+ */
+function installerRefusalText(error: SafeFetchError): string {
+  if (error.rawDetail === undefined) return error.message;
+  return error.kind === 'address-refused'
+    ? 'the hub refused the installer host. Check the hub network policy. Details are in the hub log.'
+    : 'the hub could not resolve or connect to the installer host. Check the hub connection and try again. Details are in the hub log.';
+}
 
 /**
  * Wall-clock bound on fetching one installer script, redirects and body read
@@ -101,7 +117,16 @@ async function fetchInstallerBytes(
       throw new InstallerDownloadError('Installer download was cancelled.');
     }
     if (error instanceof SafeFetchError) {
-      throw new InstallerDownloadError(`Installer download refused: ${error.message}`);
+      // The fetch layer's text names resolved addresses and socket errors. It
+      // goes to the log; the 502 body carries a fixed sentence per failure kind.
+      logger.warn('download_refused', {
+        url: request.url,
+        kind: error.kind,
+        detail: error.rawDetail ?? error.message,
+      });
+      throw new InstallerDownloadError(
+        `Installer download refused: ${installerRefusalText(error)}`
+      );
     }
     throw error;
   }

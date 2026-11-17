@@ -307,6 +307,41 @@ describe('installer download', () => {
     expect(fixture.getWrittenPath()).toBe(join(TEMP_DIR, 'installer.ps1'));
   });
 
+  // Regression: the fetch layer's own text (resolved address, socket error) went
+  // into the message the install route sends as a 502 body.
+  it('keeps the transport error text out of the refusal message', async () => {
+    const leakyHostFetch = (() =>
+      Promise.reject(
+        new Error('connect ECONNREFUSED 10.1.2.3:443 (pid 48213) at /home/alice/mango/net.ts:42:11')
+      )) as unknown as typeof fetch;
+    const downloader = createInstallerDownloader({
+      fetch: leakyHostFetch,
+      resolveHostname,
+      downloadTimeoutMs: 1000,
+    });
+
+    const failure = await downloader
+      .download({
+        url: 'https://example.test/install.sh',
+        interpreter: 'bash',
+        minBytes: 16,
+        maxBytes: 1024,
+      })
+      .then(
+        () => null,
+        (error: unknown) => error
+      );
+
+    expect(failure).toBeInstanceOf(Error);
+    const message = (failure as Error).message;
+    for (const leaked of ['10.1.2.3', 'ECONNREFUSED', '48213', '/home/alice']) {
+      expect(
+        message,
+        `(installer refusal): expected no "${leaked}" | received: ${message}`
+      ).not.toContain(leaked);
+    }
+  });
+
   it('gives up on a host that never answers, instead of waiting forever', async () => {
     // Named fake for a stalled host: the request stays pending until its signal aborts.
     const stalledHostFetch = ((_url: unknown, init?: { signal?: AbortSignal }) =>
@@ -327,5 +362,55 @@ describe('installer download', () => {
         maxBytes: 1024,
       })
     ).rejects.toThrow('Installer download refused: Request timed out.');
+  });
+
+  // Regression: a timeout is a constant message, not host detail; it must not be
+  // rewritten as "could not be resolved or connected".
+  it('keeps the constant timeout message instead of the unreachable-host copy', async () => {
+    const stalledHostFetch = ((_url: unknown, init?: { signal?: AbortSignal }) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new Error('aborted by signal')));
+      })) as unknown as typeof fetch;
+    const downloader = createInstallerDownloader({
+      fetch: stalledHostFetch,
+      resolveHostname,
+      downloadTimeoutMs: 25,
+    });
+
+    const failure = await downloader
+      .download({
+        url: 'https://example.test/install.sh',
+        interpreter: 'bash',
+        minBytes: 16,
+        maxBytes: 1024,
+      })
+      .catch((error: unknown) => error);
+
+    expect((failure as Error).message).not.toContain('could not resolve or connect');
+  });
+
+  it('replaces the address-policy text of a refused host, keeping the cause class', async () => {
+    const fixture = createDownloaderWithFetch(((_input: Parameters<typeof fetch>[0]) =>
+      Promise.resolve(
+        new Response(null, {
+          status: 302,
+          headers: { location: 'https://169.254.169.254/latest/meta-data/' },
+        })
+      )) as unknown as typeof fetch);
+
+    const failure = await fixture.downloader
+      .download({
+        url: 'https://example.test/install.sh',
+        interpreter: 'bash',
+        minBytes: 16,
+        maxBytes: 1024,
+      })
+      .catch((error: unknown) => error);
+
+    const message = (failure as Error).message;
+    expect(message).toBe(
+      'Installer download refused: the hub refused the installer host. Check the hub network policy. Details are in the hub log.'
+    );
+    expect(message).not.toContain('169.254');
   });
 });

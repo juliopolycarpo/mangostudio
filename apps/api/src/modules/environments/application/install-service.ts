@@ -25,6 +25,7 @@ import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { isExternalAgentTargetId } from '@mangostudio/shared/external-agents';
 
 import { getConfig } from '../../../lib/config';
+import { createDiagnosticLogger } from '../../../lib/logger';
 import { getInstallLogPath } from '../../../lib/mango-paths';
 import { assertRequestedProfileId, resolveActiveProfileId } from '../../../lib/profile-context';
 import { isStandaloneExecutable } from '../../../lib/runtime-paths';
@@ -60,6 +61,8 @@ import {
   type ProbeScope,
 } from './probing-service';
 import { type ToolchainService, toolchainService } from './toolchain-service';
+
+const logger = createDiagnosticLogger('install-service');
 
 const PREPARATION_TTL_MS = 10 * 60 * 1000;
 const MAX_RECENT_STREAMS = 20;
@@ -633,11 +636,16 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
           }
         }
       } catch (error) {
-        const detail = error instanceof Error ? error.message : 'Unknown probe failure.';
+        // The probe's own text can name hub paths or a driver's wording; the
+        // run log is read by the client, so it gets fixed copy and the log gets the rest.
+        logger.warn('post_install_probe_failed', {
+          environmentId: scope.environmentId,
+          error,
+        });
         stream.publish({
           type: 'log',
           stream: 'system',
-          line: `Post-install probe failed: ${detail}`,
+          line: 'Post-install probe failed. Details are in the hub log.',
           done: false,
         });
       }
@@ -658,11 +666,11 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
     try {
       await deps.repository.complete(active.runId, active.userId, active.profileId, result);
     } catch (error) {
-      const detail = error instanceof Error ? error.message : 'Unknown persistence failure.';
+      logger.warn('install_audit_row_not_updated', { runId: active.runId, error });
       active.stream.publish({
         type: 'log',
         stream: 'system',
-        line: `Install audit row was not updated: ${detail}`,
+        line: 'Install audit row was not updated. Details are in the hub log.',
         done: false,
       });
     }
@@ -719,6 +727,11 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
       // throw here is an unexpected execution failure — not evidence that the
       // installer never started. Recording `spawn-failed` would make the audit
       // trail wrong in exactly the case where it has to be trusted.
+      logger.error('install_execution_failed', {
+        runId: active.runId,
+        environmentId: scope.environmentId,
+        error,
+      });
       await recordTerminal(active, {
         finishedAt: deps.now(),
         exitCode: null,
@@ -727,7 +740,9 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
       });
       active.stream.publish({
         type: 'error',
-        error: error instanceof Error ? error.message : 'Install execution failed.',
+        // Fixed text: an unexpected throw can carry hub paths or a driver's own
+        // wording. The detail stays in the hub log.
+        error: 'Install execution failed. Details are in the hub log.',
         code: ERROR_CODES.INTERNAL,
         done: true,
       });

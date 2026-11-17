@@ -23,6 +23,7 @@ import {
 import { Elysia, t } from 'elysia';
 
 import { environmentUnavailableResponse } from '../../../lib/environment-unavailable';
+import { createDiagnosticLogger } from '../../../lib/logger';
 import { sseResponse } from '../../../lib/sse-stream';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import type { EnvironmentService } from '../application/environment-service';
@@ -45,11 +46,27 @@ const runIdParams = t.Object({
   runId: t.String({ minLength: 1 }),
 });
 
+const logger = createDiagnosticLogger('environment-routes');
+
+/**
+ * Answers a service refusal. The body carries `message` and `reason` only; the
+ * diagnostic stays in the hub log, so no producer can leak stderr or a path by
+ * putting it in the wrong field.
+ */
 function environmentError(error: unknown, set: { status?: number | string }): ApiErrorResponse {
   if (error instanceof EnvironmentServiceError) {
     set.status = error.status;
+    if (error.diagnostic !== undefined) {
+      logger.warn('service_refusal', {
+        environmentId: error.environmentId,
+        status: error.status,
+        reason: error.reason,
+        diagnostic: error.diagnostic,
+      });
+    }
     return {
       error: error.message,
+      ...(error.reason === undefined ? {} : { details: { reason: error.reason } }),
       code:
         error.status === 404
           ? ERROR_CODES.NOT_FOUND

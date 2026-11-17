@@ -21,10 +21,17 @@ import {
   type RuntimeInstallRunResult,
 } from '@mangostudio/shared/runtime-contract';
 
+import {
+  environmentUnavailableText,
+  isEnvironmentUnavailable,
+} from '../../../lib/environment-unavailable';
+import { createDiagnosticLogger } from '../../../lib/logger';
 import { getInstallLogPath } from '../../../lib/mango-paths';
 import type { RuntimeClient } from '../../../services/runtime-client/runtime-client';
 import { getRuntimeClient } from '../../../services/runtime-client/runtime-connection-manager';
 import { toolchainParams } from '../application/toolchain-service';
+
+const logger = createDiagnosticLogger('install-runner');
 
 // Re-exported so the relay's tests name the protocol's own feature minor.
 export { ORDERED_ANSWER_MINOR };
@@ -145,8 +152,19 @@ export function createInstallRunner(overrides: Partial<InstallRunnerDeps> = {}):
       try {
         client = await deps.resolveClient(command.userId, command.environmentId);
       } catch (error) {
-        const detail = error instanceof Error ? error.message : 'The environment is unavailable.';
-        options.onLog?.({ stream: 'system', line: detail });
+        // A connect refusal already has fixed per-reason copy; anything else is
+        // the hub's own error, kept in the log rather than on the run's stream.
+        logger.warn('resolve_client_failed', {
+          runId: command.runId,
+          environmentId: command.environmentId,
+          error,
+        });
+        options.onLog?.({
+          stream: 'system',
+          line: isEnvironmentUnavailable(error)
+            ? environmentUnavailableText(error)
+            : 'The environment could not be reached. Details are in the hub log.',
+        });
         return failure('spawn-failed');
       }
 
@@ -199,8 +217,15 @@ export function createInstallRunner(overrides: Partial<InstallRunnerDeps> = {}):
           durationMs: result.durationMs,
         };
       } catch (error) {
-        const detail = error instanceof Error ? error.message : 'Install execution failed.';
-        options.onLog?.({ stream: 'system', line: detail });
+        logger.warn('install_relay_failed', {
+          runId: command.runId,
+          environmentId: command.environmentId,
+          error,
+        });
+        options.onLog?.({
+          stream: 'system',
+          line: 'Install execution failed. Details are in the hub log.',
+        });
         // The installer may well have started; reporting `spawn-failed` would
         // claim otherwise. `failed` is the honest reading of "we lost track".
         return failure('failed');

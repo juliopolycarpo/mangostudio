@@ -356,7 +356,12 @@ describe('toolchain service', () => {
 
     expect(failure).toBeInstanceOf(EnvironmentServiceError);
     expect((failure as EnvironmentServiceError).status).toBe(503);
-    expect((failure as EnvironmentServiceError).message).toContain('runtime unavailable');
+    // Regression: the probe error's text ("ssh exited 255") used to be the message.
+    expect((failure as EnvironmentServiceError).message).not.toContain('ssh exited 255');
+    expect((failure as EnvironmentServiceError).diagnostic).toBe(
+      'runtime unavailable: ssh exited 255'
+    );
+    expect((failure as EnvironmentServiceError).reason).toBe('toolchain-probe-failed');
     expect(repository.upserts).toHaveLength(0);
   });
 

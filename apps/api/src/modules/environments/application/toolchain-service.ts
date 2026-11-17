@@ -23,7 +23,7 @@ import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-cont
 
 import { isEnvironmentUnavailable } from '../../../lib/environment-unavailable';
 import { publishEnvironmentInvalidation } from '../../../services/realtime/environment-invalidation';
-import { EnvironmentServiceError } from '../domain/environment-error';
+import { diagnosticOf, EnvironmentServiceError } from '../domain/environment-error';
 import {
   type EnvironmentToolchainRepository,
   environmentToolchainRepository,
@@ -101,10 +101,10 @@ async function assertKnownPath(
     // A machine that cannot be asked is unavailable, not an invalid request:
     // the path may well be right, and 422 would send the user to fix a value
     // when the fix is bringing the environment back.
-    const detail = error instanceof Error ? error.message : String(error);
     throw new EnvironmentServiceError(
-      `Cannot verify ${runtime} installations on "${environmentId}": ${detail}`,
-      503
+      `Cannot verify ${runtime} installations on "${environmentId}" right now. Try again when the environment is reachable. Details are in the hub log.`,
+      503,
+      { reason: 'toolchain-probe-failed', environmentId, diagnostic: diagnosticOf(error) }
     );
   }
   const known = status?.installations.map((installation) => installation.path) ?? [];
