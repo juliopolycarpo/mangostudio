@@ -341,7 +341,12 @@ const ROUTES: readonly RouteCase[] = [
   {
     argv: ['killserver'],
     module: 'killserver',
-    call: { handler: 'runKillServer', args: undefined },
+    call: { handler: 'runKillServer', args: { force: false } },
+  },
+  {
+    argv: ['killserver', '--force'],
+    module: 'killserver',
+    call: { handler: 'runKillServer', args: { force: true } },
   },
   {
     argv: ['service', 'status'],

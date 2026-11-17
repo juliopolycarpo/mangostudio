@@ -58,7 +58,7 @@ async function ensureNotRunning(deps: Partial<ServeDeps>): Promise<void> {
   if (!state) {
     return;
   }
-  if (await isStateLive(state, controller)) {
+  if (isStateLive(state, (pid) => controller.isAlive(pid))) {
     if (!serviceUnit || !(await wait(state.pid))) {
       throw new CliError(
         `Another instance is already running (PID ${state.pid}, port ${state.port}).`

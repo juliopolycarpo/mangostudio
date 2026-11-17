@@ -6,7 +6,12 @@
 
 import type { UserServiceManager } from '@mangostudio/shared/machine/service';
 
-import { isStateLive, readState, removeState, type ServerState } from '../../lib/server-state';
+import {
+  classifyStateProcess,
+  readState,
+  removeState,
+  type ServerState,
+} from '../../lib/server-state';
 import {
   createHubServiceManager,
   currentHubExecutable,
@@ -52,7 +57,9 @@ const COMEBACK_TIMEOUT_MS = 20_000;
 export async function runRestart(deps: Partial<RestartDeps> = {}): Promise<void> {
   const d = resolveDeps(deps);
   const state = await d.readState();
-  const alive = state !== null && (await isStateLive(state, d.controller));
+  // A recycled pid (token mismatch) reads as no instance, like a dead one; an unconfirmed pid
+  // goes on to `stopPidOrThrow`, which refuses it.
+  const alive = state !== null && (await classifyStateProcess(state, d.controller)) !== 'stale';
 
   if (!state || !alive) {
     if (state) await d.removeState();

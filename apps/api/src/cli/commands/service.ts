@@ -8,7 +8,12 @@ import type { UserServiceStatus } from '@mangostudio/shared/runtime-home';
 
 import { getConfig, getConfigEnvFilePath } from '../../lib/config';
 import { ensureRuntimeDirs } from '../../lib/mango-paths';
-import { isStateLive, readState, removeState, type ServerState } from '../../lib/server-state';
+import {
+  classifyStateProcess,
+  readState,
+  removeState,
+  type ServerState,
+} from '../../lib/server-state';
 import {
   buildHubServiceDefinition,
   createHubServiceManager,
@@ -167,7 +172,7 @@ function resolveInstallTarget(
 async function liveInstance(d: Required<ServiceDeps>): Promise<ServerState | null> {
   const state = await d.readState();
   if (!state) return null;
-  if (await isStateLive(state, d.controller)) return state;
+  if ((await classifyStateProcess(state, d.controller)) !== 'stale') return state;
   await d.removeState();
   return null;
 }

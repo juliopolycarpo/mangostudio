@@ -6,7 +6,7 @@
 
 import type { UpgradeReport, UpgradeStreamEvent } from '@mangostudio/shared/updates';
 
-import { isStateLive, readState } from '../../lib/server-state';
+import { readState } from '../../lib/server-state';
 import {
   createUpgradeService,
   type UpgradeRunRequest,
@@ -121,7 +121,7 @@ async function resolveRestartFlag(
   if (args.noRestart) return false;
   if (!interactive) return true;
   const state = await d.readState();
-  const alive = state !== null && (await isStateLive(state, d.controller));
+  const alive = state !== null && d.controller.isAlive(state.pid);
   if (!alive) return true;
   return await d.confirm('Restart the running hub once the upgrade finishes installing?');
 }

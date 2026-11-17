@@ -1,4 +1,5 @@
 import { classifyStateProcess, readState, removeState } from '../lib/server-state';
+import { CliError } from './errors';
 import { writeError, writeLine } from './output';
 import {
   assertSignalsReachHub,
@@ -36,6 +37,11 @@ interface RunServerStopCommandOptions {
    * or a `serve` right after may already have written a successor's.
    */
   removeStateWhenStopped?: boolean;
+  /**
+   * `killserver --force`: trust the state file's pid without comparing start tokens. A dead pid
+   * is still "no instance", and a pid at or below 1 is still refused.
+   */
+  skipIdentityCheck?: boolean;
 }
 
 function resolveServerShutdownDeps(
@@ -70,11 +76,17 @@ export async function runServerStopCommand({
   failureMessage,
   removeStateAfterSignal = false,
   removeStateWhenStopped = false,
+  skipIdentityCheck = false,
 }: RunServerStopCommandOptions): Promise<void> {
   const d = resolveServerShutdownDeps(deps);
   const state = await d.readState();
 
-  if (!state || (await classifyStateProcess(state, d.controller)) === 'stale') {
+  const dead = state !== null && !d.controller.isAlive(state.pid);
+  const stale =
+    state !== null &&
+    !skipIdentityCheck &&
+    (await classifyStateProcess(state, d.controller)) === 'stale';
+  if (!state || dead || stale) {
     if (state) {
       await d.removeState();
     }
@@ -83,7 +95,11 @@ export async function runServerStopCommand({
   }
 
   // Alive, but is it the hub? An unconfirmed pid throws here, before any signal.
-  await assertSignalsReachHub(d.controller, state);
+  if (skipIdentityCheck) {
+    if (!Number.isSafeInteger(state.pid) || state.pid < 2) {
+      throw new CliError(`Refusing to signal PID ${state.pid}: expected a PID above 1.`);
+    }
+  } else await assertSignalsReachHub(d.controller, state);
   d.controller[signal](state.pid);
   const stopped = await waitForExit(d.controller, state.pid, {
     timeoutMs,

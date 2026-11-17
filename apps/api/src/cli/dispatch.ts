@@ -7,6 +7,7 @@ import { releaseRuntimeConnections } from '../services/runtime-client/runtime-co
 import {
   parseDoctorArgs,
   parseEnvArgs,
+  parseKillServerArgs,
   parseLibraryArgs,
   parseLogsArgs,
   parseServeArgs,
@@ -197,8 +198,9 @@ async function route(
       return;
     }
     case 'killserver': {
+      const killArgs = parseKillServerArgs(rest);
       const { runKillServer } = await modules.killserver();
-      await runKillServer();
+      await runKillServer(killArgs);
       return;
     }
     case 'service': {

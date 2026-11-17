@@ -103,6 +103,7 @@ function baseDeps(
       controller: {
         isAlive: () => false,
         startTimeMs: () => Promise.resolve(0),
+        startToken: () => Promise.resolve(undefined),
         terminate: () => undefined,
         kill: () => undefined,
       },
@@ -273,6 +274,7 @@ describe('runUpgrade unconfirmed', () => {
       controller: {
         isAlive: () => true,
         startTimeMs: () => Promise.resolve(0),
+        startToken: () => Promise.resolve(undefined),
         terminate: () => undefined,
         kill: () => undefined,
       },
@@ -306,6 +308,7 @@ describe('runUpgrade unconfirmed', () => {
       controller: {
         isAlive: () => true,
         startTimeMs: () => Promise.resolve(0),
+        startToken: () => Promise.resolve(undefined),
         terminate: () => undefined,
         kill: () => undefined,
       },

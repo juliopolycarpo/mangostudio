@@ -1,9 +1,9 @@
-import { getPidFilePath } from '../lib/mango-paths';
 /**
  * Abstraction over OS process signals so commands stay testable without
  * sending real signals. Cross-platform via Node/Bun's process.kill mapping.
  */
 import { readProcessStartMs } from '../lib/process-start-time';
+import { readProcessStartToken } from '../lib/process-start-token';
 import {
   classifyStateProcess,
   type ServerState,
@@ -16,6 +16,8 @@ export interface ProcessController extends StateProcessProbe {
   isAlive(pid: number): boolean;
   /** When the process started (epoch ms); `undefined` when the platform query failed. */
   startTimeMs(pid: number): Promise<number | undefined>;
+  /** The process's start token, comparable for equality; `undefined` when the query failed. */
+  startToken(pid: number): Promise<string | undefined>;
   /** Request graceful termination (SIGTERM). */
   terminate(pid: number): void;
   /** Force termination (SIGKILL). */
@@ -34,6 +36,7 @@ export function createProcessController(): ProcessController {
   return {
     isAlive,
     startTimeMs: readProcessStartMs,
+    startToken: readProcessStartToken,
     terminate: (pid) => signal(pid, 'SIGTERM'),
     kill: (pid) => signal(pid, 'SIGKILL'),
   };
@@ -73,28 +76,40 @@ export interface StopDeps {
 }
 
 /**
+ * What a person can type to end `pid` themselves, for the refusal below.
+ *
+ * @example
+ * manualStopCommand(4242, 'linux'); // 'kill 4242'
+ */
+export function manualStopCommand(pid: number, platform: NodeJS.Platform): string {
+  return platform === 'win32' ? `taskkill /PID ${pid} /F` : `kill ${pid}`;
+}
+
+/**
  * Refuse to signal the pid a state file names unless it is the hub. The state file outlives a
  * crashed hub, and the OS may have given its pid to someone's editor or shell, so every signal
  * to a recorded pid passes through here.
  *
- * - alive but started after the state was written: a recycled pid, never signalled;
- * - alive and its start time unreadable: identity cannot be established, so refuse and say how
- *   to proceed rather than kill on a guess.
+ * - a different start token: a recycled pid, never signalled;
+ * - identity not provable (older hub without a token, unreadable start time): refuse and name the
+ *   command that stops it by hand, and `killserver --force`, rather than kill on a guess.
+ *   Deleting the state file is not offered as a way out: the hub may be running.
  * // Usage: await assertSignalsReachHub(controller, state)
  */
 export async function assertSignalsReachHub(
   controller: ProcessController,
-  state: ServerState
+  state: ServerState,
+  platform: NodeJS.Platform = process.platform
 ): Promise<void> {
   const kind = await classifyStateProcess(state, controller);
   if (kind === 'hub') return;
   if (kind === 'stale') {
     throw new CliError(
-      `PID ${state.pid} is no longer the MangoStudio hub (the process now using it started after the hub did), so no signal was sent. The state file is stale.`
+      `PID ${state.pid} is no longer the MangoStudio hub (another process now uses it), so no signal was sent.`
     );
   }
   throw new CliError(
-    `Cannot confirm PID ${state.pid} is MangoStudio (its start time could not be read), so no signal was sent. If MangoStudio is not running, delete ${getPidFilePath()}; otherwise stop the process by hand.`
+    `Cannot confirm PID ${state.pid} is MangoStudio, so no signal was sent. If it is the hub, stop it with "${manualStopCommand(state.pid, platform)}" or run "mangostudio killserver --force".`
   );
 }
 

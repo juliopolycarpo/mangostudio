@@ -18,8 +18,15 @@ import {
 } from '../lib/config';
 import { hubListenOptions } from '../lib/hub-connection-limits';
 import { ensureRuntimeDirs } from '../lib/mango-paths';
+import { readProcessStartToken } from '../lib/process-start-token';
 import { getSourceFrontendDir } from '../lib/runtime-paths';
-import { removeState, type ServerState, writeState } from '../lib/server-state';
+import {
+  attachStartToken,
+  readState,
+  removeState,
+  type ServerState,
+  writeState,
+} from '../lib/server-state';
 import { warmUpLibraryLocationDefaults } from '../modules/app-settings/application/app-settings-service';
 import { onEnvironmentWithdrawn } from '../modules/environments/application/environment-service';
 import { externalSessionManager } from '../modules/external-agents/application/external-session-manager';
@@ -196,7 +203,21 @@ async function persistState(port: number, host: string, frontendDir: string): Pr
     // through the supervisor instead of respawning by hand.
     ...(process.env[HUB_SERVICE_UNIT_ENV] ? { service: process.env[HUB_SERVICE_UNIT_ENV] } : {}),
   };
-  await writeState(state);
+  if (process.platform === 'win32') {
+    // The token is a PowerShell query (hundreds of ms): write the file first so the hub is
+    // findable at once, then add the token. Until then the CLI treats the file as token-less.
+    await writeState(state);
+    void attachStartToken({
+      readState,
+      writeState,
+      readToken: () => readProcessStartToken(process.pid),
+    }).catch((error: unknown) => {
+      console.warn('[api] Could not record the process start token:', error);
+    });
+    return;
+  }
+  const startToken = await readProcessStartToken(process.pid);
+  await writeState(startToken === undefined ? state : { ...state, startToken });
 }
 
 function logRunning(host: string, port: number, devFrontend: boolean): void {

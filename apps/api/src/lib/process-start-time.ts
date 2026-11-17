@@ -22,8 +22,14 @@ export interface ProcessStartTimeHost {
   readonly platform: NodeJS.Platform;
   readonly now: () => number;
   readonly readText: (path: string) => Promise<string>;
-  /** Runs a command and returns its stdout, or `undefined` when it failed or timed out. */
-  readonly run: (command: readonly string[]) => Promise<string | undefined>;
+  /**
+   * Runs a command and returns its stdout, or `undefined` when it failed or timed out.
+   * `env` entries are added to this process's environment.
+   */
+  readonly run: (
+    command: readonly string[],
+    env?: Readonly<Record<string, string>>
+  ) => Promise<string | undefined>;
 }
 
 /**
@@ -75,7 +81,7 @@ export function windowsStartMs(output: string): number | undefined {
  */
 export async function readProcessStartMs(
   pid: number,
-  host: ProcessStartTimeHost = REAL_HOST
+  host: ProcessStartTimeHost = REAL_START_TIME_HOST
 ): Promise<number | undefined> {
   if (!Number.isSafeInteger(pid) || pid < 2) return undefined;
   try {
@@ -103,12 +109,13 @@ export async function readProcessStartMs(
   }
 }
 
-const REAL_HOST: ProcessStartTimeHost = {
+export const REAL_START_TIME_HOST: ProcessStartTimeHost = {
   platform: process.platform,
   now: Date.now,
   readText: (path) => readFile(path, 'utf8'),
-  run: async (command) => {
+  run: async (command, env) => {
     const child = Bun.spawn([...command], {
+      env: { ...process.env, ...env },
       stdin: 'ignore',
       stdout: 'pipe',
       stderr: 'ignore',

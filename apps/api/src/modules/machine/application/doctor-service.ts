@@ -313,7 +313,7 @@ async function inspectInstance(d: Required<DoctorCollectDeps>): Promise<Instance
   if (!state) {
     return { state: null, alive: false };
   }
-  const alive = await isStateLive(state, d.controller);
+  const alive = isStateLive(state, (pid) => d.controller.isAlive(pid));
   return { state, alive };
 }
 

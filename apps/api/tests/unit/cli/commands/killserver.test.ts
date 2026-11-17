@@ -19,7 +19,7 @@ describe('runKillServer', () => {
   it('reports nothing to kill when not running', async () => {
     const lines: string[] = [];
 
-    await runKillServer({
+    await runKillServer(undefined, {
       readState: () => Promise.resolve(null),
       removeState: noop,
       controller: new FakeProcessController(),
@@ -42,7 +42,7 @@ describe('runKillServer', () => {
       return Promise.resolve();
     };
 
-    await runKillServer({
+    await runKillServer(undefined, {
       readState: () => Promise.resolve(STATE),
       removeState: () => {
         removed = true;

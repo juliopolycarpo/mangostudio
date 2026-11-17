@@ -52,14 +52,8 @@ import { sleep } from '../../../cli/sleep';
 import { type BuildInfo, getBuildInfo, isKnownBuildSha } from '../../../lib/build-info';
 import { getConfig, getVersion, RUNTIME_CONFIG_ENV_KEYS } from '../../../lib/config';
 import { getUpgradeLogPath } from '../../../lib/mango-paths';
-import { readProcessStartMs } from '../../../lib/process-start-time';
 import type { SafeFetchDeps } from '../../../lib/safe-fetch';
-import {
-  readLiveState,
-  readState,
-  type ServerState,
-  type StateProcessProbe,
-} from '../../../lib/server-state';
+import { readLiveState, readState, type ServerState } from '../../../lib/server-state';
 import {
   createHubServiceManager,
   currentHubExecutable,
@@ -162,11 +156,6 @@ export interface UpgradeServiceDeps {
   readonly readState: typeof readState;
   /** Whether the state file's pid is a live process — see `isStateLive`. */
   readonly isAlive: (pid: number) => boolean;
-  /**
-   * When that process started, so a recycled pid is not taken for the hub. Left out when a
-   * caller injects only `isAlive`: its fake pids can coincide with real ones on this machine.
-   */
-  readonly startTimeMs: StateProcessProbe['startTimeMs'];
   readonly now: () => number;
   readonly platform: NodeJS.Platform;
   readonly env: NodeJS.ProcessEnv;
@@ -365,10 +354,7 @@ async function withRestart(
   emit: EmitUpgradeEvent
 ): Promise<UpgradeReport> {
   emit(stageEvent('restart'));
-  const state = await readLiveState(d.readState, {
-    isAlive: d.isAlive,
-    startTimeMs: d.startTimeMs,
-  });
+  const state = await readLiveState(d.readState, d.isAlive);
   const launch: HubLaunchMode | null = state ? hubLaunchMode(state) : null;
   const decision = decideRestart({ launch, platform: d.platform, restart: wantsRestart });
 
@@ -512,10 +498,7 @@ async function runWindowsDelegate(
   emit: EmitUpgradeEvent
 ): Promise<UpgradeReport> {
   emit(stageEvent('install'));
-  const state = await readLiveState(d.readState, {
-    isAlive: d.isAlive,
-    startTimeMs: d.startTimeMs,
-  });
+  const state = await readLiveState(d.readState, d.isAlive);
   const hub: LiveHub | null =
     state && state.pid !== d.pid ? { state, launch: hubLaunchMode(state) } : null;
   if (hub?.launch === 'foreground') {
@@ -878,7 +861,6 @@ function resolveDeps(deps: Partial<UpgradeServiceDeps>): UpgradeServiceDeps {
     currentExecutable: deps.currentExecutable ?? (() => currentHubExecutable()),
     readState: deps.readState ?? readState,
     isAlive: deps.isAlive ?? createProcessController().isAlive,
-    startTimeMs: deps.startTimeMs ?? (deps.isAlive ? undefined : readProcessStartMs),
     now: deps.now ?? Date.now,
     platform: deps.platform ?? process.platform,
     env: deps.env ?? process.env,
