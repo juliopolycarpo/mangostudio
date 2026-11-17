@@ -7,6 +7,12 @@
  * - Linux: `<boot_id>:<start ticks>`. Field 22 of `/proc/<pid>/stat` counts ticks since boot, and
  *   `boot_id` makes ticks from different boots differ.
  * - macOS: the `ps -o lstart=` text, the kernel's stored start time, read with `LC_ALL=C`.
+ *   It has one-second resolution (a runner showed a test process and its parent sharing one), so
+ *   two processes started within the same second share a token. A recycled pid would be accepted
+ *   only if the hub exited and the OS reused its pid inside the hub's own start second, which
+ *   needs a full pid wrap in under a second. That is accepted rather than paid for: the only
+ *   finer source, the `kern.proc.pid` sysctl, returns a binary struct the `sysctl` tool does
+ *   not decode, and reading it needs a native call this module avoids.
  * - Windows: the process `StartTime` as .NET ticks, from one PowerShell query.
  *
  * `undefined` means "could not be read", never "the process is gone".
