@@ -57,6 +57,13 @@ function stopRealTokenizer() {
   return tokenizer;
 }
 
+function countRealTokenizerCalls() {
+  const grammar = highlighter.getLanguage('typescript');
+  const tokenizer = spyOn(grammar, 'tokenizeLine2');
+  restore = () => tokenizer.mockRestore();
+  return tokenizer;
+}
+
 function failLanguageLoad(): Promise<void> {
   return Promise.reject(new Error('Synthetic language module download failure'));
 }
@@ -103,7 +110,10 @@ describe('actual consumers of checked highlighting', () => {
 
   it('keeps escaped multiline source and its copy control after real tokenization stops', async () => {
     const tokenizer = stopRealTokenizer();
-    const source = `<script>alert("café & 漢字")</script> ${'x'.repeat(8192)}\nsecond line <tag>`;
+    // Many lines under the highlight limits, so the tokenizer runs and then stops; one 8 KB
+    // unbroken token would be refused before it (see the next case) and cost seconds.
+    const longBody = `${'x'.repeat(100)}\n`.repeat(80);
+    const source = `<script>alert("café & 漢字")</script> ${longBody}second line <tag>`;
     const clipboard = mock(writeClipboard);
     stubClipboard(clipboard);
     const { container } = render(
@@ -115,6 +125,41 @@ describe('actual consumers of checked highlighting', () => {
     expect(container.querySelector('script')).toBeNull();
     expect(container.querySelector('pre')).toHaveAttribute('data-lang', 'typescript');
     expect(container.querySelector('.shiki')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Copy code' }));
+    await waitFor(() => expect(clipboard).toHaveBeenCalledWith(source));
+  });
+
+  it('colours a code block while its fence is still open and the message is streaming', async () => {
+    const open =
+      '```typescript\nconst first = 1;\nfunction second(value: number) {\n  return value';
+    const { container, rerender } = render(<MarkdownContentRenderer content={open} isStreaming />);
+    await waitFor(() =>
+      expect(container.querySelector('pre[data-lang="typescript"]')).toHaveClass('shiki')
+    );
+
+    rerender(<MarkdownContentRenderer content={`${open} + 1;\n}`} isStreaming />);
+    const coloured = container.querySelectorAll('pre.shiki span[style*="color"]');
+    expect(
+      coloured.length,
+      'coloured spans in a streamed block whose closing fence has not arrived'
+    ).toBeGreaterThan(5);
+    expect(container.querySelector('pre.shiki')?.textContent).toContain('return value + 1;');
+  });
+
+  it('keeps escaped source and its copy control for a block over the highlight limits, without tokenizing it', async () => {
+    const tokenizer = countRealTokenizerCalls();
+    const source = `<script>alert("café & 漢字")</script> ${'x'.repeat(16_384)}\nsecond line <tag>`;
+    const clipboard = mock(writeClipboard);
+    stubClipboard(clipboard);
+    const { container } = render(
+      <MarkdownContentRenderer content={`\`\`\`typescript\n${source}\n\`\`\``} />
+    );
+
+    await flushAsyncRender();
+    expect(container.querySelector('code')?.textContent).toBe(source);
+    expect(container.querySelector('script')).toBeNull();
+    expect(container.querySelector('.shiki')).toBeNull();
+    expect(tokenizer.mock.calls.length, 'tokenizer calls for an over-limit block').toBe(0);
     fireEvent.click(screen.getByRole('button', { name: 'Copy code' }));
     await waitFor(() => expect(clipboard).toHaveBeenCalledWith(source));
   });

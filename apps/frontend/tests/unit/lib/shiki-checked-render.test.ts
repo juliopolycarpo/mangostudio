@@ -54,10 +54,16 @@ describe('checked Shiki renderer', () => {
         Date.now = unchangedClock;
         for (const theme of CODE_THEMES) {
           const options = { lang: language, theme, tokenizeTimeLimit: 500 };
+          const checkedTokens = checked.codeToTokensBase(source, options);
           observations.push({
-            checkedHtml: checked.codeToHtml(source, options),
-            rawHtml: highlighter.codeToHtml(source, options),
-            checkedTokens: checked.codeToTokensBase(source, options),
+            // Serialized line by line and framed again, as a growing block is; without
+            // whitespace merging, which the token path does not do.
+            checkedHtml: checked.htmlFromLines(
+              checked.tokenLinesToHtml(checkedTokens, options),
+              options
+            ),
+            rawHtml: highlighter.codeToHtml(source, { ...options, mergeWhitespaces: false }),
+            checkedTokens,
             rawTokens: highlighter.codeToTokensBase(source, options),
           });
         }
@@ -70,6 +76,52 @@ describe('checked Shiki renderer', () => {
       }
     });
   }
+
+  it('matches Shiki codeToHtml on a multi-construct block, except for whitespace tokens', () => {
+    // Strings with escapes, a template literal across lines, comments, regexes, JSX-free generics.
+    const source = [
+      "import { a } from './a';",
+      '',
+      '/** Doc <b>comment</b> & more. */',
+      'export async function load<T extends object>(input: T, ...rest: string[]): Promise<T> {',
+      '  const pattern = /^(?<name>[a-z]+)\\d{2,}$/giu; // trailing',
+      `  const text = \`first \${input} line`,
+      `  second \${rest.join(", ")} line\`;`,
+      "  return { ...input, text, quote: 'it\\'s', tab: '\\t' } as T;",
+      '}',
+      '',
+    ].join('\n');
+    const options = { lang: 'typescript', theme: 'one-dark-pro' };
+    const checked = createCheckedRenderers(highlighter);
+    const ours = checked.htmlFromLines(
+      checked.tokenLinesToHtml(checked.codeToTokensBase(source, options), options),
+      options
+    );
+    const shiki = highlighter.codeToHtml(source, options);
+
+    // The DOM parser decodes entities and drops tags; stripping tags with a regex would not be a
+    // faithful reading of what the browser shows.
+    const textOf = (html: string) => {
+      const holder = document.createElement('div');
+      holder.innerHTML = html;
+      return holder.textContent;
+    };
+    // Shiki's own HTML merges a whitespace-only token into the next one; ours keeps it as a
+    // token. Both are drawn identically, so compare the coloured tokens with their blanks removed.
+    const colouredTokens = (html: string) =>
+      [...html.matchAll(/<span style="([^"]*)">([^<]*)<\/span>/g)]
+        .map(([, style, text]) => `${style}|${text?.trim()}`)
+        .filter((token) => !token.endsWith('|'));
+
+    expect(textOf(ours), 'text content of the serialized block').toBe(textOf(shiki));
+    expect(ours.match(/class="line"/g)?.length, 'line spans').toBe(
+      shiki.match(/class="line"/g)?.length
+    );
+    expect(ours.slice(0, ours.indexOf('<code>')), 'the <pre> frame').toBe(
+      shiki.slice(0, shiki.indexOf('<code>'))
+    );
+    expect(colouredTokens(ours), 'coloured tokens, blanks trimmed').toEqual(colouredTokens(shiki));
+  });
 
   it('preserves the tokenizer receiver and arguments without changing the original grammar', () => {
     const grammar = highlighter.getLanguage('typescript');
