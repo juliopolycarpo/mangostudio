@@ -16,7 +16,7 @@ function statWithStartTicks(startTicks: string, comm = 'bun'): string {
   return `42 (${comm}) ${afterComm.join(' ')}`;
 }
 
-/** Canned platform output. The macOS and Windows shapes are synthetic (from ps(1) and .NET docs); the native run exercises the real readers. */
+/** Canned platform output. The macOS shape matches real `ps` output captured on a macOS runner (`Tue Nov 17 08:15:39 2026`, whole-second resolution, so a parent and child started in the same second share a token); the Windows shape is synthetic and the native run exercises the real reader. */
 class FakeTokenHost implements ProcessStartTimeHost {
   readonly commands: string[][] = [];
   readonly envs: Array<Readonly<Record<string, string>> | undefined> = [];
@@ -155,14 +155,12 @@ describe('readProcessStartToken', () => {
     expect(host.commands).toEqual([]);
   });
 
-  it('reads the same token twice for this process, and a different one for its parent', async () => {
+  it('reads the same token twice for this process', async () => {
     const own = await readProcessStartToken(process.pid);
     const again = await readProcessStartToken(process.pid);
-    const parent = await readProcessStartToken(process.ppid);
 
     expect(own, 'expected a start token for this process | received: undefined').toBeDefined();
     expect(again).toBe(own);
-    if (parent !== undefined && process.ppid > 1) expect(parent).not.toBe(own);
   });
 });
 
