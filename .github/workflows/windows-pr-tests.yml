@@ -1,0 +1,61 @@
+name: Windows PR Tests
+
+# Pull requests run the TypeScript test lanes on Linux only, so a Windows
+# defect (a path compared with `/`, a database handle the OS will not release,
+# an escaped path literal) reached main twice before anyone saw it. This runs
+# the API unit lane and the root scripts lane on Windows for the paths where
+# those defects lived.
+#
+# Advisory by design: it is not a required context in the main ruleset
+# (docs/reference/ci.md, "Branch protection / required checks") and no gate
+# lists it in `needs`, so a slow or starved Windows runner can delay the
+# signal but never a merge. There is no macOS pull-request job for the same
+# reason: macOS runners queued for 24 minutes on a trivial job here. The daily
+# run of native-bun-qualification.yml covers macOS and the full Windows suites.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - apps/api/**
+      - apps/shared/**
+      - scripts/**
+      - packages/**
+      - .github/workflows/windows-pr-tests.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  windows-tests:
+    name: Windows API and scripts tests
+    runs-on: windows-latest
+    # Bun setup can wait four minutes for a republished canary asset; the two
+    # lanes measured about 5 and 6 minutes on a loaded runner.
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # Tests compare tracked bytes; a CRLF checkout would be a defect of the
+      # runner, not of the change.
+      - name: Preserve tracked source bytes
+        run: git config --global core.autocrlf false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - id: mango
+        uses: $/.github/actions/setup-mango
+
+      - name: API unit lane
+        run: bun run --filter @mangostudio/api test:unit
+
+      # Runs even when the API lane failed, so one push shows both failures.
+      - name: Root scripts lane
+        if: ${{ !cancelled() && steps.mango.outcome == 'success' }}
+        run: bun run test:scripts:workers
