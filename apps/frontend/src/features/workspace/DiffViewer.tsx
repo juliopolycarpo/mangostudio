@@ -7,6 +7,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Spinner } from '@/components/ui/Spinner';
 import { useI18n } from '@/hooks/use-i18n';
 import { useTheme } from '@/hooks/use-theme';
+import type { CodeThemeId } from '@/lib/code-themes';
 import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
 import { highlightLineTokens, preloadCodeLanguages } from '@/lib/shiki';
 import { cn } from '@/lib/utils';
@@ -65,16 +66,24 @@ export function DiffViewer({
   const { resolvedCodeTheme } = useTheme();
   const query = useGitDiff(chatId, selection);
   const language = inferLanguage(selection.path);
-  const [highlightReady, setHighlightReady] = useState(false);
+  // What the highlighter has actually loaded: the grammar and the theme the rows
+  // may colour with. A newly chosen theme leaves the previous one in place until
+  // its chunk arrives, so rows keep their colours instead of each throwing
+  // "theme not found" and going plain. Another file's grammar is not this one's:
+  // the rows ask for it only while `loaded.language` matches.
+  const [loaded, setLoaded] = useState<{
+    readonly language: string;
+    readonly theme: CodeThemeId;
+  } | null>(null);
+  const rowLanguage = loaded?.language === language ? language : null;
   const hunks = useMemo(() => parseGitDiff(query.data?.diff ?? ''), [query.data?.diff]);
 
   useEffect(() => {
     let active = true;
-    setHighlightReady(false);
     if (!language) return;
-    void preloadCodeLanguages([language]).then(
+    void preloadCodeLanguages([language], resolvedCodeTheme).then(
       () => {
-        if (active) setHighlightReady(true);
+        if (active) setLoaded({ language, theme: resolvedCodeTheme });
       },
       () => {
         // Plain source and line chrome remain usable after a failed language load.
@@ -83,7 +92,7 @@ export function DiffViewer({
     return () => {
       active = false;
     };
-  }, [language]);
+  }, [language, resolvedCodeTheme]);
 
   return (
     <section
@@ -143,8 +152,8 @@ export function DiffViewer({
                 <DiffLineRow
                   key={diffLineKey(hunk.lines, index)}
                   line={line}
-                  language={highlightReady ? language : null}
-                  theme={resolvedCodeTheme}
+                  language={rowLanguage}
+                  theme={loaded?.theme ?? resolvedCodeTheme}
                 />
               ))}
             </div>

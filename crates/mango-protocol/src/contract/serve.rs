@@ -55,7 +55,7 @@ where
                 let future = (self.handler)(params, context);
                 Box::pin(async move {
                     let result = future.await?;
-                    serde_json::to_value(result).map_err(|error| {
+                    into_value(result).map_err(|error| {
                         RemoteError::new(
                             codes::INTERNAL,
                             format!("Result of \"{method}\" failed to serialise: {error}."),
@@ -358,4 +358,76 @@ async fn answer(
         check_result(&method, result_validator, &result, ReasonStyle::Quoted)?;
     }
     Ok(result)
+}
+
+/// `result` as a `Value`: moved as it is when it already is one, serialized otherwise.
+///
+/// `serde_json::to_value` has no shortcut for a `Value`, so a handler registered with `Value` as its
+/// result type (the usual case for a host that builds its answers as JSON) had its whole answer
+/// allocated a second time here, on every request.
+///
+/// # Example
+///
+/// ```ignore
+/// let value = into_value(json!({"entries": [1, 2, 3]}))?; // moved, not copied
+/// let value = into_value(vec![1, 2, 3])?; // serialized
+/// ```
+fn into_value<R: Serialize + 'static>(result: R) -> serde_json::Result<Value> {
+    let mut slot = Some(result);
+    if let Some(value) = (&mut slot as &mut dyn std::any::Any).downcast_mut::<Option<Value>>() {
+        return Ok(value.take().expect("the slot was filled just above"));
+    }
+    serde_json::to_value(slot.take().expect("the slot was filled just above"))
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn a_value_result_keeps_the_buffer_it_was_built_in() {
+        let entries = vec![json!({"name": "a"}), json!({"name": "b"})];
+        let built_at = entries.as_ptr();
+
+        let value = into_value(Value::Array(entries)).expect("a Value converts");
+
+        let carried_at = value.as_array().expect("an array stays an array").as_ptr();
+        assert_eq!(
+            carried_at, built_at,
+            "expected a Value result to be returned as built (buffer {built_at:p}) | \
+             received a copy at {carried_at:p}"
+        );
+    }
+
+    #[test]
+    fn a_typed_result_is_serialized() {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Answer {
+            file_count: u32,
+            names: Vec<&'static str>,
+        }
+
+        let value = into_value(Answer {
+            file_count: 2,
+            names: vec!["a", "b"],
+        })
+        .expect("a struct serializes");
+
+        assert_eq!(
+            value,
+            json!({"fileCount": 2, "names": ["a", "b"]}),
+            "expected the typed result as its serde form | received a different value"
+        );
+    }
+
+    #[test]
+    fn a_result_that_cannot_serialize_is_an_error_not_a_panic() {
+        // A map keyed by something other than a string has no JSON form.
+        let unserializable = std::collections::BTreeMap::from([((1, 2), "pair")]);
+
+        assert!(into_value(unserializable).is_err());
+    }
 }

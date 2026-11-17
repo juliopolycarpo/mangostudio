@@ -28,7 +28,7 @@ scripts/
 ├── changelog.ts      git-cliff wrapper: init/preview/release (bun run changelog)
 ├── changelog-separators.ts
 │                     Repair historical release separators only (--check for read-only validation)
-├── bench/            Hermetic performance measurement (startup.ts, runtime-handshake.ts, grep.ts, library-walk.ts + its fixture plans)
+├── bench/            Hermetic performance measurement (startup.ts, runtime-handshake.ts, grep.ts, runtime-results.ts, library-walk.ts + its fixture plans)
 ├── ci/               Dependency-free workflow steps (gate evaluation, distribution identity, cross-runtime fetch, test-shard and timings merge, Rust lane relevance and qualification selection, frontend bundle report and first-load budget)
 ├── lib/              Shared toolkit (see below)
 ├── examples/         Runnable maintainer samples (dependency-free Bun scripts)
@@ -512,16 +512,18 @@ MANGO_API_KEY='mango_…' bun run scripts/examples/external-api-smoke.ts http://
 
 ## bench/ — hermetic performance measurement
 
-| Script                       | Purpose                                                                                                                         |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `startup.ts`                 | Median process-start → first healthy `GET /api/health` of a binary                                                              |
-| `hub-footprint.ts`           | Compiled hubs side by side: binary size, start → first healthy `/api/health`, idle and post-workload RSS (Linux `/proc`)        |
-| `runtime-handshake.ts`       | Runtime child over stdio: process start → `hello` → first request, min/median/p95/max                                           |
-| `grep.ts`                    | Runtime `fs.grep` over stdio: 1/100/1000 small files, a large file, peak RSS, cancel                                            |
-| `line-decoder.ts`            | Protocol NDJSON `LineDecoder`: ns per byte for large records in small pieces and for many short records, peak RSS               |
-| `rust-test-inventory.ts`     | Rust test inventory (libtest or nextest) by logical identity; diff two, total a log                                             |
-| `external-agent-boundary.ts` | Actual receipt hashing, admitted request ownership and event mapping; alternating Base/Head processes, raw timings and peak RSS |
-| `checkpoint-writes.ts`       | Hub streaming turns against a fake provider: bytes written to the SQLite main and WAL files, commits, fsyncs, CPU, peak RSS     |
+| Script                       | Purpose                                                                                                                               |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `startup.ts`                 | Median process-start → first healthy `GET /api/health` of a binary                                                                    |
+| `hub-footprint.ts`           | Compiled hubs side by side: binary size, start → first healthy `/api/health`, idle and post-workload RSS (Linux `/proc`)              |
+| `runtime-handshake.ts`       | Runtime child over stdio: process start → `hello` → first request, min/median/p95/max                                                 |
+| `grep.ts`                    | Runtime `fs.grep` over stdio: 1/100/1000 small files, a large file, peak RSS, cancel                                                  |
+| `runtime-results.ts`         | Runtime `fs.list-directory` and `fs.read-file` over stdio, and start → first answer; peak RSS, answer digest compared across binaries |
+| `line-decoder.ts`            | Protocol NDJSON `LineDecoder`: ns per byte for large records in small pieces and for many short records, peak RSS                     |
+| `rust-test-inventory.ts`     | Rust test inventory (libtest or nextest) by logical identity; diff two, total a log                                                   |
+| `external-agent-boundary.ts` | Actual receipt hashing, admitted request ownership and event mapping; alternating Base/Head processes, raw timings and peak RSS       |
+| `checkpoint-writes.ts`       | Hub streaming turns against a fake provider: bytes written to the SQLite main and WAL files, commits, fsyncs, CPU, peak RSS           |
+| `api-json-compression.ts`    | Hub JSON responses: raw/gzip/zstd/Brotli sizes and compress time, break-even link speed, hub CPU and latency by peer address          |
 
 The benchmarks take any runtime binary, and they default to the newest of `target/release`,
 `target/release-fast` and `target/debug`. For an A/B on one machine, build with
@@ -654,6 +656,18 @@ bun run scripts/bench/grep.ts base=<old> head=<new> --scenario large-file --larg
 bun run scripts/bench/grep.ts <binary> --scenario large-file --pattern '(\d+)-NEEDLE$' --ignore-case
 ```
 
+`runtime-results.ts` measures the calls whose answer is large: `fs.list-directory` over `--entries`
+files, `fs.read-file` of a `--read-mib` text file, and `hello` (child start to the first
+`runtime.health` answer). Like `grep.ts` it uses one fresh child per sample, rotates the run order
+of several binaries and reports peak RSS. It also hashes each answer as the client parsed it and
+stops when two binaries disagree, so a speed comparison never spans different results. Pin the CPU
+for a quiet comparison.
+
+```bash
+taskset -c 4,5 bun run scripts/bench/runtime-results.ts base=<old> head=<new> --runs 31 --warmup 2
+bun run scripts/bench/runtime-results.ts <binary> --scenario list-directory --entries 50000 --json
+```
+
 `line-decoder.ts` loads `LineDecoder` from the `ndjson.ts` path it is given, so a base checkout and
 a head checkout run the same scenarios. Each scenario runs in a fresh `bun` child (one warm-up, then
 `--runs` timed passes) and prints one JSON line with min/median/p95/max per byte and the child's
@@ -677,6 +691,19 @@ counts over CPU.
 ```bash
 bun run scripts/bench/checkpoint-writes.ts --runs 3 --counts
 bun run scripts/bench/checkpoint-writes.ts --hub-dir ../base-checkout --scenario tools-20x65k --json
+```
+
+`api-json-compression.ts` seeds a throwaway hub with a realistic transcript (tool results are slices
+of this repository's sources) and a chat list. `sizes` reports raw and compressed bytes and compress
+time per endpoint plus the link speed below which compressing wins; `serve` measures hub CPU and
+latency per request over loopback and over the host's own LAN address (a real non-loopback peer), with
+and without `Accept-Encoding: gzip`. The hub's rate limiter allows 600 requests a minute per address,
+so keep `--runs` x `--requests` x 2 below that. Brotli is a size reference only (`node:zlib`, never in the
+hub).
+
+```bash
+bun run scripts/bench/api-json-compression.ts sizes --runs 30
+bun run scripts/bench/api-json-compression.ts serve --runs 9 --requests 20 --hub-dir ../base-checkout
 ```
 
 `rust-test-inventory.ts` proves a Rust test-target consolidation or a runner change lost no case:

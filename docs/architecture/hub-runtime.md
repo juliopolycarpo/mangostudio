@@ -236,6 +236,43 @@ handshake timeout and whatever its retry policy does with one — no close code 
 cause, because the peer that could name it is the one that cannot read the frame. Updating
 the hub is the fix.
 
+## API Response Compression
+
+Static assets are compressed once at build time (`frontend-build.md`). A few large JSON answers
+under `/api` are compressed per request by `apps/api/src/plugins/response-compression.ts`, and
+only when that can pay:
+
+- **Allowlist.** Only the routes in `COMPRESSED_API_ROUTES` (`apps/api/src/app.ts`) are
+  considered: the chat transcript page (about 500 KB for the frontend's 50 messages), the chat list
+  (373 KB for 1000 chats), the gallery page and tool settings (15 KB). Every other response stays
+  identity until someone adds its route there. A route earns a place by returning a large body
+  that carries user content and no credential.
+- **Who.** A peer that is not loopback. Loopback is the default deployment and the bytes never
+  leave the host, so compression there only costs CPU. The socket peer decides, never a forwarded
+  header: behind a reverse proxy or tunnel the hub sees the proxy's loopback address and sends
+  identity, and the proxy owns compression. An unknown peer counts as local.
+- **What.** A `GET` with a 2xx status whose body is JSON, from a plain handler value or a JSON
+  `Response` the route encoded itself, between 8 KiB and 2 MiB, when `Accept-Encoding` allows
+  `gzip`. Browsers send `gzip, deflate` without `br` or `zstd` to a plain-HTTP address, and Bun has
+  no native Brotli encoder, so gzip (`Bun.gzipSync`, level 1) is the only coding. Never
+  `node:zlib`: it adds 184 KB to the binary. `Bun.gzipSync` runs on the event loop (about 3 to 4 ms for
+  0.5 MB), so a body over the 2 MiB ceiling goes out as identity. A transcript page is capped at
+  100 messages and measures about 1 MB when seeded with realistic transcripts, so only a page of
+  very large tool results (an average above roughly 20 KB a message) reaches the ceiling.
+- **Never.** Streams and other media types (SSE, files, the Better Auth passthrough), a response
+  that already has `Content-Encoding` or `Cache-Control: no-transform`, HEAD, 304 and errors. A
+  strong `ETag` is weakened when the body is encoded. `Vary: Accept-Encoding` is added to every
+  response the rule could apply to, folded into the existing `Vary`.
+- **BREACH.** Compressing a body that holds a secret next to text the caller chose lets an
+  observer of the encrypted length infer the secret. The hub does not terminate TLS, so this is
+  reachable where a TLS proxy forwards to the hub from a non-loopback address (a Docker network,
+  another host). The allowlist is the defence: a new route that echoes a credential is not
+  compressed by default, which an opt-out list would not give. Nothing on the list carries a
+  session token, API key, pairing token or OAuth value, and only `GET` is compressed.
+- **Measure.** `bun run scripts/bench/api-json-compression.ts sizes` prints sizes, compress time
+  and the break-even link speed per endpoint; `serve` compares hub CPU and latency from loopback
+  and from the host's LAN address.
+
 ## Transports
 
 | Transport                 | Status  | Direction        | Framing                                                                                                                                                                                                                                                                     |

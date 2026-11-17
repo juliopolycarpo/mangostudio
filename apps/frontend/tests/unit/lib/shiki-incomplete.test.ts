@@ -14,7 +14,7 @@ let highlighter: Highlighter;
 let restoreTokenizer: (() => void) | undefined;
 
 beforeAll(async () => {
-  await preloadCodeLanguages(['ts', 'cpp']);
+  await preloadCodeLanguages(['ts', 'cpp'], 'one-dark-pro');
   highlighter = await initHighlighter();
 });
 
@@ -51,27 +51,21 @@ function stopTokenizationOn(call: number): EarlyStopTokenizer {
 describe('incomplete highlighting', () => {
   it('ignores inherited object keys without rejecting valid languages in the same preload', async () => {
     for (const name of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
-      await expect(preloadCodeLanguages([name])).resolves.toBe(false);
+      await expect(preloadCodeLanguages([name], 'one-dark-pro')).resolves.toBe(false);
       expect(highlightCode('value', name, 'one-dark-pro')).toBeNull();
       expect(highlightLineTokens('value', name, 'one-dark-pro')).toBeNull();
     }
     await expect(
-      preloadCodeLanguages(['constructor', '__proto__', 'toString', 'ts'])
+      preloadCodeLanguages(['constructor', '__proto__', 'toString', 'ts'], 'one-dark-pro')
     ).resolves.toBe(true);
   });
 
-  it('preserves common-language initialization, aliases and unsupported-language fallback', async () => {
+  it('resolves aliases to their language once it is loaded, and falls back for unsupported ones', async () => {
+    // No grammar is loaded up front any more: each alias works once its
+    // language was asked for, the way a fenced block asks for it.
+    await preloadCodeLanguages(['ts', 'js', 'py', 'sh'], 'one-dark-pro');
     expect(highlighter.getLoadedLanguages()).toEqual(
-      expect.arrayContaining([
-        'typescript',
-        'javascript',
-        'tsx',
-        'jsx',
-        'json',
-        'bash',
-        'python',
-        'markdown',
-      ])
+      expect.arrayContaining(['typescript', 'javascript', 'python', 'bash'])
     );
     const realNow = Date.now;
     const results = [];
@@ -98,21 +92,26 @@ describe('incomplete highlighting', () => {
       expect(result).toEqual({ alias: result.alias, html: expect.stringContaining('shiki') });
     expect(highlightCode('value', '', 'one-dark-pro')).toBeNull();
     expect(highlightLineTokens('value', 'unsupported-language', 'one-dark-pro')).toBeNull();
-    await expect(preloadCodeLanguages(['unsupported-language'])).resolves.toBe(false);
+    await expect(preloadCodeLanguages(['unsupported-language'], 'one-dark-pro')).resolves.toBe(
+      false
+    );
   });
 
   it('shares concurrent grammar loads and cleans up a rejected load for an explicit retry', async () => {
     const loading = spyOn(highlighter, 'loadLanguage');
     try {
-      await Promise.all([preloadCodeLanguages(['xml']), preloadCodeLanguages(['xml', 'go'])]);
+      await Promise.all([
+        preloadCodeLanguages(['xml'], 'one-dark-pro'),
+        preloadCodeLanguages(['xml', 'go'], 'one-dark-pro'),
+      ]);
       expect(loading.mock.calls.filter(([language]) => language === 'xml')).toHaveLength(1);
       expect(loading.mock.calls.filter(([language]) => language === 'go')).toHaveLength(1);
 
       loading.mockImplementationOnce(failLanguageLoad);
-      await expect(preloadCodeLanguages(['ruby'])).rejects.toThrow(
+      await expect(preloadCodeLanguages(['ruby'], 'one-dark-pro')).rejects.toThrow(
         'Synthetic language module download failure'
       );
-      await expect(preloadCodeLanguages(['ruby'])).resolves.toBe(true);
+      await expect(preloadCodeLanguages(['ruby'], 'one-dark-pro')).resolves.toBe(true);
       expect(loading.mock.calls.filter(([language]) => language === 'ruby')).toHaveLength(2);
       expect(highlightCode('puts "hi"', 'rb', 'one-dark-pro')).toContain('shiki');
     } finally {

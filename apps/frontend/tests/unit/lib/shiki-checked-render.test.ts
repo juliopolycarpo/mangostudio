@@ -32,8 +32,10 @@ const SAMPLES = {
 let highlighter: Awaited<ReturnType<typeof initHighlighter>>;
 
 beforeAll(async () => {
-  await preloadCodeLanguages(Object.keys(SAMPLES));
+  await preloadCodeLanguages(Object.keys(SAMPLES), 'one-dark-pro');
   highlighter = await initHighlighter();
+  // The cases below colour every theme, and only the requested one is loaded by default.
+  for (const theme of CODE_THEMES) await highlighter.loadTheme(theme);
 });
 
 function unchangedClock(): number {

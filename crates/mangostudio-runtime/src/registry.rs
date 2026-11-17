@@ -33,6 +33,7 @@ use crate::panic::catch_panics;
 use crate::ports::audit::{Audit, AuditEntry, NoopAudit, Outcome};
 use crate::ports::clock::{Clock, SystemClock};
 use crate::ports::exclusivity::{CallExclusivity, NoExclusivity};
+use crate::result_value::into_value;
 use crate::serve::runtime_contract;
 
 /// Whether a method name is implemented, declared but not implemented, or
@@ -353,7 +354,7 @@ impl Registry {
                                 .with_detail("method", method_name.clone())
                             })?;
                             match handler(params, context).await {
-                                Ok(result) => match serde_json::to_value(result) {
+                                Ok(result) => match into_value(result) {
                                     // The contract's compiled `result` schema,
                                     // checked here rather than through
                                     // `ServeOptions::validate_results` so the audit
