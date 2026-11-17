@@ -80,7 +80,7 @@ fn run() -> Result<(), String> {
     // Inspected here as well as inside `ensure_install` so a start that needs
     // nothing never builds a `Release`, which fails on an unsupported platform.
     if inspect_install(&install_dir) == InstallState::Complete {
-        tidy_leftovers(VERSION, &install_root);
+        tidy_leftovers(VERSION, &install_root, &install_dir);
     } else {
         match ensure_install(&Release::for_this_build()?, &install_dir)? {
             InstallStart::Complete | InstallStart::Installed => {}
@@ -169,6 +169,9 @@ struct Release<'a> {
     /// talking to a loopback fake must not be routed through the developer's
     /// proxy.
     honor_proxy_env: bool,
+    /// How a trash tree is moved back to the version directory: `fs::rename` in
+    /// production, a refusing fake in the test of a restore that fails.
+    restore_rename: fn(&Path, &Path) -> io::Result<()>,
 }
 
 impl Release<'static> {
@@ -186,6 +189,7 @@ impl Release<'static> {
             read_timeout: READ_TIMEOUT,
             lock_ceiling: LOCK_CEILING,
             honor_proxy_env: true,
+            restore_rename: |from, to| fs::rename(from, to),
         })
     }
 }
@@ -418,48 +422,63 @@ fn repair_install(release: &Release<'_>, install_dir: &Path) -> Result<InstallSt
 
     // Another launcher may have finished while this one waited.
     if inspect_install(install_dir) == InstallState::Complete {
-        sweep_scratch_dirs(release.version, install_root);
+        sweep_scratch_dirs(release.version, install_root, install_dir);
         return Ok(InstallStart::Complete);
     }
 
     // No version directory but a trash tree that can still run: a launcher
     // died (or a rename back failed) after moving the only good copy aside.
-    // Put it back before anything is swept.
+    // Put it back before anything is swept. If the move is refused the tree
+    // stays in trash (`sweep_scratch_dirs` keeps it) and the refusal is said
+    // now and again with any later failure: the start goes on to a download,
+    // and if that fails nothing is started, since the intact copy is not at
+    // the path the binary runs from.
+    let mut restore_failure = None;
     if !install_dir.exists() {
-        restore_from_trash(release.version, install_root, install_dir);
+        if let Err(failure) = restore_from_trash(release, install_root, install_dir) {
+            eprintln!("mangostudio launcher: warning: {failure}");
+            restore_failure = Some(failure);
+        }
         if inspect_install(install_dir) == InstallState::Complete {
-            sweep_scratch_dirs(release.version, install_root);
+            sweep_scratch_dirs(release.version, install_root, install_dir);
             return Ok(InstallStart::Complete);
         }
     }
+    let note_restore_failure = |failure: String| match &restore_failure {
+        Some(restore) => format!("{failure}; nothing was started, and {restore}"),
+        None => failure,
+    };
 
     // A launcher that died after unpacking and verifying, before moving the
     // tree in, left a staging tree with its record: finish that install
     // instead of downloading again, which also works offline.
     if let Some(staged) = verified_staging_tree(release.version, install_root) {
-        replace_install(release, install_root, &staged, install_dir)?;
+        replace_install(release, install_root, &staged, install_dir)
+            .map_err(&note_restore_failure)?;
         eprintln!(
             "Completed an interrupted install of MangoStudio {}.",
             release.version
         );
-        sweep_scratch_dirs(release.version, install_root);
+        sweep_scratch_dirs(release.version, install_root, install_dir);
         return Ok(InstallStart::Installed);
     }
-    sweep_scratch_dirs(release.version, install_root);
+    sweep_scratch_dirs(release.version, install_root, install_dir);
 
     // Find out cheaply, before downloading ~60 MB, whether the existing tree
     // can be replaced at all, without moving it.
     if install_dir.exists() {
-        check_replaceable(install_dir)?;
+        check_replaceable(install_dir).map_err(&note_restore_failure)?;
     }
 
     eprintln!(
         "Downloading MangoStudio {} for {}...",
         release.version, release.platform
     );
-    let manifest = download_manifest(release)?;
-    install_archive(release, install_root, install_dir, &manifest)?;
-    sweep_scratch_dirs(release.version, install_root);
+    let manifest = download_manifest(release).map_err(&note_restore_failure)?;
+    install_archive(release, install_root, install_dir, &manifest)
+        .map_err(&note_restore_failure)?;
+    // The new install is complete here, so the old tree in trash goes now.
+    sweep_scratch_dirs(release.version, install_root, install_dir);
     Ok(InstallStart::Installed)
 }
 
@@ -566,27 +585,55 @@ fn verified_staging_tree(version: &str, install_root: &Path) -> Option<PathBuf> 
 }
 
 /// Move the first trash tree that can still run back to `install_dir`. Only
-/// called when `install_dir` is missing.
-fn restore_from_trash(version: &str, install_root: &Path, install_dir: &Path) {
-    let usable = scratch_dirs(version, install_root)
+/// called when `install_dir` is missing. The move is
+/// `release.restore_rename`; a refused move (an antivirus scanner or the indexer holding a
+/// handle on Windows, a permission error, a directory created at the path
+/// meanwhile) is returned as a message naming both paths, and the trash tree
+/// stays where it is.
+fn restore_from_trash(
+    release: &Release<'_>,
+    install_root: &Path,
+    install_dir: &Path,
+) -> Result<(), String> {
+    let usable = scratch_dirs(release.version, install_root)
         .into_iter()
         .filter(|(kind, _)| *kind == ScratchKind::Trash)
         .map(|(_, path)| path)
         .find(|trash| inspect_install(trash) != InstallState::Unusable);
-    if let Some(trash) = usable
-        && fs::rename(&trash, install_dir).is_ok()
-    {
-        eprintln!(
-            "Restored the MangoStudio {version} install that an interrupted update had set aside."
-        );
-    }
+    let Some(trash) = usable else {
+        return Ok(());
+    };
+    (release.restore_rename)(&trash, install_dir).map_err(|error| {
+        format!(
+            "cannot move {} back to {}: {error}; it holds the intact MangoStudio {} install that an interrupted update set aside and stays there",
+            trash.display(),
+            install_dir.display(),
+            release.version
+        )
+    })?;
+    eprintln!(
+        "Restored the MangoStudio {} install that an interrupted update had set aside.",
+        release.version
+    );
+    Ok(())
 }
 
 /// Remove this version's staging and trash directories. Call only under the
 /// install lock.
-fn sweep_scratch_dirs(version: &str, install_root: &Path) {
-    for (_, leftover) in scratch_dirs(version, install_root) {
-        let _ = fs::remove_dir_all(leftover);
+///
+/// Invariant: this never deletes the only startable copy. While `install_dir`
+/// is missing or not complete, a trash tree that `inspect_install` does not
+/// call unusable is kept, whatever the caller did or failed to do before. It
+/// is swept once `install_dir` is complete.
+fn sweep_scratch_dirs(version: &str, install_root: &Path, install_dir: &Path) {
+    let install_is_complete = inspect_install(install_dir) == InstallState::Complete;
+    for (kind, leftover) in scratch_dirs(version, install_root) {
+        let may_be_only_copy = kind == ScratchKind::Trash
+            && !install_is_complete
+            && inspect_install(&leftover) != InstallState::Unusable;
+        if !may_be_only_copy {
+            let _ = fs::remove_dir_all(leftover);
+        }
     }
 }
 
@@ -596,7 +643,7 @@ fn sweep_scratch_dirs(version: &str, install_root: &Path) {
 /// (`try_lock`, never waiting): a held lock means a launcher is installing and
 /// its scratch directories are not leftovers. If the file can't be opened or
 /// locked, the sweep is skipped; the next install sweeps.
-fn tidy_leftovers(version: &str, install_root: &Path) {
+fn tidy_leftovers(version: &str, install_root: &Path, install_dir: &Path) {
     if scratch_dirs(version, install_root).is_empty() {
         return;
     }
@@ -608,7 +655,7 @@ fn tidy_leftovers(version: &str, install_root: &Path) {
         return;
     };
     if lock.try_lock().is_ok() {
-        sweep_scratch_dirs(version, install_root);
+        sweep_scratch_dirs(version, install_root, install_dir);
     }
 }
 
@@ -619,9 +666,13 @@ fn tidy_leftovers(version: &str, install_root: &Path) {
 ///
 /// On Windows a running hub holds its files open without delete sharing, and a
 /// directory with such a file inside cannot be renamed; opening each binary
-/// with no sharing at all fails the same way. On Unix a rename is not blocked
-/// by a running executable, so there is nothing to ask and the swap itself
-/// reports any other refusal.
+/// with no sharing at all fails the same way. The check is partial: it opens
+/// only the two binaries, while a directory rename is also blocked by any
+/// other open handle in the tree and by a process whose working directory is
+/// inside it. Then the check passes, the archive downloads and the swap fails.
+/// Nothing is lost that way: the verified staging tree is kept and the next
+/// start adopts it. On Unix a rename is not blocked by a running executable,
+/// so there is nothing to ask and the swap itself reports any refusal.
 #[cfg(windows)]
 fn check_replaceable(install_dir: &Path) -> Result<(), String> {
     use std::os::windows::fs::OpenOptionsExt;
@@ -1194,6 +1245,7 @@ mod tests {
                 read_timeout: Duration::from_secs(5),
                 lock_ceiling: Duration::from_secs(5),
                 honor_proxy_env: false,
+                restore_rename: |from, to| fs::rename(from, to),
             }
         }
 
@@ -1922,7 +1974,7 @@ mod tests {
         drop(fixture.hold_lock());
         assert_eq!(fixture.start(), Ok(InstallStart::Complete));
 
-        tidy_leftovers(fixture.version, &fixture.root.0);
+        tidy_leftovers(fixture.version, &fixture.root.0, &fixture.install_dir());
 
         assert!(!trash.exists(), "expected the trash directory to be swept");
         assert_eq!(fixture.installed_binary_body(), "new binary");
@@ -1937,14 +1989,14 @@ mod tests {
         fixture.lay_down_tree(&staging, "being unpacked");
         let installer_lock = fixture.hold_lock();
 
-        tidy_leftovers(fixture.version, &fixture.root.0);
+        tidy_leftovers(fixture.version, &fixture.root.0, &fixture.install_dir());
 
         assert!(
             staging.exists(),
             "expected a live installer's staging tree to survive"
         );
         drop(installer_lock);
-        tidy_leftovers(fixture.version, &fixture.root.0);
+        tidy_leftovers(fixture.version, &fixture.root.0, &fixture.install_dir());
         assert!(!staging.exists());
     }
 
@@ -2152,6 +2204,101 @@ mod tests {
         );
         assert!(!fixture.install_dir().exists());
         assert!(!trash.exists());
+    }
+
+    /// A rename that is always refused, as when a scanner holds a handle on the
+    /// tree (Windows) or the path is not writable.
+    fn rename_refused_by_a_scanner(_from: &Path, _to: &Path) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "access denied: a scanner holds a handle",
+        ))
+    }
+
+    /// A trash tree holding the only good copy (a sibling is off, binaries
+    /// intact) and no version directory: what a failed restore starts from.
+    fn lay_down_only_good_copy_in_trash(fixture: &InstallFixture) -> PathBuf {
+        let trash = fixture.trash_dir("11-2");
+        fixture.lay_down_tree(&trash, "the only good copy");
+        fs::write(trash.join("README.md"), "damaged by a crash")
+            .expect("expected a damaged sibling");
+        assert_eq!(inspect_install(&trash), InstallState::Startable);
+        assert!(!fixture.install_dir().exists());
+        trash
+    }
+
+    #[test]
+    fn a_failed_restore_with_the_download_failing_keeps_the_only_good_copy_and_names_it() {
+        let offline = ClosedConnectionServer::start();
+        let fixture = InstallFixture::new();
+        let trash = lay_down_only_good_copy_in_trash(&fixture);
+        let release = Release {
+            restore_rename: rename_refused_by_a_scanner,
+            ..fixture.release_at(offline.base_url())
+        };
+
+        let outcome = ensure_install(&release, &fixture.install_dir());
+
+        assert!(
+            trash.join(BINARY_NAME).is_file(),
+            "expected the trash tree {} to survive a failed restore and a failed download | received {:?}",
+            trash.display(),
+            fixture.leftover_scratch()
+        );
+        assert!(
+            matches!(&outcome, Err(message)
+                if message.contains("cannot download")
+                    && message.contains("nothing was started")
+                    && message.contains(&trash.display().to_string())
+                    && message.contains("access denied")),
+            "expected an error naming the trash tree, the refusal and that nothing started | received {outcome:?}"
+        );
+    }
+
+    #[test]
+    fn a_failed_restore_followed_by_a_good_download_sweeps_the_old_tree_after_the_new_install() {
+        let fixture = InstallFixture::new();
+        fixture.publish("binary one");
+        let trash = lay_down_only_good_copy_in_trash(&fixture);
+        let release = Release {
+            restore_rename: rename_refused_by_a_scanner,
+            ..fixture.release()
+        };
+
+        let outcome = ensure_install(&release, &fixture.install_dir());
+
+        assert_eq!(outcome, Ok(InstallStart::Installed));
+        assert_eq!(fixture.installed_binary_body(), "binary one");
+        assert!(
+            !trash.exists(),
+            "expected the old tree swept once the new install is complete"
+        );
+        assert_eq!(fixture.leftover_scratch(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn the_sweep_keeps_a_startable_trash_tree_until_the_install_is_complete() {
+        let fixture = InstallFixture::new();
+        let startable = lay_down_only_good_copy_in_trash(&fixture);
+        let unusable = fixture.trash_dir("12-3");
+        fixture.lay_down_tree(&unusable, "old binary");
+        fs::write(unusable.join(BINARY_NAME), "bin").expect("expected a short binary");
+
+        // Version directory missing.
+        sweep_scratch_dirs(fixture.version, &fixture.root.0, &fixture.install_dir());
+        assert!(startable.exists(), "expected the startable tree kept");
+        assert!(!unusable.exists(), "expected the unusable tree swept");
+
+        // Version directory present but not complete.
+        fixture.lay_down_complete_install("new binary");
+        fixture.damage_sibling();
+        sweep_scratch_dirs(fixture.version, &fixture.root.0, &fixture.install_dir());
+        assert!(startable.exists(), "expected the startable tree kept");
+
+        // Complete.
+        fixture.lay_down_complete_install("new binary");
+        sweep_scratch_dirs(fixture.version, &fixture.root.0, &fixture.install_dir());
+        assert!(!startable.exists(), "expected the tree swept");
     }
 
     #[test]

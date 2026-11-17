@@ -60,15 +60,24 @@ When an install is needed:
   a record on disk never sits beside files that did not reach it. An
   incomplete tree is moved to `.launcher-trash-<version>.*` first and deleted
   after the new one is in, so a hub that holds its files on Windows blocks the
-  move instead of being half deleted. On Windows the launcher checks that by
-  opening the binaries without sharing, before downloading, and nothing is
-  moved for the check; on Unix a running binary does not block the move. If the
+  move instead of being half deleted. On Windows the launcher first tries to open the two binaries
+  without sharing, before downloading, and moves nothing for that check. It
+  catches a running hub but not every blocker (another open handle in the
+  tree, or a process whose working directory is inside it); then the swap
+  fails after the download and the verified files are adopted by the next
+  start. On Unix a running binary does not block the move. If the
   tree cannot be replaced, the installed build starts with a warning when its
   binaries are intact.
 - A start with no version directory first moves back a trash tree whose
   binaries are intact (an update died after setting the only good copy aside).
   Scratch names are matched exactly (`<pid>-<nanos>` after the version), so a
   version such as `0.2.0-canary.abc1234` is never mistaken for `0.2.0-canary`.
+  If that move is refused, the launcher prints which path it could not restore
+  and why, and goes on to download. If the download fails too, nothing is
+  started and the error says so; the intact copy stays in its trash directory.
+  A sweep never deletes a trash tree whose binaries are intact while the
+  version directory is missing or incomplete, so the only good copy is removed
+  only once a complete install is in place.
 - A start that has to install first adopts a verified staging tree left by a
   launcher that died before the rename, with no download, then removes the
   other scratch directories of dead launchers. A start that needs no install
