@@ -27,6 +27,7 @@ use crate::consent::source::ConsentSource;
 use crate::ports::authorization::consent_denial;
 use crate::probing::detection::path_env::PathEnv;
 use crate::registry::Registry;
+use crate::result_value::object;
 use crate::subprocess::LaunchCheck;
 use crate::tool_argument::invalid_argument;
 
@@ -379,15 +380,33 @@ impl Service {
             .size
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        Ok(json!({
-            "sessionId": entry.session_id,
-            "scrollback": STANDARD.encode(&state.scrollback),
-            "status": if state.exited { "exited" } else { "running" },
-            "exitCode": state.exit.as_ref().and_then(|value| value.exit_code),
-            "signal": state.exit.as_ref().and_then(|value| value.signal.as_deref()),
-            "cols": size.0,
-            "rows": size.1,
-        }))
+        // The scrollback can be up to 256 KiB; it moves into the answer instead of being copied.
+        Ok(object([
+            ("sessionId", json!(entry.session_id)),
+            (
+                "scrollback",
+                Value::String(STANDARD.encode(&state.scrollback)),
+            ),
+            (
+                "status",
+                Value::from(if state.exited { "exited" } else { "running" }),
+            ),
+            (
+                "exitCode",
+                json!(state.exit.as_ref().and_then(|value| value.exit_code)),
+            ),
+            (
+                "signal",
+                json!(
+                    state
+                        .exit
+                        .as_ref()
+                        .and_then(|value| value.signal.as_deref())
+                ),
+            ),
+            ("cols", json!(size.0)),
+            ("rows", json!(size.1)),
+        ]))
     }
 
     fn detach(&self, params: SessionParams) -> Result<Value, RemoteError> {
