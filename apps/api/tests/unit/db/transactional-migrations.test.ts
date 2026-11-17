@@ -70,6 +70,50 @@ async function recordedMigrations<DB>(db: Kysely<DB>): Promise<string[]> {
   return rows.map(({ name }) => name);
 }
 
+const ALLOWED_MIGRATION_MODULES = new Set(['kysely', 'kysely/migration']);
+
+/**
+ * Module references in a migration source other than Kysely: static imports in either
+ * quote style, side-effect imports, and any dynamic `import(` or `require(`, whose target
+ * a text scan cannot resolve and so counts as stray. Block comments and whole-line `//`
+ * comments are dropped first: prose such as `moves from "reads only" to ...` is not an import.
+ */
+function strayModuleReferences(rawSource: string): string[] {
+  const source = rawSource.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  const staticSpecifiers = [...source.matchAll(/(?:\bfrom\s*|^\s*import\s+)(["'])([^"']+)\1/gm)]
+    .map((match) => match[2])
+    .filter((specifier): specifier is string => specifier !== undefined)
+    .filter((specifier) => !ALLOWED_MIGRATION_MODULES.has(specifier));
+  const dynamic = [
+    /\bimport\s*\(/.test(source) ? 'import(...)' : undefined,
+    /\brequire\s*\(/.test(source) ? 'require(...)' : undefined,
+  ].filter((reference): reference is string => reference !== undefined);
+  return [...staticSpecifiers, ...dynamic];
+}
+
+/**
+ * Fails with a named message when `work` is still pending after `milliseconds`, so a
+ * migration that waits on a connection the batch already holds fails the test instead of
+ * hanging the lane.
+ */
+async function finishesWithin<T>(work: Promise<T>, milliseconds: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(
+        new Error(
+          `expected the migration batch to finish within ${milliseconds}ms | received: still running; a migration may be reaching a second connection`
+        )
+      );
+    }, milliseconds);
+  });
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 describe('transactional SQLite migrations', () => {
   let db: Kysely<unknown>;
 
@@ -122,6 +166,27 @@ describe('transactional SQLite migrations', () => {
     }).toEqual({ tables: [], recorded: [] });
   });
 
+  it('names a migration that waits on the connection the batch holds instead of hanging', async () => {
+    // The outer handle shares the one connection the batch transaction holds, so a query
+    // through it queues behind the transaction that is waiting on this very migration.
+    const reachesOuterConnection: MigrationProvider = {
+      getMigrations: () =>
+        Promise.resolve({
+          '001_fake_deadlock': {
+            async up() {
+              await sql`SELECT 1`.execute(db);
+            },
+          },
+        }),
+    };
+
+    await expect(
+      finishesWithin(new Migrator({ db, provider: reachesOuterConnection }).migrateToLatest(), 500)
+    ).rejects.toThrow(
+      'expected the migration batch to finish within 500ms | received: still running; a migration may be reaching a second connection'
+    );
+  });
+
   it('keeps an earlier committed batch when only the next batch fails', async () => {
     const first = await new Migrator({ db, provider: fakeMigrationPrefix(1) }).migrateToLatest();
     expect(first.error).toBeUndefined();
@@ -146,15 +211,32 @@ describe('migration sources inside the batch transaction', () => {
     for await (const file of new Bun.Glob('*.ts').scan(migrationsDirectory)) {
       if (file === 'index.ts') continue;
       const source = await Bun.file(join(migrationsDirectory, file)).text();
-      const specifiers = [...source.matchAll(/from\s+'([^']+)'/g)].map((match) => match[1]);
-      const stray = specifiers.filter((s) => s !== 'kysely' && s !== 'kysely/migration');
+      const stray = strayModuleReferences(source);
       if (stray.length > 0 || /\bgetDb\b|bun:sqlite/.test(source)) {
-        offenders.push(`${file} (imports: ${stray.join(', ') || 'none'})`);
+        offenders.push(`${file} (references: ${stray.join(', ') || 'none'})`);
       }
     }
     // The driver serialises one connection; a migration that reached the singleton or a raw
     // handle would wait on the connection the batch transaction holds and deadlock.
     expect({ offenders }).toEqual({ offenders: [] });
+  });
+
+  it('flags double-quoted, side-effect, dynamic and require references the scan could miss', () => {
+    const source = [
+      `import type { Migration } from 'kysely/migration';`,
+      `import { getDb } from "../database";`,
+      `import '../side-effect';`,
+      `const lazy = await import(path);`,
+      `const legacy = require('node:fs');`,
+      `/** An account whose default moves from "reads only" to "everything". */`,
+      `// import { ignored } from "../commented-out";`,
+    ].join('\n');
+    expect(strayModuleReferences(source)).toEqual([
+      '../database',
+      '../side-effect',
+      'import(...)',
+      'require(...)',
+    ]);
   });
 });
 
@@ -210,10 +292,13 @@ describe('upgrading an older file database in one transaction', () => {
 
     const upgraded = openHubDatabase(path);
     try {
-      const { error, results } = await new Migrator({
-        db: upgraded,
-        provider: { getMigrations: () => Promise.resolve(allMigrations) },
-      }).migrateToLatest();
+      const { error, results } = await finishesWithin(
+        new Migrator({
+          db: upgraded,
+          provider: { getMigrations: () => Promise.resolve(allMigrations) },
+        }).migrateToLatest(),
+        10_000
+      );
 
       expect(error).toBeUndefined();
       expect(results?.every(({ status }) => status === 'Success')).toBe(true);
