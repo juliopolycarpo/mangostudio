@@ -43,7 +43,12 @@ export function requestShutdown(budgetMs: number = SHUTDOWN_BUDGET_MS): void {
     .then(
       () => process.exit(0),
       (error: unknown) => {
-        console.warn('[api] Shutdown failed:', error);
+        // Bun prints only the inner errors of an AggregateError, so name its summary too.
+        if (error instanceof AggregateError) {
+          console.warn('[api] Shutdown failed:', error.message, error.errors);
+        } else {
+          console.warn('[api] Shutdown failed:', error);
+        }
         process.exit(1);
       }
     );

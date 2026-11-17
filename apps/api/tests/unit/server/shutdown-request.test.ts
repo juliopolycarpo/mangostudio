@@ -55,4 +55,31 @@ describe('requestShutdown', () => {
       exitSpy.mockRestore();
     }
   });
+
+  it('logs the summary of an AggregateError as well as the errors it carries', async () => {
+    const exited = Promise.withResolvers<Parameters<typeof process.exit>[0]>();
+    const exitSpy = spyOn(process, 'exit').mockImplementation((code) => {
+      exited.resolve(code);
+      return undefined as never;
+    });
+    const warnSpy = spyOn(console, 'warn').mockImplementation(() => undefined);
+    const summary = 'Server shutdown had several failures.';
+    registerShutdownHandler(() =>
+      Promise.reject(
+        new AggregateError([new Error('first step'), new Error('second step')], summary)
+      )
+    );
+    try {
+      requestShutdown();
+      await exited.promise;
+      const logged = warnSpy.mock.calls.map((call) =>
+        call.map((part) => (part instanceof Error ? part.message : String(part))).join(' ')
+      );
+      expect(logged.join('\n')).toContain(summary);
+      expect(logged.join('\n')).toContain('first step');
+    } finally {
+      exitSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  });
 });

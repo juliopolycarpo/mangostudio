@@ -76,4 +76,34 @@ describe('closeDb after a driver close failure', () => {
         : failure;
     expect(messages).toEqual([DRIVER_CLOSE_FAILURE, HANDLE_CLOSE_FAILURE]);
   });
+
+  it('makes a concurrent closeDb wait for the close in flight and close the handle once', async () => {
+    getDb();
+    const destroyHeld = Promise.withResolvers<void>();
+    const destroySpy = spyOn(Kysely.prototype, 'destroy').mockImplementationOnce(
+      () => destroyHeld.promise
+    );
+    const closeSpy = spyOn(SQLiteDatabase.prototype, 'close');
+    try {
+      const first = closeDb();
+      let secondSettled = false;
+      const second = closeDb().then(() => {
+        secondSettled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      if (secondSettled) {
+        throw new Error(
+          'expected the second closeDb to wait for the held destroy | received: resolved early'
+        );
+      }
+
+      destroyHeld.resolve();
+      await Promise.all([first, second]);
+      expect(closeSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      destroyHeld.resolve();
+      destroySpy.mockRestore();
+      closeSpy.mockRestore();
+    }
+  });
 });

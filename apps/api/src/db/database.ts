@@ -16,6 +16,8 @@ import type { Database } from './types';
 let dbInstance: Kysely<Database> | null = null;
 /** The handle behind `dbInstance`, kept so `closeDb` can release the file itself. */
 let sqliteHandle: SQLiteDatabase | null = null;
+/** The close under way, so a concurrent `closeDb` waits for it instead of returning early. */
+let closeInFlight: Promise<void> | null = null;
 const dbLogger = createDiagnosticLogger('db');
 
 /**
@@ -69,16 +71,30 @@ export function getDb(): Kysely<Database> {
 
 /**
  * Gracefully closes the database connection.
+ *
+ * A call made while a close is in flight returns that close, so it settles only once the file
+ * is released and with the same result.
  */
-export async function closeDb(): Promise<void> {
+export function closeDb(): Promise<void> {
+  if (closeInFlight) return closeInFlight;
   const instance = dbInstance;
   const handle = sqliteHandle;
-  if (!instance) return;
+  if (!instance) return Promise.resolve();
   // Forget the singleton before closing: if the driver close throws, the next `getDb` must
   // open a new connection instead of returning this half-closed one, and a second `closeDb`
   // must not try to close it again. The error still reaches the caller.
   dbInstance = null;
   sqliteHandle = null;
+  closeInFlight = closeConnection(instance, handle).finally(() => {
+    closeInFlight = null;
+  });
+  return closeInFlight;
+}
+
+async function closeConnection(
+  instance: Kysely<Database>,
+  handle: SQLiteDatabase | null
+): Promise<void> {
   const destroyFailures: unknown[] = [];
   try {
     await instance.destroy();
