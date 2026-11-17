@@ -3,8 +3,9 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { expect, type Page, test } from '@playwright/test';
+import { expect, type Page, test as base } from '@playwright/test';
 
+import { newSignedInContext } from './support/own-account';
 import { dismissWorkdirPicker } from './support/workdir-picker';
 
 /**
@@ -15,6 +16,26 @@ import { dismissWorkdirPicker } from './support/workdir-picker';
  * could not finish loading". The terminal's case lives in `terminal.spec.ts`,
  * which has to run in the project that owns the single-user attestation.
  */
+/**
+ * `ownAccountPage` is a page on an account made for the test. The Reload test
+ * needs the GitHub dock button, and `github-panel.spec.ts` leaves the shared
+ * account with that panel switched off.
+ */
+const test = base.extend<{ ownAccountPage: Page }>({
+  ownAccountPage: async ({ browser }, use, testInfo) => {
+    const context = await newSignedInContext(
+      browser,
+      'lazy-chunk-failure',
+      `${Date.now()}-${testInfo.workerIndex}-${testInfo.retry}`
+    );
+    try {
+      await use(await context.newPage());
+    } finally {
+      await context.close();
+    }
+  },
+});
+
 const MARKDOWN_CHUNK = /\/assets\/chunk-MarkdownContentRenderer-[^/]*\.js$/;
 const DIFF_VIEWER_CHUNK = /\/assets\/chunk-DiffViewer-[^/]*\.js$/;
 const GITHUB_PANEL_CHUNK = /\/assets\/chunk-GithubPanel-[^/]*\.js$/;
@@ -125,7 +146,7 @@ async function routeUpgradedShell(page: Page, shellFetches: string[]): Promise<v
 }
 
 test('after a hub upgrade the page offers one Reload, and never reloads by itself', async ({
-  page,
+  ownAccountPage: page,
 }) => {
   test.setTimeout(90_000);
   const shellFetches: string[] = [];
@@ -223,8 +244,9 @@ test('after a hub upgrade a tab showing only markdown gets the notice and stops 
   // back remounts every row, so this is what proves the gate and not just the
   // shared attempt.
   await page.waitForTimeout(1_500);
-  await page.getByTestId('sidebar-new-chat').click();
-  await dismissWorkdirPicker(page, 2_000);
+  // Home, not "New chat": a new chat opens the folder picker on its own timing,
+  // and a late picker covers the chat row that has to be clicked next.
+  await page.getByRole('complementary').getByRole('button', { name: 'Home' }).click();
   await page.getByRole('button', { name: title }).first().click();
   await expect(page.locator('[data-markdown-fallback="failed"]').first()).toBeVisible();
   await page.waitForTimeout(1_500);
