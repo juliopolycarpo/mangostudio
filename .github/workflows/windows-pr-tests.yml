@@ -33,9 +33,10 @@ jobs:
   windows-tests:
     name: Windows API and scripts tests
     runs-on: windows-latest
-    # Bun setup can wait four minutes for a republished canary asset; the two
-    # lanes measured about 5 and 6 minutes on a loaded runner.
-    timeout-minutes: 40
+    # Bun setup can wait four minutes for a republished canary asset. Around
+    # it: a cold Windows cargo build of the runtime, then two lanes that
+    # measured about 3 and 8 minutes.
+    timeout-minutes: 50
     defaults:
       run:
         shell: bash
@@ -51,6 +52,11 @@ jobs:
 
       - id: mango
         uses: $/.github/actions/setup-mango
+
+      # API unit tests that reach Local spawn the cargo-built runtime; without
+      # it they fail on "no mangostudio-runtime binary" rather than on the
+      # change. Built here because no job of this workflow produces a Windows one.
+      - uses: $/.github/actions/local-runtime
 
       - name: API unit lane
         run: bun run --filter @mangostudio/api test:unit
