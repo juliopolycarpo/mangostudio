@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { join, relative } from 'node:path';
+import { join } from 'node:path';
 
 import { Glob } from 'bun';
 
@@ -25,6 +25,16 @@ interface Rule {
   /** What the rule protects, quoted back in the failure message. */
   readonly why: string;
   readonly pattern: RegExp;
+  /**
+   * A cheap test that is true wherever `pattern` can match: a plain literal or alternation with no
+   * lookaround and no `\s`, run on the raw file. Blanking a comment turns its characters into
+   * spaces, which a lookaround or `\s` in `pattern` can match but the raw text does not show, so
+   * the needle must not depend on either. A file without a hit skips the rule's full scan, which
+   * costs about ten times as much on the whole tree. `scanSource` tests plant one violation per
+   * rule, so a needle that drifted from its pattern fails there. A rule that reads comments scans
+   * the raw text anyway and has no need for one.
+   */
+  readonly needle?: RegExp;
   /** Comments describing a retired token are stale documentation, so some rules read them too. */
   readonly includeComments?: boolean;
   /** Class strings live in TypeScript; a stylesheet may use the property the rule bans. */
@@ -74,35 +84,43 @@ const RULES: readonly Rule[] = [
     pattern: edge(
       String.raw`rounded(?:-(?:[trbl]|tl|tr|bl|br|s|e|ss|se|es|ee))?(?:-(?:xl|2xl|3xl|4xl)|(?=["'\`\s}]))`
     ),
+    needle: /rounded/,
   },
   {
     why: 'shadows exist only as shadow-popover and shadow-dialog (floating surfaces)',
     pattern: edge(
       String.raw`(?:shadow(?:-(?:sm|md|lg|xl|2xl|inner|xs))?(?=["'\`\s}])|drop-shadow(?:-\w+)?)`
     ),
+    needle: /shadow/,
   },
   {
     why: 'type scale is text-micro/xs/sm/base/title/headline — other sizes compile to nothing',
     pattern: edge(String.raw`text-(?:lg|xl|2xl|3xl|4xl|5xl|6xl|\[\d+(?:\.\d+)?(?:px|rem|em)\])`),
+    needle: /text-(?:lg|xl|2xl|3xl|4xl|5xl|6xl|\[\d)/,
   },
   {
     why: 'weights are 400/500/600 — use font-medium or font-semibold',
     pattern: edge(`font-(?:bold|extrabold|black|thin|extralight|light)`),
+    needle: /font-(?:bold|extrabold|black|thin|extralight|light)/,
   },
   {
     why: 'upper-case and letter-spacing belong to .micro-label only; badges and buttons are sentence case',
     sourceOnly: true,
     pattern: edge(`(?:uppercase|tracking-(?:wide|wider|widest))`),
+    needle: /uppercase|tracking-(?:wide|wider|widest)/,
   },
   {
     why: 'tints are tokens (*-subtle, fill-*), not opacity modifiers — a second /NN in one rule also downlevels badly',
     pattern: edge(String.raw`${COLOR_UTILS}-${SEMANTIC_COLORS}/\d+`),
+    needle: /\/\d/,
   },
   {
     why: 'raw palette colours do not follow the theme — use a token from foundations.md',
     pattern: edge(
       String.raw`${COLOR_UTILS}-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}(?:/\d+)?`
     ),
+    needle:
+      /-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d/,
   },
   {
     why: 'a colour in a class is a token — an arbitrary [#hex], [rgb()], [var()] or [color-mix()] value is an untracked tint',
@@ -110,27 +128,32 @@ const RULES: readonly Rule[] = [
     pattern: edge(
       String.raw`${COLOR_UTILS}-\[(?:color:|#|rgba?\(|hsla?\(|oklch\(|color-mix\(|var\(--color-)[^\]]*\]`
     ),
+    needle: /-\[(?:color:|#|rgba?\(|hsla?\(|oklch\(|color-mix\(|var\(--color-)/,
   },
   {
     why: 'scrims are bg-scrim (bg-scrim-media under text on a picture); a raw black or white overlay does not follow the theme',
     pattern: edge(String.raw`(?:bg|border|text|ring|from|via|to)-(?:black|white)(?:/\d+)?`),
+    needle: /-(?:black|white)/,
   },
   {
     why: 'hover and press change colour only — no scale, no transition-all',
     pattern: edge(
       String.raw`(?:(?:hover|active|group-hover|focus):)?(?:scale-[\w.\[\]]+)|transition-all`
     ),
+    needle: /scale-|transition-all/,
   },
   {
     why: 'an EmptyState icon is ICON_LG from @/lib/icon-sizes (20px) — five settings pages drew a literal 24px, larger than components.md says',
     sourceOnly: true,
     pattern: /<EmptyState\b[^>]*?\bicon=\{<\w+\s+size=\{\d+\}/g,
+    needle: /<EmptyState/,
   },
   {
     why: 'spacing steps are 0.5/1/1.5/2/3/4/5/6/8/12 — 10px and 14px paddings, gaps and margins are off the grid',
     pattern: edge(
       String.raw`-?(?:p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ml|mr|gap|gap-x|gap-y|space-x|space-y)-(?:2\.5|3\.5)`
     ),
+    needle: /-(?:2\.5|3\.5)/,
   },
 ];
 
@@ -167,27 +190,43 @@ function lineOf(source: string, index: number): number {
   return line;
 }
 
-async function violations(): Promise<string[]> {
+/** One file's violations, as `file:line  hit   ← why` lines. `file` is relative to src. */
+function scanSource(file: string, raw: string): string[] {
   const found: string[] = [];
-  const glob = new Glob('**/*.{ts,tsx,css}');
-  for (const file of glob.scanSync({ cwd: SRC, absolute: false })) {
-    if (file.endsWith('routeTree.gen.ts')) continue;
-    const raw = await Bun.file(join(SRC, file)).text();
-    const code = stripComments(raw, file);
-    for (const rule of RULES) {
-      if (isAllowed(file, rule.why)) continue;
-      if (rule.sourceOnly && file.endsWith('.css')) continue;
-      const text = rule.includeComments ? raw : code;
-      for (const match of text.matchAll(rule.pattern)) {
-        const hit = match[0].trim();
-        if (!hit) continue;
-        found.push(
-          `${relative(SRC, join(SRC, file))}:${lineOf(text, match.index ?? 0)}  ${hit}   ← ${rule.why}`
-        );
-      }
+  // Stripping comments is a scan of its own, so a file nothing needs it for never pays it.
+  let code: string | undefined;
+  for (const rule of RULES) {
+    if (isAllowed(file, rule.why)) continue;
+    if (rule.sourceOnly && file.endsWith('.css')) continue;
+    if (rule.needle && !rule.needle.test(raw)) continue;
+    const text = rule.includeComments ? raw : (code ??= stripComments(raw, file));
+    for (const match of text.matchAll(rule.pattern)) {
+      const hit = match[0].trim();
+      if (!hit) continue;
+      found.push(`${file}:${lineOf(text, match.index ?? 0)}  ${hit}   ← ${rule.why}`);
     }
   }
-  return found.sort();
+  return found;
+}
+
+/** Reads in bounded batches: a Windows file open is slow, and a long serial chain of them adds up. */
+const READ_BATCH_SIZE = 64;
+
+async function readSources(files: readonly string[]): Promise<string[]> {
+  const sources: string[] = [];
+  for (let start = 0; start < files.length; start += READ_BATCH_SIZE) {
+    const batch = files.slice(start, start + READ_BATCH_SIZE);
+    sources.push(...(await Promise.all(batch.map((file) => Bun.file(join(SRC, file)).text()))));
+  }
+  return sources;
+}
+
+async function violations(): Promise<string[]> {
+  const files = [...new Glob('**/*.{ts,tsx,css}').scanSync({ cwd: SRC, absolute: false })].filter(
+    (file) => !file.endsWith('routeTree.gen.ts')
+  );
+  const sources = await readSources(files);
+  return files.flatMap((file, index) => scanSource(file, sources[index] ?? '')).sort();
 }
 
 describe('design system conformance', () => {
@@ -221,6 +260,46 @@ describe('design system conformance', () => {
     ],
   ])('rejects an undeclared exception for %s: %s', (file, why) => {
     expect(isAllowed(file, why)).toBe(false);
+  });
+
+  // One planted violation per rule. The needle skips a rule's full scan, so a needle that stopped
+  // matching what its pattern matches would hide that rule everywhere; this is what catches it.
+  const PLANTED: readonly (readonly [rule: number, file: string, source: string])[] = [
+    [0, 'a.tsx', `const c = 'bg-surface-container-high';`],
+    [1, 'a.tsx', `const c = 'glass-panel';`],
+    [2, 'a.tsx', `const c = 'font-headline';`],
+    [3, 'a.tsx', `const c = 'rounded-2xl';`],
+    [4, 'a.tsx', `const c = 'shadow-md';`],
+    [5, 'a.tsx', `const c = 'text-lg';`],
+    [6, 'a.tsx', `const c = 'font-bold';`],
+    [7, 'a.tsx', `const c = 'uppercase';`],
+    [8, 'a.tsx', `const c = 'bg-accent/50';`],
+    [9, 'a.tsx', `const c = 'bg-red-500';`],
+    [10, 'a.tsx', `const c = 'bg-[#fff]';`],
+    [11, 'a.tsx', `const c = 'bg-black/50';`],
+    [12, 'a.tsx', `const c = 'hover:scale-105';`],
+    [13, 'a.tsx', `const c = <EmptyState icon={<Icon size={24} />} />;`],
+    [14, 'a.tsx', `const c = 'p-2.5';`],
+    [3, 'a.css', `.a { @apply rounded-2xl; }`],
+    // A comment is blanked to spaces before the scan, and a space ends the class token.
+    [3, 'a.tsx', `const c = 'rounded/* retired */';`],
+    [13, 'a.tsx', `const c = <EmptyState icon={<Icon /* retired */ size={24} />} />;`],
+  ];
+
+  it('plants one violation for every rule', () => {
+    expect(new Set(PLANTED.map(([rule]) => rule)).size).toBe(RULES.length);
+  });
+
+  it.each(PLANTED)('reports a violation of rule %i planted in %s: %s', (rule, file, source) => {
+    const why = RULES[rule]?.why ?? 'no such rule';
+    const reported = scanSource(file, source);
+    expect(reported.filter((line) => line.endsWith(`← ${why}`))).not.toEqual([]);
+  });
+
+  it('reports nothing for a file inside the vocabulary', () => {
+    expect(
+      scanSource('a.tsx', `const c = 'rounded-md shadow-popover text-sm font-medium';`)
+    ).toEqual([]);
   });
 
   it('keeps every source file inside the flat design vocabulary', async () => {
