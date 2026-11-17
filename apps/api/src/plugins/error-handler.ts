@@ -73,8 +73,9 @@ export const errorHandler = new Elysia({ name: 'error-handler' })
     status(404, { error: 'Not found', code: ERROR_CODES.NOT_FOUND })
   )
   .onError('global', ({ error, set }): ApiErrorResponse | ElysiaStatus<500, ApiErrorResponse> => {
-    // An environment that cannot be reached is a recoverable 503, not a fault
-    // worth logging; every route that reaches one gets this without its own arm.
+    // An environment that cannot be reached is a recoverable 503, not a fault.
+    // It is not logged here: the connection manager logged the connect attempt
+    // once, and a client polling a down environment must not log per request.
     const unavailable = environmentUnavailableResponse(error, set);
     if (unavailable) return unavailable;
 

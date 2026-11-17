@@ -193,6 +193,11 @@ export type ExternalAgentsRevokedObserver = (userId: string, environmentId: stri
 export type TerminalsRevokedObserver = (userId: string, environmentId: string) => void;
 
 interface RuntimeConnectionEntry {
+  /**
+   * Why the last real connect attempt failed, kept so a refusal inside the
+   * backoff window names that cause rather than a bare "backing off".
+   */
+  lastRefusalReason?: EnvironmentUnavailableReason;
   /** Who this connection belongs to, so a status sweep never crosses accounts. */
   userId: string;
   environmentId: string;
@@ -276,6 +281,9 @@ const MAX_RECONNECT_ATTEMPTS = 5;
  * is a dial the holder's runtime has to answer.
  */
 export const BOUND_ELSEWHERE_RETRY_MS = 60_000;
+
+/** Logs each real connect failure once, with the full text the HTTP layer withholds. */
+const connectLogger = createDiagnosticLogger('runtime-connection');
 
 /**
  * True when the runtime closed the handshake with the already-bound code.
@@ -399,7 +407,7 @@ function backoffUnavailable(
   if (entry.retryAfterMs === Number.POSITIVE_INFINITY) {
     return new EnvironmentUnavailableError('stopped-retrying', message);
   }
-  return new EnvironmentUnavailableError('backing-off', message, {
+  return new EnvironmentUnavailableError(entry.lastRefusalReason ?? 'backing-off', message, {
     retryAfterSeconds: (entry.retryAfterMs - Date.now()) / 1_000,
   });
 }
@@ -710,6 +718,7 @@ export class RuntimeConnectionManager {
       // exactly the case the cap has to catch. `#markUnavailable` clears it
       // once the connection has actually lasted.
       entry.retryAfterMs = 0;
+      entry.lastRefusalReason = undefined;
       entry.status = {
         state: 'connected',
         manifest: connection.client.manifest,
@@ -729,9 +738,18 @@ export class RuntimeConnectionManager {
       })
       .catch((error: unknown) => {
         if (isBoundElsewhere(error)) {
-          throw this.#markBoundElsewhere(entry, userId, revision, environmentId, error);
+          const refusal = this.#markBoundElsewhere(entry, userId, revision, environmentId, error);
+          if (entry.revision === revision) {
+            connectLogger.warn('connect_failed', { environmentId, reason: refusal.reason, error });
+          }
+          throw refusal;
         }
+        const refusal = normalizeUnavailable(error);
         if (entry.revision === revision) {
+          // The one place the full diagnostic is logged: once per real attempt,
+          // not once per request that is refused while the backoff holds.
+          connectLogger.warn('connect_failed', { environmentId, reason: refusal.reason, error });
+          entry.lastRefusalReason = refusal.reason;
           const errorCode = statusErrorCode(error);
           const dialIn = isDialIn(entry.transportKind);
           entry.connection = undefined;
@@ -748,7 +766,7 @@ export class RuntimeConnectionManager {
           };
           this.#publish(userId);
         }
-        throw normalizeUnavailable(error);
+        throw refusal;
       })
       .finally(() => {
         clearTimeout(deadline);
@@ -1312,6 +1330,7 @@ export class RuntimeConnectionManager {
     if (entry.revision === revision) {
       entry.connection = undefined;
       entry.retryAfterMs = Date.now() + BOUND_ELSEWHERE_RETRY_MS;
+      entry.lastRefusalReason = 'bound-elsewhere';
       entry.status = {
         state: 'error',
         errorCode: RESERVED_ERROR_CODES.UNAVAILABLE,

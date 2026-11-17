@@ -11,7 +11,9 @@
  *
  * The response carries a fixed message per reason, never the error's own text:
  * that text can name hub paths, a user name or an environment variable, and the
- * hub may be served to other accounts. The full text goes to the hub log.
+ * hub may be served to other accounts. The full text is logged once per real
+ * connect attempt by the manager, not here: a client polling a down environment
+ * would otherwise write a line per request.
  */
 
 import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
@@ -93,7 +95,7 @@ export function environmentUnavailableText(error: EnvironmentUnavailableError): 
 /**
  * Renders a connect failure as a 503 `ApiErrorResponse` with a fixed message and
  * `details.reason`, setting the status and `Retry-After` when the manager gave a
- * wait, and logging the full error once. Returns `null` for any other error so
+ * wait. Does not log. Returns `null` for any other error so
  * the caller keeps its own classification.
  *
  * @example
@@ -106,7 +108,6 @@ export function environmentUnavailableResponse(
 ): ApiErrorResponse | null {
   if (!isEnvironmentUnavailable(error)) return null;
 
-  console.error(`[error-handler][environment-unavailable:${error.reason}]`, error);
   set.status = 503;
   if (set.headers && error.retryAfterSeconds !== undefined) {
     set.headers['Retry-After'] = String(error.retryAfterSeconds);

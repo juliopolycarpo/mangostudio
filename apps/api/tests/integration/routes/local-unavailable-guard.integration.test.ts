@@ -5,15 +5,19 @@
  * than a hand-kept list: every `GET` route with no path or required query
  * parameter is requested with a Local connector that refuses, and none may
  * answer 5xx other than the one 503 this mapping owns.
+ *
+ * Not covered: routes with a path parameter (`{id}` and the like), routes with a
+ * required query parameter, non-GET methods, and routes hidden from OpenAPI.
+ * Those stay with the explicit table in `local-unavailable.integration.test.ts`.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 
+import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import { DEFAULT_LIBRARY_LOCATION_SETTINGS } from '@mangostudio/shared/app-settings';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 
 import { app } from '../../../src/app';
-import { EnvironmentUnavailableError } from '../../../src/lib/environment-unavailable';
 import { setLibraryLocationDefaultsForTest } from '../../../src/modules/app-settings/application/app-settings-service';
 import {
   RuntimeConnectionManager,
@@ -48,7 +52,13 @@ beforeEach(async () => {
       }),
     connectors: {
       'in-process': () =>
-        Promise.reject(new EnvironmentUnavailableError('binary-missing', 'no runtime binary')),
+        // What the real Local connector throws: a plain RemoteError carrying the
+        // launch reason, which the manager must wrap into the mapped class.
+        Promise.reject(
+          new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'no runtime binary', {
+            localFailureReason: 'binary-missing',
+          })
+        ),
     },
   });
   setRuntimeConnectionManagerForTests(manager);
@@ -64,9 +74,9 @@ afterEach(async () => {
 
 /**
  * Routes that answer 500 under this harness for a reason unrelated to Local.
- * The API key listing calls the auth plugin with the request's real session
- * headers, which the mocked session cannot supply, so it fails with or without
- * an environment.
+ * Checked by removing this exclusion: `GET /api/api-keys/` answered
+ * `500 {"error":"Unexpected API key management error.","code":"INTERNAL"}` with
+ * no connector installed at all, so it is the mocked session, not Local.
  */
 const FAILS_WITHOUT_LOCAL_TOO: ReadonlySet<string> = new Set(['/api/api-keys/']);
 
@@ -84,6 +94,19 @@ async function parameterlessGetPaths(): Promise<string[]> {
 }
 
 describe('every parameterless GET route with Local unavailable', () => {
+  it('reports the launch reason a plain connector failure carried', async () => {
+    const { restore } = createAuthenticatedApiTestApp(user);
+    restoreAuth = restore;
+
+    const response = await app.handle(new Request('http://localhost/api/skills'));
+    const body = (await response.json()) as { details?: { reason?: string } };
+
+    expect(
+      { status: response.status, reason: body.details?.reason },
+      '(GET /api/skills): expected 503 with details.reason binary-missing'
+    ).toEqual({ status: 503, reason: 'binary-missing' });
+  });
+
   it('never answers 500', async () => {
     const { restore } = createAuthenticatedApiTestApp(user);
     restoreAuth = restore;

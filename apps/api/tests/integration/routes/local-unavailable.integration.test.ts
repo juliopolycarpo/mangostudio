@@ -36,6 +36,7 @@ import {
   RuntimeConnectionManager,
   setRuntimeConnectionManagerForTests,
 } from '../../../src/services/runtime-client/runtime-connection-manager';
+import { DiagnosticWarnCapture } from '../../support/diagnostic-warn-capture';
 import { insertTestChat, insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 
@@ -168,12 +169,64 @@ describe('routes that reach an unavailable Local environment', () => {
       retried.status,
       `(runtimes retry): expected status 503 | received: ${retried.status} ${text}`
     ).toBe(503);
-    expect(JSON.parse(text)).toMatchObject({ details: { reason: 'backing-off' } });
+    // Still inside the backoff window, the refusal keeps the last real cause.
+    expect(JSON.parse(text)).toMatchObject({ details: { reason: 'start-failed' } });
     const retryAfter = Number(retried.headers.get('retry-after'));
     expect(
       retryAfter > 0 && retryAfter <= MAX_RETRY_AFTER_SECONDS,
       `(runtimes retry): expected Retry-After in 1..${MAX_RETRY_AFTER_SECONDS} seconds | received: ${retried.headers.get('retry-after')}`
     ).toBe(true);
+  });
+});
+
+describe('refusals inside the backoff window', () => {
+  it('logs the full diagnostic once per real connect attempt, not once per request', async () => {
+    const capture = new DiagnosticWarnCapture();
+    const lines = await capture.during(async () => {
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await app.handle(new Request('http://localhost/api/environments/runtimes'));
+      }
+    });
+
+    const connectLines = lines.filter((line) => line.includes('"connect_failed"'));
+    expect(
+      connectLines.length,
+      `(connect log): expected 1 connect_failed entry for 5 refused requests | received: ${connectLines.length} in ${lines.join(' ; ')}`
+    ).toBe(1);
+    expect(connectLines[0]).toContain('/home/alice');
+  });
+
+  it.each([
+    [
+      'bound-elsewhere',
+      new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'already bound', {
+        closeCode: RUNTIME_ALREADY_BOUND_CLOSE_CODE,
+      }),
+    ],
+    [
+      'binary-missing',
+      new RemoteError(RESERVED_ERROR_CODES.UNAVAILABLE, 'no binary', {
+        localFailureReason: 'binary-missing',
+      }),
+    ],
+  ] as const)('keeps the %s reason on later requests in the window', async (reason, failure) => {
+    const failing = managerWith(() => Promise.reject(failure));
+    setRuntimeConnectionManagerForTests(failing);
+
+    const reasons: unknown[] = [];
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const error = await getRuntimeClient(user.id, LOCAL_ENVIRONMENT_ID).then(
+        () => null,
+        (caught: unknown) => caught
+      );
+      reasons.push(error instanceof EnvironmentUnavailableError ? error.reason : String(error));
+    }
+    await failing.closeAll();
+
+    expect(
+      reasons,
+      `(${reason}): expected every refusal to name ${reason} | received: ${reasons.join(', ')}`
+    ).toEqual([reason, reason, reason]);
   });
 });
 

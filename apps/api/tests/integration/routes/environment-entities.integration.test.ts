@@ -707,7 +707,7 @@ describe('environment entity routes', () => {
     expect(manager.getStatus(TEST_USER.id, 'stable-box').state).toBe('connected');
   });
 
-  it('surfaces unavailable transport connections as a stable conflict', async () => {
+  it('answers an unavailable transport connection with the fixed 503, not the manager text', async () => {
     const { app, repository } = createTestApp();
     await repository.create({
       id: 'future',
@@ -721,11 +721,14 @@ describe('environment entity routes', () => {
     const response = await app.handle(
       new Request('http://localhost/environments/future/connect', jsonRequest('POST'))
     );
-    expect(response.status).toBe(409);
-    expect(await response.json()).toMatchObject({
-      code: 'CONFLICT',
-      error: 'The stdio environment transport is not available yet.',
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body).toMatchObject({
+      code: 'PROVIDER_ERROR',
+      error: 'The environment is unavailable.',
+      details: { reason: 'unavailable' },
     });
+    expect(JSON.stringify(body)).not.toContain('transport is not available');
   });
 
   // #792: a cold pull is bounded at half an hour. The request has to come back

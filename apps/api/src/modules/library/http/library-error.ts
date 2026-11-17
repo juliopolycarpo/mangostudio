@@ -4,8 +4,9 @@
  * The two failures that are not hub faults have to read the same on the
  * resource routes and the settings routes, because a user switching tabs is
  * looking at one machine either way: an environment whose runtime does not do
- * library work is a 422, and one the hub cannot reach right now is the 503 the
- * environment routes already return for that code — neither is logged.
+ * library work is a 422, and one the hub cannot reach right now is the 503
+ * `environmentUnavailableResponse` gives every route — neither is logged here
+ * (the connection manager logs the connect attempt itself).
  */
 
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
