@@ -12,6 +12,7 @@
         "scripts/bench/runtime-version-child.ts",
         "scripts/bench/rust-costs.ts",
         "scripts/bench/grep.ts",
+        "scripts/bench/runtime-results.ts",
         "scripts/bench/library-walk.ts",
         "scripts/bench/line-decoder.ts",
         "scripts/bench/checkpoint-writes.ts",
