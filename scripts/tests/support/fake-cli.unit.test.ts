@@ -70,3 +70,42 @@ test('removeFakeCliDirectory removes the tree and accepts one that is already go
   expect(existsSync(directory), `(fake cli): expected removed: ${directory}`).toBe(false);
   expect(() => removeFakeCliDirectory(directory)).not.toThrow();
 });
+
+class FakeBusyDirectory {
+  attempts = 0;
+  constructor(
+    private readonly failures: number,
+    private readonly code: string
+  ) {}
+  remove = (): void => {
+    this.attempts += 1;
+    if (this.attempts <= this.failures) {
+      throw Object.assign(new Error(`${this.code}: fake lock`), { code: this.code });
+    }
+  };
+}
+
+test('removeFakeCliDirectory retries a lock that the system releases a moment later', () => {
+  const busy = new FakeBusyDirectory(3, 'EBUSY');
+
+  removeFakeCliDirectory('unused', { remove: busy.remove, retryDelayMs: 1 });
+
+  expect(busy.attempts, 'expected 3 failed attempts and one that succeeds').toBe(4);
+});
+
+test('removeFakeCliDirectory gives up on a lock that outlasts the deadline, naming the error', () => {
+  const busy = new FakeBusyDirectory(Number.POSITIVE_INFINITY, 'EBUSY');
+
+  expect(() =>
+    removeFakeCliDirectory('unused', { remove: busy.remove, deadlineMs: 20, retryDelayMs: 5 })
+  ).toThrow('EBUSY: fake lock');
+});
+
+test('removeFakeCliDirectory does not retry an error that is not a lock', () => {
+  const missing = new FakeBusyDirectory(Number.POSITIVE_INFINITY, 'EACCES');
+
+  expect(() => removeFakeCliDirectory('unused', { remove: missing.remove })).toThrow(
+    'EACCES: fake lock'
+  );
+  expect(missing.attempts).toBe(1);
+});
