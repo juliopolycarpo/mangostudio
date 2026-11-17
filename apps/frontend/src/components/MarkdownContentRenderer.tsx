@@ -12,6 +12,8 @@ const CHECK_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" 
 interface CodeHighlighter {
   highlightCode: (code: string, lang: string, theme: CodeThemeId) => string | null;
   preloadCodeLanguages: (languages: readonly string[], theme: CodeThemeId) => Promise<boolean>;
+  /** Frees the per-block state kept while a message streams; absent on a highlighter without any. */
+  releaseHighlightSessions?: () => void;
 }
 
 export interface MarkdownContentProps {
@@ -57,6 +59,7 @@ export function MarkdownContentRenderer({
     setLoadedCodeTheme,
   });
   useCopyCodeButtons(containerRef, resolvedCopyLabel, resolvedCopiedLabel);
+  useReleaseSessionsWhenStreamEnds(isStreaming, highlighter);
 
   const parser = useMemo(
     () => createParser(loadedCodeTheme ?? resolvedCodeTheme, resolvedCopyLabel, highlighter),
@@ -111,6 +114,18 @@ function useCodeHighlighter(
       cancelled = true;
     };
   }, [languages, theme, setHighlighter, setHighlightVersion, setLoadedCodeTheme]);
+}
+
+/** A finished message's blocks are final, so the per-line state kept for them while it grew can go. */
+function useReleaseSessionsWhenStreamEnds(
+  isStreaming: boolean,
+  highlighter: CodeHighlighter | null
+) {
+  const wasStreaming = useRef(false);
+  useEffect(() => {
+    if (wasStreaming.current && !isStreaming) highlighter?.releaseHighlightSessions?.();
+    wasStreaming.current = isStreaming;
+  }, [isStreaming, highlighter]);
 }
 
 function useCopyCodeButtons(

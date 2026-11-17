@@ -36,9 +36,13 @@ interface TokensToHtmlOptions {
 
 /**
  * Rejects partial tokenization before Shiki turns it into apparently complete output.
+ * `observeLine` sees each line before it is tokenized; tests use it to count tokenizer work.
  * Example: createCheckedRenderers(highlighter).codeToTokensBase(code, options).
  */
-export function createCheckedRenderers(highlighter: HighlighterCore): CheckedRenderers {
+export function createCheckedRenderers(
+  highlighter: HighlighterCore,
+  observeLine?: (line: string) => void
+): CheckedRenderers {
   const grammars = new WeakMap<Grammar, Grammar>();
   const primitive = {
     ...highlighter,
@@ -49,6 +53,7 @@ export function createCheckedRenderers(highlighter: HighlighterCore): CheckedRen
 
       const checked = Object.create(grammar) as Grammar;
       checked.tokenizeLine2 = (...args: Parameters<Grammar['tokenizeLine2']>) => {
+        observeLine?.(args[0]);
         const result = grammar.tokenizeLine2(...args);
         if (result.stoppedEarly) throw new IncompleteTokenizationError();
         return result;

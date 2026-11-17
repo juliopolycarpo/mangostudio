@@ -1,10 +1,12 @@
-import { afterEach, beforeAll, describe, expect, it, spyOn } from 'bun:test';
+import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 
 import {
   highlightCode,
   highlightLineTokens,
   initHighlighter,
+  observeTokenizedLines,
   preloadCodeLanguages,
+  releaseHighlightSessions,
 } from '@/lib/shiki';
 import { createCheckedRenderers } from '@/lib/shiki-checked-render';
 
@@ -22,7 +24,7 @@ let highlighter: Awaited<ReturnType<typeof initHighlighter>>;
 let restore: (() => void) | undefined;
 
 beforeAll(async () => {
-  await preloadCodeLanguages(['ts'], THEME);
+  await preloadCodeLanguages(['ts', 'markdown', 'python', 'bash', 'json', 'html'], THEME);
   highlighter = await initHighlighter();
   const realNow = Date.now;
   try {
@@ -43,24 +45,26 @@ function frozenClock(): number {
   return 0;
 }
 
-/** Spies on `tokenizeLine2` of the real TypeScript grammar and lets the calls run. */
-function spyOnTokenizer() {
-  const grammar = highlighter.getLanguage('typescript');
-  const spy = spyOn(grammar, 'tokenizeLine2');
-  restore = () => spy.mockRestore();
-  return spy;
+/** Collects every line the checked renderers hand to a grammar, for any language. */
+class TokenizedLineRecorder {
+  readonly lines: string[] = [];
+  readonly observe = (line: string): void => {
+    this.lines.push(line);
+  };
 }
 
-/** Every line text the tokenizer was asked to tokenize. */
-function tokenizedLines(spy: ReturnType<typeof spyOnTokenizer>): string[] {
-  return spy.mock.calls.map(([line]) => line);
+function spyOnTokenizer(): TokenizedLineRecorder {
+  const recorder = new TokenizedLineRecorder();
+  observeTokenizedLines(recorder.observe);
+  restore = () => observeTokenizedLines(null);
+  return recorder;
 }
 
-function highlightWithFrozenClock(code: string): string | null {
+function highlightWithFrozenClock(code: string, lang = 'ts'): string | null {
   const realNow = Date.now;
   try {
     Date.now = frozenClock;
-    return highlightCode(code, 'ts', THEME);
+    return highlightCode(code, lang, THEME);
   } finally {
     Date.now = realNow;
   }
@@ -72,9 +76,9 @@ function colouredSpans(html: string): number {
 }
 
 /** Highlights `prefix` from scratch with the same renderers, as the reference for a streamed prefix. */
-function oneShotHtml(prefix: string): string {
+function oneShotHtml(prefix: string, lang = 'typescript'): string {
   const renderers = createCheckedRenderers(highlighter);
-  const options = { lang: 'typescript', theme: THEME };
+  const options = { lang, theme: THEME };
   const tokens = renderers.codeToTokensBase(prefix, { ...options, tokenizeTimeLimit: 500 });
   return renderers.htmlFromLines(renderers.tokenLinesToHtml(tokens, options), options);
 }
@@ -85,7 +89,7 @@ describe('highlightCode budget', () => {
     const html = highlightWithFrozenClock('x'.repeat(LARGEST_FITTING_WORD));
 
     expect(html).toContain('shiki');
-    expect(tokenizer).toHaveBeenCalled();
+    expect(tokenizer.lines.length).toBeGreaterThan(0);
   });
 
   it('refuses a word one character over the limit without calling the tokenizer', () => {
@@ -93,7 +97,7 @@ describe('highlightCode budget', () => {
     const html = highlightWithFrozenClock('x'.repeat(LARGEST_FITTING_WORD + 1));
 
     expect(html, 'expected null for a word over the limit').toBeNull();
-    expect(tokenizer.mock.calls.length, 'tokenizer calls for a word over the limit').toBe(0);
+    expect(tokenizer.lines.length, 'tokenizer calls for a word over the limit').toBe(0);
   });
 
   it('highlights the lines before an over-limit line and draws the rest plain', () => {
@@ -115,9 +119,7 @@ describe('highlightCode budget', () => {
       plain.map(colouredSpans),
       'coloured spans on the lines from the over-limit line on'
     ).toEqual([0, 0]);
-    expect(tokenizedLines(tokenizer), 'lines the tokenizer was given').toEqual([
-      'const first = 1;',
-    ]);
+    expect(tokenizer.lines, 'lines the tokenizer was given').toEqual(['const first = 1;']);
   });
 
   it('keeps every line after an over-limit line plain, because the state after it is unknown', () => {
@@ -131,9 +133,7 @@ describe('highlightCode budget', () => {
 
     expect(html).toContain('const inside = 1;');
     expect(
-      tokenizedLines(tokenizer).filter(
-        (line) => line.includes('inside') || line.includes('outside')
-      ),
+      tokenizer.lines.filter((line) => line.includes('inside') || line.includes('outside')),
       'lines after the over-limit line given to the tokenizer'
     ).toEqual([]);
   });
@@ -145,7 +145,7 @@ describe('highlightCode budget', () => {
     const elapsed = performance.now() - start;
 
     expect(html).toBeNull();
-    expect(tokenizer.mock.calls.length).toBe(0);
+    expect(tokenizer.lines.length).toBe(0);
     expect(elapsed, `${SCALING_INPUT_LENGTH} characters took ${elapsed}ms`).toBeLessThan(
       SCALING_BOUND_MS
     );
@@ -167,9 +167,9 @@ describe('highlightLineTokens limits', () => {
     try {
       Date.now = frozenClock;
       expect(highlightLineTokens('const value = 1;', 'ts', THEME)).not.toBeNull();
-      const callsBefore = tokenizer.mock.calls.length;
+      const callsBefore = tokenizer.lines.length;
       expect(highlightLineTokens('x'.repeat(LARGEST_FITTING_WORD + 1), 'ts', THEME)).toBeNull();
-      expect(tokenizer.mock.calls.length).toBe(callsBefore);
+      expect(tokenizer.lines.length).toBe(callsBefore);
     } finally {
       Date.now = realNow;
     }
@@ -182,15 +182,13 @@ describe('highlightCode cache', () => {
     const code = 'const cachedBlock = 1;\nconst second = 2;';
 
     const first = highlightWithFrozenClock(code);
-    const callsAfterFirst = tokenizer.mock.calls.length;
+    const callsAfterFirst = tokenizer.lines.length;
     const second = highlightWithFrozenClock(code);
 
     expect(first).toContain('shiki');
     expect(second).toBe(first);
     expect(callsAfterFirst).toBeGreaterThan(0);
-    expect(tokenizer.mock.calls.length, 'tokenizer calls for an unchanged block').toBe(
-      callsAfterFirst
-    );
+    expect(tokenizer.lines.length, 'tokenizer calls for an unchanged block').toBe(callsAfterFirst);
   });
 
   it('keeps a different theme apart from the same code', async () => {
@@ -212,13 +210,13 @@ describe('highlightCode cache', () => {
     const tokenizer = spyOnTokenizer();
     const blocks = Array.from({ length: 17 }, (_, index) => `const block${index} = ${index};`);
     for (const block of blocks) highlightWithFrozenClock(block);
-    const before = tokenizer.mock.calls.length;
+    const before = tokenizer.lines.length;
 
     highlightWithFrozenClock(blocks[16] ?? '');
-    expect(tokenizer.mock.calls.length, 'the newest block is still cached').toBe(before);
+    expect(tokenizer.lines.length, 'the newest block is still cached').toBe(before);
 
     highlightWithFrozenClock(blocks[0] ?? '');
-    expect(tokenizer.mock.calls.length, 'the oldest block was evicted').toBeGreaterThan(before);
+    expect(tokenizer.lines.length, 'the oldest block was evicted').toBeGreaterThan(before);
   });
 });
 
@@ -264,7 +262,7 @@ describe('highlightCode on a block that grows', () => {
 
     // Quadratic tokenizing would be 30 chunks x up to 300 lines, about 4,650 calls.
     expect(
-      tokenizer.mock.calls.length,
+      tokenizer.lines.length,
       'tokenizer calls for 300 lines streamed in 30 chunks (expected about 300 + 30)'
     ).toBeLessThan(400);
   });
@@ -287,5 +285,168 @@ describe('highlightCode on a block that grows', () => {
     expect(after).toContain('q'.repeat(2000));
     const keptLine = (html: string | null) => (html ?? '').split('<span class="line">')[1];
     expect(keptLine(after)).toBe(keptLine(before));
+  });
+});
+
+describe('highlightCode line splitting', () => {
+  const LONG_WORD = 'x'.repeat(16_384);
+
+  it('does not tokenize an over-limit word that follows a lone carriage return', () => {
+    // Shiki splits lines on \n and \r\n only, so `a\r` and the word are one line to the grammar.
+    const tokenizer = spyOnTokenizer();
+    const html = highlightWithFrozenClock(`a\r${LONG_WORD}`);
+
+    expect(html, 'expected plain source for one over-limit line').toBeNull();
+    expect(tokenizer.lines, 'lines given to the tokenizer').toEqual([]);
+  });
+
+  it('keeps a lone carriage return inside its line when a later line is over the limit', () => {
+    const tokenizer = spyOnTokenizer();
+    const html = highlightWithFrozenClock(`a\rb\n${LONG_WORD}`);
+
+    expect(html).toContain('shiki');
+    expect(tokenizer.lines, 'lines given to the tokenizer').toEqual(['a\rb']);
+  });
+
+  it('refuses a diff line with a lone carriage return before an over-limit word', () => {
+    const tokenizer = spyOnTokenizer();
+
+    expect(highlightLineTokens(`a\r${LONG_WORD}`, 'ts', THEME)).toBeNull();
+    expect(tokenizer.lines).toEqual([]);
+  });
+});
+
+describe('highlightCode on embedded grammars', () => {
+  const WORD = 'x'.repeat(1540);
+
+  it('refuses a 1,540-character word in a ts fence inside markdown', () => {
+    const tokenizer = spyOnTokenizer();
+    const html = highlightWithFrozenClock(
+      `# Title\n\n\`\`\`ts\nconst a = 1;\n${WORD}\n\`\`\`\n`,
+      'markdown'
+    );
+
+    expect(tokenizer.lines.join('\n'), 'lines given to the tokenizer').not.toContain(WORD);
+    expect(html).toContain('Title');
+  });
+
+  it('refuses the same word in a script element inside html', () => {
+    const tokenizer = spyOnTokenizer();
+    highlightWithFrozenClock(`<p>hi</p>\n<script>\nlet a = 1;\n${WORD}\n</script>`, 'html');
+
+    expect(tokenizer.lines.join('\n'), 'lines given to the tokenizer').not.toContain(WORD);
+  });
+});
+
+describe('highlightCode streamed through embedded grammars', () => {
+  const MARKDOWN_SOURCE = [
+    '# Notes',
+    '',
+    '```ts',
+    'const a = `x',
+    'y`;',
+    '```',
+    'Some *text* and `code`.',
+    '```python',
+    'def f(x):',
+    '    return """doc',
+    'more"""',
+    '```',
+    '- item',
+    '',
+  ]
+    .join('\n')
+    .repeat(3);
+  const BASH_SOURCE = [
+    "cat <<'EOF'",
+    'not $(a command)',
+    'EOF',
+    'echo "done" && ls | wc -l',
+    'if [ -f x ]; then',
+    "  echo 'yes'",
+    'fi',
+    '',
+  ]
+    .join('\n')
+    .repeat(4);
+
+  for (const [lang, id, source] of [
+    ['markdown', 'markdown', MARKDOWN_SOURCE],
+    ['bash', 'bash', BASH_SOURCE],
+  ] as const) {
+    it(`renders each streamed ${lang} prefix as tokenizing that prefix from scratch`, () => {
+      for (let end = 1; end <= source.length; end += 5) {
+        const prefix = source.slice(0, end);
+        expect(highlightWithFrozenClock(prefix, lang), `${lang} prefix of ${end} characters`).toBe(
+          oneShotHtml(prefix, id)
+        );
+      }
+    });
+  }
+});
+
+describe('highlightCode memory bounds', () => {
+  /** A cheap-to-tokenize block whose HTML is large: one JSON array per line. */
+  function jsonBlock(seed: number, lines: number): string {
+    return Array.from(
+      { length: lines },
+      (_, line) => `{"seed": ${seed}, "line": ${line}, "a": [1, 2, 3]}`
+    ).join('\n');
+  }
+
+  it('does not keep a result above a quarter of the memory bound', () => {
+    const tokenizer = spyOnTokenizer();
+    const huge = jsonBlock(0, 12_000);
+    const first = highlightWithFrozenClock(huge, 'json');
+    const callsAfterFirst = tokenizer.lines.length;
+    releaseHighlightSessions();
+    const second = highlightWithFrozenClock(huge, 'json');
+
+    expect(first?.length ?? 0, 'html characters of the huge block').toBeGreaterThan(500_000);
+    expect(second).toBe(first);
+    expect(tokenizer.lines.length, 'tokenizer lines for a result too big to cache').toBe(
+      callsAfterFirst * 2
+    );
+  });
+
+  it('evicts older results once their total passes the memory bound', () => {
+    const tokenizer = spyOnTokenizer();
+    // About 400,000 characters of HTML each (16x the source), so six of them pass 2,000,000.
+    const blocks = Array.from({ length: 12 }, (_, seed) => jsonBlock(seed + 1, 600));
+    for (const block of blocks) highlightWithFrozenClock(block, 'json');
+    const before = tokenizer.lines.length;
+
+    highlightWithFrozenClock(blocks[11] ?? '', 'json');
+    expect(tokenizer.lines.length, 'the newest block is still cached').toBe(before);
+    highlightWithFrozenClock(blocks[0] ?? '', 'json');
+    expect(
+      tokenizer.lines.length - before,
+      'tokenizer lines for the oldest block, evicted by size before the 16-entry limit'
+    ).toBeGreaterThan(0);
+  });
+
+  it('forgets a growing block when its sessions are released', () => {
+    const lines = Array.from({ length: 40 }, (_, index) => `const released${index} = ${index};`);
+    highlightWithFrozenClock(lines.slice(0, 20).join('\n'));
+    const tokenizer = spyOnTokenizer();
+
+    releaseHighlightSessions();
+    highlightWithFrozenClock(lines.slice(0, 30).join('\n'));
+
+    expect(
+      tokenizer.lines.length,
+      'tokenizer lines for a block grown after its sessions were released (all 30)'
+    ).toBe(30);
+  });
+
+  it('keeps a growing block incremental when sessions are not released', () => {
+    const lines = Array.from({ length: 40 }, (_, index) => `const kept${index} = ${index};`);
+    highlightWithFrozenClock(lines.slice(0, 20).join('\n'));
+    const tokenizer = spyOnTokenizer();
+
+    highlightWithFrozenClock(lines.slice(0, 30).join('\n'));
+
+    // Ten new complete lines and the open last one.
+    expect(tokenizer.lines.length, 'tokenizer lines for 10 new lines').toBeLessThan(15);
   });
 });

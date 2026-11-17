@@ -67,7 +67,29 @@ let checkedRenderers: ReturnType<typeof createCheckedRenderers> | null = null;
  * means the language was not loaded yet and the next call may succeed.
  */
 const HIGHLIGHT_CACHE_ENTRIES = 16;
+/**
+ * Memory bound for the cache and for the sessions, each, in characters of HTML (2 bytes each).
+ * A block over a quarter of it is not kept: JSON HTML runs to about 16x its source.
+ */
+const HIGHLIGHT_RETAINED_CHARS = 2_000_000;
+const HIGHLIGHT_ENTRY_MAX_CHARS = HIGHLIGHT_RETAINED_CHARS / 4;
 const highlightCache = new Map<string, string>();
+let highlightCacheChars = 0;
+
+function cacheHighlightedHtml(key: string, html: string): void {
+  if (html.length > HIGHLIGHT_ENTRY_MAX_CHARS) return;
+  highlightCache.set(key, html);
+  highlightCacheChars += html.length;
+  while (
+    highlightCache.size > HIGHLIGHT_CACHE_ENTRIES ||
+    highlightCacheChars > HIGHLIGHT_RETAINED_CHARS
+  ) {
+    const oldest = highlightCache.entries().next().value;
+    if (oldest === undefined) return;
+    highlightCache.delete(oldest[0]);
+    highlightCacheChars -= oldest[1].length;
+  }
+}
 
 function highlightCacheKey(language: ShikiLanguageId, theme: CodeThemeId, code: string): string {
   return `${language}\0${theme}\0${code}`;
@@ -87,6 +109,8 @@ interface HighlightSession {
   completedSource: string;
   /** One serialized line per completed line. */
   readonly completedHtml: string[];
+  /** The characters in `completedHtml`, for the memory bound. */
+  completedHtmlChars: number;
   /** The grammar state after the last completed line; undefined before the first. */
   state: GrammarState | undefined;
 }
@@ -115,11 +139,43 @@ function takeHighlightSession(
     theme,
     completedSource: '',
     completedHtml: [],
+    completedHtmlChars: 0,
     state: undefined,
   };
   highlightSessions.push(session);
-  if (highlightSessions.length > HIGHLIGHT_SESSION_COUNT) highlightSessions.shift();
   return session;
+}
+
+/** Drops the oldest sessions past the count and memory bounds, and the one in use if it alone is too big. */
+function trimHighlightSessions(current: HighlightSession): void {
+  if (current.completedHtmlChars > HIGHLIGHT_ENTRY_MAX_CHARS) {
+    const index = highlightSessions.indexOf(current);
+    if (index !== -1) highlightSessions.splice(index, 1);
+  }
+  let retained = highlightSessions.reduce((sum, session) => sum + session.completedHtmlChars, 0);
+  while (
+    highlightSessions.length > HIGHLIGHT_SESSION_COUNT ||
+    (retained > HIGHLIGHT_RETAINED_CHARS && highlightSessions.length > 1)
+  ) {
+    retained -= highlightSessions.shift()?.completedHtmlChars ?? 0;
+  }
+}
+
+/**
+ * Forgets the growing blocks. Called when a message stops streaming: its blocks are final and
+ * come from the result cache, so their per-line HTML would only sit in memory.
+ */
+// Usage: releaseHighlightSessions();
+export function releaseHighlightSessions(): void {
+  highlightSessions.length = 0;
+}
+
+let tokenizedLineObserver: ((line: string) => void) | null = null;
+
+/** Test seam: sees every line the tokenizer is given, until called again with `null`. */
+// Usage: observeTokenizedLines((line) => lines.push(line));
+export function observeTokenizedLines(observer: ((line: string) => void) | null): void {
+  tokenizedLineObserver = observer;
 }
 
 const languageLoadPromises = new Map<ShikiLanguageId, Promise<void>>();
@@ -140,7 +196,7 @@ export function initHighlighter(): Promise<MangoHighlighter> {
     themes: [],
     langs: [],
   }).then((highlighter) => {
-    checkedRenderers = createCheckedRenderers(highlighter);
+    checkedRenderers = createCheckedRenderers(highlighter, (line) => tokenizedLineObserver?.(line));
     highlighterInstance = highlighter;
     return highlighter;
   });
@@ -199,11 +255,7 @@ export function highlightCode(code: string, lang: string, theme: CodeThemeId): s
   try {
     const html = renderHighlightedBlock(code, language, theme);
     if (html === null) return null;
-    highlightCache.set(key, html);
-    if (highlightCache.size > HIGHLIGHT_CACHE_ENTRIES) {
-      const oldest = highlightCache.keys().next().value;
-      if (oldest !== undefined) highlightCache.delete(oldest);
-    }
+    cacheHighlightedHtml(key, html);
     return html;
   } catch {
     return null;
@@ -240,10 +292,13 @@ function renderHighlightedBlock(
   if (session.completedHtml.length < completeCount) {
     const newLines = lines.slice(session.completedHtml.length, completeCount);
     const tokens = tokenize(newLines.map(([text]) => text).join('\n'), session.state);
-    session.completedHtml.push(...renderers.tokenLinesToHtml(tokens, htmlOptions));
+    const newHtml = renderers.tokenLinesToHtml(tokens, htmlOptions);
+    session.completedHtml.push(...newHtml);
+    session.completedHtmlChars += newHtml.reduce((sum, line) => sum + line.length, 0);
     session.state = getLastGrammarState(instance, tokens);
     session.completedSource = code.slice(0, lines[completeCount]?.[1]);
   }
+  trimHighlightSessions(session);
 
   // Lines after the completed ones are drawn again on every call: the last line may still be
   // arriving, so it is tokenized from the saved state and not kept; lines past the budget are plain.
@@ -333,6 +388,7 @@ function loadLanguageOnce(highlighter: MangoHighlighter, language: ShikiLanguage
     languageLoadPromises.delete(language);
     // A block may embed this grammar (a python fence in markdown), so earlier HTML is stale.
     highlightCache.clear();
+    highlightCacheChars = 0;
     highlightSessions.length = 0;
   });
   languageLoadPromises.set(language, loading);
