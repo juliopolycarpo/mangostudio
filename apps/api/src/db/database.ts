@@ -71,14 +71,23 @@ export function getDb(): Kysely<Database> {
  * Gracefully closes the database connection.
  */
 export async function closeDb(): Promise<void> {
-  if (dbInstance) {
-    await dbInstance.destroy();
+  const instance = dbInstance;
+  const handle = sqliteHandle;
+  if (!instance) return;
+  // Forget the singleton before closing: if the driver close throws, the next `getDb` must
+  // open a new connection instead of returning this half-closed one, and a second `closeDb`
+  // must not try to close it again. The error still reaches the caller.
+  dbInstance = null;
+  sqliteHandle = null;
+  try {
+    await instance.destroy();
+  } finally {
     // Kysely opens its driver on the first query and closes the database only if it did, so
     // an instance that never ran one would keep the file open. Windows cannot move or delete
-    // an open database file (backup restore, upgrade), so close the handle explicitly.
-    sqliteHandle?.close(true);
-    sqliteHandle = null;
-    dbInstance = null;
+    // an open database file (backup restore, upgrade), so close the handle explicitly, even
+    // when `destroy` failed. A throw here replaces the `destroy` error, which is acceptable
+    // since either one tells the caller the close failed.
+    handle?.close(true);
     dbLogger.info('closed');
   }
 }
