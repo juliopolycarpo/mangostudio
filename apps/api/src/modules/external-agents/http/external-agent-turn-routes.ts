@@ -47,6 +47,7 @@ import {
 import { Elysia, t } from 'elysia';
 
 import { getDb } from '../../../db/database';
+import { environmentUnavailableResponse } from '../../../lib/environment-unavailable';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { getRuntimeClient } from '../../../services/runtime-client';
 import { AppSettingsConflict } from '../../app-settings/domain/app-settings-conflict';
@@ -371,11 +372,17 @@ export function createExternalAgentTurnRoutes(
           // will not recognize.
           const client = await resolveRuntimeClient(userId, chat.environmentId);
           workspacePath = client.paths.canonical(chat.workdir);
-        } catch {
+        } catch (error) {
+          // A connect failure the manager raised is the classified case. That
+          // includes a deleted or foreign environment, which the manager words
+          // the same way, so nothing is disclosed. Any other throw keeps the
+          // generic answer it had before the dedicated code existed.
+          const unavailable = environmentUnavailableResponse(error, set);
+          if (unavailable) return unavailable;
           set.status = 503;
           return {
             error: 'Could not reach the machine this chat runs on.',
-            code: ERROR_CODES.ENVIRONMENT_UNAVAILABLE,
+            code: ERROR_CODES.PROVIDER_ERROR,
           };
         }
 

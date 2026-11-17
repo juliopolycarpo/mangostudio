@@ -12,8 +12,10 @@ export const ERROR_CODES = {
   /**
    * The environment a request targets could not be reached: its runtime is not
    * installed, failed to start, is backing off after a failure, or is disabled.
-   * Always sent with 503 and `details.reason`, and with `Retry-After` when the
-   * hub has scheduled the next connect attempt.
+   * Sent with 503. An HTTP response carries `details.reason` (one of the
+   * connection manager's reason classes) and `Retry-After` when the hub has
+   * scheduled the next connect attempt; an `SSEErrorEvent` has no `details`,
+   * so a stream carries the code and the fixed message only.
    *
    * Its own code, apart from `PROVIDER_ERROR`, so a client can tell "this
    * machine is offline, wait or pick another" from "a model or connector

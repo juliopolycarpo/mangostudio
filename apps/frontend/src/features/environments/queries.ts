@@ -34,6 +34,7 @@ import {
 } from '@tanstack/react-query';
 
 import { client } from '@/lib/api-client';
+import { invalidateEnvironmentUnavailableQueries } from '@/lib/environment-unavailable';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
 import { ApiError } from '@/lib/utils';
 
@@ -90,8 +91,22 @@ export function useEnvironmentEntitiesQuery() {
     // connected. Without this the panel keeps saying "never seen" about a
     // machine the card beside it already shows as connected.
     await queryClient.invalidateQueries({ queryKey: environmentKeys.pairings() });
+    await refetchUnavailableQueriesOnConnect(queryClient);
   });
   return useQuery(environmentEntitiesQueryOptions());
+}
+
+/**
+ * Once the refreshed environments list shows one connected, refetches the
+ * queries that failed because an environment was unavailable. Realtime only
+ * invalidates environment-scoped keys, so a git, library or workspace query
+ * that hit a runtime still starting would otherwise stay errored until the user
+ * navigated away.
+ */
+export async function refetchUnavailableQueriesOnConnect(queryClient: QueryClient): Promise<void> {
+  const environments = queryClient.getQueryData<Environment[]>(environmentKeys.entities());
+  if (!environments?.some((environment) => environment.status.state === 'connected')) return;
+  await invalidateEnvironmentUnavailableQueries(queryClient);
 }
 
 function replaceEnvironment(queryClient: QueryClient, environment: Environment): void {

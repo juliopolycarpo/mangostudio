@@ -35,6 +35,11 @@ import {
 import type { Kysely } from 'kysely';
 
 import type { Database } from '../../../db/types';
+import {
+  type EnvironmentUnavailableReason,
+  environmentUnavailableText,
+  isEnvironmentUnavailable,
+} from '../../../lib/environment-unavailable';
 import { SSE_KEEPALIVE_FRAME, SSE_KEEPALIVE_INTERVAL_MS } from '../../../lib/hub-connection-limits';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import type {
@@ -133,6 +138,16 @@ export type ExternalTurnPreflightFailure =
       readonly environmentId: string;
     }
   | { readonly kind: 'unavailable'; readonly message: string }
+  /**
+   * The connection manager refused or failed to connect to the chat's
+   * environment. Its own kind, apart from `unavailable` (an adapter that is not
+   * ready), so the route answers `ENVIRONMENT_UNAVAILABLE` with the reason.
+   */
+  | {
+      readonly kind: 'environment-unreachable';
+      readonly message: string;
+      readonly reason: EnvironmentUnavailableReason;
+    }
   | { readonly kind: 'validation'; readonly message: string }
   /**
    * A review was asked for on a workspace that is not a Git repository.
@@ -214,13 +229,7 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
         chatId: input.chatId,
         error: error instanceof Error ? error.message : 'unknown error',
       });
-      return {
-        ok: false,
-        failure: {
-          kind: 'unavailable',
-          message: 'Could not reach the machine this chat runs on.',
-        },
-      };
+      return { ok: false, failure: machineUnreachableFailure(error) };
     }
     if (!resolution.ok) {
       // Three different refusals with three different remedies. "Change a
@@ -351,13 +360,7 @@ export function createExternalTurnStream(dependencies: ExternalTurnStreamDepende
           chatId: input.chatId,
           error: error instanceof Error ? error.message : 'unknown error',
         });
-        return {
-          ok: false,
-          failure: {
-            kind: 'unavailable',
-            message: 'Could not reach the machine this chat runs on.',
-          },
-        };
+        return { ok: false, failure: machineUnreachableFailure(error) };
       }
       if (!repoRoot) {
         return {
@@ -444,10 +447,7 @@ async function preflightAttachments(
       chatId: input.chatId,
       error: error instanceof Error ? error.message : 'unknown error',
     });
-    return {
-      ok: false,
-      failure: { kind: 'unavailable', message: 'Could not reach the machine this chat runs on.' },
-    };
+    return { ok: false, failure: machineUnreachableFailure(error) };
   }
 
   if (!resolved.ok) return { ok: false, failure: attachmentRefusal(resolved.refusal) };
@@ -486,6 +486,22 @@ function attachmentRefusal(refusal: ExternalAgentAttachmentRefusal): ExternalTur
         message: `Each attachment sent to an external agent must be at most ${EXTERNAL_ATTACHMENT_MAX_BYTES / (1024 * 1024)} MB.`,
       };
   }
+}
+
+/**
+ * The refusal for a step that needed the chat's machine and could not reach it.
+ * A connect failure the manager raised is classified with its reason and fixed
+ * text; any other throw stays the generic `unavailable` it always was.
+ */
+function machineUnreachableFailure(error: unknown): ExternalTurnPreflightFailure {
+  if (isEnvironmentUnavailable(error)) {
+    return {
+      kind: 'environment-unreachable',
+      message: environmentUnavailableText(error),
+      reason: error.reason,
+    };
+  }
+  return { kind: 'unavailable', message: 'Could not reach the machine this chat runs on.' };
 }
 
 function chatBindingChanged(left: OwnedChatRecord, right: OwnedChatRecord): boolean {

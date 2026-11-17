@@ -17,7 +17,11 @@
 
 import { ChatSchema } from '@mangostudio/shared/chat';
 import { EnvironmentIdSchema, LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
-import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
+import {
+  type ApiErrorResponse,
+  ApiErrorResponseSchema,
+  ERROR_CODES,
+} from '@mangostudio/shared/errors';
 import {
   EXTERNAL_NATIVE_SESSION_PAGE_LIMIT,
   ExternalNativeSessionListResponseSchema,
@@ -63,6 +67,7 @@ const UNAUTHENTICATED = {
 function statusFor(code: ExternalNativeSessionRefusalCode): number {
   switch (code) {
     case 'unreachable':
+    case 'resolve-failed':
       return 503;
     case 'isolation-unproven':
       return 403;
@@ -80,6 +85,8 @@ function errorCodeFor(code: ExternalNativeSessionRefusalCode): string {
   switch (code) {
     case 'unreachable':
       return ERROR_CODES.ENVIRONMENT_UNAVAILABLE;
+    case 'resolve-failed':
+      return ERROR_CODES.PROVIDER_ERROR;
     case 'isolation-unproven':
       return ERROR_CODES.PERMISSION_DENIED;
     case 'stale':
@@ -89,6 +96,19 @@ function errorCodeFor(code: ExternalNativeSessionRefusalCode): string {
     default:
       return ERROR_CODES.VALIDATION;
   }
+}
+
+/** The error body for a refusal, with the connect failure's reason when it has one. */
+function refusalBody(refusal: {
+  readonly code: ExternalNativeSessionRefusalCode;
+  readonly message: string;
+  readonly reason?: string;
+}): ApiErrorResponse {
+  return {
+    error: refusal.message,
+    code: errorCodeFor(refusal.code),
+    ...(refusal.reason ? { details: { reason: refusal.reason } } : {}),
+  };
 }
 
 export function createExternalSessionRoutes(
@@ -131,7 +151,7 @@ export function createExternalSessionRoutes(
         });
         if (!listing.ok) {
           set.status = statusFor(listing.code);
-          return { error: listing.message, code: errorCodeFor(listing.code) };
+          return refusalBody(listing);
         }
         return {
           environmentId,
@@ -166,7 +186,7 @@ export function createExternalSessionRoutes(
         });
         if (!adopted.ok) {
           set.status = statusFor(adopted.code);
-          return { error: adopted.message, code: errorCodeFor(adopted.code) };
+          return refusalBody(adopted);
         }
         set.status = 201;
         return { chat: adopted.chat };

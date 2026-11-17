@@ -7,6 +7,7 @@ import type {
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
 
 import { getDb } from '../../../../src/db/database';
+import { EnvironmentUnavailableError } from '../../../../src/lib/environment-unavailable';
 import type { ExternalAgentDiscoveryService } from '../../../../src/modules/external-agents/application/external-agent-discovery';
 import { createExternalIdentityIsolationRegistry } from '../../../../src/modules/external-agents/application/external-identity-isolation';
 import {
@@ -66,7 +67,8 @@ function serviceFor(
     readonly runtime?: FakeExternalRuntimeOptions;
     readonly agents?: readonly ExternalAgentDescriptor[];
     readonly attested?: boolean;
-    readonly unreachable?: boolean;
+    /** What `resolveRuntimeClient` rejects with, when set. */
+    readonly unreachable?: Error;
     readonly now?: () => number;
   } = {}
 ) {
@@ -78,7 +80,7 @@ function serviceFor(
     discovery: discoveryOf(...(options.agents ?? [descriptor()])),
     resolveRuntimeClient: () =>
       options.unreachable
-        ? Promise.reject(new Error('offline'))
+        ? Promise.reject(options.unreachable)
         : Promise.resolve(
             options.attested === false
               ? ({ ...runtime.client, manifest: {} } as typeof runtime.client)
@@ -146,11 +148,37 @@ describe('external native session listing', () => {
   });
 
   it('answers one way for offline, deleted and somebody else"s machines', async () => {
-    const { service } = serviceFor({ unreachable: true });
+    const { service } = serviceFor({
+      unreachable: new EnvironmentUnavailableError(
+        'unavailable',
+        'Environment "someone-elses" was not found.'
+      ),
+    });
 
-    await expect(
-      service.list({ userId, environmentId: 'someone-elses', targetId: 'codex' })
-    ).resolves.toMatchObject({ ok: false, code: 'unreachable' });
+    const listing = await service.list({
+      userId,
+      environmentId: 'someone-elses',
+      targetId: 'codex',
+    });
+
+    expect(listing).toEqual({
+      ok: false,
+      code: 'unreachable',
+      message: 'The environment is unavailable.',
+      reason: 'unavailable',
+    });
+  });
+
+  it('does not classify an unnamed resolve failure as an unreachable environment', async () => {
+    const { service } = serviceFor({ unreachable: new Error('offline') });
+
+    const listing = await service.list({ userId, environmentId: 'local', targetId: 'codex' });
+
+    expect(
+      listing,
+      `(list): expected code resolve-failed | received: ${JSON.stringify(listing)}`
+    ).toMatchObject({ ok: false, code: 'resolve-failed' });
+    expect(listing).not.toHaveProperty('reason');
   });
 });
 

@@ -21,6 +21,7 @@ import {
 } from '@mangostudio/shared/environments';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 
+import { isEnvironmentUnavailable } from '../../../lib/environment-unavailable';
 import { publishEnvironmentInvalidation } from '../../../services/realtime/environment-invalidation';
 import { EnvironmentServiceError } from '../domain/environment-error';
 import {
@@ -93,6 +94,10 @@ async function assertKnownPath(
   try {
     status = await probing.getRuntimeStatus({ userId, environmentId }, runtime);
   } catch (error) {
+    // A connect failure keeps its type so the route boundary answers it with
+    // the fixed text and reason; wrapping it here would put the manager's raw
+    // diagnostic (hub paths, variable names) into the message.
+    if (isEnvironmentUnavailable(error)) throw error;
     // A machine that cannot be asked is unavailable, not an invalid request:
     // the path may well be right, and 422 would send the user to fix a value
     // when the fix is bringing the environment back.

@@ -47,6 +47,17 @@ export class ApiError extends Error {
   readonly code: string | null;
   readonly details: Readonly<Record<string, string>> | null;
 
+  /**
+   * Seconds the hub said to wait before asking again, from
+   * `details.retryAfterSeconds` (the hub mirrors its `Retry-After` header there
+   * so the value survives Eden's body-only error channel). Null when absent or
+   * not a positive number.
+   */
+  get retryAfterSeconds(): number | null {
+    const seconds = Number(this.details?.retryAfterSeconds);
+    return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+  }
+
   constructor(value: unknown) {
     const normalized = normalizeApiErrorBody(value);
     super(normalized.message ?? DEFAULT_API_ERROR_FALLBACK);
