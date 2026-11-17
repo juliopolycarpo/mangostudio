@@ -4240,6 +4240,11 @@ export const messages = {
       hint: 'O link pode estar errado, ou a página pode ter mudado de lugar.',
       home: 'Voltar ao MangoStudio',
     },
+    lazyChunk: {
+      title: 'Não foi possível carregar este painel',
+      hint: 'A conexão pode ter caído, ou o MangoStudio foi atualizado com esta aba aberta. Tente de novo ou recarregue a página.',
+      reload: 'Recarregar a página',
+    },
     bootstrap: {
       title: 'O MangoStudio não conseguiu terminar de carregar',
       lead: 'Uma das requisições de que toda página depende foi recusada.',

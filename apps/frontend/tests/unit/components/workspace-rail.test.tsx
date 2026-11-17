@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:tes
 import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
 import { fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useEffect } from 'react';
 
 import { requestRailPanel } from '../../../src/features/workspace/rail/rail-panel-request';
 import { railCollapsedStorageKey } from '../../../src/features/workspace/rail/rail-state';
@@ -23,15 +24,20 @@ void mock.module('../../../src/features/chat/hooks/use-chat-todos', () => ({
 
 // Declared at module level rather than inline in the factory: Bun lint's
 // `noComponentHookFactories` rejects a component defined inside a function.
+// Counts mounts: opening a collapsed rail onto another panel must never mount this one first.
+const gitPanelMounts = { count: 0 };
 function GitPanelStub({ chatId }: { chatId: string }) {
+  useEffect(() => {
+    gitPanelMounts.count += 1;
+  }, []);
   return <div data-testid="git-panel-content">{chatId}</div>;
 }
 
 void mock.module('../../../src/features/workspace/GitPanel', () => ({ GitPanel: GitPanelStub }));
 
-// Stubbed for the same reason as the Git panel: the registry imports it
-// eagerly, so without this every rail test would mount the real GitHub panel
-// and its queries just to click between dock buttons.
+// Stubbed for the same reason as the Git panel: without this every rail test
+// would mount the real GitHub panel and its queries just to click between dock
+// buttons.
 function GithubPanelStub({ chatId }: { chatId: string }) {
   return <div data-testid="github-panel-content">{chatId}</div>;
 }
@@ -88,6 +94,7 @@ function renderRail(overrides: Partial<React.ComponentProps<typeof WorkspaceRail
 describe('WorkspaceRail', () => {
   beforeEach(() => {
     window.localStorage.clear();
+    gitPanelMounts.count = 0;
     setDesktopMediaQuery(true);
   });
 
@@ -105,9 +112,10 @@ describe('WorkspaceRail', () => {
       },
     });
 
-    expect(screen.getByText('Verify the workspace rail')).toBeVisible();
+    expect(await screen.findByText('Verify the workspace rail')).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Show Repository panel' }));
-    expect(screen.getByTestId('git-panel-content')).toHaveTextContent('chat-1');
+    // The Git panel body is a lazy chunk: it appears once its import settles.
+    expect(await screen.findByTestId('git-panel-content')).toHaveTextContent('chat-1');
   });
 
   it('remembers the collapsed state per chat', async () => {
@@ -123,7 +131,7 @@ describe('WorkspaceRail', () => {
     expect(screen.queryByTestId('git-panel-content')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Show Repository panel' }));
-    expect(screen.getByTestId('git-panel-content')).toBeVisible();
+    expect(await screen.findByTestId('git-panel-content')).toBeVisible();
     expect(window.localStorage.getItem(railCollapsedStorageKey('chat-1'))).toBeNull();
   });
 
@@ -192,7 +200,7 @@ describe('WorkspaceRail', () => {
     expect(screen.queryByRole('dialog', { name: 'Agent side panel' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Open agent side panel' }));
     expect(screen.getByRole('dialog', { name: 'Agent side panel' })).toBeVisible();
-    expect(screen.getByTestId('git-panel-content')).toBeVisible();
+    expect(await screen.findByTestId('git-panel-content')).toBeVisible();
 
     await user.click(screen.getByRole('button', { name: 'Close agent side panel' }));
     expect(screen.queryByRole('dialog', { name: 'Agent side panel' })).not.toBeInTheDocument();
@@ -228,7 +236,7 @@ describe('WorkspaceRail', () => {
    * its own open state, so the request has to open that too or the picked
    * panel renders behind a closed drawer nobody sees.
    */
-  it('opens the mobile drawer for a panel requested from outside the rail', () => {
+  it('opens the mobile drawer for a panel requested from outside the rail', async () => {
     setDesktopMediaQuery(false);
     renderRail();
 
@@ -238,6 +246,34 @@ describe('WorkspaceRail', () => {
     });
 
     expect(screen.getByRole('dialog', { name: 'Agent side panel' })).toBeVisible();
-    expect(screen.getByTestId('github-panel-content')).toBeVisible();
+    // The drawer opens onto the requested panel; the previous one is never mounted behind it.
+    expect(screen.queryByTestId('git-panel-content')).not.toBeInTheDocument();
+    expect(await screen.findByTestId('github-panel-content')).toBeVisible();
+    expect(gitPanelMounts.count, 'Git panel mounts while opening onto GitHub').toBe(0);
+  });
+
+  it('opens a collapsed rail straight onto the clicked panel, without mounting the previous one', async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem(railCollapsedStorageKey('chat-1'), 'true');
+    renderRail();
+    expect(screen.queryByTestId('git-panel-content')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Show GitHub panel' }));
+
+    expect(await screen.findByTestId('github-panel-content')).toBeVisible();
+    expect(screen.queryByTestId('git-panel-content')).not.toBeInTheDocument();
+    expect(gitPanelMounts.count, 'Git panel mounts while opening onto GitHub').toBe(0);
+  });
+
+  it('opens a collapsed rail onto a panel requested from outside, without mounting the previous one', async () => {
+    window.localStorage.setItem(railCollapsedStorageKey('chat-1'), 'true');
+    renderRail();
+
+    act(() => {
+      requestRailPanel('github');
+    });
+
+    expect(await screen.findByTestId('github-panel-content')).toBeVisible();
+    expect(gitPanelMounts.count, 'Git panel mounts while opening onto GitHub').toBe(0);
   });
 });

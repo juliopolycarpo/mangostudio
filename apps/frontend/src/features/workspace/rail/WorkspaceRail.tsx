@@ -5,15 +5,27 @@ import {
   type WorkspacePanelSettings,
 } from '@mangostudio/shared/workspaces';
 import { PanelRightOpen } from 'lucide-react';
-import { type Ref, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type Ref,
+  startTransition,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { createPortal } from 'react-dom';
 
 import { EdgeResizeHandle } from '@/components/layout/EdgeResizeHandle';
+import { LazyChunkBoundary } from '@/components/layout/LazyChunkBoundary';
 import { Button } from '@/components/ui/Button';
 import { SELECTION_BAR } from '@/components/ui/selection-bar';
+import { Spinner } from '@/components/ui/Spinner';
 import { useChatTodos } from '@/features/chat/hooks/use-chat-todos';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
+import { preloadWhenIdle } from '@/lib/idle-preload';
 
 import { getAvailableWorkspacePanels, type RailPanelDefinition } from './panel-registry';
 import { onRailPanelRequest } from './rail-panel-request';
@@ -22,6 +34,12 @@ import { RailPanel } from './RailPanel';
 
 const DESKTOP_RAIL_QUERY = '(min-width: 1024px)';
 const COLLAPSED_RAIL_WIDTH = 48;
+/**
+ * How long a panel switch may keep the previous body up. Past this the body
+ * shows the spinner instead, so a chunk that is slow (or hung) is visible and
+ * announced, rather than only a highlight on the dock.
+ */
+const SLOW_PANEL_SWITCH_MS = 1_000;
 
 interface WorkspaceRailProps {
   readonly chatId: string;
@@ -60,9 +78,15 @@ export function WorkspaceRail({
     () => getAvailableWorkspacePanels({ chatId, workdir, todoCount: todos.length }, settings),
     [chatId, settings, todos.length, workdir]
   );
+  // The panel the person asked for: the dock answers at once.
   const [activePanelId, setActivePanelId] = useState<WorkspacePanelId | null>(
     () => availablePanels[0]?.id ?? null
   );
+  // The panel whose body is on screen. It follows `activePanelId` in a
+  // transition when a body is already showing, so a chunk still on its way
+  // leaves the previous panel up instead of a spinner.
+  const [shownPanelId, setShownPanelId] = useState<WorkspacePanelId | null>(activePanelId);
+  const [slowSwitch, setSlowSwitch] = useState(false);
   const [collapsed, setCollapsedState] = useState(() => readRailCollapsed(chatId));
   const [mobileOpen, setMobileOpen] = useState(false);
   const [width, setWidth] = useState(settings.width);
@@ -78,9 +102,23 @@ export function WorkspaceRail({
 
   useEffect(() => {
     if (!availablePanels.some((panel) => panel.id === activePanelId)) {
-      setActivePanelId(availablePanels[0]?.id ?? null);
+      const fallbackPanelId = availablePanels[0]?.id ?? null;
+      setActivePanelId(fallbackPanelId);
+      setShownPanelId(fallbackPanelId);
     }
   }, [activePanelId, availablePanels]);
+
+  // Warm the other panels' chunks once the page is quiet, so the first click
+  // on one is not a fetch. Only this idle warm-up is skipped under a data-saver
+  // preference; hover and focus on a dock button still start the chunk, since
+  // the person is about to ask for it.
+  useEffect(
+    () =>
+      preloadWhenIdle(
+        availablePanels.flatMap((panel) => (panel.lazyBody ? [panel.lazyBody.preload] : []))
+      ),
+    [availablePanels]
+  );
 
   const closeMobile = useCallback(() => {
     setMobileOpen(false);
@@ -106,9 +144,17 @@ export function WorkspaceRail({
     writeRailCollapsed(chatId, nextCollapsed);
   };
 
+  const bodyOnScreen = isDesktop ? !collapsed : mobileOpen;
+
   const selectPanel = useCallback(
     (panelId: WorkspacePanelId) => {
       setActivePanelId(panelId);
+      // Only a body that is already showing is worth holding up while the next
+      // one loads. Opening a collapsed rail or the drawer shows the requested
+      // panel at once; holding back would mount the previous one first, with
+      // its queries, for the length of the chunk fetch.
+      if (bodyOnScreen) startTransition(() => setShownPanelId(panelId));
+      else setShownPanelId(panelId);
       // Selecting a panel is a request to *see* it, so a collapsed rail opens.
       // Written through the same storage as the collapse button rather than
       // through `setCollapsed`, which is declared below this callback.
@@ -119,7 +165,7 @@ export function WorkspaceRail({
       // cleared `collapsed` picked a panel nothing on screen showed.
       if (!isDesktop) setMobileOpen(true);
     },
-    [chatId, isDesktop]
+    [bodyOnScreen, chatId, isDesktop]
   );
 
   // The rail has no keyboard shortcut for switching panels, so the command
@@ -138,12 +184,36 @@ export function WorkspaceRail({
     onWidthChange?.(widthRef.current);
   };
 
+  const switching = shownPanelId !== activePanelId;
+  useEffect(() => {
+    if (!switching) return;
+    const timer = setTimeout(() => setSlowSwitch(true), SLOW_PANEL_SWITCH_MS);
+    return () => {
+      clearTimeout(timer);
+      setSlowSwitch(false);
+    };
+  }, [switching]);
+
   if (availablePanels.length === 0) return null;
 
   const activePanel =
     availablePanels.find((panel) => panel.id === activePanelId) ?? availablePanels[0];
-  const activeTitle = panelTitles[activePanel.id];
-  const ActivePanelContent = activePanel.component;
+  // The dock answers a click at once; the body follows once its chunk is in,
+  // and the panel that was showing stays up until then (or the spinner, once
+  // that takes longer than SLOW_PANEL_SWITCH_MS).
+  const shownPanel = availablePanels.find((panel) => panel.id === shownPanelId) ?? activePanel;
+  const ActivePanelContent = shownPanel.component;
+  // Set while a chosen panel's body is still on its way and the previous one is up.
+  const loadingPanelId = shownPanel.id === activePanel.id ? null : activePanel.id;
+  const showingSpinner = slowSwitch && loadingPanelId !== null;
+  // The header names what the body is: the previous panel while it is still up,
+  // the chosen one once the spinner has replaced it.
+  const activeTitle = panelTitles[(showingSpinner ? activePanel : shownPanel).id];
+  const panelSpinner = (
+    <div className="flex h-full items-center justify-center">
+      <Spinner size="md" label={t.common.loading} />
+    </div>
+  );
   const panelContent = (
     closeMode: 'collapse' | 'close',
     onClose: () => void,
@@ -158,12 +228,22 @@ export function WorkspaceRail({
       }
       onClose={onClose}
     >
-      <ActivePanelContent
-        chatId={chatId}
-        workdir={workdir}
-        todos={todos}
-        environmentId={environmentId}
-      />
+      {showingSpinner ? (
+        panelSpinner
+      ) : (
+        // Keyed by panel, so a failure in one panel's chunk does not follow the
+        // person to the next one.
+        <Suspense fallback={panelSpinner}>
+          <LazyChunkBoundary key={shownPanel.id} onRetry={() => shownPanel.lazyBody?.reset()}>
+            <ActivePanelContent
+              chatId={chatId}
+              workdir={workdir}
+              todos={todos}
+              environmentId={environmentId}
+            />
+          </LazyChunkBoundary>
+        </Suspense>
+      )}
     </RailPanel>
   );
 
@@ -189,6 +269,7 @@ export function WorkspaceRail({
           panels={availablePanels}
           panelTitles={panelTitles}
           activePanelId={activePanel.id}
+          loadingPanelId={loadingPanelId}
           collapsed={collapsed}
           navigationLabel={t.workspace.sidePanelNavigation}
           switchLabel={t.workspace.sidePanelSwitch}
@@ -236,6 +317,7 @@ export function WorkspaceRail({
               panels={availablePanels}
               panelTitles={panelTitles}
               activePanelId={activePanel.id}
+              loadingPanelId={loadingPanelId}
               navigationLabel={t.workspace.sidePanelNavigation}
               switchLabel={t.workspace.sidePanelSwitch}
               onSelect={selectPanel}
@@ -254,6 +336,8 @@ interface PanelDockProps {
   readonly panels: readonly RailPanelDefinition[];
   readonly panelTitles: Readonly<Record<WorkspacePanelId, string>>;
   readonly activePanelId: WorkspacePanelId;
+  /** The chosen panel whose body has not replaced the previous one yet. */
+  readonly loadingPanelId?: WorkspacePanelId | null;
   /**
    * The rail is folded down to this strip, so no panel is on screen. Every icon
    * is idle then: the current-item mark (fill, accent bar, `aria-pressed`) says
@@ -270,6 +354,7 @@ function PanelDock({
   panels,
   panelTitles,
   activePanelId,
+  loadingPanelId = null,
   collapsed = false,
   navigationLabel,
   switchLabel,
@@ -291,8 +376,12 @@ function PanelDock({
             variant="subtle"
             size="icon"
             onClick={() => onSelect(panel.id)}
+            // Warm the chunk while the pointer or the keyboard is on its way to the click.
+            onPointerEnter={() => panel.lazyBody?.preload()}
+            onFocus={() => panel.lazyBody?.preload()}
             aria-label={switchLabel.replace('{panel}', title)}
             aria-pressed={active}
+            aria-busy={panel.id === loadingPanelId}
             title={title}
             // The current panel's mark is the shared selection bar, moved out to the
             // dock's own edge (`before:-left-2`) like the sidebar's current page: the

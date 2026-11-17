@@ -309,6 +309,29 @@ build):
   chunk, which takes the first block from three rounds to two. The load report models it the
   same way: renderer and highlighter in one round, then grammar and theme.
 
+**Rail panel bodies are lazy.** `rail/panel-registry.ts` is imported by the command palette and
+the chat page, so the Git, GitHub and Todo bodies load through `retryableLazy`
+(`src/lib/retryable-lazy.ts`) instead of a static import: that took 117 KB raw (27 KB
+Brotli) out of the entry. The rail starts those imports on hover or focus of the dock
+button and, once the page is idle, for every available panel (`src/lib/idle-preload.ts`;
+skipped under `saveData`; hover and focus still start the chunk), so a click rarely waits.
+A switch on an open rail keeps the previous body up while the new chunk arrives (a React
+transition) and marks the dock button `aria-busy`; after one second it shows the spinner
+instead, so a slow fetch is visible. Opening a collapsed rail or the mobile drawer shows the
+requested panel at once, never the previous one first. React holds a Suspense reveal back up
+to 300 ms after it commits a fallback, so a spinner flash made a cold click on a fast network
+about 300 ms slower than the fetch.
+
+`LazyChunkBoundary` keeps a failed chunk inside the rail with Retry and Reload; a plain
+`React.lazy` would cache the rejection and take the whole page down through the route's
+error component. Only a chunk that could not be fetched counts (the `TypeError` each browser
+raises: "Failed to fetch dynamically imported module", "error loading dynamically imported
+module", "Importing a module script failed"). A chunk that arrived and threw while it
+evaluated is a bug in that code and keeps its own error, which reaches the route's error
+component. A failed import is forgotten after a backoff (1 s, doubling to 30 s), so a view
+that mounts later heals without a click, and a dead connection is not hammered; Retry asks at
+once.
+
 `tests/browser-smoke/load-waterfall.spec.ts` watches the same first uses in a real browser
 (opt-in: `MANGO_LOAD_WATERFALL=1`, and `MANGO_LOAD_PROFILE=slow-4g` for a CDP throttle) and prints
 `LOAD_WATERFALL` lines from the page's Resource Timing entries.
