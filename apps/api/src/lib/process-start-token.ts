@@ -66,8 +66,13 @@ export async function readProcessStartToken(
       const ticks = output?.trim();
       return ticks !== undefined && /^\d{10,}$/.test(ticks) ? ticks : undefined;
     }
-    // `lstart` prints local time; the C locale keeps its shape (and so equality) stable.
-    const output = await host.run(['ps', '-o', 'lstart=', '-p', String(pid)], { LC_ALL: 'C' });
+    // `lstart` prints the start instant in the caller's time zone and locale. The hub (often a
+    // launchd service) and the CLI (a shell that may set `TZ`, or a laptop whose zone changed
+    // since the hub started) must print the same text for the same instant, so both are pinned.
+    const output = await host.run(['ps', '-o', 'lstart=', '-p', String(pid)], {
+      LC_ALL: 'C',
+      TZ: 'UTC',
+    });
     const started = output?.trim();
     return started !== undefined &&
       /^[A-Z][a-z]{2} [A-Z][a-z]{2} +\d{1,2} \d\d:\d\d:\d\d \d{4}$/.test(started)

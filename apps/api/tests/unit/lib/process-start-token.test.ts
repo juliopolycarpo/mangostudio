@@ -105,7 +105,9 @@ describe('readProcessStartToken', () => {
 
     expect(await readProcessStartToken(42, host)).toBe('Mon Nov 17 09:15:02 2026');
     expect(host.commands).toEqual([['ps', '-o', 'lstart=', '-p', '42']]);
-    expect(host.envs).toEqual([{ LC_ALL: 'C' }]);
+    // Without the pinned zone a hub and a CLI in different zones would read different tokens
+    // for one process, and the live hub would be judged stale.
+    expect(host.envs).toEqual([{ LC_ALL: 'C', TZ: 'UTC' }]);
   });
 
   it('accepts a single-digit day, which ps pads with a space', async () => {
