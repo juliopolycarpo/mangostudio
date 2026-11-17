@@ -38,8 +38,12 @@ jobs:
       # `bun audit` reads bun.lock directly, so there is no install step and
       # no dependency code runs. `--audit-level` gates the exit status as well
       # as the report; moderate matches dependency-review.yml's threshold.
+      # GHSA-fc5q-39xc-vjpf (picomatch ReDoS) has no fixed release. picomatch
+      # is dev-only (knip, the TanStack route generator) and only matches
+      # globs from repository config. Added 2026-11-17: remove when picomatch
+      # ships a fix (#2365).
       - name: Audit bun.lock
-        run: bun audit --audit-level=moderate
+        run: bun audit --audit-level=moderate --ignore=GHSA-fc5q-39xc-vjpf
 
   cargo-audit:
     # Separate from Bun so both ecosystems report even when one audit fails.
