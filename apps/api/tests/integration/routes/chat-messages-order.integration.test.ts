@@ -200,6 +200,24 @@ describe('GET /chats/:id/messages?order=desc', () => {
     expect(pages.map((page) => page.nextCursor === null)).toEqual([false, true]);
   });
 
+  it.each([
+    // [rows, limit, rows per page]: a single page that is both full and final, a
+    // one-row tail, and a limit larger than the transcript.
+    [100, 100, [100]],
+    [100, 99, [99, 1]],
+    [30, 100, [30]],
+  ])('pages %d rows with limit %d into %p', async (rows, limit, sizes) => {
+    const chatId = await newChat();
+    await seedTranscript(chatId, rows);
+
+    const pages = await readAllPages(chatId, 'desc', limit);
+
+    expect(pages.map((page) => page.messages.length)).toEqual(sizes);
+    expect(pages.map((page) => page.nextCursor === null)).toEqual(
+      sizes.map((_, index) => index === sizes.length - 1)
+    );
+  });
+
   it('is not disturbed by rows inserted after the first page was read', async () => {
     const chatId = await newChat();
     await seedTranscript(chatId, 100);

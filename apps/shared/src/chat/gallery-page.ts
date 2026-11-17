@@ -1,14 +1,17 @@
 import Type, { type Static } from 'typebox';
 
 import type { GalleryItem } from '../types/gallery';
+import { PAGE_LIMIT_DEFAULT, PAGE_LIMIT_MAX } from './page-limit';
 
 /** Query of `GET /api/messages/images`. */
 export const ListGalleryQuerySchema = Type.Object({
   /**
-   * Rows per page, as decimal text. Above `PAGE_LIMIT_MAX` it is clamped to it; a value
-   * that is not a positive integer is ignored and the page is `PAGE_LIMIT_DEFAULT` rows.
+   * Rows per page, 1 to `PAGE_LIMIT_MAX`; `PAGE_LIMIT_DEFAULT` when absent. A value outside
+   * that range or not an integer is refused with a 422, like the other paged routes.
    */
-  limit: Type.Optional(Type.String()),
+  limit: Type.Optional(
+    Type.Integer({ minimum: 1, maximum: PAGE_LIMIT_MAX, default: PAGE_LIMIT_DEFAULT })
+  ),
   /**
    * The `nextCursor` of the previous page, passed back unchanged. The value is
    * opaque: it encodes the position of the last image returned. A bare

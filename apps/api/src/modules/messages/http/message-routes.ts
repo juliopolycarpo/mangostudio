@@ -3,8 +3,6 @@ import {
   type GalleryPage,
   GalleryPageSchema,
   ListGalleryQuerySchema,
-  PAGE_LIMIT_DEFAULT,
-  PAGE_LIMIT_MAX,
   UpdateMessageBodySchema,
 } from '@mangostudio/shared/chat';
 import {
@@ -16,7 +14,6 @@ import { type Elysia, t } from 'elysia';
 
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
-import { parsePageLimit } from '../../../utils/query';
 import { ChatNotFoundError } from '../../chats/domain/chat-ownership';
 import { createMessageUseCase } from '../application/create-message';
 import { listGalleryUseCase } from '../application/list-gallery';
@@ -48,10 +45,7 @@ export const messageRoutes = (app: Elysia) =>
               {
                 userId: user?.id ?? '',
                 cursor: query.cursor,
-                limit: parsePageLimit(query.limit, {
-                  fallback: PAGE_LIMIT_DEFAULT,
-                  max: PAGE_LIMIT_MAX,
-                }),
+                limit: query.limit,
               },
               getDb()
             );

@@ -4,8 +4,8 @@
  * Both took `limit` as free text and passed whatever integer came out to the
  * query, so one request for `limit=100000` read the whole table into the hub,
  * and a negative `limit` reached SQLite as a negative `LIMIT`, which SQLite
- * reads as no limit at all. Each case below is a request that used to return
- * more rows than the documented maximum, or to ignore its own limit.
+ * reads as no limit at all. The schema now bounds it to 1..maximum and answers
+ * 422 otherwise, like the activity, GitHub and external-session routes.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
@@ -53,58 +53,50 @@ afterEach(() => {
   while (restores.length > 0) restores.pop()?.();
 });
 
-async function getJson<T>(
+async function getLimit(
   plugin: typeof chatRoutes | typeof messageRoutes,
   path: string
-): Promise<T> {
+): Promise<Response> {
   const { app, restore } = createAuthenticatedApiTestApp(user, plugin);
   restores.push(restore);
-  const response = await app.handle(new Request(`http://localhost${path}`));
-  if (response.status !== 200) {
-    throw new Error(`GET ${path}: expected status: 200 | received: ${response.status}`);
-  }
-  return (await response.json()) as T;
+  return app.handle(new Request(`http://localhost${path}`));
 }
 
-const transcriptCount = async (limit: string) =>
-  (await getJson<{ messages: unknown[] }>(chatRoutes, `/chats/${chatId}/messages?limit=${limit}`))
-    .messages.length;
-
-const galleryCount = async (limit: string) =>
-  (await getJson<{ items: unknown[] }>(messageRoutes, `/messages/images?limit=${limit}`)).items
-    .length;
+const transcriptPath = (limit: string) =>
+  `/chats/${chatId}/messages${limit === '' ? '' : `?limit=${limit}`}`;
+const galleryPath = (limit: string) => `/messages/images${limit === '' ? '' : `?limit=${limit}`}`;
 
 const routes = [
-  ['GET /chats/:id/messages', transcriptCount],
-  ['GET /messages/images', galleryCount],
+  ['GET /chats/:id/messages', chatRoutes, transcriptPath, 'messages'],
+  ['GET /messages/images', messageRoutes, galleryPath, 'items'],
 ] as const;
 
-describe.each(routes)('%s limit', (_name, count) => {
-  it('honours a limit inside the range', async () => {
+describe.each(routes)('%s limit', (_name, plugin, pathFor, rowsKey) => {
+  const count = async (limit: string) => {
+    const response = await getLimit(plugin, pathFor(limit));
+    if (response.status !== 200) {
+      throw new Error(`limit=${limit}: expected status: 200 | received: ${response.status}`);
+    }
+    return ((await response.json()) as Record<string, unknown[]>)[rowsKey]?.length;
+  };
+
+  it('honours a limit inside the range, up to the maximum', async () => {
     expect(await count('7')).toBe(7);
+    expect(await count(String(LIMIT_MAX))).toBe(LIMIT_MAX);
   });
 
   it('serves the default page when limit is absent', async () => {
     expect(await count('')).toBe(LIMIT_DEFAULT);
   });
 
-  it('clamps a limit above the maximum to the maximum', async () => {
-    expect(await count(String(LIMIT_MAX + 1))).toBe(LIMIT_MAX);
-    expect(await count('100000')).toBe(LIMIT_MAX);
-    expect(await count('99999999999999999999')).toBe(LIMIT_MAX);
-  });
-
-  it.each(['0', '-1', '-2', '-100000'])(
-    'treats limit=%s as no usable limit and serves the default page',
+  it.each(['101', '100000', '99999999999999999999', '0', '-1', '-100000', 'abc', '1.5', '12abc'])(
+    'refuses limit=%s with 422 and the range it allows',
     async (limit) => {
-      expect(await count(limit)).toBe(LIMIT_DEFAULT);
-    }
-  );
-
-  it.each(['abc', '1.5', '12abc', ' '])(
-    'treats limit=%p as no usable limit and serves the default page',
-    async (limit) => {
-      expect(await count(limit)).toBe(LIMIT_DEFAULT);
+      const response = await getLimit(plugin, pathFor(limit));
+      expect(
+        response.status,
+        `limit=${limit}: expected status: 422 (limit must be 1..${LIMIT_MAX}) | received: ${response.status}`
+      ).toBe(422);
     }
   );
 });
