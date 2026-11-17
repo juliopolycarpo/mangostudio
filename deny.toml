@@ -115,6 +115,12 @@ skip = [
   # reqwest (the runtime's MCP HTTP client) always enables hyper-util's `client-proxy`, which
   # still pins base64 0.22 for proxy basic-auth; everything else in the graph is on 0.23.
   { crate = "base64@0.22.1", reason = "hyper-util 0.1's client-proxy (always enabled by reqwest 0.13) has not moved to base64 0.23" },
+
+  # zip 9.6 pulls nix 0.32 on macOS and the BSDs, while the workspace and process-wrap 10 (via
+  # mango-external-agents) stay on 0.31. The launcher links zip only on Windows, so no build
+  # compiles both: the duplicate exists only because this check spans every target. Drop the skip
+  # when process-wrap allows nix 0.32 and the workspace moves with it (#2237).
+  { crate = "nix@0.32.0", reason = "zip 9.6's macOS/BSD dependency; the launcher links zip only on Windows, so no build compiles it" },
 ]
 
 # sources: only crates.io. No git dependencies anywhere in this graph, and none are expected —
