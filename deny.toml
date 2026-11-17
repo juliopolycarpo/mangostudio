@@ -14,7 +14,8 @@ feature-depth = 1
 [advisories]
 ignore = [
   # chrono is unmaintained, not vulnerable. rmcp 3.10.0 depends on it unconditionally, so it
-  # stays in the graph after the runtime's own use and mango-agent-acp's are gone (#2346).
+  # stays in the graph even once the runtime's own use goes; mango-agent-acp dropped it in 0.11.0
+  # (#2346).
   # Added 2026-11-17: remove when rmcp moves off chrono.
   { id = "RUSTSEC-2026-0543", reason = "unmaintained, no vulnerability; required by rmcp 3.10.0 (#2346)" },
 ]
