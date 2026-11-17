@@ -49,8 +49,19 @@ export interface WorkerIdentity {
 }
 
 /**
+ * The command line of podman's rootless pause process. The first rootless
+ * `podman` call of a user starts it, and it is meant to outlive that call: it
+ * keeps the user namespace alive for the containers that follow. It inherits the
+ * environment, and so the token, of whichever worker ran that first call, but it
+ * is per-user state, not something the worker leaked. It is neither reported nor
+ * signalled. The match is exact: the whole command line, nothing else.
+ */
+export const PODMAN_PAUSE_COMMAND = 'catatonit -P';
+
+/**
  * The processes of `entries` that belong to the worker: in its group, or
- * carrying its token. A zombie is not left behind, only unreaped.
+ * carrying its token. A zombie is not left behind, only unreaped, and podman's
+ * pause process ({@link PODMAN_PAUSE_COMMAND}) is not the worker's.
  *
  * @example
  * findLeftovers(entries, { pgid: 4242, token: 'w1' }); // => [{ pid: 4300, command: 'sleep 600' }]
@@ -62,6 +73,7 @@ export function findLeftovers(
   const marker = `${WORKER_TOKEN_ENV}=${who.token}`;
   return entries
     .filter((entry) => entry.state !== 'Z')
+    .filter((entry) => entry.command !== PODMAN_PAUSE_COMMAND)
     .filter(
       (entry) =>
         (who.pgid !== null && entry.pgid === who.pgid) ||
@@ -147,6 +159,33 @@ export interface SignalWorkerOptions {
 }
 
 /**
+ * Sends `signal` to the process group `pgid`, and to no other. A group id of 0 or
+ * 1, or one that is not an integer, would be sent as `-0` (the caller's own
+ * group, so the runner and `bun run` with it), `-1` (every process the user
+ * owns), or `NaN` from an empty string: all of them refused with an error that
+ * names the value. A group that has already emptied is not an error.
+ *
+ * @example
+ * killProcessGroup(child.pid, 'SIGKILL');
+ */
+export function killProcessGroup(
+  pgid: number,
+  signal: NodeJS.Signals,
+  sendSignal: (pid: number, signal: NodeJS.Signals) => void = process.kill
+): void {
+  if (!Number.isInteger(pgid) || pgid <= 1) {
+    throw new Error(
+      `test workers: expected a process group id that is an integer greater than 1 | received: ${JSON.stringify(pgid)}`
+    );
+  }
+  try {
+    sendSignal(-pgid, signal);
+  } catch {
+    // The group emptied between the decision and the signal.
+  }
+}
+
+/**
  * Signals the worker's group and token-bearing children that left it. A group
  * member receives the group signal once; other workers and zombies are ignored.
  * Detached children must receive cancellation before output draining can hold
@@ -162,13 +201,7 @@ export function signalWorker(
   options: SignalWorkerOptions = {}
 ): void {
   const { table = systemProcessTable, sendSignal = process.kill } = options;
-  if (who.pgid !== null) {
-    try {
-      sendSignal(-who.pgid, signal);
-    } catch {
-      // The group emptied between the decision and the signal.
-    }
-  }
+  if (who.pgid !== null) killProcessGroup(who.pgid, signal, sendSignal);
   if (!who.token) return;
   const escaped = table().filter((entry) => entry.pgid !== who.pgid);
   for (const { pid } of findLeftovers(escaped, { pgid: null, token: who.token })) {
@@ -192,13 +225,7 @@ export interface SettleOptions {
 
 /** SIGKILLs the worker's group and every process found by token. */
 function reapLeftovers(leftovers: readonly Leftover[], who: WorkerIdentity): void {
-  if (who.pgid !== null) {
-    try {
-      process.kill(-who.pgid, 'SIGKILL');
-    } catch {
-      // The group emptied between the check and the signal.
-    }
-  }
+  if (who.pgid !== null) killProcessGroup(who.pgid, 'SIGKILL');
   for (const { pid } of leftovers) {
     try {
       process.kill(pid, 'SIGKILL');

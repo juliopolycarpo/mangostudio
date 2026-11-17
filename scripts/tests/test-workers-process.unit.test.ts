@@ -22,6 +22,7 @@ import {
   type WorkerChild,
   workerEnvironment,
   type WorkerGuardian,
+  type WorkerHost,
 } from '../lib/test-worker-process';
 import { SETTLE_GRACE_MS, WORKER_TOKEN_ENV } from '../lib/test-worker-settle';
 import {
@@ -42,11 +43,7 @@ import {
   TRANSITIONAL_STATE_READS,
 } from './support/process-liveness';
 import { fakeLane } from './support/test-worker-fakes';
-import {
-  assertDrainPipeHolder,
-  DrainFixtureScope,
-  withOwnedDrainFixture,
-} from './support/worker-drain-fixture';
+import { DrainFixtureScope, withOwnedDrainFixture } from './support/worker-drain-fixture';
 import {
   settleWorkerLanesBeforeRemoval,
   trackWorkerHandle,
@@ -629,7 +626,14 @@ describe('a worker that leaks a process holding its pipes', () => {
           if (process.platform !== 'win32') {
             expect(await owner.ready()).toBe(observedPid);
             controller.signal.throwIfAborted();
-            assertDrainPipeHolder(observedPid, owner.holdingPipes, isAlive);
+            // The holder shared the worker's group, so the sweep after the drain
+            // grace has already ended it: it held the pipes, and no longer lives.
+            expect(owner.holdingPipes, 'expected the leaked process to hold the pipes').toBe(true);
+            for (let polls = 0; polls < 40 && isAlive(observedPid); polls += 1) await Bun.sleep(50);
+            expect(
+              isAlive(observedPid),
+              `expected pipe holder ${observedPid} swept with its group`
+            ).toBe(false);
             expect(
               elapsed,
               'expected the inherited pipes to require the drain grace'
@@ -734,7 +738,11 @@ describe('a worker whose exit is never reported', () => {
 
   const STILL_WAITING = 'still waiting on child.exited';
 
-  function startWedged(settle: boolean, exited = new Promise<never>(() => undefined)) {
+  function startWedged(
+    settle: boolean,
+    exited = new Promise<never>(() => undefined),
+    host: WorkerHost = {}
+  ) {
     const plan: WorkerPlan = {
       index: 1,
       count: 1,
@@ -753,7 +761,8 @@ describe('a worker whose exit is never reported', () => {
       { out: ignore, err: ignore },
       100,
       fixtureChildEnvironment(),
-      spawnWedgedExitChild(exited)
+      spawnWedgedExitChild(exited),
+      host
     );
     const within = (ms: number) =>
       Promise.race([handle.exited, Bun.sleep(ms).then(() => STILL_WAITING)]);
@@ -808,8 +817,19 @@ describe('a worker whose exit is never reported', () => {
     }
   );
 
-  it('keeps waiting on a plain child, whose kill nothing else confirms', async () => {
-    const { handle, within } = startWedged(false);
+  it('reports a killed group leader of a lane that does not settle as SIGKILLed too', async () => {
+    const { handle, within } = startWedged(false, undefined, { platform: 'linux' });
+
+    handle.kill('SIGKILL');
+
+    expect(await within(3_000), 'expected the abandoned exit wait of a group leader').toEqual({
+      exitCode: null,
+      signal: 'SIGKILL',
+    });
+  });
+
+  it('keeps waiting on a plain child on win32, whose kill nothing else confirms', async () => {
+    const { handle, within } = startWedged(false, undefined, { platform: 'win32' });
 
     handle.kill('SIGKILL');
 
@@ -1090,3 +1110,173 @@ describe('workerEnvironment', () => {
     expect(workerEnvironment({ A: undefined, B: '2' }, { env: {} })).toEqual({ B: '2' });
   });
 });
+
+/** A worker child with closed pipes that exits with code 0 when the test says so. */
+class FakeGroupWorkerChild implements WorkerChild {
+  readonly stdout = new ReadableStream<Uint8Array>({ start: (stream) => stream.close() });
+  readonly stderr = new ReadableStream<Uint8Array>({ start: (stream) => stream.close() });
+  readonly exitCode = 0;
+  readonly signalCode = null;
+  readonly killedDirectly: string[] = [];
+  private readonly exit = Promise.withResolvers<unknown>();
+  readonly exited = this.exit.promise;
+
+  constructor(readonly pid: number) {}
+
+  kill(signal: 'SIGTERM' | 'SIGKILL'): void {
+    this.killedDirectly.push(signal);
+  }
+
+  leave(): void {
+    this.exit.resolve(0);
+  }
+}
+
+/** Records the `process.kill` calls a worker handle makes instead of delivering them. */
+class RecordedSignals {
+  readonly sent: { pid: number; signal: NodeJS.Signals }[] = [];
+  readonly sendSignal = (pid: number, signal: NodeJS.Signals): void => {
+    this.sent.push({ pid, signal });
+  };
+}
+
+const PLAIN_PLAN: WorkerPlan = {
+  index: 1,
+  count: 2,
+  laneId: 'root',
+  cwd: '/repo',
+  argv: ['bun', 'test'],
+  files: null,
+  reportPath: '/tmp/root-worker-1.xml',
+  settle: false,
+  env: {},
+};
+
+/** Starts one worker over fakes and returns what it did, for either platform. */
+function startFakeWorker(platform: NodeJS.Platform, pid = 5001) {
+  const child = new FakeGroupWorkerChild(pid);
+  const signals = new RecordedSignals();
+  const spawned: boolean[] = [];
+  const handle = startWorkerProcess(
+    PLAIN_PLAN,
+    '',
+    { out: () => undefined, err: () => undefined },
+    0,
+    {},
+    (options) => {
+      spawned.push(options.detached);
+      return child;
+    },
+    { platform, sendSignal: signals.sendSignal }
+  );
+  return { child, signals, spawned, handle };
+}
+
+describe('a worker of a lane that does not settle', () => {
+  it.each(['linux', 'darwin'] as const)(
+    'leads its own process group on %s, so its group signals reach it alone',
+    async (platform) => {
+      const { spawned, signals, handle, child } = startFakeWorker(platform);
+
+      handle.kill('SIGTERM');
+      expect(spawned, `expected worker spawned detached on ${platform}`).toEqual([true]);
+      expect(signals.sent).toEqual([{ pid: -5001, signal: 'SIGTERM' }]);
+      expect(child.killedDirectly).toEqual([]);
+      child.leave();
+      await handle.exited;
+    }
+  );
+
+  it('SIGKILLs the group once the worker has exited, so a stray child cannot outlive it', async () => {
+    const { signals, handle, child } = startFakeWorker('linux');
+
+    child.leave();
+    await handle.exited;
+    expect(signals.sent).toEqual([{ pid: -5001, signal: 'SIGKILL' }]);
+    expect(handle.settle).toBeUndefined();
+  });
+
+  it('stays a plain child on win32, which has no process groups', async () => {
+    const { spawned, signals, handle, child } = startFakeWorker('win32');
+
+    handle.kill('SIGTERM');
+    child.leave();
+    await handle.exited;
+    expect(spawned).toEqual([false]);
+    expect(child.killedDirectly).toEqual(['SIGTERM']);
+    expect(signals.sent, 'expected no group signal on win32').toEqual([]);
+  });
+
+  it.each([0, 1, -1, Number.NaN, Number('')])(
+    'refuses pid %p as a group to signal, and reports it as the worker’s start error',
+    async (pid) => {
+      const { signals, handle, child } = startFakeWorker('linux', pid);
+
+      child.leave();
+      await expect(handle.exited).rejects.toThrow(
+        'expected a process group id that is an integer greater than 1'
+      );
+      expect(signals.sent, `expected no signal for pid ${pid}`).toEqual([]);
+    }
+  );
+});
+
+// Real processes: POSIX only, since Windows has no group for the signal to reach.
+describe.skipIf(process.platform === 'win32')(
+  'a worker of a lane that does not settle, for real',
+  () => {
+    it('that signals its own group is reported by name and does not take the lane down', async () => {
+      const { verdict } = await runLane(2, { 2: 'kill-own-group' });
+
+      // Reaching this line is the point: with a shared group the runner died too.
+      expect(verdict.failures[0]).toContain('api-unit worker 2/2 was killed by SIGKILL');
+      expect(
+        verdict.failures.filter((failure) => !failure.startsWith('api-unit worker 2/2 ')),
+        'expected every failure to name worker 2/2, the one that signalled its group'
+      ).toEqual([]);
+    });
+
+    it('forwards a cancellation to the worker’s whole group, child included', async () => {
+      const pidDir = mkdtempSync(join(tmpdir(), 'mangostudio-worker-pids-'));
+      workspaces.push(pidDir);
+      const controller = new AbortController();
+      const owner = ownLane(controller);
+      const running = owner.start(() =>
+        runLane(2, { 1: 'hang-tree', 2: 'hang-tree' }, { signal: controller.signal, pidDir, owner })
+      );
+      await owner.run(async () => {
+        const up = await until(() => readdirSync(pidDir).length === 4, 10_000, controller.signal);
+        const pids = readdirSync(pidDir).map((name) => readPid(pidDir, name));
+        try {
+          expect(up, 'expected two workers and two children running before cancellation').toBe(
+            true
+          );
+          controller.abort();
+          const { verdict } = await running;
+          expect(verdict.failures).toHaveLength(2);
+          expect(verdict.failures.every((failure) => failure.includes('was cancelled'))).toBe(true);
+          expect(
+            pids.filter((pid) => isAlive(pid)),
+            'expected no live descendants after cancellation'
+          ).toEqual([]);
+        } finally {
+          controller.abort();
+          cleanupPids(pids);
+        }
+      });
+    });
+
+    it('that leaves a child behind has it killed when the worker exits', async () => {
+      const pidDir = mkdtempSync(join(tmpdir(), 'mangostudio-worker-pids-'));
+      workspaces.push(pidDir);
+      const { verdict } = await runLane(2, { 1: 'leak' }, { pidDir });
+
+      expect(verdict.failures).toEqual([]);
+      const leaked = readPid(pidDir, 'leak-1.pid');
+      for (let polls = 0; polls < 40 && isAlive(leaked); polls += 1) await Bun.sleep(50);
+      expect(isAlive(leaked), `expected leaked child ${leaked} gone after its worker exited`).toBe(
+        false
+      );
+    });
+  }
+);

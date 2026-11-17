@@ -4,7 +4,12 @@
 
 import { NewlineSplitter, type SplitLine } from './newline-splitter';
 import type { GuardedChild } from './runner-guardian';
-import { settleWorker, signalWorker, WORKER_TOKEN_ENV } from './test-worker-settle';
+import {
+  killProcessGroup,
+  settleWorker,
+  signalWorker,
+  WORKER_TOKEN_ENV,
+} from './test-worker-settle';
 import type { WorkerExit, WorkerHandle, WorkerPlan } from './test-workers';
 
 /** Where a worker's output lines go; the real ones are `process.stdout` and `process.stderr`. */
@@ -67,6 +72,12 @@ interface WorkerSpawnOptions {
   readonly cwd: string;
   readonly env: Record<string, string>;
   readonly detached: boolean;
+}
+
+/** What {@link startWorkerProcess} asks of the machine; every field defaults to the real one. */
+export interface WorkerHost {
+  readonly platform?: NodeJS.Platform;
+  readonly sendSignal?: (pid: number, signal: NodeJS.Signals) => void;
 }
 
 /**
@@ -212,11 +223,17 @@ const stdSinks: LineSinks = {
  * supply their own child environment without changing the worker's policy.
  * `spawn` defaults to a real child process.
  *
- * A worker whose plan settles (POSIX) leads a process group of its own, so a
- * signal to `kill` reaches everything it started, and `settle` reports what is
- * still running in that group, or carrying the worker's token, once it has
- * exited. Windows has no group to lead; there the worker is a plain child and
- * has nothing to settle.
+ * On POSIX every worker leads a process group of its own, so a signal to `kill`
+ * reaches everything it started, and a group signal a test sends to itself ends
+ * one worker, not the runner and `bun run` with it. The group is SIGKILLed once
+ * the worker has exited and its pipes have drained, so a stray child cannot
+ * outlive it. A worker whose plan settles also has `settle`, which reports what
+ * is still running in that group, or carrying the worker's token, instead of
+ * killing it silently. Windows has no process groups; there the worker is a
+ * plain child and has nothing to settle.
+ *
+ * `platform` and `sendSignal` default to the machine's; a test names fakes for
+ * both so the Windows and POSIX branches run on every host.
  *
  * @example
  * const handle = startWorkerProcess(plan, '[api-unit 2/4] ');
@@ -228,9 +245,11 @@ export function startWorkerProcess(
   sinks: LineSinks = stdSinks,
   drainGraceMs: number = DRAIN_GRACE_MS,
   env: NodeJS.ProcessEnv = process.env,
-  spawn: SpawnWorker = spawnWorkerChild
+  spawn: SpawnWorker = spawnWorkerChild,
+  host: WorkerHost = {}
 ): WorkerHandle {
-  const leadsGroup = plan.settle && process.platform !== 'win32';
+  const { platform = process.platform, sendSignal = process.kill } = host;
+  const leadsGroup = platform !== 'win32';
   const child = spawn({
     cmd: [...plan.argv],
     cwd: plan.cwd,
@@ -282,6 +301,11 @@ export function startWorkerProcess(
     const grace = setTimeout(() => stopReading.abort(), drainGraceMs);
     await Promise.all(pumps);
     clearTimeout(grace);
+    // A worker that settles proves its group empty in `settle`, which reports
+    // what it had to kill. Any other worker's group is reaped here, so a stray
+    // child neither survives the worker nor holds the lane's pipes.
+    // A pid that is no group id throws here and surfaces as the worker's start error.
+    if (leadsGroup && !plan.settle) killProcessGroup(child.pid, 'SIGKILL', sendSignal);
     // On the abandon path Bun may never have populated exitCode/signalCode; we
     // have already sent SIGKILL, so report that when the handle reported
     // neither — keeping WorkerExit's "exactly one set" contract without
@@ -301,7 +325,7 @@ export function startWorkerProcess(
         child.kill(signal);
       } else {
         try {
-          signalWorker({ pgid: child.pid, token: token ?? '' }, signal);
+          signalWorker({ pgid: child.pid, token: token ?? '' }, signal, { sendSignal });
         } catch (caught) {
           // Keep the escalation timer alive. Settlement retries the table and
           // reports the signaling failure after cleaning up what it can find.

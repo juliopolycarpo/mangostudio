@@ -2,7 +2,9 @@ import { describe, expect, it } from 'bun:test';
 
 import {
   findLeftovers,
+  killProcessGroup,
   type Leftover,
+  PODMAN_PAUSE_COMMAND,
   type ProcessEntry,
   type ProcessTable,
   settleWorker,
@@ -188,5 +190,71 @@ describe('settleWorker', () => {
       throw new Error('ps: exit 1');
     };
     await expect(settleWorker({ who: WHO, table: unreadable })).rejects.toThrow('ps: exit 1');
+  });
+});
+
+describe('killProcessGroup', () => {
+  it('signals the negated group id', () => {
+    const host = new SignalHost([]);
+    killProcessGroup(4000, 'SIGKILL', host.sendSignal);
+    expect(host.sent).toEqual([{ pid: -4000, signal: 'SIGKILL' }]);
+  });
+
+  it('treats a group that has already emptied as done', () => {
+    const host = new SignalHost([]);
+    host.groupVanished = true;
+    expect(() => killProcessGroup(4000, 'SIGTERM', host.sendSignal)).not.toThrow();
+  });
+
+  // In Bun `kill(0)`, `kill(-0)` and `kill('')` (Number('') is 0) signal the caller's own group,
+  // and `kill(-1)` reaches every process of the user.
+  it.each([0, -0, 1, -1, 1.5, Number.NaN, Number(''), Number.POSITIVE_INFINITY])(
+    'refuses %p without sending anything',
+    (pgid) => {
+      const host = new SignalHost([]);
+      expect(() => killProcessGroup(pgid, 'SIGKILL', host.sendSignal)).toThrow(
+        'expected a process group id that is an integer greater than 1 | received:'
+      );
+      expect(host.sent).toEqual([]);
+    }
+  );
+
+  it('is what signalWorker uses, so a worker with a bad group id signals no group', () => {
+    const host = new SignalHost([]);
+    expect(() => signalWorker({ pgid: 0, token: '' }, 'SIGTERM', host)).toThrow('received: 0');
+    expect(host.sent).toEqual([]);
+  });
+});
+
+describe('podman’s rootless pause process', () => {
+  it('is not a leftover even when it carries the worker’s token', () => {
+    const environ = `${WORKER_TOKEN_ENV}=${WHO.token}`;
+    const entries = [
+      entry({ pid: 4100, pgid: 4000, command: PODMAN_PAUSE_COMMAND, environ }),
+      entry({ pid: 4200, pgid: 4200, command: PODMAN_PAUSE_COMMAND, environ }),
+    ];
+    expect(findLeftovers(entries, WHO)).toEqual([]);
+  });
+
+  it('is not signalled by token either', () => {
+    const host = new SignalHost([
+      entry({
+        pid: 4300,
+        pgid: 4300,
+        command: PODMAN_PAUSE_COMMAND,
+        environ: `${WORKER_TOKEN_ENV}=${WHO.token}`,
+      }),
+    ]);
+    signalWorker(WHO, 'SIGKILL', host);
+    expect(host.sent).toEqual([{ pid: -4000, signal: 'SIGKILL' }]);
+  });
+
+  it('exempts only the exact command line, never a similar one', () => {
+    const environ = `${WORKER_TOKEN_ENV}=${WHO.token}`;
+    const similar = ['catatonit -P --extra', '/usr/bin/catatonit -P', 'catatonit', 'sleep 600'];
+    const entries = similar.map((command, offset) =>
+      entry({ pid: 4400 + offset, pgid: 4400 + offset, command, environ })
+    );
+    expect(findLeftovers(entries, WHO).map((leftover) => leftover.command)).toEqual(similar);
   });
 });

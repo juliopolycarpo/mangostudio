@@ -802,6 +802,19 @@ lane with `expected live descendants: 0 | received: N`, its PID and command. The
 runner kills it before returning the failure. An unreadable process table also
 fails. Zombies are excluded because they hold no ports or locks. `--no-orphans`
 is omitted on this path so Bun cannot kill the evidence before the check.
+Podman's rootless pause process, whose whole command line is exactly
+`catatonit -P`, is not a leftover: the first `podman` call of a user starts it,
+it is meant to outlive that call, and it inherits the calling worker's
+environment token. The check neither reports nor signals it.
+
+On POSIX every worker of every lane, settling or not, leads a process group of
+its own. A test that signals its own group (`process.kill(0, ...)`) ends that one
+worker, which the lane reports by name, instead of the lane runner and `bun run`.
+Cancellation signals the worker's group, and the group is SIGKILLed once the
+worker has exited, so a stray child cannot outlive it. Only a settling lane
+reports such a child instead of killing it silently. Group ids are validated
+(an integer above 1) before a negative-pid kill. Windows has no process groups and
+keeps its plain child.
 
 Cancellation sends SIGTERM to the whole worker group and, on Linux, to
 token-bearing children that left the group. It escalates both to SIGKILL
