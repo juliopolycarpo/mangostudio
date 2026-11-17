@@ -91,6 +91,34 @@ describe('runtime target mapping', () => {
     expect(command.join(' ')).not.toContain('RUSTFLAGS');
   });
 
+  test.each([
+    ['a Windows home', String.raw`C:\Users\runneradmin\.cargo`],
+    ['a home with spaces', '/home/Ana Maria/.cargo'],
+    ['a home with a single quote', "/home/o'brien/.cargo"],
+    ['a home with a double quote and a Windows path', String.raw`D:\"odd"\.cargo`],
+  ])('the remap argument for %s parses as TOML into one exact rustc flag', (_name, home) => {
+    const command = cargoRuntimeBuildCommand('windows-x64', { zig: false, cargoHome: home });
+    expect(command.at(-2)).toBe('--config');
+    const parsed = Bun.TOML.parse(command.at(-1) as string) as {
+      target: Record<string, { rustflags: string[] }>;
+    };
+    expect(parsed.target['cfg(all())']?.rustflags).toEqual([`--remap-path-prefix=${home}=/cargo`]);
+  });
+
+  test('flags a Windows-shaped binary that embeds either spelling of the builder paths', () => {
+    const needles = buildPathNeedles(String.raw`E:\tools\cargo-home`);
+    const registry = Buffer.from(
+      String.raw`C:\Users\runneradmin\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\tokio-1.0\src\lib.rs`
+    );
+    expect(
+      embeddedBuildPathProblems(registry, needles).map((p) => p.split('received: ')[1])
+    ).toEqual(['.cargo\\registry\\ (1 occurrence)', '\\Users\\runneradmin\\ (1 occurrence)']);
+    const customHome = Buffer.from('E:/tools/cargo-home/registry/src/x D:\\a\\repo\\repo\\x.rs');
+    expect(
+      embeddedBuildPathProblems(customHome, needles).map((p) => p.split('received: ')[1])
+    ).toEqual(['D:\\a\\ (1 occurrence)', 'E:/tools/cargo-home (1 occurrence)']);
+  });
+
   test('resolves the Cargo home from CARGO_HOME, then HOME', () => {
     expect(resolveCargoHome({ CARGO_HOME: '/opt/cargo', HOME: '/home/a' })).toBe('/opt/cargo');
     expect(resolveCargoHome({ HOME: '/home/a' })).toBe('/home/a/.cargo');

@@ -429,16 +429,26 @@ export function runtimeVersionProblem(stdout: string, expected: string): string 
 }
 
 /**
- * Strings that mark a builder's directory inside a binary. The first three
+ * Strings that mark a builder's directory inside a binary. The fixed ones
  * match any builder's Cargo registry or a GitHub runner home without knowing
  * the machine (a prebuilt runtime is verified on a different machine than it
- * was built on); the last is this machine's own Cargo home when it is a
- * custom one such as `/usr/local/cargo`.
+ * was built on), in both path spellings: `/` for Linux and macOS, `\` for
+ * Windows (`C:\Users\runneradmin\…`, `D:\a\…`). The rest is this machine's own
+ * Cargo home, which may be custom such as `/usr/local/cargo`, in both spellings.
  */
 export function buildPathNeedles(cargoHome: string = resolveCargoHome()): string[] {
-  const needles = ['.cargo/registry/', '.cargo\\registry\\', '/home/runner/'];
-  if (cargoHome.length >= 8 && cargoHome !== CARGO_HOME_REMAP_TARGET) needles.push(cargoHome);
-  return needles;
+  const needles = [
+    '.cargo/registry/',
+    '.cargo\\registry\\',
+    '/home/runner/',
+    '/Users/runner/',
+    '\\Users\\runneradmin\\',
+    'D:\\a\\',
+  ];
+  if (cargoHome.length >= 8 && cargoHome !== CARGO_HOME_REMAP_TARGET) {
+    needles.push(cargoHome, cargoHome.replaceAll('\\', '/'), cargoHome.replaceAll('/', '\\'));
+  }
+  return [...new Set(needles)];
 }
 
 /**
