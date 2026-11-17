@@ -29,7 +29,7 @@ scripts/
 ├── changelog-separators.ts
 │                     Repair historical release separators only (--check for read-only validation)
 ├── bench/            Hermetic performance measurement (startup.ts, runtime-handshake.ts, grep.ts, library-walk.ts + its fixture plans)
-├── ci/               Dependency-free workflow steps (gate evaluation, distribution identity, cross-runtime fetch, test-shard and timings merge, Rust lane relevance and qualification selection)
+├── ci/               Dependency-free workflow steps (gate evaluation, distribution identity, cross-runtime fetch, test-shard and timings merge, Rust lane relevance and qualification selection, frontend bundle report and first-load budget)
 ├── lib/              Shared toolkit (see below)
 ├── examples/         Runnable maintainer samples (dependency-free Bun scripts)
 ├── install/          Canonical installers (install.sh, install.ps1): staged by current release automation and embedded in the hub binary

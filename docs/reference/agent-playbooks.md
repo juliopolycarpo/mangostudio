@@ -821,6 +821,7 @@ Open these first:
 - `apps/api/src/server/embedded-frontend.ts`
 - `scripts/lib/embed-frontend.ts` (binary embedding) and `scripts/test-build.ts`
 - `scripts/ci/frontend-bundle-report.ts` (per-chunk size diff against a saved baseline)
+- `scripts/ci/frontend-load-graph.ts` (eager payload, per-feature first-use rounds, eager-size budget)
 - `scripts/lib/test-lanes.ts` (the lane registry, not just `package.json`)
 
 `docs/architecture/frontend-build.md` carries the measured traps for this section (bundler,
