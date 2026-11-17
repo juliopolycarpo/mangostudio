@@ -54,6 +54,12 @@ export const WORKERS_LOG = 'workers.log';
 /** Written by the grandchild once its signal handlers are installed; holds its pid. */
 const GRANDCHILD_UP = 'grandchild-up';
 
+/** Written by the `runner-announcing` role once its SIGTERM handling has told the guardian. */
+export const STOP_ANNOUNCED_FILE = 'stop-announced';
+
+/** Written by the `runner-announcing` role once the listener that writes {@link STOP_ANNOUNCED_FILE} exists. */
+export const STOP_LISTENER_ARMED_FILE = 'stop-listener-armed';
+
 /** The file whose existence lets the workers finish. */
 export const RELEASE_FILE = 'release';
 
@@ -236,6 +242,24 @@ async function runFakeRunner(dir: string, childRole: string, extra: string[]): P
 }
 
 /**
+ * The runner of {@link runFakeRunner}, plus a marker written once the supervisor
+ * has finished handling a SIGTERM. The supervisor's handler signals the children
+ * and tells its guardian (`stopping`) synchronously, before it first yields, and
+ * Node-style emitters call listeners in registration order. A listener added
+ * after the supervisor's therefore runs only after the guardian was told, so the
+ * marker is a happens-after fact a test can wait for instead of guessing a delay.
+ */
+async function runFakeAnnouncingRunner(dir: string): Promise<number> {
+  const running = runFakeRunner(dir, 'child', ['ignore', 'ignore']);
+  // The supervisor installs its handlers when it adopts the child it just spawned.
+  await waitFor(() => process.listenerCount('SIGTERM') > 0, FAKE_LIFETIME_MS);
+  process.on('SIGTERM', () => writeFileSync(join(dir, STOP_ANNOUNCED_FILE), 'announced'));
+  // A SIGTERM sent before the listener exists would leave no marker; the test waits for this one.
+  writeFileSync(join(dir, STOP_LISTENER_ARMED_FILE), 'armed');
+  return running;
+}
+
+/**
  * The command that starts the grandchild. On Windows it goes through a `.cmd`
  * shim, as `bunx`, `turbo` and `tsc` do: Bun hands back cmd.exe's pid, and the
  * real worker is cmd.exe's child, a link that Bun's own job object lets break
@@ -319,6 +343,7 @@ if (import.meta.main) {
   const [role, dir = '', ...rest] = process.argv.slice(2);
   const numbers = rest.map(Number);
   if (role === 'runner') process.exit(await runFakeRunner(dir, rest[0] ?? 'child', rest.slice(1)));
+  if (role === 'runner-announcing') process.exit(await runFakeAnnouncingRunner(dir));
   if (role === 'runner-exit') process.exit(await runFakeExitingRunner(dir, rest));
   if (role === 'production-command') {
     process.exit(await runFakeProductionCommand(dir, rest[0] ?? '', rest[1] ?? ''));
