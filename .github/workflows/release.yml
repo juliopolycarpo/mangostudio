@@ -267,6 +267,7 @@ jobs:
       source_sha: ${{ needs.prepare.outputs.source_sha }}
       channel: release
       retention_days: 30
+      aot_order_platforms: all
 
   verify-build:
     name: Verify built Linux binary

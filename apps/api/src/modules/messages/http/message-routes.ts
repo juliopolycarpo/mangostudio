@@ -14,7 +14,6 @@ import { type Elysia, t } from 'elysia';
 
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
-import { parseQueryInt } from '../../../utils/query';
 import { ChatNotFoundError } from '../../chats/domain/chat-ownership';
 import { createMessageUseCase } from '../application/create-message';
 import { listGalleryUseCase } from '../application/list-gallery';
@@ -46,7 +45,7 @@ export const messageRoutes = (app: Elysia) =>
               {
                 userId: user?.id ?? '',
                 cursor: query.cursor,
-                limit: query.limit ? parseQueryInt(query.limit, 50) : undefined,
+                limit: query.limit,
               },
               getDb()
             );

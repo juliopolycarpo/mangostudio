@@ -201,6 +201,17 @@ hash cache in `.mango/pass-stamps` means unchanged files are not read again. The
 `--compiler bytecode` uses `--bytecode --trim` with the same ESM, source maps and
 production minification, and retains all 8 cross-compilation targets.
 
+On a Linux host a native build with `--production` (given explicitly) or `--require-aot-order`
+compiles twice: once with `--aot-record-order`, then — after `scripts/lib/aot-order.ts` has run that
+binary through `scripts/lib/hub-workload.ts` and checked the file it wrote — with
+`--aot-order=<file>`. A plain local, smoke or test build compiles once. The recording hub runs
+supervised (`ChildSupervisor`) with an allowlisted environment (`isolatedHubEnv` in
+`scripts/lib/hub-process.ts`, shared with the benchmarks), so a cancelled build leaves no hub or
+home behind. The build fails or warns if Bun prints its "is not an order file" warning. The order
+file lives in `.mango/aot-order/<arch>/hub.order` and is rebuilt every time (the recording binary
+beside it is deleted); it is never committed, because any code change invalidates it. Its SHA-256 is
+the compile receipt's `aotOrderSha256`.
+
 Native builds use the running compiler and its runtime, without downloading a
 cross-target Bun runtime; `--refresh-runtimes` has no effect on native builds.
 `.bun-version` remains the floating `canary` channel. Per-target compiler receipts
@@ -504,6 +515,7 @@ MANGO_API_KEY='mango_…' bun run scripts/examples/external-api-smoke.ts http://
 | Script                       | Purpose                                                                                                                         |
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `startup.ts`                 | Median process-start → first healthy `GET /api/health` of a binary                                                              |
+| `hub-footprint.ts`           | Compiled hubs side by side: binary size, start → first healthy `/api/health`, idle and post-workload RSS (Linux `/proc`)        |
 | `runtime-handshake.ts`       | Runtime child over stdio: process start → `hello` → first request, min/median/p95/max                                           |
 | `grep.ts`                    | Runtime `fs.grep` over stdio: 1/100/1000 small files, a large file, peak RSS, cancel                                            |
 | `line-decoder.ts`            | Protocol NDJSON `LineDecoder`: ns per byte for large records in small pieces and for many short records, peak RSS               |
@@ -569,6 +581,18 @@ module-load time are visible rather than buried under migration work.
 
 Compare two binaries by building both and running the same command against
 each; a startup claim is only worth as much as its median and spread.
+
+`hub-footprint.ts` starts each `label=binary` once per round in rotated order, each in a fresh
+isolated home, and reads `VmRSS`, `RssAnon`, `RssFile`, `RssShmem` and `VmHWM` from
+`/proc/<pid>/status`. `--idle-seconds` waits before the idle read; `--workload` signs in, lists
+chats and fetches the page and its largest script as br, gzip and identity, then reads memory
+after a 3 s settle. Keep both binaries on one filesystem (an executable on tmpfs counts as
+`RssShmem`) and run it while the host is quiet: the load average is saved per row.
+
+```bash
+bun run scripts/bench/hub-footprint.ts --rounds 10 --idle-seconds 10 --workload \
+  base=../base/.mango/out/linux-x64/mangostudio head=.mango/out/linux-x64/mangostudio
+```
 
 `runtime-handshake.ts` spawns `mangostudio-runtime --stdio` through the protocol SDK's
 launcher, exchanges `hello` as the hub does and asks for `runtime.health`, with a fresh

@@ -5,8 +5,6 @@
 
 import { afterEach, describe, expect, it } from 'bun:test';
 import { connect as connectSocket, type Socket } from 'node:net';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 
 import legacyHello from '../../../../spec/fixtures/1/legacy-hello.json';
 import { CLOSE_CODES } from '../../src/close';
@@ -15,6 +13,7 @@ import type { Port } from '../../src/port';
 import { Session } from '../../src/session';
 import { CONFORMANCE_A } from '../../src/testing/conformance';
 import { connectIpc, type IpcServer, listenIpc } from '../../src/transports/ipc';
+import { useSocketTestHome } from '../support/socket-address';
 import {
   expectMangoPeerBehaviour,
   INTEROP_ENABLED,
@@ -25,13 +24,10 @@ import {
 
 const describeInterop = INTEROP_ENABLED ? describe : describe.skip;
 
-let sequence = 0;
+const sockets = useSocketTestHome('interop');
 
-/** An address no other case in this run is using. */
-function address(): string {
-  const name = `mango-interop-${process.pid}-${++sequence}`;
-  return process.platform === 'win32' ? `\\\\.\\pipe\\${name}` : join(tmpdir(), `${name}.sock`);
-}
+/** An address no other case in this run is using; removed after the case. */
+const address = (): string => sockets.nextAddress();
 
 const running: RunningPeer[] = [];
 const servers: IpcServer[] = [];
