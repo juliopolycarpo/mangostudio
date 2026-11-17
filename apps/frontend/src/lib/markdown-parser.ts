@@ -1,11 +1,27 @@
 import { Marked, type MarkedOptions, Renderer } from 'marked';
 
 import type { CodeThemeId } from '@/lib/code-themes';
+import { HIGHLIGHT_FIRST_SLICE_MS, type HighlightSlice } from '@/lib/highlight-slices';
 
 export const CLIPBOARD_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
 
 export interface CodeHighlighter {
-  highlightCode: (code: string, lang: string, theme: CodeThemeId) => string | null;
+  /** With `budgetMs` it colours about that long and draws the rest plain; see `continueHighlight`. */
+  highlightCode: (
+    code: string,
+    lang: string,
+    theme: CodeThemeId,
+    options?: { readonly budgetMs?: number }
+  ) => string | null;
+  /** True when `highlightCode` drew a block with lines left to colour; absent on a highlighter that colours whole blocks. */
+  isHighlightContinuationPending?: (code: string, lang: string, theme: CodeThemeId) => boolean;
+  /** Colours the next stretch of such a block; absent with `isHighlightContinuationPending`. */
+  continueHighlight?: (
+    code: string,
+    lang: string,
+    theme: CodeThemeId,
+    budgetMs: number
+  ) => HighlightSlice | null;
   preloadCodeLanguages: (languages: readonly string[], theme: CodeThemeId) => Promise<boolean>;
   /** True when a block stopped once on the tokenizer's time limit and may be asked for again; absent on a highlighter that never stops. */
   isHighlightRetryPending?: (code: string, lang: string, theme: CodeThemeId) => boolean;
@@ -131,7 +147,10 @@ function renderCode(
   highlighter: CodeHighlighter | null
 ): string {
   const safeLang = lang ?? '';
-  const highlighted = safeLang ? highlighter?.highlightCode(text, safeLang, theme) : null;
+  // A budget, not the whole block: what is left is coloured in idle slices (`highlight-slices`).
+  const highlighted = safeLang
+    ? highlighter?.highlightCode(text, safeLang, theme, { budgetMs: HIGHLIGHT_FIRST_SLICE_MS })
+    : null;
   if (highlighted) return renderHighlightedCode(highlighted, safeLang, copyCodeLabel);
 
   return renderPlainCode(text, safeLang, copyCodeLabel);

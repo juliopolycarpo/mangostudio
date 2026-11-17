@@ -19,6 +19,16 @@ export class StoppingTokenizerClock {
   now = (): number => (++this.reads <= 4 ? 0 : 1_000);
 }
 
+/**
+ * A second later on every read: the first line the tokenizer reads the clock for has started at
+ * one reading and finds the limit passed at the next, whatever the line holds. A call that
+ * tokenizes any line stops; `StoppingTokenizerClock` stops only a line with enough matches.
+ */
+export class EveryLineStopsTokenizerClock {
+  private reads = 0;
+  now = (): number => this.reads++ * 1_000;
+}
+
 /** Runs `run` with `Date.now` replaced by `now`, and puts the real clock back afterwards. */
 export function withTokenizerClock<T>(now: () => number, run: () => T): T {
   const realNow = Date.now;

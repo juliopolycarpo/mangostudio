@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { act } from 'react';
 
 import { useTheme } from '../../../src/hooks/use-theme';
+import { HIGHLIGHT_FIRST_SLICE_MS } from '../../../src/lib/highlight-slices';
 import { stubClipboard } from '../../support/harness/clipboard';
 import { render, screen, waitFor } from '../../support/harness/render';
 import { advanceTimersByTimeAsync, useFakeTimers } from '../../support/harness/timers';
@@ -12,9 +13,14 @@ import { advanceTimersByTimeAsync, useFakeTimers } from '../../support/harness/t
 // `shiki.x`: `bun test` has no `jest.mocked`, and reading the
 // namespace after `mock.module` would only work by accident.
 const shiki = {
-  highlightCode: jest.fn<(code: string, language: string, theme: string) => string | null>(
-    () => null
-  ),
+  highlightCode: jest.fn<
+    (
+      code: string,
+      language: string,
+      theme: string,
+      options?: { budgetMs?: number }
+    ) => string | null
+  >(() => null),
   initHighlighter: jest.fn(() => Promise.resolve(undefined)),
   preloadCodeLanguages: jest.fn(() => Promise.resolve(true)),
 };
@@ -28,6 +34,9 @@ void mock.module('@/lib/shiki', () => ({
 // bind the components to the real highlighter.
 const { MarkdownContent } = await import('../../../src/components/MarkdownContent');
 const { MarkdownContentRenderer } = await import('../../../src/components/MarkdownContentRenderer');
+
+/** What the renderer passes the highlighter for a block's first draw: the rest is coloured in slices. */
+const FIRST_DRAW_OPTIONS = { budgetMs: HIGHLIGHT_FIRST_SLICE_MS };
 
 /** Switches the code theme the way the appearance settings do. */
 function CodeThemeSwitch() {
@@ -320,7 +329,8 @@ describe('MarkdownContent — syntax highlighting', () => {
     expect(shiki.highlightCode).toHaveBeenLastCalledWith(
       'const x = 1;',
       'typescript',
-      'one-dark-pro'
+      'one-dark-pro',
+      FIRST_DRAW_OPTIONS
     );
   });
 
@@ -338,7 +348,8 @@ describe('MarkdownContent — syntax highlighting', () => {
       expect(shiki.highlightCode).toHaveBeenLastCalledWith(
         'const x = 1;',
         'typescript',
-        'one-dark-pro'
+        'one-dark-pro',
+        FIRST_DRAW_OPTIONS
       )
     );
 
@@ -356,7 +367,8 @@ describe('MarkdownContent — syntax highlighting', () => {
     expect(shiki.highlightCode).toHaveBeenLastCalledWith(
       'const x = 1;',
       'typescript',
-      'one-dark-pro'
+      'one-dark-pro',
+      FIRST_DRAW_OPTIONS
     );
 
     await act(async () => {
@@ -367,7 +379,8 @@ describe('MarkdownContent — syntax highlighting', () => {
       expect(shiki.highlightCode).toHaveBeenLastCalledWith(
         'const x = 1;',
         'typescript',
-        'github-dark-dimmed'
+        'github-dark-dimmed',
+        FIRST_DRAW_OPTIONS
       )
     );
   });
