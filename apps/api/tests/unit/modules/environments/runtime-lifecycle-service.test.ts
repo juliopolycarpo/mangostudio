@@ -1,17 +1,22 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 
+import { RemoteError } from '@mangostudio/protocol';
 import { DEFAULT_SSH_RUNTIME_PATH, type RuntimeSetupBody } from '@mangostudio/shared/environments';
 import { RUNTIME_CAPABILITY_KEYS, RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 
+import { EnvironmentUnavailableError } from '../../../../src/lib/environment-unavailable';
 import {
   buildSetupCommand,
+  failureLineFor,
   pushRuntimeOverSsh,
   restartBudgetMs,
 } from '../../../../src/modules/environments/application/runtime-lifecycle-service';
-import type {
-  RuntimeCommandOptions,
-  RuntimeCommandResult,
+import {
+  type RuntimeCommandOptions,
+  type RuntimeCommandResult,
+  RuntimePushError,
 } from '../../../../src/modules/environments/domain/runtime-push';
+import { WslProvisioningError } from '../../../../src/modules/environments/infrastructure/wsl-provisioner';
 
 function ok(stdout = ''): RuntimeCommandResult {
   return { stdout, stderr: '', exitCode: 0 };
@@ -216,6 +221,44 @@ describe('pushRuntimeOverSsh', () => {
     await expect(push(runnerProbing('Linux\n'))).rejects.toThrow(
       'Could not read what "example.test" reported about itself: Linux'
     );
+  });
+});
+
+describe('failureLineFor', () => {
+  const HUB_PATH = '/home/alice/.mango/runtime/cache/linux-x64.tmp';
+
+  // Regression: any thrown error's text reached the run's stderr stream.
+  it('replaces the text of an error the hub did not word for the user', () => {
+    const line = failureLineFor(
+      new Error(`EACCES: permission denied, open '${HUB_PATH}'`),
+      'r1',
+      'e1'
+    );
+
+    expect(line).toBe('The runtime action failed. Details are in the hub log.');
+    expect(line).not.toContain(HUB_PATH);
+  });
+
+  it('gives a connect refusal its fixed per-reason copy, not the manager text', () => {
+    const line = failureLineFor(
+      new EnvironmentUnavailableError('binary-missing', `searched ${HUB_PATH}`),
+      'r1',
+      'e1'
+    );
+
+    expect(line).toBe('The runtime for this environment is not installed on the hub.');
+  });
+
+  it('passes through errors its collaborators word for the operator', () => {
+    expect(failureLineFor(new WslProvisioningError('The distro is stopped.'), 'r1', 'e1')).toBe(
+      'The distro is stopped.'
+    );
+    expect(failureLineFor(new RuntimePushError('Upload was truncated.'), 'r1', 'e1')).toBe(
+      'Upload was truncated.'
+    );
+    expect(
+      failureLineFor(new RemoteError('REFUSED', 'update refused: digest mismatch'), 'r1', 'e1')
+    ).toBe('update refused: digest mismatch');
   });
 });
 

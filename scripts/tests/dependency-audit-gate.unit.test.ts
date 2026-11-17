@@ -61,7 +61,20 @@ describe('mandatory dependency audit', () => {
     expect(job.steps?.filter((step) => step.run)).toEqual([
       { name: 'Audit Cargo.lock', run: 'cargo deny check advisories' },
     ]);
-    expect(readText('deny.toml')).toContain('[advisories]\nignore = []');
+    // The ignore list is pinned id by id: a new entry has to be added here on purpose, with the
+    // reason it cannot be fixed by an upgrade.
+    const advisories = (
+      Bun.TOML.parse(readText('deny.toml')) as { advisories: { ignore: unknown } }
+    ).advisories;
+    expect(
+      advisories.ignore,
+      'deny.toml [advisories] ignore: expected only the chrono unmaintained notice'
+    ).toEqual([
+      {
+        id: 'RUSTSEC-2026-0543',
+        reason: 'unmaintained, no vulnerability; required by rmcp 3.10.0 (#2346)',
+      },
+    ]);
     expect(extractJobBlock(readText('.github/workflows/protocol-ci.yml'), 'deny')).toContain(
       'run: cargo deny check bans licenses sources'
     );

@@ -8,7 +8,12 @@ import type { UserServiceStatus } from '@mangostudio/shared/runtime-home';
 
 import { getConfig, getConfigEnvFilePath } from '../../lib/config';
 import { ensureRuntimeDirs } from '../../lib/mango-paths';
-import { isStateLive, readState, removeState, type ServerState } from '../../lib/server-state';
+import {
+  classifyStateProcess,
+  readState,
+  removeState,
+  type ServerState,
+} from '../../lib/server-state';
 import {
   buildHubServiceDefinition,
   createHubServiceManager,
@@ -167,7 +172,7 @@ function resolveInstallTarget(
 async function liveInstance(d: Required<ServiceDeps>): Promise<ServerState | null> {
   const state = await d.readState();
   if (!state) return null;
-  if (isStateLive(state, (pid) => d.controller.isAlive(pid))) return state;
+  if ((await classifyStateProcess(state, d.controller)) !== 'stale') return state;
   await d.removeState();
   return null;
 }
@@ -189,7 +194,7 @@ async function stopPredecessor(
   );
   await stopPidOrThrow(
     d,
-    state.pid,
+    state,
     `The service (${unit}) is installed, but the instance started outside it (PID ${state.pid}) did not stop within 10s. Run "mangostudio killserver"; the service takes the port once that pid is gone.`
   );
 }
