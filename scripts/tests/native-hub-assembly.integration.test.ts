@@ -64,6 +64,7 @@ beforeEach(() => {
       gitDirty: false,
       buildType: 'production',
       builtAt: '2026-10-29T00:00:00.000Z',
+      aotOrderSha256: null,
       hubSha256: createHash('sha256').update(hub).digest('hex'),
       hubSize: hub.length,
       runtimeSha256: createHash('sha256').update(runtime).digest('hex'),

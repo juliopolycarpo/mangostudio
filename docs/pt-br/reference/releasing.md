@@ -175,6 +175,29 @@ diferente do host falha antes do trabalho de frontend ou runtime. Builds de
 distribuição exigem registros de produtores nativos; bytecode é um fallback
 explícito e nunca os substitui silenciosamente.
 
+Um produtor Linux (glibc e musl) com `--require-aot-order` compila o hub duas vezes; `--production`
+passado explicitamente faz o mesmo, e um build local simples, de smoke ou de teste não. A primeira
+passada adiciona `--aot-record-order`; o build inicia esse binário num home descartável com
+ambiente em lista de permissão, executa a mesma carga de requisições do benchmark de footprint, o
+encerra e passa o arquivo gravado à compilação final como `--aot-order`. O arquivo numera as
+funções por posição, e o Bun não confere se ele pertence ao programa (só avisa quando o arquivo não é
+um arquivo de ordem), então o build grava a partir do binário que vai distribuir e esvazia antes o
+diretório da ordem. Se o hub de gravação não inicia, não escreve o arquivo, escreve algo que não é um
+arquivo de ordem, passa dos 120 s, ou o Bun informa que não pôde usar o arquivo, um build local
+avisa e distribui o hub sem ordem, e um build que a exige falha, para que nenhum hub saia sem o
+layout por acidente. O binário de gravação é apagado após a compilação final; o arquivo de ordem
+fica em `.mango/aot-order/<plataforma>/`, seu SHA-256 é o `aotOrderSha256` do recibo de compilação e
+o artefato do hub nativo o carrega. Produtores macOS e Windows compilam uma vez e registram o motivo.
+
+O `distribution-build.yml` recebe as plataformas que precisam gravar em `aot_order_platforms` (ids
+separados por espaço, ou `all`; vazio por padrão). O `release.yml` passa `all`; o `ci.yml` passa
+`all` nos pushes, porque o Canary diário promove esses pacotes, e só `linux-x64` nos pull requests,
+o hub que o dry run de release reaproveita. A gravação adiciona cerca de 5 s localmente (conte mais num runner) a uma etapa de hub
+Linux que termina antes dos jobs de runtime, então não alonga a execução. O hub de gravação não tem
+runtime ao lado; veja
+[runtime-metrics.md](runtime-metrics.md#binário-do-hub-ordem-de-funções-aot) para o que isso cobre
+e o que um runtime gravado acrescentaria.
+
 `--reuse-frontend` aceita `apps/frontend/dist/build-info.json` somente quando
 o build preparado e o checkout estão limpos, apontam para o mesmo HEAD e usam
 o mesmo modo de build. Ele preserva o horário original e regenera os caminhos
