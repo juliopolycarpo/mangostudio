@@ -1534,6 +1534,34 @@ mod tests {
     }
 
     #[test]
+    fn glob_and_grep_answer_with_exactly_their_documented_fields() {
+        let root = scratch_dir("filesystem-search-whole-results");
+        fs::write(root.join("match.txt"), "one\nneedle two\n").unwrap();
+
+        assert_eq!(
+            glob(glob_params(&root, "*.txt"), &token()).unwrap(),
+            json!({
+                "pattern": "*.txt",
+                "cwd": root.to_string_lossy(),
+                "matches": ["match.txt"],
+                "truncated": false,
+            }),
+            "expected the whole fs.glob answer | received a different object"
+        );
+        assert_eq!(
+            grep(grep_params(&root, "needle"), &token()).unwrap(),
+            json!({
+                "pattern": "needle",
+                "path": ".",
+                "matches": [{"file": "match.txt", "line": 2, "text": "needle two"}],
+                "filesScanned": 1,
+                "truncated": false,
+            }),
+            "expected the whole fs.grep answer | received a different object"
+        );
+    }
+
+    #[test]
     fn restricted_glob_and_grep_keep_their_existing_result_shapes() {
         let root = scratch_dir("filesystem-search-capability-results");
         fs::write(root.join("match.txt"), "needle\n").unwrap();

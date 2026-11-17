@@ -1228,6 +1228,26 @@ mod tests {
     }
 
     #[test]
+    fn patch_response_pins_the_summary_wording_and_both_lists() {
+        let one = patch_response(vec![json!({"path": "a"})], vec![json!({"op": "edit"})]);
+        assert_eq!(
+            one,
+            json!({
+                "result": {"files": [{"path": "a"}], "summary": "1 file changed"},
+                "mutations": [{"op": "edit"}],
+            }),
+            "expected a singular summary for one file | received a different object"
+        );
+
+        let none = patch_response(Vec::new(), Vec::new());
+        assert_eq!(
+            none,
+            json!({"result": {"files": [], "summary": "0 files changed"}, "mutations": []}),
+            "expected a plural summary for no files | received a different object"
+        );
+    }
+
+    #[test]
     fn move_snapshot_uses_the_committed_destination_hash() {
         let (home, service) = fixture();
         let source = home.join("source.txt");

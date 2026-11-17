@@ -401,6 +401,18 @@ mod tests {
     }
 
     #[test]
+    fn a_data_frame_carries_exactly_its_kind_and_base64_bytes() {
+        let frame = OutputFrame::data(b"hello");
+
+        assert_eq!(
+            frame.payload,
+            serde_json::json!({ "kind": "data", "data": "aGVsbG8=" }),
+            "expected a data frame payload of kind and base64 data | received a different object"
+        );
+        assert!(!frame.end, "expected a data frame not to end the stream");
+    }
+
+    #[test]
     fn absent_viewer_gets_no_events_and_reconnect_gets_bounded_replay() {
         let mut flow = TerminalFlow::new(SCROLLBACK_MAX_BYTES + 1).unwrap();
         let mut frames = Vec::new();

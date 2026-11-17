@@ -1360,6 +1360,85 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn read_and_list_answer_with_exactly_their_documented_fields() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        std::fs::write(&path, b"abc").unwrap();
+        let sha256 = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+
+        let text = Arc::clone(&service)
+            .read(
+                read_params(&path),
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            text,
+            json!({
+                "content": "     1\tabc", "path": "file", "size": 3, "sha256": sha256,
+                "totalLines": 1, "startLine": 1, "endLine": 1, "truncated": false,
+            }),
+            "expected the whole text fs.read-file answer | received a different object"
+        );
+
+        let base64: ReadParams =
+            decode(json!({"chatId":"chat","inputPath":"file","resolvedPath":path,"view":"base64"}));
+        let bytes = Arc::clone(&service)
+            .read(
+                base64,
+                ResponseBudget::unbounded(),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            bytes,
+            json!({
+                "content": "YWJj", "path": "file", "size": 3, "sha256": sha256,
+                "totalLines": 0, "startLine": 1, "endLine": 0, "truncated": false,
+                "view": "base64",
+            }),
+            "expected the whole base64 fs.read-file answer | received a different object"
+        );
+
+        let listed = Arc::clone(&service)
+            .list(
+                decode(json!({"inputPath":".","resolvedPath":home.to_path_buf()})),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            listed,
+            json!({"path": ".", "entries": [{"name": "file", "type": "file"}]}),
+            "expected the whole fs.list-directory answer | received a different object"
+        );
+    }
+
+    #[test]
+    fn snapshot_record_pins_every_field_of_an_edit_and_a_move() {
+        assert_eq!(
+            snapshot_record(
+                Path::new("/a"),
+                "move",
+                Some(b"abc"),
+                "after",
+                Some(Path::new("/b"))
+            ),
+            json!({
+                "path": "/a", "op": "move", "afterHash": "after", "movedTo": "/b",
+                "before": {
+                    "exists": true, "contentBase64": "YWJj",
+                    "hash": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+                },
+            }),
+            "expected every field of a move's snapshot record | received a different object"
+        );
+    }
+
     #[test]
     fn mutation_result_moves_the_result_it_wraps() {
         let mutation: Mutation = serde_json::from_value(json!({
