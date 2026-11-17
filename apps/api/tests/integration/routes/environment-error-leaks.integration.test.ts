@@ -22,6 +22,7 @@ import {
   type EnvironmentRuntimeEffects,
 } from '../../../src/modules/environments/application/environment-service';
 import type { EnvironmentProbingService } from '../../../src/modules/environments/application/probing-service';
+import { createRuntimeLifecycleService } from '../../../src/modules/environments/application/runtime-lifecycle-service';
 import { createToolchainService } from '../../../src/modules/environments/application/toolchain-service';
 import type { RuntimeCommandResult } from '../../../src/modules/environments/domain/runtime-push';
 import { createEnvironmentEntityRoutes } from '../../../src/modules/environments/http/environment-entity-routes';
@@ -116,6 +117,8 @@ interface AppOptions {
   readonly secretStore?: SecretStore;
   readonly credentialDatabasePath?: () => string;
   readonly rawConnectFailure?: boolean;
+  /** Builds the ssh channel the lifecycle service runs remote commands through. */
+  readonly commandRunner?: () => (script: string) => Promise<RuntimeCommandResult>;
 }
 
 function createTestApp(options: AppOptions = {}) {
@@ -148,7 +151,14 @@ function createTestApp(options: AppOptions = {}) {
   );
   const { app, restore } = createAuthenticatedApiTestApp(
     TEST_USER,
-    createEnvironmentEntityRoutes(service, undefined, undefined, toolchain)
+    createEnvironmentEntityRoutes(
+      service,
+      undefined,
+      options.commandRunner
+        ? createRuntimeLifecycleService({ manager, commandRunner: options.commandRunner })
+        : undefined,
+      toolchain
+    )
   );
   restoreAuth = restore;
   return { app, repository };
@@ -465,6 +475,32 @@ const CASES: readonly (readonly [string, () => LeakCase])[] = [
           await seedSshEnvironment(repository);
           return app.handle(
             new Request('http://localhost/environments/leak-ssh?removeRuntime=true', json('DELETE'))
+          );
+        },
+      };
+    },
+  ]),
+  // Regression (#2368): the setup command's stderr was the 409 body, with the host
+  // name and whatever paths the remote shell printed.
+  ...REMOTE_REMOVAL_SAMPLES.map((sample): readonly [string, () => LeakCase] => [
+    `remote setup: ${sample.label}`,
+    () => {
+      const { app, repository } = createTestApp({
+        commandRunner: failingSshRunnerFor(sample.stderr, sample.exitCode),
+      });
+      return {
+        name: sample.label,
+        status: 409,
+        reason: sample.reason,
+        messageIncludes: sample.messageIncludes,
+        logged: 'build-host.internal',
+        run: async () => {
+          await seedSshEnvironment(repository);
+          return app.handle(
+            new Request(
+              'http://localhost/environments/leak-ssh/runtime/setup',
+              json('POST', { profile: 'none' })
+            )
           );
         },
       };

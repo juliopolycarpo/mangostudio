@@ -49,6 +49,7 @@ import {
 } from '../../../services/runtime-client/runtime-connection-manager';
 import { generateId } from '../../../utils/id';
 import { environmentConfigFor } from '../domain/environment-config';
+import { EnvironmentServiceError } from '../domain/environment-error';
 import { runtimeDialEndpoint } from '../domain/pairing-token';
 import {
   buildConnectBootstrapCommand,
@@ -854,15 +855,21 @@ export function createRuntimeLifecycleService(
       }
 
       const config = environmentConfigFor('ssh', record.config);
-      const runner = createSshCommandRunner(config);
+      const runner = commandRunner(config);
       const allow = resolveSetupAllow(body);
       const command = buildSetupCommand(body, allow, sshRuntimePath(config));
       const result = await runner(command.script, { args: command.args, timeoutMs: 60_000 });
       if (result.exitCode !== 0) {
-        throw new RuntimeLifecycleUnavailableError(
-          `Setup on "${config.host}" failed: ${result.stderr.trim() || result.stdout.trim() || `exit ${result.exitCode}`}`,
-          409
-        );
+        // The command's output names the host and whatever the remote shell
+        // printed, so the client gets the classified cause and the route logs the
+        // output with the environment id (see `environmentError`).
+        const output = result.stderr.trim() || result.stdout.trim();
+        const failure = classifyRemoteFailure({ exitCode: result.exitCode, output });
+        throw new EnvironmentServiceError(failure.message, 409, {
+          reason: failure.reason,
+          diagnostic: `Setup on "${config.host}" failed: ${output || `exit ${result.exitCode}`}`,
+          environmentId,
+        });
       }
 
       await manager
