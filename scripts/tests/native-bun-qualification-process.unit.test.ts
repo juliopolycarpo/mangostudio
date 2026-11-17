@@ -16,6 +16,7 @@ import {
   snapshotNativeProcesses,
   WINDOWS_CENSUS_TIMEOUT_MS,
 } from '../lib/native-bun-qualification-process';
+import { signalPid } from './support/signal-pid';
 
 const temporary: string[] = [];
 afterEach(async () => {
@@ -431,7 +432,7 @@ describe('native command cancellation', () => {
         signal?.mockRestore();
         childSignal?.mockRestore();
         timer.mockRestore();
-        if (pid !== undefined && isAlive(pid)) process.kill(pid, 'SIGKILL');
+        if (pid !== undefined && isAlive(pid)) signalPid(pid, 'SIGKILL');
         await pending;
       }
     }
@@ -478,7 +479,7 @@ describe('native command cancellation', () => {
         expect(result.settlement.empty).toBe(true);
         expect(await aliveAfterGrace(worker)).toBe(false);
       } finally {
-        if (worker !== undefined && isAlive(worker)) process.kill(worker, 'SIGKILL');
+        if (worker !== undefined && isAlive(worker)) signalPid(worker, 'SIGKILL');
       }
     }
   );
@@ -1000,7 +1001,7 @@ describe('single command receipt', () => {
           `expected worker ${worker} state: terminated | received: ${survived ? 'alive' : 'terminated'}`
         ).toBe(false);
       } finally {
-        if (worker !== undefined && isAlive(worker)) process.kill(worker, 'SIGKILL');
+        if (worker !== undefined && isAlive(worker)) signalPid(worker, 'SIGKILL');
       }
     }
   );

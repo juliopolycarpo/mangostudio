@@ -14,6 +14,7 @@ import { basename, dirname, join } from 'node:path';
 
 import { probeIsolatedRuntime } from '../lib/binary-runtime-smoke';
 import { fakeIsolatedRuntime } from './support/fake-isolated-runtime';
+import { signalPid } from './support/signal-pid';
 
 interface RuntimeObservation {
   pid: number;
@@ -154,7 +155,7 @@ test.skipIf(process.platform === 'win32')(
         };
         for (const pid of [observed.descendant, observed.pid]) {
           try {
-            process.kill(pid, 'SIGKILL');
+            signalPid(pid, 'SIGKILL');
           } catch {
             /* Already settled. */
           }

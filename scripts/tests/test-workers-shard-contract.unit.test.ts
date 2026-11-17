@@ -13,6 +13,7 @@ import { dirname, join } from 'node:path';
 
 import { parseJunitXml } from '../lib/junit-report';
 import { discoverTestFiles } from '../lib/test-workers';
+import { readPidFile, signalPid } from './support/signal-pid';
 
 const TEST_DIR = 'tests/unit';
 // One file per name and extension pattern Bun runs, in nested and flat places.
@@ -240,10 +241,14 @@ describe('bun test --no-orphans', () => {
       });
 
       const started = await until(
-        () => [coordinatorFile, runnerFile, childFile].every((file) => existsSync(file)),
+        // Non-empty, not just present: `writeFileSync` creates the file before it writes the pid.
+        () =>
+          [coordinatorFile, runnerFile, childFile].every(
+            (file) => existsSync(file) && readFileSync(file, 'utf8').trim() !== ''
+          ),
         20_000
       );
-      const pidOf = (file: string): number => (started ? Number(readFileSync(file, 'utf8')) : 0);
+      const pidOf = (file: string): number => (started ? readPidFile(file) : 0);
       const pids = [...new Set([coordinatorFile, runnerFile, childFile].map(pidOf))];
       try {
         expect(
@@ -264,7 +269,7 @@ describe('bun test --no-orphans', () => {
         ).toBe(true);
       } finally {
         for (const pid of pids) {
-          if (pid > 0 && isAlive(pid)) process.kill(pid, 'SIGKILL');
+          if (pid > 0 && isAlive(pid)) signalPid(pid, 'SIGKILL');
         }
       }
     },

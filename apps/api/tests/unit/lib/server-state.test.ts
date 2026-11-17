@@ -62,6 +62,19 @@ describe('server-state', () => {
     expect(await readState(path)).toBeNull();
   });
 
+  it.each([0, 1, -1, 1.5])(
+    'returns null when the recorded pid is %p: stop and killserver would signal it',
+    async (pid) => {
+      // kill(0) is the caller's group, kill(-1) every process the user owns.
+      await writeFile(path, JSON.stringify(makeState({ pid })), 'utf8');
+
+      expect(
+        await readState(path),
+        `expected a state naming pid ${pid} to read as null`
+      ).toBeNull();
+    }
+  );
+
   it('returns null for valid JSON that is missing required fields', async () => {
     // A truncated/older-format file must read as "no instance" rather than
     // yielding a state with an undefined pid that downstream callers signal.
