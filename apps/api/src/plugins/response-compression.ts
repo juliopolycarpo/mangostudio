@@ -11,8 +11,10 @@
  *   length attacks once compressed, and an opt-out list fails open for the next
  *   such route. See `docs/architecture/hub-runtime.md`.
  * - A plain handler value, or a JSON `Response` a route encoded itself (the chat
- *   list does). Streams and other media types (SSE, files, the Better Auth
- *   passthrough) are never read, so nothing is buffered here.
+ *   list does) that declares a `Content-Length` between the two bounds below.
+ *   Anything else, such as a stream without a length, SSE, files or the Better
+ *   Auth passthrough, is left unread. Only a body that passed these checks is
+ *   buffered, and at most {@link COMPRESSION_MAX_BYTES} of it.
  * - GET only (HEAD and conditional answers keep their headers), 2xx only,
  *   nothing already carrying a `Content-Encoding`, nothing marked `no-transform`.
  * - Between {@link COMPRESSION_MIN_BYTES} and {@link COMPRESSION_MAX_BYTES}.
@@ -113,13 +115,21 @@ function weakenEtag(etag: string): string {
   return etag.startsWith('W/') ? etag : `W/${etag}`;
 }
 
-/** The headers a `Response` a route built carries, as a plain record. */
-function responseHeaders(response: Response): Record<string, string> {
-  const headers: Record<string, string> = {};
-  response.headers.forEach((value, key) => {
-    headers[key] = value;
-  });
-  return headers;
+/**
+ * The headers of the answer: everything the route's own `Response` carried
+ * (repeated `Set-Cookie` included), with only the ones this plugin owns set.
+ */
+function outgoingHeaders(fromRoute: Response | null, contentType: string): Headers {
+  const outgoing = new Headers(fromRoute?.headers);
+  outgoing.set('content-type', contentType);
+  return outgoing;
+}
+
+/** A finished JSON `Response`'s declared length, or undefined when absent or not a count. */
+function declaredLength(response: Response): number | undefined {
+  const text = response.headers.get('content-length');
+  if (text === null || !/^\d+$/.test(text)) return undefined;
+  return Number(text);
 }
 
 export function responseCompression(options: ResponseCompressionOptions) {
@@ -141,6 +151,15 @@ export function responseCompression(options: ResponseCompressionOptions) {
         if (!/^application\/json\b/i.test(type) || fromRoute.body === null) return undefined;
         if (fromRoute.headers.has('content-encoding')) return undefined;
         if (/\bno-transform\b/i.test(fromRoute.headers.get('cache-control') ?? ''))
+          return undefined;
+        // Without a length inside the band the body is never read: a stream of
+        // unknown size could be anything, and a large one is not worth buffering.
+        const length = declaredLength(fromRoute);
+        if (
+          length === undefined ||
+          length < COMPRESSION_MIN_BYTES ||
+          length > COMPRESSION_MAX_BYTES
+        )
           return undefined;
       }
 
@@ -172,7 +191,16 @@ export function responseCompression(options: ResponseCompressionOptions) {
 
       let raw: Uint8Array<ArrayBuffer>;
       if (fromRoute !== null) {
-        raw = new Uint8Array(await fromRoute.arrayBuffer());
+        try {
+          raw = new Uint8Array(await fromRoute.arrayBuffer());
+        } catch (cause) {
+          // The body is consumed and cannot be sent; a partial read is never
+          // forwarded. Throwing lets the hub's error handler answer a 500.
+          throw new Error(
+            `(response-compression): expected the route's JSON body to be readable | received: ${String(cause)}`,
+            { cause }
+          );
+        }
       } else {
         try {
           raw = new TextEncoder().encode(JSON.stringify(responseValue)) as Uint8Array<ArrayBuffer>;
@@ -181,28 +209,31 @@ export function responseCompression(options: ResponseCompressionOptions) {
         }
       }
 
-      const outgoing: Record<string, string> = {
-        ...(fromRoute ? responseHeaders(fromRoute) : {}),
-        'content-type': fromRoute?.headers.get('content-type') ?? 'application/json',
-      };
-      outgoing.vary = headerValue(headers, 'vary') as string;
+      const outgoing = outgoingHeaders(
+        fromRoute,
+        fromRoute?.headers.get('content-type') ?? 'application/json'
+      );
+      outgoing.set('vary', headerValue(headers, 'vary') as string);
       const etag = fromRoute?.headers.get('etag') ?? headerValue(headers, 'etag');
+      const init = { status: code, statusText: fromRoute?.statusText ?? '', headers: outgoing };
 
       if (raw.byteLength < COMPRESSION_MIN_BYTES || raw.byteLength > COMPRESSION_MAX_BYTES) {
         // A plain value is left to Elysia's own serializer, so the identity
         // answer is byte for byte what it would have been; that costs a second
         // stringify, on allowlisted routes only. A route's own `Response` was
-        // already read, so it is rebuilt with the headers it carried.
+        // read (its declared length was inside the band but the body was not),
+        // so it is rebuilt with the headers it carried and the true length.
         if (fromRoute === null) return undefined;
-        if (etag !== undefined) outgoing.etag = etag;
-        return new Response(raw, { status: code, headers: outgoing });
+        if (etag !== undefined) outgoing.set('etag', etag);
+        outgoing.set('content-length', String(raw.byteLength));
+        return new Response(raw, init);
       }
 
       const packed = Bun.gzipSync(raw, { level: COMPRESSION_GZIP_LEVEL });
-      if (etag !== undefined) outgoing.etag = weakenEtag(etag);
-      outgoing['content-encoding'] = 'gzip';
-      outgoing['content-length'] = String(packed.byteLength);
-      return new Response(packed, { status: code, headers: outgoing });
+      if (etag !== undefined) outgoing.set('etag', weakenEtag(etag));
+      outgoing.set('content-encoding', 'gzip');
+      outgoing.set('content-length', String(packed.byteLength));
+      return new Response(packed, init);
     }
   );
 }

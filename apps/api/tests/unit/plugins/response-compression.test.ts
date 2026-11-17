@@ -42,6 +42,11 @@ const ALLOWED_ROUTES = [
   '/api/etagged',
   '/api/created',
   '/api/json-response',
+  '/api/json-lying-small',
+  '/api/json-lying-huge',
+  '/api/json-stream',
+  '/api/json-oversized',
+  '/api/json-unreadable',
   '/api/huge',
   '/api/items/:id',
 ];
@@ -49,56 +54,110 @@ const ALLOWED_ROUTES = [
 /** A body just past the ceiling, still valid JSON. */
 const HUGE_PAYLOAD = { blob: 'a'.repeat(COMPRESSION_MAX_BYTES + 1024) };
 
+/** What a route's own `Response` carries that a rebuilt one must not lose. */
+const ROUTE_COOKIES = ['session=abc; Path=/', 'theme=dark; Path=/'];
+const ROUTE_STATUS_TEXT = 'Accepted For Display';
+
+/**
+ * A JSON `Response` as `createJsonResponseEncoder` builds one, plus two repeated
+ * `Set-Cookie` headers, a custom header and a status text. `declaredLength`
+ * overrides the real length for routes that need the header to disagree.
+ */
+function routeJsonResponse(body: string, declaredLength = new TextEncoder().encode(body).length) {
+  const headers = new Headers({
+    'content-type': 'application/json;charset=utf-8',
+    'content-length': String(declaredLength),
+    'x-route-header': 'kept',
+  });
+  for (const cookie of ROUTE_COOKIES) headers.append('set-cookie', cookie);
+  return new Response(body, { status: 200, statusText: ROUTE_STATUS_TEXT, headers });
+}
+
 function buildApp() {
-  return new Elysia({ prefix: '/api' })
-    .use(
-      responseCompression({
-        routes: ALLOWED_ROUTES,
-        peerAddress: (request) => request.headers.get(PEER_HEADER) ?? undefined,
+  return (
+    new Elysia({ prefix: '/api' })
+      .use(
+        responseCompression({
+          routes: ALLOWED_ROUTES,
+          peerAddress: (request) => request.headers.get(PEER_HEADER) ?? undefined,
+        })
+      )
+      .onRequest(({ set }) => {
+        // A CORS-style header the plugin must keep and extend, never replace.
+        set.headers.vary = 'Origin';
       })
-    )
-    .onRequest(({ set }) => {
-      // A CORS-style header the plugin must keep and extend, never replace.
-      set.headers.vary = 'Origin';
-    })
-    .get('/large', () => LARGE_PAYLOAD)
-    .get('/small', () => SMALL_PAYLOAD)
-    .get('/list', () => LARGE_PAYLOAD.rows)
-    .get('/stream', () => {
-      const body = `data: ${'x'.repeat(COMPRESSION_MIN_BYTES * 2)}\n\n`;
-      return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
-    })
-    .get('/encoded', ({ set }) => {
-      set.headers['content-encoding'] = 'br';
-      return LARGE_PAYLOAD;
-    })
-    .get('/no-transform', ({ set }) => {
-      set.headers['cache-control'] = 'no-transform';
-      return LARGE_PAYLOAD;
-    })
-    .get('/failing', ({ set }) => {
-      set.status = 500;
-      return { error: 'boom', detail: 'x'.repeat(COMPRESSION_MIN_BYTES * 2) };
-    })
-    .get('/etagged', ({ set }) => {
-      set.headers.etag = '"abc123"';
-      return LARGE_PAYLOAD;
-    })
-    .get('/created', ({ set }) => {
-      set.status = 'Created';
-      return LARGE_PAYLOAD;
-    })
-    .get('/json-response', () => Response.json(LARGE_PAYLOAD))
-    .get('/huge', () => HUGE_PAYLOAD)
-    .get('/items/:id', () => LARGE_PAYLOAD)
-    .get('/unlisted', () => LARGE_PAYLOAD)
-    .get('/auth/session', () => LARGE_PAYLOAD)
-    .get('/api-keys', () => LARGE_PAYLOAD)
-    .get('/environments/pairing', () => LARGE_PAYLOAD)
-    .get('/settings/connectors', () => LARGE_PAYLOAD)
-    .get('/settings/secrets/gemini', () => LARGE_PAYLOAD)
-    .head('/large', () => LARGE_PAYLOAD)
-    .post('/large', () => LARGE_PAYLOAD);
+      .get('/large', () => LARGE_PAYLOAD)
+      .get('/small', () => SMALL_PAYLOAD)
+      .get('/list', () => LARGE_PAYLOAD.rows)
+      .get('/stream', () => {
+        const body = `data: ${'x'.repeat(COMPRESSION_MIN_BYTES * 2)}\n\n`;
+        return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
+      })
+      .get('/encoded', ({ set }) => {
+        set.headers['content-encoding'] = 'br';
+        return LARGE_PAYLOAD;
+      })
+      .get('/no-transform', ({ set }) => {
+        set.headers['cache-control'] = 'no-transform';
+        return LARGE_PAYLOAD;
+      })
+      .get('/failing', ({ set }) => {
+        set.status = 500;
+        return { error: 'boom', detail: 'x'.repeat(COMPRESSION_MIN_BYTES * 2) };
+      })
+      .get('/etagged', ({ set }) => {
+        set.headers.etag = '"abc123"';
+        return LARGE_PAYLOAD;
+      })
+      .get('/created', ({ set }) => {
+        set.status = 'Created';
+        return LARGE_PAYLOAD;
+      })
+      .get('/json-response', () => routeJsonResponse(JSON.stringify(LARGE_PAYLOAD)))
+      // The header says the body is in the band, the body is not: both rebuilt-identity paths.
+      .get('/json-lying-small', () =>
+        routeJsonResponse(JSON.stringify(SMALL_PAYLOAD), COMPRESSION_MIN_BYTES + 1)
+      )
+      .get('/json-lying-huge', () =>
+        routeJsonResponse(JSON.stringify(HUGE_PAYLOAD), COMPRESSION_MAX_BYTES - 1)
+      )
+      .get('/json-stream', () => {
+        const encoder = new TextEncoder();
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encoder.encode(JSON.stringify(LARGE_PAYLOAD)));
+            controller.close();
+          },
+        });
+        return new Response(body, { headers: { 'content-type': 'application/json' } });
+      })
+      .get('/json-oversized', () =>
+        routeJsonResponse(JSON.stringify(SMALL_PAYLOAD), COMPRESSION_MAX_BYTES + 1)
+      )
+      .get('/json-unreadable', () => {
+        const body = new ReadableStream<Uint8Array>({
+          pull(controller) {
+            controller.error(new Error('upstream went away'));
+          },
+        });
+        return new Response(body, {
+          headers: {
+            'content-type': 'application/json',
+            'content-length': String(COMPRESSION_MIN_BYTES * 2),
+          },
+        });
+      })
+      .get('/huge', () => HUGE_PAYLOAD)
+      .get('/items/:id', () => LARGE_PAYLOAD)
+      .get('/unlisted', () => LARGE_PAYLOAD)
+      .get('/auth/session', () => LARGE_PAYLOAD)
+      .get('/api-keys', () => LARGE_PAYLOAD)
+      .get('/environments/pairing', () => LARGE_PAYLOAD)
+      .get('/settings/connectors', () => LARGE_PAYLOAD)
+      .get('/settings/secrets/gemini', () => LARGE_PAYLOAD)
+      .head('/large', () => LARGE_PAYLOAD)
+      .post('/large', () => LARGE_PAYLOAD)
+  );
 }
 
 type App = ReturnType<typeof buildApp>;
@@ -291,6 +350,60 @@ describe('response compression', () => {
     const response = await remoteClient().request('/small');
     expect(await response.text()).toBe(JSON.stringify(SMALL_PAYLOAD));
     expect(response.headers.get('content-type')).toContain('application/json');
+  });
+});
+
+describe('a route-built JSON Response', () => {
+  const expectRouteHeaders = (response: Response) => {
+    expect(response.headers.getSetCookie()).toEqual(ROUTE_COOKIES);
+    expect(response.headers.get('x-route-header')).toBe('kept');
+    expect(response.statusText).toBe(ROUTE_STATUS_TEXT);
+  };
+
+  it('keeps repeated Set-Cookie, custom headers and the status text when compressed', async () => {
+    const response = await remoteClient().request('/json-response');
+    expect(response.headers.get('content-encoding')).toBe('gzip');
+    expectRouteHeaders(response);
+  });
+
+  it('keeps them when the real body falls below the threshold', async () => {
+    const response = await remoteClient().request('/json-lying-small');
+    expect(response.headers.get('content-encoding')).toBeNull();
+    expectRouteHeaders(response);
+    expect(response.headers.get('content-length')).toBe(
+      String(JSON.stringify(SMALL_PAYLOAD).length)
+    );
+    expect(await response.json()).toEqual(SMALL_PAYLOAD);
+  });
+
+  it('keeps them when the real body is above the ceiling', async () => {
+    const response = await remoteClient().request('/json-lying-huge');
+    expect(response.headers.get('content-encoding')).toBeNull();
+    expectRouteHeaders(response);
+    expect(((await response.json()) as { blob: string }).blob.length).toBe(
+      HUGE_PAYLOAD.blob.length
+    );
+  });
+
+  it('passes a stream with no Content-Length through unread', async () => {
+    const response = await remoteClient().request('/json-stream');
+    expect(response.headers.get('content-encoding')).toBeNull();
+    // Returned before the plugin touched the body or the Vary header.
+    expect(response.headers.get('vary')).toBe('Origin');
+    expect(await response.json()).toEqual(LARGE_PAYLOAD);
+  });
+
+  it('passes a body whose Content-Length is above the ceiling through unread', async () => {
+    const response = await remoteClient().request('/json-oversized');
+    expect(response.headers.get('content-encoding')).toBeNull();
+    expect(response.headers.get('vary')).toBe('Origin');
+    expect(response.headers.get('content-length')).toBe(String(COMPRESSION_MAX_BYTES + 1));
+  });
+
+  it('answers 500 rather than a half-read body when the body fails mid-read', async () => {
+    const response = await remoteClient().request('/json-unreadable');
+    expect(response.status).toBe(500);
+    expect(response.headers.get('content-encoding')).toBeNull();
   });
 });
 

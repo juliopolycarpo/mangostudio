@@ -16,6 +16,7 @@ import { PROBLEM_JSON_ACCEPT, PROBLEM_JSON_MEDIA_TYPE } from '@mangostudio/share
 
 import { app, COMPRESSED_API_ROUTES } from '../../../src/app';
 import { getDb } from '../../../src/db/database';
+import { COMPRESSION_MAX_BYTES } from '../../../src/plugins/response-compression';
 import { insertTestChat } from '../../support/factories';
 import { listenOnEphemeralPort } from '../../support/listen-ephemeral';
 
@@ -23,11 +24,25 @@ const lanAddress = Object.values(networkInterfaces())
   .flat()
   .find((entry) => entry?.family === 'IPv4' && !entry.internal)?.address;
 
+/**
+ * Without a LAN address the remote half cannot run. Locally that is a skip; in CI
+ * (GitHub runners have one) it is a failure, so the half cannot quietly vanish.
+ */
+const requireLanAddress = process.env.CI !== undefined && process.env.CI !== '';
+
 const CHAT_COUNT = 120;
+/** The small, bulky and huge transcript chats seeded besides the numbered ones. */
+const SEEDED_TRANSCRIPT_CHATS = 3;
+const BULKY_MESSAGES = 60;
+const GALLERY_ROWS = 60;
+/** 100 messages of this size make a page above the 2 MiB ceiling. */
+const HUGE_MESSAGE_CHARS = 25_000;
 
 let port = 0;
 let cookie = '';
 let smallChatId = '';
+let bulkyChatId = '';
+let hugeChatId = '';
 
 beforeAll(async () => {
   port = await listenOnEphemeralPort(app);
@@ -60,6 +75,44 @@ beforeAll(async () => {
       interactionMode: 'chat',
     })
     .execute();
+  bulkyChatId = (await insertTestChat(body.user.id, { title: 'Bulky transcript' })).id;
+  hugeChatId = (await insertTestChat(body.user.id, { title: 'Huge transcript' })).id;
+  const messageRows = (chatId: string, count: number, chars: number) =>
+    Array.from({ length: count }, (_, index) => ({
+      id: `${chatId}-m${index}`,
+      chatId,
+      role: 'user' as const,
+      text: `${index} ${'lorem ipsum dolor '.repeat(Math.ceil(chars / 18))}`.slice(0, chars),
+      timestamp: 1_700_000_000_000 + index,
+      isGenerating: 0,
+      interactionMode: 'chat' as const,
+    }));
+  await getDb()
+    .insertInto('messages')
+    .values(messageRows(bulkyChatId, BULKY_MESSAGES, 400))
+    .execute();
+  await getDb()
+    .insertInto('messages')
+    .values(messageRows(hugeChatId, 100, HUGE_MESSAGE_CHARS))
+    .execute();
+  await getDb()
+    .insertInto('generated_images')
+    .values(
+      Array.from({ length: GALLERY_ROWS }, (_, index) => ({
+        id: `${bulkyChatId}-img${index}`,
+        userId: body.user.id,
+        chatId: bulkyChatId,
+        messageId: `${bulkyChatId}-m${index}`,
+        prompt: `A painting of scene number ${index} with plenty of descriptive words`,
+        imageUrl: `/uploads/${bulkyChatId}-${index}.png`,
+        createdAt: 1_700_000_000_000 + index,
+        toolCallId: null,
+        modelName: 'test-model',
+        generationTime: null,
+        metadataJson: null,
+      }))
+    )
+    .execute();
   for (let index = 0; index < CHAT_COUNT; index += 1) {
     await insertTestChat(body.user.id, { title: `A chat about topic number ${index}` });
   }
@@ -87,53 +140,105 @@ describe('COMPRESSED_API_ROUTES', () => {
   });
 });
 
-describe.skipIf(lanAddress === undefined)('the composed app, seen from another machine', () => {
-  const remote = lanAddress as string;
+describe.skipIf(lanAddress === undefined && !requireLanAddress)(
+  'the composed app, seen from another machine',
+  () => {
+    it('has a non-loopback IPv4 address to dial', () => {
+      expect(
+        lanAddress,
+        '(response-compression): expected a non-loopback IPv4 address on this host | received: none (CI must provide one)'
+      ).toBeDefined();
+    });
 
-  it('gzips the chat list and keeps the rate-limit headers', async () => {
-    const response = await get(remote, '/api/chats');
-    expect(response.status).toBe(200);
-    expect(response.headers.get('content-encoding')).toBe('gzip');
-    expect(response.headers.get('vary')).toContain('Accept-Encoding');
-    expect(response.headers.get('x-ratelimit-limit')).not.toBeNull();
-    const chats = JSON.parse(
-      new TextDecoder().decode(Bun.gunzipSync(await response.arrayBuffer()))
+    const remote = lanAddress ?? '';
+
+    // Each allowlisted route on the compressed path: the gunzipped remote body is
+    // the loopback body byte for byte, with a matching length and a weak ETag.
+    const compressedRoutes = [
+      ['/api/chats', () => '/api/chats'],
+      [
+        '/api/chats/:id/messages',
+        () => `/api/chats/${bulkyChatId}/messages?limit=${BULKY_MESSAGES}`,
+      ],
+      ['/api/messages/images', () => `/api/messages/images?limit=${GALLERY_ROWS}`],
+      ['/api/settings/tools', () => '/api/settings/tools'],
+    ] as const;
+
+    it.each(compressedRoutes)(
+      'compresses %s and the bytes match the loopback answer',
+      async (_route, pathFor) => {
+        const path = pathFor();
+        const local = new Uint8Array(await (await get('127.0.0.1', path)).arrayBuffer());
+        const response = await get(remote, path);
+        expect(response.status).toBe(200);
+        expect(response.headers.get('content-encoding')).toBe('gzip');
+        const packed = new Uint8Array(await response.arrayBuffer());
+        expect(response.headers.get('content-length')).toBe(String(packed.byteLength));
+        expect(response.headers.get('vary')).toContain('Accept-Encoding');
+        const etag = response.headers.get('etag');
+        if (etag !== null) expect(etag).toMatch(/^W\//);
+        expect(Bun.gunzipSync(packed)).toEqual(local);
+      }
     );
-    expect(chats).toHaveLength(CHAT_COUNT + 1);
-  });
 
-  it('leaves a below-threshold allowlisted answer byte for byte as Elysia serializes it', async () => {
-    const path = `/api/chats/${smallChatId}/messages`;
-    // The loopback answer never enters the plugin's compression path: it is Elysia's own output.
-    const own = await get('127.0.0.1', path);
-    const viaPlugin = await get(remote, path);
-    expect(viaPlugin.status).toBe(own.status);
-    expect(viaPlugin.headers.get('content-encoding')).toBeNull();
-    expect(viaPlugin.headers.get('content-type')).toBe(own.headers.get('content-type'));
-    expect(await viaPlugin.text()).toBe(await own.text());
-  });
+    it('sends identity for an answer above the ceiling, the loopback bytes', async () => {
+      const path = `/api/chats/${hugeChatId}/messages?limit=100`;
+      const local = new Uint8Array(await (await get('127.0.0.1', path)).arrayBuffer());
+      expect(local.byteLength).toBeGreaterThan(COMPRESSION_MAX_BYTES);
+      const response = await get(remote, path);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-encoding')).toBeNull();
+      expect(response.headers.get('content-length')).toBe(String(local.byteLength));
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(local);
+    });
 
-  it('answers an unknown route with the negotiated problem document, uncompressed', async () => {
-    const response = await get(remote, '/api/no-such-route', { Accept: PROBLEM_JSON_ACCEPT });
-    expect(response.status).toBe(404);
-    expect(response.headers.get('content-type')).toContain(PROBLEM_JSON_MEDIA_TYPE);
-    expect(response.headers.get('content-encoding')).toBeNull();
-  });
+    it('gzips the chat list and keeps the rate-limit headers', async () => {
+      const response = await get(remote, '/api/chats');
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-encoding')).toBe('gzip');
+      expect(response.headers.get('vary')).toContain('Accept-Encoding');
+      expect(response.headers.get('x-ratelimit-limit')).not.toBeNull();
+      const chats = JSON.parse(
+        new TextDecoder().decode(Bun.gunzipSync(await response.arrayBuffer()))
+      );
+      expect(chats).toHaveLength(CHAT_COUNT + SEEDED_TRANSCRIPT_CHATS);
+    });
 
-  it('still amends the OpenAPI document, which is outside the compressed routes', async () => {
-    const response = await get(remote, '/scalar/json');
-    expect(response.status).toBe(200);
-    expect(response.headers.get('content-encoding')).toBeNull();
-    const document = (await response.json()) as { components?: { schemas?: object } };
-    expect(Object.keys(document.components?.schemas ?? {})).toContain('ProblemDetails');
-  });
-});
+    it('leaves a below-threshold allowlisted answer byte for byte as Elysia serializes it', async () => {
+      const path = `/api/chats/${smallChatId}/messages`;
+      // The loopback answer never enters the plugin's compression path: it is Elysia's own output.
+      const own = await get('127.0.0.1', path);
+      const viaPlugin = await get(remote, path);
+      expect(viaPlugin.status).toBe(own.status);
+      expect(viaPlugin.headers.get('content-encoding')).toBeNull();
+      expect(viaPlugin.headers.get('content-type')).toBe(own.headers.get('content-type'));
+      expect(await viaPlugin.text()).toBe(await own.text());
+    });
+
+    it('answers an unknown route with the negotiated problem document, uncompressed', async () => {
+      const response = await get(remote, '/api/no-such-route', { Accept: PROBLEM_JSON_ACCEPT });
+      expect(response.status).toBe(404);
+      expect(response.headers.get('content-type')).toContain(PROBLEM_JSON_MEDIA_TYPE);
+      expect(response.headers.get('content-encoding')).toBeNull();
+    });
+
+    it('still amends the OpenAPI document, which is outside the compressed routes', async () => {
+      const response = await get(remote, '/scalar/json');
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-encoding')).toBeNull();
+      const document = (await response.json()) as { components?: { schemas?: object } };
+      expect(Object.keys(document.components?.schemas ?? {})).toContain('ProblemDetails');
+    });
+  }
+);
 
 describe('the composed app, seen from the same machine', () => {
   it('sends the chat list as identity', async () => {
     const response = await get('127.0.0.1', '/api/chats');
     expect(response.status).toBe(200);
     expect(response.headers.get('content-encoding')).toBeNull();
-    expect(((await response.json()) as unknown[]).length).toBe(CHAT_COUNT + 1);
+    expect(((await response.json()) as unknown[]).length).toBe(
+      CHAT_COUNT + SEEDED_TRANSCRIPT_CHATS
+    );
   });
 });
