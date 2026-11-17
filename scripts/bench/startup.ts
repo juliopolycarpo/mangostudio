@@ -5,14 +5,14 @@
  * fresh database; it does not empty the OS page cache.
  * Example: bun scripts/bench/startup.ts <binary> --runs 20 --warmups 2 --resources --json
  */
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { createServer } from 'node:net';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 import { assertNoUnexpectedArguments, fatal, parseArgs } from '../lib/args';
 import { benchmarkCancellation, withBenchmarkCancellation } from '../lib/benchmark-cancellation';
 import { appendBenchmarkJournal, writeBenchmarkProgress } from '../lib/benchmark-journal';
+import { isolatedHubEnv, ownsServerState, reserveEphemeralPort } from '../lib/hub-process';
 import { summarizeLatencies } from '../lib/latency-stats';
 import { header, info, log } from '../lib/log';
 import { linuxProcessResourceUnits, type ProcessResourceUnits } from '../lib/process-resource-host';
@@ -21,7 +21,6 @@ import {
   type ProcessResourceObservation,
   startProcessResourceMonitor,
 } from '../lib/process-resource-monitor';
-import { homeEnv } from '../lib/temp-home';
 import { sha256File } from '../release/verify-checksum';
 import {
   BenchmarkChildScope,
@@ -34,7 +33,6 @@ import { assertBenchmarkPlatform } from './benchmark-platform';
 
 const READY_TIMEOUT_MS = 60_000;
 const POLL_INTERVAL_MS = 5;
-const BENCH_AUTH_SECRET = 'startup-bench-secret-at-least-32-chars';
 const ROOT = resolve(import.meta.dir, '../..');
 
 type ResourceStart = { monitor: ProcessResourceMonitor | null; error: string | null };
@@ -65,60 +63,6 @@ function printHelp(): never {
   process.exit(0);
 }
 
-function benchEnv(home: string, port: number): Record<string, string> {
-  return {
-    ...(process.env as Record<string, string>),
-    ...homeEnv(home),
-    NODE_ENV: 'production',
-    MANGO_HOME: home,
-    API_PORT: String(port),
-    API_HOST: '127.0.0.1',
-    AUTH_SECRET: BENCH_AUTH_SECRET,
-    BETTER_AUTH_SECRET: BENCH_AUTH_SECRET,
-    DATABASE_PATH: join(home, 'database.sqlite'),
-    UPLOADS_DIR: join(home, 'uploads'),
-    IMAGES_DIR: join(home, 'images'),
-    TOOL_IMAGES_DIR: join(home, 'tool-images'),
-    MANGOSTUDIO_DIAGNOSTIC_LOGS: '0',
-  };
-}
-
-/** Validates that an HTTP readiness answer belongs to this isolated child. Example: ownsStartupState(state, pid, port, spawnedAt). */
-export function ownsStartupState(
-  state: unknown,
-  pid: number,
-  port: number,
-  spawnedAt: number
-): boolean {
-  if (!state || typeof state !== 'object') return false;
-  const value = state as Record<string, unknown>;
-  return (
-    value.pid === pid &&
-    value.port === port &&
-    typeof value.startedAt === 'number' &&
-    Number.isFinite(value.startedAt) &&
-    value.startedAt >= spawnedAt
-  );
-}
-
-async function ownsServerState(
-  home: string,
-  pid: number,
-  port: number,
-  spawnedAt: number
-): Promise<boolean> {
-  try {
-    return ownsStartupState(
-      JSON.parse(await readFile(join(home, '.mango/run/server.json'), 'utf8')),
-      pid,
-      port,
-      spawnedAt
-    );
-  } catch {
-    return false;
-  }
-}
-
 async function readPeakRssKb(pid: number): Promise<number | null> {
   if (process.platform !== 'linux') return null;
   try {
@@ -130,26 +74,9 @@ async function readPeakRssKb(pid: number): Promise<number | null> {
   }
 }
 
-async function reserveEphemeralPort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', resolve);
-  });
-  const address = server.address();
-  await new Promise<void>((resolve, reject) => {
-    server.close((error) => (error ? reject(error) : resolve()));
-  });
-  if (!address || typeof address === 'string')
-    throw new Error(
-      'Startup port: expected an OS-selected loopback port | received: no TCP address'
-    );
-  return address.port;
-}
-
 function spawnHub(binary: string, home: string, port: number) {
   return Bun.spawn([binary, 'serve', String(port)], {
-    env: benchEnv(home, port),
+    env: isolatedHubEnv(home, port),
     detached: process.platform !== 'win32',
     stdin: 'ignore',
     stdout: 'pipe',

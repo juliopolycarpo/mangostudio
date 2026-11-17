@@ -57,10 +57,11 @@ Não há rota montada `GET /api/chats/:id`. Leia os metadados na lista autentica
 | Método | Path                          | Auth | Finalidade               |
 | ------ | ----------------------------- | ---- | ------------------------ |
 | `GET`  | `/api/chats/:chatId/messages` | Sim  | Listar mensagens do chat |
+| `GET`  | `/api/messages/images`        | Sim  | Paginar a galeria        |
 | `POST` | `/api/messages`               | Sim  | Criar uma mensagem       |
 
 O `GET` pagina a transcrição (`MessagesPage` de `@mangostudio/shared/chat`). Query: `limit`
-(padrão 50), `cursor` e `order` — `asc` (o padrão) lê a partir da mensagem mais antiga, `desc`
+(inteiro de 1 a 100, padrão 50; qualquer outro valor é recusado com 422), `cursor` e `order` — `asc` (o padrão) lê a partir da mensagem mais antiga, `desc`
 a partir da mais nova. Em ambas as ordens a página é cronológica, da mais antiga para a mais
 nova: `order` escolhe qual janela da transcrição a página é, e `nextCursor` aponta a borda da
 página voltada para as mensagens ainda não lidas (a última mensagem em `asc`, a primeira em
@@ -72,6 +73,8 @@ lido como posição pela outra. Um timestamp numérico puro de uma build antiga 
 (depois de toda mensagem daquele timestamp em `asc`, antes de toda uma delas em `desc`); um
 cursor vazio ou malformado é rejeitado com 400, e um `order` desconhecido com 422, como
 qualquer query que o schema recusa.
+
+`GET /api/messages/images` pagina a galeria de imagens geradas (`GalleryPage` de `@mangostudio/shared/chat`). Query: `cursor` e `limit`, com os mesmos limites da transcrição: inteiro de 1 a 100, padrão 50, e 422 para qualquer outro valor. `nextCursor` é `null` na última página.
 
 Atualize uma mensagem com `PUT /api/messages/:id` e `UpdateMessageBodySchema`. Um patch de `text` em uma mensagem cujo turno ainda está gerando responde 409 `CONFLICT`, porque o escritor do turno continua estendendo o texto que gravou; envie `isGenerating: false` no mesmo patch ou edite depois que o turno terminar.
 

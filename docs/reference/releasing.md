@@ -275,6 +275,28 @@ Bun uses `--aot --trim --format=esm --sourcemap=external` and production
 frontend or runtime work. Shipping builds require native compiler records.
 Bytecode remains an explicit fallback for standalone builds.
 
+A Linux producer (glibc and musl) given `--require-aot-order` compiles the hub twice; `--production`
+given explicitly does the same, and a plain local, smoke or test build does not. The first pass adds
+`--aot-record-order`; the build starts that binary in a throwaway home with an allowlisted
+environment, drives the same request workload the footprint benchmark uses, stops it, and passes the
+recorded file to the shipping compile as `--aot-order`. The order file numbers functions by
+position, and Bun does not check that it belongs to the program (it warns only for a file that is
+not an order file), so the build records from the binary about to ship and empties the order
+directory first. If the recording hub does not start, does not write a file, writes one that is not
+an order file, outlives its 120 s deadline, or Bun reports it could not use the file, a local build
+warns and ships the hub without an order, and a required one fails so no hub ships without the
+layout by accident. The recording binary is deleted after the shipping compile; the order file
+stays in `.mango/aot-order/<platform>/`, its SHA-256 is `aotOrderSha256` in the compile receipt,
+and the native hub artifact carries it. macOS and Windows producers compile once and log why.
+
+`distribution-build.yml` takes the platforms that must record through `aot_order_platforms` (space
+separated ids, or `all`; empty by default). `release.yml` passes `all`; `ci.yml` passes `all` for
+pushes, because daily Canary promotes those bundles, and only `linux-x64` for pull requests, the hub
+that the release dry run reuses. Recording adds about 5 s locally (allow more on a runner) to a Linux hub leg that finishes
+before the runtime jobs, so it does not lengthen the run. The recording hub has no runtime beside
+it; see [runtime-metrics.md](runtime-metrics.md#hub-binary-aot-function-order) for what that
+covers and what a recorded runtime would add.
+
 `--reuse-frontend` accepts `apps/frontend/dist/build-info.json` only when both
 the prepared build and checkout are clean, name the same HEAD and use the same
 build mode. It retains the original build time and regenerates absolute embed
@@ -1196,8 +1218,9 @@ launcher and a frozen `v<root>-canary` GitHub pre-release. This is historical
 evidence of that versioned pairing, not a promise that a current root version
 has a canary crate or that a launcher resolves the newest canary. The launcher
 constructs a release URL from its own exact crate version and makes three total
-download attempts (two retries); `*-canary` launchers refresh that versioned
-install on every run. Recheck the registry and matching assets before using an
+download attempts (two retries); `*-canary` launchers behave like stable ones:
+a complete install of that exact version starts without a request, because a
+release never changes under its version. Recheck the registry and matching assets before using an
 old pairing today.
 
 ## Prerequisites
