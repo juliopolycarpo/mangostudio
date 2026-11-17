@@ -312,6 +312,9 @@ function seedDatabase(
   const insertMessage = db.prepare(
     "INSERT INTO messages (id, chatId, role, text, timestamp, isGenerating, interactionMode, parts) VALUES (?, ?, ?, ?, ?, 0, 'text', ?)"
   );
+  const insertImage = db.prepare(
+    'INSERT INTO generated_images (id, userId, chatId, messageId, prompt, imageUrl, modelName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+  );
   let transcriptChatId = '';
   db.transaction(() => {
     for (let index = 0; index < chats; index += 1) {
@@ -320,9 +323,25 @@ function seedDatabase(
       insertChat.run(id, title, now - index * 60_000, now - index * 30_000, userId);
       if (index === 0) transcriptChatId = id;
     }
+    const messageIds: string[] = [];
     transcript.forEach((row, index) => {
-      insertMessage.run(randomUUID(), transcriptChatId, row.role, row.text, now + index, row.parts);
+      const id = randomUUID();
+      messageIds.push(id);
+      insertMessage.run(id, transcriptChatId, row.role, row.text, now + index, row.parts);
     });
+    // One gallery page's worth of generated images, all on the first answer.
+    for (let image = 0; image < FRONTEND_PAGE; image += 1) {
+      insertImage.run(
+        randomUUID(),
+        userId,
+        transcriptChatId,
+        messageIds[1] as string,
+        `A watercolor study of a harbor at dawn, variation ${image}`,
+        `/images/${randomUUID()}.png`,
+        'image-model-bench',
+        now - image * 1000
+      );
+    }
   })();
   db.close();
   return { chatId: transcriptChatId };
@@ -606,6 +625,7 @@ async function main(): Promise<void> {
         { name: `messages page, limit=${FRONTEND_PAGE} (frontend)`, path: messages(FRONTEND_PAGE) },
         { name: `messages page, limit=${LARGE_PAGE}`, path: messages(LARGE_PAGE) },
         { name: `chat list, ${chats} chats`, path: '/api/chats/' },
+        { name: `gallery page, ${FRONTEND_PAGE} images`, path: '/api/messages/images' },
         { name: 'settings: models', path: '/api/settings/models' },
         { name: 'settings: providers', path: '/api/settings/providers' },
         { name: 'settings: tools', path: '/api/settings/tools' },
