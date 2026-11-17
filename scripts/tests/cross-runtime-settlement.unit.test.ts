@@ -7,6 +7,9 @@ import { ensureBunCrossRuntime, hostReleasePlatform } from '../lib/bun-cross-run
 import { settleCrossRuntimeResolutions } from '../lib/cross-runtime-settlement';
 import { ALL_BINARY_TARGETS } from '../lib/release-targets';
 
+const CHECKSUM_LISTING_URL =
+  'https://github.com/oven-sh/bun/releases/download/canary/SHASUMS256.txt';
+
 /** Refuses the real resolver's checksum request without network I/O. */
 class FakeChecksumFailure {
   readonly requests: string[] = [];
@@ -14,7 +17,7 @@ class FakeChecksumFailure {
     (input: string | URL | Request): Promise<Response> => {
       const url = input instanceof Request ? input.url : String(input);
       this.requests.push(url);
-      if (url !== 'https://github.com/oven-sh/bun/releases/download/canary/SHASUMS256.txt') {
+      if (url !== CHECKSUM_LISTING_URL) {
         throw new Error(`unexpected network request: ${url}`);
       }
       return Promise.resolve(new Response('', { status: 503 }));
@@ -160,7 +163,14 @@ describe('settleCrossRuntimeResolutions', () => {
     try {
       const originalFailure = await firstFailure;
       expect((originalFailure as Error).message).toContain('Checksum download failed (503');
-      expect(network.requests).toHaveLength(1);
+      // The spy replaces the process-wide fetch, so a request another test left running lands
+      // here too (it was seen as two extra requests under load). Count the one this resolver owns
+      // and name the rest.
+      const checksumRequests = network.requests.filter((url) => url === CHECKSUM_LISTING_URL);
+      expect(
+        checksumRequests,
+        `expected one checksum listing request | received: ${network.requests.join(', ')}`
+      ).toHaveLength(1);
       await Bun.sleep(0);
       expect(existsSync(cacheDir), 'expected verification cache to outlive held sibling').toBe(
         true
