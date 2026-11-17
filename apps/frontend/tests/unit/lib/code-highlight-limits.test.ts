@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 
-import { countHighlightableLines } from '@/lib/code-highlight-limits';
+import { splitLines } from '@shikijs/core';
+
+import { countHighlightableLines, EMBEDDED_LANGUAGES } from '@/lib/code-highlight-limits';
+import { SHIKI_LANGUAGE_IDS, type ShikiLanguageId } from '@/lib/code-languages';
 
 /** 547² = 299,209 fits the 300,000 budget of a quadratic grammar; 548² = 300,304 does not. */
 const LARGEST_FITTING_WORD = 547;
@@ -16,10 +19,25 @@ describe('countHighlightableLines', () => {
     expect(countHighlightableLines('', 'typescript')).toBe(1);
   });
 
-  it('never spends budget on ordinary code, however many lines', () => {
+  it('colours ordinary code up to the character cap and no further', () => {
+    // 72 characters a line: 55,000 / 72 leaves 753 lines inside the TypeScript cap.
     const source =
       'export const someReasonablyNamedConstant = computeTheValue(argumentOne);\n'.repeat(10_000);
-    expect(countHighlightableLines(source, 'typescript')).toBe(10_001);
+    expect(countHighlightableLines(source, 'typescript')).toBe(753);
+    expect(countHighlightableLines(source.slice(0, 55_000), 'typescript')).toBeGreaterThan(700);
+  });
+
+  it('stops 5,000 lines of five 47-character words long before the end', () => {
+    // 1.2 MB in 5,000 lines took 10.6 s in TypeScript before the cap.
+    const line = Array.from({ length: 5 }, () => words(47)).join(' ');
+    const lines = countHighlightableLines(`${line}\n`.repeat(5000), 'typescript');
+    expect(lines, 'lines coloured out of 5,000').toBeLessThan(250);
+  });
+
+  it('stops 5,000 lines of 253 characters on YAML long before the end', () => {
+    // 3.7 s before the cap.
+    const lines = countHighlightableLines(`${'k: v '.repeat(50)}\n`.repeat(5000), 'yaml');
+    expect(lines, 'lines coloured out of 5,000').toBeLessThan(400);
   });
 
   it('accepts a word at the budget and refuses one character more', () => {
@@ -83,8 +101,29 @@ describe('countHighlightableLines', () => {
     expect(countHighlightableLines(`${line}\n`.repeat(6), 'python')).toBe(7);
   });
 
-  it('splits lines on \\n, \\r\\n and \\r, as Shiki does', () => {
-    expect(countHighlightableLines('a\r\nb\rc\nd', 'typescript')).toBe(4);
+  it('splits lines on \\n and \\r\\n only, as Shiki does', () => {
+    expect(countHighlightableLines('a\r\nb\rc\nd', 'typescript')).toBe(3);
+  });
+
+  it('counts lines exactly as Shiki splitLines does, over every separator', () => {
+    const separators = ['\n', '\r\n', '\r', '\u2028', '\u2029', '\f', '\v', '\n\r', '\r\r\n'];
+    for (const first of separators) {
+      for (const second of separators) {
+        const source = `a${first}b${second}c${first}${second}d`;
+        expect(
+          countHighlightableLines(source, 'typescript'),
+          `lines in ${JSON.stringify(source)}`
+        ).toBe(splitLines(source).length);
+      }
+    }
+  });
+
+  it('does not end a line at a lone carriage return before an over-limit word', () => {
+    const source = `a\r${words(LARGEST_FITTING_WORD + 1)}`;
+    expect(
+      countHighlightableLines(source, 'typescript'),
+      `lines in ${JSON.stringify(source.slice(0, 12))}...`
+    ).toBe(0);
   });
 
   it('refuses a 1 MB source in well under a second, stopping at the first offending line', () => {
@@ -92,5 +131,53 @@ describe('countHighlightableLines', () => {
     const start = performance.now();
     expect(countHighlightableLines(source, 'typescript')).toBe(0);
     expect(performance.now() - start).toBeLessThan(250);
+  });
+});
+
+describe('embedded grammars', () => {
+  const WORD = words(1540);
+
+  it('limits markdown, html and php by the strictest grammar they embed', () => {
+    // 1,540² is far under the default budget and far over the script one.
+    expect(countHighlightableLines(WORD, 'python')).toBe(1);
+    expect(countHighlightableLines(WORD, 'markdown'), 'word in markdown (embeds typescript)').toBe(
+      0
+    );
+    expect(countHighlightableLines(WORD, 'html'), 'word in html (embeds javascript)').toBe(0);
+    expect(countHighlightableLines(WORD, 'php'), 'word in php (embeds javascript)').toBe(0);
+    expect(countHighlightableLines(WORD, 'ruby'), 'word in ruby (embeds cpp)').toBe(0);
+  });
+
+  it('charges lines on a grammar that embeds a line-cost one', () => {
+    const line = 'a b '.repeat(250);
+    expect(countHighlightableLines(`${line}\n`.repeat(6), 'xml'), 'xml embeds java').toBe(4);
+  });
+
+  interface Registration {
+    readonly name?: string;
+    readonly embeddedLangsLazy?: readonly string[];
+  }
+
+  /** Shipped grammars a language's registrations load or can switch into, from `@shikijs/langs`. */
+  async function registeredEmbeds(language: ShikiLanguageId): Promise<ShikiLanguageId[]> {
+    const module = (await import(`@shikijs/langs/${language}`)) as { default: Registration[] };
+    const known = new Set<string>(SHIKI_LANGUAGE_IDS);
+    const names = module.default.flatMap((registration) => [
+      registration.name ?? '',
+      ...(registration.embeddedLangsLazy ?? []),
+    ]);
+    const ids = names.map((name) => (name === 'shellscript' ? 'bash' : name));
+    return [...new Set(ids)]
+      .filter((id) => known.has(id) && id !== language)
+      .sort() as ShikiLanguageId[];
+  }
+
+  it('lists, for each grammar, the shipped grammars its registration loads or embeds', async () => {
+    for (const language of SHIKI_LANGUAGE_IDS) {
+      expect(
+        [...(EMBEDDED_LANGUAGES[language] ?? [])].sort(),
+        `grammars ${language} embeds, per EMBEDDED_LANGUAGES`
+      ).toEqual(await registeredEmbeds(language));
+    }
   });
 });
