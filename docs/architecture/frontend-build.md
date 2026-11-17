@@ -297,7 +297,7 @@ a real port; extend it rather than adding another `handle()`-driven case.
 ### Precompressed representations (embedded mode only)
 
 The binary ships a gzip and a Brotli copy of every compressible text asset, and the server
-picks one from `Accept-Encoding`. It never compresses an asset response: the CPU cost is paid once, at
+picks one from `Accept-Encoding`. It never compresses an asset response (API JSON is a separate case, see `hub-runtime.md`): the CPU cost is paid once, at
 build time, by `scripts/lib/precompress-assets.ts` (gzip level 9, Brotli quality 11 in generic
 mode, both deterministic). A file gets a copy only if it is a text format (`.js`, `.css`,
 `.html`, `.json`, `.svg`, `.webmanifest`, `.txt`, `.xml`), is at least 256 B, and the copy saves
@@ -377,36 +377,6 @@ install stops serving a stale shell — and carries an ETag derived from its sta
 `no-cache` degenerates into re-sending the whole document on every navigation. Inside a
 compiled binary there is no inode to stat, so the shell ships there without a validator; its
 content cannot change within one binary anyway.
-
-### API JSON compression
-
-The sections above cover static assets, which are compressed once at build time. Large JSON
-answers under `/api` are compressed per request by `apps/api/src/plugins/response-compression.ts`,
-and only when it can pay:
-
-- **Who.** A peer that is not loopback. Loopback is the default deployment and the bytes never
-  leave the host, so compression there only costs CPU. The socket peer decides, never a forwarded
-  header: behind a reverse proxy or tunnel the hub sees the proxy's loopback address and sends
-  identity, and the proxy owns compression. An unknown peer counts as local.
-- **What.** A plain handler value (object or array) on a `GET` with a 2xx status, at least 8 KiB
-  serialized, whose client sends `Accept-Encoding` allowing `gzip`. Browsers send `gzip, deflate`
-  without `br` or `zstd` to a plain-HTTP address, and Bun has no native Brotli encoder, so gzip
-  (`Bun.gzipSync`, level 1) is the only coding. Never `node:zlib`: it adds 184 KB to the binary.
-- **Never.** A `Response` the route built (SSE streams, the Better Auth passthrough, files), a
-  response that already has `Content-Encoding` or `Cache-Control: no-transform`, HEAD, 304 and
-  errors. A strong `ETag` is weakened when the body is encoded. `Vary: Accept-Encoding` is added to
-  every response the rule could apply to, folded into the existing `Vary`.
-- **BREACH.** Compressing a body that holds a secret next to text the caller chose lets an
-  observer of the encrypted length infer the secret. The hub does not terminate TLS, so this is
-  reachable where a TLS proxy forwards to the hub from a non-loopback address (a Docker network,
-  another host). Responses that carry credentials are opted out by path prefix
-  (`NEVER_COMPRESSED_PREFIXES`: `/api/auth`, `/api/api-keys`, `/api/environments`,
-  `/api/settings/connectors`, `/api/settings/secrets`), and only `GET` is compressed, which
-  excludes the POST responses that issue a key, a pairing token or an OAuth authorize URL. What
-  remains is user content (chat transcripts, lists, settings) that carries no credential.
-- **Measure.** `bun run scripts/bench/api-json-compression.ts sizes` prints sizes, compress time
-  and the break-even link speed per endpoint; `serve` compares hub CPU and latency from loopback
-  and from the host's LAN address.
 
 ## The standalone binary
 
