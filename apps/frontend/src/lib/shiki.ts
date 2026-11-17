@@ -11,7 +11,7 @@ import { createJavaScriptRegexEngine } from '@shikijs/engine-javascript';
 import { countHighlightableLines } from '@/lib/code-highlight-limits';
 import { resolveLanguageId, type ShikiLanguageId } from '@/lib/code-languages';
 import type { CodeThemeId } from '@/lib/code-themes';
-import { createCheckedRenderers } from '@/lib/shiki-checked-render';
+import { createCheckedRenderers, IncompleteTokenizationError } from '@/lib/shiki-checked-render';
 
 export { CODE_THEMES, type CodeThemeId } from '@/lib/code-themes';
 
@@ -93,6 +93,62 @@ function cacheHighlightedHtml(key: string, html: string): void {
 
 function highlightCacheKey(language: ShikiLanguageId, theme: CodeThemeId, code: string): string {
   return `${language}\0${theme}\0${code}`;
+}
+
+/**
+ * Where a block, or a diff line, that stopped on the tokenizer's time limit stands.
+ *
+ * The stop is not always the content's fault: the JavaScript regex engine compiles a grammar
+ * rule on the first line that reaches it, which takes 140 ms on an idle machine and seconds
+ * under CPU load, and the same text takes a few milliseconds afterwards. So the first stop is a
+ * `retry-pending`: the consumer yields and asks again (`isHighlightRetryPending`). A second stop
+ * is `gave-up`: the content is one the limit is meant to refuse, and it is drawn plain without
+ * being tokenized again, so a block costs at most two capped attempts. Size-limit refusals and
+ * engine failures never get an entry.
+ */
+type TimeStopState = 'retry-pending' | 'gave-up';
+const TIME_STOP_ENTRIES = 64;
+/** Oldest first; a streamed block leaves one entry per prefix that stopped, so it is bounded. */
+const timeStops = new Map<string, TimeStopState>();
+
+function lineStopKey(language: ShikiLanguageId, theme: CodeThemeId, line: string): string {
+  return `line\0${highlightCacheKey(language, theme, line)}`;
+}
+
+function recordTimeStop(key: string, error: unknown): void {
+  if (!(error instanceof IncompleteTokenizationError)) return;
+  const state: TimeStopState = timeStops.has(key) ? 'gave-up' : 'retry-pending';
+  timeStops.delete(key);
+  timeStops.set(key, state);
+  while (timeStops.size > TIME_STOP_ENTRIES) {
+    const oldest = timeStops.keys().next().value;
+    if (oldest === undefined) return;
+    timeStops.delete(oldest);
+  }
+}
+
+/**
+ * True when `code` in this language stopped once on the time limit and has not been asked for
+ * since, so asking again after yielding may colour it. Streaming consumers ask once the
+ * message is done: while it grows, the next chunk renders the block again anyway.
+ */
+// Usage: if (isHighlightRetryPending(code, 'ts', 'one-dark-pro')) scheduleRetry();
+export function isHighlightRetryPending(code: string, lang: string, theme: CodeThemeId): boolean {
+  const language = resolveLanguageId(lang);
+  if (!language) return false;
+  return timeStops.get(highlightCacheKey(language, theme, code)) === 'retry-pending';
+}
+
+/** The same for a line drawn by `highlightLineTokens`. */
+// Usage: if (isLineHighlightRetryPending(line, 'ts', 'one-dark-pro')) scheduleRetry();
+export function isLineHighlightRetryPending(
+  line: string,
+  lang: string,
+  theme: CodeThemeId
+): boolean {
+  const language = resolveLanguageId(lang);
+  if (!language) return false;
+  return timeStops.get(lineStopKey(language, theme, line)) === 'retry-pending';
 }
 
 /**
@@ -237,6 +293,10 @@ export async function preloadCodeLanguages(
  *
  * A block that is a longer prefix of an earlier call (a streaming message) only tokenizes its
  * new lines; see `HighlightSession`.
+ *
+ * A block the tokenizer stops on its time limit returns `null` like any plain block, but is
+ * remembered: `isHighlightRetryPending` says whether asking again may colour it, and a second
+ * stop ends the attempts (`TimeStopState`).
  */
 // Usage: const html = highlightCode('const x = 1;', 'ts', 'one-dark-pro');
 export function highlightCode(code: string, lang: string, theme: CodeThemeId): string | null {
@@ -252,12 +312,17 @@ export function highlightCode(code: string, lang: string, theme: CodeThemeId): s
     return cached;
   }
 
+  // Stopped twice: a block the limit refuses, not tokenized a third time.
+  if (timeStops.get(key) === 'gave-up') return null;
+
   try {
     const html = renderHighlightedBlock(code, language, theme);
+    timeStops.delete(key);
     if (html === null) return null;
     cacheHighlightedHtml(key, html);
     return html;
-  } catch {
+  } catch (error) {
+    recordTimeStop(key, error);
     return null;
   }
 }
@@ -344,15 +409,19 @@ export function highlightLineTokens(
   if (!isLanguageLoaded(highlighterInstance, language)) return null;
   if (countHighlightableLines(line, language) < 1) return null;
 
+  const key = lineStopKey(language, theme, line);
+  if (timeStops.get(key) === 'gave-up') return null;
   try {
-    return (
+    const tokens =
       checkedRenderers?.codeToTokensBase(line, {
         lang: language,
         theme,
         tokenizeTimeLimit: 500,
-      })[0] ?? []
-    );
-  } catch {
+      })[0] ?? [];
+    timeStops.delete(key);
+    return tokens;
+  } catch (error) {
+    recordTimeStop(key, error);
     return null;
   }
 }
@@ -390,6 +459,7 @@ function loadLanguageOnce(highlighter: MangoHighlighter, language: ShikiLanguage
     highlightCache.clear();
     highlightCacheChars = 0;
     highlightSessions.length = 0;
+    timeStops.clear();
   });
   languageLoadPromises.set(language, loading);
   return loading;

@@ -11,7 +11,11 @@ import {
 
 type Grammar = ReturnType<HighlighterCore['getLanguage']>;
 
-class IncompleteTokenizationError extends Error {
+/**
+ * The tokenizer stopped on `tokenizeTimeLimit` before the line ended. It is the only reason the
+ * checked grammar throws, so a caller can tell it from an engine failure.
+ */
+export class IncompleteTokenizationError extends Error {
   constructor() {
     super('Incomplete syntax highlighting: tokenizer stopped before the line ended');
     this.name = 'IncompleteTokenizationError';

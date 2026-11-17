@@ -37,6 +37,28 @@ export function detectCodeLanguages(tokens: readonly Token[]): string[] {
   return [...languages].sort();
 }
 
+/** A fenced block as the renderer hands it to the highlighter. */
+export interface CodeFence {
+  readonly text: string;
+  readonly lang: string;
+}
+
+/**
+ * The fenced blocks in `tokens` that the renderer asks the highlighter to colour, nested ones
+ * included. A fence inside a markdown block is not listed: the markdown block is the unit the
+ * highlighter sees.
+ */
+// Usage: collectCodeFences(Lexer.lex('```ts\nlet a;\n```')) // [{ text: 'let a;', lang: 'ts' }]
+export function collectCodeFences(tokens: readonly Token[]): CodeFence[] {
+  const fences: CodeFence[] = [];
+  void tokenWalker.walkTokens([...tokens], (token) => {
+    if (token.type === 'code' && 'lang' in token && token.lang) {
+      fences.push({ text: token.text, lang: token.lang });
+    }
+  });
+  return fences;
+}
+
 function collectFromTokens(tokens: Token[], languages: Set<string>, depth: number): void {
   // walkTokens recurses into list items and blockquotes, so fenced code nested
   // inside them still has its grammar preloaded for highlighting.

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 
 import { Lexer } from 'marked';
 
-import { detectCodeLanguages } from '../../../src/lib/markdown-code-languages';
+import { collectCodeFences, detectCodeLanguages } from '../../../src/lib/markdown-code-languages';
 import { MARKDOWN_LEXER_OPTIONS } from '../../../src/lib/markdown-parser';
 
 function languagesOf(text: string): string[] {
@@ -41,5 +41,28 @@ describe('detectCodeLanguages', () => {
 
     expect(detectCodeLanguages(tokens)).toEqual(['go']);
     expect(detectCodeLanguages(tokens)).toEqual(['go']);
+  });
+});
+
+describe('collectCodeFences', () => {
+  it('lists each fence with its text and info string, nested ones included', () => {
+    const tokens = Lexer.lex(
+      '```ts\nlet a;\n```\n\n- item\n\n  ```py\n  b = 1\n  ```\n\n> ```cobol\n> x\n> ```\n',
+      MARKDOWN_LEXER_OPTIONS
+    );
+    expect(collectCodeFences(tokens)).toEqual([
+      { text: 'let a;', lang: 'ts' },
+      { text: 'b = 1', lang: 'py' },
+      { text: 'x', lang: 'cobol' },
+    ]);
+  });
+
+  it('skips a fence without an info string, which is never highlighted', () => {
+    expect(collectCodeFences(Lexer.lex('```\nplain\n```\n', MARKDOWN_LEXER_OPTIONS))).toEqual([]);
+  });
+
+  it('lists a markdown fence once, without the fences written inside it', () => {
+    const tokens = Lexer.lex('````md\n```ts\nlet a;\n```\n````\n', MARKDOWN_LEXER_OPTIONS);
+    expect(collectCodeFences(tokens).map((fence) => fence.lang)).toEqual(['md']);
   });
 });
