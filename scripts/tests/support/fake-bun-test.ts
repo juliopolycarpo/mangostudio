@@ -27,6 +27,7 @@ import { join } from 'node:path';
 
 import { discoverTestFiles } from '../../lib/test-workers';
 import { fixtureChildEnvironment } from './child-supervision';
+import { writePidFileAtomically } from './signal-pid';
 import { reportOf, shardOf } from './test-worker-fakes';
 import { startDrainPipeHolder } from './worker-drain-fixture';
 
@@ -87,7 +88,8 @@ async function main(argv: readonly string[]): Promise<void> {
       cmd: [
         process.execPath,
         '-e',
-        "process.on('SIGTERM', () => undefined); require('node:fs').writeFileSync(process.argv.at(-1), String(process.pid)); setInterval(() => undefined, 1000)",
+        // Stage, then rename: a reader never finds the pid file empty.
+        "process.on('SIGTERM', () => undefined); const fs = require('node:fs'); fs.writeFileSync(process.argv.at(-1) + '.tmp', String(process.pid)); fs.renameSync(process.argv.at(-1) + '.tmp', process.argv.at(-1)); setInterval(() => undefined, 1000)",
         childReady,
       ],
       // Preserve the fake's deliberate lifetime under a root --no-orphans
@@ -99,7 +101,7 @@ async function main(argv: readonly string[]): Promise<void> {
       detached: true,
     });
     child.unref();
-    writeFileSync(join(dir, `session-worker-${index}.pid`), `${process.pid}`);
+    writePidFileAtomically(join(dir, `session-worker-${index}.pid`), process.pid);
     setInterval(() => undefined, 1000);
     return;
   }
@@ -111,15 +113,15 @@ async function main(argv: readonly string[]): Promise<void> {
       stderr: 'ignore',
     });
     const dir = process.env.MANGOSTUDIO_FAKE_PID_DIR as string;
-    writeFileSync(join(dir, `tree-child-${index}.pid`), `${child.pid}`);
-    writeFileSync(join(dir, `tree-worker-${index}.pid`), `${process.pid}`);
+    writePidFileAtomically(join(dir, `tree-child-${index}.pid`), child.pid);
+    writePidFileAtomically(join(dir, `tree-worker-${index}.pid`), process.pid);
     setInterval(() => undefined, 1_000);
     return;
   }
   if (mode === 'hang') {
-    writeFileSync(
+    writePidFileAtomically(
       join(process.env.MANGOSTUDIO_FAKE_PID_DIR as string, `worker-${index}.pid`),
-      `${process.pid}`
+      process.pid
     );
     setInterval(() => undefined, 1_000);
     return;
@@ -129,9 +131,9 @@ async function main(argv: readonly string[]): Promise<void> {
     const leaked = await startDrainPipeHolder();
     // The root owns its private connection before metadata I/O can fail.
     leaked.unref();
-    writeFileSync(
+    writePidFileAtomically(
       join(process.env.MANGOSTUDIO_FAKE_PID_DIR as string, `grandchild-${index}.pid`),
-      `${leaked.pid}`
+      leaked.pid
     );
   }
   if (mode === 'leak' || mode === 'leak-session' || mode === 'tidy') {
@@ -146,9 +148,9 @@ async function main(argv: readonly string[]): Promise<void> {
       stderr: 'ignore',
       detached: mode === 'leak-session',
     });
-    writeFileSync(
+    writePidFileAtomically(
       join(process.env.MANGOSTUDIO_FAKE_PID_DIR as string, `${mode}-${index}.pid`),
-      `${leaked.pid}`
+      leaked.pid
     );
     leaked.unref();
   }

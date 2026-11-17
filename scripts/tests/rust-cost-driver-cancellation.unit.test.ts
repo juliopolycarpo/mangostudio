@@ -188,6 +188,7 @@ else if (args[0] === 'build') {
   const driverPid = Number(stat.slice(stat.lastIndexOf(')')+2).split(' ')[1]);
   await Bun.write(${JSON.stringify(join(this.directory, 'stall-reached'))}, JSON.stringify({ cargoPid: process.pid, workerPid: worker.pid, driverPid }));
   while (!(await Bun.file(${JSON.stringify(join(this.directory, 'cancel-now'))}).exists())) await Bun.sleep(5);
+  if (!Number.isSafeInteger(driverPid) || driverPid < 2) throw new Error('expected driver pid > 1 | received: ' + driverPid);
   process.kill(driverPid, 'SIGTERM');
   setInterval(() => {}, 1000); await new Promise(() => {});
 } else throw new Error('Unexpected fake cargo command: '+args);

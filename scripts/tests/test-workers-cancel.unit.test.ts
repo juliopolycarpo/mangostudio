@@ -6,7 +6,7 @@
  * survive it.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -16,20 +16,16 @@ import { fixtureChildEnvironment } from './support/child-supervision';
 import { FAKE_LANE_MAIN } from './support/fake-lane-main';
 import { FAKE_ROOT_RUNNER } from './support/fake-root-runner';
 import { isAlive } from './support/process-liveness';
+import { forceKill } from './support/process-tree';
+import { readPidFile } from './support/signal-pid';
 
 const API_DIR = join(ROOT_DIR, 'apps', 'api');
 const dirs: string[] = [];
 const pidsToReap: number[] = [];
 
 afterEach(() => {
-  for (const pid of pidsToReap.splice(0)) {
-    try {
-      process.kill(pid, 'SIGKILL');
-    } catch {
-      // gone, as it should be
-    }
-  }
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  for (const pid of pidsToReap.splice(0)) forceKill(pid);
 });
 
 async function until(ready: () => boolean, timeoutMs: number): Promise<boolean> {
@@ -90,9 +86,12 @@ function startLane(
     stderr: 'ignore',
   });
   pidsToReap.push(child.pid);
-  const pidFiles = () => readdirSync(join(dir, 'pids')).sort();
-  const pids = (): number[] =>
-    pidFiles().map((name) => Number(readFileSync(join(dir, 'pids', name), 'utf8')));
+  // `.tmp` names are a fake's staging files (see writePidFileAtomically), not pid files yet.
+  const pidFiles = () =>
+    readdirSync(join(dir, 'pids'))
+      .filter((name) => !name.endsWith('.tmp'))
+      .sort();
+  const pids = (): number[] => pidFiles().map((name) => readPidFile(join(dir, 'pids', name)));
   return { child, pids, pidFiles };
 }
 
@@ -141,6 +140,10 @@ describe.skipIf(process.platform === 'win32')('cancelling the integration lane m
       up,
       `expected 3 workers and 3 children running | received files: ${lane.pidFiles()}`
     ).toBe(true);
+    expect(
+      pids.filter((pid) => isAlive(pid)),
+      'expected every worker and child alive before the cancel'
+    ).toHaveLength(6);
 
     lane.child.kill('SIGTERM');
     const exitCode = await lane.child.exited;
