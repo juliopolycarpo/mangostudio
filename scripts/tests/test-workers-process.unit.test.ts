@@ -446,6 +446,30 @@ describe('four real worker processes', () => {
 const readPid = (dir: string, name: string): number =>
   Number(readFileSync(join(dir, name), 'utf8'));
 
+/**
+ * The PID files a fake has finished writing. Fakes stage each file as `<name>.tmp` and rename it,
+ * so a raw listing can count a worker whose PID is not readable yet (seen on a slow Windows runner).
+ * @example const up = writtenPidFiles(pidDir).length === 4;
+ */
+const writtenPidFiles = (dir: string): string[] =>
+  readdirSync(dir)
+    .filter((name) => name.endsWith('.pid'))
+    .sort();
+
+describe('writtenPidFiles', () => {
+  it('lists only renamed PID files, not ones still staged', () => {
+    const pidDir = mkdtempSync(join(tmpdir(), 'mangostudio-worker-pids-'));
+    workspaces.push(pidDir);
+    writeFileSync(join(pidDir, 'worker-2.pid'), '2');
+    writeFileSync(join(pidDir, 'worker-1.pid'), '1');
+    writeFileSync(join(pidDir, 'worker-3.pid.tmp'), '3');
+    expect(
+      writtenPidFiles(pidDir),
+      'expected the written PID files, without the staged worker-3.pid.tmp'
+    ).toEqual(['worker-1.pid', 'worker-2.pid']);
+  });
+});
+
 // Settlement is POSIX: Windows has no group to lead (the runner says so there).
 describe.skipIf(process.platform === 'win32')('workers that must settle', () => {
   it('signals the whole group on cancellation without relying on settlement to reap a child', async () => {
@@ -454,7 +478,7 @@ describe.skipIf(process.platform === 'win32')('workers that must settle', () => 
     const controller = new AbortController();
     const owner = ownLane(controller);
     owner.verify(() => {
-      const alive = readdirSync(pidDir)
+      const alive = writtenPidFiles(pidDir)
         .map((name) => readPid(pidDir, name))
         .filter((pid) => isAlive(pid));
       if (alive.length)
@@ -475,8 +499,8 @@ describe.skipIf(process.platform === 'win32')('workers that must settle', () => 
       )
     );
     await owner.run(async () => {
-      const up = await until(() => readdirSync(pidDir).length === 4, 10_000, controller.signal);
-      const pids = readdirSync(pidDir).map((name) => readPid(pidDir, name));
+      const up = await until(() => writtenPidFiles(pidDir).length === 4, 10_000, controller.signal);
+      const pids = writtenPidFiles(pidDir).map((name) => readPid(pidDir, name));
       try {
         expect(up, 'expected two workers and two children running before cancellation').toBe(true);
         controller.abort();
@@ -668,7 +692,7 @@ describe('cancelling real worker processes', () => {
     const controller = new AbortController();
     const owner = ownLane(controller);
     owner.verify(() => {
-      const alive = readdirSync(pidDir)
+      const alive = writtenPidFiles(pidDir)
         .map((name) => readPid(pidDir, name))
         .filter((pid) => isAlive(pid));
       if (alive.length)
@@ -682,12 +706,13 @@ describe('cancelling real worker processes', () => {
 
     await owner.run(async () => {
       // Cancel only once every worker is up, or a late one would never be signalled.
-      await until(() => readdirSync(pidDir).length >= 3, 20_000, controller.signal);
-      expect(
-        readdirSync(pidDir).sort(),
-        'expected all 3 workers running before cancelling'
-      ).toEqual(['worker-1.pid', 'worker-2.pid', 'worker-3.pid']);
-      const pids = readdirSync(pidDir).map((name) =>
+      await until(() => writtenPidFiles(pidDir).length >= 3, 20_000, controller.signal);
+      expect(writtenPidFiles(pidDir), 'expected all 3 workers running before cancelling').toEqual([
+        'worker-1.pid',
+        'worker-2.pid',
+        'worker-3.pid',
+      ]);
+      const pids = writtenPidFiles(pidDir).map((name) =>
         Number(readFileSync(join(pidDir, name), 'utf8'))
       );
       controller.abort();
@@ -1396,8 +1421,12 @@ describe.skipIf(process.platform === 'win32')(
         runLane(2, { 1: 'hang-tree', 2: 'hang-tree' }, { signal: controller.signal, pidDir, owner })
       );
       await owner.run(async () => {
-        const up = await until(() => readdirSync(pidDir).length === 4, 10_000, controller.signal);
-        const pids = readdirSync(pidDir).map((name) => readPid(pidDir, name));
+        const up = await until(
+          () => writtenPidFiles(pidDir).length === 4,
+          10_000,
+          controller.signal
+        );
+        const pids = writtenPidFiles(pidDir).map((name) => readPid(pidDir, name));
         try {
           expect(up, 'expected two workers and two children running before cancellation').toBe(
             true
