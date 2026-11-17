@@ -512,19 +512,20 @@ MANGO_API_KEY='mango_…' bun run scripts/examples/external-api-smoke.ts http://
 
 ## bench/ — hermetic performance measurement
 
-| Script                       | Purpose                                                                                                                               |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `startup.ts`                 | Median process-start → first healthy `GET /api/health` of a binary                                                                    |
-| `hub-footprint.ts`           | Compiled hubs side by side: binary size, start → first healthy `/api/health`, idle and post-workload RSS (Linux `/proc`)              |
-| `runtime-handshake.ts`       | Runtime child over stdio: process start → `hello` → first request, min/median/p95/max                                                 |
-| `grep.ts`                    | Runtime `fs.grep` over stdio: 1/100/1000 small files, a large file, peak RSS, cancel                                                  |
-| `runtime-results.ts`         | Runtime `fs.list-directory` and `fs.read-file` over stdio, and start → first answer; peak RSS, answer digest compared across binaries |
-| `runtime-requests.ts`        | Runtime `fs.glob` and small-request and large-params round trips over one session; paired median delta and pairs won                  |
-| `line-decoder.ts`            | Protocol NDJSON `LineDecoder`: ns per byte for large records in small pieces and for many short records, peak RSS                     |
-| `rust-test-inventory.ts`     | Rust test inventory (libtest or nextest) by logical identity; diff two, total a log                                                   |
-| `external-agent-boundary.ts` | Actual receipt hashing, admitted request ownership and event mapping; alternating Base/Head processes, raw timings and peak RSS       |
-| `checkpoint-writes.ts`       | Hub streaming turns against a fake provider: bytes written to the SQLite main and WAL files, commits, fsyncs, CPU, peak RSS           |
-| `api-json-compression.ts`    | Hub JSON responses: raw/gzip/zstd/Brotli sizes and compress time, break-even link speed, hub CPU and latency by peer address          |
+| Script                       | Purpose                                                                                                                                          |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `startup.ts`                 | Median process-start → first healthy `GET /api/health` of a binary                                                                               |
+| `hub-footprint.ts`           | Compiled hubs side by side: binary size, start → first healthy `/api/health`, idle and post-workload RSS (Linux `/proc`)                         |
+| `runtime-handshake.ts`       | Runtime child over stdio: process start → `hello` → first request, min/median/p95/max                                                            |
+| `grep.ts`                    | Runtime `fs.grep` over stdio: 1/100/1000 small files, a large file, peak RSS, cancel                                                             |
+| `runtime-results.ts`         | Runtime `fs.list-directory` and `fs.read-file` over stdio, and start → first answer; peak RSS, answer digest compared across binaries            |
+| `runtime-requests.ts`        | Runtime `fs.glob` and small-request and large-params round trips over one session; paired median delta and pairs won                             |
+| `line-decoder.ts`            | Protocol NDJSON `LineDecoder`: ns per byte for large records in small pieces and for many short records, peak RSS                                |
+| `rust-test-inventory.ts`     | Rust test inventory (libtest or nextest) by logical identity; diff two, total a log                                                              |
+| `external-agent-boundary.ts` | Actual receipt hashing, admitted request ownership and event mapping; alternating Base/Head processes, raw timings and peak RSS                  |
+| `checkpoint-writes.ts`       | Hub streaming turns against a fake provider: bytes written to the SQLite main and WAL files, commits, fsyncs, CPU, peak RSS                      |
+| `api-json-compression.ts`    | Hub JSON responses: raw/gzip/zstd/Brotli sizes and compress time, break-even link speed, hub CPU and latency by peer address                     |
+| `stream-reducer.ts`          | Frontend stream reducer and transcript-cache patch for 500/2,000/8,000 chunks of text, reasoning and subagent text: time, growth, heap, identity |
 
 The benchmarks take any runtime binary, and they default to the newest of `target/release`,
 `target/release-fast` and `target/debug`. For an A/B on one machine, build with
@@ -692,6 +693,21 @@ counts over CPU.
 ```bash
 bun run scripts/bench/checkpoint-writes.ts --runs 3 --counts
 bun run scripts/bench/checkpoint-writes.ts --hub-dir ../base-checkout --scenario tools-20x65k --json
+```
+
+`stream-reducer.ts` runs the real `reduceTextGenerationStreamChunk` and the transcript-cache patch
+in-process for streams of 500, 2,000 and 8,000 chunks of 40 characters (`text`, `thinking`,
+`subagent_text`) above a settled history. It prints total time, the mean per-chunk cost of the first
+and last 50 chunks (growth), the heap the finished state keeps, and how many objects change identity
+on one more chunk (cache, pages, live row, its parts, sibling rows). `--frontend-dir` points at a
+checkout's `apps/frontend`, so a base and a head checkout run the same scenarios; a checkout without
+`message-cache-patch.ts` is measured with the updater that preceded it. It measures the reducer and
+the store write, not React: rendering a chunk costs far more (see the markdown parse of the whole
+text per chunk).
+
+```bash
+bun run scripts/bench/stream-reducer.ts --runs 7 --history 200
+bun run scripts/bench/stream-reducer.ts --frontend-dir ../base/apps/frontend --kind text --json
 ```
 
 `api-json-compression.ts` seeds a throwaway hub with a realistic transcript (tool results are slices
