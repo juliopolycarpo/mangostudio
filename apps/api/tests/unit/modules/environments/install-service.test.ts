@@ -30,6 +30,7 @@ import type {
   InstallerArtifact,
   InstallerDownloader,
 } from '../../../../src/modules/environments/infrastructure/installer-download';
+import { DiagnosticWarnCapture, expectHubLogEntry } from '../../../support/diagnostic-warn-capture';
 
 /** Always answers the default selection; no run in this file exercises a stored override. */
 class FakeToolchainService implements ToolchainService {
@@ -52,6 +53,11 @@ const REQUEST_CONTEXT = {
   clientIp: '127.0.0.1',
 } as const;
 const NO_INPUT = { kind: 'none' } as const;
+/** Raw probe failure text: a hub filesystem path and driver wording a client must not read. */
+const PROBE_FAILURE_DETAIL = "ENOENT: no such file or directory, open '/home/alice/.nvm/nvm.sh'";
+/** Raw database text for the audit-row failure. */
+const AUDIT_FAILURE_DETAIL =
+  'SQLITE_BUSY: database is locked (UPDATE "install_runs" SET "status" = ? WHERE "id" = ?)';
 const BUN_INSTALLATION = {
   path: '/home/tester/.bun/bin/bun',
   rawPath: '/home/tester/.bun/bin/bun',
@@ -431,7 +437,7 @@ describe('install service', () => {
     detection.probingService.getRuntimeStatus = (_scope, id, options) => {
       if (options?.force) {
         detection.forced.push({ kind: 'runtime', id });
-        return Promise.reject(new Error('runtime probe exploded'));
+        return Promise.reject(new Error(PROBE_FAILURE_DETAIL));
       }
       return originalGetRuntimeStatus(_scope, id, options);
     };
@@ -449,13 +455,16 @@ describe('install service', () => {
       platform: 'linux',
     });
 
-    const started = await service.start(
-      { recipeId: recipe.id, input: { kind: 'node-version', version: 'lts' } },
-      REQUEST_CONTEXT
-    );
-    const events = await collectEvents(
-      await service.getRunStream(started.runId, REQUEST_CONTEXT.userId)
-    );
+    let events: Record<string, unknown>[] = [];
+    const logged = await new DiagnosticWarnCapture().during(async () => {
+      const started = await service.start(
+        { recipeId: recipe.id, input: { kind: 'node-version', version: 'lts' } },
+        REQUEST_CONTEXT
+      );
+      events = await collectEvents(
+        await service.getRunStream(started.runId, REQUEST_CONTEXT.userId)
+      );
+    });
 
     expect(detection.forced).toEqual([
       { kind: 'runtime', id: 'node' },
@@ -466,6 +475,15 @@ describe('install service', () => {
       stream: 'system',
       line: 'Post-install probe failed. Details are in the hub log.',
       done: false,
+    });
+    // Regression (#2340): the probe's own text, with a hub path, used to be the line.
+    expect(
+      JSON.stringify(events).includes('/home/alice'),
+      `(probe): expected a stream without the hub path | received: ${JSON.stringify(events)}`
+    ).toBe(false);
+    expectHubLogEntry(logged, 'post_install_probe_failed', {
+      fields: { environmentId: 'local' },
+      fragment: PROBE_FAILURE_DETAIL,
     });
     expect(events.filter((event) => event.type === 'probe').map((event) => event.target)).toEqual([
       'version-manager',
@@ -914,7 +932,7 @@ describe('install service', () => {
     const memory = createMemoryRepository();
     const repository: InstallRunRepository = {
       ...memory.repository,
-      complete: () => Promise.reject(new Error('database is locked')),
+      complete: () => Promise.reject(new Error(AUDIT_FAILURE_DETAIL)),
     };
     const runner: InstallRunner = {
       run: () =>
@@ -938,19 +956,31 @@ describe('install service', () => {
       platform: 'linux',
     });
 
-    const started = await service.start(
-      { recipeId: 'bun.update', input: NO_INPUT },
-      REQUEST_CONTEXT
-    );
-    const events = await collectEvents(
-      await service.getRunStream(started.runId, REQUEST_CONTEXT.userId)
-    );
+    let events: Record<string, unknown>[] = [];
+    const logged = await new DiagnosticWarnCapture().during(async () => {
+      const started = await service.start(
+        { recipeId: 'bun.update', input: NO_INPUT },
+        REQUEST_CONTEXT
+      );
+      events = await collectEvents(
+        await service.getRunStream(started.runId, REQUEST_CONTEXT.userId)
+      );
+    });
 
     expect(events).toContainEqual({
       type: 'log',
       stream: 'system',
       line: 'Install audit row was not updated. Details are in the hub log.',
       done: false,
+    });
+    // Regression (#2340): the database error used to follow the colon in this line.
+    expect(
+      JSON.stringify(events).includes('SQLITE_BUSY'),
+      `(audit row): expected a stream without the SQL error | received: ${JSON.stringify(events)}`
+    ).toBe(false);
+    expectHubLogEntry(logged, 'install_audit_row_not_updated', {
+      fields: { runId: 'unrecorded-run', environmentId: 'local' },
+      fragment: AUDIT_FAILURE_DETAIL,
     });
     expect(events.at(-1)).toMatchObject({ type: 'exit', code: 0, status: 'succeeded', done: true });
   });

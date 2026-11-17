@@ -156,11 +156,39 @@ export function runtimeSlotBytesScript(slot: RuntimeSlot): string {
   );
 }
 
+/** What a machine's command printed and exited with, kept apart from the error's text. */
+export interface RuntimePushRemoteOutput {
+  readonly exitCode: number;
+  /** The command's stderr, or its stdout when stderr was empty. */
+  readonly output: string;
+}
+
+export interface RuntimePushErrorOptions {
+  /**
+   * The failed command's own output. Present only where the error came from a
+   * command's result, so a client-facing line can classify the cause without
+   * reading `message`, which embeds that same output.
+   */
+  readonly remote?: RuntimePushRemoteOutput;
+}
+
+/**
+ * `message` is worded for the hub operator and embeds remote output, so it
+ * belongs in the hub log. A line a client reads is built from `remote` instead.
+ */
 export class RuntimePushError extends Error {
-  constructor(message: string) {
+  readonly remote?: RuntimePushRemoteOutput;
+
+  constructor(message: string, options: RuntimePushErrorOptions = {}) {
     super(message);
     this.name = 'RuntimePushError';
+    if (options.remote !== undefined) this.remote = options.remote;
   }
+}
+
+/** The failed result's own output, for {@link RuntimePushError} to carry. */
+export function remoteOutputOf(result: RuntimeCommandResult): RuntimePushRemoteOutput {
+  return { exitCode: result.exitCode, output: result.stderr.trim() || result.stdout.trim() };
 }
 
 export interface PushRuntimeBinaryParams {
@@ -201,7 +229,8 @@ export async function pushRuntimeBinary(params: PushRuntimeBinaryParams): Promis
   }
   if (result.exitCode !== 0) {
     throw new RuntimePushError(
-      `Could not place the runtime in the ${params.slot} slot: ${describeResult(result)}`
+      `Could not place the runtime in the ${params.slot} slot: ${describeResult(result)}`,
+      { remote: remoteOutputOf(result) }
     );
   }
 
@@ -214,7 +243,8 @@ export async function pushRuntimeBinary(params: PushRuntimeBinaryParams): Promis
   }
   if (check.exitCode !== 0) {
     throw new RuntimePushError(
-      `The runtime was placed in the ${params.slot} slot but does not run: ${describeResult(check)}`
+      `The runtime was placed in the ${params.slot} slot but does not run: ${describeResult(check)}`,
+      { remote: remoteOutputOf(check) }
     );
   }
   if (check.stdout.trim() !== params.version) {

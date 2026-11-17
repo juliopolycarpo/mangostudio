@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 
 import { RemoteError } from '@mangostudio/protocol';
 import { DEFAULT_SSH_RUNTIME_PATH, type RuntimeSetupBody } from '@mangostudio/shared/environments';
+import { RUNTIME_UPDATE_REFUSED } from '@mangostudio/shared/runtime-contract';
 import { RUNTIME_CAPABILITY_KEYS, RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 
 import { EnvironmentUnavailableError } from '../../../../src/lib/environment-unavailable';
@@ -10,13 +11,17 @@ import {
   failureLineFor,
   pushRuntimeOverSsh,
   restartBudgetMs,
+  RuntimeLifecycleConflictError,
+  RuntimeLifecycleUnavailableError,
 } from '../../../../src/modules/environments/application/runtime-lifecycle-service';
 import {
   type RuntimeCommandOptions,
   type RuntimeCommandResult,
   RuntimePushError,
 } from '../../../../src/modules/environments/domain/runtime-push';
+import { RuntimeAssetLoadError } from '../../../../src/modules/environments/domain/runtime-release-fetch';
 import { WslProvisioningError } from '../../../../src/modules/environments/infrastructure/wsl-provisioner';
+import { DiagnosticWarnCapture, expectHubLogEntry } from '../../../support/diagnostic-warn-capture';
 
 function ok(stdout = ''): RuntimeCommandResult {
   return { stdout, stderr: '', exitCode: 0 };
@@ -222,10 +227,28 @@ describe('pushRuntimeOverSsh', () => {
       'Could not read what "example.test" reported about itself: Linux'
     );
   });
+
+  it('hands a failed platform probe to the run line as command output, not message text', async () => {
+    const runner = (script: string): Promise<RuntimeCommandResult> =>
+      Promise.resolve(
+        isPlatformProbe(script)
+          ? { stdout: '', stderr: 'Permission denied (publickey).', exitCode: 255 }
+          : ok('0.0.1-old')
+      );
+
+    const failure: unknown = await push(runner).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(RuntimePushError);
+    expect((failure as RuntimePushError).remote).toEqual({
+      exitCode: 255,
+      output: 'Permission denied (publickey).',
+    });
+  });
 });
 
 describe('failureLineFor', () => {
   const HUB_PATH = '/home/alice/.mango/runtime/cache/linux-x64.tmp';
+  const WSL_PATH = 'C:\\Users\\alice\\AppData\\Local\\wsl.exe';
 
   // Regression: any thrown error's text reached the run's stderr stream.
   it('replaces the text of an error the hub did not word for the user', () => {
@@ -249,16 +272,112 @@ describe('failureLineFor', () => {
     expect(line).toBe('The runtime for this environment is not installed on the hub.');
   });
 
-  it('passes through errors its collaborators word for the operator', () => {
-    expect(failureLineFor(new WslProvisioningError('The distro is stopped.'), 'r1', 'e1')).toBe(
-      'The distro is stopped.'
-    );
-    expect(failureLineFor(new RuntimePushError('Upload was truncated.'), 'r1', 'e1')).toBe(
-      'Upload was truncated.'
-    );
+  it('passes through a lifecycle refusal, whose text this module writes', () => {
     expect(
-      failureLineFor(new RemoteError('REFUSED', 'update refused: digest mismatch'), 'r1', 'e1')
-    ).toBe('update refused: digest mismatch');
+      failureLineFor(new RuntimeLifecycleUnavailableError('Pick a runtime first.', 409), 'r1', 'e1')
+    ).toBe('Pick a runtime first.');
+    expect(failureLineFor(new RuntimeLifecycleConflictError('A run is active.'), 'r1', 'e1')).toBe(
+      'A run is active.'
+    );
+  });
+
+  // Regression (#2340): provisioning, push, release-fetch and runtime-sent text
+  // used to be the stderr line. Each embeds a path, remote stderr or driver
+  // wording, so each now gets fixed copy and the hub log gets the error.
+  const RAW_DETAIL_CASES: readonly (readonly [
+    label: string,
+    error: Error,
+    reason: string,
+    fragment: string,
+    line: string,
+  ])[] = [
+    [
+      'a WSL provisioning failure',
+      new WslProvisioningError(`Could not run WSL at "${WSL_PATH}": spawn EACCES`),
+      'wsl-provisioning-failed',
+      WSL_PATH,
+      'The runtime could not be set up in the WSL distribution. Check that the distribution starts, then try again. Details are in the hub log.',
+    ],
+    [
+      'a push error without a command result',
+      new RuntimePushError(`Could not read what "h" reported about itself: ${HUB_PATH}`),
+      'runtime-push-failed',
+      HUB_PATH,
+      'The runtime could not be copied to the machine. Check the machine, then try again. Details are in the hub log.',
+    ],
+    [
+      'a push error from an SSH command that was refused',
+      new RuntimePushError(`Could not probe "h": Permission denied (publickey) for ${HUB_PATH}`, {
+        remote: { exitCode: 255, output: `Permission denied (publickey) for ${HUB_PATH}` },
+      }),
+      'auth-failed',
+      HUB_PATH,
+      'The machine rejected the SSH credentials. Check the user name and identity file on the environment, then try again. Details are in the hub log.',
+    ],
+    [
+      'a push error from a command with no known cause',
+      new RuntimePushError(`Could not place the runtime in the remote slot: ${HUB_PATH}`, {
+        remote: { exitCode: 2, output: HUB_PATH },
+      }),
+      'remote-command-failed',
+      HUB_PATH,
+      'The command on the machine failed (exit code 2). Check the machine, then try again. Details are in the hub log.',
+    ],
+    [
+      'an unreachable release host',
+      new RuntimeAssetLoadError(`Could not download https://x.test/a: connect ECONNREFUSED`, {
+        unreachable: true,
+      }),
+      'release-unreachable',
+      'ECONNREFUSED',
+      "The hub could not reach the release host to download the runtime. Check the hub's network, then try again. Details are in the hub log.",
+    ],
+    [
+      'a release that answered but could not be used',
+      new RuntimeAssetLoadError(`No local runtime build at ${HUB_PATH} for version "dev".`),
+      'release-unavailable',
+      HUB_PATH,
+      'The runtime for this release could not be loaded or verified. Details are in the hub log.',
+    ],
+    [
+      'a reserved runtime error code',
+      new RemoteError('DENIED', `fsRead was not granted for ${HUB_PATH}`),
+      'runtime-error',
+      HUB_PATH,
+      'The runtime reported an error (DENIED). Details are in the hub log.',
+    ],
+    [
+      'a runtime error with a code the runtime chose',
+      new RemoteError('CODE_FROM_THE_PEER', `boom at ${HUB_PATH}`),
+      'runtime-error',
+      'CODE_FROM_THE_PEER',
+      'The runtime reported an error. Details are in the hub log.',
+    ],
+  ];
+
+  for (const [label, error, reason, fragment, expectedLine] of RAW_DETAIL_CASES) {
+    it(`gives ${label} fixed copy and logs the raw text with the run and environment`, async () => {
+      let line = '';
+      const logged = await new DiagnosticWarnCapture().during(() => {
+        line = failureLineFor(error, 'run-9', 'env-9');
+      });
+
+      expect(line).toBe(expectedLine);
+      expect(
+        line.includes(fragment),
+        `(${label}): expected a line without "${fragment}" | received: ${line}`
+      ).toBe(false);
+      expectHubLogEntry(logged, 'run_failed', {
+        fields: { runId: 'run-9', environmentId: 'env-9', reason },
+        fragment,
+      });
+    });
+  }
+
+  it('keeps the update-refused code, which the runtime defines, in the line', () => {
+    expect(
+      failureLineFor(new RemoteError(RUNTIME_UPDATE_REFUSED, 'digest mismatch'), 'r1', 'e1')
+    ).toBe('The runtime reported an error (RUNTIME_UPDATE_REFUSED). Details are in the hub log.');
   });
 });
 

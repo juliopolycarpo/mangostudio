@@ -26,7 +26,7 @@ import {
 import Value from 'typebox/value';
 
 import { getDb } from '../../../src/db/database';
-import { getVersion } from '../../../src/lib/config';
+import { getHomeMangoDir, getVersion } from '../../../src/lib/config';
 import {
   createEnvironmentService,
   type EnvironmentRuntimeEffects,
@@ -35,6 +35,7 @@ import {
   createRuntimeLifecycleService,
   type RuntimeLifecycleService,
 } from '../../../src/modules/environments/application/runtime-lifecycle-service';
+import { RUNTIME_CACHE_DIR_NAME } from '../../../src/modules/environments/domain/runtime-release-fetch';
 import { createEnvironmentEntityRoutes } from '../../../src/modules/environments/http/environment-entity-routes';
 import {
   type CreateEnvironmentRecord,
@@ -58,6 +59,7 @@ import {
   persistRuntimeToken,
   setRuntimeTokenStoreForTests,
 } from '../../../src/services/runtime-client/runtime-token-secrets';
+import { DiagnosticWarnCapture, expectHubLogEntry } from '../../support/diagnostic-warn-capture';
 import { insertTestUser } from '../../support/factories';
 import { connectFakeRuntime, type FakeRuntimeConnection } from '../../support/fake-runtime-host';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
@@ -1244,23 +1246,41 @@ describe('environment entity routes', () => {
       await manager.connect(TEST_USER.id, 'wsl-staged-download-cache-failure');
       await manager.refreshManifest(TEST_USER.id, 'wsl-staged-download-cache-failure');
 
-      const started = await app.handle(
-        new Request(
-          'http://localhost/environments/wsl-staged-download-cache-failure/runtime/install',
-          jsonRequest('POST', { action: 'download' })
-        )
-      );
-      expect(started.status).toBe(200);
-      const { runId } = (await started.json()) as { runId: string };
-      const log = await app.handle(
-        new Request(
-          `http://localhost/environments/wsl-staged-download-cache-failure/runtime/runs/${runId}/log`
-        )
-      );
-      const body = await log.text();
+      let body = '';
+      const logged = await new DiagnosticWarnCapture().during(async () => {
+        const started = await app.handle(
+          new Request(
+            'http://localhost/environments/wsl-staged-download-cache-failure/runtime/install',
+            jsonRequest('POST', { action: 'download' })
+          )
+        );
+        expect(started.status).toBe(200);
+        const { runId } = (await started.json()) as { runId: string };
+        const log = await app.handle(
+          new Request(
+            `http://localhost/environments/wsl-staged-download-cache-failure/runtime/runs/${runId}/log`
+          )
+        );
+        body = await log.text();
+      });
 
       expect(body).toContain('"status":"failed"');
       expect(body).not.toContain('Verified and cached');
+      // Regression (#2340): the failure line named the hub's cache directory. The
+      // path is the product of a successful download, but a failed write stages
+      // nothing, so only the hub log keeps it.
+      const cacheDir = join(getHomeMangoDir(), RUNTIME_CACHE_DIR_NAME);
+      expect(
+        body.includes(JSON.stringify(cacheDir).slice(1, -1)),
+        `(cache write failure): expected a stream without "${cacheDir}" | received: ${body}`
+      ).toBe(false);
+      expectHubLogEntry(logged, 'runtime_cache_write_failed', {
+        fields: {
+          environmentId: 'wsl-staged-download-cache-failure',
+          reason: 'cache-write-failed',
+        },
+        fragment: cacheDir,
+      });
       await manager.closeAll();
     } finally {
       if (originalVersion === undefined) delete process.env.VERSION;

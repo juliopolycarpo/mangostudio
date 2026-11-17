@@ -19,6 +19,7 @@ import {
   ORDERED_ANSWER_MINOR,
 } from '../../../../src/modules/environments/infrastructure/install-runner';
 import type { RuntimeClient } from '../../../../src/services/runtime-client/runtime-client';
+import { DiagnosticWarnCapture, expectHubLogEntry } from '../../../support/diagnostic-warn-capture';
 
 const COMMAND = {
   runId: 'run-1',
@@ -297,6 +298,51 @@ describe('install relay', () => {
     expect(events).toEqual([
       { stream: 'system', line: 'Install execution failed. Details are in the hub log.' },
     ]);
+  });
+
+  // Regression (#2340): the hub's own error text names paths and driver wording,
+  // and it must reach the hub log with the run and environment id, not the stream.
+  describe('keeps hub-internal detail out of the run stream', () => {
+    const HUB_DETAIL = "EACCES: permission denied, open '/home/alice/.mango/runtime/install.sock'";
+
+    it('for a resolve failure that is not a connect refusal', async () => {
+      const events: InstallLogLine[] = [];
+      const runner = createInstallRunner({
+        resolveClient: () => Promise.reject(new Error(HUB_DETAIL)),
+        now: () => 1_700_000_000_000,
+      });
+
+      const logged = await new DiagnosticWarnCapture().during(() =>
+        runner.run(COMMAND, { onLog: (event) => events.push(event) })
+      );
+
+      expect(
+        JSON.stringify(events).includes('/home/alice'),
+        `(resolve): expected a stream without the hub path | received: ${JSON.stringify(events)}`
+      ).toBe(false);
+      expectHubLogEntry(logged, 'resolve_client_failed', {
+        fields: { runId: 'run-1', environmentId: 'ubuntu' },
+        fragment: '/home/alice/.mango/runtime/install.sock',
+      });
+    });
+
+    it('for a relay failure after the request was accepted', async () => {
+      const fake = fakeClient({ result: () => Promise.reject(new Error(HUB_DETAIL)) });
+      const events: InstallLogLine[] = [];
+
+      const logged = await new DiagnosticWarnCapture().during(() =>
+        runnerFor(fake.client).run(COMMAND, { onLog: (event) => events.push(event) })
+      );
+
+      expect(
+        JSON.stringify(events).includes('/home/alice'),
+        `(relay): expected a stream without the hub path | received: ${JSON.stringify(events)}`
+      ).toBe(false);
+      expectHubLogEntry(logged, 'install_relay_failed', {
+        fields: { runId: 'run-1', environmentId: 'ubuntu' },
+        fragment: '/home/alice/.mango/runtime/install.sock',
+      });
+    });
   });
 
   it('omits the toolchain for a peer that does not advertise it', async () => {
