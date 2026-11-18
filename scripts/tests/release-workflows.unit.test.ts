@@ -22,8 +22,12 @@ import { readText } from './support/read-text';
 import {
   extractJobBlock,
   extractJobBlocks,
+  extractOnBlock,
+  extractStepBlock,
   extractStepBlocks,
   extractStepBlocksAtIndent,
+  extractStepBlocksUsing,
+  extractTopLevelBlock,
 } from './support/workflow-blocks';
 import {
   compositeActionFiles,
@@ -69,6 +73,26 @@ function expectJobNeeds(workflow: string, job: string, needs: string): void {
   const block = extractJobBlock(workflow, job);
   expect(block, `job "${job}" not found in workflow`).not.toBe('');
   expect(block).toMatch(new RegExp(`\\n    needs: ${needs}(?:\\n|$)`));
+}
+
+/**
+ * One `on.workflow_dispatch.inputs.<name>` declaration. Parsed rather than
+ * matched as text: `type: boolean` and `default: false` appear under every input,
+ * so a file-wide match cannot tell which input they belong to.
+ */
+function workflowDispatchInput(workflowPath: string, name: string): unknown {
+  const definition = Bun.YAML.parse(readText(workflowPath)) as {
+    on: { workflow_dispatch: { inputs: Record<string, unknown> } };
+  };
+  return definition.on.workflow_dispatch.inputs[name];
+}
+
+/** The release dry run's relevance step: the one place that runs `changed-paths.ts`. */
+function dryRunChangedPathsStep(): string {
+  return extractStepBlock(
+    extractJobBlock(readText('.github/workflows/release-dry-run.yml'), 'changes'),
+    'Check release and launcher paths'
+  );
 }
 
 function extractWorkflowRunSteps(workflowPath: string): WorkflowRunStep[] {
@@ -264,10 +288,14 @@ describe('release workflow binary gate', () => {
   test('the publish composite re-exports auth and provenance to both summaries', () => {
     const action = readText('.github/actions/publish-npm-distribution/action.yml');
     const publishOutputPrefix = '$' + '{{ steps.publish.outputs.';
-    expect(action).toContain('auth:');
-    expect(action).toContain(`value: ${publishOutputPrefix}auth }}`);
-    expect(action).toContain('provenance:');
-    expect(action).toContain(`value: ${publishOutputPrefix}provenance }}`);
+    // The re-export is the composite's `outputs:` map; the same expressions would
+    // not re-export anything from a step.
+    const outputs = extractTopLevelBlock(action, 'outputs');
+    expect(outputs, 'publish-npm-distribution action.yml: outputs section').not.toBe('');
+    expect(outputs).toContain('auth:');
+    expect(outputs).toContain(`value: ${publishOutputPrefix}auth }}`);
+    expect(outputs).toContain('provenance:');
+    expect(outputs).toContain(`value: ${publishOutputPrefix}provenance }}`);
 
     for (const [file, job] of [
       ['release.yml', 'npm-publish'],
@@ -291,14 +319,21 @@ describe('release workflow binary gate', () => {
       `CARGO_REGISTRY_TOKEN: ${secretPrefix}CARGO_REGISTRY_TOKEN }}`
     );
 
-    for (const [workflow, job, secret] of [
-      [release, 'homebrew', 'DIST_REPOS_TOKEN'],
-      [release, 'scoop', 'DIST_REPOS_TOKEN'],
+    for (const [workflow, job, preflightStep, secret] of [
+      [release, 'homebrew', 'Preflight Homebrew dist-repos secret', 'DIST_REPOS_TOKEN'],
+      [release, 'scoop', 'Preflight Scoop dist-repos secret', 'DIST_REPOS_TOKEN'],
     ] as const) {
       const block = extractJobBlock(workflow, job);
-      expect(block, job).toContain('uses: $/.github/actions/require-secret');
-      expect(block, job).toContain(`name: ${secret}`);
-      expect(block, job).toContain(`value: "${secretPrefix}${secret} }}"`);
+      // The composite call, the secret it names and the value it checks must all
+      // sit in the one preflight step; elsewhere in the job they check nothing.
+      const preflight = extractStepBlock(block, preflightStep);
+      expect(preflight, `${job}: ${preflightStep}`).toContain(
+        'uses: $/.github/actions/require-secret'
+      );
+      expect(preflight, `${job}: ${preflightStep}`).toContain(`name: ${secret}`);
+      expect(preflight, `${job}: ${preflightStep}`).toContain(
+        `value: "${secretPrefix}${secret} }}"`
+      );
       expect(block.indexOf('uses: actions/checkout@'), job).toBeLessThan(
         block.indexOf('uses: $/.github/actions/require-secret')
       );
@@ -384,27 +419,34 @@ describe('release workflow binary gate', () => {
     const platformExpression = '$' + '{{ matrix.platform }}';
     const dockerArchExpression = '$' + '{{ matrix.docker_arch }}';
 
-    expect(workflow).toContain('  binary:');
-    expect(workflow).toContain(`name: Binary ${platformExpression}`);
-    expect(workflow).toContain('- platform: linux-x64');
-    expect(workflow).toContain('- platform: linux-arm64');
-    expect(workflow).toContain('- platform: darwin-arm64');
-    expect(workflow).toContain('- platform: darwin-x64');
-    expect(workflow).toContain('- platform: windows-x64');
-    expect(workflow).toContain('- platform: windows-arm64');
-    expect(workflow).toContain('runner: ubuntu-24.04-arm');
-    expect(workflow).toContain('runner: macos-15-intel');
-    expect(workflow).toContain('runner: windows-11-arm');
-    expect(workflow).toContain(`PLATFORM: ${platformExpression}`);
+    // The platform matrix, its runners and the Docker steps all live in `binary`;
+    // the `runtime` job above it carries none of them.
+    const binary = extractJobBlock(workflow, 'binary');
+    expect(binary, 'smoke-binary.yml: binary job').not.toBe('');
+    expect(binary).toContain(`name: Binary ${platformExpression}`);
+    expect(binary).toContain('- platform: linux-x64');
+    expect(binary).toContain('- platform: linux-arm64');
+    expect(binary).toContain('- platform: darwin-arm64');
+    expect(binary).toContain('- platform: darwin-x64');
+    expect(binary).toContain('- platform: windows-x64');
+    expect(binary).toContain('- platform: windows-arm64');
+    expect(binary).toContain('runner: ubuntu-24.04-arm');
+    expect(binary).toContain('runner: macos-15-intel');
+    expect(binary).toContain('runner: windows-11-arm');
+    expect(extractStepBlock(binary, 'Run binary smoke test')).toContain(
+      `PLATFORM: ${platformExpression}`
+    );
 
     expect(workflow).not.toContain('  docker:');
-    expect(workflow).toContain('name: Run Bookworm Docker smoke test');
-    expect(workflow).toContain('name: Run Alpine Docker smoke test');
-    expect(workflow).toContain('musl_platform: linux-x64-musl');
-    expect(workflow).toContain('musl_platform: linux-arm64-musl');
+    expect(binary).toContain('musl_platform: linux-x64-musl');
+    expect(binary).toContain('musl_platform: linux-arm64-musl');
     const dockerArchVar = '$' + '{DOCKER_ARCH}';
-    expect(workflow).toContain(`DOCKER_ARCH: ${dockerArchExpression}`);
-    expect(workflow).toContain(`--platform "linux/${dockerArchVar}"`);
+    // extractStepBlock throws when a Docker variant's step is renamed or dropped.
+    for (const name of ['Run Bookworm Docker smoke test', 'Run Alpine Docker smoke test']) {
+      const dockerStep = extractStepBlock(binary, name);
+      expect(dockerStep, name).toContain(`DOCKER_ARCH: ${dockerArchExpression}`);
+      expect(dockerStep, name).toContain(`--platform "linux/${dockerArchVar}"`);
+    }
     expect(workflow).not.toContain('docker/setup-qemu-action');
   });
 
@@ -459,7 +501,7 @@ describe('release workflow binary gate', () => {
     expect(extractJobBlock(readText('.github/workflows/release.yml'), 'build')).toContain(
       'aot_order_platforms: all'
     );
-    expect(readText('.github/workflows/ci.yml')).toContain(
+    expect(extractJobBlock(readText('.github/workflows/ci.yml'), 'distribution')).toContain(
       'aot_order_platforms: $' + "{{ github.event_name == 'pull_request' && 'linux-x64' || 'all' }}"
     );
     expect(hub).toContain('oven/bun:$' + '{BUN_CHANNEL}-alpine');
@@ -507,24 +549,36 @@ describe('release workflow binary gate', () => {
 
   test('one reusable builder creates manifest-backed target and packaged artifacts', () => {
     const workflow = readText('.github/workflows/distribution-build.yml');
+    const hub = extractJobBlock(workflow, 'hub');
+    const build = extractJobBlock(workflow, 'build');
 
+    // The whole-file counts keep "one builder" honest: a second copy anywhere is
+    // a failure. The presence checks next to them name where the one copy lives,
+    // since a count alone passes after the command moves to another job.
     expect(workflow.match(/bun run build --binary/g)).toHaveLength(2);
+    expect(hub.match(/bun run build --binary/g), 'hub job: native hub compiles').toHaveLength(2);
     expect(workflow.match(/bun \.\/scripts\/release\/pack-npm\.ts/g)).toHaveLength(1);
-    expect(workflow.match(/bun \.\/scripts\/release\/archive-assets\.ts/g)).toHaveLength(1);
-    expect(workflow).toContain(
-      'bun ./scripts/release/distribution-manifest.ts --validate distribution-manifest.json --expect built'
+    expect(extractStepBlock(build, 'Assemble npm distribution')).toContain(
+      'bun ./scripts/release/pack-npm.ts'
     );
-    expect(workflow).toContain('bun ./scripts/release/bundle-distribution.ts');
+    expect(workflow.match(/bun \.\/scripts\/release\/archive-assets\.ts/g)).toHaveLength(1);
+    expect(extractStepBlock(build, 'Archive release assets')).toContain(
+      'bun ./scripts/release/archive-assets.ts'
+    );
     // The manifest and runtime builder must use the same selected profile,
     // including light bundles produced for pull requests.
-    const manifestStep = workflow.slice(
-      workflow.indexOf('name: Create and verify distribution manifest'),
-      workflow.indexOf('id: bundle')
+    const manifestStep = extractStepBlock(build, 'Create and verify distribution manifest');
+    expect(manifestStep).toContain(
+      'bun ./scripts/release/distribution-manifest.ts --validate distribution-manifest.json --expect built'
     );
     expect(manifestStep).toContain('RUNTIME_PROFILE: $' + '{{ inputs.runtime_profile }}');
+    expect(extractStepBlock(build, 'Create content-addressed bundles')).toContain(
+      'bun ./scripts/release/bundle-distribution.ts'
+    );
     expect(workflow.match(/overwrite: false/g)).toHaveLength(13);
-    expect(workflow).toContain('actions/attest-build-provenance@');
-    expect(workflow).toMatch(
+    const attest = extractStepBlock(build, 'Attest distribution bundles');
+    expect(attest).toContain('actions/attest-build-provenance@');
+    expect(attest).toMatch(
       /subject-path: \|\n\s+\.distribution-bundles\/\*\.tar\n\s+\.distribution-bundles\/\*\.tar\.gz/
     );
   });
@@ -594,14 +648,23 @@ describe('release workflow binary gate', () => {
 
     // Every release target is in the default matrix, each leg builds exactly
     // one, and zig is fetched only against a pinned checksum.
-    for (const target of ALL_BINARY_TARGETS) expect(runtime).toContain(`"${target.arch}"`);
-    expect(runtime).toContain('args=(--platform "$PLATFORM" --zig --rustup');
-    expect(runtime).toContain('args+=(--artifact-profile "$ARTIFACT_PROFILE")');
-    expect(runtime).toContain(
+    // The default matrix is the `platforms` input; the build and zig steps are in
+    // the one `runtime` job.
+    const inputs = extractOnBlock(runtime);
+    for (const target of ALL_BINARY_TARGETS) {
+      expect(inputs, 'runtime-build.yml on: inputs').toContain(`"${target.arch}"`);
+    }
+    const runtimeJob = extractJobBlock(runtime, 'runtime');
+    const buildStep = extractStepBlock(runtimeJob, 'Build runtime');
+    expect(buildStep).toContain('args=(--platform "$PLATFORM" --zig --rustup');
+    expect(buildStep).toContain('args+=(--artifact-profile "$ARTIFACT_PROFILE")');
+    expect(buildStep).toContain(
       "inputs.mode == 'artifact' && inputs.record_receipts && inputs.profile"
     );
-    expect(runtime).toContain('bun --no-install ./scripts/build-runtime.ts "$' + '{args[@]}"');
-    expect(runtime).toContain('uses: ./.github/actions/setup-zigbuild');
+    expect(buildStep).toContain('bun --no-install ./scripts/build-runtime.ts "$' + '{args[@]}"');
+    expect(extractStepBlock(runtimeJob, 'Install zig and cargo-zigbuild')).toContain(
+      'uses: ./.github/actions/setup-zigbuild'
+    );
     const zigbuild = readText('.github/actions/setup-zigbuild/action.yml');
     expect(zigbuild).toMatch(/ZIG_SHA256: [0-9a-f]{64}\n/);
     expect(zigbuild).toContain('sha256sum --check --strict');
@@ -620,13 +683,19 @@ describe('release workflow binary gate', () => {
     expect(cacheStep, 'runtime-build.yml rust-cache restores on main').toContain(
       'lookup-only: $' + "{{ github.ref == 'refs/heads/main' }}"
     );
-    expect(runtime).toMatch(/\n {6}cache:\n(?: {8}.*\n)*? {8}default: false\n/);
+    // The `cache` input's own default, not another input's `default: false`: the
+    // lazy match is confined to the `on:` block so it cannot run into a job.
+    expect(extractOnBlock(runtime), 'runtime-build.yml cache input').toMatch(
+      /\n {6}cache:\n(?: {8}.*\n)*? {8}default: false\n/
+    );
 
     // Release bytes never start from restored build state: the release path,
     // and the distribution build it shares, never opt in.
     const distribution = readText('.github/workflows/distribution-build.yml');
     expect(extractJobBlock(distribution, 'runtime')).toContain('cache: $' + '{{ inputs.cache }}');
-    expect(distribution).toMatch(/\n {6}cache:\n(?: {8}.*\n)*? {8}default: false\n/);
+    expect(extractOnBlock(distribution), 'distribution-build.yml cache input').toMatch(
+      /\n {6}cache:\n(?: {8}.*\n)*? {8}default: false\n/
+    );
     expect(readText('.github/workflows/release.yml'), 'release.yml cargo cache').not.toMatch(
       /\n\s+cache:/
     );
@@ -710,29 +779,43 @@ describe('release workflow binary gate', () => {
     expect(bundleFileName('assets', SCOPED_BUNDLE_COMPRESSION)).toBe('assets.tar.gz');
     expect(bundleFileName('linux-x64', TARGET_BUNDLE_COMPRESSION)).toBe('linux-x64.tar');
 
+    // Each upload step names the file it uploads; the path in another step would
+    // not upload this bundle.
+    const build = extractJobBlock(workflow, 'build');
     for (const scope of ['checksums', 'assets', 'npm']) {
-      expect(workflow, scope).toContain(
+      expect(extractStepBlock(build, `Upload ${scope} distribution`), scope).toContain(
         `path: .distribution-bundles/${bundleFileName(scope, SCOPED_BUNDLE_COMPRESSION)}`
       );
     }
     for (const target of ALL_BINARY_TARGETS) {
-      expect(workflow, target.arch).toContain(
+      expect(extractStepBlock(build, `Upload ${target.arch} target`), target.arch).toContain(
         `path: .distribution-bundles/${bundleFileName(target.arch, TARGET_BUNDLE_COMPRESSION)}`
       );
     }
 
     // The consumer resolves exactly one bundle, so its glob has to cover both
     // shapes; attestation coverage is asserted with the rest of that workflow.
-    expect(readText('.github/actions/download-distribution/action.yml')).toContain(
-      'bundles=("$DOWNLOAD_DIR"/*.tar "$DOWNLOAD_DIR"/*.tar.gz)'
-    );
+    expect(
+      extractStepBlock(
+        readText('.github/actions/download-distribution/action.yml'),
+        'Resolve distribution bundle',
+        4
+      )
+    ).toContain('bundles=("$DOWNLOAD_DIR"/*.tar "$DOWNLOAD_DIR"/*.tar.gz)');
   });
 
   test('binary and Docker smoke consume target artifacts without rebuilding by default', () => {
     const workflow = readText('.github/workflows/smoke-binary.yml');
     const skipBuildExpression = '$' + "{{ inputs.rebuild && '0' || '1' }}";
 
-    expect(workflow.match(/uses: \.\/\.github\/actions\/download-distribution/g)).toHaveLength(2);
+    // One download for the host target and one for the musl Docker target, both
+    // in the `binary` job.
+    expect(
+      extractJobBlock(workflow, 'binary').match(
+        /uses: \.\/\.github\/actions\/download-distribution/g
+      ),
+      'smoke-binary.yml binary job: distribution downloads'
+    ).toHaveLength(2);
     for (const job of ['binary']) {
       const jobBlock = extractJobBlock(workflow, job);
       const setupBunIndex = jobBlock.indexOf('uses: ./.github/actions/setup-bun');
@@ -742,7 +825,9 @@ describe('release workflow binary gate', () => {
         jobBlock.indexOf('uses: ./.github/actions/download-distribution')
       );
     }
-    expect(workflow).toContain(`SKIP_BUILD: ${skipBuildExpression}`);
+    expect(
+      extractStepBlock(extractJobBlock(workflow, 'binary'), 'Run binary smoke test')
+    ).toContain(`SKIP_BUILD: ${skipBuildExpression}`);
     const dockerAssertions = extractStepBlocks(extractJobBlock(workflow, 'binary')).filter((step) =>
       step.includes('scripts/release/smoke-docker-image.sh')
     );
@@ -804,21 +889,29 @@ describe('release workflow binary gate', () => {
     const workflow = readText('.github/workflows/release.yml');
     const versionVar = '$' + '{VERSION}';
 
-    expect(workflow).toContain('  verify-build:');
     // Scope to the job: six release jobs carry the same attestation lines, so a
     // whole-file assertion would still pass if verify-build lost them.
     const verifyBuild = extractJobBlock(workflow, 'verify-build');
+    expect(verifyBuild, 'release.yml: verify-build job').not.toBe('');
     expect(verifyBuild).toContain('name: Verify built Linux binary');
-    expect(verifyBuild).toContain(
-      'attestations: read # fetch build provenance for gh attestation verify'
+    // Job permissions sit at indent 6; anchoring keeps a step's text from standing in.
+    expect(verifyBuild, 'verify-build: attestations: read').toMatch(
+      /^ {6}attestations: read # fetch build provenance for gh attestation verify$/m
     );
-    expect(verifyBuild).toContain('contents: read');
-    expect(verifyBuild).toContain('verify-attestation: "true"');
-    expect(verifyBuild).toContain('scope: assets');
-    expect(workflow).toContain(
+    expect(verifyBuild, 'verify-build: contents: read').toMatch(/^ {6}contents: read$/m);
+    // The unnamed download step carries the scope and the provenance check.
+    const downloads = extractStepBlocksUsing(
+      verifyBuild,
+      '$/.github/actions/download-distribution'
+    );
+    expect(downloads, 'verify-build: download-distribution steps').toHaveLength(1);
+    expect(downloads[0]).toContain('verify-attestation: "true"');
+    expect(downloads[0]).toContain('scope: assets');
+    const smokeStep = extractStepBlock(verifyBuild, 'Run Linux x64 binary smoke test');
+    expect(smokeStep).toContain(
       `archive="release-assets/mangostudio-${versionVar}-linux-x64.tar.gz"`
     );
-    expect(workflow).toContain('scripts/release/smoke-binary.sh "$binary_path" "$VERSION" 13003');
+    expect(smokeStep).toContain('scripts/release/smoke-binary.sh "$binary_path" "$VERSION" 13003');
 
     // Every channel but cargo-publish also needs `prepare`, which is where the
     // pre-release classification each of them reads is resolved.
@@ -881,43 +974,63 @@ describe('release workflow binary gate', () => {
   test('post-publish verification covers broader npm, crates.io, and Homebrew installs', () => {
     const workflow = readText('.github/workflows/release.yml');
 
-    expect(workflow).toContain('  verify-release:');
-    expect(workflow).toContain('os: ubuntu-24.04-arm');
-    expect(workflow).toContain('platform: linux-arm64');
-    expect(workflow).toContain('os: macos-15-intel');
-    expect(workflow).toContain('platform: darwin-x64');
-    expect(workflow).toContain('os: windows-11-arm');
-    expect(workflow).toContain('platform: windows-arm64');
+    // The matrix, the npm wrapper check and the archive check belong to
+    // `verify-release`; the cargo and Homebrew installs to their own jobs.
+    const verifyReleaseBlock = extractJobBlock(workflow, 'verify-release');
+    expect(verifyReleaseBlock, 'release.yml: verify-release job').not.toBe('');
+    expect(verifyReleaseBlock).toContain('os: ubuntu-24.04-arm');
+    expect(verifyReleaseBlock).toContain('platform: linux-arm64');
+    expect(verifyReleaseBlock).toContain('os: macos-15-intel');
+    expect(verifyReleaseBlock).toContain('platform: darwin-x64');
+    expect(verifyReleaseBlock).toContain('os: windows-11-arm');
+    expect(verifyReleaseBlock).toContain('platform: windows-arm64');
 
     // Each npm install must prove the wrapper picked this runner's platform
     // package at the released version, not merely that a binary answered.
-    const verifyReleaseBlock = extractJobBlock(workflow, 'verify-release');
-    expect(verifyReleaseBlock).toContain('name: Verify npm wrapper platform resolution');
-    expect(verifyReleaseBlock).toContain('MANGOSTUDIO_WRAPPER_INFO=1 mangostudio');
-    // Split the same way `platformVar` below is: these are shell expansions in
-    // a workflow, and Bun lint reads `${...}` in a plain string as a template
+    const wrapperStep = extractStepBlock(
+      verifyReleaseBlock,
+      'Verify npm wrapper platform resolution'
+    );
+    expect(wrapperStep).toContain('MANGOSTUDIO_WRAPPER_INFO=1 mangostudio');
+    // Split like `runtimeArtifact` below: these are shell expansions in a
+    // workflow, and Bun lint reads `${...}` in a plain string as a template
     // literal someone forgot to tag.
-    const runtimeArtifact = 'mangostudio-runtime-$' + '{VERSION}-$' + '{PLATFORM}';
-    expect(verifyReleaseBlock).toContain(`raw_runtime="${runtimeArtifact}`);
-    expect(verifyReleaseBlock).toContain('Expected raw runtime version');
     const platformVar = '$' + '{PLATFORM/windows/win32}';
-    expect(verifyReleaseBlock).toContain(`expected_package="@mangostudio/cli-${platformVar}"`);
+    expect(wrapperStep).toContain(`expected_package="@mangostudio/cli-${platformVar}"`);
+    const archiveStep = extractStepBlock(verifyReleaseBlock, 'Verify GitHub Release archive');
+    const runtimeArtifact = 'mangostudio-runtime-$' + '{VERSION}-$' + '{PLATFORM}';
+    expect(archiveStep).toContain(`raw_runtime="${runtimeArtifact}`);
+    expect(archiveStep).toContain('Expected raw runtime version');
 
     expectJobNeeds(workflow, 'verify-release', String.raw`\[build, npm-publish, github-release\]`);
     expectJobNeeds(workflow, 'verify-cargo', String.raw`\[build, cargo-publish, github-release\]`);
     expectJobNeeds(workflow, 'verify-homebrew', String.raw`\[build, homebrew\]`);
 
-    expect(workflow).toContain('cargo install mangostudio --version "$VERSION" --locked');
-    expect(workflow).toContain('MANGOSTUDIO_DIST_URL: https://github.com/');
-    expect(workflow).toContain('brew install juliopolycarpo/tap/mangostudio');
+    const verifyCargo = extractJobBlock(workflow, 'verify-cargo');
+    expect(
+      extractStepBlock(verifyCargo, 'Install launcher from crates.io'),
+      'verify-cargo: install step'
+    ).toContain('cargo install mangostudio --version "$VERSION" --locked');
+    expect(
+      extractStepBlock(verifyCargo, 'Run launcher against GitHub Release assets'),
+      'verify-cargo: run step'
+    ).toContain('MANGOSTUDIO_DIST_URL: https://github.com/');
+    expect(
+      extractStepBlock(extractJobBlock(workflow, 'verify-homebrew'), 'Install formula from tap'),
+      'verify-homebrew: install step'
+    ).toContain('brew install juliopolycarpo/tap/mangostudio');
   });
 
   test('release dry run exercises the same serve and health check path', () => {
     const workflow = readText('.github/workflows/release-dry-run.yml');
     const runnerTempVar = '$' + '{RUNNER_TEMP}';
 
-    expect(workflow).toContain('name: Verify local archive serves health');
-    expect(workflow).toContain(
+    expect(
+      extractStepBlock(
+        extractJobBlock(workflow, 'dry-run-linux'),
+        'Verify local archive serves health'
+      )
+    ).toContain(
       `scripts/release/smoke-binary.sh "${runnerTempVar}/mango-bin/mangostudio" "$DRY_RUN_VERSION" 13003`
     );
   });
@@ -967,8 +1080,7 @@ describe('release workflow binary gate', () => {
   });
 
   test('launcher dry run selects compiler pins and packaged verifier changes', () => {
-    const workflow = readText('.github/workflows/release-dry-run.yml');
-    expect(workflow).toContain('bun ./scripts/ci/changed-paths.ts release');
+    expect(dryRunChangedPathsStep()).toContain('bun ./scripts/ci/changed-paths.ts release');
     const pattern = LAUNCHER_PATTERN;
 
     for (const path of [
@@ -987,9 +1099,9 @@ describe('release workflow binary gate', () => {
   });
 
   test('release dry run relevance pattern mirrors the release import graph', () => {
-    const workflow = readText('.github/workflows/release-dry-run.yml');
-    expect(workflow).toContain('bun ./scripts/ci/changed-paths.ts collect');
-    expect(workflow).toContain('bun ./scripts/ci/changed-paths.ts release');
+    const changedPaths = dryRunChangedPathsStep();
+    expect(changedPaths).toContain('bun ./scripts/ci/changed-paths.ts collect');
+    expect(changedPaths).toContain('bun ./scripts/ci/changed-paths.ts release');
 
     const pattern = RELEASE_PATTERN;
 
@@ -1021,50 +1133,72 @@ describe('release workflow binary gate', () => {
 
   test('release dry run derives placeholder checksums from release targets', () => {
     const workflow = readText('.github/workflows/release-dry-run.yml');
+    const renderStep = extractStepBlock(
+      extractJobBlock(workflow, 'dry-run-linux'),
+      'Render distribution manifests'
+    );
 
-    expect(workflow).toContain('bun ./scripts/release/fill-dry-run-checksums.ts \\');
-    expect(workflow).toContain('--version "$DRY_RUN_VERSION" \\');
-    expect(workflow).toContain('--sums "$sums"');
+    expect(renderStep).toContain('bun ./scripts/release/fill-dry-run-checksums.ts \\');
+    expect(renderStep).toContain('--version "$DRY_RUN_VERSION" \\');
+    expect(renderStep).toContain('--sums "$sums"');
     expect(workflow).not.toContain('append_if_missing');
     expect(workflow).not.toContain('darwin-arm64.tar.gz" "$(printf');
   });
 
   test('release dry run exercises the Docker release-asset staging path', () => {
-    const workflow = readText('.github/workflows/release-dry-run.yml');
+    const linux = extractJobBlock(
+      readText('.github/workflows/release-dry-run.yml'),
+      'dry-run-linux'
+    );
 
     // Stages from the published tarballs (the release `docker` job's path), not
     // from build output, so it covers what ci.yml's smoke job does not.
-    expect(workflow).toContain(
+    expect(extractStepBlock(linux, 'Stage Bookworm Docker context from release assets')).toContain(
       'bun ./scripts/release/stage-docker-ctx.ts --release-assets release-assets --arch amd64 --variant bookworm'
     );
-    expect(workflow).toContain('-f Dockerfile \\');
-    expect(workflow).toContain(
+    expect(extractStepBlock(linux, 'Build Bookworm Docker image')).toContain('-f Dockerfile \\');
+    expect(extractStepBlock(linux, 'Verify Docker image serves health')).toContain(
       'scripts/release/smoke-docker-image.sh mangostudio:dryrun-bookworm-amd64 linux/amd64 13002'
     );
   });
 
   test('release dry run verifies the install layout and lifecycle', () => {
-    const workflow = readText('.github/workflows/release-dry-run.yml');
+    // The Windows job has a "Verify install layout" step of its own, so a
+    // file-wide match could be satisfied by it; these are the POSIX shell checks
+    // of the Linux job.
+    const linux = extractJobBlock(
+      readText('.github/workflows/release-dry-run.yml'),
+      'dry-run-linux'
+    );
     const installDirVar = '$' + '{MANGOSTUDIO_INSTALL_DIR}';
 
-    expect(workflow).toContain('name: Verify install layout');
-    expect(workflow).toContain(`readlink "${installDirVar}/current"`);
-    expect(workflow).toContain(`${installDirVar}/current/mangostudio`);
-    expect(workflow).toContain('name: Verify install lifecycle (--use, --prune, --uninstall)');
-    expect(workflow).toContain('bash scripts/install/install.sh --use "$DRY_RUN_VERSION"');
-    expect(workflow).toContain('bash scripts/install/install.sh --prune');
-    expect(workflow).toContain('bash scripts/install/install.sh --uninstall');
+    const layout = extractStepBlock(linux, 'Verify install layout');
+    expect(layout).toContain(`readlink "${installDirVar}/current"`);
+    expect(layout).toContain(`${installDirVar}/current/mangostudio`);
+    const lifecycle = extractStepBlock(
+      linux,
+      'Verify install lifecycle (--use, --prune, --uninstall)'
+    );
+    expect(lifecycle).toContain('bash scripts/install/install.sh --use "$DRY_RUN_VERSION"');
+    expect(lifecycle).toContain('bash scripts/install/install.sh --prune');
+    expect(lifecycle).toContain('bash scripts/install/install.sh --uninstall');
   });
 
   test('release dry run guards the embedded installers against drift from the committed scripts', () => {
-    const workflow = readText('.github/workflows/release-dry-run.yml');
+    const linux = extractJobBlock(
+      readText('.github/workflows/release-dry-run.yml'),
+      'dry-run-linux'
+    );
 
     // The `__installer <sh|ps1>` command prints the embedded script verbatim;
     // this only proves out once that command lands, but the guard belongs on
     // the branch either way.
-    expect(workflow).toContain('name: Verify the embedded installers match the committed scripts');
-    expect(workflow).toContain('__installer sh | diff - scripts/install/install.sh');
-    expect(workflow).toContain('__installer ps1 | diff - scripts/install/install.ps1');
+    const guard = extractStepBlock(
+      linux,
+      'Verify the embedded installers match the committed scripts'
+    );
+    expect(guard).toContain('__installer sh | diff - scripts/install/install.sh');
+    expect(guard).toContain('__installer ps1 | diff - scripts/install/install.ps1');
   });
 
   test('both dry-run jobs make the installed binary detect its own moved install root', () => {
@@ -1074,12 +1208,15 @@ describe('release workflow binary gate', () => {
     const workflow = readText('.github/workflows/release-dry-run.yml');
     const linux = extractJobBlock(workflow, 'dry-run-linux');
     const windows = extractJobBlock(workflow, 'dry-run-windows');
-    for (const block of [linux, windows]) {
-      expect(block).toContain('upgrade --check --json');
-      expect(block).toContain('self-managed');
+    const stepName = 'Verify the installed binary recognises its own install';
+    const linuxStep = extractStepBlock(linux, stepName);
+    const windowsStep = extractStepBlock(windows, stepName);
+    for (const step of [linuxStep, windowsStep]) {
+      expect(step).toContain('upgrade --check --json');
+      expect(step).toContain('self-managed');
     }
-    expect(linux).toContain("jq -r '.installedVia.manager'");
-    expect(windows).toContain('$report.installedVia.manager');
+    expect(linuxStep).toContain("jq -r '.installedVia.manager'");
+    expect(windowsStep).toContain('$report.installedVia.manager');
   });
 
   test('reuse dry runs preserve verified hubs and packaging inputs without rebuilding', () => {
@@ -1106,8 +1243,10 @@ describe('release workflow binary gate', () => {
       expect(archive).not.toMatch(/^ {8}if:/m);
     }
     const windows = extractJobBlock(workflow, 'dry-run-windows');
-    expect(windows).toContain('name: Download immutable Windows distribution');
-    expect(windows).toContain(
+    expect(
+      extractStepBlock(windows, 'Download immutable Windows distribution'),
+      'dry-run-windows: distribution download'
+    ).toContain(
       'runtime-profile: $' + "{{ github.event_name == 'pull_request' && 'light' || 'shipping' }}"
     );
   });
@@ -1164,17 +1303,21 @@ describe('release workflow binary gate', () => {
   test('release dry run runs the install.ps1 failed-probe and npm tarball cases on Windows and is relevant to them', () => {
     const workflow = readText('.github/workflows/release-dry-run.yml');
     const windowsBlock = extractJobBlock(workflow, 'dry-run-windows');
+    const probeStep = extractStepBlock(
+      windowsBlock,
+      'Verify the failed version probe diagnostics and the npm tarball extraction'
+    );
 
     // Linux skips install-ps1-layout.unit.test.ts for want of a Windows
     // PowerShell, so this job is the only place the fake-binary cases and the
     // GNU-tar-first tarball case run.
-    expect(windowsBlock).toContain("-t 'failed version probe|npm tarball extraction'");
-    expect(windowsBlock).toContain('scripts/tests/install-ps1-layout.unit.test.ts');
-    expect(windowsBlock).toContain('MANGOSTUDIO_TEST_NATIVE_FAKES: "1"');
+    expect(probeStep).toContain("-t 'failed version probe|npm tarball extraction'");
+    expect(probeStep).toContain('scripts/tests/install-ps1-layout.unit.test.ts');
+    expect(probeStep).toContain('MANGOSTUDIO_TEST_NATIVE_FAKES: "1"');
 
     // `bun test -t` exits 0 while any one alternative matches, so a renamed
     // describe would drop its cases from this job without failing it.
-    const filter = /-t '([^']+)'/.exec(windowsBlock)?.[1] ?? '';
+    const filter = /-t '([^']+)'/.exec(probeStep)?.[1] ?? '';
     const layoutCases = readText('scripts/tests/install-ps1-layout.unit.test.ts');
     const describes = [...layoutCases.matchAll(/^describe\('([^']+)'/gm)].map((match) => match[1]);
     for (const name of filter.split('|')) {
@@ -1206,8 +1349,7 @@ describe('release workflow binary gate', () => {
   });
 
   test('release dry run relevance pattern does not over-promise Alpine Docker coverage', () => {
-    const workflow = readText('.github/workflows/release-dry-run.yml');
-    expect(workflow).toContain('bun ./scripts/ci/changed-paths.ts release');
+    expect(dryRunChangedPathsStep()).toContain('bun ./scripts/ci/changed-paths.ts release');
 
     // The dry-run only builds the Bookworm image, so its relevance pattern
     // must not claim to exercise Dockerfile.alpine; ci.yml's smoke job covers
@@ -1290,12 +1432,13 @@ describe('release workflow binary gate', () => {
   });
 
   test('release tag trigger excludes canary pre-release tags', () => {
-    const workflow = readText('.github/workflows/release.yml');
+    const triggers = extractOnBlock(readText('.github/workflows/release.yml'));
 
     // Stable + real prereleases fire the release; canary-like
-    // v<version>-canary.<sha> tags must not.
-    expect(workflow).toContain('- "v*.*.*"');
-    expect(workflow).toContain('- "!v*-canary*"');
+    // v<version>-canary.<sha> tags must not. The patterns only filter pushes
+    // when they sit under `on:`, not in a job's script.
+    expect(triggers, 'release.yml on: push tags').toContain('- "v*.*.*"');
+    expect(triggers, 'release.yml on: push tags').toContain('- "!v*-canary*"');
   });
 
   test('release build artifacts retain long enough to re-run a single failed job', () => {
@@ -1367,15 +1510,18 @@ describe('release workflow binary gate', () => {
   });
 
   test('release dispatch exposes an explicit legacy cargo token escape hatch', () => {
-    const workflow = readText('.github/workflows/release.yml');
-    expect(workflow).toContain('allow_legacy_cargo_token:');
-    expect(workflow).toContain('type: boolean');
-    expect(workflow).toContain('default: false');
+    expect(
+      workflowDispatchInput('.github/workflows/release.yml', 'allow_legacy_cargo_token'),
+      'release.yml on.workflow_dispatch.inputs.allow_legacy_cargo_token'
+    ).toMatchObject({ type: 'boolean', default: false });
   });
 
   test('npm publishing prefers OIDC with a dispatch-only legacy fallback', () => {
     const workflow = readText('.github/workflows/release.yml');
-    expect(workflow).toContain('allow_legacy_npm_token:');
+    expect(
+      workflowDispatchInput('.github/workflows/release.yml', 'allow_legacy_npm_token'),
+      'release.yml on.workflow_dispatch.inputs.allow_legacy_npm_token'
+    ).toBeDefined();
     const npmBlock = extractJobBlock(workflow, 'npm-publish');
     expect(npmBlock).toContain(
       "github.event_name == 'workflow_dispatch' && inputs.allow_legacy_npm_token"
@@ -1395,8 +1541,13 @@ describe('release workflow binary gate', () => {
     expect(prepare).toContain(
       "github.event_name == 'workflow_dispatch' && inputs.allow_unverified_source"
     );
-    expect(workflow).toContain('allow_unverified_source:');
-    expect(workflow).toContain('actions: read');
+    expect(
+      workflowDispatchInput('.github/workflows/release.yml', 'allow_unverified_source'),
+      'release.yml on.workflow_dispatch.inputs.allow_unverified_source'
+    ).toBeDefined();
+    // The Gate lookup reads ci.yml's run through the API, which needs this job's
+    // own `actions: read` (job permissions sit at indent 6).
+    expect(prepare, 'prepare: actions: read').toMatch(/^ {6}actions: read\b/m);
   });
 
   test('canary runs daily independently of CI and promotes the frozen shipping source', () => {
@@ -1404,7 +1555,7 @@ describe('release workflow binary gate', () => {
     const workflow = readText('.github/workflows/canary.yml');
     expect(extractJobBlock(ci, 'canary')).toBe('');
     expect(ci).not.toContain('uses: $/.github/workflows/canary.yml');
-    expect(workflow).toContain('cron: "17 6 * * *"');
+    expect(extractOnBlock(workflow), 'canary.yml on: schedule').toContain('cron: "17 6 * * *"');
     expect(workflow).not.toContain('workflow_call:');
     expect(workflow).not.toContain('workflow_run:');
     const source = extractJobBlock(workflow, 'source');
@@ -1447,8 +1598,11 @@ describe('release workflow binary gate', () => {
 
   test('canary preserves independent channels and recovers only approved bytes', () => {
     const workflow = readText('.github/workflows/canary.yml');
-    expect(workflow).toContain('group: canary-publish');
-    expect(workflow).toContain('cancel-in-progress: false');
+    // Workflow-level concurrency serializes every canary run; a job-level group
+    // would only serialize that job.
+    const concurrency = extractTopLevelBlock(workflow, 'concurrency');
+    expect(concurrency, 'canary.yml top-level concurrency').toContain('group: canary-publish');
+    expect(concurrency, 'canary.yml top-level concurrency').toContain('cancel-in-progress: false');
     for (const absent of ['docker-canary', 'crates-canary', 'build']) {
       expect(extractJobBlock(workflow, absent)).toBe('');
     }
@@ -1607,13 +1761,19 @@ describe('release workflow binary gate', () => {
     ]);
     // SKIP_BUILD smoke must not require raw binaries in the slim target bundle.
     expect(smoke).toContain('existsSync(RAW_HUB_ASSET_PATH) ? RAW_HUB_ASSET_PATH : BINARY_PATH');
-    expect(action).toContain('--expect downloaded');
+    // Composite steps sit at indent 4. The check that proves the bundle and the
+    // step that unpacks the target are two steps, in that order.
+    expect(
+      extractStepBlock(action, 'Verify distribution identity and checksums', 4),
+      'download-distribution: verify step'
+    ).toContain('--expect downloaded');
     expect(action.indexOf('Verify distribution identity and checksums')).toBeLessThan(
       action.indexOf('Materialize target directory')
     );
-    expect(action).toContain(
-      'bun --no-install ./scripts/release/extract-target.ts --target "$TARGET"'
-    );
+    expect(
+      extractStepBlock(action, 'Materialize target directory', 4),
+      'download-distribution: materialize step'
+    ).toContain('bun --no-install ./scripts/release/extract-target.ts --target "$TARGET"');
   });
 
   test('binary smoke helper checks version, delegates the health poll, and surfaces failure logs', () => {
