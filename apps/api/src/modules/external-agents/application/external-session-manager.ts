@@ -125,6 +125,44 @@ export class ExternalSessionReapedError extends Error {
 }
 
 /**
+ * The turn that asked for a session stopped before the open finished, so no
+ * vendor session was kept for it. Distinct from a reap: nothing about the
+ * chat's consent or environment changed.
+ */
+export class ExternalSessionOpenStoppedError extends Error {
+  constructor(chatId: string) {
+    super(`The external session for chat "${chatId}" was not opened: its turn was stopped.`);
+    this.name = 'ExternalSessionOpenStoppedError';
+  }
+}
+
+/**
+ * Settles with `pending`, or rejects as soon as `signal` aborts.
+ *
+ * The losing promise is left running (a connect cannot be cancelled from here), so its rejection is
+ * swallowed to keep it from surfacing as unhandled.
+ */
+function untilStopped<T>(
+  pending: Promise<T>,
+  signal: AbortSignal | undefined,
+  chatId: string
+): Promise<T> {
+  if (!signal) return pending;
+  if (signal.aborted) {
+    pending.catch(() => undefined);
+    return Promise.reject(new ExternalSessionOpenStoppedError(chatId));
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      pending.catch(() => undefined);
+      reject(new ExternalSessionOpenStoppedError(chatId));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    pending.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+  });
+}
+
+/**
  * Whether a failed `external-agent.close` is only the hub giving up its wait.
  *
  * The runtime has no cancel token on a close, so a close the hub timed out on is still running
@@ -165,6 +203,12 @@ export interface EnsureExternalSessionInput extends ExternalSessionBinding {
    * attempts of their own.
    */
   readonly existingConnectionOnly?: boolean;
+  /**
+   * The turn's stop signal. Once it aborts, the open ends with
+   * {@link ExternalSessionOpenStoppedError} instead of starting a vendor
+   * session nobody is waiting for, and a session already opened is closed.
+   */
+  readonly signal?: AbortSignal;
 }
 
 /** How a reap was asked for. */
@@ -455,7 +499,12 @@ export function createExternalSessionManager(
    */
   const opening = new Map<
     string,
-    { readonly promise: Promise<ExternalSessionHandle>; readonly binding: ExternalSessionBinding }
+    {
+      readonly promise: Promise<ExternalSessionHandle>;
+      readonly binding: ExternalSessionBinding;
+      /** The stop signal of the caller that started this open, if it had one. */
+      readonly signal: AbortSignal | undefined;
+    }
   >();
   /**
    * Bumped by every reap. An open is slow — it starts a process on someone
@@ -616,7 +665,8 @@ export function createExternalSessionManager(
   async function openRetryingAtCapacity(
     open: () => Promise<OpenedSession>,
     reaped: () => boolean,
-    chatId: string
+    chatId: string,
+    signal: AbortSignal | undefined
   ): Promise<OpenedSession> {
     const deadline = Date.now() + capacityRetryMs;
     for (;;) {
@@ -627,6 +677,8 @@ export function createExternalSessionManager(
           error instanceof RemoteError && error.details?.kind === EXTERNAL_AGENT_CAPACITY_CODE;
         if (!atCapacity || Date.now() >= deadline) throw error;
         if (reaped()) throw new ExternalSessionReapedError(chatId);
+        // A stopped turn has no use for the slot it is waiting on.
+        if (signal?.aborted) throw new ExternalSessionOpenStoppedError(chatId);
         await new Promise((resolve) => setTimeout(resolve, capacityRetryIntervalMs));
       }
     }
@@ -716,12 +768,20 @@ export function createExternalSessionManager(
     if (startsFresh) await releaseAdoptionLease(input.chatId, db);
     const resumable = startsFresh ? undefined : matching;
 
-    const client = await (
-      input.existingConnectionOnly ? resolveExistingRuntimeClient : resolveRuntimeClient
-    )(input.userId, input.environmentId);
+    // A connect can take many seconds, and a stop that lands meanwhile must not be followed by an
+    // `external-agent.open`, which spawns a vendor process on the runtime.
+    const client = await untilStopped(
+      (input.existingConnectionOnly ? resolveExistingRuntimeClient : resolveRuntimeClient)(
+        input.userId,
+        input.environmentId
+      ),
+      input.signal,
+      input.chatId
+    );
     const toolchain = await resolveToolchainParams(client.manifest, () =>
       resolveToolchain(input.userId, input.environmentId)
     );
+    if (input.signal?.aborted) throw new ExternalSessionOpenStoppedError(input.chatId);
     const sessionId = newSessionId();
     const openParams = {
       sessionId,
@@ -741,8 +801,17 @@ export function createExternalSessionManager(
     const opened = await openRetryingAtCapacity(
       () => client.externalAgents.open(openParams, { timeoutMs: openTimeoutMs }),
       () => (reapGenerations.get(input.chatId) ?? 0) !== generation,
-      input.chatId
+      input.chatId,
+      input.signal
     );
+    // The stop landed while the vendor was starting: nothing is registered or written yet, so
+    // closing the session is the whole cleanup and the stored continuation stays as it was.
+    if (input.signal?.aborted) {
+      await client.externalAgents
+        .close({ sessionId }, { timeoutMs: closeWaitMs })
+        .catch(() => undefined);
+      throw new ExternalSessionOpenStoppedError(input.chatId);
+    }
 
     const sequencer = new ExternalEventSequencer();
     const record: SessionRecord = {
@@ -807,13 +876,16 @@ export function createExternalSessionManager(
     // Checked after the last await and registered on the same tick, so a reap
     // that landed while the vendor was starting cannot be followed by the row it
     // just deleted, or by a session the owner has already refused.
-    if ((reapGenerations.get(input.chatId) ?? 0) !== generation) {
+    const reapedWhileOpening = (reapGenerations.get(input.chatId) ?? 0) !== generation;
+    if (reapedWhileOpening || input.signal?.aborted) {
       record.unsubscribe();
       await deleteContinuation(input.chatId, db);
       await client.externalAgents
         .close({ sessionId }, { timeoutMs: closeWaitMs })
         .catch(() => undefined);
-      throw new ExternalSessionReapedError(input.chatId);
+      throw reapedWhileOpening
+        ? new ExternalSessionReapedError(input.chatId)
+        : new ExternalSessionOpenStoppedError(input.chatId);
     }
     sessions.set(input.chatId, record);
     // The row just written describes the new conversation, which the old mark does not concern.
@@ -840,10 +912,12 @@ export function createExternalSessionManager(
       // Shared only with a send that wants the same session. A concurrent send
       // whose binding differs would otherwise be handed a session opened against
       // another environment, workspace or account, so it waits for the open to
-      // settle and then takes the ordinary path, which reaps and reopens.
+      // settle and then takes the ordinary path, which reaps and reopens. The
+      // same goes for a caller with another stop signal: joining would either
+      // end its open with someone else's stop or ignore its own.
       const inflight = opening.get(input.chatId);
       if (inflight) {
-        return sameBinding(inflight.binding, input)
+        return sameBinding(inflight.binding, input) && inflight.signal === input.signal
           ? inflight.promise
           : inflight.promise.catch(() => undefined).then(() => this.ensureSession(input));
       }
@@ -851,7 +925,7 @@ export function createExternalSessionManager(
       const pending = ensureSession(input).finally(() => {
         if (opening.get(input.chatId)?.promise === pending) opening.delete(input.chatId);
       });
-      opening.set(input.chatId, { promise: pending, binding: input });
+      opening.set(input.chatId, { promise: pending, binding: input, signal: input.signal });
       return pending;
     },
 

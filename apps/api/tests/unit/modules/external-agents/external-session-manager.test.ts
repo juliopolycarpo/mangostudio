@@ -10,6 +10,7 @@ import {
   createExternalSessionManager,
   type EnsureExternalSessionInput,
   type ExternalSessionConsumer,
+  ExternalSessionOpenStoppedError,
   ExternalSessionReapedError,
   isUnconfirmedClose,
 } from '../../../../src/modules/external-agents/application/external-session-manager';
@@ -769,6 +770,46 @@ describe('external session manager', () => {
     expect(runtime.calls.close).toEqual([{ sessionId: 'session-a' }]);
     expect(manager.liveSessionCount()).toBe(0);
     await expect(readContinuation(chatId, getDb())).resolves.toBeUndefined();
+  });
+
+  it('opens nothing for a caller whose stop signal already aborted', async () => {
+    const runtime = createFakeExternalRuntime();
+    const manager = managerFor(runtime, ['session-a']);
+    const stop = new AbortController();
+    stop.abort();
+
+    await expect(manager.ensureSession(baseInput({ signal: stop.signal }))).rejects.toBeInstanceOf(
+      ExternalSessionOpenStoppedError
+    );
+    expect(runtime.calls.open.length).toBe(0);
+    expect(manager.liveSessionCount()).toBe(0);
+  });
+
+  it('closes a session whose stop landed while the vendor was starting, writing no continuation', async () => {
+    const stop = new AbortController();
+    const runtime = createFakeExternalRuntime({ onOpen: () => stop.abort() });
+    const manager = managerFor(runtime, ['session-a']);
+
+    await expect(manager.ensureSession(baseInput({ signal: stop.signal }))).rejects.toBeInstanceOf(
+      ExternalSessionOpenStoppedError
+    );
+    expect(runtime.calls.close).toEqual([{ sessionId: 'session-a' }]);
+    expect(manager.liveSessionCount()).toBe(0);
+    await expect(readContinuation(chatId, getDb())).resolves.toBeUndefined();
+  });
+
+  it('does not hand a caller with another stop signal the open of a stopped turn', async () => {
+    const stopped = new AbortController();
+    const runtime = createFakeExternalRuntime({ onOpen: () => stopped.abort() });
+    const manager = managerFor(runtime, ['session-a', 'session-b']);
+
+    const first = manager.ensureSession(baseInput({ signal: stopped.signal }));
+    const next = manager.ensureSession(baseInput());
+
+    await expect(first).rejects.toBeInstanceOf(ExternalSessionOpenStoppedError);
+    const handle = await next;
+    expect(handle.sessionId).toBe('session-b');
+    expect(manager.liveSessionCount()).toBe(1);
   });
 
   it('never sends a MangoStudio tool definition or environment to the vendor', async () => {
