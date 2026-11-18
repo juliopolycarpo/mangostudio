@@ -3,14 +3,16 @@
 use std::fs::{self, File};
 use std::io::{self, BufRead, Read};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
-use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use super::{AuditArgs, EnvSource, InstallArgs, ServiceAction, ServiceArgs};
 use crate::hex::hex;
+use crate::ports::wall_clock::{
+    EARLIEST_RFC3339_SECONDS_BEFORE_EPOCH, SystemWallClock, WallClock, parse_rfc3339_instant,
+};
 use crate::runtime_home::{
     RuntimeSlot, read_runtime_slot_config, resolve_runtime_slot_for_current_exe,
     slot_audit_log_path, slot_current_binary_path, slot_dir, slot_for_path,
@@ -402,7 +404,9 @@ pub(super) fn run_service(args: ServiceArgs, env: &impl EnvSource) -> i32 {
     }
 }
 
-fn parse_since(raw: &str) -> Result<DateTime<Utc>, String> {
+/// Reads `audit --since`: a relative duration such as `24h` counted back from `now`, or an
+/// RFC 3339 instant. Takes `now` so a test can pin it.
+fn parse_since(raw: &str, now: SystemTime) -> Result<SystemTime, String> {
     let raw = raw.trim();
     if let Some(unit) = raw.chars().last().map(|unit| unit.to_ascii_lowercase())
         && matches!(unit, 's' | 'm' | 'h' | 'd')
@@ -412,6 +416,7 @@ fn parse_since(raw: &str) -> Result<DateTime<Utc>, String> {
             .all(|byte| byte.is_ascii_digit())
         && let Ok(amount) = raw[..raw.len() - 1].parse::<i64>()
     {
+        let out_of_range = || format!("--since {raw:?} is outside the supported date range");
         let seconds = amount
             .checked_mul(match unit {
                 's' => 1,
@@ -419,23 +424,22 @@ fn parse_since(raw: &str) -> Result<DateTime<Utc>, String> {
                 'h' => 3600,
                 _ => 86400,
             })
-            .ok_or_else(|| format!("--since {raw:?} is outside the supported date range"))?;
-        return Utc::now()
-            .checked_sub_signed(chrono::Duration::seconds(seconds))
-            .ok_or_else(|| format!("--since {raw:?} is outside the supported date range"));
+            .ok_or_else(out_of_range)?;
+        // The earliest instant an RFC 3339 year can name bounds the range, so `--since` never
+        // lands somewhere the audit log's own timestamps cannot.
+        let earliest =
+            SystemTime::UNIX_EPOCH - Duration::from_secs(EARLIEST_RFC3339_SECONDS_BEFORE_EPOCH);
+        return now
+            .checked_sub(Duration::from_secs(seconds.unsigned_abs()))
+            .filter(|since| *since >= earliest)
+            .ok_or_else(out_of_range);
     }
-    DateTime::parse_from_rfc3339(raw)
-        .map(|date| date.with_timezone(&Utc))
-        .map_err(|_| {
-            format!("--since {raw:?} is not an ISO-8601 instant or relative duration like 24h")
-        })
+    parse_rfc3339_instant(raw).ok_or_else(|| {
+        format!("--since {raw:?} is not an ISO-8601 instant or relative duration like 24h")
+    })
 }
 
-fn audit_records(
-    path: &Path,
-    since: Option<DateTime<Utc>>,
-    denied: bool,
-) -> io::Result<Vec<Value>> {
+fn audit_records(path: &Path, since: Option<SystemTime>, denied: bool) -> io::Result<Vec<Value>> {
     let mut records = Vec::new();
     for index in (0..=20).rev() {
         let path = if index == 0 {
@@ -467,8 +471,8 @@ fn audit_records(
                 continue;
             }
             if let Some(since) = since
-                && DateTime::parse_from_rfc3339(record["ts"].as_str().unwrap_or(""))
-                    .is_ok_and(|time| time.with_timezone(&Utc) < since)
+                && parse_rfc3339_instant(record["ts"].as_str().unwrap_or(""))
+                    .is_some_and(|time| time < since)
             {
                 continue;
             }
@@ -485,7 +489,13 @@ pub(super) fn run_audit(args: AuditArgs, env: &impl EnvSource) -> i32 {
     let slot = args
         .slot
         .unwrap_or_else(|| resolve_runtime_slot_for_current_exe(&home));
-    let since = match args.since.as_deref().map(parse_since).transpose() {
+    let now = SystemWallClock.now();
+    let since = match args
+        .since
+        .as_deref()
+        .map(|raw| parse_since(raw, now))
+        .transpose()
+    {
         Ok(since) => since,
         Err(error) => return report_error(args.json, &error),
     };
@@ -596,15 +606,98 @@ mod tests {
         });
         fs::write(&path, format!("bad\n{earlier}\n{boundary}\n")).unwrap();
         assert_eq!(audit_records(&path, None, true).unwrap(), vec![earlier]);
-        let since = parse_since("2026-09-21T05:30:00+05:30").unwrap();
+        let since = parse_since("2026-09-21T05:30:00+05:30", SystemTime::now()).unwrap();
         assert_eq!(
             audit_records(&path, Some(since), false).unwrap(),
             vec![boundary],
             "audit --since should keep the boundary instant and drop the preceding second"
         );
-        assert!(parse_since("impossible").is_err());
-        assert!(parse_since("-1h").is_err());
-        assert!(parse_since("24H").is_ok());
+    }
+
+    /// 2023-11-14T22:13:20Z, a fixed "now" so every expected instant is an exact value.
+    fn pinned_now() -> SystemTime {
+        SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000)
+    }
+
+    #[test]
+    fn since_durations_count_back_from_now_by_exact_amounts() {
+        let cases = [
+            ("30s", 1_700_000_000 - 30),
+            ("5m", 1_700_000_000 - 300),
+            ("24h", 1_700_000_000 - 86_400),
+            ("2d", 1_700_000_000 - 172_800),
+            // Unit case and surrounding whitespace do not matter.
+            ("24H", 1_700_000_000 - 86_400),
+            ("  7D ", 1_700_000_000 - 604_800),
+            ("0s", 1_700_000_000),
+        ];
+        for (raw, expected_seconds) in cases {
+            assert_eq!(
+                parse_since(raw, pinned_now()),
+                Ok(SystemTime::UNIX_EPOCH + Duration::from_secs(expected_seconds)),
+                "(parse_since): expected {raw:?} to be {expected_seconds} s after the epoch"
+            );
+        }
+    }
+
+    #[test]
+    fn since_instants_parse_to_exact_values_whatever_the_offset() {
+        let at_2026_09_21 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_790_000_000);
+        for raw in [
+            "2026-09-21T14:13:20Z",
+            "2026-09-21T14:13:20.000+00:00",
+            "2026-09-21T19:43:20+05:30",
+            "2026-09-21T07:13:20-07:00",
+        ] {
+            assert_eq!(
+                parse_since(raw, pinned_now()),
+                Ok(at_2026_09_21),
+                "(parse_since): expected {raw:?} to be 1790000000 s after the epoch"
+            );
+        }
+    }
+
+    #[test]
+    fn since_text_that_is_neither_a_duration_nor_an_instant_is_refused_by_name() {
+        for raw in [
+            "impossible",
+            "-1h",
+            "h",
+            "",
+            "1w",
+            "1.5h",
+            "2026-09-21",
+            "24h ago",
+        ] {
+            let error = parse_since(raw, pinned_now()).expect_err("expected a refusal");
+            assert_eq!(
+                error,
+                format!(
+                    "--since {:?} is not an ISO-8601 instant or relative duration like 24h",
+                    raw.trim()
+                ),
+                "(parse_since): expected the unparseable-value message for {raw:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn since_durations_stop_at_year_zero() {
+        // Exactly year zero is the last representable instant; one second more is refused.
+        let year_zero_seconds = 1_700_000_000 + 62_167_219_200_i64;
+        assert_eq!(
+            parse_since(&format!("{year_zero_seconds}s"), pinned_now()),
+            Ok(SystemTime::UNIX_EPOCH - Duration::from_secs(62_167_219_200)),
+        );
+        let error = parse_since(&format!("{}s", year_zero_seconds + 1), pinned_now())
+            .expect_err("one second before year zero is out of range");
+        assert_eq!(
+            error,
+            format!(
+                "--since \"{}s\" is outside the supported date range",
+                year_zero_seconds + 1
+            )
+        );
     }
 
     fn titled<'a>(findings: &'a [Value], title: &str) -> Vec<&'a Value> {
@@ -786,7 +879,8 @@ mod tests {
 
     #[test]
     fn since_past_the_supported_date_range_is_refused_by_name() {
-        let error = parse_since("999999999d").expect_err("two million years back is out of range");
+        let error = parse_since("999999999d", SystemTime::now())
+            .expect_err("two million years back is out of range");
         assert!(
             error == "--since \"999999999d\" is outside the supported date range",
             "expected the out-of-range message | received: {error}"

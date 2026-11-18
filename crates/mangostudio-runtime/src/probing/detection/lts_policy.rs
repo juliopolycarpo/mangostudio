@@ -22,15 +22,13 @@
 //! midnight boundaries — the same domain `Date.parse(\`${value}T00:00:00.000Z\`)`
 //! computes in TypeScript. This workspace carries no date/time crate
 //! ([`crate::ports::wall_clock`] already made the same call for formatting
-//! an instant), so [`days_from_civil`] is the arithmetic inverse of that
-//! module's `civil_from_days`: Howard Hinnant's `days_from_civil`, also
-//! public domain —
-//! <http://howardhinnant.github.io/date_algorithms.html#days_from_civil>.
+//! an instant), so [`days_from_civil`], which lives beside that module's
+//! `civil_from_days`, does the calendar arithmetic.
 
 use std::time::SystemTime;
 
 use super::types::LtsStatus;
-use crate::ports::wall_clock::epoch_millis;
+use crate::ports::wall_clock::{days_from_civil, epoch_millis};
 
 const DAY_MS: i64 = 24 * 60 * 60 * 1_000;
 
@@ -122,22 +120,6 @@ pub fn normalize_node_version(value: &str) -> Option<String> {
 
 fn compare_versions(left: super::types::SemVer, right: super::types::SemVer) -> std::cmp::Ordering {
     left.cmp(&right)
-}
-
-/// Howard Hinnant's `days_from_civil`: days since the Unix epoch
-/// (1970-01-01 = day 0) for the proleptic Gregorian `(year, month, day)`.
-/// The arithmetic inverse of [`crate::ports::wall_clock`]'s
-/// `civil_from_days`. Public domain —
-/// <http://howardhinnant.github.io/date_algorithms.html#days_from_civil>.
-#[must_use]
-fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
-    let y = if month <= 2 { year - 1 } else { year };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
-    let yoe = (y - era * 400) as u64; // [0, 399]
-    let month_index = if month > 2 { month - 3 } else { month + 9 } as u64;
-    let doy = (153 * month_index + 2) / 5 + day as u64 - 1; // [0, 365]
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
-    era * 146_097 + doe as i64 - 719_468
 }
 
 /// Parses a strict `YYYY-MM-DD` date into milliseconds since the Unix
