@@ -63,8 +63,8 @@ export const EXTERNAL_AGENTS_TOPIC = 'external-agents' as const;
  */
 export const ACTIVITY_TOPIC = 'activity' as const;
 /**
- * "A chat this account can see changed": a row was created, edited, or moved
- * in the list by a turn, a compaction, or a message written through the API.
+ * "A chat this account can see changed": a row was created, edited, deleted, or
+ * moved in the list by a turn, a compaction, or a message written through the API.
  *
  * Separate from {@link ACTIVITY_TOPIC} because the two readers disagree about
  * what a frame means. The chat list refetches on every frame, and the feed
