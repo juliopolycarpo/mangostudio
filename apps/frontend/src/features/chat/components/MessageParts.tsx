@@ -65,6 +65,14 @@ interface MessagePartsProps {
   onQuestionSubmit?: (prompt: string) => void;
   /** Resolved once per feed by `ChatFeed`, threaded down to the activity row. */
   toolIdentities: ToolIdentityResolver;
+  /**
+   * toolCallId of the feed's most recent file mutation, resolved once by
+   * `ChatFeed` so the collapse_older mode keeps one diff card open for the whole
+   * conversation. `null` means the feed has no mutation. Leave it `undefined`
+   * where a message renders outside a feed (a preview): the latest mutation of
+   * this message's own parts is used instead.
+   */
+  latestFileChangeId?: string | null;
 }
 
 export function MessageParts({
@@ -75,12 +83,19 @@ export function MessageParts({
   chatId = null,
   onQuestionSubmit,
   toolIdentities,
+  latestFileChangeId: feedLatestFileChangeId,
 }: MessagePartsProps) {
   const { groups, consumed } = useMemo(
     () => planToolGroups(parts, isStreaming),
     [parts, isStreaming]
   );
-  const latestFileChangeId = useMemo(() => findLatestFileChangeId(parts), [parts]);
+  // Only a message rendered outside a feed pays for its own scan.
+  const ownLatestFileChangeId = useMemo(
+    () => (feedLatestFileChangeId === undefined ? findLatestFileChangeId(parts) : null),
+    [feedLatestFileChangeId, parts]
+  );
+  const latestFileChangeId =
+    feedLatestFileChangeId === undefined ? ownLatestFileChangeId : feedLatestFileChangeId;
   const loopExhaustion = useMemo(() => pairLoopExhaustion(parts), [parts]);
   // The turn record is written first so nothing is ever a bare text blob with no
   // record of who produced it, but it *reads* as a summary, so it renders last.
