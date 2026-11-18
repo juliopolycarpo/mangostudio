@@ -1,4 +1,5 @@
 export { summarizeGhSubcommand } from './audit';
+export { GH_READ_OPERATIONS, GH_WRITE_OPERATIONS } from './gh-operations';
 export {
   GITHUB_PR_REVIEW_THREADS_QUERY,
   PINNED_GITHUB_GRAPHQL_DOCUMENTS,

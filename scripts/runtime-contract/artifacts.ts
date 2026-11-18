@@ -11,7 +11,11 @@
  * be tested without touching disk.
  */
 
-import { PINNED_GITHUB_GRAPHQL_DOCUMENTS } from '@mangostudio/shared/github';
+import {
+  GH_READ_OPERATIONS,
+  GH_WRITE_OPERATIONS,
+  PINNED_GITHUB_GRAPHQL_DOCUMENTS,
+} from '@mangostudio/shared/github';
 import {
   CONSENT_DENIED_KIND,
   EXTERNAL_AGENT_DISCOVERY_LAUNCH_REFUSED_CODE,
@@ -180,6 +184,10 @@ function stringsDocument(): Record<string, unknown> {
       alreadyBoundReason: RUNTIME_ALREADY_BOUND_REASON,
     },
     githubGraphqlDocuments: [...PINNED_GITHUB_GRAPHQL_DOCUMENTS],
+    githubCliOperations: {
+      read: [...GH_READ_OPERATIONS],
+      write: [...GH_WRITE_OPERATIONS],
+    },
     runtimeHome: {
       slots: [...RUNTIME_SLOTS],
       homeDirName: MANGO_HOME_DIR_NAME,

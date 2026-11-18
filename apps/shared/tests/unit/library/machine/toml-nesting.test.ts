@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { getLibraryLocation } from '../../../../src/library/host';
 import { LibraryCache, readLocationInstances } from '../../../../src/library/machine';
 import {
+  isTomlTable,
   TOML_NESTING_LIMIT,
   tomlNestingWithinLimit,
 } from '../../../../src/library/machine/toml-nesting';
@@ -46,6 +47,33 @@ async function settingsVerdict(text: string): Promise<string | undefined> {
   const instance = scanned.instances[0]?.instance;
   return instance && 'invalidReason' in instance ? instance.invalidReason : undefined;
 }
+
+/** A date/time value exactly as `Bun.TOML` produces it for `literal`. */
+function parsedTomlScalar(literal: string): unknown {
+  return Reflect.get(Bun.TOML.parse(`value = ${literal}`), 'value');
+}
+
+describe('isTomlTable', () => {
+  it.each<[string, unknown, boolean]>([
+    ['a plain object', { a: 1 }, true],
+    ['an empty plain object', {}, true],
+    ['a null-prototype object', Object.assign(Object.create(null), { a: 1 }), true],
+    ['a table parsed by Bun.TOML', Bun.TOML.parse('[a]\nb = 1'), true],
+    ['Temporal.PlainDate from Bun.TOML', parsedTomlScalar('1979-05-27'), false],
+    ['Temporal.PlainTime from Bun.TOML', parsedTomlScalar('07:32:00'), false],
+    ['Temporal.PlainDateTime from Bun.TOML', parsedTomlScalar('1979-05-27T07:32:00'), false],
+    ['Temporal.Instant from Bun.TOML', parsedTomlScalar('1979-05-27T07:32:00Z'), false],
+    ['an offset datetime from Bun.TOML', parsedTomlScalar('1979-05-27T00:32:00-07:00'), false],
+    ['a Date', new Date(0), false],
+    ['an array', [], false],
+    ['a Map', new Map(), false],
+    ['null', null, false],
+    ['a string', 'table', false],
+    ['undefined', undefined, false],
+  ])('%s -> %s', (_name, value, expected) => {
+    expect(isTomlTable(value)).toBe(expected);
+  });
+});
 
 describe('tomlNestingWithinLimit', () => {
   it('counts containers below the root table, which is depth 0', () => {

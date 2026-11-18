@@ -15,7 +15,12 @@ describe('resolveLanguageId', () => {
     ['', null],
     ['   ', null],
     ['vue', null],
-    ['rs', null],
+    ['rs', 'rust'],
+    ['RS', 'rust'],
+    ['jsonc', 'json'],
+    ['jsonc title="tsconfig.json"', 'json'],
+    ['diff', 'diff'],
+    ['svelte', null],
     ['constructor', null],
     ['__proto__', null],
   ];
