@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 
 import {
+  fileTimeToDotNetTicks,
+  fileTimeToEpochMs,
   linuxStartMs,
   type ProcessStartTimeHost,
   psElapsedStartMs,
   readProcessStartMs,
-  windowsStartMs,
 } from '../../../src/lib/process-start-time';
+import { readWindowsCreationFileTime } from '../../../src/lib/windows-process-times';
 
 const NOW = 1_700_000_000_000;
 
@@ -53,29 +55,73 @@ describe('psElapsedStartMs', () => {
   });
 });
 
-describe('windowsStartMs', () => {
-  it('reads Unix milliseconds', () => {
-    expect(windowsStartMs('1700000000123\r\n')).toBe(1_700_000_000_123);
+/** `FILETIME` ticks at 1970-01-01 UTC: the 1601 epoch plus 11,644,473,600 s in 100 ns ticks. */
+const FILETIME_AT_UNIX_EPOCH = 116_444_736_000_000_000n;
+
+describe('fileTimeToEpochMs', () => {
+  it('maps the Unix epoch to zero, which pins the 1601 offset', () => {
+    expect(fileTimeToEpochMs(FILETIME_AT_UNIX_EPOCH)).toBe(0);
   });
 
-  it.each(['', 'Get-Process : Cannot find a process', '17e9'])(
-    'returns undefined for %p',
-    (out) => {
-      expect(windowsStartMs(out)).toBeUndefined();
+  it('maps a known instant: 2023-11-14T22:13:20Z is 1_700_000_000_000 ms', () => {
+    expect(fileTimeToEpochMs(FILETIME_AT_UNIX_EPOCH + 1_700_000_000_000n * 10_000n)).toBe(
+      1_700_000_000_000
+    );
+  });
+
+  it('keeps the millisecond exact where a double would lose ticks', () => {
+    // 1.3e17 ticks is past 2^53: one tick short of the next millisecond must still round up to
+    // it, and one tick past the previous must still round down.
+    const base = FILETIME_AT_UNIX_EPOCH + 1_700_000_000_123n * 10_000n;
+    expect(fileTimeToEpochMs(base - 1n)).toBe(1_700_000_000_123);
+    expect(fileTimeToEpochMs(base + 1n)).toBe(1_700_000_000_123);
+  });
+
+  it.each([
+    [4_999n, 0],
+    [5_000n, 1],
+    [14_999n, 1],
+    [15_000n, 2],
+  ])('rounds %p ticks past a millisecond half up to %p ms', (ticks, expected) => {
+    expect(fileTimeToEpochMs(FILETIME_AT_UNIX_EPOCH + ticks)).toBe(expected);
+  });
+
+  it.each([0n, 1n, -1n, FILETIME_AT_UNIX_EPOCH - 1n])(
+    'is undefined for %p, before 1970 and so not a real process start',
+    (fileTime) => {
+      expect(fileTimeToEpochMs(fileTime)).toBeUndefined();
     }
   );
 });
 
-/** A host that serves canned files and command output, and records what it was asked. */
+describe('fileTimeToDotNetTicks', () => {
+  it('adds the 1601 to 0001 offset, as the decimal text PowerShell printed', () => {
+    expect(fileTimeToDotNetTicks(1n)).toBe('504911232000000001');
+    // The Unix epoch in .NET ticks, a constant every .NET reference lists.
+    expect(fileTimeToDotNetTicks(FILETIME_AT_UNIX_EPOCH)).toBe('621355968000000000');
+  });
+
+  it.each([0n, -1n])('is undefined for %p', (fileTime) => {
+    expect(fileTimeToDotNetTicks(fileTime)).toBeUndefined();
+  });
+});
+
+/** A host that serves canned files, command output and a creation time, and records what it was asked. */
 class FakeStartTimeHost implements ProcessStartTimeHost {
   readonly commands: string[][] = [];
   readonly reads: string[] = [];
+  readonly creationTimeQueries: number[] = [];
   constructor(
     readonly platform: NodeJS.Platform,
     private readonly files: Record<string, string> = {},
-    private readonly commandOutput: string | undefined = undefined
+    private readonly commandOutput: string | undefined = undefined,
+    private readonly windowsCreationTime: bigint | undefined = undefined
   ) {}
   now = () => NOW;
+  readWindowsCreationTime = (pid: number): Promise<bigint | undefined> => {
+    this.creationTimeQueries.push(pid);
+    return Promise.resolve(this.windowsCreationTime);
+  };
   readText = (path: string): Promise<string> => {
     this.reads.push(path);
     const text = this.files[path];
@@ -103,11 +149,30 @@ describe('readProcessStartMs', () => {
     expect(host.commands).toEqual([['ps', '-o', 'etime=', '-p', '42']]);
   });
 
-  it('asks PowerShell on Windows', async () => {
-    const host = new FakeStartTimeHost('win32', {}, '1699999999000\r\n');
+  it('converts the native creation time on Windows, with no spawn', async () => {
+    const host = new FakeStartTimeHost(
+      'win32',
+      {},
+      undefined,
+      FILETIME_AT_UNIX_EPOCH + 1_699_999_999_000n * 10_000n
+    );
     expect(await readProcessStartMs(42, host)).toBe(1_699_999_999_000);
-    expect(host.commands[0]?.[0]).toBe('powershell.exe');
-    expect(host.commands[0]?.at(-1)).toContain('Get-Process -Id 42');
+    expect(host.creationTimeQueries).toEqual([42]);
+    expect(host.commands).toEqual([]);
+  });
+
+  it('is undefined on Windows when the process cannot be opened or queried', async () => {
+    const host = new FakeStartTimeHost('win32');
+    expect(await readProcessStartMs(42, host)).toBeUndefined();
+    expect(host.creationTimeQueries).toEqual([42]);
+  });
+
+  it('is undefined on Windows when the native read throws, as when kernel32 cannot load', async () => {
+    const throwing: ProcessStartTimeHost = {
+      ...new FakeStartTimeHost('win32'),
+      readWindowsCreationTime: () => Promise.reject(new Error('dlopen kernel32.dll failed')),
+    };
+    expect(await readProcessStartMs(42, throwing)).toBeUndefined();
   });
 
   it('is undefined when the query fails', async () => {
@@ -128,7 +193,25 @@ describe('readProcessStartMs', () => {
     const expected = Date.now() - process.uptime() * 1000;
 
     expect(started, 'expected a start time for this process | received: undefined').toBeDefined();
-    // ps and Get-Process resolve to a second; allow the query's own latency too.
+    // ps resolves to a second, and Bun starts its uptime clock a little after the OS creates the
+    // process. The Windows read is a microsecond native call, so this bounds the clocks, not a query.
     expect(Math.abs((started ?? 0) - expected)).toBeLessThan(3_000);
+  });
+});
+
+describe('readWindowsCreationFileTime', () => {
+  const onWindows = process.platform === 'win32' ? it : it.skip;
+
+  onWindows('reads this process as created about process.uptime() ago', async () => {
+    const fileTime = await readWindowsCreationFileTime(process.pid);
+    const expected = Date.now() - process.uptime() * 1000;
+
+    expect(fileTime, 'expected a FILETIME for this process | received: undefined').toBeDefined();
+    expect(Math.abs((fileTimeToEpochMs(fileTime ?? 0n) ?? 0) - expected)).toBeLessThan(3_000);
+  });
+
+  onWindows('is undefined for a pid no process holds', async () => {
+    // Pids are multiples of four and this one is far above any a runner reaches.
+    expect(await readWindowsCreationFileTime(0x7ffffffc)).toBeUndefined();
   });
 });

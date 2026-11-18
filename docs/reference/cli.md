@@ -619,8 +619,8 @@ and cleaned up automatically.
 
 The file also records `startToken`, the server's own process start token (on
 Linux the boot id plus the process start tick, on macOS the `ps -o lstart=`
-text, on Windows the `StartTime` ticks, added a moment after startup because the
-query is slow there). `stop`, `killserver`, `restart` and `service install`
+text, on Windows the creation time as .NET ticks from a native `GetProcessTimes`
+call), added a moment after startup. `stop`, `killserver`, `restart` and `service install`
 compare it for equality with the token of the recorded PID before they signal it,
 so they never signal an unrelated process that reused the PID. A different token
 means the file is stale and it is removed. No wall-clock time is compared, so a
