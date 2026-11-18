@@ -30,8 +30,6 @@ export interface RuntimeDefinition {
    */
   readonly keepUnparsedVersion?: boolean;
   readonly wellKnownDirs: (env: PathEnv) => readonly string[];
-  /** Also probes the bare binary name, as a final OS-resolved fallback. */
-  readonly includeBareBinaryNames?: boolean;
 }
 
 interface RuntimeScanFailure {
@@ -57,15 +55,6 @@ export interface BinaryScanDeps extends PathEnv {
   readonly totalTimeoutMs?: number;
   readonly configuredPath?: string;
   readonly configuredOnly?: boolean;
-  /**
-   * Stops the scan once a probed version satisfies the caller. Candidates are
-   * handed out in PATH order, so every candidate ahead of the match has already
-   * started and is still awaited — only strictly later ones are skipped. A
-   * caller that only needs to know whether a satisfying version exists sets
-   * this to keep its cost down; duplicate analysis leaves it unset because it
-   * needs the full list.
-   */
-  readonly stopWhen?: (version: string) => boolean;
 }
 
 interface BinaryCandidate {
@@ -176,16 +165,6 @@ function* iterateBinaryCandidates(
   for (const directory of definition.wellKnownDirs(deps)) {
     yield* appendDirectory(directory, 'well-known');
   }
-
-  if (definition.includeBareBinaryNames) {
-    for (const name of names) {
-      yield {
-        path: name,
-        origin: 'path',
-        requiresExistenceCheck: false,
-      };
-    }
-  }
 }
 
 async function resolveRealpath(path: string, deps: BinaryScanDeps): Promise<string> {
@@ -199,21 +178,16 @@ async function resolveRealpath(path: string, deps: BinaryScanDeps): Promise<stri
 async function mapWithConcurrency<T, Result>(
   items: readonly T[],
   concurrency: number,
-  mapper: (item: T) => Promise<Result>,
-  /** Marks a result as terminal; items after that index are left unmapped. */
-  isTerminal?: (result: Result) => boolean
+  mapper: (item: T) => Promise<Result>
 ): Promise<Result[]> {
   const results = new Array<Result>(items.length);
   let nextIndex = 0;
-  let terminalIndex = Number.POSITIVE_INFINITY;
 
   const worker = async () => {
-    while (nextIndex < items.length && nextIndex <= terminalIndex) {
+    while (nextIndex < items.length) {
       const index = nextIndex;
       nextIndex += 1;
-      const result = await mapper(items[index] as T);
-      results[index] = result;
-      if (isTerminal?.(result) && index < terminalIndex) terminalIndex = index;
+      results[index] = await mapper(items[index] as T);
     }
   };
 
@@ -340,7 +314,6 @@ export async function scanRuntime(
   const failures: RuntimeScanFailure[] = [];
   const firstPathByRealpath = new Map<string, string>();
   let hasEffectiveInstallation = false;
-  const { stopWhen } = deps;
   const candidates = [...iterateBinaryCandidates(definition, deps)].filter(
     (candidate) => !candidate.requiresExistenceCheck || deps.pathExists(candidate.path)
   );
@@ -400,11 +373,7 @@ export async function scanRuntime(
 
       const path = await resolveRealpath(candidate.path, deps);
       return { kind: 'installation', candidate, path, version };
-    },
-    stopWhen
-      ? (result) =>
-          result?.kind === 'installation' && result.version !== null && stopWhen(result.version)
-      : undefined
+    }
   );
 
   for (const probeResult of probeResults) {
