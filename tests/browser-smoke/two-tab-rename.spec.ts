@@ -1,3 +1,4 @@
+import { CHATS_TOPIC } from '@mangostudio/shared/realtime';
 import { type Browser, type BrowserContext, expect, type Page, test } from '@playwright/test';
 
 import { type RealtimeProbe, watchRealtime } from './support/realtime-probe';
@@ -9,7 +10,7 @@ import { dismissWorkdirPicker } from './support/workdir-picker';
  * and window focus does not refetch it (`lib/query-client.ts`), so the signal
  * is the only way a second tab learns of it. This is the browser-level
  * acceptance of the API-level check that `PUT /api/chats/:id` publishes the
- * activity invalidation to the owner's sockets and to nobody else's.
+ * chats invalidation to the owner's sockets and to nobody else's.
  */
 
 // Generous on purpose: the reload marker and the socket count, not this bound,
@@ -90,7 +91,7 @@ async function untilQuiet(read: () => number): Promise<void> {
     if (Date.now() - since >= QUIET_MS) return;
   }
   throw new Error(
-    `expected activity to go quiet within ${QUIET_LIMIT_MS} ms | received: still changing at ${last}`
+    `expected realtime traffic to go quiet within ${QUIET_LIMIT_MS} ms | received: still changing at ${last}`
   );
 }
 
@@ -125,9 +126,9 @@ test('a rename in one tab reaches the same user’s other tab, and no other user
   const stranger = await newSignedInContext(browser, 'other-user');
   const strangerPage = await stranger.newPage();
   const probes = {
-    first: watchRealtime(first),
-    second: watchRealtime(second),
-    stranger: watchRealtime(strangerPage),
+    first: watchRealtime(first, { topic: CHATS_TOPIC }),
+    second: watchRealtime(second, { topic: CHATS_TOPIC }),
+    stranger: watchRealtime(strangerPage, { topic: CHATS_TOPIC }),
   };
   const strangerListRequests: string[] = [];
   strangerPage.on('request', (request) => {
@@ -191,7 +192,7 @@ test('a rename in one tab reaches the same user’s other tab, and no other user
     ).toBe(socketsBefore);
     expect(
       probes.second.invalidations(),
-      'expected second tab: an activity invalidate frame after the rename | received: none'
+      'expected second tab: a chats invalidate frame after the rename | received: none'
     ).toBeGreaterThan(before);
 
     // Give a stray signal to the other account's tab the time the first tab
@@ -206,7 +207,7 @@ test('a rename in one tab reaches the same user’s other tab, and no other user
     ).toBe(strangerRequestsBefore);
     expect(
       probes.stranger.invalidations(),
-      `expected other user's activity invalidate frames after the rename: ${strangerBefore} | received: ${probes.stranger.invalidations()}`
+      `expected other user's chats invalidate frames after the rename: ${strangerBefore} | received: ${probes.stranger.invalidations()}`
     ).toBe(strangerBefore);
 
     // The negative checks above only mean something if that tab's socket was
@@ -221,7 +222,7 @@ test('a rename in one tab reaches the same user’s other tab, and no other user
     ).toBe(true);
     await expect
       .poll(() => probes.stranger.invalidations(), {
-        message: `expected other user's activity invalidate frames after its own update: > ${strangerBefore} | received: none (socket not listening)`,
+        message: `expected other user's chats invalidate frames after its own update: > ${strangerBefore} | received: none (socket not listening)`,
         timeout: SYNC_TIMEOUT_MS,
       })
       .toBeGreaterThan(strangerBefore);

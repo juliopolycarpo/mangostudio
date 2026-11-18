@@ -63,15 +63,17 @@ export interface RealtimeProbe {
 }
 
 /**
- * Watch a page's current realtime socket before navigation.
- * @example const probe = watchRealtime(page); await probe.subscribed('first tab');
+ * Watch a page's current realtime socket before navigation, counting the
+ * subscription ack and invalidate frames of one topic (activity by default).
+ * @example const probe = watchRealtime(page, { topic: CHATS_TOPIC }); await probe.subscribed('first tab');
  */
 export function watchRealtime(
   page: Page,
-  options: { clock?: ProbeClock; timeoutMs?: number } = {}
+  options: { clock?: ProbeClock; timeoutMs?: number; topic?: string } = {}
 ): RealtimeProbe {
   const time = options.clock ?? clock;
   const timeoutMs = options.timeoutMs ?? SUBSCRIBE_TIMEOUT_MS;
+  const topic = options.topic ?? ACTIVITY_TOPIC;
   let received = 0;
   let sockets = 0;
   let current: { socket: import('@playwright/test').WebSocket; ack: boolean } | undefined;
@@ -110,20 +112,18 @@ export function watchRealtime(
       }
       const live = current === connection && !socket.isClosed();
       if (direction === 'send' && Value.Check(RealtimeClientMessageSchema, value)) {
-        const activity = 'topics' in value && value.topics.includes(ACTIVITY_TOPIC);
-        record(`send:${value.type}:${activity ? 'activity' : 'other'}:${live ? 'current' : 'old'}`);
-        if (live && value.type === 'unsubscribe' && activity) connection.ack = false;
+        const watched = 'topics' in value && value.topics.includes(topic);
+        record(`send:${value.type}:${watched ? topic : 'other'}:${live ? 'current' : 'old'}`);
+        if (live && value.type === 'unsubscribe' && watched) connection.ack = false;
         return;
       }
       if (direction === 'receive' && Value.Check(RealtimeServerMessageSchema, value)) {
-        const activity =
+        const watched =
           value.type === 'subscribed'
-            ? value.topics.includes(ACTIVITY_TOPIC)
-            : value.type === 'invalidate' && value.topic === ACTIVITY_TOPIC;
-        record(
-          `receive:${value.type}:${activity ? 'activity' : 'other'}:${live ? 'current' : 'old'}`
-        );
-        if (!live || !activity) return;
+            ? value.topics.includes(topic)
+            : value.type === 'invalidate' && value.topic === topic;
+        record(`receive:${value.type}:${watched ? topic : 'other'}:${live ? 'current' : 'old'}`);
+        if (!live || !watched) return;
         if (value.type === 'subscribed') connection.ack = true;
         if (value.type === 'invalidate') received += 1;
         return;
@@ -140,7 +140,7 @@ export function watchRealtime(
       while (!current || current.socket.isClosed() || !current.ack) {
         if (time.now() >= deadline) {
           throw new Error(
-            `expected ${label} activity subscription ack within ${timeoutMs} ms | received: none (${sockets} realtime socket(s) opened; events: ${events.join(', ') || 'none'})`
+            `expected ${label} ${topic} subscription ack within ${timeoutMs} ms | received: none (${sockets} realtime socket(s) opened; events: ${events.join(', ') || 'none'})`
           );
         }
         await time.sleep(POLL_MS);

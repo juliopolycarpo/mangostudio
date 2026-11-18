@@ -121,6 +121,24 @@ describe('browser realtime probe', () => {
     );
   });
 
+  it('counts only the watched topic when one is given', async () => {
+    const page = new FakePage();
+    const clock = new FakeClock();
+    const probe = watchRealtime(page.asPage(), { clock, timeoutMs: 200, topic: 'chats' });
+    const socket = new FakeSocket();
+    page.open(socket);
+    socket.receive(ack);
+    await expect(probe.subscribed('chats tab')).rejects.toThrow(
+      'chats tab chats subscription ack within 200 ms'
+    );
+    socket.receive(JSON.stringify({ type: 'subscribed', topics: ['chats'] }));
+    await probe.subscribed('chats tab');
+    socket.receive(invalidation);
+    expect(probe.invalidations()).toBe(0);
+    socket.receive(JSON.stringify({ type: 'invalidate', topic: 'chats' }));
+    expect(probe.invalidations()).toBe(1);
+  });
+
   it('rejects replaced socket frames even when the old socket did not close', async () => {
     const page = new FakePage();
     const clock = new FakeClock();
