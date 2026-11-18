@@ -2,6 +2,13 @@ import Type, { type Static } from 'typebox';
 
 import { ReadonlyArraySchema } from '../schema-helpers';
 
+/**
+ * Well-known tool-settings parameter that holds a built-in tool's execution
+ * budget in seconds. The API enforces it and the chat card shows it, so both
+ * read the name from here.
+ */
+export const TOOL_EXECUTION_TIMEOUT_PARAM = 'timeoutSeconds';
+
 export const PathListItemSchema = Type.Object({
   path: Type.String(),
   enabled: Type.Boolean(),

@@ -781,7 +781,11 @@ while running (pulsing), because a bead has to clear 3:1 against the canvas on i
 A row is 24px, or 44px on a coarse pointer, so the node stays centred on a row that the
 touch floor raised.
 
-A tool call is a timeline row with its name in mono. Expanded, it opens onto a `surface`
+A tool call is a timeline row with its name in mono. Its right-hand cluster (mono, `fg-subtle`,
+`tabular-nums`, hidden below `sm`) holds a running call's clock in whole seconds, `12s of 30s`
+when its tool has a configured limit, which the measured duration replaces once the call ends.
+A failed, cancelled or timed-out call adds the reason after its status word in `fg-subtle`.
+Expanded, it opens onto a `surface`
 panel with a `stroke` border and `rounded-md` (`TimelineDisclosure`). Inside, each section
 (arguments, output, an Edit's file diff) has a 32px header with a `MicroLabel` or the file's
 path, then its content as a full-bleed `canvas` band in mono. The user's message is a

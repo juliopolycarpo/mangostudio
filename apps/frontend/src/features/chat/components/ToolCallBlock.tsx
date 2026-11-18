@@ -13,10 +13,12 @@ import { MicroLabel } from '@/components/ui/MicroLabel';
 import { useChatDisplaySettings } from '@/hooks/use-chat-display-settings';
 import { useClipboard } from '@/hooks/use-clipboard';
 import { useI18n } from '@/hooks/use-i18n';
+import { useNow } from '@/hooks/use-now';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
 
+import { useConfiguredToolTimeoutSeconds } from '../hooks/use-configured-tool-timeout';
 import { buildFileChangePreview, isFileChangeTool } from './file-change-preview';
 import { FileChangePreviewBody } from './FileChangePreview';
 import { TimelineDisclosure } from './TimelineDisclosure';
@@ -30,11 +32,15 @@ import {
 } from './tool-result-summary';
 import {
   formatToolDuration,
+  formatToolElapsed,
   getToolHint,
   StatusGlyph,
   toneTextClass,
   toolStatusTone,
 } from './ToolCallVisuals';
+
+/** How often a running call's clock repaints: its readout is whole seconds. */
+const LIVE_ELAPSED_TICK_MS = 1_000;
 
 interface ToolCallBlockProps {
   name: string;
@@ -88,6 +94,16 @@ export function ToolCallBlock({
       ? null
       : t.tools.status[status];
   const tone = toolStatusTone(status);
+  // Why a failed, cancelled or timed-out call ended. "Timed out" beside "Time
+  // limit reached" would say the same thing twice, so that pair shows only the
+  // status.
+  const reasonCode = execution?.reasonCode;
+  const reasonLabel =
+    reasonCode !== undefined &&
+    (status === 'failed' || status === 'cancelled' || status === 'timed_out') &&
+    !(status === 'timed_out' && reasonCode === 'timeout')
+      ? t.tools.reasons[reasonCode]
+      : null;
   const resultLabels: Record<ResultKind, string> = {
     error: t.tools.errorLabel,
     result: t.tools.resultLabel,
@@ -96,6 +112,28 @@ export function ToolCallBlock({
   };
   const isActive = isActiveToolExecutionStatus(status);
   const duration = execution?.durationMs;
+  // A running call counts up beside the limit its tool is configured with. The
+  // clock only runs while the call does: a call waiting on the reader or queued
+  // is not spending its budget, and a settled call shows its measured duration.
+  const isRunning = status === 'running';
+  const now = useNow(isRunning ? LIVE_ELAPSED_TICK_MS : null);
+  // The hub's start time is the anchor; a legacy part with no snapshot counts
+  // from when this card first saw the call running.
+  const [firstSeenRunningAt] = useState(() => Date.now());
+  const configuredTimeoutSeconds = useConfiguredToolTimeoutSeconds(
+    name,
+    isRunning && source === 'builtin'
+  );
+  const liveElapsed = isRunning
+    ? formatToolElapsed(now - (execution?.startedAt ?? firstSeenRunningAt))
+    : null;
+  const liveClock =
+    liveElapsed !== null && configuredTimeoutSeconds !== null
+      ? formatMessage(t.tools.elapsedOfLimit, {
+          elapsed: liveElapsed,
+          limit: formatToolElapsed(configuredTimeoutSeconds * 1000),
+        })
+      : liveElapsed;
   // Parsed once and shared: the outcome on the row and the raw body below it
   // read the same payload, and a result is the largest string in a transcript.
   const parsedResult = useMemo(() => parseToolResult(result), [result]);
@@ -140,12 +178,19 @@ export function ToolCallBlock({
         onToggle={() => setExpanded((v) => !v)}
         glyph={<StatusGlyph status={status} name={name} />}
         summary={summary ? formatToolSummary(summary, t.tools.summary) : null}
-        duration={duration !== undefined && !isActive ? formatToolDuration(duration) : null}
+        duration={
+          liveClock ?? (duration !== undefined && !isActive ? formatToolDuration(duration) : null)
+        }
       >
         <span className={cn('shrink-0 font-mono font-medium', toneTextClass(tone))}>{label}</span>
         {source !== 'builtin' && <Badge>{t.tools.sources[source]}</Badge>}
         {hint && <span className="truncate font-mono text-fg-muted">{hint}</span>}
-        {statusLabel && <span className={cn('shrink-0', toneTextClass(tone))}>{statusLabel}</span>}
+        {statusLabel && (
+          <span className={cn('shrink-0', toneTextClass(tone))}>
+            {statusLabel}
+            {reasonLabel && <span className="text-fg-subtle"> · {reasonLabel}</span>}
+          </span>
+        )}
       </TimelineRow>
 
       <TimelineDisclosure open={expanded}>

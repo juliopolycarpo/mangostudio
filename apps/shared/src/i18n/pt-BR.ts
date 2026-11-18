@@ -4176,6 +4176,21 @@ export const messages = {
       mcp: 'MCP',
       subagent: 'Subagente',
     },
+    /** Por que uma chamada falhou, foi cancelada ou esgotou o tempo, um item por `ToolExecutionReasonCode`. */
+    reasons: {
+      timeout: 'Limite de tempo atingido',
+      user_cancelled: 'Cancelada por você',
+      turn_aborted: 'Turno interrompido',
+      not_allowed: 'Não permitida',
+      tool_disabled: 'Ferramenta desativada',
+      unknown_tool: 'Ferramenta desconhecida',
+      validation_failed: 'Argumentos inválidos',
+      server_closed: 'Servidor encerrado',
+      execution_error: 'Erro de execução',
+      outcome_unknown: 'Resultado desconhecido',
+    },
+    /** O relógio de uma chamada em execução ao lado do limite de tempo configurado, ex.: `12s de 30s`. */
+    elapsedOfLimit: '{elapsed} de {limit}',
     /** O que a chamada produziu, alinhado à direita na linha da timeline. */
     summary: {
       item: '{count} item',
