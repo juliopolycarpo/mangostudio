@@ -31,6 +31,7 @@ function handleApiKeyError(error: unknown, set: { status?: number | string }): A
   return { error: 'Unexpected API key management error.', code: ERROR_CODES.INTERNAL };
 }
 
+// No `as const`: it makes Eden type the spread `error` channel as `unknown`.
 const errorResponses = {
   400: ApiErrorResponseSchema,
   401: ApiErrorResponseSchema,
@@ -38,7 +39,7 @@ const errorResponses = {
   404: ApiErrorResponseSchema,
   422: ApiErrorResponseSchema,
   500: ApiErrorResponseSchema,
-} as const;
+};
 
 export const apiKeyRoutes = new Elysia().use(requireCookieAuth).group('/api-keys', (app) =>
   app

@@ -40,11 +40,12 @@ function handleToolIdentityError(
   return { error: 'Unexpected tool identity error.', code: ERROR_CODES.INTERNAL };
 }
 
+// No `as const`: it makes Eden type the spread `error` channel as `unknown`.
 const errorResponses = {
   401: ApiErrorResponseSchema,
   422: ApiErrorResponseSchema,
   500: ApiErrorResponseSchema,
-} as const;
+};
 
 const subjectKeyParams = t.Object({ subjectKey: SubjectKeySchema });
 
