@@ -1083,6 +1083,12 @@ fn walk_opened_capability(
                 // filesystem did not report (`DT_UNKNOWN`) may be one, so those
                 // are resolved in full; so is every entry off Unix, where a
                 // reparse point is not guaranteed to report as a symlink.
+                // The reported type is trusted only to decide whether a name
+                // is listed. A filesystem that reports a symlink as a regular
+                // file can disclose a name that already sits inside an allowed
+                // directory, nothing more: contents are read through a handle
+                // checked by `verify_opened_file`, and descent goes through
+                // `open_dir_nofollow` plus `bind_opened_directory`.
                 let allowed = if cfg!(unix) && (is_directory || file_type.is_file()) {
                     plain_children.allows(&name)
                 } else {

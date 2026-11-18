@@ -573,6 +573,115 @@ mod tests {
         }
     }
 
+    /// A root configured, or a parent requested, through a symlink has a
+    /// lexical spelling that differs from its canonical one. The lexical and
+    /// canonical clauses of the uniform check must each be told apart here.
+    #[cfg(unix)]
+    #[test]
+    fn plain_children_agree_with_allows_when_spellings_go_through_symlinks() {
+        use std::os::unix::fs::symlink;
+
+        let dir = scratch_dir("filesystem-policy-plain-child-alias");
+        let root = dir.join("root");
+        for directory in [
+            root.join("kept"),
+            root.join("private/nested"),
+            root.join("private-notes"),
+        ] {
+            std::fs::create_dir_all(directory).unwrap();
+        }
+        let alias_below_parent = dir.join("alias-nested");
+        let alias_of_private = dir.join("alias-private");
+        let searched_through = dir.join("searched-through");
+        symlink(root.join("private/nested"), &alias_below_parent).unwrap();
+        symlink(root.join("private"), &alias_of_private).unwrap();
+        symlink(&root, &searched_through).unwrap();
+
+        let policies = [
+            (
+                "denied alias of a directory two levels below the parent",
+                vec![root.clone()],
+                vec![alias_below_parent.clone()],
+            ),
+            (
+                "denied alias of a direct child of the parent",
+                vec![root.clone()],
+                vec![alias_of_private.clone()],
+            ),
+            (
+                "denied root spelled through the searched symlink",
+                vec![root.clone()],
+                vec![searched_through.join("private")],
+            ),
+            (
+                "allowed root spelled through the searched symlink",
+                vec![searched_through.clone()],
+                vec![],
+            ),
+            (
+                "allowed symlink, denied canonical child",
+                vec![searched_through.clone()],
+                vec![root.join("private")],
+            ),
+        ];
+        let parents = [
+            root.clone(),
+            searched_through.clone(),
+            searched_through.join("private"),
+            searched_through.join("private/nested"),
+            root.join("private"),
+            alias_of_private.clone(),
+            alias_below_parent.clone(),
+        ];
+        for (label, allowed_roots, denied_roots) in policies {
+            let policy = PathPolicy {
+                allowed_roots,
+                denied_roots,
+                containment_root: None,
+            }
+            .compile()
+            .unwrap();
+            for parent in &parents {
+                let verified_parent = std::fs::canonicalize(parent).unwrap();
+                for name in ["kept", "private", "private-notes", "nested", "leaf.txt"] {
+                    assert_eq!(
+                        policy
+                            .plain_children_of(parent, &verified_parent)
+                            .allows(OsStr::new(name)),
+                        policy.allows(&parent.join(name)),
+                        "(plain child under {label}): expected the same answer as `allows` for {}",
+                        parent.join(name).display()
+                    );
+                }
+            }
+        }
+
+        // Defense in depth: the walk resolves symlink children with `allows`
+        // and never asks `plain_children_of` about one. Even so, a deny root
+        // spelled below the parent that resolves elsewhere must keep the
+        // directory out of the uniform shortcut, so the lexical clause alone
+        // decides this answer.
+        std::fs::create_dir_all(dir.join("outside")).unwrap();
+        let escape_link = root.join("escape");
+        symlink(dir.join("outside"), &escape_link).unwrap();
+        let policy = PathPolicy {
+            allowed_roots: vec![root.clone()],
+            denied_roots: vec![escape_link.clone()],
+            containment_root: None,
+        }
+        .compile()
+        .unwrap();
+        let verified_root = std::fs::canonicalize(&root).unwrap();
+        assert_eq!(
+            policy
+                .plain_children_of(&root, &verified_root)
+                .allows(OsStr::new("escape")),
+            policy.allows(&escape_link),
+            "(deny root below the parent resolving elsewhere): expected the same answer as `allows` for {}",
+            escape_link.display()
+        );
+    }
+
     #[test]
     fn allow_and_deny_both_apply_with_component_boundaries() {
         let dir = scratch_dir("filesystem-policy-deny");
