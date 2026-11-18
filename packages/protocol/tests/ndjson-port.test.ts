@@ -164,6 +164,29 @@ describe('NDJSON port', () => {
     expect(closures).toEqual([{ kind: 'closed', reason: 'write EPIPE' }]);
   });
 
+  it('fails a broken sink behind queued input when the transport supplies afterQueuedInput', () => {
+    const sink = new FakeByteSink();
+    const queued: Array<() => void> = [];
+    const handle = createNdjsonPort({ sink, afterQueuedInput: (event) => queued.push(event) });
+    const closures: PortClosure[] = [];
+    handle.port.onClosed((closure) => closures.push(closure));
+    sink.failWith = Object.assign(new Error('write EPIPE'), { code: 'EPIPE' });
+
+    // The refusal names the failure even though the port has not reported it.
+    expect(() => handle.port.send({ type: 'ping' })).toThrow(
+      /cannot write \(write EPIPE\).*closes once frames already received are delivered/
+    );
+    expect(closures).toEqual([]);
+    expect(queued).toHaveLength(1);
+    // A second refused send does not queue a second failure.
+    expect(() => handle.port.send({ type: 'ping' })).toThrow(/cannot write/);
+    expect(queued).toHaveLength(1);
+
+    queued[0]?.();
+    expect(closures).toEqual([{ kind: 'closed', reason: 'write EPIPE' }]);
+    expect(sink.ended).toBe(true);
+  });
+
   it('writes a close frame, ends the sink, and never reports its own close', () => {
     const sink = new FakeByteSink();
     const handle = createNdjsonPort({ sink });
