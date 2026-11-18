@@ -98,8 +98,16 @@ beforeEach(() => {
   originalFs.writeFileSync(join(frontendDir, 'index.html'), '<html>synthetic shell</html>');
   originalFs.writeFileSync(join(frontendDir, BUILD_STATE_FILE), PRIVATE_BODY);
   originalFs.writeFileSync(join(frontendDir, 'assets', 'index-CaseVar.js'), PUBLIC_BODY);
-  for (const variant of CASE_VARIANTS) {
-    originalFs.symlinkSync(BUILD_STATE_FILE, join(frontendDir, variant));
+  // A case-sensitive volume needs a symlink per variant to stand in for a case-keeping one. On a
+  // case-insensitive volume (NTFS, APFS by default) every variant already opens the file, and a
+  // symlink beside it would collide with it.
+  const volumeIgnoresCase = originalFs.existsSync(
+    join(frontendDir, BUILD_STATE_FILE.toUpperCase())
+  );
+  if (!volumeIgnoresCase) {
+    for (const variant of CASE_VARIANTS) {
+      originalFs.symlinkSync(BUILD_STATE_FILE, join(frontendDir, variant));
+    }
   }
   originalFs.symlinkSync(join('..', CASE_VARIANTS[0]), join(frontendDir, 'assets', ALIAS_NAME));
 });
