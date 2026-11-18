@@ -54,6 +54,11 @@ touching the per-file and per-request code. `fs.grep`, 121 interleaved runs of
 on main and 12.5 to 12.6 ms with the cold crate at `s`, and a first request of 59.7 to 60.0 ms
 against 58.8 to 60.3 ms. Peak RSS of the `files-1000` runtime is 23,028 KiB against 23,032 KiB.
 
+A benchmark comparison that spans this split mixes optimization levels for those modules: the base
+revision builds the MCP client, the external-agent host, probing and the toolchain commands at
+`opt-level = 3`, the head at `s`. Read a delta on `external_agents` benchmarks as the cost of that
+change as well as of any code change.
+
 Three things were measured and rejected, so the list stops here:
 
 - `mangostudio-runtime` itself at `s` takes the stripped binary from 23.8 MB to 19.4 MB, and

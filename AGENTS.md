@@ -50,8 +50,9 @@ Useful docs:
   environment directly, at the site that needs it, because that value is never configuration —
   nothing selects or validates it ahead of time, and scattering the probing sites is the point (a
   `PATH` walk lives with the walk it bounds). In the Rust host this is
-  `crates/mangostudio-runtime/src/health.rs`'s two `PATH` fallbacks and its `PATHEXT` read for
-  the Windows executable-name walk,
+  `crates/mangostudio-runtime/src/health.rs`'s two `PATH` fallbacks and
+  `crates/mangostudio-runtime-core/src/executable_path.rs`'s `PATHEXT` read for the Windows
+  executable-name walk,
   `crates/mangostudio-runtime-core/src/runtime_home.rs`'s `home_dir()` for slot resolution,
   `crates/mangostudio-runtime-cold/src/probing/host.rs`'s environment snapshot for detection, and
   `crates/mangostudio-runtime-core/src/subprocess/unix_guardian.rs`'s `vars_os()` snapshot that copies

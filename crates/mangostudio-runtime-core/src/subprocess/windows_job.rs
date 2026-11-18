@@ -77,6 +77,7 @@ pub struct WindowsJobChild {
 impl WindowsJobChild {
     /// Observe whether the retained fixture Job has no active processes.
     /// Usage: `while !child.fixture_job_empty()? { /* bounded poll */ }`.
+    #[cfg(any(test, feature = "test-support"))]
     pub(super) fn fixture_job_empty(&self) -> io::Result<bool> {
         use windows_sys::Win32::System::JobObjects::{
             JOBOBJECT_BASIC_ACCOUNTING_INFORMATION, JobObjectBasicAccountingInformation,

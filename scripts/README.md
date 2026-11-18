@@ -553,7 +553,7 @@ binary is never packaged or published: the release scripts and workflows only bu
 outside `scripts/bench/` names the profile.
 
 `external-agent-boundary.ts` runs ignored Rust libtests, so benchmarks are not part of the normal
-test gate. Build each revision's runtime libtest with `cargo test -p mangostudio-runtime --lib
+test gate. Build each revision's libtest with `cargo test -p mangostudio-runtime-cold --lib
 --release --locked --no-run --message-format=json` and `MANGOSTUDIO_BENCH_SOURCE_SHA` set to that
 revision's full commit SHA. Set `CARGO_PROFILE_RELEASE_LTO=false` and
 `CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16` identically on both builds. This keeps optimization at

@@ -96,8 +96,9 @@ lto = "fat"
 codegen-units = 1
 strip = true
 # Never "abort": handler panic isolation (`crates/mangostudio-runtime-core/src/panic.rs`)
-# recovers a panic by catching its unwind. The runtime crates refuse to compile with
-# an aborting panic strategy, `crates/mangostudio-runtime/tests/it/panic_isolation.rs`
+# recovers a panic by catching its unwind. All three runtime crates (core, cold and the
+# binary) carry a `compile_error!` guard against an aborting panic strategy,
+# `crates/mangostudio-runtime/tests/it/panic_isolation.rs`
 # (`the_release_profile_unwinds`) requires this exact setting, and
 # `scripts/tests/protocol-lanes.unit.test.ts` rejects an abort in any manifest.
 panic = "unwind"
