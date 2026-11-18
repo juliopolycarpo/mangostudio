@@ -20,7 +20,7 @@
  */
 
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, uptime } from 'node:os';
 import { join } from 'node:path';
 
 import { startFakeChatGptServer } from '@mangostudio/api/test-support/chatgpt/fake-server';
@@ -30,6 +30,7 @@ import { smokeBinaryApplication } from './lib/binary-application-smoke';
 import { probeIsolatedRuntime } from './lib/binary-runtime-smoke';
 import { SmokeHub } from './lib/binary-smoke-hub';
 import { artifactSmokeEnvironment, canExecuteArtifact } from './lib/binary-smoke-process';
+import { awaitStartToken, startTokenProblem } from './lib/binary-smoke-start-token';
 import { ROOT_DIR } from './lib/config';
 import { collectContentEncodingProblems } from './lib/content-encoding-smoke';
 import {
@@ -585,6 +586,42 @@ async function smokeContentEncodings(port: number): Promise<void> {
   pass(`gzip, br and identity are served raw and agree on ${paths.join(', ')}`);
 }
 
+/**
+ * The compiled hub must record its own `startToken`, which the CLI compares before it signals a
+ * pid. On Windows the token comes from `bun:ffi` inside the compiled binary, and a failed load
+ * leaves the field out without any other symptom, so this is the only place that sees it.
+ */
+async function smokeStartToken(
+  home: string,
+  spawnedAtMs: number,
+  hubStderr: () => string
+): Promise<void> {
+  const statePath = join(home, '.mango', 'run', 'server.json');
+  const token = await awaitStartToken({
+    readStateText: () => {
+      try {
+        return Promise.resolve(readFileSync(statePath, 'utf8'));
+      } catch {
+        return Promise.resolve(undefined);
+      }
+    },
+    sleep: (ms) => Bun.sleep(ms),
+    now: Date.now,
+    budgetMs: 10_000,
+    intervalMs: 100,
+  });
+  const problem = startTokenProblem(
+    token,
+    { platform: process.platform, nowMs: Date.now(), uptimeSeconds: uptime() },
+    { spawnedAtMs, toleranceMs: 5_000 }
+  );
+  if (problem) {
+    const stderr = hubStderr().trim();
+    fail(`${problem} (${statePath})${stderr ? `\n     hub stderr: ${stderr.slice(-500)}` : ''}`);
+  }
+  pass("state file carries a startToken that decodes to this hub's start time");
+}
+
 async function smokeTest(): Promise<void> {
   console.log(`\n🚀 Starting binary on port ${PORT}...`);
 
@@ -643,9 +680,12 @@ async function smokeTest(): Promise<void> {
         }
       },
     });
+    const spawnedAtMs = Date.now();
     await hub.start();
 
     console.log('\n🔍 Running HTTP assertions...');
+
+    await smokeStartToken(tmpHome, spawnedAtMs, () => hub?.errorText() ?? '');
 
     // /api/health → 200 JSON
     {
