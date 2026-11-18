@@ -328,7 +328,7 @@ describe('createGeminiInteractionAccumulator', () => {
     expect(logger.entries).toEqual([]);
   });
 
-  it('keeps warning about an unknown delta kind through the injected logger', () => {
+  it('warns about an unknown delta kind with the kind alone', () => {
     const logger = new RecordingDiagnosticLogger();
     const accumulator = createGeminiInteractionAccumulator(logger);
 
@@ -336,11 +336,98 @@ describe('createGeminiInteractionAccumulator', () => {
       event({
         event_type: 'step.delta',
         index: 0,
-        delta: { type: 'text_annotation', annotations: [] },
+        delta: {
+          type: 'text_annotation',
+          annotations: [{ type: 'url_citation', url: 'https://private.example/secret' }],
+        },
       })
     );
 
-    expect(logger.events('warn')).toEqual(['unknown_delta_type']);
+    expect(logger.entries).toEqual([
+      { level: 'warn', event: 'unknown_delta_type', metadata: { deltaType: 'text_annotation' } },
+    ]);
+  });
+
+  it('keeps the known output and warns exactly once, without payload, for an unmapped step kind', () => {
+    const logger = new RecordingDiagnosticLogger();
+    const accumulator = createGeminiInteractionAccumulator(logger);
+    const secret = 'SECRET-user-query-and-tool-output';
+
+    const mapped: AgentEvent[] = [
+      ...accumulator.mapEvent(
+        event({
+          event_type: 'step.start',
+          index: 0,
+          step: { type: 'google_search_call', id: 'srv_1', arguments: { queries: [secret] } },
+        })
+      ),
+      ...accumulator.mapEvent(
+        event({
+          event_type: 'step.start',
+          index: 1,
+          step: { type: 'google_search_call', id: 'srv_2', arguments: { queries: [secret] } },
+        })
+      ),
+      ...accumulator.mapEvent(
+        event({
+          event_type: 'step.start',
+          index: 2,
+          step: { type: 'function_call', id: 'fc_1', name: 'search', arguments: {} },
+        })
+      ),
+      ...accumulator.mapEvent(
+        event({ event_type: 'step.delta', index: 3, delta: { type: 'text', text: 'Answer' } })
+      ),
+    ];
+
+    expect(mapped).toEqual([
+      { type: 'tool_call_started', callId: 'fc_1', name: 'search' },
+      { type: 'assistant_text_delta', text: 'Answer' },
+    ]);
+    expect(logger.entries).toEqual([
+      { level: 'warn', event: 'unhandled_step_type', metadata: { stepType: 'google_search_call' } },
+    ]);
+    expect(JSON.stringify(logger.entries)).not.toContain(secret);
+  });
+
+  it('warns once per unmapped kind per turn, across steps and deltas', () => {
+    const logger = new RecordingDiagnosticLogger();
+    const accumulator = createGeminiInteractionAccumulator(logger);
+    const imageChunk = { type: 'image', data: 'SECRET-base64-bytes' };
+
+    for (const stepType of ['code_execution_call', 'url_context_result', 'code_execution_call']) {
+      accumulator.mapEvent(
+        event({ event_type: 'step.start', index: 0, step: { type: stepType, id: 'srv' } })
+      );
+    }
+    for (let chunk = 0; chunk < 3; chunk += 1) {
+      accumulator.mapEvent(event({ event_type: 'step.delta', index: 1, delta: imageChunk }));
+    }
+    accumulator.mapEvent(
+      event({ event_type: 'step.delta', index: 1, delta: { type: 'audio', data: 'x' } })
+    );
+
+    expect(logger.entries.map(({ event: name, metadata }) => [name, metadata])).toEqual([
+      ['unhandled_step_type', { stepType: 'code_execution_call' }],
+      ['unhandled_step_type', { stepType: 'url_context_result' }],
+      ['unknown_delta_type', { deltaType: 'image' }],
+      ['unknown_delta_type', { deltaType: 'audio' }],
+    ]);
+    expect(JSON.stringify(logger.entries)).not.toContain('SECRET');
+  });
+
+  it('starts a fresh warning budget for each turn', () => {
+    const logger = new RecordingDiagnosticLogger();
+    const unmappedStep = event({
+      event_type: 'step.start',
+      index: 0,
+      step: { type: 'google_search_call', id: 'srv_1' },
+    });
+
+    createGeminiInteractionAccumulator(logger).mapEvent(unmappedStep);
+    createGeminiInteractionAccumulator(logger).mapEvent(unmappedStep);
+
+    expect(logger.events('warn')).toEqual(['unhandled_step_type', 'unhandled_step_type']);
   });
 
   it('captures interaction id and usage on completion', () => {

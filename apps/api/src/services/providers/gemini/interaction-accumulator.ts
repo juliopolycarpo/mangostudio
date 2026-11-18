@@ -33,6 +33,36 @@ interface ActiveCall {
 
 type ActiveCalls = Map<number, ActiveCall>;
 
+/** Reports a step or delta kind the adapter does not map, at most once per kind per turn. */
+interface UnmappedKindReporter {
+  step(stepType: string): void;
+  delta(deltaType: string): void;
+}
+
+/**
+ * Builds the per-turn reporter for unmapped kinds. A stream that sends a kind we
+ * drop sends it many times (every chunk of a media or annotation delta), so the
+ * first sighting warns and the rest stay quiet. Only the kind name is logged:
+ * the step or delta body can carry user text, tool output, or media bytes.
+ *
+ * Usage: const unmapped = createUnmappedKindReporter(logger);
+ *        unmapped.step('google_search_call'); // warns
+ *        unmapped.step('google_search_call'); // silent
+ */
+function createUnmappedKindReporter(logger: DiagnosticLogger): UnmappedKindReporter {
+  const reported = new Set<string>();
+  const reportOnce = (scope: 'step' | 'delta', event: string, kind: string) => {
+    const key = `${scope}:${kind}`;
+    if (reported.has(key)) return;
+    reported.add(key);
+    logger.warn(event, scope === 'step' ? { stepType: kind } : { deltaType: kind });
+  };
+  return {
+    step: (stepType) => reportOnce('step', 'unhandled_step_type', stepType),
+    delta: (deltaType) => reportOnce('delta', 'unknown_delta_type', deltaType),
+  };
+}
+
 export interface GeminiInteractionAccumulator {
   /** Maps one raw Interactions SSE event into zero or more AgentEvents. */
   mapEvent(event: InteractionSSEEvent): AgentEvent[];
@@ -56,6 +86,7 @@ export function createGeminiInteractionAccumulator(
   logger: DiagnosticLogger = geminiInteractionsLogger
 ): GeminiInteractionAccumulator {
   const activeCalls: ActiveCalls = new Map();
+  const unmapped = createUnmappedKindReporter(logger);
   let interactionId: string | undefined;
   let providerReportedInputTokens: number | undefined;
   let abandonedReason: string | undefined;
@@ -95,9 +126,9 @@ export function createGeminiInteractionAccumulator(
           return [];
         }
         case 'step.start':
-          return mapStepStart(event, activeCalls, logger);
+          return mapStepStart(event, activeCalls, unmapped);
         case 'step.delta':
-          return mapStepDelta(event, activeCalls, logger);
+          return mapStepDelta(event, activeCalls, logger, unmapped);
         case 'step.stop':
           return mapStepStop(event, activeCalls, logger);
         case 'interaction.completed':
@@ -134,15 +165,14 @@ type StepStopEvent = Extract<InteractionSSEEvent, { event_type: 'step.stop' }>;
 function mapStepStart(
   event: StepStartEvent,
   activeCalls: ActiveCalls,
-  logger: DiagnosticLogger
+  unmapped: UnmappedKindReporter
 ): AgentEvent[] {
   if (!isFunctionCallStart(event.step)) {
     // Only `model_output` and `thought` are mapped. Any other kind (server-side
     // tool steps, ...) is dropped, so say so: without this a step we do not
-    // understand reads as a turn that silently produced nothing. Log the kind
-    // alone — the step body can carry user content or tool output.
+    // understand reads as a turn that silently produced nothing.
     if (event.step.type !== 'model_output' && event.step.type !== 'thought') {
-      logger.warn('unhandled_step_type', { stepType: event.step.type });
+      unmapped.step(event.step.type);
       return [];
     }
     // A `model_output` / `thought` step.start can open with the turn's first
@@ -177,7 +207,8 @@ function mapStepStart(
 function mapStepDelta(
   event: StepDeltaEvent,
   activeCalls: ActiveCalls,
-  logger: DiagnosticLogger
+  logger: DiagnosticLogger,
+  unmapped: UnmappedKindReporter
 ): AgentEvent[] {
   const delta = narrowGeminiDelta(event.delta);
   if (delta.kind === 'thought_summary') {
@@ -190,7 +221,8 @@ function mapStepDelta(
     return mapArgumentsDelta(event.index, delta.arguments, activeCalls, logger);
   }
   if (delta.kind !== 'thought_signature') {
-    logger.warn('unknown_delta_type', { delta: event.delta });
+    // Name the kind only: annotation and media deltas carry citations, text and bytes.
+    unmapped.delta(event.delta.type);
   }
   return [];
 }
