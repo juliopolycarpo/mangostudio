@@ -23,7 +23,8 @@ export const TOKEN_REQUEST_TIMEOUT_MS = 30_000;
 /** OAuth flow failure surfaced to the user (bad code, malformed response, ...). */
 export class OAuthFlowError extends Error {
   readonly code: string = ERROR_CODES.VALIDATION;
-  readonly status: number = 422;
+  // A `readonly` literal initializer keeps the type `422`, not `number`.
+  readonly status = 422;
 
   constructor(message: string, options?: ErrorOptions) {
     super(message, options);

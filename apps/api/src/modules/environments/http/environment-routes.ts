@@ -1,10 +1,4 @@
-import type {
-  AgentCliStatus,
-  RuntimeId,
-  RuntimeStatus,
-  VersionManagerId,
-  VersionManagerStatus,
-} from '@mangostudio/shared/environments';
+import type { RuntimeId, VersionManagerId } from '@mangostudio/shared/environments';
 import {
   AgentCliStatusListSchema,
   AgentCliStatusSchema,
@@ -19,14 +13,10 @@ import {
   VersionManagerStatusSchema,
   WslDetectionSchema,
 } from '@mangostudio/shared/environments';
-import {
-  type ApiErrorResponse,
-  ApiErrorResponseSchema,
-  ERROR_CODES,
-} from '@mangostudio/shared/errors';
+import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import type { LibraryTargetId } from '@mangostudio/shared/library';
 import { LibraryTargetIdSchema } from '@mangostudio/shared/library';
-import { Elysia, t } from 'elysia';
+import { Elysia, status, t } from 'elysia';
 
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { type EnvironmentService, environmentService } from '../application/environment-service';
@@ -77,51 +67,45 @@ async function getRuntimeOrNotFound(
   service: EnvironmentProbingService,
   scope: ProbeScope,
   id: RuntimeId,
-  force: boolean,
-  set: { status?: number | string }
-): Promise<RuntimeStatus | ApiErrorResponse> {
-  const status = await service.getRuntimeStatus(scope, id, { force });
-  if (status) return status;
+  force: boolean
+) {
+  const detected = await service.getRuntimeStatus(scope, id, { force });
+  if (detected) return detected;
 
-  set.status = 404;
-  return {
+  return status(404, {
     error: `Runtime detection is not available for ${id}.`,
     code: ERROR_CODES.NOT_FOUND,
-  };
+  });
 }
 
 async function getVersionManagerOrNotFound(
   service: EnvironmentProbingService,
   scope: ProbeScope,
   id: VersionManagerId,
-  force: boolean,
-  set: { status?: number | string }
-): Promise<VersionManagerStatus | ApiErrorResponse> {
-  const status = await service.getVersionManagerStatus(scope, id, { force });
-  if (status) return status;
+  force: boolean
+) {
+  const detected = await service.getVersionManagerStatus(scope, id, { force });
+  if (detected) return detected;
 
-  set.status = 404;
-  return {
+  return status(404, {
     error: `Version manager detection is not available for ${id}.`,
     code: ERROR_CODES.NOT_FOUND,
-  };
+  });
 }
 
 async function getAgentCliOrNotFound(
   service: EnvironmentProbingService,
   scope: ProbeScope,
   targetId: LibraryTargetId,
-  force: boolean,
-  set: { status?: number | string }
-): Promise<AgentCliStatus | ApiErrorResponse> {
-  const status = await service.getAgentCliStatus(scope, targetId, { force });
-  if (status) return status;
+  force: boolean
+) {
+  const detected = await service.getAgentCliStatus(scope, targetId, { force });
+  if (detected) return detected;
 
-  set.status = 404;
-  return {
+  return status(404, {
     error: `Agent CLI detection is not available for ${targetId}.`,
     code: ERROR_CODES.NOT_FOUND,
-  };
+  });
 }
 
 export function createEnvironmentRoutes(
@@ -148,8 +132,8 @@ export function createEnvironmentRoutes(
           404: ApiErrorResponseSchema,
         },
       },
-      ({ params, query, set, user }) =>
-        getRuntimeOrNotFound(probingService, scopeFor(user, query), params.id, false, set)
+      ({ params, query, user }) =>
+        getRuntimeOrNotFound(probingService, scopeFor(user, query), params.id, false)
     )
     .post(
       '/environments/runtimes/:id/probe',
@@ -161,8 +145,8 @@ export function createEnvironmentRoutes(
           404: ApiErrorResponseSchema,
         },
       },
-      ({ params, query, set, user }) =>
-        getRuntimeOrNotFound(probingService, scopeFor(user, query), params.id, true, set)
+      ({ params, query, user }) =>
+        getRuntimeOrNotFound(probingService, scopeFor(user, query), params.id, true)
     )
     .get(
       '/environments/version-managers',
@@ -179,8 +163,8 @@ export function createEnvironmentRoutes(
           404: ApiErrorResponseSchema,
         },
       },
-      ({ params, query, set, user }) =>
-        getVersionManagerOrNotFound(probingService, scopeFor(user, query), params.id, false, set)
+      ({ params, query, user }) =>
+        getVersionManagerOrNotFound(probingService, scopeFor(user, query), params.id, false)
     )
     .post(
       '/environments/version-managers/:id/probe',
@@ -192,8 +176,8 @@ export function createEnvironmentRoutes(
           404: ApiErrorResponseSchema,
         },
       },
-      ({ params, query, set, user }) =>
-        getVersionManagerOrNotFound(probingService, scopeFor(user, query), params.id, true, set)
+      ({ params, query, user }) =>
+        getVersionManagerOrNotFound(probingService, scopeFor(user, query), params.id, true)
     )
     .get(
       '/environments/agents',
@@ -210,8 +194,8 @@ export function createEnvironmentRoutes(
           404: ApiErrorResponseSchema,
         },
       },
-      ({ params, query, set, user }) =>
-        getAgentCliOrNotFound(probingService, scopeFor(user, query), params.targetId, false, set)
+      ({ params, query, user }) =>
+        getAgentCliOrNotFound(probingService, scopeFor(user, query), params.targetId, false)
     )
     .post(
       '/environments/agents/:targetId/probe',
@@ -223,8 +207,8 @@ export function createEnvironmentRoutes(
           404: ApiErrorResponseSchema,
         },
       },
-      ({ params, query, set, user }) =>
-        getAgentCliOrNotFound(probingService, scopeFor(user, query), params.targetId, true, set)
+      ({ params, query, user }) =>
+        getAgentCliOrNotFound(probingService, scopeFor(user, query), params.targetId, true)
     )
     .get('/environments/wsl', { response: { 200: WslDetectionSchema } }, async ({ user }) => {
       const detection = await wslService.detect();

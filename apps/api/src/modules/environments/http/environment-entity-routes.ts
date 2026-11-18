@@ -15,13 +15,10 @@ import {
   ToolchainUpdateBodySchema,
   UpdateEnvironmentBodySchema,
 } from '@mangostudio/shared/environments';
-import {
-  type ApiErrorResponse,
-  ApiErrorResponseSchema,
-  ERROR_CODES,
-} from '@mangostudio/shared/errors';
-import { Elysia, t } from 'elysia';
+import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
+import { Elysia, status, t } from 'elysia';
 
+import { apiErrorStatus } from '../../../lib/api-error-status';
 import { environmentUnavailableResponse } from '../../../lib/environment-unavailable';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { sseResponse } from '../../../lib/sse-stream';
@@ -49,13 +46,31 @@ const runIdParams = t.Object({
 const logger = createDiagnosticLogger('environment-routes');
 
 /**
+ * The refusals `environmentError` can answer with, declared once for every route
+ * that calls it. The helper's return type is the union of all of them, so a route
+ * declaring fewer statuses would not type-check.
+ *
+ * Deliberately not `as const`: spread into a `response` map, a readonly object
+ * makes Eden read the whole error channel as `unknown`.
+ */
+const ENVIRONMENT_ERRORS = {
+  400: ApiErrorResponseSchema,
+  404: ApiErrorResponseSchema,
+  409: ApiErrorResponseSchema,
+  422: ApiErrorResponseSchema,
+  503: ApiErrorResponseSchema,
+};
+
+/**
  * Answers a service refusal. The body carries `message` and `reason` only; the
  * diagnostic stays in the hub log, so no producer can leak stderr or a path by
  * putting it in the wrong field.
  */
-function environmentError(error: unknown, set: { status?: number | string }): ApiErrorResponse {
+function environmentError(
+  error: unknown,
+  set: { headers?: Record<string, string | number | string[]> }
+) {
   if (error instanceof EnvironmentServiceError) {
-    set.status = error.status;
     if (error.diagnostic !== undefined) {
       logger.warn('service_refusal', {
         environmentId: error.environmentId,
@@ -64,7 +79,7 @@ function environmentError(error: unknown, set: { status?: number | string }): Ap
         diagnostic: error.diagnostic,
       });
     }
-    return {
+    return apiErrorStatus(error.status, {
       error: error.message,
       ...(error.reason === undefined ? {} : { details: { reason: error.reason } }),
       code:
@@ -75,11 +90,10 @@ function environmentError(error: unknown, set: { status?: number | string }): Ap
             : error.status === 503
               ? ERROR_CODES.PROVIDER_ERROR
               : ERROR_CODES.VALIDATION,
-    };
+    });
   }
   if (error instanceof RuntimeLifecycleUnavailableError) {
-    set.status = error.status;
-    return {
+    return apiErrorStatus(error.status, {
       error: error.message,
       code:
         error.status === 404
@@ -87,11 +101,10 @@ function environmentError(error: unknown, set: { status?: number | string }): Ap
           : error.status === 409
             ? ERROR_CODES.CONFLICT
             : ERROR_CODES.VALIDATION,
-    };
+    });
   }
   if (error instanceof RuntimeLifecycleConflictError) {
-    set.status = 409;
-    return { error: error.message, code: ERROR_CODES.CONFLICT };
+    return status(409, { error: error.message, code: ERROR_CODES.CONFLICT });
   }
   const unavailable = environmentUnavailableResponse(error, set);
   if (unavailable) return unavailable;
@@ -121,12 +134,7 @@ export function createEnvironmentEntityRoutes(
         '/environments',
         {
           body: CreateEnvironmentBodySchema,
-          response: {
-            201: EnvironmentSchema,
-            400: ApiErrorResponseSchema,
-            409: ApiErrorResponseSchema,
-            503: ApiErrorResponseSchema,
-          },
+          response: { 201: EnvironmentSchema, ...ENVIRONMENT_ERRORS },
         },
         async ({ body, user, set }) => {
           try {
@@ -161,13 +169,7 @@ export function createEnvironmentEntityRoutes(
         {
           params: environmentParams,
           body: UpdateEnvironmentBodySchema,
-          response: {
-            200: EnvironmentSchema,
-            400: ApiErrorResponseSchema,
-            404: ApiErrorResponseSchema,
-            409: ApiErrorResponseSchema,
-            503: ApiErrorResponseSchema,
-          },
+          response: { 200: EnvironmentSchema, ...ENVIRONMENT_ERRORS },
         },
         async ({ params, body, user, set }) => {
           const userId = user?.id ?? '';
@@ -196,14 +198,7 @@ export function createEnvironmentEntityRoutes(
         {
           params: environmentParams,
           body: ToolchainUpdateBodySchema,
-          response: {
-            200: ToolchainSelectionSchema,
-            400: ApiErrorResponseSchema,
-            404: ApiErrorResponseSchema,
-            409: ApiErrorResponseSchema,
-            422: ApiErrorResponseSchema,
-            503: ApiErrorResponseSchema,
-          },
+          response: { 200: ToolchainSelectionSchema, ...ENVIRONMENT_ERRORS },
         },
         async ({ params, body, user, set }) => {
           const userId = user?.id ?? '';
@@ -230,12 +225,7 @@ export function createEnvironmentEntityRoutes(
               t.Union([t.Boolean(), t.Literal('true'), t.Literal('false')])
             ),
           }),
-          response: {
-            200: t.Object({ success: t.Literal(true) }),
-            404: ApiErrorResponseSchema,
-            409: ApiErrorResponseSchema,
-            503: ApiErrorResponseSchema,
-          },
+          response: { 200: t.Object({ success: t.Literal(true) }), ...ENVIRONMENT_ERRORS },
         },
         async ({ params, query, user, set }) => {
           try {
@@ -252,12 +242,7 @@ export function createEnvironmentEntityRoutes(
         '/environments/:id/connect',
         {
           params: environmentParams,
-          response: {
-            200: EnvironmentSchema,
-            404: ApiErrorResponseSchema,
-            409: ApiErrorResponseSchema,
-            503: ApiErrorResponseSchema,
-          },
+          response: { 200: EnvironmentSchema, ...ENVIRONMENT_ERRORS },
         },
         async ({ params, user, set }) => {
           try {
@@ -271,10 +256,7 @@ export function createEnvironmentEntityRoutes(
         '/environments/:id/disconnect',
         {
           params: environmentParams,
-          response: {
-            200: EnvironmentSchema,
-            404: ApiErrorResponseSchema,
-          },
+          response: { 200: EnvironmentSchema, ...ENVIRONMENT_ERRORS },
         },
         async ({ params, user, set }) => {
           try {
@@ -288,11 +270,7 @@ export function createEnvironmentEntityRoutes(
         '/environments/:id/pairing',
         {
           params: environmentParams,
-          response: {
-            200: RuntimePairingStatusSchema,
-            404: ApiErrorResponseSchema,
-            409: ApiErrorResponseSchema,
-          },
+          response: { 200: RuntimePairingStatusSchema, ...ENVIRONMENT_ERRORS },
         },
         async ({ params, user, set }) => {
           try {
@@ -308,11 +286,7 @@ export function createEnvironmentEntityRoutes(
         '/environments/:id/pairing',
         {
           params: environmentParams,
-          response: {
-            201: RuntimePairingIssueSchema,
-            404: ApiErrorResponseSchema,
-            409: ApiErrorResponseSchema,
-          },
+          response: { 201: RuntimePairingIssueSchema, ...ENVIRONMENT_ERRORS },
         },
         async ({ params, user, set }) => {
           try {
@@ -327,11 +301,7 @@ export function createEnvironmentEntityRoutes(
         '/environments/:id/pairing',
         {
           params: environmentParams,
-          response: {
-            200: t.Object({ success: t.Literal(true) }),
-            404: ApiErrorResponseSchema,
-            409: ApiErrorResponseSchema,
-          },
+          response: { 200: t.Object({ success: t.Literal(true) }), ...ENVIRONMENT_ERRORS },
         },
         async ({ params, user, set }) => {
           try {
@@ -349,10 +319,7 @@ export function createEnvironmentEntityRoutes(
           query: t.Object({
             slotBytes: t.Optional(t.Union([t.Boolean(), t.Literal('true'), t.Literal('false')])),
           }),
-          response: {
-            200: RuntimeLifecycleViewSchema,
-            404: ApiErrorResponseSchema,
-          },
+          response: { 200: RuntimeLifecycleViewSchema, ...ENVIRONMENT_ERRORS },
         },
         async ({ params, query, user, set }) => {
           try {
@@ -369,12 +336,7 @@ export function createEnvironmentEntityRoutes(
         {
           params: environmentParams,
           body: RuntimeLifecycleInstallBodySchema,
-          response: {
-            200: RuntimeLifecycleStartResponseSchema,
-            400: ApiErrorResponseSchema,
-            404: ApiErrorResponseSchema,
-            409: ApiErrorResponseSchema,
-          },
+          response: { 200: RuntimeLifecycleStartResponseSchema, ...ENVIRONMENT_ERRORS },
         },
         async ({ params, body, user, set }) => {
           try {
@@ -407,12 +369,7 @@ export function createEnvironmentEntityRoutes(
         {
           params: environmentParams,
           body: RuntimeSetupBodySchema,
-          response: {
-            200: RuntimeLifecycleViewSchema,
-            400: ApiErrorResponseSchema,
-            404: ApiErrorResponseSchema,
-            409: ApiErrorResponseSchema,
-          },
+          response: { 200: RuntimeLifecycleViewSchema, ...ENVIRONMENT_ERRORS },
         },
         async ({ params, body, user, set }) => {
           try {
@@ -431,12 +388,7 @@ export function createEnvironmentEntityRoutes(
         {
           params: environmentParams,
           body: RuntimePairedBootstrapBodySchema,
-          response: {
-            200: RuntimeLifecycleStartResponseSchema,
-            400: ApiErrorResponseSchema,
-            404: ApiErrorResponseSchema,
-            409: ApiErrorResponseSchema,
-          },
+          response: { 200: RuntimeLifecycleStartResponseSchema, ...ENVIRONMENT_ERRORS },
         },
         async ({ params, body, user, set }) => {
           try {

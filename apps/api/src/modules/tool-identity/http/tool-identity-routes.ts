@@ -1,20 +1,15 @@
-import {
-  type ApiErrorResponse,
-  ApiErrorResponseSchema,
-  ERROR_CODES,
-} from '@mangostudio/shared/errors';
+import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import {
   SubjectKeySchema,
   TOOL_IMAGE_MAX_BYTES,
-  type ToolIdentityListResponse,
   ToolIdentityListResponseSchema,
-  type ToolIdentityUpdateResponse,
   ToolIdentityUpdateResponseSchema,
   ToolIdentityUpdateSchema,
 } from '@mangostudio/shared/tool-identity';
-import { Elysia, t } from 'elysia';
+import { Elysia, status, t } from 'elysia';
 
 import { getDb } from '../../../db/database';
+import { apiErrorStatus } from '../../../lib/api-error-status';
 import { matchesEtag } from '../../../lib/http-cache';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
@@ -26,25 +21,20 @@ import {
 } from '../application/tool-identity-service';
 import { ToolIdentityError } from '../application/tool-subject';
 
-function handleToolIdentityError(
-  error: unknown,
-  set: { status?: number | string }
-): ApiErrorResponse {
+function handleToolIdentityError(error: unknown) {
   if (error instanceof ToolIdentityError) {
-    set.status = error.status;
-    return { error: error.message, code: error.code };
+    return apiErrorStatus(error.status, { error: error.message, code: error.code });
   }
 
   console.error('[tool-identity] Unexpected tool identity error');
-  set.status = 500;
-  return { error: 'Unexpected tool identity error.', code: ERROR_CODES.INTERNAL };
+  return status(500, { error: 'Unexpected tool identity error.', code: ERROR_CODES.INTERNAL });
 }
 
 const errorResponses = {
   401: ApiErrorResponseSchema,
   422: ApiErrorResponseSchema,
   500: ApiErrorResponseSchema,
-} as const;
+};
 
 const subjectKeyParams = t.Object({ subjectKey: SubjectKeySchema });
 
@@ -70,11 +60,11 @@ export const toolIdentityRoutes = new Elysia().use(requireAuth).group('/tool-ide
           ...errorResponses,
         },
       },
-      async ({ set, user }): Promise<ToolIdentityListResponse | ApiErrorResponse> => {
+      async ({ user }) => {
         try {
           return await listToolIdentities(getDb(), user?.id ?? '');
         } catch (error) {
-          return handleToolIdentityError(error, set);
+          return handleToolIdentityError(error);
         }
       }
     )
@@ -89,12 +79,7 @@ export const toolIdentityRoutes = new Elysia().use(requireAuth).group('/tool-ide
           ...errorResponses,
         },
       },
-      async ({
-        body,
-        params,
-        set,
-        user,
-      }): Promise<ToolIdentityUpdateResponse | ApiErrorResponse> => {
+      async ({ body, params, user }) => {
         try {
           const identity = await updateToolIdentity(
             getDb(),
@@ -104,7 +89,7 @@ export const toolIdentityRoutes = new Elysia().use(requireAuth).group('/tool-ide
           );
           return { identity };
         } catch (error) {
-          return handleToolIdentityError(error, set);
+          return handleToolIdentityError(error);
         }
       }
     )
@@ -135,12 +120,7 @@ export const toolIdentityRoutes = new Elysia().use(requireAuth).group('/tool-ide
           ...errorResponses,
         },
       },
-      async ({
-        body,
-        params,
-        set,
-        user,
-      }): Promise<ToolIdentityUpdateResponse | ApiErrorResponse> => {
+      async ({ body, params, user }) => {
         try {
           const identity = await uploadToolIdentityImage(
             getDb(),
@@ -150,7 +130,7 @@ export const toolIdentityRoutes = new Elysia().use(requireAuth).group('/tool-ide
           );
           return { identity };
         } catch (error) {
-          return handleToolIdentityError(error, set);
+          return handleToolIdentityError(error);
         }
       }
     )
@@ -169,8 +149,10 @@ export const toolIdentityRoutes = new Elysia().use(requireAuth).group('/tool-ide
         try {
           const image = await readToolIdentityImage(getDb(), user?.id ?? '', params.subjectKey);
           if (!image) {
-            set.status = 404;
-            return { error: 'No stored image for this tool.', code: ERROR_CODES.NOT_FOUND };
+            return status(404, {
+              error: 'No stored image for this tool.',
+              code: ERROR_CODES.NOT_FOUND,
+            });
           }
 
           const etag = `"${image.cacheKey}"`;
@@ -189,7 +171,7 @@ export const toolIdentityRoutes = new Elysia().use(requireAuth).group('/tool-ide
           set.headers['Content-Type'] = image.mimeType;
           return image.body;
         } catch (error) {
-          return handleToolIdentityError(error, set);
+          return handleToolIdentityError(error);
         }
       }
     )
@@ -203,13 +185,13 @@ export const toolIdentityRoutes = new Elysia().use(requireAuth).group('/tool-ide
           ...errorResponses,
         },
       },
-      async ({ params, set, user }): Promise<undefined | ApiErrorResponse> => {
+      async ({ params, set, user }) => {
         try {
           await resetToolIdentity(getDb(), user?.id ?? '', params.subjectKey);
           set.status = 204;
           return undefined;
         } catch (error) {
-          return handleToolIdentityError(error, set);
+          return handleToolIdentityError(error);
         }
       }
     )

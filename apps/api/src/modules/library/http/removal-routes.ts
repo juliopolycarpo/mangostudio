@@ -10,11 +10,7 @@
  * `backupId` namespace, so `POST /library/propagate/undo` restores either kind.
  */
 
-import {
-  type ApiErrorResponse,
-  ApiErrorResponseSchema,
-  ERROR_CODES,
-} from '@mangostudio/shared/errors';
+import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import {
   type RemovalApply,
   type RemovalApplyRequest,
@@ -25,8 +21,9 @@ import {
   RemovalPreviewRequestSchema,
   RemovalPreviewSchema,
 } from '@mangostudio/shared/library';
-import { Elysia } from 'elysia';
+import { Elysia, status } from 'elysia';
 
+import { apiErrorStatus } from '../../../lib/api-error-status';
 import { ProfileMismatchError } from '../../../lib/profile-context';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { applyLibraryRemoval } from '../application/removal-apply';
@@ -51,14 +48,18 @@ const ERROR_CODE_BY_STATUS = {
   422: ERROR_CODES.VALIDATION,
 } as const;
 
-function mapRemovalError(error: unknown, set: { status?: number | string }): ApiErrorResponse {
+function mapRemovalError(
+  error: unknown,
+  set: { headers?: Record<string, string | number | string[]> }
+) {
   if (error instanceof LibraryRequestError) {
-    set.status = error.status;
-    return { error: error.message, code: error.code ?? ERROR_CODE_BY_STATUS[error.status] };
+    return apiErrorStatus(error.status, {
+      error: error.message,
+      code: error.code ?? ERROR_CODE_BY_STATUS[error.status],
+    });
   }
   if (error instanceof ProfileMismatchError) {
-    set.status = 400;
-    return { error: error.message, code: ERROR_CODES.VALIDATION };
+    return status(400, { error: error.message, code: ERROR_CODES.VALIDATION });
   }
   return handleLibraryError(error, set, '[library]', 'Unexpected library removal error.');
 }
@@ -77,9 +78,11 @@ export function createRemovalRoutes(service: RemovalRouteService = defaultRemova
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          // The preview reads the runtime, so an unreachable one answers 503.
+          503: ApiErrorResponseSchema,
         },
       },
-      async ({ body, set, user }): Promise<RemovalPreview | ApiErrorResponse> => {
+      async ({ body, set, user }) => {
         try {
           return await service.preview(user?.id ?? '', body);
         } catch (error) {
@@ -107,7 +110,7 @@ export function createRemovalRoutes(service: RemovalRouteService = defaultRemova
           503: ApiErrorResponseSchema,
         },
       },
-      async ({ body, set, user }): Promise<RemovalApply | ApiErrorResponse> => {
+      async ({ body, set, user }) => {
         try {
           return await service.apply(user?.id ?? '', body);
         } catch (error) {

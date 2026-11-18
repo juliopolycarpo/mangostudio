@@ -1,9 +1,8 @@
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
-import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { WorkspacePathError } from '@mangostudio/shared/runtime-contract';
-import type { ListDirectoryResponse, ValidatePathResponse } from '@mangostudio/shared/workspaces';
 import { ListDirectoryQuerySchema, ValidatePathBodySchema } from '@mangostudio/shared/workspaces';
-import { Elysia } from 'elysia';
+import { Elysia, status } from 'elysia';
 
 import { getDb } from '../../../db/database';
 import { environmentUnavailableResponse } from '../../../lib/environment-unavailable';
@@ -15,24 +14,20 @@ import { type RuntimeSelection, validateWorkdir } from '../application/workdir-v
 
 function handleDirectoryBrowserError(
   error: unknown,
-  set: { status?: number | string }
-): ApiErrorResponse {
+  set: { headers?: Record<string, string | number | string[]> }
+) {
   if (error instanceof DirectoryBrowserError) {
     if (error.code === 'VALIDATION') {
-      set.status = 400;
-      return { error: error.message, code: ERROR_CODES.VALIDATION };
+      return status(400, { error: error.message, code: ERROR_CODES.VALIDATION });
     }
 
     switch (error.reason) {
       case 'not-found':
-        set.status = 404;
-        return { error: error.message, code: ERROR_CODES.NOT_FOUND };
+        return status(404, { error: error.message, code: ERROR_CODES.NOT_FOUND });
       case 'not-a-directory':
-        set.status = 422;
-        return { error: error.message, code: ERROR_CODES.NOT_A_DIRECTORY };
+        return status(422, { error: error.message, code: ERROR_CODES.NOT_A_DIRECTORY });
       case 'permission-denied':
-        set.status = 403;
-        return { error: error.message, code: ERROR_CODES.PERMISSION_DENIED };
+        return status(403, { error: error.message, code: ERROR_CODES.PERMISSION_DENIED });
       default:
         break;
     }
@@ -42,8 +37,7 @@ function handleDirectoryBrowserError(
   if (unavailable) return unavailable;
 
   console.error('[workspace] Unexpected directory browsing error:', error);
-  set.status = 500;
-  return { error: 'Unexpected directory browsing error.', code: ERROR_CODES.INTERNAL };
+  return status(500, { error: 'Unexpected directory browsing error.', code: ERROR_CODES.INTERNAL });
 }
 
 /** Raised when a request names a chat and an environment at once. */
@@ -108,12 +102,11 @@ export const workspaceRoutes = new Elysia().use(requireAuth).group('/workspace/f
       {
         query: ListDirectoryQuerySchema,
       },
-      async ({ query, set, user }): Promise<ListDirectoryResponse | ApiErrorResponse> => {
+      async ({ query, set, user }) => {
         try {
           const scope = await resolveRuntimeSelection(user?.id ?? '', query);
           if (scope.kind === 'missing') {
-            set.status = 404;
-            return { error: scope.message, code: ERROR_CODES.NOT_FOUND };
+            return status(404, { error: scope.message, code: ERROR_CODES.NOT_FOUND });
           }
           return await listDirectory(
             query.path,
@@ -121,34 +114,27 @@ export const workspaceRoutes = new Elysia().use(requireAuth).group('/workspace/f
           );
         } catch (error) {
           if (error instanceof ConflictingScopeError) {
-            set.status = 400;
-            return { error: error.message, code: ERROR_CODES.VALIDATION };
+            return status(400, { error: error.message, code: ERROR_CODES.VALIDATION });
           }
           return handleDirectoryBrowserError(error, set);
         }
       }
     )
-    .post(
-      '/validate',
-      { body: ValidatePathBodySchema },
-      async ({ body, set, user }): Promise<ValidatePathResponse | ApiErrorResponse> => {
-        try {
-          const scope = await resolveRuntimeSelection(user?.id ?? '', body);
-          if (scope.kind === 'missing') {
-            set.status = 404;
-            return { error: scope.message, code: ERROR_CODES.NOT_FOUND };
-          }
-          return await validateWorkdir(
-            body.path,
-            scope.kind === 'runtime' ? scope.selection : undefined
-          );
-        } catch (error) {
-          if (error instanceof WorkspacePathError || error instanceof ConflictingScopeError) {
-            set.status = 400;
-            return { error: error.message, code: ERROR_CODES.VALIDATION };
-          }
-          throw error;
+    .post('/validate', { body: ValidatePathBodySchema }, async ({ body, user }) => {
+      try {
+        const scope = await resolveRuntimeSelection(user?.id ?? '', body);
+        if (scope.kind === 'missing') {
+          return status(404, { error: scope.message, code: ERROR_CODES.NOT_FOUND });
         }
+        return await validateWorkdir(
+          body.path,
+          scope.kind === 'runtime' ? scope.selection : undefined
+        );
+      } catch (error) {
+        if (error instanceof WorkspacePathError || error instanceof ConflictingScopeError) {
+          return status(400, { error: error.message, code: ERROR_CODES.VALIDATION });
+        }
+        throw error;
       }
-    )
+    })
 );
