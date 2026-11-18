@@ -52,10 +52,14 @@ export interface NpmPublishOptions {
   readonly provenancePolicy?: ProvenancePolicy;
   readonly retryDelaysMs?: readonly number[];
   readonly sleep?: (ms: number) => Promise<void>;
-  /** Resolved auth mode; skips env resolution (tests). */
-  readonly authMode?: 'legacy-explicit' | 'oidc';
   /** Allow NODE_AUTH_TOKEN when OIDC is unavailable (dispatch escape hatch). */
   readonly allowLegacyToken?: boolean;
+  /**
+   * Environment probes feeding `resolveNpmPublishAuth`. They choose what the resolver sees; they
+   * cannot skip it. Default: read `process.env`.
+   */
+  readonly oidcAvailable?: () => boolean;
+  readonly tokenPresent?: () => boolean;
 }
 
 export interface NpmPublishSummary {
@@ -207,15 +211,13 @@ export async function publishPackages(
   // A dry run only reads the registry (`npm view`), so it must not demand
   // publish credentials: release-dry-run.yml and the documented local command
   // run it without `id-token: write` and without a token.
-  const publishAuthMode =
-    options.authMode ??
-    (options.dryRun
-      ? undefined
-      : resolveNpmPublishAuth({
-          allowLegacy: options.allowLegacyToken ?? false,
-          oidcAvailable: isNpmPublishOidcAvailable(),
-          tokenPresent: isNpmPublishTokenPresent(),
-        }));
+  const publishAuthMode = options.dryRun
+    ? undefined
+    : resolveNpmPublishAuth({
+        allowLegacy: options.allowLegacyToken ?? false,
+        oidcAvailable: (options.oidcAvailable ?? (() => isNpmPublishOidcAvailable()))(),
+        tokenPresent: (options.tokenPresent ?? (() => isNpmPublishTokenPresent()))(),
+      });
   const context = createContext(options);
   const summary = { published: 0, skipped: 0, dryRun: 0 };
 

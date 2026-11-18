@@ -372,6 +372,51 @@ describe('previewLibraryPropagation — blocked destinations', () => {
     expect(destinationAt(entry, 'claude-instructions').blockedReason).toBe('slug-mismatch');
   });
 
+  it('reports a disabled target as a blocked destination while the enabled one still plans', async () => {
+    // Regression: a disabled target used to fail the whole preview with a 422.
+    const entry = firstEntry(
+      await preview(['skill:gh'], ['agents-skills', 'cursor-skills'], {
+        resources: [resource('skill:gh', 'skill', 'gh', [instance('mango-skills', 'hash-a')])],
+        enabledLocationIds: ['agents-skills'],
+      })
+    );
+
+    expect(destinationAt(entry, 'cursor-skills')).toMatchObject({
+      blockedReason: 'location-disabled',
+      outcomes: [],
+    });
+    expect(destinationAt(entry, 'agents-skills').blockedReason).toBeUndefined();
+    expect(destinationAt(entry, 'agents-skills').outcomes[0]?.operation).toBe('create');
+  });
+
+  it('reports a disabled location the user cannot fix by enabling it under its own reason', async () => {
+    // Switching a read-only vendor location on would not make it writable, so
+    // the permanent reason wins over `location-disabled`.
+    const entry = firstEntry(
+      await preview(['skill:gh'], ['cursor-skills-builtin'], {
+        resources: [ghSkill],
+        enabledLocationIds: [],
+      })
+    );
+
+    expect(destinationAt(entry, 'cursor-skills-builtin').blockedReason).toBe('read-only-location');
+  });
+
+  it('keeps a machine-level reason ahead of a disabled location', async () => {
+    const entry = firstEntry(
+      await preview(['skill:gh'], ['cursor-skills'], {
+        enabledLocationIds: [],
+        // The offline machine still lists a copy, so the resource is observed.
+        environments: {
+          'remote-1': { resources: [ghSkill], blockedReason: 'environment-offline' },
+        },
+        environmentIds: ['remote-1'],
+      })
+    );
+
+    expect(destinationAt(entry, 'cursor-skills').blockedReason).toBe('environment-offline');
+  });
+
   it('leaves a blocked destination with no outcomes to act on', async () => {
     const entry = firstEntry(
       await preview(['skill:gh'], ['cursor-skills-builtin'], { resources: [ghSkill] })

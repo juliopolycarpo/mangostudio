@@ -9,6 +9,7 @@
 import { describe, expect, it, jest } from 'bun:test';
 
 import { en } from '@mangostudio/shared/i18n';
+import type { LibraryLocationId } from '@mangostudio/shared/library';
 import userEvent from '@testing-library/user-event';
 
 import { MatrixFilters } from '../../../../src/features/library/components/MatrixFilters';
@@ -88,5 +89,59 @@ describe('MatrixFilters', () => {
     renderFilters();
 
     expect(screen.queryByTestId('matrix-filters-count')).toBeNull();
+  });
+});
+
+// Discovery never scans a disabled location, so no row can carry an instance in
+// one: offering it guarantees the "no rows match" empty state.
+describe('MatrixFilters location options', () => {
+  const ENABLED = location({ id: 'agents-skills', path: '/home/dev/.agents/skills' });
+  const DISABLED = location({ id: 'claude-skills', path: '/home/dev/.claude/skills' });
+
+  async function locationOptionLabels(
+    enabledLocationIds: ReadonlySet<LibraryLocationId> | undefined,
+    selectedLocationId: LibraryLocationId | 'any' = 'any'
+  ): Promise<string[]> {
+    const user = userEvent.setup();
+    render(
+      <MatrixFilters
+        filters={{ ...DEFAULT_LIBRARY_FILTERS, locationId: selectedLocationId }}
+        targets={TARGETS}
+        locations={[ENABLED, DISABLED]}
+        enabledLocationIds={enabledLocationIds}
+        onChange={jest.fn()}
+      />
+    );
+    await user.click(screen.getByRole('combobox', { name: en.library.filters.location }));
+    return screen.getAllByRole('option').map((option) => option.textContent ?? '');
+  }
+
+  it('omits a disabled location from the location filter', async () => {
+    const labels = await locationOptionLabels(new Set<LibraryLocationId>(['agents-skills']));
+
+    expect(labels).toEqual([en.library.filters.anyLocation, '/home/dev/.agents/skills']);
+  });
+
+  it('lists every location while the enabled set is not known yet', async () => {
+    const labels = await locationOptionLabels(undefined);
+
+    expect(labels).toEqual([
+      en.library.filters.anyLocation,
+      '/home/dev/.agents/skills',
+      '/home/dev/.claude/skills',
+    ]);
+  });
+
+  it('keeps a location disabled after it was picked, so the active filter stays named', async () => {
+    const labels = await locationOptionLabels(
+      new Set<LibraryLocationId>(['agents-skills']),
+      'claude-skills'
+    );
+
+    expect(labels).toEqual([
+      en.library.filters.anyLocation,
+      '/home/dev/.agents/skills',
+      '/home/dev/.claude/skills',
+    ]);
   });
 });

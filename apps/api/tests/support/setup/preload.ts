@@ -18,6 +18,9 @@
  * already pulls in `@google/genai`, `src/services/gemini` and the openai
  * modules through `registerApplicationServices()`, and connector tests mock all
  * of them without hitting this.
+ *
+ * tests/unit/support/preload-imports.test.ts enforces the rule: every import
+ * here must start with `./`.
  */
 
 import { assertHermeticHome } from './hermetic-home';

@@ -53,6 +53,32 @@ const LINE_STYLES: Record<DiffPreviewLine['kind'], { row: string; gutter: string
 };
 
 /**
+ * The changed span inside a replaced line: its own status tint laid over the
+ * row's, so the span reads one step stronger, in `fg`. Status text over two
+ * stacked tints falls under 4.5:1 in the light theme, and no new token is worth
+ * a second tint, so the span trades the status colour for the primary text
+ * colour; the row's tint and the gutter sign still carry the outcome.
+ */
+const EMPHASIS_STYLES: Partial<Record<DiffPreviewLine['kind'], string>> = {
+  add: 'bg-success-subtle text-fg',
+  del: 'bg-danger-subtle text-fg',
+};
+
+/** A line's text, with its emphasized span (if any) set off in its own element. */
+function DiffLineText({ line }: { line: DiffPreviewLine }) {
+  const { emphasis } = line;
+  const emphasisClass = EMPHASIS_STYLES[line.kind];
+  if (!emphasis || !emphasisClass) return line.text;
+  return (
+    <>
+      {line.text.slice(0, emphasis.start)}
+      <span className={emphasisClass}>{line.text.slice(emphasis.start, emphasis.end)}</span>
+      {line.text.slice(emphasis.end)}
+    </>
+  );
+}
+
+/**
  * Renders a computed file-change preview: one section per touched file with an
  * operation badge, +/- counts, and a capped, color-coded diff body.
  *
@@ -164,7 +190,9 @@ function FileSection({
                   className={`${LINE_STYLES[line.kind].row} leading-relaxed`}
                 >
                   <td className={GUTTER_CELL_CLASS}>{LINE_STYLES[line.kind].gutter}</td>
-                  <td className="whitespace-pre pr-3">{line.text}</td>
+                  <td className="whitespace-pre pr-3">
+                    <DiffLineText line={line} />
+                  </td>
                 </tr>
               ))}
             </tbody>

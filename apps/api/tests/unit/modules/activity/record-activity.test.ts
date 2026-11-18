@@ -12,6 +12,7 @@ import {
   type ActivityPage,
   type ActivityRepository,
 } from '../../../../src/modules/activity/infrastructure/activity-repository';
+import { RecordingDiagnosticLogger } from '../../../support/mocks/recording-diagnostic-logger';
 import { waitUntil } from '../../../support/wait-until';
 
 /** Named fake standing in for the real Kysely-backed repository. */
@@ -217,23 +218,55 @@ describe('recordActivity', () => {
     expect(publisher.calledFor).toEqual([]);
   });
 
-  it('does not reject and does not publish when the repository insert rejects', async () => {
+  it('publishes one frame and logs the failure when the repository insert rejects', async () => {
     const repository = new FakeActivityRepository();
     repository.insertError = new Error('disk is on fire');
     const publisher = new FakePublisher();
+    const logger = new RecordingDiagnosticLogger();
 
     // The whole point of `recordActivity`: activity is best-effort telemetry,
     // never a reason to fail the operation that produced it.
     await expect(
       recordActivity(
-        { userId: 'user-1', kind: 'chat_created', chatId: 'chat-1', payload: { title: 'Hi' } },
-        { repository, publish: publisher.publish }
+        {
+          userId: 'user-1',
+          kind: 'chat_created',
+          chatId: 'chat-1',
+          payload: { title: 'secret title' },
+        },
+        { repository, publish: publisher.publish, logger }
       )
     ).resolves.toBeUndefined();
 
-    expect(publisher.calledFor).toEqual([]);
+    // The event happened even though its row did not land; open feeds refetch.
+    expect(publisher.calledFor).toEqual(['user-1']);
     expect(repository.prunedFor).toEqual([]);
+    expect(logger.events('error')).toEqual(['insert_failed']);
+    const metadata = logger.entries[0]?.metadata;
+    expect(metadata).toMatchObject({ userId: 'user-1', rowCount: 1, kinds: ['chat_created'] });
+    expect((metadata?.error as Error).message).toBe('disk is on fire');
+    expect(JSON.stringify(metadata)).not.toContain('secret title');
   });
+
+  it('publishes only after the insert resolved', async () => {
+    const order: string[] = [];
+    const repository = new FakeActivityRepository();
+    const insertMany = repository.insertMany.bind(repository);
+    repository.insertMany = async (rows) => {
+      await insertMany(rows);
+      order.push('insert');
+    };
+    const logger = new RecordingDiagnosticLogger();
+
+    await recordActivity(
+      { userId: 'user-1', kind: 'chat_created', payload: { title: 'Hi' } },
+      { repository, publish: () => order.push('publish'), logger }
+    );
+
+    expect(order).toEqual(['insert', 'publish']);
+    expect(logger.entries).toEqual([]);
+  });
+
   it('still announces a row whose retention pass failed', async () => {
     const repository = new FakeActivityRepository();
     const publisher = new FakePublisher();

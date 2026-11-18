@@ -24,7 +24,7 @@ import { OperationReceiptSchema } from '@mangostudio/shared/operations';
 import { app } from '../../../src/app';
 import { getConfig, loadConfigForTest } from '../../../src/lib/config';
 import { REALTIME_WEBSOCKET_OPTIONS } from '../../../src/modules/realtime/http/realtime-routes';
-import { listenOnEphemeralPort } from '../../support/listen-ephemeral';
+import { listenOnEphemeralPort, stopEphemeralServer } from '../../support/listen-ephemeral';
 import { SPLIT_DEPLOYMENT_TEST_ORIGIN } from '../../support/setup/test-environment';
 
 const ROUTE_INVENTORY_FIXTURE = join(
@@ -510,7 +510,9 @@ describe('root WebSocket transport', () => {
 
       expect((await closed).code).not.toBe(1000);
     } finally {
-      void app.server?.stop(true);
+      // `app` is the instance every other file in the lane shares: release it
+      // through Elysia so response-compression-app can listen on it afterwards.
+      await stopEphemeralServer(app);
     }
   });
 });

@@ -23,6 +23,11 @@ interface ChatMessageRowProps {
   toolIdentities: ToolIdentityResolver;
   /** Catalog names by model id, resolved once per feed; only an assistant row reads it. */
   modelNames?: ReadonlyMap<string, string>;
+  /**
+   * toolCallId of the feed's most recent file mutation, resolved once by
+   * `ChatFeed`. `null` means the feed has none; only an assistant row reads it.
+   */
+  latestFileChangeId?: string | null;
 }
 
 /**
@@ -44,6 +49,7 @@ function ChatMessageRowComponent({
   onQuestionSubmit,
   toolIdentities,
   modelNames,
+  latestFileChangeId,
 }: ChatMessageRowProps) {
   const isImageTurn = isImageInteraction(message);
   const isUser = message.role === 'user';
@@ -87,6 +93,7 @@ function ChatMessageRowComponent({
             onQuestionSubmit={onQuestionSubmit}
             toolIdentities={toolIdentities}
             modelNames={modelNames}
+            latestFileChangeId={latestFileChangeId}
           />
         )}
       </div>

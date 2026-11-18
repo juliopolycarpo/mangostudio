@@ -117,6 +117,8 @@ async function main(): Promise<void> {
   const channel = requiredEnv('DISTRIBUTION_CHANNEL');
 
   if (args.validate) {
+    // parseArgs already rejects --validate without --expect; this narrows the type.
+    if (!args.expect) throw new Error('--expect is required with --validate');
     header('Validate distribution manifest');
     const manifest = readDistributionManifest(args.manifestPath);
     validateDistributionManifest(manifest, {

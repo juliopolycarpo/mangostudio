@@ -18,7 +18,7 @@ import { app, COMPRESSED_API_ROUTES } from '../../../src/app';
 import { getDb } from '../../../src/db/database';
 import { COMPRESSION_MAX_BYTES } from '../../../src/plugins/response-compression';
 import { insertTestChat } from '../../support/factories';
-import { listenOnEphemeralPort } from '../../support/listen-ephemeral';
+import { listenOnEphemeralPort, stopEphemeralServer } from '../../support/listen-ephemeral';
 
 const lanAddress = Object.values(networkInterfaces())
   .flat()
@@ -119,7 +119,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await app.stop(true);
+  await stopEphemeralServer(app);
 });
 
 function get(host: string, path: string, headers: Record<string, string> = {}): Promise<Response> {

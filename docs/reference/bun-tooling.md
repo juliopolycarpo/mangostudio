@@ -8,6 +8,12 @@ labels. The i18n override permits dictionary imports in i18n plumbing and tests.
 `scripts/tests/bun-lint.integration.test.ts` exercises it and checks that Bun runs typed
 promise, hooks, and label rules.
 
+`no-floating-promises` cannot see through `expect(...).rejects` / `.resolves`, so an
+unawaited assertion passes whatever the promise does. Bun's default-on
+`bun:test/valid-expect` owns that class (awaited, returned and `Promise.all` forms are
+accepted), and the same integration test fails if it is switched off. Two explicit discards
+escape it: `void expect(...).rejects…` and an assigned, never-awaited promise.
+
 Two import boundaries are deliberately not in `bunfig.toml`: the `@mangostudio/shared` root
 ban (type-only imports included) and the frontend ban on `@mangostudio/api/internal/*`
 (type-only imports allowed, one parity-test exception). Each is owned by one source scan in

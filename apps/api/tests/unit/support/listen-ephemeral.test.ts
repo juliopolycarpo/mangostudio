@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { Elysia } from 'elysia';
 import { websocket } from 'elysia/websocket';
 
-import { listenOnEphemeralPort } from '../../support/listen-ephemeral';
+import { listenOnEphemeralPort, stopEphemeralServer } from '../../support/listen-ephemeral';
 
 class NeverPublishingApp {
   stopped = false;
@@ -73,5 +73,51 @@ describe('listenOnEphemeralPort', () => {
     await expect(listenOnEphemeralPort(app)).rejects.toThrow('no listen callback');
 
     expect(app.stopped).toBe(true);
+  }, 10_000);
+});
+
+class NeverStoppingApp {
+  stop(_force: boolean): Promise<void> {
+    return new Promise(() => {});
+  }
+}
+
+describe('stopEphemeralServer', () => {
+  it('releases the app so the same instance can listen again', async () => {
+    const app = new Elysia().get('/ping', () => 'pong');
+    await listenOnEphemeralPort(app);
+
+    await stopEphemeralServer(app);
+
+    const port = await listenOnEphemeralPort(app);
+    stopServer = () => {
+      void app.server?.stop(true);
+    };
+    expect(port).toBeGreaterThan(0);
+  });
+
+  it('is the difference from stopping the Bun server directly, which keeps listen() refused', async () => {
+    // The mechanism behind #2482: app-plugin-contract stopped the shared app
+    // with `app.server.stop(true)`, and the next file to listen on it threw.
+    const app = new Elysia().get('/ping', () => 'pong');
+    await listenOnEphemeralPort(app);
+    await app.server?.stop(true);
+
+    await expect(listenOnEphemeralPort(app)).rejects.toThrow(
+      'Cannot call listen() while a server or teardown is active'
+    );
+
+    await stopEphemeralServer(app);
+    const port = await listenOnEphemeralPort(app);
+    stopServer = () => {
+      void app.server?.stop(true);
+    };
+    expect(port).toBeGreaterThan(0);
+  });
+
+  it('names the pending teardown when stop never settles', async () => {
+    await expect(stopEphemeralServer(new NeverStoppingApp())).rejects.toThrow(
+      'expected app.stop(true) to settle within 5000ms | received: teardown still pending'
+    );
   }, 10_000);
 });

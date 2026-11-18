@@ -218,18 +218,11 @@ export async function previewLibraryPropagation(
   const environmentIds = parseRequestedEnvironments(request.environmentIds);
 
   // A location the scanner skips has no instances in the snapshots, so every
-  // destination there would classify as `create` and the apply would overwrite
-  // whatever is really on disk — and the state hash would not cover it either.
-  // Refusing the request is the only honest answer.
+  // destination there would classify as `create` and an apply would overwrite
+  // whatever is really on disk. Such a destination is reported as blocked
+  // (`location-disabled`) instead: the rest of the request still previews, and
+  // the apply refuses it because it re-previews and sees the same block.
   const enabled = await deps.enabledLocationIds(userId);
-  for (const location of locations) {
-    if (!enabled.has(location.id)) {
-      throw new LibraryRequestError(
-        422,
-        `Library location "${location.id}" is not enabled, so its contents cannot be previewed or written.`
-      );
-    }
-  }
 
   const kinds = [...new Set([...refs.values()].map((ref) => ref.kind))];
   const snapshots = await Promise.all(
@@ -260,6 +253,7 @@ export async function previewLibraryPropagation(
       refs.get(key) as LibraryResourceRef,
       snapshots,
       locations,
+      enabled,
       deps.adapters,
       acknowledged.has(key),
       agentAvailable
@@ -372,6 +366,7 @@ function buildPreviewEntry(
   ref: LibraryResourceRef,
   snapshots: readonly EnvironmentSnapshot[],
   locations: readonly LocationDefinition[],
+  enabledLocationIds: ReadonlySet<LibraryLocationId>,
   adapters: AdapterCatalog,
   acknowledgedDivergence: boolean,
   agentAvailable: boolean
@@ -426,6 +421,7 @@ function buildPreviewEntry(
               snapshot,
               sourceGroups,
               location,
+              enabledLocationIds.has(location.id),
               snapshot.statuses.get(location.id),
               instanceByLocation.get(location.id),
               adapters,
@@ -533,6 +529,7 @@ function buildDestination(
   snapshot: EnvironmentSnapshot,
   sourceGroups: readonly PropagationSourceGroup[],
   location: LocationDefinition,
+  locationEnabled: boolean,
   status: LibraryLocationStatus | undefined,
   current: LibraryInstance | undefined,
   adapters: AdapterCatalog,
@@ -558,6 +555,7 @@ function buildDestination(
     destinationBlockedReason(
       ref,
       location,
+      locationEnabled,
       status,
       current,
       sourceGroups,
@@ -583,6 +581,7 @@ function buildDestination(
 function destinationBlockedReason(
   ref: LibraryResourceRef,
   location: LocationDefinition,
+  locationEnabled: boolean,
   status: LibraryLocationStatus | undefined,
   current: LibraryInstance | undefined,
   sourceGroups: readonly PropagationSourceGroup[],
@@ -599,6 +598,11 @@ function destinationBlockedReason(
   if (location.layout === 'single-file' && location.resourceSlug !== ref.slug) {
     return 'slug-mismatch';
   }
+  // Ordered after the properties the user cannot change: switching the location
+  // on would not help while it is unsupported, read-only, or the wrong slug. A
+  // disabled location is skipped by the scanner, so `current` and the scan
+  // diagnostics below say nothing about it and must not be consulted.
+  if (!locationEnabled) return 'location-disabled';
   if (snapshot.failedLocationIds?.has(location.id)) return 'location-scan-failed';
   if (!status.writable) return 'location-unwritable';
   if (current && !current.valid) return 'invalid-destination';

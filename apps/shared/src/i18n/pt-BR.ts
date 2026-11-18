@@ -2471,6 +2471,8 @@ export const messages = {
       'read-only-location': 'Este local é somente leitura.',
       'unsupported-location': 'Este local não existe nesta plataforma.',
       'location-unwritable': 'O MangoStudio não tem permissão de escrita neste local.',
+      'location-disabled':
+        'Este local está desligado nas configurações de locais da biblioteca, então não é varrido.',
       'location-scan-failed':
         'Não foi possível verificar este local. Confira o acesso e gere a prévia novamente.',
       'slug-mismatch': 'Este local guarda um único recurso, e não é este.',

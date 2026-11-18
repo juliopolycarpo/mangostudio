@@ -1,25 +1,22 @@
 /**
- * The destinations a propagation preview may name, for one resource kind.
+ * The destinations a propagation preview is asked about, for one resource kind.
  *
- * Both propagation openers — the matrix bulk action and the resource detail —
- * need the same answer, and both need to tell "there is nothing to offer" apart
- * from "the answer has not arrived": the enabled-location set lives in app
- * settings, and treating "not loaded yet" as "nothing is enabled" would
- * silently drop every destination outside MangoStudio's own directories, which
- * `enabledLibraryLocations` always keeps on. The same holds while the hub is
- * still detecting installed agent CLIs: the enablement it answers with then is
- * a placeholder, so the answer stays unresolved until detection lands.
+ * Every location of the kind is a candidate, enabled or not: the API reports a
+ * disabled one as a blocked destination and the wizard shows why. The answer
+ * still waits for app settings, though. The API decides what is disabled from
+ * them, and while the hub is still detecting installed agent CLIs that
+ * enablement is a placeholder, so a preview taken then would call locations
+ * disabled that the user has not switched off. The answer stays unresolved
+ * until detection lands.
  *
  * // Usage: const candidates = useCandidateLocations(locations, 'skill');
  */
 
-import { libraryLocationsFor } from '@mangostudio/shared/app-settings';
 import type {
   LibraryLocationId,
   LibraryLocationStatus,
   ResourceKind,
 } from '@mangostudio/shared/library';
-import { enabledLibraryLocations } from '@mangostudio/shared/library/values';
 import { useMemo } from 'react';
 
 import { useLibraryDefaultsDetection } from '@/features/settings/app/use-library-defaults-detection';
@@ -43,21 +40,16 @@ export function useCandidateLocations(
   kind: ResourceKind | undefined
 ): CandidateLocations {
   const { settings: appSettings, defaultsPending } = useLibraryDefaultsDetection();
-  const libraryLocations = appSettings ? libraryLocationsFor(appSettings) : undefined;
+  const settingsLoaded = appSettings !== undefined;
 
   return useMemo(() => {
     if (defaultsPending) return DETECTING;
-    if (kind === undefined || libraryLocations === undefined) return UNRESOLVED;
+    if (kind === undefined || !settingsLoaded) return UNRESOLVED;
 
     return {
-      locationIds: propagationCandidateLocationIds(
-        locations,
-        kind,
-        // No workspace-scoped location exists, so every candidate is home.
-        enabledLibraryLocations(libraryLocations, 'home')
-      ),
+      locationIds: propagationCandidateLocationIds(locations, kind),
       isResolved: true,
       isDetecting: false,
     };
-  }, [locations, kind, libraryLocations, defaultsPending]);
+  }, [locations, kind, settingsLoaded, defaultsPending]);
 }
