@@ -394,6 +394,12 @@ export const PropagationBlockedReasonSchema = Type.Union([
   Type.Literal('read-only-location'),
   Type.Literal('unsupported-location'),
   Type.Literal('location-unwritable'),
+  /**
+   * The user switched the location off in app settings, so the scanner skips
+   * it and its contents cannot be compared. Reported as a blocked destination
+   * rather than a refused request so the wizard can say why it is unavailable.
+   */
+  Type.Literal('location-disabled'),
   Type.Literal('location-scan-failed'),
   /** A `single-file` destination stores one named resource, and this is not it. */
   Type.Literal('slug-mismatch'),

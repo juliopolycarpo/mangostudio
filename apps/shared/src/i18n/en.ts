@@ -1573,6 +1573,8 @@ export const messages: CoreMessages = {
       'read-only-location': 'This location is read-only.',
       'unsupported-location': 'This location does not exist on this platform.',
       'location-unwritable': 'MangoStudio cannot write to this location.',
+      'location-disabled':
+        'This location is switched off in the library location settings, so it is not scanned.',
       'location-scan-failed': 'This location could not be scanned. Check access and preview again.',
       'slug-mismatch': 'This location stores a single resource, and this is not it.',
       'invalid-destination':
