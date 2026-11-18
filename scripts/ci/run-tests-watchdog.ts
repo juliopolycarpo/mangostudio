@@ -50,7 +50,13 @@ import { constants, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
-import { normalizeLogLine } from '../lib/log-lines';
+import {
+  failSummaryCount,
+  isInlineFailure,
+  isUnhandledErrorHeading,
+  normalizeLogLine,
+  unhandledErrorCount,
+} from '../lib/log-lines';
 import { isShardIdentity, serializeShardReceipt } from '../lib/shard-receipt';
 import { TIMINGS_DIR } from '../lib/test-lanes';
 
@@ -132,27 +138,21 @@ const CRASH_LOG_MARKERS = [/oh no: Bun has crashed/, /panic\(main thread\)/];
 // than a tail slice: a full panic dump (version, features, stack) can trail
 // the summary by well over 200 lines.
 //
-// `[1-9]\d*`, not `\d+`: Bun always prints a ` 0 fail` line on a clean run,
-// and `\d+` matches that zero — verified live, it turned a green shared-lane
-// run into a reported exit 1.
+// The shapes themselves live in scripts/lib/log-lines.ts, shared with the
+// qa-gate parser. What belongs here is what this scan does with them: a count
+// only counts above zero, because Bun always prints a ` 0 fail` line on a clean
+// run, and reading that zero as a finding turned a green shared-lane run into
+// a reported exit 1 (verified live).
 //
 // The same scan must keep Bun's unhandled-error signal. An error raised
 // between tests prints `# Unhandled error between tests` and a `N error(s)`
 // summary with no failing testcase — `scripts/qa-gate/unhandled-errors.ts`
 // exists because JUnit reports `failures="0"` for that run. Without these
 // shapes, a crash after only that signal leaves `failuresSeen` false and a
-// clean retry reports green over the ordering finding.
-//
-// Both summary shapes are anchored end-to-end, matching the live-verified
-// shape in scripts/qa-gate/unhandled-errors.ts. A `\b` tail would also match
-// an ordinary log line — `1 error: cannot find module …` — and turn a
-// findings-free night red. Narrowing costs nothing here because each summary
-// has a redundant detector that survives a truncated run anyway: inline
-// `(fail)` for failures, the block heading for unhandled errors.
-const INLINE_FAILURE_RE = /^\(fail\)/;
-const FAILURE_SUMMARY_RE = /^[1-9]\d*\s+fail$/;
-const UNHANDLED_HEADING = '# Unhandled error between tests';
-const UNHANDLED_ERROR_COUNT_RE = /^[1-9]\d*\s+errors?$/;
+// clean retry reports green over the ordering finding. Each summary has a
+// redundant detector that survives a truncated run: inline `(fail)` for
+// failures, the block heading for unhandled errors.
+const isPositive = (count: number | null): boolean => count !== null && count > 0;
 
 interface AttemptResult {
   readonly exitCode: number;
@@ -196,10 +196,10 @@ const hasFailure = (logText: string): boolean =>
   logText.split('\n').some((rawLine) => {
     const { body } = normalizeLogLine(rawLine);
     return (
-      INLINE_FAILURE_RE.test(body) ||
-      FAILURE_SUMMARY_RE.test(body) ||
-      body === UNHANDLED_HEADING ||
-      UNHANDLED_ERROR_COUNT_RE.test(body)
+      isInlineFailure(body) ||
+      isPositive(failSummaryCount(body)) ||
+      isUnhandledErrorHeading(body) ||
+      isPositive(unhandledErrorCount(body))
     );
   });
 
