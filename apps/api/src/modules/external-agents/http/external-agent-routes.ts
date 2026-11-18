@@ -30,7 +30,7 @@ import {
   externalRemedyFor,
   isExternalAgentTargetId,
 } from '@mangostudio/shared/external-agents';
-import { Elysia, t } from 'elysia';
+import { Elysia, status, t } from 'elysia';
 
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
@@ -141,11 +141,10 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
           401: ApiErrorResponseSchema,
         },
       },
-      async ({ query, user, set }) => {
+      async ({ query, user }) => {
         const userId = authenticatedUserId(user);
         if (!userId) {
-          set.status = 401;
-          return UNAUTHENTICATED;
+          return status(401, UNAUTHENTICATED);
         }
         const environmentId = query.environmentId ?? LOCAL_ENVIRONMENT_ID;
         // Discovery answers for an environment it could not reach rather than
@@ -162,11 +161,10 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
           401: ApiErrorResponseSchema,
         },
       },
-      async ({ user, set }) => {
+      async ({ user }) => {
         const userId = authenticatedUserId(user);
         if (!userId) {
-          set.status = 401;
-          return UNAUTHENTICATED;
+          return status(401, UNAUTHENTICATED);
         }
         return { disclosures: [...(await listExternalDisclosures(userId, getDb()))] };
       }
@@ -183,15 +181,13 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
           503: ApiErrorResponseSchema,
         },
       },
-      async ({ params, query, user, set }) => {
+      async ({ params, query, user }) => {
         const userId = authenticatedUserId(user);
         if (!userId) {
-          set.status = 401;
-          return UNAUTHENTICATED;
+          return status(401, UNAUTHENTICATED);
         }
         if (!isExternalAgentTargetId(params.targetId)) {
-          set.status = 404;
-          return { error: 'Unknown external agent.', code: ERROR_CODES.NOT_FOUND };
+          return status(404, { error: 'Unknown external agent.', code: ERROR_CODES.NOT_FOUND });
         }
         const environmentId = query.environmentId ?? LOCAL_ENVIRONMENT_ID;
         // The one discovery call that waits for the adapter. Everywhere else a
@@ -205,21 +201,19 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
         );
         const agent = agents.find((candidate) => candidate.descriptor.targetId === params.targetId);
         if (!agent || agent.descriptor.unavailableReason) {
-          set.status = 404;
-          return {
+          return status(404, {
             error: 'This agent is not available on that machine.',
             code: ERROR_CODES.NOT_FOUND,
-          };
+          });
         }
         if (!agent.adapterAnswered) {
           // The probe was refused, timed out or never started. Recording anyway
           // would store consent to a capability set nobody was shown, so the
           // notice stays unanswered and the client may retry.
-          set.status = 503;
-          return {
+          return status(503, {
             error: 'Could not confirm what this agent can do on that machine. Try again.',
             code: ERROR_CODES.PROVIDER_ERROR,
-          };
+          });
         }
 
         // The fingerprint is derived from this descriptor, never taken from the
@@ -246,15 +240,13 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
           404: ApiErrorResponseSchema,
         },
       },
-      async ({ params, user, set }) => {
+      async ({ params, user }) => {
         const userId = authenticatedUserId(user);
         if (!userId) {
-          set.status = 401;
-          return UNAUTHENTICATED;
+          return status(401, UNAUTHENTICATED);
         }
         if (!isExternalAgentTargetId(params.targetId)) {
-          set.status = 404;
-          return { error: 'Unknown external agent.', code: ERROR_CODES.NOT_FOUND };
+          return status(404, { error: 'Unknown external agent.', code: ERROR_CODES.NOT_FOUND });
         }
         await revokeExternalDisclosure({ userId, targetId: params.targetId }, getDb());
         // Blocking the next start is not enough. Revoking while a vendor process
@@ -283,15 +275,13 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
           404: ApiErrorResponseSchema,
         },
       },
-      async ({ params, query, user, set }) => {
+      async ({ params, query, user }) => {
         const userId = authenticatedUserId(user);
         if (!userId) {
-          set.status = 401;
-          return UNAUTHENTICATED;
+          return status(401, UNAUTHENTICATED);
         }
         if (!isExternalAgentTargetId(params.targetId)) {
-          set.status = 404;
-          return { error: 'Unknown external agent.', code: ERROR_CODES.NOT_FOUND };
+          return status(404, { error: 'Unknown external agent.', code: ERROR_CODES.NOT_FOUND });
         }
         const environmentId = query.environmentId ?? LOCAL_ENVIRONMENT_ID;
         const limits = await readCachedExternalAccountLimits({
@@ -314,15 +304,13 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
           404: ApiErrorResponseSchema,
         },
       },
-      async ({ params, query, user, set }) => {
+      async ({ params, query, user }) => {
         const userId = authenticatedUserId(user);
         if (!userId) {
-          set.status = 401;
-          return UNAUTHENTICATED;
+          return status(401, UNAUTHENTICATED);
         }
         if (!isExternalAgentTargetId(params.targetId)) {
-          set.status = 404;
-          return { error: 'Unknown external agent.', code: ERROR_CODES.NOT_FOUND };
+          return status(404, { error: 'Unknown external agent.', code: ERROR_CODES.NOT_FOUND });
         }
         const environmentId = query.environmentId ?? LOCAL_ENVIRONMENT_ID;
         // Short-lived probe when no live session is named — see application layer.
@@ -346,15 +334,13 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
           404: ApiErrorResponseSchema,
         },
       },
-      ({ params, query, user, set }) => {
+      ({ params, query, user }) => {
         const userId = authenticatedUserId(user);
         if (!userId) {
-          set.status = 401;
-          return UNAUTHENTICATED;
+          return status(401, UNAUTHENTICATED);
         }
         if (!isExternalAgentTargetId(params.targetId)) {
-          set.status = 404;
-          return { error: 'Unknown external agent.', code: ERROR_CODES.NOT_FOUND };
+          return status(404, { error: 'Unknown external agent.', code: ERROR_CODES.NOT_FOUND });
         }
         const environmentId = query.environmentId ?? LOCAL_ENVIRONMENT_ID;
         // Absent means nothing has been observed for this key yet, which is not
