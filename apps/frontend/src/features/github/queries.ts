@@ -23,7 +23,7 @@ import type {
 import { queryOptions } from '@tanstack/react-query';
 
 import { client } from '@/lib/api-client';
-import { throwApiError } from '@/lib/utils';
+import { ApiError } from '@/lib/utils';
 
 /** The API caches GitHub reads for a minute; asking again sooner re-reads that cache. */
 const GITHUB_STALE_TIME_MS = 60_000;
@@ -80,8 +80,8 @@ export function githubInboxQueryOptions(environmentId?: string, forceRefresh?: F
           ...(forceRefresh?.() ? { refresh: true } : {}),
         },
       });
-      if (error) throwApiError(error);
-      return data as GithubInboxResponse;
+      if (error) throw new ApiError(error.value);
+      return data;
     },
   });
 }
@@ -104,8 +104,8 @@ export function githubPrsQueryOptions(
       const { data, error } = await client.api.github.prs.get({
         query: { chatId, filter, ...(forceRefresh?.() ? { refresh: true } : {}) },
       });
-      if (error) throwApiError(error);
-      return data as GithubPrsResponse;
+      if (error) throw new ApiError(error.value);
+      return data;
     },
   });
 }
@@ -128,8 +128,8 @@ export function githubIssuesQueryOptions(
       const { data, error } = await client.api.github.issues.get({
         query: { chatId, filter, ...(forceRefresh?.() ? { refresh: true } : {}) },
       });
-      if (error) throwApiError(error);
-      return data as GithubIssuesResponse;
+      if (error) throw new ApiError(error.value);
+      return data;
     },
   });
 }
@@ -146,8 +146,8 @@ export function githubPrDetailQueryOptions(chatId: string, number: number) {
     staleTime: GITHUB_STALE_TIME_MS,
     queryFn: async (): Promise<GithubPrDetailResponse> => {
       const { data, error } = await client.api.github.pr.get({ query: { chatId, number } });
-      if (error) throwApiError(error);
-      return data as GithubPrDetailResponse;
+      if (error) throw new ApiError(error.value);
+      return data;
     },
   });
 }
@@ -164,8 +164,8 @@ export function githubPrChecksQueryOptions(chatId: string, number: number) {
     staleTime: GITHUB_STALE_TIME_MS,
     queryFn: async (): Promise<GithubPrChecksResponse> => {
       const { data, error } = await client.api.github.pr.checks.get({ query: { chatId, number } });
-      if (error) throwApiError(error);
-      return data as GithubPrChecksResponse;
+      if (error) throw new ApiError(error.value);
+      return data;
     },
   });
 }
@@ -186,8 +186,8 @@ export function githubPrThreadsQueryOptions(chatId: string, number: number) {
       const { data, error } = await client.api.github.pr['review-threads'].get({
         query: { chatId, number },
       });
-      if (error) throwApiError(error);
-      return data as GithubPrThreadsResponse;
+      if (error) throw new ApiError(error.value);
+      return data;
     },
   });
 }

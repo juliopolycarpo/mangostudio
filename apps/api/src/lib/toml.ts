@@ -2,13 +2,11 @@
  * The API's only TOML boundary. Every parse and serialize in `apps/api` goes
  * through this module, so the underlying library can change in one place.
  */
+import { isTomlTable } from '@mangostudio/shared/library/machine';
+
 import { readUtf8FileOrNull } from './safe-file';
 
 export type TomlStringSections = Record<string, Record<string, string>>;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 /**
  * Project the string-valued entries of a parsed TOML document into sections.
@@ -30,7 +28,7 @@ function projectTomlStringSections(parsed: Record<string, unknown>): TomlStringS
   const sections: TomlStringSections = {};
 
   for (const [sectionName, sectionValue] of Object.entries(parsed)) {
-    if (!isRecord(sectionValue)) {
+    if (!isTomlTable(sectionValue)) {
       continue;
     }
 
@@ -127,7 +125,7 @@ function safeTomlParserError(error: unknown): Error {
 export function parseTomlDocument(content: string): Record<string, unknown> {
   try {
     const parsed = Bun.TOML.parse(content);
-    return isRecord(parsed) ? parsed : {};
+    return isTomlTable(parsed) ? parsed : {};
   } catch (error) {
     throw safeTomlParserError(error);
   }
@@ -163,7 +161,8 @@ export function setTomlSectionValue(
   key: string,
   value: string | boolean
 ): void {
-  const current = isRecord(doc[section]) ? { ...(doc[section] as Record<string, unknown>) } : {};
+  const existing = doc[section];
+  const current = isTomlTable(existing) ? { ...existing } : {};
   current[key] = value;
   doc[section] = current;
 }
@@ -181,7 +180,8 @@ export function deleteTomlSectionValue(
   key: string
 ): boolean {
   const current = doc[section];
-  if (!isRecord(current) || !(key in current)) return false;
+  // Own keys only: `in` also matches names inherited from Object.prototype, such as toString.
+  if (!isTomlTable(current) || !Object.hasOwn(current, key)) return false;
   const next = { ...current };
   delete next[key];
   doc[section] = next;

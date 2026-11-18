@@ -9,12 +9,8 @@ import {
   InstallStartBodySchema,
   InstallStartResponseSchema,
 } from '@mangostudio/shared/environments';
-import {
-  type ApiErrorResponse,
-  ApiErrorResponseSchema,
-  ERROR_CODES,
-} from '@mangostudio/shared/errors';
-import { Elysia, t } from 'elysia';
+import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
+import { Elysia, status, t } from 'elysia';
 
 import type { GuardIpPolicy } from '../../../lib/client-ip';
 import { getConfig } from '../../../lib/config';
@@ -66,33 +62,24 @@ function unavailableResponse(error: InstallUnavailableError) {
   };
 }
 
-function mapInstallError(
-  error: unknown,
-  set: { status?: number | string }
-): ApiErrorResponse | ReturnType<typeof blockedResponse> | ReturnType<typeof unavailableResponse> {
+function mapInstallError(error: unknown) {
   if (error instanceof InstallBlockedError) {
-    set.status = 403;
-    return blockedResponse(error);
+    return status(403, blockedResponse(error));
   }
   if (error instanceof InstallUnavailableError) {
-    set.status = 409;
-    return unavailableResponse(error);
+    return status(409, unavailableResponse(error));
   }
   if (error instanceof InstallConflictError || error instanceof InstallPreparationError) {
-    set.status = 409;
-    return { error: error.message, code: ERROR_CODES.CONFLICT };
+    return status(409, { error: error.message, code: ERROR_CODES.CONFLICT });
   }
   if (error instanceof RecipeInputError) {
-    set.status = 422;
-    return { error: error.message, code: ERROR_CODES.VALIDATION };
+    return status(422, { error: error.message, code: ERROR_CODES.VALIDATION });
   }
   if (error instanceof ProfileMismatchError) {
-    set.status = 400;
-    return { error: error.message, code: ERROR_CODES.VALIDATION };
+    return status(400, { error: error.message, code: ERROR_CODES.VALIDATION });
   }
   if (error instanceof InstallerDownloadError) {
-    set.status = 502;
-    return { error: error.message, code: ERROR_CODES.INTERNAL };
+    return status(502, { error: error.message, code: ERROR_CODES.INTERNAL });
   }
   throw error;
 }
@@ -133,7 +120,7 @@ export function createInstallRoutes(
           502: ApiErrorResponseSchema,
         },
       },
-      async ({ body, user, guardClientIp, request, set }) => {
+      async ({ body, user, guardClientIp, request }) => {
         try {
           return await service.prepare(
             body,
@@ -145,7 +132,7 @@ export function createInstallRoutes(
             })
           );
         } catch (error) {
-          return mapInstallError(error, set);
+          return mapInstallError(error);
         }
       }
     )
@@ -159,9 +146,10 @@ export function createInstallRoutes(
           403: InstallBlockedResponseSchema,
           409: t.Union([InstallBlockedResponseSchema, ApiErrorResponseSchema]),
           422: ApiErrorResponseSchema,
+          502: ApiErrorResponseSchema,
         },
       },
-      async ({ body, user, guardClientIp, request, set }) => {
+      async ({ body, user, guardClientIp, request }) => {
         try {
           return await service.start(
             body,
@@ -173,7 +161,7 @@ export function createInstallRoutes(
             })
           );
         } catch (error) {
-          return mapInstallError(error, set);
+          return mapInstallError(error);
         }
       }
     )
@@ -193,11 +181,10 @@ export function createInstallRoutes(
           404: ApiErrorResponseSchema,
         },
       },
-      async ({ params, user, set }) => {
+      async ({ params, user }) => {
         const result = await service.cancel(params.runId, user?.id ?? '');
         if (result) return result;
-        set.status = 404;
-        return { error: 'Install run not found.', code: ERROR_CODES.NOT_FOUND };
+        return status(404, { error: 'Install run not found.', code: ERROR_CODES.NOT_FOUND });
       }
     )
     .get(
@@ -208,11 +195,10 @@ export function createInstallRoutes(
           404: ApiErrorResponseSchema,
         },
       },
-      async ({ params, user, set }) => {
+      async ({ params, user }) => {
         const source = await service.getRunStream(params.runId, user?.id ?? '');
         if (!source) {
-          set.status = 404;
-          return { error: 'Install run not found.', code: ERROR_CODES.NOT_FOUND };
+          return status(404, { error: 'Install run not found.', code: ERROR_CODES.NOT_FOUND });
         }
         return sseResponse(source, 'Install log stream failed.');
       }

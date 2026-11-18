@@ -1,12 +1,9 @@
-import type { ApiErrorResponse } from '@mangostudio/shared/errors';
-import type {
-  ProviderSettingsDescriptor,
-  ProviderSettingsListResponse,
-} from '@mangostudio/shared/provider-settings';
+import type { ProviderSettingsListResponse } from '@mangostudio/shared/provider-settings';
 import { UpdateProviderRuntimeSettingsBodySchema } from '@mangostudio/shared/provider-settings';
-import { Elysia, t } from 'elysia';
+import { Elysia, status, t } from 'elysia';
 
 import { getDb } from '../../../db/database';
+import { apiErrorStatus } from '../../../lib/api-error-status';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
   getProviderSettingsDescriptor,
@@ -16,18 +13,13 @@ import {
   updateProviderSettingsDescriptor,
 } from '../application/provider-settings-service';
 
-function handleProviderSettingsError(
-  error: unknown,
-  set: { status?: number | string }
-): ApiErrorResponse {
+function handleProviderSettingsError(error: unknown) {
   if (error instanceof ProviderSettingsError) {
-    set.status = error.status;
-    return { error: error.message, code: error.code };
+    return apiErrorStatus(error.status, { error: error.message, code: error.code });
   }
 
   console.error('[provider-settings] Unexpected error:', error);
-  set.status = 500;
-  return { error: 'Unexpected provider settings error.', code: 'INTERNAL' };
+  return status(500, { error: 'Unexpected provider settings error.', code: 'INTERNAL' });
 }
 
 export const providerSettingsRoutes = new Elysia()
@@ -41,7 +33,7 @@ export const providerSettingsRoutes = new Elysia()
   .get(
     '/providers/:provider',
     { params: t.Object({ provider: t.String() }) },
-    async ({ params, set, user }): Promise<ProviderSettingsDescriptor | ApiErrorResponse> => {
+    async ({ params, user }) => {
       try {
         return await getProviderSettingsDescriptor(
           getDb(),
@@ -49,7 +41,7 @@ export const providerSettingsRoutes = new Elysia()
           parseProviderParam(params.provider)
         );
       } catch (error) {
-        return handleProviderSettingsError(error, set);
+        return handleProviderSettingsError(error);
       }
     }
   )
@@ -60,7 +52,7 @@ export const providerSettingsRoutes = new Elysia()
       params: t.Object({ provider: t.String() }),
       body: UpdateProviderRuntimeSettingsBodySchema,
     },
-    async ({ body, params, set, user }): Promise<ProviderSettingsDescriptor | ApiErrorResponse> => {
+    async ({ body, params, user }) => {
       try {
         return await updateProviderSettingsDescriptor(
           getDb(),
@@ -69,7 +61,7 @@ export const providerSettingsRoutes = new Elysia()
           body
         );
       } catch (error) {
-        return handleProviderSettingsError(error, set);
+        return handleProviderSettingsError(error);
       }
     }
   );

@@ -30,7 +30,8 @@ export interface ApiKeyRequestContext {
 export class ApiKeyServiceError extends Error {
   constructor(
     message: string,
-    readonly status: number,
+    // Literals, not `number`, so `status(error.status, ...)` types into Eden's error channel.
+    readonly status: 400 | 404,
     readonly code: ErrorCode
   ) {
     super(message);

@@ -198,6 +198,7 @@ explicitly enabled behind a trusted reverse proxy.
 - Streaming errors use `SSEErrorEvent` from `@mangostudio/shared/streaming`: `{ type: 'error', error, done: true }`.
 - Domain errors extend `Error` with typed codes (e.g., `ChatNotFoundError`, `ToolParameterError`).
 - The centralized `error-handler.ts` plugin maps thrown errors to HTTP responses.
+- A `mapResponse` or `afterResponse` hook that needs the response status reads it with `resolveStatus(responseValue, set)` from `plugins/error-negotiation.ts`, never `set.status` alone. A `status(code, body)` return carries the code on the returned object, while a route assigns `set.status`; `resolveStatus` reads whichever one the response actually used. `tests/unit/plugins/error-status-hooks.test.ts` pins the case where a handler sets a success status and then throws.
 
 ### Validation
 

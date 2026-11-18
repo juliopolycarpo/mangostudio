@@ -4,7 +4,8 @@ import { MCP_SERVER_SLUG_MAX_LENGTH, MCP_SERVER_SLUG_PATTERN } from '@mangostudi
 export class McpServerError extends Error {
   constructor(
     message: string,
-    readonly status: number,
+    // Literals, not `number`, so `status(error.status, ...)` types into Eden's error channel.
+    readonly status: 404 | 409 | 422 | 502,
     readonly code: string
   ) {
     super(message);

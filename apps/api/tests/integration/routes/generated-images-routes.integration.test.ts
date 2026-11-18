@@ -29,6 +29,18 @@ describe('generated image routes', () => {
     expect(await response.text()).toBe('png-data');
   });
 
+  it('answers a missing image with the plain-text 404 body and no cache header', async () => {
+    const imagesDir = join(TMP_DIR, 'images');
+    mkdirSync(imagesDir, { recursive: true });
+
+    const app = createGeneratedImageRoutes(imagesDir);
+    const response = await app.handle(new Request('http://localhost/images/missing.png'));
+
+    expect(response.status).toBe(404);
+    expect(response.headers.has('cache-control')).toBe(false);
+    expect(await response.text()).toBe('Not found');
+  });
+
   it('rejects paths outside the images directory', () => {
     const imagesDir = join(TMP_DIR, 'images');
 

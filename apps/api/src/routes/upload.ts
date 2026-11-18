@@ -7,7 +7,7 @@ import { extname, join } from 'node:path';
 
 import { UploadChatAttachmentResponseSchema } from '@mangostudio/shared/chat';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
-import { type Elysia, t } from 'elysia';
+import { type Elysia, status, t } from 'elysia';
 
 import { getDb } from '../db/database';
 import { getConfig } from '../lib/config';
@@ -58,8 +58,12 @@ export const uploadRoutes = (app: Elysia) =>
           body: t.Object({
             image: t.File({ type: 'image/*', maxSize: '20m' }),
           }),
+          response: {
+            200: t.Object({ imageUrl: t.String() }),
+            400: ApiErrorResponseSchema,
+          },
         },
-        async ({ body, set }) => {
+        async ({ body }) => {
           const file = body.image;
           const uniqueSuffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
           const ext = extname(file.name || '.png') || '.png';
@@ -71,11 +75,10 @@ export const uploadRoutes = (app: Elysia) =>
           // Validate file content using magic bytes
           const fileType = await detectFileType(buffer);
           if (!fileType) {
-            set.status = 400;
-            return {
+            return status(400, {
               error: 'Invalid file: cannot determine file type',
               code: ERROR_CODES.VALIDATION,
-            };
+            });
           }
 
           // Allow only specific image MIME types
@@ -90,11 +93,10 @@ export const uploadRoutes = (app: Elysia) =>
           ];
 
           if (!allowedMimeTypes.includes(fileType.mime)) {
-            set.status = 400;
-            return {
+            return status(400, {
               error: `Invalid file type: ${fileType.mime}. Allowed types: ${allowedMimeTypes.join(', ')}`,
               code: ERROR_CODES.VALIDATION,
-            };
+            });
           }
 
           // Additional security: ensure file extension matches detected type
@@ -137,14 +139,13 @@ export const uploadRoutes = (app: Elysia) =>
             404: ApiErrorResponseSchema,
           },
         },
-        async ({ body, set, user }) => {
+        async ({ body, user }) => {
           const db = getDb();
           const chat = await getById(body.chatId, db);
           const userId = user?.id ?? '';
 
           if (chat?.userId !== userId) {
-            set.status = 404;
-            return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
+            return status(404, { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND });
           }
 
           try {
@@ -185,8 +186,7 @@ export const uploadRoutes = (app: Elysia) =>
             return { attachment };
           } catch (err) {
             if (err instanceof InvalidAttachmentError) {
-              set.status = 400;
-              return { error: err.message, code: ERROR_CODES.VALIDATION };
+              return status(400, { error: err.message, code: ERROR_CODES.VALIDATION });
             }
             throw err;
           }

@@ -173,7 +173,7 @@ pub struct ProbeError;
 /// The filesystem/subprocess seams [`scan_runtime`] needs, mirroring
 /// `binary-scan.ts`'s `BinaryScanDeps` interface. The optional TypeScript
 /// fields (`maxConcurrency`, `probeTimeoutMs`, `totalTimeoutMs`,
-/// `configuredPath`, `configuredOnly`, `stopWhen`) are not trait methods
+/// `configuredPath`, `configuredOnly`) are not trait methods
 /// here — they carry no I/O, so they live in [`BinaryScanOptions`] instead,
 /// as plain data a caller constructs directly.
 pub trait BinaryScanDeps: Send + Sync + 'static {

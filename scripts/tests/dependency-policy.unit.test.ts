@@ -11,6 +11,7 @@ import {
   findManifestDependencyViolations,
   findRetiredDependencies,
   formatDependencyPolicyViolation,
+  MANIFEST_SECTIONS,
   readAllManifests,
   RETIRED_DEPENDENCIES,
 } from '../lib/dependency-policy';
@@ -77,8 +78,73 @@ describe('dependency policy', () => {
     expect(RETIRED_DEPENDENCIES.map((rule) => rule.label)).toEqual([
       '@sinclair/typebox',
       '@elysiajs/*',
+      'TOML libraries (smol-toml, toml, @iarna/toml, ...)',
+      'madge',
+      '@elysia/static',
+      '@tanstack/router-cli',
     ]);
-    expect([...COHORT_DEPENDENCIES]).toEqual(['elysia', 'typebox', '@mangostudio/protocol']);
+    expect([...COHORT_DEPENDENCIES]).toEqual([
+      'elysia',
+      'typebox',
+      '@mangostudio/protocol',
+      '@types/bun',
+    ]);
+  });
+
+  test.each([
+    'smol-toml',
+    'toml',
+    '@iarna/toml',
+    '@ltd/j-toml',
+    '@std/toml',
+    'madge',
+    '@elysia/static',
+    '@tanstack/router-cli',
+  ])('rejects the retired package %s in every manifest section', (packageName) => {
+    for (const section of MANIFEST_SECTIONS) {
+      const violations = findRetiredDependencies([
+        { workspacePath: 'apps/shared', manifest: { [section]: { [packageName]: '1.0.0' } } },
+      ]);
+
+      expect(
+        violations.map(
+          ({ workspacePath, section, packageName }) => `${workspacePath} ${section} ${packageName}`
+        ),
+        `${section} ${packageName}`
+      ).toEqual([`apps/shared ${section} ${packageName}`]);
+      expect(violations[0]?.reason).not.toBe('');
+    }
+  });
+
+  test.each(['@elysia/cors', '@tanstack/router-generator', 'knip', 'bun-types'])(
+    'does not mistake %s for a retired package',
+    (packageName) => {
+      expect(
+        findRetiredDependencies([
+          { workspacePath: '', manifest: { devDependencies: { [packageName]: '1.0.0' } } },
+        ])
+      ).toEqual([]);
+    }
+  );
+
+  test('rejects a cohort @types/bun declared at an inline range beside the catalog', () => {
+    expect(
+      findCohortVersionConflicts([
+        { workspacePath: '', manifest: { devDependencies: { '@types/bun': 'catalog:' } } },
+        {
+          workspacePath: 'packages/new-workspace',
+          manifest: { devDependencies: { '@types/bun': '^1.4.2' } },
+        },
+      ])
+    ).toEqual([
+      {
+        packageName: '@types/bun',
+        declarations: [
+          ['^1.4.2', ['packages/new-workspace/package.json devDependencies']],
+          ['catalog:', ['package.json devDependencies']],
+        ],
+      },
+    ]);
   });
 
   test('rejects a retired specifier in any manifest and any section', () => {

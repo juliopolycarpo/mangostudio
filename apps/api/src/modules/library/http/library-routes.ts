@@ -31,7 +31,7 @@ import {
   listLibraryTargetDescriptors,
 } from '@mangostudio/shared/library/host';
 import { WorkspacePathError } from '@mangostudio/shared/runtime-contract';
-import { Elysia, t } from 'elysia';
+import { Elysia, type ElysiaStatus, status, t } from 'elysia';
 import type { Static } from 'typebox';
 
 import { getDb } from '../../../db/database';
@@ -136,37 +136,33 @@ function filterLibraryScanResult(
   };
 }
 
-function invalidResourceKey(set: { status?: number | string }): ApiErrorResponse {
-  set.status = 400;
-  return {
+function invalidResourceKey() {
+  return status(400, {
     error: 'Invalid library resource key.',
     code: ERROR_CODES.VALIDATION,
-  };
+  });
 }
 
 function missingResourceResponse(
-  set: { status?: number | string },
   scan: LibraryScanResult,
   kind: ResourceKind,
   location?: LibraryLocationId
-): ApiErrorResponse {
+) {
   if (
     scan.locationDiagnostics?.some(
       ({ locationId }) =>
         LOCATION_KIND_BY_ID.get(locationId) === kind && (!location || locationId === location)
     )
   ) {
-    set.status = 503;
-    return {
+    return status(503, {
       error: 'The library scan could not verify whether this resource is available.',
       code: ERROR_CODES.PROVIDER_ERROR,
-    };
+    });
   }
-  set.status = 404;
-  return {
+  return status(404, {
     error: 'Library resource not found.',
     code: ERROR_CODES.NOT_FOUND,
-  };
+  });
 }
 
 /**
@@ -215,19 +211,19 @@ export const STATE_REQUIRES_TARGET_MESSAGE =
   "`state` filters a target's coverage, so it requires `target`.";
 
 /**
- * Resolves the coverage filters, or the 400 body explaining why they contradict
+ * Resolves the coverage filters, or the 400 answer explaining why they contradict
  * each other. Returns the narrowed {@link ResourceFilters} so the filter pass
  * receives a combination that has already been proven answerable.
  */
 function parseResourceFilters(
-  query: Pick<Static<typeof resourceQuery>, 'kind' | 'target' | 'location' | 'state'>,
-  set: { status?: number | string }
-): { ok: true; filters: ResourceFilters } | { ok: false; body: ApiErrorResponse } {
+  query: Pick<Static<typeof resourceQuery>, 'kind' | 'target' | 'location' | 'state'>
+):
+  | { ok: true; filters: ResourceFilters }
+  | { ok: false; failure: ElysiaStatus<400, ApiErrorResponse> } {
   if (query.state && !query.target) {
-    set.status = 400;
     return {
       ok: false,
-      body: { error: STATE_REQUIRES_TARGET_MESSAGE, code: ERROR_CODES.VALIDATION },
+      failure: status(400, { error: STATE_REQUIRES_TARGET_MESSAGE, code: ERROR_CODES.VALIDATION }),
     };
   }
 
@@ -238,19 +234,19 @@ function parseResourceFilters(
   };
 }
 
-function rejectWorkspaceRoot(
-  set: { status?: number | string },
-  message: string
-): { ok: false; body: ApiErrorResponse } {
-  set.status = 422;
-  return { ok: false, body: { error: message, code: ERROR_CODES.VALIDATION } };
+type WorkspaceRootRejection = {
+  ok: false;
+  failure: ElysiaStatus<422, ApiErrorResponse>;
+};
+
+function rejectWorkspaceRoot(message: string): WorkspaceRootRejection {
+  return { ok: false, failure: status(422, { error: message, code: ERROR_CODES.VALIDATION }) };
 }
 
-/** Resolves the requested root, or the 422 body explaining why it cannot. */
+/** Resolves the requested root, or the 422 answer explaining why it cannot. */
 async function resolveWorkspaceRoot(
-  workspaceRoot: string | undefined,
-  set: { status?: number | string }
-): Promise<{ ok: true; root: string | undefined } | { ok: false; body: ApiErrorResponse }> {
+  workspaceRoot: string | undefined
+): Promise<{ ok: true; root: string | undefined } | WorkspaceRootRejection> {
   if (workspaceRoot === undefined) return { ok: true, root: undefined };
 
   let validation: WorkdirValidationResult;
@@ -260,14 +256,14 @@ async function resolveWorkspaceRoot(
     validation = await validateWorkdir(workspaceRoot, { requireAbsolute: true });
   } catch (error) {
     if (error instanceof WorkspacePathError) {
-      return rejectWorkspaceRoot(set, error.message);
+      return rejectWorkspaceRoot(error.message);
     }
     throw error;
   }
 
   return validation.ok
     ? { ok: true, root: validation.resolvedPath }
-    : rejectWorkspaceRoot(set, `The workspace root is ${validation.reason}.`);
+    : rejectWorkspaceRoot(`The workspace root is ${validation.reason}.`);
 }
 
 function scopeFor(userId: string, environmentId: string | undefined): LibraryScope {
@@ -338,13 +334,13 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
             503: ApiErrorResponseSchema,
           },
         },
-        async ({ query, set, user }): Promise<LibraryScanResult | ApiErrorResponse> => {
+        async ({ query, set, user }) => {
           // Before the scan: a filter combination with no answer should not cost
           // a filesystem walk to reject.
-          const filters = parseResourceFilters(query, set);
-          if (!filters.ok) return filters.body;
-          const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
-          if (!workspace.ok) return workspace.body;
+          const filters = parseResourceFilters(query);
+          if (!filters.ok) return filters.failure;
+          const workspace = await resolveWorkspaceRoot(query.workspaceRoot);
+          if (!workspace.ok) return workspace.failure;
           try {
             const scan = await service.discover(
               user?.id ?? '',
@@ -376,16 +372,11 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
             503: ApiErrorResponseSchema,
           },
         },
-        async ({
-          params,
-          query,
-          set,
-          user,
-        }): Promise<LibraryResourceContent | ApiErrorResponse> => {
+        async ({ params, query, set, user }) => {
           const ref = parseResourceKey(params.key);
-          if (!ref) return invalidResourceKey(set);
-          const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
-          if (!workspace.ok) return workspace.body;
+          if (!ref) return invalidResourceKey();
+          const workspace = await resolveWorkspaceRoot(query.workspaceRoot);
+          if (!workspace.ok) return workspace.failure;
           try {
             const scan = await service.discover(
               user?.id ?? '',
@@ -394,7 +385,7 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
               query.environmentId
             );
             const resource = scan.resources.find((candidate) => candidate.key === params.key);
-            if (!resource) return missingResourceResponse(set, scan, ref.kind, query.location);
+            if (!resource) return missingResourceResponse(scan, ref.kind, query.location);
             return (
               (await service.readContent(
                 user?.id ?? '',
@@ -402,7 +393,7 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
                 query.location,
                 workspace.root,
                 query.environmentId
-              )) ?? missingResourceResponse(set, scan, ref.kind, query.location)
+              )) ?? missingResourceResponse(scan, ref.kind, query.location)
             );
           } catch (error) {
             return handleLibraryError(error, set);
@@ -426,11 +417,11 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
             503: ApiErrorResponseSchema,
           },
         },
-        async ({ params, query, set, user }): Promise<LibraryResource | ApiErrorResponse> => {
+        async ({ params, query, set, user }) => {
           const ref = parseResourceKey(params.key);
-          if (!ref) return invalidResourceKey(set);
-          const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
-          if (!workspace.ok) return workspace.body;
+          if (!ref) return invalidResourceKey();
+          const workspace = await resolveWorkspaceRoot(query.workspaceRoot);
+          if (!workspace.ok) return workspace.failure;
           try {
             const scan = await service.discover(
               user?.id ?? '',
@@ -440,7 +431,7 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
             );
             return (
               scan.resources.find((candidate) => candidate.key === params.key) ??
-              missingResourceResponse(set, scan, ref.kind)
+              missingResourceResponse(scan, ref.kind)
             );
           } catch (error) {
             return handleLibraryError(error, set);
@@ -461,9 +452,9 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
             503: ApiErrorResponseSchema,
           },
         },
-        async ({ query, set, user }): Promise<LibraryLocationStatus[] | ApiErrorResponse> => {
-          const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
-          if (!workspace.ok) return workspace.body;
+        async ({ query, set, user }) => {
+          const workspace = await resolveWorkspaceRoot(query.workspaceRoot);
+          if (!workspace.ok) return workspace.failure;
           try {
             return await service.listLocations(user?.id ?? '', workspace.root, query.environmentId);
           } catch (error) {
@@ -495,9 +486,9 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
             503: ApiErrorResponseSchema,
           },
         },
-        async ({ query, set, user }): Promise<LibraryScanResult | ApiErrorResponse> => {
-          const workspace = await resolveWorkspaceRoot(query.workspaceRoot, set);
-          if (!workspace.ok) return workspace.body;
+        async ({ query, set, user }) => {
+          const workspace = await resolveWorkspaceRoot(query.workspaceRoot);
+          if (!workspace.ok) return workspace.failure;
           try {
             return await service.discover(
               user?.id ?? '',

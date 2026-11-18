@@ -930,6 +930,8 @@ export function createExternalTurnController(
         .ensureSession({
           ...sessionInputFor(input, context.chat.environmentId, targetId),
           existingConnectionOnly: true,
+          // A stop during a slow reconnect must not open a vendor session for the ended turn.
+          signal: stop.signal,
         })
         .catch((error: unknown) => {
           if (typeof error === 'object' && error !== null) reopenFailures.add(error);

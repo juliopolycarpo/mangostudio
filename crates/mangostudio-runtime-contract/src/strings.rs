@@ -45,6 +45,40 @@ pub fn github_graphql_documents() -> &'static [String] {
     })
 }
 
+/// Returns the `gh` operations `gh.exec` runs, as two words such as `pr view`.
+/// The generated artifact derives them from `GH_READ_OPERATIONS` in the shared
+/// TypeScript source, which the hub's audit summaries read too.
+///
+/// # Example
+///
+/// ```
+/// let read = mangostudio_runtime_contract::strings::github_cli_read_operations();
+/// assert!(read.iter().any(|operation| operation == "pr view"));
+/// ```
+pub fn github_cli_read_operations() -> &'static [String] {
+    static READ: OnceLock<Vec<String>> = OnceLock::new();
+    READ.get_or_init(|| github_cli_operations("read"))
+}
+
+/// Returns the `gh` operations `gh.mutate` runs, as two words such as `pr create`.
+/// Derived from `GH_WRITE_OPERATIONS` the same way as [`github_cli_read_operations`].
+///
+/// # Example
+///
+/// ```
+/// let write = mangostudio_runtime_contract::strings::github_cli_write_operations();
+/// assert!(write.iter().any(|operation| operation == "pr create"));
+/// ```
+pub fn github_cli_write_operations() -> &'static [String] {
+    static WRITE: OnceLock<Vec<String>> = OnceLock::new();
+    WRITE.get_or_init(|| github_cli_operations("write"))
+}
+
+fn github_cli_operations(side: &str) -> Vec<String> {
+    serde_json::from_value(document()["githubCliOperations"][side].clone())
+        .expect("generated gh operations are strings")
+}
+
 /// What a runtime prints to stderr when nobody on its machine has answered
 /// the consent question yet.
 pub const RUNTIME_SETUP_PENDING_SIGNATURE: &str = "runtime setup is pending on this machine";
@@ -109,7 +143,8 @@ pub(crate) fn errors_document() -> &'static Value {
 mod tests {
     use super::{
         RUNTIME_PAIRING_TOKEN_PREFIX, RUNTIME_SETUP_PENDING_SIGNATURE, RUNTIME_UPDATE_EXIT_CODE,
-        binding, document, github_graphql_documents, runtime_home,
+        binding, document, github_cli_read_operations, github_cli_write_operations,
+        github_graphql_documents, runtime_home,
     };
 
     #[test]
@@ -143,6 +178,30 @@ mod tests {
             document()["githubGraphqlDocuments"]
         );
         assert!(documents.iter().all(|query| query.starts_with("query(")));
+    }
+
+    #[test]
+    fn gh_operations_are_loaded_from_the_shared_artifact() {
+        for (side, operations) in [
+            ("read", github_cli_read_operations()),
+            ("write", github_cli_write_operations()),
+        ] {
+            assert!(
+                !operations.is_empty(),
+                "expected gh {side} operations in strings.json | received: none"
+            );
+            assert_eq!(
+                serde_json::json!(operations),
+                document()["githubCliOperations"][side],
+                "expected the gh {side} accessor to equal strings.json"
+            );
+            assert!(
+                operations
+                    .iter()
+                    .all(|operation| operation.split(' ').count() == 2),
+                "expected two-word gh {side} operations | received: {operations:?}"
+            );
+        }
     }
 
     #[test]

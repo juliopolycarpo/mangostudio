@@ -3,6 +3,7 @@ import { describe, expect, it } from 'bun:test';
 import { createGeminiInteractionAccumulator } from '../../../../src/services/providers/gemini/interaction-accumulator';
 import type { InteractionSSEEvent } from '../../../../src/services/providers/gemini/normalizers';
 import type { AgentEvent } from '../../../../src/services/providers/types';
+import { RecordingDiagnosticLogger } from '../../../support/mocks/recording-diagnostic-logger';
 
 /** Casts a plain fake SSE event to the SDK union for replay. */
 function event(data: Record<string, unknown>): InteractionSSEEvent {
@@ -269,6 +270,77 @@ describe('createGeminiInteractionAccumulator', () => {
         event({ event_type: 'step.start', index: 0, step: { type: 'model_output', content: [] } })
       )
     ).toEqual([]);
+  });
+
+  it.each([
+    'google_search_call',
+    'google_search_result',
+    'code_execution_call',
+    'url_context_result',
+  ])('warns about an unmapped %s step.start and drops it', (stepType) => {
+    const logger = new RecordingDiagnosticLogger();
+    const accumulator = createGeminiInteractionAccumulator(logger);
+
+    const mapped = accumulator.mapEvent(
+      event({
+        event_type: 'step.start',
+        index: 0,
+        step: { type: stepType, id: 'srv_1', result: [{ url: 'https://private.example/secret' }] },
+      })
+    );
+
+    expect(mapped).toEqual([]);
+    // Only the kind is logged: the step body can carry user content or tool output.
+    expect(logger.entries).toEqual([
+      { level: 'warn', event: 'unhandled_step_type', metadata: { stepType } },
+    ]);
+  });
+
+  it('does not warn for the step kinds it maps', () => {
+    const logger = new RecordingDiagnosticLogger();
+    const accumulator = createGeminiInteractionAccumulator(logger);
+
+    accumulator.mapEvent(
+      event({
+        event_type: 'step.start',
+        index: 0,
+        step: { type: 'function_call', id: 'fc_1', name: 'search', arguments: {} },
+      })
+    );
+    accumulator.mapEvent(
+      event({
+        event_type: 'step.start',
+        index: 1,
+        step: { type: 'model_output', content: [{ type: 'text', text: 'Hi' }] },
+      })
+    );
+    accumulator.mapEvent(
+      event({ event_type: 'step.start', index: 2, step: { type: 'model_output', content: [] } })
+    );
+    accumulator.mapEvent(
+      event({
+        event_type: 'step.start',
+        index: 3,
+        step: { type: 'thought', summary: [{ type: 'text', text: 'Hmm' }] },
+      })
+    );
+
+    expect(logger.entries).toEqual([]);
+  });
+
+  it('keeps warning about an unknown delta kind through the injected logger', () => {
+    const logger = new RecordingDiagnosticLogger();
+    const accumulator = createGeminiInteractionAccumulator(logger);
+
+    accumulator.mapEvent(
+      event({
+        event_type: 'step.delta',
+        index: 0,
+        delta: { type: 'text_annotation', annotations: [] },
+      })
+    );
+
+    expect(logger.events('warn')).toEqual(['unknown_delta_type']);
   });
 
   it('captures interaction id and usage on completion', () => {

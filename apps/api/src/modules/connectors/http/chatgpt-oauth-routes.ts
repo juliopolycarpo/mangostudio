@@ -3,9 +3,7 @@
  * Parse → call use case → respond. No business logic here.
  */
 
-import type { ChatGptOAuthStatus, StartChatGptOAuthResponse } from '@mangostudio/shared/connectors';
 import { StartChatGptOAuthBodySchema } from '@mangostudio/shared/connectors';
-import type { ApiErrorResponse } from '@mangostudio/shared/errors';
 import { Elysia, t } from 'elysia';
 
 import { requireAuth } from '../../../plugins/auth-middleware';
@@ -22,11 +20,11 @@ export const chatGptOAuthRoutes = new Elysia()
   .post(
     '/connectors/chatgpt/oauth/start',
     { body: StartChatGptOAuthBodySchema },
-    async ({ body, set, user }): Promise<StartChatGptOAuthResponse | ApiErrorResponse> => {
+    async ({ body, user }) => {
       try {
         return await startChatGptOAuth(user?.id ?? '', body);
       } catch (error) {
-        return handleConnectorError(error, set);
+        return handleConnectorError(error);
       }
     }
   )
@@ -34,11 +32,11 @@ export const chatGptOAuthRoutes = new Elysia()
   .get(
     '/connectors/chatgpt/oauth/:sessionId/status',
     { params: t.Object({ sessionId: t.String() }) },
-    ({ params, set, user }): ChatGptOAuthStatus | ApiErrorResponse => {
+    ({ params, user }) => {
       try {
         return getChatGptOAuthStatus(user?.id ?? '', params.sessionId);
       } catch (error) {
-        return handleConnectorError(error, set);
+        return handleConnectorError(error);
       }
     }
   )
@@ -46,12 +44,12 @@ export const chatGptOAuthRoutes = new Elysia()
   .post(
     '/connectors/chatgpt/oauth/:sessionId/cancel',
     { params: t.Object({ sessionId: t.String() }) },
-    ({ params, set, user }): { success: true } | ApiErrorResponse => {
+    ({ params, user }) => {
       try {
         cancelChatGptOAuth(user?.id ?? '', params.sessionId);
-        return { success: true };
+        return { success: true as const };
       } catch (error) {
-        return handleConnectorError(error, set);
+        return handleConnectorError(error);
       }
     }
   );

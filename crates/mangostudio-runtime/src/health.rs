@@ -662,10 +662,12 @@ async fn detect_shells(path_override: Option<&std::ffi::OsStr>) -> Vec<RuntimeSh
 
 /// Resolves `name` against an explicit `PATH` value, checking (on Unix)
 /// that it is actually executable rather than merely present — mirrors
-/// `Bun.which`'s own check. On Windows, `<name>.exe` is tried alongside the
-/// bare name unless the caller supplies the `.exe` suffix. Never reads
-/// the real environment. Tests can supply a temporary search directory
-/// without mutating the process-wide `PATH`.
+/// `Bun.which`'s own check. On Windows there is no execute bit, so the
+/// name must instead carry an executable extension: see
+/// [`windows_executable_names`]. Never reads the real `PATH`. Tests can
+/// supply a temporary search directory without mutating the process-wide
+/// `PATH`; on Windows the process's `PATHEXT` still applies, because it
+/// describes the machine rather than the caller's search directories.
 ///
 /// Returns `dir.join(name)` as found, never canonicalised: two `PATH`
 /// entries that reach the same real file through a symlink or a `..`
@@ -678,19 +680,71 @@ async fn detect_shells(path_override: Option<&std::ffi::OsStr>) -> Vec<RuntimeSh
 /// enough in practice that resolving every candidate has not been worth
 /// its own `std::fs::canonicalize` call on this walk's hot path.
 pub(crate) fn which_in(name: &str, path_var: &std::ffi::OsStr) -> Option<PathBuf> {
-    for dir in std::env::split_paths(path_var) {
-        let candidate = dir.join(name);
-        if is_executable_file(&candidate) {
-            return Some(candidate);
-        }
-        if cfg!(windows) && !name.ends_with(".exe") {
-            let with_exe = dir.join(format!("{name}.exe"));
-            if is_executable_file(&with_exe) {
-                return Some(with_exe);
-            }
-        }
+    let names = if cfg!(windows) {
+        windows_executable_names(name, std::env::var_os("PATHEXT").as_deref())
+    } else {
+        vec![name.to_owned()]
+    };
+    first_executable_in(&names, path_var)
+}
+
+/// Walks `path_var` in order and returns the first directory entry named in
+/// `names` that is an executable file. Within one directory, `names` is tried
+/// in order, so an earlier `PATHEXT` extension wins over a later one there,
+/// but a hit in an earlier directory always beats any name in a later one.
+fn first_executable_in(names: &[String], path_var: &std::ffi::OsStr) -> Option<PathBuf> {
+    std::env::split_paths(path_var).find_map(|dir| {
+        names
+            .iter()
+            .map(|name| dir.join(name))
+            .find(|candidate| is_executable_file(candidate))
+    })
+}
+
+/// `PATHEXT` as Windows documents its default, used when the variable is unset
+/// or empty.
+const DEFAULT_WINDOWS_PATHEXT: &str = ".COM;.EXE;.BAT;.CMD";
+
+/// The file names a Windows shell would try for `name`, in order. Pure, so
+/// it is tested on every host.
+///
+/// Windows has no execute bit, so the extension is what makes a file
+/// runnable: a `name` that already ends in a `PATHEXT` extension (compared
+/// case-insensitively) is tried as written, and every other `name` gets each
+/// extension appended. A bare extensionless `name` is never a candidate, so a
+/// POSIX-style script called `gh` cannot shadow a later `gh.exe`.
+///
+/// Appended extensions are lowercased. Windows matches them case-insensitively
+/// either way, and `PATHEXT` spells them in upper case by default, so the
+/// returned path reads `gh.exe` as installers name the file, not `gh.EXE`.
+///
+/// # Example
+/// ```ignore
+/// let names = windows_executable_names("gh", Some(OsStr::new(".EXE;.CMD")));
+/// assert_eq!(names, ["gh.exe", "gh.cmd"]);
+/// ```
+fn windows_executable_names(name: &str, pathext: Option<&std::ffi::OsStr>) -> Vec<String> {
+    let pathext = pathext.map(|value| value.to_string_lossy());
+    let pathext = pathext
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(DEFAULT_WINDOWS_PATHEXT);
+    let extensions = pathext
+        .split(';')
+        .map(str::trim)
+        .filter(|extension| extension.len() > 1 && extension.starts_with('.'))
+        .collect::<Vec<_>>();
+    let lowercase_name = name.to_ascii_lowercase();
+    if extensions
+        .iter()
+        .any(|extension| lowercase_name.ends_with(&extension.to_ascii_lowercase()))
+    {
+        return vec![name.to_owned()];
     }
-    None
+    extensions
+        .iter()
+        .map(|extension| format!("{name}{}", extension.to_ascii_lowercase()))
+        .collect()
 }
 
 /// Checks a concrete path before trying to execute it, such as `/usr/bin/git`.
@@ -1431,6 +1485,83 @@ mod tests {
         assert!(
             super::is_executable_file(&file),
             "expected a regular file to be executable on a platform without execute bits"
+        );
+    }
+
+    #[test]
+    fn windows_executable_names_follow_pathext() {
+        use std::ffi::OsStr;
+
+        let cases: [(&str, Option<&str>, &[&str]); 8] = [
+            // Unset and empty fall back to Windows' own default list.
+            ("gh", None, &["gh.com", "gh.exe", "gh.bat", "gh.cmd"]),
+            ("gh", Some(""), &["gh.com", "gh.exe", "gh.bat", "gh.cmd"]),
+            ("gh", Some("  "), &["gh.com", "gh.exe", "gh.bat", "gh.cmd"]),
+            // The variable's own order wins, appended in lower case; blanks and non-extensions
+            // drop out.
+            ("gh", Some(".CMD; .exe;;.;bad"), &["gh.cmd", "gh.exe"]),
+            // A name that already ends in a listed extension is tried as written, in any case.
+            ("gh.exe", Some(".COM;.EXE"), &["gh.exe"]),
+            ("GH.Cmd", Some(".EXE;.cmd"), &["GH.Cmd"]),
+            // A dot that is not a listed extension does not make the name runnable.
+            (
+                "python3.12",
+                Some(".EXE;.CMD"),
+                &["python3.12.exe", "python3.12.cmd"],
+            ),
+            ("gh.exe", Some(".CMD"), &["gh.exe.cmd"]),
+        ];
+        for (name, pathext, expected) in cases {
+            let received = super::windows_executable_names(name, pathext.map(OsStr::new));
+            assert_eq!(
+                received, expected,
+                "(windows_executable_names): expected names for {name:?} with PATHEXT {pathext:?}: {expected:?} | received: {received:?}"
+            );
+        }
+    }
+
+    /// The `gh.exe`-behind-an-extensionless-`gh` layout from the bug report, walked with the
+    /// names a Windows host would try. Unix execute bits stand in for Windows' lack of them.
+    #[cfg(unix)]
+    #[test]
+    fn executable_walk_skips_an_extensionless_file_for_a_later_pathext_match() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = scratch_home("pathext-walk");
+        let (first, second, third) = (root.join("first"), root.join("second"), root.join("third"));
+        for dir in [&first, &second, &third] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        for file in [
+            first.join("gh"),
+            second.join("gh.exe"),
+            second.join("gh.cmd"),
+            third.join("gh.bat"),
+        ] {
+            std::fs::write(&file, "").unwrap();
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let path_var = std::env::join_paths([&first, &second, &third]).unwrap();
+
+        // `.cmd` is listed first, so within `second` it beats `gh.exe`; `first`'s bare `gh` is
+        // never a candidate.
+        let names = super::windows_executable_names("gh", Some(".cmd;.exe".as_ref()));
+        assert_eq!(
+            super::first_executable_in(&names, &path_var),
+            Some(second.join("gh.cmd")),
+            "(first_executable_in): expected the .cmd shim in the second directory"
+        );
+        let names = super::windows_executable_names("gh", Some(".bat".as_ref()));
+        assert_eq!(
+            super::first_executable_in(&names, &path_var),
+            Some(third.join("gh.bat")),
+            "(first_executable_in): expected the .bat shim in the third directory"
+        );
+        let names = super::windows_executable_names("gh", Some(".com".as_ref()));
+        assert_eq!(
+            super::first_executable_in(&names, &path_var),
+            None,
+            "(first_executable_in): expected no match for a PATHEXT no file carries"
         );
     }
 

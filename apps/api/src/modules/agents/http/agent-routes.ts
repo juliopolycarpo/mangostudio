@@ -1,18 +1,13 @@
-import type {
-  AgentMarkdownPreviewResponse,
-  AgentProfile,
-  AgentProfileListResponse,
-  DeleteAgentProfileResponse,
-} from '@mangostudio/shared/agents';
+import type { AgentProfileListResponse } from '@mangostudio/shared/agents';
 import {
   AgentMarkdownPreviewBodySchema,
   AgentProfileUpsertBodySchema,
   CreateAgentProfileBodySchema,
 } from '@mangostudio/shared/agents';
-import type { ApiErrorResponse } from '@mangostudio/shared/errors';
-import { Elysia, t } from 'elysia';
+import { Elysia, status, t } from 'elysia';
 
 import { getDb } from '../../../db/database';
+import { apiErrorStatus } from '../../../lib/api-error-status';
 import { environmentUnavailableResponse } from '../../../lib/environment-unavailable';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
@@ -27,18 +22,16 @@ import { AgentSettingsError } from '../domain/agent-profile';
 
 function handleAgentSettingsError(
   error: unknown,
-  set: { status?: number | string }
-): ApiErrorResponse {
+  set: { headers?: Record<string, string | number | string[]> }
+) {
   if (error instanceof AgentSettingsError) {
-    set.status = error.status;
-    return { error: error.message, code: error.code };
+    return apiErrorStatus(error.status, { error: error.message, code: error.code });
   }
 
   const unavailable = environmentUnavailableResponse(error, set);
   if (unavailable) return unavailable;
 
-  set.status = 500;
-  return { error: 'Unexpected agent settings error.', code: 'INTERNAL' };
+  return status(500, { error: 'Unexpected agent settings error.', code: 'INTERNAL' });
 }
 
 export const agentRoutes = new Elysia()
@@ -54,7 +47,7 @@ export const agentRoutes = new Elysia()
     {
       params: t.Object({ agentId: t.String() }),
     },
-    async ({ params, set, user }): Promise<AgentProfile | ApiErrorResponse> => {
+    async ({ params, set, user }) => {
       try {
         return await getAgentProfile(getDb(), user?.id ?? '', params.agentId);
       } catch (error) {
@@ -69,7 +62,7 @@ export const agentRoutes = new Elysia()
       params: t.Object({ agentId: t.String() }),
       body: AgentProfileUpsertBodySchema,
     },
-    async ({ body, params, set, user }): Promise<AgentProfile | ApiErrorResponse> => {
+    async ({ body, params, set, user }) => {
       try {
         return await updateAgentProfile(getDb(), user?.id ?? '', params.agentId, body);
       } catch (error) {
@@ -83,7 +76,7 @@ export const agentRoutes = new Elysia()
     {
       body: CreateAgentProfileBodySchema,
     },
-    ({ body, set }): AgentProfile | ApiErrorResponse => {
+    ({ body, set }) => {
       try {
         return createAgentProfile(body);
       } catch (error) {
@@ -97,7 +90,7 @@ export const agentRoutes = new Elysia()
     {
       params: t.Object({ agentId: t.String() }),
     },
-    ({ params, set }): DeleteAgentProfileResponse | ApiErrorResponse => {
+    ({ params, set }) => {
       try {
         return deleteAgentProfile(params.agentId);
       } catch (error) {
@@ -111,7 +104,7 @@ export const agentRoutes = new Elysia()
     {
       body: AgentMarkdownPreviewBodySchema,
     },
-    ({ body, set }): AgentMarkdownPreviewResponse | ApiErrorResponse => {
+    ({ body, set }) => {
       try {
         return previewAgentProfileMarkdown(body.markdown, body.id);
       } catch (error) {

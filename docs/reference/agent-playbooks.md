@@ -629,8 +629,11 @@ change groups, with the GitHub card collapsed at the bottom.
 - `apps/api/tests/integration/routes/git-{state,write,navigation}.integration.test.ts`
   drive real temp repositories and skip when git is absent. Their fixtures pin
   `core.hooksPath` so a global `commit-msg` hook cannot rewrite fixture messages.
-- `apps/frontend/tests/unit/components/git-panel.test.tsx` mocks the hook module
+- `apps/frontend/tests/support/mocks/git-panel-hooks.ts` mocks the hook module
   wholesale, so a new hook must be added to that mock before the panel can render.
+  `tests/support/harness/git-panel.tsx` adds `Panel` and `repoState`. The diff viewer's
+  Suspense fallback is asserted in its own file, `git-panel-diff-suspense.test.tsx`,
+  because `LazyDiffViewer`'s lazy singleton only suspends once per module registry.
 
 ## Live Terminal
 

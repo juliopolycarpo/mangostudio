@@ -15,7 +15,9 @@ const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export class AgentSettingsError extends Error {
   constructor(
     message: string,
-    readonly status: number,
+    // Literals, not `number`: the route answers `status(error.status, ...)`, and a
+    // literal union types each status into Eden's error channel.
+    readonly status: 404 | 409 | 422,
     readonly code: string
   ) {
     super(message);

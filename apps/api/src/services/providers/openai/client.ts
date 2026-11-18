@@ -39,8 +39,8 @@ export interface OpenAIAuthContext {
 
 /** Thrown when OpenAI rejects the key or auth context (HTTP 401 / 403). */
 export class OpenAIAuthError extends Error {
-  readonly status: number;
-  constructor(message: string, status: number) {
+  readonly status: 401 | 403;
+  constructor(message: string, status: 401 | 403) {
     super(message);
     this.name = 'OpenAIAuthError';
     this.status = status;

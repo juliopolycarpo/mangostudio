@@ -1,16 +1,11 @@
 import {
   CreateMessageBodySchema,
-  type GalleryPage,
   GalleryPageSchema,
   ListGalleryQuerySchema,
   UpdateMessageBodySchema,
 } from '@mangostudio/shared/chat';
-import {
-  type ApiErrorResponse,
-  ApiErrorResponseSchema,
-  ERROR_CODES,
-} from '@mangostudio/shared/errors';
-import { type Elysia, t } from 'elysia';
+import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
+import { type Elysia, status, t } from 'elysia';
 
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
@@ -21,6 +16,9 @@ import { updateMessageUseCase } from '../application/update-message';
 import { InvalidGalleryCursorError } from '../domain/gallery-cursor';
 import { GeneratingMessageTextEditError } from '../domain/message-generating';
 import { MessageNotFoundError } from '../domain/message-ownership';
+
+/** The `{ success: true }` acknowledgement the message write routes answer with. */
+const SuccessResponseSchema = t.Object({ success: t.Literal(true) });
 
 export const messageRoutes = (app: Elysia) =>
   app.group('/messages', (app) =>
@@ -39,7 +37,7 @@ export const messageRoutes = (app: Elysia) =>
             400: ApiErrorResponseSchema,
           },
         },
-        async ({ query, user, set }): Promise<ApiErrorResponse | GalleryPage> => {
+        async ({ query, user }) => {
           try {
             return await listGalleryUseCase(
               {
@@ -51,8 +49,7 @@ export const messageRoutes = (app: Elysia) =>
             );
           } catch (err) {
             if (err instanceof InvalidGalleryCursorError) {
-              set.status = 400;
-              return { error: err.message, code: ERROR_CODES.VALIDATION };
+              return status(400, { error: err.message, code: ERROR_CODES.VALIDATION });
             }
             throw err;
           }
@@ -60,35 +57,41 @@ export const messageRoutes = (app: Elysia) =>
       )
 
       /** Create a new message for a chat owned by the user. */
-      .post('/', { body: CreateMessageBodySchema }, async ({ body, user, set }) => {
-        try {
-          await createMessageUseCase(
-            {
-              id: body.id,
-              chatId: body.chatId,
-              userId: user?.id ?? '',
-              role: body.role,
-              text: body.text,
-              imageUrl: body.imageUrl,
-              referenceImage: body.referenceImage,
-              timestamp: body.timestamp,
-              isGenerating: body.isGenerating ?? false,
-              generationTime: body.generationTime,
-              modelName: body.modelName,
-              styleParams: body.styleParams,
-              interactionMode: body.interactionMode ?? 'image',
-            },
-            getDb()
-          );
-          return { success: true };
-        } catch (err) {
-          if (err instanceof ChatNotFoundError) {
-            set.status = 404;
-            return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
+      .post(
+        '/',
+        {
+          body: CreateMessageBodySchema,
+          response: { 200: SuccessResponseSchema, 404: ApiErrorResponseSchema },
+        },
+        async ({ body, user }) => {
+          try {
+            await createMessageUseCase(
+              {
+                id: body.id,
+                chatId: body.chatId,
+                userId: user?.id ?? '',
+                role: body.role,
+                text: body.text,
+                imageUrl: body.imageUrl,
+                referenceImage: body.referenceImage,
+                timestamp: body.timestamp,
+                isGenerating: body.isGenerating ?? false,
+                generationTime: body.generationTime,
+                modelName: body.modelName,
+                styleParams: body.styleParams,
+                interactionMode: body.interactionMode ?? 'image',
+              },
+              getDb()
+            );
+            return { success: true as const };
+          } catch (err) {
+            if (err instanceof ChatNotFoundError) {
+              return status(404, { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND });
+            }
+            throw err;
           }
-          throw err;
         }
-      })
+      )
 
       /**
        * Update a message in a chat owned by the user. A `text` patch on a message that is
@@ -99,8 +102,13 @@ export const messageRoutes = (app: Elysia) =>
         {
           params: t.Object({ id: t.String() }),
           body: UpdateMessageBodySchema,
+          response: {
+            200: SuccessResponseSchema,
+            404: ApiErrorResponseSchema,
+            409: ApiErrorResponseSchema,
+          },
         },
-        async ({ params, body, user, set }) => {
+        async ({ params, body, user }) => {
           try {
             await updateMessageUseCase(
               {
@@ -117,15 +125,13 @@ export const messageRoutes = (app: Elysia) =>
               },
               getDb()
             );
-            return { success: true };
+            return { success: true as const };
           } catch (err) {
             if (err instanceof MessageNotFoundError) {
-              set.status = 404;
-              return { error: 'Message not found', code: ERROR_CODES.NOT_FOUND };
+              return status(404, { error: 'Message not found', code: ERROR_CODES.NOT_FOUND });
             }
             if (err instanceof GeneratingMessageTextEditError) {
-              set.status = 409;
-              return { error: err.message, code: ERROR_CODES.CONFLICT };
+              return status(409, { error: err.message, code: ERROR_CODES.CONFLICT });
             }
             throw err;
           }

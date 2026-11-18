@@ -1,6 +1,6 @@
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { TurnRecoveryActionResponse } from '@mangostudio/shared/turn-recovery';
-import { type Elysia, t } from 'elysia';
+import { type Elysia, status, t } from 'elysia';
 
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
@@ -14,14 +14,12 @@ import {
   TurnRecoveryNotFoundError,
 } from '../application/turn-recovery';
 
-function handleRecoveryError(error: unknown, set: { status?: number | string }) {
+function handleRecoveryError(error: unknown) {
   if (error instanceof TurnRecoveryNotFoundError) {
-    set.status = 404;
-    return { error: error.message, code: ERROR_CODES.NOT_FOUND };
+    return status(404, { error: error.message, code: ERROR_CODES.NOT_FOUND });
   }
   if (error instanceof TurnRecoveryConflictError) {
-    set.status = 409;
-    return { error: error.message, code: ERROR_CODES.CONFLICT };
+    return status(409, { error: error.message, code: ERROR_CODES.CONFLICT });
   }
   throw error;
 }
@@ -33,7 +31,7 @@ export const turnRecoveryRoutes = (app: Elysia) =>
       .post(
         '/dismiss',
         { params: t.Object({ id: t.String(), messageId: t.String() }) },
-        async ({ params, user, set }) => {
+        async ({ params, user }) => {
           try {
             await dismissInterruptedTurn(
               {
@@ -48,14 +46,14 @@ export const turnRecoveryRoutes = (app: Elysia) =>
               status: 'dismissed',
             } satisfies TurnRecoveryActionResponse;
           } catch (error) {
-            return handleRecoveryError(error, set);
+            return handleRecoveryError(error);
           }
         }
       )
       .post(
         '/cancel',
         { params: t.Object({ id: t.String(), messageId: t.String() }) },
-        async ({ params, user, set }) => {
+        async ({ params, user }) => {
           const userId = user?.id ?? '';
           try {
             const turn = await assertTurnCanCancel(
@@ -89,7 +87,7 @@ export const turnRecoveryRoutes = (app: Elysia) =>
               status: 'interrupted',
             } satisfies TurnRecoveryActionResponse;
           } catch (error) {
-            return handleRecoveryError(error, set);
+            return handleRecoveryError(error);
           }
         }
       )

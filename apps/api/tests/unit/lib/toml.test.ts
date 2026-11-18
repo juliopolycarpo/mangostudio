@@ -1,21 +1,14 @@
 /**
  * `src/lib/toml.ts` is the API's only TOML boundary. The round-trip cases pin
- * the adapter's contract; the import sweep keeps TOML libraries out of this
- * workspace now that Bun owns parsing and serialization.
+ * the adapter's contract. TOML libraries are rejected in every workspace: their
+ * imports by scripts/tests/toml-library-import-guard.unit.test.ts, their
+ * manifest entries by `RETIRED_DEPENDENCIES` in scripts/lib/dependency-policy.ts.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import {
-  existsSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative, resolve, sep } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import {
   deleteTomlSectionValue,
@@ -70,17 +63,6 @@ afterEach(() => {
   rmSync(directory, { recursive: true, force: true });
 });
 
-const TOML_LIBRARIES = ['smol-toml', 'toml', '@iarna/toml', '@ltd/j-toml', '@std/toml'];
-const TOML_LIBRARY_SPECIFIER =
-  /\b(?:from|import|require)\s*\(?\s*['"](?:@[^/'"]+\/)?[^./'"]*toml[^/'"]*(?:\/[^'"]*)?['"]/;
-
-function sourceFilesUnder(directory: string): string[] {
-  return readdirSync(directory, { recursive: true, encoding: 'utf8' })
-    .filter((entry) => entry.endsWith('.ts') || entry.endsWith('.tsx'))
-    .map((entry) => join(directory, entry))
-    .filter((path) => statSync(path).isFile());
-}
-
 describe('stringifyTomlDocument', () => {
   it('round-trips nested tables and non-string values through parseTomlDocument', () => {
     const doc = {
@@ -90,6 +72,20 @@ describe('stringifyTomlDocument', () => {
 
     expect(parseTomlDocument(stringifyTomlDocument(doc))).toEqual(doc);
   });
+
+  it.each(['toString', 'constructor', '__proto__', 'hasOwnProperty'])(
+    'does not delete %s, which a section inherits but does not define',
+    (key) => {
+      const section = { secret: 'kept' };
+      const doc: Record<string, unknown> = { auth: section };
+
+      expect(
+        deleteTomlSectionValue(doc, 'auth', key),
+        `(deleteTomlSectionValue): expected false for the inherited key ${key} | received true`
+      ).toBe(false);
+      expect(doc.auth, 'expected the section object left untouched').toBe(section);
+    }
+  );
 
   it('reads, edits and writes a config without losing unrelated values or date types', () => {
     writeFileSync(configPath, CONFIG_DOCUMENT);
@@ -314,55 +310,50 @@ describe('TOML file readers', () => {
   });
 });
 
+describe('TOML section helpers and Temporal values', () => {
+  // Top-level date/time values are Temporal objects, not tables.
+  const TEMPORAL_DOCUMENT = [
+    'released = 1979-05-27',
+    'cutoff = 1979-05-27T07:32:00Z',
+    'local = 1979-05-27T07:32:00',
+    'alarm = 07:32:00',
+    '[auth]',
+    'secret = "s"',
+  ].join('\n');
+
+  it('does not report a top-level date or time as an empty string section', () => {
+    expect(parseTomlStringSections(TEMPORAL_DOCUMENT)).toEqual({ auth: { secret: 's' } });
+  });
+
+  // Temporal values inherit accessors such as `year`, so `key in value` is true.
+  it.each([
+    ['released', 'year'],
+    ['cutoff', 'epochMilliseconds'],
+    ['local', 'hour'],
+    ['alarm', 'minute'],
+  ])('keeps the %s date value when asked to delete its inherited %s accessor', (section, key) => {
+    const doc = parseTomlDocument(TEMPORAL_DOCUMENT);
+    const before = stringifyTomlDocument(doc);
+
+    expect(deleteTomlSectionValue(doc, section, key)).toBe(false);
+    expect(stringifyTomlDocument(doc)).toBe(before);
+  });
+
+  it('replaces a date value with a table when setting a key under its name', () => {
+    const doc = parseTomlDocument(TEMPORAL_DOCUMENT);
+
+    setTomlSectionValue(doc, 'released', 'note', 'x');
+
+    expect(doc.released).toEqual({ note: 'x' });
+  });
+});
+
 describe('TOML library boundary', () => {
   it('uses one native parse and stringify without a source scanner or offset metadata bridge', () => {
     const adapter = readFileSync(join(API_ROOT, ADAPTER), 'utf8');
     expect(adapter.match(/\bBun\.TOML\.parse\(/g)).toHaveLength(1);
     expect(adapter.match(/\bBun\.TOML\.stringify\(/g)).toHaveLength(1);
+    // An import of the deleted module would fail typecheck, so no text scan is needed.
     expect(existsSync(join(API_ROOT, 'src/lib/toml-offsets.ts'))).toBe(false);
-    for (const file of sourceFilesUnder(join(API_ROOT, 'src'))) {
-      expect(readFileSync(file, 'utf8')).not.toMatch(/\bfrom\s*['"][^'"]*toml-offsets['"]/);
-    }
-  });
-
-  it('recognizes static imports, dynamic imports, and CommonJS requires', () => {
-    for (const library of TOML_LIBRARIES) {
-      for (const source of [
-        `import { parse } from '${library}'`,
-        `import '${library}'`,
-        `await import('${library}')`,
-        `require('${library}')`,
-        `import { parse } from '${library}/parse'`,
-      ]) {
-        expect(TOML_LIBRARY_SPECIFIER.test(source), source).toBe(true);
-      }
-    }
-  });
-
-  it('allows the project-owned adapter and the Bun builtin', () => {
-    for (const source of [
-      "import { parseTomlDocument } from './toml'",
-      "await import('../lib/toml')",
-      "require('./toml')",
-      "import { TOML } from 'bun'",
-    ]) {
-      expect(TOML_LIBRARY_SPECIFIER.test(source), source).toBe(false);
-    }
-  });
-
-  it('imports no TOML library, including in the adapter', () => {
-    const offenders = ['src', 'tests']
-      .flatMap((directory) => sourceFilesUnder(join(API_ROOT, directory)))
-      .map((path) => relative(API_ROOT, path).split(sep).join('/'))
-      .filter((path) => TOML_LIBRARY_SPECIFIER.test(readFileSync(join(API_ROOT, path), 'utf8')));
-
-    expect(offenders, `import TOML helpers from ${ADAPTER} instead`).toEqual([]);
-  });
-
-  it('declares no TOML library dependency', () => {
-    const manifest = JSON.parse(readFileSync(join(API_ROOT, 'package.json'), 'utf8'));
-    const declared = Object.keys({ ...manifest.dependencies, ...manifest.devDependencies });
-
-    expect(declared.filter((name) => name.includes('toml'))).toEqual([]);
   });
 });

@@ -21,9 +21,18 @@ use crate::workspace::lexically_normalize;
 /// A directory that has been opened and checked against the final policy.
 pub(super) struct BoundDir {
     anchor: AnchoredDir,
+    /// The directory handle's final host path, read once when it was bound.
+    final_path: PathBuf,
 }
 
 impl BoundDir {
+    /// The host path this directory resolved to when it was bound and checked
+    /// against the policy. Its non-symlink children live at `final_path/name`,
+    /// so a walk can authorize them without resolving each path again.
+    pub(super) fn final_path(&self) -> &Path {
+        &self.final_path
+    }
+
     /// Re-opens this directory from the filesystem root before running a
     /// relative operation.
     ///
@@ -302,7 +311,7 @@ pub(super) fn bind_opened_directory(
 ) -> Result<BoundDir, RemoteError> {
     let final_path = directory_final_path(&dir)?;
     let anchor = bind_authorization_anchor(policy, requested, &final_path, &final_path)?;
-    Ok(BoundDir { anchor })
+    Ok(BoundDir { anchor, final_path })
 }
 
 fn bind_verified_parent(

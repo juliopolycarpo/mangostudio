@@ -2,7 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { PINNED_GITHUB_GRAPHQL_DOCUMENTS } from '@mangostudio/shared/github';
+import {
+  GH_READ_OPERATIONS,
+  GH_WRITE_OPERATIONS,
+  PINNED_GITHUB_GRAPHQL_DOCUMENTS,
+} from '@mangostudio/shared/github';
 
 import {
   ARTIFACT_DIR,
@@ -55,6 +59,29 @@ describe('runtime contract artifacts', () => {
       expect(readFileSync(join(ROOT_DIR, path), 'utf8')).toBe(expected);
     }
   });
+
+  test.each([
+    ['read', GH_READ_OPERATIONS],
+    ['write', GH_WRITE_OPERATIONS],
+  ] as const)(
+    'the committed strings.json carries exactly the shared gh %s operations',
+    (side, operations) => {
+      const committed = JSON.parse(
+        readFileSync(join(ROOT_DIR, ARTIFACT_DIR, 'strings.json'), 'utf8')
+      ) as { githubCliOperations?: Record<string, readonly string[]> };
+      const received = committed.githubCliOperations?.[side] ?? [];
+      // Name the command and the side that disagree, so a one-sided edit points at itself.
+      const missing = operations.filter((operation) => !received.includes(operation));
+      const extra = received.filter((operation) => !operations.includes(operation));
+      expect(
+        { missing, extra },
+        `(strings.json githubCliOperations.${side}): expected \`gh ${missing[0] ?? extra[0]}\` on both sides; ` +
+          `missing from the committed artifact: [${missing}], only in the committed artifact: [${extra}]. ` +
+          'Run "bun run contracts:emit".'
+      ).toEqual({ missing: [], extra: [] });
+      expect(received).toEqual([...operations]);
+    }
+  );
 
   test('the catalog validates against the published protocol schema', async () => {
     await expect(assertCatalogValid(renderArtifacts())).resolves.toBeUndefined();
@@ -150,6 +177,10 @@ describe('runtime contract artifacts', () => {
       alreadyBoundReason: 'runtime already bound to another environment',
     });
     expect(strings.githubGraphqlDocuments).toEqual(PINNED_GITHUB_GRAPHQL_DOCUMENTS);
+    expect(strings.githubCliOperations).toEqual({
+      read: GH_READ_OPERATIONS,
+      write: GH_WRITE_OPERATIONS,
+    });
     expect(strings.runtimeHome.slots).toEqual(['host', 'wsl', 'remote']);
     expect(strings.errors.serviceErrorKinds).toContain('consent_denied');
   });

@@ -18,6 +18,10 @@ import { stdioPort } from '../src/transports/stdio';
 const BUN = Bun.which('bun') ?? process.execPath;
 const ECHO_CHILD = fileURLToPath(new URL('./fixtures/stdio-echo.ts', import.meta.url));
 
+/** Sequential round trips against a real child, and how long each may take. */
+const BURST_REQUESTS = 300;
+const BURST_REPLY_DEADLINE_MS = 5_000;
+
 /**
  * Two stdio ports cross-wired through a pair of pipes: `a` writes what `b`
  * reads and the other way round, which is exactly the shape a parent and a
@@ -148,6 +152,30 @@ describe('stdio transport', () => {
       expect(await child.terminate()).toEqual({ code: 0, signal: null });
     }
   });
+
+  it('answers a back-to-back burst of requests from inside the child stdin callback', async () => {
+    // The child answers from its `process.stdin` `data` callback and the parent
+    // sends the next request the moment a reply lands, the shape in which Bun
+    // for Windows lost a pipe write made from a read callback (see `deferReads`
+    // in node-stream.ts). Each request is bounded, so a lost reply fails here
+    // as the missing one rather than as a suite timeout. Run on `windows-latest`
+    // in the Interop job to measure whether the stdio transport needs the same
+    // deferral.
+    const child = spawnPort({ argv: [BUN, ECHO_CHILD] });
+    try {
+      const session = new Session(child.port, { peer: CONFORMANCE_A, livenessIntervalMs: false });
+      await session.ready;
+
+      for (let index = 0; index < BURST_REQUESTS; index++) {
+        const reply = await session
+          .request('test.echo', { index }, { timeoutMs: BURST_REPLY_DEADLINE_MS })
+          .catch((error: unknown) => `request ${index} failed: ${String(error)}`);
+        expect(reply).toEqual({ index });
+      }
+    } finally {
+      expect(await child.terminate()).toEqual({ code: 0, signal: null });
+    }
+  }, 60_000);
 
   it('releases the input when the port closes, so the process can exit', () => {
     const input = new PassThrough();

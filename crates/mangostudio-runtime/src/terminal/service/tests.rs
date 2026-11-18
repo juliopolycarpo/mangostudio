@@ -701,12 +701,23 @@ async fn fake_pty_exit_refuses_write_with_typed_error_and_preserves_native_code(
     assert_eq!(service.list().unwrap()["sessions"][0]["exitCode"], 7);
 }
 
+/// The file a fake `name` is written as on this OS. Windows runs a file only through a
+/// `PATHEXT` extension, so an extensionless name becomes `name.exe` there; every other name,
+/// and every name on Unix, is kept as written.
+fn fake_executable_name(name: &str) -> String {
+    if cfg!(windows) && !name.contains('.') {
+        format!("{name}.exe")
+    } else {
+        name.to_owned()
+    }
+}
+
 /// A host on `platform` whose `PATH` is one scratch directory holding a fake of each `shells`
-/// name. Files without an extension resolve on every OS, so these run on every CI host.
+/// name, written as [`fake_executable_name`] spells it so it resolves on every CI host.
 fn host_with_shells(label: &str, platform: &str, shells: &[&str]) -> (ScratchDir, PathEnv) {
     let scratch = ScratchDir::created(label);
     for name in shells {
-        let path = scratch.join(name);
+        let path = scratch.join(fake_executable_name(name));
         std::fs::write(&path, b"fake shell").unwrap();
         #[cfg(unix)]
         {
@@ -1541,7 +1552,10 @@ fn cursor_login_prefers_the_vendor_specific_executable() {
     params.shell = None;
     params.login_target = Some("cursor".into());
     let launch = prepare(params, host).expect("the vendor-specific Cursor executable is available");
-    assert_eq!(launch.request.program, scratch.join("cursor-agent"));
+    assert_eq!(
+        launch.request.program,
+        scratch.join(fake_executable_name("cursor-agent"))
+    );
     assert!(launch.cursor_alias.is_none());
 }
 

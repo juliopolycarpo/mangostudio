@@ -56,6 +56,28 @@ const SHUTDOWN_DRAIN_GRACE: Duration = Duration::from_secs(5);
 /// [`MAX_PENDING_HANDSHAKES`] permit — and its `OwnedTasks` slot — forever.
 const UPGRADE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How long an accepted peer may stay completely silent before its
+/// [`MAX_PENDING_HANDSHAKES`] permit is taken back. Only the wait for the
+/// first byte is bounded by this; once a byte has arrived the rest of the
+/// upgrade runs under [`UPGRADE_TIMEOUT`] (still counted from accept).
+///
+/// Without a separate deadline, four peers that connect and send nothing hold
+/// every permit for the whole [`UPGRADE_TIMEOUT`] and a real hub is refused
+/// for ten seconds (#1086). A silent peer costs one task and one descriptor;
+/// it should not also cost a quarter of the admission budget for that long.
+///
+/// 2 s is sized against what the hub actually does. Its Direct URL dial
+/// (`connect-http-runtime.ts`, a WebSocket under a 15 s dial-plus-hello
+/// budget) writes the upgrade request the moment the TCP connection opens, so
+/// a `ws://` peer's first byte follows `accept` by well under a millisecond.
+/// The only legitimate delay is a TCP-level proxy that opens its upstream
+/// connection on accept and forwards the first byte after finishing the
+/// client's TLS handshake (`https:` Direct URLs dial `wss:`): that is one to
+/// two round trips, so 2 s still leaves headroom at a 500 ms RTT, which is
+/// already a poor link. A longer value only hands the flood back its time; a
+/// shorter one starts refusing hubs on slow links.
+const FIRST_BYTE_TIMEOUT: Duration = Duration::from_secs(2);
+
 /// How long to back off after `listener.accept()` itself fails (an `EMFILE`
 /// once every pending-handshake permit is genuinely held by a slow peer, a
 /// transient `ECONNABORTED`, …) before trying again — never busy-loop the
@@ -488,7 +510,8 @@ async fn release_active(previous: ActiveGeneration, code: u16, reason: &str) {
 /// exactly the upgrade below — bounded by [`UPGRADE_TIMEOUT`], since
 /// the WebSocket upgrade has no read timeout of its own and a peer that opens
 /// the socket and never speaks would otherwise hold it, and this task's
-/// `OwnedTasks` slot, forever.
+/// `OwnedTasks` slot, forever. A peer that sends no first byte at all loses
+/// both after [`FIRST_BYTE_TIMEOUT`] instead.
 async fn handle_connection(
     stream: TcpStream,
     permit: tokio::sync::OwnedSemaphorePermit,
@@ -497,14 +520,23 @@ async fn handle_connection(
 ) {
     let token = context.token.clone();
     let runtime_version = context.runtime_version.clone();
-    // The health-check peek and the upgrade itself share this one timeout,
-    // not two separate ones: `TcpStream::peek` waits for bytes exactly the
-    // way the WebSocket upgrade does, so a peer that opens the socket and
-    // never sends anything at all — not even a health check — must not be
-    // able to hold this slot any longer by arriving before the part of
-    // this function that used to be the only bounded step.
+    // Two deadlines, nested. The outer one is the whole exchange, counted
+    // from accept. The inner one covers only the health-check peek, which
+    // is where a peer that has sent nothing waits: `TcpStream::peek` blocks
+    // for a first byte exactly the way the WebSocket upgrade would, so
+    // without its own short deadline a silent peer holds this permit for the
+    // full `UPGRADE_TIMEOUT` and four of them refuse every real hub for that
+    // long (#1086). The peek returns on the first byte, so a peer that has
+    // spoken at all is on the outer clock alone from then on.
     let classified = tokio::time::timeout(UPGRADE_TIMEOUT, async move {
-        if is_health_check(&stream).await {
+        let Ok(health_check) =
+            tokio::time::timeout(FIRST_BYTE_TIMEOUT, is_health_check(&stream)).await
+        else {
+            // Silent for `FIRST_BYTE_TIMEOUT`: nothing to answer or upgrade.
+            // The stream and the permit drop with this task.
+            return None;
+        };
+        if health_check {
             respond_health(stream, &runtime_version).await;
             return None;
         }
@@ -530,7 +562,8 @@ async fn handle_connection(
     })
     .await;
     let (port, binding_header) = match classified {
-        // A health check was answered; nothing to upgrade at all. `permit`
+        // A health check was answered, or the peer sent no first byte within
+        // `FIRST_BYTE_TIMEOUT`; nothing to upgrade either way. `permit`
         // drops here — a health check never counted against
         // `MAX_PENDING_HANDSHAKES` in `serve.ts` either.
         Ok(None) => return,
@@ -1602,6 +1635,160 @@ mod tests {
             matches!(admission, Admission::Admitted { previous: None, .. }),
             "expected admission: admitted with nothing to supersede | received: {}",
             outcome(&admission)
+        );
+    }
+
+    /// What the pending-handshake tests below hand `handle_connection`: the
+    /// accepting side of `MAX_PENDING_HANDSHAKES` loopback connections, plus
+    /// the connecting ends, which the test holds open and silent.
+    struct LoopbackPeers {
+        /// The runtime's half of each connection, as `accept` returned it.
+        accepted: Vec<tokio::net::TcpStream>,
+        /// The peer's half; dropping one is what a hangup looks like.
+        peers: Vec<tokio::net::TcpStream>,
+    }
+
+    /// Opens `count` loopback connections and accepts every one before the
+    /// caller spawns anything, so no timer exists while the sockets are set up
+    /// and paused time has nothing to jump over.
+    async fn open_loopback_peers(count: usize) -> LoopbackPeers {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind a loopback listener");
+        let address = listener.local_addr().expect("the listener's address");
+        let mut peers = Vec::new();
+        let mut accepted = Vec::new();
+        for _ in 0..count {
+            peers.push(
+                tokio::net::TcpStream::connect(address)
+                    .await
+                    .expect("connect to the loopback listener"),
+            );
+            accepted.push(listener.accept().await.expect("accept the connection").0);
+        }
+        LoopbackPeers { accepted, peers }
+    }
+
+    fn pending_handshake_context() -> (Arc<ServeState>, Arc<super::ConnectionContext>) {
+        let context = Arc::new(super::ConnectionContext {
+            token: "unused".into(),
+            slot: crate::runtime_home::RuntimeSlot::Host,
+            // Never read: no peer here gets past the upgrade, so nothing
+            // probes capabilities or builds a host.
+            mango_home: std::path::PathBuf::from("unused-mango-home"),
+            runtime_version: "0.0.0".into(),
+            restart: crate::transport::UpdateRestart::unsupervised(),
+            log: Box::new(|_line: &str| {}),
+            seams: super::TestSeams::default(),
+        });
+        (Arc::new(ServeState::new()), context)
+    }
+
+    /// Hands every accepted stream to `handle_connection` under a permit from
+    /// a fresh semaphore, the way the accept loop does, and returns that
+    /// semaphore for the test to watch.
+    fn spawn_pending_handshakes(
+        accepted: Vec<tokio::net::TcpStream>,
+        state: &Arc<ServeState>,
+        context: &Arc<super::ConnectionContext>,
+    ) -> Arc<tokio::sync::Semaphore> {
+        let pending = Arc::new(tokio::sync::Semaphore::new(super::MAX_PENDING_HANDSHAKES));
+        for stream in accepted {
+            let permit = Arc::clone(&pending)
+                .try_acquire_owned()
+                .expect("a permit for each accepted peer");
+            tokio::spawn(super::handle_connection(
+                stream,
+                permit,
+                Arc::clone(state),
+                Arc::clone(context),
+            ));
+        }
+        pending
+    }
+
+    /// #1086: `MAX_PENDING_HANDSHAKES` peers that connect and never send a
+    /// byte must give their permits back at the first-byte deadline, so a real
+    /// hub arriving behind them is admitted in seconds, not after the whole
+    /// upgrade timeout. Paused time makes the bound exact.
+    #[tokio::test(start_paused = true)]
+    async fn silent_peers_release_every_permit_at_the_first_byte_deadline() {
+        let LoopbackPeers {
+            accepted,
+            peers: silent_peers,
+        } = open_loopback_peers(super::MAX_PENDING_HANDSHAKES).await;
+        let (state, context) = pending_handshake_context();
+        let pending = spawn_pending_handshakes(accepted, &state, &context);
+
+        let started = tokio::time::Instant::now();
+        // A real hub needs one permit; waiting for all of them is the
+        // stricter claim: nothing is left holding the admission budget. The
+        // 1 ms slack keeps the deadline's own tick from racing this timer.
+        let all_released = tokio::time::timeout(
+            super::FIRST_BYTE_TIMEOUT + std::time::Duration::from_millis(1),
+            Arc::clone(&pending).acquire_many_owned(super::MAX_PENDING_HANDSHAKES as u32),
+        )
+        .await;
+        let elapsed = started.elapsed();
+        assert!(
+            all_released.is_ok(),
+            "expected every silent peer's permit released by {:?} | received: {} of {} permits \
+             free after {elapsed:?}",
+            super::FIRST_BYTE_TIMEOUT,
+            pending.available_permits(),
+            super::MAX_PENDING_HANDSHAKES,
+        );
+        drop(silent_peers);
+    }
+
+    /// The first-byte deadline is only about silence. A peer that has sent a
+    /// byte and then stalls is still bounded by the full upgrade timeout,
+    /// counted from accept: it keeps its permit past the first-byte deadline
+    /// and loses it at `UPGRADE_TIMEOUT`.
+    #[tokio::test(start_paused = true)]
+    async fn a_peer_that_sent_a_byte_keeps_its_permit_until_the_upgrade_timeout() {
+        use tokio::io::AsyncWriteExt as _;
+
+        let LoopbackPeers {
+            accepted,
+            mut peers,
+        } = open_loopback_peers(1).await;
+        let (state, context) = pending_handshake_context();
+        let pending = spawn_pending_handshakes(accepted, &state, &context);
+
+        let started = tokio::time::Instant::now();
+        tokio::time::sleep(super::FIRST_BYTE_TIMEOUT / 2).await;
+        peers[0]
+            .write_all(b"G")
+            .await
+            .expect("send one byte of a request line");
+        // Past the first-byte deadline, with the upgrade still half-sent.
+        tokio::time::sleep(super::FIRST_BYTE_TIMEOUT * 2).await;
+        assert_eq!(
+            pending.available_permits(),
+            super::MAX_PENDING_HANDSHAKES - 1,
+            "expected the peer's one permit still held {:?} after accept | received: released",
+            started.elapsed()
+        );
+
+        let released = tokio::time::timeout(
+            super::UPGRADE_TIMEOUT,
+            Arc::clone(&pending).acquire_many_owned(super::MAX_PENDING_HANDSHAKES as u32),
+        )
+        .await;
+        assert!(
+            released.is_ok(),
+            "expected the permit released by the upgrade timeout of {:?} | received: still held \
+             at {:?}",
+            super::UPGRADE_TIMEOUT,
+            started.elapsed()
+        );
+        assert_eq!(
+            started.elapsed(),
+            super::UPGRADE_TIMEOUT,
+            "expected the stalled upgrade dropped at {:?} after accept | received: {:?}",
+            super::UPGRADE_TIMEOUT,
+            started.elapsed()
         );
     }
 }

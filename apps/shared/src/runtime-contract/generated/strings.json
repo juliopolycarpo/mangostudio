@@ -72,6 +72,24 @@
   "githubGraphqlDocuments": [
     "query($owner: String!, $name: String!, $number: Int!) {\n  repository(owner: $owner, name: $name) {\n    pullRequest(number: $number) {\n      reviewThreads(first: 50) {\n        totalCount\n        nodes {\n          isResolved\n          isOutdated\n          path\n          line\n          comments(first: 20) {\n            totalCount\n            nodes { author { login } body }\n          }\n        }\n      }\n    }\n  }\n}"
   ],
+  "githubCliOperations": {
+    "read": [
+      "auth status",
+      "repo view",
+      "pr view",
+      "pr list",
+      "pr status",
+      "pr checks",
+      "issue list",
+      "search prs",
+      "api graphql"
+    ],
+    "write": [
+      "pr create",
+      "pr ready",
+      "pr checkout"
+    ]
+  },
   "runtimeHome": {
     "slots": [
       "host",

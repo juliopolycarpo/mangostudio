@@ -26,7 +26,9 @@ const FIXED_PATHS: ReadonlyMap<FixedRuleFileKind, { label: string; path: string 
 export class RuleFileError extends Error {
   constructor(
     message: string,
-    readonly status: number,
+    // Literals, not `number`: the route answers `status(error.status, ...)`, and a
+    // literal union types each status into Eden's error channel.
+    readonly status: 404 | 422,
     readonly code: string
   ) {
     super(message);

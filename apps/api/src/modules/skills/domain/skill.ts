@@ -13,7 +13,9 @@ const SKILL_SOURCES: ReadonlyArray<SkillSource> = ['mango', 'agents', 'claude'];
 export class SkillError extends Error {
   constructor(
     message: string,
-    readonly status: number,
+    // The statuses a skill failure is reported with. Literals, not `number`, so a
+    // route answering `status(error.status, ...)` types each one into Eden's error channel.
+    readonly status: 403 | 404 | 422 | 503,
     readonly code: string
   ) {
     super(message);

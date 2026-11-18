@@ -11,7 +11,8 @@ import type { SSEErrorEvent } from '@mangostudio/shared/streaming';
 import { type Elysia, t } from 'elysia';
 
 import { getDb } from '../../../db/database';
-import { environmentUnavailableResponse } from '../../../lib/environment-unavailable';
+import { type ApiErrorStatus, apiErrorStatus } from '../../../lib/api-error-status';
+import { environmentUnavailableBody } from '../../../lib/environment-unavailable';
 import { getErrorCode } from '../../../lib/error-code';
 import { SSE_KEEPALIVE_FRAME, SSE_KEEPALIVE_INTERVAL_MS } from '../../../lib/hub-connection-limits';
 import { requireAuth } from '../../../plugins/auth-middleware';
@@ -284,21 +285,42 @@ function toSsePayload(event: StreamEvent): object {
   }
 }
 
+/**
+ * The refusal a turn-recovery failure answers with, or `undefined` for an error
+ * that is not one of the three recovery refusals (the caller rethrows it).
+ * Inspecting and reserving a resume refuse for the same reasons, so both
+ * pre-flight catch blocks share this mapping.
+ */
+function turnRecoveryRefusal(err: unknown): ApiErrorStatus<400 | 404 | 409> | undefined {
+  if (err instanceof TurnRecoveryNotFoundError) {
+    return apiErrorStatus(404, { error: err.message, code: ERROR_CODES.NOT_FOUND });
+  }
+  if (err instanceof TurnRecoveryConflictError) {
+    return apiErrorStatus(409, { error: err.message, code: ERROR_CODES.CONFLICT });
+  }
+  if (err instanceof TurnRecoveryValidationError) {
+    return apiErrorStatus(400, { error: err.message, code: ERROR_CODES.VALIDATION });
+  }
+  return undefined;
+}
+
 async function respondStream(
   body: RespondStreamBody,
   userId: string,
-  set: { status?: number | string },
   admission?: { chat: OwnedChatRecord; onUserCancelled: () => void }
 ) {
   const db = getDb();
+
+  // Every refusal before the stream starts is `status(code, body)`, never a
+  // `Response`: the keyed wrapper below tells a refused preflight (release the
+  // key, retryable) from an accepted stream by `instanceof Response`.
 
   // Ownership check must be pre-flight to return HTTP 404 before SSE
   // headers flush. The same read supplies the persisted runner, which
   // names the agent when the request does not.
   const ownedChat = admission?.chat ?? (await getOwnedChat(body.chatId, userId, db));
   if (!ownedChat) {
-    set.status = 404;
-    return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
+    return apiErrorStatus(404, { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND });
   }
 
   const attachmentIds = normalizeTextTurnAttachmentIds(body.attachmentIds);
@@ -307,8 +329,7 @@ async function respondStream(
     await assertChatAttachmentIdsAvailable({ attachmentIds, userId, chatId: body.chatId }, db);
   } catch (err) {
     if (err instanceof ChatAttachmentNotFoundError || err instanceof EmptyTextTurnError) {
-      set.status = 400;
-      return { error: err.message, code: ERROR_CODES.VALIDATION };
+      return apiErrorStatus(400, { error: err.message, code: ERROR_CODES.VALIDATION });
     }
     throw err;
   }
@@ -331,8 +352,7 @@ async function respondStream(
       db
     );
     if (result.ok) return result.response;
-    set.status = EXTERNAL_PREFLIGHT_STATUS[result.failure.kind];
-    return {
+    return apiErrorStatus(EXTERNAL_PREFLIGHT_STATUS[result.failure.kind], {
       error: result.failure.message,
       code: EXTERNAL_PREFLIGHT_CODE[result.failure.kind],
       // The disclosure has to name what gets loaded, and only the
@@ -344,7 +364,7 @@ async function respondStream(
       // descriptor, so a client that only learned "a disclosure is
       // required" could not record one.
       ...externalPreflightDetails(result.failure),
-    };
+    });
   }
 
   let inspectedRecovery: Awaited<ReturnType<typeof inspectInterruptedTurnResume>> | null = null;
@@ -355,18 +375,8 @@ async function respondStream(
         db
       );
     } catch (err) {
-      if (err instanceof TurnRecoveryNotFoundError) {
-        set.status = 404;
-        return { error: err.message, code: ERROR_CODES.NOT_FOUND };
-      }
-      if (err instanceof TurnRecoveryConflictError) {
-        set.status = 409;
-        return { error: err.message, code: ERROR_CODES.CONFLICT };
-      }
-      if (err instanceof TurnRecoveryValidationError) {
-        set.status = 400;
-        return { error: err.message, code: ERROR_CODES.VALIDATION };
-      }
+      const refusal = turnRecoveryRefusal(err);
+      if (refusal) return refusal;
       throw err;
     }
   }
@@ -388,13 +398,11 @@ async function respondStream(
     });
   } catch (err) {
     if (err instanceof AgentSettingsError && err.status === 404) {
-      set.status = 404;
-      return { error: 'Agent not found', code: ERROR_CODES.NOT_FOUND };
+      return apiErrorStatus(404, { error: 'Agent not found', code: ERROR_CODES.NOT_FOUND });
     }
     if (err instanceof NoModelAvailableError) {
       const refusal = modelUnavailableResponse(err);
-      set.status = refusal.status;
-      return refusal.body;
+      return apiErrorStatus(refusal.status, refusal.body);
     }
     throw err;
   }
@@ -407,11 +415,10 @@ async function respondStream(
       await getProviderForModel(resolvedModel.modelId, userId);
     }
   } catch {
-    set.status = 400;
-    return {
+    return apiErrorStatus(400, {
       error: 'No provider available for the requested model.',
       code: ERROR_CODES.PROVIDER_ERROR,
-    };
+    });
   }
 
   const abortController = new AbortController();
@@ -450,18 +457,8 @@ async function respondStream(
       );
     } catch (err) {
       unregisterTurn();
-      if (err instanceof TurnRecoveryNotFoundError) {
-        set.status = 404;
-        return { error: err.message, code: ERROR_CODES.NOT_FOUND };
-      }
-      if (err instanceof TurnRecoveryConflictError) {
-        set.status = 409;
-        return { error: err.message, code: ERROR_CODES.CONFLICT };
-      }
-      if (err instanceof TurnRecoveryValidationError) {
-        set.status = 400;
-        return { error: err.message, code: ERROR_CODES.VALIDATION };
-      }
+      const refusal = turnRecoveryRefusal(err);
+      if (refusal) return refusal;
       throw err;
     }
   }
@@ -525,7 +522,7 @@ async function respondStream(
         if (!abortController.signal.aborted) {
           // A connect failure carries the same fixed text and code the JSON routes
           // answer 503 with, not the manager's diagnostic (paths, usernames).
-          const unavailable = environmentUnavailableResponse(err, {});
+          const unavailable = environmentUnavailableBody(err);
           const message =
             unavailable?.error ?? (err instanceof Error ? err.message : 'Stream generation failed');
           const code = unavailable?.code ?? getErrorCode(err);
@@ -577,34 +574,37 @@ export const respondStreamRoutes = (app: Elysia) =>
             410: ApiErrorResponseSchema,
           },
         },
-        async ({ params, user, set }) => {
+        async ({ params, user }) => {
           try {
             const row = await readOperation(getDb(), user?.id ?? '', params.operationId, {
               requireOwnedChat: true,
             });
             if (!row) {
-              set.status = 404;
-              return { error: 'Operation not found', code: ERROR_CODES.NOT_FOUND };
+              return apiErrorStatus(404, {
+                error: 'Operation not found',
+                code: ERROR_CODES.NOT_FOUND,
+              });
             }
             return operationReceipt(row);
           } catch (error) {
             if (error instanceof OperationExpiredError) {
-              set.status = 410;
-              return { error: error.message, code: ERROR_CODES.OPERATION_EXPIRED };
+              return apiErrorStatus(410, {
+                error: error.message,
+                code: ERROR_CODES.OPERATION_EXPIRED,
+              });
             }
             throw error;
           }
         }
       )
-      .post('/respond/stream', { body: RespondStreamBodySchema }, async ({ body, user, set }) => {
+      .post('/respond/stream', { body: RespondStreamBodySchema }, async ({ body, user }) => {
         const userId = user?.id ?? '';
-        if (!body.operationId) return respondStream(body, userId, set);
+        if (!body.operationId) return respondStream(body, userId);
         const db = getDb();
         // Authorize before observing any receipt, including a replay.
         const chat = await getOwnedChat(body.chatId, userId, db);
         if (!chat) {
-          set.status = 404;
-          return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
+          return apiErrorStatus(404, { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND });
         }
         const operationId = body.operationId;
         try {
@@ -627,7 +627,7 @@ export const respondStreamRoutes = (app: Elysia) =>
           if (!claimed) return operationReceipt(row);
           try {
             let userCancelled = false;
-            const response = await respondStream(body, userId, set, {
+            const response = await respondStream(body, userId, {
               chat,
               onUserCancelled: () => {
                 userCancelled = true;
@@ -665,11 +665,10 @@ export const respondStreamRoutes = (app: Elysia) =>
         } catch (error) {
           if (error instanceof OperationConflictError || error instanceof OperationExpiredError) {
             const expired = error instanceof OperationExpiredError;
-            set.status = expired ? 410 : 409;
-            return {
+            return apiErrorStatus(expired ? 410 : 409, {
               error: error.message,
               code: expired ? ERROR_CODES.OPERATION_EXPIRED : ERROR_CODES.CONFLICT,
-            };
+            });
           }
           throw error;
         }

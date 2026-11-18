@@ -3,13 +3,7 @@
  * Parse → call use case → respond. No business logic here.
  */
 
-import type {
-  ChatGptUsageHistoryResponse,
-  ChatGptUsageStatsResponse,
-  RedeemChatGptResetCreditResponse,
-} from '@mangostudio/shared/connectors';
 import { RedeemChatGptResetCreditBodySchema } from '@mangostudio/shared/connectors';
-import type { ApiErrorResponse } from '@mangostudio/shared/errors';
 import { Elysia, t } from 'elysia';
 
 import { requireAuth } from '../../../plugins/auth-middleware';
@@ -29,16 +23,11 @@ export const chatGptUsageRoutes = new Elysia()
       params: t.Object({ id: t.String() }),
       body: RedeemChatGptResetCreditBodySchema,
     },
-    async ({
-      params,
-      body,
-      set,
-      user,
-    }): Promise<RedeemChatGptResetCreditResponse | ApiErrorResponse> => {
+    async ({ params, body, user }) => {
       try {
         return await redeemChatGptResetCredit(user?.id ?? '', params.id, body.redeemRequestId);
       } catch (error) {
-        return handleConnectorError(error, set);
+        return handleConnectorError(error);
       }
     }
   )
@@ -46,11 +35,11 @@ export const chatGptUsageRoutes = new Elysia()
   .get(
     '/connectors/:id/usage/stats',
     { params: t.Object({ id: t.String() }) },
-    async ({ params, set, user }): Promise<ChatGptUsageStatsResponse | ApiErrorResponse> => {
+    async ({ params, user }) => {
       try {
         return { stats: await getChatGptUsageStats(user?.id ?? '', params.id) };
       } catch (error) {
-        return handleConnectorError(error, set);
+        return handleConnectorError(error);
       }
     }
   )
@@ -64,12 +53,7 @@ export const chatGptUsageRoutes = new Elysia()
         days: t.Optional(t.Numeric({ minimum: 1, maximum: 90 })),
       }),
     },
-    async ({
-      params,
-      query,
-      set,
-      user,
-    }): Promise<ChatGptUsageHistoryResponse | ApiErrorResponse> => {
+    async ({ params, query, user }) => {
       try {
         return await getChatGptUsageHistory(
           user?.id ?? '',
@@ -78,7 +62,7 @@ export const chatGptUsageRoutes = new Elysia()
           query.days ?? 7
         );
       } catch (error) {
-        return handleConnectorError(error, set);
+        return handleConnectorError(error);
       }
     }
   );

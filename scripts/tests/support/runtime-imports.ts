@@ -2,31 +2,11 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 import { ROOT_DIR } from '../../lib/config';
+import { collectModuleSpecifiers } from '../../lib/import-specifiers';
 
 export interface RuntimeImportWalkResult {
   readonly files: ReadonlySet<string>;
   readonly externalSpecifiers: ReadonlyMap<string, readonly string[]>;
-}
-
-// The clause may span lines but never contains a quote or `;`, so a statement
-// cannot swallow the one that follows it.
-const IMPORT_FROM_RE = /(?:^|\n)\s*(?:import|export)\s+([^'";]*?)\s*from\s*['"]([^'"]+)['"]/g;
-/** Side-effect imports (`import 'x'`) carry no clause and no `from`. */
-const SIDE_EFFECT_IMPORT_RE = /(?:^|\n)\s*import\s*['"]([^'"]+)['"]/g;
-/** Deferred runtime edges: `import('x')` and `require('x')` with literal specifiers. */
-const DYNAMIC_IMPORT_RE = /\b(?:import|require)\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
-const BLOCK_COMMENT_RE = /\/\*[\s\S]*?\*\//g;
-const LINE_COMMENT_RE = /(^|[^:'"`\\])\/\/[^\n]*/g;
-
-/**
- * Strip comments so commented-out or illustrative `import`/`require` snippets do
- * not register as runtime edges. Newlines are preserved so the anchored import
- * patterns keep matching.
- */
-function stripComments(source: string): string {
-  return source
-    .replace(BLOCK_COMMENT_RE, (comment) => comment.replace(/[^\n]/g, ' '))
-    .replace(LINE_COMMENT_RE, (_match, prefix: string) => prefix);
 }
 
 function resolveRelativeModule(fromFile: string, specifier: string): string {
@@ -48,22 +28,6 @@ function resolveRelativeModule(fromFile: string, specifier: string): string {
     }
   }
   throw new Error(`Unresolved relative import "${specifier}" from ${fromFile}`);
-}
-
-function isTypeOnlyImportClause(clause: string): boolean {
-  const trimmed = clause.trim();
-  if (/^type\b/.test(trimmed)) {
-    return true;
-  }
-  if (!/^\{[\s\S]*\}$/.test(trimmed)) {
-    return false;
-  }
-  const inner = trimmed.slice(1, -1);
-  const bindings = inner
-    .split(',')
-    .map((part) => part.trim())
-    .filter(Boolean);
-  return bindings.length > 0 && bindings.every((binding) => /^\s*type\s/.test(binding));
 }
 
 function readWorkspaceAliases(rootDir: string): Record<string, string[]> {
@@ -162,10 +126,6 @@ export function walkRuntimeImports(
     }
     files.add(filePath);
 
-    // `matchAll` clones the pattern, so the shared module-level regexes keep no
-    // `lastIndex` state across the recursive `walk` calls below.
-    const source = stripComments(readFileSync(filePath, 'utf8'));
-
     function visitSpecifier(specifier: string): void {
       // Runtime builtins ship inside the executable: `node:*`, `bun` and `bun:*`
       // (`bun:ffi`, `bun:sqlite`), never a package a `--no-install` job lacks.
@@ -188,17 +148,12 @@ export function walkRuntimeImports(
       recordExternal(specifier, filePath);
     }
 
-    for (const match of source.matchAll(IMPORT_FROM_RE)) {
-      if (isTypeOnlyImportClause(match[1] ?? '')) {
-        continue;
-      }
-      visitSpecifier(match[2] ?? '');
-    }
-    for (const match of source.matchAll(SIDE_EFFECT_IMPORT_RE)) {
-      visitSpecifier(match[1] ?? '');
-    }
-    for (const match of source.matchAll(DYNAMIC_IMPORT_RE)) {
-      visitSpecifier(match[1] ?? '');
+    // Type-only edges are erased at runtime, so a `--no-install` job never loads them.
+    for (const { text, typeOnly } of collectModuleSpecifiers(
+      readFileSync(filePath, 'utf8'),
+      filePath
+    )) {
+      if (!typeOnly) visitSpecifier(text);
     }
   }
 
