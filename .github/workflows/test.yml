@@ -169,6 +169,14 @@ jobs:
       # dot-directory, and at the default the whole tree is dropped from the
       # artifact silently — the upload still reports success, and the merge job
       # is where it surfaces.
+      #
+      # `coverage-run.log.attempt-1` exists only when the watchdog retried: it
+      # is the hung or crashed first attempt, renamed aside so the retry's log
+      # does not erase it. It is uploaded here, with the results, because a
+      # hang that a clean retry recovers leaves the step green and the
+      # failure-only log upload below never runs. It is not parsed by
+      # `Extract unhandled errors`: the watchdog already fails the shard when
+      # attempt 1 reported findings. A missing file only warns.
       - name: Upload shard results
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -182,6 +190,7 @@ jobs:
             .mango/artifacts/timings/
             shard-meta.json
             unhandled-errors.json
+            coverage-run.log.attempt-1
           retention-days: 30
 
       - name: Upload shard log
@@ -246,6 +255,8 @@ jobs:
         if: ${{ !cancelled() }}
         run: bun ./scripts/qa-gate/unhandled-errors.ts coverage-run.log > unhandled-errors.json
 
+      # `coverage-run.log.attempt-1` is the watchdog's preserved first attempt
+      # after a retry; see the shard job's upload for why it rides along here.
       - name: Upload frontend results
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -259,6 +270,7 @@ jobs:
             .mango/artifacts/timings/
             shard-meta.json
             unhandled-errors.json
+            coverage-run.log.attempt-1
           retention-days: 30
 
       - name: Upload frontend log

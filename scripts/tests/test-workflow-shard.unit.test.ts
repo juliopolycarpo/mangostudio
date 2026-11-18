@@ -195,6 +195,18 @@ describe('Test workflow shard matrix', () => {
     expect(block).toContain('unhandled-errors.json');
   });
 
+  // The watchdog retries a hang without any flag, so a green shard can still
+  // have a preserved first attempt. The failure-only log upload never runs for
+  // it; only the always-run results upload can carry it to an artifact.
+  test('the results upload carries the preserved first-attempt log', () => {
+    const upload = extractStepBlocks(extractJobBlock(workflow, 'shard')).find((step) =>
+      step.includes('- name: Upload shard results')
+    );
+    expect(upload, 'expected an "Upload shard results" step in the shard job').toBeDefined();
+    expect(upload).toContain(NOT_CANCELLED);
+    expect(upload).toMatch(/^ {12}coverage-run\.log\.attempt-1$/m);
+  });
+
   test('the upload keeps dot-directories', () => {
     // Observed on a real run: at the default, dot-directories like `.mango`
     // are dropped from the artifact and the upload still reports success, so
@@ -235,6 +247,15 @@ describe('Test workflow frontend job', () => {
     // cost, and one that reads like working cache reuse in the job log.
     expect(frontend).not.toContain('family: turbo');
     expect(frontend).not.toContain('.turbo/cache');
+  });
+
+  test('the results upload carries the preserved first-attempt log', () => {
+    const upload = extractStepBlocks(frontend).find((step) =>
+      step.includes('- name: Upload frontend results')
+    );
+    expect(upload, 'expected an "Upload frontend results" step in the frontend job').toBeDefined();
+    expect(upload).toContain(NOT_CANCELLED);
+    expect(upload).toMatch(/^ {12}coverage-run\.log\.attempt-1$/m);
   });
 
   test('uploads the same artifact shape as a shard, dot-directories included', () => {

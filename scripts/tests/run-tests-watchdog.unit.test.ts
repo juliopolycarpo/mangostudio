@@ -308,7 +308,9 @@ describe('runTestsWithWatchdog', () => {
     });
     expect(sink.text()).toContain(line);
     expect(sink.text()).toContain('retaining exit code 1 after a clean retry');
-    expect(await Bun.file(githubOutput).text()).toBe('');
+    // No `crashed=` key without crash retry; the preserved first attempt is
+    // reported because any retry now keeps it.
+    expect(await Bun.file(githubOutput).text()).toBe('log-preserved=true\n');
   });
 
   // The cold-cache half of the same invariant: with no baseline to restore,
@@ -393,7 +395,6 @@ describe('runTestsWithWatchdog', () => {
         command: ['bun', '-e', script],
         timeoutSeconds: 3,
         logFile,
-        preserveAttemptLogs: true,
         stdout: sink,
       })
     );
@@ -427,7 +428,6 @@ describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
       optionsIn(dir, {
         command: ['bun', '-e', crashOnceThenScript(marker, 'process.exit(0);')],
         retryOnCrash: true,
-        preserveAttemptLogs: true,
         stdout: sink,
       })
     );
@@ -750,9 +750,6 @@ describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
               ]
             : ['bash', '-c', script],
         retryOnCrash: true,
-        // Only so the assertion below has attempt 1's log to read; the retry
-        // would otherwise truncate it.
-        preserveAttemptLogs: true,
       })
     );
 
@@ -816,7 +813,6 @@ describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
         command: ['bun', '-e', script],
         timeoutSeconds: 3,
         retryOnCrash: true,
-        preserveAttemptLogs: true,
       })
     );
 
@@ -833,7 +829,7 @@ describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
     await writeFile(githubOutput, '');
     process.env.GITHUB_OUTPUT = githubOutput;
 
-    await runTestsWithWatchdog(optionsIn(dir, { retryOnCrash: true, preserveAttemptLogs: true }));
+    await runTestsWithWatchdog(optionsIn(dir, { retryOnCrash: true }));
 
     expect(await Bun.file(githubOutput).text()).toContain('log-preserved=false\n');
   });
@@ -997,5 +993,62 @@ describe('killProcessGroup', () => {
       kind: 'failed',
       message: 'signal SIGKILL to process group 4242: EPERM kill EPERM',
     });
+  });
+});
+
+// Regression for the merge-gate shards: they retry on a hang without ever
+// passing retryOnCrash, and the retry's `createWriteStream('w')` used to erase
+// attempt 1's log, taking its findings with it.
+describe('attempt log preservation without retryOnCrash', () => {
+  const hangOnceThenScript = (marker: string, logLine: string): string => `
+    const fs = require("node:fs");
+    if (fs.existsSync(${JSON.stringify(marker)})) {
+      console.log("attempt two output");
+      process.exit(0);
+    }
+    fs.writeFileSync(${JSON.stringify(marker)}, "");
+    console.log(${JSON.stringify(logLine)});
+    setInterval(() => {}, 1000);
+  `;
+
+  it('keeps the hung first attempt at <logFile>.attempt-1 and the retry at <logFile>', async () => {
+    const dir = await makeTemp();
+    const githubOutput = join(dir, 'github-output');
+    await writeFile(githubOutput, '');
+    process.env.GITHUB_OUTPUT = githubOutput;
+
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, {
+        command: [
+          'bun',
+          '-e',
+          hangOnceThenScript(join(dir, 'first-attempt-ran'), '(fail) a > b [0.37ms]'),
+        ],
+        timeoutSeconds: 3,
+      })
+    );
+
+    expect(result).toMatchObject({ attempts: 2 });
+    const attemptOne = await Bun.file(join(dir, 'run.log.attempt-1')).text();
+    expect(attemptOne, '(attempt-1 log): expected the hung attempt output').toContain(
+      '(fail) a > b'
+    );
+    const final = await Bun.file(join(dir, 'run.log')).text();
+    expect(final, '(run log): expected the retry output only').toContain('attempt two output');
+    expect(final).not.toContain('(fail) a > b');
+    expect(await Bun.file(githubOutput).text()).toBe('log-preserved=true\n');
+  });
+
+  it('leaves no .attempt-1 log when the first attempt is the only one', async () => {
+    const dir = await makeTemp();
+    const githubOutput = join(dir, 'github-output');
+    await writeFile(githubOutput, '');
+    process.env.GITHUB_OUTPUT = githubOutput;
+
+    const result = await runTestsWithWatchdog(optionsIn(dir, {}));
+
+    expect(result).toMatchObject({ exitCode: 0, attempts: 1 });
+    expect(await Bun.file(join(dir, 'run.log.attempt-1')).exists()).toBe(false);
+    expect(await Bun.file(githubOutput).text()).toBe('log-preserved=false\n');
   });
 });

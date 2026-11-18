@@ -398,7 +398,9 @@ Two mitigations are in place until it closes:
   retries once, restoring the timings baseline first so the retry computes the
   same shard partition as the other shard jobs. Test failures or unhandled
   errors reported before the hang still fail the invocation after a clean
-  retry, even when crash retries are disabled.
+  retry, even when crash retries are disabled. A retry never overwrites the
+  first attempt's log: it is renamed to `<log>.attempt-1`, and the shard and
+  frontend jobs upload `coverage-run.log.attempt-1` with their results artifact.
 
 **Numbered-shard bound, 2026-11-05.** [CI 41961144859 on `442ccd0b`](https://github.com/juliopolycarpo/mangostudio/actions/runs/41961144859/job/127030686924)
 killed a still-progressing attempt at 240s. Its healthy retry completed the
