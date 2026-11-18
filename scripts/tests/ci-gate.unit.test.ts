@@ -10,6 +10,7 @@ import {
   extractJobBlocks,
   extractOnBlock,
   extractStepBlocks,
+  extractTopLevelBlock,
   parseNeedsList,
   sectionKeys,
 } from './support/workflow-blocks';
@@ -171,7 +172,7 @@ describe('ci.yml trigger and concurrency policy', () => {
   });
 
   test('one authoritative run per PR: keyed by PR number, never by SHA', () => {
-    expect(workflow).toContain(
+    expect(extractTopLevelBlock(workflow, 'concurrency')).toContain(
       `group: ${EXPR} github.workflow }}-${EXPR} github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.ref }}`
     );
     // A new push supersedes the previous run on every ref, main included:
@@ -286,11 +287,13 @@ describe('CI / Gate aggregate', () => {
   });
 
   test('non-pull_request events treat every lane as relevant', () => {
-    expect(workflow).toContain('if [ "$EVENT_NAME" != "pull_request" ]');
+    expect(extractJobBlock(workflow, 'changes')).toContain(
+      'if [ "$EVENT_NAME" != "pull_request" ]'
+    );
   });
 
   test('an empty PR diff fails closed instead of skipping distribution', () => {
-    expect(workflow).toContain(
+    expect(extractJobBlock(workflow, 'changes')).toContain(
       'bun ./scripts/ci/changed-paths.ts collect "$BASE_SHA" "$HEAD_SHA" "$RUNNER_TEMP/changed-files"'
     );
   });
@@ -645,8 +648,9 @@ describe('release-dry-run.yml always-reporting gate', () => {
   });
 
   test('non-PR events treat every lane as relevant (weekly drift check)', () => {
-    expect(workflow).toContain('if [ "$EVENT_NAME" != "pull_request" ]; then');
-    expect(workflow).toContain('echo "release=true" >> "$GITHUB_OUTPUT"');
+    const changes = extractJobBlock(workflow, 'changes');
+    expect(changes).toContain('if [ "$EVENT_NAME" != "pull_request" ]; then');
+    expect(changes).toContain('echo "release=true" >> "$GITHUB_OUTPUT"');
   });
 
   test('gate needs every mandatory job and accepts each lane skip only when irrelevant', () => {
