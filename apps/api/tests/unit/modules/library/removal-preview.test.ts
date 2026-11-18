@@ -15,7 +15,6 @@ import {
 import { getLibraryLocation } from '@mangostudio/shared/library/host';
 
 import { previewLibraryRemoval } from '../../../../src/modules/library/application/removal-preview';
-import { LibraryRequestError } from '../../../../src/modules/library/domain/library-request-error';
 
 function instance(
   locationId: LibraryLocationId,
@@ -224,13 +223,72 @@ describe('previewLibraryRemoval classification', () => {
     expect(firstEntry(result).locations.map((row) => row.locationId)).toEqual(['claude-skills']);
   });
 
-  it('refuses a location the scanner is not allowed to see', async () => {
-    await expect(
-      preview(['skill:gh'], ['claude-skills'], {
-        resources: [resource([instance('claude-skills', 'hash-a')])],
-        enabledLocationIds: [],
-      })
-    ).rejects.toBeInstanceOf(LibraryRequestError);
+  // Regression: a disabled location used to fail the whole preview with a 422,
+  // hiding the plan for every other location in the request.
+  it('blocks a disabled location while the enabled one still previews', async () => {
+    const result = await preview(['skill:gh'], ['claude-skills', 'mango-skills'], {
+      resources: [resource([instance('mango-skills', 'hash-a')])],
+      enabledLocationIds: ['mango-skills'],
+    });
+
+    const entry = firstEntry(result);
+    expect(locationAt(entry, 'claude-skills')).toMatchObject({
+      operation: 'blocked',
+      blockedReason: 'location-disabled',
+      eliminatesContentGroup: false,
+    });
+    expect(locationAt(entry, 'mango-skills').operation).toBe('remove');
+  });
+
+  it('blocks a disabled location that lists a copy, never offering it for removal', async () => {
+    const result = await preview(['skill:gh'], ['claude-skills'], {
+      resources: [resource([instance('claude-skills', 'hash-a')])],
+      enabledLocationIds: [],
+    });
+
+    expect(locationAt(firstEntry(result), 'claude-skills')).toMatchObject({
+      operation: 'blocked',
+      blockedReason: 'location-disabled',
+    });
+  });
+
+  it('keeps a permanent reason ahead of a disabled location', async () => {
+    // Switching a read-only vendor location on would not make it removable.
+    const result = await preview(['skill:gh'], ['cursor-skills-builtin'], {
+      resources: [resource([instance('cursor-skills-builtin', 'hash-a')])],
+      enabledLocationIds: [],
+    });
+
+    expect(locationAt(firstEntry(result), 'cursor-skills-builtin').blockedReason).toBe(
+      'read-only-location'
+    );
+  });
+
+  it('keeps a machine-level reason ahead of a disabled location', async () => {
+    const result = await preview(['skill:gh'], ['claude-skills'], {
+      enabledLocationIds: [],
+      // The offline machine still lists a copy, so the resource is observed.
+      environments: {
+        'remote-1': {
+          resources: [resource([instance('claude-skills', 'hash-a')])],
+          blockedReason: 'environment-offline',
+        },
+      },
+      environmentIds: ['remote-1'],
+    });
+
+    expect(locationAt(firstEntry(result), 'claude-skills').blockedReason).toBe(
+      'environment-offline'
+    );
+  });
+
+  it('does not report a last copy while a disabled location is the only one holding it', async () => {
+    const result = await preview(['skill:gh'], ['claude-skills'], {
+      resources: [resource([instance('claude-skills', 'hash-a')])],
+      enabledLocationIds: [],
+    });
+
+    expect(firstEntry(result).wouldRemoveLastCopy).toBe(false);
   });
 });
 
