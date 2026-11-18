@@ -1,5 +1,5 @@
 import { type GitDiffLine, parseGitDiff } from '@mangostudio/shared/git';
-import { ArrowLeft, FileDiff } from 'lucide-react';
+import { FileDiff } from 'lucide-react';
 import { memo, useEffect, useMemo, useState } from 'react';
 
 import { Callout } from '@/components/ui/Callout';
@@ -9,7 +9,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { useTheme } from '@/hooks/use-theme';
 import type { CodeThemeId } from '@/lib/code-themes';
 import { retryStoppedHighlights } from '@/lib/highlight-retry';
-import { ICON_LG, ICON_SM } from '@/lib/icon-sizes';
+import { ICON_LG } from '@/lib/icon-sizes';
 import {
   highlightLineTokens,
   isLineHighlightRetryPending,
@@ -17,11 +17,8 @@ import {
 } from '@/lib/shiki';
 import { cn } from '@/lib/utils';
 
-import { FilePathLabel } from './components/FilePathLabel';
-import { IconButton } from './components/IconButton';
 import type { GitDiffInput } from './hooks/use-git-state';
 import { useGitDiff } from './hooks/use-git-state';
-import { shortHash } from './short-hash';
 
 /**
  * How much of a syntax colour survives on an added or removed line; the rest is
@@ -61,11 +58,9 @@ interface DiffSelection extends GitDiffInput {
 export function DiffViewer({
   chatId,
   selection,
-  onClose,
 }: {
   readonly chatId: string;
   readonly selection: DiffSelection;
-  readonly onClose: () => void;
 }) {
   const { t } = useI18n();
   const { resolvedCodeTheme } = useTheme();
@@ -99,30 +94,10 @@ export function DiffViewer({
     };
   }, [language, resolvedCodeTheme]);
 
+  // The titled region and the back control are `DiffViewerFrame`'s, drawn by
+  // `LazyDiffViewer` before this chunk loads; this is only what goes inside it.
   return (
-    <section
-      aria-label={selection.title}
-      className="overflow-hidden rounded-md border border-stroke bg-surface"
-    >
-      <div className="flex h-10 items-center gap-2 border-b border-stroke px-2">
-        <IconButton label={t.git.diff.back} onClick={onClose}>
-          <ArrowLeft size={ICON_SM} />
-        </IconButton>
-        <div className="min-w-0 flex-1">
-          <FilePathLabel path={selection.path} />
-          <p
-            className={cn('text-micro text-fg-subtle', selection.commit && 'font-mono')}
-            title={selection.commit}
-          >
-            {selection.commit
-              ? shortHash(selection.commit)
-              : selection.staged
-                ? t.git.diff.staged
-                : t.git.diff.worktree}
-          </p>
-        </div>
-      </div>
-
+    <>
       {query.isLoading ? (
         <EmptyState icon={<Spinner />} title={t.git.diff.loading} className="min-h-32" />
       ) : query.error ? (
@@ -165,7 +140,7 @@ export function DiffViewer({
           ))}
         </div>
       )}
-    </section>
+    </>
   );
 }
 

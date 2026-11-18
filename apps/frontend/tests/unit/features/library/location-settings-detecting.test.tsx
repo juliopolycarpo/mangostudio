@@ -42,6 +42,8 @@ const { LocationSettings } =
   await import('../../../../src/features/library/components/LocationSettings');
 const { useCandidateLocations } =
   await import('../../../../src/features/library/hooks/use-candidate-locations');
+const { useEnabledLocationIds } =
+  await import('../../../../src/features/library/hooks/use-enabled-location-ids');
 
 const l = en.library.locationSettings;
 
@@ -162,5 +164,34 @@ describe('library location defaults while the hub is detecting agents', () => {
         isDetecting: false,
       })
     );
+  });
+
+  it('leaves the enabled-location set unknown while pending, then names only the enabled ones', async () => {
+    fetchScenario.respondWithJson('GET', '/api/settings/app', { body: PENDING_ANSWER });
+
+    const { result } = renderHook(() => useEnabledLocationIds());
+
+    await waitFor(() =>
+      expect(
+        realtime.isSubscribed(SETTINGS_TOPIC),
+        'expected a settings subscription while detecting | received: none'
+      ).toBe(true)
+    );
+    expect(
+      result.current,
+      'expected enabled ids: undefined while pending | received: a set of placeholder defaults'
+    ).toBeUndefined();
+
+    fetchScenario.respondWithJson('GET', '/api/settings/app', { body: DETECTED_ANSWER });
+    await publishAppInvalidation();
+
+    await waitFor(() => expect(result.current).toBeDefined());
+    expect(result.current?.has('claude-skills')).toBe(true);
+    expect(result.current?.has('mango-skills')).toBe(true);
+    // Not in DETECTED_ANSWER, so it was never turned on.
+    expect(
+      result.current?.has('agents-skills'),
+      'expected agents-skills to be absent from the enabled set'
+    ).toBe(false);
   });
 });

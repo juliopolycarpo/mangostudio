@@ -9,6 +9,38 @@ interface ListenableApp {
 }
 
 const PUBLISH_TIMEOUT_MS = 5_000;
+const STOP_TIMEOUT_MS = 5_000;
+
+/**
+ * Stops a server started by {@link listenOnEphemeralPort} and resolves once
+ * Elysia has released the app, so the same instance can `listen()` again.
+ *
+ * Never stop with `app.server.stop(true)`: that closes the Bun socket but
+ * bypasses Elysia's teardown, which leaves `app.server` and its stop hook set.
+ * Every later `listen()` on that app then throws "Cannot call listen() while a
+ * server or teardown is active". That only matters for an app other files share
+ * (`src/app.ts` is one module instance for the whole unisolated lane); a
+ * per-test app can be dropped.
+ *
+ * // Usage: afterAll(() => stopEphemeralServer(app));
+ */
+export async function stopEphemeralServer(app: Pick<ListenableApp, 'stop'>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(
+        new Error(
+          `expected app.stop(true) to settle within ${STOP_TIMEOUT_MS}ms | received: teardown still pending`
+        )
+      );
+    }, STOP_TIMEOUT_MS);
+  });
+  try {
+    await Promise.race([Promise.resolve(app.stop(true)), timedOut]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /**
  * Starts `app` on an ephemeral port and resolves with that port once every

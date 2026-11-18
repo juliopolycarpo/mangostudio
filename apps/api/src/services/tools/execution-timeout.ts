@@ -1,3 +1,5 @@
+import { TOOL_EXECUTION_TIMEOUT_PARAM } from '@mangostudio/shared/tool-settings';
+
 import type { EffectiveToolSettings, RegisteredTool } from './types';
 
 /**
@@ -12,8 +14,9 @@ export class ToolExecutionTimedOutError extends Error {
   }
 }
 
-/** Well-known tool-settings parameter for per-tool execution budgets. */
-export const TOOL_EXECUTION_TIMEOUT_PARAM = 'timeoutSeconds';
+// Re-exported so the API's tools and tests keep one import site; the name is
+// shared with the chat card that displays the budget.
+export { TOOL_EXECUTION_TIMEOUT_PARAM };
 
 export const TOOL_EXECUTION_TIMEOUT_SECONDS_DEFAULT = 30;
 export const TOOL_EXECUTION_TIMEOUT_SECONDS_MIN = 5;

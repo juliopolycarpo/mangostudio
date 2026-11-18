@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
   existsSync,
-  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -17,7 +16,7 @@ import { join, relative } from 'node:path';
 import { tarCreationCommand, zipCreationCommand } from '../lib/archive-creation';
 import { captureCommand } from '../lib/exec';
 import { zipArchiveCommands } from '../lib/zip-archive';
-import { extractTargetArchive } from '../release/extract-target';
+import { assertMaterializedMembers, extractTargetArchive } from '../release/extract-target';
 
 let tempDirs: string[] = [];
 
@@ -55,6 +54,108 @@ async function runOrThrow(command: readonly string[], cwd?: string): Promise<voi
   const result = await captureCommand([...command], cwd ? { cwd } : undefined);
   if (result.exitCode !== 0) throw new Error(result.stderr || result.stdout);
 }
+
+describe('assertMaterializedMembers', () => {
+  function layout(files: Record<string, string>): string {
+    const root = makeTempDir();
+    for (const [path, contents] of Object.entries(files)) {
+      mkdirSync(join(root, path, '..'), { recursive: true });
+      writeFileSync(join(root, path), contents);
+    }
+    return root;
+  }
+
+  function layoutError(root: string, expectedMembers: readonly string[]): string {
+    try {
+      assertMaterializedMembers(root, expectedMembers);
+    } catch (caught) {
+      return caught instanceof Error ? caught.message : String(caught);
+    }
+    throw new Error('expected a Target archive layout mismatch | received: no error');
+  }
+
+  test('accepts a tree that matches, including nested members and their parents', () => {
+    const root = layout({ 'README.md': 'r', mangostudio: 'b', 'sidecar/bin/tool': 't' });
+
+    expect(() =>
+      assertMaterializedMembers(root, ['README.md', 'mangostudio', 'sidecar/bin/tool'])
+    ).not.toThrow();
+  });
+
+  test('names a member missing from a subtree that still has its top-level directory', () => {
+    const root = layout({ 'README.md': 'r', 'sidecar/a.js': 'a' });
+
+    expect(layoutError(root, ['README.md', 'sidecar/a.js', 'sidecar/b.js'])).toBe(
+      'Target archive layout mismatch:\nsidecar/b.js: missing file'
+    );
+  });
+
+  test('names every extra entry, including those under an unexpected directory', () => {
+    const root = layout({ 'README.md': 'r', 'stray.txt': 's', 'extra/deep/file': 'x' });
+
+    expect(layoutError(root, ['README.md'])).toBe(
+      [
+        'Target archive layout mismatch:',
+        'extra: unexpected directory',
+        'extra/deep: unexpected directory',
+        'extra/deep/file: unexpected file',
+        'stray.txt: unexpected file',
+      ].join('\n')
+    );
+  });
+
+  test('names a directory where a file is expected and a file where a directory is expected', () => {
+    const root = layout({ 'mangostudio/inner': 'i', sidecar: 'not a directory' });
+
+    expect(layoutError(root, ['mangostudio', 'sidecar/tool'])).toBe(
+      [
+        'Target archive layout mismatch:',
+        'mangostudio: expected file, got directory',
+        'mangostudio/inner: unexpected file',
+        'sidecar: expected directory, got file',
+        'sidecar/tool: missing file',
+      ].join('\n')
+    );
+  });
+
+  test('reports missing, extra and mismatched entries together', () => {
+    const root = layout({ 'README.md': 'r', 'stray.txt': 's' });
+
+    expect(layoutError(root, ['README.md', 'mangostudio'])).toBe(
+      'Target archive layout mismatch:\nmangostudio: missing file\nstray.txt: unexpected file'
+    );
+  });
+
+  test.skipIf(process.platform === 'win32')(
+    'refuses symlinks, including one that points at an expected file, without following it',
+    () => {
+      const root = layout({ mangostudio: 'b', 'real/file': 'f' });
+      symlinkSync('mangostudio', join(root, 'alias'));
+      symlinkSync('real', join(root, 'real-link'));
+      // A symlink to a directory must not make its children look like part of the tree.
+      const outside = layout({ 'secret.txt': 's' });
+      symlinkSync(outside, join(root, 'escape'));
+
+      expect(layoutError(root, ['mangostudio', 'real/file', 'alias'])).toBe(
+        [
+          'Target archive layout mismatch:',
+          'alias: symlink refused',
+          'escape: symlink refused',
+          'real-link: symlink refused',
+        ].join('\n')
+      );
+    }
+  );
+
+  test.skipIf(process.platform === 'win32')('refuses a FIFO as a special file', async () => {
+    const root = layout({ mangostudio: 'b' });
+    await runOrThrow(['mkfifo', join(root, 'pipe')]);
+
+    expect(layoutError(root, ['mangostudio'])).toBe(
+      'Target archive layout mismatch:\npipe: special file refused'
+    );
+  });
+});
 
 describe('distribution extraction', () => {
   test('materializes tar.gz and zip archives into the same target layout', async () => {
@@ -96,7 +197,34 @@ describe('distribution extraction', () => {
   // the mode GNU tar used to. POSIX-only: Windows has no executable bit, and
   // Bun.Archive skips every symlink there regardless of privilege.
   test.skipIf(process.platform === 'win32')(
-    'preserves the executable bit and symlinks through native tar.gz extraction',
+    'preserves the executable bit through native tar.gz extraction',
+    async () => {
+      const rootDir = makeTempDir();
+      const sourceDir = join(rootDir, 'source');
+      stageTarget(sourceDir, 'mangostudio');
+
+      const archivePath = join(rootDir, 'target.tar.gz');
+      const tar = tarCreationCommand(archivePath, [{ directory: sourceDir, members: ['.'] }]);
+      await runOrThrow(tar.command, tar.cwd);
+
+      const destination = join(rootDir, '.mango', 'out', 'linux-x64');
+      await extractTargetArchive({
+        archivePath,
+        archiveFormat: 'tar.gz',
+        destination,
+        expectedMembers: ['README.md', 'mangostudio'],
+        rootDir,
+      });
+
+      expect(statSync(join(destination, 'mangostudio')).mode & 0o111).not.toBe(0);
+      expect(statSync(join(destination, 'README.md')).mode & 0o111).toBe(0);
+    }
+  );
+
+  // The manifest records regular files only, so an archive carrying a symlink is
+  // refused even when the member list names it, and nothing reaches the destination.
+  test.skipIf(process.platform === 'win32')(
+    'refuses a symlink in a tar.gz and leaves the destination untouched',
     async () => {
       const rootDir = makeTempDir();
       const sourceDir = join(rootDir, 'source');
@@ -108,17 +236,17 @@ describe('distribution extraction', () => {
       await runOrThrow(tar.command, tar.cwd);
 
       const destination = join(rootDir, '.mango', 'out', 'linux-x64');
-      await extractTargetArchive({
-        archivePath,
-        archiveFormat: 'tar.gz',
-        destination,
-        expectedMembers: ['README.md', 'mangostudio', 'mangostudio-link'],
-        rootDir,
-      });
+      await expect(
+        extractTargetArchive({
+          archivePath,
+          archiveFormat: 'tar.gz',
+          destination,
+          expectedMembers: ['README.md', 'mangostudio', 'mangostudio-link'],
+          rootDir,
+        })
+      ).rejects.toThrow('mangostudio-link: symlink refused');
 
-      expect(statSync(join(destination, 'mangostudio')).mode & 0o111).not.toBe(0);
-      expect(statSync(join(destination, 'README.md')).mode & 0o111).toBe(0);
-      expect(lstatSync(join(destination, 'mangostudio-link')).isSymbolicLink()).toBe(true);
+      expect(existsSync(destination)).toBe(false);
     }
   );
 

@@ -28,6 +28,7 @@ import { useTranscriptReadAhead } from '../hooks/use-transcript-read-ahead';
 import { CHAT_COLUMN_CLASS, CHAT_GUTTER_X_CLASS } from '../lib/chat-column';
 import type { ReaderPosition } from '../transcript-read-ahead';
 import { ChatMessageRow } from './ChatMessageRow';
+import { findLatestFileChangeIdInFeed } from './file-change-preview';
 
 /** The height the virtualizer assumes for a row it has not measured yet. */
 export const ESTIMATED_ROW_HEIGHT_PX = 150;
@@ -88,6 +89,10 @@ export function ChatFeed({
   // Likewise once for the feed: each turn header names its model the way the
   // composer does, and a lookup per row would be a catalog observer per row.
   const modelNames = useModelDisplayNames();
+  // The collapse_older diff mode keeps one card open per conversation, so the
+  // newest file mutation is resolved here, once, and read by every row; a row
+  // resolving its own would keep the last edit of every turn open.
+  const latestFileChangeId = useMemo(() => findLatestFileChangeIdInFeed(messages), [messages]);
   const { data: checkpointData } = useChatFileCheckpoints(chatId);
   // The summary is both the revert affordance's gate and what the confirmation
   // needs to say about the writes it cannot undo, so the row carries the entry
@@ -256,6 +261,7 @@ export function ChatFeed({
               }
               toolIdentities={toolIdentities}
               modelNames={modelNames}
+              latestFileChangeId={latestFileChangeId}
             />
           ))}
         </div>

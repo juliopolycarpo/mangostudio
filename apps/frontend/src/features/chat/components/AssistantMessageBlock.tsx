@@ -28,6 +28,8 @@ interface AssistantMessageBlockProps {
   toolIdentities: ToolIdentityResolver;
   /** Catalog names by model id, resolved once per feed and read by the turn header. */
   modelNames?: ReadonlyMap<string, string>;
+  /** The feed's most recent file mutation, resolved once by `ChatFeed`; see `MessageParts`. */
+  latestFileChangeId?: string | null;
 }
 
 /** What the block derives once and every child below it reads. */
@@ -155,6 +157,7 @@ interface AssistantTurnSectionProps extends DerivedTurn {
   chatId?: string | null;
   onQuestionSubmit?: (prompt: string) => void;
   toolIdentities: ToolIdentityResolver;
+  latestFileChangeId?: string | null;
 }
 
 /** Routes an assistant turn to the body its generation state calls for. */
@@ -167,6 +170,7 @@ function AssistantTurnSection({
   chatId,
   onQuestionSubmit,
   toolIdentities,
+  latestFileChangeId,
 }: AssistantTurnSectionProps) {
   return (
     <div className={isStreaming ? 'flex flex-col gap-3' : 'flex flex-col gap-1'}>
@@ -184,6 +188,7 @@ function AssistantTurnSection({
           chatId={chatId}
           onQuestionSubmit={onQuestionSubmit}
           toolIdentities={toolIdentities}
+          latestFileChangeId={latestFileChangeId}
         />
       )}
       {isStreaming ? null : <TurnClosingRow msg={msg} parts={parts} isImageTurn={isImageTurn} />}
@@ -208,6 +213,7 @@ export function AssistantMessageBlock({
   onQuestionSubmit,
   toolIdentities,
   modelNames,
+  latestFileChangeId,
 }: AssistantMessageBlockProps) {
   const parts = useMemo(() => messagePartsFromMessage(msg), [msg]);
   const isStreaming = msg.isGenerating ?? false;
@@ -234,6 +240,7 @@ export function AssistantMessageBlock({
         chatId={chatId}
         onQuestionSubmit={onQuestionSubmit}
         toolIdentities={toolIdentities}
+        latestFileChangeId={latestFileChangeId}
       />
     </div>
   );

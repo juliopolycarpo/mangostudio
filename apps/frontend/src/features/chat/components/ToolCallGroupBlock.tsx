@@ -29,6 +29,8 @@ interface ToolCallGroupBlockProps {
   calls: ToolCallEntry[];
   /** toolCallId of the message's most recent file mutation, if any. */
   latestFileChangeId?: string | null;
+  /** The owning turn is still streaming; forwarded to each member card. */
+  isLiveTurn?: boolean;
 }
 
 /**
@@ -49,7 +51,11 @@ function groupStatus(calls: ToolCallEntry[]): ToolExecutionStatus {
  *
  * // Usage: <ToolCallGroupBlock calls={entries} />
  */
-export function ToolCallGroupBlock({ calls, latestFileChangeId = null }: ToolCallGroupBlockProps) {
+export function ToolCallGroupBlock({
+  calls,
+  latestFileChangeId = null,
+  isLiveTurn = false,
+}: ToolCallGroupBlockProps) {
   const { t } = useI18n();
   const display = useChatDisplaySettings();
   const name = calls[0].name;
@@ -151,6 +157,7 @@ export function ToolCallGroupBlock({ calls, latestFileChangeId = null }: ToolCal
             status={call.status}
             execution={call.execution}
             isLatestFileChange={call.toolCallId === latestFileChangeId}
+            isLiveTurn={isLiveTurn}
           />
         ))}
       </TimelineDisclosure>

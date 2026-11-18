@@ -12,14 +12,18 @@
 //
 // Usage: bun ./scripts/qa-gate/unhandled-errors.ts <run.log> > errors.json
 
-import { normalizeLogLine } from '../lib/log-lines';
+import {
+  isInlineFailure,
+  isUnhandledErrorHeading,
+  normalizeLogLine,
+  unhandledErrorCount,
+} from '../lib/log-lines';
 import type { TestErrorHeadline } from './collect/types';
 
 // `bun test`: a block heading, then the offending source and an
-// `error: <message>` headline, then the run summary's ` N error` line.
-const BUN_UNHANDLED_HEADING = '# Unhandled error between tests';
+// `error: <message>` headline, then the run summary's ` N error` line. The
+// heading and count shapes come from ../lib/log-lines.
 const BUN_HEADLINE_RE = /^error:\s+(.+)$/;
-const BUN_ERROR_COUNT_RE = /^(\d+)\s+errors?$/;
 const BUN_PASS_RE = /^(\d+)\s+pass$/;
 
 const MAX_HEADLINES = 5;
@@ -53,7 +57,7 @@ export const parseUnhandledErrors = (text: string): UnhandledErrors => {
     const { taskKey, body } = normalizeLogLine(rawLine);
     if (body.startsWith('##[')) continue;
 
-    if (body === BUN_UNHANDLED_HEADING) {
+    if (isUnhandledErrorHeading(body)) {
       bunBlockOpen.add(taskKey);
       continue;
     }
@@ -67,13 +71,12 @@ export const parseUnhandledErrors = (text: string): UnhandledErrors => {
       }
       // The block ended without a headline (source frames only): stop looking
       // once the runner is back to reporting tests.
-      if (body.startsWith('(pass)') || body.startsWith('(fail)') || BUN_PASS_RE.test(body)) {
+      if (body.startsWith('(pass)') || isInlineFailure(body) || BUN_PASS_RE.test(body)) {
         bunBlockOpen.delete(taskKey);
       }
     }
 
-    const bunErrorCount = body.match(BUN_ERROR_COUNT_RE);
-    if (bunErrorCount) errors += Number(bunErrorCount[1]);
+    errors += unhandledErrorCount(body) ?? 0;
   }
 
   return { errors, headlines };

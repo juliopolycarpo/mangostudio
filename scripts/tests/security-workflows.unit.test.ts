@@ -1,16 +1,33 @@
 import { describe, expect, test } from 'bun:test';
 
 import { readText } from './support/read-text';
-import { extractJobBlocks, extractStepBlocks } from './support/workflow-blocks';
+import {
+  extractJobBlock,
+  extractJobBlocks,
+  extractOnBlock,
+  extractStepBlock,
+  extractStepBlocks,
+  extractStepBlocksUsing,
+  extractTopLevelBlock,
+  sectionKeys,
+} from './support/workflow-blocks';
 
 /** Every step of every job in a workflow, as isolated blocks. */
 function workflowSteps(workflow: string): string[] {
   return extractJobBlocks(workflow).flatMap(({ block }) => extractStepBlocks(block));
 }
 
-function expectWorkflowHasPinnedAction(workflow: string, action: string): void {
+/**
+ * Assert the one step that runs `action` inside `jobBlock` pins it to a full
+ * commit SHA with a version comment, and return that step for further checks.
+ * Scoped to a job: another job pinning the same action does not count.
+ */
+function expectJobHasPinnedAction(jobBlock: string, action: string): string {
+  const steps = extractStepBlocksUsing(jobBlock, action);
+  expect(steps, `expected one step running ${action} | received: ${steps.length}`).toHaveLength(1);
   const escapedAction = action.replaceAll('/', String.raw`\/`);
-  expect(workflow).toMatch(new RegExp(`uses: ${escapedAction}@[a-f0-9]{40} # v\\d`));
+  expect(steps[0]).toMatch(new RegExp(`uses: ${escapedAction}@[a-f0-9]{40} # v\\d`));
+  return steps[0];
 }
 
 interface DependabotConfig {
@@ -27,28 +44,47 @@ describe('security workflows', () => {
   test('CodeQL uses explicit advanced setup for the repository languages', () => {
     const workflow = readText('.github/workflows/codeql.yml');
     const languageExpression = '$' + '{{ matrix.language }}';
-    expect(workflow).toContain(`languages: ${languageExpression}`);
+    const triggers = extractOnBlock(workflow);
 
-    expect(workflow).toContain('pull_request:\n    branches: [main, "stack/**"]');
-    expect(workflow).toContain('push:\n    branches: [main]');
-    expect(workflow).toContain('schedule:');
-    expect(workflow).toContain('workflow_dispatch:');
-    expect(workflow).toContain('permissions:\n  contents: read');
-    expect(workflow).toContain('security-events: write');
+    expect(sectionKeys(triggers)).toEqual([
+      'pull_request',
+      'push',
+      'schedule',
+      'workflow_dispatch',
+    ]);
+    expect(triggers).toContain('pull_request:\n    branches: [main, "stack/**"]');
+    expect(triggers).toContain('push:\n    branches: [main]');
+    const permissions = extractTopLevelBlock(workflow, 'permissions');
+    expect(permissions).toMatch(/^ {2}contents: read$/m);
+    // The SARIF upload grant belongs to the analysis jobs, never to the whole workflow.
+    expect(permissions).not.toContain('security-events');
 
-    expect(workflow).toContain('language: javascript-typescript');
-    expect(workflow).toContain('language: rust');
-    expect(workflow).toContain('build-mode: none');
-    expect(workflow).toContain('queries: security-extended');
-    expect(workflow).toContain('category: "/language:javascript-typescript"');
-    expect(workflow).toContain('category: "/language:rust"');
-    expect(workflow).toContain('os: windows-latest');
-    expect(workflow).toContain('label: rust, windows');
-    expect(workflow).toContain('category: "/language:rust/windows"');
+    // Each analysis job carries its own grant, matrix and pinned init/analyze pair; a sibling
+    // job's copy of the same line does not configure this one.
+    const matrixByJob = {
+      analyze: ['language: javascript-typescript', 'category: "/language:javascript-typescript"'],
+      'analyze-rust': [
+        'language: rust',
+        'category: "/language:rust"',
+        'os: windows-latest',
+        'label: rust, windows',
+        'category: "/language:rust/windows"',
+      ],
+    };
+    for (const [job, lines] of Object.entries(matrixByJob)) {
+      const block = extractJobBlock(workflow, job);
+      expect(block, `${job}: job-level security-events grant`).toMatch(
+        /^ {6}security-events: write #/m
+      );
+      for (const line of [...lines, 'build-mode: none', 'queries: security-extended']) {
+        expect(block, `${job}: matrix entry ${line}`).toContain(line);
+      }
+      const init = expectJobHasPinnedAction(block, 'github/codeql-action/init');
+      expect(init, `${job}: init languages`).toContain(`languages: ${languageExpression}`);
+      expectJobHasPinnedAction(block, 'github/codeql-action/analyze');
+    }
     expect(workflow).not.toContain('autobuild');
     expect(workflow).not.toContain('setup-mango');
-    expectWorkflowHasPinnedAction(workflow, 'github/codeql-action/init');
-    expectWorkflowHasPinnedAction(workflow, 'github/codeql-action/analyze');
   });
 
   test('CodeQL always analyzes JavaScript and gates only the Rust legs on pull requests', () => {
@@ -80,12 +116,16 @@ describe('security workflows', () => {
   test('dependency review is a PR-only vulnerability gate with no license policy', () => {
     const workflow = readText('.github/workflows/dependency-review.yml');
 
-    expect(workflow).toContain('pull_request:\n    branches: [main, "stack/**"]');
+    expect(extractOnBlock(workflow)).toContain('pull_request:\n    branches: [main, "stack/**"]');
+    expect(sectionKeys(extractOnBlock(workflow))).toEqual(['pull_request']);
     expect(workflow).not.toContain('push:');
-    expect(workflow).toContain('permissions:\n  contents: read');
-    expect(workflow).toContain('fail-on-severity: moderate');
-    expect(workflow).toContain('license-check: false');
-    expectWorkflowHasPinnedAction(workflow, 'actions/dependency-review-action');
+    expect(extractTopLevelBlock(workflow, 'permissions')).toMatch(/^ {2}contents: read$/m);
+    const review = expectJobHasPinnedAction(
+      extractJobBlock(workflow, 'dependency-review'),
+      'actions/dependency-review-action'
+    );
+    expect(review).toContain('fail-on-severity: moderate');
+    expect(review).toContain('license-check: false');
   });
 
   test('contributor and security docs describe the bot-facing security checks', () => {
@@ -113,7 +153,9 @@ describe('security workflows', () => {
       }
     }
     const action = readText('.github/actions/download-distribution/action.yml');
-    expect(action).toContain('--runtime-profile "$EXPECTED_RUNTIME_PROFILE"');
+    expect(extractStepBlock(action, 'Verify distribution identity and checksums', 4)).toContain(
+      '--runtime-profile "$EXPECTED_RUNTIME_PROFILE"'
+    );
   });
 
   test('publish-path distribution downloads verify provenance; PR-path downloads do not', () => {
@@ -142,19 +184,21 @@ describe('security workflows', () => {
   });
 
   test('every shipped dependency ecosystem is covered by Dependabot', () => {
-    const config = readText('.github/dependabot.yml');
+    const config = Bun.YAML.parse(readText('.github/dependabot.yml')) as DependabotConfig;
+    const ecosystems = config.updates.map((update) => update['package-ecosystem']);
     // The unified Cargo workspace publishes the launcher and enforces its root
     // lockfile with --locked; without a cargo entry nothing ever updates it. Docker base
     // images ship on every release and need the same coverage.
     for (const ecosystem of ['github-actions', 'bun', 'cargo', 'docker']) {
-      expect(config).toContain(`package-ecosystem: ${ecosystem}`);
+      expect(ecosystems, `dependabot.yml update entries`).toContain(ecosystem);
     }
 
-    const bunBlock = config.split('package-ecosystem:').find((block) => block.startsWith(' bun'));
-    expect(bunBlock).toBeDefined();
-    expect(bunBlock).toContain('interval: weekly');
-    expect(bunBlock).toContain('dev-minor-patch:');
-    expect(bunBlock).toContain('prod-minor-patch:');
+    // Read from the bun entry itself: the other ecosystems also declare weekly schedules.
+    const bunUpdate = config.updates.find((update) => update['package-ecosystem'] === 'bun');
+    expect(bunUpdate?.schedule?.interval).toBe('weekly');
+    expect(Object.keys(bunUpdate?.groups ?? {})).toEqual(
+      expect.arrayContaining(['dev-minor-patch', 'prod-minor-patch'])
+    );
   });
 
   test('Dependabot waits at least as long as the Cargo publish-age hold before a cargo bump', () => {

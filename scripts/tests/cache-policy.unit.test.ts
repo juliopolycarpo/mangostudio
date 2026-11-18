@@ -21,7 +21,10 @@ import {
   extractJobBlock,
   extractJobBlocks,
   extractOnBlock,
+  extractStepBlock,
+  extractStepBlocks,
   extractStepBlocksAtIndent,
+  extractTopLevelBlock,
   sectionKeys,
 } from './support/workflow-blocks';
 import {
@@ -140,9 +143,11 @@ describe('CI cache policy', () => {
     ]);
     const workflow = readText('.github/workflows/rust-cache-cleanup.yml');
     const job = extractJobBlock(workflow, 'cleanup');
-    expect(workflow).toContain('permissions: {}');
-    expect(workflow).toContain('types: [completed]');
-    expect(workflow).toContain('branches: [main]');
+    // Workflow scope grants nothing; the cleanup job's own permissions carry the delete grant.
+    expect(workflow).toMatch(/^permissions: \{\}$/m);
+    const triggers = extractOnBlock(workflow);
+    expect(triggers).toMatch(/^ {4}types: \[completed\]$/m);
+    expect(triggers).toMatch(/^ {4}branches: \[main\]$/m);
     expect(workflow).not.toMatch(/^ {2}pull_request:/m);
     expect(job).toContain("github.ref == 'refs/heads/main'");
     expect(job).toContain("github.event.workflow_run.head_branch == 'main'");
@@ -150,12 +155,21 @@ describe('CI cache policy', () => {
       'github.event.workflow_run.head_repository.full_name == github.repository'
     );
     expect(job).toContain('["push","schedule","workflow_dispatch"]');
-    expect(job).toContain('ref: main');
+    const steps = extractStepBlocks(job);
+    const checkout = steps.find((step) => /^ {6}- uses: actions\/checkout@/m.test(step));
+    expect(
+      checkout,
+      'cleanup job: expected an actions/checkout step | received none'
+    ).toBeDefined();
+    expect(checkout).toMatch(/^ {10}ref: main$/m);
+    expect(checkout).toMatch(/^ {10}persist-credentials: false$/m);
     expect(job).not.toMatch(/ref:.*workflow_run/);
-    expect(job).toContain('persist-credentials: false');
-    expect(job).toContain('bun ./scripts/ci/rust-cache-cleanup.ts --delete');
-    expect(workflow).toContain('group: rust-cache-cleanup-main');
-    expect(workflow).toContain('cancel-in-progress: false');
+    expect(extractStepBlock(job, 'Delete superseded Rust cache IDs')).toContain(
+      'run: bun ./scripts/ci/rust-cache-cleanup.ts --delete'
+    );
+    const concurrency = extractTopLevelBlock(workflow, 'concurrency');
+    expect(concurrency).toMatch(/^ {2}group: rust-cache-cleanup-main$/m);
+    expect(concurrency).toMatch(/^ {2}cancel-in-progress: false$/m);
   });
 
   test('registers every entrypoint that can save a known Rust family', () => {
@@ -253,19 +267,25 @@ describe('CI cache policy', () => {
 
   test('centralizes trusted main restore prefixes and standardized diagnostics', () => {
     const manifest = readText('.github/actions/cache-scoped/action.yml');
-    expect(manifest).toMatch(/\$\{RUNNER_OS\}-\$\{RUNNER_ARCH\}/);
-    expect(manifest).toContain(`${EXPRESSION_START} inputs.cache-epoch }}`);
-    expect(manifest).toContain("github.event_name == 'pull_request'");
-    expect(manifest).toContain("github.ref == 'refs/heads/main'");
-    expect(manifest).toContain('-main-');
+    // The key grammar lives in one step; the diagnostics in another. Each line is read from the
+    // step that owns it, so a mention in the other step (or in an input description) is no match.
+    const keys = extractStepBlock(manifest, 'Resolve scoped cache keys', 4);
+    expect(keys).toMatch(/\$\{RUNNER_OS\}-\$\{RUNNER_ARCH\}/);
+    expect(keys).toContain(`${EXPRESSION_START} inputs.cache-epoch }}`);
+    expect(keys).toContain("github.event_name == 'pull_request'");
+    expect(keys).toContain("github.ref == 'refs/heads/main'");
+    expect(keys).toContain('-main-');
     expect(manifest).not.toContain('github.sha');
-    for (const output of ['cache-hit:', 'cache-restored:', 'primary-key:', 'restored-prefix:']) {
-      expect(manifest).toContain(output);
+    const outputs = extractTopLevelBlock(manifest, 'outputs');
+    for (const output of ['cache-hit', 'cache-restored', 'primary-key', 'restored-prefix']) {
+      expect(outputs, `outputs: ${output}`).toMatch(new RegExp(`^ {2}${output}:$`, 'm'));
     }
-    expect(manifest).toContain('$GITHUB_STEP_SUMMARY');
+    expect(extractStepBlock(manifest, 'Summarize scoped cache', 4)).toContain(
+      '$GITHUB_STEP_SUMMARY'
+    );
     expect(manifest).not.toMatch(/path:.*(?:credential|secret|token)/i);
-    expect(manifest).toContain('must not contain empty segments');
-    expect(manifest).toContain("exact-restore must be 'true' or 'false'");
+    expect(keys).toContain('must not contain empty segments');
+    expect(keys).toContain("exact-restore must be 'true' or 'false'");
   });
 
   test('passes the repository epoch fallback to every cache-scoped call and none to setup-mango', () => {
@@ -326,7 +346,13 @@ describe('CI cache policy', () => {
     // `1.4.0-canary.1` from `bun --version`, so a key built on that would share
     // one Bun build's artifacts with a different one. Turbo keys read it from
     // setup-mango's `bun-version` output.
-    expect(readText('.github/actions/setup-mango/action.yml')).toContain('bun --revision');
+    expect(
+      extractStepBlock(
+        readText('.github/actions/setup-mango/action.yml'),
+        'Resolve Bun revision',
+        4
+      )
+    ).toContain('bun --revision');
 
     // One restore and one save per producer lane. QA consumes Check's cache
     // read-only; the rotation describe below pins the producer wiring.
@@ -337,7 +363,12 @@ describe('CI cache policy', () => {
     for (const site of turbo.filter((candidate) => candidate.inputs.mode === 'restore')) {
       expect(site.inputs['restore-prefix']).toMatch(/^(check|test|build)-$/);
     }
-    expect(readText('.github/workflows/lint.yml')).toContain('bun run turbo:version');
+    expect(
+      extractStepBlock(
+        extractJobBlock(readText('.github/workflows/lint.yml'), 'check'),
+        'Resolve check cache toolchains'
+      )
+    ).toContain('bun run turbo:version');
 
     // No `vite` family, deliberately: the frontend moved to `Bun.build()`, so
     // nothing populates `node_modules/.vite` and the old optimizer cache was

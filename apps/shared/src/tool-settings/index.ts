@@ -5,6 +5,7 @@ export {
   ToolParameterDescriptorSchema,
   type ToolParameterOption,
   ToolParameterOptionSchema,
+  TOOL_EXECUTION_TIMEOUT_PARAM,
   ToolParametersSchema,
   type ToolParameterType,
   ToolParameterTypeSchema,

@@ -7,14 +7,14 @@
  * `TerminalView.test.tsx`).
  */
 
-import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+import { afterAll, afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 
 import userEvent from '@testing-library/user-event';
 import type { ComponentType } from 'react';
 
 import { render, screen, waitFor, within } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
-import { routerWithLinkStub } from '../../support/mocks/router';
+import { restoreRouter, routerWithLinkStub } from '../../support/mocks/router';
 
 function TerminalViewStub({ sessionId }: { sessionId: string }) {
   return <div data-testid="terminal-view-stub">{sessionId}</div>;
@@ -55,6 +55,9 @@ const TerminalIndexPage = (TerminalRoute as unknown as { options: { component: C
 const TerminalSessionRouteComponent = (
   TerminalSessionRoute as unknown as { options: { component: ComponentType } }
 ).options.component;
+
+// The router fake is process-wide: hand the real one back for later files.
+afterAll(restoreRouter);
 
 describe('/terminal route', () => {
   const fetchScenario = createFetchScenario();
@@ -288,7 +291,10 @@ describe('/terminal route', () => {
     render(<TerminalIndexPage />);
     const row = (await screen.findAllByRole('listitem'))[0];
     await user.click(within(row).getByRole('button', { name: 'Open here' }));
-    expect(screen.getByTestId('terminal-view-stub')).toHaveTextContent('term-1');
+    // `LazyTerminalView` binds a module-level `retryableLazy()`: only the first
+    // mount per module registry suspends. Await the view so the test does not
+    // depend on an earlier test having already loaded the chunk.
+    expect(await screen.findByTestId('terminal-view-stub')).toHaveTextContent('term-1');
 
     await user.click(within(row).getByRole('button', { name: 'Close terminal' }));
     const dialog = await screen.findByRole('dialog', { name: 'Close this terminal?' });
@@ -355,12 +361,13 @@ describe('/terminal route', () => {
 });
 
 describe('/terminal/$sessionId route', () => {
-  it('renders the session named in the route params', () => {
+  it('renders the session named in the route params', async () => {
     paramsState.current = { sessionId: 'term-42' };
 
     render(<TerminalSessionRouteComponent />);
 
-    expect(screen.getByTestId('terminal-view-stub')).toHaveTextContent('term-42');
+    // Awaited for the same reason as above: the lazy binding suspends on first mount.
+    expect(await screen.findByTestId('terminal-view-stub')).toHaveTextContent('term-42');
     expect(screen.getByText('Terminal')).toBeVisible();
   });
 });

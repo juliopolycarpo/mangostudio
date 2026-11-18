@@ -63,16 +63,81 @@ export async function extractTargetArchive(
   }
 }
 
-function assertMaterializedMembers(destination: string, expectedMembers: readonly string[]): void {
-  const actual = readdirSync(destination).sort();
-  const expected = [...expectedMembers].sort();
-  if (
-    actual.length !== expected.length ||
-    actual.some((member, index) => member !== expected[index])
-  ) {
+type MemberKind = 'directory' | 'file' | 'other' | 'symlink';
+
+/**
+ * Compare the whole extracted tree, not only its top level, against the layout the
+ * manifest promises. `expectedMembers` are regular files, as POSIX paths relative to
+ * `destination`; their parent directories are implied. A truncated or padded subtree
+ * therefore fails even when its top-level directory exists.
+ *
+ * The distribution manifest only records regular files (`collectFiles` refuses
+ * anything else), so a symlink or special file in a target archive is never legitimate
+ * and is refused outright instead of being followed or compared.
+ *
+ * Every offending path is named in one error, sorted so the message is stable.
+ */
+export function assertMaterializedMembers(
+  destination: string,
+  expectedMembers: readonly string[]
+): void {
+  const expected = expectedLayout(expectedMembers);
+  const actual = new Map<string, MemberKind>();
+  walkMaterializedTree(destination, '', actual);
+
+  const problems: Array<{ path: string; message: string }> = [];
+  const report = (path: string, detail: string): void => {
+    problems.push({ path, message: `${path}: ${detail}` });
+  };
+  for (const [path, kind] of actual) {
+    if (kind === 'symlink' || kind === 'other') {
+      report(path, `${kind === 'symlink' ? 'symlink' : 'special file'} refused`);
+    } else if (!expected.has(path)) {
+      report(path, `unexpected ${kind}`);
+    }
+  }
+  for (const [path, kind] of expected) {
+    const found = actual.get(path);
+    if (found === undefined) {
+      report(path, `missing ${kind}`);
+    } else if (found !== kind && found !== 'symlink' && found !== 'other') {
+      report(path, `expected ${kind}, got ${found}`);
+    }
+  }
+
+  if (problems.length > 0) {
+    problems.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
     throw new Error(
-      `Target archive layout mismatch: expected ${expected.join(', ')}, got ${actual.join(', ')}`
+      `Target archive layout mismatch:\n${problems.map((problem) => problem.message).join('\n')}`
     );
+  }
+}
+
+function expectedLayout(expectedMembers: readonly string[]): Map<string, MemberKind> {
+  const expected = new Map<string, MemberKind>();
+  for (const member of expectedMembers) {
+    const segments = member.split('/');
+    for (let depth = 1; depth < segments.length; depth += 1) {
+      expected.set(segments.slice(0, depth).join('/'), 'directory');
+    }
+    expected.set(member, 'file');
+  }
+  return expected;
+}
+
+function walkMaterializedTree(
+  root: string,
+  relativeDirectory: string,
+  found: Map<string, MemberKind>
+): void {
+  for (const entry of readdirSync(join(root, relativeDirectory), { withFileTypes: true })) {
+    const path = relativeDirectory === '' ? entry.name : `${relativeDirectory}/${entry.name}`;
+    // Dirent reports the entry itself, so a symlink is never followed into its target.
+    if (entry.isSymbolicLink()) found.set(path, 'symlink');
+    else if (entry.isDirectory()) {
+      found.set(path, 'directory');
+      walkMaterializedTree(root, path, found);
+    } else found.set(path, entry.isFile() ? 'file' : 'other');
   }
 }
 

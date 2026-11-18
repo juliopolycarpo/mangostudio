@@ -2,6 +2,7 @@ import type { ActivityEvent, ActivityEventKind } from '@mangostudio/shared/activ
 import type { Kysely } from 'kysely';
 
 import type { Database } from '../../../db/types';
+import type { DiagnosticLogger } from '../../../lib/logger';
 import { publishActivityInvalidation } from '../../../services/realtime/activity-invalidation';
 import { generateId } from '../../../utils/id';
 import {
@@ -47,7 +48,32 @@ export interface RecordActivityDeps {
   readonly repository?: ActivityRepository;
   readonly publish?: (userId: string) => void;
   readonly db?: Kysely<Database>;
+  readonly logger?: Pick<DiagnosticLogger, 'error'>;
 }
+
+/**
+ * Deliberately not `createDiagnosticLogger`: that one is gated off in the
+ * integration lane, which is exactly where a swallowed write would hide. Same
+ * line shape, always emitted.
+ */
+const activityErrorLogger: Pick<DiagnosticLogger, 'error'> = {
+  error: (event, metadata = {}) => {
+    console.error(
+      JSON.stringify({
+        level: 'error',
+        scope: 'activity',
+        event,
+        ts: Date.now(),
+        metadata: Object.fromEntries(
+          Object.entries(metadata).map(([key, value]) => [
+            key,
+            value instanceof Error ? { name: value.name, message: value.message } : value,
+          ])
+        ),
+      })
+    );
+  },
+};
 
 /**
  * Appends one row to the account's activity feed and tells its tabs.
@@ -56,7 +82,9 @@ export interface RecordActivityDeps {
  * record of work that already happened; a hub that refused to commit because it
  * could not write the note about the commit would be trading the product for
  * the telemetry. Seams call this as `void recordActivity(...)` — the promise is
- * returned only so tests can await the write they are asserting on.
+ * returned only so tests can await the write they are asserting on. No caller
+ * branches on the outcome, so a failed row write is logged, not surfaced; the
+ * `activity` frame still goes out so open feeds refetch what did persist.
  */
 export function recordActivity(
   input: RecordActivityInput,
@@ -80,9 +108,7 @@ export function recordActivities(
   deps: RecordActivityDeps = {}
 ): Promise<void> {
   return writeActivities(userId, entries, deps).catch((error: unknown) => {
-    // Deliberately not the diagnostic logger: that one is gated off in the
-    // integration lane, which is exactly where a swallowed write would hide.
-    console.error('[activity] Could not record an activity event:', error);
+    (deps.logger ?? activityErrorLogger).error('record_failed', { error });
   });
 }
 
@@ -107,15 +133,30 @@ async function writeActivities(
     payloadJson: JSON.stringify(entry.payload),
   }));
 
-  await repository.insertMany(rows);
+  const logger = deps.logger ?? activityErrorLogger;
+  let inserted = false;
+  try {
+    await repository.insertMany(rows);
+    inserted = true;
+  } catch (error: unknown) {
+    // Ids and counts only: the payload is user content and stays out of logs.
+    logger.error('insert_failed', {
+      error,
+      userId,
+      rowCount: rows.length,
+      kinds: [...new Set(rows.map((row) => row.kind))],
+    });
+  }
 
-  // Announced before retention runs, and not behind it: the rows are already
-  // durable, so a prune that fails must not also cost the reader the refresh
-  // that would have shown them. Retention is housekeeping; the notification is
-  // the feature.
+  // Announced whether or not the insert landed, and before retention runs: the
+  // event the row describes happened either way, and a feed that refetches
+  // shows whatever did persist. A dropped frame would leave every open tab
+  // stale with no way to know. A prune that fails must not cost the refresh
+  // either; retention is housekeeping, the notification is the feature. On the
+  // success path this still follows the commit, so a refetch sees the rows.
   (deps.publish ?? publishActivityInvalidation)(userId);
 
-  if (!retentionDue(userId, rows.length)) return;
+  if (!inserted || !retentionDue(userId, rows.length)) return;
 
   // Pruned against the newest row written, so a batch carrying an injected
   // older `createdAt` cannot pull the retention cutoff backwards.
@@ -125,7 +166,7 @@ async function writeActivities(
   } catch (error: unknown) {
     // Due again: the next write retries instead of waiting out another interval.
     rowsSinceRetention.delete(userId);
-    console.error('[activity] Could not prune the activity feed:', error);
+    logger.error('prune_failed', { error, userId });
   }
 }
 

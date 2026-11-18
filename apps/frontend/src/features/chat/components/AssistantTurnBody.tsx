@@ -20,6 +20,8 @@ interface AssistantTurnBodyProps {
   onQuestionSubmit?: (prompt: string) => void;
   /** Resolved once per feed by `ChatFeed`, threaded down to the activity row. */
   toolIdentities: ToolIdentityResolver;
+  /** The feed's most recent file mutation, resolved once by `ChatFeed`; see `MessageParts`. */
+  latestFileChangeId?: string | null;
 }
 
 /** The one turn kind with nothing to put on a timeline until it has finished. */
@@ -91,6 +93,7 @@ export function AssistantTurnBody({
   chatId = null,
   onQuestionSubmit,
   toolIdentities,
+  latestFileChangeId,
 }: AssistantTurnBodyProps) {
   if (isStreaming && isImageTurn) return <GeneratingImagePlaceholder />;
 
@@ -104,6 +107,7 @@ export function AssistantTurnBody({
         isStreaming={isStreaming}
         onQuestionSubmit={onQuestionSubmit}
         toolIdentities={toolIdentities}
+        latestFileChangeId={latestFileChangeId}
       />
       {status.phase === 'settled' && !producedSomething(parts) ? <NoResponseNotice /> : null}
     </>

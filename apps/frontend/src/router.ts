@@ -1,5 +1,6 @@
 import { createRouter } from '@tanstack/react-router';
 
+import { RouteErrorView } from './components/layout/RouteErrorView';
 import type { AuthContext } from './lib/auth-context';
 import { queryClient } from './lib/query-client';
 import { routeTree } from './routeTree.gen';
@@ -11,6 +12,9 @@ export const router = createRouter({
   routeTree,
   context: { auth: defaultAuth, queryClient },
   defaultPreload: 'intent',
+  // A route chunk that cannot be fetched needs a recovery action; the router's
+  // own default offers none.
+  defaultErrorComponent: RouteErrorView,
 });
 
 declare module '@tanstack/react-router' {
