@@ -57,6 +57,14 @@ function expectedCommands(name: string, source: string, original: Record<string,
       ...(expected['runtime-home-fixture-freshness'] as string[]),
     ];
     delete expected['runtime-home-fixture-freshness'];
+    // Added after the fixture: the unused-dependency scan runs before the
+    // first compile step.
+    const workspace = expected.workspace as string[];
+    workspace.splice(
+      workspace.indexOf('cargo check -p mangostudio --all-targets --locked'),
+      0,
+      'cargo shear --deny-warnings --locked'
+    );
   }
   if (name === 'protocol-ci' && !extractJobBlock(source, 'package')) {
     expected.typescript = [...(expected.typescript as string[]), ...(expected.package as string[])];

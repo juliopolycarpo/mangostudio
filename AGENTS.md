@@ -98,6 +98,9 @@ Useful docs:
   dependencies workflow opts out because it reports what a downstream consumer resolves.
 - Check Rust changes with `bun run check --rust` and `bun run test --rust`, which run
   `cargo fmt --all -- --check`,
+  `cargo shear --deny-warnings --locked` (install `cargo-shear` at the version
+  `docs/reference/testing.md` names; it fails on an unused dependency, and an exception goes in
+  `[package.metadata.cargo-shear]` with a reason comment),
   `cargo clippy --workspace --all-targets --all-features --locked -- -D warnings`,
   `cargo nextest run --workspace --all-targets --all-features --locked --retries 0` (install
   `cargo-nextest` at the version `docs/reference/testing.md` names; `--retries 0` keeps a flaky

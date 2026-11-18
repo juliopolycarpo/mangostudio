@@ -1375,7 +1375,6 @@ dependencies = [
  "getrandom 0.4.3",
  "globset",
  "icu_collator",
- "jsonschema",
  "libc",
  "mango-agent-acp",
  "mango-external-agents",
