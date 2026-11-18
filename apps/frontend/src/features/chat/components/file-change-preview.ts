@@ -39,11 +39,36 @@ const LINE_DIFF_CELL_BUDGET = 250_000;
 /** Unchanged lines kept on each side of a change, as in a unified diff. */
 const DIFF_CONTEXT_LINES = 3;
 
+/**
+ * Intra-line emphasis is skipped for a line pair when either line is longer
+ * than this many UTF-16 code units: minified output or a one-line JSON blob
+ * would otherwise spend the render pass on a highlight nobody can read.
+ */
+export const INTRA_LINE_MAX_LINE_LENGTH = 1_000;
+
+/**
+ * At most this many del/add pairs per diff are examined for emphasis, so the
+ * extra pass stays linear in the (already capped) diff size.
+ */
+export const INTRA_LINE_MAX_PAIRS = 200;
+
 type DiffPreviewLineKind = 'add' | 'del' | 'context' | 'marker';
+
+/** A half-open `[start, end)` range of UTF-16 code units within a line's text. */
+interface DiffLineEmphasis {
+  start: number;
+  end: number;
+}
 
 export interface DiffPreviewLine {
   kind: DiffPreviewLineKind;
   text: string;
+  /**
+   * The span of an `add`/`del` line that differs from its paired line, set only
+   * when a deletion run and an addition run of equal length were paired and
+   * the two lines share a prefix or suffix. Absent means no emphasis.
+   */
+  emphasis?: DiffLineEmphasis;
 }
 
 type FileChangeOp = 'create' | 'overwrite' | 'update' | 'delete' | 'move';
@@ -286,6 +311,7 @@ function applyPatchPreview(args: Record<string, unknown>): FileChangePreview | n
     }
   }
 
+  for (const file of files) file.lines = addIntraLineEmphasis(file.lines);
   return files.length > 0 ? { files } : null;
 }
 
@@ -359,7 +385,7 @@ export function diffTextLines(oldText: string, newText: string): DiffPreviewLine
 
   return collapseContext([
     ...oldLines.slice(0, prefix).map<DiffPreviewLine>((text) => ({ kind: 'context', text })),
-    ...middle,
+    ...addIntraLineEmphasis(middle),
     ...oldLines
       .slice(oldLines.length - suffix)
       .map<DiffPreviewLine>((text) => ({ kind: 'context', text })),
@@ -424,6 +450,112 @@ function collapseContext(lines: DiffPreviewLine[]): DiffPreviewLine[] {
     collapsed.push(...lines.slice(runStart, index));
   }
   return collapsed;
+}
+
+/**
+ * Marks, inside each paired deletion/addition line, the span that actually
+ * changed, so a one-identifier edit to a long line reads at a glance.
+ *
+ * A run of consecutive `del` lines directly followed by a run of `add` lines of
+ * the same length is paired line by line (the first deleted with the first
+ * added, and so on). Runs of unequal length are left alone: with no way to say
+ * which line replaced which, a guess would highlight unrelated text. Each pair
+ * keeps its common prefix and suffix and emphasizes what lies between, which is
+ * a single span per line; no diff of the characters is computed.
+ *
+ * Bounded so a huge diff stays linear: at most `INTRA_LINE_MAX_PAIRS` pairs are
+ * examined, and a pair with a line over `INTRA_LINE_MAX_LINE_LENGTH` is skipped.
+ * Returns new line objects for the lines it touches and never mutates its input.
+ *
+ * // Usage: const marked = addIntraLineEmphasis(lcsDiff(oldLines, newLines));
+ */
+export function addIntraLineEmphasis(lines: DiffPreviewLine[]): DiffPreviewLine[] {
+  let pairsLeft = INTRA_LINE_MAX_PAIRS;
+  let result: DiffPreviewLine[] | null = null;
+  let index = 0;
+  while (index < lines.length && pairsLeft > 0) {
+    if (lines[index].kind !== 'del') {
+      index += 1;
+      continue;
+    }
+    const deletedEnd = runEnd(lines, index, 'del');
+    const addedEnd = runEnd(lines, deletedEnd, 'add');
+    const runLength = deletedEnd - index;
+    if (runLength === addedEnd - deletedEnd) {
+      for (let offset = 0; offset < runLength && pairsLeft > 0; offset++) {
+        pairsLeft -= 1;
+        const deletedAt = index + offset;
+        const addedAt = deletedEnd + offset;
+        const marked = emphasizePair(lines[deletedAt].text, lines[addedAt].text);
+        if (!marked) continue;
+        result ??= lines.slice();
+        if (marked.deleted) result[deletedAt] = { ...lines[deletedAt], emphasis: marked.deleted };
+        if (marked.added) result[addedAt] = { ...lines[addedAt], emphasis: marked.added };
+      }
+    }
+    index = addedEnd;
+  }
+  return result ?? lines;
+}
+
+/** Index just past the run of `kind` lines that starts at `from`. */
+function runEnd(lines: DiffPreviewLine[], from: number, kind: DiffPreviewLineKind): number {
+  let end = from;
+  while (end < lines.length && lines[end].kind === kind) end += 1;
+  return end;
+}
+
+/**
+ * The changed span of each side of a replaced line, or `null` when nothing is
+ * worth marking: a line is over the length cap, the two share no prefix or
+ * suffix (the whole line changed, so emphasis would add nothing), or they are
+ * identical. A side whose changed span is empty (a pure insertion or removal)
+ * gets no emphasis.
+ */
+function emphasizePair(
+  deletedText: string,
+  addedText: string
+): { deleted?: DiffLineEmphasis; added?: DiffLineEmphasis } | null {
+  if (
+    deletedText.length > INTRA_LINE_MAX_LINE_LENGTH ||
+    addedText.length > INTRA_LINE_MAX_LINE_LENGTH
+  ) {
+    return null;
+  }
+
+  const shorter = Math.min(deletedText.length, addedText.length);
+  let prefix = 0;
+  while (prefix < shorter && deletedText[prefix] === addedText[prefix]) prefix += 1;
+  // A shared leading half of a surrogate pair would cut an astral character in
+  // two, so the pair joins the changed span instead.
+  if (prefix > 0 && isHighSurrogate(deletedText.charCodeAt(prefix - 1))) prefix -= 1;
+
+  let suffix = 0;
+  while (
+    suffix < shorter - prefix &&
+    deletedText[deletedText.length - 1 - suffix] === addedText[addedText.length - 1 - suffix]
+  ) {
+    suffix += 1;
+  }
+  if (suffix > 0 && isLowSurrogate(deletedText.charCodeAt(deletedText.length - suffix))) {
+    suffix -= 1;
+  }
+
+  if (prefix + suffix === 0) return null;
+  const deleted = { start: prefix, end: deletedText.length - suffix };
+  const added = { start: prefix, end: addedText.length - suffix };
+  return {
+    deleted: deleted.end > deleted.start ? deleted : undefined,
+    added: added.end > added.start ? added : undefined,
+  };
+}
+
+function isHighSurrogate(codeUnit: number): boolean {
+  return codeUnit >= 0xd800 && codeUnit <= 0xdbff;
+}
+
+function isLowSurrogate(codeUnit: number): boolean {
+  return codeUnit >= 0xdc00 && codeUnit <= 0xdfff;
 }
 
 function lcsDiff(oldLines: string[], newLines: string[]): DiffPreviewLine[] {
