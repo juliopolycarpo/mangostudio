@@ -7,6 +7,7 @@ import { ROOT_DIR } from '../lib/config';
 import { parseJunitXml } from '../lib/junit-report';
 import {
   collectNativeTestEvidence,
+  isLaneErrorLine,
   nativeTestInventory,
   type NativeTestLane,
   parseNativeTestLog,
@@ -160,6 +161,39 @@ describe('default suite raw evidence', () => {
     expect(truncated[1].errors.join('\n')).toContain('Expected one complete Bun summary');
     const missingXml = parseNativeTestLog(completeLog(), inventory, null);
     expect(missingXml[0].errors).toContain('Missing, empty, or truncated root JUnit');
+  });
+
+  test('isLaneErrorLine accepts the exact unhandled-error heading and a positive error count', () => {
+    for (const body of [
+      '# Unhandled error between tests',
+      '1 error',
+      '2 errors',
+      'oh no: Bun has crashed',
+      'panic(main thread): index out of bounds',
+    ]) {
+      expect(`${body} → ${isLaneErrorLine(body)}`).toBe(`${body} → true`);
+    }
+  });
+
+  test('isLaneErrorLine rejects near-miss headings and non-summary error lines', () => {
+    for (const body of [
+      // Heading shape is exact: a suffix or a missing `#` is not Bun's heading.
+      '# Unhandled error between tests (2)',
+      'Unhandled error between tests',
+      // Zero errors is a clean run; a line that merely starts with a count is a log line.
+      '0 errors',
+      '1 error: Cannot find module',
+    ]) {
+      expect(`${body} → ${isLaneErrorLine(body)}`).toBe(`${body} → false`);
+    }
+  });
+
+  test('a heading with trailing text on a lane line is not recorded as an unhandled error', () => {
+    const near = completeLog().replace(
+      '@mangostudio/api:test:unit: 0 fail',
+      '@mangostudio/api:test:unit: # Unhandled error between tests (2)\n@mangostudio/api:test:unit: 0 fail'
+    );
+    expect(parseNativeTestLog(near, inventory, root)[1].errors).toEqual([]);
   });
 
   test('normalizes ANSI and Windows relative file paths without losing outcome identity', () => {

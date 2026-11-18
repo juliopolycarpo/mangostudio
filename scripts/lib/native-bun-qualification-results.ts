@@ -2,6 +2,7 @@ import { cp, mkdir, readdir, readFile } from 'node:fs/promises';
 import { join, posix } from 'node:path';
 
 import { type JunitCounts, parseJunitXml } from './junit-report';
+import { isUnhandledErrorHeading, unhandledErrorCount } from './log-lines';
 
 export interface NativeTestLane {
   readonly id: string;
@@ -277,13 +278,23 @@ function recordLine(lane: MutableLane, body: string, line: number, cwd: string):
   if (/^\d+ pass$/.test(body)) lane.passFooters.push({ line, worker });
   const filtered = /^([1-9]\d*) filtered out$/.exec(body);
   if (filtered) lane.filtered.push({ count: Number(filtered[1]), line, worker });
-  if (
-    /^# Unhandled error between tests|^[1-9]\d* errors?$|oh no: Bun has crashed|panic\(main thread\)/.test(
-      body
-    )
-  ) {
-    lane.errors.push(`line ${line}: ${body}`);
-  }
+  if (isLaneErrorLine(body)) lane.errors.push(`line ${line}: ${body}`);
+}
+
+/**
+ * Whether a normalized lane line proves the run raised an error that JUnit and the
+ * `Ran N tests` summary would not show. The heading and count shapes belong to
+ * `log-lines.ts`; a ` 0 errors` line is not an error, so the count must be positive.
+ * The crash markers are Bun process failures with no shared shape yet.
+ * // Usage: isLaneErrorLine('2 errors') // → true
+ */
+export function isLaneErrorLine(body: string): boolean {
+  const errorCount = unhandledErrorCount(body);
+  return (
+    isUnhandledErrorHeading(body) ||
+    (errorCount !== null && errorCount > 0) ||
+    /oh no: Bun has crashed|panic\(main thread\)/.test(body)
+  );
 }
 
 /**
