@@ -288,7 +288,10 @@ describe('/terminal route', () => {
     render(<TerminalIndexPage />);
     const row = (await screen.findAllByRole('listitem'))[0];
     await user.click(within(row).getByRole('button', { name: 'Open here' }));
-    expect(screen.getByTestId('terminal-view-stub')).toHaveTextContent('term-1');
+    // `LazyTerminalView` binds a module-level `retryableLazy()`: only the first
+    // mount per module registry suspends. Await the view so the test does not
+    // depend on an earlier test having already loaded the chunk.
+    expect(await screen.findByTestId('terminal-view-stub')).toHaveTextContent('term-1');
 
     await user.click(within(row).getByRole('button', { name: 'Close terminal' }));
     const dialog = await screen.findByRole('dialog', { name: 'Close this terminal?' });
@@ -355,12 +358,13 @@ describe('/terminal route', () => {
 });
 
 describe('/terminal/$sessionId route', () => {
-  it('renders the session named in the route params', () => {
+  it('renders the session named in the route params', async () => {
     paramsState.current = { sessionId: 'term-42' };
 
     render(<TerminalSessionRouteComponent />);
 
-    expect(screen.getByTestId('terminal-view-stub')).toHaveTextContent('term-42');
+    // Awaited for the same reason as above: the lazy binding suspends on first mount.
+    expect(await screen.findByTestId('terminal-view-stub')).toHaveTextContent('term-42');
     expect(screen.getByText('Terminal')).toBeVisible();
   });
 });
