@@ -469,20 +469,43 @@ function lcsDiff(oldLines: string[], newLines: string[]): DiffPreviewLine[] {
   return lines;
 }
 
+/** The slice of a message part the latest-mutation lookup reads. */
+type FileChangePartLike = { type: string; name?: string; toolCallId?: string };
+
 /**
  * Returns the toolCallId of the last previewable file-mutation call in a
- * message's parts, used by the collapse_older display mode.
+ * message's parts. The feed-wide lookup below is what the collapse_older
+ * display mode uses; this one is its per-message fallback.
  *
  * // Usage: const latestId = findLatestFileChangeId(parts);
  */
-export function findLatestFileChangeId(
-  parts: ReadonlyArray<{ type: string; name?: string; toolCallId?: string }>
-): string | null {
+export function findLatestFileChangeId(parts: ReadonlyArray<FileChangePartLike>): string | null {
   for (let i = parts.length - 1; i >= 0; i--) {
     const part = parts[i];
     if (part.type !== 'tool_call') continue;
     if (typeof part.name !== 'string' || !FILE_CHANGE_TOOLS.has(part.name)) continue;
     return part.toolCallId ?? null;
+  }
+  return null;
+}
+
+/**
+ * Returns the toolCallId of the last file-mutation call anywhere in a
+ * transcript, so the collapse_older display mode can keep exactly one diff card
+ * open for the whole conversation. Messages are chronological; the scan walks
+ * back from the newest and stops at the first message that holds a mutation.
+ *
+ * It reads the stored parts as they are: a tool call is never merged or
+ * rewritten by part normalization, and a legacy message with no parts has none.
+ *
+ * // Usage: const latestId = findLatestFileChangeIdInFeed(messages);
+ */
+export function findLatestFileChangeIdInFeed(
+  messages: ReadonlyArray<{ parts?: ReadonlyArray<FileChangePartLike> | null }>
+): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const latestInMessage = findLatestFileChangeId(messages[i].parts ?? []);
+    if (latestInMessage !== null) return latestInMessage;
   }
   return null;
 }
