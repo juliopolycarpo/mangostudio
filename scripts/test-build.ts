@@ -200,6 +200,8 @@ function validatePrebuiltDistribution(): void {
       packageVersion: VERSION,
       channel,
       target: PLATFORM.arch,
+      // The prebuilt consumer materializes `.mango/out/<target>` from the archive.
+      expect: 'downloaded',
     });
     pass(`Prebuilt distribution verified for ${PLATFORM.arch}`);
   } catch (caught) {

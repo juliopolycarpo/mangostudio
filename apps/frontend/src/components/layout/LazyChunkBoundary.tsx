@@ -128,7 +128,7 @@ class ChunkErrorBoundary extends Component<ChunkErrorBoundaryProps, LazyChunkBou
   }
 }
 
-interface LazyChunkFailureProps {
+export interface LazyChunkFailureProps {
   readonly retrying: boolean;
   readonly onRetry: () => void;
   readonly monitor: StaleBuildMonitor;
@@ -141,8 +141,11 @@ interface LazyChunkFailureProps {
  * says the build is stale the panel offers Retry and Reload; once it does, the
  * panel only says so and the page-level notice carries the single Reload, so
  * several failing surfaces do not each ask for one. It never reloads on its own.
+ *
+ * Also the route boundary's failure view (`RouteErrorView`), so a failed route
+ * chunk offers the same two actions as a failed panel.
  */
-function LazyChunkFailure({ retrying, onRetry, monitor }: LazyChunkFailureProps) {
+export function LazyChunkFailure({ retrying, onRetry, monitor }: LazyChunkFailureProps) {
   const { t } = useI18n();
   const stale = useBuildIsStale(monitor);
   const sawStale = useRef(false);

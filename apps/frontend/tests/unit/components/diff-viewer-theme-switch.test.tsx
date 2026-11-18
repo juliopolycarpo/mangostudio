@@ -81,7 +81,6 @@ describe('DiffViewer code theme switch', () => {
           <DiffViewer
             chatId="chat-theme-switch"
             selection={{ path: 'example.ts', staged: false, title: 'View diff for example.ts' }}
-            onClose={mock()}
           />
         </>
       );

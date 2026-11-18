@@ -181,6 +181,7 @@ describe('ToolCallGroupBlock', () => {
     const remediation = 'Re-read the file and retry with the current content.';
     render(
       <ToolCallGroupBlock
+        isLiveTurn
         calls={[
           entry({ toolCallId: 't1' }),
           entry({

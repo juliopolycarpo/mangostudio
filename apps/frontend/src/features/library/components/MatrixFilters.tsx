@@ -13,7 +13,11 @@
  * tells `.claude/skills` from `.mango/skills`, stays readable.
  */
 
-import type { LibraryLocationStatus, LibraryTargetDescriptor } from '@mangostudio/shared/library';
+import type {
+  LibraryLocationId,
+  LibraryLocationStatus,
+  LibraryTargetDescriptor,
+} from '@mangostudio/shared/library';
 import { Search, SlidersHorizontal } from 'lucide-react';
 import { type ReactNode, useId, useMemo, useState } from 'react';
 
@@ -37,10 +41,22 @@ interface MatrixFiltersProps {
   readonly filters: LibraryFilters;
   readonly targets: readonly LibraryTargetDescriptor[];
   readonly locations: readonly LibraryLocationStatus[];
+  /**
+   * Locations the scanner reads. Discovery skips the rest, so no row can match
+   * one and offering it only leads to an empty state. Undefined while the
+   * settings answer is not real yet: the list then stays whole.
+   */
+  readonly enabledLocationIds?: ReadonlySet<LibraryLocationId>;
   readonly onChange: (update: Partial<LibraryFilters>) => void;
 }
 
-export function MatrixFilters({ filters, targets, locations, onChange }: MatrixFiltersProps) {
+export function MatrixFilters({
+  filters,
+  targets,
+  locations,
+  enabledLocationIds,
+  onChange,
+}: MatrixFiltersProps) {
   const { t } = useI18n();
   const l = t.library;
   const searchId = useId();
@@ -71,9 +87,18 @@ export function MatrixFilters({ filters, targets, locations, onChange }: MatrixF
   const locationOptions = useMemo<SelectOption[]>(
     () => [
       { value: 'any', label: l.filters.anyLocation },
-      ...locations.map((location) => ({ value: location.id, label: location.path ?? location.id })),
+      ...locations
+        // A location disabled after it was picked stays listed, so the control
+        // still names the filter that is emptying the matrix.
+        .filter(
+          (location) =>
+            enabledLocationIds === undefined ||
+            enabledLocationIds.has(location.id) ||
+            location.id === filters.locationId
+        )
+        .map((location) => ({ value: location.id, label: location.path ?? location.id })),
     ],
-    [l.filters.anyLocation, locations]
+    [l.filters.anyLocation, locations, enabledLocationIds, filters.locationId]
   );
   const sortOptions = useMemo<SelectOption[]>(
     () => [

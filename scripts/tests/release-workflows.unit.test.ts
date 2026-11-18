@@ -734,30 +734,46 @@ describe('release workflow binary gate', () => {
     );
   });
 
-  test('archive upload payloads skip artifact re-compression', () => {
-    const uploads = workflowFiles().flatMap((path) =>
-      uploadArtifactSteps(readText(path)).map((step) => ({
-        path,
-        step,
-        archive: uploadPaths(step).some((payload) => ARCHIVE_PAYLOAD.test(payload)),
-        preparedBinaryInputs:
-          path === '.github/workflows/distribution-build.yml' &&
-          uploadPaths(step).some(
-            (payload) => payload.startsWith('.mango/out/') || payload === 'apps/frontend/dist'
-          ),
-      }))
-    );
+  // Anchored so a commented-out key can neither satisfy nor trip the policy.
+  const STORED_UPLOAD = /^\s*compression-level: 0$/m;
+  const ANY_COMPRESSION_LEVEL = /^\s*compression-level:/m;
 
-    // Eleven distribution bundles, the dry-run's windows-x64 zip and the
-    // frozen canary approval archive; a fourteenth must make the same decision deliberately, instead of quietly
-    // re-Deflating a payload whose compression `bundle-distribution.ts` (or,
-    // for the dry run, archive-assets.ts) already chose — or already chose to
-    // skip.
-    expect(uploads.filter((upload) => upload.archive)).toHaveLength(13);
-    for (const { path, step, archive, preparedBinaryInputs } of uploads) {
-      // Anchored so a commented-out key can neither satisfy nor trip the policy.
-      if (archive || preparedBinaryInputs) expect(step, path).toMatch(/^\s*compression-level: 0$/m);
-      else expect(step, path).not.toMatch(/^\s*compression-level:/m);
+  // Repository-wide: re-Deflating an already-compressed archive costs CI time for no size win.
+  // Any workflow that uploads one must store it. Plain payloads are not constrained here.
+  test('archive upload payloads skip artifact re-compression', () => {
+    for (const path of workflowFiles()) {
+      for (const step of uploadArtifactSteps(readText(path))) {
+        if (uploadPaths(step).some((payload) => ARCHIVE_PAYLOAD.test(payload))) {
+          expect(step, path).toMatch(STORED_UPLOAD);
+        }
+      }
+    }
+  });
+
+  // Scoped to the distribution build, whose uploads are the product bytes: each one decides its
+  // compression deliberately. Other workflows may tune `compression-level` on their own plain
+  // payloads (or add a stored archive) without touching this count.
+  test('distribution-build.yml stores every bundle and prebuilt input, and tunes nothing else', () => {
+    const path = '.github/workflows/distribution-build.yml';
+    const uploads = uploadArtifactSteps(readText(path)).map((step) => ({
+      step,
+      archive: uploadPaths(step).some((payload) => ARCHIVE_PAYLOAD.test(payload)),
+      preparedBinaryInputs: uploadPaths(step).some(
+        (payload) => payload.startsWith('.mango/out/') || payload === 'apps/frontend/dist'
+      ),
+    }));
+
+    // Three scoped bundles (checksums, assets, npm) plus one per binary target. A new bundle must
+    // make the same decision deliberately, instead of quietly re-Deflating a payload whose
+    // compression `bundle-distribution.ts` already chose, or chose to skip.
+    const bundles = uploads.filter((upload) => upload.archive);
+    expect(
+      bundles,
+      `${path}: expected ${3 + ALL_BINARY_TARGETS.length} archive uploads | received: ${bundles.length}`
+    ).toHaveLength(3 + ALL_BINARY_TARGETS.length);
+    for (const { step, archive, preparedBinaryInputs } of uploads) {
+      if (archive || preparedBinaryInputs) expect(step, path).toMatch(STORED_UPLOAD);
+      else expect(step, path).not.toMatch(ANY_COMPRESSION_LEVEL);
     }
   });
 

@@ -123,17 +123,19 @@ function settings(locationIds: readonly LibraryLocationId[]): typeof DEFAULT_APP
 
 function preview(
   request: PropagationPreviewRequest,
-  failedLocationIds?: readonly LibraryLocationId[]
-): Promise<PropagationPreview> {
-  const env = pathEnv();
-  const cache = new LibraryCache();
-  const enabled = settings([
+  failedLocationIds?: readonly LibraryLocationId[],
+  /** Defaults to every location the suite writes to; pass fewer to disable the rest. */
+  enabledLocationIds: readonly LibraryLocationId[] = [
     ...SKILL_LOCATIONS,
     ...INSTRUCTION_LOCATIONS,
     ...SUBAGENT_LOCATIONS,
     ...COMMAND_LOCATIONS,
     'cursor-rules',
-  ]);
+  ]
+): Promise<PropagationPreview> {
+  const env = pathEnv();
+  const cache = new LibraryCache();
+  const enabled = settings(enabledLocationIds);
   return previewLibraryPropagation(userId(), request, {
     snapshot: async (scanUserId, environmentId, kinds) => ({
       environmentId,
@@ -457,37 +459,36 @@ describe('propagation apply — request validation', () => {
 
   // A location the scanner skips reports every destination as `create`, so an
   // apply would overwrite real content while the preview claimed there was none.
-  it('refuses to preview a location the user has not enabled', async () => {
-    writeInstruction('claude-instructions', '# House rules\n');
+  it('reports a location the user has not enabled as blocked, and refuses to write to it', async () => {
+    writeSkill('mango-skills', 'source content');
+    makeDirectories('agents-skills', 'claude-skills');
+    const request: PropagationPreviewRequest = {
+      resourceKeys: ['skill:gh'],
+      targetLocationIds: ['agents-skills', 'claude-skills'],
+    };
+    // `claude-skills` is switched off, so the scanner never reads it.
+    const enabledLocationIds: readonly LibraryLocationId[] = ['agents-skills'];
+    const previewWithClaudeOff = (freshRequest: PropagationPreviewRequest) =>
+      preview(freshRequest, undefined, enabledLocationIds);
 
-    const env = pathEnv();
-    const failure = previewLibraryPropagation(
-      userId(),
-      { resourceKeys: ['instruction:global'], targetLocationIds: [...INSTRUCTION_LOCATIONS] },
-      {
-        snapshot: async (scanUserId, environmentId, kinds) => ({
-          environmentId,
-          resources: (
-            await discoverLibraryResources(getDb(), scanUserId, {
-              force: true,
-              kinds,
-              cache: new LibraryCache(),
-              pathEnv: env,
-              settings: settings([...INSTRUCTION_LOCATIONS]),
-            })
-          ).resources,
-          statuses: new Map(
-            INSTRUCTION_LOCATIONS.map((id) => [id, describeLocation(id, env)] as const)
-          ),
-          directoryHashDomain: directoryHashDomainVersion(),
-        }),
-        // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
-        enabledLocationIds: async () =>
-          enabledLibraryLocations(libraryLocationsFor(settings(['claude-instructions'])), 'home'),
-      }
-    );
+    const taken = await previewWithClaudeOff(request);
+    const entry = onlyEntry(taken);
+    const claude = entry.destinations.find(({ locationId }) => locationId === 'claude-skills');
+    const agents = entry.destinations.find(({ locationId }) => locationId === 'agents-skills');
+    expect(claude).toMatchObject({ blockedReason: 'location-disabled', outcomes: [] });
+    expect(agents?.outcomes[0]?.operation).toBe('create');
 
-    await expect(failure).rejects.toMatchObject({ status: 422 });
+    // Reported as blocked is a UI affordance, not an authorization decision:
+    // a client that applies to it anyway is still refused.
+    await expect(
+      applyLibraryPropagation(
+        userId(),
+        toRequest(taken, request, [adoptAll(entry, winnerFrom(entry, 'mango-skills'))]),
+        applyDeps({ preview: (_userId, freshRequest) => previewWithClaudeOff(freshRequest) })
+      )
+    ).rejects.toMatchObject({ status: 422, message: expect.stringContaining('location-disabled') });
+    expect(existsSync(skillPath('claude-skills'))).toBe(false);
+    expect(existsSync(skillPath('agents-skills'))).toBe(false);
   });
 });
 

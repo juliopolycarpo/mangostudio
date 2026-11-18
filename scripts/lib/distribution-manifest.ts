@@ -145,8 +145,12 @@ export interface ValidateDistributionManifestOptions {
   readonly runtimeProfile?: RuntimeProfile;
   readonly target?: string;
   readonly scope?: DistributionManifestScope;
-  /** Defaults to downloaded for the prebuilt smoke consumer; producer CLIs pass this explicitly. */
-  readonly expect?: DistributionManifestExpectation;
+  /**
+   * Which tree the caller holds. `built` also checks every `.mango/out/<target>/**` file;
+   * `downloaded` checks only the target archive and `SHA256SUMS`. Required so that a caller
+   * never gets the weaker check by omission.
+   */
+  readonly expect: DistributionManifestExpectation;
 }
 
 /** Manifest validation slice for a downloaded distribution bundle. */
@@ -300,12 +304,15 @@ export function validateDistributionManifest(
     throw new Error(`Distribution target is missing from manifest: ${options.target}`);
   }
 
-  const files = selectFiles(
-    manifest,
-    target,
-    options.scope ?? 'all',
-    options.expect ?? 'downloaded'
-  );
+  // The type already requires `expect`; this stops an untyped caller from falling through to
+  // the weaker `downloaded` slice.
+  if (options.expect !== 'built' && options.expect !== 'downloaded') {
+    throw new Error(
+      `Distribution manifest expectation: expected built | downloaded | received: ${String(options.expect)}`
+    );
+  }
+
+  const files = selectFiles(manifest, target, options.scope ?? 'all', options.expect);
   if (files.length === 0) throw new Error('Distribution manifest selected no files to validate.');
   for (const file of files) validateFile(options.rootDir, file);
 }

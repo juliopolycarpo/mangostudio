@@ -113,17 +113,11 @@ export async function previewLibraryRemoval(
       : [LOCAL_ENVIRONMENT_ID];
 
   // The scanner skips disabled locations, so their copies never appear in
-  // `discovered`. Previewing one would report every copy there as `absent` —
-  // the exact reading under which a removal looks safe when it is not.
+  // `discovered`. Reading one as `absent` is the reading under which a removal
+  // looks safe when it is not, so each such location is reported as blocked
+  // (`location-disabled`) while the rest of the request still previews. An
+  // apply re-previews and refuses the blocked row.
   const enabled = await deps.enabledLocationIds(userId);
-  for (const location of locations) {
-    if (!enabled.has(location.id)) {
-      throw new LibraryRequestError(
-        422,
-        `Library location "${location.id}" is not enabled, so its contents cannot be previewed or removed.`
-      );
-    }
-  }
 
   const kinds = [...new Set([...refs.values()].map((ref) => ref.kind))];
   const snapshots = await Promise.all(
@@ -150,7 +144,7 @@ export async function previewLibraryRemoval(
   ).flat();
 
   const entries = requested.map((key) =>
-    buildRemovalEntry(key, refs.get(key) as LibraryResourceRef, snapshots, locations)
+    buildRemovalEntry(key, refs.get(key) as LibraryResourceRef, snapshots, locations, enabled)
   );
   const stateHash = hashLibraryState(
     snapshots.map((snapshot) => ({
@@ -227,7 +221,8 @@ function buildRemovalEntry(
   resourceKey: string,
   ref: LibraryResourceRef,
   snapshots: readonly EnvironmentSnapshot[],
-  locations: readonly LocationDefinition[]
+  locations: readonly LocationDefinition[],
+  enabledLocationIds: ReadonlySet<LibraryLocationId>
 ): RemovalPreviewEntry {
   const placed: PlacedInstance[] = snapshots.flatMap((snapshot) => {
     const resource = snapshot.resources.find((candidate) => candidate.key === resourceKey);
@@ -259,7 +254,12 @@ function buildRemovalEntry(
           environmentBlockedReason(snapshot.blockedReason) ??
           (snapshot.failedLocationIds?.has(location.id)
             ? 'location-scan-failed'
-            : removalBlockedReason(location, snapshot.statuses.get(location.id), instance)),
+            : removalBlockedReason(
+                location,
+                enabledLocationIds.has(location.id),
+                snapshot.statuses.get(location.id),
+                instance
+              )),
       };
     });
   });
@@ -399,17 +399,26 @@ function eliminatesContentGroup(
  * incidental, so the reported code is the one the user would have to fix first.
  * An instance the scanner could not read is last and still blocks: it cannot be
  * backed up faithfully, so removing it would be a deletion with no undo (G2).
+ *
+ * A disabled location blocks whether or not a copy is listed: the scanner never
+ * reads it, so "no copy" there is not an observation. It ranks after the
+ * properties enabling the location cannot fix (unsupported, read-only). A
+ * disabled location is never scanned, so it cannot also be in the failed-scan
+ * set the caller checks first.
  */
 function removalBlockedReason(
   location: LocationDefinition,
+  locationEnabled: boolean,
   status: LibraryLocationStatus | undefined,
   instance: LibraryInstance | undefined
 ): RemovalBlockedReason | undefined {
-  if (!instance) return undefined;
+  if (!instance && locationEnabled) return undefined;
   // Missing status is unsupported before any path access.
   // eslint-disable-next-line @typescript-eslint/prefer-optional-chain
   if (!status || status.path === null) return 'unsupported-location';
   if (location.access !== 'read-write') return 'read-only-location';
+  if (!locationEnabled) return 'location-disabled';
+  if (!instance) return undefined;
   if (!status.writable) return 'location-unwritable';
   if (!instance.valid) return 'invalid-instance';
   return undefined;
