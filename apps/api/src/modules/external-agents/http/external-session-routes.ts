@@ -29,8 +29,9 @@ import {
   isExternalAgentTargetId,
   schemaMaxLengthFor,
 } from '@mangostudio/shared/external-agents';
-import { Elysia, t } from 'elysia';
+import { Elysia, status, t } from 'elysia';
 
+import { apiErrorStatus } from '../../../lib/api-error-status';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
   type ExternalNativeSessionRefusalCode,
@@ -64,7 +65,7 @@ const UNAUTHENTICATED = {
  * has the session, and a client that could not tell them apart would offer the
  * wrong remedy for one of them.
  */
-function statusFor(code: ExternalNativeSessionRefusalCode): number {
+function statusFor(code: ExternalNativeSessionRefusalCode): 400 | 403 | 409 | 503 {
   switch (code) {
     case 'unreachable':
     case 'resolve-failed':
@@ -130,15 +131,13 @@ export function createExternalSessionRoutes(
           503: ApiErrorResponseSchema,
         },
       },
-      async ({ query, user, set }) => {
+      async ({ query, user }) => {
         const userId = user?.id;
         if (!userId) {
-          set.status = 401;
-          return UNAUTHENTICATED;
+          return status(401, UNAUTHENTICATED);
         }
         if (!isExternalAgentTargetId(query.targetId)) {
-          set.status = 404;
-          return { error: 'Unknown external agent.', code: ERROR_CODES.NOT_FOUND };
+          return status(404, { error: 'Unknown external agent.', code: ERROR_CODES.NOT_FOUND });
         }
         const environmentId = query.environmentId ?? LOCAL_ENVIRONMENT_ID;
         const listing = await sessions.list({
@@ -150,8 +149,7 @@ export function createExternalSessionRoutes(
           ...(query.limit === undefined ? {} : { limit: query.limit }),
         });
         if (!listing.ok) {
-          set.status = statusFor(listing.code);
-          return refusalBody(listing);
+          return apiErrorStatus(statusFor(listing.code), refusalBody(listing));
         }
         return {
           environmentId,
@@ -176,8 +174,7 @@ export function createExternalSessionRoutes(
       async ({ body, user, set }) => {
         const userId = user?.id;
         if (!userId) {
-          set.status = 401;
-          return UNAUTHENTICATED;
+          return status(401, UNAUTHENTICATED);
         }
         const adopted = await sessions.adopt({
           userId,
@@ -185,8 +182,7 @@ export function createExternalSessionRoutes(
           session: body.session,
         });
         if (!adopted.ok) {
-          set.status = statusFor(adopted.code);
-          return refusalBody(adopted);
+          return apiErrorStatus(statusFor(adopted.code), refusalBody(adopted));
         }
         set.status = 201;
         return { chat: adopted.chat };

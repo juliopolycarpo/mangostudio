@@ -44,9 +44,10 @@ import {
   ExternalReviewTargetSchema,
   schemaMaxLengthFor,
 } from '@mangostudio/shared/external-agents';
-import { Elysia, t } from 'elysia';
+import { Elysia, status, t } from 'elysia';
 
 import { getDb } from '../../../db/database';
+import { apiErrorStatus } from '../../../lib/api-error-status';
 import { environmentUnavailableResponse } from '../../../lib/environment-unavailable';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { getRuntimeClient } from '../../../services/runtime-client';
@@ -137,14 +138,17 @@ const DEFAULT_REVIEW_PROMPT = 'Review my uncommitted changes.';
  * not answer, deliberately: distinguishing them would confirm that another
  * user's approval exists.
  */
-function statusForRejection(reason: string): number {
+function rejectedAnswer(reason: string) {
+  // One literal `status()` per arm rather than a computed code: the arms are
+  // what the route's declared `400 | 404 | 409` response map is checked against.
+  const body = { status: 'rejected' as const, reason };
   switch (reason) {
     case 'not-found':
-      return 404;
+      return status(404, body);
     case 'unknown-option':
-      return 400;
+      return status(400, body);
     default:
-      return 409;
+      return status(409, body);
   }
 }
 
@@ -184,17 +188,14 @@ export function createExternalAgentTurnRoutes(
           409: RespondResponseSchema,
         },
       },
-      async ({ params, body, user, set }) => {
+      async ({ params, body, user }) => {
         const result = await controller.answerApproval({
           userId: user?.id ?? '',
           chatId: params.id,
           requestId: body.requestId,
           optionId: body.optionId,
         });
-        if (result.status === 'rejected') {
-          set.status = statusForRejection(result.reason);
-          return { status: 'rejected' as const, reason: result.reason };
-        }
+        if (result.status === 'rejected') return rejectedAnswer(result.reason);
         return { status: 'accepted' as const, optionId: result.optionId };
       }
     )
@@ -209,7 +210,7 @@ export function createExternalAgentTurnRoutes(
           409: ExternalAgentSteerResultSchema,
         },
       },
-      async ({ params, body, user, set }) => {
+      async ({ params, body, user }) => {
         const result = await controller.steer({
           userId: user?.id ?? '',
           chatId: params.id,
@@ -219,7 +220,7 @@ export function createExternalAgentTurnRoutes(
         // Every rejection reads as a conflict: the chat and the request are
         // both well-formed, but the turn this was addressed to is not there to
         // steer, right now, for whichever of the reasonCode's causes applies.
-        if (!result.accepted) set.status = 409;
+        if (!result.accepted) return status(409, result);
         return result;
       }
     )
@@ -233,13 +234,12 @@ export function createExternalAgentTurnRoutes(
         // declaring a schema around it would put validation between the vendor's
         // events and the socket.
       },
-      async ({ params, body, user, set }) => {
+      async ({ params, body, user }) => {
         const userId = user?.id ?? '';
         const db = getDb();
         const chat = await getOwnedChat(params.id, userId, db);
         if (!chat) {
-          set.status = 404;
-          return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
+          return status(404, { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND });
         }
 
         // Everything else — runner kind, workdir, conflict, disclosure, trust,
@@ -259,12 +259,11 @@ export function createExternalAgentTurnRoutes(
           db
         );
         if (result.ok) return result.response;
-        set.status = EXTERNAL_PREFLIGHT_STATUS[result.failure.kind];
-        return {
+        return apiErrorStatus(EXTERNAL_PREFLIGHT_STATUS[result.failure.kind], {
           error: result.failure.message,
           code: EXTERNAL_PREFLIGHT_CODE[result.failure.kind],
           ...externalPreflightDetails(result.failure),
-        };
+        });
       }
     )
     .post(
@@ -283,8 +282,7 @@ export function createExternalAgentTurnRoutes(
         const db = getDb();
         const source = await getOwnedChat(params.id, userId, db);
         if (!source) {
-          set.status = 404;
-          return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
+          return status(404, { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND });
         }
 
         // One transaction, because a fork is one thing. `createChat` commits a
@@ -347,22 +345,19 @@ export function createExternalAgentTurnRoutes(
         const db = getDb();
         const chat = await getOwnedChat(params.id, userId, db);
         if (!chat) {
-          set.status = 404;
-          return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
+          return status(404, { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND });
         }
         if (chat.runner.kind !== 'external') {
-          set.status = 400;
-          return {
+          return status(400, {
             error: 'This chat is not configured for an external agent.',
             code: ERROR_CODES.VALIDATION,
-          };
+          });
         }
         if (!chat.workdir) {
-          set.status = 400;
-          return {
+          return status(400, {
             error: 'Choose a folder for this chat before trusting it.',
             code: ERROR_CODES.VALIDATION,
-          };
+          });
         }
 
         let workspacePath: string;
@@ -379,11 +374,10 @@ export function createExternalAgentTurnRoutes(
           // generic answer it had before the dedicated code existed.
           const unavailable = environmentUnavailableResponse(error, set);
           if (unavailable) return unavailable;
-          set.status = 503;
-          return {
+          return status(503, {
             error: 'Could not reach the machine this chat runs on.',
             code: ERROR_CODES.PROVIDER_ERROR,
-          };
+          });
         }
 
         // The scope the refusal disclosed, echoed back by the dialog that
@@ -397,11 +391,10 @@ export function createExternalAgentTurnRoutes(
           body.targetId !== chat.runner.targetId ||
           body.environmentId !== chat.environmentId
         ) {
-          set.status = 409;
-          return {
+          return status(409, {
             error: 'This chat changed while you were deciding. Try the message again.',
             code: ERROR_CODES.CONFLICT,
-          };
+          });
         }
 
         try {
@@ -416,8 +409,7 @@ export function createExternalAgentTurnRoutes(
           );
         } catch (error) {
           if (!(error instanceof AppSettingsConflict)) throw error;
-          set.status = 409;
-          return { error: error.message, code: ERROR_CODES.CONFLICT };
+          return status(409, { error: error.message, code: ERROR_CODES.CONFLICT });
         }
         return { workspacePath };
       }
