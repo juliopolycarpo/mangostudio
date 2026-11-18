@@ -12,10 +12,8 @@ import {
   DeleteBranchBodySchema,
   DiscardPathsBodySchema,
   GenerateCommitMessageBodySchema,
-  type GenerateCommitMessageResponse,
   GenerateCommitMessageResponseSchema,
   GitBatchStateRequestSchema,
-  type GitBatchStateResponse,
   GitBatchStateResponseSchema,
   GitBranchesResponseSchema,
   GitCommitDetailsResponseSchema,
@@ -28,13 +26,11 @@ import {
   GitHistoryResponseSchema,
   GitPushBodySchema,
   GitRemoteBodySchema,
-  type GitRepoState,
   GitRepoStateSchema,
   GitStateQuerySchema,
   GitStatusSchema,
   GitWorktreeListResponseSchema,
   InitRepoBodySchema,
-  type InitRepoResponse,
   InitRepoResponseSchema,
   RemoveWorktreeBodySchema,
   RenameBranchBodySchema,
@@ -47,14 +43,16 @@ import {
   SwitchBranchBodySchema,
   UnstagePathsBodySchema,
 } from '@mangostudio/shared/git';
-import { Elysia } from 'elysia';
+import { Elysia, type ElysiaStatus, status } from 'elysia';
 
 import { getDb } from '../../../db/database';
+import { type ApiErrorStatus, apiErrorStatus } from '../../../lib/api-error-status';
 import { environmentUnavailableResponse } from '../../../lib/environment-unavailable';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import {
   chatAccessDenied,
+  type ChatTargetRefusal,
   chatWorkdirConflict,
   resolveChatWorkdir,
 } from '../../chats/application/chat-workdir';
@@ -100,9 +98,12 @@ import {
 } from '../application/git-write-service';
 import { GitCliError } from '../infrastructure/git-cli';
 
-type RouteResult<T> = T | ApiErrorResponse;
+type GitCommandFailure = ElysiaStatus<503, ApiErrorResponse> | ElysiaStatus<500, ApiErrorResponse>;
 
-function gitCommandError(error: unknown, set: { status?: number | string }): ApiErrorResponse {
+function gitCommandError(
+  error: unknown,
+  set: { headers?: Record<string, string | number | string[]> }
+): GitCommandFailure {
   const unavailable = environmentUnavailableResponse(error, set);
   if (unavailable) return unavailable;
 
@@ -114,14 +115,15 @@ function gitCommandError(error: unknown, set: { status?: number | string }): Api
       stderr: error.stderr,
     });
   }
-  set.status = 500;
-  return { error: 'Git command failed', code: ERROR_CODES.INTERNAL };
+  return status(500, { error: 'Git command failed', code: ERROR_CODES.INTERNAL });
 }
 
-function gitWriteError(error: unknown, set: { status?: number | string }): ApiErrorResponse {
+function gitWriteError(
+  error: unknown,
+  set: { headers?: Record<string, string | number | string[]> }
+): GitCommandFailure | ApiErrorStatus<GitWriteError['status']> {
   if (!(error instanceof GitWriteError)) return gitCommandError(error, set);
-  set.status = error.status;
-  return {
+  return apiErrorStatus(error.status, {
     error: error.message,
     code: error.code,
     ...(error.detail
@@ -132,16 +134,15 @@ function gitWriteError(error: unknown, set: { status?: number | string }): ApiEr
               : { stderr: error.detail },
         }
       : {}),
-  };
+  });
 }
 
 async function routeWorkdir(
   chatId: string,
-  userId: string,
-  set: { status?: number | string }
+  userId: string
 ): Promise<
   | { workdir: string; chat: ChatRecord; invalidationTarget: GitInvalidationTarget }
-  | { error: ApiErrorResponse }
+  | { error: ChatTargetRefusal }
 > {
   const resolution = await resolveChatWorkdir(chatId, userId, getDb());
   if (resolution.state === 'ok') {
@@ -156,9 +157,9 @@ async function routeWorkdir(
     };
   }
   if (resolution.state === 'no-workdir') {
-    return { error: chatWorkdirConflict(set) };
+    return { error: chatWorkdirConflict() };
   }
-  return { error: chatAccessDenied(resolution, set) };
+  return { error: chatAccessDenied(resolution) };
 }
 
 export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
@@ -172,12 +173,13 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           403: ApiErrorResponseSchema,
           404: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
-      async ({ query, request, set, user }): Promise<RouteResult<GitRepoState>> => {
+      async ({ query, request, set, user }) => {
         const resolution = await resolveChatWorkdir(query.chatId, user?.id ?? '', getDb());
         if (resolution.state === 'no-workdir') return { state: 'no-workdir' };
-        if (resolution.state !== 'ok') return chatAccessDenied(resolution, set);
+        if (resolution.state !== 'ok') return chatAccessDenied(resolution);
 
         try {
           return await getRepoState(resolution.workdir, request.signal, {
@@ -196,9 +198,10 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         response: {
           200: GitBatchStateResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
-      async ({ body, request, set, user }): Promise<RouteResult<GitBatchStateResponse>> => {
+      async ({ body, request, set, user }) => {
         const userId = user?.id ?? '';
         // The ownership lookup is a database read, not Git. It stays outside
         // the catch — like `resolveChatWorkdir` on every sibling route — so a
@@ -229,10 +232,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           404: ApiErrorResponseSchema,
           409: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
-      async ({ body, request, set, user }): Promise<RouteResult<InitRepoResponse>> => {
-        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+      async ({ body, request, set, user }) => {
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
 
         try {
@@ -253,10 +257,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ body, request, set, user }) => {
-        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
 
         try {
@@ -282,10 +287,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ body, request, set, user }) => {
-        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
 
         try {
@@ -311,10 +317,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ body, request, set, user }) => {
-        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
 
         try {
@@ -343,10 +350,10 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           503: ApiErrorResponseSchema,
         },
       },
-      async ({ body, request, set, user }): Promise<RouteResult<GenerateCommitMessageResponse>> => {
+      async ({ body, request, set, user }) => {
         const db = getDb();
         const userId = user?.id ?? '';
-        const resolved = await routeWorkdir(body.chatId, userId, set);
+        const resolved = await routeWorkdir(body.chatId, userId);
         if ('error' in resolved) return resolved.error;
         const { workdir, chat } = resolved;
 
@@ -412,12 +419,13 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ body, request, set, user }) => {
         const db = getDb();
         const userId = user?.id ?? '';
-        const resolved = await routeWorkdir(body.chatId, userId, set);
+        const resolved = await routeWorkdir(body.chatId, userId);
         if ('error' in resolved) return resolved.error;
 
         try {
@@ -445,12 +453,13 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ query, request, set, user }) => {
         const db = getDb();
         const userId = user?.id ?? '';
-        const resolved = await routeWorkdir(query.chatId, userId, set);
+        const resolved = await routeWorkdir(query.chatId, userId);
         if ('error' in resolved) return resolved.error;
 
         try {
@@ -479,10 +488,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ body, request, set, user }) => {
-        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
 
         try {
@@ -508,10 +518,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ body, request, set, user }) => {
-        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
 
         try {
@@ -537,10 +548,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ body, request, set, user }) => {
-        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
 
         try {
@@ -566,10 +578,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ body, request, set, user }) => {
-        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
 
         try {
@@ -595,10 +608,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ query, request, set, user }) => {
-        const resolved = await routeWorkdir(query.chatId, user?.id ?? '', set);
+        const resolved = await routeWorkdir(query.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
 
         try {
@@ -619,10 +633,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ query, request, set, user }) => {
-        const resolved = await routeWorkdir(query.chatId, user?.id ?? '', set);
+        const resolved = await routeWorkdir(query.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
         try {
           return await listBranches(resolved.workdir, request.signal, resolved.invalidationTarget);
@@ -642,10 +657,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ body, request, set, user }) => {
-        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
         try {
           return await switchBranch(
@@ -670,10 +686,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ body, request, set, user }) => {
-        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
         try {
           return await checkoutRemoteBranch(
@@ -698,10 +715,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ body, request, set, user }) => {
-        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
         try {
           return await createBranch(
@@ -726,10 +744,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ body, request, set, user }) => {
-        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
         try {
           return await deleteBranch(
@@ -754,10 +773,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ body, request, set, user }) => {
-        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
         try {
           return await renameBranch(
@@ -782,10 +802,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ query, request, set, user }) => {
-        const resolved = await routeWorkdir(query.chatId, user?.id ?? '', set);
+        const resolved = await routeWorkdir(query.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
         try {
           return await listWorktrees(resolved.workdir, request.signal, resolved.invalidationTarget);
@@ -805,10 +826,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ body, request, set, user }) => {
-        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
         try {
           return await addWorktree(
@@ -833,10 +855,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ body, request, set, user }) => {
-        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
         try {
           return await removeWorktree(
@@ -861,10 +884,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ query, request, set, user }) => {
-        const resolved = await routeWorkdir(query.chatId, user?.id ?? '', set);
+        const resolved = await routeWorkdir(query.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
         try {
           return await listHistory(
@@ -889,10 +913,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ query, request, set, user }) => {
-        const resolved = await routeWorkdir(query.chatId, user?.id ?? '', set);
+        const resolved = await routeWorkdir(query.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
         try {
           return await getCommitDetails(
@@ -917,10 +942,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ query, request, set, user }) => {
-        const resolved = await routeWorkdir(query.chatId, user?.id ?? '', set);
+        const resolved = await routeWorkdir(query.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
         try {
           return await getFileDiff(
@@ -945,10 +971,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ body, request, set, user }) => {
-        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
         try {
           return await fetchRemote(
@@ -973,10 +1000,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ body, request, set, user }) => {
-        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
         try {
           return await pullFastForward(
@@ -1000,10 +1028,11 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
       async ({ body, request, set, user }) => {
-        const resolved = await routeWorkdir(body.chatId, user?.id ?? '', set);
+        const resolved = await routeWorkdir(body.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
         try {
           return await pushBranch(

@@ -11,7 +11,7 @@ import type { SSEErrorEvent } from '@mangostudio/shared/streaming';
 import { type Elysia, t } from 'elysia';
 
 import { getDb } from '../../../db/database';
-import { environmentUnavailableResponse } from '../../../lib/environment-unavailable';
+import { environmentUnavailableBody } from '../../../lib/environment-unavailable';
 import { getErrorCode } from '../../../lib/error-code';
 import { SSE_KEEPALIVE_FRAME, SSE_KEEPALIVE_INTERVAL_MS } from '../../../lib/hub-connection-limits';
 import { requireAuth } from '../../../plugins/auth-middleware';
@@ -525,7 +525,7 @@ async function respondStream(
         if (!abortController.signal.aborted) {
           // A connect failure carries the same fixed text and code the JSON routes
           // answer 503 with, not the manager's diagnostic (paths, usernames).
-          const unavailable = environmentUnavailableResponse(err, {});
+          const unavailable = environmentUnavailableBody(err);
           const message =
             unavailable?.error ?? (err instanceof Error ? err.message : 'Stream generation failed');
           const code = unavailable?.code ?? getErrorCode(err);

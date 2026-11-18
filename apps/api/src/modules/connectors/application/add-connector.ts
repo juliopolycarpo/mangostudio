@@ -23,7 +23,8 @@ export class ConnectorValidationError extends Error {
   constructor(
     message: string,
     public readonly code: string = ERROR_CODES.VALIDATION,
-    public readonly status = 400
+    // Literals, not `number`, so `status(error.status, ...)` types into Eden's error channel.
+    public readonly status: 400 | 409 | 410 | 422 = 400
   ) {
     super(message);
     this.name = 'ConnectorValidationError';

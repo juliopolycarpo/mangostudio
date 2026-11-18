@@ -57,7 +57,10 @@ assertType<Equals<HealthResponse['data'], { status: string; timestamp: number } 
 assertType<
   Equals<
     HealthResponse['error'],
-    { status: 429; value: ApiErrorResponse } | { status: 500; value: ApiErrorResponse } | null
+    | { status: 429; value: ApiErrorResponse }
+    | { status: 500; value: ApiErrorResponse }
+    | { status: 503; value: ApiErrorResponse }
+    | null
   >
 >();
 
@@ -98,8 +101,8 @@ assertType<
 //    outside that declaration (401, 403, 422, 429) come from the shared auth,
 //    API-key, validation and rate-limit hooks every route inherits.
 type InheritedHookStatus = 401 | 403 | 422 | 429;
-type ChatScopedStatus = InheritedHookStatus | 404 | 409 | 500;
-type InboxStatus = InheritedHookStatus | 500;
+type ChatScopedStatus = InheritedHookStatus | 404 | 409 | 500 | 503;
+type InboxStatus = InheritedHookStatus | 500 | 503;
 
 /**
  * Constrained to Eden's `{ status, value }` arms (or `null`) so a channel that
@@ -120,16 +123,16 @@ type ErrorBodyAt<Response extends TreatyResponse, Status extends number> = Extra
  */
 type SameShape<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 
-/** Chat-scoped routes declare 404, 409 and 500 beyond what the hooks add. */
+/** Chat-scoped routes declare 404, 409, 500 and 503 beyond what the hooks add. */
 type ChatScopedErrorsExact<Response extends TreatyResponse> =
   Equals<ErrorStatuses<Response>, ChatScopedStatus> extends true
-    ? SameShape<ErrorBodyAt<Response, 404 | 409 | 500>, ApiErrorResponse>
+    ? SameShape<ErrorBodyAt<Response, 404 | 409 | 500 | 503>, ApiErrorResponse>
     : false;
 
-/** The inbox has no chat to refuse, so it declares only 500. */
+/** The inbox has no chat to refuse, so it declares only 500 and 503. */
 type InboxErrorsExact<Response extends TreatyResponse> =
   Equals<ErrorStatuses<Response>, InboxStatus> extends true
-    ? SameShape<ErrorBodyAt<Response, 500>, ApiErrorResponse>
+    ? SameShape<ErrorBodyAt<Response, 500 | 503>, ApiErrorResponse>
     : false;
 
 type GithubContextResponse = Awaited<ReturnType<typeof client.api.github.context.get>>;
@@ -155,6 +158,54 @@ assertType<ChatScopedErrorsExact<GithubPrThreadsResponse>>();
 assertType<ChatScopedErrorsExact<GithubCreatePrResponse>>();
 assertType<ChatScopedErrorsExact<GithubPrReadyResponse>>();
 assertType<ChatScopedErrorsExact<GithubPrCheckoutResponse>>();
+
+// 9. Routes with no declared `response` map take their error channel from what
+//    the handler returns. A handler that assigns `set.status` and returns a bare
+//    `ApiErrorResponse` types that body into Eden's successful `data`, so a
+//    caller reading `data` sees an error body as a success. Handlers return
+//    `status(code, body)` instead, which lands the body in `error`. These three
+//    routes answer through the shared failure helpers (skills, agents, rule
+//    files) and have no `response` map of their own.
+type SkillsListResponse = Awaited<ReturnType<typeof client.api.skills.get>>;
+type AgentGetResponse = Awaited<ReturnType<ReturnType<typeof client.api.settings.agents>['get']>>;
+type RuleFilePreviewResponse = Awaited<
+  ReturnType<(typeof client.api.settings)['rule-files']['preview']['post']>
+>;
+
+/** True when an error body can be read from the successful `data` channel. */
+type ErrorBodyInData<Response extends { data: unknown }> = [ApiErrorResponse] extends [
+  NonNullable<Response['data']>,
+]
+  ? true
+  : false;
+
+/** True when every error arm at `Status` carries an `ApiErrorResponse`-shaped body. */
+type ErrorBodyIsApiError<Response extends TreatyResponse, Status extends number> = [
+  ErrorBodyAt<Response, Status>,
+] extends [ApiErrorResponse]
+  ? true
+  : false;
+
+assertType<Equals<ErrorBodyInData<SkillsListResponse>, false>>();
+assertType<Equals<ErrorBodyInData<AgentGetResponse>, false>>();
+assertType<Equals<ErrorBodyInData<RuleFilePreviewResponse>, false>>();
+
+// Connectors answer every failure through `handleConnectorError` and declare no
+// `response` map either, so a failed add must not read as a connector.
+type ConnectorAddResponse = Awaited<ReturnType<typeof client.api.settings.connectors.post>>;
+assertType<Equals<ErrorBodyInData<ConnectorAddResponse>, false>>();
+assertType<ErrorBodyIsApiError<ConnectorAddResponse, 403 | 404 | 409 | 410 | 500 | 502>>();
+assertType<Equals<Extract<ErrorStatuses<ConnectorAddResponse>, 502 | 503>, 502 | 503>>();
+
+// The statuses each handler can answer with, beside what the shared hooks add.
+assertType<Equals<ErrorStatuses<SkillsListResponse>, InheritedHookStatus | 404 | 500 | 503>>();
+assertType<Equals<ErrorStatuses<AgentGetResponse>, 401 | 404 | 409 | 422 | 500 | 503>>();
+assertType<Equals<ErrorStatuses<RuleFilePreviewResponse>, 401 | 404 | 422 | 500>>();
+assertType<ErrorBodyIsApiError<SkillsListResponse, 403 | 404 | 422 | 500 | 503>>();
+assertType<ErrorBodyIsApiError<AgentGetResponse, 404 | 409 | 500 | 503>>();
+// Its 422 is Elysia's own body validation, a `ValidationProblem`, so only the
+// handler's statuses are checked here.
+assertType<ErrorBodyIsApiError<RuleFilePreviewResponse, 404 | 500>>();
 
 describe('Eden treaty type seam', () => {
   it('keeps route input and output types inferable from App', () => {

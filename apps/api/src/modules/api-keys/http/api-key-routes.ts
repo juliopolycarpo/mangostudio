@@ -1,17 +1,12 @@
 import {
   CreateApiKeyBodySchema,
-  type CreateApiKeyResponse,
   CreateApiKeyResponseSchema,
-  type ListApiKeysResponse,
   ListApiKeysResponseSchema,
 } from '@mangostudio/shared/api-keys';
-import {
-  type ApiErrorResponse,
-  ApiErrorResponseSchema,
-  ERROR_CODES,
-} from '@mangostudio/shared/errors';
-import { Elysia, t } from 'elysia';
+import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
+import { Elysia, status, t } from 'elysia';
 
+import { apiErrorStatus } from '../../../lib/api-error-status';
 import { requireCookieAuth } from '../../../plugins/auth-middleware';
 import {
   ApiKeyServiceError,
@@ -20,15 +15,16 @@ import {
   revokeApiKey,
 } from '../application/api-key-service';
 
-function handleApiKeyError(error: unknown, set: { status?: number | string }): ApiErrorResponse {
+function handleApiKeyError(error: unknown) {
   if (error instanceof ApiKeyServiceError) {
-    set.status = error.status;
-    return { error: error.message, code: error.code };
+    return apiErrorStatus(error.status, { error: error.message, code: error.code });
   }
 
   console.error('[api-keys] Unexpected API key management error');
-  set.status = 500;
-  return { error: 'Unexpected API key management error.', code: ERROR_CODES.INTERNAL };
+  return status(500, {
+    error: 'Unexpected API key management error.',
+    code: ERROR_CODES.INTERNAL,
+  });
 }
 
 // No `as const`: it makes Eden type the spread `error` channel as `unknown`.
@@ -51,14 +47,14 @@ export const apiKeyRoutes = new Elysia().use(requireCookieAuth).group('/api-keys
           ...errorResponses,
         },
       },
-      async ({ request, set, user }): Promise<ListApiKeysResponse | ApiErrorResponse> => {
+      async ({ request, user }) => {
         try {
           return await listApiKeys({
             userId: user?.id ?? '',
             headers: request.headers,
           });
         } catch (error) {
-          return handleApiKeyError(error, set);
+          return handleApiKeyError(error);
         }
       }
     )
@@ -71,7 +67,7 @@ export const apiKeyRoutes = new Elysia().use(requireCookieAuth).group('/api-keys
           ...errorResponses,
         },
       },
-      async ({ body, request, set, user }): Promise<CreateApiKeyResponse | ApiErrorResponse> => {
+      async ({ body, request, set, user }) => {
         try {
           const response = await createApiKey(
             { userId: user?.id ?? '', headers: request.headers },
@@ -80,7 +76,7 @@ export const apiKeyRoutes = new Elysia().use(requireCookieAuth).group('/api-keys
           set.status = 201;
           return response;
         } catch (error) {
-          return handleApiKeyError(error, set);
+          return handleApiKeyError(error);
         }
       }
     )
@@ -93,13 +89,13 @@ export const apiKeyRoutes = new Elysia().use(requireCookieAuth).group('/api-keys
           ...errorResponses,
         },
       },
-      async ({ params, request, set, user }): Promise<undefined | ApiErrorResponse> => {
+      async ({ params, request, set, user }) => {
         try {
           await revokeApiKey({ userId: user?.id ?? '', headers: request.headers }, params.id);
           set.status = 204;
           return undefined;
         } catch (error) {
-          return handleApiKeyError(error, set);
+          return handleApiKeyError(error);
         }
       }
     )

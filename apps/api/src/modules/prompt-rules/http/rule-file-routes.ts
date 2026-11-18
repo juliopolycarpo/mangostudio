@@ -1,7 +1,7 @@
-import type { ApiErrorResponse } from '@mangostudio/shared/errors';
 import { RuleFilePreviewBodySchema } from '@mangostudio/shared/prompt-rules';
-import { Elysia } from 'elysia';
+import { Elysia, status } from 'elysia';
 
+import { apiErrorStatus } from '../../../lib/api-error-status';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
   getDefaultRuleFileDescriptors,
@@ -9,15 +9,13 @@ import {
   RuleFileError,
 } from '../application/rule-file-resolver';
 
-function handleRuleFileError(error: unknown, set: { status?: number | string }): ApiErrorResponse {
+function handleRuleFileError(error: unknown) {
   if (error instanceof RuleFileError) {
-    set.status = error.status;
-    return { error: error.message, code: error.code };
+    return apiErrorStatus(error.status, { error: error.message, code: error.code });
   }
 
   console.error('[prompt-rules] Unexpected error:', error);
-  set.status = 500;
-  return { error: 'Unexpected error while processing rule file.', code: 'INTERNAL' };
+  return status(500, { error: 'Unexpected error while processing rule file.', code: 'INTERNAL' });
 }
 
 export const ruleFileRoutes = new Elysia().use(requireAuth).group('/rule-files', (app) =>
@@ -31,11 +29,11 @@ export const ruleFileRoutes = new Elysia().use(requireAuth).group('/rule-files',
       {
         body: RuleFilePreviewBodySchema,
       },
-      ({ body, set }) => {
+      ({ body }) => {
         try {
           return previewRuleFile(body.path);
         } catch (error) {
-          return handleRuleFileError(error, set);
+          return handleRuleFileError(error);
         }
       }
     )

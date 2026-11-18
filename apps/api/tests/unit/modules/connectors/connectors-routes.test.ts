@@ -79,25 +79,26 @@ describe('handleConnectorError', () => {
     ] as const;
 
     for (const testCase of cases) {
-      const set: { status?: number | string } = {};
+      const answer = handleConnectorError(testCase.error);
 
-      expect(handleConnectorError(testCase.error, set)).toEqual({
+      expect(answer.response).toEqual({
         error: testCase.expectedMessage,
         code: testCase.expectedCode,
       });
-      expect(set.status).toBe(testCase.expectedStatus);
+      expect(answer.status).toBe(testCase.expectedStatus);
     }
   });
 
   it('falls back to an internal error for unexpected failures', () => {
     const consoleSpy = spyOn(console, 'error').mockImplementation(() => undefined);
-    const set: { status?: number | string } = {};
 
-    expect(handleConnectorError(new Error('Unexpected boom'), set)).toEqual({
+    const answer = handleConnectorError(new Error('Unexpected boom'));
+
+    expect(answer.response).toEqual({
       error: 'Unexpected boom',
       code: ERROR_CODES.INTERNAL,
     });
-    expect(set.status).toBe(500);
+    expect(answer.status).toBe(500);
     expect(consoleSpy).toHaveBeenCalled();
 
     consoleSpy.mockRestore();

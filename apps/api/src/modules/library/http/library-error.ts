@@ -10,23 +10,28 @@
  */
 
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
+import { type ElysiaStatus, status } from 'elysia';
 
 import { environmentUnavailableResponse } from '../../../lib/environment-unavailable';
 import { LibraryFeatureUnavailableError } from '../domain/library-feature-error';
 
+/** The three answers a library route can give for a failure it did not classify itself. */
+export type LibraryFailure =
+  | ElysiaStatus<422, ApiErrorResponse>
+  | ElysiaStatus<503, ApiErrorResponse>
+  | ElysiaStatus<500, ApiErrorResponse>;
+
 export function handleLibraryError(
   error: unknown,
-  set: { status?: number | string },
+  set: { headers?: Record<string, string | number | string[]> },
   logPrefix = '[library]',
   unexpectedMessage = 'Unexpected library discovery error.'
-): ApiErrorResponse {
+): LibraryFailure {
   if (error instanceof LibraryFeatureUnavailableError) {
-    set.status = 422;
-    return { error: error.message, code: ERROR_CODES.VALIDATION };
+    return status(422, { error: error.message, code: ERROR_CODES.VALIDATION });
   }
   const unavailable = environmentUnavailableResponse(error, set);
   if (unavailable) return unavailable;
   console.error(`${logPrefix} Unexpected error:`, error);
-  set.status = 500;
-  return { error: unexpectedMessage, code: ERROR_CODES.INTERNAL };
+  return status(500, { error: unexpectedMessage, code: ERROR_CODES.INTERNAL });
 }
