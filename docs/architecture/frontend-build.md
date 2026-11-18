@@ -458,7 +458,11 @@ IDs can exceed JavaScript's safe integer range; cache validators retain their nu
 and millisecond contract. A volume that reports no file ID (inode 0, as exFAT/FAT and some
 SMB or FUSE mounts do) has no identity to compare, so that check is skipped there: the
 realpath check still hides the build state and its symbolic links, but a hardlink to it is not
-detected. Those volumes generally do not support hardlinks.
+detected. Those volumes generally do not support hardlinks. The build state is also refused by
+name before any filesystem access, in every letter case and percent-encoding, and the resolved
+path is compared case-insensitively: a case-insensitive volume (APFS, casefold ext4, vfat) opens
+`/.BUILD-STATE.json` and keeps that spelling through `realpathSync`, so an exact-name check alone
+would serve it.
 
 Hashed assets use `public, max-age=31536000, immutable`. Unhashed root files use
 `public, max-age=86400` with ETag revalidation; `/config.js` and the shell use `no-cache`.
