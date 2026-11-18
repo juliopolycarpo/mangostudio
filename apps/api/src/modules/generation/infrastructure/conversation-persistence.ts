@@ -301,8 +301,9 @@ async function writeChatUpdatedAt(
  * Pass a connection, not an open transaction: the frame must not outrun the commit.
  *
  * Use `{ bestEffort: true }` once a keyed turn's verdict is durable, so a recency
- * write failure cannot replace that verdict. A swallowed failure moved nothing,
- * so it announces nothing.
+ * write failure cannot replace that verdict. The frame still goes out when the
+ * failure is swallowed, because the verdict's transcript is committed and tabs
+ * reconcile on it; a failure that rethrows announces nothing.
  *
  * @example await updateChatAfterTurn(chatId, userId, finishedAt, db, { bestEffort: true });
  */
@@ -318,8 +319,10 @@ export async function updateChatAfterTurn(
   } catch (error) {
     if (!bestEffort) throw error;
     logger.warn('chat_recency_update_failed', { chatId, error: String(error) });
-    return;
   }
+  // Also after a swallowed failure: the turn's transcript is already committed,
+  // and a tab waiting on this frame to settle a mid-unwind row would otherwise
+  // keep showing it as working.
   publishChatListInvalidation(userId);
 }
 

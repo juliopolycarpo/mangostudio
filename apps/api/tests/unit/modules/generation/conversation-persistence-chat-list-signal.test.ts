@@ -98,11 +98,22 @@ describe('updateChatAfterTurn', () => {
     expect(bus.chatListFramesFor(user.id)).toHaveLength(1);
   });
 
-  it('announces nothing when a best-effort write fails, and when a plain one throws', async () => {
+  it('still sends one frame when a best-effort recency write fails', async () => {
+    // A keyed turn's transcript is committed before this write. Tabs settle a
+    // mid-unwind row on the chats frame, so swallowing the failure must not
+    // swallow the signal.
     const bus = installRecordingRealtimeBus();
     const user = await insertTestUser();
 
     await updateChatAfterTurn('chat-1', user.id, 1, rejectingChatWriteDb(), { bestEffort: true });
+
+    expect(bus.chatListFramesFor(user.id)).toHaveLength(1);
+  });
+
+  it('rethrows a plain recency failure and sends no frame', async () => {
+    const bus = installRecordingRealtimeBus();
+    const user = await insertTestUser();
+
     await expect(updateChatAfterTurn('chat-1', user.id, 1, rejectingChatWriteDb())).rejects.toThrow(
       'disk full'
     );
