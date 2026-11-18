@@ -909,6 +909,95 @@ describe('install.ps1 canary tag selection', () => {
   });
 });
 
+describe('install.ps1 canary release lookup (fake api.github.com)', () => {
+  // The named fake of the releases API is a function called Invoke-RestMethod:
+  // PowerShell resolves a function before the cmdlet of the same name, so
+  // Get-CanaryTag reaches it exactly as it would reach the real call. A refusal
+  // is raised as FakeGithubApiException, whose Response carries the status and
+  // headers the way WebException (Windows PowerShell 5.1) and
+  // HttpResponseException (PowerShell 7) do. Only single quotes appear in the
+  // command, so it survives the powershell.exe argument quoting unchanged.
+  const DEFINE_FAKE_EXCEPTION =
+    "Add-Type -TypeDefinition 'public class FakeGithubApiException : System.Exception { public object Response; public FakeGithubApiException(string message, object response) : base(message) { Response = response; } }'";
+  const RESET_EPOCH = '1790000000';
+  const RESET_UTC = '2026-09-21T14:13:20Z';
+  const TOKEN = 'ghp_FIXTURE_TOKEN_MUST_NOT_PRINT';
+
+  /** The body of a fake Invoke-RestMethod that GitHub refused with this status and these headers. */
+  const refusal = (status: number, headers: Record<string, string> = {}): string =>
+    [
+      '$h = New-Object System.Net.WebHeaderCollection',
+      ...Object.entries(headers).map(
+        ([name, value]) => `$h.Add(${psQuote(name)}, ${psQuote(value)})`
+      ),
+      `$r = [pscustomobject]@{ StatusCode = ${status}; Headers = $h }`,
+      `throw (New-Object FakeGithubApiException -ArgumentList @('The remote server returned an error: (${status}).', $r))`,
+    ].join('; ');
+
+  /** What Get-CanaryTag throws against the fake, or 'tag=<tag>' when it resolves. */
+  const lookupMessage = (invokeRestMethodBody: string): string => {
+    const result = runDotSourced(
+      layout().scriptPath,
+      `${DEFINE_FAKE_EXCEPTION}; $env:GITHUB_TOKEN = ${psQuote(TOKEN)}; function Invoke-RestMethod { ${invokeRestMethodBody} }; $m = '<no failure>'; try { $m = 'tag=' + (Get-CanaryTag) } catch { $m = $_.Exception.Message }; [Console]::Out.Write($m)`
+    );
+    expect(result.exitCode, JSON.stringify(result)).toBe(0);
+    return result.stdout;
+  };
+
+  test.skipIf(!POWERSHELL)(
+    'a rate-limited lookup names the status, the reset time, and how to proceed',
+    () => {
+      const message = lookupMessage(
+        refusal(403, { 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': RESET_EPOCH })
+      );
+
+      expect(message).toContain('GitHub API rate limit exceeded (HTTP 403)');
+      expect(message).toContain(`resets at ${RESET_UTC}`);
+      expect(message).toContain('run the installer again');
+      expect(message).not.toContain('no canary release found');
+      expect(message).not.toContain(TOKEN);
+    }
+  );
+
+  test.skipIf(!POWERSHELL)(
+    'a secondary-limit 429 without a reset header still reads as a rate limit',
+    () => {
+      const message = lookupMessage(refusal(429, { 'Retry-After': '60' }));
+
+      expect(message).toContain('GitHub API rate limit exceeded (HTTP 429)');
+      expect(message).not.toContain('resets at');
+      expect(message).not.toContain('no canary release found');
+    }
+  );
+
+  test.skipIf(!POWERSHELL)('a 403 that is not a rate limit is reported as an API refusal', () => {
+    const message = lookupMessage(
+      refusal(403, { 'X-RateLimit-Remaining': '42', 'X-RateLimit-Reset': RESET_EPOCH })
+    );
+
+    expect(message).toContain('GitHub API request failed (HTTP 403)');
+    expect(message).not.toContain('rate limit');
+    expect(message).not.toContain('no canary release found');
+  });
+
+  test.skipIf(!POWERSHELL)('a failure with no HTTP response keeps the transport error', () => {
+    const message = lookupMessage("throw 'The remote name could not be resolved: api.github.com'");
+
+    expect(message).toContain('failed to fetch canary releases from');
+    expect(message).toContain('The remote name could not be resolved');
+  });
+
+  test.skipIf(!POWERSHELL)('an empty release list still reports no canary release', () => {
+    expect(lookupMessage('return @()')).toContain('no canary release found');
+  });
+
+  test.skipIf(!POWERSHELL)('a successful lookup returns the newest tag', () => {
+    expect(lookupMessage("[pscustomobject]@{ tag_name = 'v0.1.1-canary.abc1234' }")).toBe(
+      'tag=v0.1.1-canary.abc1234'
+    );
+  });
+});
+
 describe('install.ps1 failed version probe (fake mangostudio.exe)', () => {
   // The probe runs `<dir>\mangostudio.exe --version`; when it fails the
   // installer must say why. Windows reports a binary that cannot load through

@@ -34,6 +34,44 @@ uname() { fixture_linux_uname "$@"; }
 export -f fixture_linux_uname uname
 `;
 
+// Named fake of `curl` answering for api.github.com. It honours the flags the
+// installer's release lookup uses, so it behaves like the real client whichever
+// way the script asks: `-f` turns an HTTP error into curl exit 22, `-D <file>`
+// receives the response headers, `-o <file>` the body (stdout otherwise), and
+// `-w '%{http_code}'` prints the status after the body.
+// The answer comes from FIXTURE_GITHUB_STATUS, FIXTURE_GITHUB_HEADERS (header
+// lines joined by a literal \\r\\n) and FIXTURE_GITHUB_BODY.
+const FIXTURE_GITHUB_API_CURL = `
+fixture_github_api_curl() {
+  local headers_file='' body_file='' write_out='' fail_on_http_error=0
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -D) headers_file="$2"; shift ;;
+      -o) body_file="$2"; shift ;;
+      -w) write_out="$2"; shift ;;
+      --*) ;;
+      -*f*) fail_on_http_error=1 ;;
+    esac
+    shift
+  done
+  local status="\${FIXTURE_GITHUB_STATUS:-200}"
+  if [ "$fail_on_http_error" = 1 ] && [ "$status" -ge 400 ]; then
+    printf 'curl: (22) The requested URL returned error: %s\\n' "$status" >&2
+    return 22
+  fi
+  if [ -n "$headers_file" ]; then
+    printf 'HTTP/2 %s\\r\\n%b\\r\\n\\r\\n' "$status" "\${FIXTURE_GITHUB_HEADERS:-}" > "$headers_file"
+  fi
+  if [ -n "$body_file" ]; then
+    printf '%s' "\${FIXTURE_GITHUB_BODY:-}" > "$body_file"
+  else
+    printf '%s' "\${FIXTURE_GITHUB_BODY:-}"
+  fi
+  case "$write_out" in *http_code*) printf '%s' "$status" ;; esac
+}
+curl() { fixture_github_api_curl "$@"; }
+`;
+
 /** Select Git Bash rather than the Windows WSL launcher, e.g. fixtureBash(). */
 function fixtureBash(): string {
   const bash = Bun.which('bash');
@@ -715,32 +753,94 @@ describe('install.sh internals (network-free)', () => {
     expect(result.stdout).toBe('');
   });
 
-  test('successful empty canary lookup reports no matching release', () => {
-    const result = sourceAndCall(`
-      fixture_empty_releases() { printf '[]'; }
-      curl() { fixture_empty_releases "$@"; }
+  interface GithubAnswer {
+    readonly status: number;
+    readonly headers?: readonly string[];
+    readonly body?: string;
+  }
+
+  /** Run resolve_canary_tag against the named api.github.com fake, e.g. resolveCanaryFromGithub({ status: 200, body: '[]' }). */
+  function resolveCanaryFromGithub(answer: GithubAnswer): RunResult {
+    const headers = (answer.headers ?? []).join('\\r\\n');
+    return sourceAndCall(`
+      ${FIXTURE_GITHUB_API_CURL}
+      export FIXTURE_GITHUB_STATUS='${answer.status}'
+      export FIXTURE_GITHUB_HEADERS='${headers}'
+      export FIXTURE_GITHUB_BODY='${answer.body ?? ''}'
+      # A token in the environment must never reach the output, whatever the installer does with it.
+      export GITHUB_TOKEN='ghp_FIXTURE_TOKEN_MUST_NOT_PRINT'
       tag="$(resolve_canary_tag)"
+      printf '%s\\n' "$tag"
     `);
+  }
+
+  const RESET_EPOCH = 1790000000;
+  const RESET_UTC = '2026-09-21T14:13:20Z';
+
+  test('successful empty canary lookup reports no matching release', () => {
+    const result = resolveCanaryFromGithub({ status: 200, body: '[]' });
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain('no canary release found');
     expect(result.stderr).not.toContain('failed to fetch');
+    expect(result.stderr).not.toContain('rate limit');
     expect(result.stdout).toBe('');
   });
 
   test('successful canary lookup returns the newest tag', () => {
-    const result = sourceAndCall(`
-      fixture_canary_releases() {
-        printf '[{"tag_name":"v0.1.1-canary.abc1234"}]'
-      }
-      curl() { fixture_canary_releases "$@"; }
-      tag="$(resolve_canary_tag)"
-      printf '%s\\n' "$tag"
-    `);
+    const result = resolveCanaryFromGithub({
+      status: 200,
+      body: '[{"tag_name":"v0.1.1-canary.abc1234"}]',
+    });
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe('');
     expect(result.stdout.trim()).toBe('v0.1.1-canary.abc1234');
+  });
+
+  test('a rate-limited canary lookup names the status, the reset time, and how to proceed', () => {
+    const result = resolveCanaryFromGithub({
+      status: 403,
+      headers: ['x-ratelimit-remaining: 0', `x-ratelimit-reset: ${RESET_EPOCH}`],
+      body: '{"message":"API rate limit exceeded for 203.0.113.7."}',
+    });
+
+    expect(result.exitCode, JSON.stringify(result)).toBe(1);
+    expect(result.stderr).toContain('GitHub API rate limit exceeded (HTTP 403)');
+    expect(result.stderr).toContain(`resets at ${RESET_UTC}`);
+    expect(result.stderr).toContain('run the installer again');
+    expect(result.stderr).not.toContain('no canary release found');
+    expect(result.stderr).not.toContain('ghp_FIXTURE_TOKEN_MUST_NOT_PRINT');
+    expect(result.stdout).toBe('');
+  });
+
+  test('a secondary-limit 429 without a reset header still reads as a rate limit', () => {
+    const result = resolveCanaryFromGithub({ status: 429, headers: ['retry-after: 60'] });
+
+    expect(result.exitCode, JSON.stringify(result)).toBe(1);
+    expect(result.stderr).toContain('GitHub API rate limit exceeded (HTTP 429)');
+    expect(result.stderr).not.toContain('resets at');
+    expect(result.stderr).not.toContain('no canary release found');
+  });
+
+  test('a 403 that is not a rate limit is reported as an API refusal, not a rate limit', () => {
+    const result = resolveCanaryFromGithub({
+      status: 403,
+      headers: ['x-ratelimit-remaining: 42', `x-ratelimit-reset: ${RESET_EPOCH}`],
+    });
+
+    expect(result.exitCode, JSON.stringify(result)).toBe(1);
+    expect(result.stderr).toContain('GitHub API request failed (HTTP 403)');
+    expect(result.stderr).not.toContain('rate limit');
+    expect(result.stderr).not.toContain('no canary release found');
+  });
+
+  test('a server error from the releases API is reported with its status', () => {
+    const result = resolveCanaryFromGithub({ status: 502 });
+
+    expect(result.exitCode, JSON.stringify(result)).toBe(1);
+    expect(result.stderr).toContain('GitHub API request failed (HTTP 502)');
+    expect(result.stderr).not.toContain('no canary release found');
   });
 
   test('extract_canary_tag picks the newest per-commit canary tag_name', () => {
