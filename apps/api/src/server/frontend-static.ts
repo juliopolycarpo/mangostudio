@@ -6,7 +6,7 @@
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { join, sep } from 'node:path';
 
-import { BUILD_STATE_FILE, BUILD_STATE_URL_PATH } from '@mangostudio/shared/utils/dist-files';
+import { BUILD_STATE_FILE } from '@mangostudio/shared/utils/dist-files';
 import { NotFound } from 'elysia';
 
 import type { App } from '../app';
@@ -543,16 +543,19 @@ function resolveFrontendFile(
     return null;
   }
   if (!decoded.startsWith('/') || !/\.[A-Za-z0-9]+$/.test(decoded)) return null;
-  // Build freshness metadata is an internal input, never a public frontend
-  // asset. The embedded branch never sees it — `listDistFiles` drops it before
-  // the manifest is generated — but this branch resolves against a live `dist/`,
-  // where every build writes one.
-  if (decoded === BUILD_STATE_URL_PATH) return null;
   // Checked *after* decoding: `new URL()` normalises literal `..` segments away
   // but leaves `%2e%2e` and `%2f` encoded, so the traversal attempt only becomes
   // visible here. A NUL truncates the path at the syscall boundary.
   const segments = decoded.slice(1).split('/');
   if (segments.some((s) => s === '' || s === '.' || s === '..' || /[\\\0]/.test(s))) return null;
+  // Build freshness metadata is an internal input, never a public frontend
+  // asset. The embedded branch never sees it — `listDistFiles` drops it before
+  // the manifest is generated — but this branch resolves against a live `dist/`,
+  // where every build writes one. Refused by name before any filesystem access,
+  // in any case: a case-insensitive volume (APFS, casefold ext4, vfat) opens the
+  // file under `.BUILD-STATE.json` and keeps that spelling through `realpathSync`,
+  // so the exact-name and realpath comparisons below would not see it.
+  if (segments.some((s) => foldCase(s) === BUILD_STATE_FOLDED)) return null;
 
   // Deployers can switch a frontend directory link to a new release at runtime.
   // Resolve it for each file and use that same root for all eligibility checks.
@@ -563,8 +566,9 @@ function resolveFrontendFile(
   // still resolve outward, and only a realpath comparison catches that.
   const real = realpathSyncSafe(filePath);
   if (!real?.startsWith(frontendRoot + sep)) return null;
-  // A symlink can give private build metadata a public-looking asset name.
-  if (real === join(frontendRoot, BUILD_STATE_FILE)) return null;
+  // A symlink can give private build metadata a public-looking asset name. Folded,
+  // because a case-insensitive volume may hand back the requested spelling.
+  if (foldCase(real) === foldCase(join(frontendRoot, BUILD_STATE_FILE))) return null;
 
   // `statFile`, not `statSync`: a dangling symlink or a file removed between
   // the resolve and the stat must answer 404, not throw out of the handler.
@@ -573,11 +577,31 @@ function resolveFrontendFile(
   // Hardlinks have different realpaths but share file identity with the private
   // metadata. Check per request because a rebuild can replace that metadata.
   const buildStateStats = statFile(join(frontendRoot, BUILD_STATE_FILE));
-  if (stats.dev === buildStateStats?.dev && stats.ino === buildStateStats?.ino) {
+  // A zero inode means the volume reports no file ID (exFAT/FAT, some SMB or FUSE
+  // mounts): every file would share it and the whole frontend would answer 404.
+  // Without an identity there is nothing to compare, so only the realpath check
+  // above guards the build state there.
+  if (
+    buildStateStats &&
+    buildStateStats.ino !== 0n &&
+    stats.dev === buildStateStats.dev &&
+    stats.ino === buildStateStats.ino
+  ) {
     return null;
   }
   return { filePath: real, stats, urlPath: decoded };
 }
+
+/**
+ * The form two spellings of one file name share on a case-insensitive volume.
+ * Upper then lower, because lowercasing alone leaves characters such as `ſ`
+ * (long s) apart from the `s` that Unicode case folding equates them with.
+ */
+function foldCase(name: string): string {
+  return name.toUpperCase().toLowerCase();
+}
+
+const BUILD_STATE_FOLDED = foldCase(BUILD_STATE_FILE);
 
 /** `realpathSync`, or null when the path cannot be resolved. */
 function realpathSyncSafe(path: string): string | null {
