@@ -1,22 +1,17 @@
-//! GitHub CLI argument policy, mirroring the TypeScript runtime's allowlists.
+//! GitHub CLI argument policy. The operation allowlists come from the runtime contract, which
+//! emits them from `GH_READ_OPERATIONS` and `GH_WRITE_OPERATIONS` in `@mangostudio/shared/github`;
+//! the hub's audit summaries read the same two lists.
 
 use mango_protocol::error::RemoteError;
-use mangostudio_runtime_contract::strings::github_graphql_documents;
+use mangostudio_runtime_contract::strings::{
+    github_cli_read_operations, github_cli_write_operations, github_graphql_documents,
+};
 
 use crate::tool_argument::tool_argument;
 
-const READ: &[&str] = &[
-    "auth status",
-    "repo view",
-    "pr view",
-    "pr list",
-    "pr status",
-    "pr checks",
-    "issue list",
-    "search prs",
-    "api graphql",
-];
-const WRITE: &[&str] = &["pr create", "pr ready", "pr checkout"];
+fn listed(allowed: &[String], operation: &str) -> bool {
+    allowed.iter().any(|entry| entry == operation)
+}
 
 /// Validates the operation and flags before the GitHub CLI can be launched.
 /// Diagnostics deliberately omit rejected operands, which can contain prose.
@@ -31,8 +26,12 @@ const WRITE: &[&str] = &["pr create", "pr ready", "pr checkout"];
 pub fn validate(mutate: bool, args: &[String]) -> Result<(), RemoteError> {
     let operation = operation(args)
         .ok_or_else(|| invalid("unrecognized operation", "a supported gh subcommand"))?;
-    let allowed = if mutate { WRITE } else { READ };
-    if !(allowed.contains(&operation.as_str()) || !mutate && operation == "--version") {
+    let allowed = if mutate {
+        github_cli_write_operations()
+    } else {
+        github_cli_read_operations()
+    };
+    if !(listed(allowed, &operation) || !mutate && operation == "--version") {
         return Err(refused_operation(mutate, &operation));
     }
     for argument in args {
@@ -47,16 +46,17 @@ pub fn validate(mutate: bool, args: &[String]) -> Result<(), RemoteError> {
 /// Names the method that refused, and the method that runs the operation when it is on the other
 /// allowlist. An operation on neither list may be prose, so it is not echoed.
 fn refused_operation(mutate: bool, operation: &str) -> RemoteError {
-    let (method, other, other_list) = if mutate {
-        ("gh.mutate", "gh.exec", READ)
+    let (read, write) = (github_cli_read_operations(), github_cli_write_operations());
+    let (method, other, own_list, other_list) = if mutate {
+        ("gh.mutate", "gh.exec", write, read)
     } else {
-        ("gh.exec", "gh.mutate", WRITE)
+        ("gh.exec", "gh.mutate", read, write)
     };
-    let known = other_list.contains(&operation) || operation == "--version";
+    let known = listed(other_list, operation) || operation == "--version";
     if !known {
         return invalid(
             &format!("{method} refuses an operation outside its subcommand allowlist"),
-            &format!("one of: {}", if mutate { WRITE } else { READ }.join(", ")),
+            &format!("one of: {}", own_list.join(", ")),
         );
     }
     invalid(
@@ -180,17 +180,17 @@ mod tests {
 
     #[test]
     fn read_and_write_operations_stay_separate() {
-        for operation in READ {
+        for operation in github_cli_read_operations() {
             let args = argv(&operation.split(' ').collect::<Vec<_>>());
-            if *operation != "api graphql" {
-                assert!(validate(false, &args).is_ok());
+            if operation != "api graphql" {
+                assert!(validate(false, &args).is_ok(), "gh {operation} on read");
             }
-            assert!(validate(true, &args).is_err());
+            assert!(validate(true, &args).is_err(), "gh {operation} on write");
         }
-        for operation in WRITE {
+        for operation in github_cli_write_operations() {
             let args = argv(&operation.split(' ').collect::<Vec<_>>());
-            assert!(validate(true, &args).is_ok());
-            assert!(validate(false, &args).is_err());
+            assert!(validate(true, &args).is_ok(), "gh {operation} on write");
+            assert!(validate(false, &args).is_err(), "gh {operation} on read");
         }
         assert!(validate(false, &argv(&["--version"])).is_ok());
         assert!(validate(false, &argv(&["--version", "operand"])).is_err());
