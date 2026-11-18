@@ -114,6 +114,7 @@ export const EMBEDDED_LANGUAGES: Partial<Record<ShikiLanguageId, readonly ShikiL
     'cpp',
     'csharp',
     'css',
+    'diff',
     'go',
     'html',
     'java',
