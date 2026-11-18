@@ -532,6 +532,25 @@ function Write-NextSteps {
   Write-Host 'Then open: http://localhost:3001'
 }
 
+# The system tar (bsdtar, shipped with Windows 10 1803+) by full path, never
+# whichever tar.exe PATH finds first: a GNU tar ahead of it (Git's usr\bin, as
+# on a GitHub-hosted runner) reads the "C:" of an archive path as a remote host.
+# SystemRoot says where Windows lives, windir is the same directory under its
+# older name. With neither set there is nothing to build the path from, and
+# falling back to the bare name would bring the PATH lookup back, so it fails.
+function Get-SystemTarPath {
+  $windowsDir = $env:SystemRoot
+  if (-not $windowsDir) { $windowsDir = $env:windir }
+  if (-not $windowsDir) {
+    Fail 'cannot locate the Windows system tar.exe | expected: SystemRoot or windir set | received: neither is set'
+  }
+  $systemTar = Join-Path $windowsDir 'System32\tar.exe'
+  if (-not (Test-Path -LiteralPath $systemTar)) {
+    Fail "the Windows system tar.exe is missing | expected: $systemTar | received: no such file"
+  }
+  return $systemTar
+}
+
 # Extract into a scratch directory and return its path. Never touches
 # "<install_root>/<version>" — that swap only happens once the caller has
 # smoke-checked these bytes, so a corrupt re-install of an already-installed
@@ -541,16 +560,8 @@ function Expand-NpmTarball([string]$ArchivePath, [string]$DestinationPath) {
   if (Test-Path $stagingDir) { Remove-Item $stagingDir -Recurse -Force }
   New-Item -ItemType Directory -Force $stagingDir | Out-Null
 
-  # The system tar (bsdtar, shipped with Windows 10 1803+), not whichever
-  # tar.exe PATH finds first: a GNU tar ahead of it (Git's usr\bin, as on a
-  # GitHub-hosted runner) reads the "C:" of an archive path as a remote host.
-  $tar = 'tar.exe'
-  if ($env:SystemRoot) {
-    $systemTar = Join-Path $env:SystemRoot 'System32\tar.exe'
-    if (Test-Path -LiteralPath $systemTar) { $tar = $systemTar }
-  }
-
   try {
+    $tar = Get-SystemTarPath
     & $tar -xzf $ArchivePath -C $stagingDir
     if ($LASTEXITCODE -ne 0) {
       Fail "$tar failed to extract $ArchivePath | expected: exit code: 0 | received: exit code: $LASTEXITCODE"
