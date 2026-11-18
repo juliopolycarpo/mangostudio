@@ -2244,6 +2244,9 @@ unsafe fn errno_raw() -> libc::c_int {
 }
 
 #[cfg(test)]
+mod pty_master_tests;
+
+#[cfg(test)]
 mod tests {
     use std::ffi::OsString;
 
