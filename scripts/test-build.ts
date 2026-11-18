@@ -685,8 +685,6 @@ async function smokeTest(): Promise<void> {
 
     console.log('\n🔍 Running HTTP assertions...');
 
-    await smokeStartToken(tmpHome, spawnedAtMs, () => hub?.errorText() ?? '');
-
     // /api/health → 200 JSON
     {
       const res = await fetch(`http://127.0.0.1:${PORT}/api/health`);
@@ -695,6 +693,10 @@ async function smokeTest(): Promise<void> {
       if (!ct.includes('application/json')) fail(`/api/health content-type is not JSON: ${ct}`);
       pass('/api/health → 200 JSON');
     }
+
+    // After the first HTTP assertion, so a hub that is not serving fails there at once instead
+    // of after the token budget.
+    await smokeStartToken(tmpHome, spawnedAtMs, () => hub?.errorText() ?? '');
 
     // / → 200 HTML
     {
