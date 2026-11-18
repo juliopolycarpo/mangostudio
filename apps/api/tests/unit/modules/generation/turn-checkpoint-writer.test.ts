@@ -20,6 +20,7 @@ import {
 } from '../../../../src/modules/messages/infrastructure/message-checkpoint-deltas';
 import { insertMessage } from '../../../../src/modules/messages/infrastructure/message-repository';
 import { insertTestChat, insertTestUser } from '../../../support/factories';
+import { ManualHeldTailClock } from '../../../support/held-tail-clock';
 
 interface RecordedWrite {
   readonly text: string;
@@ -174,21 +175,23 @@ function setup() {
     agentId: 'default',
   });
   const parts: MessagePart[] = [checkpoint];
-  const state = { text: '', now: 1_000 };
+  const clock = new ManualHeldTailClock(1_000);
+  const state = { text: '' };
   const writer = new TurnCheckpointWriter({
     store,
     chatId: 'chat-1',
     messageId: 'turn-1',
     checkpoint,
     getContent: () => ({ text: state.text, parts, providerState: null }),
-    now: () => state.now,
+    now: clock.readNow,
     defer: manual.defer,
+    scheduleHeldTail: clock.schedule,
   });
   const append = (chars: number) => {
     state.text += 'x'.repeat(chars);
     parts.push({ type: 'text', text: 'x'.repeat(chars) });
   };
-  return { store, manual, checkpoint, parts, state, writer, append };
+  return { store, manual, checkpoint, parts, state, clock, writer, append };
 }
 
 describe('TurnCheckpointWriter', () => {
@@ -452,6 +455,196 @@ describe('TurnCheckpointWriter', () => {
     manual.fire();
     await writer.flush();
     expect(store.writes).toHaveLength(0);
+  });
+});
+
+describe('TurnCheckpointWriter held tail', () => {
+  beforeEach(() => {
+    spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    mock.restore();
+  });
+
+  /** One accepted write at t = 1000 ms, then a delta the throttle skips at t = 1300 ms. */
+  async function stallAfterAcceptedWrite() {
+    const harness = setup();
+    harness.append(CHECKPOINT_TEXT_INTERVAL_CHARS);
+    expect(await harness.writer.checkpoint()).toBe(true);
+    harness.manual.fire();
+    await tick();
+    harness.clock.advance(300);
+    harness.append(100);
+    expect(await harness.writer.checkpoint()).toBe(false);
+    return harness;
+  }
+
+  it('writes the held tail one second after the last accepted write when no delta follows', async () => {
+    const { store, manual, clock } = await stallAfterAcceptedWrite();
+    expect({ writes: store.writes.length, timers: clock.pending }).toEqual({
+      writes: 1,
+      timers: 1,
+    });
+
+    // 999 ms after the accepted write: the window has not run out.
+    clock.advance(699);
+    manual.fire();
+    await tick();
+    expect(store.writes).toHaveLength(1);
+
+    clock.advance(1);
+    manual.fire();
+    await tick();
+    expect(store.writes.map((write) => write.text.length)).toEqual([
+      CHECKPOINT_TEXT_INTERVAL_CHARS,
+      CHECKPOINT_TEXT_INTERVAL_CHARS + 100,
+    ]);
+    expect(clock.pending).toBe(0);
+  });
+
+  it('writes the held tail once however long the stall lasts', async () => {
+    const { store, manual, clock } = await stallAfterAcceptedWrite();
+
+    clock.advance(5_000);
+    manual.fire();
+    await tick();
+    clock.advance(5_000);
+    manual.fire();
+    await tick();
+
+    expect(store.writes).toHaveLength(2);
+  });
+
+  it('lets an accepted delta supersede the timer without a second write', async () => {
+    const { store, manual, clock, writer, append } = await stallAfterAcceptedWrite();
+
+    clock.advance(200);
+    append(CHECKPOINT_TEXT_INTERVAL_CHARS);
+    expect(await writer.checkpoint()).toBe(true);
+    expect(clock.pending).toBe(0);
+    manual.fire();
+    await tick();
+    clock.advance(5_000);
+    manual.fire();
+    await tick();
+
+    expect(store.writes.map((write) => write.text.length)).toEqual([
+      CHECKPOINT_TEXT_INTERVAL_CHARS,
+      CHECKPOINT_TEXT_INTERVAL_CHARS * 2 + 100,
+    ]);
+  });
+
+  it('keeps the timer when a later delta is skipped too, and writes everything held', async () => {
+    const { store, manual, clock, writer, append } = await stallAfterAcceptedWrite();
+
+    clock.advance(200);
+    append(50);
+    expect(await writer.checkpoint()).toBe(false);
+    expect(clock.scheduled).toBe(1);
+    clock.advance(500);
+    manual.fire();
+    await tick();
+
+    expect(store.writes.at(-1)?.text.length).toBe(CHECKPOINT_TEXT_INTERVAL_CHARS + 150);
+    expect(store.writes).toHaveLength(2);
+  });
+
+  it('cancels the timer when a forced checkpoint writes the tail itself', async () => {
+    const { store, clock, writer } = await stallAfterAcceptedWrite();
+
+    expect(await writer.checkpoint({ force: true })).toBe(true);
+    expect(clock.pending).toBe(0);
+    clock.advance(5_000);
+
+    expect(store.writes.map((write) => write.text.length)).toEqual([
+      CHECKPOINT_TEXT_INTERVAL_CHARS,
+      CHECKPOINT_TEXT_INTERVAL_CHARS + 100,
+    ]);
+  });
+
+  it('cancels the timer on flush', async () => {
+    const { store, manual, clock, writer } = await stallAfterAcceptedWrite();
+
+    await writer.flush();
+    expect(clock.pending).toBe(0);
+    clock.advance(5_000);
+    manual.fire();
+    await writer.flush();
+
+    expect(store.writes).toHaveLength(1);
+  });
+
+  it('writes nothing on a timer once prepareFinal has run, and arms no new one', async () => {
+    const { store, manual, clock, writer, append } = await stallAfterAcceptedWrite();
+
+    await writer.prepareFinal('completed');
+    const writesAtFinal = store.writes.length;
+    expect(clock.pending).toBe(0);
+
+    // A delta after the final state is skipped; it must not arm a timer either.
+    append(10);
+    expect(await writer.checkpoint()).toBe(false);
+    clock.advance(5_000);
+    manual.fire();
+    await tick();
+
+    expect({ pending: clock.pending, writes: store.writes.length }).toEqual({
+      pending: 0,
+      writes: writesAtFinal,
+    });
+  });
+
+  it('leaves no pending timer after close, however many calls follow', async () => {
+    const { store, manual, clock, writer, append } = await stallAfterAcceptedWrite();
+
+    writer.close();
+    expect(clock.pending).toBe(0);
+    append(10);
+    await writer.checkpoint();
+    expect(clock.pending).toBe(0);
+    clock.advance(5_000);
+    manual.fire();
+    await writer.flush();
+
+    expect(store.writes).toHaveLength(1);
+  });
+
+  it('keeps the write count of a steady stream unchanged', async () => {
+    const { store, manual, clock, writer, append } = setup();
+
+    // 250 deltas of 8 characters, 10 ms apart: an accepted write at deltas 64, 128
+    // and 192. Each skipped delta arms the timer; no stall is long enough to fire it.
+    for (let delta = 0; delta < 250; delta++) {
+      clock.advance(10);
+      append(8);
+      await writer.checkpoint();
+      manual.fire();
+      await tick();
+    }
+
+    expect(store.writes).toHaveLength(3);
+  });
+});
+
+describe('TurnCheckpointWriter held tail on SQLite', () => {
+  it('writes the held tail into the row when the stall outlasts the window', async () => {
+    const { writer, append, readRow, clock } = await setupDurable();
+    append(CHECKPOINT_TEXT_INTERVAL_CHARS);
+    expect(await writer.checkpoint()).toBe(true);
+    await tick();
+    await writer.flush();
+    clock.advance(300);
+    append(100);
+    expect(await writer.checkpoint()).toBe(false);
+    expect((await readRow()).text).toHaveLength(CHECKPOINT_TEXT_INTERVAL_CHARS);
+
+    clock.advance(700);
+    // The timer marked the tail dirty; the default wake-up writes it on a later tick.
+    await tick();
+    await writer.flush();
+
+    expect((await readRow()).text).toHaveLength(CHECKPOINT_TEXT_INTERVAL_CHARS + 100);
   });
 });
 
@@ -739,7 +932,8 @@ async function setupDurable(options: { defer?: (run: () => void) => void } = {})
     agentId: 'default',
   });
   const parts: MessagePart[] = [checkpoint];
-  const state = { text: '', now: 1_000 };
+  const state = { text: '' };
+  const clock = new ManualHeldTailClock(1_000);
   await insertMessage(
     {
       id: turnId,
@@ -759,7 +953,8 @@ async function setupDurable(options: { defer?: (run: () => void) => void } = {})
     messageId: turnId,
     checkpoint,
     getContent: () => ({ text: state.text, parts, providerState: null }),
-    now: () => state.now,
+    now: clock.readNow,
+    scheduleHeldTail: clock.schedule,
     ...(options.defer ? { defer: options.defer } : {}),
   });
   const append = (chars: number) => {
@@ -782,7 +977,7 @@ async function setupDurable(options: { defer?: (run: () => void) => void } = {})
   };
   const finalize = () =>
     getDb().updateTable('messages').set({ isGenerating: 0 }).where('id', '=', turnId).execute();
-  return { checkpoint, writer, append, readRow, finalize, turnId };
+  return { checkpoint, writer, append, readRow, finalize, turnId, clock };
 }
 
 describe('TurnCheckpointWriter on SQLite', () => {
