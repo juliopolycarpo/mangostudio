@@ -7,7 +7,7 @@
 import { type Dirent, existsSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readdir, rename, rm } from 'node:fs/promises';
 import { STATUS_CODES } from 'node:http';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, win32 } from 'node:path';
 
 import { ROOT_DIR } from './config';
 import {
@@ -685,11 +685,38 @@ async function extractZipArchive(archivePath: string, destination: string): Prom
   await runArchiveCommand('extract', extract);
 }
 
-function zipCommands(
+/** What `zipCommands` reads from the machine, injectable so a test needs no Windows host. */
+interface ZipCommandsHost {
+  readonly platform?: NodeJS.Platform;
+  readonly env?: Readonly<Record<string, string | undefined>>;
+  /** The `unzip` on PATH, or null. Absent means probe PATH. */
+  readonly unzip?: string | null;
+}
+
+/**
+ * The Windows system tar (bsdtar) by full path. A bare `tar` resolves through
+ * PATH, where Git's GNU tar (`usr\bin`, as on a hosted runner) can come first
+ * and reads the `C:` of an archive path as a remote host. Throws, naming the
+ * variables, when neither SystemRoot nor windir says where Windows lives: a
+ * guess or a PATH lookup would bring that tar back.
+ * @example windowsSystemTar({ SystemRoot: 'C:\\Windows' }) // 'C:\\Windows\\System32\\tar.exe'
+ */
+function windowsSystemTar(env: Readonly<Record<string, string | undefined>>): string {
+  const windowsDirectory = env.SystemRoot || env.windir;
+  if (!windowsDirectory) {
+    throw new Error(
+      'Cannot locate the Windows system tar.exe | expected: SystemRoot or windir set | received: neither is set'
+    );
+  }
+  return win32.join(windowsDirectory, 'System32', 'tar.exe');
+}
+
+export function zipCommands(
   archivePath: string,
-  destination: string
+  destination: string,
+  host: ZipCommandsHost = {}
 ): { list: string[]; extract: string[] } {
-  const unzip = Bun.which('unzip');
+  const unzip = host.unzip === undefined ? Bun.which('unzip') : host.unzip;
   if (unzip) {
     return {
       list: [unzip, '-Z1', archivePath],
@@ -697,14 +724,17 @@ function zipCommands(
     };
   }
 
-  // Windows 10+ ships bsdtar as `tar`, which reads zip archives. GNU tar does
-  // not, so this fallback only carries hosts that have no `unzip` at all; a host
-  // with neither is reported by name when the command cannot be spawned.
-  const toTarPath = (path: string): string =>
-    process.platform === 'win32' ? path.replaceAll('\\', '/') : path;
+  // Windows 10+ ships bsdtar, which reads zip archives, and it is the only tar
+  // that does: GNU tar does not. So Windows names the System32 one outright
+  // instead of trusting PATH. Elsewhere this fallback only carries hosts that
+  // have no `unzip`; a host with neither is reported by name when the command
+  // cannot be spawned.
+  const onWindows = (host.platform ?? process.platform) === 'win32';
+  const tar = onWindows ? windowsSystemTar(host.env ?? process.env) : 'tar';
+  const toTarPath = (path: string): string => (onWindows ? path.replaceAll('\\', '/') : path);
   return {
-    list: ['tar', '-tf', toTarPath(archivePath)],
-    extract: ['tar', '-xf', toTarPath(archivePath), '-C', toTarPath(destination)],
+    list: [tar, '-tf', toTarPath(archivePath)],
+    extract: [tar, '-xf', toTarPath(archivePath), '-C', toTarPath(destination)],
   };
 }
 

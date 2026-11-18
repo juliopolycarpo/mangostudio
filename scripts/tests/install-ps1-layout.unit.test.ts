@@ -1301,6 +1301,64 @@ describe('install.ps1 npm tarball extraction', () => {
     90000
   );
 
+  /**
+   * What `Get-SystemTarPath <args>` returns, or `error: <message>` when it fails. The values
+   * are passed as parameters: unsetting SystemRoot inside the PowerShell host can break the
+   * host itself, which would hide the function's own answer.
+   */
+  function systemTarOutcome(args: string): string {
+    const l = layout();
+    const result = runDotSourced(
+      l.scriptPath,
+      `try { Get-SystemTarPath ${args} } catch { 'error: ' + $_.Exception.Message }`
+    );
+    const outcome = result.stdout.replace(/\r/g, '').trim();
+    if (result.exitCode !== 0 || outcome === '') {
+      throw new Error(
+        `(Get-SystemTarPath ${args}): expected a path or an error line on stdout | received exit ${result.exitCode}, stdout ${JSON.stringify(result.stdout)}, stderr ${JSON.stringify(result.stderr)}`
+      );
+    }
+    return outcome;
+  }
+
+  test.skipIf(!POWERSHELL)(
+    'resolves the system tar from windir when SystemRoot is unset',
+    () => {
+      const windowsTar = toWindowsPath(systemExecutable('tar.exe'));
+
+      const outcome = systemTarOutcome("-SystemRoot '' -Windir $env:SystemRoot");
+
+      expect(outcome).toBe(windowsTar);
+    },
+    90000
+  );
+
+  test.skipIf(!POWERSHELL)(
+    'refuses, naming SystemRoot and windir, rather than falling back to a tar on PATH',
+    () => {
+      const outcome = systemTarOutcome("-SystemRoot '' -Windir ''");
+
+      expect(outcome).toBe(
+        'error: cannot locate the Windows system tar.exe | expected: SystemRoot or windir set | received: neither is set'
+      );
+    },
+    90000
+  );
+
+  test.skipIf(!POWERSHELL)(
+    'refuses, naming the path, when the Windows directory holds no tar.exe',
+    () => {
+      const emptyWindowsDir = toWindowsPath(layout().linuxDir);
+
+      const outcome = systemTarOutcome(`-SystemRoot ${psQuote(emptyWindowsDir)}`);
+
+      expect(outcome).toBe(
+        `error: the Windows system tar.exe is missing | expected: ${emptyWindowsDir}\\System32\\tar.exe | received: no such file`
+      );
+    },
+    90000
+  );
+
   test.skipIf(!POWERSHELL)(
     'a .tgz tar cannot read fails naming the tar that ran and its exit code, and stages nothing',
     () => {
