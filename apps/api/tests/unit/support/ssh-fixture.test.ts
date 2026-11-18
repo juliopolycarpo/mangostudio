@@ -166,20 +166,25 @@ describe('locateSshdHelpers', () => {
 });
 
 describe('startThrowawaySshd', () => {
-  it('fails with the server output when sshd never listens, and leaves no directory behind', async () => {
-    const directory = await scratchDirectory();
-    const brokenSshd = join(directory, 'sshd');
-    await writeFile(brokenSshd, '#!/bin/sh\necho "fake sshd refused the config" >&2\nexit 1\n');
-    await chmod(brokenSshd, 0o755);
+  // The stand-in sshd is a shell script, which Windows cannot execute; the
+  // fixture itself only runs on the Linux test shards.
+  it.skipIf(process.platform === 'win32')(
+    'fails with the server output when sshd never listens, and leaves no directory behind',
+    async () => {
+      const directory = await scratchDirectory();
+      const brokenSshd = join(directory, 'sshd');
+      await writeFile(brokenSshd, '#!/bin/sh\necho "fake sshd refused the config" >&2\nexit 1\n');
+      await chmod(brokenSshd, 0o755);
 
-    const error = await startThrowawaySshd({ sshdPath: brokenSshd }).catch((caught) => caught);
+      const error = await startThrowawaySshd({ sshdPath: brokenSshd }).catch((caught) => caught);
 
-    expect(error).toBeInstanceOf(SshFixtureUnavailableError);
-    expect(error.message).toContain(
-      'expected to listen on 127.0.0.1 | received: exited before listening'
-    );
-    expect(error.message).toContain('fake sshd refused the config');
-  });
+      expect(error).toBeInstanceOf(SshFixtureUnavailableError);
+      expect(error.message).toContain(
+        'expected to listen on 127.0.0.1 | received: exited before listening'
+      );
+      expect(error.message).toContain('fake sshd refused the config');
+    }
+  );
 
   it('names the configured path when MANGOSTUDIO_SSHD_PATH points at nothing', async () => {
     const directory = await scratchDirectory();
