@@ -182,5 +182,5 @@
   "/api/workspace/fs/validate": ["post"],
   "/api/ws": [],
   "/images/*": ["get"],
-  "/uploads/*": ["get"]
+  "/uploads/*": ["get", "head"]
 }

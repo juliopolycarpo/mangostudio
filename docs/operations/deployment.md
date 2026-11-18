@@ -381,7 +381,8 @@ nginx treats the request as proxied and skips gzip by default. Add `gzip_proxied
 `gzip on;` in that setup.
 
 To check a deployment, request a hashed asset from the page with a `GET` and read the headers
-(`curl -I` sends `HEAD`, which the hub's asset routes do not answer):
+(`curl -I` sends `HEAD`, and a proxy usually does not compress a header-only response, so it can
+print no `Content-Encoding` even when the `GET` is compressed):
 
 ```bash
 curl -sS -o /dev/null -D - -H 'Accept-Encoding: gzip' \

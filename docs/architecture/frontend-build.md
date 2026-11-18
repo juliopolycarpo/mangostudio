@@ -528,9 +528,12 @@ at least 128 B and 5 %; fonts and images are never tried.
   `ETag`, so a validator for one never revalidates another. Hashed assets without copies stay
   validator-free; with copies they carry one, because two representations need telling apart.
   Cache policy is unchanged: hashed assets `immutable`, the shell and `/config.js` `no-cache`.
-- **HEAD** is answered for embedded assets and the SPA shell with the metadata GET would send.
-  It arrives in the not-found fallback, since HEAD never matches a literal GET route; API and
-  upload paths still decline there. Directory mode and uploads still answer HEAD with 404.
+- **HEAD** is answered wherever GET serves a static file, with the status and headers GET would
+  send and no body: embedded assets and the SPA shell, directory-mode files and shell, and
+  `/uploads/*`. In the frontend it arrives in the not-found fallback, since HEAD never matches a
+  literal GET route; API paths decline there, as does a missing or private file. `/uploads/*` has
+  its own `HEAD` route beside the `GET` one, with the same `ETag`, `Last-Modified` and 304
+  handling.
 - **Range** is Bun's: over the stored bytes of the selected representation. Bun ignores
   `If-Range`, for identity files too, so the per-copy `ETag` does not protect a resume. Bun does
   not slice the virtual files of a compiled binary, which answers `200` with the whole

@@ -532,6 +532,88 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
     }
   });
 
+  test('answers HEAD with the headers GET sends and no body', async () => {
+    const server = await startFilesystemServer();
+    try {
+      for (const path of [
+        '/',
+        '/index.html',
+        '/settings/agents',
+        '/library/my-skill.md',
+        '/favicon.ico',
+        '/assets/index-AbCd1234.js',
+      ]) {
+        const get = await server.get(path);
+        await get.text();
+        const head = await fetch(`${server.origin}${path}`, { method: 'HEAD' });
+        expect(`HEAD ${path} -> ${head.status}`).toBe(`HEAD ${path} -> 200`);
+        expect(await head.text(), `HEAD ${path} body`).toBe('');
+        for (const name of ['content-type', 'content-length', 'cache-control', 'etag']) {
+          expect(`HEAD ${path} ${name}: ${head.headers.get(name)}`).toBe(
+            `HEAD ${path} ${name}: ${get.headers.get(name)}`
+          );
+        }
+        expect(head.headers.get('etag'), `HEAD ${path} ETag`).not.toBeNull();
+      }
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('answers a conditional HEAD with 304 and the validators', async () => {
+    const server = await startFilesystemServer();
+    try {
+      for (const path of ['/', '/favicon.ico', '/assets/index-AbCd1234.js']) {
+        const etag = (await fetch(`${server.origin}${path}`, { method: 'HEAD' })).headers.get(
+          'etag'
+        );
+        expect(etag, `HEAD ${path} ETag`).not.toBeNull();
+        const cached = await fetch(`${server.origin}${path}`, {
+          method: 'HEAD',
+          headers: { 'If-None-Match': etag ?? '' },
+        });
+        expect(`HEAD ${path} -> ${cached.status}`).toBe(`HEAD ${path} -> 304`);
+        expect(cached.headers.get('etag')).toBe(etag);
+      }
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('does not answer HEAD for missing, private or API-owned paths with a frontend file', async () => {
+    const server = await startFilesystemServer();
+    try {
+      for (const path of [
+        '/missing.png',
+        '/assets/missing-AbCd1234.js',
+        BUILD_STATE_URL_PATH,
+        '/api/unknown.json',
+      ]) {
+        const head = await fetch(`${server.origin}${path}`, { method: 'HEAD' });
+        expect(`HEAD ${path} -> ${head.status}`).toBe(`HEAD ${path} -> 404`);
+      }
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test('answers HEAD for an upload with the headers GET sends and no body', async () => {
+    const server = await startFilesystemServer();
+    try {
+      writeFileSync(join(server.uploadsDir, 'photo.png'), UPLOAD_BYTES);
+
+      const head = await fetch(`${server.origin}/uploads/photo.png`, { method: 'HEAD' });
+      expect(`${head.status} ${await head.text()}`).toBe('200 ');
+      expect(head.headers.get('etag'), 'HEAD upload ETag').not.toBeNull();
+      expect(head.headers.get('content-length')).toBe(String(UPLOAD_BYTES.length));
+
+      const missing = await fetch(`${server.origin}/uploads/missing.png`, { method: 'HEAD' });
+      expect(missing.status).toBe(404);
+    } finally {
+      await server.stop();
+    }
+  });
+
   test('serves the shell, a root file, and a hashed asset', async () => {
     const server = await startFilesystemServer();
     try {

@@ -789,14 +789,23 @@ describe('embedded assets without identity bytes', () => {
 });
 
 describe('paths the encoding work must not touch', () => {
-  test('never answers HEAD for API, upload or missing paths from the frontend', async () => {
-    for (const path of ['/api/probe', '/uploads/note.txt', '/uploads/missing.txt', '/api/nope']) {
+  test('never answers HEAD for API or missing upload paths from the frontend', async () => {
+    for (const path of ['/api/probe', '/uploads/missing.txt', '/api/nope']) {
       const head = await send(path, { 'Accept-Encoding': 'gzip, br' }, 'HEAD');
 
       expect(head.status).toBe(404);
       expect(head.headers['content-encoding']).toBeUndefined();
       expect(varyDirectives(head)).not.toContain('Accept-Encoding');
     }
+  });
+
+  test('answers HEAD for an existing upload from the uploads route, not the frontend', async () => {
+    const head = await send('/uploads/note.txt', { 'Accept-Encoding': 'gzip, br' }, 'HEAD');
+
+    expect(head.status).toBe(200);
+    expect(head.body.length, 'HEAD /uploads/note.txt body bytes').toBe(0);
+    expect(head.headers['content-encoding']).toBeUndefined();
+    expect(varyDirectives(head)).not.toContain('Accept-Encoding');
   });
 
   test('leaves API and upload responses without Vary or a content coding', async () => {

@@ -193,6 +193,70 @@ describe('GET /uploads/*', () => {
   });
 });
 
+/**
+ * HEAD runs over a listening server: `app.handle()` hands back whatever body the
+ * handler returned, while Bun's server is what drops it for a HEAD response.
+ */
+describe('HEAD /uploads/*', () => {
+  const servers: Array<ReturnType<typeof createUploadedFileRoutes>> = [];
+
+  afterEach(async () => {
+    for (const server of servers.splice(0)) await server.stop();
+  });
+
+  async function listenOverUploads() {
+    const { uploadsDir, outsideDir } = await buildUploads();
+    const app = createUploadedFileRoutes(uploadsDir);
+    await app.modules;
+    app.listen({ hostname: '127.0.0.1', port: 0, reusePort: false });
+    servers.push(app);
+    const origin = `http://127.0.0.1:${app.server?.port}`;
+    const send = (method: string, path: string, headers?: Record<string, string>) =>
+      fetch(`${origin}${path}`, { method, headers });
+    return { uploadsDir, outsideDir, send };
+  }
+
+  test('answers with the headers GET sends and no body', async () => {
+    const { send } = await listenOverUploads();
+    const get = await send('GET', '/uploads/photo.png');
+    const head = await send('HEAD', '/uploads/photo.png');
+
+    expect(await outcome(head)).toBe('200 ');
+    for (const name of [
+      'content-type',
+      'content-length',
+      'cache-control',
+      'etag',
+      'last-modified',
+    ]) {
+      expect(`${name}: ${head.headers.get(name)}`).toBe(`${name}: ${get.headers.get(name)}`);
+    }
+    expect(head.headers.get('etag'), 'HEAD ETag').not.toBeNull();
+    expect(head.headers.get('content-length'), 'HEAD Content-Length').toBe('9');
+  });
+
+  test('answers 304 to a matching conditional HEAD, with the validators', async () => {
+    const { send } = await listenOverUploads();
+    const etag = (await send('HEAD', '/uploads/photo.png')).headers.get('etag') ?? '';
+
+    const response = await send('HEAD', '/uploads/photo.png', { 'if-none-match': etag });
+    expect(await outcome(response)).toBe('304 ');
+    expect(response.headers.get('etag')).toBe(etag);
+    expect(response.headers.get('cache-control')).toBe(UPLOADED_FILE_CACHE_CONTROL);
+  });
+
+  test('404s a missing file, dotfile and encoded traversal like GET does', async () => {
+    const { uploadsDir, outsideDir, send } = await listenOverUploads();
+    writeFileSync(join(uploadsDir, '.env'), 'TOKEN=1');
+    const traversal = `/uploads/..%2f${basename(outsideDir)}%2fsecret.txt`;
+
+    for (const path of ['/uploads/missing.png', '/uploads/.env', traversal]) {
+      const head = await send('HEAD', path);
+      expect(`HEAD ${path} -> ${head.status}`).toBe(`HEAD ${path} -> 404`);
+    }
+  });
+});
+
 describe('resolveUploadedFile', () => {
   test('resolves a contained regular file to its real path', async () => {
     const uploadsDir = tempDir('uploads-');
