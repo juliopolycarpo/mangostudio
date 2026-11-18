@@ -59,9 +59,10 @@ describe('Rust workspace lane commands', () => {
     expect(doc?.env).toEqual({ RUSTDOCFLAGS: '-D warnings' });
   });
 
-  test('covers the five commands AGENTS.md lists for a Rust change', () => {
+  test('covers the commands AGENTS.md lists for a Rust change', () => {
     expect([...RUST_CHECK_TASKS, ...RUST_TEST_TASKS].map((task) => task.label)).toEqual([
       'rust:fmt',
+      'rust:unused-deps',
       'rust:clippy',
       'rust:doc',
       'rust:nextest',
@@ -83,11 +84,22 @@ describe('missingRustTools', () => {
   });
 
   test('the check tasks never ask for cargo-nextest', () => {
-    expect(missingRustTools(RUST_CHECK_TASKS, fakePathWith('cargo'))).toEqual([]);
+    expect(missingRustTools(RUST_CHECK_TASKS, fakePathWith('cargo', 'cargo-shear'))).toEqual([]);
+  });
+
+  test('the test tasks never ask for cargo-shear', () => {
+    expect(missingRustTools(RUST_TEST_TASKS, fakePathWith('cargo', 'cargo-nextest'))).toEqual([]);
+  });
+
+  test('names cargo-shear when only cargo is installed', () => {
+    expect(missingRustTools(RUST_CHECK_TASKS, fakePathWith('cargo'))).toEqual([
+      '(rust lane): expected cargo-shear on PATH | received: not found; ' +
+        'install the version docs/reference/testing.md names',
+    ]);
   });
 
   test('names cargo when no toolchain is installed', () => {
-    expect(missingRustTools(RUST_CHECK_TASKS, fakePathWith())).toEqual([
+    expect(missingRustTools(RUST_CHECK_TASKS, fakePathWith('cargo-shear'))).toEqual([
       '(rust lane): expected cargo on PATH | received: not found; ' +
         'install the toolchain rust-toolchain.toml pins (https://rustup.rs)',
     ]);

@@ -11,7 +11,7 @@ scripts/
 ├── dev.ts            Start dev servers (bun run dev)
 ├── build.ts          Build workspaces or standalone binaries (bun run build)
 ├── build-runtime.ts  Build the cargo mangostudio-runtime per release target (bun run build:runtime)
-├── check.ts          Check orchestrator (bun run check; see full command contract below; --rust adds rustfmt, Clippy, rustdoc)
+├── check.ts          Check orchestrator (bun run check; see full command contract below; --rust adds rustfmt, cargo shear, Clippy, rustdoc)
 ├── check-import-cycles.ts
 │                     Cycle-only TS/JS scan, including generated and gitignored files
 ├── check-source-scan.ts

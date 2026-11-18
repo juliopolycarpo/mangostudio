@@ -71,7 +71,7 @@ generated contract-artifact freshness, lockfile dedupe, the TypeScript Mango Pro
 lanes (spec, schema equality, fixtures) and workflow static analysis
 (actionlint, zizmor, ShellCheck) in parallel.
 Run bun run protocol:check separately for the full protocol gate, including Rust.
-The Rust workspace lane (rustfmt, Clippy, rustdoc) runs only with --rust.
+The Rust workspace lane (rustfmt, cargo shear, Clippy, rustdoc) runs only with --rust.
 Default workspace selection: --all
 Cycle scans include generated and gitignored TS/JS source files.
 They skip node_modules, .git, dist, coverage, and .turbo at any depth.
@@ -90,8 +90,9 @@ Workspace flags:
   --shared
   --root     Run root-level checks only (tooling lint + docs)
   --all      Every workspace plus root; does not include --rust
-  --rust     Rust workspace lane: cargo fmt --check, Clippy and cargo doc with
-             warnings denied. Alone it runs only this lane. With --staged or
+  --rust     Rust workspace lane: cargo fmt --check, cargo shear (unused
+             dependencies), Clippy and cargo doc with warnings denied. Alone it
+             runs only this lane. With --staged or
              --changed it runs only when a changed path feeds the Rust workspace.
 
 Mode flags:

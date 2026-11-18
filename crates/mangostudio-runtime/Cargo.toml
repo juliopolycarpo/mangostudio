@@ -25,6 +25,13 @@ description = "MangoStudio runtime host: the typed contract served over mango-pr
 [lints]
 workspace = true
 
+# `cargo shear` (Cargo Shim's "Check unused dependencies" step) walks `mod` declarations from
+# the crate roots. `cli.rs` mounts `cli/native_operation.rs` with `#[path]`, so rustc resolves
+# that file's `mod user_service;` to `cli/user_service.rs`, while shear looks under
+# `cli/native_operation/` and reports the file as unlinked. The file is compiled and tested.
+[package.metadata.cargo-shear]
+ignored-paths = ["src/cli/user_service.rs"]
+
 [[bin]]
 name = "mangostudio-runtime"
 path = "src/main.rs"

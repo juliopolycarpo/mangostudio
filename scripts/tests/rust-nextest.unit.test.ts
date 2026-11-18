@@ -350,7 +350,8 @@ describe('real PowerShell fixtures run one at a time under nextest', () => {
 describe('the documented gate is the CI gate', () => {
   const agents = readText('AGENTS.md');
   const testing = readText('docs/reference/testing.md');
-  const version = pinnedNextest(stepRunning(workspaceJob, 'taiki-e/install-action'));
+  // The workspace job also installs cargo-shear through the same action.
+  const version = pinnedNextest(extractStepBlocks(workspaceJob).find(pinnedNextest));
 
   test('AGENTS.md names the nextest command and keeps the doctest command', () => {
     const received = agents.match(/cargo (?:nextest run|test)[^`]*--workspace[^`]*/g);

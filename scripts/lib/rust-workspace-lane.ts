@@ -27,7 +27,7 @@ import { cargoTargetDir } from './runtime-build';
 import { classifyChangedPaths, RUST_WORKSPACE_PATHS } from './rust-lanes';
 
 /** The executable a task needs on PATH beside `cargo` itself. */
-type RustTool = 'cargo' | 'cargo-nextest';
+type RustTool = 'cargo' | 'cargo-nextest' | 'cargo-shear';
 
 export interface RustLaneTask {
   readonly label: string;
@@ -38,9 +38,18 @@ export interface RustLaneTask {
 
 const WORKSPACE_FEATURES = ['--workspace', '--all-features', '--locked'] as const;
 
-/** What `bun run check --rust` runs: rustfmt, Clippy and rustdoc, warnings denied. */
+/**
+ * What `bun run check --rust` runs: rustfmt, the unused-dependency scan, Clippy
+ * and rustdoc, warnings denied. The scan is a syntactic pass over every
+ * workspace member's manifest and sources, so it needs no build.
+ */
 export const RUST_CHECK_TASKS: readonly RustLaneTask[] = [
   { label: 'rust:fmt', cmd: ['cargo', 'fmt', '--all', '--', '--check'], tool: 'cargo' },
+  {
+    label: 'rust:unused-deps',
+    cmd: ['cargo', 'shear', '--deny-warnings', '--locked'],
+    tool: 'cargo-shear',
+  },
   {
     label: 'rust:clippy',
     cmd: [
@@ -94,6 +103,7 @@ export const RUST_TEST_TASKS: readonly RustLaneTask[] = [
 const INSTALL_HINT: Readonly<Record<RustTool, string>> = {
   cargo: 'install the toolchain rust-toolchain.toml pins (https://rustup.rs)',
   'cargo-nextest': 'install the version docs/reference/testing.md names',
+  'cargo-shear': 'install the version docs/reference/testing.md names',
 };
 
 /**

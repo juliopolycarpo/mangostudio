@@ -1992,23 +1992,41 @@ The Rust workspace tests run under [cargo-nextest](https://nexte.st), locally an
 
 ```bash
 cargo install cargo-nextest --locked --version 0.9.151
+cargo install cargo-shear --locked --version 1.14.0
 cargo fmt --all -- --check
+cargo shear --deny-warnings --locked
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo nextest run --workspace --all-targets --all-features --locked --retries 0
 cargo test --doc --workspace --all-features --locked
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --workspace --all-features --locked
 ```
 
-`bun run check --rust` runs the rustfmt, Clippy and rustdoc commands above, one after
-another; `bun run test --rust` runs nextest and the doctests in a phase of their own, after
-the unit and integration phases. Both fail when `cargo` or `cargo-nextest` is missing
-instead of skipping. The lane is opt-in: `--all`, a bare `bun run check` and the
+`bun run check --rust` runs the rustfmt, cargo-shear, Clippy and rustdoc commands above, one
+after another; `bun run test --rust` runs nextest and the doctests in a phase of their own,
+after the unit and integration phases. Each fails when a tool it needs (`cargo`,
+`cargo-shear` for check, `cargo-nextest` for test) is missing instead of skipping. The lane is opt-in: `--all`, a bare `bun run check` and the
 pre-commit hook never start cargo. With `--staged` or `--changed`, `--rust` runs only when
 a changed path is in `RUST_WORKSPACE_PATHS` (`scripts/lib/rust-lanes.ts`), the list
 `cargo-shim.yml` selects its lanes with. `scripts/tests/rust-workspace-lane.unit.test.ts`
 fails when a lane command stops matching its `cargo-shim.yml` step.
 `bun run clean --rust` removes the cargo target directories, including the
 `mangostudio-runtime` binary the API tests spawn.
+
+### Unused dependencies
+
+`cargo shear --deny-warnings --locked` fails on a dependency, dev-dependency or
+target-specific dependency that no source file of its crate reads. It is a syntactic scan,
+so it needs no build and no nightly, and runs in well under a second. Cargo's own
+`unused_dependencies` lint (workspace lints in `Cargo.toml`) stays on, but it skips
+dev-dependencies and a dependency another crate also pulls in. `--deny-warnings` also fails
+an unlinked source file and an allowlist entry that no longer matches anything.
+
+A dependency kept only for feature unification or linking, or a file shear cannot follow,
+goes in that crate's `[package.metadata.cargo-shear]` (`ignored` or `ignored-paths`) with a
+comment above the table giving the reason;
+`scripts/tests/rust-unused-dependencies.unit.test.ts` requires the comment and pins the
+Cargo Shim step. The one entry today is `crates/mangostudio-runtime/src/cli/user_service.rs`:
+`cli.rs` mounts its parent module with `#[path]`, which shear does not resolve.
 
 ### Pass stamps
 

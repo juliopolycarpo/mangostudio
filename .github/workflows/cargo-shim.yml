@@ -153,6 +153,25 @@ jobs:
         if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' && steps.toolchain.outcome == 'success' }}
         run: cargo metadata --manifest-path crates/mango-protocol/fuzz/Cargo.toml --locked --all-features --format-version 1 > /dev/null
 
+      # Cargo's own `unused_dependencies` lint (see the workspace lints in
+      # Cargo.toml) skips dev-dependencies and a dependency another crate also
+      # pulls in. cargo-shear reads every member's manifests and sources,
+      # dev- and target-specific dependencies included, in under a second and
+      # with no compilation. The version is pinned here and the action
+      # verifies its release checksum.
+      - id: setup-shear
+        uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        with:
+          tool: cargo-shear@1.14.0
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' }}
+
+      # `--deny-warnings` also fails a stale allowlist entry or an unlinked
+      # source file. Allowed exceptions live in each crate's
+      # `[package.metadata.cargo-shear]` with the reason beside them.
+      - name: Check unused dependencies
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' && steps.setup-shear.outcome == 'success' }}
+        run: cargo shear --deny-warnings --locked
+
       # The default-feature workspace build and all-target/all-feature Clippy
       # below cover both graphs without repeating cargo check first.
       # Package selection prevents other members from enabling dependency
