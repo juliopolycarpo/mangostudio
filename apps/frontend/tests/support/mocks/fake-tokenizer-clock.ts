@@ -29,12 +29,40 @@ export class EveryLineStopsTokenizerClock {
   now = (): number => this.reads++ * 1_000;
 }
 
+/**
+ * The real clock running `factor` times faster, so a machine `factor` times slower than this one:
+ * a grammar's cold regex compile (100-270 ms on a fast machine) passes the tokenizer's 500 ms
+ * limit while a warm call of a few milliseconds stays far under it.
+ */
+export class SlowedTokenizerClock {
+  private readonly realNow = Date.now.bind(Date);
+  private readonly startedAt = this.realNow();
+
+  constructor(private readonly factor: number) {}
+
+  now = (): number => this.startedAt + (this.realNow() - this.startedAt) * this.factor;
+}
+
 /** Runs `run` with `Date.now` replaced by `now`, and puts the real clock back afterwards. */
 export function withTokenizerClock<T>(now: () => number, run: () => T): T {
   const realNow = Date.now;
   try {
     Date.now = now;
     return run();
+  } finally {
+    Date.now = realNow;
+  }
+}
+
+/** `withTokenizerClock` for a callback that awaits: the clock stays replaced until it settles. */
+export async function withTokenizerClockAsync<T>(
+  now: () => number,
+  run: () => Promise<T>
+): Promise<T> {
+  const realNow = Date.now;
+  try {
+    Date.now = now;
+    return await run();
   } finally {
     Date.now = realNow;
   }
