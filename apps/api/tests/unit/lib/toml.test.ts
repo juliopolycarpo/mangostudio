@@ -296,6 +296,44 @@ describe('TOML file readers', () => {
   });
 });
 
+describe('TOML section helpers and Temporal values', () => {
+  // Top-level date/time values are Temporal objects, not tables.
+  const TEMPORAL_DOCUMENT = [
+    'released = 1979-05-27',
+    'cutoff = 1979-05-27T07:32:00Z',
+    'local = 1979-05-27T07:32:00',
+    'alarm = 07:32:00',
+    '[auth]',
+    'secret = "s"',
+  ].join('\n');
+
+  it('does not report a top-level date or time as an empty string section', () => {
+    expect(parseTomlStringSections(TEMPORAL_DOCUMENT)).toEqual({ auth: { secret: 's' } });
+  });
+
+  // Temporal values inherit accessors such as `year`, so `key in value` is true.
+  it.each([
+    ['released', 'year'],
+    ['cutoff', 'epochMilliseconds'],
+    ['local', 'hour'],
+    ['alarm', 'minute'],
+  ])('keeps the %s date value when asked to delete its inherited %s accessor', (section, key) => {
+    const doc = parseTomlDocument(TEMPORAL_DOCUMENT);
+    const before = stringifyTomlDocument(doc);
+
+    expect(deleteTomlSectionValue(doc, section, key)).toBe(false);
+    expect(stringifyTomlDocument(doc)).toBe(before);
+  });
+
+  it('replaces a date value with a table when setting a key under its name', () => {
+    const doc = parseTomlDocument(TEMPORAL_DOCUMENT);
+
+    setTomlSectionValue(doc, 'released', 'note', 'x');
+
+    expect(doc.released).toEqual({ note: 'x' });
+  });
+});
+
 describe('TOML library boundary', () => {
   it('uses one native parse and stringify without a source scanner or offset metadata bridge', () => {
     const adapter = readFileSync(join(API_ROOT, ADAPTER), 'utf8');
