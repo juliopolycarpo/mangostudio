@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
+import { isTomlLibraryName } from '../lib/dependency-policy';
 import { collectModuleSpecifiers } from '../lib/import-specifiers';
 
 const TOML_LIBRARIES = ['smol-toml', 'toml', '@iarna/toml', '@ltd/j-toml', '@std/toml'];
@@ -24,14 +25,12 @@ function packageNameOf(specifier: string): string {
 }
 
 /**
- * A bare specifier whose package name (without its scope) contains `toml`. Relative
- * paths, `node:*` and `bun` never match, so the local `./toml` adapter and the Bun
- * builtin stay allowed.
+ * A bare specifier of a package the dependency policy treats as a TOML library.
+ * Relative paths and `node:*` never match, so the local `./toml` adapter stays
+ * allowed, and neither does the `bun` builtin.
  */
 function isTomlLibrarySpecifier(specifier: string): boolean {
-  if (/^(?:\.|\/|node:)/.test(specifier)) return false;
-  const name = packageNameOf(specifier);
-  return name.slice(name.indexOf('/') + 1).includes('toml');
+  return !/^(?:\.|\/|node:)/.test(specifier) && isTomlLibraryName(packageNameOf(specifier));
 }
 
 function findTomlLibraryImports(source: string, file: string): TomlLibraryImport[] {

@@ -1,7 +1,8 @@
 /**
  * `src/lib/toml.ts` is the API's only TOML boundary. The round-trip cases pin
- * the adapter's contract. Imports of TOML libraries are rejected in every
- * workspace by scripts/tests/toml-library-import-guard.unit.test.ts.
+ * the adapter's contract. TOML libraries are rejected in every workspace: their
+ * imports by scripts/tests/toml-library-import-guard.unit.test.ts, their
+ * manifest entries by `RETIRED_DEPENDENCIES` in scripts/lib/dependency-policy.ts.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
@@ -302,12 +303,5 @@ describe('TOML library boundary', () => {
     expect(adapter.match(/\bBun\.TOML\.stringify\(/g)).toHaveLength(1);
     // An import of the deleted module would fail typecheck, so no text scan is needed.
     expect(existsSync(join(API_ROOT, 'src/lib/toml-offsets.ts'))).toBe(false);
-  });
-
-  it('declares no TOML library dependency', () => {
-    const manifest = JSON.parse(readFileSync(join(API_ROOT, 'package.json'), 'utf8'));
-    const declared = Object.keys({ ...manifest.dependencies, ...manifest.devDependencies });
-
-    expect(declared.filter((name) => name.includes('toml'))).toEqual([]);
   });
 });

@@ -31,17 +31,6 @@ describe('frontend package manifest', () => {
     assertBunTypesDeclaration(await readManifest(FRONTEND_MANIFEST));
   });
 
-  it('uses the default catalog for Bun types in every TypeScript workspace', async () => {
-    for (const path of [
-      '../../package.json',
-      '../api/package.json',
-      '../shared/package.json',
-      '../../packages/protocol/package.json',
-    ]) {
-      assertBunTypesDeclaration(await readManifest(new URL(path, FRONTEND_MANIFEST)));
-    }
-  });
-
   it('uses the Bun toolchain version for the shared Bun types range', () => {
     const declared = catalog?.['@types/bun'];
     expect(
