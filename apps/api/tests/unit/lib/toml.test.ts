@@ -73,6 +73,20 @@ describe('stringifyTomlDocument', () => {
     expect(parseTomlDocument(stringifyTomlDocument(doc))).toEqual(doc);
   });
 
+  it.each(['toString', 'constructor', '__proto__', 'hasOwnProperty'])(
+    'does not delete %s, which a section inherits but does not define',
+    (key) => {
+      const section = { secret: 'kept' };
+      const doc: Record<string, unknown> = { auth: section };
+
+      expect(
+        deleteTomlSectionValue(doc, 'auth', key),
+        `(deleteTomlSectionValue): expected false for the inherited key ${key} | received true`
+      ).toBe(false);
+      expect(doc.auth, 'expected the section object left untouched').toBe(section);
+    }
+  );
+
   it('reads, edits and writes a config without losing unrelated values or date types', () => {
     writeFileSync(configPath, CONFIG_DOCUMENT);
     const doc = readTomlDocument(configPath);
