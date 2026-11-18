@@ -7,7 +7,8 @@
  * {@link SshEnvironmentConfigSchema}.
  */
 
-import { spawn } from 'node:child_process';
+import { type ChildProcessByStdio, spawn } from 'node:child_process';
+import type { Readable, Writable } from 'node:stream';
 
 import {
   quoteForRemoteShell,
@@ -27,8 +28,32 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_OUTPUT_BYTES = 64 * 1024;
 const STDIN_CHUNK_BYTES = 64 * 1024;
 
-export function createSshCommandRunner(config: SshEnvironmentConfig): RuntimeCommandRunner {
-  return (script, options) => runOverSsh(config, script, options);
+/** The piped child a runner drives: stdin to feed, stdout and stderr to collect. */
+export type SshChild = ChildProcessByStdio<Writable, Readable, Readable>;
+
+export interface SshCommandRunnerDeps {
+  /**
+   * Starts `ssh` with the argv the runner built. Defaults to a plain `ssh`
+   * spawn; a test that must trust a throwaway host key supplies its own.
+   */
+  readonly spawnSsh?: (args: readonly string[]) => SshChild;
+}
+
+function spawnPlainSsh(args: readonly string[]): SshChild {
+  return spawn('ssh', [...args], { stdio: ['pipe', 'pipe', 'pipe'], ...HIDDEN_WINDOW });
+}
+
+/**
+ * @example
+ * const run = createSshCommandRunner({ host: 'build-01.internal' });
+ * const { stdout } = await run('uname -m');
+ */
+export function createSshCommandRunner(
+  config: SshEnvironmentConfig,
+  deps: SshCommandRunnerDeps = {}
+): RuntimeCommandRunner {
+  const spawnSsh = deps.spawnSsh ?? spawnPlainSsh;
+  return (script, options) => runOverSsh(config, spawnSsh, script, options);
 }
 
 /**
@@ -44,6 +69,7 @@ export function buildSshRemoteCommand(script: string, args: readonly string[] = 
 
 function runOverSsh(
   config: SshEnvironmentConfig,
+  spawnSsh: (args: readonly string[]) => SshChild,
   script: string,
   options: RuntimeCommandOptions = {}
 ): Promise<RuntimeCommandResult> {
@@ -65,10 +91,7 @@ function runOverSsh(
       return;
     }
 
-    const child = spawn('ssh', args, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      ...HIDDEN_WINDOW,
-    });
+    const child = spawnSsh(args);
 
     let stdout = '';
     let stderr = '';
@@ -166,7 +189,11 @@ async function writeStdin(
     const finish = (error?: Error) => {
       if (settled) return;
       settled = true;
-      stdin.off('error', onError);
+      // `onError` stays attached on purpose. A chunk written just before the
+      // child dies (an abort from `onStdinProgress`, a dropped connection)
+      // reports EPIPE after this point, and an `error` event with no listener
+      // is an uncaught exception. The handler is idempotent and the stream is
+      // one write's, so it does not accumulate.
       if (error) reject(error);
       else resolve();
     };
@@ -174,7 +201,7 @@ async function writeStdin(
       raiseFailure?.(error);
       finish(error);
     };
-    // Persistent for the whole write loop — EPIPE after a successful write()
+    // Persistent for the stream's life — EPIPE after a successful write()
     // would otherwise become an uncaught exception when only drain had a listener.
     stdin.on('error', onError);
 
