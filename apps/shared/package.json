@@ -51,6 +51,7 @@
     "./utils/model-detection": "./src/utils/model-detection.ts",
     "./utils/dist-files": "./src/utils/dist-files.ts",
     "./utils/net": "./src/utils/net.ts",
+    "./utils/concurrency": "./src/utils/concurrency.ts",
     "./utils/delimited-text-splitter": "./src/utils/delimited-text-splitter.ts",
     "./process": "./src/process/index.ts",
     "./process/host": "./src/process/host.ts",
