@@ -714,10 +714,14 @@ const DEFAULT_WINDOWS_PATHEXT: &str = ".COM;.EXE;.BAT;.CMD";
 /// extension appended. A bare extensionless `name` is never a candidate, so a
 /// POSIX-style script called `gh` cannot shadow a later `gh.exe`.
 ///
+/// Appended extensions are lowercased. Windows matches them case-insensitively
+/// either way, and `PATHEXT` spells them in upper case by default, so the
+/// returned path reads `gh.exe` as installers name the file, not `gh.EXE`.
+///
 /// # Example
 /// ```ignore
 /// let names = windows_executable_names("gh", Some(OsStr::new(".EXE;.CMD")));
-/// assert_eq!(names, ["gh.EXE", "gh.CMD"]);
+/// assert_eq!(names, ["gh.exe", "gh.cmd"]);
 /// ```
 fn windows_executable_names(name: &str, pathext: Option<&std::ffi::OsStr>) -> Vec<String> {
     let pathext = pathext.map(|value| value.to_string_lossy());
@@ -739,7 +743,7 @@ fn windows_executable_names(name: &str, pathext: Option<&std::ffi::OsStr>) -> Ve
     }
     extensions
         .iter()
-        .map(|extension| format!("{name}{extension}"))
+        .map(|extension| format!("{name}{}", extension.to_ascii_lowercase()))
         .collect()
 }
 
@@ -1490,11 +1494,12 @@ mod tests {
 
         let cases: [(&str, Option<&str>, &[&str]); 8] = [
             // Unset and empty fall back to Windows' own default list.
-            ("gh", None, &["gh.COM", "gh.EXE", "gh.BAT", "gh.CMD"]),
-            ("gh", Some(""), &["gh.COM", "gh.EXE", "gh.BAT", "gh.CMD"]),
-            ("gh", Some("  "), &["gh.COM", "gh.EXE", "gh.BAT", "gh.CMD"]),
-            // The variable's own order and spelling win; blanks and non-extensions drop out.
-            ("gh", Some(".CMD; .exe;;.;bad"), &["gh.CMD", "gh.exe"]),
+            ("gh", None, &["gh.com", "gh.exe", "gh.bat", "gh.cmd"]),
+            ("gh", Some(""), &["gh.com", "gh.exe", "gh.bat", "gh.cmd"]),
+            ("gh", Some("  "), &["gh.com", "gh.exe", "gh.bat", "gh.cmd"]),
+            // The variable's own order wins, appended in lower case; blanks and non-extensions
+            // drop out.
+            ("gh", Some(".CMD; .exe;;.;bad"), &["gh.cmd", "gh.exe"]),
             // A name that already ends in a listed extension is tried as written, in any case.
             ("gh.exe", Some(".COM;.EXE"), &["gh.exe"]),
             ("GH.Cmd", Some(".EXE;.cmd"), &["GH.Cmd"]),
@@ -1502,9 +1507,9 @@ mod tests {
             (
                 "python3.12",
                 Some(".EXE;.CMD"),
-                &["python3.12.EXE", "python3.12.CMD"],
+                &["python3.12.exe", "python3.12.cmd"],
             ),
-            ("gh.exe", Some(".CMD"), &["gh.exe.CMD"]),
+            ("gh.exe", Some(".CMD"), &["gh.exe.cmd"]),
         ];
         for (name, pathext, expected) in cases {
             let received = super::windows_executable_names(name, pathext.map(OsStr::new));
