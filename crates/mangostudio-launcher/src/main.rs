@@ -2401,14 +2401,38 @@ mod tests {
         let fixture = InstallFixture::new();
         fixture.publish("#!/bin/sh\necho second build\n");
         // The "hub" is the installed binary itself, a script run from inside
-        // the install directory. It blocks reading its stdin (a shell builtin,
-        // so no child process outlives the test) and the shell keeps the
-        // script file open meanwhile.
-        fixture.lay_down_complete_install("#!/bin/sh\nread _\n");
+        // the install directory. It creates the marker file named by its first
+        // argument, then blocks reading its stdin (shell builtins, so no child
+        // process outlives the test). The shell keeps the script file open
+        // meanwhile.
+        //
+        // The marker is what makes the test deterministic. `spawn` returns once
+        // the kernel has exec'd `/bin/sh`, but the shell opens the script by
+        // path afterwards. A reinstall that swaps the directory in that window
+        // hands the shell the new script, which exits at once (issue #2434).
+        // Once the marker exists the shell holds the old file, so only then is
+        // the reinstall allowed to run. The marker lives outside the install
+        // root so it is not part of the tree the reinstall inspects.
+        fixture.lay_down_complete_install("#!/bin/sh\n: > \"$1\"\nread _\n");
+        let marker_root = ScratchRoot::new();
+        let hub_started_marker = marker_root.0.join("hub-started");
         let mut running_hub = Command::new(fixture.binary_path())
+            .arg(&hub_started_marker)
             .stdin(std::process::Stdio::piped())
             .spawn()
             .expect("expected the installed binary to start");
+        let marker_deadline = Instant::now() + Duration::from_secs(30);
+        while !hub_started_marker.exists() {
+            let exited = running_hub
+                .try_wait()
+                .expect("expected to poll the starting hub");
+            assert!(
+                exited.is_none() && Instant::now() < marker_deadline,
+                "expected the hub to create {} before the reinstall | received exit status {exited:?} after at most 30s",
+                hub_started_marker.display()
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
         // Damage a sibling so the install is replaced while the hub runs.
         fixture.damage_sibling();
         assert_eq!(
