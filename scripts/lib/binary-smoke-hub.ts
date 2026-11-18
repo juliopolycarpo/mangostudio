@@ -173,6 +173,27 @@ export class SmokeHub {
       `Local runtime: expected disconnected child processes to exit within ${budgetMs}ms | received ${JSON.stringify(remaining)}`
     );
   }
+  /**
+   * Await the hub's own exit without signalling it, for a stop the hub was asked to perform
+   * elsewhere (`mangostudio stop`). `undefined` means it outlived `budgetMs`; `stop()` still
+   * owns forced cleanup, so call it afterwards either way.
+   * @example const code = await hub.awaitExit(10_000);
+   */
+  async awaitExit(budgetMs: number): Promise<number | undefined> {
+    const child = this.child;
+    if (!child) throw new Error('hub exit wait: expected a started hub');
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        child.exited,
+        new Promise<undefined>((resolve) => {
+          timer = setTimeout(() => resolve(undefined), budgetMs);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   private async signal(signal: 'SIGTERM' | 'SIGKILL'): Promise<void> {
     const child = this.child;
     if (!child) return;

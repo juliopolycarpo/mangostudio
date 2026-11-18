@@ -31,6 +31,7 @@ import { probeIsolatedRuntime } from './lib/binary-runtime-smoke';
 import { SmokeHub } from './lib/binary-smoke-hub';
 import { artifactSmokeEnvironment, canExecuteArtifact } from './lib/binary-smoke-process';
 import { awaitStartToken, startTokenProblem } from './lib/binary-smoke-start-token';
+import { checkGracefulStop, probeLoopbackPort, runBoundedCommand } from './lib/binary-smoke-stop';
 import { ROOT_DIR } from './lib/config';
 import { collectContentEncodingProblems } from './lib/content-encoding-smoke';
 import {
@@ -622,6 +623,47 @@ async function smokeStartToken(
   pass("state file carries a startToken that decodes to this hub's start time");
 }
 
+/**
+ * `mangostudio stop` against the compiled hub this smoke started, in the same MANGO_HOME. On
+ * Windows the CLI asks the hub to stop itself over loopback and falls back to `TerminateProcess`;
+ * only the real binary can show which path ran. A fallback still exits 0, so this reads the
+ * notice, the hub's exit code, the state file and the port. The caller's `finally` still stops
+ * what the smoke started if any of it fails, and `stop` reads only this home's state file.
+ */
+async function smokeGracefulStop(options: {
+  hub: SmokeHub;
+  binaryPath: string;
+  home: string;
+  env: Record<string, string>;
+}): Promise<void> {
+  console.log('\n🛑 Running graceful stop smoke...');
+  const stopBudgetMs = 30_000;
+  const statePath = join(options.home, '.mango', 'run', 'server.json');
+  const problems = await checkGracefulStop(
+    {
+      runStop: () =>
+        runBoundedCommand([options.binaryPath, 'stop'], {
+          cwd: options.home,
+          env: options.env,
+          budgetMs: stopBudgetMs,
+        }),
+      awaitHubExit: (budgetMs) => options.hub.awaitExit(budgetMs),
+      stateFileExists: () => existsSync(statePath),
+      probePort: () => probeLoopbackPort(PORT, 2_000),
+    },
+    { hubExitBudgetMs: 10_000, stopBudgetMs, port: PORT }
+  );
+  if (problems.length > 0) {
+    for (const problem of problems) console.error(`     ${problem}`);
+    const stderr = options.hub.errorText().trim();
+    if (stderr) console.error(`     hub stderr: ${stderr.slice(-500)}`);
+    fail(`Graceful stop: ${problems.length} problem(s), listed above`);
+  }
+  pass(
+    'mangostudio stop → graceful (no hard-kill notice), hub exit 0, server.json gone, port free'
+  );
+}
+
 async function smokeTest(): Promise<void> {
   console.log(`\n🚀 Starting binary on port ${PORT}...`);
 
@@ -642,6 +684,25 @@ async function smokeTest(): Promise<void> {
     // rejects that case before the production smoke starts.
     if (existsSync(RUNTIME_BINARY_PATH)) copyFileSync(RUNTIME_BINARY_PATH, runtimePath);
     await bindDescendantsToRunner();
+    // One environment for the hub and for the `stop` run against it, so both resolve the same
+    // MANGO_HOME and therefore the same state file.
+    const hubEnv: Record<string, string> = {
+      ...artifactSmokeEnvironment(process.env, tmpHome, ROOT_DIR),
+      DATABASE_PATH: dbPath,
+      API_HOST: '127.0.0.1',
+      API_PORT: String(PORT),
+      BETTER_AUTH_URL: authBaseUrl,
+      ...(fakeChatGpt
+        ? {
+            MANGO_CHATGPT_AUTH_BASE_URL: fakeChatGpt.authBaseUrl,
+            MANGO_CHATGPT_BASE_URL: fakeChatGpt.apiBaseUrl,
+            MANGO_SECRET_STORE_UNSAFE_FILE_FALLBACK_DIR: join(tmpHome, 'secret-store'),
+          }
+        : {}),
+      // Required since the auth-secret startup guard landed; a 32+ char
+      // random value satisfies the runtime check without exposing a real key.
+      BETTER_AUTH_SECRET: 'smoke-test-secret-at-least-32-characters-long',
+    };
     hub = new SmokeHub({
       spawn: () => {
         // The binary is a CLI; bare invocation prints help, so start the server
@@ -650,23 +711,7 @@ async function smokeTest(): Promise<void> {
           cmd: [binaryPath, 'serve'],
           cwd: tmpHome,
           detached: process.platform !== 'win32',
-          env: {
-            ...artifactSmokeEnvironment(process.env, tmpHome, ROOT_DIR),
-            DATABASE_PATH: dbPath,
-            API_HOST: '127.0.0.1',
-            API_PORT: String(PORT),
-            BETTER_AUTH_URL: authBaseUrl,
-            ...(fakeChatGpt
-              ? {
-                  MANGO_CHATGPT_AUTH_BASE_URL: fakeChatGpt.authBaseUrl,
-                  MANGO_CHATGPT_BASE_URL: fakeChatGpt.apiBaseUrl,
-                  MANGO_SECRET_STORE_UNSAFE_FILE_FALLBACK_DIR: join(tmpHome, 'secret-store'),
-                }
-              : {}),
-            // Required since the auth-secret startup guard landed; a 32+ char
-            // random value satisfies the runtime check without exposing a real key.
-            BETTER_AUTH_SECRET: 'smoke-test-secret-at-least-32-characters-long',
-          },
+          env: hubEnv,
           stdout: 'ignore',
           stderr: 'pipe',
         });
@@ -963,6 +1008,14 @@ async function smokeTest(): Promise<void> {
         'Authenticated chat CRUD, WebSocket activity, Local runtime health and SQLite restart persistence'
       );
     }
+
+    // Last, because it ends the hub. The smoke's own cleanup below still runs if this fails.
+    await smokeGracefulStop({
+      hub,
+      binaryPath,
+      home: tmpHome,
+      env: hubEnv,
+    });
   } finally {
     try {
       await hub?.stop();

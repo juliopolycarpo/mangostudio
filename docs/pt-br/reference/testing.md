@@ -165,6 +165,13 @@ modelos. O smoke permanece hermético ao apontar `MANGO_CHATGPT_AUTH_BASE_URL` /
 binário nunca grava esses tokens no OS secret store do usuário. Nenhuma chamada real é feita
 às APIs do Cursor ou ChatGPT.
 
+A última etapa executa o `mangostudio stop` compilado contra o hub que o smoke iniciou, no mesmo
+`MANGO_HOME`. Ela falha a menos que `stop` saia com 0 sem aviso de kill forçado (no Windows,
+`stop` pede ao hub que se encerre e recorre a `TerminateProcess` com um aviso impresso; o
+fallback também sai com 0), o processo do hub saia com 0 em até 10 s, `server.json` tenha
+sumido e uma conexão à porta do smoke seja recusada. Se a etapa falhar, a limpeza do próprio
+smoke ainda encerra o hub que ele iniciou, e nada além dele.
+
 O smoke do ChatGPT precisa da porta de callback `1455`. Quando a porta já está ocupada, o
 script imprime uma mensagem de skip para essa etapa e mantém o restante do smoke binário
 ativo.

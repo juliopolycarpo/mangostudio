@@ -1377,6 +1377,15 @@ smoke tokens use `MANGO_SECRET_STORE_UNSAFE_FILE_FALLBACK_DIR` under the tempora
 so the binary never writes fake tokens to the user's OS secret store. No real Cursor or
 ChatGPT API calls are made.
 
+The last step runs the compiled `mangostudio stop` against the hub the smoke started, in the same
+`MANGO_HOME`. It fails unless `stop` exits 0 without a hard-kill notice (on Windows, `stop` asks
+the hub to shut itself down and falls back to `TerminateProcess` with a printed notice; the
+fallback still exits 0), the hub process exits 0 within 10 s, `server.json` is gone and a
+connect to the smoke port is refused. `scripts/lib/binary-smoke-stop.ts` owns the checks;
+`scripts/tests/binary-smoke-stop.unit.test.ts` drives the real `terminateHub` to keep the
+notice match in step with the CLI's wording. If the step fails, the smoke's own cleanup still
+stops the hub it spawned and nothing else.
+
 The ChatGPT smoke needs callback port `1455`. When that port is already bound, the script
 prints a skip message for the ChatGPT connector leg while keeping the rest of the binary
 smoke active.
