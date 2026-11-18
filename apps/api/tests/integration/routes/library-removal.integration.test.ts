@@ -71,9 +71,13 @@ function libraryPathEnv() {
   });
 }
 
-function skillLocationSettings(): typeof DEFAULT_APP_SETTINGS {
+function skillLocationSettings(
+  enabledLocationIds: readonly LibraryLocationId[] = SKILL_LOCATIONS
+): typeof DEFAULT_APP_SETTINGS {
   return withLibraryLocations(DEFAULT_APP_SETTINGS, DEFAULT_PROFILE_ID, {
-    home: Object.fromEntries(SKILL_LOCATIONS.map((id) => [id, true])),
+    home: Object.fromEntries(
+      SKILL_LOCATIONS.map((id) => [id, enabledLocationIds.includes(id)] as const)
+    ),
     workspace: {},
   });
 }
@@ -81,7 +85,9 @@ function skillLocationSettings(): typeof DEFAULT_APP_SETTINGS {
 function previewRemoval(
   locationIds: readonly LibraryLocationId[],
   userId: string = TEST_USER.id,
-  failedLocationIds?: readonly LibraryLocationId[]
+  failedLocationIds?: readonly LibraryLocationId[],
+  /** Defaults to every skill location; pass fewer to switch the rest off. */
+  enabledLocationIds: readonly LibraryLocationId[] = SKILL_LOCATIONS
 ): Promise<RemovalPreview> {
   const pathEnv = libraryPathEnv();
   const cache = new LibraryCache();
@@ -99,7 +105,7 @@ function previewRemoval(
             kinds,
             cache,
             pathEnv,
-            settings: skillLocationSettings(),
+            settings: skillLocationSettings(enabledLocationIds),
           })
         ).resources,
         statuses: new Map(
@@ -109,17 +115,24 @@ function previewRemoval(
       }),
       enabledLocationIds: () =>
         Promise.resolve(
-          enabledLibraryLocations(libraryLocationsFor(skillLocationSettings()), 'home')
+          enabledLibraryLocations(
+            libraryLocationsFor(skillLocationSettings(enabledLocationIds)),
+            'home'
+          )
         ),
       pathEnv: libraryPathEnv,
     }
   );
 }
 
-function applyRemoval(request: RemovalApplyRequest, userId: string = TEST_USER.id) {
+function applyRemoval(
+  request: RemovalApplyRequest,
+  userId: string = TEST_USER.id,
+  enabledLocationIds: readonly LibraryLocationId[] = SKILL_LOCATIONS
+) {
   return applyLibraryRemoval(userId, request, {
     preview: (previewUserId, previewRequest) =>
-      previewRemoval(previewRequest.locationIds, previewUserId),
+      previewRemoval(previewRequest.locationIds, previewUserId, undefined, enabledLocationIds),
     pathEnv: libraryPathEnv,
     // Only refusals run here; removals that write run against the real runtime
     // in `rust-runtime-library-removal.integration.test.ts`.
@@ -223,6 +236,59 @@ describe('library removal over real locations', () => {
 
     await expect(applyRemoval(removeEverything(preview))).rejects.toMatchObject({ status: 409 });
     expect(existsSync(join(home, '.claude', 'skills', 'gh'))).toBe(true);
+  });
+});
+
+describe('library removal of a disabled location', () => {
+  // Regression: a disabled location used to fail the whole preview with a 422.
+  it('previews the disabled location as blocked and the enabled one as removable', async () => {
+    skillAt('mango-skills', 'enabled copy\n');
+    skillAt('claude-skills', 'copy the scanner never reads\n');
+
+    const entry = entryOf(
+      await previewRemoval(['mango-skills', 'claude-skills'], TEST_USER.id, undefined, [
+        'mango-skills',
+      ])
+    );
+    const rows = Object.fromEntries(entry.locations.map((row) => [row.locationId, row]));
+
+    expect(rows['claude-skills']).toMatchObject({
+      operation: 'blocked',
+      blockedReason: 'location-disabled',
+    });
+    expect(rows['mango-skills']?.operation).toBe('remove');
+  });
+
+  // Reported as blocked is a UI affordance, not an authorization decision: a
+  // client that asks to remove from the row anyway is refused, and nothing is
+  // deleted anywhere in the request.
+  it('refuses an apply that removes from the disabled location and leaves every copy on disk', async () => {
+    const mangoCopy = skillAt('mango-skills', 'enabled copy\n');
+    const claudeCopy = skillAt('claude-skills', 'copy the scanner never reads\n');
+    const enabled: readonly LibraryLocationId[] = ['mango-skills'];
+    const preview = await previewRemoval(
+      ['mango-skills', 'claude-skills'],
+      TEST_USER.id,
+      undefined,
+      enabled
+    );
+    const forced: RemovalApplyRequest = {
+      ...removeEverything(preview, { acknowledge: true }),
+      decisions: preview.entries.map((entry) => ({
+        resourceKey: entry.resourceKey,
+        locations: entry.locations.map((row) => ({
+          locationId: row.locationId,
+          action: 'remove' as const,
+        })),
+      })),
+    };
+
+    await expect(applyRemoval(forced, TEST_USER.id, enabled)).rejects.toMatchObject({
+      status: 422,
+      message: expect.stringContaining('location-disabled'),
+    });
+    expect(existsSync(mangoCopy)).toBe(true);
+    expect(existsSync(claudeCopy)).toBe(true);
   });
 });
 

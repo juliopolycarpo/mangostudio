@@ -2,10 +2,11 @@ import { describe, expect, it } from 'bun:test';
 
 import Value from 'typebox/value';
 
-import type { ExternalAgentEvent } from '../../src/external-agents';
+import { EXTERNAL_TURN_TERMINAL_REASONS, type ExternalAgentEvent } from '../../src/external-agents';
 import {
   externalAgentEventToStreamChunk,
   externalSessionStartedChunk,
+  externalTurnCompletedChunk,
   StreamChunkSchema,
 } from '../../src/streaming';
 
@@ -46,14 +47,28 @@ const EVERY_EVENT: readonly ExternalAgentEvent[] = [
   { type: 'completed' },
   { type: 'notice', severity: 'warning', title: 'Rate limit close', description: 'Resets soon.' },
   { type: 'error', error: { code: 'vendor_failed', message: 'boom' } },
-  // Appended rather than placed in union order: the option-set case below
-  // indexes into this array. One vendor sends help text with each name and the
-  // other sends names alone, so both halves are represented.
+  // One vendor sends help text with each name and the other sends names alone,
+  // so both halves are represented.
   {
     type: 'commands_available',
     commands: [{ name: 'review', description: 'Read a diff' }, { name: 'compact' }],
   },
 ];
+
+/** Picks a fixture by its `type`, so reordering `EVERY_EVENT` cannot retarget a test. */
+function eventOfType<T extends ExternalAgentEvent['type']>(
+  type: T
+): Extract<ExternalAgentEvent, { type: T }> {
+  const matches = EVERY_EVENT.filter(
+    (event): event is Extract<ExternalAgentEvent, { type: T }> => event.type === type
+  );
+  if (matches.length !== 1) {
+    throw new Error(
+      `(EVERY_EVENT): expected exactly one '${type}' fixture | received: ${matches.length}`
+    );
+  }
+  return matches[0] as Extract<ExternalAgentEvent, { type: T }>;
+}
 
 describe('external stream chunks', () => {
   it('maps every neutral event to a valid chunk, or to nothing on purpose', () => {
@@ -116,7 +131,7 @@ describe('external stream chunks', () => {
   });
 
   it('preserves the vendor option set exactly, in the vendor order', () => {
-    const chunk = externalAgentEventToStreamChunk(EVERY_EVENT[6] as ExternalAgentEvent);
+    const chunk = externalAgentEventToStreamChunk(eventOfType('approval_requested'));
     expect(chunk).toMatchObject({
       type: 'external_approval_request',
       options: [
@@ -150,6 +165,23 @@ describe('external stream chunks', () => {
       })
     ).not.toHaveProperty('isError');
   });
+});
+
+describe('externalTurnCompletedChunk', () => {
+  // The constant is derived from the schema union, so a reason added there is
+  // covered here without touching this file.
+  it.each([...EXTERNAL_TURN_TERMINAL_REASONS])(
+    'projects the %s reason onto a valid, non-final chunk',
+    (reason) => {
+      const chunk = externalTurnCompletedChunk(reason);
+
+      expect(chunk).toEqual({ type: 'external_turn_completed', reason, done: false });
+      expect(
+        Value.Check(StreamChunkSchema, chunk),
+        `(external_turn_completed): expected '${reason}' chunk to satisfy StreamChunkSchema`
+      ).toBe(true);
+    }
+  );
 });
 
 describe('an external error chunk with a remedy', () => {

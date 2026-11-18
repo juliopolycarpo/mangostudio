@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 
 import type { ChatGptUsageHistoryResponse } from '@mangostudio/shared/connectors';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
@@ -13,6 +13,7 @@ import {
 import { settingsRoutes } from '../../../src/routes/settings';
 import { resetChatGptUsageStoreForTests } from '../../../src/services/providers/chatgpt/usage';
 import { upsertSecretMetadata } from '../../../src/services/secret-store/metadata';
+import { TEST_ACCOUNT_ID } from '../../support/chatgpt';
 import { type FakeChatGptServer, startFakeChatGptServer } from '../../support/chatgpt/fake-server';
 import type { ErrorPayload } from '../../support/connectors';
 import { insertTestUser, type UserFixture } from '../../support/factories';
@@ -30,6 +31,11 @@ let restoreAuth: (() => void) | null = null;
 let previousChatGptConfig: { authBaseUrl: string; apiBaseUrl: string } | null = null;
 
 beforeEach(async () => {
+  // The in-memory database outlives every file in the lane, and a file that
+  // persists usage samples without cleaning up (the connector lifecycle test
+  // did) leaves rows for this account id. Start from an empty table instead of
+  // trusting whatever ran before, so the first test here never sees them.
+  await getDb().deleteFrom('connector_usage_samples').execute();
   const fakeChatGpt = startFakeChatGptServer();
   const user = await insertTestUser();
 
@@ -207,6 +213,37 @@ describe('GET /settings/connectors/:id/usage/stats', () => {
   it('returns 404 for unknown connectors', async () => {
     const response = await fetchStats('no-such-connector');
     expect(response.status).toBe(404);
+  });
+});
+
+describe('usage history isolation from earlier files (#2472)', () => {
+  // Stands in for a file that persisted samples and never cleaned up. It lands
+  // before this describe's first beforeEach, exactly where the lifecycle test's
+  // leftover row sat when this file's first test ran under --seed=42.
+  beforeAll(async () => {
+    await getDb()
+      .insertInto('connector_usage_samples')
+      .values({
+        id: crypto.randomUUID(),
+        accountId: TEST_ACCOUNT_ID,
+        window: 'secondary',
+        usedPercent: 40,
+        windowMinutes: 10_080,
+        resetsAt: null,
+        sampledAt: Date.now(),
+      })
+      .execute();
+  });
+
+  it('starts from an empty sample table regardless of what ran before', async () => {
+    const connectorId = await connectChatGpt();
+
+    const response = await harness.app.handle(
+      new Request(`http://localhost/settings/connectors/${connectorId}/usage/history`)
+    );
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as ChatGptUsageHistoryResponse;
+    expect(payload.samples).toEqual([]);
   });
 });
 

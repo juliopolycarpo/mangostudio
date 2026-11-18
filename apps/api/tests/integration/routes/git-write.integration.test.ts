@@ -150,6 +150,66 @@ function getBranches(app: ReturnType<typeof createAuthenticatedApiTestApp>['app'
   return app.handle(new Request(url.toString()));
 }
 
+/**
+ * A repo with one commit on `main`. `withRemote` also gives it a bare `origin`
+ * that holds `main` and a `feat/remote-only` branch the repo has no local copy
+ * of; only the remote group needs it, so the others skip the extra fixture
+ * subprocesses.
+ */
+async function createWriteScopeRepo({ withRemote }: { withRemote: boolean }): Promise<string> {
+  const workdir = await createTempRepo();
+  await writeFile(join(workdir, 'tracked.txt'), 'initial\n');
+  await runFixtureGit(workdir, ['add', 'tracked.txt']);
+  await runFixtureGit(workdir, ['commit', '-m', 'initial']);
+  await runFixtureGit(workdir, ['branch', '-M', 'main']);
+  if (!withRemote) return workdir;
+
+  const remote = await realpath(await mkdtemp(join(tmpdir(), 'mango-git-realtime-remote-')));
+  tempDirs.push(remote);
+  await runFixtureGit(remote, ['init', '--bare', '--initial-branch=main']);
+  await runFixtureGit(workdir, ['remote', 'add', 'origin', remote]);
+  await runFixtureGit(workdir, ['push', '-u', 'origin', 'main']);
+  await runFixtureGit(workdir, ['switch', '-c', 'feat/remote-only']);
+  await runFixtureGit(workdir, ['push', '-u', 'origin', 'feat/remote-only']);
+  await runFixtureGit(workdir, ['switch', 'main']);
+  await runFixtureGit(workdir, ['branch', '-D', 'feat/remote-only']);
+  return workdir;
+}
+
+/**
+ * Subscribes to the chat's realtime topic and returns an assertion that one
+ * mutation publishes exactly one invalidation carrying that operation's scopes.
+ */
+async function createWriteScopeObserver(workdir: string) {
+  const { app, chatId, user } = await createRouteFixture(workdir);
+  const bus = createRealtimeBus();
+  const events: RealtimeInvalidateEvent[] = [];
+  bus.subscribe(user.id, (event) => events.push(event));
+  setRealtimeBusForTests(bus);
+
+  const expectInvalidation = async (
+    responsePromise: Promise<Response>,
+    operation: Exclude<GitWriteOperation, 'init' | 'stage' | 'unstage'>
+  ): Promise<Response> => {
+    const gitEventsBefore = events.filter((event) => event.topic === gitTopic(chatId)).length;
+    const response = await responsePromise;
+    expect(response.status, operation).toBe(200);
+    expect(
+      events.filter((event) => event.topic === gitTopic(chatId)).slice(gitEventsBefore),
+      operation
+    ).toEqual([
+      {
+        type: 'invalidate',
+        topic: gitTopic(chatId),
+        scopes: [...EXPECTED_WRITE_SCOPES[operation]],
+      },
+    ]);
+    return response;
+  };
+
+  return { app, chatId, expectInvalidation };
+}
+
 afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
@@ -237,50 +297,13 @@ describe('Git write routes', () => {
     ]);
   });
 
+  // The write surface is split by concern so each case stays a handful of Git
+  // subprocesses, and a failure names the group instead of one 20-step walk.
   it.skipIf(!hasGit)(
-    'publishes the expected chat-scoped event after every successful Git mutation',
+    'publishes the expected chat-scoped event after every worktree mutation',
     async () => {
-      const remote = await realpath(await mkdtemp(join(tmpdir(), 'mango-git-realtime-remote-')));
-      tempDirs.push(remote);
-      await runFixtureGit(remote, ['init', '--bare', '--initial-branch=main']);
-
-      const workdir = await createTempRepo();
-      await writeFile(join(workdir, 'tracked.txt'), 'initial\n');
-      await runFixtureGit(workdir, ['add', 'tracked.txt']);
-      await runFixtureGit(workdir, ['commit', '-m', 'initial']);
-      await runFixtureGit(workdir, ['branch', '-M', 'main']);
-      await runFixtureGit(workdir, ['remote', 'add', 'origin', remote]);
-      await runFixtureGit(workdir, ['push', '-u', 'origin', 'main']);
-      await runFixtureGit(workdir, ['switch', '-c', 'feat/remote-only']);
-      await runFixtureGit(workdir, ['push', '-u', 'origin', 'feat/remote-only']);
-      await runFixtureGit(workdir, ['switch', 'main']);
-      await runFixtureGit(workdir, ['branch', '-D', 'feat/remote-only']);
-
-      const { app, chatId, user } = await createRouteFixture(workdir);
-      const bus = createRealtimeBus();
-      const events: RealtimeInvalidateEvent[] = [];
-      bus.subscribe(user.id, (event) => events.push(event));
-      setRealtimeBusForTests(bus);
-
-      const expectInvalidation = async (
-        responsePromise: Promise<Response>,
-        operation: Exclude<GitWriteOperation, 'init' | 'stage' | 'unstage'>
-      ): Promise<Response> => {
-        const gitEventsBefore = events.filter((event) => event.topic === gitTopic(chatId)).length;
-        const response = await responsePromise;
-        expect(response.status, operation).toBe(200);
-        expect(
-          events.filter((event) => event.topic === gitTopic(chatId)).slice(gitEventsBefore),
-          operation
-        ).toEqual([
-          {
-            type: 'invalidate',
-            topic: gitTopic(chatId),
-            scopes: [...EXPECTED_WRITE_SCOPES[operation]],
-          },
-        ]);
-        return response;
-      };
+      const workdir = await createWriteScopeRepo({ withRemote: false });
+      const { app, chatId, expectInvalidation } = await createWriteScopeObserver(workdir);
 
       await writeFile(join(workdir, 'tracked.txt'), 'discard me\n');
       await expectInvalidation(
@@ -320,6 +343,14 @@ describe('Git write routes', () => {
       await writeFile(join(workdir, 'tracked.txt'), 'drop this stash\n');
       await postJson(app, '/git/stash', { chatId });
       await expectInvalidation(postJson(app, '/git/stash/drop', { chatId, index: 0 }), 'stashDrop');
+    }
+  );
+
+  it.skipIf(!hasGit)(
+    'publishes the expected chat-scoped event after every branch mutation',
+    async () => {
+      const workdir = await createWriteScopeRepo({ withRemote: false });
+      const { app, chatId, expectInvalidation } = await createWriteScopeObserver(workdir);
 
       await expectInvalidation(
         postJson(app, '/git/branches', { chatId, name: 'feat/realtime' }),
@@ -341,6 +372,15 @@ describe('Git write routes', () => {
         deleteJson(app, '/git/branches', { chatId, name: 'feat/live' }),
         'deleteBranch'
       );
+    }
+  );
+
+  it.skipIf(!hasGit)(
+    'publishes the expected chat-scoped event after every remote mutation',
+    async () => {
+      const workdir = await createWriteScopeRepo({ withRemote: true });
+      const { app, chatId, expectInvalidation } = await createWriteScopeObserver(workdir);
+
       await expectInvalidation(
         postJson(app, '/git/branches/checkout-remote', {
           chatId,
@@ -352,16 +392,11 @@ describe('Git write routes', () => {
 
       await expectInvalidation(postJson(app, '/git/fetch', { chatId }), 'fetch');
       await expectInvalidation(postJson(app, '/git/pull', { chatId }), 'pull');
+      // A local commit ahead of origin, so the push sends something.
+      await writeFile(join(workdir, 'tracked.txt'), 'ahead of origin\n');
+      await runFixtureGit(workdir, ['commit', '-am', 'ahead of origin']);
       await expectInvalidation(postJson(app, '/git/push', { chatId }), 'push');
-    },
-    // Every other case in this file covers one operation; this one walks the
-    // whole write surface to prove no operation publishes the wrong scope, so
-    // it spawns ~20 sequential Git subprocesses plus a push against a shared
-    // runner. It landed with ~1s of headroom under bun's 5s default and has
-    // been drifting into it as the suite grows, so the budget is stated rather
-    // than inherited. It is not a slow test to be tolerated — if it ever
-    // approaches this number, something has genuinely regressed.
-    30_000
+    }
   );
 
   it.skipIf(!hasGit)('refuses to widen a selection through a magic pathspec', async () => {

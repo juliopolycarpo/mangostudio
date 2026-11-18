@@ -4,8 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Writable } from 'node:stream';
 
-import { runTestsWithWatchdog, type WatchdogOptions } from '../ci/run-tests-watchdog';
+import {
+  killProcessGroup,
+  runTestsWithWatchdog,
+  type WatchdogOptions,
+} from '../ci/run-tests-watchdog';
 import { BUN_ORPHAN_POLICY_ENV, fixtureChildEnvironment } from './support/child-supervision';
+import { FakeProcessGroupPort } from './support/fake-process-group-port';
 import { readWatchdogStrayPid } from './support/fake-watchdog-crash';
 import { forceKill } from './support/process-tree';
 
@@ -886,5 +891,111 @@ describe('runTestsWithWatchdog crash retry (retryOnCrash)', () => {
       const stray = readWatchdogStrayPid(dir);
       if (stray !== undefined) forceKill(stray);
     }
+  });
+});
+
+describe('crash reap against a fake process-group port', () => {
+  // The child exits 134 on its first run and 0 on the retry; the port, not the
+  // kernel, decides what the group looks like once the leader is reaped.
+  const runCrashOnce = async (
+    port: FakeProcessGroupPort,
+    graceSeconds: number
+  ): Promise<{
+    result: Awaited<ReturnType<typeof runTestsWithWatchdog>>;
+    text: string;
+    ms: number;
+  }> => {
+    const dir = await makeTemp();
+    const sink = new CaptureSink();
+    const startedAt = performance.now();
+    const result = await runTestsWithWatchdog(
+      optionsIn(dir, {
+        command: [
+          'bun',
+          '-e',
+          crashOnceThenScript(join(dir, 'first-attempt-ran'), 'process.exit(0);'),
+        ],
+        retryOnCrash: true,
+        processGroups: port,
+        crashReapGraceSeconds: graceSeconds,
+        stdout: sink,
+      })
+    );
+    return { result, text: sink.text(), ms: performance.now() - startedAt };
+  };
+
+  it('does not signal a group that was already empty when the leader exited', async () => {
+    const port = new FakeProcessGroupPort({ aliveWhenProbed: false });
+
+    const { result, text, ms } = await runCrashOnce(port, 20);
+
+    expect(result, text).toMatchObject({ exitCode: 0, attempts: 2 });
+    expect(
+      port.kills(),
+      `(crash reap): expected no kill of a group that was empty at exit | received: ${JSON.stringify(port.kills())}`
+    ).toEqual([]);
+    expect(ms, '(crash reap): expected no grace wait when nothing was signalled').toBeLessThan(
+      15_000
+    );
+  });
+
+  it('kills the group it saw alive at exit and pays the grace once the kill lands', async () => {
+    const port = new FakeProcessGroupPort({ aliveWhenProbed: true });
+
+    const { result, text, ms } = await runCrashOnce(port, 1);
+
+    expect(result, text).toMatchObject({ exitCode: 0, attempts: 2 });
+    const [probe] = port.signals;
+    expect(probe?.signal, '(crash reap): expected the exit-time probe first').toBe(0);
+    expect(port.kills()).toEqual([{ pid: probe?.pid as number, signal: 'SIGKILL' }]);
+    expect(ms, '(crash reap): expected the 1s grace after a landed kill').toBeGreaterThanOrEqual(
+      950
+    );
+  });
+
+  it('surfaces a refused kill and skips the grace it would have waited for', async () => {
+    const port = new FakeProcessGroupPort({ aliveWhenProbed: true, killFailsWith: 'EPERM' });
+
+    const { result, text, ms } = await runCrashOnce(port, 20);
+
+    // The retry still runs: a failed reap must not cancel it.
+    expect(result, text).toMatchObject({ exitCode: 0, attempts: 2 });
+    expect(text).toMatch(/Watchdog could not signal SIGKILL to process group \d+: EPERM/);
+    expect(ms, '(crash reap): expected no grace wait after a refused kill').toBeLessThan(15_000);
+  });
+
+  it('treats a group that vanished between the probe and the kill as nothing to kill', async () => {
+    const port = new FakeProcessGroupPort({ aliveWhenProbed: true, killFailsWith: 'ESRCH' });
+
+    const { result, text, ms } = await runCrashOnce(port, 20);
+
+    expect(result, text).toMatchObject({ exitCode: 0, attempts: 2 });
+    expect(text).not.toContain('Watchdog could not signal');
+    expect(ms, '(crash reap): expected no grace wait when the group was gone').toBeLessThan(15_000);
+  });
+});
+
+describe('killProcessGroup', () => {
+  it('reports delivered when the signal lands', () => {
+    const port = new FakeProcessGroupPort({ aliveWhenProbed: true });
+
+    expect(killProcessGroup(port, 4242, 'SIGKILL')).toEqual({ kind: 'delivered' });
+  });
+
+  it('reports absent for ESRCH, the "nothing to kill" answer', () => {
+    const port = new FakeProcessGroupPort({ aliveWhenProbed: true, killFailsWith: 'ESRCH' });
+
+    expect(killProcessGroup(port, 4242, 'SIGKILL')).toEqual({ kind: 'absent' });
+  });
+
+  it('reports failed with the errno and target for any other error', () => {
+    const port = new FakeProcessGroupPort({ aliveWhenProbed: true, killFailsWith: 'EPERM' });
+
+    const outcome = killProcessGroup(port, 4242, 'SIGKILL');
+
+    expect(outcome).toEqual({
+      kind: 'failed',
+      message: 'signal SIGKILL to process group 4242: EPERM kill EPERM',
+    });
   });
 });

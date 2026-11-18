@@ -2471,6 +2471,8 @@ export const messages = {
       'read-only-location': 'Este local é somente leitura.',
       'unsupported-location': 'Este local não existe nesta plataforma.',
       'location-unwritable': 'O MangoStudio não tem permissão de escrita neste local.',
+      'location-disabled':
+        'Este local está desligado nas configurações de locais da biblioteca, então não é varrido.',
       'location-scan-failed':
         'Não foi possível verificar este local. Confira o acesso e gere a prévia novamente.',
       'slug-mismatch': 'Este local guarda um único recurso, e não é este.',
@@ -4176,6 +4178,21 @@ export const messages = {
       mcp: 'MCP',
       subagent: 'Subagente',
     },
+    /** Por que uma chamada falhou, foi cancelada ou esgotou o tempo, um item por `ToolExecutionReasonCode`. */
+    reasons: {
+      timeout: 'Limite de tempo atingido',
+      user_cancelled: 'Cancelada por você',
+      turn_aborted: 'Turno interrompido',
+      not_allowed: 'Não permitida',
+      tool_disabled: 'Ferramenta desativada',
+      unknown_tool: 'Ferramenta desconhecida',
+      validation_failed: 'Argumentos inválidos',
+      server_closed: 'Servidor encerrado',
+      execution_error: 'Erro de execução',
+      outcome_unknown: 'Resultado desconhecido',
+    },
+    /** O relógio de uma chamada em execução ao lado do limite de tempo configurado, ex.: `12s de 30s`. */
+    elapsedOfLimit: '{elapsed} de {limit}',
     /** O que a chamada produziu, alinhado à direita na linha da timeline. */
     summary: {
       item: '{count} item',

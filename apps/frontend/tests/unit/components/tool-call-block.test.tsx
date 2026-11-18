@@ -59,22 +59,60 @@ describe('ToolCallBlock', () => {
     expect(screen.getByText(/"content": "logs"/)).toBeInTheDocument();
   });
 
-  it('renders an error state', () => {
+  it('renders a failure in the live turn open so remediation is immediately visible', () => {
     render(
       <ToolCallBlock
         name="generate_image"
         args={{ prompt: 'a cat' }}
         status="failed"
         result="Failed to generate"
+        isLiveTurn
       />
     );
     const button = screen.getByRole('button', { name: /Generate Image.*Failed/i });
     expect(button).toHaveTextContent(/Generate Image/i);
     expect(button).toHaveAttribute('aria-expanded', 'true');
 
-    // Failed calls open automatically so remediation is immediately visible.
     expect(screen.getByText('error')).toBeInTheDocument();
     expect(screen.getByText('Failed to generate')).toBeInTheDocument();
+  });
+
+  it.each(['failed', 'timed_out'] as const)(
+    'keeps a historical %s call collapsed when it mounts already settled',
+    (status) => {
+      render(
+        <ToolCallBlock
+          name="bash"
+          args={{ command: 'false' }}
+          status={status}
+          result='{"error":"boom"}'
+        />
+      );
+      // A reopened chat mounts every past failure at once; only the status
+      // label and the rail tone call them out, not 30 open result bodies.
+      expect(screen.getByRole('button')).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.queryByText('boom')).not.toBeInTheDocument();
+    }
+  );
+
+  it('lets the reader open a historical failure by hand', () => {
+    render(<ToolCallBlock name="bash" args={{}} status="failed" result='{"error":"boom"}' />);
+    fireEvent.click(screen.getByRole('button'));
+    expect(screen.getByText('boom')).toBeInTheDocument();
+  });
+
+  it('does not reopen a card the reader closed when the live turn ends', () => {
+    const { rerender } = render(
+      <ToolCallBlock name="bash" args={{}} status="failed" result='{"error":"boom"}' isLiveTurn />
+    );
+    // The open body also holds copy buttons, so address the row by its label.
+    const row = () => screen.getByRole('button', { name: /Bash/ });
+    expect(row()).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(row());
+    expect(row()).toHaveAttribute('aria-expanded', 'false');
+
+    rerender(<ToolCallBlock name="bash" args={{}} status="failed" result='{"error":"boom"}' />);
+    expect(row()).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('opens automatically when a running call later fails', () => {
@@ -213,6 +251,7 @@ describe('ToolCallBlock', () => {
           status="failed"
           result={FAILED}
           execution={snapshot({ status: 'failed', durationMs: 5200 })}
+          isLiveTurn
         />
       );
 
@@ -229,7 +268,15 @@ describe('ToolCallBlock', () => {
     });
 
     it('draws each stream that printed something as its own section and skips the empty one', () => {
-      render(<ToolCallBlock name="bash" args={{ command: 'x' }} status="failed" result={FAILED} />);
+      render(
+        <ToolCallBlock
+          name="bash"
+          args={{ command: 'x' }}
+          status="failed"
+          result={FAILED}
+          isLiveTurn
+        />
+      );
       expect(screen.getByText('stderr')).toBeInTheDocument();
       expect(screen.queryByText('stdout')).toBeNull();
       expect(screen.queryByText('error')).toBeNull();
@@ -242,7 +289,7 @@ describe('ToolCallBlock', () => {
     it('leads with the stream the reader came for and tints only the failing one', () => {
       const result = JSON.stringify({ exitCode: 1, stdout: 'compiling\n', stderr: 'boom\n' });
       const { rerender } = render(
-        <ToolCallBlock name="bash" args={{}} status="failed" result={result} />
+        <ToolCallBlock name="bash" args={{}} status="failed" result={result} isLiveTurn />
       );
       const labels = () =>
         screen.getAllByText(/^(stdout|stderr)$/).map((label) => label.textContent);
@@ -282,6 +329,7 @@ describe('ToolCallBlock', () => {
           args={{}}
           status="failed"
           result={JSON.stringify({ exitCode: 1, stdout: '', stderr: 'x', truncated: true })}
+          isLiveTurn
         />
       );
       expect(screen.getByText(en.tools.outputTruncated)).toBeInTheDocument();
@@ -308,6 +356,7 @@ describe('ToolCallBlock', () => {
           args={{}}
           status="timed_out"
           result='{"error":"Command timed out after 30 seconds."}'
+          isLiveTurn
         />
       );
       expect(screen.getByText('error')).toBeInTheDocument();

@@ -77,12 +77,33 @@ const ok = (stdout = ''): NpmCommandResult => ({ exitCode: 0, stdout, stderr: ''
 const fail = (stderr: string): NpmCommandResult => ({ exitCode: 1, stdout: '', stderr });
 const missing = (): NpmCommandResult => fail('npm ERR! code E404\n404 Not Found');
 
+/**
+ * Stands in for the process environment the auth probes read. The tests pick what the
+ * resolver sees; `resolveNpmPublishAuth` still runs on every real publish.
+ */
+class FakeNpmAuthEnvironment {
+  oidcProbeCalls = 0;
+  tokenProbeCalls = 0;
+
+  constructor(private readonly environment: { readonly oidc: boolean; readonly token: boolean }) {}
+
+  oidcAvailable = (): boolean => {
+    this.oidcProbeCalls += 1;
+    return this.environment.oidc;
+  };
+
+  tokenPresent = (): boolean => {
+    this.tokenProbeCalls += 1;
+    return this.environment.token;
+  };
+}
+
 const publishWithFakes = (
   runner: FakeNpmRunner,
   packages: readonly NpmPublishPackage[] = [PLATFORM_PACKAGE],
   options: {
     readonly allowLegacyToken?: boolean;
-    readonly authMode?: 'legacy-explicit' | 'oidc';
+    readonly auth?: FakeNpmAuthEnvironment;
     readonly dryRun?: boolean;
     readonly provenancePolicy?: ProvenancePolicy;
     readonly retryDelaysMs?: readonly number[];
@@ -90,9 +111,12 @@ const publishWithFakes = (
 ) => {
   const sleeper = new FakeSleeper();
   const logger = new CapturingLogger();
+  // Default environment: a legacy token the dispatch escape hatch allows, no OIDC.
+  const auth = options.auth ?? new FakeNpmAuthEnvironment({ oidc: false, token: true });
   const result = publishPackages(packages, {
-    allowLegacyToken: options.allowLegacyToken,
-    authMode: options.authMode ?? 'legacy-explicit',
+    allowLegacyToken: options.allowLegacyToken ?? true,
+    oidcAvailable: auth.oidcAvailable,
+    tokenPresent: auth.tokenPresent,
     dryRun: options.dryRun,
     logger,
     retryDelaysMs: options.retryDelaysMs ?? [10],
@@ -256,33 +280,75 @@ describe('publishPackages auth reporting', () => {
     }
   });
 
-  test('fails closed when publishPackages runs without OIDC or allowed legacy token', async () => {
+  test('reports auth=oidc when the OIDC probe reports availability', async () => {
     const runner = new FakeNpmRunner([missing(), ok()]);
-    const priorUrl = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
-    const priorToken = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
-    const priorNpm = process.env.NODE_AUTH_TOKEN;
-    delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
-    delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
-    delete process.env.NODE_AUTH_TOKEN;
-    try {
-      await expect(
-        publishPackages([PLATFORM_PACKAGE], {
-          allowLegacyToken: false,
-          logger: new CapturingLogger(),
-          retryDelaysMs: [10],
-          runner,
-          sleep: () => Promise.resolve(),
-        })
-      ).rejects.toThrow(/authentication failed/);
-      expect(runner.calls).toHaveLength(0);
-    } finally {
-      if (priorUrl === undefined) delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
-      else process.env.ACTIONS_ID_TOKEN_REQUEST_URL = priorUrl;
-      if (priorToken === undefined) delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
-      else process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = priorToken;
-      if (priorNpm === undefined) delete process.env.NODE_AUTH_TOKEN;
-      else process.env.NODE_AUTH_TOKEN = priorNpm;
-    }
+    const auth = new FakeNpmAuthEnvironment({ oidc: true, token: false });
+    const { result } = publishWithFakes(runner, [PLATFORM_PACKAGE], {
+      allowLegacyToken: false,
+      auth,
+    });
+
+    await expect(result).resolves.toMatchObject({ auth: 'oidc', published: 1 });
+    expect(auth.oidcProbeCalls).toBe(1);
+  });
+
+  test('reports auth=legacy-explicit only when the token is present and allowed', async () => {
+    const runner = new FakeNpmRunner([missing(), ok()]);
+    const auth = new FakeNpmAuthEnvironment({ oidc: true, token: true });
+    const { result } = publishWithFakes(runner, [PLATFORM_PACKAGE], {
+      allowLegacyToken: true,
+      auth,
+    });
+
+    await expect(result).resolves.toMatchObject({ auth: 'legacy-explicit', published: 1 });
+  });
+
+  test('prefers OIDC over a present token when the legacy fallback is not allowed', async () => {
+    const runner = new FakeNpmRunner([missing(), ok()]);
+    const { result } = publishWithFakes(runner, [PLATFORM_PACKAGE], {
+      allowLegacyToken: false,
+      auth: new FakeNpmAuthEnvironment({ oidc: true, token: true }),
+    });
+
+    await expect(result).resolves.toMatchObject({ auth: 'oidc', published: 1 });
+  });
+
+  test.each([
+    ['no credentials', { oidc: false, token: false }, true],
+    ['a token the fallback does not allow', { oidc: false, token: true }, false],
+  ])('fails closed before any npm call with %s', async (_label, environment, allowLegacyToken) => {
+    const runner = new FakeNpmRunner([missing(), ok()]);
+    const auth = new FakeNpmAuthEnvironment(environment);
+    const { result } = publishWithFakes(runner, [PLATFORM_PACKAGE], { allowLegacyToken, auth });
+
+    await expect(result).rejects.toThrow(/authentication failed/);
+    expect(runner.calls).toHaveLength(0);
+    // The resolver ran against both probes instead of being bypassed.
+    expect(auth.oidcProbeCalls).toBe(1);
+    expect(auth.tokenProbeCalls).toBe(1);
+  });
+
+  test('has no option that skips auth resolution', async () => {
+    const runner = new FakeNpmRunner([missing(), ok()]);
+    const auth = new FakeNpmAuthEnvironment({ oidc: false, token: false });
+    const options = {
+      allowLegacyToken: false,
+      logger: new CapturingLogger(),
+      oidcAvailable: auth.oidcAvailable,
+      retryDelaysMs: [10],
+      runner,
+      sleep: () => Promise.resolve(),
+      tokenPresent: auth.tokenPresent,
+    };
+
+    await expect(
+      publishPackages([PLATFORM_PACKAGE], {
+        ...options,
+        // @ts-expect-error `authMode` was removed from NpmPublishOptions.
+        authMode: 'oidc',
+      })
+    ).rejects.toThrow(/authentication failed/);
+    expect(runner.calls).toHaveLength(0);
   });
 
   // release-dry-run.yml runs `publish-npm.ts --dry-run` with only
@@ -290,31 +356,27 @@ describe('publishPackages auth reporting', () => {
   // local use, so a dry run must never demand publish credentials.
   test('a dry run needs no credentials and reports auth=not-published', async () => {
     const runner = new FakeNpmRunner([missing()]);
-    const priorUrl = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
-    const priorToken = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
-    const priorNpm = process.env.NODE_AUTH_TOKEN;
-    delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
-    delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
-    delete process.env.NODE_AUTH_TOKEN;
-    try {
-      await expect(
-        publishPackages([PLATFORM_PACKAGE], {
-          allowLegacyToken: false,
-          dryRun: true,
-          logger: new CapturingLogger(),
-          retryDelaysMs: [10],
-          runner,
-          sleep: () => Promise.resolve(),
-        })
-      ).resolves.toMatchObject({ auth: 'not-published', dryRun: 1, published: 0 });
-    } finally {
-      if (priorUrl === undefined) delete process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
-      else process.env.ACTIONS_ID_TOKEN_REQUEST_URL = priorUrl;
-      if (priorToken === undefined) delete process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
-      else process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN = priorToken;
-      if (priorNpm === undefined) delete process.env.NODE_AUTH_TOKEN;
-      else process.env.NODE_AUTH_TOKEN = priorNpm;
-    }
+    const auth = new FakeNpmAuthEnvironment({ oidc: false, token: false });
+    const { result } = publishWithFakes(runner, [PLATFORM_PACKAGE], {
+      allowLegacyToken: false,
+      auth,
+      dryRun: true,
+    });
+
+    await expect(result).resolves.toMatchObject({
+      auth: 'not-published',
+      dryRun: 1,
+      published: 0,
+    });
+  });
+
+  test('already-published packages report auth=not-published whatever the credentials', async () => {
+    const runner = new FakeNpmRunner([ok('1.2.3\n')]);
+    const { result } = publishWithFakes(runner, [PLATFORM_PACKAGE], {
+      auth: new FakeNpmAuthEnvironment({ oidc: true, token: false }),
+    });
+
+    await expect(result).resolves.toMatchObject({ auth: 'not-published', skipped: 1 });
   });
 });
 
@@ -350,13 +412,15 @@ describe('publishPackages', () => {
   test('publishes under a dist-tag when one is provided', async () => {
     const runner = new FakeNpmRunner([missing(), ok()]);
     const sleeper = new FakeSleeper();
+    const auth = new FakeNpmAuthEnvironment({ oidc: true, token: false });
     await publishPackages([PLATFORM_PACKAGE], {
-      authMode: 'legacy-explicit',
       distTag: 'canary',
       logger: new CapturingLogger(),
+      oidcAvailable: auth.oidcAvailable,
       retryDelaysMs: [10],
       runner,
       sleep: sleeper.sleep,
+      tokenPresent: auth.tokenPresent,
     });
 
     // --tag precedes --provenance, and the default path (no distTag) stays bare.
@@ -499,7 +563,7 @@ describe('publishPackages', () => {
       published: 0,
       skipped: 0,
       dryRun: 1,
-      auth: 'legacy-explicit',
+      auth: 'not-published',
       provenance: { status: 'explicit' },
     });
     expect(runner.calls.map((call) => call.args[0])).toEqual(['view']);

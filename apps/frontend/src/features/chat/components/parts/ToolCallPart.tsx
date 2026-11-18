@@ -36,7 +36,13 @@ export function ToolCallPart({
   latestFileChangeId,
 }: ToolCallPartProps) {
   if (group) {
-    return <ToolCallGroupBlock calls={group} latestFileChangeId={latestFileChangeId} />;
+    return (
+      <ToolCallGroupBlock
+        calls={group}
+        latestFileChangeId={latestFileChangeId}
+        isLiveTurn={isStreaming}
+      />
+    );
   }
 
   const entry = toToolCallEntry(parts, index, isStreaming);
@@ -48,6 +54,7 @@ export function ToolCallPart({
       status={entry.status}
       execution={entry.execution}
       isLatestFileChange={part.toolCallId === latestFileChangeId}
+      isLiveTurn={isStreaming}
     />
   );
 }

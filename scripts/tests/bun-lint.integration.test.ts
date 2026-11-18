@@ -70,6 +70,58 @@ describe('Bun lint repository policy', () => {
     expect(result.rules).toContain('@typescript-eslint/no-floating-promises');
   });
 
+  // `no-floating-promises` cannot see through the `expect(...)` matcher chain, so an
+  // unawaited `.rejects` / `.resolves` assertion passes whatever the promise does.
+  // `bun:test/valid-expect` owns that class; this pins it so a bunfig or Bun change
+  // that turns it off fails here instead of letting the next one through.
+  test.each([
+    ['rejects', "expect(fail()).rejects.toThrow('x');"],
+    ['resolves', 'expect(Promise.resolve(1)).resolves.toBe(1);'],
+    ['multi-line', "expect(\n    fail()\n  ).rejects.toThrow('x');"],
+    ['negated', "expect(fail()).rejects.not.toThrow('x');"],
+    ['Promise.all array', "Promise.all([expect(fail()).rejects.toThrow('x')]);"],
+  ])('reports an unawaited %s assertion', (name, statement) => {
+    const path = `apps/api/tests/unit/unawaited-${name.replaceAll(' ', '-')}.test.ts`;
+    writeFixture(
+      path,
+      `import { expect, it } from 'bun:test';\n` +
+        `const fail = () => Promise.reject(new Error('x'));\n` +
+        `it('probe', async () => {\n  ${statement}\n});\n`
+    );
+    const result = lint(path);
+    expect(
+      result.rules,
+      `(${path}): expected \`bun:test/valid-expect\` to flag the unawaited assertion | received: ${result.rules.join(', ') || 'no findings'}`
+    ).toContain('bun:test/valid-expect');
+    expect(result.exitCode).toBe(1);
+  });
+
+  test('accepts awaited, returned and concise-arrow async assertions', () => {
+    const path = 'apps/api/tests/unit/awaited.test.ts';
+    writeFixture(
+      path,
+      [
+        `import { expect, it } from 'bun:test';`,
+        `const fail = () => Promise.reject(new Error('x'));`,
+        `it('awaited', async () => {`,
+        `  await expect(fail()).rejects.toThrow('x');`,
+        `  await Promise.all([expect(fail()).rejects.toThrow('x')]);`,
+        `});`,
+        `it('returned', () => {`,
+        `  return expect(fail()).rejects.toThrow('x');`,
+        `});`,
+        `it('concise', () => expect(fail()).rejects.toThrow('x'));`,
+        ``,
+      ].join('\n')
+    );
+    const result = lint(path);
+    expect(
+      result.rules,
+      `(${path}): expected no findings for awaited assertions | received: ${result.rules.join(', ')}`
+    ).toEqual([]);
+    expect(result.exitCode).toBe(0);
+  });
+
   test('resolves repository overrides when invoked from a workspace', () => {
     const path = 'apps/frontend/src/from-workspace.ts';
     writeFixture(path, "import { en } from '@mangostudio/shared/i18n';\nexport { en };\n");

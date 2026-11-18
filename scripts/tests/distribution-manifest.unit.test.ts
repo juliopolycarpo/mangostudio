@@ -388,9 +388,8 @@ describe('distribution manifest', () => {
     expect(() =>
       validateDistributionManifest(manifest, { ...base, expect: 'downloaded' })
     ).not.toThrow();
-    expect(() => validateDistributionManifest(manifest, base)).not.toThrow();
     expect(() => validateDistributionManifest(manifest, { ...base, expect: 'built' })).toThrow(
-      /file cannot be read/
+      /file cannot be read: \.mango\/out\/linux-x64\//
     );
 
     const archive = join(rootDir, 'release-assets', 'mangostudio-1.2.3-linux-x64.tar.gz');
@@ -398,6 +397,44 @@ describe('distribution manifest', () => {
     expect(() => validateDistributionManifest(manifest, { ...base, expect: 'downloaded' })).toThrow(
       /mismatch/
     );
+    // `built` covers the archive too, not only the target tree.
+    expect(() => validateDistributionManifest(manifest, { ...base, expect: 'built' })).toThrow();
+  });
+
+  test('downloaded ignores a tampered target tree that built rejects', () => {
+    const { rootDir, manifest } = fixture();
+    const base = {
+      rootDir,
+      sourceSha: manifest.sourceSha,
+      packageVersion: '1.2.3',
+      target: 'linux-x64',
+    };
+    writeFileSync(join(rootDir, '.mango', 'out', 'linux-x64', 'mangostudio'), 'tampered');
+
+    expect(() =>
+      validateDistributionManifest(manifest, { ...base, expect: 'downloaded' })
+    ).not.toThrow();
+    expect(() => validateDistributionManifest(manifest, { ...base, expect: 'built' })).toThrow(
+      /Distribution (size|SHA-256) mismatch for \.mango\/out\/linux-x64\/mangostudio/
+    );
+  });
+
+  test('refuses an omitted or unknown expectation instead of defaulting to downloaded', () => {
+    const { rootDir, manifest } = fixture();
+    const base = { rootDir, sourceSha: manifest.sourceSha, packageVersion: '1.2.3' };
+
+    // @ts-expect-error `expect` is required: omission is a type error.
+    const omitted = () => validateDistributionManifest(manifest, base);
+    expect(omitted).toThrow(
+      'Distribution manifest expectation: expected built | downloaded | received: undefined'
+    );
+    expect(() =>
+      validateDistributionManifest(manifest, {
+        ...base,
+        // @ts-expect-error not a DistributionManifestExpectation
+        expect: 'both',
+      })
+    ).toThrow('expected built | downloaded | received: both');
   });
 
   test('validates manifest slices per consumer scope', () => {

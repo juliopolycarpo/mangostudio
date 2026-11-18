@@ -1573,6 +1573,8 @@ export const messages: CoreMessages = {
       'read-only-location': 'This location is read-only.',
       'unsupported-location': 'This location does not exist on this platform.',
       'location-unwritable': 'MangoStudio cannot write to this location.',
+      'location-disabled':
+        'This location is switched off in the library location settings, so it is not scanned.',
       'location-scan-failed': 'This location could not be scanned. Check access and preview again.',
       'slug-mismatch': 'This location stores a single resource, and this is not it.',
       'invalid-destination':
@@ -3315,6 +3317,21 @@ export const messages: CoreMessages = {
       mcp: 'MCP',
       subagent: 'Subagent',
     },
+    /** Why a failed, cancelled or timed-out call ended, one entry per `ToolExecutionReasonCode`. */
+    reasons: {
+      timeout: 'Time limit reached',
+      user_cancelled: 'Cancelled by you',
+      turn_aborted: 'Turn stopped',
+      not_allowed: 'Not allowed',
+      tool_disabled: 'Tool disabled',
+      unknown_tool: 'Unknown tool',
+      validation_failed: 'Invalid arguments',
+      server_closed: 'Server closed',
+      execution_error: 'Execution error',
+      outcome_unknown: 'Outcome unknown',
+    },
+    /** A running call's clock beside its configured time limit, e.g. `12s of 30s`. */
+    elapsedOfLimit: '{elapsed} of {limit}',
     /** What a finished call produced, shown right-aligned on the timeline row. */
     summary: {
       item: '{count} item',
