@@ -272,8 +272,11 @@ describe('chats statements without idx_chats_updated_at', () => {
       () => listChatIdsUnderWorktreeRoot(OWNER, 'local', '/work', typedDb()),
     ],
     ['verifyChatOwnership', () => verifyChatOwnership(OTHER_ID, OWNER, typedDb())],
-    // The image turn and createMessage write recency with the same `id` filter.
-    ['the recency update after a turn', () => updateChatAfterTurn(OTHER_ID, 9_000, typedDb())],
+    // The image turn and createMessage write recency through the same statement.
+    [
+      'the recency update after a turn',
+      () => updateChatAfterTurn(OTHER_ID, OWNER, 9_000, typedDb()),
+    ],
   ];
 
   it.each(reads)('%s does not use it before the migration', async (_label, read) => {

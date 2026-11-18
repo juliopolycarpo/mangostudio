@@ -102,7 +102,12 @@ finalized). It is a separate topic because both the list and the feed refetch on
 every frame they receive; on one shared topic a git commit refetched the chat
 list and a cancelled turn refetched the feed, each answered with what the tab
 already had. The API publishes it through `publishChatListInvalidation`
-(`apps/api/src/services/realtime/chat-list-invalidation.ts`).
+(`apps/api/src/services/realtime/chat-list-invalidation.ts`). Whoever moves
+`chats.updatedAt` announces it from the same place, `updateChatAfterTurn` and
+`persistImageTurn` in
+`apps/api/src/modules/generation/infrastructure/conversation-persistence.ts`;
+only chat create and chat update, which do not move that column, publish on
+their own. `chat-list-signal-boundary.test.ts` enforces both.
 
 Foreign Git topics remain unsubscribed and return the same non-enumerating
 `NOT_FOUND` response as an unavailable topic. Unknown topic grammars return
