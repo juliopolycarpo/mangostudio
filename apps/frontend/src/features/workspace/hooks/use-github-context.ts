@@ -3,7 +3,7 @@ import type { GithubContext } from '@mangostudio/shared/github';
 import { useQuery } from '@tanstack/react-query';
 
 import { client } from '@/lib/api-client';
-import { throwApiError } from '@/lib/utils';
+import { ApiError } from '@/lib/utils';
 
 export const githubContextKeys = {
   all: ['github-context'] as const,
@@ -19,8 +19,8 @@ export function useGithubContext(chatId: string, gitState: GitRepoState | undefi
     queryKey: githubContextKeys.detail(chatId, branch ?? ''),
     queryFn: async (): Promise<GithubContext> => {
       const { data, error } = await client.api.github.context.get({ query: { chatId } });
-      if (error) throwApiError(error);
-      return data as GithubContext;
+      if (error) throw new ApiError(error.value);
+      return data;
     },
     enabled: branch !== undefined,
     refetchOnWindowFocus: true,
