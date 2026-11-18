@@ -41,25 +41,11 @@ function renderViewer(path: string = PATH) {
     <DiffViewer
       chatId="chat-1"
       selection={{ path, staged: false, title: `View diff for ${path}` }}
-      onClose={jest.fn()}
     />
   );
 }
 
 describe('DiffViewer', () => {
-  it('heads the card with the file name first and the full path as the tooltip', async () => {
-    renderViewer();
-    await flushAsyncRender();
-
-    // A plain `truncate` on the whole path cut the file name off the end of a
-    // deep path; the label keeps the name and lets only the directory give way.
-    const label = screen.getByTitle(PATH);
-    expect(label.querySelector('[aria-hidden="true"] > span')).toHaveTextContent(
-      'GeneralSettings.tsx'
-    );
-    expect(screen.getByText('Working tree changes')).toBeVisible();
-  });
-
   it('pulls syntax colours toward the foreground on added and removed lines only', async () => {
     renderViewer();
 

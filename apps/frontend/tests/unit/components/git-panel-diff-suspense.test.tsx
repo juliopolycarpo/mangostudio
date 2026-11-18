@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
 
-import { act, fireEvent, screen } from '@testing-library/react';
+import { act, fireEvent, screen, within } from '@testing-library/react';
 
 import { Panel, repoState } from '../../support/harness/git-panel';
 import { render } from '../../support/harness/render';
@@ -39,13 +39,17 @@ describe('GitPanel diff viewer chunk', () => {
     fireEvent.click(screen.getByRole('button', { name: 'View diff for src/panel.tsx' }));
 
     expect(screen.getByText('Loading diff…')).toBeVisible();
-    expect(screen.queryByRole('region', { name: 'View diff for src/panel.tsx' })).toBeNull();
+    // The frame is not part of the chunk: the region and its back control are
+    // already on screen while the viewer body is still pending.
+    const region = screen.getByRole('region', { name: 'View diff for src/panel.tsx' });
+    expect(within(region).getByRole('button', { name: 'Close diff' })).toBeVisible();
 
     // Await the chunk itself: a cold import can exceed findByRole's deadline.
     await act(async () => {
       await import('../../../src/features/workspace/DiffViewer');
     });
 
+    expect(screen.queryByText('Loading diff…')).toBeNull();
     expect(screen.getByRole('region', { name: 'View diff for src/panel.tsx' })).toBeVisible();
   });
 });
