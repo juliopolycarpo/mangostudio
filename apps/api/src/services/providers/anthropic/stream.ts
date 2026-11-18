@@ -5,6 +5,7 @@
 import type Anthropic from '@anthropic-ai/sdk';
 
 import { createDiagnosticLogger } from '../../../lib/logger';
+import { asCredentialRejection } from '../core/provider-credential-rejected';
 import type { AgentEvent, AgentTurnRequest } from '../types';
 import { buildCachedAnthropicRequest } from './cached-request';
 import {
@@ -83,6 +84,10 @@ export async function* streamAnthropicAgentTurn(
       providerState: serializeAnthropicTurnState(req, newLoopMessages, providerReportedInputTokens),
     };
   } catch (err: unknown) {
+    // A rejected key is the connector's problem, not a turn failure to narrate:
+    // raise the shared error so the caller can name what to fix.
+    const rejection = asCredentialRejection('anthropic', err);
+    if (rejection) throw rejection;
     yield {
       type: 'turn_error',
       error: err instanceof Error ? err.message : 'Anthropic request failed',

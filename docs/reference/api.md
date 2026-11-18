@@ -378,13 +378,14 @@ error response that participates, and publishes the schema as
 
 ### Common Error Codes
 
-| Code                      | HTTP Status | Meaning                                                                                                        |
-| ------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------- |
-| `UNAUTHORIZED`            | 401         | Missing or invalid session                                                                                     |
-| `OWNERSHIP`               | 403         | Resource not owned by the user                                                                                 |
-| `NOT_FOUND`               | 404         | Resource does not exist                                                                                        |
-| `VALIDATION`              | 422         | Invalid request body or semantics                                                                              |
-| `RATE_LIMITED`            | 429         | Too many requests (see `Retry-After`)                                                                          |
-| `INTERNAL`                | 500         | Unexpected server error                                                                                        |
-| `PROVIDER_ERROR`          | 502 / 503   | Upstream model provider failed/unavailable                                                                     |
-| `ENVIRONMENT_UNAVAILABLE` | 503         | The target environment's runtime cannot be reached (`details.reason`; `Retry-After` when a retry is scheduled) |
+| Code                           | HTTP Status | Meaning                                                                                                                               |
+| ------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `UNAUTHORIZED`                 | 401         | Missing or invalid session                                                                                                            |
+| `OWNERSHIP`                    | 403         | Resource not owned by the user                                                                                                        |
+| `NOT_FOUND`                    | 404         | Resource does not exist                                                                                                               |
+| `VALIDATION`                   | 422         | Invalid request body or semantics                                                                                                     |
+| `RATE_LIMITED`                 | 429         | Too many requests (see `Retry-After`)                                                                                                 |
+| `INTERNAL`                     | 500         | Unexpected server error                                                                                                               |
+| `PROVIDER_ERROR`               | 502 / 503   | Upstream model provider failed/unavailable                                                                                            |
+| `PROVIDER_CREDENTIAL_REJECTED` | stream      | A provider answered 401 or 403 to a connector's key; fix that connector in Settings (stream error events and failed subagent results) |
+| `ENVIRONMENT_UNAVAILABLE`      | 503         | The target environment's runtime cannot be reached (`details.reason`; `Retry-After` when a retry is scheduled)                        |

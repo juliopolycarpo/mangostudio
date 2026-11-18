@@ -46,6 +46,11 @@ const PUBLISHED: [ErrorCode, string, string][] = [
   ['OPERATION_EXPIRED', 'https://mangostudio.dev/problems/operation-expired', 'Operation expired'],
   ['PROVIDER_ERROR', 'https://mangostudio.dev/problems/provider-error', 'Provider error'],
   [
+    'PROVIDER_CREDENTIAL_REJECTED',
+    'https://mangostudio.dev/problems/provider-credential-rejected',
+    'Provider rejected the connector key',
+  ],
+  [
     'ENVIRONMENT_UNAVAILABLE',
     'https://mangostudio.dev/problems/environment-unavailable',
     'Environment unavailable',

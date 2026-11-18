@@ -10,6 +10,17 @@ export const ERROR_CODES = {
   OPERATION_EXPIRED: 'OPERATION_EXPIRED',
   PROVIDER_ERROR: 'PROVIDER_ERROR',
   /**
+   * A model provider answered HTTP 401 or 403 to a connector's key: it was
+   * revoked, expired, or lacks access to the model.
+   *
+   * Its own code, apart from `PROVIDER_ERROR`, because the remedy is the user's
+   * and specific: fix that connector in Settings. Retrying or picking another
+   * environment cannot help. Carried by a turn's `SSEErrorEvent` and by a failed
+   * subagent result; the message never repeats the provider's own text, which
+   * can echo part of the key.
+   */
+  PROVIDER_CREDENTIAL_REJECTED: 'PROVIDER_CREDENTIAL_REJECTED',
+  /**
    * The environment a request targets could not be reached: its runtime is not
    * installed, failed to start, is backing off after a failure, or is disabled.
    * Sent with 503. An HTTP response carries `details.reason` (one of the

@@ -21,6 +21,7 @@ import {
   serializeContinuationEnvelope,
 } from '../core/continuation-envelope';
 import { logProviderDegrade } from '../core/continuation-logger';
+import { asCredentialRejection } from '../core/provider-credential-rejected';
 import { buildGeminiInteractionsReplay } from '../core/replay-builder';
 import { toolDefsToGeminiInteractions } from '../core/tool-mapper';
 import type { AgentEvent, AgentTurnRequest } from '../types';
@@ -237,6 +238,11 @@ export async function* streamGeminiAgentTurn(
 
     yield* processGeminiInteractionStream(stream, req);
   } catch (err: unknown) {
+    // Checked before the cursor heuristics below: a rejected key is the
+    // connector's problem and must not be mistaken for an expired interaction.
+    const rejection = asCredentialRejection('gemini', err);
+    if (rejection) throw rejection;
+
     const errMsg = err instanceof Error ? err.message : String(err);
 
     const isCursorError =
