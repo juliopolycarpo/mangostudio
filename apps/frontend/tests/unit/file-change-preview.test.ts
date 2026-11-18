@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 
 import {
+  addIntraLineEmphasis,
   buildFileChangePreview,
   DIFF_PREVIEW_MAX_LINES,
+  type DiffPreviewLine,
+  diffTextLines,
   findLatestFileChangeId,
+  INTRA_LINE_MAX_LINE_LENGTH,
+  INTRA_LINE_MAX_PAIRS,
   truncateDiffLines,
 } from '../../src/features/chat/components/file-change-preview';
 
@@ -70,7 +75,8 @@ describe('buildFileChangePreview', () => {
     expect(preview?.files[0]?.lines).toEqual([
       { kind: 'context', text: 'const a = 1;' },
       { kind: 'del', text: 'const b = 2;' },
-      { kind: 'add', text: 'const b = 20;' },
+      // A pure insertion inside the line: only the added side has a span.
+      { kind: 'add', text: 'const b = 20;', emphasis: { start: 11, end: 12 } },
       { kind: 'context', text: 'const c = 3;' },
     ]);
     expect(preview?.files[0]?.added).toBe(1);
@@ -218,8 +224,8 @@ describe('buildFileChangePreview', () => {
       lines: [
         { kind: 'marker', text: '@@ function main' },
         { kind: 'context', text: 'context line' },
-        { kind: 'del', text: 'old line' },
-        { kind: 'add', text: 'new line' },
+        { kind: 'del', text: 'old line', emphasis: { start: 0, end: 3 } },
+        { kind: 'add', text: 'new line', emphasis: { start: 0, end: 3 } },
       ],
       added: 1,
       removed: 1,
@@ -289,5 +295,111 @@ describe('findLatestFileChangeId', () => {
     expect(
       findLatestFileChangeId([{ type: 'tool_call', name: 'grep', toolCallId: 'g' }])
     ).toBeNull();
+  });
+});
+
+function del(text: string): DiffPreviewLine {
+  return { kind: 'del', text };
+}
+
+function add(text: string): DiffPreviewLine {
+  return { kind: 'add', text };
+}
+
+function context(text: string): DiffPreviewLine {
+  return { kind: 'context', text };
+}
+
+describe('addIntraLineEmphasis', () => {
+  it('marks the changed identifier between a shared prefix and suffix', () => {
+    const deleted = 'const total = computeTotal(items);';
+    const added = 'const total = computeSum(items);';
+    const marked = addIntraLineEmphasis([del(deleted), add(added)]);
+    expect(marked).toEqual([
+      { kind: 'del', text: deleted, emphasis: { start: 21, end: 26 } },
+      { kind: 'add', text: added, emphasis: { start: 21, end: 24 } },
+    ]);
+    // The spans are exactly the text that differs.
+    expect(deleted.slice(21, 26)).toBe('Total');
+    expect(added.slice(21, 24)).toBe('Sum');
+  });
+
+  it('pairs equal-length runs line by line, in order', () => {
+    const marked = addIntraLineEmphasis([del('a = 1'), del('b = 2'), add('a = 10'), add('b = 20')]);
+    expect(marked.map((line) => line.emphasis)).toEqual([
+      undefined,
+      undefined,
+      { start: 5, end: 6 },
+      { start: 5, end: 6 },
+    ]);
+  });
+
+  it('leaves runs of unequal length alone, since no line can be said to replace another', () => {
+    const lines = [del('foo(a)'), del('foo(b)'), add('foo(c)')];
+    expect(addIntraLineEmphasis(lines)).toEqual(lines);
+  });
+
+  it('does not pair a deletion with an addition that is not directly after it', () => {
+    const lines = [del('x = 1'), context('between'), add('x = 2')];
+    expect(addIntraLineEmphasis(lines)).toEqual(lines);
+  });
+
+  it('skips a pair that shares no prefix or suffix, where the whole line changed', () => {
+    const lines = [del('alpha'), add('omega-')];
+    expect(addIntraLineEmphasis(lines)).toEqual(lines);
+  });
+
+  it('leaves the span empty on the side that lost nothing', () => {
+    const [deleted, added] = addIntraLineEmphasis([del('call(a)'), add('call(a, b)')]);
+    expect(deleted.emphasis).toBeUndefined();
+    expect(added.emphasis).toEqual({ start: 6, end: 9 });
+  });
+
+  it('does not split a surrogate pair that straddles the shared edge', () => {
+    // The two emoji share their high surrogate (0xD83D) and differ in the low one.
+    const marked = addIntraLineEmphasis([del('x \u{1F600} y'), add('x \u{1F601} y')]);
+    expect(marked[0].emphasis).toEqual({ start: 2, end: 4 });
+    expect(marked[1].emphasis).toEqual({ start: 2, end: 4 });
+    expect('x \u{1F600} y'.slice(2, 4)).toBe('\u{1F600}');
+  });
+
+  it('does not mutate its input', () => {
+    const lines = [del('a = 1'), add('a = 2')];
+    const snapshot = structuredClone(lines);
+    addIntraLineEmphasis(lines);
+    expect(lines).toEqual(snapshot);
+  });
+
+  it('skips a pair when either line is over the length cap', () => {
+    const tail = 'x'.repeat(INTRA_LINE_MAX_LINE_LENGTH);
+    const long = [del(`a${tail}`), add(`b${tail}`)];
+    expect(addIntraLineEmphasis(long)).toEqual(long);
+
+    // At the cap exactly, the pair is still marked.
+    const edge = 'x'.repeat(INTRA_LINE_MAX_LINE_LENGTH - 1);
+    const marked = addIntraLineEmphasis([del(`a${edge}`), add(`b${edge}`)]);
+    expect(marked[0].emphasis).toEqual({ start: 0, end: 1 });
+  });
+
+  it('examines at most INTRA_LINE_MAX_PAIRS pairs of a huge diff', () => {
+    const pairCount = INTRA_LINE_MAX_PAIRS + 25;
+    const lines = [
+      ...Array.from({ length: pairCount }, (_, i) => del(`row ${i} old`)),
+      ...Array.from({ length: pairCount }, (_, i) => add(`row ${i} new`)),
+    ];
+    const marked = addIntraLineEmphasis(lines);
+    // Each examined pair marks both of its lines; the rest are left plain.
+    expect(marked.filter((line) => line.emphasis !== undefined)).toHaveLength(
+      INTRA_LINE_MAX_PAIRS * 2
+    );
+    expect(marked[pairCount - 1].emphasis).toBeUndefined();
+    expect(marked[marked.length - 1].emphasis).toBeUndefined();
+  });
+
+  it('runs after the line diff, and leaves context lines plain', () => {
+    const lines = diffTextLines('keep\nreturn oldName;\nkeep', 'keep\nreturn newName;\nkeep');
+    expect(lines.find((line) => line.kind === 'del')?.emphasis).toEqual({ start: 7, end: 10 });
+    expect(lines.find((line) => line.kind === 'add')?.emphasis).toEqual({ start: 7, end: 10 });
+    expect(lines.find((line) => line.kind === 'context')?.emphasis).toBeUndefined();
   });
 });
