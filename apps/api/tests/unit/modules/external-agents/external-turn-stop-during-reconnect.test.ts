@@ -31,6 +31,7 @@ import {
   type GatedConnectRuntime,
 } from '../../../support/external-agents/gated-connect-runtime';
 import { insertTestUser } from '../../../support/factories';
+import { waitUntil } from '../../../support/wait-until';
 
 const CONFIGURATION: ExternalAgentConfiguration = {
   level: 'default',
@@ -133,7 +134,7 @@ function harness() {
     isTerminalConnectFailure: () => false,
   });
   const submission = async (): Promise<SubmissionOutcome> => {
-    await waitFor(() => submissions.length === 1, 'the submission loop to start');
+    await waitUntil(() => submissions.length === 1, 'the submission loop to start');
     const outcome = submissions[0];
     if (outcome === undefined) throw new Error('expected a submission | received: none');
     return await outcome;
@@ -146,14 +147,6 @@ function harness() {
     submission,
     existingClientRequests: () => existingClientRequests,
   };
-}
-
-async function waitFor(predicate: () => boolean, label: string): Promise<void> {
-  for (let attempt = 0; attempt < 2_000; attempt += 1) {
-    if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 1));
-  }
-  throw new Error(`expected ${label} | received: still waiting after 2s`);
 }
 
 describe('stop while the submission waits on an in-flight connect', () => {
@@ -174,16 +167,16 @@ describe('stop while the submission waits on an in-flight connect', () => {
 
     try {
       // Nothing connected: the first reacquire is refused and the loop backs off.
-      await waitFor(() => clock.pendingCount() === 1, 'the turn to wait in backoff');
+      await waitUntil(() => clock.pendingCount() === 1, 'the turn to wait in backoff');
       expect(runtime.opened).toEqual(['session-1']);
 
       // Someone else starts reconnecting; the runtime is slow to come up.
       void manager.connect(userId, 'local', { force: true }).catch(() => undefined);
-      await waitFor(() => runtime.pendingConnectCount() === 1, 'the reconnect to be in flight');
+      await waitUntil(() => runtime.pendingConnectCount() === 1, 'the reconnect to be in flight');
 
       // The loop wakes and parks on the in-flight connect.
       clock.advance();
-      await waitFor(
+      await waitUntil(
         () => existingClientRequests() === 2,
         'the second reacquire to wait on the in-flight connect'
       );

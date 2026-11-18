@@ -879,7 +879,9 @@ export function createExternalSessionManager(
     const reapedWhileOpening = (reapGenerations.get(input.chatId) ?? 0) !== generation;
     if (reapedWhileOpening || input.signal?.aborted) {
       record.unsubscribe();
-      await deleteContinuation(input.chatId, db);
+      // Only a reap withdraws the row. A stop leaves the conversation the open just started or
+      // resumed on record, so the next turn resumes it instead of silently starting over.
+      if (reapedWhileOpening) await deleteContinuation(input.chatId, db);
       await client.externalAgents
         .close({ sessionId }, { timeoutMs: closeWaitMs })
         .catch(() => undefined);
