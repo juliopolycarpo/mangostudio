@@ -1372,7 +1372,6 @@ dependencies = [
  "bytes",
  "cap-fs-ext",
  "cap-std",
- "chrono",
  "futures-util",
  "getrandom 0.4.3",
  "globset",
