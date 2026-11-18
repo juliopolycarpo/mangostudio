@@ -1527,16 +1527,20 @@ runs the same suite against podman.
 CI does not compile a second copy: the `Smoke — Container` job consumes the Linux runtime
 binaries the distribution lane already built, so the suite runs against release bytes.
 
-The real-sshd cases of `connect-ssh-runtime.integration.test.ts` skip on a machine whose
-`localhost` sshd does not already trust the caller. `MANGOSTUDIO_SSH_FIXTURE=1` makes the
-file start a throwaway sshd instead (`apps/api/tests/support/ssh-fixture.ts`): a loopback-only
+The real-sshd cases of `connect-ssh-runtime.integration.test.ts`,
+`machine-onboarding.integration.test.ts` and `ssh-runtime-push.integration.test.ts` skip on a
+machine whose `localhost` sshd does not already trust the caller. `MANGOSTUDIO_SSH_FIXTURE=1`
+makes each file start a throwaway sshd instead (`apps/api/tests/support/ssh-fixture.ts`; the
+per-suite wiring — the switch, the config target, a command runner that trusts the fixture's
+host key, the localhost probe — is `ssh-fixture-suite.ts`): a loopback-only
 server on a free high port, run as the calling user with `UsePAM no`, a per-run host key and
 client key, and a private `known_hosts`, all in one temp directory that `afterAll` removes. It
 needs the `sshd` binary (`/usr/sbin/sshd`, found on `PATH`, or named by
 `MANGOSTUDIO_SSHD_PATH`) but no service, no root and no change to `~/.ssh`. With the variable
-set, a missing sshd, runtime binary or key login fails the file with the cause rather than
-skipping. `test.yml` sets it for the API shards, so one of them runs the six cases on every
-CI run. macOS and Windows qualification legs still skip them.
+set, a missing sshd, key login (and, for the connect suite, runtime binary) fails the file with
+the cause rather than skipping. `test.yml` sets it for the API shards, so the shards that own
+those files run their real-server cases on every CI run. macOS and Windows qualification legs
+still skip them.
 
 ```bash
 MANGOSTUDIO_SSH_FIXTURE=1 bun run --filter @mangostudio/api test:integration

@@ -123,10 +123,11 @@ jobs:
         with:
           artifact: ${{ inputs.runtime_artifact }}
 
-      # connect-ssh-runtime.integration.test.ts starts its own throwaway sshd
+      # The connect-ssh-runtime, machine-onboarding and ssh-runtime-push
+      # integration suites each start their own throwaway sshd
       # (apps/api/tests/support/ssh-fixture.ts: loopback, high port, per-run
-      # keys, runs as this user) when MANGOSTUDIO_SSH_FIXTURE=1, and fails the
-      # file instead of skipping if it cannot. It only needs the sshd binary,
+      # keys, runs as this user) when MANGOSTUDIO_SSH_FIXTURE=1, and fail the
+      # file instead of skipping if they cannot. It only needs the sshd binary,
       # not a running service, so install the package only when the image
       # lacks it, and stop the service its postinst would start.
       - name: Ensure the sshd binary
@@ -156,7 +157,7 @@ jobs:
         id: coverage
         env:
           SHARD: ${{ matrix.shard }}
-          # Both shards set it; only the one that owns the ssh file reads it.
+          # Both shards set it; only the shards that own an ssh suite read it.
           MANGOSTUDIO_SSH_FIXTURE: "1"
         run: |
           bun ./scripts/ci/run-tests-watchdog.ts --label="${SHARD}" --timeout-seconds=480 \
