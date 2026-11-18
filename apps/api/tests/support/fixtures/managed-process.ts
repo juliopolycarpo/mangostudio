@@ -10,22 +10,45 @@ import { createReleaseDiagnostics, readRootIdentity } from './managed-process-di
 
 const DEFAULT_DIAGNOSTIC_LIMIT_BYTES = 32 * 1024;
 const DEFAULT_EXIT_TIMEOUT_MS = 5_000;
+/** Fresh ports a collided child is relaunched on before `waitUntilReady` gives up on the port. */
+const MAX_PORT_RELAUNCHES = 3;
+/**
+ * What the Hub prints when it loses the bind (`listenOrExit` in `src/server/start-server.ts`).
+ * It names the address, which tells it apart from the capture-lock refusal ("User data is
+ * already in use"), a failure a new port would not cure.
+ */
+const PORT_TAKEN_PATTERN = /Address \S+ is already in use\./;
+
+export interface ManagedSpawnOptions {
+  cmd: string[];
+  env?: Record<string, string | undefined>;
+  cwd?: string;
+}
 
 export interface ManagedProcessFixture {
+  /**
+   * The loopback port the child is meant to bind. It changes when the child loses the race for
+   * it and `waitUntilReady` relaunches it, so read it where it is used, never once up front.
+   */
   readonly port: number;
   readonly tempDir: string;
   readonly child: Bun.Subprocess | null;
-  spawn(options: {
-    cmd: string[];
-    env?: Record<string, string | undefined>;
-    cwd?: string;
-  }): Bun.Subprocess;
+  /**
+   * Starts the child. A server that binds `port` passes a function of the port: the fixture
+   * reserves the port a moment before the child binds it, so another process can take it in
+   * between, and `waitUntilReady` then relaunches the function on a fresh port.
+   */
+  spawn(options: ManagedSpawnOptions | ((port: number) => ManagedSpawnOptions)): Bun.Subprocess;
+  /**
+   * Polls `probe` until it holds. A probe must read `child` and `port` from the fixture on
+   * every call, because a port collision replaces both.
+   */
   waitUntilReady(
     probe: () => boolean | Promise<boolean>,
     options: { label: string; timeoutMs: number; intervalMs?: number }
   ): Promise<void>;
   waitForExit(timeoutMs?: number): Promise<number>;
-  stop(signal?: NodeJS.Signals): Promise<number>;
+  stop(signal?: NodeJS.Signals, timeoutMs?: number): Promise<number>;
   diagnostics(): string;
   cleanup(): Promise<void>;
   assertReleased(): Promise<void>;
@@ -59,7 +82,7 @@ export async function createManagedProcessFixture(options: {
   /** Inject removal failures/postconditions without racing the host filesystem. */
   removeTempDir?: (path: string) => Promise<void>;
 }): Promise<ManagedProcessFixture> {
-  const port = await reserveEphemeralPort();
+  let port = await reserveEphemeralPort();
   const tempDir = await mkdtemp(join(tmpdir(), options.tempPrefix));
   const limit = options.diagnosticLimitBytes ?? DEFAULT_DIAGNOSTIC_LIMIT_BYTES;
   let child: Bun.Subprocess | null = null;
@@ -68,6 +91,8 @@ export async function createManagedProcessFixture(options: {
   let stdoutCapture: Promise<void> | null = null;
   let stderrCapture: Promise<void> | null = null;
   let cleanupPromise: Promise<void> | null = null;
+  let buildSpawnOptions: ((port: number) => ManagedSpawnOptions) | null = null;
+  const lostPorts: number[] = [];
   const releaseDiagnostics = createReleaseDiagnostics(tempDir);
 
   const assertResourcesReleased = async (): Promise<void> => {
@@ -105,8 +130,53 @@ export async function createManagedProcessFixture(options: {
     append(decoder.decode());
   };
 
+  const startChild = (spawnOptions: ManagedSpawnOptions): Bun.Subprocess => {
+    const started = Bun.spawn({
+      cmd: spawnOptions.cmd,
+      env: spawnOptions.env,
+      cwd: spawnOptions.cwd,
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    child = started;
+    if (!started.stdout || typeof started.stdout === 'number') {
+      throw new Error('Managed child stdout was not piped.');
+    }
+    if (!started.stderr || typeof started.stderr === 'number') {
+      throw new Error('Managed child stderr was not piped.');
+    }
+    stdoutCapture = capture(started.stdout, (chunk) => {
+      stdout = appendBounded(stdout, chunk);
+    });
+    stderrCapture = capture(started.stderr, (chunk) => {
+      stderr = appendBounded(stderr, chunk);
+    });
+    return started;
+  };
+
+  /**
+   * When the child already exited because another process holds its port, reserves a fresh
+   * port and starts it again. Only a child started from a function of the port is relaunched,
+   * and only for the Hub's own "Address ... is already in use" refusal.
+   */
+  const relaunchAfterPortCollision = async (): Promise<boolean> => {
+    if (!buildSpawnOptions || !child || isRunning(child)) return false;
+    if (lostPorts.length >= MAX_PORT_RELAUNCHES) return false;
+    await Promise.all([stdoutCapture, stderrCapture]);
+    if (!PORT_TAKEN_PATTERN.test(stderr)) return false;
+    lostPorts.push(port);
+    port = await reserveEphemeralPort();
+    stdout = '';
+    stderr = '';
+    startChild(buildSpawnOptions(port));
+    return true;
+  };
+
   const fixture: ManagedProcessFixture = {
-    port,
+    get port() {
+      return port;
+    },
     tempDir,
     get child() {
       return child;
@@ -114,31 +184,18 @@ export async function createManagedProcessFixture(options: {
     spawn(spawnOptions) {
       if (cleanupPromise) throw new Error('Managed process fixture cleanup has started.');
       if (child) throw new Error('Managed process fixture already has a child.');
-      child = Bun.spawn({
-        cmd: spawnOptions.cmd,
-        env: spawnOptions.env,
-        cwd: spawnOptions.cwd,
-        stdin: 'ignore',
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
-      if (!child.stdout || typeof child.stdout === 'number') {
-        throw new Error('Managed child stdout was not piped.');
+      if (typeof spawnOptions === 'function') {
+        buildSpawnOptions = spawnOptions;
+        return startChild(spawnOptions(port));
       }
-      if (!child.stderr || typeof child.stderr === 'number') {
-        throw new Error('Managed child stderr was not piped.');
-      }
-      stdoutCapture = capture(child.stdout, (chunk) => {
-        stdout = appendBounded(stdout, chunk);
-      });
-      stderrCapture = capture(child.stderr, (chunk) => {
-        stderr = appendBounded(stderr, chunk);
-      });
-      return child;
+      return startChild(spawnOptions);
     },
     async waitUntilReady(probe, readiness) {
       const deadline = Date.now() + readiness.timeoutMs;
       while (Date.now() < deadline) {
+        // Before the probe: a probe that accepts "the child exited" must not take a lost
+        // port for the outcome it is waiting for.
+        if (await relaunchAfterPortCollision()) continue;
         if (await probe()) return;
         await Bun.sleep(readiness.intervalMs ?? 25);
       }
@@ -169,14 +226,19 @@ export async function createManagedProcessFixture(options: {
         if (timer) clearTimeout(timer);
       }
     },
-    stop(signal = 'SIGTERM') {
+    stop(signal = 'SIGTERM', timeoutMs) {
       if (!child) throw new Error('Managed process fixture has not spawned a child.');
       releaseDiagnostics.observeProcesses(child);
       if (isRunning(child)) child.kill(signal);
-      return fixture.waitForExit();
+      return fixture.waitForExit(timeoutMs);
     },
     diagnostics() {
-      return [`stdout:\n${stdout || '<empty>'}`, `stderr:\n${stderr || '<empty>'}`].join('\n');
+      const lost = lostPorts.map(
+        (lostPort) => `port ${lostPort} was taken before the child bound it; relaunched`
+      );
+      return [...lost, `stdout:\n${stdout || '<empty>'}`, `stderr:\n${stderr || '<empty>'}`].join(
+        '\n'
+      );
     },
     cleanup() {
       cleanupPromise ??= (async () => {
