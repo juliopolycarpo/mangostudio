@@ -3,11 +3,20 @@
 `bunfig.toml` keeps the repository's lint rules and generated-file exclusions. Bun's
 recommended rules provide the general JavaScript and TypeScript checks. Explicit rules
 cover the additional policies previously configured in Biome: typed promise and operand
-checks, import restrictions, TypeScript style, React hooks, JSX keys, and labels. The
-frontend override permits dictionary imports in i18n plumbing and tests; only the
-live-versus-reload test may import API internals. The shared root import remains forbidden
-including type-only imports. `scripts/tests/bun-lint.integration.test.ts` exercises these
-boundaries and checks that Bun runs typed promise, hooks, and label rules.
+checks, the i18n dictionary import restriction, TypeScript style, React hooks, JSX keys, and
+labels. The i18n override permits dictionary imports in i18n plumbing and tests.
+`scripts/tests/bun-lint.integration.test.ts` exercises it and checks that Bun runs typed
+promise, hooks, and label rules.
+
+Two import boundaries are deliberately not in `bunfig.toml`: the `@mangostudio/shared` root
+ban (type-only imports included) and the frontend ban on `@mangostudio/api/internal/*`
+(type-only imports allowed, one parity-test exception). Each is owned by one source scan in
+`bun run check`, `scripts/lib/shared-root-import-boundary.ts` and
+`scripts/lib/frontend-api-import-boundary.ts`. Bun's `no-restricted-imports` does not see
+`import()`, `require()` or `import('x').T` types, so covering them in lint takes one
+`no-restricted-syntax` selector per loader form, repeated in every override block that
+replaces the rule's options. The shared root also stays out of `apps/shared/package.json`
+`exports`, which is runtime truth, not a lint copy.
 
 Bun's `import/no-cycle` ignores type-only imports. The separate graph check in `scripts/lib/import-cycles.ts` includes
 those edges and generated or gitignored source files. Workspace and root checks skip
