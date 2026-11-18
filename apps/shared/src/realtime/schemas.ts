@@ -54,11 +54,25 @@ export const EXTERNAL_AGENTS_TOPIC = 'external-agents' as const;
  * "Something worth reporting happened on this account."
  *
  * One topic for every activity kind rather than one per producer: the feed is a
- * single query, and the consumers that piggyback on it (the chat list, which
- * `chat_created`/`turn_completed` already imply is stale) want the same
- * coarse signal. Splitting it would buy nothing but frames.
+ * single query and wants one coarse signal. Splitting it by kind would buy
+ * nothing but frames.
+ *
+ * It means "a row was added to the feed" and nothing else. A chat whose
+ * `updatedAt` moved without a feed row is {@link CHATS_TOPIC}, so a listener
+ * for one is never woken by the other.
  */
 export const ACTIVITY_TOPIC = 'activity' as const;
+/**
+ * "A chat this account can see changed": a row was created, edited, or moved
+ * in the list by a turn, a compaction, or a message written through the API.
+ *
+ * Separate from {@link ACTIVITY_TOPIC} because the two readers disagree about
+ * what a frame means. The chat list refetches on every frame, and the feed
+ * refetches on every frame; sharing one topic made a git commit refetch the chat
+ * list and a cancelled turn refetch the feed, each answered with what the tab
+ * already had.
+ */
+export const CHATS_TOPIC = 'chats' as const;
 
 const GIT_TOPIC_PREFIX = 'git:' as const;
 const MAX_REALTIME_TOPICS_PER_MESSAGE = 32;
@@ -199,11 +213,22 @@ const RealtimeActivityInvalidateMessageSchema = Type.Object(
   { additionalProperties: false }
 );
 
+const RealtimeChatsInvalidateMessageSchema = Type.Object(
+  {
+    type: Type.Literal('invalidate'),
+    topic: Type.Literal(CHATS_TOPIC),
+    /** Keeps the invalidate union ergonomic while rejecting scopes on this topic. */
+    scopes: Type.Optional(Type.Never()),
+  },
+  { additionalProperties: false }
+);
+
 export const RealtimeInvalidateMessageSchema = Type.Union([
   RealtimeSettingsInvalidateMessageSchema,
   RealtimeEnvironmentsInvalidateMessageSchema,
   RealtimeExternalAgentsInvalidateMessageSchema,
   RealtimeActivityInvalidateMessageSchema,
+  RealtimeChatsInvalidateMessageSchema,
   RealtimeGitInvalidateMessageSchema,
 ]);
 export type RealtimeInvalidateMessage = Static<typeof RealtimeInvalidateMessageSchema>;

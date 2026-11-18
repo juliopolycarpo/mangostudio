@@ -2,6 +2,7 @@ import type { Chat } from '@mangostudio/shared/chat';
 import type { Kysely } from 'kysely';
 
 import type { Database } from '../../../db/types';
+import { publishChatListInvalidation } from '../../../services/realtime/chat-list-invalidation';
 import { recordActivity } from '../../activity/application/record-activity';
 import { claimOperation } from '../../operations/application/product-operation';
 import { ChatNotFoundError } from '../domain/chat-ownership';
@@ -59,7 +60,9 @@ export async function createChatUseCase(
       created = true;
       return chat;
     });
-    if (created)
+    if (created) {
+      // A replayed operation wrote nothing, so only the first claim announces.
+      publishChatListInvalidation(input.userId);
       void recordActivity(
         {
           userId: input.userId,
@@ -70,6 +73,7 @@ export async function createChatUseCase(
         },
         { db }
       );
+    }
     return chat;
   }
   const data: CreateChatData = {
@@ -79,6 +83,7 @@ export async function createChatUseCase(
   };
   const chat = await createChat(data, db);
 
+  publishChatListInvalidation(input.userId);
   void recordActivity(
     {
       userId: input.userId,

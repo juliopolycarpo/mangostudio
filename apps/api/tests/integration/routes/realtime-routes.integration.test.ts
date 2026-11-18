@@ -4,6 +4,7 @@ import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import {
   ACTIVITY_TOPIC,
+  CHATS_TOPIC,
   ENVIRONMENTS_TOPIC,
   EXTERNAL_AGENTS_TOPIC,
   gitTopic,
@@ -549,6 +550,26 @@ describe('realtime WebSocket subscriptions', () => {
     bus.publish(user.id, { type: 'invalidate', topic: EXTERNAL_AGENTS_TOPIC });
     await Bun.sleep(50);
     expect(client.messages.filter((message) => message.type === 'invalidate')).toHaveLength(1);
+  });
+
+  it('carries chat-list refreshes on the chats topic, not the activity one', async () => {
+    // The chat list and the activity feed each refetch on every frame they get,
+    // so a subscriber to one must not receive the other's frames.
+    const { bus, httpUrl, wsUrl } = await startServer();
+    const user = await signUp(httpUrl);
+    const client = connect(wsUrl, { Cookie: user.cookie });
+
+    await client.opened;
+    await client.nextMessage();
+    send(client.socket, { type: 'subscribe', topics: [CHATS_TOPIC] });
+    expect(await client.nextMessage()).toEqual({ type: 'subscribed', topics: [CHATS_TOPIC] });
+
+    bus.publish(user.id, { type: 'invalidate', topic: ACTIVITY_TOPIC });
+    await Bun.sleep(50);
+    expect(client.messages.some((message) => message.type === 'invalidate')).toBe(false);
+
+    bus.publish(user.id, { type: 'invalidate', topic: CHATS_TOPIC });
+    expect(await client.nextMessage()).toEqual({ type: 'invalidate', topic: CHATS_TOPIC });
   });
 
   it('delivers settings invalidations only to subscribed sockets for the same user', async () => {

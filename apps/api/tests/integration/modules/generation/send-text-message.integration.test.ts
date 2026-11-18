@@ -312,7 +312,9 @@ describe('sendTextMessage activity signal', () => {
     );
 
     // The recorder is deliberately not awaited by the turn, so poll for it.
+    // One frame per topic: the chat moved (list) and the turn earned a row (feed).
     expect(await bus.waitForActivityFrames(TEST_USER.id, 1)).toHaveLength(1);
+    expect(bus.chatListFramesFor(TEST_USER.id)).toHaveLength(1);
 
     const row = await db
       .selectFrom('activity_events')

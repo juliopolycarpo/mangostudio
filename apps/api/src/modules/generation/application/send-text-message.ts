@@ -7,6 +7,7 @@ import {
   getProvider,
   getProviderForModel,
 } from '../../../services/providers/core/provider-registry';
+import { publishChatListInvalidation } from '../../../services/realtime/chat-list-invalidation';
 import { generateId } from '../../../utils/id';
 import { resolveProviderRuntimeAttachments } from '../../attachments/application/runtime-attachment-resolver';
 import { assertChatAttachmentIdsAvailable } from '../../attachments/infrastructure/attachment-repository';
@@ -160,8 +161,9 @@ export async function sendTextMessage(
     bestEffort: Boolean(input.admittedChat),
   });
   // The same turn the streaming sibling records, on the runner that returns in
-  // one response instead of a stream. Without it a `/api/respond` turn moves
-  // `updatedAt` and no tab hears about it.
+  // one response instead of a stream. Without the frame a `/api/respond` turn
+  // moves `updatedAt` and no tab hears about it.
+  publishChatListInvalidation(input.userId);
   void recordTurnCompletedActivity(input.userId, input.chatId, db);
 
   return {

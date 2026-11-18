@@ -59,7 +59,7 @@ void mock.module('../../../src/features/workspace/hooks/use-git-state', () => ({
 /**
  * Stands in for the realtime socket: records the latest handler per
  * `(topic, concern)` and lets a test deliver a signal the way the server's
- * activity publish would.
+ * chats publish would.
  */
 class FakeRealtimeInvalidations {
   private readonly handlers = new Map<string, (signal: { type: string }) => void | Promise<void>>();
@@ -1597,7 +1597,7 @@ describe('useTextGeneration — interrupted turn actions', () => {
 });
 
 describe('useTextGeneration — transcript reconciliation with the persisted turn', () => {
-  const ACTIVITY_TOPIC = 'activity';
+  const CHATS_TOPIC = 'chats';
 
   beforeEach(() => {
     mockStream.mockReset();
@@ -1808,7 +1808,7 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
   });
 
   // A review reports its refusal by throwing after the chunk, which would arm the reconcile that
-  // re-reads on the next activity signal and replace the refusal card with rows that hold nothing.
+  // re-reads on the next chats signal and replace the refusal card with rows that hold nothing.
   it('does not arm a transcript re-read for a review the agent could not start', async () => {
     const props = makeProps();
     const refusal = new ExternalRefusalError({
@@ -1847,7 +1847,7 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
       refusal
     );
     await act(async () => {
-      await fakeRealtime.emit(ACTIVITY_TOPIC);
+      await fakeRealtime.emit(CHATS_TOPIC);
     });
 
     expect(messagesInvalidations(invalidateSpy)).toHaveLength(0);
@@ -1959,7 +1959,7 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
       await result.current.generation.handleRespond('second');
     });
     await act(async () => {
-      await fakeRealtime.emit(ACTIVITY_TOPIC);
+      await fakeRealtime.emit(CHATS_TOPIC);
     });
 
     const cached = queryClient.getQueryData<{
@@ -2054,7 +2054,7 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
         await result.current.generation.handleRespond('second');
       });
       await act(async () => {
-        await fakeRealtime.emit(ACTIVITY_TOPIC);
+        await fakeRealtime.emit(CHATS_TOPIC);
       });
       const cached = queryClient.getQueryData<{
         pages: Array<{
@@ -2174,9 +2174,9 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
   // A dropped socket leaves the server mid-unwind: it learns the reader is gone
   // at its next write, which can be a whole tool call away. An immediate
   // re-read would replace the terminal error row with a persisted row still at
-  // `isGenerating`. The activity publish every finalizer sends is what says the
+  // `isGenerating`. The chats publish every finalizer sends is what says the
   // persisted row is now the truth.
-  it('reconciles a thrown stream on the activity signal, not immediately', async () => {
+  it('reconciles a thrown stream on the chats signal, not immediately', async () => {
     const props = makeProps();
     mockStream.mockImplementation(
       (
@@ -2199,7 +2199,7 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
     expect(messagesInvalidations(invalidateSpy)).toHaveLength(0);
 
     await act(async () => {
-      await fakeRealtime.emit(ACTIVITY_TOPIC);
+      await fakeRealtime.emit(CHATS_TOPIC);
     });
 
     expect(messagesInvalidations(invalidateSpy)).toContainEqual([
@@ -2241,7 +2241,7 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
     // Mid-read: the finalize signal arrives while the controller ref is still
     // installed, so the gate defers it instead of reconciling right away.
     await act(async () => {
-      await fakeRealtime.emit(ACTIVITY_TOPIC);
+      await fakeRealtime.emit(CHATS_TOPIC);
     });
     expect(messagesInvalidations(invalidateSpy)).toHaveLength(0);
 
@@ -2257,7 +2257,7 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
     ]);
   });
 
-  // The activity topic is user-scoped: a reconnect ack or a turn finishing in
+  // The chats topic is user-scoped: a reconnect ack or a turn finishing in
   // another chat lands on the same handler. If any signal consumed the pending
   // reconcile, one that fires while the server is still unwinding would clear
   // it, refetch a row still at `isGenerating`, and pin the transcript on
@@ -2288,7 +2288,7 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
       pageParams: [null],
     });
     await act(async () => {
-      await fakeRealtime.emit(ACTIVITY_TOPIC);
+      await fakeRealtime.emit(CHATS_TOPIC);
     });
     expect(messagesInvalidations(invalidateSpy)).toHaveLength(1);
 
@@ -2298,13 +2298,13 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
       pageParams: [null],
     });
     await act(async () => {
-      await fakeRealtime.emit(ACTIVITY_TOPIC);
+      await fakeRealtime.emit(CHATS_TOPIC);
     });
     expect(messagesInvalidations(invalidateSpy)).toHaveLength(2);
 
     // Settled: a later signal has nothing left to reconcile.
     await act(async () => {
-      await fakeRealtime.emit(ACTIVITY_TOPIC);
+      await fakeRealtime.emit(CHATS_TOPIC);
     });
     expect(messagesInvalidations(invalidateSpy)).toHaveLength(2);
   });
@@ -2360,7 +2360,7 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
     );
 
     await act(async () => {
-      await fakeRealtime.emit(ACTIVITY_TOPIC);
+      await fakeRealtime.emit(CHATS_TOPIC);
     });
 
     expect(result.current.queryClient.getQueryData<MessagesQueryData>(queryKey)).toEqual(
@@ -2454,7 +2454,7 @@ describe('useTextGeneration — transcript reconciliation with the persisted tur
 
     // Mid-stream: the signal must not clobber the optimistic state being built.
     await act(async () => {
-      await fakeRealtime.emit(ACTIVITY_TOPIC);
+      await fakeRealtime.emit(CHATS_TOPIC);
     });
     expect(messagesInvalidations(invalidateSpy)).toHaveLength(0);
 

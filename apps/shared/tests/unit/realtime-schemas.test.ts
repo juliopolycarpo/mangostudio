@@ -4,6 +4,7 @@ import Value from 'typebox/value';
 
 import {
   ACTIVITY_TOPIC,
+  CHATS_TOPIC,
   ENVIRONMENTS_TOPIC,
   EXTERNAL_AGENTS_TOPIC,
   GIT_SCOPES,
@@ -27,6 +28,10 @@ describe('realtime topic helpers', () => {
     expect(EXTERNAL_AGENTS_TOPIC).toBe('external-agents');
     expect(EXTERNAL_AGENTS_TOPIC).not.toBe(ENVIRONMENTS_TOPIC);
     expect(ACTIVITY_TOPIC).toBe('activity');
+    // The chat list and the feed each refetch on every frame, so they must not
+    // share a topic.
+    expect(CHATS_TOPIC).toBe('chats');
+    expect(CHATS_TOPIC).not.toBe(ACTIVITY_TOPIC);
     expect(gitTopic('chat-abc')).toBe('git:chat-abc');
     expect(parseGitTopic(gitTopic('chat-abc'))).toBe('chat-abc');
     expect(parseGitTopic('settings')).toBeUndefined();
@@ -169,6 +174,20 @@ describe('realtime server messages', () => {
       Value.Check(RealtimeServerMessageSchema, {
         type: 'invalidate',
         topic: ACTIVITY_TOPIC,
+        scopes: ['whatever'],
+      })
+    ).toBe(false);
+    expect(
+      Value.Check(RealtimeServerMessageSchema, {
+        type: 'invalidate',
+        topic: CHATS_TOPIC,
+      })
+    ).toBe(true);
+    // Like the activity topic, the chats topic names no narrower scope.
+    expect(
+      Value.Check(RealtimeServerMessageSchema, {
+        type: 'invalidate',
+        topic: CHATS_TOPIC,
         scopes: ['whatever'],
       })
     ).toBe(false);

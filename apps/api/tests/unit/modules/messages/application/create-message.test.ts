@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 describe('createMessageUseCase', () => {
-  it('signals the activity topic after moving the chat timestamp', async () => {
+  it('signals the chats topic after moving the chat timestamp', async () => {
     // `POST /chats/:id/messages` reorders the chat list for every open tab. The
     // route writes the row and moves `updatedAt`; without the signal the other
     // tabs keep the old ordering until an unrelated mutation happens to fire.
@@ -43,7 +43,9 @@ describe('createMessageUseCase', () => {
       .executeTakeFirstOrThrow();
 
     expect(row.updatedAt).toBe(timestamp);
-    expect(bus.activityFramesFor(user.id)).toHaveLength(1);
+    expect(bus.chatListFramesFor(user.id)).toHaveLength(1);
+    // No feed row was written, so the feed has nothing to refetch.
+    expect(bus.activityFramesFor(user.id)).toHaveLength(0);
   });
 
   it('addresses the signal to the message author, not to every listener', async () => {
@@ -65,6 +67,6 @@ describe('createMessageUseCase', () => {
       getDb()
     );
 
-    expect(bus.activityFramesFor(other.id)).toHaveLength(0);
+    expect(bus.chatListFramesFor(other.id)).toHaveLength(0);
   });
 });

@@ -261,6 +261,7 @@ describe('generateImage realtime invalidation', () => {
       db
     );
 
-    expect(bus.activityFramesFor(TEST_USER.id)).toHaveLength(1);
+    expect(bus.chatListFramesFor(TEST_USER.id)).toHaveLength(1);
+    expect(bus.activityFramesFor(TEST_USER.id)).toHaveLength(0);
   });
 });

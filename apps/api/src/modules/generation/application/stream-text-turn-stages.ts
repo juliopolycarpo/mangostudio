@@ -37,7 +37,7 @@ import type {
   GenerationConfig,
   ToolDefinition,
 } from '../../../services/providers/types';
-import { publishActivityInvalidation } from '../../../services/realtime/activity-invalidation';
+import { publishChatListInvalidation } from '../../../services/realtime/chat-list-invalidation';
 import { GENERATE_IMAGE_TOOL_NAME } from '../../../services/tools/builtin/generate-image';
 import type { WorkdirPolicy } from '../../../services/tools/types';
 import { generateId } from '../../../utils/id';
@@ -1020,6 +1020,9 @@ export async function* finalizeSuccessfulTurn(
   await updateChatAfterTurn(chatId, aiTimestamp, db, {
     bestEffort: Boolean(session.input.admittedChat),
   });
+  // The list frame and the feed row are separate signals: the row says a turn
+  // is worth remembering, the frame says the chat moved.
+  publishChatListInvalidation(userId);
   void recordTurnCompletedActivity(userId, chatId, db);
 
   yield { type: 'done', messageId: aiMsgId, generationTime };
@@ -1093,7 +1096,7 @@ export async function* finalizeToolLoopExhausted(
     );
     if (!finalized) return;
     await updateChatAfterTurn(chatId, Date.now(), db);
-    publishActivityInvalidation(userId);
+    publishChatListInvalidation(userId);
   } catch {
     // best-effort
   }
@@ -1171,7 +1174,7 @@ export async function* finalizeTurnError(
     );
     if (finalized) {
       await updateChatAfterTurn(chatId, Date.now(), db);
-      publishActivityInvalidation(userId);
+      publishChatListInvalidation(userId);
     }
   } catch {
     // best-effort
@@ -1217,7 +1220,7 @@ export async function finalizeInterruptedTurn(
   await updateChatAfterTurn(chatId, Date.now(), db, {
     bestEffort: Boolean(session.input.admittedChat),
   });
-  publishActivityInvalidation(userId);
+  publishChatListInvalidation(userId);
 }
 
 export function getAbortInterruptionReason(

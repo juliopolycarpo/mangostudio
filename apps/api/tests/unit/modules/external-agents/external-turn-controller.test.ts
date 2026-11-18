@@ -671,7 +671,7 @@ describe('external turn controller', () => {
     expect(turnPartOf((await readAssistantRow()).parts).error?.message).toBe('the process died');
   });
 
-  it('signals the activity topic on a vendor error, without writing a feed row', async () => {
+  it('signals the chats topic on a vendor error, without a feed frame or row', async () => {
     const bus = installRecordingRealtimeBus();
     const { runtime, controller } = harness();
     const running = startTurn(controller);
@@ -683,7 +683,8 @@ describe('external turn controller', () => {
     });
     await running;
 
-    expect(bus.activityFramesFor(userId)).toHaveLength(1);
+    expect(bus.chatListFramesFor(userId)).toHaveLength(1);
+    expect(bus.activityFramesFor(userId)).toHaveLength(0);
 
     const row = await getDb()
       .selectFrom('activity_events')
