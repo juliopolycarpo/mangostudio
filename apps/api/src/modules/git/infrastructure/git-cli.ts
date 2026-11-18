@@ -59,7 +59,7 @@ export class GitCliError extends Error {
 
 /**
  * The runtime refuses to launch Git in a cwd that is not an existing directory
- * — `FreshLaunch::check` in `crates/mangostudio-runtime/src/commands/service.rs`
+ * — `FreshLaunch::check` in `crates/mangostudio-runtime-cold/src/commands/service.rs`
  * — before Git runs, so the failure has no exit code and no structured reason;
  * its message is the only thing that names it. Anchored on both ends so a Git
  * stderr that merely mentions a cwd never matches.

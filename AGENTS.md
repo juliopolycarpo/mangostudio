@@ -43,18 +43,19 @@ Useful docs:
 - One parsing point per host for _configuration_ — the environment variables that select a mode,
   a token, or a path the host trusts — never scattered: hub configuration parsing lives only in
   `apps/api/src/lib/config.ts`; the Rust runtime host's, only in
-  `crates/mangostudio-runtime/src/config.rs`. Each host owns its own single parser — a second host
+  `crates/mangostudio-runtime-core/src/config.rs`. Each host owns its own single parser — a second host
   cannot route its configuration through another host's module.
   Machine probing is a separate, legitimate carve-out: a detector describing what is actually on
   this machine (`PATH`, `$HOME`, an already-collected environment snapshot) reads the process
   environment directly, at the site that needs it, because that value is never configuration —
   nothing selects or validates it ahead of time, and scattering the probing sites is the point (a
   `PATH` walk lives with the walk it bounds). In the Rust host this is
-  `crates/mangostudio-runtime/src/health.rs`'s two `PATH` fallbacks and its `PATHEXT` read for
-  the Windows executable-name walk,
-  `crates/mangostudio-runtime/src/runtime_home.rs`'s `home_dir()` for slot resolution,
-  `crates/mangostudio-runtime/src/probing/host.rs`'s environment snapshot for detection, and
-  `crates/mangostudio-runtime/src/subprocess/unix_guardian.rs`'s `vars_os()` snapshot that copies
+  `crates/mangostudio-runtime/src/health.rs`'s two `PATH` fallbacks and
+  `crates/mangostudio-runtime-core/src/executable_path.rs`'s `PATHEXT` read for the Windows
+  executable-name walk,
+  `crates/mangostudio-runtime-core/src/runtime_home.rs`'s `home_dir()` for slot resolution,
+  `crates/mangostudio-runtime-cold/src/probing/host.rs`'s environment snapshot for detection, and
+  `crates/mangostudio-runtime-core/src/subprocess/unix_guardian.rs`'s `vars_os()` snapshot that copies
   inherited environment entries for exact child execution before fork (it does not select or parse
   host configuration). `crates/mangostudio-runtime/tests/config_boundary.rs` pins every such call
   outside `config.rs` by exact text and count; a new read fails the test, not a review comment.

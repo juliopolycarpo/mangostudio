@@ -14,7 +14,7 @@
  * The runtime's kind for an open refused because it already hosts its maximum number of sessions.
  *
  * Also the `code` of the stream's `error` chunk. The runtime spells it in
- * `crates/mangostudio-runtime/src/external_agents/supervisor.rs`; its tests pin that spelling.
+ * `crates/mangostudio-runtime-cold/src/external_agents/supervisor.rs`; its tests pin that spelling.
  */
 export const EXTERNAL_AGENT_CAPACITY_CODE = 'external_agent_capacity';
 

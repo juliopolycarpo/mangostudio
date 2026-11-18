@@ -52,6 +52,8 @@ export const MANIFESTS = {
 export const WORKSPACE_DEPENDENCY_CRATES = [
   'mango-protocol',
   'mangostudio-runtime-contract',
+  'mangostudio-runtime-core',
+  'mangostudio-runtime-cold',
 ] as const;
 
 export const SEMVER_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;

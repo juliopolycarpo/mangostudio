@@ -242,11 +242,10 @@ fn compile_root(path: &Path) -> Result<Root, RemoteError> {
     Ok(Root { lexical, canonical })
 }
 
-/// Normalizes final and canonical Windows paths to the same Win32 spelling.
+// Normalizes final and canonical Windows paths to the same Win32 spelling. It lives in the core
+// crate beside `canonical_directory`, which the external-agent host also needs.
 #[cfg(windows)]
-pub(crate) fn normalize_windows_final_path(path: &Path) -> PathBuf {
-    windows::normalize_final_path(path)
-}
+pub(crate) use mangostudio_runtime_core::canonical::normalize_windows_final_path;
 
 pub(super) fn is_prefix(root: &Path, path: &Path) -> bool {
     prefix_relation(root, path) == Some(true)
@@ -273,9 +272,9 @@ mod windows {
     )]
     #![deny(clippy::undocumented_unsafe_blocks)]
 
-    use std::ffi::{OsString, c_void};
+    use std::ffi::c_void;
     use std::mem::{MaybeUninit, size_of};
-    use std::os::windows::ffi::{OsStrExt as _, OsStringExt as _};
+    use std::os::windows::ffi::OsStrExt as _;
     use std::path::{Component, Path, PathBuf};
 
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
@@ -298,21 +297,6 @@ mod windows {
         Missing,
         NotDirectory,
         Indeterminate,
-    }
-
-    pub(super) fn normalize_final_path(path: &Path) -> PathBuf {
-        const VERBATIM: &[u16] = &[b'\\' as u16, b'\\' as u16, b'?' as u16, b'\\' as u16];
-        const UNC: &[u16] = &[b'U' as u16, b'N' as u16, b'C' as u16, b'\\' as u16];
-        let path: Vec<u16> = path.as_os_str().encode_wide().collect();
-        let Some(rest) = path.strip_prefix(VERBATIM) else {
-            return PathBuf::from(OsString::from_wide(&path));
-        };
-        if let Some(unc) = rest.strip_prefix(UNC) {
-            let mut normal = vec![b'\\' as u16, b'\\' as u16];
-            normal.extend_from_slice(unc);
-            return PathBuf::from(OsString::from_wide(&normal));
-        }
-        PathBuf::from(OsString::from_wide(rest))
     }
 
     struct OwnedHandle(HANDLE);
@@ -752,19 +736,6 @@ mod tests {
         .unwrap();
         assert!(policy.allows(&allowed.join("file")));
         assert!(!policy.allows(&refused.join("file")));
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn normalizes_verbatim_handle_and_canonical_paths_to_win32_spelling() {
-        assert_eq!(
-            normalize_windows_final_path(Path::new(r"\\?\C:\workspace\root")),
-            PathBuf::from(r"C:\workspace\root")
-        );
-        assert_eq!(
-            normalize_windows_final_path(Path::new(r"\\?\UNC\server\share\root")),
-            PathBuf::from(r"\\server\share\root")
-        );
     }
 
     #[cfg(windows)]

@@ -118,7 +118,7 @@ shell na imagem; o painel diz isso.
 
 ## Windows
 
-Sessões em um runtime Windows usam ConPTY (`crates/mangostudio-runtime/src/subprocess/windows_job.rs`)
+Sessões em um runtime Windows usam ConPTY (`crates/mangostudio-runtime-core/src/subprocess/windows_job.rs`)
 com PowerShell (`pwsh` preferido, `powershell.exe` como alternativa), iniciadas dentro do mesmo
 Job com encerramento no fechamento de um filho limitado. Redimensionar funciona. Os testes de
 terminal com shell real do runtime são só Unix (`#[cfg(unix)]`), então o ramo ConPTY não tem teste

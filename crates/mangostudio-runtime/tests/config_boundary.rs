@@ -1,6 +1,7 @@
 //! Enforces AGENTS.md's "one parsing point per host" rule for
 //! *configuration*: every environment variable this host reads as
-//! configuration is parsed in `src/config.rs`, and nowhere else.
+//! configuration is parsed in `mangostudio-runtime-core/src/config.rs`, and nowhere else. The host
+//! is three crates (`mangostudio-runtime`, `-core` and `-cold`), so the scan walks all three.
 //!
 //! Machine probing is a named carve-out from that rule, not an exception to
 //! it: a detector reading `PATH`, `$HOME`, or a full environment snapshot to
@@ -18,21 +19,65 @@
 //! for a different one without adding a new line at all.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-/// `(path relative to `src/`, exact call text, expected occurrence count)`
+/// The crates that make up the runtime host as `(crate name, crate directory)`. Each is scanned
+/// through its `src/`. Every directory is its own `CARGO_MANIFEST_DIR` join so
+/// `scripts/lib/crate-inputs.ts` records these three crates as inputs of this test, not the whole
+/// `crates/` directory (which would force every crate edit to select the rust lane through it).
+fn host_crates() -> [(&'static str, PathBuf); 3] {
+    [
+        (
+            "mangostudio-runtime",
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../mangostudio-runtime"),
+        ),
+        (
+            "mangostudio-runtime-core",
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../mangostudio-runtime-core"),
+        ),
+        (
+            "mangostudio-runtime-cold",
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../mangostudio-runtime-cold"),
+        ),
+    ]
+}
+
+/// The one file that may parse configuration from the environment.
+const CONFIG_PARSER: &str = "mangostudio-runtime-core/src/config.rs";
+
+/// `(path relative to `crates/`, exact call text, expected occurrence count)`
 /// triples AGENTS.md's carve-out names. Keep this in sync with that list; a
 /// real new probing site — or a real change to an existing one's count — is
 /// added here *and* to AGENTS.md in the same change, never only here.
 const ALLOWED: &[(&str, &str, usize)] = &[
-    ("health.rs", "env::var_os(\"PATH\")", 2),
+    (
+        "mangostudio-runtime/src/health.rs",
+        "env::var_os(\"PATH\")",
+        2,
+    ),
     // `which_in` reads the machine's `PATHEXT` on Windows to learn which extensions run.
-    ("health.rs", "env::var_os(\"PATHEXT\")", 1),
-    ("probing/host.rs", "env::vars_os()", 1),
-    ("runtime_home.rs", "env::home_dir()", 1),
+    (
+        "mangostudio-runtime-core/src/executable_path.rs",
+        "env::var_os(\"PATHEXT\")",
+        1,
+    ),
+    (
+        "mangostudio-runtime-cold/src/probing/host.rs",
+        "env::vars_os()",
+        1,
+    ),
+    (
+        "mangostudio-runtime-core/src/runtime_home.rs",
+        "env::home_dir()",
+        1,
+    ),
     // This snapshots the inherited environment for exact child execution before fork. It does
     // not select or parse runtime configuration; AGENTS.md documents this distinct carve-out.
-    ("subprocess/unix_guardian.rs", "env::vars_os()", 1),
+    (
+        "mangostudio-runtime-core/src/subprocess/unix_guardian.rs",
+        "env::vars_os()",
+        1,
+    ),
 ];
 
 /// The call *shapes* this test scans for, independent of which literal (if
@@ -68,29 +113,39 @@ fn signature_for(line: &str, shape: &'static str) -> String {
         .to_string()
 }
 
-/// Every `(path relative to `src/`, signature)` hit outside `config.rs`,
-/// found by walking the crate's own `src/` tree, folded into how many times
+/// Every `(path relative to `crates/`, signature)` hit outside the config parser,
+/// found by walking each host crate's `src/` tree, folded into how many times
 /// each pair occurred.
-fn env_read_counts(src_dir: &Path) -> BTreeMap<(String, String), usize> {
+fn env_read_counts(host_crates: &[(&str, PathBuf)]) -> BTreeMap<(String, String), usize> {
     let mut counts = BTreeMap::new();
-    let mut stack = vec![src_dir.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        for entry in std::fs::read_dir(&dir).expect("src/ is readable") {
+    // Each entry carries the crate it belongs to, so its relative path names that crate.
+    let mut stack: Vec<_> = host_crates
+        .iter()
+        .map(|(name, crate_dir)| (*name, crate_dir, crate_dir.join("src")))
+        .collect();
+    while let Some((crate_name, crate_dir, dir)) = stack.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap_or_else(|error| {
+            panic!(
+                "expected {} to be readable | received {error}",
+                dir.display()
+            )
+        }) {
             let entry = entry.expect("dir entry reads");
             let path = entry.path();
             if path.is_dir() {
-                stack.push(path);
+                stack.push((crate_name, crate_dir, path));
                 continue;
             }
             if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
                 continue;
             }
-            let relative = path
-                .strip_prefix(src_dir)
-                .expect("path is under src_dir")
+            let within_crate = path
+                .strip_prefix(crate_dir)
+                .expect("path is under its crate directory")
                 .to_string_lossy()
                 .replace('\\', "/");
-            if relative == "config.rs" {
+            let relative = format!("{crate_name}/{within_crate}");
+            if relative == CONFIG_PARSER {
                 continue;
             }
             let contents = std::fs::read_to_string(&path).expect("source file reads as utf8");
@@ -110,8 +165,7 @@ fn env_read_counts(src_dir: &Path) -> BTreeMap<(String, String), usize> {
 
 #[test]
 fn every_environment_read_outside_config_rs_matches_the_allowlists_exact_count() {
-    let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let found = env_read_counts(&src_dir);
+    let found = env_read_counts(&host_crates());
 
     let expected: BTreeMap<(String, String), usize> = ALLOWED
         .iter()

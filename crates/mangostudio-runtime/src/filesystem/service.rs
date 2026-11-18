@@ -1196,9 +1196,9 @@ pub(crate) fn register(registry: Registry, consent: ConsentSource) -> Registry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::result_value::assert_wire_eq;
     use crate::runtime_home::RuntimeSlot;
     use crate::test_support::{ScratchDir, scratch_dir};
+    use mangostudio_runtime_core::assert_wire_eq;
 
     fn fixture() -> (ScratchDir, Arc<Service>) {
         fixture_with_io(Arc::new(NativeMoveIo), Arc::new(NativeWriteIo))

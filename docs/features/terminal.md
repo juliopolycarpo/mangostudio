@@ -118,7 +118,7 @@ the image; the panel says so.
 
 ## Windows
 
-Sessions on a Windows runtime use ConPTY (`crates/mangostudio-runtime/src/subprocess/windows_job.rs`)
+Sessions on a Windows runtime use ConPTY (`crates/mangostudio-runtime-core/src/subprocess/windows_job.rs`)
 with PowerShell (`pwsh` preferred, `powershell.exe` fallback), started inside the same
 kill-on-close Job as a bounded child. Resize works. The runtime's real-shell terminal tests are
 Unix-only (`#[cfg(unix)]`), so the ConPTY branch has no test of its own; the POSIX path is

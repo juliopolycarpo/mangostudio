@@ -4,7 +4,9 @@ members = [
   "crates/mango-protocol",
   "crates/mangostudio-launcher",
   "crates/mangostudio-runtime",
+  "crates/mangostudio-runtime-cold",
   "crates/mangostudio-runtime-contract",
+  "crates/mangostudio-runtime-core",
 ]
 # `crates/mango-protocol/fuzz` is its own workspace (see its Cargo.toml): a
 # cargo-fuzz crate needs nightly and libFuzzer, so it must never be pulled into
@@ -51,7 +53,9 @@ unused_dependencies = "deny"
 # checks the two agree, so a forgotten bump here fails the build loudly rather
 # than silently pinning a stale minor.
 mango-protocol = { path = "crates/mango-protocol", version = "0.2.0" }
+mangostudio-runtime-cold = { path = "crates/mangostudio-runtime-cold", version = "0.2.0" }
 mangostudio-runtime-contract = { path = "crates/mangostudio-runtime-contract", version = "0.2.0" }
+mangostudio-runtime-core = { path = "crates/mangostudio-runtime-core", version = "0.2.0" }
 
 # Third-party dependencies declared by two or more members. Each entry holds
 # the version and shared features. Cargo adds each member's features to this
@@ -91,9 +95,10 @@ opt-level = 3
 lto = "fat"
 codegen-units = 1
 strip = true
-# Never "abort": handler panic isolation (`crates/mangostudio-runtime/src/panic.rs`)
-# recovers a panic by catching its unwind. The runtime refuses to compile with
-# an aborting panic strategy, `crates/mangostudio-runtime/tests/it/panic_isolation.rs`
+# Never "abort": handler panic isolation (`crates/mangostudio-runtime-core/src/panic.rs`)
+# recovers a panic by catching its unwind. All three runtime crates (core, cold and the
+# binary) carry a `compile_error!` guard against an aborting panic strategy,
+# `crates/mangostudio-runtime/tests/it/panic_isolation.rs`
 # (`the_release_profile_unwinds`) requires this exact setting, and
 # `scripts/tests/protocol-lanes.unit.test.ts` rejects an abort in any manifest.
 panic = "unwind"
@@ -117,7 +122,7 @@ opt-level = "s"
 # Measured on linux-x64 (docs/reference/runtime-metrics.md): the stripped runtime
 # shrinks 11% with `fs.grep`, `hello` and `fs.list-directory` within noise.
 # The packages that run per line or per byte stay at 3 (`mangostudio-runtime`,
-# `mango-external-agents`, `mango-protocol`, `memchr`, `serde_json`, `tokio`) and so does QuickJS
+# `mangostudio-runtime-core`, `mango-external-agents`, `mango-protocol`, `memchr`, `serde_json`, `tokio`) and so does QuickJS
 # (`rquickjs-sys`): cc-rs takes its C optimisation level from the package
 # profile, so `s` there would build the regex engine with `-Os`. The
 # `release_profile` integration test pins both lists.
@@ -176,6 +181,15 @@ opt-level = "s"
 [profile.release.package.mango-agent-codex]
 opt-level = "s"
 [profile.release.package.mangostudio-runtime-contract]
+opt-level = "s"
+
+# The host's own cold code, split out of `mangostudio-runtime` so it can take `s` without the
+# binary package carrying an override (the symbol table stayed in the binary when it did, see
+# `the_binary_package_has_no_release_override`): the MCP client, the external-agent host, machine
+# probing and the toolchain commands, where a request waits on a child or the network. The hot code
+# (`fs.*`, the relay, the PTY, the protocol framing) stays in `mangostudio-runtime` and
+# `mangostudio-runtime-core` at 3.
+[profile.release.package.mangostudio-runtime-cold]
 opt-level = "s"
 
 # For local release builds and benchmarks, never for a binary that ships:

@@ -11,7 +11,7 @@ const RELEASE_SENSITIVE_ROOT_TESTS = new Set([
 ]);
 
 export const RELEASE_PATTERN =
-  /^(\.github\/workflows\/release[^/]*\.yml$|\.github\/workflows\/canary\.yml$|\.github\/workflows\/runtime-build\.yml$|scripts\/release\/|scripts\/install\/|scripts\/tests\/install-ps1-layout\.unit\.test\.ts$|scripts\/tests\/support\/windows-user-path\.ts$|scripts\/build(-runtime)?\.ts$|scripts\/lib\/|scripts\/ci\/dry-run-artifacts\.ts$|\.github\/actions\/download-distribution\/|packages\/cli\/|crates\/(mangostudio-launcher|mangostudio-runtime|mangostudio-runtime-contract|mango-protocol)\/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|\.cargo\/config\.toml$|\.github\/actions\/setup-zigbuild\/|Dockerfile$)/;
+  /^(\.github\/workflows\/release[^/]*\.yml$|\.github\/workflows\/canary\.yml$|\.github\/workflows\/runtime-build\.yml$|scripts\/release\/|scripts\/install\/|scripts\/tests\/install-ps1-layout\.unit\.test\.ts$|scripts\/tests\/support\/windows-user-path\.ts$|scripts\/build(-runtime)?\.ts$|scripts\/lib\/|scripts\/ci\/dry-run-artifacts\.ts$|\.github\/actions\/download-distribution\/|packages\/cli\/|crates\/(mangostudio-launcher|mangostudio-runtime|mangostudio-runtime-core|mangostudio-runtime-cold|mangostudio-runtime-contract|mango-protocol)\/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|\.cargo\/config\.toml$|\.github\/actions\/setup-zigbuild\/|Dockerfile$)/;
 
 export const LAUNCHER_PATTERN =
   /^(crates\/mangostudio-launcher\/|Cargo\.(toml|lock)$|rust-toolchain\.toml$|\.github\/workflows\/release(-dry-run)?\.yml$|scripts\/release\/verify-launcher-package\.sh$)/;

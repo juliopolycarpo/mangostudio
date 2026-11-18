@@ -1,5 +1,5 @@
 //! Pins the SDK integration to the private adapter and one real-SDK executable fixture.
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const SDK_CRATES: &[&str] = &[
     "mango_external_agents",
@@ -7,10 +7,32 @@ const SDK_CRATES: &[&str] = &[
     "mango_agent_claude",
     "mango_agent_codex",
 ];
-const FIXTURES: &[&str] = &["examples/fake_cursor_agent.rs"];
+/// The crates that make up the runtime host as `(crate name, crate directory)`. Every directory is
+/// its own `CARGO_MANIFEST_DIR` join so `scripts/lib/crate-inputs.ts` records these three crates as
+/// inputs of this test, not the whole `crates/` directory (which would force every crate edit to
+/// select the rust lane through it).
+fn host_crates() -> [(&'static str, PathBuf); 3] {
+    [
+        (
+            "mangostudio-runtime",
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../mangostudio-runtime"),
+        ),
+        (
+            "mangostudio-runtime-core",
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../mangostudio-runtime-core"),
+        ),
+        (
+            "mangostudio-runtime-cold",
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../mangostudio-runtime-cold"),
+        ),
+    ]
+}
+/// Paths are relative to `crates/`, so they name the crate that owns the file.
+const ADAPTER_DIR: &str = "mangostudio-runtime-cold/src/external_agents/adapter/";
+const FIXTURES: &[&str] = &["mangostudio-runtime/examples/fake_cursor_agent.rs"];
 
 fn allowed(path: &str) -> bool {
-    path.starts_with("src/external_agents/adapter/") || FIXTURES.contains(&path)
+    path.starts_with(ADAPTER_DIR) || FIXTURES.contains(&path)
 }
 
 // Rust identifiers after removing comments and string literals. This catches imports, re-exports,
@@ -108,24 +130,40 @@ fn sdk_references(source: &str) -> Vec<&str> {
 
 #[test]
 fn product_sources_cannot_name_sdk_crates() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let mut pending = vec![root.join("src"), root.join("tests"), root.join("examples")];
+    let host_crates = host_crates();
+    let mut pending = Vec::new();
+    for (name, crate_dir) in &host_crates {
+        // `src/` is where product code lives: a crate without it is a broken scan, not an empty one.
+        assert!(
+            crate_dir.join("src").is_dir(),
+            "expected {} to be a directory | received no src/ for {name}",
+            crate_dir.join("src").display()
+        );
+        for subdir in ["src", "tests", "examples"] {
+            let dir = crate_dir.join(subdir);
+            // `tests/` and `examples/` exist only in the crates that ship them.
+            if dir.is_dir() {
+                pending.push((*name, crate_dir, dir));
+            }
+        }
+    }
     let mut violations = Vec::new();
-    while let Some(dir) = pending.pop() {
+    while let Some((crate_name, crate_dir, dir)) = pending.pop() {
         for entry in std::fs::read_dir(dir).unwrap() {
             let path = entry.unwrap().path();
             if path.is_dir() {
-                pending.push(path);
+                pending.push((crate_name, crate_dir, path));
                 continue;
             }
             if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
                 continue;
             }
-            let relative = path
-                .strip_prefix(root)
+            let within_crate = path
+                .strip_prefix(crate_dir)
                 .unwrap()
                 .to_string_lossy()
                 .replace('\\', "/");
+            let relative = format!("{crate_name}/{within_crate}");
             if allowed(&relative) {
                 continue;
             }
@@ -140,7 +178,12 @@ fn product_sources_cannot_name_sdk_crates() {
         violations.is_empty(),
         "SDK references must stay inside the private adapter: {violations:#?}"
     );
-    let modules = std::fs::read_to_string(root.join("src/external_agents/mod.rs")).unwrap();
+    let (_, cold_crate_dir) = host_crates
+        .iter()
+        .find(|(name, _)| *name == "mangostudio-runtime-cold")
+        .expect("the cold crate is one of the host crates");
+    let modules =
+        std::fs::read_to_string(cold_crate_dir.join("src/external_agents/mod.rs")).unwrap();
     assert!(
         modules.lines().any(|line| line == "mod adapter;"),
         "the SDK adapter must remain private"
@@ -164,11 +207,20 @@ fn the_guard_catches_every_dependency_and_type_escape() {
             );
         }
     }
-    assert!(!allowed("src/external_agents/supervisor/tests.rs"));
-    assert!(!allowed("src/terminal/login.rs"));
-    assert!(!allowed("tests/new_sdk_fixture.rs"));
-    assert!(!allowed("src/external_agents/adapter.rs"));
-    assert!(allowed("src/external_agents/adapter/session.rs"));
+    assert!(!allowed(
+        "mangostudio-runtime-cold/src/external_agents/supervisor/tests.rs"
+    ));
+    assert!(!allowed("mangostudio-runtime-cold/src/login.rs"));
+    assert!(!allowed("mangostudio-runtime/tests/new_sdk_fixture.rs"));
+    assert!(!allowed(
+        "mangostudio-runtime-cold/src/external_agents/adapter.rs"
+    ));
+    assert!(!allowed(
+        "mangostudio-runtime/src/external_agents/adapter/session.rs"
+    ));
+    assert!(allowed(
+        "mangostudio-runtime-cold/src/external_agents/adapter/session.rs"
+    ));
 }
 
 #[test]

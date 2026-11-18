@@ -1,0 +1,1100 @@
+use std::collections::BTreeMap;
+
+use mango_external_agents::Limits;
+use mango_external_agents::process::{
+    InterruptOutcome, LaunchSpec, ManagedProcess, ProcessLauncher,
+};
+use mango_external_agents::session::CancelReason;
+
+use super::*;
+use crate::test_support::scratch_dir;
+use mangostudio_runtime_core::subprocess::AlwaysAllow;
+
+const BOUND: Duration = Duration::from_secs(10);
+
+fn launcher() -> GuardedProcessLauncher {
+    GuardedProcessLauncher::new(Arc::new(AlwaysAllow), &Limits::default())
+}
+
+async fn start(launcher: &GuardedProcessLauncher, spec: LaunchSpec) -> ManagedProcess {
+    tokio::time::timeout(BOUND, launcher.spawn(spec))
+        .await
+        .expect("expected the launch within the bound | received a hung launch")
+        .unwrap_or_else(|error| panic!("expected a started child | received {error}"))
+}
+
+/// A control over a child that already ended, with the outcomes its owner published and no process.
+fn ended_control(
+    pid: Option<u32>,
+    exit: std::result::Result<ExitStatus, String>,
+    cleanup: std::result::Result<(), String>,
+) -> GuardedControl {
+    let (interrupt_tx, _interrupts) = mpsc::channel(1);
+    let (_terminal_tx, terminal) = watch::channel(Some(Terminal { cleanup }));
+    let (_exit_tx, exit) = watch::channel(Some(exit));
+    GuardedControl {
+        pid,
+        tail: StderrTail::with_capacity(0),
+        kill: CancellationToken::new(),
+        interrupts: interrupt_tx,
+        terminal,
+        exit,
+        _lease: Arc::new(Lease {
+            _guard: CancellationToken::new().drop_guard(),
+        }),
+    }
+}
+
+/// SDK 0.8 reserves `Error::Launch` for starting an executable: a child that started and then
+/// would not stop or be confirmed gone is `Error::Teardown` and keeps the leader's pid.
+#[tokio::test]
+async fn a_started_child_that_will_not_end_is_a_teardown_not_a_launch_failure() {
+    let control = ended_control(
+        Some(4242),
+        Err("a wait failure (Other)".to_owned()),
+        Err("a live process after 5s".to_owned()),
+    );
+    for (operation, result) in [
+        ("kill", control.kill(CancelReason::Requested).await),
+        ("wait", control.wait().await.map(|_| ())),
+    ] {
+        match result {
+            Err(Error::Teardown { pid, message }) => {
+                assert_eq!(pid, Some(4242), "{operation}: expected the leader pid");
+                assert!(!message.is_empty(), "{operation}: expected a cause");
+            }
+            other => panic!("expected Error::Teardown from {operation} | received {other:?}"),
+        }
+    }
+}
+
+/// SDK 0.11 reports a lost process reaper as an error rather than an empty exit status. This
+/// launcher's owner task is that reaper: when it is gone before it published the target's exit,
+/// `wait` is an error naming the missing owner, never a status and never a hang.
+#[tokio::test]
+async fn a_wait_whose_process_owner_is_gone_is_closed_not_an_exit_status() {
+    let (interrupt_tx, _interrupts) = mpsc::channel(1);
+    let (_terminal_tx, terminal) = watch::channel(None);
+    let (exit_tx, exit) = watch::channel(None);
+    let control = GuardedControl {
+        pid: Some(4242),
+        tail: StderrTail::with_capacity(0),
+        kill: CancellationToken::new(),
+        interrupts: interrupt_tx,
+        terminal,
+        exit,
+        _lease: Arc::new(Lease {
+            _guard: CancellationToken::new().drop_guard(),
+        }),
+    };
+    drop(exit_tx);
+
+    let received = tokio::time::timeout(BOUND, control.wait())
+        .await
+        .expect("expected wait to answer once the owner is gone | received a hang");
+    assert!(
+        matches!(
+            &received,
+            Err(Error::Closed { subject }) if *subject == "external-agent process owner"
+        ),
+        "expected Error::Closed for the external-agent process owner | received {received:?}"
+    );
+}
+
+/// A start that failed keeps its own error only when the child's tree is proven gone.
+#[test]
+fn a_failed_start_with_a_proven_empty_tree_keeps_the_start_error() {
+    let missing = failed_start_error(Error::program_not_found("codex"), Some(4242), Ok(()));
+    assert!(
+        missing.is_program_not_found(),
+        "expected the missing-program error to stand | received {missing:?}"
+    );
+
+    let refused = failed_start_error(
+        Error::Launch {
+            program: "codex".to_owned(),
+            message: "an OS launch failure (Permission denied (os error 13))".to_owned(),
+        },
+        Some(4242),
+        Ok(()),
+    );
+    assert!(
+        matches!(&refused, Error::Launch { message, .. } if message.contains("os error 13")),
+        "expected the launch error to stand | received {refused:?}"
+    );
+}
+
+/// A cleanup that could not prove the tree empty may have left a guardian or a descendant running.
+/// That outranks every start failure, a cancelled start included: the result is `Error::Teardown`
+/// with the pid, and it is never the missing-program error a version probe reads as "not
+/// installed".
+#[test]
+fn a_failed_start_whose_cleanup_failed_is_a_teardown_naming_the_pid_and_the_start_failure() {
+    let unproven = "a process tree not proven empty within 2s";
+    let starts = [
+        (Error::program_not_found("codex"), "no such program"),
+        (
+            Error::Launch {
+                program: "codex".to_owned(),
+                message: "an OS launch failure (Permission denied (os error 13))".to_owned(),
+            },
+            "os error 13",
+        ),
+        (
+            Error::Cancelled {
+                reason: CancelReason::Requested,
+            },
+            "cancelled",
+        ),
+    ];
+    for (start, start_text) in starts {
+        let rendered = format!("{start:?}");
+        let error = failed_start_error(start, Some(4242), Err(unproven.to_owned()));
+        assert!(
+            !error.is_program_not_found(),
+            "({rendered}): expected a teardown, never a missing program | received {error:?}"
+        );
+        match error {
+            Error::Teardown { pid, message } => {
+                assert_eq!(pid, Some(4242), "({rendered}): expected the child's pid");
+                assert!(
+                    message.contains(unproven) && message.contains(start_text),
+                    "({rendered}): expected the cleanup failure and the start failure \
+                     ({start_text:?}) in the message | received {message:?}"
+                );
+            }
+            other => panic!("({rendered}): expected Error::Teardown | received {other:?}"),
+        }
+    }
+}
+
+#[cfg(unix)]
+mod unix {
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use mango_external_agents::Error;
+    use mango_external_agents::process::ExitStatus;
+    use mango_protocol::error::RemoteError;
+
+    use super::*;
+
+    /// Counts every OS launch it forwards to the production spawner.
+    #[derive(Default)]
+    struct CountingSpawner {
+        spawns: AtomicUsize,
+    }
+
+    impl ChildSpawner for CountingSpawner {
+        fn spawn(&self, request: &ProcessRequest, stdin_pipe: bool) -> io::Result<PipeChild> {
+            self.spawns.fetch_add(1, Ordering::SeqCst);
+            PipeChildSpawner.spawn(request, stdin_pipe)
+        }
+    }
+
+    /// A consent check that has been revoked; counts how often it was asked.
+    #[derive(Default)]
+    struct RevokedConsent {
+        checks: AtomicUsize,
+    }
+
+    impl LaunchCheck for RevokedConsent {
+        fn check(&self) -> std::result::Result<(), RemoteError> {
+            self.checks.fetch_add(1, Ordering::SeqCst);
+            Err(RemoteError::new(
+                mango_protocol::error::codes::DENIED,
+                "external-agent consent was revoked",
+            ))
+        }
+    }
+
+    fn spec(argv: &[&str], cwd: &Path, stdin: bool) -> LaunchSpec {
+        LaunchSpec {
+            argv: argv.iter().map(|&argument| argument.to_owned()).collect(),
+            cwd: cwd.to_path_buf(),
+            env: BTreeMap::from([("PATH".to_owned(), "/usr/bin:/bin".to_owned())]),
+            stdin,
+            hide_window: true,
+        }
+    }
+
+    /// Writes a script the kernel will not execute: a body, but no execute bit.
+    fn unexecutable_file(directory: &Path) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = directory.join("agent-cli");
+        std::fs::write(&path, "#!/bin/sh\nexit 0\n").expect("write the fixture");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
+            .expect("clear the execute bits");
+        path
+    }
+
+    /// A launch request for `program` with exactly `path` as its `PATH`.
+    fn request_in(program: &str, path: &Path, cwd: &Path) -> ProcessRequest {
+        let mut request = ProcessRequest::new(program, std::iter::empty::<OsString>());
+        request.env = Some(BTreeMap::from([(
+            OsString::from("PATH"),
+            path.as_os_str().to_owned(),
+        )]));
+        request.cwd = Some(cwd.to_path_buf());
+        request
+    }
+
+    /// What the spawn errors the guardian can report mean to the launcher, with the cwd a real
+    /// directory unless the row says otherwise. Only a missing program may read as not installed.
+    #[test]
+    fn only_a_missing_program_in_an_existing_cwd_is_a_missing_program() {
+        let cwd = scratch_dir("agent-launcher-classify");
+        let absent_cwd = cwd.join("removed");
+        let empty_path = scratch_dir("agent-launcher-classify-empty");
+        let present_path = scratch_dir("agent-launcher-classify-present");
+        let present = unexecutable_file(&present_path);
+        let errno = |code: i32| io::Error::from_raw_os_error(code);
+        let nowhere = request_in("agent-cli", &empty_path, &cwd);
+        let nowhere_in_absent_cwd = request_in("agent-cli", &empty_path, &absent_cwd);
+        let found_on_path = request_in("agent-cli", &present_path, &cwd);
+        let explicit_found = request_in(present.to_str().expect("utf-8"), &empty_path, &cwd);
+        let explicit_missing = request_in("/nonexistent/agent-cli", &empty_path, &cwd);
+        let rows: Vec<(&str, io::Error, &ProcessRequest, bool)> = vec![
+            ("ENOENT", errno(libc::ENOENT), &nowhere, true),
+            ("ENOTDIR", errno(libc::ENOTDIR), &nowhere, true),
+            (
+                "no PATH to search",
+                io::Error::new(io::ErrorKind::NotFound, "PATH is required"),
+                &nowhere,
+                true,
+            ),
+            (
+                "ENOENT, cwd gone",
+                errno(libc::ENOENT),
+                &nowhere_in_absent_cwd,
+                false,
+            ),
+            (
+                "ENOTDIR, cwd gone",
+                errno(libc::ENOTDIR),
+                &nowhere_in_absent_cwd,
+                false,
+            ),
+            // Path resolution refusals count only when a candidate exists to be refused.
+            (
+                "EACCES, file on PATH",
+                errno(libc::EACCES),
+                &found_on_path,
+                false,
+            ),
+            (
+                "ELOOP, file on PATH",
+                errno(libc::ELOOP),
+                &found_on_path,
+                false,
+            ),
+            (
+                "ENAMETOOLONG, file on PATH",
+                errno(libc::ENAMETOOLONG),
+                &found_on_path,
+                false,
+            ),
+            (
+                "EACCES, explicit file",
+                errno(libc::EACCES),
+                &explicit_found,
+                false,
+            ),
+            ("EACCES, CLI nowhere", errno(libc::EACCES), &nowhere, true),
+            ("ELOOP, CLI nowhere", errno(libc::ELOOP), &nowhere, true),
+            (
+                "ENAMETOOLONG, CLI nowhere",
+                errno(libc::ENAMETOOLONG),
+                &nowhere,
+                true,
+            ),
+            (
+                "EACCES, explicit path missing",
+                errno(libc::EACCES),
+                &explicit_missing,
+                true,
+            ),
+            // Host-resource and found-file failures never read as missing, evidence or not.
+            ("ENOEXEC", errno(libc::ENOEXEC), &nowhere, false),
+            ("ETXTBSY", errno(libc::ETXTBSY), &nowhere, false),
+            ("EMFILE", errno(libc::EMFILE), &nowhere, false),
+            ("ENFILE", errno(libc::ENFILE), &nowhere, false),
+            ("ENOMEM", errno(libc::ENOMEM), &nowhere, false),
+            (
+                "a guardian protocol error",
+                io::Error::new(io::ErrorKind::InvalidData, "invalid readiness byte"),
+                &nowhere,
+                false,
+            ),
+        ];
+        for (name, error, request, expected) in rows {
+            assert_eq!(
+                is_missing_program(&error, request),
+                expected,
+                "({name}): expected is_missing_program {expected} | received {} for {error:?}",
+                !expected
+            );
+        }
+    }
+
+    /// A launch of the bare name `prog` with `path_entries` as the whole `PATH`.
+    fn spec_searching(path_entries: &[&Path], cwd: &Path) -> LaunchSpec {
+        let path = std::env::join_paths(path_entries).expect("PATH entries have no ':'");
+        LaunchSpec {
+            argv: vec!["prog".to_owned()],
+            cwd: cwd.to_path_buf(),
+            env: BTreeMap::from([("PATH".to_owned(), path.to_string_lossy().into_owned())]),
+            stdin: false,
+            hide_window: true,
+        }
+    }
+
+    /// Writes `directory/prog` with `mode`; a script that prints `ran`.
+    fn prog_with_mode(directory: &Path, mode: u32) {
+        use std::os::unix::fs::PermissionsExt;
+        let path = directory.join("prog");
+        std::fs::write(&path, "#!/bin/sh\necho ran\n").expect("write prog");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode))
+            .expect("set the prog mode");
+    }
+
+    /// An earlier `PATH` entry holding a `prog` this user may not execute must not shadow a working
+    /// one later on, as `execvp` and every shell resolve it.
+    #[tokio::test]
+    async fn the_path_search_runs_a_later_entry_past_a_non_executable_one() {
+        let root = scratch_dir("agent-launcher-path-walk-mode");
+        let refused = root.join("refused");
+        let working = root.join("working");
+        std::fs::create_dir_all(&refused).expect("mkdir refused");
+        std::fs::create_dir_all(&working).expect("mkdir working");
+        prog_with_mode(&refused, 0o644);
+        prog_with_mode(&working, 0o755);
+
+        let mut process = start(&launcher(), spec_searching(&[&refused, &working], &root)).await;
+        assert_eq!(
+            read_all(&mut process).await.trim(),
+            "ran",
+            "expected the later working prog to run | received other output"
+        );
+        wait(&process).await;
+    }
+
+    /// Restores a directory's mode on drop so the scratch cleanup can remove it.
+    struct Unsearchable(PathBuf);
+
+    impl Drop for Unsearchable {
+        fn drop(&mut self) {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+
+    #[tokio::test]
+    async fn the_path_search_runs_a_later_entry_past_an_unsearchable_directory() {
+        use std::os::unix::fs::PermissionsExt;
+        // Root ignores directory permission bits, so a chmod 000 directory stays searchable.
+        if nix::unistd::geteuid().is_root() {
+            eprintln!("skipped: running as root, directory modes do not restrict root");
+            return;
+        }
+        let root = scratch_dir("agent-launcher-path-walk-dir");
+        let sealed = root.join("sealed");
+        let working = root.join("working");
+        std::fs::create_dir_all(&sealed).expect("mkdir sealed");
+        std::fs::create_dir_all(&working).expect("mkdir working");
+        prog_with_mode(&sealed, 0o755);
+        prog_with_mode(&working, 0o755);
+        std::fs::set_permissions(&sealed, std::fs::Permissions::from_mode(0o000))
+            .expect("seal the directory");
+        let _restore = Unsearchable(sealed.clone());
+
+        let mut process = start(&launcher(), spec_searching(&[&sealed, &working], &root)).await;
+        assert_eq!(
+            read_all(&mut process).await.trim(),
+            "ran",
+            "expected the prog behind the unsearchable directory to run | received other output"
+        );
+        wait(&process).await;
+    }
+
+    #[tokio::test]
+    async fn a_path_holding_only_a_non_executable_prog_still_fails_with_eacces() {
+        let root = scratch_dir("agent-launcher-path-walk-only-refused");
+        let refused = root.join("refused");
+        let empty = root.join("empty");
+        std::fs::create_dir_all(&refused).expect("mkdir refused");
+        std::fs::create_dir_all(&empty).expect("mkdir empty");
+        prog_with_mode(&refused, 0o644);
+
+        // The refusal comes first and a missing candidate follows, so the remembered EACCES is
+        // what must be reported, not the last candidate's ENOENT.
+        let result = launcher()
+            .spawn(spec_searching(&[&refused, &empty], &root))
+            .await;
+        let Err(Error::Launch { message, .. }) = result else {
+            panic!(
+                "expected Error::Launch | received {:?}",
+                result.map(|_| "a started child")
+            );
+        };
+        assert!(
+            message.contains("os error 13"),
+            "expected the remembered EACCES | received {message:?}"
+        );
+    }
+
+    #[test]
+    fn a_launch_failure_names_the_os_error_or_the_kind_and_never_a_custom_message() {
+        let errno = describe_os_error(&io::Error::from_raw_os_error(libc::EACCES));
+        assert_eq!(
+            errno,
+            "an OS launch failure (Permission denied (os error 13))"
+        );
+        let custom = describe_os_error(&io::Error::other("argv --token=secret in /home/ada/work"));
+        assert_eq!(
+            custom, "a launcher failure (Other)",
+            "expected the kind only | received {custom:?}"
+        );
+    }
+
+    /// A launch error the SDK hands to the host instead of reading as "not installed": the program
+    /// exists, so the error must stay `Launch` and name the errno.
+    #[tokio::test]
+    async fn a_non_executable_program_is_a_launch_error_and_not_a_missing_program() {
+        let directory = scratch_dir("agent-launcher-unexecutable");
+        let program = unexecutable_file(&directory);
+        let result = launcher()
+            .spawn(spec(&[program.to_str().expect("utf-8")], &directory, false))
+            .await;
+        let Err(error) = result else {
+            panic!("expected Error::Launch | received a started child");
+        };
+        assert!(
+            !error.is_program_not_found()
+                && matches!(&error, Error::Launch { message, .. } if message.contains("os error 13")),
+            "expected Error::Launch naming EACCES | received {error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_missing_program_is_program_not_found() {
+        let directory = scratch_dir("agent-launcher-not-found");
+        let result = launcher()
+            .spawn(spec(&["/nonexistent/agent-cli"], &directory, false))
+            .await;
+        let Err(error) = result else {
+            panic!("expected Error::ProgramNotFound | received a started child");
+        };
+        assert!(
+            error.is_program_not_found()
+                && matches!(&error, Error::ProgramNotFound { program } if program == "/nonexistent/agent-cli"),
+            "expected Error::ProgramNotFound naming the program | received {error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_missing_cwd_is_a_launch_error_and_not_a_missing_program() {
+        let directory = scratch_dir("agent-launcher-cwd-gone");
+        let gone = directory.join("removed");
+        let result = launcher().spawn(spec(&["/bin/sh"], &gone, false)).await;
+        let Err(error) = result else {
+            panic!("expected Error::Launch | received a started child");
+        };
+        assert!(
+            !error.is_program_not_found()
+                && matches!(&error, Error::Launch { message, .. } if message.contains("os error 2")),
+            "expected Error::Launch naming ENOENT for a missing cwd | received {error:?}"
+        );
+    }
+
+    /// An unsearchable `PATH` entry makes `execve` report EACCES for a program installed nowhere,
+    /// which is a missing program and not a refused launch.
+    #[tokio::test]
+    async fn an_unsearchable_path_entry_with_the_program_nowhere_is_program_not_found() {
+        use std::os::unix::fs::PermissionsExt;
+        // Root ignores directory permission bits, so a chmod 000 directory stays searchable.
+        if nix::unistd::geteuid().is_root() {
+            eprintln!("skipped: running as root, directory modes do not restrict root");
+            return;
+        }
+        let root = scratch_dir("agent-launcher-sealed-only");
+        let sealed = root.join("sealed");
+        std::fs::create_dir_all(&sealed).expect("mkdir sealed");
+        std::fs::set_permissions(&sealed, std::fs::Permissions::from_mode(0o000))
+            .expect("seal the directory");
+        let _restore = Unsearchable(sealed.clone());
+
+        let result = launcher().spawn(spec_searching(&[&sealed], &root)).await;
+        let Err(error) = result else {
+            panic!("expected Error::ProgramNotFound | received a started child");
+        };
+        assert!(
+            error.is_program_not_found(),
+            "expected Error::ProgramNotFound for an unsearchable PATH entry holding no candidate \
+             | received {error:?}"
+        );
+    }
+
+    /// Reads stdout to EOF within the bound.
+    async fn read_all(process: &mut ManagedProcess) -> String {
+        let mut output = Vec::new();
+        loop {
+            let chunk = tokio::time::timeout(BOUND, process.stdout.next_chunk())
+                .await
+                .expect("expected stdout to reach EOF within the bound | received no EOF")
+                .unwrap_or_else(|error| panic!("expected readable stdout | received {error}"));
+            match chunk {
+                Some(chunk) => output.extend_from_slice(&chunk),
+                None => return String::from_utf8_lossy(&output).into_owned(),
+            }
+        }
+    }
+
+    async fn wait(process: &ManagedProcess) -> ExitStatus {
+        tokio::time::timeout(BOUND, process.control.wait())
+            .await
+            .expect("expected the child reaped within the bound | received no exit")
+            .unwrap_or_else(|error| panic!("expected an exit status | received {error}"))
+    }
+
+    fn script(directory: &Path, body: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = directory.join("agent.sh");
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("script is written");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
+            .expect("script is executable");
+        path
+    }
+
+    fn alive(pid: i32) -> bool {
+        !matches!(
+            nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None),
+            Err(nix::errno::Errno::ESRCH)
+        )
+    }
+
+    /// Polls until `path` holds a pid; the panic names the file it waited for.
+    async fn pid_in(path: &Path) -> i32 {
+        for _ in 0..500 {
+            if let Ok(text) = std::fs::read_to_string(path)
+                && let Ok(pid) = text.trim().parse()
+            {
+                return pid;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("expected a pid in {} | received no pid", path.display());
+    }
+
+    async fn wait_for(path: &Path) {
+        for _ in 0..500 {
+            if path.exists() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!(
+            "expected {} to be written | received no file",
+            path.display()
+        );
+    }
+
+    /// Polls until `pid` is gone; the panic names the pid still alive.
+    async fn assert_gone(name: &str, pid: i32) {
+        for _ in 0..200 {
+            if !alive(pid) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("expected {name} pid {pid} gone after kill | received pid {pid} still alive");
+    }
+
+    #[tokio::test]
+    async fn the_child_sees_exactly_the_given_argv_cwd_and_env() {
+        let directory = scratch_dir("agent-launcher-authority");
+        let cwd = std::fs::canonicalize(&*directory).expect("scratch dir canonicalises");
+        let env = BTreeMap::from([
+            ("PATH".to_owned(), "/usr/bin:/bin".to_owned()),
+            ("AGENT_SENTINEL".to_owned(), "given value".to_owned()),
+        ]);
+        let mut env_process = start(
+            &launcher(),
+            LaunchSpec {
+                env: env.clone(),
+                ..spec(&["/usr/bin/env"], &cwd, false)
+            },
+        )
+        .await;
+        let printed = read_all(&mut env_process).await;
+        let mut lines: Vec<&str> = printed.lines().collect();
+        lines.sort_unstable();
+        // Only names reach the failure message: an inherited environment would carry the
+        // parent's credentials into the test log. HOME is set in the test process, so its absence
+        // proves nothing was inherited.
+        let names: Vec<&str> = lines
+            .iter()
+            .map(|line| line.split_once('=').map_or(*line, |(name, _)| name))
+            .collect();
+        assert_eq!(
+            names,
+            vec!["AGENT_SENTINEL", "PATH"],
+            "expected exactly the spec's environment names | received names {names:?}"
+        );
+        assert_eq!(
+            lines,
+            vec!["AGENT_SENTINEL=given value", "PATH=/usr/bin:/bin"],
+            "expected the spec's environment values unchanged"
+        );
+        assert_eq!(wait(&env_process).await.code, Some(0));
+
+        let body = "printf '%s\\n' \"$0\" \"$#\" \"$@\"\npwd -P";
+        let program = script(&directory, body);
+        let program = program.to_str().expect("utf-8 scratch path");
+        let mut argv_process = start(
+            &launcher(),
+            spec(&[program, "two words", "", "--flag=x"], &cwd, false),
+        )
+        .await;
+        let printed = read_all(&mut argv_process).await;
+        let expected = format!("{program}\n3\ntwo words\n\n--flag=x\n{}\n", cwd.display());
+        assert_eq!(
+            printed, expected,
+            "expected argv[0], three literal arguments and the spec cwd | received {printed:?}"
+        );
+        wait(&argv_process).await;
+    }
+
+    #[tokio::test]
+    async fn stdout_streams_chunks_to_eof_and_stdin_round_trips_until_closed() {
+        let directory = scratch_dir("agent-launcher-stdio");
+        let mut process = start(&launcher(), spec(&["cat"], &directory, true)).await;
+        let stdin = process.stdin.as_mut().expect("expected a stdin pipe");
+        stdin
+            .write_all(b"first\n")
+            .await
+            .expect("stdin accepts bytes");
+        let chunk = tokio::time::timeout(BOUND, process.stdout.next_chunk())
+            .await
+            .expect("expected an echoed chunk within the bound")
+            .expect("stdout is readable");
+        assert_eq!(chunk.as_deref(), Some(&b"first\n"[..]));
+        stdin.close().await.expect("stdin closes");
+        assert_eq!(
+            read_all(&mut process).await,
+            "",
+            "expected EOF after stdin closed"
+        );
+        assert_eq!(wait(&process).await.code, Some(0));
+    }
+
+    #[tokio::test]
+    async fn a_spec_without_stdin_gives_the_child_no_pipe() {
+        let directory = scratch_dir("agent-launcher-no-stdin");
+        let body = "if [ -p /dev/stdin ]; then echo pipe; else echo none; fi";
+        let program = script(&directory, body);
+        let mut process = start(
+            &launcher(),
+            spec(&[program.to_str().expect("utf-8")], &directory, false),
+        )
+        .await;
+        assert!(
+            process.stdin.is_none(),
+            "expected no stdin sink for stdin: false"
+        );
+        let printed = read_all(&mut process).await;
+        assert_eq!(
+            printed.trim(),
+            "none",
+            "expected stdin connected to no pipe | received {printed:?}"
+        );
+        wait(&process).await;
+    }
+
+    #[tokio::test]
+    async fn the_stderr_tail_is_bounded_and_redacted() {
+        let directory = scratch_dir("agent-launcher-stderr");
+        let body = "head -c 65536 /dev/zero | tr '\\0' 'x' >&2\necho >&2\n\
+                    echo 'Authorization: Bearer sk-launcher-secret-123456' >&2\necho tail-end >&2";
+        let program = script(&directory, body);
+        let limits = Limits {
+            stderr_tail_bytes: 256,
+            ..Limits::default()
+        };
+        let launcher = GuardedProcessLauncher::new(Arc::new(AlwaysAllow), &limits);
+        let mut process = start(
+            &launcher,
+            spec(&[program.to_str().expect("utf-8")], &directory, false),
+        )
+        .await;
+        read_all(&mut process).await;
+        wait(&process).await;
+        let tail = process.control.stderr_tail();
+        assert!(
+            tail.len() <= 256,
+            "expected at most 256 retained stderr bytes | received {}",
+            tail.len()
+        );
+        assert!(
+            tail.contains("tail-end") && !tail.contains('x'),
+            "expected only the last lines kept | received {tail:?}"
+        );
+        assert!(
+            !tail.contains("sk-launcher-secret-123456"),
+            "expected the credential redacted | received {tail:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn kill_reaps_the_whole_tree_and_concurrent_kills_are_idempotent() {
+        let directory = scratch_dir("agent-launcher-tree");
+        let target = directory.join("target.pid");
+        let grandchild = directory.join("grandchild.pid");
+        let body = format!(
+            "trap '' INT TERM\necho $$ > {}\nsleep 60 & echo $! > {}\nwhile :; do sleep 1; done",
+            target.display(),
+            grandchild.display()
+        );
+        let program = script(&directory, &body);
+        let process = start(
+            &launcher(),
+            spec(&[program.to_str().expect("utf-8")], &directory, false),
+        )
+        .await;
+        let target_pid = pid_in(&target).await;
+        let grandchild_pid = pid_in(&grandchild).await;
+        assert_eq!(
+            process.control.pid(),
+            u32::try_from(target_pid).ok(),
+            "expected pid() to be the target's own pid"
+        );
+        let first = Arc::clone(&process.control);
+        let second = Arc::clone(&process.control);
+        let (left, right) = tokio::time::timeout(BOUND, async {
+            tokio::join!(
+                first.kill(CancelReason::Requested),
+                second.kill(CancelReason::Requested)
+            )
+        })
+        .await
+        .expect("expected both kills to finish within the bound");
+        assert!(
+            left.is_ok() && right.is_ok(),
+            "expected both concurrent kills to succeed | received {left:?} and {right:?}"
+        );
+        assert_gone("target", target_pid).await;
+        assert_gone("grandchild", grandchild_pid).await;
+        let repeated = process.control.kill(CancelReason::Requested).await;
+        assert!(
+            repeated.is_ok(),
+            "expected a repeated kill to succeed | received {repeated:?}"
+        );
+        assert_eq!(
+            wait(&process).await.signal,
+            Some(libc::SIGKILL),
+            "expected the target ended by the forced tree kill"
+        );
+    }
+
+    #[tokio::test]
+    async fn dropping_every_handle_reaps_the_tree() {
+        let directory = scratch_dir("agent-launcher-drop");
+        let target = directory.join("target.pid");
+        let body = format!(
+            "trap '' INT TERM\necho $$ > {}\nexec sleep 60",
+            target.display()
+        );
+        let program = script(&directory, &body);
+        let process = start(
+            &launcher(),
+            spec(&[program.to_str().expect("utf-8")], &directory, true),
+        )
+        .await;
+        let target_pid = pid_in(&target).await;
+        drop(process);
+        assert_gone("dropped target", target_pid).await;
+    }
+
+    #[tokio::test]
+    async fn interrupt_delivers_sigint_to_a_running_child() {
+        let directory = scratch_dir("agent-launcher-interrupt");
+        let ready = directory.join("ready");
+        let body = format!(
+            "trap 'exit 42' INT\ntouch {}\nwhile :; do sleep 0.05; done",
+            ready.display()
+        );
+        let program = script(&directory, &body);
+        let process = start(
+            &launcher(),
+            spec(&[program.to_str().expect("utf-8")], &directory, false),
+        )
+        .await;
+        wait_for(&ready).await;
+        let outcome = process.control.interrupt(CancelReason::Requested).await;
+        assert!(
+            matches!(outcome, Ok(InterruptOutcome::Delivered)),
+            "expected InterruptOutcome::Delivered | received {outcome:?}"
+        );
+        let status = wait(&process).await;
+        assert_eq!(
+            status.code,
+            Some(42),
+            "expected the SIGINT trap's exit code 42 | received {status:?}"
+        );
+    }
+
+    /// A runtime started under `nohup`, or as a background job of a non-interactive shell, has
+    /// `SIGINT` ignored, and `execve` would hand that to every vendor CLI it launches, so the
+    /// Hub's interrupt did nothing. Re-runs [`interrupt_delivers_sigint_to_a_running_child`] in
+    /// this same test binary started by a shell that ignores `SIGINT` first, so no other test in
+    /// this process sees the ignored signal.
+    #[test]
+    fn interrupt_reaches_a_child_when_the_runtime_ignores_sigint() {
+        let inner = "external_agents::adapter::launcher::tests::unix::interrupt_delivers_sigint_to_a_running_child";
+        let output = std::process::Command::new("/bin/sh")
+            .args(["-c", "trap '' INT; exec \"$0\" --exact \"$1\" --nocapture"])
+            .arg(std::env::current_exe().expect("the test binary path exists"))
+            .arg(inner)
+            .output()
+            .expect("the shell that ignores SIGINT starts");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success() && stdout.contains("1 passed"),
+            "expected a child to trap the SIGINT sent while the runtime ignores it | received {}:\n{stdout}\n{stderr}",
+            output.status,
+        );
+    }
+
+    #[tokio::test]
+    async fn interrupt_after_exit_is_not_delivered() {
+        let directory = scratch_dir("agent-launcher-interrupt-exited");
+        let process = start(&launcher(), spec(&["true"], &directory, false)).await;
+        wait(&process).await;
+        let outcome = process.control.interrupt(CancelReason::Requested).await;
+        assert!(
+            matches!(outcome, Ok(InterruptOutcome::NotDelivered)),
+            "expected InterruptOutcome::NotDelivered for an exited child | received {outcome:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_full_pool_refuses_the_next_launch_and_frees_its_slot_on_exit() {
+        let directory = scratch_dir("agent-launcher-pool");
+        let gate = directory.join("gate");
+        let body = format!("while [ ! -e {} ]; do sleep 0.05; done", gate.display());
+        let program = script(&directory, &body);
+        let program = program.to_str().expect("utf-8");
+        let launcher = launcher().with_pool(1);
+        let first = start(&launcher, spec(&[program], &directory, false)).await;
+        let refused =
+            tokio::time::timeout(BOUND, launcher.spawn(spec(&[program], &directory, false)))
+                .await
+                .expect("expected the refusal within the bound | received a queued launch");
+        assert!(
+            matches!(refused, Err(Error::LimitExceeded { limit: 1, .. })),
+            "expected Error::LimitExceeded at 1 live process | received {:?}",
+            refused.as_ref().map(|_| "a second child")
+        );
+        std::fs::write(&gate, "").expect("gate opens");
+        wait(&first).await;
+        // `wait` answers as soon as the child exits; the slot is the tree's,
+        // and is released once `kill` has proven the tree gone.
+        tokio::time::timeout(BOUND, first.control.kill(CancelReason::Requested))
+            .await
+            .expect("expected the tree proven gone within the bound")
+            .expect("expected the finished tree to be reaped");
+        let third = start(&launcher, spec(&["true"], &directory, false)).await;
+        wait(&third).await;
+    }
+
+    #[tokio::test]
+    async fn a_refusing_launch_check_prevents_exec() {
+        let directory = scratch_dir("agent-launcher-refused");
+        let spawner = Arc::new(CountingSpawner::default());
+        let consent = Arc::new(RevokedConsent::default());
+        let launcher = GuardedProcessLauncher::new(
+            Arc::clone(&consent) as Arc<dyn LaunchCheck>,
+            &Limits::default(),
+        )
+        .with_spawner(Arc::clone(&spawner) as Arc<dyn ChildSpawner>);
+        let result = launcher.spawn(spec(&["true"], &directory, false)).await;
+        assert!(
+            matches!(
+                result,
+                Err(Error::Cancelled {
+                    reason: CancelReason::ConsentRevoked
+                })
+            ),
+            "expected Error::Cancelled(ConsentRevoked) | received {:?}",
+            result.as_ref().map(|_| "a started child")
+        );
+        assert_eq!(
+            consent.checks.load(Ordering::SeqCst),
+            1,
+            "expected the check to run once"
+        );
+        assert_eq!(
+            spawner.spawns.load(Ordering::SeqCst),
+            0,
+            "expected zero OS launches after a refused check"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_allowing_launch_check_reaches_the_spawner_once() {
+        let directory = scratch_dir("agent-launcher-allowed");
+        let spawner = Arc::new(CountingSpawner::default());
+        let launcher = launcher().with_spawner(Arc::clone(&spawner) as Arc<dyn ChildSpawner>);
+        let process = start(&launcher, spec(&["true"], &directory, false)).await;
+        wait(&process).await;
+        assert_eq!(
+            spawner.spawns.load(Ordering::SeqCst),
+            1,
+            "expected one OS launch"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_missing_program_error_carries_no_environment_value() {
+        let directory = scratch_dir("agent-launcher-missing");
+        let mut missing = spec(&["/nonexistent/agent-cli"], &directory, false);
+        missing
+            .env
+            .insert("AGENT_TOKEN".to_owned(), "env-secret-value".to_owned());
+        let result = launcher().spawn(missing).await;
+        let Err(error) = result else {
+            panic!("expected Error::ProgramNotFound | received a started child");
+        };
+        assert!(
+            matches!(&error, Error::ProgramNotFound { program } if program == "/nonexistent/agent-cli"),
+            "expected Error::ProgramNotFound naming the program | received {error:?}"
+        );
+        let rendered = format!("{error} {error:?}");
+        assert!(
+            !rendered.contains("env-secret-value"),
+            "expected no environment value in the error | received {rendered:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn shutdown_forces_a_tree_nobody_killed() {
+        let directory = scratch_dir("agent-launcher-shutdown");
+        let target = directory.join("target.pid");
+        let body = format!(
+            "trap '' INT TERM\necho $$ > {}\nexec sleep 60",
+            target.display()
+        );
+        let program = script(&directory, &body);
+        let release: &'static Release = Box::leak(Box::new(Release::new()));
+        let launcher = launcher().with_release(release);
+        let process = start(
+            &launcher,
+            spec(&[program.to_str().expect("utf-8")], &directory, false),
+        )
+        .await;
+        let target_pid = pid_in(&target).await;
+        let released = release.released().await;
+        assert!(
+            released,
+            "expected the owner released inside the shutdown budget"
+        );
+        assert_gone("unkilled target", target_pid).await;
+        drop(process);
+    }
+
+    #[tokio::test]
+    async fn an_empty_argv_is_a_host_configuration_error() {
+        let directory = scratch_dir("agent-launcher-empty");
+        let result = launcher().spawn(spec(&[], &directory, false)).await;
+        assert!(
+            matches!(result, Err(Error::HostConfiguration { .. })),
+            "expected Error::HostConfiguration | received {:?}",
+            result.as_ref().map(|_| "a started child")
+        );
+    }
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn windows_interrupt_is_unsupported_and_kill_ends_the_job() {
+    let directory = scratch_dir("agent-launcher-windows");
+    let process = start(
+        &launcher(),
+        LaunchSpec {
+            argv: vec![
+                "cmd.exe".into(),
+                "/d".into(),
+                "/c".into(),
+                "ping -n 60 127.0.0.1 >nul".into(),
+            ],
+            cwd: directory.to_path_buf(),
+            env: BTreeMap::from([("SystemRoot".to_owned(), "C:\\Windows".to_owned())]),
+            stdin: false,
+            hide_window: true,
+        },
+    )
+    .await;
+    let outcome = process.control.interrupt(CancelReason::Requested).await;
+    assert!(
+        matches!(outcome, Ok(InterruptOutcome::Unsupported)),
+        "expected InterruptOutcome::Unsupported on Windows | received {outcome:?}"
+    );
+    let killed = tokio::time::timeout(BOUND, process.control.kill(CancelReason::Requested)).await;
+    assert!(
+        matches!(killed, Ok(Ok(()))),
+        "expected the Job to end the child within the bound | received {killed:?}"
+    );
+}
+
+/// Cursor's Windows entry point is a `.ps1`: the request built from the SDK's launch spec, once
+/// the Job spawner rewrites it, runs the system PowerShell on that script with the spec's own
+/// arguments, environment, working directory, stdin and hidden window. Checked as argv, never by
+/// running PowerShell with a piped stdout.
+#[test]
+fn a_powershell_script_spec_becomes_a_contained_powershell_file_launch() {
+    let script = r"C:\Users\me\AppData\Local\cursor-agent\cursor-agent.ps1";
+    let spec = LaunchSpec {
+        argv: vec![script.into(), "acp".into()],
+        cwd: std::path::PathBuf::from(r"C:\workspace"),
+        env: BTreeMap::from([
+            ("PATH".to_owned(), r"C:\Windows\system32".to_owned()),
+            ("SystemRoot".to_owned(), r"C:\Windows".to_owned()),
+        ]),
+        stdin: true,
+        hide_window: true,
+    };
+    let exact = request(&spec);
+    let launch = mangostudio_runtime_core::subprocess::powershell_script_request(&exact, None)
+        .unwrap_or_else(|error| panic!("expected a PowerShell launch | received {error}"));
+
+    let argv: Vec<String> = std::iter::once(launch.program.to_string_lossy().into_owned())
+        .chain(
+            launch
+                .args
+                .iter()
+                .map(|argument| argument.to_string_lossy().into_owned()),
+        )
+        .collect();
+    assert_eq!(
+        argv,
+        [
+            r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "RemoteSigned",
+            "-File",
+            script,
+            "acp",
+        ],
+        "expected the PowerShell -File argv | received {argv:?}"
+    );
+    assert_eq!(
+        launch.env, exact.env,
+        "expected the SDK's exact environment"
+    );
+    assert_eq!(launch.cwd.as_deref(), Some(spec.cwd.as_path()));
+    assert!(launch.hide_window, "expected no console window");
+}

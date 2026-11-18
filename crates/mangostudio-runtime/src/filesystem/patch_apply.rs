@@ -883,7 +883,6 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::result_value::assert_wire_eq;
     use crate::{
         consent::source::ConsentSource,
         filesystem::{
@@ -894,6 +893,7 @@ mod tests {
         runtime_home::RuntimeSlot,
         test_support::{ScratchDir, scratch_dir},
     };
+    use mangostudio_runtime_core::assert_wire_eq;
 
     fn fixture() -> (ScratchDir, Arc<Service>) {
         let home = scratch_dir("patch-apply");

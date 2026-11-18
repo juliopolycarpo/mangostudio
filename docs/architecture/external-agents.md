@@ -227,7 +227,7 @@ Entry points:
 - `apps/shared/src/external-agents/schemas.ts` — the contracts
 - `apps/api/src/modules/external-agents/application/external-agent-discovery.ts` — the two tiers
 - `apps/api/src/services/runtime-client/runtime-client.ts` — the typed hub facade and event filter
-- `crates/mangostudio-runtime/src/external_agents/` — the runtime host over the External Agents
+- `crates/mangostudio-runtime-cold/src/external_agents/` — the runtime host over the External Agents
   SDK: session supervisor, authorized launch, isolation and the mapper to the wire (see
   [The Rust runtime host](#the-rust-runtime-host))
 - `apps/api/src/modules/external-agents/domain/adapter-descriptors.ts` — product declarations
@@ -447,7 +447,7 @@ MangoStudio never reads, stores, logs or transmits a credential value.
 
 It **may** read a bounded, non-secret CLI config to test whether a key is present — Cursor
 publishes sign-in state that way, and `probe_config_key` in
-`crates/mangostudio-runtime/src/probing/detection/auth_signal.rs` does exactly that: a length-capped read, a
+`crates/mangostudio-runtime-cold/src/probing/detection/auth_signal.rs` does exactly that: a length-capped read, a
 parse, one boolean out. The parsed value is never retained and no part of it reaches a result, a
 log or a diagnostic. Credential _files_, by contrast, are stat-only: `probe_auth_file` never opens
 one.
@@ -474,7 +474,7 @@ absence is default-deny, and there is no configuration flag that fabricates a pr
 The proof has two halves, in two places, because neither side can supply the other's.
 
 The **runtime** attests what it can establish about itself, in
-`crates/mangostudio-runtime/src/external_agents/isolation.rs`:
+`crates/mangostudio-runtime-cold/src/external_agents/isolation.rs`:
 
 | Method             | What it means                                                          | Who makes it                                      |
 | ------------------ | ---------------------------------------------------------------------- | ------------------------------------------------- |
@@ -1041,7 +1041,7 @@ target unavailable.
 
 ## The Rust runtime host
 
-`crates/mangostudio-runtime/src/external_agents/` hosts the same ten methods over the published
+`crates/mangostudio-runtime-cold/src/external_agents/` hosts the same ten methods over the published
 External Agents SDK (`mango-external-agents`, `mango-agent-claude`, `mango-agent-codex` and
 `mango-agent-acp`, pinned exactly at 0.11.0). The SDK owns vendor protocols, harness lifecycle and
 the idle-turn bound; the runtime owns authorized launch, scratch, consent, the session cap, the
@@ -1530,7 +1530,7 @@ runtime supports that layout as follows:
   version line happens to parse as this vendor's still wins, because a version string is the
   only identity the probe has. Telling them apart would need a vendor-specific fingerprint.
 - **Launch.** A `.ps1` cannot be started by `CreateProcessW`. The Windows Job spawner
-  (`crates/mangostudio-runtime/src/subprocess/powershell_script.rs`) rewrites it to
+  (`crates/mangostudio-runtime-core/src/subprocess/powershell_script.rs`) rewrites it to
   `<SystemRoot>\System32\WindowsPowerShell\v1.0\powershell.exe -NoLogo -NoProfile
 -NonInteractive -ExecutionPolicy RemoteSigned -File <script> <args...>`. The interpreter is
   named by full path, never searched for. The script path must be absolute, and a verbatim

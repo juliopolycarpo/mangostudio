@@ -23,10 +23,41 @@ Twenty-eight more packages build with `opt-level = "s"`: the MCP, HTTP, TLS and 
 adapters and their protocol schema, the runtime contract, `cap-std` and
 `cap-primitives`, `globset`, and the regex engine crates (`aho-corasick`, `regex-automata`,
 `regex-syntax`). The packages that run per request or per line stay at 3: `mangostudio-runtime`,
-`mango-external-agents`, `mango-protocol`, `memchr`, `serde_json`, `tokio`, and QuickJS (`rquickjs-sys`, C built by
-cc-rs, which reads its optimisation level from the package profile, so `s` there would compile the
-regex engine `fs.grep` runs with `-Os`). `crates/mangostudio-runtime/tests/it/release_profile.rs`
-pins both lists.
+`mangostudio-runtime-core`, `mango-external-agents`, `mango-protocol`, `memchr`, `serde_json`, `tokio`,
+and QuickJS (`rquickjs-sys`, C built by cc-rs, which reads its optimisation level from the package
+profile, so `s` there would compile the regex engine `fs.grep` runs with `-Os`).
+`crates/mangostudio-runtime/tests/it/release_profile.rs` pins both lists.
+
+The host's own cold code is one more package at `s`, `mangostudio-runtime-cold`: the MCP client, the
+external-agent host, machine probing and the toolchain commands. It is a separate crate because
+`mangostudio-runtime` cannot take the override (see the first rejected row below). Generic code
+that these modules instantiate, such as `Registry::implement` handlers, is compiled in the
+instantiating crate, so the handlers get `s` too. Linux x64, glibc,
+`cargo build --release -p mangostudio-runtime`, stripped, same toolchain and profile for each row:
+
+| Build                                                      | Stripped bytes | vs. main |
+| ---------------------------------------------------------- | -------------: | -------: |
+| main (one host crate)                                      |     23,817,432 |        — |
+| `mangostudio-runtime-cold` at `s`                          |     22,663,512 |    −4.8% |
+| host crates (runtime, core and cold) all at `s`, for scale |     20,882,192 |   −12.3% |
+
+The split recovers 1,153,920 of the 2,935,240 bytes that the whole host at `s` would, 39%, without
+touching the per-file and per-request code. `fs.grep`, 121 interleaved runs of
+`scripts/bench/grep.ts` on eight pinned CPUs, host load about 3:
+
+| Scenario   | main | cold at `s` | host at `s` | paired median delta, cold at `s` (pairs faster) | paired median delta, host at `s` (pairs faster) |
+| ---------- | ---: | ----------: | ----------: | ----------------------------------------------- | ----------------------------------------------- |
+| files-100  |  6.4 |         6.5 |         6.7 | 0.0 ms (56 of 121)                              | +0.3 ms (46 of 121)                             |
+| files-1000 | 57.1 |        57.6 |        60.2 | 0.0 ms (60 of 121)                              | +3.1 ms (42 of 121)                             |
+
+`runtime-handshake.ts` (61 runs, three rounds per binary) gives a `hello` median of 12.3 to 12.5 ms
+on main and 12.5 to 12.6 ms with the cold crate at `s`, and a first request of 59.7 to 60.0 ms
+against 58.8 to 60.3 ms. Peak RSS of the `files-1000` runtime is 23,028 KiB against 23,032 KiB.
+
+A benchmark comparison that spans this split mixes optimization levels for those modules: the base
+revision builds the MCP client, the external-agent host, probing and the toolchain commands at
+`opt-level = 3`, the head at `s`. Read a delta on `external_agents` benchmarks as the cost of that
+change as well as of any code change.
 
 Three things were measured and rejected, so the list stops here:
 
@@ -34,6 +65,8 @@ Three things were measured and rejected, so the list stops here:
   `fs.grep` over 1,000 files slows by 7% (paired median +7.2 ms on 106 ms, 6 of 41 pairs faster).
   Its per-file work is in that crate. A `[profile.release.package.mangostudio-runtime]` table also
   left the symbol table in the stripped binary (+5.4 MB), so the test refuses that table.
+  `mangostudio-runtime-core` stays at 3 for the same reason: the registry, the blocking pool and
+  the subprocess runner sit under every request, the relay and the PTY.
 - `mango-protocol` at `s` takes the stripped binary from 23.8 MB to 22.3 MB, but still slows the
   large-answer and per-request paths after large results stopped being copied. Against a build with
   the package at 3, over two series of 61 runs each: an `fs.list-directory` over 120,000 entries

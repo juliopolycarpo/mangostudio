@@ -27,7 +27,7 @@ connect with the command that builds it (see [Local runtime](#local-runtime)).
 | Per-chat read freshness state                                                    | Runtime (`crates/mangostudio-runtime`) | This cache is disposable and can be rebuilt through normal reads.                                                                                                                                                                                                                |
 | Pre-mutation capture, current-state hashing, and revert effects                  | Runtime (`crates/mangostudio-runtime`) | Mutation responses include serializable before snapshots and resulting hashes. Optional `containmentRoot` on revert.                                                                                                                                                             |
 | Checkpoint manifests, blobs, retention, and reverted state                       | Hub (`apps/api`)                       | Durable checkpoint state remains in SQLite and hub-managed blob storage.                                                                                                                                                                                                         |
-| MCP sessions: the SDK, the child process, the outbound HTTP request              | Runtime (`crates/mangostudio-runtime`) | A server row names an environment; its session opens there. Only `crates/mangostudio-runtime/src/mcp/sdk.rs` depends on `rmcp`.                                                                                                                                                  |
+| MCP sessions: the SDK, the child process, the outbound HTTP request              | Runtime (`crates/mangostudio-runtime`) | A server row names an environment; its session opens there. Only `crates/mangostudio-runtime-cold/src/mcp/sdk.rs` depends on `rmcp`.                                                                                                                                             |
 | MCP server rows, secrets, tool naming, and the pending elicitation registry      | Hub (`apps/api`)                       | The wire names a model sees must not change with placement; secrets live in one store and are delivered at connect. See [mcp.md](../reference/mcp.md).                                                                                                                           |
 | Toolchain, version-manager, and agent-CLI detection (`probing.*`)                | Runtime (`crates/mangostudio-runtime`) | PATH scans, version spawns, auth-signal stats, and library location stats all describe the machine they run on. Per-scan budgets live with the spawns they bound.                                                                                                                |
 | Detection policy: recipes, Node release data, cache freshness                    | Hub (`apps/api`)                       | Installability, live LTS metadata, and how long an answer may be reused are hub decisions and travel down as parameters. Cache keys include the connection, so a reconnect drops what it said.                                                                                   |
@@ -459,7 +459,7 @@ contract — every row in `apps/shared/src/runtime-contract/contract.ts` carries
 `capabilities` list keyed to the consent file's `allow` set, so a method defined without one
 is a compile error there, and naming a capability nobody can grant is a compile error too.
 
-`AuthorizationGuard` (`crates/mangostudio-runtime/src/ports/authorization.rs`) is the one
+`AuthorizationGuard` (`crates/mangostudio-runtime-core/src/ports/authorization.rs`) is the one
 `mango_protocol::contract::Guard` the runtime registers. It reads that list for every call, so a
 host whose `allow` is narrowed answers the methods it lacks with `DENIED` instead of running them,
 and it records the denial before returning. The Rust SDK's guard runs after the contract
@@ -1291,7 +1291,7 @@ Add a runtime operation as one coherent change:
    with `captureSnapshot: true` additionally require `fsRead` and `checkpoints`, since their
    response includes the previous file bytes. The Rust host rechecks that consent under the
    mutation lock before committing effects. Other read/write splits need separate methods.
-3. Register the handler through `Registry::implement` (`crates/mangostudio-runtime/src/registry.rs`)
+3. Register the handler through `Registry::implement` (`crates/mangostudio-runtime-core/src/registry.rs`)
    from its family's registration function, and add the method to
    `build_host_implements_exactly_the_current_method_families` in
    `crates/mangostudio-runtime/src/transport/mod.rs`. A declared method that is never registered
@@ -1310,7 +1310,7 @@ offer on some machines — has two more legs, and forgetting either ships green:
 
 8. Add the field to `RuntimeCapabilityManifestSchema`
    (`apps/shared/src/runtime-contract/manifest.ts`) as `Type.Optional`, and populate it from
-   the runtime's manifest (`crates/mangostudio-runtime/src/manifest.rs`). Required would fail decode
+   the runtime's manifest (`crates/mangostudio-runtime-core/src/manifest.rs`). Required would fail decode
    for every older peer; document whether absent means granted or unavailable, because the
    two readings already coexist in that schema — the original `features` keys mean granted,
    `externalAgents` and `gh` mean unavailable.

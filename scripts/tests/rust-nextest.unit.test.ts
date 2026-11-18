@@ -15,8 +15,10 @@ import { extractJobBlock, extractStepBlocks } from './support/workflow-blocks';
 
 const WORKSPACE_TESTS =
   'cargo nextest run --workspace --all-targets --all-features --locked --retries 0';
+// The runtime is three packages: the binary crate and the core and cold
+// libraries it links. Windows ARM64 must test all of them.
 const RUNTIME_TESTS =
-  'cargo nextest run -p mangostudio-runtime --all-targets --all-features --locked --retries 0';
+  'cargo nextest run -p mangostudio-runtime -p mangostudio-runtime-core -p mangostudio-runtime-cold --all-targets --all-features --locked --retries 0';
 const DOCTESTS = 'cargo test --doc --workspace --all-features --locked';
 const FIXTURE_GENERATOR =
   'cargo test -p mangostudio-runtime --test generate_rust_fixture --locked -- --ignored';
