@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
 import { readText } from './support/read-text';
-import { extractJobBlock, extractOnBlock, sectionKeys } from './support/workflow-blocks';
+import {
+  extractJobBlock,
+  extractOnBlock,
+  extractStepBlock,
+  sectionKeys,
+} from './support/workflow-blocks';
 
 const EXPR = '$' + '{{';
 
@@ -17,16 +22,21 @@ describe('issue triage workflow', () => {
   });
 
   test('uses minimal permissions and plain gh without checkout', () => {
-    expect(workflow).toContain('permissions: {}');
-    expect(workflow).toContain('issues: write');
+    // Workflow scope is empty; each job then grants itself issues: write and nothing else.
+    expect(workflow).toMatch(/^permissions: \{\}$/m);
     expect(workflow).not.toContain('pull-requests: write');
     expect(workflow).not.toContain('contents: write');
     expect(workflow).not.toContain('actions/checkout');
     expect(workflow).not.toContain('actions/github-script');
-    expect(workflow).toContain(`GH_TOKEN: ${EXPR} github.token }}`);
-    expect(workflow).toContain('gh issue view');
-    expect(workflow).toContain('gh issue edit');
-    expect(workflow).toContain('gh issue comment');
+    for (const job of ['type-label', 'needs-triage']) {
+      const block = extractJobBlock(workflow, job);
+      expect(block, `${job}: job-level issues: write`).toMatch(/^ {6}issues: write\b/m);
+      expect(block, `${job}: plain gh token`).toContain(`GH_TOKEN: ${EXPR} github.token }}`);
+      expect(block, `${job}: gh issue view`).toContain('gh issue view');
+      expect(block, `${job}: gh issue edit`).toContain('gh issue edit');
+    }
+    // Only the type-label job comments.
+    expect(extractJobBlock(workflow, 'type-label')).toContain('gh issue comment');
   });
 
   test('backstops status needs triage only on opened when no status label exists', () => {
@@ -60,7 +70,11 @@ describe('issue triage workflow', () => {
     // `gh --jq` takes a single expression; it has no `--arg` passthrough, so
     // `--jq --arg m ...` makes gh reject the call with "accepts 1 arg(s)".
     expect(workflow).not.toContain('--jq --arg');
-    expect(workflow).toContain('contains($ENV.MARKER)');
+    const step = extractStepBlock(
+      extractJobBlock(workflow, 'type-label'),
+      'Require exactly one type label'
+    );
+    expect(step).toContain('contains($ENV.MARKER)');
   });
 
   test('derives the AGENTS.md link from the event context, not a hardcoded repo', () => {
