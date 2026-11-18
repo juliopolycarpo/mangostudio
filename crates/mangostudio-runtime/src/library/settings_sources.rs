@@ -7,7 +7,8 @@
 //! failure); a file that exists but cannot be turned into text reports why
 //! (`unreadable`, `not-regular-file`, `too-large`). A settings path is a
 //! fixed vendor name, so a final-component symlink is refused rather than
-//! followed (`O_NOFOLLOW` where the platform has it, as TypeScript does).
+//! followed (`O_NOFOLLOW` on Unix, as TypeScript does; on Windows the leaf is
+//! opened as a reparse point and refused by its attributes).
 
 use std::collections::HashMap;
 use std::fs::OpenOptions;
@@ -221,7 +222,7 @@ fn read_rules_directory(path: &Path) -> Option<RulesRead> {
 fn read_bounded(path: &Path) -> Result<(String, u64), Option<ReadFailure>> {
     let file = open_no_follow(path).map_err(|error| classify(path, &error))?;
     let metadata = file.metadata().map_err(|_| Some(ReadFailure::Unreadable))?;
-    if !metadata.is_file() {
+    if !metadata.is_file() || is_reparse_point(&metadata) {
         return Err(Some(ReadFailure::NotRegularFile));
     }
     if metadata.len() > MAX_SETTINGS_SOURCE_BYTES {
@@ -244,7 +245,32 @@ fn open_no_follow(path: &Path) -> std::io::Result<std::fs::File> {
         // before the `fstat` check refuses it.
         options.custom_flags(nix::libc::O_NOFOLLOW | nix::libc::O_NONBLOCK);
     }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // Open a final-component symlink or other reparse point itself instead
+        // of its target, so `read_bounded` sees `FILE_ATTRIBUTE_REPARSE_POINT`
+        // on the handle and refuses it. No `FILE_FLAG_BACKUP_SEMANTICS`: only
+        // files are opened here, and a directory leaf must keep failing to open.
+        options.custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT);
+    }
     options.open(path)
+}
+
+/// Whether the opened handle is a reparse point (symlink, junction, mount point,
+/// cloud placeholder). Unix refuses a symlink leaf at `open` (`O_NOFOLLOW`);
+/// Windows has no such open flag, so the opened handle's attributes decide.
+#[cfg(windows)]
+fn is_reparse_point(metadata: &std::fs::Metadata) -> bool {
+    use std::os::windows::fs::MetadataExt;
+    metadata.file_attributes()
+        & windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT
+        != 0
+}
+
+#[cfg(not(windows))]
+fn is_reparse_point(_metadata: &std::fs::Metadata) -> bool {
+    false
 }
 
 fn classify(path: &Path, error: &std::io::Error) -> Option<ReadFailure> {
@@ -321,6 +347,86 @@ mod tests {
         assert_eq!(
             settings.content, None,
             "the symlink target must never be read"
+        );
+    }
+
+    /// The leaf policy must not turn away an ordinary file on any platform.
+    #[test]
+    fn a_regular_settings_file_is_read_with_its_size() {
+        let home = crate::test_support::scratch_dir("library-settings-regular");
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::write(home.join(".claude/settings.json"), "{\"ok\": true}").unwrap();
+        let sources = read_settings_sources(&env_at(&home));
+        let settings = source(&sources, "claude-settings");
+        assert_eq!(
+            (
+                settings.present,
+                settings.failure_reason,
+                settings.content.as_deref(),
+                settings.size_bytes
+            ),
+            (true, None, Some("{\"ok\": true}"), Some(12)),
+            "expected a regular file to be read in full | received {settings:?}"
+        );
+    }
+
+    /// Windows has no `O_NOFOLLOW`: the symlink leaf is opened as a reparse point
+    /// and refused by its attributes, with the same reason Unix reports.
+    #[cfg(windows)]
+    #[test]
+    fn a_settings_path_that_is_a_file_symlink_is_refused_on_windows() {
+        // `ERROR_PRIVILEGE_NOT_HELD`: creating a symlink needs Developer Mode or
+        // an elevated token.
+        const ERROR_PRIVILEGE_NOT_HELD: i32 = 1314;
+        let home = crate::test_support::scratch_dir("library-settings-symlink-windows");
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::write(home.join("elsewhere.json"), "{\"secret\": true}").unwrap();
+        if let Err(error) = std::os::windows::fs::symlink_file(
+            home.join("elsewhere.json"),
+            home.join(".claude/settings.json"),
+        ) {
+            assert_eq!(
+                error.raw_os_error(),
+                Some(ERROR_PRIVILEGE_NOT_HELD),
+                "expected symlink creation to succeed or fail with ERROR_PRIVILEGE_NOT_HELD | received {error:?}"
+            );
+            eprintln!("skipped: this Windows account lacks the symlink-creation privilege");
+            return;
+        }
+        let sources = read_settings_sources(&env_at(&home));
+        let settings = source(&sources, "claude-settings");
+        assert_eq!(settings.failure_reason, Some(ReadFailure::NotRegularFile));
+        assert_eq!(
+            settings.content, None,
+            "the symlink target must never be read"
+        );
+    }
+
+    /// A directory junction at the leaf is a reparse point too; it needs no
+    /// privilege to create, so this case always runs on Windows.
+    #[cfg(windows)]
+    #[test]
+    fn a_settings_path_that_is_a_junction_is_refused_on_windows() {
+        let home = crate::test_support::scratch_dir("library-settings-junction-windows");
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::create_dir_all(home.join("elsewhere")).unwrap();
+        let created = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            // Joined per component: `mklink` rejects a forward slash in the link path.
+            .arg(home.join(".claude").join("settings.json"))
+            .arg(home.join("elsewhere"))
+            .output()
+            .unwrap();
+        assert!(
+            created.status.success(),
+            "expected mklink /J to create the junction | received {created:?}"
+        );
+        let sources = read_settings_sources(&env_at(&home));
+        let settings = source(&sources, "claude-settings");
+        assert_eq!(
+            (settings.failure_reason, settings.content.as_deref()),
+            (Some(ReadFailure::NotRegularFile), None),
+            "expected a junction leaf to be refused unread | received {settings:?}"
         );
     }
 
