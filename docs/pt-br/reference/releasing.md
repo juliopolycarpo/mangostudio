@@ -388,6 +388,11 @@ mangostudio upgrade --canary 1234abc
 Nada reconstrói mais uma tag canary a partir de uma versão: `install.sh
 --canary`, `install.ps1 -Canary` e a verificação de atualização do hub sempre
 resolvem a pre-release canary mais recente na lista de releases do GitHub.
+Essa consulta é anônima por padrão e divide o limite de 60 requisições por hora
+do IP. Defina `GITHUB_TOKEN` (ou `GH_TOKEN`, se a primeira não existir) e os dois
+instaladores enviam `Authorization: Bearer <token>` somente a `api.github.com`;
+os downloads dos assets nunca recebem o token. O `mangostudio upgrade` do hub
+não repassa essas variáveis ao script embutido.
 
 Os canais publicam de forma independente após aprovação. Antes de declarar
 no-op, a verificação baixa os sete pacotes npm e compara arquivos, hashes e

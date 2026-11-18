@@ -433,7 +433,14 @@ Two consequences worth knowing:
 
 - **Nothing reconstructs a canary tag from a version.** `install.sh --canary`,
   `install.ps1 -Canary` and the hub's own update check all resolve the newest
-  canary pre-release from the release list.
+  canary pre-release from the release list. That lookup is an anonymous
+  `api.github.com` call by default, so it shares the caller's 60-requests-per-hour
+  limit. Set `GITHUB_TOKEN` (or `GH_TOKEN` when it is unset) and both installers
+  send it as `Authorization: Bearer <token>` on that call and nothing else:
+  release asset downloads from `github.com` never carry it. `install.sh` hands the
+  header to curl through a config on stdin, so it never shows up in `ps`. An
+  empty value counts as unset. The hub's `mangostudio upgrade` does not forward
+  either variable to the embedded script.
 - **Old canary releases are pruned**, tag included, to a keep-window
   (`scripts/release/prune-canary-releases.ts`, 14 by default, roughly fourteen
   days when main advances daily, and ~15 GB of release storage at ~1.1 GB per

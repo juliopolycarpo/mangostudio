@@ -65,6 +65,8 @@ function Show-Usage {
   Write-Host '  MANGOSTUDIO_INSTALL_DIR     Override the versioned install root'
   Write-Host '  MANGOSTUDIO_BIN_DIR         Override the user bin directory'
   Write-Host '  MANGOSTUDIO_INSTALL_ORIGIN  Set to "upgrade" when the hub itself runs this script'
+  Write-Host '  GITHUB_TOKEN                Authenticates api.github.com requests (GH_TOKEN if unset); raises the'
+  Write-Host '                              rate limit. Release downloads never receive it.'
 }
 
 function Fail([string]$Message) {
@@ -170,7 +172,7 @@ function Get-ResponseHeader($Response, [string]$Name) {
 # 429, or as 403 with X-RateLimit-Remaining 0 (primary limit) or Retry-After
 # (secondary limit); any other refusal keeps its plain status. Mirrors
 # describe_github_api_failure in install.sh.
-function Get-GitHubApiFailureMessage($ErrorRecord, [string]$Url) {
+function Get-GitHubApiFailureMessage($ErrorRecord, [string]$Url, [bool]$Authenticated) {
   $response = Get-Prop $ErrorRecord.Exception 'Response'
   if ($null -eq $response) {
     return "failed to fetch canary releases from ${Url}: $($ErrorRecord.Exception.Message)"
@@ -199,15 +201,51 @@ function Get-GitHubApiFailureMessage($ErrorRecord, [string]$Url) {
   } elseif ($retryAfter) {
     $message = "$message; Retry-After: $retryAfter"
   }
+  # An anonymous request shares the caller's IP quota; a token raises it. When
+  # one was already sent, the suggestion would be wrong, so it is left out.
+  if (-not $Authenticated) {
+    return "$message. Wait for it to reset and run the installer again, or set GITHUB_TOKEN to raise the limit."
+  }
   return "$message. Wait for it to reset, then run the installer again."
+}
+
+# The token for api.github.com requests: GITHUB_TOKEN, else GH_TOKEN. An empty
+# or blank value counts as unset, because CI systems export an empty
+# GITHUB_TOKEN when no secret is wired. $null for an anonymous request.
+function Get-GitHubApiToken {
+  foreach ($name in 'GITHUB_TOKEN', 'GH_TOKEN') {
+    $value = [Environment]::GetEnvironmentVariable($name)
+    if ([string]::IsNullOrWhiteSpace($value)) { continue }
+    $token = $value.Trim()
+    # A header value with a control, space or non-ASCII character makes
+    # PowerShell reject the request, and PowerShell 7 quotes the value in that
+    # error. Refuse it here instead, without echoing it.
+    if ($token -match '[^\x21-\x7E]') {
+      Fail "$name contains whitespace, control or non-ASCII characters; refusing to send it"
+    }
+    return $token
+  }
+  return $null
+}
+
+# Invoke-RestMethod for an api.github.com URL, authenticated when a token is
+# set. Only call this for api.github.com: the release asset downloads (Save-Url)
+# stay anonymous. The header travels in -Headers, never in a message or the
+# command line; PowerShell 7 also drops Authorization on a cross-host redirect
+# (unless -PreserveAuthorizationOnRedirect, which is not passed here).
+function Invoke-GitHubApi([string]$Url, [string]$Token) {
+  $request = @{ Uri = $Url; UseBasicParsing = $true }
+  if ($Token) { $request.Headers = @{ Authorization = "Bearer $Token" } }
+  Invoke-RestMethod @request
 }
 
 function Get-CanaryTag {
   $url = "$GitHubApi/releases?per_page=30"
+  $token = Get-GitHubApiToken
   try {
-    $releases = Invoke-RestMethod -Uri $url -UseBasicParsing
+    $releases = Invoke-GitHubApi $url $token
   } catch {
-    Fail (Get-GitHubApiFailureMessage $_ $url)
+    Fail (Get-GitHubApiFailureMessage $_ $url ([bool]$token))
   }
   $tag = Select-CanaryTag $releases
   if (-not $tag) { Fail 'no canary release found' }

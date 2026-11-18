@@ -934,13 +934,51 @@ describe('install.ps1 canary release lookup (fake api.github.com)', () => {
       `throw (New-Object FakeGithubApiException -ArgumentList @('The remote server returned an error: (${status}).', $r))`,
     ].join('; ');
 
+  /**
+   * Environment for one lookup: each entry is set, then the other token
+   * variable stays unset so the test host's own tokens never decide the case.
+   * Defaults to GITHUB_TOKEN=TOKEN.
+   */
+  interface TokenEnv {
+    readonly GITHUB_TOKEN?: string;
+    readonly GH_TOKEN?: string;
+  }
+
+  /** PowerShell that clears both token variables, then sets the ones in env. */
+  const tokenSetup = (env: TokenEnv): string =>
+    [
+      'Remove-Item Env:GITHUB_TOKEN -ErrorAction SilentlyContinue',
+      'Remove-Item Env:GH_TOKEN -ErrorAction SilentlyContinue',
+      ...Object.entries(env).map(([name, value]) => `$env:${name} = ${psQuote(value)}`),
+    ].join('; ');
+
   /** What Get-CanaryTag throws against the fake, or 'tag=<tag>' when it resolves. */
-  const lookupMessage = (invokeRestMethodBody: string): string => {
+  const lookupMessage = (
+    invokeRestMethodBody: string,
+    env: TokenEnv = { GITHUB_TOKEN: TOKEN }
+  ): string => {
     const result = runDotSourced(
       layout().scriptPath,
-      `${DEFINE_FAKE_EXCEPTION}; $env:GITHUB_TOKEN = ${psQuote(TOKEN)}; function Invoke-RestMethod { ${invokeRestMethodBody} }; $m = '<no failure>'; try { $m = 'tag=' + (Get-CanaryTag) } catch { $m = $_.Exception.Message }; [Console]::Out.Write($m)`
+      `${DEFINE_FAKE_EXCEPTION}; ${tokenSetup(env)}; function Invoke-RestMethod { ${invokeRestMethodBody} }; $m = '<no failure>'; try { $m = 'tag=' + (Get-CanaryTag) } catch { $m = $_.Exception.Message }; [Console]::Out.Write($m)`
     );
     expect(result.exitCode, JSON.stringify(result)).toBe(0);
+    return result.stdout;
+  };
+
+  /**
+   * What the fake Invoke-RestMethod saw: 'tag=<tag>;auth=<sent|none|other>;uri=<uri>'.
+   * The fake compares the Authorization header to the expected Bearer value
+   * itself, so the token never has to appear in the output.
+   */
+  const observedRequest = (env: TokenEnv, expectedToken: string): string => {
+    const fake =
+      "param($Uri, [switch]$UseBasicParsing, $Headers) $global:SeenUri = $Uri; $global:SeenAuth = 'none'; if ($Headers) { $global:SeenAuth = [string]$Headers['Authorization'] }; [pscustomobject]@{ tag_name = 'v0.1.1-canary.abc1234' }";
+    const result = runDotSourced(
+      layout().scriptPath,
+      `${tokenSetup(env)}; function Invoke-RestMethod { ${fake} }; $tag = Get-CanaryTag; $auth = 'other'; if ($global:SeenAuth -eq 'none') { $auth = 'none' } elseif ($global:SeenAuth -ceq ${psQuote(`Bearer ${expectedToken}`)}) { $auth = 'sent' }; [Console]::Out.Write('tag=' + $tag + ';auth=' + $auth + ';uri=' + $global:SeenUri)`
+    );
+    expect(result.exitCode, JSON.stringify(result)).toBe(0);
+    expect(result.stdout + result.stderr).not.toContain(expectedToken);
     return result.stdout;
   };
 
@@ -996,6 +1034,78 @@ describe('install.ps1 canary release lookup (fake api.github.com)', () => {
       'tag=v0.1.1-canary.abc1234'
     );
   });
+
+  const API_URL = 'https://api.github.com/repos/juliopolycarpo/mangostudio/releases?per_page=30';
+  const OTHER_TOKEN = 'ghp_FIXTURE_OTHER_TOKEN_MUST_NOT_PRINT';
+
+  test.skipIf(!POWERSHELL)('GITHUB_TOKEN is sent to the releases API as a Bearer header', () => {
+    expect(observedRequest({ GITHUB_TOKEN: TOKEN }, TOKEN)).toBe(
+      `tag=v0.1.1-canary.abc1234;auth=sent;uri=${API_URL}`
+    );
+  });
+
+  test.skipIf(!POWERSHELL)('GH_TOKEN is used when GITHUB_TOKEN is unset', () => {
+    expect(observedRequest({ GH_TOKEN: TOKEN }, TOKEN)).toContain(';auth=sent;');
+  });
+
+  test.skipIf(!POWERSHELL)('GITHUB_TOKEN wins over GH_TOKEN when both are set', () => {
+    expect(observedRequest({ GITHUB_TOKEN: TOKEN, GH_TOKEN: OTHER_TOKEN }, TOKEN)).toContain(
+      ';auth=sent;'
+    );
+  });
+
+  test.skipIf(!POWERSHELL)('no token sends no Authorization header', () => {
+    expect(observedRequest({}, TOKEN)).toBe(`tag=v0.1.1-canary.abc1234;auth=none;uri=${API_URL}`);
+  });
+
+  test.skipIf(!POWERSHELL)('a whitespace-only token counts as unset', () => {
+    expect(observedRequest({ GITHUB_TOKEN: '   ' }, TOKEN)).toContain(';auth=none;');
+  });
+
+  test.skipIf(!POWERSHELL)('a token with an embedded space is refused without echoing it', () => {
+    const message = lookupMessage("[pscustomobject]@{ tag_name = 'v0.1.1-canary.abc1234' }", {
+      GITHUB_TOKEN: 'ghp_has space',
+    });
+
+    expect(message).toContain('GITHUB_TOKEN contains whitespace');
+    expect(message).not.toContain('ghp_has');
+  });
+
+  test.skipIf(!POWERSHELL)('release asset downloads never receive the token', () => {
+    const fake =
+      "param($Uri, $OutFile, [switch]$UseBasicParsing, $Headers) $global:SeenHeaders = 'none'; if ($PSBoundParameters.ContainsKey('Headers')) { $global:SeenHeaders = 'present' }";
+    const result = runDotSourced(
+      layout().scriptPath,
+      `${tokenSetup({ GITHUB_TOKEN: TOKEN, GH_TOKEN: OTHER_TOKEN })}; function Invoke-WebRequest { ${fake} }; Save-Url 'https://github.com/juliopolycarpo/mangostudio/releases/download/v0.1.1/SHA256SUMS' 'unused.txt'; [Console]::Out.Write('headers=' + $global:SeenHeaders)`
+    );
+
+    expect(result.exitCode, JSON.stringify(result)).toBe(0);
+    expect(result.stdout).toBe('headers=none');
+  });
+
+  test.skipIf(!POWERSHELL)('an anonymous rate-limited lookup suggests setting GITHUB_TOKEN', () => {
+    const message = lookupMessage(
+      refusal(403, { 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': RESET_EPOCH }),
+      {}
+    );
+
+    expect(message).toContain('GitHub API rate limit exceeded (HTTP 403)');
+    expect(message).toContain('set GITHUB_TOKEN');
+  });
+
+  test.skipIf(!POWERSHELL)(
+    'a rate-limited lookup that already sent a token does not suggest one',
+    () => {
+      const message = lookupMessage(
+        refusal(403, { 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': RESET_EPOCH }),
+        { GH_TOKEN: TOKEN }
+      );
+
+      expect(message).toContain('GitHub API rate limit exceeded (HTTP 403)');
+      expect(message).not.toContain('GITHUB_TOKEN');
+      expect(message).not.toContain(TOKEN);
+    }
+  );
 });
 
 describe('install.ps1 failed version probe (fake mangostudio.exe)', () => {
