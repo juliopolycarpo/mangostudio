@@ -91,6 +91,18 @@ function openPort(deferReads: boolean) {
     destroyWritable(): void {
       writable.destroy();
     },
+    /**
+     * Emits one chunk per text out of a single buffer, overwritten in place
+     * between reads, the way a readable that reuses its read buffer does.
+     */
+    emitFromReusedBuffer(...texts: string[]): void {
+      const shared = Buffer.alloc(Math.max(...texts.map((text) => Buffer.byteLength(text))));
+      for (const text of texts) {
+        shared.fill(0x20);
+        shared.write(text);
+        readable.emit('data', shared);
+      }
+    },
   };
 }
 
@@ -186,6 +198,17 @@ describe('createStreamPort read delivery', () => {
     expect(() => port.handle.port.send({ type: 'pong' })).toThrow(/state "failed"/);
 
     expect(port.order).toEqual(['closure:closed']);
+  });
+
+  it('keeps each deferred chunk intact when the stream reuses one buffer', async () => {
+    const port = openPort(true);
+
+    port.emitFromReusedBuffer(PING, PONG);
+    await nextTurn();
+
+    // Without a copy both chunks alias the buffer's last contents, so the
+    // second read shows twice and the first never arrives.
+    expect(port.order).toEqual(['ping', 'pong']);
   });
 
   it('still delivers the end of the stream after a frame listener throws', () => {

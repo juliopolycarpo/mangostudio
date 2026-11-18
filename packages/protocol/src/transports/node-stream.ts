@@ -26,7 +26,9 @@ export interface StreamPortOptions {
    * instead of inside the stream's own callback. A frame listener that answers
    * from inside a child pipe's `data` callback loses the reply on Bun for
    * Windows when the child writes it back at once, so the launcher asks for
-   * this; a socket does not need it.
+   * this; a socket does not need it. Each chunk is copied when it arrives,
+   * because it is delivered after the callback returns, so a readable that
+   * reuses one buffer between reads is safe.
    */
   readonly deferReads?: boolean;
 }
@@ -101,7 +103,11 @@ function readFramesFrom(
   deliver: ReadDelivery
 ): () => void {
   const onData = (chunk: unknown): void => {
-    const bytes = toBytes(chunk);
+    const view = toBytes(chunk);
+    // A deferred chunk outlives this callback, and a readable that reuses its
+    // buffer would overwrite it before the drain; a string chunk is already a
+    // fresh encoding. Inline delivery decodes before the callback returns.
+    const bytes = deliver.holdsChunks && typeof chunk !== 'string' ? view.slice() : view;
     deliver.run(() => handle.feed(bytes));
   };
   const onEnd = (): void => deliver.run(() => handle.eof());
@@ -128,6 +134,8 @@ function readFramesFrom(
 
 /** How a stream event reaches the port, and how to drop the ones still waiting. */
 interface ReadDelivery {
+  /** True when an event runs after the stream's callback returned. */
+  readonly holdsChunks: boolean;
   run(event: () => void): void;
   /** Runs behind whatever is waiting, and at once when nothing is. */
   after(event: () => void): void;
@@ -135,6 +143,7 @@ interface ReadDelivery {
 }
 
 const deliverNow: ReadDelivery = {
+  holdsChunks: false,
   run: (event) => event(),
   after: (event) => event(),
   stop: () => undefined,
@@ -177,6 +186,7 @@ function deliverLaterInOrder(): ReadDelivery {
     schedule();
   };
   return {
+    holdsChunks: true,
     run,
     after: (event) => (waiting.length > 0 ? run(event) : event()),
     stop: () => {
