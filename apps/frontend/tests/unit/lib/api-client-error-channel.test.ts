@@ -3,7 +3,7 @@
  *
  * `api-keys` and `tool-identities` spread a module-level `errorResponses` map
  * into each route's `response`. Declaring that map `as const` makes Eden type
- * `error` as `unknown`, so callers had to route it through `throwApiError`.
+ * `error` as `unknown`, so callers had to unwrap it without type checking.
  * These are compile-time assertions with a token runtime body; `tsc` runs them
  * under `bun run check`.
  */
