@@ -261,12 +261,46 @@
  * The caret has to be a pseudo element on the last line's own box. Rendered as
  * a sibling of `.markdown-content` it sits *below* the final paragraph, because
  * both are block boxes — which left a blank line hanging under every streaming
- * block for as long as the stream ran. */
+ * block for as long as the stream ran.
+ *
+ * A list or a quote opens a line *under* its last line rather than trailing it,
+ * so the caret hops down to whatever holds that line. Code blocks and tables
+ * have no line to trail at all: inside `<pre>` the caret would land in the
+ * highlighted source, next to the copy button, and after a table's scroll box it
+ * would hang on a line of its own. At the top level they are simply left out of
+ * the lists below.
+ *
+ * Every selector keyed on the streaming class ends in a tag, and the lists are
+ * spelled out. A bare `:last-child` or an `:is()` list as the last compound makes
+ * Chrome restyle the whole subtree when the class changes, and the class comes off
+ * when the reply ends: 160 ms for a 100 KB answer (16,000 of its 19,000 elements
+ * are code-token spans), against 11 ms with tags. The tags are the block elements
+ * `createParser` can emit at the top of a message or of a quote. */
 
 .streaming-caret::after,
-.markdown-content--streaming > :last-child::after,
-.markdown-content--streaming > :is(ul, ol):last-child > li:last-child::after,
-.markdown-content--streaming > blockquote:last-child > :last-child::after {
+.markdown-content--streaming > p:last-child::after,
+.markdown-content--streaming > h1:last-child::after,
+.markdown-content--streaming > h2:last-child::after,
+.markdown-content--streaming > h3:last-child::after,
+.markdown-content--streaming > h4:last-child::after,
+.markdown-content--streaming > h5:last-child::after,
+.markdown-content--streaming > h6:last-child::after,
+.markdown-content--streaming > hr:last-child::after,
+.markdown-content--streaming > ul:last-child > li:last-child::after,
+.markdown-content--streaming > ol:last-child > li:last-child::after,
+.markdown-content--streaming > blockquote:last-child > p:last-child::after,
+.markdown-content--streaming > blockquote:last-child > h1:last-child::after,
+.markdown-content--streaming > blockquote:last-child > h2:last-child::after,
+.markdown-content--streaming > blockquote:last-child > h3:last-child::after,
+.markdown-content--streaming > blockquote:last-child > h4:last-child::after,
+.markdown-content--streaming > blockquote:last-child > h5:last-child::after,
+.markdown-content--streaming > blockquote:last-child > h6:last-child::after,
+.markdown-content--streaming > blockquote:last-child > hr:last-child::after,
+.markdown-content--streaming > blockquote:last-child > ul:last-child::after,
+.markdown-content--streaming > blockquote:last-child > ol:last-child::after,
+.markdown-content--streaming > blockquote:last-child > blockquote:last-child::after,
+.markdown-content--streaming > blockquote:last-child > pre:last-child::after,
+.markdown-content--streaming > blockquote:last-child > div:last-child::after {
   content: "";
   display: inline-block;
   width: 2px;
@@ -277,16 +311,6 @@
    * quiet as the prose it trails. */
   background: var(--streaming-caret-color, var(--color-accent));
   animation: var(--animate-blink);
-}
-
-/* A list or a quote opens a line *under* its last line rather than trailing it,
- * so the caret hops down to whatever holds that line. Code blocks and tables
- * have no line to trail at all: inside `<pre>` the caret would land in the
- * highlighted source, next to the copy button, and after a table's scroll box it
- * would hang on a line of its own. */
-.markdown-content--streaming
-  > :is(ul, ol, blockquote, pre, .markdown-table-scroll):last-child::after {
-  content: none;
 }
 
 .markdown-content--thinking {
