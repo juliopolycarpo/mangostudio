@@ -20,6 +20,18 @@ describe('owned artifact hub', () => {
     expect(fake.events).toEqual(['spawn', 'ready', 'SIGTERM', 'spawn', 'ready', 'SIGTERM']);
     expect(fake.signalled).toEqual([-900001, -900001]);
   });
+  test('awaitExit returns the hub exit code without signalling and times out while it runs', async () => {
+    const fake = new FakeSmokeHub();
+    const hub = new SmokeHub(fake.options());
+    await expect(hub.awaitExit(10)).rejects.toThrow('hub exit wait: expected a started hub');
+    await hub.start();
+    expect(await hub.awaitExit(20)).toBeUndefined();
+    expect(fake.signalled).toEqual([]);
+    fake.root?.kill('SIGTERM');
+    expect(await hub.awaitExit(1_000)).toBe(0);
+    // The owner still settles the exited hub afterwards, as the smoke's finally does.
+    await hub.stop();
+  });
   test('failed readiness leaves the exact child owned for finally cleanup', async () => {
     const fake = new FakeSmokeHub();
     fake.readyFailure = true;
