@@ -85,6 +85,17 @@ describe('requestHubShutdown', () => {
     expect(http.calls, 'expected no request to a non-loopback state-file host').toEqual([]);
   });
 
+  for (const port of [0, -1, 65_536, 3001.5, Number.NaN, 1e21]) {
+    it(`does not dial a state file port of ${port}`, async () => {
+      const http = new FakeFetch(() => new Response(null, { status: 202 }));
+
+      const answer = await requestHubShutdown({ ...STATE, port }, { fetch: http.fetch });
+
+      expect(answer.accepted).toBe(false);
+      expect(http.calls, `expected no request to port ${port}`).toEqual([]);
+    });
+  }
+
   it('reports the status when the hub refuses the token', async () => {
     const http = new FakeFetch(() => new Response('{}', { status: 401 }));
 

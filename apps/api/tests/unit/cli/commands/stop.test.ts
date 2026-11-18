@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import { runStop } from '../../../../src/cli/commands/stop';
+import { HUB_SHUTDOWN_WAIT_MS } from '../../../../src/cli/process-control';
 import type { ServerState } from '../../../../src/lib/server-state';
 import { FakeHubShutdown } from '../../../support/mocks/fake-hub-shutdown';
 import { FakeProcessController } from '../../../support/mocks/fake-process-controller';
@@ -233,7 +234,9 @@ describe('runStop', () => {
       });
 
       expect(controller.terminated, 'expected the fallback to terminate pid 42 once').toEqual([42]);
-      expect(lines.join('\n')).toContain('did not exit within 10s of the shutdown request');
+      expect(lines.join('\n')).toContain(
+        `did not exit within ${HUB_SHUTDOWN_WAIT_MS / 1000}s of the shutdown request`
+      );
       expect(lines.at(-1)).toBe('MangoStudio stopped (PID 42).');
       expect(exitCode).toBeUndefined();
     });

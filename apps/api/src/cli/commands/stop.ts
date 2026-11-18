@@ -30,6 +30,5 @@ export async function runStop(deps: Partial<StopDeps> = {}): Promise<void> {
     noInstanceMessage: 'No running instance to stop.',
     successMessage: (pid) => `MangoStudio stopped (PID ${pid}).`,
     failureMessage: () => "MangoStudio did not stop in time; try 'mangostudio killserver'.",
-    removeStateWhenStopped: platform === 'win32',
   });
 }

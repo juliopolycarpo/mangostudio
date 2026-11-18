@@ -31,28 +31,28 @@ introduzidos depois dessa release estável.
 
 ## Comandos
 
-| Comando                                                                                                               | Descrição                                                                                            |
-| --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `mangostudio`                                                                                                         | Imprime ajuda e a lista de comandos.                                                                 |
-| `setup [host\|port\|host:port] [--service\|--no-service] [--no-open]`                                                 | Leva uma instalação nova até um hub rodando e abre no navegador.                                     |
-| `serve [host\|port\|host:port]`                                                                                       | Inicia o servidor em foreground (padrão `localhost:3001`).                                           |
-| `serve [host\|port\|host:port] -d`                                                                                    | Inicia o servidor em background (detached) e retorna.                                                |
-| `status`                                                                                                              | Mostra se um servidor está rodando, sua URL, modo de início e saúde.                                 |
-| `status --json`                                                                                                       | Emite o documento de status do hub em vez de texto simples.                                          |
-| `stop`                                                                                                                | Encerra graciosamente o servidor em execução (SIGTERM).                                              |
-| `restart`                                                                                                             | Reinicia o servidor do mesmo jeito que ele foi iniciado.                                             |
-| `killserver`                                                                                                          | Força encerramento do servidor (SIGKILL).                                                            |
-| `service <ação> [host\|port\|host:port] [--json]`                                                                     | Mantém o servidor rodando após logout e reboot.                                                      |
-| `logs [-f] [-n <count>]`                                                                                              | Imprime o fim do log do servidor; `-f` acompanha.                                                    |
-| `open`                                                                                                                | Abre o servidor em execução no navegador padrão.                                                     |
-| `doctor`                                                                                                              | Executa diagnósticos de ambiente e configuração.                                                     |
-| `doctor --all`                                                                                                        | Inclui checagens do conector ChatGPT mesmo sem conector configurado.                                 |
-| `env [runtimes\|agents] [--json]`                                                                                     | Reporta runtimes, gerenciadores de versão e CLIs de agente (somente leitura).                        |
-| `env install <recipe> [--environment <id>] [--version <spec>]`                                                        | Executa uma receita de instalação nesta máquina (`--environment` é sempre recusado por enquanto).    |
-| `env update <recipe> [--environment <id>]`                                                                            | Igual a `env install`, restrito a receitas de atualização.                                           |
-| `env toolchain [node\|bun <caminho\|auto>] [--environment <id>] [--user <email>]`                                     | Mostra ou define com qual Node e Bun os processos iniciados rodam em um ambiente.                    |
-| `upgrade [--check] [--yes] [--stable \| --canary [<sha7>] \| --version <x.y.z>] [--rollback] [--no-restart] [--json]` | Atualiza esta instalação, ou entrega ao gerenciador de pacotes que é dono dela. `update` é um alias. |
-| `version`, `--version`, `-v`                                                                                          | Imprime a versão embutida do MangoStudio.                                                            |
+| Comando                                                                                                               | Descrição                                                                                                   |
+| --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `mangostudio`                                                                                                         | Imprime ajuda e a lista de comandos.                                                                        |
+| `setup [host\|port\|host:port] [--service\|--no-service] [--no-open]`                                                 | Leva uma instalação nova até um hub rodando e abre no navegador.                                            |
+| `serve [host\|port\|host:port]`                                                                                       | Inicia o servidor em foreground (padrão `localhost:3001`).                                                  |
+| `serve [host\|port\|host:port] -d`                                                                                    | Inicia o servidor em background (detached) e retorna.                                                       |
+| `status`                                                                                                              | Mostra se um servidor está rodando, sua URL, modo de início e saúde.                                        |
+| `status --json`                                                                                                       | Emite o documento de status do hub em vez de texto simples.                                                 |
+| `stop`                                                                                                                | Encerra graciosamente o servidor em execução (SIGTERM; no Windows, um pedido de desligamento via loopback). |
+| `restart`                                                                                                             | Reinicia o servidor do mesmo jeito que ele foi iniciado.                                                    |
+| `killserver`                                                                                                          | Força encerramento do servidor (SIGKILL).                                                                   |
+| `service <ação> [host\|port\|host:port] [--json]`                                                                     | Mantém o servidor rodando após logout e reboot.                                                             |
+| `logs [-f] [-n <count>]`                                                                                              | Imprime o fim do log do servidor; `-f` acompanha.                                                           |
+| `open`                                                                                                                | Abre o servidor em execução no navegador padrão.                                                            |
+| `doctor`                                                                                                              | Executa diagnósticos de ambiente e configuração.                                                            |
+| `doctor --all`                                                                                                        | Inclui checagens do conector ChatGPT mesmo sem conector configurado.                                        |
+| `env [runtimes\|agents] [--json]`                                                                                     | Reporta runtimes, gerenciadores de versão e CLIs de agente (somente leitura).                               |
+| `env install <recipe> [--environment <id>] [--version <spec>]`                                                        | Executa uma receita de instalação nesta máquina (`--environment` é sempre recusado por enquanto).           |
+| `env update <recipe> [--environment <id>]`                                                                            | Igual a `env install`, restrito a receitas de atualização.                                                  |
+| `env toolchain [node\|bun <caminho\|auto>] [--environment <id>] [--user <email>]`                                     | Mostra ou define com qual Node e Bun os processos iniciados rodam em um ambiente.                           |
+| `upgrade [--check] [--yes] [--stable \| --canary [<sha7>] \| --version <x.y.z>] [--rollback] [--no-restart] [--json]` | Atualiza esta instalação, ou entrega ao gerenciador de pacotes que é dono dela. `update` é um alias.        |
+| `version`, `--version`, `-v`                                                                                          | Imprime a versão embutida do MangoStudio.                                                                   |
 
 Ações de `service`: `install`, `uninstall`, `status`, `start`, `stop`,
 `restart`. `install` grava uma unidade de usuário — unidade systemd
@@ -141,6 +141,16 @@ ambiente permitidas, a passagem de bastão na instalação, linger no Linux),
 `restart`, `logs`, modo background, instância única, arquivos de runtime, códigos
 de saída, a seção **Doctor** e configuração, consulte a
 [versão completa em inglês](../../reference/cli.md).
+
+No Windows, `process.kill` é `TerminateProcess` e o hub não consegue tratá-lo. Por isso
+`stop` (e a metade de parada de `restart`, `service install` e `upgrade`) usa o
+`controlToken` gravado no arquivo de estado `~/.mango/run/server.json` (modo 0600) para
+enviar `POST /api/control/shutdown` ao hub via loopback. O hub aceita apenas um par
+loopback direto (qualquer cabeçalho de proxy, como `X-Forwarded-For`, resulta em 403) com o
+token no cabeçalho `x-mangostudio-control-token` (caso contrário, 401), executa a mesma
+parada graciosa do SIGTERM e sai com código 0. Se o hub não puder ser consultado, recusar
+ou continuar rodando 12,5 s após o pedido, o comando avisa e recorre ao encerramento
+forçado, com 1 s adicional. POSIX continua usando SIGTERM.
 
 O hub inicia o Local como o binário `mangostudio-runtime`. `mangostudio doctor` reporta o
 binário que o Local executaria — `MANGOSTUDIO_RUNTIME_BINARY`, o binário ao lado de um hub

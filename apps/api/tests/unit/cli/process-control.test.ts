@@ -1,15 +1,22 @@
 import { describe, expect, it } from 'bun:test';
 
 import { CliError } from '../../../src/cli/errors';
+import { SHUTDOWN_REQUEST_TIMEOUT_MS } from '../../../src/cli/hub-shutdown-request';
 import {
   createProcessController,
+  HARD_STOP_TIMEOUT_MS,
+  HUB_SHUTDOWN_WAIT_MS,
+  HUB_STOP_DEADLINE_MS,
   stopPidOrThrow,
   terminateHub,
   waitForExit,
 } from '../../../src/cli/process-control';
+import { RESTART_WAIT_TIMEOUT_MS } from '../../../src/cli/restart-handshake';
 import type { ServerState } from '../../../src/lib/server-state';
+import { SHUTDOWN_BUDGET_MS } from '../../../src/server/shutdown-request';
 import { FakeHubShutdown } from '../../support/mocks/fake-hub-shutdown';
 import { FakeProcessController } from '../../support/mocks/fake-process-controller';
+import { FakeServerStateFile } from '../../support/mocks/fake-server-state-file';
 
 const NEVER_A_PID = 2_147_483_646;
 const noSleep = (): Promise<void> => Promise.resolve();
@@ -134,8 +141,10 @@ describe('terminateHub and stopPidOrThrow', () => {
         requestShutdown: hub.request,
         notice: (message) => notices.push(message),
         ...clock((elapsed) => {
-          // Dies only after the hard stop, which comes after the 10s graceful budget.
-          if (elapsed > 10_000 && controller.terminated.length > 0) controller.die(42);
+          // Dies only after the hard stop, which comes after the whole graceful wait.
+          if (elapsed > HUB_SHUTDOWN_WAIT_MS && controller.terminated.length > 0) {
+            controller.die(42);
+          }
         }),
       },
       STATE
@@ -144,7 +153,9 @@ describe('terminateHub and stopPidOrThrow', () => {
     expect(stopped).toBe(true);
     expect(controller.terminated).toEqual([42]);
     expect(notices).toHaveLength(1);
-    expect(notices[0]).toContain('did not exit within 10s of the shutdown request');
+    expect(notices[0]).toContain(
+      `did not exit within ${HUB_SHUTDOWN_WAIT_MS / 1000}s of the shutdown request`
+    );
   });
 
   it('on linux sends only the signal', async () => {
@@ -212,5 +223,163 @@ describe('terminateHub and stopPidOrThrow', () => {
 
     await expect(failure).rejects.toThrow('no signal was sent');
     expect(hub.requested, 'expected no token to be sent to a recycled pid').toEqual([]);
+  });
+});
+
+describe('win32 stop budgets', () => {
+  const STATE: ServerState = {
+    pid: 42,
+    port: 3001,
+    host: '127.0.0.1',
+    startedAt: 0,
+    logFile: '',
+    version: 't',
+    controlToken: 'control-token-for-budgets',
+  };
+
+  it('keeps the CLI wait after an accepted request strictly longer than the hub stop budget', () => {
+    expect(
+      HUB_SHUTDOWN_WAIT_MS,
+      `expected the CLI wait (${HUB_SHUTDOWN_WAIT_MS}ms) to exceed the hub's stop budget (${SHUTDOWN_BUDGET_MS}ms), so the CLI never ends a hub still inside its budget`
+    ).toBeGreaterThan(SHUTDOWN_BUDGET_MS);
+  });
+
+  it('keeps request, wait and hard stop together under the hand-over a successor waits for', () => {
+    expect(
+      HUB_STOP_DEADLINE_MS,
+      `expected the stop deadline (${HUB_STOP_DEADLINE_MS}ms) under RESTART_WAIT_TIMEOUT_MS (${RESTART_WAIT_TIMEOUT_MS}ms)`
+    ).toBeLessThan(RESTART_WAIT_TIMEOUT_MS);
+    expect(HUB_STOP_DEADLINE_MS).toBe(
+      SHUTDOWN_REQUEST_TIMEOUT_MS + HUB_SHUTDOWN_WAIT_MS + HARD_STOP_TIMEOUT_MS
+    );
+  });
+
+  it('ends a hub that accepted the request and never exits inside one deadline, worst-case request included', async () => {
+    const controller = new FakeProcessController([42]);
+    let now = 0;
+    const timeouts: (number | undefined)[] = [];
+
+    await terminateHub(
+      {
+        controller,
+        platform: 'win32',
+        now: () => now,
+        sleep: (ms) => {
+          now += ms;
+          return Promise.resolve();
+        },
+        // A request that takes its whole timeout, then is accepted.
+        requestShutdown: (_state, options) => {
+          timeouts.push(options?.timeoutMs);
+          now += options?.timeoutMs ?? 0;
+          return Promise.resolve({ accepted: true });
+        },
+      },
+      STATE
+    );
+
+    expect(timeouts).toEqual([SHUTDOWN_REQUEST_TIMEOUT_MS]);
+    expect(controller.terminated).toEqual([42]);
+    // Polling overshoots a wait by up to one interval each.
+    expect(
+      now,
+      `expected the whole stop to end by ${HUB_STOP_DEADLINE_MS}ms (+ polling) | received: ${now}ms`
+    ).toBeLessThanOrEqual(HUB_STOP_DEADLINE_MS + 400);
+    expect(now).toBeLessThan(RESTART_WAIT_TIMEOUT_MS);
+  });
+
+  it('waits at least the hub budget for an accepted request before ending the hub', async () => {
+    const controller = new FakeProcessController([42]);
+    let now = 0;
+    let terminatedAt: number | undefined;
+    const realTerminate = controller.terminate.bind(controller);
+    controller.terminate = (pid) => {
+      terminatedAt = now;
+      realTerminate(pid);
+    };
+
+    await terminateHub(
+      {
+        controller,
+        platform: 'win32',
+        now: () => now,
+        sleep: (ms) => {
+          now += ms;
+          return Promise.resolve();
+        },
+        requestShutdown: () => Promise.resolve({ accepted: true }),
+      },
+      STATE
+    );
+
+    expect(
+      terminatedAt,
+      `expected terminate after the hub's ${SHUTDOWN_BUDGET_MS}ms budget | received: ${terminatedAt}ms`
+    ).toBeGreaterThan(SHUTDOWN_BUDGET_MS);
+  });
+});
+
+describe('state file after a win32 stop through stopPidOrThrow', () => {
+  const STATE: ServerState = {
+    pid: 42,
+    port: 3001,
+    host: '127.0.0.1',
+    startedAt: 0,
+    logFile: '/x.log',
+    version: 't',
+    controlToken: 'control-token-for-state-cleanup',
+  };
+
+  const stopWithFiles = async (options: {
+    platform: NodeJS.Platform;
+    refuse: boolean;
+    successorPid?: number;
+  }) => {
+    const controller = new FakeProcessController([42]);
+    const stateFile = new FakeServerStateFile(STATE);
+    const hub = new FakeHubShutdown(
+      options.refuse ? { accepted: false, reason: 'refused' } : { accepted: true }
+    );
+    let now = 0;
+    await stopPidOrThrow(
+      {
+        controller,
+        platform: options.platform,
+        requestShutdown: hub.request,
+        readState: stateFile.readState,
+        removeState: stateFile.removeState,
+        now: () => now,
+        sleep: (ms) => {
+          now += ms;
+          // A graceful hub exits on its own; a refused one only to the hard stop.
+          if (!options.refuse || controller.terminated.length > 0) controller.die(42);
+          if (options.successorPid) stateFile.write({ ...STATE, pid: options.successorPid });
+          return Promise.resolve();
+        },
+      },
+      STATE,
+      'PID 42 did not stop.'
+    );
+    return stateFile;
+  };
+
+  it('is cleared after a hard-kill fallback, which the hub never got to clean up', async () => {
+    const stateFile = await stopWithFiles({ platform: 'win32', refuse: true });
+
+    expect(stateFile.present, 'expected the state file removed after the hard stop on win32').toBe(
+      false
+    );
+  });
+
+  it('is left alone when a successor already wrote its own over it', async () => {
+    const stateFile = await stopWithFiles({ platform: 'win32', refuse: true, successorPid: 77 });
+
+    expect(stateFile.pid).toBe(77);
+  });
+
+  it('is left to the hub on linux, whose SIGTERM handler removes it', async () => {
+    const stateFile = await stopWithFiles({ platform: 'linux', refuse: false });
+
+    expect(stateFile.present).toBe(true);
   });
 });

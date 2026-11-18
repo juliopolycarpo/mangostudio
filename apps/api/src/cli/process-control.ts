@@ -6,11 +6,18 @@ import { readProcessStartMs } from '../lib/process-start-time';
 import { readProcessStartToken } from '../lib/process-start-token';
 import {
   classifyStateProcess,
+  readState,
+  removeState,
   type ServerState,
   type StateProcessProbe,
 } from '../lib/server-state';
+import { SHUTDOWN_BUDGET_MS } from '../server/shutdown-request';
 import { CliError } from './errors';
-import { type HubShutdownRequester, requestHubShutdown } from './hub-shutdown-request';
+import {
+  type HubShutdownRequester,
+  requestHubShutdown,
+  SHUTDOWN_REQUEST_TIMEOUT_MS,
+} from './hub-shutdown-request';
 
 export interface ProcessController extends StateProcessProbe {
   /** True when the pid refers to a live process. */
@@ -70,11 +77,27 @@ export async function waitForExit(
 }
 
 /**
- * How long a hard stop is given after a graceful request ran out of time. Short: the hub had its
- * whole budget already, and the total (this plus {@link STOP_TIMEOUT_MS}) must stay under the
- * 15s a unit's `serve` waits on the state-file holder.
+ * How long a hard stop is given. `TerminateProcess` is immediate; this only covers the OS
+ * releasing the pid.
  */
-export const HARD_STOP_TIMEOUT_MS = 3_000;
+export const HARD_STOP_TIMEOUT_MS = 1_000;
+
+/**
+ * How long the CLI waits for the pid to exit after the hub accepted a shutdown request. It
+ * outlasts the hub's own stop watchdog ({@link SHUTDOWN_BUDGET_MS}) by a margin for the process
+ * to exit, so the CLI never ends a hub that is still inside its budget: when a stop does overrun,
+ * it is the hub's watchdog that gives up first.
+ */
+export const HUB_SHUTDOWN_WAIT_MS = SHUTDOWN_BUDGET_MS + 500;
+
+/**
+ * The whole of a win32 stop: the request, the wait after it, the hard stop. One deadline taken
+ * when `terminateHub` starts, kept under the 15s a successor or a unit's `serve` waits on the
+ * predecessor (`RESTART_WAIT_TIMEOUT_MS` in `restart-handshake.ts`, which imports this module, so
+ * it is only named here); a test pins both orderings.
+ */
+export const HUB_STOP_DEADLINE_MS =
+  SHUTDOWN_REQUEST_TIMEOUT_MS + HUB_SHUTDOWN_WAIT_MS + HARD_STOP_TIMEOUT_MS;
 
 /** What `terminateHub` needs from its caller's dependency bag. */
 export interface HubTerminationDeps {
@@ -87,13 +110,16 @@ export interface HubTerminationDeps {
   readonly requestShutdown?: HubShutdownRequester;
   /** Says that the graceful path was not used, and why. Silent when omitted. */
   readonly notice?: (message: string) => void;
+  /** The state-file reader and remover for the cleanup after a win32 stop; the real ones when omitted. */
+  readonly readState?: typeof readState;
+  readonly removeState?: typeof removeState;
 }
 
 /** What `stopPidOrThrow` needs from its caller's dependency bag. */
 export type StopDeps = HubTerminationDeps;
 
 export interface TerminateHubOptions {
-  /** Budget for the hub to exit after the request (or, without one, after the signal). */
+  /** Budget for the pid to exit after a SIGTERM (POSIX). The win32 budgets are fixed above. */
   readonly timeoutMs?: number;
   readonly intervalMs?: number;
 }
@@ -104,20 +130,24 @@ export interface TerminateHubOptions {
  * Where SIGTERM is catchable the signal is the graceful stop and nothing else is tried. On win32
  * `terminate` is `TerminateProcess`, which skips the hub's cleanup (in-flight turns, runtime
  * children, the SQLite WAL checkpoint), so the hub is first asked to stop itself over loopback.
- * If it cannot be asked, declines, or outlives `timeoutMs`, the hard stop follows with a notice
- * saying so, and gets {@link HARD_STOP_TIMEOUT_MS} more.
- * // Usage: const stopped = await terminateHub(d, state, { timeoutMs: STOP_TIMEOUT_MS })
+ * If it cannot be asked, declines, or outlives {@link HUB_SHUTDOWN_WAIT_MS}, the hard stop follows
+ * with a notice saying so. The request, the wait and the hard stop share one
+ * {@link HUB_STOP_DEADLINE_MS} budget: the hard stop always keeps its slice, and the wait takes
+ * whatever the request left.
+ *
+ * A stopped win32 hub that did not get to remove the state file (it was ended hard) is cleared
+ * here, only while the file still names this pid: a successor may already have written its own.
+ * // Usage: const stopped = await terminateHub(d, state)
  */
 export async function terminateHub(
   d: HubTerminationDeps,
   state: ServerState,
   options: TerminateHubOptions = {}
 ): Promise<boolean> {
-  const timeoutMs = options.timeoutMs ?? STOP_TIMEOUT_MS;
   const intervalMs = options.intervalMs ?? STOP_POLL_INTERVAL_MS;
   const wait = (budgetMs: number) =>
     waitForExit(d.controller, state.pid, {
-      timeoutMs: budgetMs,
+      timeoutMs: Math.max(0, budgetMs),
       intervalMs,
       now: d.now,
       sleep: d.sleep,
@@ -125,22 +155,39 @@ export async function terminateHub(
 
   if ((d.platform ?? process.platform) !== 'win32') {
     d.controller.terminate(state.pid);
-    return await wait(timeoutMs);
+    return await wait(options.timeoutMs ?? STOP_TIMEOUT_MS);
   }
 
-  const answer = await (d.requestShutdown ?? requestHubShutdown)(state);
+  const deadline = d.now() + HUB_STOP_DEADLINE_MS;
+  const answer = await (d.requestShutdown ?? requestHubShutdown)(state, {
+    timeoutMs: SHUTDOWN_REQUEST_TIMEOUT_MS,
+  });
+  let stopped = false;
   if (answer.accepted) {
-    if (await wait(timeoutMs)) return true;
-    d.notice?.(
-      `MangoStudio (PID ${state.pid}) did not exit within ${timeoutMs / 1000}s of the shutdown request; ending it.`
-    );
+    stopped = await wait(deadline - HARD_STOP_TIMEOUT_MS - d.now());
+    if (!stopped) {
+      d.notice?.(
+        `MangoStudio (PID ${state.pid}) did not exit within ${HUB_SHUTDOWN_WAIT_MS / 1000}s of the shutdown request; ending it.`
+      );
+    }
   } else {
     d.notice?.(
       `Could not ask MangoStudio (PID ${state.pid}) to shut down gracefully: ${answer.reason}. Ending it; in-flight work is not finished.`
     );
   }
-  d.controller.terminate(state.pid);
-  return await wait(HARD_STOP_TIMEOUT_MS);
+  if (!stopped) {
+    d.controller.terminate(state.pid);
+    stopped = await wait(HARD_STOP_TIMEOUT_MS);
+  }
+  if (stopped) await removeStateStillNaming(d, state.pid);
+  return stopped;
+}
+
+/** Remove the state file only when it still names `pid`. // Usage: await removeStateStillNaming(d, 42) */
+async function removeStateStillNaming(d: HubTerminationDeps, pid: number): Promise<void> {
+  const current = await (d.readState ?? readState)();
+  if (current?.pid !== pid) return;
+  await (d.removeState ?? removeState)();
 }
 
 /**

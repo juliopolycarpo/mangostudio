@@ -34,15 +34,12 @@ interface RunServerStopCommandOptions {
   noInstanceMessage: string;
   successMessage: (pid: number) => string;
   failureMessage: (pid: number) => string;
-  removeStateAfterSignal?: boolean;
   /**
-   * Remove the state file once the pid is confirmed gone. For a signal the hub
-   * cannot catch, so its own cleanup never ran; a pid that outlives the wait
-   * keeps its file, since that file is the only way left to find it. The file
-   * is removed only while it still names the stopped pid: a supervisor restart
-   * or a `serve` right after may already have written a successor's.
+   * Remove the state file once the signal is sent, whether or not the pid went. For `kill`,
+   * which the hub never gets to answer. (`terminate` on win32 clears a stopped hub's file inside
+   * `terminateHub`, since a hub ended hard never removed it.)
    */
-  removeStateWhenStopped?: boolean;
+  removeStateAfterSignal?: boolean;
   /**
    * `killserver --force`: trust the state file's pid without comparing start tokens. A dead pid
    * is still "no instance", and a pid at or below 1 is still refused.
@@ -67,13 +64,6 @@ function resolveServerShutdownDeps(
   };
 }
 
-/** Remove the state file only when it still names `pid`. // Usage: await removeStateStillNaming(d, 42) */
-async function removeStateStillNaming(d: Required<ServerShutdownDeps>, pid: number): Promise<void> {
-  const current = await d.readState();
-  if (current?.pid !== pid) return;
-  await d.removeState();
-}
-
 export async function runServerStopCommand({
   deps,
   signal,
@@ -83,7 +73,6 @@ export async function runServerStopCommand({
   successMessage,
   failureMessage,
   removeStateAfterSignal = false,
-  removeStateWhenStopped = false,
   skipIdentityCheck = false,
 }: RunServerStopCommandOptions): Promise<void> {
   const d = resolveServerShutdownDeps(deps);
@@ -112,6 +101,7 @@ export async function runServerStopCommand({
   if (signal === 'terminate') {
     // On Windows this asks the hub to stop itself first, so its graceful path runs.
     stopped = await terminateHub({ ...d, notice: d.log }, state, { timeoutMs, intervalMs });
+    // A win32 hub that was ended hard never removed its file; `terminateHub` already cleared it.
   } else {
     d.controller.kill(state.pid);
     stopped = await waitForExit(d.controller, state.pid, {
@@ -122,11 +112,7 @@ export async function runServerStopCommand({
     });
   }
 
-  if (removeStateAfterSignal) {
-    await d.removeState();
-  } else if (removeStateWhenStopped && stopped) {
-    await removeStateStillNaming(d, state.pid);
-  }
+  if (removeStateAfterSignal) await d.removeState();
 
   if (stopped) {
     d.log(successMessage(state.pid));

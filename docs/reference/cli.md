@@ -646,8 +646,13 @@ route accepts only a direct loopback peer (a request carrying `X-Forwarded-For`
 or another proxy header is refused with 403) and a matching
 `x-mangostudio-control-token` header (otherwise 401). If the hub cannot be asked
 (an older hub with no token, a bind to one non-loopback address), declines, or is
-still running 10 s after the request, `stop` says so and falls back to the hard
-kill, giving it 3 s more. POSIX keeps SIGTERM.
+still running 12.5 s after the request (the hub's own 12 s stop watchdog plus a
+margin to exit, so the CLI never ends a hub still inside its budget), `stop` says
+so and falls back to the hard kill, giving it 1 s more. The request, the wait and
+the hard stop share one 14.5 s deadline, under the 15 s a successor waits for its
+predecessor. Where `restart`, `service install` or `upgrade` ended the hub hard,
+they remove the state file it left behind, as `stop` does, unless a successor has
+already written its own. POSIX keeps SIGTERM.
 
 ## Runtime files
 

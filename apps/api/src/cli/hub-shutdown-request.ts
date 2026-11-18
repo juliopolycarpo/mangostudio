@@ -8,12 +8,20 @@ import { HUB_CONTROL_TOKEN_HEADER, HUB_SHUTDOWN_PATH } from '../lib/hub-control'
 import type { ServerState } from '../lib/server-state';
 import { resolveLocalTarget } from './health';
 
-const REQUEST_TIMEOUT_MS = 2000;
+/**
+ * How long the request itself may take. The hub answers 202 before it starts stopping, so a
+ * loopback round trip that takes longer than this is not going to be accepted.
+ */
+export const SHUTDOWN_REQUEST_TIMEOUT_MS = 1_000;
 
 /** `reason` names why the hub was not asked, or why it declined, for the line the CLI prints. */
 export type HubShutdownAnswer = { accepted: true } | { accepted: false; reason: string };
 
-export type HubShutdownRequester = (state: ServerState) => Promise<HubShutdownAnswer>;
+/** `timeoutMs` caps the round trip; {@link SHUTDOWN_REQUEST_TIMEOUT_MS} when omitted. */
+export type HubShutdownRequester = (
+  state: ServerState,
+  options?: { readonly timeoutMs?: number }
+) => Promise<HubShutdownAnswer>;
 
 export interface HubShutdownRequestDeps {
   readonly fetch?: typeof fetch;
@@ -40,13 +48,17 @@ export async function requestHubShutdown(
   if (target === null) {
     return { accepted: false, reason: `the hub listens on ${state.host}, not on loopback` };
   }
+  // The port comes from the same file; a value that is not a TCP port is never dialled.
+  if (!Number.isInteger(state.port) || state.port < 1 || state.port > 65_535) {
+    return { accepted: false, reason: `the state file names an invalid port (${state.port})` };
+  }
   try {
     const response = await (deps.fetch ?? fetch)(
       `http://${target}:${state.port}${HUB_SHUTDOWN_PATH}`,
       {
         method: 'POST',
         headers: { [HUB_CONTROL_TOKEN_HEADER]: state.controlToken },
-        signal: AbortSignal.timeout(deps.timeoutMs ?? REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(deps.timeoutMs ?? SHUTDOWN_REQUEST_TIMEOUT_MS),
       }
     );
     if (response.status === 202) return { accepted: true };
