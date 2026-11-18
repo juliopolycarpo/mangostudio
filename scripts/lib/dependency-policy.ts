@@ -69,6 +69,16 @@ interface RetiredDependencyRule {
 }
 
 /**
+ * Whether a package is a TOML library: its name, without the scope, contains
+ * `toml` (`smol-toml`, `@iarna/toml`, `@ltd/j-toml`). Takes a package name, so
+ * pass `packageNameOf(specifier)` for an import specifier.
+ *
+ * @example isTomlLibraryName('@std/toml'); // true
+ */
+export const isTomlLibraryName = (packageName: string): boolean =>
+  packageName.slice(packageName.indexOf('/') + 1).includes('toml');
+
+/**
  * Specifiers that must not reappear in any manifest, root included.
  *
  * These are not "unused packages" like the deny list above — installing one
@@ -89,6 +99,28 @@ export const RETIRED_DEPENDENCIES = [
     reason: 'Elysia 2 publishes its official plugins under the `@elysia/*` scope.',
     matches: (packageName) => packageName.startsWith('@elysiajs/'),
   },
+  {
+    label: 'TOML libraries (smol-toml, toml, @iarna/toml, ...)',
+    reason: 'Bun parses and writes TOML natively through Bun.TOML.',
+    matches: isTomlLibraryName,
+  },
+  {
+    label: 'madge',
+    reason:
+      'Import cycles are found by the TypeScript-resolved scan in scripts/lib/import-cycles.ts.',
+    matches: (packageName) => packageName === 'madge',
+  },
+  {
+    label: '@elysia/static',
+    reason:
+      'It walks the whole uploads directory at registration and mounts no wildcard in production; the uploads route resolves each request instead.',
+    matches: (packageName) => packageName === '@elysia/static',
+  },
+  {
+    label: '@tanstack/router-cli',
+    reason: 'Route generation runs in-process through @tanstack/router-generator.',
+    matches: (packageName) => packageName === '@tanstack/router-cli',
+  },
 ] as const satisfies readonly RetiredDependencyRule[];
 
 /**
@@ -102,8 +134,16 @@ export const RETIRED_DEPENDENCIES = [
  * that emits the contract artifacts needs the published catalog schema — and a
  * second copy would mean the catalog is built by a `defineContract` the
  * contract was not defined with.
+ *
+ * `@types/bun` is here so a workspace added later cannot declare its own range
+ * beside the root catalog's.
  */
-export const COHORT_DEPENDENCIES = ['elysia', 'typebox', '@mangostudio/protocol'] as const;
+export const COHORT_DEPENDENCIES = [
+  'elysia',
+  'typebox',
+  '@mangostudio/protocol',
+  '@types/bun',
+] as const;
 
 export interface ManifestEntry {
   /** Repo-relative manifest location, e.g. `apps/api`. Empty string for root. */

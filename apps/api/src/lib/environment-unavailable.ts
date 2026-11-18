@@ -18,6 +18,7 @@
 
 import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
+import { type ElysiaStatus, status } from 'elysia';
 
 /** Why a connect was refused or failed, in the classes a client can act on. */
 export const ENVIRONMENT_UNAVAILABLE_REASONS = [
@@ -93,25 +94,18 @@ export function environmentUnavailableText(error: EnvironmentUnavailableError): 
 }
 
 /**
- * Renders a connect failure as a 503 `ApiErrorResponse` with a fixed message and
- * `details.reason`, setting the status and `Retry-After` when the manager gave a
- * wait. Does not log. Returns `null` for any other error so
- * the caller keeps its own classification.
+ * The `ApiErrorResponse` body for a connect failure: a fixed message, the
+ * environment-unavailable code and `details.reason`. Pure, so callers with no
+ * HTTP response to shape (an SSE error event) read the body without a `set`.
+ * Returns `null` for any other error so the caller keeps its own classification.
  *
  * @example
- * const body = environmentUnavailableResponse(error, set);
- * if (body) return body;
+ * const body = environmentUnavailableBody(error);
+ * if (body) controller.enqueue(sseEvent({ type: 'error', error: body.error, done: true }));
  */
-export function environmentUnavailableResponse(
-  error: unknown,
-  set: { status?: number | string; headers?: Record<string, string | number | string[]> }
-): ApiErrorResponse | null {
+export function environmentUnavailableBody(error: unknown): ApiErrorResponse | null {
   if (!isEnvironmentUnavailable(error)) return null;
 
-  set.status = 503;
-  if (set.headers && error.retryAfterSeconds !== undefined) {
-    set.headers['Retry-After'] = String(error.retryAfterSeconds);
-  }
   return {
     error: environmentUnavailableText(error),
     code: ERROR_CODES.ENVIRONMENT_UNAVAILABLE,
@@ -124,4 +118,26 @@ export function environmentUnavailableResponse(
         : { retryAfterSeconds: String(error.retryAfterSeconds) }),
     },
   };
+}
+
+/**
+ * Renders a connect failure as a typed 503 `status(503, body)` and sets
+ * `Retry-After` on `set.headers` when the manager gave a wait. Does not log.
+ * Returns `null` for any other error so the caller keeps its own classification.
+ *
+ * @example
+ * const unavailable = environmentUnavailableResponse(error, set);
+ * if (unavailable) return unavailable;
+ */
+export function environmentUnavailableResponse(
+  error: unknown,
+  set: { headers?: Record<string, string | number | string[]> }
+): ElysiaStatus<503, ApiErrorResponse> | null {
+  const body = environmentUnavailableBody(error);
+  if (!body || !isEnvironmentUnavailable(error)) return null;
+
+  if (set.headers && error.retryAfterSeconds !== undefined) {
+    set.headers['Retry-After'] = String(error.retryAfterSeconds);
+  }
+  return status(503, body);
 }

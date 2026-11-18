@@ -1,3 +1,5 @@
+import type { ProviderType } from '@mangostudio/shared/types';
+
 import type { AgentEvent } from '../types';
 import {
   type ChatCompletionsAccumulator,
@@ -5,6 +7,7 @@ import {
   createChatCompletionsAccumulator,
 } from './chat-completions-accumulator';
 import { throwOnChatCompletionsFailure } from './chat-completions-errors';
+import { asCredentialRejection } from './provider-credential-rejected';
 
 export interface AgentTurnStreamOpenResult<TChunk> {
   readonly stream?: AsyncIterable<TChunk>;
@@ -99,6 +102,8 @@ interface ChatCompletionsAgentStreamContext {
 }
 
 interface ChatCompletionsAgentTurnLoopOptions<TChunk> {
+  /** The adapter running the loop; names it when the provider rejects the key. */
+  readonly provider: ProviderType;
   readonly signal?: AbortSignal;
   readonly openStream: () => Promise<AsyncIterable<TChunk>>;
   readonly extractReasoningChunks: (delta: Record<string, unknown>) => string[];
@@ -121,12 +126,16 @@ export async function* streamChatCompletionsAgentTurnLoop<TChunk>(
     mapChunk: ({ chunk, accumulator, context }) =>
       mapChatCompletionsAgentStreamChunk(chunk, accumulator, context),
     complete: options.complete,
-    onError: (err) => [
-      {
-        type: 'turn_error',
-        error: err instanceof Error ? err.message : options.fallbackErrorMessage,
-      },
-    ],
+    onError: (err) => {
+      const rejection = asCredentialRejection(options.provider, err);
+      if (rejection) throw rejection;
+      return [
+        {
+          type: 'turn_error',
+          error: err instanceof Error ? err.message : options.fallbackErrorMessage,
+        },
+      ];
+    },
   });
 }
 

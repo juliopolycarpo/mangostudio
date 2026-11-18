@@ -4,12 +4,11 @@
  */
 
 import type { ModelCatalogResponse } from '@mangostudio/shared/catalog';
-import type { Connector, ConnectorStatus } from '@mangostudio/shared/connectors';
+import type { ConnectorStatus } from '@mangostudio/shared/connectors';
 import {
   AddConnectorBodySchema,
   UpdateConnectorModelsBodySchema,
 } from '@mangostudio/shared/connectors';
-import type { ApiErrorResponse } from '@mangostudio/shared/errors';
 import { Elysia, t } from 'elysia';
 
 import { createDiagnosticLogger } from '../../../lib/logger';
@@ -43,35 +42,31 @@ export const geminiAliasRoutes = new Elysia()
     return getUnifiedModelCatalog(user?.id ?? '');
   })
 
-  .post(
-    '/connectors/gemini',
-    { body: AddConnectorBodySchema },
-    async ({ body, set, user }): Promise<Connector | ApiErrorResponse> => {
-      try {
-        const connector = await addGeminiConnector(user?.id ?? '', body);
-        await refreshGeminiModelCatalog(user?.id ?? '', 'secret-updated');
-        invalidateUnifiedCatalog(user?.id ?? '');
-        invalidateProviderRoutingCache(user?.id ?? '');
-        return connector;
-      } catch (error) {
-        return handleConnectorError(error, set);
-      }
+  .post('/connectors/gemini', { body: AddConnectorBodySchema }, async ({ body, user }) => {
+    try {
+      const connector = await addGeminiConnector(user?.id ?? '', body);
+      await refreshGeminiModelCatalog(user?.id ?? '', 'secret-updated');
+      invalidateUnifiedCatalog(user?.id ?? '');
+      invalidateProviderRoutingCache(user?.id ?? '');
+      return connector;
+    } catch (error) {
+      return handleConnectorError(error);
     }
-  )
+  })
 
   .delete(
     '/connectors/gemini/:id',
     { params: t.Object({ id: t.String() }) },
-    async ({ params, set, user }): Promise<{ success: true } | ApiErrorResponse> => {
+    async ({ params, user }) => {
       try {
         await deleteGeminiConnector(user?.id ?? '', params.id);
         await refreshGeminiModelCatalog(user?.id ?? '', 'secret-updated');
         invalidateUnifiedCatalog(user?.id ?? '');
         invalidateProviderRoutingCache(user?.id ?? '');
         connectorLogger.info('connector_deleted', { id: params.id, provider: 'gemini' });
-        return { success: true };
+        return { success: true as const };
       } catch (error) {
-        return handleConnectorError(error, set);
+        return handleConnectorError(error);
       }
     }
   )
@@ -82,14 +77,14 @@ export const geminiAliasRoutes = new Elysia()
       params: t.Object({ id: t.String() }),
       body: UpdateConnectorModelsBodySchema,
     },
-    async ({ params, body, set, user }): Promise<{ success: true } | ApiErrorResponse> => {
+    async ({ params, body, user }) => {
       try {
         await updateConnectorModels(user?.id ?? '', params.id, body.enabledModels);
         invalidateUnifiedCatalog(user?.id ?? '');
         invalidateProviderRoutingCache(user?.id ?? '');
-        return { success: true };
+        return { success: true as const };
       } catch (error) {
-        return handleConnectorError(error, set);
+        return handleConnectorError(error);
       }
     }
   );

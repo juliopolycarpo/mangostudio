@@ -29,6 +29,7 @@ const SHIKI_LANGUAGES = {
   cpp: () => import('@shikijs/langs/cpp'),
   csharp: () => import('@shikijs/langs/csharp'),
   css: () => import('@shikijs/langs/css'),
+  diff: () => import('@shikijs/langs/diff'),
   go: () => import('@shikijs/langs/go'),
   html: () => import('@shikijs/langs/html'),
   java: () => import('@shikijs/langs/java'),

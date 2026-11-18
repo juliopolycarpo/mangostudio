@@ -28,40 +28,32 @@ import {
 } from '@mangostudio/shared/errors';
 import {
   GITHUB_LIST_LIMIT_DEFAULT,
-  type GithubContext,
   GithubContextQuerySchema,
   GithubContextSchema,
   GithubCreatePrBodySchema,
-  type GithubCreatePrResponse,
   GithubCreatePrResponseSchema,
   GithubInboxQuerySchema,
-  type GithubInboxResponse,
   GithubInboxResponseSchema,
   GithubIssuesQuerySchema,
-  type GithubIssuesResponse,
   GithubIssuesResponseSchema,
   GithubPrActionBodySchema,
-  type GithubPrActionResponse,
   GithubPrActionResponseSchema,
-  type GithubPrChecksResponse,
   GithubPrChecksResponseSchema,
-  type GithubPrDetailResponse,
   GithubPrDetailResponseSchema,
   GithubPrRefQuerySchema,
   GithubPrsQuerySchema,
-  type GithubPrsResponse,
   GithubPrsResponseSchema,
-  type GithubPrThreadsResponse,
   GithubPrThreadsResponseSchema,
   summarizeGhSubcommand,
 } from '@mangostudio/shared/github';
-import { Elysia } from 'elysia';
+import { Elysia, type ElysiaStatus, status } from 'elysia';
 
 import { getDb } from '../../../db/database';
 import { environmentUnavailableResponse } from '../../../lib/environment-unavailable';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import {
   chatAccessDenied,
+  type ChatTargetRefusal,
   chatWorkdirConflict,
   resolveChatWorkdir,
 } from '../../chats/application/chat-workdir';
@@ -70,8 +62,6 @@ import { type GithubReadService, githubReadService } from '../application/github
 import { type GithubWriteService, githubWriteService } from '../application/github-write-service';
 import { GithubOutputError } from '../domain/gh-output';
 import { GhCliError, type GhRuntimeSelection } from '../infrastructure/gh-cli';
-
-type RouteResult<T> = T | ApiErrorResponse;
 
 /** Everything a chat-scoped GitHub call needs, resolved once per request. */
 interface GithubTarget {
@@ -86,13 +76,20 @@ export interface GithubRouteDeps {
   readonly writes?: GithubWriteService;
 }
 
-/** The response codes every GitHub route can answer with, declared once. */
+/**
+ * The response codes every chat-scoped GitHub route can answer with, declared once.
+ *
+ * Deliberately not `as const`: spread into a route's `response` map, a readonly
+ * object makes Eden read the whole error channel as `unknown`, and every client
+ * call site loses `error.value`. `api-client-types.test.ts` pins this.
+ */
 const CHAT_SCOPED_ERRORS = {
   403: ApiErrorResponseSchema,
   404: ApiErrorResponseSchema,
   409: ApiErrorResponseSchema,
   500: ApiErrorResponseSchema,
-} as const;
+  503: ApiErrorResponseSchema,
+};
 
 /**
  * Builds the GitHub routes over injected services.
@@ -113,8 +110,8 @@ export function createGithubRoutes(deps: GithubRouteDeps = {}) {
           query: GithubContextQuerySchema,
           response: { 200: GithubContextSchema, ...CHAT_SCOPED_ERRORS },
         },
-        async ({ query, request, set, user }): Promise<RouteResult<GithubContext>> => {
-          const target = await resolveTarget(query.chatId, user?.id ?? '', set);
+        async ({ query, request, set, user }) => {
+          const target = await resolveTarget(query.chatId, user?.id ?? '');
           if ('error' in target) return target.error;
           return await guard(set, () =>
             resolveContext(target.workdir, target.selection, request.signal)
@@ -125,9 +122,13 @@ export function createGithubRoutes(deps: GithubRouteDeps = {}) {
         '/inbox',
         {
           query: GithubInboxQuerySchema,
-          response: { 200: GithubInboxResponseSchema, 500: ApiErrorResponseSchema },
+          response: {
+            200: GithubInboxResponseSchema,
+            500: ApiErrorResponseSchema,
+            503: ApiErrorResponseSchema,
+          },
         },
-        async ({ query, request, set, user }): Promise<RouteResult<GithubInboxResponse>> =>
+        async ({ query, request, set, user }) =>
           await guard(set, () =>
             reads.getInbox({
               // No chat, so no chat to take an environment from: the query says
@@ -148,8 +149,8 @@ export function createGithubRoutes(deps: GithubRouteDeps = {}) {
           query: GithubPrsQuerySchema,
           response: { 200: GithubPrsResponseSchema, ...CHAT_SCOPED_ERRORS },
         },
-        async ({ query, request, set, user }): Promise<RouteResult<GithubPrsResponse>> => {
-          const target = await resolveTarget(query.chatId, user?.id ?? '', set);
+        async ({ query, request, set, user }) => {
+          const target = await resolveTarget(query.chatId, user?.id ?? '');
           if ('error' in target) return target.error;
           return await guard(set, () =>
             reads.listPullRequests({
@@ -167,8 +168,8 @@ export function createGithubRoutes(deps: GithubRouteDeps = {}) {
           query: GithubIssuesQuerySchema,
           response: { 200: GithubIssuesResponseSchema, ...CHAT_SCOPED_ERRORS },
         },
-        async ({ query, request, set, user }): Promise<RouteResult<GithubIssuesResponse>> => {
-          const target = await resolveTarget(query.chatId, user?.id ?? '', set);
+        async ({ query, request, set, user }) => {
+          const target = await resolveTarget(query.chatId, user?.id ?? '');
           if ('error' in target) return target.error;
           return await guard(set, () =>
             reads.listIssues({
@@ -186,8 +187,8 @@ export function createGithubRoutes(deps: GithubRouteDeps = {}) {
           query: GithubPrRefQuerySchema,
           response: { 200: GithubPrDetailResponseSchema, ...CHAT_SCOPED_ERRORS },
         },
-        async ({ query, request, set, user }): Promise<RouteResult<GithubPrDetailResponse>> => {
-          const target = await resolveTarget(query.chatId, user?.id ?? '', set);
+        async ({ query, request, set, user }) => {
+          const target = await resolveTarget(query.chatId, user?.id ?? '');
           if ('error' in target) return target.error;
           return await guard(set, () =>
             reads.getPullRequest({ ...repoRequest(target, request.signal), number: query.number })
@@ -200,8 +201,8 @@ export function createGithubRoutes(deps: GithubRouteDeps = {}) {
           query: GithubPrRefQuerySchema,
           response: { 200: GithubPrChecksResponseSchema, ...CHAT_SCOPED_ERRORS },
         },
-        async ({ query, request, set, user }): Promise<RouteResult<GithubPrChecksResponse>> => {
-          const target = await resolveTarget(query.chatId, user?.id ?? '', set);
+        async ({ query, request, set, user }) => {
+          const target = await resolveTarget(query.chatId, user?.id ?? '');
           if ('error' in target) return target.error;
           return await guard(set, () =>
             reads.getPullRequestChecks({
@@ -217,8 +218,8 @@ export function createGithubRoutes(deps: GithubRouteDeps = {}) {
           query: GithubPrRefQuerySchema,
           response: { 200: GithubPrThreadsResponseSchema, ...CHAT_SCOPED_ERRORS },
         },
-        async ({ query, request, set, user }): Promise<RouteResult<GithubPrThreadsResponse>> => {
-          const target = await resolveTarget(query.chatId, user?.id ?? '', set);
+        async ({ query, request, set, user }) => {
+          const target = await resolveTarget(query.chatId, user?.id ?? '');
           if ('error' in target) return target.error;
           return await guard(set, () =>
             reads.getReviewThreads({ ...repoRequest(target, request.signal), number: query.number })
@@ -231,8 +232,8 @@ export function createGithubRoutes(deps: GithubRouteDeps = {}) {
           body: GithubCreatePrBodySchema,
           response: { 200: GithubCreatePrResponseSchema, ...CHAT_SCOPED_ERRORS },
         },
-        async ({ body, request, set, user }): Promise<RouteResult<GithubCreatePrResponse>> => {
-          const target = await resolveTarget(body.chatId, user?.id ?? '', set);
+        async ({ body, request, set, user }) => {
+          const target = await resolveTarget(body.chatId, user?.id ?? '');
           if ('error' in target) return target.error;
           return await guard(set, () =>
             writes.createPullRequest(writeRequest(target, request.signal), body)
@@ -245,8 +246,8 @@ export function createGithubRoutes(deps: GithubRouteDeps = {}) {
           body: GithubPrActionBodySchema,
           response: { 200: GithubPrActionResponseSchema, ...CHAT_SCOPED_ERRORS },
         },
-        async ({ body, request, set, user }): Promise<RouteResult<GithubPrActionResponse>> => {
-          const target = await resolveTarget(body.chatId, user?.id ?? '', set);
+        async ({ body, request, set, user }) => {
+          const target = await resolveTarget(body.chatId, user?.id ?? '');
           if ('error' in target) return target.error;
           return await guard(set, () =>
             writes.markPullRequestReady(writeRequest(target, request.signal), body)
@@ -259,8 +260,8 @@ export function createGithubRoutes(deps: GithubRouteDeps = {}) {
           body: GithubPrActionBodySchema,
           response: { 200: GithubPrActionResponseSchema, ...CHAT_SCOPED_ERRORS },
         },
-        async ({ body, request, set, user }): Promise<RouteResult<GithubPrActionResponse>> => {
-          const target = await resolveTarget(body.chatId, user?.id ?? '', set);
+        async ({ body, request, set, user }) => {
+          const target = await resolveTarget(body.chatId, user?.id ?? '');
           if ('error' in target) return target.error;
           return await guard(set, () =>
             writes.checkoutPullRequest(writeRequest(target, request.signal), body)
@@ -281,12 +282,11 @@ export const githubRoutes = createGithubRoutes();
  */
 async function resolveTarget(
   chatId: string,
-  userId: string,
-  set: { status?: number | string }
-): Promise<GithubTarget | { error: ApiErrorResponse }> {
+  userId: string
+): Promise<GithubTarget | { error: ChatTargetRefusal }> {
   const resolution = await resolveChatWorkdir(chatId, userId, getDb());
-  if (resolution.state === 'no-workdir') return { error: chatWorkdirConflict(set) };
-  if (resolution.state !== 'ok') return { error: chatAccessDenied(resolution, set) };
+  if (resolution.state === 'no-workdir') return { error: chatWorkdirConflict() };
+  if (resolution.state !== 'ok') return { error: chatAccessDenied(resolution) };
   return {
     workdir: resolution.workdir,
     chatId: resolution.chat.id,
@@ -311,9 +311,9 @@ function writeRequest(target: GithubTarget, signal: AbortSignal) {
  * the response says only that the read failed.
  */
 async function guard<T>(
-  set: { status?: number | string },
+  set: { headers?: Record<string, string | number | string[]> },
   run: () => Promise<T>
-): Promise<T | ApiErrorResponse> {
+): Promise<T | GithubFailure> {
   try {
     return await run();
   } catch (error) {
@@ -321,7 +321,12 @@ async function guard<T>(
   }
 }
 
-function githubFailure(error: unknown, set: { status?: number | string }): ApiErrorResponse {
+type GithubFailure = ElysiaStatus<503, ApiErrorResponse> | ElysiaStatus<500, ApiErrorResponse>;
+
+function githubFailure(
+  error: unknown,
+  set: { headers?: Record<string, string | number | string[]> }
+): GithubFailure {
   const unavailable = environmentUnavailableResponse(error, set);
   if (unavailable) return unavailable;
 
@@ -342,9 +347,8 @@ function githubFailure(error: unknown, set: { status?: number | string }): ApiEr
   } else {
     console.error('[github] request failed', error);
   }
-  set.status = 500;
-  return {
+  return status(500, {
     error: 'GitHub context could not be read',
     code: error instanceof GithubOutputError ? error.code : ERROR_CODES.INTERNAL,
-  };
+  });
 }

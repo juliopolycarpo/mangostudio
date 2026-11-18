@@ -5,10 +5,10 @@
  * whose JSON arguments arrive as string fragments across step deltas) and
  * captures the terminal interaction id, reported usage, and final status used
  * to decide whether a continuation envelope may be minted at all. Owns its
- * diagnostic logging for cache hits and unrecognised delta shapes.
+ * diagnostic logging for cache hits and unrecognised step and delta shapes.
  */
 
-import { createDiagnosticLogger } from '../../../lib/logger';
+import { createDiagnosticLogger, type DiagnosticLogger } from '../../../lib/logger';
 import { safeJsonParse } from '../../../lib/safe-parse';
 import type { AgentEvent } from '../types';
 import {
@@ -47,9 +47,14 @@ export interface GeminiInteractionAccumulator {
   readonly abandonedReason: string | undefined;
 }
 
-/** Builds an accumulator for a single Gemini Interactions stream. */
+/**
+ * Builds an accumulator for a single Gemini Interactions stream. `logger` is a
+ * test seam; production uses the shared `gemini-interactions` diagnostic logger.
+ */
 // Usage: const accumulator = createGeminiInteractionAccumulator();
-export function createGeminiInteractionAccumulator(): GeminiInteractionAccumulator {
+export function createGeminiInteractionAccumulator(
+  logger: DiagnosticLogger = geminiInteractionsLogger
+): GeminiInteractionAccumulator {
   const activeCalls: ActiveCalls = new Map();
   let interactionId: string | undefined;
   let providerReportedInputTokens: number | undefined;
@@ -69,7 +74,7 @@ export function createGeminiInteractionAccumulator(): GeminiInteractionAccumulat
     const usage = extractGeminiUsage(event.interaction.usage);
     if (usage.totalInputTokens > 0) providerReportedInputTokens = usage.totalInputTokens;
     if (usage.cachedTokens > 0 && usage.totalInputTokens > 0) {
-      geminiInteractionsLogger.info('prefix_cache_hit', {
+      logger.info('prefix_cache_hit', {
         cachedTokens: usage.cachedTokens,
         totalInputTokens: usage.totalInputTokens,
         hitPercent: Math.round((usage.cachedTokens / usage.totalInputTokens) * 100),
@@ -86,15 +91,15 @@ export function createGeminiInteractionAccumulator(): GeminiInteractionAccumulat
           const code = event.error?.code;
           const message = event.error?.message;
           streamError = [code, message].filter(Boolean).join(': ') || 'Gemini interaction failed.';
-          geminiInteractionsLogger.error('interaction_error', { code, message });
+          logger.error('interaction_error', { code, message });
           return [];
         }
         case 'step.start':
-          return mapStepStart(event, activeCalls);
+          return mapStepStart(event, activeCalls, logger);
         case 'step.delta':
-          return mapStepDelta(event, activeCalls);
+          return mapStepDelta(event, activeCalls, logger);
         case 'step.stop':
-          return mapStepStop(event, activeCalls);
+          return mapStepStop(event, activeCalls, logger);
         case 'interaction.completed':
           noteStatus(event.interaction.status);
           captureUsage(event);
@@ -126,8 +131,20 @@ type StepStartEvent = Extract<InteractionSSEEvent, { event_type: 'step.start' }>
 type StepDeltaEvent = Extract<InteractionSSEEvent, { event_type: 'step.delta' }>;
 type StepStopEvent = Extract<InteractionSSEEvent, { event_type: 'step.stop' }>;
 
-function mapStepStart(event: StepStartEvent, activeCalls: ActiveCalls): AgentEvent[] {
+function mapStepStart(
+  event: StepStartEvent,
+  activeCalls: ActiveCalls,
+  logger: DiagnosticLogger
+): AgentEvent[] {
   if (!isFunctionCallStart(event.step)) {
+    // Only `model_output` and `thought` are mapped. Any other kind (server-side
+    // tool steps, ...) is dropped, so say so: without this a step we do not
+    // understand reads as a turn that silently produced nothing. Log the kind
+    // alone — the step body can carry user content or tool output.
+    if (event.step.type !== 'model_output' && event.step.type !== 'thought') {
+      logger.warn('unhandled_step_type', { stepType: event.step.type });
+      return [];
+    }
     // A `model_output` / `thought` step.start can open with the turn's first
     // chunk already attached; step.delta continues it rather than repeating
     // it, so this text is a prefix to render, not a duplicate to drop.
@@ -157,7 +174,11 @@ function mapStepStart(event: StepStartEvent, activeCalls: ActiveCalls): AgentEve
   return [{ type: 'tool_call_started', callId, name: name || undefined }];
 }
 
-function mapStepDelta(event: StepDeltaEvent, activeCalls: ActiveCalls): AgentEvent[] {
+function mapStepDelta(
+  event: StepDeltaEvent,
+  activeCalls: ActiveCalls,
+  logger: DiagnosticLogger
+): AgentEvent[] {
   const delta = narrowGeminiDelta(event.delta);
   if (delta.kind === 'thought_summary') {
     return delta.text ? [{ type: 'reasoning_delta', text: delta.text }] : [];
@@ -166,10 +187,10 @@ function mapStepDelta(event: StepDeltaEvent, activeCalls: ActiveCalls): AgentEve
     return [{ type: 'assistant_text_delta', text: delta.text }];
   }
   if (delta.kind === 'arguments_delta') {
-    return mapArgumentsDelta(event.index, delta.arguments, activeCalls);
+    return mapArgumentsDelta(event.index, delta.arguments, activeCalls, logger);
   }
   if (delta.kind !== 'thought_signature') {
-    geminiInteractionsLogger.warn('unknown_delta_type', { delta: event.delta });
+    logger.warn('unknown_delta_type', { delta: event.delta });
   }
   return [];
 }
@@ -177,13 +198,14 @@ function mapStepDelta(event: StepDeltaEvent, activeCalls: ActiveCalls): AgentEve
 function mapArgumentsDelta(
   index: number,
   fragment: string,
-  activeCalls: ActiveCalls
+  activeCalls: ActiveCalls,
+  logger: DiagnosticLogger
 ): AgentEvent[] {
   const call = activeCalls.get(index);
   if (!call) {
     // v2 moved every argument byte into the deltas, so an unmatched fragment
     // is a whole tool call lost rather than a partial update missed.
-    geminiInteractionsLogger.warn('orphan_arguments_delta', { index });
+    logger.warn('orphan_arguments_delta', { index });
     return [];
   }
   if (!fragment) return [];
@@ -209,15 +231,15 @@ const ARGUMENTS_DIAGNOSTIC_PREVIEW_CHARS = 200;
  * passing it on would drop the `step.start` fallback for a `{}` the consumer
  * silently substitutes downstream.
  *
- * Usage: resolveCallArguments({ id: 'fc_1', name: 'search', argumentsJson: '{"q":1}', initialArguments: {} })
+ * Usage: resolveCallArguments({ id: 'fc_1', name: 'search', argumentsJson: '{"q":1}', initialArguments: {} }, logger)
  *        -> '{"q":1}'
  */
-function resolveCallArguments(call: ActiveCall): string {
+function resolveCallArguments(call: ActiveCall, logger: DiagnosticLogger): string {
   const buffered = call.argumentsJson.trim();
   if (!buffered) return JSON.stringify(call.initialArguments);
   if (safeJsonParse(buffered)) return buffered;
 
-  geminiInteractionsLogger.warn('unusable_arguments_delta', {
+  logger.warn('unusable_arguments_delta', {
     callId: call.id,
     name: call.name,
     bufferedChars: buffered.length,
@@ -226,7 +248,11 @@ function resolveCallArguments(call: ActiveCall): string {
   return JSON.stringify(call.initialArguments);
 }
 
-function mapStepStop(event: StepStopEvent, activeCalls: ActiveCalls): AgentEvent[] {
+function mapStepStop(
+  event: StepStopEvent,
+  activeCalls: ActiveCalls,
+  logger: DiagnosticLogger
+): AgentEvent[] {
   const call = activeCalls.get(event.index);
   if (!call) return [];
   activeCalls.delete(event.index);
@@ -235,7 +261,7 @@ function mapStepStop(event: StepStopEvent, activeCalls: ActiveCalls): AgentEvent
       type: 'tool_call_completed',
       callId: call.id,
       name: call.name,
-      arguments: resolveCallArguments(call),
+      arguments: resolveCallArguments(call, logger),
     },
   ];
 }

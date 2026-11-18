@@ -8,9 +8,11 @@ import { createDiagnosticLogger } from '../../../lib/logger';
 import { safeJsonParse } from '../../../lib/safe-parse';
 import { executeMcpTool } from '../../../services/mcp/tool-bridge';
 import { isMcpToolName } from '../../../services/mcp/tool-naming';
+import { ProviderCredentialRejectedError } from '../../../services/providers/core/provider-credential-rejected';
 import {
   getProvider as getRegisteredProvider,
   getProviderForModel,
+  resolveProviderTypeForModel,
 } from '../../../services/providers/core/provider-registry';
 import type {
   AgentTurnRequest,
@@ -24,6 +26,7 @@ import { ASK_USER_QUESTION_TOOL_NAME } from '../../../services/tools/builtin/ask
 import { DELEGATE_TO_AGENT_TOOL_NAME } from '../../../services/tools/builtin/delegate-to-agent';
 import { TODO_READ_TOOL_NAME, TODO_WRITE_TOOL_NAME } from '../../../services/tools/builtin/todo';
 import type { EffectiveToolSettings, WorkdirPolicy } from '../../../services/tools/types';
+import { parseStringArray } from '../../../utils/json';
 import { noteUncheckpointedSource } from '../../file-checkpoints/application/note-uncheckpointed-source';
 import { appendSkillsPromptSection } from '../../skills/application/skills-prompt-section';
 import { appendWorkdirPromptSection } from '../../workspaces/application/workdir-prompt-section';
@@ -41,7 +44,9 @@ import {
   SUBAGENT_EMPTY_TEXT_FALLBACK,
   SUBAGENT_FAILED_CODE,
   SUBAGENT_SUMMARIZE_PROMPT,
+  SubagentCredentialRejectedError,
   SubagentDelegationError,
+  SubagentModelUnavailableError,
   type SubagentRunResult,
 } from './subagent-turn-types';
 
@@ -90,6 +95,15 @@ export async function prepareSubagentTurn(
     userId: input.userId,
     type: 'text',
   });
+  // A pinned model outlives the connector that served it. `resolveModel` accepts
+  // any explicit id, so without this the turn only fails later, deep in provider
+  // resolution, with a registry message that names neither the agent nor the pin.
+  if (input.targetProfile.model) {
+    const route = await resolveProviderTypeForModel(resolvedModel.modelId, input.userId);
+    if (!route) {
+      throw new SubagentModelUnavailableError(input.targetProfile.id, resolvedModel.modelId);
+    }
+  }
   const provider = resolvedModel.providerType
     ? getRegisteredProvider(resolvedModel.providerType)
     : await getProviderForModel(resolvedModel.modelId, input.userId);
@@ -151,6 +165,64 @@ export async function prepareSubagentTurn(
     tools: [],
     summary: '',
   };
+}
+
+/**
+ * Re-expresses a provider's rejected-key error in the subagent's terms: which
+ * agent, which model and which connector to fix. Any other error comes back
+ * unchanged, so the caller can rethrow whatever this returns.
+ *
+ * The provider adapters know the provider, not the connector, so the connectors
+ * are looked up the way routing finds them: rows of that provider that enable the
+ * model. When several do, all are named, since the adapter's key resolution may
+ * have picked any of them.
+ *
+ * Naming the connector is best effort: this runs inside the failure path, so a
+ * failing lookup must not replace the rejection with a generic failure. It falls
+ * back to an unnamed connector and keeps the typed code.
+ */
+export async function attributeCredentialRejection(
+  session: SubagentTurnSession,
+  error: unknown
+): Promise<unknown> {
+  if (!(error instanceof ProviderCredentialRejectedError)) return error;
+  const { input, resolvedModel } = session;
+  const connectorNames = await findConnectorNamesForModel(session, error.provider).catch(
+    (lookupError: unknown) => {
+      logSubagentError('connector_lookup_failed', {
+        chatId: input.chatId,
+        userId: input.userId,
+        targetAgentId: input.targetProfile.id,
+        provider: error.provider,
+        message: lookupError instanceof Error ? lookupError.message : String(lookupError),
+      });
+      return [];
+    }
+  );
+  return new SubagentCredentialRejectedError(
+    input.targetProfile.id,
+    resolvedModel.modelId,
+    error.provider,
+    error.status,
+    connectorNames
+  );
+}
+
+async function findConnectorNamesForModel(
+  session: SubagentTurnSession,
+  provider: string
+): Promise<string[]> {
+  const { input, resolvedModel } = session;
+  const rows = await input.db
+    .selectFrom('secret_metadata')
+    .select(['name', 'enabledModels'])
+    .where('provider', '=', provider)
+    .where('configured', '=', 1)
+    .where((eb) => eb.or([eb('userId', '=', input.userId), eb('userId', 'is', null)]))
+    .execute();
+  return rows
+    .filter((row) => parseStringArray(row.enabledModels).includes(resolvedModel.modelId))
+    .map((row) => row.name);
 }
 
 /**

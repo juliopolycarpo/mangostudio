@@ -9,7 +9,7 @@ import type { ToolIdentityListResponse } from '@mangostudio/shared/tool-identity
 import { queryOptions } from '@tanstack/react-query';
 
 import { client } from '@/lib/api-client';
-import { throwApiError } from '@/lib/utils';
+import { ApiError } from '@/lib/utils';
 
 /** Overrides change only when the user edits one, and the socket says when. */
 const STALE_TIME_MS = 5 * 60_000;
@@ -25,7 +25,7 @@ export function toolIdentitiesQueryOptions() {
     staleTime: STALE_TIME_MS,
     queryFn: async () => {
       const { data, error } = await client.api['tool-identities'].get();
-      if (error) throwApiError(error);
+      if (error) throw new ApiError(error.value);
       return data as ToolIdentityListResponse;
     },
   });

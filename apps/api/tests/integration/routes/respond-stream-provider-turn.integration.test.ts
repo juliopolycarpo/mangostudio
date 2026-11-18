@@ -25,6 +25,11 @@ import type {
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import {
+  KEY_REJECTING_PROVIDER_TYPES,
+  KeyRejectingProviderFake,
+  UPSTREAM_REJECTION_TEXT,
+} from '../../support/providers/key-rejecting-providers';
+import {
   buildRespondStreamRequest,
   createTestStreamDb,
   mockNoopTools,
@@ -415,6 +420,49 @@ describe('POST /respond/stream — agent-turn provider', () => {
       })
     );
   });
+
+  // The wire shape is the same error frame as any provider failure; only the
+  // code is new, so a client can tell a revoked key from a generic failure.
+  it.each(KEY_REJECTING_PROVIDER_TYPES)(
+    'reports a %s key the provider rejected with the credential-rejected code',
+    async (providerType) => {
+      const insertedMessages: Array<Record<string, unknown>> = [];
+      const fake = new KeyRejectingProviderFake(providerType, 401);
+
+      await mockAgentTurnProvider((req) => fake.streamAgentTurn(req), insertedMessages);
+      await mock.module('../../../src/db/database', mockStreamDb(insertedMessages));
+
+      const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
+      restoreAuth = restore;
+
+      const response = await app.handle(
+        buildRespondStreamRequest({
+          chatId: `stream-agent-chat-rejected-${providerType}`,
+          prompt: 'Do work',
+          model: 'gpt-5.2',
+        })
+      );
+
+      expect(response.status).toBe(200);
+      const errorEvent = parseSseEvents(await response.text()).find(
+        (event) => event.type === 'error'
+      );
+      expect(
+        errorEvent,
+        `(${providerType} stream error event): expected code ${ERROR_CODES.PROVIDER_CREDENTIAL_REJECTED} | received ${JSON.stringify(errorEvent)}`
+      ).toMatchObject({
+        type: 'error',
+        code: ERROR_CODES.PROVIDER_CREDENTIAL_REJECTED,
+        done: true,
+      });
+      expect(Value.Check(SSEErrorEventSchema, errorEvent)).toBe(true);
+      expect(JSON.stringify(errorEvent)).not.toContain(UPSTREAM_REJECTION_TEXT);
+
+      const aiMessage = insertedMessages.find((message) => message.role === 'ai');
+      const parts = parsePersistedParts(aiMessage?.parts);
+      expect(parts.some((part) => part.type === 'error')).toBe(true);
+    }
+  );
 });
 
 /**

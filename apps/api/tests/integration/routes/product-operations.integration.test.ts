@@ -708,4 +708,62 @@ describe('durable authorized product operations over real routes/storage', () =>
     provider.release?.();
     expect(await stream.text()).toContain('Answer');
   });
+  it('replays a refused keyed submission with the same status and body each time', async () => {
+    const refusals: Array<{
+      name: string;
+      send: () => Promise<Response>;
+      status: number;
+      code: string;
+    }> = [
+      {
+        name: 'empty prompt',
+        send: () =>
+          app.handle(
+            request('/respond/stream', { chatId, prompt: '', operationId: 'replayed-refusal' })
+          ),
+        status: 400,
+        code: ERROR_CODES.VALIDATION,
+      },
+      {
+        name: 'unknown chat',
+        send: () =>
+          app.handle(
+            request('/respond/stream', {
+              chatId: 'missing-chat',
+              prompt: 'Hello',
+              operationId: 'replayed-refusal',
+            })
+          ),
+        status: 404,
+        code: ERROR_CODES.NOT_FOUND,
+      },
+    ];
+    for (const refusal of refusals) {
+      const first = await refusal.send();
+      const firstBody = await first.json();
+      const replay = await refusal.send();
+      const replayBody = await replay.json();
+      expect(`${refusal.name}: first status ${first.status}`).toBe(
+        `${refusal.name}: first status ${refusal.status}`
+      );
+      expect(`${refusal.name}: replay status ${replay.status}`).toBe(
+        `${refusal.name}: replay status ${refusal.status}`
+      );
+      expect(firstBody).toMatchObject({ code: refusal.code });
+      expect(replayBody).toEqual(firstBody);
+    }
+  });
+  it('replays a conflicting key with the same 409 status and body each time', async () => {
+    expect((await submit('conflicting-key')).status).toBe(200);
+    // Wait for the accepted turn to reach the provider, so the release below ends it.
+    await waitFor(() => provider.calls === 1);
+    const first = await submit('conflicting-key', 'Different');
+    const firstBody = await first.json();
+    const replay = await submit('conflicting-key', 'Different');
+    expect(`first status ${first.status}`).toBe('first status 409');
+    expect(`replay status ${replay.status}`).toBe('replay status 409');
+    expect(firstBody).toMatchObject({ code: ERROR_CODES.CONFLICT });
+    expect(await replay.json()).toEqual(firstBody);
+    provider.release?.();
+  });
 });

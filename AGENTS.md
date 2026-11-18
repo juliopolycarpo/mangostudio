@@ -50,7 +50,8 @@ Useful docs:
   environment directly, at the site that needs it, because that value is never configuration —
   nothing selects or validates it ahead of time, and scattering the probing sites is the point (a
   `PATH` walk lives with the walk it bounds). In the Rust host this is
-  `crates/mangostudio-runtime/src/health.rs`'s two `PATH` fallbacks,
+  `crates/mangostudio-runtime/src/health.rs`'s two `PATH` fallbacks and its `PATHEXT` read for
+  the Windows executable-name walk,
   `crates/mangostudio-runtime/src/runtime_home.rs`'s `home_dir()` for slot resolution,
   `crates/mangostudio-runtime/src/probing/host.rs`'s environment snapshot for detection, and
   `crates/mangostudio-runtime/src/subprocess/unix_guardian.rs`'s `vars_os()` snapshot that copies
@@ -82,6 +83,11 @@ Useful docs:
   including the published `mangostudio` launcher. `rust-toolchain.toml` pins the same development
   toolchain; policy tests enforce equality. The launcher keeps the application version, while
   `[workspace.package].version` remains the protocol version.
+- The published launcher repeats the root `[profile.release]` in its own manifest, because
+  `cargo install` builds the package as the root and never sees the workspace profile. Cargo
+  ignores that table inside the workspace and warns about it on every command; the warning is
+  expected. Change the root profile and the launcher copy together:
+  `scripts/tests/launcher-release-profile.unit.test.ts` fails on drift.
 - `.cargo/config.toml` sets `registry.global-min-publish-age = "3 days"`: when Cargo resolves or
   updates a lockfile it skips crate versions published less than three days ago. `--locked` builds
   do not resolve and `cargo install` ignores the setting. Run

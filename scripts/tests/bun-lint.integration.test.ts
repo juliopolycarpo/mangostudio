@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -93,34 +93,32 @@ describe('Bun lint repository policy', () => {
     expect(result.rules).toContain('jsx-a11y/label-has-associated-control');
   });
 
-  test('enforces import boundaries while allowing i18n plumbing and the integration exception', () => {
+  test('enforces the i18n import boundary and exempts the plumbing and tests', () => {
+    const source = "import { en } from '@mangostudio/shared/i18n';\nexport { en };\n";
     const path = 'apps/frontend/src/view.ts';
-    writeFixture(
-      path,
-      "import { en } from '@mangostudio/shared/i18n';\nimport { secret } from '@mangostudio/api/internal/secret';\nexport { en, secret };\n"
-    );
+    writeFixture(path, source);
     const forbidden = lint(path);
     expect(forbidden.exitCode).toBe(1);
     expect(forbidden.rules.filter((rule) => rule.endsWith('/no-restricted-imports'))).toHaveLength(
-      2
+      1
     );
 
-    const testPath =
-      'apps/frontend/tests/unit/features/generation/external-turn-live-vs-reload.test.ts';
-    writeFixture(
-      testPath,
-      "import { en } from '@mangostudio/shared/i18n';\nimport { secret } from '@mangostudio/api/internal/secret';\nexport { en, secret };\n"
-    );
+    const testPath = 'apps/frontend/tests/unit/locale.test.ts';
+    writeFixture(testPath, source);
     const allowed = lint(testPath);
     expect(allowed.rules.filter((rule) => rule.endsWith('/no-restricted-imports'))).toHaveLength(0);
+  });
 
-    writeFixture(
-      testPath,
-      "import type { Legacy } from '@mangostudio/shared';\nexport type { Legacy };\n"
-    );
-    const rootImport = lint(testPath);
-    expect(rootImport.exitCode).toBe(1);
-    expect(rootImport.rules).toContain('@typescript-eslint/no-restricted-imports');
+  test('leaves the shared root and API-internal bans to the check source scans', () => {
+    // Each of these boundaries has one owner (scripts/lib/*-import-boundary.ts).
+    // A copy in bunfig.toml would drift per override block and miss import(),
+    // require() and import('x').T, which no-restricted-imports does not see.
+    const config = readFileSync(join(import.meta.dir, '../../bunfig.toml'), 'utf8');
+    const rules = config.split('\n').filter((line) => !line.trimStart().startsWith('#'));
+    expect(rules.filter((line) => line.includes('@mangostudio/api/internal'))).toEqual([]);
+    expect(
+      rules.filter((line) => /(?:'|")@mangostudio\/shared(?:'|")/.test(line.replaceAll('\\', '')))
+    ).toEqual([]);
   });
 
   test('excludes generated routes and runtime contracts from directory scans', () => {

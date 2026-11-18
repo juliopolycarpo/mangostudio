@@ -1,9 +1,5 @@
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
-import {
-  type ApiErrorResponse,
-  ApiErrorResponseSchema,
-  ERROR_CODES,
-} from '@mangostudio/shared/errors';
+import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import {
   type LibraryDivergenceAck,
   LibraryDivergenceAckListSchema,
@@ -27,8 +23,9 @@ import {
   PropagationUndoRequestSchema,
   PropagationUndoSchema,
 } from '@mangostudio/shared/library';
-import { Elysia, t } from 'elysia';
+import { Elysia, status, t } from 'elysia';
 
+import { apiErrorStatus } from '../../../lib/api-error-status';
 import { ProfileMismatchError } from '../../../lib/profile-context';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { describeBackupUsage, purgeEnvironmentBackup } from '../application/backup-inventory';
@@ -74,21 +71,24 @@ const ERROR_CODE_BY_STATUS = {
   422: ERROR_CODES.VALIDATION,
 } as const;
 
-function mapPropagationError(error: unknown, set: { status?: number | string }): ApiErrorResponse {
+function mapPropagationError(
+  error: unknown,
+  set: { headers?: Record<string, string | number | string[]> }
+) {
   if (error instanceof LibraryRequestError) {
-    set.status = error.status;
-    return { error: error.message, code: error.code ?? ERROR_CODE_BY_STATUS[error.status] };
+    return apiErrorStatus(error.status, {
+      error: error.message,
+      code: error.code ?? ERROR_CODE_BY_STATUS[error.status],
+    });
   }
   if (error instanceof ProfileMismatchError) {
-    set.status = 400;
-    return { error: error.message, code: ERROR_CODES.VALIDATION };
+    return status(400, { error: error.message, code: ERROR_CODES.VALIDATION });
   }
   return handleLibraryError(error, set, '[library]', 'Unexpected library propagation error.');
 }
 
-function invalidResourceKey(set: { status?: number | string }): ApiErrorResponse {
-  set.status = 422;
-  return { error: 'Invalid library resource key.', code: ERROR_CODES.VALIDATION };
+function invalidResourceKey() {
+  return status(422, { error: 'Invalid library resource key.', code: ERROR_CODES.VALIDATION });
 }
 
 export function createPropagationRoutes(
@@ -107,9 +107,11 @@ export function createPropagationRoutes(
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          // The preview reads the runtime, so an unreachable one answers 503.
+          503: ApiErrorResponseSchema,
         },
       },
-      async ({ body, set, user }): Promise<PropagationPreview | ApiErrorResponse> => {
+      async ({ body, set, user }) => {
         try {
           return await service.preview(user?.id ?? '', body);
         } catch (error) {
@@ -135,7 +137,7 @@ export function createPropagationRoutes(
           503: ApiErrorResponseSchema,
         },
       },
-      async ({ body, set, user }): Promise<PropagationApply | ApiErrorResponse> => {
+      async ({ body, set, user }) => {
         try {
           return await service.apply(user?.id ?? '', body);
         } catch (error) {
@@ -149,7 +151,9 @@ export function createPropagationRoutes(
         body: PropagationUndoRequestSchema,
         response: {
           200: PropagationUndoSchema,
+          400: ApiErrorResponseSchema,
           404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
           // Undo replays the backup set on the runtime, so an unreachable
@@ -157,7 +161,7 @@ export function createPropagationRoutes(
           503: ApiErrorResponseSchema,
         },
       },
-      async ({ body, set, user }): Promise<PropagationUndo | ApiErrorResponse> => {
+      async ({ body, set, user }) => {
         try {
           return await service.undo(
             user?.id ?? '',
@@ -174,10 +178,15 @@ export function createPropagationRoutes(
       {
         response: {
           200: PropagationBackupUsageSchema,
+          400: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
-      async ({ set, user }): Promise<PropagationBackupUsage | ApiErrorResponse> => {
+      async ({ set, user }) => {
         try {
           return await service.backupUsage(user?.id ?? '');
         } catch (error) {
@@ -197,15 +206,14 @@ export function createPropagationRoutes(
           503: ApiErrorResponseSchema,
         },
       },
-      async ({ params, query, set, user }): Promise<undefined | ApiErrorResponse> => {
+      async ({ params, query, set, user }) => {
         // Pinning keeps a set holding someone's only copy of a resource out of
         // every automatic eviction path, which only works if there is an
         // explicit way to say "yes, really, let it go". This is it.
         try {
           assertBackupId(params.backupId);
         } catch {
-          set.status = 422;
-          return { error: 'Invalid library backup id.', code: ERROR_CODES.VALIDATION };
+          return status(422, { error: 'Invalid library backup id.', code: ERROR_CODES.VALIDATION });
         }
         try {
           // Idempotent: purging a set that is already gone is the state the
@@ -228,10 +236,15 @@ export function createPropagationRoutes(
       {
         response: {
           200: LibraryDivergenceAckListSchema,
+          400: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+          422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
-      async ({ set, user }): Promise<LibraryDivergenceAck[] | ApiErrorResponse> => {
+      async ({ set, user }) => {
         try {
           return await service.listAcks(user?.id ?? '');
         } catch (error) {
@@ -252,9 +265,10 @@ export function createPropagationRoutes(
           409: ApiErrorResponseSchema,
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
-      async ({ body, set, user }): Promise<LibraryDivergenceAck | ApiErrorResponse> => {
+      async ({ body, set, user }) => {
         try {
           return await service.acknowledge(user?.id ?? '', body);
         } catch (error) {
@@ -270,10 +284,11 @@ export function createPropagationRoutes(
           204: t.Void(),
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
+          503: ApiErrorResponseSchema,
         },
       },
-      async ({ params, set, user }): Promise<undefined | ApiErrorResponse> => {
-        if (!parseResourceKey(params.key)) return invalidResourceKey(set);
+      async ({ params, set, user }) => {
+        if (!parseResourceKey(params.key)) return invalidResourceKey();
         try {
           // Idempotent: forgetting an acknowledgement that is not there is the
           // state the caller asked for, not an error.

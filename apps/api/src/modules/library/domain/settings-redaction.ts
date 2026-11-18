@@ -1,4 +1,5 @@
 import type { SettingsField } from '@mangostudio/shared/library';
+import { isTomlTable } from '@mangostudio/shared/library/machine';
 
 import { looksCredentialShaped } from '../../../lib/credential-policy';
 
@@ -46,7 +47,7 @@ function collectFields(
     return;
   }
 
-  if (isRecord(value)) {
+  if (isTomlTable(value)) {
     for (const [key, item] of Object.entries(value)) {
       const childPath = path ? `${path}.${key}` : key;
       // One marker at the root instead of descending. Dropping the subtree
@@ -135,15 +136,5 @@ function shouldOmitSubtree(key: string): boolean {
     normalized === 'installation_id' ||
     normalized.startsWith('session') ||
     normalized === 'credentials'
-  );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value) &&
-    !(value instanceof Date) &&
-    !Object.prototype.toString.call(value).startsWith('[object Temporal.')
   );
 }

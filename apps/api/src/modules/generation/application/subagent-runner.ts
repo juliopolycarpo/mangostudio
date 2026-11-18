@@ -3,6 +3,7 @@ import type { AgentProfile } from '@mangostudio/shared/agents';
 import { getAgentProfile } from '../../agents/application/agent-settings-service';
 import {
   assembleSubagentResult,
+  attributeCredentialRejection,
   createFailedResult,
   enforceSubagentRunResult,
   logSubagentError,
@@ -11,6 +12,7 @@ import {
   recoverSubagentSummary,
   runPlainSubagentText,
   runSubagentStreamLoop,
+  type SubagentTurnSession,
 } from './subagent-turn-stages';
 import {
   type DelegateToSubagentRequest,
@@ -18,7 +20,9 @@ import {
   SUBAGENT_EMPTY_TEXT_FALLBACK,
   SUBAGENT_FAILED_CODE,
   SUBAGENT_TIMEOUT_CODE,
+  SubagentCredentialRejectedError,
   SubagentDelegationError,
+  SubagentModelUnavailableError,
   type SubagentProgressEvent,
   type SubagentRunResult,
   type SubagentRuntimeInput,
@@ -28,7 +32,9 @@ import {
 export {
   type DelegateToSubagentRequest,
   SUBAGENT_EMPTY_TEXT_FALLBACK,
+  SubagentCredentialRejectedError,
   SubagentDelegationError,
+  SubagentModelUnavailableError,
   type SubagentProgressEvent,
   type SubagentRunResult,
   type SubagentRuntimeInput,
@@ -167,6 +173,20 @@ async function executeSubagentTurn(
 ): Promise<SubagentRunResult> {
   const startedAt = Date.now();
   const session = await prepareSubagentTurn(input);
+  try {
+    return await runPreparedSubagentTurn(session, startedAt);
+  } catch (error) {
+    // Only here is the model known, so the rejected key is attributed to the
+    // agent, model and connector before the failure reaches normalization.
+    throw await attributeCredentialRejection(session, error);
+  }
+}
+
+async function runPreparedSubagentTurn(
+  session: SubagentTurnSession,
+  startedAt: number
+): Promise<SubagentRunResult> {
+  const { input } = session;
 
   if (!session.provider.generateAgentTurnStream) {
     const text = await runPlainSubagentText(session);
@@ -243,6 +263,12 @@ function normalizeSubagentFailure(
   }
   if (error instanceof SubagentDelegationError && error.code === 'TIMEOUT') {
     return { status: 'timeout', code: SUBAGENT_TIMEOUT_CODE, message: error.message };
+  }
+  if (
+    error instanceof SubagentModelUnavailableError ||
+    error instanceof SubagentCredentialRejectedError
+  ) {
+    return { status: 'failed', code: error.code, message: error.message };
   }
   if (error instanceof Error) {
     return { status: 'failed', code: SUBAGENT_FAILED_CODE, message: error.message };

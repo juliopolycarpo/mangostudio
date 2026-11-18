@@ -72,15 +72,18 @@ export const errorHandler = new Elysia({ name: 'error-handler' })
   .onError('global', NotFound, (): ElysiaStatus<404, ApiErrorResponse> =>
     status(404, { error: 'Not found', code: ERROR_CODES.NOT_FOUND })
   )
-  .onError('global', ({ error, set }): ApiErrorResponse | ElysiaStatus<500, ApiErrorResponse> => {
-    // An environment that cannot be reached is a recoverable 503, not a fault.
-    // It is not logged here: the connection manager logged the connect attempt
-    // once, and a client polling a down environment must not log per request.
-    const unavailable = environmentUnavailableResponse(error, set);
-    if (unavailable) return unavailable;
+  .onError(
+    'global',
+    ({ error, set }): ElysiaStatus<503, ApiErrorResponse> | ElysiaStatus<500, ApiErrorResponse> => {
+      // An environment that cannot be reached is a recoverable 503, not a fault.
+      // It is not logged here: the connection manager logged the connect attempt
+      // once, and a client polling a down environment must not log per request.
+      const unavailable = environmentUnavailableResponse(error, set);
+      if (unavailable) return unavailable;
 
-    // The raw error is deliberately logged server-side — it is the only record
-    // of what actually failed — while the client is told nothing about it.
-    console.error(`[error-handler][${error instanceof Error ? error.name : 'unknown'}]`, error);
-    return status(500, { error: 'An internal error occurred', code: ERROR_CODES.INTERNAL });
-  });
+      // The raw error is deliberately logged server-side — it is the only record
+      // of what actually failed — while the client is told nothing about it.
+      console.error(`[error-handler][${error instanceof Error ? error.name : 'unknown'}]`, error);
+      return status(500, { error: 'An internal error occurred', code: ERROR_CODES.INTERNAL });
+    }
+  );

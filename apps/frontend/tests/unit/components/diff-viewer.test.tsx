@@ -12,12 +12,17 @@ void mock.module('../../../src/features/workspace/hooks/use-git-state', () => ({
   useGitDiff: () => ({ data: hooks.diff, isLoading: false, error: null }),
 }));
 
+// Records which grammars the viewer asks for, so a test can pin the extension-to-language map.
+const preloadCodeLanguagesFake = jest.fn((_languages: readonly string[], _theme: string) =>
+  Promise.resolve(true)
+);
+
 // Every token gets a known colour, so the style each line carries is the
 // viewer's doing and not the highlighter's.
 void mock.module('@/lib/shiki', () => ({
   CODE_THEMES: ['one-dark-pro', 'github-dark-dimmed', 'github-light', 'one-light'],
   highlightLineTokens: (line: string) => [{ content: line, offset: 0, color: '#d73a49' }],
-  preloadCodeLanguages: jest.fn(() => Promise.resolve(true)),
+  preloadCodeLanguages: preloadCodeLanguagesFake,
 }));
 
 // After the mocks, never before: a static import is evaluated first and would
@@ -26,16 +31,16 @@ const { DiffViewer } = await import('../../../src/features/workspace/DiffViewer'
 
 const PATH = 'apps/frontend/src/components/settings/GeneralSettings.tsx';
 
-function renderViewer() {
+function renderViewer(path: string = PATH) {
   hooks.diff = {
-    path: PATH,
+    path,
     binary: false,
     diff: '@@ -1,2 +1,2 @@\n context line\n-old line\n+new line\n',
   };
   return render(
     <DiffViewer
       chatId="chat-1"
-      selection={{ path: PATH, staged: false, title: `View diff for ${PATH}` }}
+      selection={{ path, staged: false, title: `View diff for ${path}` }}
       onClose={jest.fn()}
     />
   );
@@ -71,6 +76,24 @@ describe('DiffViewer', () => {
     expect(styleOf('new line')).not.toContain('#d73a49');
     expect(styleOf('old line')).not.toContain('#d73a49');
   });
+
+  const extensionCases: readonly [string, string][] = [
+    ['crates/app/src/lib.rs', 'rust'],
+    ['tsconfig.jsonc', 'json'],
+    ['changes/fix.diff', 'diff'],
+  ];
+  for (const [path, grammar] of extensionCases) {
+    it(`asks for the ${grammar} grammar when the file is ${path}`, async () => {
+      preloadCodeLanguagesFake.mockClear();
+      renderViewer(path);
+      await flushAsyncRender();
+
+      expect(
+        preloadCodeLanguagesFake.mock.calls.map(([languages]) => languages),
+        `preloadCodeLanguages languages for ${path} | expected: [["${grammar}"]]`
+      ).toEqual([[grammar]]);
+    });
+  }
 
   it('draws exactly the lines the hunk header counts, with no row for the final newline', async () => {
     const { container } = renderViewer();

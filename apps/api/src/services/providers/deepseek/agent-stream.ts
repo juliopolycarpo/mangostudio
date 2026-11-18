@@ -54,6 +54,7 @@ export async function* streamDeepSeekAgentTurn(
   });
 
   yield* streamChatCompletionsAgentTurnLoop({
+    provider: 'deepseek',
     signal: req.signal,
     openStream: () =>
       client.chat.completions.create(

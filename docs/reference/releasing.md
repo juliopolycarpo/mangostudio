@@ -561,6 +561,33 @@ Every PR gets a changelog preview in a managed bot comment, published by
 metrics comparison is a second, separate comment. The commit list and the
 changelog entries each fold once they exceed five items.
 
+### Pull request titles
+
+A squash merge takes its subject from the PR title, and `cliff.toml` sets
+`filter_unconventional = true` and groups commits only by the types its
+`commit_parsers` name. A title with any other type reaches `main` and drops out of
+`CHANGELOG.md` and the release notes without a warning.
+
+The `PR title` workflow (`.github/workflows/pr-title.yml`, job `Title has a changelog type`)
+runs `scripts/ci/check-pr-title.ts` on every PR to `main` and fails a title that is not
+`type(scope): summary` or `type: summary`, with an optional `!` before the colon, a type from
+the list below, a summary, and no leading or trailing space. The failure names the title it
+received and the expected shape. The types are read from `cliff.toml` when the check runs, so
+the two cannot drift: a parser that groups a whole type (`^feat`) adds it, while a skip parser
+(`^chore\(release\)`) and a scope-narrowed one (`^build\(deps\)`) add nothing.
+
+Allowed types: `feat`, `fix`, `perf`, `refactor`, `security`, `migration`, `docs`, `test`, `ci`,
+`build`, `style`, `chore`, `revert`.
+
+The workflow checks out the base branch, not the PR head, so a PR cannot loosen the check or add a
+type to `cliff.toml` and pass itself. A new type is usable in a title once its change is on `main`.
+Two repository settings sit outside the workflow and decide whether it guards anything:
+
+- The main ruleset has to require the `Title has a changelog type` context by name. The workflow
+  is not part of any aggregate gate, so a red check that is not required still merges.
+- The squash-title setting has to be `PR_TITLE`. Under `COMMIT_OR_PR_TITLE`, GitHub squashes a
+  single-commit PR under that commit's own subject and the title is not what lands.
+
 ## Testing the release pipeline
 
 CI calls `.github/workflows/release-dry-run.yml` on every PR, but a cheap
@@ -1183,7 +1210,17 @@ cache under `~/.mango/dist/`.
 downloads the platform archive matching the crate version from the GitHub
 release into `~/.mango/dist/<version>/` (verified against `SHA256SUMS`, same
 layout as the shell installer) and execs the real binary. Both install paths
-report the same `mangostudio --version`. See
+report the same `mangostudio --version`. The workspace `[profile.release]` is
+not part of the published crate, so the launcher manifest repeats it (fat LTO,
+one codegen unit, stripped, `panic = "unwind"`, plus the overrides for the
+packages it links). Without the copy `cargo install` builds with Cargo's default
+release profile: 3.56 MB unstripped instead of 2.19 MB on linux-x64, in about
+half the compile time (19 s against 37 s on 28 cores). Cargo ignores the table
+inside the workspace and prints `warning: profiles for the non root package will
+be ignored` on each command (rust-lang/cargo#8264); the warning is expected.
+`scripts/tests/launcher-release-profile.unit.test.ts` fails when the copy drifts
+from the root profile, and `scripts/release/verify-launcher-package.sh` checks
+the packaged manifest. See
 [`crates/mangostudio-launcher/README.md`](../../crates/mangostudio-launcher/README.md).
 
 Design notes:

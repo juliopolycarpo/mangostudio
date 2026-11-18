@@ -54,6 +54,37 @@ case "$1" in
 esac
 `;
 
+// The workspace profile the verifier compares the package with, written in the
+// root manifest's key order and with an override for a package the launcher
+// does not link.
+const WORKSPACE_PROFILE = `
+# Comments in the root are not part of the profile.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "unwind"
+
+[profile.release.package.rustls]
+opt-level = "s"
+[profile.release.package.jsonschema]
+opt-level = "s"
+`;
+
+// What Cargo writes into a normalized manifest: the same values, reordered.
+const PACKAGED_PROFILE = `
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "unwind"
+strip = true
+
+[profile.release.package.rustls]
+opt-level = "s"
+`;
+
 interface CargoInvocation {
   cwd: string;
   toolchain: string;
@@ -63,6 +94,7 @@ interface CargoInvocation {
 function runVerifier(
   options: {
     packagedFloor?: string | null;
+    packagedProfile?: string;
     workspaceFloor?: string;
     packageStatus?: number;
     installStatus?: number;
@@ -78,7 +110,7 @@ function runVerifier(
     copyFileSync(SCRIPT, script);
     writeFileSync(
       join(repository, 'Cargo.toml'),
-      `[workspace.package]\nrust-version = "${options.workspaceFloor ?? '1.99.0'}"\n`
+      `[workspace.package]\nrust-version = "${options.workspaceFloor ?? '1.99.0'}"\n${WORKSPACE_PROFILE}`
     );
 
     const source = join(directory, 'package-source');
@@ -87,7 +119,7 @@ function runVerifier(
     const packagedFloor = options.packagedFloor === undefined ? '1.99.0' : options.packagedFloor;
     writeFileSync(
       join(packageDirectory, 'Cargo.toml'),
-      `[package]\nname = "mangostudio"\nversion = "0.1.1"\n${packagedFloor === null ? 'rust-version.workspace = true' : `rust-version = "${packagedFloor}"`}\n`
+      `[package]\nname = "mangostudio"\nversion = "0.1.1"\n${packagedFloor === null ? 'rust-version.workspace = true' : `rust-version = "${packagedFloor}"`}\n${options.packagedProfile ?? PACKAGED_PROFILE}`
     );
 
     const bin = join(directory, 'bin');
@@ -188,6 +220,34 @@ describe.skipIf(process.platform === 'win32')('packaged launcher verification', 
     expect(result.stderr).toContain(
       "Invalid packaged launcher rust-version '<missing>'; expected '1.99.0'"
     );
+    expect(result.invocations).toHaveLength(1);
+  });
+
+  test('rejects a package that lost the release profile before installing', () => {
+    const result = runVerifier({ packagedProfile: '' });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      'Invalid packaged launcher [profile.release]; expected the workspace values below'
+    );
+    expect(result.stderr).toContain('release|lto = "fat"');
+    expect(result.stderr).toContain('received:\n<missing>');
+    expect(result.invocations).toHaveLength(1);
+    expect(result.temporaryContents).toEqual([]);
+  });
+
+  test('rejects a package whose release profile differs from the workspace', () => {
+    const result = runVerifier({ packagedProfile: PACKAGED_PROFILE.replace('"fat"', '"thin"') });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('release|lto = "thin"');
+    expect(result.stderr).toContain('release|lto = "fat"');
+    expect(result.invocations).toHaveLength(1);
+  });
+
+  test('rejects a package whose package override differs from the workspace', () => {
+    const result = runVerifier({ packagedProfile: PACKAGED_PROFILE.replace('"s"', '3') });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('rustls|opt-level = 3');
+    expect(result.stderr).toContain('rustls|opt-level = "s"');
     expect(result.invocations).toHaveLength(1);
   });
 

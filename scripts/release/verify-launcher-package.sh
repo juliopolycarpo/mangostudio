@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Verify the launcher consumers receive: package it, check its normalized MSRV,
-# then install it without access to the checkout's workspace or Cargo config.
+# Verify the launcher consumers receive: package it, check its normalized MSRV
+# and release profile, then install it without access to the checkout's workspace or Cargo config.
 # Usage: bash scripts/release/verify-launcher-package.sh
 
 set -euo pipefail
@@ -24,6 +24,24 @@ if [[ "$workdir" == "$repository_root/"* ]]; then
   exit 1
 fi
 
+# Print the `[profile.release]` keys and `[profile.release.package.<name>]`
+# overrides of manifest $1 as sorted `<table>|<key = value>` lines. Cargo
+# rewrites key order in a packaged manifest, hence the sort. With $2 (a
+# space-separated table list), print only those tables: the workspace root
+# overrides packages the launcher never links.
+release_profile_lines() {
+  awk -v wanted=" ${2:-} " '
+    /^\[/ {
+      table = ""
+      if ($0 == "[profile.release]") table = "release"
+      else if ($0 ~ /^\[profile\.release\.package\.[^].]+\]$/) table = substr($0, 26, length($0) - 26)
+      if (table != "" && wanted != "  " && index(wanted, " " table " ") == 0) table = ""
+      next
+    }
+    table != "" && NF && $0 !~ /^[[:space:]]*#/ { print table "|" $0 }
+  ' "$1" | sort
+}
+
 cd "$repository_root"
 cargo package --locked --no-verify --manifest-path crates/mangostudio-launcher/Cargo.toml \
   --target-dir "$workdir/package-target"
@@ -46,6 +64,24 @@ manifest="${manifests[0]}"
 actual_msrv="$(sed -n 's/^rust-version = "\([^"]*\)"$/\1/p' "$manifest")"
 if [ "$actual_msrv" != "$expected_msrv" ]; then
   echo "Invalid packaged launcher rust-version '${actual_msrv:-<missing>}'; expected '$expected_msrv'" >&2
+  exit 1
+fi
+
+# `cargo install` builds the extracted package with itself as the root, so the
+# workspace `[profile.release]` is not part of it: the launcher manifest carries
+# its own copy, and Cargo must have kept it in the package. A package without it
+# still installs, just as a larger, unstripped binary, so compare it with the root.
+actual_profile="$(release_profile_lines "$manifest")"
+profile_tables="release $(printf '%s\n' "$actual_profile" | awk -F'|' '{ print $1 }' | sort -u | tr '\n' ' ')"
+expected_profile="$(release_profile_lines "$repository_root/Cargo.toml" "$profile_tables")"
+if [ -z "$actual_profile" ] || [ "$actual_profile" != "$expected_profile" ]; then
+  {
+    echo "Invalid packaged launcher [profile.release]; expected the workspace values below"
+    echo "expected:"
+    printf '%s\n' "$expected_profile"
+    echo "received:"
+    printf '%s\n' "${actual_profile:-<missing>}"
+  } >&2
   exit 1
 fi
 

@@ -1,8 +1,4 @@
-import {
-  type ApiErrorResponse,
-  ApiErrorResponseSchema,
-  ERROR_CODES,
-} from '@mangostudio/shared/errors';
+import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import {
   TerminalAvailabilityQuerySchema,
   TerminalAvailabilitySchema,
@@ -12,7 +8,7 @@ import {
   TerminalRenameBodySchema,
   TerminalSessionResponseSchema,
 } from '@mangostudio/shared/terminal';
-import { Elysia, t } from 'elysia';
+import { Elysia, status, t } from 'elysia';
 
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { ChatNotFoundError } from '../../chats/domain/chat-ownership';
@@ -30,41 +26,43 @@ import {
 } from '../domain/terminal-errors';
 
 /** The pattern every other module error mapper follows: `mapMachineError` is the reference. */
-function mapTerminalError(error: unknown, set: { status?: number | string }): ApiErrorResponse {
+function mapTerminalError(error: unknown) {
   if (error instanceof TerminalInvalidOpenError) {
-    set.status = 400;
-    return { error: error.message, code: ERROR_CODES.VALIDATION };
+    return status(400, { error: error.message, code: ERROR_CODES.VALIDATION });
   }
   if (error instanceof TerminalDisabledError) {
-    set.status = 403;
-    return { error: error.message, code: ERROR_CODES.TERMINAL_DISABLED };
+    return status(403, { error: error.message, code: ERROR_CODES.TERMINAL_DISABLED });
   }
   if (error instanceof TerminalLimitError) {
-    set.status = 409;
-    return {
+    return status(409, {
       error: error.message,
       code: ERROR_CODES.TERMINAL_LIMIT,
       details: { limit: String(error.limit) },
-    };
+    });
   }
   if (error instanceof TerminalNotIsolatedError) {
-    set.status = 403;
-    return { error: error.message, code: ERROR_CODES.TERMINAL_NOT_ISOLATED };
+    return status(403, { error: error.message, code: ERROR_CODES.TERMINAL_NOT_ISOLATED });
   }
   if (error instanceof TerminalUnavailableError) {
-    set.status = 409;
-    return {
+    return status(409, {
       error: error.message,
       code: ERROR_CODES.UNSUPPORTED,
       details: { reason: error.reason },
-    };
+    });
   }
   if (error instanceof ChatNotFoundError || error instanceof TerminalSessionNotFoundError) {
-    set.status = 404;
-    return { error: error.message, code: ERROR_CODES.NOT_FOUND };
+    return status(404, { error: error.message, code: ERROR_CODES.NOT_FOUND });
   }
   throw error;
 }
+
+/** Every status `mapTerminalError` can answer; each route declares the same set. */
+const TERMINAL_ERRORS = {
+  400: ApiErrorResponseSchema,
+  403: ApiErrorResponseSchema,
+  404: ApiErrorResponseSchema,
+  409: ApiErrorResponseSchema,
+};
 
 const idParams = t.Object({ id: t.String({ minLength: 1 }) });
 const OkResponseSchema = t.Object({ ok: t.Literal(true) });
@@ -98,10 +96,7 @@ export function createTerminalRoutes(service: TerminalSessionService = terminalS
         body: TerminalOpenBodySchema,
         response: {
           201: TerminalSessionResponseSchema,
-          400: ApiErrorResponseSchema,
-          403: ApiErrorResponseSchema,
-          404: ApiErrorResponseSchema,
-          409: ApiErrorResponseSchema,
+          ...TERMINAL_ERRORS,
         },
       },
       async ({ body, request, set, user }) => {
@@ -111,14 +106,13 @@ export function createTerminalRoutes(service: TerminalSessionService = terminalS
           return { session };
         } catch (error) {
           if (error instanceof Error && error.name === 'AbortError') {
-            set.status = 409;
-            return {
+            return status(409, {
               error: 'Terminal open canceled.',
               code: ERROR_CODES.UNSUPPORTED,
               details: { reason: 'disconnected' },
-            };
+            });
           }
-          return mapTerminalError(error, set);
+          return mapTerminalError(error);
         }
       }
     )
@@ -127,13 +121,13 @@ export function createTerminalRoutes(service: TerminalSessionService = terminalS
       {
         params: idParams,
         body: TerminalRenameBodySchema,
-        response: { 200: TerminalSessionResponseSchema, 404: ApiErrorResponseSchema },
+        response: { 200: TerminalSessionResponseSchema, ...TERMINAL_ERRORS },
       },
-      ({ params, body, set, user }) => {
+      ({ params, body, user }) => {
         try {
           return { session: service.rename(user?.id ?? '', params.id, body) };
         } catch (error) {
-          return mapTerminalError(error, set);
+          return mapTerminalError(error);
         }
       }
     )
@@ -143,16 +137,15 @@ export function createTerminalRoutes(service: TerminalSessionService = terminalS
         params: idParams,
         response: {
           200: OkResponseSchema,
-          404: ApiErrorResponseSchema,
-          409: ApiErrorResponseSchema,
+          ...TERMINAL_ERRORS,
         },
       },
-      async ({ params, set, user }) => {
+      async ({ params, user }) => {
         try {
           await service.close(user?.id ?? '', params.id);
           return { ok: true as const };
         } catch (error) {
-          return mapTerminalError(error, set);
+          return mapTerminalError(error);
         }
       }
     );

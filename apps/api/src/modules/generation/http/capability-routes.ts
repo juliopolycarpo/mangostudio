@@ -3,6 +3,7 @@ import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { Elysia, t } from 'elysia';
 
 import { getDb } from '../../../db/database';
+import { apiErrorStatus } from '../../../lib/api-error-status';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { ChatNotFoundError } from '../../chats/domain/chat-ownership';
 import { inspectChatCapabilities } from '../application/inspect-chat-capabilities';
@@ -23,7 +24,7 @@ export const capabilityRoutes = new Elysia()
       params: t.Object({ id: t.String() }),
       query: ChatCapabilitiesQuerySchema,
     },
-    async ({ params, query, user, set }) => {
+    async ({ params, query, user }) => {
       try {
         return await inspectChatCapabilities({
           db: getDb(),
@@ -34,13 +35,11 @@ export const capabilityRoutes = new Elysia()
         });
       } catch (err) {
         if (err instanceof ChatNotFoundError) {
-          set.status = 404;
-          return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
+          return apiErrorStatus(404, { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND });
         }
         if (err instanceof NoModelAvailableError) {
           const refusal = modelUnavailableResponse(err);
-          set.status = refusal.status;
-          return refusal.body;
+          return apiErrorStatus(refusal.status, refusal.body);
         }
         throw err;
       }

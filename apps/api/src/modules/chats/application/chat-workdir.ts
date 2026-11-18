@@ -1,4 +1,5 @@
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
+import { type ElysiaStatus, status } from 'elysia';
 import type { Kysely } from 'kysely';
 
 import type { Database } from '../../../db/types';
@@ -29,20 +30,20 @@ export async function resolveChatWorkdir(
  * Callers keep ownership of `no-workdir`: it is a normal reported state for
  * some endpoints and a conflict for others.
  */
-export function chatAccessDenied(
-  resolution: { readonly state: 'not-found' | 'forbidden' },
-  set: { status?: number | string }
-): ApiErrorResponse {
+export function chatAccessDenied(resolution: {
+  readonly state: 'not-found' | 'forbidden';
+}): ElysiaStatus<404, ApiErrorResponse> | ElysiaStatus<403, ApiErrorResponse> {
   if (resolution.state === 'not-found') {
-    set.status = 404;
-    return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
+    return status(404, { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND });
   }
-  set.status = 403;
-  return { error: 'Chat belongs to another user', code: ERROR_CODES.OWNERSHIP };
+  return status(403, { error: 'Chat belongs to another user', code: ERROR_CODES.OWNERSHIP });
 }
 
 /** Standard 409 when a route requires a bound chat workdir. */
-export function chatWorkdirConflict(set: { status?: number | string }): ApiErrorResponse {
-  set.status = 409;
-  return { error: 'Chat has no working directory', code: ERROR_CODES.CONFLICT };
+export function chatWorkdirConflict(): ElysiaStatus<409, ApiErrorResponse> {
+  return status(409, { error: 'Chat has no working directory', code: ERROR_CODES.CONFLICT });
 }
+
+/** Every refusal the two helpers above can produce, for routes that carry one in a result. */
+export type ChatTargetRefusal =
+  ReturnType<typeof chatAccessDenied> | ReturnType<typeof chatWorkdirConflict>;

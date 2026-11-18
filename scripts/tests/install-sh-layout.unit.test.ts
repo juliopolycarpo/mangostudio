@@ -166,17 +166,21 @@ function buildReleaseArchive(dir: string, name: string, printedVersion: string):
   return createFixtureTar(join(dir, name), srcDir, ['mangostudio']);
 }
 
-/** A release archive whose mangostudio prints `stderr` and exits `exitCode` — a hub the OS cannot start. */
+/**
+ * A release archive whose mangostudio prints `stderr` (and `stdout`, when given) and exits
+ * `exitCode` — a hub the OS cannot start, or one that prints its version and then fails.
+ */
 function buildFailingArchive(
   dir: string,
   name: string,
-  failure: { readonly stderr: string; readonly exitCode: number }
+  failure: { readonly stderr: string; readonly exitCode: number; readonly stdout?: string }
 ): string {
   const srcDir = join(dir, `src-failing-${name}`);
   mkdirSync(srcDir, { recursive: true });
+  const printStdout = failure.stdout === undefined ? '' : `printf '%s\\n' '${failure.stdout}'\n`;
   writeFileSync(
     join(srcDir, 'mangostudio'),
-    `#!/bin/sh\nprintf '%s\\n' '${failure.stderr}' >&2\nexit ${failure.exitCode}\n`
+    `#!/bin/sh\n${printStdout}printf '%s\\n' '${failure.stderr}' >&2\nexit ${failure.exitCode}\n`
   );
   chmodSync(join(srcDir, 'mangostudio'), 0o755);
   return createFixtureTar(join(dir, name), srcDir, ['mangostudio']);
@@ -528,6 +532,23 @@ describe('install.sh layout', () => {
     expect(result.stderr).toContain('exit status: 3');
     expect(result.stderr).not.toContain('apk add');
     expect(existsSync(join(root, 'current'))).toBe(false);
+  });
+
+  test('a hub that prints the expected version but exits non-zero fails the install', () => {
+    const { workDir, root, env } = layout();
+    const broken = buildFailingArchive(workDir, `mangostudio-0.1.0-${PLATFORM}.tar.gz`, {
+      stdout: '0.1.0',
+      stderr: 'panic: crashed after printing the version',
+      exitCode: 3,
+    });
+
+    const result = run(['--local', broken, '--version', '0.1.0'], env);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('expected version: 0.1.0 | received: <none>');
+    expect(result.stderr).toContain('expected: exit status: 0 | received: exit status: 3');
+    expect(existsSync(join(root, 'current'))).toBe(false);
+    expect(existsSync(join(root, '0.1.0'))).toBe(false);
   });
 
   test('a glibc loader error is shown but never gets the apk hint', () => {

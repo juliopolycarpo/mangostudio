@@ -46,26 +46,22 @@ describe('resolveChatWorkdir', () => {
 
 describe('chat access helpers', () => {
   it('maps denied resolutions and missing workdir to API errors', () => {
-    const set = { status: 200 as number | string };
+    const notFound = chatAccessDenied({ state: 'not-found' });
+    expect(notFound.status).toBe(404);
+    expect(notFound.response).toEqual({ error: 'Chat not found', code: 'NOT_FOUND' });
 
-    expect(chatAccessDenied({ state: 'not-found' }, set)).toEqual({
-      error: 'Chat not found',
-      code: 'NOT_FOUND',
-    });
-    expect(set.status).toBe(404);
-
-    set.status = 200;
-    expect(chatAccessDenied({ state: 'forbidden' }, set)).toEqual({
+    const forbidden = chatAccessDenied({ state: 'forbidden' });
+    expect(forbidden.status).toBe(403);
+    expect(forbidden.response).toEqual({
       error: 'Chat belongs to another user',
       code: 'OWNERSHIP',
     });
-    expect(set.status).toBe(403);
 
-    set.status = 200;
-    expect(chatWorkdirConflict(set)).toEqual({
+    const conflict = chatWorkdirConflict();
+    expect(conflict.status).toBe(409);
+    expect(conflict.response).toEqual({
       error: 'Chat has no working directory',
       code: 'CONFLICT',
     });
-    expect(set.status).toBe(409);
   });
 });

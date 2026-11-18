@@ -151,23 +151,15 @@ export function planUpgrade(
       }
       return delegate(['scoop', 'update', 'mangostudio']);
     case 'cargo':
-      if (request.sha) {
+      // crates.io canaries are no longer published. The `<root>-canary` crate
+      // that exists is a frozen pre-2026-09-16 release, so installing it would
+      // hand back a stale launcher or fail to resolve.
+      if (canary || request.sha) {
         return refused(
           'channel-unsupported',
           installer,
-          'crates.io has no per-commit canary. Switch to the shell installer for a pinned commit.'
+          'crates.io no longer publishes canary builds. Switch to the shell installer for canary.'
         );
-      }
-      if (canary) {
-        const root = versionRoot(request.version ?? context.currentVersion);
-        return delegate([
-          'cargo',
-          'install',
-          'mangostudio',
-          '--version',
-          `${root}-canary`,
-          '--locked',
-        ]);
       }
       if (request.version !== undefined) {
         return delegate([

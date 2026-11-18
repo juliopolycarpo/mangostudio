@@ -19,7 +19,7 @@ import {
   normalizeHashPath,
 } from '../index';
 import type { CachedInstanceDisplay, CachedInstanceHash, LibraryCache } from './cache';
-import { tomlNestingWithinLimit } from './toml-nesting';
+import { isTomlTable, tomlNestingWithinLimit } from './toml-nesting';
 
 const textDecoder = new TextDecoder();
 /** The file inside a skill directory that carries its text and frontmatter. */
@@ -535,7 +535,7 @@ function describeInstance(
     }
     if (location.format === 'toml-agent' || location.format === 'toml-settings') {
       const value = Bun.TOML.parse(text);
-      if (!isObject(value) || !tomlNestingWithinLimit(value)) {
+      if (!isTomlTable(value) || !tomlNestingWithinLimit(value)) {
         return { title: slug, invalidReason: 'invalid-metadata' };
       }
       const title =

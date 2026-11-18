@@ -2,8 +2,8 @@
  * Auth routes: bridge between Elysia and Better Auth.
  */
 
-import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
-import type { Elysia } from 'elysia';
+import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
+import { type Elysia, status } from 'elysia';
 import type { Kysely } from 'kysely';
 
 import { AUTH_BASE_PATH, getAuth } from '../auth';
@@ -94,18 +94,26 @@ export const authRoutes = (app: Elysia) =>
       // sign-up and sign-in failing with `Invalid JSON in request body`. Handing
       // over a re-created `Request` instead would be lossy, so the parse is
       // skipped rather than replayed.
-      .all('/*', { parse: 'none' }, (context) => {
-        authLogger.info('request', { method: context.request.method, path: context.path });
+      .all(
+        '/*',
+        {
+          parse: 'none',
+          // Only the route's own 405 is declared. Better Auth answers with a
+          // `Response`, which Elysia hands back untouched, whatever its status.
+          response: { 405: ApiErrorResponseSchema },
+        },
+        (context) => {
+          authLogger.info('request', { method: context.request.method, path: context.path });
 
-        if (BETTER_AUTH_ACCEPT_METHODS.includes(context.request.method)) {
-          return handleAuthRequest(context.request);
+          if (BETTER_AUTH_ACCEPT_METHODS.includes(context.request.method)) {
+            return handleAuthRequest(context.request);
+          }
+          context.set.headers ??= {};
+          context.set.headers.Allow = ALLOWED_AUTH_METHODS;
+          return status(405, {
+            error: 'Method not allowed',
+            code: ERROR_CODES.METHOD_NOT_ALLOWED,
+          });
         }
-        context.set.status = 405;
-        context.set.headers ??= {};
-        context.set.headers.Allow = ALLOWED_AUTH_METHODS;
-        return {
-          error: 'Method not allowed',
-          code: ERROR_CODES.METHOD_NOT_ALLOWED,
-        } satisfies ApiErrorResponse;
-      })
+      )
   );

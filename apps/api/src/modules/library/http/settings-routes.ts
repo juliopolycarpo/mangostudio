@@ -1,5 +1,4 @@
 import { EnvironmentIdSchema, LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
-import type { ApiErrorResponse } from '@mangostudio/shared/errors';
 import { ApiErrorResponseSchema } from '@mangostudio/shared/errors';
 import {
   type ConceptComparison,
@@ -64,7 +63,7 @@ export function createSettingsRoutes(service: SettingsRouteService = defaultSett
           503: ApiErrorResponseSchema,
         },
       },
-      async ({ query, set, user }): Promise<SettingsSnapshot[] | ApiErrorResponse> => {
+      async ({ query, set, user }) => {
         try {
           return await service.list(scopeFor(user?.id ?? '', query.environmentId));
         } catch (error) {
@@ -83,7 +82,7 @@ export function createSettingsRoutes(service: SettingsRouteService = defaultSett
           503: ApiErrorResponseSchema,
         },
       },
-      async ({ query, set, user }): Promise<ConceptComparison[] | ApiErrorResponse> => {
+      async ({ query, set, user }) => {
         try {
           return await service.compare(scopeFor(user?.id ?? '', query.environmentId));
         } catch (error) {
@@ -103,7 +102,7 @@ export function createSettingsRoutes(service: SettingsRouteService = defaultSett
           503: ApiErrorResponseSchema,
         },
       },
-      async ({ params, query, set, user }): Promise<SettingsSnapshot | ApiErrorResponse> => {
+      async ({ params, query, set, user }) => {
         try {
           return await service.get(scopeFor(user?.id ?? '', query.environmentId), params.targetId);
         } catch (error) {

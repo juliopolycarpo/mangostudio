@@ -1122,6 +1122,59 @@ describe('install.ps1 failed version probe (fake mangostudio.exe)', () => {
     90000
   );
 
+  /**
+   * What Test-SmokeOrFail throws when Invoke-VersionProbe reports `stdout` and `exitCode`, or
+   * '<no failure>'. The probe is replaced after dot-sourcing, so this needs no exe at all.
+   */
+  function stubbedProbeMessage(stdout: string, exitCode: number): string {
+    const l = layout();
+    const probe = `function Invoke-VersionProbe { [pscustomobject]@{ Stdout = @(${psQuote(stdout)}); Stderr = @(); ExitCode = ${exitCode}; StartError = $null } }`;
+    const result = runDotSourced(
+      l.scriptPath,
+      `${probe}; $m = '<no failure>'; try { Test-SmokeOrFail ${psQuote(l.root)} ${psQuote(EXPECTED)} $false } catch { $m = $_.Exception.Message }; [Console]::Out.Write($m)`
+    );
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `expected the stubbed probe to report a message | received exit ${result.exitCode}: ${result.stderr}`
+      );
+    }
+    return result.stdout.replace(/\r/g, '');
+  }
+
+  test.skipIf(!POWERSHELL)(
+    'a probe that prints the expected version but exits non-zero fails, as install.sh does',
+    () => {
+      const message = stubbedProbeMessage(EXPECTED, 3);
+
+      expect(message.split('\n')[0]).toBe(FIRST_LINE);
+      expect(message).toContain('expected: exit code: 0 | received: exit code: 3 (0x00000003)');
+    },
+    90000
+  );
+
+  test.skipIf(!POWERSHELL)(
+    'a probe that prints the expected version and exits zero passes',
+    () => {
+      expect(stubbedProbeMessage(EXPECTED, 0)).toBe('<no failure>');
+    },
+    90000
+  );
+
+  test.skipIf(!POWERSHELL || !NATIVE_FAKES)(
+    'a real exe that prints the expected version but exits non-zero fails the probe',
+    () => {
+      const l = fakeLayout((target) =>
+        compileFake(target, `Console.WriteLine("${EXPECTED}"); return 7;`)
+      );
+
+      const message = probeMessage(l);
+
+      expect(message.split('\n')[0]).toBe(FIRST_LINE);
+      expect(message).toContain('received: exit code: 7 (0x00000007)');
+    },
+    90000
+  );
+
   test.skipIf(!POWERSHELL || !NATIVE_FAKES)(
     'a probe that prints the expected version passes, with or without a stderr warning',
     () => {
@@ -1244,6 +1297,64 @@ describe('install.ps1 npm tarball extraction', () => {
       ).toBe('<none>');
       expect(result.exitCode).not.toBe(0);
       expect(result.stderr).toContain(`expected version: ${EXPECTED} | received: <none>`);
+    },
+    90000
+  );
+
+  /**
+   * What `Get-SystemTarPath <args>` returns, or `error: <message>` when it fails. The values
+   * are passed as parameters: unsetting SystemRoot inside the PowerShell host can break the
+   * host itself, which would hide the function's own answer.
+   */
+  function systemTarOutcome(args: string): string {
+    const l = layout();
+    const result = runDotSourced(
+      l.scriptPath,
+      `try { Get-SystemTarPath ${args} } catch { 'error: ' + $_.Exception.Message }`
+    );
+    const outcome = result.stdout.replace(/\r/g, '').trim();
+    if (result.exitCode !== 0 || outcome === '') {
+      throw new Error(
+        `(Get-SystemTarPath ${args}): expected a path or an error line on stdout | received exit ${result.exitCode}, stdout ${JSON.stringify(result.stdout)}, stderr ${JSON.stringify(result.stderr)}`
+      );
+    }
+    return outcome;
+  }
+
+  test.skipIf(!POWERSHELL)(
+    'resolves the system tar from windir when SystemRoot is unset',
+    () => {
+      const windowsTar = toWindowsPath(systemExecutable('tar.exe'));
+
+      const outcome = systemTarOutcome("-SystemRoot '' -Windir $env:SystemRoot");
+
+      expect(outcome).toBe(windowsTar);
+    },
+    90000
+  );
+
+  test.skipIf(!POWERSHELL)(
+    'refuses, naming SystemRoot and windir, rather than falling back to a tar on PATH',
+    () => {
+      const outcome = systemTarOutcome("-SystemRoot '' -Windir ''");
+
+      expect(outcome).toBe(
+        'error: cannot locate the Windows system tar.exe | expected: SystemRoot or windir set | received: neither is set'
+      );
+    },
+    90000
+  );
+
+  test.skipIf(!POWERSHELL)(
+    'refuses, naming the path, when the Windows directory holds no tar.exe',
+    () => {
+      const emptyWindowsDir = toWindowsPath(layout().linuxDir);
+
+      const outcome = systemTarOutcome(`-SystemRoot ${psQuote(emptyWindowsDir)}`);
+
+      expect(outcome).toBe(
+        `error: the Windows system tar.exe is missing | expected: ${emptyWindowsDir}\\System32\\tar.exe | received: no such file`
+      );
     },
     90000
   );

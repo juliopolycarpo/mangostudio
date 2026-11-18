@@ -14,7 +14,7 @@
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { SSEErrorEvent } from '@mangostudio/shared/streaming';
 
-import { environmentUnavailableResponse } from './environment-unavailable';
+import { environmentUnavailableBody } from './environment-unavailable';
 import { SSE_KEEPALIVE_FRAME, SSE_KEEPALIVE_INTERVAL_MS } from './hub-connection-limits';
 
 const ENCODER = new TextEncoder();
@@ -54,7 +54,7 @@ export function sseResponse<T extends object>(
         if (!disconnected) {
           // An unreachable environment is the same recoverable condition the
           // JSON routes answer 503 for; it keeps their fixed text and code.
-          const unavailable = environmentUnavailableResponse(error, {});
+          const unavailable = environmentUnavailableBody(error);
           const event: SSEErrorEvent = unavailable
             ? { type: 'error', error: unavailable.error, code: unavailable.code, done: true }
             : {

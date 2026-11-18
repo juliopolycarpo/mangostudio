@@ -20,6 +20,7 @@ import {
   downloadVerifiedAsset,
   ensureBunCrossRuntime,
   hostReleasePlatform,
+  zipCommands,
 } from '../lib/bun-cross-runtime';
 import { ALL_BINARY_TARGETS } from '../lib/release-targets';
 
@@ -855,5 +856,72 @@ describe('clearBunCrossRuntimeCache', () => {
     // The cold path has to be reachable on demand, not only by knowing which
     // directory to delete — and an absent cache is already the desired state.
     expect(await clearBunCrossRuntimeCache(CHANNEL, options)).toBe(cleared);
+  });
+});
+
+describe('zipCommands on Windows', () => {
+  const WINDOWS_ARCHIVE = 'C:\\cache\\bun-windows-x64.zip';
+  const WINDOWS_DESTINATION = 'C:\\cache\\extract';
+  const SYSTEM_TAR = 'C:\\Windows\\System32\\tar.exe';
+
+  test('names the System32 tar by full path, so a GNU tar earlier on PATH cannot run', () => {
+    const commands = zipCommands(WINDOWS_ARCHIVE, WINDOWS_DESTINATION, {
+      platform: 'win32',
+      env: { SystemRoot: 'C:\\Windows' },
+      unzip: null,
+    });
+
+    expect(commands.list).toEqual([SYSTEM_TAR, '-tf', 'C:/cache/bun-windows-x64.zip']);
+    expect(commands.extract).toEqual([
+      SYSTEM_TAR,
+      '-xf',
+      'C:/cache/bun-windows-x64.zip',
+      '-C',
+      'C:/cache/extract',
+    ]);
+  });
+
+  test('derives the System32 directory from windir when SystemRoot is unset', () => {
+    const commands = zipCommands(WINDOWS_ARCHIVE, WINDOWS_DESTINATION, {
+      platform: 'win32',
+      env: { windir: 'D:\\WinNT' },
+      unzip: null,
+    });
+
+    expect(commands.list[0]).toBe('D:\\WinNT\\System32\\tar.exe');
+    expect(commands.extract[0]).toBe('D:\\WinNT\\System32\\tar.exe');
+  });
+
+  test('refuses, naming both variables, instead of falling back to a tar from PATH', () => {
+    expect(() =>
+      zipCommands(WINDOWS_ARCHIVE, WINDOWS_DESTINATION, {
+        platform: 'win32',
+        env: { SystemRoot: '', windir: undefined },
+        unzip: null,
+      })
+    ).toThrow(
+      'Cannot locate the Windows system tar.exe | expected: SystemRoot or windir set | received: neither is set'
+    );
+  });
+
+  test('keeps using unzip when one is on PATH, without needing SystemRoot', () => {
+    const commands = zipCommands(WINDOWS_ARCHIVE, WINDOWS_DESTINATION, {
+      platform: 'win32',
+      env: {},
+      unzip: 'C:\\tools\\unzip.exe',
+    });
+
+    expect(commands.list[0]).toBe('C:\\tools\\unzip.exe');
+  });
+
+  test('keeps the bare tar name off Windows', () => {
+    const commands = zipCommands('/tmp/bun.zip', '/tmp/extract', {
+      platform: 'linux',
+      env: {},
+      unzip: null,
+    });
+
+    expect(commands.list).toEqual(['tar', '-tf', '/tmp/bun.zip']);
+    expect(commands.extract).toEqual(['tar', '-xf', '/tmp/bun.zip', '-C', '/tmp/extract']);
   });
 });

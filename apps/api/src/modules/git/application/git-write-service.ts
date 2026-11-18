@@ -53,7 +53,9 @@ const MERGE_CONFLICT_PATTERN = /CONFLICT|Merge conflict|needs merge/i;
 export class GitWriteError extends Error {
   constructor(
     message: string,
-    readonly status: number,
+    // Literals, not `number`: the git routes answer `status(error.status, ...)`, and a
+    // literal union types each status into Eden's error channel.
+    readonly status: 404 | 409 | 422,
     readonly code: ErrorCode,
     readonly detail?: string
   ) {

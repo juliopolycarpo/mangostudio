@@ -3,6 +3,7 @@ import { GenerateTextBodySchema } from '@mangostudio/shared/generation';
 import type { Elysia } from 'elysia';
 
 import { getDb } from '../../../db/database';
+import { apiErrorStatus } from '../../../lib/api-error-status';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { ChatAttachmentNotFoundError } from '../../attachments/infrastructure/attachment-repository';
 import { ChatNotFoundError } from '../../chats/domain/chat-ownership';
@@ -30,15 +31,14 @@ export const respondRoutes = (app: Elysia) =>
        * POST /api/respond
        * Text-chat: persists user message, calls provider, persists AI reply, returns both.
        */
-      .post('/respond', { body: GenerateTextBodySchema }, async ({ body, set, user }) => {
+      .post('/respond', { body: GenerateTextBodySchema }, async ({ body, user }) => {
         const db = getDb();
         const userId = user?.id ?? '';
         const operationId = body.operationId;
         if (operationId) {
           const chat = await getOwnedChat(body.chatId, userId, db);
           if (!chat) {
-            set.status = 404;
-            return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
+            return apiErrorStatus(404, { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND });
           }
           try {
             const { row, claimed } = await claimOperation(
@@ -85,11 +85,10 @@ export const respondRoutes = (app: Elysia) =>
           } catch (error) {
             if (error instanceof OperationConflictError || error instanceof OperationExpiredError) {
               const expired = error instanceof OperationExpiredError;
-              set.status = expired ? 410 : 409;
-              return {
+              return apiErrorStatus(expired ? 410 : 409, {
                 error: error.message,
                 code: expired ? ERROR_CODES.OPERATION_EXPIRED : ERROR_CODES.CONFLICT,
-              };
+              });
             }
             throw error;
           }
@@ -108,28 +107,23 @@ export const respondRoutes = (app: Elysia) =>
           );
         } catch (err) {
           if (err instanceof ChatNotFoundError) {
-            set.status = 404;
-            return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
+            return apiErrorStatus(404, { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND });
           }
           if (err instanceof NoModelAvailableError) {
             const refusal = modelUnavailableResponse(err);
-            set.status = refusal.status;
-            return refusal.body;
+            return apiErrorStatus(refusal.status, refusal.body);
           }
           if (err instanceof ChatAttachmentNotFoundError || err instanceof EmptyTextTurnError) {
-            set.status = 400;
-            return { error: err.message, code: ERROR_CODES.VALIDATION };
+            return apiErrorStatus(400, { error: err.message, code: ERROR_CODES.VALIDATION });
           }
           if (err instanceof UnsupportedChatRunnerError) {
-            set.status = 409;
-            return { error: err.message, code: ERROR_CODES.UNSUPPORTED };
+            return apiErrorStatus(409, { error: err.message, code: ERROR_CODES.UNSUPPORTED });
           }
           console.error('[respond] Error:', err);
-          set.status = 500;
-          return {
+          return apiErrorStatus(500, {
             error: 'Text generation failed. Please try again.',
             code: ERROR_CODES.PROVIDER_ERROR,
-          };
+          });
         }
       })
   );

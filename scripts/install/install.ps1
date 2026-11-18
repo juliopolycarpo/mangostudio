@@ -532,6 +532,27 @@ function Write-NextSteps {
   Write-Host 'Then open: http://localhost:3001'
 }
 
+# The system tar (bsdtar, shipped with Windows 10 1803+) by full path, never
+# whichever tar.exe PATH finds first: a GNU tar ahead of it (Git's usr\bin, as
+# on a GitHub-hosted runner) reads the "C:" of an archive path as a remote host.
+# SystemRoot says where Windows lives, windir is the same directory under its
+# older name. With neither set there is nothing to build the path from, and
+# falling back to the bare name would bring the PATH lookup back, so it fails.
+# Both values are parameters, defaulting to the environment, so a test can pass
+# them without unsetting variables the PowerShell host itself relies on.
+function Get-SystemTarPath([string]$SystemRoot = $env:SystemRoot, [string]$Windir = $env:windir) {
+  $windowsDir = $SystemRoot
+  if (-not $windowsDir) { $windowsDir = $Windir }
+  if (-not $windowsDir) {
+    Fail 'cannot locate the Windows system tar.exe | expected: SystemRoot or windir set | received: neither is set'
+  }
+  $systemTar = Join-Path $windowsDir 'System32\tar.exe'
+  if (-not (Test-Path -LiteralPath $systemTar)) {
+    Fail "the Windows system tar.exe is missing | expected: $systemTar | received: no such file"
+  }
+  return $systemTar
+}
+
 # Extract into a scratch directory and return its path. Never touches
 # "<install_root>/<version>" — that swap only happens once the caller has
 # smoke-checked these bytes, so a corrupt re-install of an already-installed
@@ -541,16 +562,8 @@ function Expand-NpmTarball([string]$ArchivePath, [string]$DestinationPath) {
   if (Test-Path $stagingDir) { Remove-Item $stagingDir -Recurse -Force }
   New-Item -ItemType Directory -Force $stagingDir | Out-Null
 
-  # The system tar (bsdtar, shipped with Windows 10 1803+), not whichever
-  # tar.exe PATH finds first: a GNU tar ahead of it (Git's usr\bin, as on a
-  # GitHub-hosted runner) reads the "C:" of an archive path as a remote host.
-  $tar = 'tar.exe'
-  if ($env:SystemRoot) {
-    $systemTar = Join-Path $env:SystemRoot 'System32\tar.exe'
-    if (Test-Path -LiteralPath $systemTar) { $tar = $systemTar }
-  }
-
   try {
+    $tar = Get-SystemTarPath
     & $tar -xzf $ArchivePath -C $stagingDir
     if ($LASTEXITCODE -ne 0) {
       Fail "$tar failed to extract $ArchivePath | expected: exit code: 0 | received: exit code: $LASTEXITCODE"
@@ -655,15 +668,19 @@ function Format-StartError([string]$Message) {
 # Run "<dir>\mangostudio.exe --version" and compare to what we meant to
 # install, before the pointer moves. RemoveOnFailure=$true for a directory
 # this run just created (fresh install/local/canary); $false for -Use/
-# -Rollback, which reuse a directory that predates this run. A probe that
-# exits non-zero, writes to stderr or cannot be started has its exit code,
-# stderr and start error appended to the message, as install.sh does, so the
-# reason the hub did not run reaches the user.
+# -Rollback, which reuse a directory that predates this run. A failed check
+# has the probe's exit code, stderr and start error appended to the message,
+# as install.sh does, so the reason the hub did not run reaches the user. A
+# non-zero exit fails the check even when the probe printed the right version.
 function Test-SmokeOrFail([string]$Dir, [string]$Expected, [bool]$RemoveOnFailure) {
   $exePath = Join-Path $Dir 'mangostudio.exe'
   $probe = Invoke-VersionProbe $exePath 10
   $actual = $null
   if ($probe.Stdout.Count -gt 0) { $actual = $probe.Stdout[0].Trim() }
+  # A probe that printed the right version and then exited non-zero did not
+  # run cleanly, so what it printed does not count, as in install.sh's
+  # smoke_or_fail. A start failure has no exit code and no output either.
+  if ($null -ne $probe.ExitCode -and $probe.ExitCode -ne 0) { $actual = $null }
 
   if ($actual -eq $Expected) { return }
 

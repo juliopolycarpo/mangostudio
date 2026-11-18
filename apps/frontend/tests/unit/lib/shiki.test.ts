@@ -98,6 +98,49 @@ describe('shiki highlighter', () => {
     expect(html).toContain('main');
   });
 
+  it('colours an rs fence with the rust grammar', async () => {
+    const shiki = await loadShiki();
+
+    await shiki.preloadCodeLanguages(['rs'], 'one-dark-pro');
+    const highlighter = await shiki.initHighlighter();
+    const html = completeRender(() => shiki.highlightCode('fn main() {}', 'rs', 'one-dark-pro'));
+
+    expect(highlighter.getLoadedLanguages()).toContain('rust');
+    expect(html, 'rs fence html').toContain('<span style=');
+  });
+
+  it('colours a jsonc fence and scopes its comments as comments', async () => {
+    const shiki = await loadShiki();
+
+    await shiki.preloadCodeLanguages(['jsonc'], 'one-dark-pro');
+    const highlighter = await shiki.initHighlighter();
+    const comment = shiki.highlightLineTokens('// strict mode', 'jsonc', 'one-dark-pro');
+    const property = shiki.highlightLineTokens('{"a": 1}', 'jsonc', 'one-dark-pro');
+
+    expect(highlighter.getLoadedLanguages()).toContain('json');
+    // A comment the grammar does not know is coloured as invalid or plain text; a known one gets
+    // the theme's comment colour, which differs from the property colour.
+    const commentColor = comment?.find((token) => token.content.includes('strict'))?.color;
+    const propertyColor = property?.find((token) => token.content.includes('a'))?.color;
+    expect(commentColor, `jsonc comment token colour | expected: a theme colour`).toBeDefined();
+    expect(commentColor, `jsonc comment ${commentColor} vs property ${propertyColor}`).not.toBe(
+      propertyColor
+    );
+  });
+
+  it('colours a diff fence with the diff grammar', async () => {
+    const shiki = await loadShiki();
+
+    await shiki.preloadCodeLanguages(['diff'], 'one-dark-pro');
+    const highlighter = await shiki.initHighlighter();
+    const html = completeRender(() =>
+      shiki.highlightCode('@@ -1 +1 @@\n-old\n+new', 'diff', 'one-dark-pro')
+    );
+
+    expect(highlighter.getLoadedLanguages()).toContain('diff');
+    expect(html, 'diff fence html').toContain('<span style=');
+  });
+
   it('ignores unsupported languages without initializing the highlighter', async () => {
     const shiki = await loadShiki();
 

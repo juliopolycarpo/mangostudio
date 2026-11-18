@@ -13,7 +13,7 @@ export async function compactChat(
 ): Promise<ContextCompactionResponse> {
   const { data, error } = await client.api.chats({ id: chatId }).compact.post(body);
   if (error) throw new ApiError(error.value);
-  return data as ContextCompactionResponse;
+  return data;
 }
 
 export async function summarizeToNewChat(
@@ -23,5 +23,5 @@ export async function summarizeToNewChat(
   const chat = client.api.chats({ id: chatId });
   const { data, error } = await chat['summarize-to-new-chat'].post(body);
   if (error) throw new ApiError(error.value);
-  return data as ContextCompactionResponse;
+  return data;
 }

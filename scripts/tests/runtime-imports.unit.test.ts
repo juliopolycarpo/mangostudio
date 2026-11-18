@@ -67,6 +67,43 @@ describe('runtime import walker workspace aliases', () => {
     ]);
   });
 
+  // Planted violations: each form must surface `planted-runtime-package` against
+  // `apps/api/tests/support/chatgpt/index.ts`. The regex scanner this replaced missed
+  // the wrapped loader and `module['require']`, and counted `import('x').Type` and
+  // `other.require('x')` as runtime edges.
+  test.each([
+    "const loaded = module.require('planted-runtime-package');",
+    "const loaded = (require as NodeRequire)('planted-runtime-package');",
+    "const loaded = module['require']('planted-runtime-package');",
+    "import loaded = require('planted-runtime-package');",
+    "import 'planted-runtime-package';",
+    "export * from 'planted-runtime-package';",
+    "const loaded = await import('planted-runtime-package');",
+    "import { type Model, value } from 'planted-runtime-package';",
+  ])('reports the planted runtime edge in %s', (source) => {
+    const importer = 'apps/api/tests/support/chatgpt/index.ts';
+    writeFixture(importer, `${source}\n`);
+
+    expect([...walkRuntimeImports('scripts/entry.ts', fixtureRoot).externalSpecifiers]).toEqual([
+      ['planted-runtime-package', [importer]],
+    ]);
+  });
+
+  test.each([
+    "import type { Model } from 'planted-runtime-package';",
+    "import { type Model } from 'planted-runtime-package';",
+    "export type { Model } from 'planted-runtime-package';",
+    "type Model = import('planted-runtime-package').Model;",
+    "// import 'planted-runtime-package';",
+    "/* const loaded = require('planted-runtime-package'); */",
+    'const example = "import loaded from \'planted-runtime-package\';";',
+    "const loaded = other.require('planted-runtime-package');",
+  ])('ignores the type-only, commented or unrelated edge in %s', (source) => {
+    writeFixture('apps/api/tests/support/chatgpt/index.ts', `${source}\n`);
+
+    expect([...walkRuntimeImports('scripts/entry.ts', fixtureRoot).externalSpecifiers]).toEqual([]);
+  });
+
   test('accepts a relative fixture root while following the same original source', () => {
     const walk = walkRuntimeImports('scripts/entry.ts', relative(process.cwd(), fixtureRoot));
 

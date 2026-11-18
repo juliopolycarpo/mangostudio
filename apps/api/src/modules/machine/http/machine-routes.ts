@@ -1,8 +1,4 @@
-import {
-  type ApiErrorResponse,
-  ApiErrorResponseSchema,
-  ERROR_CODES,
-} from '@mangostudio/shared/errors';
+import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import {
   MACHINE_LOG_TAIL_MAX,
   MachineActionResponseSchema,
@@ -16,7 +12,7 @@ import {
   MachineStatusSchema,
 } from '@mangostudio/shared/machine';
 import { MachineUpdateStatusSchema, MachineUpgradeBodySchema } from '@mangostudio/shared/updates';
-import { Elysia, t } from 'elysia';
+import { Elysia, status, t } from 'elysia';
 import Value from 'typebox/value';
 
 import type { GuardIpPolicy } from '../../../lib/client-ip';
@@ -32,33 +28,36 @@ import {
   UpgradeUnavailableError,
 } from '../application/machine-service';
 
-function mapMachineError(error: unknown, set: { status?: number | string }): ApiErrorResponse {
+function mapMachineError(error: unknown) {
   if (error instanceof MachineActionBlockedError) {
-    set.status = 403;
-    return {
+    return status(403, {
       error: error.message,
       code: ERROR_CODES.PERMISSION_DENIED,
       details: { reasons: error.guard.reasons.join(',') },
-    };
+    });
   }
   if (error instanceof MachineActionUnavailableError) {
-    set.status = 409;
-    return {
+    return status(409, {
       error: error.message,
       code: ERROR_CODES.UNSUPPORTED,
       details: { reason: error.reason, command: error.command },
-    };
+    });
   }
   if (error instanceof UpgradeUnavailableError) {
-    set.status = 409;
-    return {
+    return status(409, {
       error: error.message,
       code: ERROR_CODES.UNSUPPORTED,
       details: { reason: error.reason, command: error.command },
-    };
+    });
   }
   throw error;
 }
+
+/** Every status `mapMachineError` can answer; each route that calls it declares the same set. */
+const MACHINE_ERRORS = {
+  403: ApiErrorResponseSchema,
+  409: ApiErrorResponseSchema,
+};
 
 /** Comma-separated section names, each one the schema knows; null when any is not. */
 export function parseDoctorSections(raw: string | undefined): MachineDoctorSection[] | null {
@@ -92,14 +91,13 @@ export function createMachineRoutes(
         query: t.Object({ sections: t.Optional(t.String({ maxLength: 256 })) }),
         response: { 200: MachineDoctorReportSchema, 422: ApiErrorResponseSchema },
       },
-      async ({ query, set, user }) => {
+      async ({ query, user }) => {
         const sections = parseDoctorSections(query.sections);
         if (sections === null) {
-          set.status = 422;
-          return {
+          return status(422, {
             error: `Unknown doctor section in "${query.sections}". Expected environments or library.`,
             code: ERROR_CODES.VALIDATION,
-          };
+          });
         }
         // Scoped to the signed-in account: the rows name MCP servers and
         // connectors, which are per-user rather than per-machine.
@@ -112,13 +110,13 @@ export function createMachineRoutes(
         query: t.Object({
           tail: t.Optional(t.Numeric({ minimum: 1, maximum: MACHINE_LOG_TAIL_MAX })),
         }),
-        response: { 200: MachineLogTailSchema, 403: ApiErrorResponseSchema },
+        response: { 200: MachineLogTailSchema, ...MACHINE_ERRORS },
       },
-      async ({ query, guardClientIp, set }) => {
+      async ({ query, guardClientIp }) => {
         try {
           return await service.logs(query.tail ?? 0, { clientIp: guardClientIp });
         } catch (error) {
-          return mapMachineError(error, set);
+          return mapMachineError(error);
         }
       }
     )
@@ -127,8 +125,7 @@ export function createMachineRoutes(
       {
         response: {
           202: MachineActionResponseSchema,
-          403: ApiErrorResponseSchema,
-          409: ApiErrorResponseSchema,
+          ...MACHINE_ERRORS,
         },
       },
       async ({ guardClientIp, set }) => {
@@ -137,7 +134,7 @@ export function createMachineRoutes(
           set.status = 202;
           return response;
         } catch (error) {
-          return mapMachineError(error, set);
+          return mapMachineError(error);
         }
       }
     )
@@ -147,8 +144,7 @@ export function createMachineRoutes(
         body: MachineServiceBodySchema,
         response: {
           202: MachineActionResponseSchema,
-          403: ApiErrorResponseSchema,
-          409: ApiErrorResponseSchema,
+          ...MACHINE_ERRORS,
         },
       },
       async ({ body, guardClientIp, set }) => {
@@ -157,7 +153,7 @@ export function createMachineRoutes(
           set.status = 202;
           return response;
         } catch (error) {
-          return mapMachineError(error, set);
+          return mapMachineError(error);
         }
       }
     )
@@ -167,14 +163,14 @@ export function createMachineRoutes(
         body: MachineConfigWriteBodySchema,
         response: {
           200: MachineConfigWriteResponseSchema,
-          403: ApiErrorResponseSchema,
+          ...MACHINE_ERRORS,
         },
       },
-      async ({ body, guardClientIp, set }) => {
+      async ({ body, guardClientIp }) => {
         try {
           return await service.writeConfig(body, { clientIp: guardClientIp });
         } catch (error) {
-          return mapMachineError(error, set);
+          return mapMachineError(error);
         }
       }
     )
@@ -182,17 +178,14 @@ export function createMachineRoutes(
       '/machine/upgrade',
       {
         body: MachineUpgradeBodySchema,
-        response: {
-          403: ApiErrorResponseSchema,
-          409: ApiErrorResponseSchema,
-        },
+        response: MACHINE_ERRORS,
       },
-      async ({ body, guardClientIp, set }) => {
+      async ({ body, guardClientIp }) => {
         try {
           const source = await service.upgrade(body, { clientIp: guardClientIp });
           return sseResponse(source, 'Upgrade stream failed.');
         } catch (error) {
-          return mapMachineError(error, set);
+          return mapMachineError(error);
         }
       }
     );

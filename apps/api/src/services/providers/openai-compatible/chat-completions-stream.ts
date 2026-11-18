@@ -88,6 +88,7 @@ export async function* streamOAICompatAgentTurn(
   const responseFormat = buildResponseFormat(req.generationConfig?.structuredOutput);
 
   yield* streamChatCompletionsAgentTurnLoop({
+    provider: 'openai-compatible',
     signal: req.signal,
     openStream: () =>
       client.chat.completions.create(
