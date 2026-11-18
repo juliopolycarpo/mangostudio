@@ -8,7 +8,7 @@
 //! here, not in review.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// `(path relative to crates/, call text, expected occurrence count, why it is allowed)`.
 const ALLOWED: &[(&str, &str, usize, &str)] = &[
@@ -248,20 +248,35 @@ fn process_command_sites(lines: &[(usize, &str)]) -> Vec<(usize, &'static str)> 
     sites
 }
 
-/// The crates that make up the runtime host, under `crates/`. Each is scanned through its `src/`.
-const HOST_CRATES: &[&str] = &[
-    "mangostudio-runtime",
-    "mangostudio-runtime-core",
-    "mangostudio-runtime-cold",
-];
+/// The crates that make up the runtime host as `(crate name, crate directory)`. Each is scanned
+/// through its `src/`. Every directory is its own `CARGO_MANIFEST_DIR` join so
+/// `scripts/lib/crate-inputs.ts` records these three crates as inputs of this test, not the whole
+/// `crates/` directory (which would force every crate edit to select the rust lane through it).
+fn host_crates() -> [(&'static str, PathBuf); 3] {
+    [
+        (
+            "mangostudio-runtime",
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../mangostudio-runtime"),
+        ),
+        (
+            "mangostudio-runtime-core",
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../mangostudio-runtime-core"),
+        ),
+        (
+            "mangostudio-runtime-cold",
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../mangostudio-runtime-cold"),
+        ),
+    ]
+}
 
-fn spawn_sites(crates_dir: &Path) -> BTreeMap<(String, String), Vec<usize>> {
+fn spawn_sites(host_crates: &[(&str, PathBuf)]) -> BTreeMap<(String, String), Vec<usize>> {
     let mut sites: BTreeMap<(String, String), Vec<usize>> = BTreeMap::new();
-    let mut stack: Vec<_> = HOST_CRATES
+    // Each entry carries the crate it belongs to, so its relative path names that crate.
+    let mut stack: Vec<_> = host_crates
         .iter()
-        .map(|name| crates_dir.join(name).join("src"))
+        .map(|(name, crate_dir)| (*name, crate_dir, crate_dir.join("src")))
         .collect();
-    while let Some(dir) = stack.pop() {
+    while let Some((crate_name, crate_dir, dir)) = stack.pop() {
         for entry in std::fs::read_dir(&dir).unwrap_or_else(|error| {
             panic!(
                 "expected {} to be readable | received {error}",
@@ -270,17 +285,18 @@ fn spawn_sites(crates_dir: &Path) -> BTreeMap<(String, String), Vec<usize>> {
         }) {
             let path = entry.expect("dir entry reads").path();
             if path.is_dir() {
-                stack.push(path);
+                stack.push((crate_name, crate_dir, path));
                 continue;
             }
             if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
                 continue;
             }
-            let relative = path
-                .strip_prefix(crates_dir)
-                .expect("path is under crates_dir")
+            let within_crate = path
+                .strip_prefix(crate_dir)
+                .expect("path is under its crate directory")
                 .to_string_lossy()
                 .replace('\\', "/");
+            let relative = format!("{crate_name}/{within_crate}");
             if is_test_file(&relative) {
                 continue;
             }
@@ -309,8 +325,7 @@ fn spawn_sites(crates_dir: &Path) -> BTreeMap<(String, String), Vec<usize>> {
 
 #[test]
 fn every_host_spawn_goes_through_the_hidden_window_request() {
-    let crates_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
-    let found = spawn_sites(&crates_dir);
+    let found = spawn_sites(&host_crates());
     let expected: BTreeMap<(String, String), usize> = ALLOWED
         .iter()
         .map(|&(path, text, count, _)| ((path.to_string(), text.to_string()), count))

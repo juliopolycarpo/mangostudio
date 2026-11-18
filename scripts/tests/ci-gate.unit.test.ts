@@ -38,6 +38,12 @@ const INTEGRATION_PR_WORKFLOWS = [
 // Interpolating it into a template literal is not flagged.
 const EXPR = '$' + '{{';
 
+// The runtime is three packages (the binary crate plus the core and cold
+// libraries it links). Every runtime-scoped cargo invocation names all three.
+const RUNTIME_PACKAGE_FLAGS =
+  '-p mangostudio-runtime -p mangostudio-runtime-core -p mangostudio-runtime-cold';
+const RUNTIME_NEXTEST_COMMAND = `cargo nextest run ${RUNTIME_PACKAGE_FLAGS} --all-targets --all-features --locked --retries 0`;
+
 describe('Integration branch coverage', () => {
   test.each([...INTEGRATION_PR_WORKFLOWS])(
     '%s runs for PRs that target main or the reserved stack namespace',
@@ -400,9 +406,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
       expect(step, `Windows ARM64 must retain ${command}`).toBeDefined();
       expect(step).toContain(`if: ${EXPR} !cancelled() }}`);
     }
-    expect(block).toContain(
-      'cargo nextest run -p mangostudio-runtime --all-targets --all-features --locked --retries 0'
-    );
+    expect(block).toContain(RUNTIME_NEXTEST_COMMAND);
     expect(block).not.toContain('name: Gate');
     expect(parseNeedsList(extractJobBlock(workflow, 'gate-unique'))).toContain(
       'workspace-windows-arm64'
@@ -420,12 +424,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
         'Check nextest runs the libtest test set',
       ],
     ],
-    [
-      'workspace-windows-arm64',
-      [
-        'cargo nextest run -p mangostudio-runtime --all-targets --all-features --locked --retries 0',
-      ],
-    ],
+    ['workspace-windows-arm64', [RUNTIME_NEXTEST_COMMAND]],
   ])('%s requires successful Bun and nextest setup for dependent tests', (job, commands) => {
     const steps = extractStepBlocks(extractJobBlock(workflow, job));
     const bun = steps.findIndex((step) => step.includes('uses: $/.github/actions/setup-bun'));
@@ -499,7 +498,7 @@ describe('cargo-shim.yml always-reporting Rust workspace gate', () => {
     expect(muslBlock).toContain('uses: $/.github/actions/setup-zigbuild');
     for (const triple of ['x86_64-unknown-linux-musl', 'aarch64-unknown-linux-musl']) {
       expect(muslBlock).toContain(
-        `cargo-zigbuild clippy --locked -p mangostudio-runtime --all-targets --target ${triple} -- -D warnings`
+        `cargo-zigbuild clippy --locked ${RUNTIME_PACKAGE_FLAGS} --all-targets --target ${triple} -- -D warnings`
       );
     }
   });
