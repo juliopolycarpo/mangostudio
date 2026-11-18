@@ -13,10 +13,10 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { sanitizedEnv } from '@mangostudio/protocol/spawn';
-import { dialDeadline } from '@mangostudio/shared/utils/dial-deadline';
 
 import { cleanupMangoHome, scratchMangoHome } from './rust-runtime-binary';
 import { reserveEphemeralPort } from './rust-serve-dial';
+import { startupDeadline } from './startup-deadline';
 
 export interface RustServeRuntime {
   readonly port: number;
@@ -93,7 +93,7 @@ export async function startRustServe(
           /* Caller owns this deadline. */
         },
       }
-    : dialDeadline(timeoutMs, `Serve health deadline exceeded ${timeoutMs}ms`);
+    : startupDeadline(timeoutMs, `Serve health deadline exceeded ${timeoutMs}ms`);
   const signal = deadline.signal;
   try {
     await waitForHealth(baseUrl, child, stderr, timeoutMs, signal);

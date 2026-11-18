@@ -38,6 +38,7 @@ export class DeferredSpawnPort {
   readonly #exit = Promise.withResolvers<ExitStatus>();
   terminateCallCount = 0;
   spawnCallCount = 0;
+  startErrorCallCount = 0;
   promotedTerminateGraceMs: number | undefined;
 
   /** Hand this as the injected `spawnPort` dependency. */
@@ -50,8 +51,10 @@ export class DeferredSpawnPort {
       pid: 4321,
       exited: this.#exit.promise,
       stderrTail: () => '',
-      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
-      startError: async () => ({ exit: undefined, spawnErrorCode: undefined, stderrLine: '' }),
+      startError: () => {
+        this.startErrorCallCount += 1;
+        return Promise.resolve({ exit: undefined, spawnErrorCode: undefined, stderrLine: '' });
+      },
       setTerminateGraceMs: (ms) => {
         this.promotedTerminateGraceMs = ms;
         return true;

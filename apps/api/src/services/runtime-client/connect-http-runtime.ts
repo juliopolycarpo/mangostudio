@@ -11,7 +11,6 @@
 import { CLOSE_CODES, type Port, RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import { connectWebSocket } from '@mangostudio/protocol/ws';
 import { HUB_BINDING_KEY_HEADER } from '@mangostudio/shared/runtime-contract';
-import { dialDeadline } from '@mangostudio/shared/utils/dial-deadline';
 
 import { getVersion } from '../../lib/config';
 import { createDiagnosticLogger } from '../../lib/logger';
@@ -165,19 +164,24 @@ export async function openRuntimeSession(
 ): Promise<ProtocolHubSession> {
   const timeoutMs = resolveRemoteHandshakeTimeoutMs('http');
   const startedAt = openers.now();
-  const deadline = dialDeadline(
-    timeoutMs,
-    `The runtime did not accept a WebSocket at ${wsUrl} within ${timeoutMs}ms.`
-  );
   let port: Port;
   try {
+    // The SDK's dial owns the one timer: `timeoutMs` and `signal` compose into
+    // a single signal, and the half-open socket is closed on either abort.
     port = await openers.dial(wsUrl, {
       headers: runtimeUpgradeHeaders(token, workspaceBinding),
-      // `connectWebSocket` closes the half-open socket on either abort.
-      signal: signal ? AbortSignal.any([deadline.signal, signal]) : deadline.signal,
+      timeoutMs,
+      ...(signal ? { signal } : {}),
     });
-  } finally {
-    deadline.clear();
+  } catch (error) {
+    // The SDK names a deadline `TimeoutError`; a caller's own abort keeps its
+    // reason, and the caller reads `signal.aborted` to report `CANCELLED`.
+    if (!signal?.aborted && error instanceof Error && error.name === 'TimeoutError') {
+      throw new Error(`The runtime did not accept a WebSocket at ${wsUrl} within ${timeoutMs}ms.`, {
+        cause: error,
+      });
+    }
+    throw error;
   }
   // Floored at 1ms: a dial that opened on the deadline's last tick still
   // arms a hello timer that fires, never a zero or negative one.

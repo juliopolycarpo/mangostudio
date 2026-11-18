@@ -1,6 +1,5 @@
-import { dialDeadline } from '@mangostudio/shared/utils/dial-deadline';
-
 import { type RustServeRuntime, startRustServe } from './rust-serve-runtime';
+import { startupDeadline } from './startup-deadline';
 
 interface McpServeFixtureOptions {
   readonly label: string;
@@ -11,7 +10,7 @@ interface McpServeFixtureOptions {
 
 interface McpServeFixtureDependencies {
   readonly start: typeof startRustServe;
-  readonly deadline: typeof dialDeadline;
+  readonly deadline: typeof startupDeadline;
 }
 
 /**
@@ -23,7 +22,7 @@ interface McpServeFixtureDependencies {
 export async function startMcpServeFixture(
   binaryPath: string,
   options: McpServeFixtureOptions,
-  dependencies: McpServeFixtureDependencies = { start: startRustServe, deadline: dialDeadline }
+  dependencies: McpServeFixtureDependencies = { start: startRustServe, deadline: startupDeadline }
 ): Promise<{ close(): Promise<void> }> {
   const deadline = dependencies.deadline(10_000, 'MCP serve fixture startup exceeded 10000ms');
   let runtime: RustServeRuntime | undefined;

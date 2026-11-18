@@ -18,12 +18,7 @@
 import { statSync } from 'node:fs';
 
 import { RemoteError, RESERVED_ERROR_CODES, type SessionClosure } from '@mangostudio/protocol';
-import {
-  type LaunchedPeer,
-  type SpawnedPeer,
-  type SpawnOptions,
-  spawnPort,
-} from '@mangostudio/protocol/spawn';
+import { type LaunchedPeer, type SpawnOptions, spawnPort } from '@mangostudio/protocol/spawn';
 import { sanitizeShellEnv } from '@mangostudio/shared/process';
 import type { HubExternalAgentIsolation } from '@mangostudio/shared/runtime-contract';
 
@@ -44,10 +39,8 @@ const KILL_GRACE_MS = 2_000;
 const EXIT_GRACE_MS = 1_000;
 const MAX_STDERR_BYTES = 16_384;
 const STDERR_EXCERPT_MAX_CHARS = 2_000;
-/** How long a failed launch waits for the child's exit status before reporting. */
-const EXIT_OBSERVATION_GRACE_MS = 250;
 
-/** Spawn failures the built-in explanation can tell apart, read off the stderr tail. */
+/** Spawn failures the built-in explanation can tell apart, from the launcher's `startError`. */
 const SPAWN_ERROR_CODES = ['ENOENT', 'EACCES'] as const;
 
 const logger = createDiagnosticLogger('runtime-stdio');
@@ -209,7 +202,18 @@ export async function spawnRuntimeChild(
     // idempotent termination sequence. Join that bounded work so an ordinary
     // opening rejection cannot discard child ownership before cleanup settles.
     await terminatePeer(peer, launch.command, options.environmentId);
-    const failure = await observeLaunchFailure(peer, launch.command, error);
+    // The launcher's own observation: `startError()` waits out the race between
+    // the pipe closing and the exit landing, and names a spawn error code only
+    // for a command that never became a process. The stderr excerpt is read
+    // here because the message shows more than the last line.
+    const start = await peer.startError();
+    const failure: RuntimeLaunchFailure = {
+      command: launch.command,
+      stderr: peer.stderrTail(),
+      exitCode: start.exit?.code ?? null,
+      spawnErrorCode: start.spawnErrorCode,
+      error,
+    };
     throw asRemoteFailure(
       error,
       options.describeFailure?.(failure) ?? describeLaunchFailure(failure, options.cwd)
@@ -266,52 +270,6 @@ async function terminatePeer(
 }
 
 /**
- * Everything a describer needs about a launch that never handshaked, read once
- * the child has had a moment to report how it ended.
- *
- * The child is nearly always gone already — a wrapper that could not start its
- * target exits at once — but the pipe closing and the exit race, and a describer
- * reading the status before it lands would see nothing. The termination the
- * caller has just started settles this quickly either way, and the report goes
- * out on the grace when it does not.
- *
- * @example
- * const failure = await observeLaunchFailure(peer, 'ssh', error);
- * classifySshFailure({ stderr: failure.stderr, exitCode: failure.exitCode });
- */
-async function observeLaunchFailure(
-  peer: SpawnedPeer,
-  command: string,
-  error: unknown
-): Promise<RuntimeLaunchFailure> {
-  const status = await settledWithin(peer.exited, EXIT_OBSERVATION_GRACE_MS);
-  const stderr = peer.stderrTail();
-  return {
-    command,
-    stderr,
-    exitCode: status?.code ?? null,
-    spawnErrorCode: spawnErrorCodeOf(peer, stderr),
-    error,
-  };
-}
-
-/**
- * The `code` of a spawn error, when the command could not be started at all.
- *
- * `pid` is undefined exactly when no process was created, and the launcher puts
- * the spawn error's message — which always names its code — in the stderr tail.
- * Reading both is what keeps a remote shell that happens to print `ENOENT` from
- * being mistaken for a wrapper the hub could not start.
- *
- * @example
- * spawnErrorCodeOf(peer, 'spawn wsl.exe ENOENT'); // 'ENOENT' when peer.pid is undefined
- */
-function spawnErrorCodeOf(peer: SpawnedPeer, stderrTail: string): string | undefined {
-  if (peer.pid !== undefined) return undefined;
-  return SPAWN_ERROR_CODES.find((code) => stderrTail.includes(code));
-}
-
-/**
  * Turns a launch failure into a message that names the next step. A missing
  * binary and a runtime that started but never answered need different fixes,
  * and the child's stderr is usually the only place the reason appears.
@@ -323,8 +281,10 @@ function describeLaunchFailure(failure: RuntimeLaunchFailure, cwd: string | unde
   const spawnCode = failure.spawnErrorCode;
   // A working directory the target cannot enter fails the spawn with the same
   // codes a bad executable does, so blame it before the binary: telling someone
-  // to reinstall over a mistyped cwd sends them to the wrong fix entirely.
-  if (spawnCode !== undefined && cwd && !isUsableDir(cwd)) {
+  // to reinstall over a mistyped cwd sends them to the wrong fix entirely. Only
+  // the two codes below are told apart; any other spawn failure keeps the
+  // generic handshake message.
+  if (SPAWN_ERROR_CODES.some((code) => code === spawnCode) && cwd && !isUsableDir(cwd)) {
     return `The working directory ${cwd} configured on this environment is missing or not readable.`;
   }
   if (spawnCode === 'ENOENT') {
@@ -405,24 +365,6 @@ function cancelledError(command: string): RemoteError {
 
 function excerpt(stderr: string): string {
   return stderr.trim().slice(-STDERR_EXCERPT_MAX_CHARS);
-}
-
-/** The promise's value when it settles inside the grace, undefined when it does not. */
-function settledWithin<T>(promise: Promise<T>, ms: number): Promise<T | undefined> {
-  return new Promise((resolve) => {
-    const grace = setTimeout(() => resolve(undefined), ms);
-    grace.unref?.();
-    void promise.then(
-      (value: T) => {
-        clearTimeout(grace);
-        resolve(value);
-      },
-      () => {
-        clearTimeout(grace);
-        resolve(undefined);
-      }
-    );
-  });
 }
 
 function isUsableDir(path: string): boolean {
