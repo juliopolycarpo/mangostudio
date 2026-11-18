@@ -38,7 +38,20 @@ function containerChildren(value: unknown): unknown[] {
 }
 
 function isContainer(value: unknown): value is object {
-  if (Array.isArray(value)) return true;
+  return Array.isArray(value) || isTomlTable(value);
+}
+
+/**
+ * Whether `value` is a TOML table: a plain object or a null-prototype object.
+ * Arrays, `Date` and the Temporal values `Bun.TOML` returns for date/time
+ * literals are scalars or arrays, never tables. Checking the prototype rather
+ * than naming those types means a value type Bun adds later is rejected too.
+ *
+ * @example
+ * isTomlTable({ a: 1 }); // true
+ * isTomlTable(Reflect.get(Bun.TOML.parse('d = 1979-05-27'), 'd')); // false
+ */
+export function isTomlTable(value: unknown): value is Record<string, unknown> {
   if (typeof value !== 'object' || value === null) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;

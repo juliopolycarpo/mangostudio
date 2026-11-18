@@ -51,6 +51,14 @@ updated_at = 1979-05-27T07:32:00Z
     ]);
   });
 
+  it('reports a nested TOML date as one scalar field, not a walked table', () => {
+    const document = parseTomlDocument('[release]\ndate = 1979-05-27\n');
+
+    expect(redactSettingsDocument(document, { homeDir: '/home/ada' })).toEqual([
+      { path: 'release.date', presentation: 'value', value: '1979-05-27' },
+    ]);
+  });
+
   it('leaves date-shaped strings unchanged', () => {
     expect(
       redactSettingsDocument({ updated_at: '1979-05-27T07:32:00Z' }, { homeDir: '/home/ada' })

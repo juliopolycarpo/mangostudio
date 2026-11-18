@@ -52,6 +52,7 @@ export {
 } from './path-safety';
 export { libraryContentPath, MAX_LIBRARY_CONTENT_BYTES } from './read';
 export { readSettingsSources } from './settings-sources';
+export { isTomlTable } from './toml-nesting';
 export {
   findStagedRemovalLeftovers,
   findStagedRemovalsForLocations,
