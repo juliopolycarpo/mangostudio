@@ -659,7 +659,9 @@ function registerSpa(app: App, frontendDir: string): void {
   app.onError(NotFound, ({ request }) => frontendNotFound(request));
 
   setFrontendFallback((request) => {
-    if (request.method !== 'GET') return undefined;
+    // HEAD never matches the literal `GET /` route, so it arrives here too and gets
+    // the response GET would: the same status and headers, with Bun dropping the body.
+    if (request.method !== 'GET' && request.method !== 'HEAD') return undefined;
     const { pathname } = new URL(request.url);
     // This fallback sits on *every* unmatched request, so an unknown endpoint
     // under an API-owned prefix arrives here too. Those can never name a file

@@ -329,7 +329,8 @@ Se outro proxy, load balancer ou CDN ficar na frente do nginx e adicionar o head
 adicione `gzip_proxied any;` ao lado de `gzip on;`.
 
 Para conferir um deploy, peça um asset com hash da página com `GET` e leia os headers
-(`curl -I` envia `HEAD`, que as rotas de assets do hub não respondem):
+(`curl -I` envia `HEAD`, e um proxy em geral não comprime uma resposta só com headers, então
+ele pode não imprimir `Content-Encoding` mesmo quando o `GET` vem comprimido):
 
 ```bash
 curl -sS -o /dev/null -D - -H 'Accept-Encoding: gzip' \

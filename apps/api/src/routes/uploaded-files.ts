@@ -1,5 +1,5 @@
 /**
- * `GET /uploads/*`: serves user uploads by resolving each request against the
+ * `GET` and `HEAD /uploads/*`: serves user uploads by resolving each request against the
  * uploads directory, instead of enumerating the directory at startup.
  *
  * This replaced `@elysia/static`. That plugin walks its whole assets directory
@@ -16,7 +16,7 @@ import type { Stats } from 'node:fs';
 import { realpath, stat } from 'node:fs/promises';
 import { sep } from 'node:path';
 
-import { Elysia, NotFound } from 'elysia';
+import { type Context, Elysia, NotFound } from 'elysia';
 
 import { fileEtag, isNotModified } from '../lib/http-cache';
 import { resolveContainedPath } from '../utils/paths';
@@ -87,7 +87,8 @@ export async function resolveUploadedFile(
 }
 
 /**
- * The `GET /uploads/*` route over `uploadsDir`.
+ * The `GET` and `HEAD /uploads/*` routes over `uploadsDir`. `HEAD` answers the
+ * status and headers `GET` would, with no body.
  *
  * Construction touches no files, so startup cost does not depend on how many
  * uploads exist. Each response carries a size/mtime `ETag`, `Last-Modified`
@@ -98,7 +99,13 @@ export async function resolveUploadedFile(
  * const app = new Elysia().use(createUploadedFileRoutes(getConfig().uploads.dir));
  */
 export function createUploadedFileRoutes(uploadsDir: string) {
-  return new Elysia().get('/uploads/*', async ({ params, request, set }) => {
+  // One handler for both methods: HEAD must carry exactly the status and headers
+  // GET would, and Bun drops the body of a HEAD response itself.
+  const serveUpload = async ({
+    params,
+    request,
+    set,
+  }: Pick<Context, 'request' | 'set'> & { params: { '*': string } }) => {
     const file = await resolveUploadedFile(uploadsDir, params['*']);
     if (!file) throw new NotFound();
 
@@ -112,5 +119,6 @@ export function createUploadedFileRoutes(uploadsDir: string) {
       return null;
     }
     return Bun.file(file.filePath);
-  });
+  };
+  return new Elysia().get('/uploads/*', serveUpload).head('/uploads/*', serveUpload);
 }
