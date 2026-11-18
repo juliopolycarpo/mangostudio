@@ -974,6 +974,9 @@ describe('install.sh internals (network-free)', () => {
         export FIXTURE_CURL_LOG='${shellPath(log)}'
         export GITHUB_TOKEN='${TOKEN}'
         export GH_TOKEN='${OTHER_TOKEN}'
+        # Load the token as the installer does, so a download routed through
+        # github_api_curl would carry it and fail this test.
+        load_github_api_token
         scratch="$(mktemp -d)"
         curl_download 'https://github.com/juliopolycarpo/mangostudio/releases/download/v0.1.1/SHA256SUMS' "$scratch/SHA256SUMS"
         rm -rf "$scratch"
