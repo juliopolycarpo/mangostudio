@@ -451,8 +451,11 @@ to the shell; malformed escapes and decoded traversal forms also fail with a 404
 
 Disk resolution checks the current canonical frontend directory on every request, so an
 atomic rebuild or deployment-link switch can add filenames and directories without
-restarting the server. Files that escape that directory or alias private build state through
-symbolic links or hardlinks return 404. The shell uses the same eligibility checks for `/`,
+restarting the server. A request resolves that directory once and reuses it for every lookup it
+makes, including the shell served for a dotted deep link, and it stats the private build state
+only for a file with more than one hard link, since a hardlink alias cannot have fewer. Files
+that escape that directory or alias private build state through symbolic links or hardlinks
+return 404. The shell uses the same eligibility checks for `/`,
 `/index.html` and deep links. File identity retains bigint device and inode values, since NTFS
 IDs can exceed JavaScript's safe integer range; cache validators retain their numeric size
 and millisecond contract. A volume that reports no file ID (inode 0, as exFAT/FAT and some
