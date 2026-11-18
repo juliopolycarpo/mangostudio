@@ -2,8 +2,8 @@ import { describe, expect, it } from 'bun:test';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { readSourceFileBatches } from '../support/source-file-batches';
 import { scanSourcePaths } from '../support/source-scan';
+import { findUnconsumedAliases } from '../support/unconsumed-aliases';
 
 const API_ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const DB_TYPES_RELATIVE_PATH = 'src/db/types.ts';
@@ -13,13 +13,14 @@ async function readDbTypes() {
   return await Bun.file(join(API_ROOT, DB_TYPES_RELATIVE_PATH)).text();
 }
 
-async function readApiSourceFiles() {
+/** `src` first: that is where aliases are consumed, so a live set stops the scan early. */
+async function listApiSourcePaths() {
   const paths: string[] = [];
 
   await collectMatchingSourcePaths('src/**/*.ts', paths);
   await collectMatchingSourcePaths('tests/**/*.ts', paths);
 
-  return await readSourceFileBatches(paths, (path) => Bun.file(join(API_ROOT, path)).text());
+  return paths;
 }
 
 async function collectMatchingSourcePaths(pattern: string, paths: string[]) {
@@ -34,18 +35,14 @@ function extractRowAliases(dbTypes: string) {
   return Array.from(dbTypes.matchAll(ROW_ALIAS_PATTERN), (match) => match[1]);
 }
 
-function hasConsumer(alias: string, files: string[]) {
-  const aliasPattern = new RegExp(`\\b${alias}\\b`);
-
-  return files.some((text) => aliasPattern.test(text));
-}
-
 describe('database row aliases', () => {
   it('exports only row aliases with active consumers', async () => {
-    const [dbTypes, sourceFiles] = await Promise.all([readDbTypes(), readApiSourceFiles()]);
+    const [dbTypes, sourcePaths] = await Promise.all([readDbTypes(), listApiSourcePaths()]);
 
-    const unusedAliases = extractRowAliases(dbTypes).filter(
-      (alias) => !hasConsumer(alias, sourceFiles)
+    const unusedAliases = await findUnconsumedAliases(
+      extractRowAliases(dbTypes),
+      sourcePaths,
+      (path) => Bun.file(join(API_ROOT, path)).text()
     );
 
     expect(unusedAliases).toEqual([]);
