@@ -293,24 +293,18 @@ export function validInstances(resource: LibraryResource): ValidLibraryInstance[
 }
 
 /**
- * Location ids a propagation preview is allowed to name.
+ * Location ids a propagation preview is asked about: every location of the kind.
  *
- * The API refuses any destination the scanner skips, so the wizard must not ask
- * about a disabled location even when that directory exists on disk. Path-null
- * locations resolve to nowhere on this platform, so there is no directory to
- * write into — the preview would only report them back as `unsupported-location`.
+ * Disabled and path-null locations are named on purpose. The preview reports
+ * them back as blocked destinations (`location-disabled`, `unsupported-location`),
+ * and that reason is the only place a user learns why a directory is unavailable;
+ * a location filtered out here would simply be missing from the wizard.
  */
 export function propagationCandidateLocationIds(
   locations: readonly LibraryLocationStatus[],
-  kind: ResourceKind,
-  enabledLocationIds: ReadonlySet<LibraryLocationId>
+  kind: ResourceKind
 ): LibraryLocationId[] {
-  return locations
-    .filter(
-      (location) =>
-        location.kind === kind && location.path !== null && enabledLocationIds.has(location.id)
-    )
-    .map((location) => location.id);
+  return locations.filter((location) => location.kind === kind).map((location) => location.id);
 }
 
 export type LibraryShowFilter = 'all' | 'divergent' | 'single-location' | 'shadowed';

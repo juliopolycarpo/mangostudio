@@ -9,6 +9,7 @@
 import { describe, expect, it, jest } from 'bun:test';
 
 import { en } from '@mangostudio/shared/i18n';
+import type { PropagationBlockedReason } from '@mangostudio/shared/library';
 import userEvent from '@testing-library/user-event';
 
 import { ConflictStep } from '../../../../src/features/library/components/ConflictStep';
@@ -169,6 +170,7 @@ describe('DestinationStep', () => {
   it.each([
     { blockedReason: 'read-only-location', id: 'cursor-skills-builtin', access: 'read-only' },
     { blockedReason: 'location-scan-failed', id: 'cursor-skills', access: 'read-write' },
+    { blockedReason: 'location-disabled', id: 'cursor-skills', access: 'read-write' },
   ] as const)(
     'disables a destination blocked by $blockedReason and says why',
     async ({ blockedReason, id, access }) => {
@@ -204,6 +206,33 @@ describe('DestinationStep', () => {
       );
     }
   );
+
+  // A client older than the hub meets reasons it has no wording for. It must
+  // still render the destination, disabled, with the code standing in for text.
+  it('degrades to the raw code for a blocked reason this client has no wording for', async () => {
+    const unknownReason = 'reason-from-a-newer-hub' as PropagationBlockedReason;
+    const blocked = preview([
+      previewEntry({
+        destinations: [
+          destination({ locationId: 'cursor-skills', blockedReason: unknownReason, outcomes: [] }),
+        ],
+      }),
+    ]);
+
+    await renderWithRouter(
+      <DestinationStep
+        environmentName={(id: string) => id}
+        preview={blocked}
+        draft={initialDraft(blocked)}
+        locations={[location({ id: 'cursor-skills' })]}
+        onToggle={() => undefined}
+      />
+    );
+
+    const row = screen.getByTestId('destination-row');
+    expect(within(row).getByRole('checkbox')).toBeDisabled();
+    expect(within(row).getByTestId('blocked-reason')).toHaveTextContent(unknownReason);
+  });
 
   it('sends an unwritable destination to the surface that reported the problem', async () => {
     const unwritable = preview([
