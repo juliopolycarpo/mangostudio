@@ -138,6 +138,8 @@ describe.each(KEY_REJECTING_PROVIDER_TYPES)(
         expect(result.error?.message).toContain(`"${PINNED_CONNECTOR_NAME}"`);
         expect(result.error?.message).toContain(`HTTP ${status}`);
         expect(result.error?.message).toContain('Settings');
+        // A 403 can mean the key lacks access to the model, not that it is bad.
+        expect(result.error?.message).toContain('lack access to this model');
         expect(result.error?.message).not.toContain(UPSTREAM_REJECTION_TEXT);
         expect(result.summary).toBe(result.error?.message ?? '');
         expect(result.trace.error).toBe(result.error?.message);
@@ -164,6 +166,83 @@ describe.each(KEY_REJECTING_PROVIDER_TYPES)(
     });
   }
 );
+
+describe('subagent on a 403 that is not about the key', () => {
+  it('fails with the vendor explanation under the generic code, not as a key problem', async () => {
+    installProvider(
+      new KeyRejectingProviderFake('openai', 403, {
+        code: 'unsupported_country_region_territory',
+        message: 'Country, region, or territory not supported',
+      })
+    );
+    await insertTestConnector(USER_ID, {
+      id: `${USER_ID}-openai-region`,
+      name: PINNED_CONNECTOR_NAME,
+      provider: 'openai',
+      enabledModels: [PINNED_MODEL],
+    });
+    await pinSubagentModel(PINNED_MODEL);
+
+    const result = await runSubagentTurn(delegationInput());
+
+    expect(
+      result.error?.code,
+      `(openai subagent result, HTTP 403 region block): expected FAILED | received ${result.error?.code} with message "${result.error?.message}"`
+    ).toBe('FAILED');
+    expect(result.error?.message).toContain('Country, region, or territory not supported');
+  });
+});
+
+/**
+ * Names the connector from the database after the provider already failed. That
+ * lookup is best effort: when it throws, the user still needs to hear that the
+ * key was rejected.
+ */
+describe('subagent when the connector lookup fails', () => {
+  /** Delegates to the real database, except that every read of connector metadata throws. */
+  function dbFailingOnConnectorLookup(): SubagentRuntimeInput['db'] {
+    const real = getDb();
+    return new Proxy(real, {
+      get(target, property, receiver) {
+        if (property === 'selectFrom') {
+          return (table: string, ...rest: unknown[]) => {
+            if (table === 'secret_metadata') {
+              throw new Error('connector lookup unavailable: secret_metadata read failed');
+            }
+            return (target.selectFrom as (...args: unknown[]) => unknown)(table, ...rest);
+          };
+        }
+        const value: unknown = Reflect.get(target, property, receiver);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+  }
+
+  it('keeps the credential-rejected code and names no connector', async () => {
+    installProvider(new KeyRejectingProviderFake('anthropic', 401));
+    await insertTestConnector(USER_ID, {
+      id: `${USER_ID}-anthropic-lookup`,
+      name: PINNED_CONNECTOR_NAME,
+      provider: 'anthropic',
+      enabledModels: [PINNED_MODEL],
+    });
+    await pinSubagentModel(PINNED_MODEL);
+
+    const result = await runSubagentTurn({
+      ...delegationInput(),
+      db: dbFailingOnConnectorLookup(),
+    });
+
+    expect(
+      result.error?.code,
+      `(subagent result with a failing connector lookup): expected ${CREDENTIAL_REJECTED_CODE} | received ${result.error?.code} with message "${result.error?.message}"`
+    ).toBe(CREDENTIAL_REJECTED_CODE);
+    expect(result.error?.message).toContain(`"${SUBAGENT_ID}"`);
+    expect(result.error?.message).toContain(`"${PINNED_MODEL}"`);
+    expect(result.error?.message).toContain('its connector');
+    expect(result.error?.message).not.toContain(PINNED_CONNECTOR_NAME);
+  });
+});
 
 describe('subagent that inherits the parent model', () => {
   it('names the connector serving the parent model', async () => {

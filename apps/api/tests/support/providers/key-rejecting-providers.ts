@@ -54,7 +54,8 @@ class KeyRejectingHttp {
 
   constructor(
     private readonly wire: Wire,
-    private readonly status: number
+    private readonly status: number,
+    private readonly upstreamError?: UpstreamError
   ) {}
 
   readonly fetch = (input: string | URL | Request): Promise<Response> => {
@@ -63,23 +64,34 @@ class KeyRejectingHttp {
   };
 
   private body(): unknown {
+    const message = this.upstreamError?.message ?? UPSTREAM_REJECTION_TEXT;
     if (this.wire === 'anthropic') {
       return {
         type: 'error',
         error: {
-          type: this.status === 403 ? 'permission_error' : 'authentication_error',
-          message: UPSTREAM_REJECTION_TEXT,
+          type:
+            this.upstreamError?.code ??
+            (this.status === 403 ? 'permission_error' : 'authentication_error'),
+          message,
         },
       };
     }
     return {
       error: {
-        message: UPSTREAM_REJECTION_TEXT,
+        message,
         type: 'invalid_request_error',
-        code: this.status === 403 ? 'permission_denied' : 'invalid_api_key',
+        code:
+          this.upstreamError?.code ??
+          (this.status === 403 ? 'permission_denied' : 'invalid_api_key'),
       },
     };
   }
+}
+
+/** A vendor's own machine-readable reason and explanation, replacing the default key text. */
+export interface UpstreamError {
+  readonly code: string;
+  readonly message: string;
 }
 
 /** One provider whose key is rejected on every call. */
@@ -88,19 +100,21 @@ export class KeyRejectingProviderFake {
 
   constructor(
     readonly providerType: KeyRejectingProviderType,
-    readonly status: number
+    readonly status: number,
+    upstreamError?: UpstreamError
   ) {
     if (providerType === 'gemini') {
-      if (status !== 401 && status !== 403) {
+      if ((status !== 401 && status !== 403) || upstreamError) {
         throw new RangeError(
-          `(KeyRejectingProviderFake gemini): expected status 401 | 403 | received: ${status}`
+          `(KeyRejectingProviderFake gemini): expected status 401 | 403 without an upstream error | received: ${status} ${JSON.stringify(upstreamError)}`
         );
       }
       this.http = new FakeGeminiHttp(status === 401 ? 'unauthorized' : 'forbidden');
     } else {
       this.http = new KeyRejectingHttp(
         providerType === 'anthropic' ? 'anthropic' : 'openai',
-        status
+        status,
+        upstreamError
       );
     }
   }

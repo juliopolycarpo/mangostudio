@@ -122,7 +122,7 @@ export class SubagentCredentialRejectedError extends SubagentDelegationError {
     readonly connectorNames: readonly string[]
   ) {
     super(
-      `Agent "${agentId}" could not run on model "${modelId}": the ${provider} provider rejected the API key of ${describeConnectors(connectorNames)} (HTTP ${httpStatus}). It may have been revoked or expired. Update the key in Settings, or pick another model for this agent.`,
+      `Agent "${agentId}" could not run on model "${modelId}": the ${provider} provider rejected the API key of ${describeConnectors(connectorNames)} (HTTP ${httpStatus}). It may have been revoked or expired, or lack access to this model. Update the key in Settings, or pick another model for this agent.`,
       ERROR_CODES.PROVIDER_CREDENTIAL_REJECTED
     );
     this.name = 'SubagentCredentialRejectedError';

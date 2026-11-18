@@ -13,6 +13,7 @@ import {
   KeyRejectingProviderFake,
   type KeyRejectingProviderType,
   UPSTREAM_REJECTION_TEXT,
+  type UpstreamError,
 } from '../../../support/providers/key-rejecting-providers';
 
 const CREDENTIAL_REJECTED_CODE = 'PROVIDER_CREDENTIAL_REJECTED';
@@ -106,6 +107,84 @@ describe.each(KEY_REJECTING_PROVIDER_TYPES)('%s adapter on a rejected key', (pro
       turn.events.map((event) => event.type),
       `(${providerType} events before the rejection): expected none | received ${describeOutcome(turn)}`
     ).toEqual([]);
+  });
+});
+
+/**
+ * A 403 is not always about the key. OpenAI answers 403 for a blocked region and
+ * gateways send quota or policy denials the same way; replacing a working key does
+ * not fix those, and the vendor's own explanation is what the user needs.
+ */
+describe('HTTP 403 for a reason that is not the key', () => {
+  const REGION_BLOCK: UpstreamError = {
+    code: 'unsupported_country_region_territory',
+    message: 'Country, region, or territory not supported',
+  };
+
+  it('keeps the OpenAI region block as an ordinary provider error with its explanation', async () => {
+    const fake = new KeyRejectingProviderFake('openai', 403, REGION_BLOCK);
+
+    const turn = await drain(fake.streamAgentTurn(turnRequest()));
+
+    const thrown = turn.thrown as { code?: unknown; message?: unknown } | undefined;
+    expect(
+      thrown?.code,
+      `(openai agent turn, HTTP 403 ${REGION_BLOCK.code}): expected the vendor's own error, not ${CREDENTIAL_REJECTED_CODE} | received ${describeOutcome(turn)}`
+    ).toBe(REGION_BLOCK.code);
+    expect(String(thrown?.message)).toContain(REGION_BLOCK.message);
+  });
+
+  it('keeps it a turn_error with the explanation on the Chat Completions adapters', async () => {
+    const fake = new KeyRejectingProviderFake('openai-compatible', 403, REGION_BLOCK);
+
+    const turn = await drain(fake.streamAgentTurn(turnRequest()));
+
+    expect(
+      turn.thrown,
+      `(openai-compatible agent turn, HTTP 403 ${REGION_BLOCK.code}): expected a turn_error event | received ${describeOutcome(turn)}`
+    ).toBeUndefined();
+    expect(describeOutcome(turn)).toContain(REGION_BLOCK.message);
+  });
+
+  it('reads the reason Anthropic nests under error.error', async () => {
+    const fake = new KeyRejectingProviderFake('anthropic', 403, {
+      code: 'quota_exceeded',
+      message: 'Monthly quota exceeded',
+    });
+
+    const turn = await drain(fake.streamAgentTurn(turnRequest()));
+
+    expect(
+      turn.thrown,
+      `(anthropic agent turn, HTTP 403 quota_exceeded): expected a turn_error event | received ${describeOutcome(turn)}`
+    ).toBeUndefined();
+    expect(describeOutcome(turn)).toContain('Monthly quota exceeded');
+  });
+
+  it('still treats a 401 as the key whatever reason the vendor names', async () => {
+    const fake = new KeyRejectingProviderFake('openai', 401, {
+      code: 'insufficient_quota',
+      message: 'You exceeded your current quota',
+    });
+
+    const turn = await drain(fake.streamAgentTurn(turnRequest()));
+
+    expect((turn.thrown as { code?: unknown } | undefined)?.code, describeOutcome(turn)).toBe(
+      CREDENTIAL_REJECTED_CODE
+    );
+  });
+
+  it('still treats a 403 with an unlisted reason as the key', async () => {
+    const fake = new KeyRejectingProviderFake('openai', 403, {
+      code: 'model_not_found',
+      message: 'The project does not have access to this model',
+    });
+
+    const turn = await drain(fake.streamAgentTurn(turnRequest()));
+
+    expect((turn.thrown as { code?: unknown } | undefined)?.code, describeOutcome(turn)).toBe(
+      CREDENTIAL_REJECTED_CODE
+    );
   });
 });
 

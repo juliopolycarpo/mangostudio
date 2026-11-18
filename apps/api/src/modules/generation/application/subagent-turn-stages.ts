@@ -176,6 +176,10 @@ export async function prepareSubagentTurn(
  * are looked up the way routing finds them: rows of that provider that enable the
  * model. When several do, all are named, since the adapter's key resolution may
  * have picked any of them.
+ *
+ * Naming the connector is best effort: this runs inside the failure path, so a
+ * failing lookup must not replace the rejection with a generic failure. It falls
+ * back to an unnamed connector and keeps the typed code.
  */
 export async function attributeCredentialRejection(
   session: SubagentTurnSession,
@@ -183,16 +187,18 @@ export async function attributeCredentialRejection(
 ): Promise<unknown> {
   if (!(error instanceof ProviderCredentialRejectedError)) return error;
   const { input, resolvedModel } = session;
-  const rows = await input.db
-    .selectFrom('secret_metadata')
-    .select(['name', 'enabledModels'])
-    .where('provider', '=', error.provider)
-    .where('configured', '=', 1)
-    .where((eb) => eb.or([eb('userId', '=', input.userId), eb('userId', 'is', null)]))
-    .execute();
-  const connectorNames = rows
-    .filter((row) => parseStringArray(row.enabledModels).includes(resolvedModel.modelId))
-    .map((row) => row.name);
+  const connectorNames = await findConnectorNamesForModel(session, error.provider).catch(
+    (lookupError: unknown) => {
+      logSubagentError('connector_lookup_failed', {
+        chatId: input.chatId,
+        userId: input.userId,
+        targetAgentId: input.targetProfile.id,
+        provider: error.provider,
+        message: lookupError instanceof Error ? lookupError.message : String(lookupError),
+      });
+      return [];
+    }
+  );
   return new SubagentCredentialRejectedError(
     input.targetProfile.id,
     resolvedModel.modelId,
@@ -200,6 +206,23 @@ export async function attributeCredentialRejection(
     error.status,
     connectorNames
   );
+}
+
+async function findConnectorNamesForModel(
+  session: SubagentTurnSession,
+  provider: string
+): Promise<string[]> {
+  const { input, resolvedModel } = session;
+  const rows = await input.db
+    .selectFrom('secret_metadata')
+    .select(['name', 'enabledModels'])
+    .where('provider', '=', provider)
+    .where('configured', '=', 1)
+    .where((eb) => eb.or([eb('userId', '=', input.userId), eb('userId', 'is', null)]))
+    .execute();
+  return rows
+    .filter((row) => parseStringArray(row.enabledModels).includes(resolvedModel.modelId))
+    .map((row) => row.name);
 }
 
 /**
