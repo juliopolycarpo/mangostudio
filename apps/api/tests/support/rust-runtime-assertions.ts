@@ -8,7 +8,7 @@
  * Every value asserted here is either fixed by this test's own setup (a
  * temp directory this file created and knows the real path of) or fixed by
  * the crate's own behaviour for a freshly auto-granted slot with no
- * `runtime.json` on disk (see `crates/mangostudio-runtime/src/consent/presets.rs`'s
+ * `runtime.json` on disk (see `crates/mangostudio-runtime-core/src/consent/presets.rs`'s
  * `FULL` preset and `default_consent_for_slot`) — never normalized away.
  * `binaryPath`, `version`, and `homeDir` (the real developer/CI `$HOME`, not
  * the test's own temp directories) are the only genuinely volatile fields,

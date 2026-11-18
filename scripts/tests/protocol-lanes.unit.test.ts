@@ -438,7 +438,7 @@ describe('the protocol tree at the repository root', () => {
   });
 
   test('no workspace member opts the release profile into panic = "abort"', () => {
-    // `mangostudio-runtime::panic::catch_panics` is a redaction control that
+    // `mangostudio_runtime_core::panic::catch_panics` is a redaction control that
     // silently becomes a no-op the moment any crate's release profile sets
     // `panic = "abort"` — `catch_unwind` cannot catch an abort. Nothing sets
     // it today; this pins that fact instead of relying on it staying true by
@@ -454,6 +454,8 @@ describe('the protocol tree at the repository root', () => {
       'crates/mango-protocol/Cargo.toml',
       'crates/mangostudio-launcher/Cargo.toml',
       'crates/mangostudio-runtime/Cargo.toml',
+      'crates/mangostudio-runtime-core/Cargo.toml',
+      'crates/mangostudio-runtime-cold/Cargo.toml',
       'crates/mangostudio-runtime-contract/Cargo.toml',
     ];
     for (const manifestPath of manifestPaths) {
@@ -473,6 +475,8 @@ describe('the protocol tree at the repository root', () => {
     expect(manifest).toContain('"crates/mango-protocol"');
     expect(manifest).toContain('"crates/mangostudio-launcher"');
     expect(manifest).toContain('"crates/mangostudio-runtime"');
+    expect(manifest).toContain('"crates/mangostudio-runtime-core"');
+    expect(manifest).toContain('"crates/mangostudio-runtime-cold"');
     expect(manifest).toContain('"crates/mangostudio-runtime-contract"');
     expect(manifest).toContain('exclude = ["crates/mango-protocol/fuzz"]');
     expect(manifest).not.toContain('packages/cargo-shim');

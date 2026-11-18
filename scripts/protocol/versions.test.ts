@@ -19,10 +19,14 @@ const CARGO_TOML =
   '[workspace]\nmembers = ["crates/*"]\n\n[workspace.package]\nversion = "0.1.0"\nedition = "2024"\n\n' +
   '[workspace.dependencies]\n' +
   'mango-protocol = { path = "crates/mango-protocol", version = "0.1.0" }\n' +
-  'mangostudio-runtime-contract = { path = "crates/mangostudio-runtime-contract", version = "0.1.0" }\n';
+  'mangostudio-runtime-contract = { path = "crates/mangostudio-runtime-contract", version = "0.1.0" }\n' +
+  'mangostudio-runtime-core = { path = "crates/mangostudio-runtime-core", version = "0.1.0" }\n' +
+  'mangostudio-runtime-cold = { path = "crates/mangostudio-runtime-cold", version = "0.1.0" }\n';
 const CARGO_LOCK =
   '[[package]]\nname = "serde"\nversion = "1.0.0"\n\n[[package]]\nname = "mango-protocol"\nversion = "0.1.0"\n\n' +
-  '[[package]]\nname = "mangostudio-runtime-contract"\nversion = "0.1.0"\n';
+  '[[package]]\nname = "mangostudio-runtime-contract"\nversion = "0.1.0"\n\n' +
+  '[[package]]\nname = "mangostudio-runtime-core"\nversion = "0.1.0"\n\n' +
+  '[[package]]\nname = "mangostudio-runtime-cold"\nversion = "0.1.0"\n';
 const FUZZ_CARGO_LOCK =
   '[[package]]\nname = "mango-protocol"\nversion = "0.1.0"\n\n[[package]]\nname = "serde"\nversion = "1.0.0"\n';
 
@@ -151,8 +155,12 @@ describe('readVersions', () => {
         file: 'Cargo.toml ([workspace.dependencies] mangostudio-runtime-contract)',
         version: '0.1.0',
       },
+      { file: 'Cargo.toml ([workspace.dependencies] mangostudio-runtime-core)', version: '0.1.0' },
+      { file: 'Cargo.toml ([workspace.dependencies] mangostudio-runtime-cold)', version: '0.1.0' },
       { file: 'Cargo.lock (mango-protocol)', version: '0.1.0' },
       { file: 'Cargo.lock (mangostudio-runtime-contract)', version: '0.1.0' },
+      { file: 'Cargo.lock (mangostudio-runtime-core)', version: '0.1.0' },
+      { file: 'Cargo.lock (mangostudio-runtime-cold)', version: '0.1.0' },
       { file: 'crates/mango-protocol/fuzz/Cargo.lock (mango-protocol)', version: '0.1.0' },
     ]);
   });
@@ -203,6 +211,10 @@ describe('writeVersions', () => {
       '0.2.0',
       '0.2.0',
       '0.2.0',
+      '0.2.0',
+      '0.2.0',
+      '0.1.0',
+      '0.1.0',
       '0.1.0',
       '0.1.0',
       '0.1.0',
@@ -240,6 +252,10 @@ describe('writeVersions', () => {
       '0.1.0',
       '0.1.0',
       '0.1.0',
+      '0.1.0',
+      '0.1.0',
+      '0.1.0',
+      '0.1.0',
     ]);
   });
 
@@ -261,7 +277,9 @@ describe('writeVersions', () => {
       MANIFESTS.cargoWorkspace,
       '[workspace.package]\nedition = "2024"\n\n[workspace.dependencies]\n' +
         'mango-protocol = { path = "crates/mango-protocol", version = "0.1.0" }\n' +
-        'mangostudio-runtime-contract = { path = "crates/mangostudio-runtime-contract", version = "0.1.0" }\n'
+        'mangostudio-runtime-contract = { path = "crates/mangostudio-runtime-contract", version = "0.1.0" }\n' +
+        'mangostudio-runtime-core = { path = "crates/mangostudio-runtime-core", version = "0.1.0" }\n' +
+        'mangostudio-runtime-cold = { path = "crates/mangostudio-runtime-cold", version = "0.1.0" }\n'
     );
 
     await expect(writeVersions('0.2.0', repo.root)).rejects.toThrow(

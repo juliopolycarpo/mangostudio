@@ -41,6 +41,8 @@ max-files-changed: 2999
           # carry no area: or type: label.
           - "crates/mangostudio-runtime-contract/**"
           - "crates/mangostudio-runtime/**"
+          - "crates/mangostudio-runtime-core/**"
+          - "crates/mangostudio-runtime-cold/**"
 
 "area: git":
   - changed-files:
@@ -129,7 +131,7 @@ max-files-changed: 2999
       - any-glob-to-any-file:
           - "apps/api/src/services/mcp/**"
           - "apps/api/src/modules/mcp-servers/**"
-          - "crates/mangostudio-runtime/src/mcp/**"
+          - "crates/mangostudio-runtime-cold/src/mcp/**"
           - "apps/frontend/src/features/settings/mcp/**"
           - "apps/shared/src/mcp/**"
 

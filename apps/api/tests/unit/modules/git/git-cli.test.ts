@@ -145,7 +145,7 @@ describe('hub git CLI facade', () => {
   });
 });
 
-/** The failure `crates/mangostudio-runtime/src/commands/service.rs` sends for a cwd that is gone. */
+/** The failure `crates/mangostudio-runtime-cold/src/commands/service.rs` sends for a cwd that is gone. */
 function runtimeMissingCwdFailure(cwd: string): RemoteError {
   const message = `Invalid cwd ${JSON.stringify(cwd)}; expected an existing directory.`;
   return new RemoteError('INTERNAL', message, {

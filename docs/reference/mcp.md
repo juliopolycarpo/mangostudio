@@ -31,7 +31,7 @@ Consequences worth knowing:
 
 ## Transports
 
-Two MCP transports are supported (`crates/mangostudio-runtime/src/mcp/sdk.rs`). They are
+Two MCP transports are supported (`crates/mangostudio-runtime-cold/src/mcp/sdk.rs`). They are
 independent of the environment transport that connects the hub to the runtime.
 
 - **stdio** — the runtime spawns a process (`command` + `args`) and speaks MCP over its
@@ -41,7 +41,7 @@ independent of the environment transport that connects the hub to the runtime.
   HTTP client is tried first; on a 4xx from the initialize POST it falls back to the legacy
   SSE transport, per the MCP spec-compat recipe.
 
-Only `crates/mangostudio-runtime/src/mcp/sdk.rs` depends on the Rust MCP SDK (`rmcp`); the rest
+Only `crates/mangostudio-runtime-cold/src/mcp/sdk.rs` depends on the Rust MCP SDK (`rmcp`); the rest
 of the runtime speaks the project-owned traits in `mcp/client.rs`, and the hub consumes the
 `McpClientHandle` wrapper, so an SDK bump stays contained to that file. API test fixtures (for
 example the servers under `apps/api/tests/support/fixtures/mcp/`) may import
@@ -118,7 +118,7 @@ header **names** (`headerNames`). Stdio servers use `env` for non-secret variabl
 two maps are merged, with secret values winning on a duplicate key.
 
 The spawned child does **not** inherit the runtime process environment wholesale. Only a small
-allowlist (`PATH`, `HOME`, `TERM`, … — see `child_env` in `crates/mangostudio-runtime/src/mcp/stdio.rs`) plus
+allowlist (`PATH`, `HOME`, `TERM`, … — see `child_env` in `crates/mangostudio-runtime-cold/src/mcp/stdio.rs`) plus
 the managed public and secret environment maps is forwarded, so connector API keys and the
 app's auth secret never leak accidentally. Exported shell functions are stripped to avoid a
 Shellshock-style injection vector.
@@ -175,7 +175,7 @@ SDK so a timed-out request is actually cancelled.
 Failures degrade instead of aborting the turn: a server tool error, an unreachable server, or a
 timeout is recorded as a typed error tool result and the turn continues. Oversized results are
 capped at 64 KiB with a truncation marker, runtime-side
-(`crates/mangostudio-runtime/src/mcp/content.rs`) so the cap applies before the wire.
+(`crates/mangostudio-runtime-cold/src/mcp/content.rs`) so the cap applies before the wire.
 
 Two deadlines compose. The runtime applies the server's `timeoutMs` to the MCP request; the hub
 applies a slightly later deadline to the protocol request carrying it. The runtime's always
@@ -197,7 +197,7 @@ trade-off is intentional; see [#540](https://github.com/juliopolycarpo/mangostud
 ## Form elicitation
 
 MangoStudio declares the MCP client `elicitation.form` capability
-(`crates/mangostudio-runtime/src/mcp/sdk.rs`, via `SdkConnector::handler`). When a server sends `elicitation/create` during
+(`crates/mangostudio-runtime-cold/src/mcp/sdk.rs`, via `SdkConnector::handler`). When a server sends `elicitation/create` during
 an in-flight tool call, the API parks the request
 (`apps/api/src/services/mcp/elicitation-registry.ts`), streams an `mcp_elicitation_request` SSE
 chunk into the open chat turn, and renders a form card. The user accepts (with field values),
@@ -276,4 +276,4 @@ command runs there, with that machine's access, and any stored credentials are d
 - **A tool call returns a timeout error.** Raise the server's `timeoutMs`, or check whether the
   server hangs; the turn still completes with the error result recorded.
 - **A long tool result looks cut off.** Results over 64 KiB are truncated with a marker by
-  `crates/mangostudio-runtime/src/mcp/content.rs`, to protect the context window.
+  `crates/mangostudio-runtime-cold/src/mcp/content.rs`, to protect the context window.

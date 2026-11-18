@@ -14,7 +14,7 @@ import {
 } from '@mangostudio/shared/generation';
 import Value from 'typebox/value';
 
-import limits from '../crates/mangostudio-runtime/src/external_agents/adapter/fixtures/prompt-limits.json';
+import limits from '../crates/mangostudio-runtime-cold/src/external_agents/adapter/fixtures/prompt-limits.json';
 
 const configuration = { level: 'default', routing: 'user', workspaceRoots: [] };
 

@@ -347,7 +347,7 @@ Open these first:
 
 - `apps/shared/src/environments/detection/` (the pure domain: PATH scan, duplicate
   analysis, runtime and agent definitions, auth signals, nvm, the Node release policy)
-- `crates/mangostudio-runtime/src/probing/` (the same domain bound to a real host —
+- `crates/mangostudio-runtime-cold/src/probing/` (the same domain bound to a real host —
   `methods.rs` is the three `probing.*` methods, `host.rs` the environment snapshot,
   `detection/` the ported domain)
 - `apps/api/src/modules/environments/application/probing-service.ts` (per-environment
@@ -356,7 +356,7 @@ Open these first:
 - `apps/api/src/modules/environments/domain/install-recipes.ts` (the recipe table: platforms,
   downloads, argv builders, accepted exit codes, copy-only entries)
 - `apps/api/src/modules/environments/application/toolchain-service.ts` and
-  `crates/mangostudio-runtime/src/commands/toolchain.rs` (which Node and Bun a spawned process runs with;
+  `crates/mangostudio-runtime-cold/src/commands/toolchain.rs` (which Node and Bun a spawned process runs with;
   see `docs/features/environments.md`)
 - `apps/api/src/modules/environments/domain/prerequisite-findings.ts` (hub-side
   `prerequisite-missing` findings from the recipe table)
@@ -475,7 +475,7 @@ Open these first:
   per-vendor candidate resolution behind them — a _different_ responsibility from reading one back)
 - `apps/shared/src/external-agents/remedies.ts` (reason → what would fix it, `satisfies`-guarded so
   a new reason cannot ship without one)
-- `crates/mangostudio-runtime/src/external_agents/` (the runtime host over the External Agents
+- `crates/mangostudio-runtime-cold/src/external_agents/` (the runtime host over the External Agents
   SDK — `service.rs` for the `external-agent.*` handlers, `supervisor.rs` for session lifecycle,
   `port.rs` for the owned agent operations, `turns.rs` for receipts and event relay,
   `isolation.rs` for the attestation, and private `adapter/` for SDK construction, mapping
@@ -534,7 +534,7 @@ live.
 
 Open these first:
 
-- `crates/mangostudio-runtime/src/mcp/` (`sdk.rs` is the only `rmcp` boundary; transports and the session registry —
+- `crates/mangostudio-runtime-cold/src/mcp/` (`sdk.rs` is the only `rmcp` boundary; transports and the session registry —
   the server runs on the environment's runtime, not in the hub)
 - `apps/api/src/services/mcp/runtime-session.ts` (hub handle over the protocol,
   secret delivery, elicitation hop)
@@ -920,14 +920,14 @@ Where a runtime lives and what it is allowed to do — `~/.mango/runtime/<slot>/
 `allow` set, and the CLI that writes it:
 
 - `apps/shared/src/runtime-home/` (schemas, presets, path layout — the contract)
-- `crates/mangostudio-runtime/src/runtime_home.rs` (the half that touches disk), `src/setup.rs`, `src/health.rs`
-- `crates/mangostudio-runtime/src/slot_publish.rs` (the slot pointer per platform — POSIX `current`
+- `crates/mangostudio-runtime-core/src/runtime_home.rs` (the half that touches disk), `src/setup.rs`, `src/health.rs`
+- `crates/mangostudio-runtime-core/src/slot_publish.rs` (the slot pointer per platform — POSIX `current`
   link, Windows atomic `.cmd` shim — plus the version prune and the rename retry slot writes
   go through), `src/slot_update_lock.rs` (one writer per slot, across processes)
 - `crates/mangostudio-runtime/src/cli/native_operation.rs` (`mangostudio-runtime install`: the same publication a
   live update performs, minus the transfer), `src/update.rs` and `src/update_transfer.rs` (the transfer)
-- `crates/mangostudio-runtime/src/runtime_home/owner_only.rs` (`chmod 0600`, or `icacls` where there is no mode)
-- `crates/mangostudio-runtime/src/ports/authorization.rs`, `src/consent/` (dispatch refusal + per-call re-read)
+- `crates/mangostudio-runtime-core/src/runtime_home/owner_only.rs` (`chmod 0600`, or `icacls` where there is no mode)
+- `crates/mangostudio-runtime-core/src/ports/authorization.rs`, `src/consent/` (dispatch refusal + per-call re-read)
 - `crates/mangostudio-runtime/src/audit/` (local NDJSON receipt; never on the wire)
 - `apps/api/src/modules/generation/application/resolve-capability-candidates.ts` (hub withholds
   tools the connected manifest refuses)
@@ -1021,7 +1021,7 @@ in the spawn path applies and the manager is entered through `adopt()` rather th
 - `@mangostudio/protocol/ws` — `createWebSocketPort` (frames chunked across 16 KiB
   messages, send queue, backpressure) and the `mango.v1` subprotocol; `CLOSE_CODES` says why
   a socket ended and whether redialing can change it
-- `crates/mangostudio-runtime/src/transport/connect.rs` (dial loop, backoff, heartbeat), `crates/mangostudio-runtime/src/runtime_home.rs`
+- `crates/mangostudio-runtime/src/transport/connect.rs` (dial loop, backoff, heartbeat), `crates/mangostudio-runtime-core/src/runtime_home.rs`
 - `apps/api/src/modules/environments/http/runtime-socket-routes.ts` (`/api/runtime`)
 - `apps/api/src/modules/environments/domain/pairing-token.ts` (selector + verifier, dial endpoint)
 - `apps/api/src/modules/environments/application/runtime-pairing-service.ts`

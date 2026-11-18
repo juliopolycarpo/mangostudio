@@ -156,7 +156,7 @@ Two other things left with the TypeScript runtime:
   ([juliopolycarpo/mango-external-agents](https://github.com/juliopolycarpo/mango-external-agents)),
   whose CI runs the vendor contract drift workflow.
 - The `runtime-slot-windows` job in `test.yml` is gone. Its Windows slot coverage is the Rust
-  `#[cfg(windows)]` tests in `crates/mangostudio-runtime/src/slot_publish.rs` and
+  `#[cfg(windows)]` tests in `crates/mangostudio-runtime-core/src/slot_publish.rs` and
   `src/cli/native_operation.rs`, which `cargo-shim.yml`'s `workspace` matrix runs on
   `windows-latest`.
 

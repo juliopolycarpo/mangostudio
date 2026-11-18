@@ -165,6 +165,8 @@ describe('labeler coverage', () => {
     const runtimeSection = extractLabelSection(labeler, '"area: runtime":', '"area: git":');
     expect(runtimeSection).not.toContain('apps/runtime/');
     expect(runtimeSection).toContain('- "crates/mangostudio-runtime/**"');
+    expect(runtimeSection).toContain('- "crates/mangostudio-runtime-core/**"');
+    expect(runtimeSection).toContain('- "crates/mangostudio-runtime-cold/**"');
     expect(runtimeSection).toContain('- "apps/shared/src/runtime-contract/**"');
     expect(runtimeSection).toContain('- "apps/api/src/services/runtime-client/**"');
     // The Mango Protocol is the hub/runtime wire contract; without these globs a
@@ -177,6 +179,8 @@ describe('labeler coverage', () => {
     expect(runtimeSection).toContain('- "scripts/protocol/**"');
     expect(runtimeSection).toContain('- "crates/mangostudio-runtime-contract/**"');
     expect(runtimeSection).toContain('- "crates/mangostudio-runtime/**"');
+    expect(runtimeSection).toContain('- "crates/mangostudio-runtime-core/**"');
+    expect(runtimeSection).toContain('- "crates/mangostudio-runtime-cold/**"');
   });
 
   test('classifies the repository status feature as area: git', () => {

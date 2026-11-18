@@ -65,7 +65,10 @@ describe('lastContentIndex', () => {
 describe('the runtime relay cap', () => {
   it('forwards exactly as many notices as the hub keeps', () => {
     const relay = readFileSync(
-      join(import.meta.dir, '../../../../crates/mangostudio-runtime/src/external_agents/turns.rs'),
+      join(
+        import.meta.dir,
+        '../../../../crates/mangostudio-runtime-cold/src/external_agents/turns.rs'
+      ),
       'utf8'
     );
     const declared = /const NOTICES_PER_TURN: usize = (\d+);/.exec(relay)?.[1];

@@ -311,7 +311,7 @@ jobs:
           tool: cargo-nextest@0.9.151
         if: ${{ !cancelled() }}
 
-      - run: cargo nextest run -p mangostudio-runtime --all-targets --all-features --locked --retries 0
+      - run: cargo nextest run -p mangostudio-runtime -p mangostudio-runtime-core -p mangostudio-runtime-cold --all-targets --all-features --locked --retries 0
         if: ${{ !cancelled() && steps.setup-bun.outcome == 'success' && steps.setup-nextest.outcome == 'success' }}
 
   musl-clippy:
@@ -338,9 +338,9 @@ jobs:
           prefix-key: v0-rust-${{ hashFiles('Cargo.toml') }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - run: cargo-zigbuild clippy --locked -p mangostudio-runtime --all-targets --target x86_64-unknown-linux-musl -- -D warnings
+      - run: cargo-zigbuild clippy --locked -p mangostudio-runtime -p mangostudio-runtime-core -p mangostudio-runtime-cold --all-targets --target x86_64-unknown-linux-musl -- -D warnings
 
-      - run: cargo-zigbuild clippy --locked -p mangostudio-runtime --all-targets --target aarch64-unknown-linux-musl -- -D warnings
+      - run: cargo-zigbuild clippy --locked -p mangostudio-runtime -p mangostudio-runtime-core -p mangostudio-runtime-cold --all-targets --target aarch64-unknown-linux-musl -- -D warnings
 
   real-binary-qualification:
     # Proves the hub's own real code actually talks to the real compiled
