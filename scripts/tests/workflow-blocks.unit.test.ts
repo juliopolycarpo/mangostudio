@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
-import { parseNeedsList, runScriptLines } from './support/workflow-blocks';
+import {
+  extractStepBlock,
+  extractStepBlocksUsing,
+  extractTopLevelBlock,
+  parseNeedsList,
+  runScriptLines,
+} from './support/workflow-blocks';
 import { parseWithInputs, uploadPaths } from './support/workflow-files';
 
 // Regression test for a real outage: a `needs: [a, b]` flow sequence wrapped
@@ -31,6 +37,108 @@ describe('parseNeedsList', () => {
   test('returns [] when the job has no needs key at all', () => {
     const block = '  changes:\n    runs-on: ubuntu-latest\n';
     expect(parseNeedsList(block)).toEqual([]);
+  });
+});
+
+describe('extractTopLevelBlock', () => {
+  const workflow = [
+    'name: Demo',
+    'concurrency:',
+    '  group: demo',
+    '  cancel-in-progress: false',
+    'permissions: {}',
+    'jobs:',
+    '  build:',
+    '    concurrency:',
+    '      group: job-level',
+  ].join('\n');
+
+  test('reads the top-level mapping and never a job-level one with the same key', () => {
+    const block = extractTopLevelBlock(workflow, 'concurrency');
+    expect(block).toContain('cancel-in-progress: false');
+    expect(block).not.toContain('job-level');
+  });
+
+  test('returns an empty block for an inline value or an absent key', () => {
+    expect(extractTopLevelBlock(workflow, 'permissions')).toBe('');
+    expect(extractTopLevelBlock(workflow, 'env')).toBe('');
+  });
+});
+
+describe('extractStepBlock', () => {
+  const job = [
+    '    steps:',
+    '      - name: Build',
+    '        run: make',
+    '      - uses: actions/upload-artifact@v4',
+    '        with:',
+    '          name: Build',
+    '          path: out',
+    '      - uses: actions/checkout@v4',
+    '        name: Check out # why',
+    '        with:',
+    '          persist-credentials: false',
+  ].join('\n');
+
+  test('returns only the named step, whichever key order it was written in', () => {
+    expect(extractStepBlock(job, 'Build')).toBe('      - name: Build\n        run: make\n');
+    expect(extractStepBlock(job, 'Check out')).toContain('persist-credentials: false');
+    expect(extractStepBlock(job, 'Check out')).not.toContain('run: make');
+  });
+
+  test('ignores a nested `name:` input that happens to equal the step name', () => {
+    // The upload step's `with: name: Build` must not make "Build" ambiguous.
+    expect(extractStepBlock(job, 'Build')).not.toContain('upload-artifact');
+  });
+
+  test('reads composite-action steps at indent 4', () => {
+    const action = ['runs:', '  steps:', '    - name: Verify', '      run: true'].join('\n');
+    expect(extractStepBlock(action, 'Verify', 4)).toContain('run: true');
+  });
+
+  test('throws naming the missing step and the steps it did find', () => {
+    expect(() => extractStepBlock(job, 'Deploy')).toThrow(
+      'expected exactly one step named "Deploy" | received: 0 of [Build, <unnamed>, Check out]'
+    );
+  });
+
+  test('throws when two steps share the name instead of picking one', () => {
+    const duplicated = `${job}\n      - name: Build\n        run: other`;
+    expect(() => extractStepBlock(duplicated, 'Build')).toThrow('received: 2 of');
+  });
+});
+
+describe('extractStepBlocksUsing', () => {
+  const job = [
+    '    steps:',
+    '      - uses: github/codeql-action/init@abc # v4',
+    '        with:',
+    '          languages: rust',
+    '      - uses: github/codeql-action/analyze@abc # v4',
+    '        with:',
+    '          category: rust',
+    '      - name: Check',
+    '        uses: ./.github/actions/local',
+    '      - run: echo "uses: github/codeql-action/init@abc"',
+  ].join('\n');
+
+  test('matches the action exactly, not a longer action path sharing its prefix', () => {
+    const [init, ...rest] = extractStepBlocksUsing(job, 'github/codeql-action/init');
+    expect(rest).toEqual([]);
+    expect(init).toContain('languages: rust');
+    expect(init).not.toContain('category: rust');
+  });
+
+  test('finds uses written after the step name, and local actions without a ref', () => {
+    expect(extractStepBlocksUsing(job, './.github/actions/local')).toHaveLength(1);
+  });
+
+  test('does not read the text of a run script as a uses line', () => {
+    expect(extractStepBlocksUsing(job, 'github/codeql-action/init')).toHaveLength(1);
+  });
+
+  test('returns an empty list for an absent action', () => {
+    expect(extractStepBlocksUsing(job, 'actions/checkout')).toEqual([]);
   });
 });
 

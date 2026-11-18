@@ -55,6 +55,56 @@ export function extractStepBlocksAtIndent(source: string, indent: number): strin
   });
 }
 
+/**
+ * Isolate the one step whose `name:` is exactly `stepName`. `source` is a job
+ * block (steps at indent 6, the default) or a composite-action manifest
+ * (`indent: 4`).
+ *
+ * Throws when the step is absent or the name is ambiguous instead of returning
+ * ''. An empty block makes a `not.toContain` guard pass and a `toContain` guard
+ * fail with no hint, so a renamed step would read as a policy violation or, worse,
+ * as a clean pass.
+ *
+ * // Usage: expect(extractStepBlock(extractJobBlock(workflow, 'verify'), 'Run gate')).toContain('if: always()')
+ */
+export function extractStepBlock(source: string, stepName: string, indent = 6): string {
+  // The step's own `name:` key only: `- name:` or a sibling at indent + 2. A deeper `name:`
+  // (an upload-artifact `with:` input, say) belongs to the action, not the step.
+  const ownName = (pattern: string) =>
+    new RegExp(`^(?: {${indent}}- | {${indent + 2}})name: ${pattern}\\s*(?:#.*)?$`, 'm');
+  const steps = extractStepBlocksAtIndent(source, indent);
+  const nameLine = ownName(escapeRegExp(stepName));
+  const matches = steps.filter((step) => nameLine.test(step));
+  if (matches.length !== 1) {
+    const anyName = ownName('(.+?)');
+    const names = steps.map((step) => anyName.exec(step)?.[1] ?? '<unnamed>');
+    throw new Error(
+      `(workflow step): expected exactly one step named "${stepName}" | received: ${matches.length} of [${names.join(', ')}]`
+    );
+  }
+  return matches[0];
+}
+
+/**
+ * Every step that runs `action` (`uses: <action>@<ref>`, or the bare local
+ * path), for steps that carry no `name:`. `source` and `indent` as in
+ * `extractStepBlock`. Returns [] when none match; assert the count at the call
+ * site, because a loop over an empty list passes vacuously.
+ *
+ * // Usage: extractStepBlocksUsing(job, 'github/codeql-action/init') // [step]
+ */
+export function extractStepBlocksUsing(source: string, action: string, indent = 6): string[] {
+  const usesLine = new RegExp(
+    `^(?: {${indent}}- | {${indent + 2}})uses: ['"]?${escapeRegExp(action)}(?:@\\S+)?['"]?\\s*(?:#.*)?$`,
+    'm'
+  );
+  return extractStepBlocksAtIndent(source, indent).filter((step) => usesLine.test(step));
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /** One line of a `run:` script, with its 1-based position in the file. */
 export interface RunScriptLine {
   readonly line: number;
@@ -106,9 +156,19 @@ export function runScriptLines(source: string): RunScriptLine[] {
   ]);
 }
 
+/**
+ * Isolate the body of a top-level block mapping (`concurrency:`, `env:`,
+ * `permissions:` with children). Returns '' when the key is absent or written
+ * inline (`permissions: {}`), so an inline value is asserted with an anchored
+ * line match instead.
+ */
+export function extractTopLevelBlock(workflow: string, key: string): string {
+  return new RegExp(`\\n${key}:\\n([\\s\\S]*?)(?=\\n\\S|$)`).exec(workflow)?.[1] ?? '';
+}
+
 /** Isolate the body of the top-level `on:` trigger section. */
 export function extractOnBlock(workflow: string): string {
-  return /\non:\n([\s\S]*?)(?=\n\S|$)/.exec(workflow)?.[1] ?? '';
+  return extractTopLevelBlock(workflow, 'on');
 }
 
 /** List the keys declared at the top level of a section body (indent 2). */
