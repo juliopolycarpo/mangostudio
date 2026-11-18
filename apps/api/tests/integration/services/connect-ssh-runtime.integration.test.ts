@@ -10,6 +10,14 @@
  * Self-skipping, like the Git suites: a machine with no sshd listening, or one
  * whose own host key has never been accepted, cannot run these and must not
  * fail because of it.
+ *
+ * `MANGOSTUDIO_SSH_FIXTURE=1` is the opposite contract, for CI and for a
+ * developer who wants the cases to run: the suite starts a throwaway sshd of
+ * its own (see `tests/support/ssh-fixture.ts`) and anything missing — sshd, the
+ * runtime binary, a working key login — fails the file with the reason instead
+ * of skipping. Locally:
+ *
+ *   MANGOSTUDIO_SSH_FIXTURE=1 bun run --filter @mangostudio/api test:integration
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
@@ -21,18 +29,35 @@ import type { SshEnvironmentConfig } from '@mangostudio/shared/environments';
 
 import { connectSshRuntime } from '../../../src/services/runtime-client/connect-ssh-runtime';
 import { resolveRustRuntimeBinary } from '../../support/rust-runtime-binary';
+import { startThrowawaySshd, type ThrowawaySshd } from '../../support/ssh-fixture';
 
 /** The compiled runtime the wrapper execs: CI's override, or this checkout's newest build. */
 const binary = resolveRustRuntimeBinary();
 const SHELL_DEFAULTS = { kind: 'bash', timeoutMs: 10_000, maxOutputBytes: 65_536 } as const;
 
+const fixtureRequired = process.env.MANGOSTUDIO_SSH_FIXTURE === '1';
+if (fixtureRequired && !binary.available) {
+  throw new Error(
+    `MANGOSTUDIO_SSH_FIXTURE=1: expected a runtime binary at ${binary.path} | received: none. ` +
+      'Build it with "cargo build -p mangostudio-runtime --locked" or set MANGOSTUDIO_RUNTIME_BINARY.'
+  );
+}
+/** Started at load because `skipIf` below is decided at collection time. */
+const fixture: ThrowawaySshd | undefined = fixtureRequired ? await startThrowawaySshd() : undefined;
+// Registered straight after the start so no later failure can leave the server up.
+afterAll(async () => {
+  await fixture?.stop();
+});
+
 const hasSshClient = Bun.which('ssh') !== null;
 /**
  * The same connection the hub will open: batch mode, and a host key that must
  * already be trusted. Probing with anything laxer would let the suite run under
- * conditions the launcher itself refuses.
+ * conditions the launcher itself refuses. The fixture has already proved its
+ * own key login, so it needs no probe.
  */
-const canReachLocalhost = hasSshClient && binary.available && (await probeLocalhost());
+const canReachLocalhost =
+  fixture !== undefined || (hasSshClient && binary.available && (await probeLocalhost()));
 
 let workdir = '';
 let runtimePath = '';
@@ -62,8 +87,27 @@ function runtimeWrapper(): string {
   return `#!/bin/sh\nexec '${binary.path.replaceAll("'", "'\\''")}' "$@"\n`;
 }
 
+/** `localhost` as the machine's own sshd knows it, or the throwaway server's address and key. */
 function sshConfig(overrides: Partial<SshEnvironmentConfig> = {}): SshEnvironmentConfig {
-  return { host: 'localhost', remoteRuntimePath: runtimePath, ...overrides };
+  const target: SshEnvironmentConfig = fixture
+    ? {
+        host: fixture.host,
+        port: fixture.port,
+        user: fixture.user,
+        identityFile: fixture.identityFile,
+      }
+    : { host: 'localhost' };
+  return { ...target, remoteRuntimePath: runtimePath, ...overrides };
+}
+
+/** The hub's real launcher; only the fixture's trust options are put in front of `ssh`. */
+function connectToSsh(config: SshEnvironmentConfig) {
+  return connectSshRuntime(
+    { userId: 'test-user', id: 'ssh-box', config },
+    () => undefined,
+    {},
+    fixture ? { spawnPort: (options) => fixture.spawnPort(options) } : {}
+  );
 }
 
 beforeAll(async () => {
@@ -84,10 +128,7 @@ describe('connectSshRuntime over a real sshd', () => {
   it.skipIf(!canReachLocalhost)(
     'handshakes with a runtime on the far side of the ssh pipe',
     async () => {
-      const connection = await connectSshRuntime(
-        { userId: 'test-user', id: 'ssh-box', config: sshConfig() },
-        () => undefined
-      );
+      const connection = await connectToSsh(sshConfig());
 
       try {
         expect(connection.client.manifest.pathStyle).toBe('posix');
@@ -102,10 +143,7 @@ describe('connectSshRuntime over a real sshd', () => {
   it.skipIf(!canReachLocalhost)(
     'runs a shell command on the target rather than on the hub',
     async () => {
-      const connection = await connectSshRuntime(
-        { userId: 'test-user', id: 'ssh-box', config: sshConfig() },
-        () => undefined
-      );
+      const connection = await connectToSsh(sshConfig());
 
       try {
         const result = await connection.client.shell.run({
@@ -126,10 +164,7 @@ describe('connectSshRuntime over a real sshd', () => {
       // The wrapper's runtime reports whatever the ssh session's environment
       // says, which is not this process's. Release equality is deliberately not
       // a gate for a machine the hub does not install onto.
-      const connection = await connectSshRuntime(
-        { userId: 'test-user', id: 'ssh-box', config: sshConfig() },
-        () => undefined
-      );
+      const connection = await connectToSsh(sshConfig());
 
       try {
         expect(connection.client.runtimeVersion.length).toBeGreaterThan(0);
@@ -149,10 +184,7 @@ describe('connectSshRuntime over a real sshd', () => {
       await writeFile(spaced, runtimeWrapper());
       await chmod(spaced, 0o755);
 
-      const connection = await connectSshRuntime(
-        { userId: 'test-user', id: 'ssh-box', config: sshConfig({ remoteRuntimePath: spaced }) },
-        () => undefined
-      );
+      const connection = await connectToSsh(sshConfig({ remoteRuntimePath: spaced }));
 
       try {
         expect(connection.client.manifest.features.tools).toBe(true);
@@ -167,13 +199,8 @@ describe('connectSshRuntime over a real sshd', () => {
     'runs nothing when the runtime path carries shell metacharacters',
     async () => {
       const marker = join(workdir, 'injected');
-      const error = await connectSshRuntime(
-        {
-          userId: 'test-user',
-          id: 'ssh-box',
-          config: sshConfig({ remoteRuntimePath: `/bin/true; touch ${marker}` }),
-        },
-        () => undefined
+      const error = await connectToSsh(
+        sshConfig({ remoteRuntimePath: `/bin/true; touch ${marker}` })
       ).catch((caught) => caught);
 
       expect({ code: error.code, message: error.message, details: error.details }).toMatchObject({
@@ -188,13 +215,8 @@ describe('connectSshRuntime over a real sshd', () => {
   it.skipIf(!canReachLocalhost)(
     'says a runtime is missing rather than that the connection failed',
     async () => {
-      const error = await connectSshRuntime(
-        {
-          userId: 'test-user',
-          id: 'ssh-box',
-          config: sshConfig({ remoteRuntimePath: join(workdir, 'absent') }),
-        },
-        () => undefined
+      const error = await connectToSsh(
+        sshConfig({ remoteRuntimePath: join(workdir, 'absent') })
       ).catch((caught) => caught);
 
       expect({ code: error.code, message: error.message, details: error.details }).toMatchObject({
