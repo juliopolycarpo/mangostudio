@@ -159,6 +159,7 @@ continuar igual. Veja [`reference/external-api.md`](./../reference/external-api.
 - Erros de streaming usam `SSEErrorEvent` de `@mangostudio/shared/streaming`: `{ type: 'error', error, done: true }`.
 - Erros de domínio estendem `Error` com códigos tipados, como `ChatNotFoundError` e `ToolParameterError`.
 - O plugin centralizado `error-handler.ts` mapeia exceções lançadas para respostas HTTP.
+- Um hook `mapResponse` ou `afterResponse` que precisa do status da resposta o lê com `resolveStatus(responseValue, set)` de `plugins/error-negotiation.ts`, nunca só com `set.status`. Um retorno `status(code, body)` carrega o código no objeto retornado, enquanto uma rota atribui `set.status`; `resolveStatus` lê o que a resposta realmente usou. `tests/unit/plugins/error-status-hooks.test.ts` fixa o caso em que um handler define um status de sucesso e depois lança.
 
 ### Rate Limiting
 

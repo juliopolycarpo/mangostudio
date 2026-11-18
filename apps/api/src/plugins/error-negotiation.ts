@@ -51,6 +51,11 @@ function asApiErrorResponse(value: unknown): ApiErrorResponse | null {
  * disagreed with its own HTTP status — the one thing RFC 9457 requires it not
  * to do.
  *
+ * This is the only supported way for a `mapResponse` or `afterResponse` hook
+ * (logging, metrics, negotiation) to read a response status. `set.status` alone
+ * can disagree with what is sent, and the error handler's arms return
+ * `status(code, body)` without assigning it themselves.
+ *
  * @example
  * const status = resolveStatus(responseValue, set);
  * if (status !== null && status >= 400) { ... }
