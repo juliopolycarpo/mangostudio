@@ -491,10 +491,11 @@ mod tests {
                 Some(ERROR_PRIVILEGE_NOT_HELD),
                 "expected symlink creation to succeed or fail with ERROR_PRIVILEGE_NOT_HELD | received {error:?}"
             );
-            assert!(
-                !RUNS_IN_GITHUB_ACTIONS,
-                "expected the GitHub Actions runner to create file symlinks | received ERROR_PRIVILEGE_NOT_HELD (1314)"
-            );
+            if RUNS_IN_GITHUB_ACTIONS {
+                panic!(
+                    "expected the GitHub Actions runner to create file symlinks | received ERROR_PRIVILEGE_NOT_HELD (1314)"
+                );
+            }
             eprintln!(
                 "SKIPPED a_settings_path_that_is_a_file_symlink_is_refused_on_windows: \
                  this account lacks the symlink-creation privilege (Developer Mode or elevation)"
