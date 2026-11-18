@@ -81,6 +81,53 @@ const shardCount = (): number => {
   return Number(declared);
 };
 
+// #922, the hang `MANGOSTUDIO_SPAWN_DIAGNOSTICS` was added to chase, is closed.
+// At workflow scope the flag reached the frontend and merge jobs, which never
+// install the wrappers, and entered every test task's turbo cache key. It stays
+// out of every scope until someone is chasing a hang again, and then belongs on
+// the one step that runs the api lane.
+describe('Test workflow spawn diagnostics', () => {
+  interface EnvScope {
+    readonly where: string;
+    readonly env: Record<string, unknown>;
+  }
+
+  const parsed = Bun.YAML.parse(workflow) as {
+    env?: Record<string, unknown>;
+    jobs: Record<
+      string,
+      { env?: Record<string, unknown>; steps?: { env?: Record<string, unknown>; name?: string }[] }
+    >;
+  };
+
+  const scopes = (): EnvScope[] => [
+    { where: 'workflow env', env: parsed.env ?? {} },
+    ...Object.entries(parsed.jobs).flatMap(([job, definition]) => [
+      { where: `job ${job} env`, env: definition.env ?? {} },
+      ...(definition.steps ?? []).map((step, index) => ({
+        where: `job ${job} step ${step.name ?? index} env`,
+        env: step.env ?? {},
+      })),
+    ]),
+  ];
+
+  test('is not set in any workflow, job or step env', () => {
+    const setIn = scopes()
+      .filter(({ env }) => 'MANGOSTUDIO_SPAWN_DIAGNOSTICS' in env)
+      .map(({ where }) => where);
+
+    expect(
+      setIn,
+      `expected MANGOSTUDIO_SPAWN_DIAGNOSTICS set nowhere in test.yml | received: ${setIn.join(', ')}`
+    ).toEqual([]);
+  });
+
+  test('the workflow env still carries SHARD_COUNT', () => {
+    // Guards the test above against passing because the scope walk read nothing.
+    expect(parsed.env).toMatchObject({ SHARD_COUNT: 2 });
+  });
+});
+
 describe('Test workflow shard matrix', () => {
   test('the matrix lists exactly SHARD_COUNT shards, numbered from one', () => {
     const listed = /^ {8}shard: \[([\d, ]+)\]$/m
