@@ -1,6 +1,7 @@
 import { ERROR_CODES, type ErrorCode } from '@mangostudio/shared/errors';
 import {
   ACTIVITY_TOPIC,
+  CHATS_TOPIC,
   ENVIRONMENTS_TOPIC,
   EXTERNAL_AGENTS_TOPIC,
   HUB_WEBSOCKET_BACKPRESSURE_LIMIT_BYTES,
@@ -58,6 +59,7 @@ const USER_SCOPED_TOPICS: ReadonlySet<string> = new Set<string>([
   ENVIRONMENTS_TOPIC,
   EXTERNAL_AGENTS_TOPIC,
   ACTIVITY_TOPIC,
+  CHATS_TOPIC,
 ]);
 
 function isUserScopedTopic(topic: string): boolean {

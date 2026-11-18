@@ -59,7 +59,7 @@ import {
   isEnvironmentUnavailable,
 } from '../../../lib/environment-unavailable';
 import { createDiagnosticLogger } from '../../../lib/logger';
-import { publishActivityInvalidation } from '../../../services/realtime/activity-invalidation';
+import { publishChatListInvalidation } from '../../../services/realtime/chat-list-invalidation';
 import { isRequestNotSent } from '../../../services/runtime-client/request-not-sent';
 import { getRuntimeConnectionManager } from '../../../services/runtime-client/runtime-connection-manager';
 import { generateId } from '../../../utils/id';
@@ -1256,10 +1256,9 @@ export function createExternalTurnController(
     // worth a feed row. A cancelled or errored turn is already visible in the
     // chat it happened in, but its `updatedAt` still moved — so the sidebar
     // still needs the signal, just not a row to explain it.
+    publishChatListInvalidation(input.userId);
     if (reason === 'completed') {
       void recordTurnCompletedActivity(input.userId, input.chatId, db);
-    } else {
-      publishActivityInvalidation(input.userId);
     }
 
     input.observer?.onTerminal?.(reason, transcript.turnPart.error);

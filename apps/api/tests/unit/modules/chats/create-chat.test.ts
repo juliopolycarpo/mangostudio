@@ -1,16 +1,21 @@
 import { Database as SQLiteDatabase } from 'bun:sqlite';
-import { expect, it } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 
 import { Kysely } from 'kysely';
 import { Migrator } from 'kysely/migration';
 
 import { redactBackupDatabase } from '../../../../src/backup/privacy';
 import { createBunSqliteDialect } from '../../../../src/db/bun-sqlite-dialect';
+import { getDb } from '../../../../src/db/database';
 import { allMigrations } from '../../../../src/db/migrations';
 import type { Database } from '../../../../src/db/types';
 import { createChatUseCase } from '../../../../src/modules/chats/application/create-chat';
 import { ChatNotFoundError } from '../../../../src/modules/chats/domain/chat-ownership';
-import { makeTestIdentity } from '../../../support/factories';
+import { insertTestUser, makeTestIdentity } from '../../../support/factories';
+import {
+  installRecordingRealtimeBus,
+  restoreRealtimeBus,
+} from '../../../support/mocks/recording-realtime-bus';
 
 it('replays an owned chat after backup removes its completed result snapshot', async () => {
   const sqlite = new SQLiteDatabase(':memory:');
@@ -69,4 +74,27 @@ it('replays an owned chat after backup removes its completed result snapshot', a
   } finally {
     await db.destroy();
   }
+});
+
+describe('createChatUseCase realtime invalidation', () => {
+  afterEach(() => {
+    restoreRealtimeBus();
+  });
+
+  it('signals the chat list once per created chat, and not on a replayed operation', async () => {
+    // A new chat is list-visible in every other tab. Its feed row rides the
+    // activity topic; the list's refresh must not depend on that row.
+    const bus = installRecordingRealtimeBus();
+    const user = await insertTestUser();
+    const input = { userId: user.id, title: 'Announced chat', operationId: 'announce-once' };
+
+    await createChatUseCase(input, getDb());
+    expect(bus.chatListFramesFor(user.id)).toHaveLength(1);
+
+    await createChatUseCase(input, getDb());
+    expect(bus.chatListFramesFor(user.id)).toHaveLength(1);
+
+    await createChatUseCase({ userId: user.id, title: 'Plain chat' }, getDb());
+    expect(bus.chatListFramesFor(user.id)).toHaveLength(2);
+  });
 });

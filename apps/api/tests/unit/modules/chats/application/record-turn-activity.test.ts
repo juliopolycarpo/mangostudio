@@ -18,6 +18,7 @@ afterEach(async () => {
 
 describe('recordTurnCompletedActivity', () => {
   it('writes a turn_completed row carrying the chat title and runner', async () => {
+    const bus = installRecordingRealtimeBus();
     const user = await insertTestUser({ id: 'turn-activity-user-1' });
     const chat = await insertTestChat(user.id, { title: 'Fix the flaky test' });
 
@@ -32,15 +33,18 @@ describe('recordTurnCompletedActivity', () => {
 
     expect(row).toBeDefined();
     expect(row?.chatId).toBe(chat.id);
+    // The feed row is announced on the activity topic and nowhere else.
+    expect(bus.activityFramesFor(user.id)).toHaveLength(1);
+    expect(bus.chatListFramesFor(user.id)).toHaveLength(0);
     const payload = JSON.parse(row?.payloadJson ?? '{}');
     expect(payload.title).toBe('Fix the flaky test');
     expect(payload.runner).toEqual({ kind: 'mangostudio', agentId: 'default' });
   });
 
-  it('writes no row when the chat cannot be found, but still signals the topic', async () => {
+  it('writes no row and publishes no frame when the chat cannot be found', async () => {
     // A chat deleted while its turn was running leaves nothing to describe in
-    // the feed — and leaves every other tab showing a row that is now gone. The
-    // signal is the only thing that corrects them.
+    // the feed. The chat list's signal belongs to the writer that moved
+    // `updatedAt`, so nothing here speaks for it on either topic.
     const bus = installRecordingRealtimeBus();
     const user = await insertTestUser({ id: 'turn-activity-user-2' });
 
@@ -53,6 +57,6 @@ describe('recordTurnCompletedActivity', () => {
       .executeTakeFirst();
 
     expect(row).toBeUndefined();
-    expect(bus.activityFramesFor(user.id)).toHaveLength(1);
+    expect(bus.published).toHaveLength(0);
   });
 });

@@ -3,7 +3,7 @@ import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { Kysely } from 'kysely';
 
 import type { Database } from '../../../db/types';
-import { publishActivityInvalidation } from '../../../services/realtime/activity-invalidation';
+import { publishChatListInvalidation } from '../../../services/realtime/chat-list-invalidation';
 import { createEnvironmentRepository } from '../../environments/infrastructure/environment-repository';
 import { externalSessionManager } from '../../external-agents/application/external-session-manager';
 import { requireValidWorkdir } from '../../workspaces/application/workdir-validation';
@@ -72,14 +72,14 @@ export async function updateChatUseCase(
   });
 
   // Only the writing tab patches its own cache from the mutation; every other
-  // tab of this account learns through the chat list's activity subscription.
+  // tab of this account learns through the chat list's `chats` subscription.
   // The list renders every field this use case writes (title, models, runner,
   // workdir, environment), so any applied update publishes, not just a title.
   // Published straight after the commit and before the session reap below,
   // which can fail or take a while and says nothing about what the list shows.
   // A request that set no field wrote nothing, so there is nothing to refetch.
   if (hasAppliedField(updates)) {
-    publishActivityInvalidation(input.userId);
+    publishChatListInvalidation(input.userId);
   }
 
   // Environment, workspace and vendor are part of an external session's

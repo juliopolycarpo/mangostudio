@@ -27,7 +27,7 @@ import type {
 } from '@mangostudio/shared/generation';
 import type { CoreMessages } from '@mangostudio/shared/i18n';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
-import { ACTIVITY_TOPIC } from '@mangostudio/shared/realtime';
+import { CHATS_TOPIC } from '@mangostudio/shared/realtime';
 import type { StreamChunk } from '@mangostudio/shared/streaming';
 import type { MessagePart, ReasoningEffort } from '@mangostudio/shared/types';
 import { type QueryClient, useQueryClient } from '@tanstack/react-query';
@@ -331,7 +331,7 @@ export function useTextGeneration({
    * replace the terminal error row with one that reads as working forever.
    * Instead the refetch waits for the signal below, or for the next turn's
    * `finally`, whichever comes first — and an entry leaves the set only once
-   * the re-read shows the row settled, because the activity topic is
+   * the re-read shows the row settled, because the chats topic is
    * user-scoped: a reconnect ack or a turn in another chat also lands here,
    * and treating any signal as the finalize would end the wait early and pin
    * the mid-unwind row. A signal that arrives while the wait is gated off
@@ -340,7 +340,7 @@ export function useTextGeneration({
    */
   const pendingTranscriptReconciles = useRef<Set<string>>(new Set());
   /**
-   * Set when an activity signal arrives while a stream is still being read.
+   * Set when a chats signal arrives while a stream is still being read.
    *
    * The gate below skips reconciling mid-turn, but the server may have
    * finished and published exactly then — a persisted turn whose final SSE
@@ -417,14 +417,14 @@ export function useTextGeneration({
   );
 
   // Every turn finalizer — success, interrupt, error, exhausted — publishes on
-  // the activity topic once the row is persisted, and the subscription's
+  // the chats topic once the row is persisted, and the subscription's
   // `subscribed` ack fires on reconnect, so a finalize published while the
   // socket was down is not lost. That makes this the signal that can end the
   // wait armed above. Gated off while a stream is being read: mid-turn the
   // optimistic state is fresher than the database, and the turn's own end
   // paths decide what reconciliation it needs. A signal that lands during
   // that gate is deferred, not dropped — the read's own `finally` redeems it.
-  useRealtimeInvalidation(ACTIVITY_TOPIC, 'transcript-reconcile', async () => {
+  useRealtimeInvalidation(CHATS_TOPIC, 'transcript-reconcile', async () => {
     if (stream.abortControllerRef.current) {
       signalDuringReadRef.current = true;
       return;
@@ -783,7 +783,7 @@ export function useTextGeneration({
         // this re-reads rather than bumping the cached row by hand.
         void queryClient.invalidateQueries({ queryKey: chatKeys.lists() });
         // Not for a refusal the hub made before it stored anything: a review reports one by
-        // throwing, and the re-read the next activity signal would run replaces the refusal
+        // throwing, and the re-read the next chats signal would run replaces the refusal
         // card with rows that hold nothing of it.
         const refusalIsOnlyCopy = refusedBeforeStart && !streamState.receivedServerUserMessageId;
         if (refusalIsOnlyCopy) {

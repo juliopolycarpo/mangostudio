@@ -15,7 +15,7 @@ import {
   getProvider,
   getProviderForModel,
 } from '../../../services/providers/core/provider-registry';
-import { publishActivityInvalidation } from '../../../services/realtime/activity-invalidation';
+import { publishChatListInvalidation } from '../../../services/realtime/chat-list-invalidation';
 import { generateId } from '../../../utils/id';
 import { resolveModel } from '../../generation/application/resolve-model';
 import {
@@ -195,7 +195,7 @@ async function persistSummaryMessage(params: {
   // A compaction writes a summary message and moves the chat to the top of the
   // list. No feed row — nobody ran a turn — but every other tab is still showing
   // the pre-compaction ordering until it is told otherwise.
-  publishActivityInvalidation(params.userId);
+  publishChatListInvalidation(params.userId);
 
   return { summaryMessageId, contextInfo: toContextInfo(snapshot) };
 }

@@ -86,6 +86,7 @@ source of truth and refresh relevant queries after `subscribed` (and after
 | `settings`     | Any authenticated cookie session | `app`, `provider`, `tool`, `tool-identity`                              |
 | `environments` | Any authenticated cookie session | None                                                                    |
 | `activity`     | Any authenticated cookie session | None                                                                    |
+| `chats`        | Any authenticated cookie session | None                                                                    |
 | `git:<chatId>` | The user must own `<chatId>`     | `state`, `stashes`, `branches`, `history`, `commits`, `diffs`, `github` |
 
 `activity` is one topic for every activity kind rather than one per producer.
@@ -93,6 +94,15 @@ The feed is a single query, so a per-kind topic would only ever fan back into
 the same invalidation. It is published from the activity recorder
 (`apps/api/src/modules/activity/application/record-activity.ts`), not from the
 seven emission seams, so a new kind cannot ship a row nobody is told about.
+
+`chats` means a chat the account can see changed: it was created, edited, or
+moved in the list because `chats.updatedAt` advanced. The chat list is its only
+data reader (the transcript-reconcile wait also listens, to learn that a turn
+finalized). It is a separate topic because both the list and the feed refetch on
+every frame they receive; on one shared topic a git commit refetched the chat
+list and a cancelled turn refetched the feed, each answered with what the tab
+already had. The API publishes it through `publishChatListInvalidation`
+(`apps/api/src/services/realtime/chat-list-invalidation.ts`).
 
 Foreign Git topics remain unsubscribed and return the same non-enumerating
 `NOT_FOUND` response as an unavailable topic. Unknown topic grammars return

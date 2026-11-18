@@ -67,7 +67,7 @@ async function seedCompactableChat(modelId: string): Promise<{ userId: string; c
 }
 
 describe('compactChatUseCase realtime invalidation', () => {
-  it('publishes exactly one activity invalidation for the acting user', async () => {
+  it('publishes exactly one chats invalidation for the acting user', async () => {
     const db = getDb();
     const modelId = `compaction-model-${Date.now()}`;
     registerSummaryProvider('Summary of the conversation.');
@@ -76,12 +76,13 @@ describe('compactChatUseCase realtime invalidation', () => {
 
     await compactChatUseCase({ chatId, userId, model: modelId }, db);
 
-    expect(bus.activityFramesFor(userId)).toHaveLength(1);
+    expect(bus.chatListFramesFor(userId)).toHaveLength(1);
+    expect(bus.activityFramesFor(userId)).toHaveLength(0);
   });
 });
 
 describe('summarizeToNewChatUseCase realtime invalidation', () => {
-  it('publishes exactly one activity invalidation for the acting user', async () => {
+  it('publishes exactly one chats invalidation for the acting user', async () => {
     const db = getDb();
     const modelId = `handoff-model-${Date.now()}`;
     registerSummaryProvider('Summary for handoff.');
@@ -90,7 +91,8 @@ describe('summarizeToNewChatUseCase realtime invalidation', () => {
 
     await summarizeToNewChatUseCase({ chatId, userId, model: modelId }, db);
 
-    expect(bus.activityFramesFor(userId)).toHaveLength(1);
+    expect(bus.chatListFramesFor(userId)).toHaveLength(1);
+    expect(bus.activityFramesFor(userId)).toHaveLength(0);
   });
 });
 

@@ -1,5 +1,5 @@
 import type { RealtimeServerMessage } from '@mangostudio/shared/realtime';
-import { ACTIVITY_TOPIC } from '@mangostudio/shared/realtime';
+import { ACTIVITY_TOPIC, CHATS_TOPIC } from '@mangostudio/shared/realtime';
 
 import {
   type getRealtimeBus,
@@ -26,12 +26,17 @@ export class RecordingRealtimeBus {
    * expect(bus.activityFramesFor(user.id)).toHaveLength(1);
    */
   activityFramesFor(userId: string): PublishedRealtimeMessage[] {
-    return this.published.filter(
-      (entry) =>
-        entry.userId === userId &&
-        entry.message.type === 'invalidate' &&
-        entry.message.topic === ACTIVITY_TOPIC
-    );
+    return this.framesFor(userId, ACTIVITY_TOPIC);
+  }
+
+  /**
+   * The chats-topic invalidations addressed to one user, in publish order.
+   *
+   * @example
+   * expect(bus.chatListFramesFor(user.id)).toHaveLength(1);
+   */
+  chatListFramesFor(userId: string): PublishedRealtimeMessage[] {
+    return this.framesFor(userId, CHATS_TOPIC);
   }
 
   /**
@@ -62,6 +67,15 @@ export class RecordingRealtimeBus {
 
     throw new Error(
       `Expected at least ${count} activity frame(s) for user "${userId}" within ${timeoutMs}ms, saw ${this.activityFramesFor(userId).length}`
+    );
+  }
+
+  private framesFor(userId: string, topic: string): PublishedRealtimeMessage[] {
+    return this.published.filter(
+      (entry) =>
+        entry.userId === userId &&
+        entry.message.type === 'invalidate' &&
+        entry.message.topic === topic
     );
   }
 }

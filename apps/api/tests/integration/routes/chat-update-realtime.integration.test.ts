@@ -1,7 +1,7 @@
 /**
  * `PUT /chats/:id` must tell every open tab of the owning account that the chat
  * list changed. The writing tab patches its own cache from the mutation; any
- * other tab only learns through the activity topic, so a silent update leaves
+ * other tab only learns through the chats topic, so a silent update leaves
  * its sidebar stale until the socket happens to reconnect.
  *
  * Two tabs are two bus subscribers of the same user: the realtime route does
@@ -11,7 +11,7 @@
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 
-import { ACTIVITY_TOPIC, type RealtimeInvalidateEvent } from '@mangostudio/shared/realtime';
+import { CHATS_TOPIC, type RealtimeInvalidateEvent } from '@mangostudio/shared/realtime';
 
 import { getDb } from '../../../src/db/database';
 import { chatRoutes } from '../../../src/modules/chats/http/chat-routes';
@@ -51,8 +51,8 @@ function openTab(userId: string): RealtimeInvalidateEvent[] {
   return events;
 }
 
-function activityCount(events: readonly RealtimeInvalidateEvent[]): number {
-  return events.filter((event) => event.topic === ACTIVITY_TOPIC).length;
+function chatListCount(events: readonly RealtimeInvalidateEvent[]): number {
+  return events.filter((event) => event.topic === CHATS_TOPIC).length;
 }
 
 function expectActivityInvalidations(
@@ -61,10 +61,10 @@ function expectActivityInvalidations(
   action: string,
   tab: string
 ): void {
-  const received = activityCount(events);
+  const received = chatListCount(events);
   if (received === expected) return;
   throw new Error(
-    `expected activity invalidations after ${action}: ${expected} | received: ${received} (${tab})`
+    `expected chats invalidations after ${action}: ${expected} | received: ${received} (${tab})`
   );
 }
 
@@ -106,7 +106,7 @@ describe('chat update realtime invalidation', () => {
     expectActivityInvalidations(writingTab, 1, 'title update', 'writing tab');
     expectActivityInvalidations(secondTab, 1, 'title update', 'second tab');
     expectActivityInvalidations(otherAccountTab, 0, 'title update', 'other account tab');
-    expect(secondTab).toEqual([{ type: 'invalidate', topic: ACTIVITY_TOPIC }]);
+    expect(secondTab).toEqual([{ type: 'invalidate', topic: CHATS_TOPIC }]);
   });
 
   it('publishes only once the new title is durable', async () => {
