@@ -21,6 +21,14 @@ import {
 
 const ENTRY = join(import.meta.dir, '../../../src/index.ts');
 const START_TIMEOUT_MS = 15_000;
+/**
+ * How long a test waits for the Hub to exit, whether it is booting into a refusal or shutting
+ * down. Exit is the event the test waits on, so this only bounds a Hub that never exits. A
+ * cold boot takes about 0.5 s on an idle host and 6 s measured with four cores shared with
+ * 40 busy loops (the fixture's 5 s default failed there), so 15 s is the bound the readiness
+ * waits already use. It stays under TEST_TIMEOUT_MS so the named failure is the one reported.
+ */
+const EXIT_TIMEOUT_MS = START_TIMEOUT_MS;
 const TEST_TIMEOUT_MS = 30_000;
 const VALID_AUTH_SECRET = 'test-secret-at-least-32-characters-long';
 
@@ -106,7 +114,7 @@ describe('startServer via __serve', () => {
           }
         );
         expect(child.exitCode).toBe(1);
-        await running.waitForExit();
+        await running.waitForExit(EXIT_TIMEOUT_MS);
         expect(running.diagnostics()).toContain('capture lock cannot be acquired');
         expect(existsSync(database)).toBe(false);
         expect(existsSync(join(lexicalParent, 'database.sqlite'))).toBe(false);
@@ -125,20 +133,20 @@ describe('startServer via __serve', () => {
       const running = await createManagedProcessFixture({ tempPrefix: 'mango-data-ownership-' });
       const database = join(running.tempDir, 'database.sqlite');
       try {
-        running.spawn({
-          cmd: ['bun', ENTRY, '__serve', String(running.port)],
+        running.spawn((port) => ({
+          cmd: ['bun', ENTRY, '__serve', String(port)],
           env: {
-            ...serverEnv(running.tempDir, running.port),
+            ...serverEnv(running.tempDir, port),
             DATABASE_PATH: database,
             BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
           },
-        });
+        }));
         await running.waitUntilReady(() => probeHealthOnce('127.0.0.1', running.port), {
           label: 'persisted Hub health',
           timeoutMs: START_TIMEOUT_MS,
         });
         await expect(acquireCaptureLock(database)).rejects.toThrow('already in use');
-        await running.stop(process.platform === 'win32' ? 'SIGKILL' : 'SIGTERM');
+        await running.stop(process.platform === 'win32' ? 'SIGKILL' : 'SIGTERM', EXIT_TIMEOUT_MS);
         const release = await acquireCaptureLock(database);
         await release();
       } finally {
@@ -166,7 +174,7 @@ describe('startServer via __serve', () => {
             BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
           },
         });
-        expect(await running.waitForExit()).toBe(1);
+        expect(await running.waitForExit(EXIT_TIMEOUT_MS)).toBe(1);
         expect(running.diagnostics()).toContain('capture lock cannot be acquired');
         expect(await probeHealthOnce('127.0.0.1', running.port)).toBe(false);
         expect(existsSync(uploads)).toBe(false);
@@ -204,20 +212,22 @@ describe('startServer via __serve', () => {
       databasePath?: string;
     } = {}
   ): Promise<{ pid: number | undefined; pidFile: string }> {
-    const { port, tempDir: home } = running;
+    const { tempDir: home } = running;
     const pidFile = join(home, '.mango', 'run', 'server.json');
 
-    const child = running.spawn({
+    running.spawn((port) => ({
       cmd: ['bun', ...(preload ? ['--preload', preload] : []), ENTRY, '__serve', String(port)],
       env: {
         ...serverEnv(home, port, ambient),
         DATABASE_PATH: databasePath,
         BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
       },
-    });
+    }));
 
-    await running.waitUntilReady(() => probeHealthOnce('127.0.0.1', port), {
-      label: `server health at 127.0.0.1:${port}`,
+    // The port can change while waiting (see `ManagedProcessFixture.spawn`), so each probe
+    // reads it from the fixture.
+    await running.waitUntilReady(() => probeHealthOnce('127.0.0.1', running.port), {
+      label: 'server health on the fixture loopback port',
       timeoutMs: START_TIMEOUT_MS,
       intervalMs: 150,
     });
@@ -225,7 +235,7 @@ describe('startServer via __serve', () => {
       label: `server state file ${pidFile}`,
       timeoutMs: START_TIMEOUT_MS,
     });
-    return { pid: child.pid, pidFile };
+    return { pid: running.child?.pid, pidFile };
   }
 
   it(
@@ -308,25 +318,25 @@ describe('startServer via __serve', () => {
     '$label binds the expected interface',
     async (entry) => {
       if (!fixture) throw new Error('Expected a managed process fixture.');
-      const { port, tempDir: home } = fixture;
+      const running = fixture;
+      const home = running.tempDir;
       const pidFile = join(home, '.mango', 'run', 'server.json');
-      const target = entry.target ? `${entry.target}:${port}` : String(port);
-      fixture.spawn({
-        cmd: ['bun', ENTRY, 'serve', target],
+      running.spawn((port) => ({
+        cmd: ['bun', ENTRY, 'serve', entry.target ? `${entry.target}:${port}` : String(port)],
         env: {
           ...serverEnv(home, port),
           API_HOST: entry.envHost,
           BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
         },
-      });
-      await fixture.waitUntilReady(() => probeHealthOnce(entry.expected, port), {
-        label: `server health at ${entry.expected}:${port}`,
+      }));
+      await running.waitUntilReady(() => probeHealthOnce(entry.expected, running.port), {
+        label: `server health on ${entry.expected} at the fixture loopback port`,
         timeoutMs: START_TIMEOUT_MS,
       });
       await waitForState(pidFile);
       const state = JSON.parse(await readFile(pidFile, 'utf8'));
       expect(state.host).toBe(entry.expected);
-      expect(state.port).toBe(port);
+      expect(state.port).toBe(running.port);
     },
     TEST_TIMEOUT_MS
   );
@@ -364,7 +374,7 @@ describe('startServer via __serve', () => {
         });
         expect(socket.readyState).toBe(WebSocket.OPEN);
         process.kill(pid, 'SIGTERM');
-        expect(await fixture.waitForExit(15_000)).toBe(0);
+        expect(await fixture.waitForExit(EXIT_TIMEOUT_MS)).toBe(0);
         const diagnostics = fixture.diagnostics();
         expect(diagnostics).toContain('shutdown-fixture:external-reaped');
         expect(diagnostics).toContain('shutdown-fixture:terminals-closed');
@@ -385,7 +395,7 @@ describe('startServer via __serve', () => {
       if (!fixture) throw new Error('Expected a managed process fixture.');
       const { pidFile } = await startServing(fixture);
 
-      const exitCode = await fixture.stop('SIGTERM');
+      const exitCode = await fixture.stop('SIGTERM', EXIT_TIMEOUT_MS);
 
       expect(exitCode).toBe(0);
       expect(existsSync(pidFile)).toBe(false);
@@ -402,7 +412,7 @@ describe('startServer via __serve', () => {
       );
       const { pidFile } = await startServing(fixture, preload);
 
-      expect(await fixture.stop('SIGTERM')).toBe(0);
+      expect(await fixture.stop('SIGTERM', EXIT_TIMEOUT_MS)).toBe(0);
       expect(existsSync(pidFile)).toBe(false);
       expect(fixture.diagnostics()).toContain('fixture runtime teardown failed');
       expect(fixture.diagnostics()).toContain('Runtime connection teardown failed during shutdown');
@@ -419,7 +429,7 @@ describe('startServer via __serve', () => {
       );
       const database = join(fixture.tempDir, 'drain-failure.sqlite');
       const { pidFile } = await startServing(fixture, preload, { databasePath: database });
-      expect(await fixture.stop('SIGTERM')).toBe(1);
+      expect(await fixture.stop('SIGTERM', EXIT_TIMEOUT_MS)).toBe(1);
       expect(fixture.diagnostics()).toContain('fixture HTTP drain failed');
       expect(existsSync(pidFile)).toBe(false);
       const release = await acquireCaptureLock(database);
@@ -444,7 +454,7 @@ describe('startServer via __serve', () => {
       );
       const database = join(running.tempDir, 'hung-drain.sqlite');
       const { pidFile } = await startServing(running, preload, { databasePath: database });
-      const stopped = running.stop('SIGTERM');
+      const stopped = running.stop('SIGTERM', EXIT_TIMEOUT_MS);
       await running.waitUntilReady(
         () => running.diagnostics().includes('shutdown-fixture: HTTP drain will not settle'),
         { label: 'hung HTTP drain', timeoutMs: START_TIMEOUT_MS }
@@ -468,18 +478,18 @@ describe('startServer via __serve', () => {
         new URL('../../support/fixtures/gated-duplicate-server-stop.ts', import.meta.url)
       );
       const database = join(running.tempDir, 'duplicate-stop.sqlite');
-      const child = running.spawn({
+      running.spawn((port) => ({
         cmd: ['bun', entry],
         env: {
-          ...serverEnv(running.tempDir, running.port),
+          ...serverEnv(running.tempDir, port),
           DATABASE_PATH: database,
           BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
         },
-      });
+      }));
       const checkpoint = 'shutdown-fixture: duplicate stop while HTTP drain is gated';
       try {
         await running.waitUntilReady(
-          () => child.exitCode !== null || running.diagnostics().includes(checkpoint),
+          () => running.child?.exitCode !== null || running.diagnostics().includes(checkpoint),
           { label: 'duplicate handle stop during HTTP drain', timeoutMs: START_TIMEOUT_MS }
         );
         expect(running.diagnostics()).toContain(checkpoint);
@@ -492,9 +502,9 @@ describe('startServer via __serve', () => {
         );
         expect(ownership).toContain('already in use');
       } finally {
-        child.kill('SIGUSR2');
+        running.child?.kill('SIGUSR2');
       }
-      expect(await running.waitForExit()).toBe(0);
+      expect(await running.waitForExit(EXIT_TIMEOUT_MS)).toBe(0);
       const release = await acquireCaptureLock(database);
       await release();
     },
@@ -510,17 +520,19 @@ describe('startServer via __serve', () => {
         new URL('../../support/fixtures/failing-database-close-stop.ts', import.meta.url)
       );
       const database = join(running.tempDir, 'failed-database-close.sqlite');
-      const child = running.spawn({
+      running.spawn((port) => ({
         cmd: ['bun', entry],
         env: {
-          ...serverEnv(running.tempDir, running.port),
+          ...serverEnv(running.tempDir, port),
           DATABASE_PATH: database,
           BETTER_AUTH_SECRET: VALID_AUTH_SECRET,
         },
-      });
+      }));
       try {
         await running.waitUntilReady(
-          () => child.exitCode !== null || running.diagnostics().includes('shutdown-fixture: stop'),
+          () =>
+            running.child?.exitCode !== null ||
+            running.diagnostics().includes('shutdown-fixture: stop'),
           { label: 'stop outcome after a failed database close', timeoutMs: START_TIMEOUT_MS }
         );
         expect(running.diagnostics()).toContain(
@@ -538,9 +550,9 @@ describe('startServer via __serve', () => {
         );
         expect(ownership).toBe('capture lock released');
       } finally {
-        child.kill('SIGUSR2');
+        running.child?.kill('SIGUSR2');
       }
-      expect(await running.waitForExit()).toBe(0);
+      expect(await running.waitForExit(EXIT_TIMEOUT_MS)).toBe(0);
     },
     TEST_TIMEOUT_MS
   );
@@ -568,7 +580,7 @@ describe('startServer via __serve', () => {
       await expect(acquireCaptureLock(database)).rejects.toThrow('already in use');
 
       child.kill('SIGUSR2');
-      expect(await running.waitForExit()).toBe(0);
+      expect(await running.waitForExit(EXIT_TIMEOUT_MS)).toBe(0);
       const release = await acquireCaptureLock(database);
       await release();
 
@@ -602,7 +614,7 @@ describe('startServer via __serve', () => {
         },
       });
 
-      const exitCode = await fixture.waitForExit();
+      const exitCode = await fixture.waitForExit(EXIT_TIMEOUT_MS);
 
       expect(exitCode).toBe(1);
       expect(fixture.diagnostics()).toContain('BETTER_AUTH_SECRET is required');

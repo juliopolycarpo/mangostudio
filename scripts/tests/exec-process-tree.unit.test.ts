@@ -41,6 +41,14 @@ const READY_TIMEOUT_MS = 10_000;
 const SETTLE_TIMEOUT_MS = 1_000;
 /** Per-test limit for cases that wait out a cancel grace (5 s); Bun's default is 5 s. */
 const GRACE_TEST_TIMEOUT_MS = 15_000;
+/**
+ * How long a test waits for a runner's guardian to exit once what it guarded is gone. Its
+ * contract is to leave within the cancel grace (it waits that long for children before it
+ * SIGKILLs them) and a poll, and it starts as a Bun process of its own, so on a starved host its
+ * first read can land after the children are already gone. A 2 s wait asserted a faster guardian
+ * than the one the runner promises; this one only bounds a guardian that never leaves.
+ */
+const GUARDIAN_EXIT_BOUND_MS = CANCEL_GRACE_MS + 3_000;
 
 type RunnerProcess = ReturnType<typeof Bun.spawn>;
 
@@ -617,7 +625,7 @@ describe.skipIf(IS_WINDOWS)('the guardian when the runner is not killed', () => 
     writeFileSync(join(dir, RELEASE_FILE), 'go');
     expectGuarded('runner exit status', 0, await runner.exited);
 
-    const left = await waitFor(() => !isAlive(guardian), 2_000);
+    const left = await waitFor(() => !isAlive(guardian), GUARDIAN_EXIT_BOUND_MS);
     expectGuarded('guardian gone after a normal runner exit', true, left);
   });
 
@@ -630,7 +638,11 @@ describe.skipIf(IS_WINDOWS)('the guardian when the runner is not killed', () => 
     expectGuarded('runner exit status', 143, await runner.exited);
 
     await expectNothingLeft(pids);
-    expectGuarded('guardian gone', true, await waitFor(() => !isAlive(guardian), 2_000));
+    expectGuarded(
+      'guardian gone',
+      true,
+      await waitFor(() => !isAlive(guardian), GUARDIAN_EXIT_BOUND_MS)
+    );
     // The runner stopped them once; a guardian acting as well would make it two.
     expectGuarded(
       'SIGTERM deliveries',
@@ -654,7 +666,7 @@ describe.skipIf(IS_WINDOWS)('the guardian when the runner is not killed', () => 
     const guardian = await guardianOf(runner);
 
     forceKill(guardian);
-    await waitFor(() => !isAlive(guardian), 2_000);
+    await waitFor(() => !isAlive(guardian), GUARDIAN_EXIT_BOUND_MS);
     writeFileSync(join(dir, RELEASE_FILE), 'go');
 
     expectGuarded('runner exit status with its guardian dead', 0, await runner.exited);
@@ -713,7 +725,7 @@ describe.skipIf(IS_WINDOWS)('a runner that signalled its children and then went 
       expectGuarded(
         'guardian gone after the children left',
         true,
-        await waitFor(() => !isAlive(guardian), 2_000)
+        await waitFor(() => !isAlive(guardian), GUARDIAN_EXIT_BOUND_MS)
       );
       expectGuarded('SIGTERM deliveries', ONE_SIGTERM_EACH, signalDeliveries());
     },

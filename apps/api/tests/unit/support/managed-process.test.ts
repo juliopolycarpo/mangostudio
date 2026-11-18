@@ -389,3 +389,121 @@ describe('createManagedProcessFixture', () => {
     }
   });
 });
+
+/**
+ * Stands in for the Hub's bind: listens on the port in argv, or prints the Hub's own refusal
+ * (`listenOrExit` in `src/server/start-server.ts`) and exits 1 when another process holds it.
+ */
+const FAKE_PORT_BINDING_SERVER = `
+const { createServer } = require('node:net');
+const port = Number(process.argv[1]);
+const server = createServer();
+server.once('error', (error) => {
+  if (error.code !== 'EADDRINUSE') throw error;
+  console.error('[api] Address 127.0.0.1:' + port + ' is already in use.');
+  process.exit(1);
+});
+server.listen(port, '127.0.0.1', () => console.log('listening ' + port));
+`;
+
+/** Always refuses with the Hub's port message, whatever the port, so no relaunch can succeed. */
+const FAKE_ALWAYS_TAKEN_SERVER = `
+console.error('[api] Address 127.0.0.1:' + process.argv[1] + ' is already in use.');
+process.exit(1);
+`;
+
+/** Refuses for a reason a new port would not cure: the Hub's capture-lock message. */
+const FAKE_CAPTURE_LOCK_REFUSAL = `
+console.error('User data is already in use, or the capture lock cannot be acquired.');
+process.exit(1);
+`;
+
+/** Another process that took the fixture's port between its reservation and the child's bind. */
+class FakePortThief {
+  private readonly server = createServer();
+
+  async take(port: number): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      this.server.once('error', reject);
+      this.server.listen(port, '127.0.0.1', resolve);
+    });
+  }
+
+  async release(): Promise<void> {
+    await new Promise<void>((resolve) => this.server.close(() => resolve()));
+  }
+}
+
+describe('port collisions while a child starts', () => {
+  const READY_TIMEOUT_MS = 15_000;
+
+  it('relaunches a function-spawned child on a fresh port after another process took the first', async () => {
+    const fixture = await createFixture();
+    const reservedPort = fixture.port;
+    const thief = new FakePortThief();
+    await thief.take(reservedPort);
+    try {
+      fixture.spawn((port) => ({
+        cmd: [process.execPath, '-e', FAKE_PORT_BINDING_SERVER, String(port)],
+      }));
+      await fixture.waitUntilReady(() => /listening \d+/.test(fixture.diagnostics()), {
+        label: 'fake Hub listening',
+        timeoutMs: READY_TIMEOUT_MS,
+      });
+
+      expect(fixture.port, 'port after the first one was taken').not.toBe(reservedPort);
+      const diagnostics = fixture.diagnostics();
+      expect(diagnostics).toContain(`listening ${fixture.port}`);
+      expect(diagnostics).toContain(`port ${reservedPort} was taken before the child bound it`);
+    } finally {
+      await thief.release();
+    }
+  });
+
+  it('stops relaunching after three lost ports and leaves the refusal in the diagnostics', async () => {
+    const fixture = await createFixture();
+    fixture.spawn((port) => ({
+      cmd: [process.execPath, '-e', FAKE_ALWAYS_TAKEN_SERVER, String(port)],
+    }));
+    await fixture.waitUntilReady(() => fixture.child?.exitCode !== null, {
+      label: 'fake Hub exit after its relaunches',
+      timeoutMs: READY_TIMEOUT_MS,
+    });
+
+    const diagnostics = fixture.diagnostics();
+    expect(
+      diagnostics.match(/was taken before the child bound it/g)?.length,
+      'relaunches recorded in the diagnostics'
+    ).toBe(3);
+    expect(diagnostics).toContain(`Address 127.0.0.1:${fixture.port} is already in use.`);
+  });
+
+  it('does not relaunch a child that refused for another reason', async () => {
+    const fixture = await createFixture();
+    const reservedPort = fixture.port;
+    fixture.spawn((port) => ({
+      cmd: [process.execPath, '-e', FAKE_CAPTURE_LOCK_REFUSAL, String(port)],
+    }));
+    await fixture.waitUntilReady(() => fixture.child?.exitCode !== null, {
+      label: 'fake Hub capture-lock refusal',
+      timeoutMs: READY_TIMEOUT_MS,
+    });
+
+    expect(fixture.port, 'port after a refusal a new port cannot cure').toBe(reservedPort);
+    expect(fixture.diagnostics()).not.toContain('was taken before the child bound it');
+  });
+
+  it('does not relaunch a child spawned from fixed options', async () => {
+    const fixture = await createFixture();
+    const reservedPort = fixture.port;
+    fixture.spawn({
+      cmd: [process.execPath, '-e', FAKE_ALWAYS_TAKEN_SERVER, String(reservedPort)],
+    });
+    await fixture.waitUntilReady(() => fixture.child?.exitCode !== null, {
+      label: 'fake Hub exit with fixed options',
+      timeoutMs: READY_TIMEOUT_MS,
+    });
+
+    expect(fixture.port, 'port of a child that cannot be rebuilt').toBe(reservedPort);
+  });
+});
