@@ -104,9 +104,11 @@ function flatOneShotHtml(code: string, lang = 'typescript'): string {
   return renderers.htmlFromLines(renderers.tokenLinesToHtml(tokens, options), options);
 }
 
-/** The text a reader sees: the markup taken out. */
+/** The text a reader sees: the markup parsed by the DOM, so entities come back decoded. */
 function textOfHtml(html: string | null): string {
-  return (html ?? '').replaceAll(/<[^>]+>/g, '');
+  const holder = document.createElement('div');
+  holder.innerHTML = html ?? '';
+  return holder.textContent ?? '';
 }
 
 /** The markup of each `<span class="line">` in `html`, whether the block is flat or in groups. */
@@ -176,10 +178,7 @@ describe('highlightCode with a time budget', () => {
     const html = withFrozenDateNow(() => highlightCode(code, 'ts', THEME, { budgetMs: BUDGET_MS }));
 
     expect(htmlLines(html), 'html lines for a 200-line block').toHaveLength(200);
-    const text = (html ?? '').replaceAll(/<[^>]+>/g, '');
-    expect(text.replaceAll('&#x26;', '&').replaceAll('&#x3C;', '<')).toContain(
-      'const keepsEveryLine = 1;'
-    );
+    expect(textOfHtml(html)).toContain('const keepsEveryLine = 1;');
   });
 
   it('does not slice a block of at most 64 lines, however slow the clock', () => {
