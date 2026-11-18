@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { readText } from './support/read-text';
+import { wholeFileWorkflowAssertions } from './support/whole-file-workflow-assertions';
 import {
   extractJobBlock,
   extractJobBlocks,
@@ -437,5 +438,36 @@ describe('workflow hygiene', () => {
     }
     // Guards against the policy silently covering zero workflows.
     expect(checked).toBeGreaterThan(0);
+  });
+});
+
+// The workflow policy tests that name a job or step in their titles. A positive
+// toContain/toMatch over the whole file passes when the text sits in any other
+// job, step or comment, so each fact is read through workflow-blocks.ts instead.
+const SCOPED_WORKFLOW_TESTS = [
+  'browser-smoke',
+  'cache-policy',
+  'ci-gate',
+  'issue-triage',
+  'nightly-distribution-health',
+  'qa-workflows',
+  'release-workflows',
+  'security-workflows',
+];
+
+describe('workflow policy tests scope their assertions', () => {
+  test('no positive toContain or toMatch runs over a whole workflow file', () => {
+    const offenders: string[] = [];
+    for (const name of SCOPED_WORKFLOW_TESTS) {
+      const file = `scripts/tests/${name}.unit.test.ts`;
+      for (const { line, subject, matcher } of wholeFileWorkflowAssertions(readText(file))) {
+        offenders.push(`${file}:${line} expect(${subject}).${matcher}(...)`);
+      }
+    }
+    // Name the way out so the failure is actionable: scope it, or say why it cannot be.
+    expect(
+      offenders,
+      'whole-file assertions on workflow text: read the fact from extractJobBlock / extractStepBlock / extractOnBlock / extractTopLevelBlock, or add a `// whole-file: <reason>` comment above it'
+    ).toEqual([]);
   });
 });

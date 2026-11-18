@@ -789,6 +789,15 @@ Nothing under `generated/` is formatted; see `bunfig.toml` for the current exclu
   `qa-gate/collect/*` and `qa-gate/render/*` do.
 - **Every helper gets a test.** Put cross-cutting tests in `tests/`; tests that pin
   one module may sit beside it (`*.unit.test.ts`). All are picked up by `bun test scripts`.
+- **Workflow tests read blocks, not files.** A test that names a job or step asserts
+  against that block, through `tests/support/workflow-blocks.ts` (`extractJobBlock`,
+  `extractStepBlock`, `extractStepBlocksUsing`, `extractOnBlock`, `extractTopLevelBlock`).
+  A positive `toContain` over the whole file passes when the text sits in any other job,
+  step or comment. Absence assertions (`not.toContain`) may stay whole-file, and a
+  `toMatch` anchored at column zero (`/^permissions: \{\}$/m`) can only match a top-level
+  key. `workflow-hygiene.unit.test.ts` scans the workflow policy tests for the rest; when
+  a workflow-wide fact is the point (a count, a single-step composite), put
+  `// whole-file: <reason>` on the line above.
 - **Wrap third-party tools** behind a project-owned module (see `lib/changelog.ts`
   around git-cliff) so the integration is testable and swappable.
 

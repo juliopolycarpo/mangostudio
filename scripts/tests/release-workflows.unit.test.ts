@@ -355,8 +355,11 @@ describe('release workflow binary gate', () => {
 
     const action = readText('.github/actions/require-secret/action.yml');
     const inputPrefix = '$' + '{{ inputs.';
+    // whole-file: the composite has one step, so the manifest is the step
     expect(action).toContain(`SECRET_NAME: ${inputPrefix}name }}`);
+    // whole-file: single-step composite
     expect(action).toContain(`SECRET_VALUE: ${inputPrefix}value }}`);
+    // whole-file: single-step composite
     expect(action).toContain('Missing required secret: $SECRET_NAME');
     expect(action).not.toMatch(/echo[^\n]*SECRET_VALUE/);
   });
@@ -666,9 +669,12 @@ describe('release workflow binary gate', () => {
       'uses: ./.github/actions/setup-zigbuild'
     );
     const zigbuild = readText('.github/actions/setup-zigbuild/action.yml');
-    expect(zigbuild).toMatch(/ZIG_SHA256: [0-9a-f]{64}\n/);
-    expect(zigbuild).toContain('sha256sum --check --strict');
-    expect(zigbuild).toContain('tool: cargo-zigbuild@0.24.1');
+    const installZig = extractStepBlock(zigbuild, 'Install zig', 4);
+    expect(installZig).toMatch(/ZIG_SHA256: [0-9a-f]{64}\n/);
+    expect(installZig).toContain('sha256sum --check --strict');
+    expect(extractStepBlock(zigbuild, 'Install cargo-zigbuild', 4)).toContain(
+      'tool: cargo-zigbuild@0.24.1'
+    );
   });
 
   test('published builds never restore the runtime cargo cache, and only main saves it', () => {

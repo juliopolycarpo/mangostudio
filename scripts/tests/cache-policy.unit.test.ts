@@ -501,7 +501,10 @@ describe('CI cache policy', () => {
         step.file === '.github/workflows/cargo-shim.yml' && qualification.includes(step.block)
     );
 
-    expect(action, 'local-runtime action cache key').toContain('shared-key: local-runtime');
+    expect(
+      extractStepBlock(action, 'Restore the cargo cache', 4),
+      'local-runtime action cache key'
+    ).toContain('shared-key: local-runtime');
     expect(cacheStep?.block, 'real-binary-qualification rust-cache step').toContain(
       'shared-key: local-runtime'
     );
