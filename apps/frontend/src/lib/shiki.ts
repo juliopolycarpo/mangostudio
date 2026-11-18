@@ -13,6 +13,7 @@ import { resolveLanguageId, type ShikiLanguageId } from '@/lib/code-languages';
 import type { CodeThemeId } from '@/lib/code-themes';
 import {
   groupedLinesHtml,
+  HIGHLIGHT_CATCH_UP_LINES,
   HIGHLIGHT_GROUP_LINES,
   type HighlightSlice,
   isGroupedBlock,
@@ -604,7 +605,9 @@ export function isHighlightContinuationPending(
   const language = resolveLanguageId(lang);
   if (!language) return false;
   const key = highlightCacheKey(language, theme, code);
-  return partialBlocks.has(key) && timeStops.get(key)?.state !== 'retry-pending';
+  // A block that gave up stays in `partialBlocks` but `continueHighlight` refuses it, so a caller
+  // that asked again would schedule a slice that does nothing.
+  return partialBlocks.has(key) && !isGivenUp(key) && timeStops.get(key)?.state !== 'retry-pending';
 }
 
 /**
@@ -613,13 +616,19 @@ export function isHighlightContinuationPending(
  * the block is finished its whole HTML goes into the result cache, so a later draw of it is one
  * lookup. Returns null when there is nothing to continue, or when the tokenizer stopped on its
  * time limit: the stop is recorded as for `highlightCode`, and a retry runs the same call again.
+ *
+ * `fromLine` is how far the caller's block has been coloured. Blocks with the same text share one
+ * session, so another block may have moved it past that: the caller then gets the lines between
+ * (up to `HIGHLIGHT_CATCH_UP_LINES`) with no tokenizing, and the session moves only for a caller
+ * that is level with it. Without `fromLine` the caller is taken to be level.
  */
-// Usage: const slice = continueHighlight(code, 'ts', 'one-dark-pro', 25);
+// Usage: const slice = continueHighlight(code, 'ts', 'one-dark-pro', 25, linesOnScreen);
 export function continueHighlight(
   code: string,
   lang: string,
   theme: CodeThemeId,
-  budgetMs: number
+  budgetMs: number,
+  fromLine?: number
 ): HighlightSlice | null {
   const language = resolveLanguageId(lang);
   if (!highlighterInstance || !language) return null;
@@ -630,13 +639,25 @@ export function continueHighlight(
   if (!rendering || !plan) return null;
 
   const session = takeHighlightSession(language, theme, code);
-  const fromLine = session.completedHtml.length;
+  // Blocks with the same text share this session, so its progress is not the caller's: lines
+  // before `fromLine` are the ones the caller's block shows coloured. A caller that is ahead
+  // of the session (its lines were dropped) starts at the session's end, which colours lines
+  // again and never leaves a gap.
+  const start = Math.min(fromLine ?? session.completedHtml.length, session.completedHtml.length);
   try {
-    advanceSession(rendering, session, code, plan, budgetMs);
-    trimHighlightSessions(session);
-    recordCompletion(key);
-    const done = session.pendingLines === 0;
-    const openHtml = openLineHtml(rendering, session, plan);
+    // A caller behind the session is handed lines that are already coloured, without tokenizing.
+    const behind = start < session.completedHtml.length;
+    if (!behind) {
+      advanceSession(rendering, session, code, plan, budgetMs);
+      trimHighlightSessions(session);
+      recordCompletion(key);
+    }
+    const end = behind
+      ? Math.min(session.completedHtml.length, start + HIGHLIGHT_CATCH_UP_LINES)
+      : session.completedHtml.length;
+    const reachesEnd = end === session.completedHtml.length;
+    const done = reachesEnd && session.pendingLines === 0;
+    const openHtml = reachesEnd ? openLineHtml(rendering, session, plan) : [];
     if (done) {
       const trailing = [
         ...openHtml,
@@ -646,8 +667,8 @@ export function continueHighlight(
       markPartialBlock(key, false);
     }
     return {
-      fromLine,
-      lineHtml: [...session.completedHtml.slice(fromLine), ...openHtml],
+      fromLine: start,
+      lineHtml: [...session.completedHtml.slice(start, end), ...openHtml],
       lineCount: plan.lines.length,
       done,
     };

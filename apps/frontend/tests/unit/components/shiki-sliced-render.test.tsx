@@ -443,3 +443,52 @@ describe('slices and a change to the block', () => {
     );
   });
 });
+
+/** Runs idle callbacks until none wait (100 rounds at most), then lets the final redraw land. */
+async function runSlicesToTheEnd(scheduler: FakeIdleScheduler): Promise<void> {
+  for (let guard = 0; guard < 100 && scheduler.pending > 0; guard++) await scheduler.runIdle();
+  await settleFirstDraw();
+}
+
+function codeBlocksOf(container: HTMLElement): HTMLElement[] {
+  return [...container.querySelectorAll<HTMLElement>('pre[data-lang="typescript"] code')];
+}
+
+describe('identical blocks share one highlighting session', () => {
+  it('colours both blocks when the same fence is in a message twice', async () => {
+    const scheduler = installIdleScheduler();
+    useTenMillisecondClock();
+    const source = typescriptSource('fenceTwice', 20);
+    const content = `${fence(source)}\n\nBetween the two.\n\n${fence(source)}`;
+    const { container } = render(<MarkdownContentRenderer content={content} />);
+    await settleFirstDraw();
+
+    await runSlicesToTheEnd(scheduler);
+
+    const blocks = codeBlocksOf(container);
+    expect(blocks, 'code blocks in the message').toHaveLength(2);
+    for (const [index, block] of blocks.entries()) {
+      expect(block.innerHTML, `markup of block ${index}`).toBe(oneShotCodeHtml(source));
+    }
+  });
+
+  it('colours the same block in two mounted messages, whatever order their slices run in', async () => {
+    const scheduler = installIdleScheduler();
+    useTenMillisecondClock();
+    const source = typescriptSource('twoMounts', 20);
+    const first = render(<MarkdownContentRenderer content={fence(source)} />);
+    const second = render(<MarkdownContentRenderer content={fence(source)} />);
+    await settleFirstDraw();
+    // Both loops wait, and the second draw left the shared session ahead of the first's block.
+    expect(scheduler.pending, 'slice loops waiting').toBe(2);
+
+    await runSlicesToTheEnd(scheduler);
+
+    expect(codeOf(first.container).innerHTML, 'markup of the first message').toBe(
+      oneShotCodeHtml(source)
+    );
+    expect(codeOf(second.container).innerHTML, 'markup of the second message').toBe(
+      oneShotCodeHtml(source)
+    );
+  });
+});

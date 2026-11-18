@@ -271,8 +271,9 @@ function pendingSlicedBlocks(
       ? [
           {
             pre: elements[index] ?? container.ownerDocument.createElement('pre'),
-            advance: (budgetMs: number) =>
-              continueHighlight(fence.text, fence.lang, theme, budgetMs),
+            advance: (budgetMs: number, fromLine: number) =>
+              continueHighlight(fence.text, fence.lang, theme, budgetMs, fromLine),
+            isPending: () => isHighlightContinuationPending(fence.text, fence.lang, theme),
             canRetryAfterStop: () =>
               isHighlightRetryPending?.(fence.text, fence.lang, theme) ?? false,
           },

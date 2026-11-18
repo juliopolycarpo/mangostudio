@@ -2,6 +2,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 
 import {
   groupedLinesHtml,
+  HIGHLIGHT_CATCH_UP_LINES,
   HIGHLIGHT_GROUP_CLASS,
   HIGHLIGHT_GROUP_LINES,
   type HighlightSlice,
@@ -314,6 +315,108 @@ describe('continueHighlight', () => {
     expect(lines, 'lines after slicing').toEqual(lineMarkup(oneShotHtml(code)));
   });
 
+  it('tokenizes no more than one budget of lines in a call, however long the block is', () => {
+    const code = typescriptBlock('oneBudgetPerCall', 200);
+    // 10 ms per clock read, 25 ms budget: the read after the third batch passes it.
+    const readMs = 10;
+    setTimeStopClock(new SteppingClock(readMs).now);
+    withFrozenDateNow(() => highlightCode(code, 'ts', THEME, { budgetMs: BUDGET_MS }));
+    const recorder = recordTokenizedLines();
+    const budgetLines = BATCH_LINES * Math.ceil(BUDGET_MS / readMs);
+
+    const perCall: number[] = [];
+    let slice: HighlightSlice | null = null;
+    for (let call = 0; call < 20; call++) {
+      const before = recorder.lines.length;
+      slice = withFrozenDateNow(() => continueHighlight(code, 'ts', THEME, BUDGET_MS));
+      perCall.push(recorder.lines.length - before);
+      if (slice === null || slice.done) break;
+    }
+
+    expect(Math.max(...perCall), 'most lines tokenized by one call').toBeLessThanOrEqual(
+      budgetLines
+    );
+    expect(Math.min(...perCall), 'fewest lines tokenized by one call').toBeGreaterThan(0);
+    expect(slice?.done, 'a 2,000-line block finished within 20 calls').toBe(false);
+  });
+
+  it('starts at the line the caller has coloured, and hands a caller behind the session its lines without tokenizing', () => {
+    const code = typescriptBlock('callerBehind', 20);
+    setTimeStopClock(new SteppingClock(10).now);
+    // Two draws of the same text (the same fence twice): the second moves the session on.
+    withFrozenDateNow(() => highlightCode(code, 'ts', THEME, { budgetMs: BUDGET_MS }));
+    withFrozenDateNow(() => highlightCode(code, 'ts', THEME, { budgetMs: BUDGET_MS }));
+    const coloured = BATCH_LINES * 3;
+    const recorder = recordTokenizedLines();
+
+    const slice = withFrozenDateNow(() =>
+      continueHighlight(code, 'ts', THEME, BUDGET_MS, coloured)
+    );
+
+    expect(recorder.lines, 'lines tokenized for a caller that is behind').toEqual([]);
+    expect(slice?.fromLine, 'slice starts at the caller line').toBe(coloured);
+    expect(slice?.lineHtml.length, 'lines the session had ahead of the caller').toBe(coloured);
+    expect(slice?.done, 'slice done').toBe(false);
+    expect(lineMarkup(`<code>${(slice?.lineHtml ?? []).join('\n')}</code>`)).toEqual(
+      lineMarkup(oneShotHtml(code)).slice(coloured, coloured * 2)
+    );
+  });
+
+  it('brings a caller far behind the session its lines in slices of at most the catch-up size', () => {
+    const code = typescriptBlock('farBehind', 200);
+    setTimeStopClock(new SteppingClock(10).now);
+    withFrozenDateNow(() => highlightCode(code, 'ts', THEME, { budgetMs: BUDGET_MS }));
+    // Another block with this text takes the session to about 1,000 lines.
+    const sessionLines = sliceToTheEnd(code, 'ts', 10, 20).length;
+    const recorder = recordTokenizedLines();
+
+    const slice = withFrozenDateNow(() => continueHighlight(code, 'ts', THEME, BUDGET_MS, 0));
+
+    expect(sessionLines, 'slices that moved the session').toBe(20);
+    expect(recorder.lines, 'lines tokenized for a caller that is behind').toEqual([]);
+    expect(slice?.fromLine, 'slice starts at the caller line').toBe(0);
+    expect(slice?.lineHtml.length, 'lines in a catch-up slice').toBe(HIGHLIGHT_CATCH_UP_LINES);
+  });
+
+  it('keeps callers with their own progress on one session without a gap or a repeat of tokenizing', () => {
+    const code = typescriptBlock('twoCallers', 40);
+    setTimeStopClock(new SteppingClock(10).now);
+    withFrozenDateNow(() => highlightCode(code, 'ts', THEME, { budgetMs: BUDGET_MS }));
+    withFrozenDateNow(() => highlightCode(code, 'ts', THEME, { budgetMs: BUDGET_MS }));
+    const recorder = recordTokenizedLines();
+    // The first caller shows the first draw's 48 lines; the second shows the second draw's 96.
+    const callers = [
+      { name: 'first', next: BATCH_LINES * 3, lines: [] as string[], done: false },
+      { name: 'second', next: BATCH_LINES * 6, lines: [] as string[], done: false },
+    ];
+
+    for (let round = 0; round < 200 && callers.some((caller) => !caller.done); round++) {
+      for (const caller of callers) {
+        if (caller.done) continue;
+        const slice = withFrozenDateNow(() =>
+          continueHighlight(code, 'ts', THEME, BUDGET_MS, caller.next)
+        );
+        // Null: the other caller finished the block. That caller is drawn from the cache.
+        if (slice === null) {
+          caller.done = true;
+          continue;
+        }
+        expect(slice.fromLine, `${caller.name} slice start`).toBe(caller.next);
+        caller.next = slice.fromLine + slice.lineHtml.length;
+        caller.done = slice.done;
+      }
+    }
+
+    expect(
+      callers.every((caller) => caller.done),
+      'callers finished'
+    ).toBe(true);
+    // Every line once, plus the open last line once more when the block ends.
+    expect(recorder.lines.length, 'lines tokenized for both callers').toBeLessThanOrEqual(
+      code.split('\n').length - BATCH_LINES * 6 + 1
+    );
+  });
+
   it('does nothing for a block that is not partly drawn', () => {
     const code = typescriptBlock('neverDrawn', 3);
 
@@ -390,6 +493,8 @@ describe('continueHighlight and the tokenizer time limit', () => {
 
     expect(third, 'slice after two stops').toBeNull();
     expect(isHighlightRetryPending(code, 'ts', THEME), 'retry pending after two stops').toBe(false);
+    // A given-up block is refused, so no caller should schedule a slice for it.
+    expect(isHighlightContinuationPending(code, 'ts', THEME), 'continuation pending').toBe(false);
     expect(recorder.lines, 'lines tokenized after the block gave up').toEqual([]);
   });
 });

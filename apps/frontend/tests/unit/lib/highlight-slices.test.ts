@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 
 import {
+  colouredLinesIn,
   continueHighlightsInSlices,
   groupedLinesHtml,
   HIGHLIGHT_GROUP_CLASS,
@@ -56,20 +57,40 @@ function sliceOf(fromLine: number, texts: readonly string[], lineCount: number, 
 /** A block that answers with the slices it is given, one per `advance`, and records the budgets asked. */
 class ScriptedBlock implements SlicedBlock {
   readonly budgets: number[] = [];
+  /** The line the loop said its `<pre>` had reached, at each ask. */
+  readonly fromLines: number[] = [];
   private next = 0;
 
   constructor(
     readonly pre: Element,
     private readonly answers: readonly (HighlightSlice | null)[],
-    private readonly retriesAfterStop = false
+    private readonly retriesAfterStop = false,
+    private readonly pending = true
   ) {}
 
-  advance = (budgetMs: number): HighlightSlice | null => {
+  advance = (budgetMs: number, fromLine: number): HighlightSlice | null => {
     this.budgets.push(budgetMs);
+    this.fromLines.push(fromLine);
     return this.answers[this.next++] ?? null;
   };
 
+  isPending = (): boolean => this.pending;
+
   canRetryAfterStop = (): boolean => this.retriesAfterStop;
+}
+
+/** A block drawn partly: the first `coloured` lines have styled tokens, the rest are plain text. */
+function drawPartlyColouredBlock(texts: readonly string[], coloured: number): HTMLPreElement {
+  const pre = document.createElement('pre');
+  const lines = texts.map((text, index) =>
+    index < coloured
+      ? `<span class="line"><span style="color:#fff">${text}</span></span>`
+      : `<span class="line"><span>${text}</span></span>`
+  );
+  pre.innerHTML = `<code>${lines.join('\n')}</code>`;
+  document.body.append(pre);
+  mounted.push(pre);
+  return pre;
 }
 
 class RedrawCounter {
@@ -380,5 +401,107 @@ describe('continueHighlightsInSlices', () => {
 
     expect(after.budgets.length, 'asks of the block after a refused one').toBe(1);
     expect(scheduler.pending).toBe(0);
+  });
+
+  it('asks each block from the line its own page has reached, then from where its last slice ended', async () => {
+    const scheduler = installIdle();
+    const texts = ['a', 'b', 'c', 'd', 'e', 'f'];
+    // Two lines coloured by the first draw; the slices cover lines 2-3, then 4-5.
+    const block = new ScriptedBlock(drawPartlyColouredBlock(texts, 2), [
+      sliceOf(2, ['C', 'D'], 6),
+      sliceOf(4, ['E', 'F'], 6, true),
+    ]);
+    continueHighlightsInSlices([block], new RedrawCounter().redraw);
+
+    await scheduler.runIdle();
+    await scheduler.runIdle();
+
+    expect(block.fromLines, 'lines the loop said were coloured, at each ask').toEqual([2, 4]);
+    expect(lineTexts(block.pre), 'line texts after both slices').toEqual([
+      'a',
+      'b',
+      'C',
+      'D',
+      'E',
+      'F',
+    ]);
+  });
+
+  it('draws the message again, and asks nothing, for a block another block with its text finished', async () => {
+    const scheduler = installIdle();
+    const finishedElsewhere = new ScriptedBlock(
+      drawPartlyColouredBlock(['a', 'b'], 1),
+      [sliceOf(1, ['B'], 2, true)],
+      false,
+      false
+    );
+    const after = new ScriptedBlock(drawBlock(['c']), [sliceOf(0, ['C'], 1, true)]);
+    const redraws = new RedrawCounter();
+    continueHighlightsInSlices([finishedElsewhere, after], redraws.redraw);
+
+    await scheduler.runIdle();
+    await scheduler.runIdle();
+
+    expect(finishedElsewhere.budgets, 'asks of a block that is not pending').toEqual([]);
+    expect(after.budgets.length, 'asks of the block after it').toBe(1);
+    expect(redraws.calls, 'redraws of the message').toBe(1);
+  });
+
+  it('still takes the retry of a block that is not pending because it stopped on the time limit', async () => {
+    const scheduler = installIdle();
+    const stopped = new ScriptedBlock(
+      drawPartlyColouredBlock(['a', 'b'], 1),
+      [null, sliceOf(1, ['B'], 2, true)],
+      true,
+      false
+    );
+    const redraws = new RedrawCounter();
+    continueHighlightsInSlices([stopped], redraws.redraw);
+
+    await scheduler.runIdle();
+    await scheduler.runIdle();
+
+    expect(stopped.fromLines, 'both asks start at the stopped slice').toEqual([1, 1]);
+    expect(redraws.calls, 'redraws after a retry that landed').toBe(0);
+  });
+});
+
+describe('colouredLinesIn', () => {
+  it('counts the lines before the first plain one', () => {
+    expect(colouredLinesIn(drawPartlyColouredBlock(['a', 'b', 'c', 'd'], 2))).toBe(2);
+  });
+
+  it('is the line count when every line is coloured, and 0 when none is', () => {
+    expect(colouredLinesIn(drawPartlyColouredBlock(['a', 'b', 'c'], 3)), 'all coloured').toBe(3);
+    expect(colouredLinesIn(drawPartlyColouredBlock(['a', 'b', 'c'], 0)), 'none coloured').toBe(0);
+  });
+
+  it('counts through the groups of a long block', () => {
+    const coloured = HIGHLIGHT_GROUP_LINES * 2 + 3;
+    const lines = numberedLines(LONG_BLOCK_LINES).map((text, index) =>
+      index < coloured
+        ? `<span class="line"><span style="color:#fff">${text}</span></span>`
+        : `<span class="line"><span>${text}</span></span>`
+    );
+    const pre = document.createElement('pre');
+    pre.innerHTML = `<code>${groupedLinesHtml(lines)}</code>`;
+    document.body.append(pre);
+    mounted.push(pre);
+
+    expect(colouredLinesIn(pre)).toBe(coloured);
+  });
+
+  it('steps over an empty line, which has no token to colour', () => {
+    const pre = document.createElement('pre');
+    pre.innerHTML =
+      '<code><span class="line"><span style="color:#fff">a</span></span>\n<span class="line"></span>\n<span class="line"><span>c</span></span></code>';
+    document.body.append(pre);
+    mounted.push(pre);
+
+    expect(colouredLinesIn(pre)).toBe(2);
+  });
+
+  it('is 0 for a block with no code element', () => {
+    expect(colouredLinesIn(document.createElement('pre'))).toBe(0);
   });
 });

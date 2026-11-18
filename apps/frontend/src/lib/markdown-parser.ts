@@ -15,12 +15,16 @@ export interface CodeHighlighter {
   ) => string | null;
   /** True when `highlightCode` drew a block with lines left to colour; absent on a highlighter that colours whole blocks. */
   isHighlightContinuationPending?: (code: string, lang: string, theme: CodeThemeId) => boolean;
-  /** Colours the next stretch of such a block; absent with `isHighlightContinuationPending`. */
+  /**
+   * Colours the next stretch of such a block, for a block on screen coloured up to `fromLine`;
+   * absent with `isHighlightContinuationPending`.
+   */
   continueHighlight?: (
     code: string,
     lang: string,
     theme: CodeThemeId,
-    budgetMs: number
+    budgetMs: number,
+    fromLine?: number
   ) => HighlightSlice | null;
   preloadCodeLanguages: (languages: readonly string[], theme: CodeThemeId) => Promise<boolean>;
   /** True when a block stopped once on the tokenizer's time limit and may be asked for again; absent on a highlighter that never stops. */

@@ -25,6 +25,13 @@ export const HIGHLIGHT_SLICE_IDLE_TIMEOUT_MS = 1;
 /** Lines in each group of a long block (`groupedLinesHtml`); also the batch a slice tokenizes between clock reads. */
 export const HIGHLIGHT_GROUP_LINES = 16;
 
+/**
+ * The most lines one slice brings a block that is behind the highlighter's session, which other
+ * blocks with the same text moved on. Those lines are already coloured, so a slice of them costs
+ * a patch and no tokenizing; this keeps the patch near the size of a normal slice.
+ */
+export const HIGHLIGHT_CATCH_UP_LINES = 256;
+
 /** A block of this many lines or fewer is drawn as flat lines, with no groups. */
 export const HIGHLIGHT_UNGROUPED_MAX_LINES = 64;
 
@@ -75,10 +82,31 @@ export interface HighlightSlice {
 export interface SlicedBlock {
   /** The `<pre>` showing the block now. A slice is only written into this element. */
   readonly pre: Element;
-  /** Colours about `budgetMs` more of the block; null when there is nothing to continue or the tokenizer stopped. */
-  readonly advance: (budgetMs: number) => HighlightSlice | null;
+  /**
+   * The next slice of the block for a `<pre>` that has its lines before `fromLine` coloured: about
+   * `budgetMs` more of tokenizing, or lines another block with the same text coloured already.
+   * Null when there is nothing to continue or the tokenizer stopped.
+   */
+  readonly advance: (budgetMs: number, fromLine: number) => HighlightSlice | null;
+  /** Whether the highlighter still has lines to colour for this text (false once a block with the same text finished it). */
+  readonly isPending: () => boolean;
   /** After a null slice: whether the highlighter will take one more try (a stop on the time limit gets one). */
   readonly canRetryAfterStop: () => boolean;
+}
+
+/**
+ * The lines at the start of `pre` that are coloured or empty: where the slices of a block drawn
+ * partly begin. A line is plain when it holds a token with no style, so this never passes a
+ * line that needs colour; it can stop early, and a slice written over a coloured line is the
+ * same line again.
+ */
+// Usage: const from = colouredLinesIn(pre);
+export function colouredLinesIn(pre: Element): number {
+  const code = pre.querySelector('code');
+  if (!code) return 0;
+  const lines = code.querySelectorAll('.line');
+  const plainLine = code.querySelector('.line > span:not([style])')?.parentElement;
+  return plainLine ? Array.prototype.indexOf.call(lines, plainLine) : lines.length;
 }
 
 /**
@@ -146,6 +174,10 @@ export function continueHighlightsInSlices(
     if (needsRedraw && !cancelled) onRedraw();
   };
 
+  // The line each block on screen has reached. The highlighter's session is shared by every block
+  // with the same text, so its own progress says nothing about what this `<pre>` shows.
+  const nextLines = new Map<SlicedBlock, number>();
+
   const runBlock = (index: number): void => {
     const block = blocks[index];
     if (block === undefined) {
@@ -154,13 +186,23 @@ export function continueHighlightsInSlices(
     }
     cancelPending = scheduleIdle(() => {
       if (cancelled) return;
-      const slice = block.advance(HIGHLIGHT_SLICE_MS);
+      // Finished, or given up on, through another block with the same text: this one is plain
+      // from where it stopped, and only a draw from the highlighter's cache colours it.
+      if (!block.isPending() && !block.canRetryAfterStop()) {
+        needsRedraw = true;
+        runBlock(index + 1);
+        return;
+      }
+      const from = nextLines.get(block) ?? colouredLinesIn(block.pre);
+      const slice = block.advance(HIGHLIGHT_SLICE_MS, from);
       if (slice === null) {
+        nextLines.set(block, from);
         runBlock(block.canRetryAfterStop() ? index : index + 1);
         return;
       }
       const patched = patchCodeLines(block.pre, slice);
       if (!patched) needsRedraw = true;
+      nextLines.set(block, slice.fromLine + slice.lineHtml.length);
       runBlock(slice.done ? index + 1 : index);
     }, HIGHLIGHT_SLICE_IDLE_TIMEOUT_MS);
   };
