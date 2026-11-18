@@ -144,9 +144,10 @@ function Test-Checksum([string]$ManifestPath, [string]$ArchivePath, [string]$Ass
 # suffix is optional only so the frozen pre-2026-09 rolling tag still resolves.
 # GitHub lists newest first, so the first match is the newest build.
 function Select-CanaryTag($Releases) {
-  $match = $Releases | Where-Object { $_.tag_name -match '^v[0-9].*-canary(\.g?[0-9a-f]{7,40})?$' } | Select-Object -First 1
-  if ($match) { return $match.tag_name }
-  return $null
+  # An empty list reaches here as $null, which a pipeline still feeds through
+  # once, so each tag is read with Get-Prop rather than dot access.
+  $match = $Releases | Where-Object { (Get-Prop $_ 'tag_name') -match '^v[0-9].*-canary(\.g?[0-9a-f]{7,40})?$' } | Select-Object -First 1
+  return (Get-Prop $match 'tag_name')
 }
 
 # One header from a failed request's response. Windows PowerShell 5.1 raises a
@@ -154,7 +155,10 @@ function Select-CanaryTag($Releases) {
 # raises one whose Response is an HttpResponseMessage with HttpResponseHeaders.
 # $null when the header is absent.
 function Get-ResponseHeader($Response, [string]$Name) {
-  $headers = Get-Prop $Response 'Headers'
+  # Read the property directly: both header types are enumerable, and returning
+  # one from a function such as Get-Prop unrolls it into its header names.
+  if ($null -eq $Response -or $Response.PSObject.Properties.Name -notcontains 'Headers') { return $null }
+  $headers = $Response.Headers
   if ($null -eq $headers) { return $null }
   if ($headers -is [System.Net.WebHeaderCollection]) { return $headers[$Name] }
   $values = $null
