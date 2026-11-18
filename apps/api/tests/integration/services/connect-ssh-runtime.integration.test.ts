@@ -29,58 +29,35 @@ import type { SshEnvironmentConfig } from '@mangostudio/shared/environments';
 
 import { connectSshRuntime } from '../../../src/services/runtime-client/connect-ssh-runtime';
 import { resolveRustRuntimeBinary } from '../../support/rust-runtime-binary';
-import { startThrowawaySshd, type ThrowawaySshd } from '../../support/ssh-fixture';
+import {
+  probeLocalhostSsh,
+  sshFixtureRequested,
+  sshTargetFor,
+  startSshFixtureIfRequested,
+} from '../../support/ssh-fixture-suite';
 
 /** The compiled runtime the wrapper execs: CI's override, or this checkout's newest build. */
 const binary = resolveRustRuntimeBinary();
 const SHELL_DEFAULTS = { kind: 'bash', timeoutMs: 10_000, maxOutputBytes: 65_536 } as const;
 
-const fixtureRequired = process.env.MANGOSTUDIO_SSH_FIXTURE === '1';
-if (fixtureRequired && !binary.available) {
+if (sshFixtureRequested(process.env) && !binary.available) {
   throw new Error(
     `MANGOSTUDIO_SSH_FIXTURE=1: expected a runtime binary at ${binary.path} | received: none. ` +
       'Build it with "cargo build -p mangostudio-runtime --locked" or set MANGOSTUDIO_RUNTIME_BINARY.'
   );
 }
 /** Started at load because `skipIf` below is decided at collection time. */
-const fixture: ThrowawaySshd | undefined = fixtureRequired ? await startThrowawaySshd() : undefined;
-// Registered straight after the start so no later failure can leave the server up.
-afterAll(async () => {
-  await fixture?.stop();
-});
+const fixture = await startSshFixtureIfRequested(process.env, afterAll);
 
-const hasSshClient = Bun.which('ssh') !== null;
 /**
- * The same connection the hub will open: batch mode, and a host key that must
- * already be trusted. Probing with anything laxer would let the suite run under
- * conditions the launcher itself refuses. The fixture has already proved its
- * own key login, so it needs no probe.
+ * The fixture has already proved its own key login, so it needs no probe; the
+ * machine's own localhost is probed as the hub would open it.
  */
 const canReachLocalhost =
-  fixture !== undefined || (hasSshClient && binary.available && (await probeLocalhost()));
+  fixture !== undefined || (binary.available && (await probeLocalhostSsh()));
 
 let workdir = '';
 let runtimePath = '';
-
-async function probeLocalhost(): Promise<boolean> {
-  const child = Bun.spawn(
-    [
-      'ssh',
-      '-o',
-      'BatchMode=yes',
-      '-o',
-      'ConnectTimeout=5',
-      '-o',
-      'StrictHostKeyChecking=yes',
-      '-T',
-      '--',
-      'localhost',
-      'true',
-    ],
-    { stdout: 'ignore', stderr: 'ignore' }
-  );
-  return (await child.exited) === 0;
-}
 
 /** A shell script that execs the compiled runtime with whatever arguments it got. */
 function runtimeWrapper(): string {
@@ -89,15 +66,7 @@ function runtimeWrapper(): string {
 
 /** `localhost` as the machine's own sshd knows it, or the throwaway server's address and key. */
 function sshConfig(overrides: Partial<SshEnvironmentConfig> = {}): SshEnvironmentConfig {
-  const target: SshEnvironmentConfig = fixture
-    ? {
-        host: fixture.host,
-        port: fixture.port,
-        user: fixture.user,
-        identityFile: fixture.identityFile,
-      }
-    : { host: 'localhost' };
-  return { ...target, remoteRuntimePath: runtimePath, ...overrides };
+  return { ...sshTargetFor(fixture), remoteRuntimePath: runtimePath, ...overrides };
 }
 
 /** The hub's real launcher; only the fixture's trust options are put in front of `ssh`. */

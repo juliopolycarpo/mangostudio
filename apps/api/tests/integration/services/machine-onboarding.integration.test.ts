@@ -1,5 +1,5 @@
 /**
- * Self-skipping checks for the two onboarding commands against localhost sshd.
+ * Checks for the two onboarding commands against a real sshd.
  *
  * The unit tests run the same scripts under a local `sh`; these run them
  * through a real ssh channel, which is where the two properties that matter
@@ -10,6 +10,11 @@
  *
  * The remote `HOME` is a temporary directory, so nothing here touches the
  * developer's own `~/.mango`.
+ *
+ * Without `MANGOSTUDIO_SSH_FIXTURE=1` the suite is self-skipping: a machine with
+ * no localhost sshd that trusts the caller cannot run it. With it, the suite
+ * starts a throwaway sshd of its own (`tests/support/ssh-fixture.ts`) and a
+ * missing sshd or a broken login fails the file with the cause instead.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
@@ -21,7 +26,12 @@ import {
   buildServiceInstallCommand,
 } from '../../../src/modules/environments/domain/remote-bootstrap-commands';
 import type { RuntimeCommandOptions } from '../../../src/modules/environments/domain/runtime-push';
-import { createSshCommandRunner } from '../../../src/modules/environments/infrastructure/ssh-command-runner';
+import {
+  probeLocalhostSsh,
+  sshCommandRunnerFor,
+  sshTargetFor,
+  startSshFixtureIfRequested,
+} from '../../support/ssh-fixture-suite';
 
 const HUB_ENDPOINT = 'wss://hub.example.com/api/runtime';
 const TOKEN = 'mrt_selector.secret-value';
@@ -39,38 +49,28 @@ function fakeBinaryPath(home: string): string {
   return `${home}/.mango/runtime/remote/current/mangostudio-runtime`;
 }
 
-const hasSshClient = Bun.which('ssh') !== null;
-const canReachLocalhost = hasSshClient && (await probeLocalhost());
-
-async function probeLocalhost(): Promise<boolean> {
-  const child = Bun.spawn(
-    [
-      'ssh',
-      '-o',
-      'BatchMode=yes',
-      '-o',
-      'ConnectTimeout=5',
-      '-o',
-      'StrictHostKeyChecking=yes',
-      '-T',
-      '--',
-      'localhost',
-      'true',
-    ],
-    { stdout: 'ignore', stderr: 'ignore' }
-  );
-  return (await child.exited) === 0;
-}
-
-const config: SshEnvironmentConfig = { host: 'localhost' };
 let remoteHome = '';
+
+// `afterAll` hooks run in registration order and this one still needs the
+// server, so it is registered before the fixture's own stop.
+afterAll(async () => {
+  if (!remoteHome) return;
+  await runOnTarget(`rm -rf -- ${quoteForRemoteShell(remoteHome)}`).catch(() => undefined);
+});
+
+/** Started at load because `skipIf` below is decided at collection time. */
+const fixture = await startSshFixtureIfRequested(process.env, afterAll);
+const canReachLocalhost = fixture !== undefined || (await probeLocalhostSsh());
+const config: SshEnvironmentConfig = sshTargetFor(fixture);
+
+/** One script on the target through the hub's real ssh command runner. */
+function runOnTarget(script: string, options?: RuntimeCommandOptions) {
+  return sshCommandRunnerFor(fixture, config)(script, options);
+}
 
 /** Runs a script with the isolated HOME the fake runtime was installed under. */
 function isolated(script: string, options?: RuntimeCommandOptions) {
-  return createSshCommandRunner(config)(
-    `export HOME=${quoteForRemoteShell(remoteHome)}; ${script}`,
-    options
-  );
+  return runOnTarget(`export HOME=${quoteForRemoteShell(remoteHome)}; ${script}`, options);
 }
 
 /**
@@ -103,18 +103,11 @@ async function readRemote(name: string): Promise<string> {
 
 beforeAll(async () => {
   if (!canReachLocalhost) return;
-  const created = await createSshCommandRunner(config)('mktemp -d /tmp/mango-onboarding-XXXXXX');
+  const created = await runOnTarget('mktemp -d /tmp/mango-onboarding-XXXXXX');
   if (created.exitCode !== 0) {
     throw new Error(`Could not create isolated remote HOME: ${created.stderr}`);
   }
   remoteHome = created.stdout.trim();
-});
-
-afterAll(async () => {
-  if (!canReachLocalhost || !remoteHome) return;
-  await createSshCommandRunner(config)(`rm -rf -- ${quoteForRemoteShell(remoteHome)}`).catch(
-    () => undefined
-  );
 });
 
 describe('machine onboarding over a real sshd', () => {
@@ -167,7 +160,7 @@ describe('machine onboarding over a real sshd', () => {
       await installFakeRuntime('exit 0');
       // A non-interactive `ssh host command` really does arrive without one;
       // this is the session the workaround exists for.
-      const bare = await createSshCommandRunner(config)(
+      const bare = await runOnTarget(
         // eslint-disable-next-line no-template-curly-in-string -- shell parameter expansion on the target, not a JS placeholder
         'echo "${XDG_RUNTIME_DIR:-unset}"'
       );

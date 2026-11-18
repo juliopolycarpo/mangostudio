@@ -1,8 +1,13 @@
 /**
- * Self-skipping SSH push / setup checks against localhost sshd.
+ * SSH push / setup checks against a real sshd.
  *
  * Isolates the remote mango home under a temporary directory so the test never
  * overwrites the developer's real `remote` slot under ~/.mango.
+ *
+ * Without `MANGOSTUDIO_SSH_FIXTURE=1` the real-server cases self-skip on a
+ * machine whose localhost sshd does not trust the caller. With it, the suite
+ * starts a throwaway sshd of its own (`tests/support/ssh-fixture.ts`) and a
+ * missing sshd or a broken login fails the file with the cause instead.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
@@ -23,35 +28,36 @@ import {
   type RuntimeCommandOptions,
   type RuntimeCommandRunner,
 } from '../../../src/modules/environments/domain/runtime-push';
-import { createSshCommandRunner } from '../../../src/modules/environments/infrastructure/ssh-command-runner';
-
-const hasSshClient = Bun.which('ssh') !== null;
-const canReachLocalhost = hasSshClient && (await probeLocalhost());
-
-async function probeLocalhost(): Promise<boolean> {
-  const child = Bun.spawn(
-    [
-      'ssh',
-      '-o',
-      'BatchMode=yes',
-      '-o',
-      'ConnectTimeout=5',
-      '-o',
-      'StrictHostKeyChecking=yes',
-      '-T',
-      '--',
-      'localhost',
-      'true',
-    ],
-    { stdout: 'ignore', stderr: 'ignore' }
-  );
-  return (await child.exited) === 0;
-}
+import {
+  probeLocalhostSsh,
+  sshCommandRunnerFor,
+  sshTargetFor,
+  startSshFixtureIfRequested,
+} from '../../support/ssh-fixture-suite';
 
 let workdir = '';
 let fakeBinary = new Uint8Array();
 let remoteHome = '';
 let isolatedRunner: RuntimeCommandRunner | null = null;
+
+// `afterAll` hooks run in registration order and this one still needs the
+// server, so it is registered before the fixture's own stop.
+afterAll(async () => {
+  if (workdir) await rm(workdir, { force: true, recursive: true });
+  if (canReachLocalhost && remoteHome) {
+    await runOnTarget(`rm -rf -- ${quoteForRemoteShell(remoteHome)}`).catch(() => undefined);
+  }
+});
+
+/** Started at load because `skipIf` below is decided at collection time. */
+const fixture = await startSshFixtureIfRequested(process.env, afterAll);
+const canReachLocalhost = fixture !== undefined || (await probeLocalhostSsh());
+const config: SshEnvironmentConfig = sshTargetFor(fixture);
+
+/** One script on the target through the hub's real ssh command runner. */
+function runOnTarget(script: string, options?: RuntimeCommandOptions) {
+  return sshCommandRunnerFor(fixture, config)(script, options);
+}
 
 beforeAll(async () => {
   workdir = await mkdtemp(join(tmpdir(), 'mango-ssh-push-'));
@@ -62,24 +68,13 @@ beforeAll(async () => {
 
   if (!canReachLocalhost) return;
 
-  const config: SshEnvironmentConfig = { host: 'localhost' };
-  const base = createSshCommandRunner(config);
-  const homeResult = await base('mktemp -d /tmp/mango-ssh-push-XXXXXX');
+  const homeResult = await runOnTarget('mktemp -d /tmp/mango-ssh-push-XXXXXX');
   if (homeResult.exitCode !== 0) {
     throw new Error(`Could not create isolated remote HOME: ${homeResult.stderr}`);
   }
   remoteHome = homeResult.stdout.trim();
   isolatedRunner = (script: string, options?: RuntimeCommandOptions) =>
-    base(`export HOME=${quoteForRemoteShell(remoteHome)}; ${script}`, options);
-});
-
-afterAll(async () => {
-  if (workdir) await rm(workdir, { force: true, recursive: true });
-  if (canReachLocalhost && remoteHome) {
-    const config: SshEnvironmentConfig = { host: 'localhost' };
-    const base = createSshCommandRunner(config);
-    await base(`rm -rf -- ${quoteForRemoteShell(remoteHome)}`).catch(() => undefined);
-  }
+    runOnTarget(`export HOME=${quoteForRemoteShell(remoteHome)}; ${script}`, options);
 });
 
 describe('ssh runtime push over a real sshd', () => {
