@@ -124,6 +124,14 @@
   line-height: 1.6;
 }
 
+/* A long block is drawn in groups of lines (`groupedLinesHtml`). Each group is a block of its
+ * own with its layout contained, so swapping the lines of one group lays out that group and
+ * not the whole block. The line breaks inside the text are unchanged, so a copy is too. */
+.markdown-content pre code .code-line-group {
+  display: block;
+  contain: layout style;
+}
+
 .markdown-content blockquote {
   border-left: 3px solid var(--color-stroke-strong);
   padding-left: 1em;

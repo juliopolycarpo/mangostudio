@@ -11,6 +11,13 @@ import { createJavaScriptRegexEngine } from '@shikijs/engine-javascript';
 import { countHighlightableLines } from '@/lib/code-highlight-limits';
 import { resolveLanguageId, type ShikiLanguageId } from '@/lib/code-languages';
 import type { CodeThemeId } from '@/lib/code-themes';
+import {
+  groupedLinesHtml,
+  HIGHLIGHT_CATCH_UP_LINES,
+  HIGHLIGHT_GROUP_LINES,
+  type HighlightSlice,
+  isGroupedBlock,
+} from '@/lib/highlight-slices';
 import { createCheckedRenderers, IncompleteTokenizationError } from '@/lib/shiki-checked-render';
 
 export { CODE_THEMES, type CodeThemeId } from '@/lib/code-themes';
@@ -223,23 +230,48 @@ interface HighlightSession {
   completedHtmlChars: number;
   /** The grammar state after the last completed line; undefined before the first. */
   state: GrammarState | undefined;
+  /**
+   * Complete lines the last call left uncoloured because its time budget ran out. A session with
+   * work left is unfinished: it is kept when released, and is not dropped for its size, because
+   * dropping it would send the next slice back to line one.
+   */
+  pendingLines: number;
 }
 
 const HIGHLIGHT_SESSION_COUNT = 4;
 /** Most recently used last. */
 const highlightSessions: HighlightSession[] = [];
 
-function takeHighlightSession(
-  language: ShikiLanguageId,
-  theme: CodeThemeId,
-  code: string
-): HighlightSession {
-  const index = highlightSessions.findIndex(
+/**
+ * Lines tokenized between two reads of the clock when a call has a time budget. The budget is
+ * only checked between batches, so a slice overshoots it by at most one batch: about 8 ms for 16
+ * lines of TypeScript in Chromium (0.5 ms a line; Bun is about four times faster). A batch is
+ * one group of a long block, so a slice swaps whole groups.
+ */
+const SLICE_BATCH_LINES = HIGHLIGHT_GROUP_LINES;
+
+/**
+ * A call with a time budget colours this many lines, or fewer, in one go. A short block is
+ * coloured at once, with no plain-then-coloured flash, and the last stretch of a long one lands
+ * in a single slice of about 30 ms and not in several tiny ones.
+ */
+const UNSLICED_LINES = 64;
+
+function findHighlightSession(language: ShikiLanguageId, theme: CodeThemeId, code: string): number {
+  return highlightSessions.findIndex(
     (session) =>
       session.language === language &&
       session.theme === theme &&
       code.startsWith(session.completedSource)
   );
+}
+
+function takeHighlightSession(
+  language: ShikiLanguageId,
+  theme: CodeThemeId,
+  code: string
+): HighlightSession {
+  const index = findHighlightSession(language, theme, code);
   // The longest matching prefix would be ideal, but two blocks sharing a prefix is rare and the
   // worst case is only a re-tokenization from the shared lines.
   const session: HighlightSession = (index === -1
@@ -251,6 +283,7 @@ function takeHighlightSession(
     completedHtml: [],
     completedHtmlChars: 0,
     state: undefined,
+    pendingLines: 0,
   };
   highlightSessions.push(session);
   return session;
@@ -258,7 +291,7 @@ function takeHighlightSession(
 
 /** Drops the oldest sessions past the count and memory bounds, and the one in use if it alone is too big. */
 function trimHighlightSessions(current: HighlightSession): void {
-  if (current.completedHtmlChars > HIGHLIGHT_ENTRY_MAX_CHARS) {
+  if (current.completedHtmlChars > HIGHLIGHT_ENTRY_MAX_CHARS && current.pendingLines === 0) {
     const index = highlightSessions.indexOf(current);
     if (index !== -1) highlightSessions.splice(index, 1);
   }
@@ -273,11 +306,34 @@ function trimHighlightSessions(current: HighlightSession): void {
 
 /**
  * Forgets the growing blocks. Called when a message stops streaming: its blocks are final and
- * come from the result cache, so their per-line HTML would only sit in memory.
+ * come from the result cache, so their per-line HTML would only sit in memory. A block that is
+ * still being coloured in slices keeps its session, so its next slice carries on.
  */
 // Usage: releaseHighlightSessions();
 export function releaseHighlightSessions(): void {
+  const unfinished = highlightSessions.filter((session) => session.pendingLines > 0);
   highlightSessions.length = 0;
+  highlightSessions.push(...unfinished);
+}
+
+/**
+ * Blocks last drawn with only their first lines coloured, because the call that drew them had a
+ * time budget. `isHighlightContinuationPending` reads it. It is a set of keys and not a look at
+ * the sessions, which are evicted by count: a message with many large blocks must still colour
+ * the ones whose session is gone (they start again from their first line). Oldest first.
+ */
+const PARTIAL_BLOCK_ENTRIES = 64;
+const partialBlocks = new Set<string>();
+
+function markPartialBlock(key: string, partial: boolean): void {
+  partialBlocks.delete(key);
+  if (!partial) return;
+  partialBlocks.add(key);
+  while (partialBlocks.size > PARTIAL_BLOCK_ENTRIES) {
+    const oldest = partialBlocks.values().next().value;
+    if (oldest === undefined) return;
+    partialBlocks.delete(oldest);
+  }
 }
 
 let tokenizedLineObserver: ((line: string) => void) | null = null;
@@ -351,9 +407,17 @@ export async function preloadCodeLanguages(
  * A block the tokenizer stops on its time limit returns `null` like any plain block, but is
  * remembered: `isHighlightRetryPending` says whether asking again may colour it, and a second
  * stop ends the attempts (`TimeStopState`).
+ *
+ * With `options.budgetMs` the call colours lines for about that long and draws the rest plain
+ * (`HighlightSlice` explains the rest). Without it the call colours the whole block.
  */
 // Usage: const html = highlightCode('const x = 1;', 'ts', 'one-dark-pro');
-export function highlightCode(code: string, lang: string, theme: CodeThemeId): string | null {
+export function highlightCode(
+  code: string,
+  lang: string,
+  theme: CodeThemeId,
+  options: { readonly budgetMs?: number } = {}
+): string | null {
   const language = resolveLanguageId(lang);
   if (!highlighterInstance || !language) return null;
   if (!isLanguageLoaded(highlighterInstance, language)) return null;
@@ -370,73 +434,248 @@ export function highlightCode(code: string, lang: string, theme: CodeThemeId): s
   if (isGivenUp(key)) return null;
 
   try {
-    const html = renderHighlightedBlock(code, language, theme);
+    const block = renderHighlightedBlock(code, language, theme, options.budgetMs);
     recordCompletion(key);
-    if (html === null) return null;
-    cacheHighlightedHtml(key, html);
-    return html;
+    if (block === null) return null;
+    // A block with lines still to colour is not the final HTML for this source: a cached copy
+    // would be served to every later call and the rest would never be coloured.
+    markPartialBlock(key, !block.complete);
+    if (block.complete) cacheHighlightedHtml(key, block.html);
+    return block.html;
   } catch (error) {
     recordTimeStop(key, error);
     return null;
   }
 }
 
+/** What `highlightCode` knows about a block before it tokenizes any of it. */
+interface BlockPlan {
+  readonly lines: ReturnType<typeof splitLines>;
+  /** Complete lines (those with their line break) that are coloured when the block is finished. */
+  readonly completeCount: number;
+  /** Lines inside the highlighting budget: all of them, or the ones before the first over-limit line. */
+  readonly highlightable: number;
+}
+
+/** Null when no line of the block is coloured, so the caller's escaped source is used. */
+function planBlock(code: string, language: ShikiLanguageId): BlockPlan | null {
+  const lines = splitLines(code);
+  const highlightable = countHighlightableLines(code, language);
+  if (highlightable === 0) return null;
+  // Every line but the last has its line break, so its tokens are final.
+  return { lines, highlightable, completeCount: Math.min(lines.length - 1, highlightable) };
+}
+
+interface BlockRendering {
+  readonly renderers: ReturnType<typeof createCheckedRenderers>;
+  readonly instance: MangoHighlighter;
+  readonly htmlOptions: { readonly lang: ShikiLanguageId; readonly theme: CodeThemeId };
+  readonly tokenize: (text: string, state: GrammarState | undefined) => ThemedToken[][];
+}
+
+function blockRendering(language: ShikiLanguageId, theme: CodeThemeId): BlockRendering | null {
+  const renderers = checkedRenderers;
+  const instance = highlighterInstance;
+  if (!renderers || !instance) return null;
+  return {
+    renderers,
+    instance,
+    htmlOptions: { lang: language, theme },
+    tokenize: (text, state) =>
+      renderers.codeToTokensBase(text, {
+        lang: language,
+        theme,
+        grammarState: state,
+        tokenizeTimeLimit: 500,
+      }),
+  };
+}
+
+/**
+ * Colours the session's next complete lines until `budgetMs` has passed (checked between
+ * batches), or all of them when there is no budget. Each batch is stored as it lands, so a throw
+ * in a later one keeps the lines before it. Leaves `session.pendingLines` at what is still to do.
+ */
+function advanceSession(
+  rendering: BlockRendering,
+  session: HighlightSession,
+  code: string,
+  plan: BlockPlan,
+  budgetMs: number | undefined
+): void {
+  const spendable =
+    plan.completeCount - session.completedHtml.length > UNSLICED_LINES ? budgetMs : undefined;
+  const deadline = spendable === undefined ? Number.POSITIVE_INFINITY : timeStopClock() + spendable;
+  while (session.completedHtml.length < plan.completeCount) {
+    const from = session.completedHtml.length;
+    const to =
+      spendable === undefined
+        ? plan.completeCount
+        : Math.min(plan.completeCount, from + SLICE_BATCH_LINES);
+    const tokens = rendering.tokenize(
+      plan.lines
+        .slice(from, to)
+        .map(([text]) => text)
+        .join('\n'),
+      session.state
+    );
+    const newHtml = rendering.renderers.tokenLinesToHtml(tokens, rendering.htmlOptions);
+    session.completedHtml.push(...newHtml);
+    session.completedHtmlChars += newHtml.reduce((sum, line) => sum + line.length, 0);
+    session.state = getLastGrammarState(rendering.instance, tokens);
+    session.completedSource = code.slice(0, plan.lines[to]?.[1]);
+    if (timeStopClock() >= deadline) break;
+  }
+  session.pendingLines = plan.completeCount - session.completedHtml.length;
+}
+
+/**
+ * The last line of a finished block, coloured from the saved state. It is drawn again on every
+ * call and never kept, because it may still be arriving. Empty while complete lines are left:
+ * the state it needs is not known yet, and it is drawn plain.
+ */
+function openLineHtml(
+  rendering: BlockRendering,
+  session: HighlightSession,
+  plan: BlockPlan
+): string[] {
+  if (session.pendingLines > 0 || plan.highlightable <= plan.completeCount) return [];
+  const tokens = rendering.tokenize(plan.lines[plan.completeCount]?.[0] ?? '', session.state);
+  return rendering.renderers.tokenLinesToHtml(tokens, rendering.htmlOptions);
+}
+
+/** The lines from `fromLine` on drawn as plain text: the ones not reached yet and the ones past the budget. */
+function plainLinesHtml(rendering: BlockRendering, plan: BlockPlan, fromLine: number): string[] {
+  const tokens: ThemedToken[][] = [];
+  for (let index = fromLine; index < plan.lines.length; index++) {
+    const text = plan.lines[index]?.[0] ?? '';
+    tokens.push(text ? [{ content: text, offset: 0 }] : []);
+  }
+  return rendering.renderers.tokenLinesToHtml(tokens, rendering.htmlOptions);
+}
+
+/** The whole block around its serialized lines: flat, or in groups when it is long (`isGroupedBlock`). */
+function blockHtml(rendering: BlockRendering, lines: readonly string[]): string {
+  return rendering.renderers.htmlFromLines(
+    isGroupedBlock(lines.length) ? [groupedLinesHtml(lines)] : lines,
+    rendering.htmlOptions
+  );
+}
+
 function renderHighlightedBlock(
   code: string,
   language: ShikiLanguageId,
-  theme: CodeThemeId
-): string | null {
-  if (!checkedRenderers || !highlighterInstance) return null;
-  const renderers = checkedRenderers;
-  const instance = highlighterInstance;
-  const tokenize = (text: string, state: GrammarState | undefined) =>
-    renderers.codeToTokensBase(text, {
-      lang: language,
-      theme,
-      grammarState: state,
-      tokenizeTimeLimit: 500,
-    });
-
-  const lines = splitLines(code);
-  const highlightable = countHighlightableLines(code, language);
+  theme: CodeThemeId,
+  budgetMs: number | undefined
+): { readonly html: string; readonly complete: boolean } | null {
+  const rendering = blockRendering(language, theme);
+  const plan = planBlock(code, language);
   // Nothing to colour: the caller's escaped source is the same text without the empty wrapper.
-  if (highlightable === 0) return null;
-  // Every line but the last has its line break, so its tokens are final.
-  const completeCount = Math.min(lines.length - 1, highlightable);
+  if (!rendering || !plan) return null;
   const session = takeHighlightSession(language, theme, code);
 
-  const htmlOptions = { lang: language, theme };
-
   // A throw below leaves the session as it was: it is only updated once its lines exist.
-  if (session.completedHtml.length < completeCount) {
-    const newLines = lines.slice(session.completedHtml.length, completeCount);
-    const tokens = tokenize(newLines.map(([text]) => text).join('\n'), session.state);
-    const newHtml = renderers.tokenLinesToHtml(tokens, htmlOptions);
-    session.completedHtml.push(...newHtml);
-    session.completedHtmlChars += newHtml.reduce((sum, line) => sum + line.length, 0);
-    session.state = getLastGrammarState(instance, tokens);
-    session.completedSource = code.slice(0, lines[completeCount]?.[1]);
-  }
+  advanceSession(rendering, session, code, plan, budgetMs);
   trimHighlightSessions(session);
 
-  // Lines after the completed ones are drawn again on every call: the last line may still be
-  // arriving, so it is tokenized from the saved state and not kept; lines past the budget are plain.
-  const openTokens: ThemedToken[][] = [];
-  if (highlightable > completeCount) {
-    openTokens.push(...tokenize(lines[completeCount]?.[0] ?? '', session.state));
+  // Lines after the completed ones are drawn again on every call; see `openLineHtml`.
+  const openHtml = openLineHtml(rendering, session, plan);
+  const trailing = [
+    ...openHtml,
+    ...plainLinesHtml(rendering, plan, session.completedHtml.length + openHtml.length),
+  ];
+  return {
+    html: blockHtml(rendering, [...session.completedHtml, ...trailing]),
+    complete: session.pendingLines === 0,
+  };
+}
+
+/**
+ * True when `highlightCode` drew this block with a budget and left lines uncoloured, so
+ * `continueHighlight` has more to do. False for a block that was never drawn that way, one that
+ * is finished (it is in the result cache), and one the tokenizer stopped on its time limit
+ * (`isHighlightRetryPending` owns that).
+ */
+// Usage: if (isHighlightContinuationPending(code, 'ts', 'one-dark-pro')) scheduleSlices();
+export function isHighlightContinuationPending(
+  code: string,
+  lang: string,
+  theme: CodeThemeId
+): boolean {
+  const language = resolveLanguageId(lang);
+  if (!language) return false;
+  const key = highlightCacheKey(language, theme, code);
+  // A block that gave up stays in `partialBlocks` but `continueHighlight` refuses it, so a caller
+  // that asked again would schedule a slice that does nothing.
+  return partialBlocks.has(key) && !isGivenUp(key) && timeStops.get(key)?.state !== 'retry-pending';
+}
+
+/**
+ * Colours the next stretch of a block `highlightCode` drew partly, for about `budgetMs`, and
+ * returns the HTML of the lines that changed so the caller can swap just those on screen. When
+ * the block is finished its whole HTML goes into the result cache, so a later draw of it is one
+ * lookup. Returns null when there is nothing to continue, or when the tokenizer stopped on its
+ * time limit: the stop is recorded as for `highlightCode`, and a retry runs the same call again.
+ *
+ * `fromLine` is how far the caller's block has been coloured. Blocks with the same text share one
+ * session, so another block may have moved it past that: the caller then gets the lines between
+ * (up to `HIGHLIGHT_CATCH_UP_LINES`) with no tokenizing, and the session moves only for a caller
+ * that is level with it. Without `fromLine` the caller is taken to be level.
+ */
+// Usage: const slice = continueHighlight(code, 'ts', 'one-dark-pro', 25, linesOnScreen);
+export function continueHighlight(
+  code: string,
+  lang: string,
+  theme: CodeThemeId,
+  budgetMs: number,
+  fromLine?: number
+): HighlightSlice | null {
+  const language = resolveLanguageId(lang);
+  if (!highlighterInstance || !language) return null;
+  const key = highlightCacheKey(language, theme, code);
+  if (!partialBlocks.has(key) || isGivenUp(key)) return null;
+  const rendering = blockRendering(language, theme);
+  const plan = planBlock(code, language);
+  if (!rendering || !plan) return null;
+
+  const session = takeHighlightSession(language, theme, code);
+  // Blocks with the same text share this session, so its progress is not the caller's: lines
+  // before `fromLine` are the ones the caller's block shows coloured. A caller that is ahead
+  // of the session (its lines were dropped) starts at the session's end, which colours lines
+  // again and never leaves a gap.
+  const start = Math.min(fromLine ?? session.completedHtml.length, session.completedHtml.length);
+  try {
+    // A caller behind the session is handed lines that are already coloured, without tokenizing.
+    const behind = start < session.completedHtml.length;
+    if (!behind) {
+      advanceSession(rendering, session, code, plan, budgetMs);
+      trimHighlightSessions(session);
+      recordCompletion(key);
+    }
+    const end = behind
+      ? Math.min(session.completedHtml.length, start + HIGHLIGHT_CATCH_UP_LINES)
+      : session.completedHtml.length;
+    const reachesEnd = end === session.completedHtml.length;
+    const done = reachesEnd && session.pendingLines === 0;
+    const openHtml = reachesEnd ? openLineHtml(rendering, session, plan) : [];
+    if (done) {
+      const trailing = [
+        ...openHtml,
+        ...plainLinesHtml(rendering, plan, session.completedHtml.length + openHtml.length),
+      ];
+      cacheHighlightedHtml(key, blockHtml(rendering, [...session.completedHtml, ...trailing]));
+      markPartialBlock(key, false);
+    }
+    return {
+      fromLine: start,
+      lineHtml: [...session.completedHtml.slice(start, end), ...openHtml],
+      lineCount: plan.lines.length,
+      done,
+    };
+  } catch (error) {
+    recordTimeStop(key, error);
+    return null;
   }
-  for (
-    let index = session.completedHtml.length + openTokens.length;
-    index < lines.length;
-    index++
-  ) {
-    const text = lines[index]?.[0] ?? '';
-    openTokens.push(text ? [{ content: text, offset: 0 }] : []);
-  }
-  return renderers.htmlFromLines(
-    [...session.completedHtml, ...renderers.tokenLinesToHtml(openTokens, htmlOptions)],
-    htmlOptions
-  );
 }
 
 export interface HighlightToken {
@@ -517,6 +756,7 @@ function loadLanguageOnce(highlighter: MangoHighlighter, language: ShikiLanguage
     highlightCache.clear();
     highlightCacheChars = 0;
     highlightSessions.length = 0;
+    partialBlocks.clear();
     timeStops.clear();
     recoveredLineTokens.clear();
   });

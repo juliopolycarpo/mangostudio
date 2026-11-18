@@ -6,6 +6,11 @@ import { useTheme } from '@/hooks/use-theme';
 import type { CodeThemeId } from '@/lib/code-themes';
 import { retryStoppedHighlights } from '@/lib/highlight-retry';
 import {
+  continueHighlightsInSlices,
+  HIGHLIGHT_FIRST_SLICE_MS,
+  type SlicedBlock,
+} from '@/lib/highlight-slices';
+import {
   BlockDomMirror,
   IncrementalBlockRenderer,
   IncrementalLexer,
@@ -81,6 +86,15 @@ export function MarkdownContentRenderer({
     theme: loadedCodeTheme ?? resolvedCodeTheme,
     isStreaming,
     onRecovered: () => setHighlightVersion((version) => version + 1),
+  });
+  useColourRemainingLines({
+    containerRef,
+    tokens,
+    parser,
+    highlighter,
+    theme: loadedCodeTheme ?? resolvedCodeTheme,
+    isStreaming,
+    onRedraw: () => setHighlightVersion((version) => version + 1),
   });
 
   // No React children and no `dangerouslySetInnerHTML`: the blocks are written into the
@@ -179,11 +193,93 @@ function useRetryStoppedHighlights({
     const { isHighlightRetryPending, highlightCode } = highlighter;
     const retries = collectCodeFences(tokens.tokens)
       .filter((fence) => isHighlightRetryPending(fence.text, fence.lang, theme))
-      .map((fence) => () => highlightCode(fence.text, fence.lang, theme) !== null);
+      .map(
+        (fence) => () =>
+          highlightCode(fence.text, fence.lang, theme, { budgetMs: HIGHLIGHT_FIRST_SLICE_MS }) !==
+          null
+      );
     if (retries.length === 0) return;
     return retryStoppedHighlights(retries, () => onRecoveredRef.current());
     // `parser` is not read: it marks a render, and the stops it left are read from the highlighter.
   }, [tokens, parser, highlighter, theme, isStreaming]);
+}
+
+interface RemainingLinesColouring {
+  readonly containerRef: React.RefObject<HTMLDivElement | null>;
+  readonly tokens: MarkdownTokens;
+  /** The parser that rendered the blocks on screen: a new one draws them again, from the start. */
+  readonly parser: Marked;
+  readonly highlighter: CodeHighlighter | null;
+  readonly theme: CodeThemeId;
+  readonly isStreaming: boolean;
+  readonly onRedraw: () => void;
+}
+
+/**
+ * Colours what a large code block's first draw left plain. The first draw colours about 25 ms
+ * of lines (`HIGHLIGHT_FIRST_SLICE_MS`) and the rest follows in idle slices, each written into
+ * its own block, so a 2,000-line block is never one long task and the message around it is not
+ * drawn again. A content or theme change cancels what is pending, and so does unmount: the
+ * blocks on screen are then not the ones the slices were made for.
+ *
+ * Not while streaming: the next chunk draws the growing block again, and the stream's end runs
+ * this with the final content.
+ */
+function useColourRemainingLines({
+  containerRef,
+  tokens,
+  parser,
+  highlighter,
+  theme,
+  isStreaming,
+  onRedraw,
+}: RemainingLinesColouring) {
+  // The latest callback, without making a new render of the parent cancel a pending slice.
+  const onRedrawRef = useRef(onRedraw);
+  useEffect(() => {
+    onRedrawRef.current = onRedraw;
+  });
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (isStreaming || !container) return;
+    const blocks = pendingSlicedBlocks(container, tokens, highlighter, theme);
+    if (blocks.length === 0) return;
+    return continueHighlightsInSlices(blocks, () => onRedrawRef.current());
+    // `parser` is not read: it marks a render, and what that render left partial is read from the highlighter.
+  }, [containerRef, tokens, parser, highlighter, theme, isStreaming]);
+}
+
+/**
+ * The fenced blocks on screen with lines left to colour, each with the `<pre>` that shows it.
+ * Fences and `pre[data-lang]` elements are both in document order and one-to-one: the renderer
+ * escapes raw HTML, so nothing else in a message makes one. A block with no element here is
+ * given a detached one, which a slice cannot be written into, so it is drawn again at the end.
+ */
+function pendingSlicedBlocks(
+  container: HTMLElement,
+  tokens: MarkdownTokens,
+  highlighter: CodeHighlighter | null,
+  theme: CodeThemeId
+): SlicedBlock[] {
+  if (!highlighter?.isHighlightContinuationPending || !highlighter.continueHighlight) return [];
+  const { isHighlightContinuationPending, continueHighlight, isHighlightRetryPending } =
+    highlighter;
+  const elements = container.querySelectorAll('pre[data-lang]');
+  return collectCodeFences(tokens.tokens).flatMap((fence, index) =>
+    isHighlightContinuationPending(fence.text, fence.lang, theme)
+      ? [
+          {
+            pre: elements[index] ?? container.ownerDocument.createElement('pre'),
+            advance: (budgetMs: number, fromLine: number) =>
+              continueHighlight(fence.text, fence.lang, theme, budgetMs, fromLine),
+            isPending: () => isHighlightContinuationPending(fence.text, fence.lang, theme),
+            canRetryAfterStop: () =>
+              isHighlightRetryPending?.(fence.text, fence.lang, theme) ?? false,
+          },
+        ]
+      : []
+  );
 }
 
 function useCopyCodeButtons(
