@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 
@@ -20,6 +20,7 @@ import { DEFAULT_PR_OUTPUT, type FakeGhScenario } from '../../support/fake-gh/pr
 import {
   cleanupGithubFixtureDirectories,
   type GithubFixtureDirectory,
+  removeDirectoryWithRetry,
 } from '../../support/github-fixture-cleanup';
 import {
   createApiTestApp,
@@ -97,7 +98,8 @@ async function closeFixtureRuntime(): Promise<void> {
 
 const cleanupDependencies = {
   closeRuntime: closeFixtureRuntime,
-  removeDirectory: (path: string) => rm(path, { recursive: true, force: true }),
+  // The runtime is closed first, so the retry only waits out what Windows still holds after exit.
+  removeDirectory: (path: string) => removeDirectoryWithRetry(path),
 };
 
 afterAll(async () => {
