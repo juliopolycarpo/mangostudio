@@ -65,6 +65,7 @@ const PROBLEM_TITLES: Record<ErrorCode, string> = {
   CONFLICT: 'Conflict',
   OPERATION_EXPIRED: 'Operation expired',
   PROVIDER_ERROR: 'Provider error',
+  PROVIDER_CREDENTIAL_REJECTED: 'Provider rejected the connector key',
   ENVIRONMENT_UNAVAILABLE: 'Environment unavailable',
   GENERATION_EMPTY: 'Empty generation',
   OWNERSHIP: 'Not the owner',

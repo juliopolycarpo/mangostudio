@@ -317,13 +317,14 @@ resposta de erro que participa, e publica o schema como
 
 ### Códigos De Erro Comuns
 
-| Código                    | HTTP Status | Significado                                                                                                           |
-| ------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------- |
-| `UNAUTHORIZED`            | 401         | Sessão ausente ou inválida                                                                                            |
-| `OWNERSHIP`               | 403         | Recurso não pertence ao usuário                                                                                       |
-| `NOT_FOUND`               | 404         | Recurso não existe                                                                                                    |
-| `VALIDATION`              | 422         | Body de request ou semântica inválida                                                                                 |
-| `RATE_LIMITED`            | 429         | Muitas requisições (ver `Retry-After`)                                                                                |
-| `INTERNAL`                | 500         | Erro inesperado do servidor                                                                                           |
-| `PROVIDER_ERROR`          | 502 / 503   | Provedor de modelo falhou ou indisponível                                                                             |
-| `ENVIRONMENT_UNAVAILABLE` | 503         | O runtime do ambiente de destino está inacessível (`details.reason`; `Retry-After` quando há nova tentativa agendada) |
+| Código                         | HTTP Status | Significado                                                                                                                                                     |
+| ------------------------------ | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `UNAUTHORIZED`                 | 401         | Sessão ausente ou inválida                                                                                                                                      |
+| `OWNERSHIP`                    | 403         | Recurso não pertence ao usuário                                                                                                                                 |
+| `NOT_FOUND`                    | 404         | Recurso não existe                                                                                                                                              |
+| `VALIDATION`                   | 422         | Body de request ou semântica inválida                                                                                                                           |
+| `RATE_LIMITED`                 | 429         | Muitas requisições (ver `Retry-After`)                                                                                                                          |
+| `INTERNAL`                     | 500         | Erro inesperado do servidor                                                                                                                                     |
+| `PROVIDER_ERROR`               | 502 / 503   | Provedor de modelo falhou ou indisponível                                                                                                                       |
+| `PROVIDER_CREDENTIAL_REJECTED` | stream      | Um provedor respondeu 401 ou 403 à chave de um conector; corrija esse conector em Configurações (eventos de erro de stream e resultados de subagente com falha) |
+| `ENVIRONMENT_UNAVAILABLE`      | 503         | O runtime do ambiente de destino está inacessível (`details.reason`; `Retry-After` quando há nova tentativa agendada)                                           |

@@ -1,5 +1,6 @@
 import type { AgentId, AgentProfile } from '@mangostudio/shared/agents';
 import type { MultiAgentSettings } from '@mangostudio/shared/app-settings';
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { SubagentTracePart } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
 
@@ -99,4 +100,37 @@ export class SubagentModelUnavailableError extends SubagentDelegationError {
     );
     this.name = 'SubagentModelUnavailableError';
   }
+}
+
+/**
+ * The provider rejected the key of the connector serving the agent's model
+ * (HTTP 401 or 403), typically because the key was revoked or expired.
+ *
+ * Distinct from {@link SubagentModelUnavailableError}: the connector exists and
+ * routes, so the fix is its key, not its presence. The message names the agent,
+ * the model and the connector to fix, and carries the shared
+ * `PROVIDER_CREDENTIAL_REJECTED` code so the parent can tell this from any
+ * other failed delegation. The provider's own text is left out on purpose, as
+ * it can echo part of the key.
+ */
+export class SubagentCredentialRejectedError extends SubagentDelegationError {
+  constructor(
+    readonly agentId: AgentId,
+    readonly modelId: string,
+    readonly provider: string,
+    readonly httpStatus: number,
+    readonly connectorNames: readonly string[]
+  ) {
+    super(
+      `Agent "${agentId}" could not run on model "${modelId}": the ${provider} provider rejected the API key of ${describeConnectors(connectorNames)} (HTTP ${httpStatus}). It may have been revoked or expired, or lack access to this model. Update the key in Settings, or pick another model for this agent.`,
+      ERROR_CODES.PROVIDER_CREDENTIAL_REJECTED
+    );
+    this.name = 'SubagentCredentialRejectedError';
+  }
+}
+
+function describeConnectors(names: readonly string[]): string {
+  if (names.length === 0) return 'its connector';
+  const quoted = names.map((name) => `"${name}"`).join(', ');
+  return names.length === 1 ? `connector ${quoted}` : `connectors ${quoted}`;
 }

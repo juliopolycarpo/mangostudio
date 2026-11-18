@@ -12,7 +12,14 @@ export class FakeGeminiHttp {
   invocations = 0;
   signal: AbortSignal | undefined;
 
-  constructor(private readonly behavior: 'normal' | 'error' | 'stall' | 'image' = 'normal') {}
+  /**
+   * `unauthorized` and `forbidden` answer every call the way Gemini answers a revoked or
+   * unauthorised key (HTTP 401 and 403), so a test can drive the real SDK's error path.
+   */
+  constructor(
+    private readonly behavior:
+      'normal' | 'error' | 'stall' | 'image' | 'unauthorized' | 'forbidden' = 'normal'
+  ) {}
 
   /** Implements the SDK's fetch option. Example: httpOptions: { fetch: peer.fetch }. */
   readonly fetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
@@ -35,6 +42,30 @@ export class FakeGeminiHttp {
       return Response.json(
         { error: { code: 400, message: 'invalid synthetic model', status: 'INVALID_ARGUMENT' } },
         { status: 400 }
+      );
+    }
+    if (this.behavior === 'unauthorized') {
+      return Response.json(
+        {
+          error: {
+            code: 401,
+            message: 'Request had invalid authentication credentials.',
+            status: 'UNAUTHENTICATED',
+          },
+        },
+        { status: 401 }
+      );
+    }
+    if (this.behavior === 'forbidden') {
+      return Response.json(
+        {
+          error: {
+            code: 403,
+            message: 'Your API key was reported as leaked. Please use another API key.',
+            status: 'PERMISSION_DENIED',
+          },
+        },
+        { status: 403 }
       );
     }
     return this.respond(route);
