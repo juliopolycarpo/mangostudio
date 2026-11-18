@@ -63,7 +63,11 @@ beforeEach(async () => {
   harness = { user, fakeChatGpt, secretStore };
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // The plan-usage test persists samples under the shared test account id, and
+  // the in-memory database outlives this file. Drop them so a later file's
+  // "nothing sampled yet" read does not see them (#2472).
+  await getDb().deleteFrom('connector_usage_samples').execute();
   restoreAuth?.();
   restoreAuth = null;
   setChatGptTokenServiceForTests(null);
