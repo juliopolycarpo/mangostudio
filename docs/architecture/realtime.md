@@ -95,8 +95,8 @@ the same invalidation. It is published from the activity recorder
 (`apps/api/src/modules/activity/application/record-activity.ts`), not from the
 seven emission seams, so a new kind cannot ship a row nobody is told about.
 
-`chats` means a chat the account can see changed: it was created, edited, or
-moved in the list because `chats.updatedAt` advanced. The chat list is its only
+`chats` means a chat the account can see changed: it was created, edited,
+deleted, or moved in the list because `chats.updatedAt` advanced. The chat list is its only
 data reader (the transcript-reconcile wait also listens, to learn that a turn
 finalized). It is a separate topic because both the list and the feed refetch on
 every frame they receive; on one shared topic a git commit refetched the chat

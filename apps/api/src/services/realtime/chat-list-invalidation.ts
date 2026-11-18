@@ -3,8 +3,8 @@ import { CHATS_TOPIC } from '@mangostudio/shared/realtime';
 import { getRealtimeBus } from './realtime-bus';
 
 /**
- * Announces that a chat this account can see changed: created, edited, or moved
- * in the list because `chats.updatedAt` advanced.
+ * Announces that a chat this account can see changed: created, edited, deleted,
+ * or moved in the list because `chats.updatedAt` advanced.
  *
  * Signal-only, like every other topic: the frame says "the list is stale", and
  * the tab refetches to learn how. It is not an activity-feed signal. A turn that

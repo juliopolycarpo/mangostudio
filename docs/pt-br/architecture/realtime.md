@@ -101,8 +101,8 @@ de atividade (`apps/api/src/modules/activity/application/record-activity.ts`), e
 não pelos sete pontos de emissão, para que um novo tipo não consiga gravar uma
 linha sobre a qual ninguém é avisado.
 
-`chats` significa que um chat visível para a conta mudou: foi criado, editado ou
-reposicionado na lista porque `chats.updatedAt` avançou. A lista de chats é o
+`chats` significa que um chat visível para a conta mudou: foi criado, editado,
+excluído ou reposicionado na lista porque `chats.updatedAt` avançou. A lista de chats é o
 único leitor de dados (a espera de reconciliação da transcrição também escuta,
 para saber que um turno foi finalizado). É um tópico separado porque a lista e o
 feed refazem a busca a cada frame recebido; em um tópico compartilhado, um commit
