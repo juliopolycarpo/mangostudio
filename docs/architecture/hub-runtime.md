@@ -942,8 +942,8 @@ The runtime owns the reconnect, because the hub cannot dial it:
 - A dial that neither opens nor fails is bounded by the same handshake timeout the session
   uses. `connectWebSocket` settles on `open`, `error` or `close`; a host that accepts TCP
   and never finishes the upgrade produces none of the three, so without a deadline the
-  reconnect loop never starts. Both dialers share one deadline module
-  (`apps/shared/src/utils/dial-deadline.ts`).
+  reconnect loop never starts. The SDK's `connectWebSocket` carries that deadline
+  (`timeoutMs`).
 - Close codes say why. A refused credential or a disabled environment ends the process with
   the command that fixes it — retrying those is a machine hammering an endpoint that will
   never say yes. A rate-limited close waits out the window rather than returning on the
@@ -1020,8 +1020,8 @@ does.
 
 A dial that neither opens nor fails is bounded here rather than by the connection manager: a
 host that accepts the TCP connection and then says nothing produces no `open`, no `error` and
-no `close`, so `connect-http-runtime.ts` carries a `dialDeadline`
-(`apps/shared/src/utils/dial-deadline.ts`) that aborts the dial with the
+no `close`, so `connect-http-runtime.ts` passes the SDK's `connectWebSocket` a
+`timeoutMs` and keeps no timer of its own; a dial that runs out of it is reported with the
 message the card will show. A connect released mid-dial or mid-handshake — a disconnect, a
 delete, shutdown — aborts both, closes the socket and settles as `CANCELLED`.
 
