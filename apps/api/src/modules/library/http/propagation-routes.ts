@@ -213,8 +213,7 @@ export function createPropagationRoutes(
         try {
           assertBackupId(params.backupId);
         } catch {
-          set.status = 422;
-          return { error: 'Invalid library backup id.', code: ERROR_CODES.VALIDATION };
+          return status(422, { error: 'Invalid library backup id.', code: ERROR_CODES.VALIDATION });
         }
         try {
           // Idempotent: purging a set that is already gone is the state the

@@ -1,5 +1,6 @@
-import { ERROR_CODES } from '@mangostudio/shared/errors';
-import { type Elysia, t } from 'elysia';
+import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
+import { ChatTodosResponseSchema } from '@mangostudio/shared/todos';
+import { type Elysia, status, t } from 'elysia';
 
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
@@ -10,16 +11,18 @@ export const todoRoutes = (app: Elysia) =>
   app.group('/chats', (app) =>
     app.use(requireAuth).get(
       '/:id/todos',
-      { params: t.Object({ id: t.String() }) },
+      {
+        params: t.Object({ id: t.String() }),
+        response: { 200: ChatTodosResponseSchema, 404: ApiErrorResponseSchema },
+      },
       /** Current todo state for a chat owned by the authenticated user. */
-      async ({ params, user, set }) => {
+      async ({ params, user }) => {
         const userId = user?.id ?? '';
         try {
           await assertChatOwnership(params.id, userId, getDb());
         } catch (err) {
           if (err instanceof ChatNotFoundError) {
-            set.status = 404;
-            return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
+            return status(404, { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND });
           }
           throw err;
         }

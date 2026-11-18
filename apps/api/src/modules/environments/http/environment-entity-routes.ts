@@ -154,14 +154,13 @@ export function createEnvironmentEntityRoutes(
             404: ApiErrorResponseSchema,
           },
         },
-        async ({ params, user, set }) => {
+        async ({ params, user }) => {
           const environment = await service.find(user?.id ?? '', params.id);
           if (environment) return environment;
-          set.status = 404;
-          return {
+          return status(404, {
             error: `Environment "${params.id}" was not found.`,
             code: ERROR_CODES.NOT_FOUND,
-          };
+          });
         }
       )
       .put(
@@ -355,11 +354,13 @@ export function createEnvironmentEntityRoutes(
             404: ApiErrorResponseSchema,
           },
         },
-        async ({ params, user, set }) => {
+        async ({ params, user }) => {
           const cancelled = await lifecycle.cancel(params.runId, user?.id ?? '');
           if (!cancelled) {
-            set.status = 404;
-            return { error: 'Runtime install run not found.', code: ERROR_CODES.NOT_FOUND };
+            return status(404, {
+              error: 'Runtime install run not found.',
+              code: ERROR_CODES.NOT_FOUND,
+            });
           }
           return { runId: params.runId, cancellationRequested: true };
         }
@@ -406,11 +407,13 @@ export function createEnvironmentEntityRoutes(
             404: ApiErrorResponseSchema,
           },
         },
-        async ({ params, user, set }) => {
+        async ({ params, user }) => {
           const source = await lifecycle.getRunStream(params.runId, user?.id ?? '');
           if (!source) {
-            set.status = 404;
-            return { error: 'Runtime install run not found.', code: ERROR_CODES.NOT_FOUND };
+            return status(404, {
+              error: 'Runtime install run not found.',
+              code: ERROR_CODES.NOT_FOUND,
+            });
           }
 
           return sseResponse(source, 'Runtime install log stream failed.');

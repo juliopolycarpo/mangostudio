@@ -4,12 +4,8 @@ import {
   type AppSettingsResponse,
   AppSettingsResponseSchema,
 } from '@mangostudio/shared/app-settings';
-import {
-  type ApiErrorResponse,
-  ApiErrorResponseSchema,
-  ERROR_CODES,
-} from '@mangostudio/shared/errors';
-import { Elysia } from 'elysia';
+import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
+import { Elysia, status } from 'elysia';
 import type { Kysely } from 'kysely';
 
 import { getDb } from '../../../db/database';
@@ -48,13 +44,12 @@ export function createAppSettingsRoutes(database: () => Kysely<Database> = getDb
         // happens against the row rather than against whatever the caller last
         // read. Normalization belongs after that merge, so it runs in the service.
         // Migrated from ESLint
-        async ({ body, headers, user, set }): Promise<AppSettingsResponse | ApiErrorResponse> => {
+        async ({ body, headers, user }) => {
           try {
             return await writeAppSettings(database(), user?.id ?? '', body, headers['if-match']);
           } catch (error) {
             if (!(error instanceof AppSettingsConflict)) throw error;
-            set.status = 409;
-            return { error: error.message, code: ERROR_CODES.CONFLICT };
+            return status(409, { error: error.message, code: ERROR_CODES.CONFLICT });
           }
         }
       )
