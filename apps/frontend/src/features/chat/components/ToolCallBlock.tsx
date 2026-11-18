@@ -44,6 +44,12 @@ interface ToolCallBlockProps {
   execution?: ToolExecutionSnapshot;
   /** True when this call is the message's most recent file mutation. */
   isLatestFileChange?: boolean;
+  /**
+   * True while the turn that owns this call is still streaming. A failure opens
+   * its card only then (or on the call's own running -> failed transition), so
+   * a reopened chat does not replay every historical failure as an open body.
+   */
+  isLiveTurn?: boolean;
 }
 
 export function ToolCallBlock({
@@ -53,6 +59,7 @@ export function ToolCallBlock({
   status,
   execution,
   isLatestFileChange = false,
+  isLiveTurn = false,
 }: ToolCallBlockProps) {
   const { t } = useI18n();
   const { diffPreviewsEnabled, diffPreviewMode } = useChatDisplaySettings();
@@ -67,8 +74,20 @@ export function ToolCallBlock({
     (diffPreviewMode === 'expanded' ||
       (diffPreviewMode === 'collapse_older' && isLatestFileChange));
 
-  const [expanded, setExpanded] = useState(isError || autoExpandPreview);
+  const [expanded, setExpanded] = useState((isError && isLiveTurn) || autoExpandPreview);
   const [showRaw, setShowRaw] = useState(false);
+
+  // The model's remediation advice sits in a failed call's body, so a failure
+  // that happens in front of the reader opens the card: either this call went
+  // from active to failed while mounted, or it first appeared failed inside the
+  // streaming turn. Adjusted during render (React's "derive state from props"
+  // pattern) so the card opens in the same commit as the status, with no effect
+  // pass; the reader can still toggle it by hand afterwards.
+  const [seenStatus, setSeenStatus] = useState(status);
+  if (seenStatus !== status) {
+    setSeenStatus(status);
+    if (isError && isActiveToolExecutionStatus(seenStatus)) setExpanded(true);
+  }
 
   const preview = useMemo(
     () => (previewable && expanded ? buildFileChangePreview(name, args, result) : null),
@@ -115,10 +134,6 @@ export function ToolCallBlock({
       {showRaw ? t.tools.diff.hideRaw : t.tools.diff.showRaw}
     </Button>
   );
-
-  useEffect(() => {
-    if (isError) setExpanded(true);
-  }, [isError]);
 
   // Applies the display mode once a card turns previewable — a call mounts with
   // empty arguments while it streams, so the mount-time state is not enough. In
