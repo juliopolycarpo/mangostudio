@@ -1741,27 +1741,115 @@ mod tests {
         drop(silent_peers);
     }
 
+    /// Splits an accepted stream into the half `handle_connection` owns and a
+    /// duplicate handle on the same socket that the test can peek at. Both
+    /// share one file description, so the duplicate must stay non-blocking.
+    fn observe_accepted(
+        accepted: tokio::net::TcpStream,
+    ) -> (tokio::net::TcpStream, std::net::TcpStream) {
+        let std_stream = accepted.into_std().expect("detach the accepted stream");
+        let observer = std_stream
+            .try_clone()
+            .expect("duplicate the accepted socket");
+        let accepted =
+            tokio::net::TcpStream::from_std(std_stream).expect("re-register the accepted stream");
+        (accepted, observer)
+    }
+
+    /// Blocks the test thread, in real time, until one byte sits in the
+    /// accepted socket's receive queue.
+    ///
+    /// Paused tokio time jumps to the next timer whenever the runtime has
+    /// nothing to poll, without waiting for the kernel. A byte the kernel
+    /// has not queued yet is therefore invisible to the server task, and the
+    /// first-byte deadline can fire first. Blocking here keeps the runtime
+    /// from parking until the byte is queued, so the test orders the byte
+    /// before the deadline instead of hoping loopback delivery is instant.
+    fn wait_until_a_byte_is_queued(observer: &std::net::TcpStream) {
+        const REAL_TIME_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
+        let give_up_at = std::time::Instant::now() + REAL_TIME_BUDGET;
+        let mut first_byte = [0u8; 1];
+        loop {
+            match observer.peek(&mut first_byte) {
+                Ok(0) => panic!(
+                    "expected one byte queued on the accepted socket | received: end of stream"
+                ),
+                Ok(_) => return,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(error) => panic!(
+                    "expected one byte queued on the accepted socket | received: peek failed: \
+                     {error}"
+                ),
+            }
+            assert!(
+                std::time::Instant::now() < give_up_at,
+                "expected one byte queued on the accepted socket within {REAL_TIME_BUDGET:?} of \
+                 real time | received: an empty receive queue"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+
     /// The first-byte deadline is only about silence. A peer that has sent a
     /// byte and then stalls is still bounded by the full upgrade timeout,
     /// counted from accept: it keeps its permit past the first-byte deadline
     /// and loses it at `UPGRADE_TIMEOUT`.
     #[tokio::test(start_paused = true)]
     async fn a_peer_that_sent_a_byte_keeps_its_permit_until_the_upgrade_timeout() {
+        stalled_peer_after_one_byte(None).await;
+    }
+
+    /// #2438: the same claim when the kernel queues the byte late, as macOS
+    /// loopback did on CI: a peer thread writes after 100 ms of real time.
+    /// Paused time must not reach the first-byte deadline in that gap.
+    #[tokio::test(start_paused = true)]
+    async fn a_byte_the_kernel_queues_late_still_counts_before_the_first_byte_deadline() {
+        stalled_peer_after_one_byte(Some(std::time::Duration::from_millis(100))).await;
+    }
+
+    /// Sends one byte of a request line half a first-byte deadline after
+    /// accept, then asserts the permit survives past that deadline and goes
+    /// at `UPGRADE_TIMEOUT`. `delivery_lag` is how long, in real time, a
+    /// separate thread waits before writing; `None` writes directly.
+    async fn stalled_peer_after_one_byte(delivery_lag: Option<std::time::Duration>) {
+        use std::io::Write as _;
         use tokio::io::AsyncWriteExt as _;
 
-        let LoopbackPeers {
-            accepted,
-            mut peers,
-        } = open_loopback_peers(1).await;
+        let LoopbackPeers { accepted, peers } = open_loopback_peers(1).await;
+        let (accepted, observer) = observe_accepted(accepted.into_iter().next().expect("one"));
         let (state, context) = pending_handshake_context();
-        let pending = spawn_pending_handshakes(accepted, &state, &context);
+        let pending = spawn_pending_handshakes(vec![accepted], &state, &context);
 
         let started = tokio::time::Instant::now();
         tokio::time::sleep(super::FIRST_BYTE_TIMEOUT / 2).await;
-        peers[0]
-            .write_all(b"G")
-            .await
-            .expect("send one byte of a request line");
+        // Whatever keeps the peer's socket open until the end of the test: a
+        // hangup would release the permit on its own.
+        let _peer_stays_open: Box<dyn std::any::Any> = match delivery_lag {
+            None => {
+                let mut peer = peers.into_iter().next().expect("one peer");
+                peer.write_all(b"G")
+                    .await
+                    .expect("send one byte of a request line");
+                Box::new(peer)
+            }
+            Some(lag) => {
+                let mut peer = peers
+                    .into_iter()
+                    .next()
+                    .expect("one peer")
+                    .into_std()
+                    .expect("detach the peer");
+                // The writer holds the socket until this sender drops.
+                let (release_peer, hold_peer) = std::sync::mpsc::channel::<()>();
+                std::thread::spawn(move || {
+                    std::thread::sleep(lag);
+                    peer.write_all(b"G").expect("send one byte after the lag");
+                    let _ = hold_peer.recv();
+                });
+                Box::new(release_peer)
+            }
+        };
+        wait_until_a_byte_is_queued(&observer);
         // Past the first-byte deadline, with the upgrade still half-sent.
         tokio::time::sleep(super::FIRST_BYTE_TIMEOUT * 2).await;
         assert_eq!(
