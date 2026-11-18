@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { cpSync, existsSync, realpathSync, symlinkSync } from 'node:fs';
+import { cpSync, existsSync, realpathSync, statSync, symlinkSync, utimesSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -15,6 +15,7 @@ import {
   trackTempPath,
   writeBuildState,
 } from '../../build';
+import { routeTreeIsCurrent } from '../../scripts/routes';
 import { BuildFixtureDiagnostics } from '../support/build-fixture-diagnostics';
 import { BuildFixtureOwner } from '../support/build-fixture-owner';
 
@@ -466,7 +467,7 @@ describe('compiler failure publication', () => {
     diagnostics: BuildFixtureDiagnostics,
     owner: BuildFixtureOwner,
     afterAllocation: (path: string) => void = () => {}
-  ): Promise<{ isolated: string; frontend: string }> {
+  ): Promise<{ isolated: string; frontend: string; routeTreeStamp: number }> {
     diagnostics.record('fixture:prepare-started');
     const repository = join(import.meta.dir, '../../../..');
     diagnostics.record('fixture:directory-started');
@@ -485,6 +486,21 @@ describe('compiler failure publication', () => {
         ),
     });
     diagnostics.record('fixture:frontend-copied');
+    // These cases are about the stylesheet and source guards, not the route tree. `build.ts --dev`
+    // regenerates the tree whenever `routeTreeIsCurrent` reads it as older than `src/routes`, and the
+    // copy stamps every file with its own copy time, so which side wins depends on copy order and
+    // timestamp resolution. A stale read loads the TanStack generator and parses every route before
+    // the stylesheet is touched. Stamp the copied tree after the copy so the child always skips it.
+    // Two seconds ahead, so a copy that finished inside the same coarse timestamp tick still loses.
+    const copiedRouteTree = join(frontend, 'src/routeTree.gen.ts');
+    const stampedAt = new Date(Date.now() + 2000);
+    utimesSync(copiedRouteTree, stampedAt, stampedAt);
+    if (!routeTreeIsCurrent(frontend)) {
+      throw new Error(
+        `(build fixture): expected route tree current after stamping: true | received: false at ${copiedRouteTree}`
+      );
+    }
+    const routeTreeStamp = statSync(copiedRouteTree).mtimeMs;
     diagnostics.record('fixture:dependencies-started');
     const modules = join(frontend, 'node_modules');
     await mkdir(modules);
@@ -518,7 +534,17 @@ describe('compiler failure publication', () => {
     await writeFile(join(frontend, 'dist/index.html'), 'previous published bundle');
     await writeFile(join(frontend, 'dist-metafile.json'), 'previous metafile');
     diagnostics.record('fixture:prepared');
-    return { isolated, frontend };
+    return { isolated, frontend, routeTreeStamp };
+  }
+
+  /** The dev build restamps `routeTree.gen.ts` whenever it runs the generator, so a moved mtime means it ran. */
+  function assertRouteTreeNotRegenerated(frontend: string, routeTreeStamp: number): void {
+    const received = statSync(join(frontend, 'src/routeTree.gen.ts')).mtimeMs;
+    if (received !== routeTreeStamp) {
+      throw new Error(
+        `(build child): expected route generation skipped, routeTree.gen.ts mtimeMs: ${routeTreeStamp} | received: ${received}`
+      );
+    }
   }
 
   async function assertPreviousOutput(frontend: string): Promise<void> {
@@ -556,7 +582,9 @@ describe('compiler failure publication', () => {
     const diagnostics = new BuildFixtureDiagnostics('stylesheet compilation failure');
     const owner = new BuildFixtureOwner(diagnostics);
     await owner.run(async () => {
-      const { frontend } = await owner.prepare(() => isolatedBuildFixture(diagnostics, owner));
+      const { frontend, routeTreeStamp } = await owner.prepare(() =>
+        isolatedBuildFixture(diagnostics, owner)
+      );
       diagnostics.record('fixture:invalid-stylesheet-started');
       await owner.prepare(() =>
         writeFile(join(frontend, 'src/index.css'), '@import "./missing-tailwind-stylesheet.css";')
@@ -573,6 +601,7 @@ describe('compiler failure publication', () => {
       expect({ exitCode, output: stdout + stderr }).toMatchObject({ exitCode: 1 });
       expect(stderr).toContain('expected resolvable Tailwind stylesheet');
       expect(stderr).toContain('missing-tailwind-stylesheet.css');
+      assertRouteTreeNotRegenerated(frontend, routeTreeStamp);
       await assertPreviousOutput(frontend);
       diagnostics.record('assertions:passed');
     });
@@ -582,7 +611,9 @@ describe('compiler failure publication', () => {
     const diagnostics = new BuildFixtureDiagnostics('source mutation during compilation');
     const owner = new BuildFixtureOwner(diagnostics);
     await owner.run(async () => {
-      const { frontend } = await owner.prepare(() => isolatedBuildFixture(diagnostics, owner));
+      const { frontend, routeTreeStamp } = await owner.prepare(() =>
+        isolatedBuildFixture(diagnostics, owner)
+      );
       diagnostics.record('fixture:mutation-preload-started');
       const preload = join(frontend, 'scripts/mutate-after-discovery.ts');
       await owner.prepare(() =>
@@ -621,6 +652,7 @@ describe('compiler failure publication', () => {
       expect(stderr).toContain(
         'expected unchanged Tailwind inputs between dependency discovery and publication'
       );
+      assertRouteTreeNotRegenerated(frontend, routeTreeStamp);
       await assertPreviousOutput(frontend);
       diagnostics.record('assertions:passed');
     });
