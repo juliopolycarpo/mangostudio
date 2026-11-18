@@ -64,7 +64,7 @@ export interface WatchdogOptions {
   readonly killGraceSeconds?: number;
   /**
    * How long a crashed attempt's reaped process group gets to finish before
-   * the retry starts. Injectable for the same reason `killGraceSeconds` is:
+   * the retry starts; only paid when the reap signalled a live group. Injectable for the same reason `killGraceSeconds` is:
    * the crash-path tests would otherwise each pay the full CI-sized wait.
    */
   readonly crashReapGraceSeconds?: number;
@@ -102,6 +102,8 @@ export interface WatchdogOptions {
    * hold the night's only ordering finding when a crash cuts it off.
    */
   readonly preserveAttemptLogs?: boolean;
+  /** Process-group signalling; defaults to `process.kill`. Injected by tests. */
+  readonly processGroups?: ProcessGroupPort;
 }
 
 export interface WatchdogResult {
@@ -159,6 +161,15 @@ interface AttemptResult {
   readonly hung: boolean;
   /** The attempt's direct child, for reaping stragglers before a retry. */
   readonly pid?: number;
+  /**
+   * Whether the child's process group still had a member at the instant the
+   * runtime reported the child exited. A group id is free once its last member
+   * is gone and the kernel may hand it to an unrelated process, so only a group
+   * seen alive at exit may be signalled by `pid` afterwards: while a member
+   * lives the id cannot be recycled, and sampling it in the exit handler, not
+   * after the log read that follows, keeps the window to one event-loop turn.
+   */
+  readonly groupAliveAtExit?: boolean;
 }
 
 /**
@@ -243,12 +254,73 @@ const signalExitCode = (signal: NodeJS.Signals): number => {
   return typeof number === 'number' ? 128 + number : 1;
 };
 
-const killGroup = (pid: number, signal: NodeJS.Signals): void => {
-  try {
+/**
+ * The one place the watchdog touches a process group. A port so tests can
+ * answer "is it alive" and "did the kill land" without signalling a real pid.
+ */
+export interface ProcessGroupPort {
+  /**
+   * `process.kill(-pid, signal)`: deliver `signal` to every member of the group
+   * led by `pid`, or with `0` only check that the group exists. Throws the
+   * errno error `process.kill` throws (`ESRCH` for an empty group, `EPERM` for
+   * one the caller may not signal).
+   */
+  signalGroup(pid: number, signal: NodeJS.Signals | 0): void;
+}
+
+const systemProcessGroups: ProcessGroupPort = {
+  signalGroup: (pid, signal) => {
     process.kill(-pid, signal);
-  } catch {
-    // The group can be fully reaped between the timeout firing and this call.
+  },
+};
+
+/**
+ * What a group signal did. `absent` is the ordinary "nothing to kill" (no
+ * member left); `failed` is a real refusal the run must not read as success.
+ */
+export type GroupKillOutcome =
+  | { readonly kind: 'delivered' }
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'failed'; readonly message: string };
+
+/**
+ * Signal the group led by `pid` and say what happened. Only `ESRCH` means
+ * there was nothing to kill; any other error (`EPERM`, an invalid pid) is a
+ * `failed` outcome carrying the errno and the target, so the caller can surface it.
+ * // Usage: killProcessGroup(systemProcessGroups, 4242, 'SIGKILL') // → { kind: 'absent' }
+ */
+export const killProcessGroup = (
+  port: ProcessGroupPort,
+  pid: number,
+  signal: NodeJS.Signals | 0
+): GroupKillOutcome => {
+  try {
+    port.signalGroup(pid, signal);
+    return { kind: 'delivered' };
+  } catch (caught) {
+    const code = (caught as NodeJS.ErrnoException).code;
+    if (code === 'ESRCH') return { kind: 'absent' };
+    return {
+      kind: 'failed',
+      message: `signal ${signal} to process group ${pid}: ${code ?? 'unknown error'} ${(caught as Error).message}`,
+    };
   }
+};
+
+/**
+ * {@link killProcessGroup}, with a real failure written to the run's output.
+ * A refused signal leaves a straggler alive, which is exactly what the reap and
+ * the hang kill exist to prevent, so it must not pass silently.
+ */
+const signalGroupReporting = (
+  port: ProcessGroupPort,
+  mirror: NodeJS.WritableStream,
+  pid: number,
+  signal: NodeJS.Signals
+): GroupKillOutcome => {
+  const outcome = killProcessGroup(port, pid, signal);
+  if (outcome.kind === 'failed') mirror.write(`Watchdog could not ${outcome.message}\n`);
+  return outcome;
 };
 
 /** Bound on settling a finished child's output; a grandchild holding a pipe must not hold the run. */
@@ -337,8 +409,18 @@ const runAttempt = async (options: WatchdogOptions): Promise<AttemptResult> => {
   child.stdout.on('data', forward);
   child.stderr.on('data', forward);
 
+  const groups = options.processGroups ?? systemProcessGroups;
+  let groupAliveAtExit = false;
   const exited = new Promise<number>((resolve) => {
-    child.once('exit', (code, signal) => resolve(code ?? (signal ? signalExitCode(signal) : 1)));
+    child.once('exit', (code, signal) => {
+      // The runtime has reaped the leader by now. If a member is left, the
+      // group id is still ours; if none is, it is free for the kernel to reuse
+      // and nothing may signal it by this pid later.
+      if (child.pid !== undefined) {
+        groupAliveAtExit = killProcessGroup(groups, child.pid, 0).kind === 'delivered';
+      }
+      resolve(code ?? (signal ? signalExitCode(signal) : 1));
+    });
     // Without this listener a spawn failure (a missing executable, EMFILE)
     // emits `error` with nothing subscribed, which Node throws — the watchdog
     // would die before writing `shard-meta.json`, and the merge job would read
@@ -371,15 +453,15 @@ const runAttempt = async (options: WatchdogOptions): Promise<AttemptResult> => {
     const first = await Promise.race([exited, timedOut]);
     if (first !== 'timeout') {
       await settleOutput(outputClosed, [mirror, ...(logWritable ? [log] : [])]);
-      return { exitCode: first, hung: false, pid: child.pid };
+      return { exitCode: first, hung: false, pid: child.pid, groupAliveAtExit };
     }
 
     const pid = child.pid;
     const graceMs = (options.killGraceSeconds ?? 10) * 1000;
     if (pid !== undefined) {
-      killGroup(pid, 'SIGTERM');
+      signalGroupReporting(groups, mirror, pid, 'SIGTERM');
       await Promise.race([exited, sleep(graceMs)]);
-      killGroup(pid, 'SIGKILL');
+      signalGroupReporting(groups, mirror, pid, 'SIGKILL');
       // Direct-child fallback for a platform where the group kill is refused;
       // a no-op when the group kill landed.
       child.kill('SIGKILL');
@@ -524,9 +606,21 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
     // database and inherited output pipes alongside attempt 2. Reap the
     // group and give any straggler a moment to finish before the log is
     // renamed out of the retry's way.
-    if (attempt.pid !== undefined) {
-      killGroup(attempt.pid, 'SIGKILL');
-      await sleep((options.crashReapGraceSeconds ?? 2) * 1000);
+    //
+    // The direct child is already reaped here, so `pid` may be a freed id the
+    // kernel has handed to an unrelated process group. Signal it only when the
+    // group was seen alive at exit, and wait only when that signal landed: an
+    // empty group has nothing to finish, and the common crash leaves none.
+    if (attempt.pid !== undefined && attempt.groupAliveAtExit === true) {
+      const reap = signalGroupReporting(
+        options.processGroups ?? systemProcessGroups,
+        mirror,
+        attempt.pid,
+        'SIGKILL'
+      );
+      if (reap.kind === 'delivered') {
+        await sleep((options.crashReapGraceSeconds ?? 2) * 1000);
+      }
     }
     attempt = await retry();
     await observe(attempt);
