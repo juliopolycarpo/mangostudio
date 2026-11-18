@@ -180,7 +180,8 @@ export function deleteTomlSectionValue(
   key: string
 ): boolean {
   const current = doc[section];
-  if (!isTomlTable(current) || !(key in current)) return false;
+  // Own keys only: `in` also matches names inherited from Object.prototype, such as toString.
+  if (!isTomlTable(current) || !Object.hasOwn(current, key)) return false;
   const next = { ...current };
   delete next[key];
   doc[section] = next;
