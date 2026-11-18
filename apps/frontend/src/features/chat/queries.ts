@@ -7,6 +7,7 @@ import {
   queryOptions,
   type QueryPersister,
   useInfiniteQuery,
+  type UseInfiniteQueryResult,
   useMutation,
   useQuery,
   useQueryClient,
@@ -282,17 +283,14 @@ export const messagesQueryOptions = (chatId: string) =>
  * @example
  * const isEmpty = useMessagesQuery(chatId, (cache) => cache.pages.length === 0).data;
  */
-export function useMessagesQuery<TData = MessagesCache>(
+export function useMessagesQuery(chatId: string | null): UseInfiniteQueryResult<MessagesCache>;
+export function useMessagesQuery<TData>(
   chatId: string | null,
-  select: (data: MessagesCache) => TData = selectWholeTranscript as (data: MessagesCache) => TData
-) {
+  select: (data: MessagesCache) => TData
+): UseInfiniteQueryResult<TData>;
+export function useMessagesQuery(chatId: string | null, select?: (data: MessagesCache) => unknown) {
   const id = chatId ?? '';
-  return useInfiniteQuery({
-    ...messagesQueryOptions(id),
-    enabled: !!chatId,
-    select,
-  });
+  // An absent `select` is the query's own identity default, so the unselected
+  // overload returns the cache exactly as before.
+  return useInfiniteQuery({ ...messagesQueryOptions(id), enabled: !!chatId, select });
 }
-
-/** The default `select`: the whole cache, as an unselected query returns it. */
-const selectWholeTranscript = (data: MessagesCache): MessagesCache => data;
