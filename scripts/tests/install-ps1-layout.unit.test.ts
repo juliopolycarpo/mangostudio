@@ -1248,14 +1248,24 @@ describe('install.ps1 npm tarball extraction', () => {
     90000
   );
 
-  /** What Get-SystemTarPath returns, or `error: <message>`, after `setup` has changed the environment. */
-  function systemTarOutcome(setup: string): string {
+  /**
+   * What `Get-SystemTarPath <args>` returns, or `error: <message>` when it fails. The values
+   * are passed as parameters: unsetting SystemRoot inside the PowerShell host can break the
+   * host itself, which would hide the function's own answer.
+   */
+  function systemTarOutcome(args: string): string {
     const l = layout();
     const result = runDotSourced(
       l.scriptPath,
-      `${setup}; try { [Console]::Out.Write((Get-SystemTarPath)) } catch { [Console]::Out.Write('error: ' + $_.Exception.Message) }`
+      `try { Get-SystemTarPath ${args} } catch { 'error: ' + $_.Exception.Message }`
     );
-    return result.stdout.replace(/\r/g, '');
+    const outcome = result.stdout.replace(/\r/g, '').trim();
+    if (result.exitCode !== 0 || outcome === '') {
+      throw new Error(
+        `(Get-SystemTarPath ${args}): expected a path or an error line on stdout | received exit ${result.exitCode}, stdout ${JSON.stringify(result.stdout)}, stderr ${JSON.stringify(result.stderr)}`
+      );
+    }
+    return outcome;
   }
 
   test.skipIf(!POWERSHELL)(
@@ -1263,7 +1273,7 @@ describe('install.ps1 npm tarball extraction', () => {
     () => {
       const windowsTar = toWindowsPath(systemExecutable('tar.exe'));
 
-      const outcome = systemTarOutcome('$env:windir = $env:SystemRoot; Remove-Item Env:SystemRoot');
+      const outcome = systemTarOutcome("-SystemRoot '' -Windir $env:SystemRoot");
 
       expect(outcome).toBe(windowsTar);
     },
@@ -1273,7 +1283,7 @@ describe('install.ps1 npm tarball extraction', () => {
   test.skipIf(!POWERSHELL)(
     'refuses, naming SystemRoot and windir, rather than falling back to a tar on PATH',
     () => {
-      const outcome = systemTarOutcome('Remove-Item Env:SystemRoot; Remove-Item Env:windir');
+      const outcome = systemTarOutcome("-SystemRoot '' -Windir ''");
 
       expect(outcome).toBe(
         'error: cannot locate the Windows system tar.exe | expected: SystemRoot or windir set | received: neither is set'
@@ -1287,7 +1297,7 @@ describe('install.ps1 npm tarball extraction', () => {
     () => {
       const emptyWindowsDir = toWindowsPath(layout().linuxDir);
 
-      const outcome = systemTarOutcome(`$env:SystemRoot = ${psQuote(emptyWindowsDir)}`);
+      const outcome = systemTarOutcome(`-SystemRoot ${psQuote(emptyWindowsDir)}`);
 
       expect(outcome).toBe(
         `error: the Windows system tar.exe is missing | expected: ${emptyWindowsDir}\\System32\\tar.exe | received: no such file`

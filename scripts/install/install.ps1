@@ -538,9 +538,11 @@ function Write-NextSteps {
 # SystemRoot says where Windows lives, windir is the same directory under its
 # older name. With neither set there is nothing to build the path from, and
 # falling back to the bare name would bring the PATH lookup back, so it fails.
-function Get-SystemTarPath {
-  $windowsDir = $env:SystemRoot
-  if (-not $windowsDir) { $windowsDir = $env:windir }
+# Both values are parameters, defaulting to the environment, so a test can pass
+# them without unsetting variables the PowerShell host itself relies on.
+function Get-SystemTarPath([string]$SystemRoot = $env:SystemRoot, [string]$Windir = $env:windir) {
+  $windowsDir = $SystemRoot
+  if (-not $windowsDir) { $windowsDir = $Windir }
   if (-not $windowsDir) {
     Fail 'cannot locate the Windows system tar.exe | expected: SystemRoot or windir set | received: neither is set'
   }
