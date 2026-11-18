@@ -15,13 +15,15 @@ import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import type { NoModelAvailableError } from '../application/resolve-model';
 
 export interface ModelUnavailableHttpResponse {
-  readonly status: number;
+  // A literal, not `number`: callers answer `apiErrorStatus(refusal.status, refusal.body)`,
+  // and the literal is what types the 503 into Eden's error channel.
+  readonly status: 503;
   readonly body: ApiErrorResponse;
 }
 
 /**
  * Maps a model-resolution failure to its HTTP answer.
- * // Usage: const { status, body } = modelUnavailableResponse(err); set.status = status; return body;
+ * // Usage: const refusal = modelUnavailableResponse(err); return apiErrorStatus(refusal.status, refusal.body);
  */
 export function modelUnavailableResponse(
   error: NoModelAvailableError
