@@ -480,7 +480,7 @@ async fn idle_peers_with_a_slot_still_free_do_not_block_an_authorized_dial() {
     assert_eq!(session.remote().unwrap().peer.role, "runtime");
 
     // The dial got through *while* the idle peers held their slots, not
-    // after their `UPGRADE_TIMEOUT` freed them: they are all still open. That
+    // after the first-byte deadline freed them: they are all still open. That
     // ordering, not a speed, is what shows the bound counts mid-upgrade peers
     // only.
     assert_idle_peers_still_open(&idle_peers, "after the authorized dial succeeded");
@@ -493,17 +493,22 @@ async fn idle_peers_with_a_slot_still_free_do_not_block_an_authorized_dial() {
     server.await.unwrap().unwrap();
 }
 
-/// The defect this test exists to close: a peer that opens the TCP
-/// connection and never sends a byte must not lock the listener, leak a
-/// task or a file descriptor, or hold a pending-handshake permit forever.
-/// Every slot is exhausted here, so an authenticated hub racing in behind
-/// them genuinely has to wait — but only until the idle peers' own
-/// `UPGRADE_TIMEOUT` expires, never permanently, and `run` still shuts down
-/// cleanly (no aborted task) afterwards. Slow by design (a little over
-/// `UPGRADE_TIMEOUT`): this is the bounded-degradation guarantee itself,
-/// not something a shorter proxy assertion can stand in for.
+/// A peer that opens the TCP connection and never sends a byte must not lock
+/// the listener, leak a task or a file descriptor, or hold a pending-handshake
+/// permit for long (#1086). Every slot is exhausted here, so an authenticated
+/// hub racing in behind them has to wait, but only until the runtime's
+/// first-byte deadline drops the idle peers, never for the whole 10 s upgrade
+/// timeout, and `run` still shuts down cleanly (no aborted task) afterwards.
+/// The unit tests in `serve.rs` pin the exact deadline under paused time; this
+/// proves it end to end over real sockets, with a bound that only separates
+/// the first-byte deadline from the upgrade timeout.
 #[tokio::test]
-async fn full_exhaustion_recovers_within_the_upgrade_timeout_not_forever() {
+async fn four_silent_peers_do_not_deny_a_real_dial_for_the_upgrade_timeout() {
+    /// Well under the runtime's 10 s upgrade timeout, well over its 2 s
+    /// first-byte deadline: a runner slow enough to cross it is not the
+    /// failure this guards against.
+    const RECOVERY_BOUND: Duration = Duration::from_secs(6);
+
     let (addr, listener) = bind_ephemeral().await;
     let cancel = CancellationToken::new();
     let home = scratch_home("idle-peers-full");
@@ -524,16 +529,14 @@ async fn full_exhaustion_recovers_within_the_upgrade_timeout_not_forever() {
         }
         peers
     };
+    let silent_since = std::time::Instant::now();
 
     // Every slot is held, so each individual dial is refused immediately
-    // (a hard TCP drop at admission, per the fix — never a queued wait) for
-    // as long as the idle peers hold their permits. A real hub's own
-    // reconnect loop is exactly this: retry on a cadence. Before the fix,
-    // no dial would ever have succeeded here, because nothing ever
-    // recovered the idle peers' permits at all. The hang guard is what
-    // "not forever" means here; the idle peers' own end of stream below is
-    // what shows the recovery came from their `UPGRADE_TIMEOUT`.
-    let recovered = until("a dial to succeed once the idle peers time out", async {
+    // (a hard TCP drop at admission — never a queued wait) for as long as
+    // the idle peers hold their permits. A real hub's own reconnect loop is
+    // exactly this: retry on a cadence. The idle peers' own end of stream
+    // below is what shows the recovery came from the runtime dropping them.
+    let recovered = until("a dial to succeed once the idle peers are dropped", async {
         loop {
             if let Ok(session) = dial(addr, Some(TOKEN)).await {
                 return session;
@@ -542,9 +545,15 @@ async fn full_exhaustion_recovers_within_the_upgrade_timeout_not_forever() {
         }
     })
     .await;
+    let waited = silent_since.elapsed();
     assert_eq!(recovered.remote().unwrap().peer.role, "runtime");
-    // Recovery came from the runtime dropping the idle peers at their own
-    // `UPGRADE_TIMEOUT`, which freed their permits: each one reads the end
+    assert!(
+        waited < RECOVERY_BOUND,
+        "expected a real dial served within {RECOVERY_BOUND:?} of four silent peers connecting | \
+         received: {waited:?}"
+    );
+    // Recovery came from the runtime dropping the idle peers at its
+    // first-byte deadline, which freed their permits: each one reads the end
     // of its stream.
     for (index, mut peer) in idle_peers.into_iter().enumerate() {
         use tokio::io::AsyncReadExt as _;
@@ -567,7 +576,7 @@ async fn full_exhaustion_recovers_within_the_upgrade_timeout_not_forever() {
 /// The other half of the same bound: once every pending-handshake slot is
 /// genuinely held, a peer beyond it is refused *before* any task is
 /// spawned — proven by it being dropped (no bytes) while every idle peer
-/// still holds its slot, rather than lingering for `UPGRADE_TIMEOUT`.
+/// still holds its slot, rather than lingering until the first-byte deadline.
 #[tokio::test]
 async fn a_peer_past_the_pending_handshake_bound_is_dropped_before_spawning() {
     use tokio::io::AsyncReadExt as _;
@@ -594,9 +603,9 @@ async fn a_peer_past_the_pending_handshake_bound_is_dropped_before_spawning() {
     // A peer past the bound is dropped at admission, which is an ordering,
     // not a speed: the accept loop takes the backlog in order, so the four
     // idle peers each hold a permit before the fifth is accepted, and they
-    // keep it until their own `UPGRADE_TIMEOUT`. So the fifth must end while
+    // keep it until the first-byte deadline. So the fifth must end while
     // every idle peer is still open. Had it been spawned into a task instead,
-    // it could only end at its own `UPGRADE_TIMEOUT`, after the idle peers'
+    // it could only end at its own first-byte deadline, after the idle peers'
     // (accepted earlier) had already dropped them. No wall-clock threshold
     // decides this; the bound below only keeps a broken build from hanging.
     let mut fifth = tokio::net::TcpStream::connect(addr).await.unwrap();
