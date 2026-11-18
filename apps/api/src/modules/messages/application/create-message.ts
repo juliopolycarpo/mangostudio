@@ -2,8 +2,8 @@ import type { InteractionMode } from '@mangostudio/shared/types';
 import type { Kysely } from 'kysely';
 
 import type { Database } from '../../../db/types';
-import { publishChatListInvalidation } from '../../../services/realtime/chat-list-invalidation';
 import { assertChatOwnership } from '../../chats/domain/chat-ownership';
+import { updateChatAfterTurn } from '../../generation/infrastructure/conversation-persistence';
 import { insertMessage } from '../infrastructure/message-repository';
 
 export interface CreateMessageInput {
@@ -46,14 +46,8 @@ export async function createMessageUseCase(
     db
   );
 
-  await db
-    .updateTable('chats')
-    .set({ updatedAt: input.timestamp })
-    .where('id', '=', input.chatId)
-    .execute();
-
   // No feed row: a message written straight through this route is not a turn
-  // anything ran, so there is nothing to describe. The signal is still owed —
-  // the row it reordered is on screen in every other tab.
-  publishChatListInvalidation(input.userId);
+  // anything ran, so there is nothing to describe. The chat list is still owed
+  // its signal, and the helper that moves the timestamp sends it.
+  await updateChatAfterTurn(input.chatId, input.userId, input.timestamp, db);
 }

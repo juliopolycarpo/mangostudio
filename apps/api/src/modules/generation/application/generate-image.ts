@@ -10,7 +10,6 @@ import {
   getProvider,
   getProviderForModel,
 } from '../../../services/providers/core/provider-registry';
-import { publishChatListInvalidation } from '../../../services/realtime/chat-list-invalidation';
 import { generateId } from '../../../utils/id';
 import { assertChatOwnership } from '../../chats/domain/chat-ownership';
 import { composePrompt } from '../../prompt-rules/application/prompt-composer';
@@ -159,10 +158,9 @@ export async function generateImage(
       conn
     )
   );
-  // `persistImageTurn` moves `updatedAt` inside its transaction, so the signal
-  // waits until the transaction has committed. No feed row: the timeline tracks
-  // turns a runner executed, and an image generation is not one of those yet.
-  publishChatListInvalidation(input.userId);
+  // `persistImageTurn` announces the move itself, after its transaction commits.
+  // No feed row: the timeline tracks turns a runner executed, and an image
+  // generation is not one of those yet.
 
   return {
     userMessage: {

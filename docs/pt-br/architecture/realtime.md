@@ -109,7 +109,12 @@ feed refazem a busca a cada frame recebido; em um tópico compartilhado, um comm
 git refazia a busca da lista de chats e um turno cancelado refazia a do feed,
 cada uma respondida com o que a aba já tinha. A API o publica por
 `publishChatListInvalidation`
-(`apps/api/src/services/realtime/chat-list-invalidation.ts`).
+(`apps/api/src/services/realtime/chat-list-invalidation.ts`). Quem move
+`chats.updatedAt` o anuncia no mesmo lugar, `updateChatAfterTurn` e
+`persistImageTurn` em
+`apps/api/src/modules/generation/infrastructure/conversation-persistence.ts`;
+apenas a criação, a edição e a exclusão de chat, que não mexem nessa coluna, publicam por
+conta própria. `chat-list-signal-boundary.test.ts` garante as duas regras.
 
 Tópicos Git de outro usuário permanecem sem assinatura e retornam a mesma
 resposta `NOT_FOUND`, sem enumeração, de um tópico indisponível. Gramáticas de

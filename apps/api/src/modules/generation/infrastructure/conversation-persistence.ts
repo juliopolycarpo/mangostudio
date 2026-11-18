@@ -4,6 +4,7 @@ import type { Kysely } from 'kysely';
 
 import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
+import { publishChatListInvalidation } from '../../../services/realtime/chat-list-invalidation';
 import { linkAttachmentsToMessage } from '../../attachments/infrastructure/attachment-repository';
 import { insertGeneratedImageArtifact } from '../../generated-images/infrastructure/generated-image-repository';
 import {
@@ -270,28 +271,59 @@ export function finalizeCheckpointedAiResponse(
 }
 
 /**
- * Move a chat up in recent activity. Use `{ bestEffort: true }` once a keyed turn's
- * verdict is durable, so a recency write failure cannot replace that verdict.
+ * The one statement that moves `chats.updatedAt`, and never backwards: a late
+ * writer holding an older timestamp must not push a chat back down the list.
+ * Not exported — callers go through {@link updateChatAfterTurn}, or through
+ * {@link persistImageTurn}, which must write inside its own transaction.
+ */
+async function writeChatUpdatedAt(
+  chatId: string,
+  timestamp: number,
+  db: Kysely<Database>
+): Promise<void> {
+  await db
+    .updateTable('chats')
+    .set({ updatedAt: timestamp })
+    .where('id', '=', chatId)
+    .where('updatedAt', '<=', timestamp)
+    .execute();
+}
+
+/**
+ * Move a chat up in recent activity and tell every tab of `userId` that the chat
+ * list is stale. This is where the invariant lives: whoever moves
+ * `chats.updatedAt` announces it here, so a new writer cannot forget the signal
+ * (`chat-list-signal-boundary.test.ts` rejects one that writes the column
+ * itself). The frame goes out after the write returns, once, and also when the
+ * `updatedAt` guard matched no row: a chat deleted mid-turn is still a stale row
+ * in every other tab.
  *
- * @example await updateChatAfterTurn(chatId, finishedAt, db, { bestEffort: true });
+ * Pass a connection, not an open transaction: the frame must not outrun the commit.
+ *
+ * Use `{ bestEffort: true }` once a keyed turn's verdict is durable, so a recency
+ * write failure cannot replace that verdict. The frame still goes out when the
+ * failure is swallowed, because the verdict's transcript is committed and tabs
+ * reconcile on it; a failure that rethrows announces nothing.
+ *
+ * @example await updateChatAfterTurn(chatId, userId, finishedAt, db, { bestEffort: true });
  */
 export async function updateChatAfterTurn(
   chatId: string,
+  userId: string,
   aiTimestamp: number,
   db: Kysely<Database>,
   { bestEffort = false } = {}
 ): Promise<void> {
   try {
-    await db
-      .updateTable('chats')
-      .set({ updatedAt: aiTimestamp })
-      .where('id', '=', chatId)
-      .where('updatedAt', '<=', aiTimestamp)
-      .execute();
+    await writeChatUpdatedAt(chatId, aiTimestamp, db);
   } catch (error) {
     if (!bestEffort) throw error;
     logger.warn('chat_recency_update_failed', { chatId, error: String(error) });
   }
+  // Also after a swallowed failure: the turn's transcript is already committed,
+  // and a tab waiting on this frame to settle a mid-unwind row would otherwise
+  // keep showing it as working.
+  publishChatListInvalidation(userId);
 }
 
 export interface PersistImageMessageInput {
@@ -370,13 +402,12 @@ export async function persistImageTurn(
       );
     }
 
-    await trx
-      .updateTable('chats')
-      .set({ updatedAt: input.aiTimestamp })
-      .where('id', '=', input.chatId)
-      .where('updatedAt', '<=', input.aiTimestamp)
-      .execute();
+    await writeChatUpdatedAt(input.chatId, input.aiTimestamp, trx);
   });
+  // After the commit, not beside the write: a frame sent from inside the
+  // transaction could reach a tab whose refetch still reads the old ordering,
+  // and a rolled-back turn would announce a move that never happened.
+  publishChatListInvalidation(input.userId);
 }
 
 async function insertAiMessageWithGeneratedImages(

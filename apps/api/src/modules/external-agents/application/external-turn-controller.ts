@@ -59,7 +59,6 @@ import {
   isEnvironmentUnavailable,
 } from '../../../lib/environment-unavailable';
 import { createDiagnosticLogger } from '../../../lib/logger';
-import { publishChatListInvalidation } from '../../../services/realtime/chat-list-invalidation';
 import { isRequestNotSent } from '../../../services/runtime-client/request-not-sent';
 import { getRuntimeConnectionManager } from '../../../services/runtime-client/runtime-connection-manager';
 import { generateId } from '../../../utils/id';
@@ -1251,12 +1250,13 @@ export function createExternalTurnController(
     );
     // Only the timestamp: an external turn has no MangoStudio agent profile, so
     // nothing that derives one from a completed turn applies to it.
-    await updateChatAfterTurn(input.chatId, at, db, { bestEffort: Boolean(input.admittedChat) });
+    await updateChatAfterTurn(input.chatId, input.userId, at, db, {
+      bestEffort: Boolean(input.admittedChat),
+    });
     // Every terminal reason reaches here; only the one that produced work is
     // worth a feed row. A cancelled or errored turn is already visible in the
-    // chat it happened in, but its `updatedAt` still moved — so the sidebar
-    // still needs the signal, just not a row to explain it.
-    publishChatListInvalidation(input.userId);
+    // chat it happened in, and its `updatedAt` still moved — the sidebar's
+    // signal comes from `updateChatAfterTurn`, just not a row to explain it.
     if (reason === 'completed') {
       void recordTurnCompletedActivity(input.userId, input.chatId, db);
     }

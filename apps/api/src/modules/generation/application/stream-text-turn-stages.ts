@@ -37,7 +37,6 @@ import type {
   GenerationConfig,
   ToolDefinition,
 } from '../../../services/providers/types';
-import { publishChatListInvalidation } from '../../../services/realtime/chat-list-invalidation';
 import { GENERATE_IMAGE_TOOL_NAME } from '../../../services/tools/builtin/generate-image';
 import type { WorkdirPolicy } from '../../../services/tools/types';
 import { generateId } from '../../../utils/id';
@@ -1017,12 +1016,11 @@ export async function* finalizeSuccessfulTurn(
   );
   if (!finalized) return;
 
-  await updateChatAfterTurn(chatId, aiTimestamp, db, {
+  // `updateChatAfterTurn` sends the list frame; the feed row below is a separate
+  // signal that says the turn is worth remembering.
+  await updateChatAfterTurn(chatId, userId, aiTimestamp, db, {
     bestEffort: Boolean(session.input.admittedChat),
   });
-  // The list frame and the feed row are separate signals: the row says a turn
-  // is worth remembering, the frame says the chat moved.
-  publishChatListInvalidation(userId);
   void recordTurnCompletedActivity(userId, chatId, db);
 
   yield { type: 'done', messageId: aiMsgId, generationTime };
@@ -1095,8 +1093,7 @@ export async function* finalizeToolLoopExhausted(
       db
     );
     if (!finalized) return;
-    await updateChatAfterTurn(chatId, Date.now(), db);
-    publishChatListInvalidation(userId);
+    await updateChatAfterTurn(chatId, userId, Date.now(), db);
   } catch {
     // best-effort
   }
@@ -1173,8 +1170,7 @@ export async function* finalizeTurnError(
       db
     );
     if (finalized) {
-      await updateChatAfterTurn(chatId, Date.now(), db);
-      publishChatListInvalidation(userId);
+      await updateChatAfterTurn(chatId, userId, Date.now(), db);
     }
   } catch {
     // best-effort
@@ -1217,10 +1213,9 @@ export async function finalizeInterruptedTurn(
   );
   if (!finalized) return;
   if (reasonCode === 'user_cancelled') session.input.onUserCancelled?.();
-  await updateChatAfterTurn(chatId, Date.now(), db, {
+  await updateChatAfterTurn(chatId, userId, Date.now(), db, {
     bestEffort: Boolean(session.input.admittedChat),
   });
-  publishChatListInvalidation(userId);
 }
 
 export function getAbortInterruptionReason(
