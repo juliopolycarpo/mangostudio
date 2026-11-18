@@ -9,6 +9,7 @@ import type { WorkdirPolicy } from '../../../services/tools/types';
 export const SUBAGENT_TIMEOUT_CODE = 'TIMEOUT';
 export const SUBAGENT_ABORT_CODE = 'ABORTED';
 export const SUBAGENT_FAILED_CODE = 'FAILED';
+export const SUBAGENT_MODEL_UNAVAILABLE_CODE = 'MODEL_UNAVAILABLE';
 export const SUBAGENT_EMPTY_TEXT_FALLBACK = 'Subagent completed without a text response.';
 export const SUBAGENT_SUMMARIZE_PROMPT =
   'Final summary required. Respond now in plain text only — do not call any tools. Summarise your findings: key points, relevant file paths or commands, and recommended next steps if any.';
@@ -75,5 +76,27 @@ export class SubagentDelegationError extends Error {
   ) {
     super(message);
     this.name = 'SubagentDelegationError';
+  }
+}
+
+/**
+ * The model an agent profile pins is not served by any connector, typically
+ * because its API key was revoked or its connector removed after the pin was
+ * saved. Raised before the subagent runs anything, so nothing needs replaying.
+ *
+ * It names the agent, the model and the recovery, and is deliberately not
+ * answered by running on the parent's model: that would move the task to a
+ * different provider and cost model the user never chose for this agent.
+ */
+export class SubagentModelUnavailableError extends SubagentDelegationError {
+  constructor(
+    readonly agentId: AgentId,
+    readonly modelId: string
+  ) {
+    super(
+      `Agent "${agentId}" is pinned to model "${modelId}", but no configured connector serves it (its API key may have been revoked or the connector removed). Restore the connector in Settings, or pick an available model for this agent.`,
+      SUBAGENT_MODEL_UNAVAILABLE_CODE
+    );
+    this.name = 'SubagentModelUnavailableError';
   }
 }
