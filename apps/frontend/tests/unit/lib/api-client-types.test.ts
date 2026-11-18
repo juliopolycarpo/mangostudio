@@ -89,6 +89,73 @@ assertType<
   Equals<typeof client.api.ws.subscribe extends (...args: never) => unknown ? true : false, true>
 >();
 
+// 8. The GitHub routes keep the typed error channel their `response` maps
+//    declare. Two things once erased it: an `as const` on the shared error map
+//    (Eden then read `error` as `unknown`), and the callers' `{}` workaround
+//    that followed. Each route is pinned on two facts, because a widened
+//    channel breaks both: the exact set of statuses the route can answer, and
+//    the body shape of every status the route itself declares. The statuses
+//    outside that declaration (401, 403, 422, 429) come from the shared auth,
+//    API-key, validation and rate-limit hooks every route inherits.
+type InheritedHookStatus = 401 | 403 | 422 | 429;
+type ChatScopedStatus = InheritedHookStatus | 404 | 409 | 500;
+type InboxStatus = InheritedHookStatus | 500;
+
+/**
+ * Constrained to Eden's `{ status, value }` arms (or `null`) so a channel that
+ * widened to `unknown` or `{}` fails to satisfy the check instead of indexing.
+ */
+type TreatyResponse = { error: { status: number; value: unknown } | null };
+type ErrorArms<Response extends TreatyResponse> = Exclude<Response['error'], null>;
+type ErrorStatuses<Response extends TreatyResponse> = ErrorArms<Response>['status'];
+type ErrorBodyAt<Response extends TreatyResponse, Status extends number> = Extract<
+  ErrorArms<Response>,
+  { status: Status }
+>['value'];
+
+/**
+ * Mutual assignability. The 500 arm is a union of the route's declared body and
+ * the error hook's, structurally identical but distinct type identities, so the
+ * identity-based `Equals` reports them unequal.
+ */
+type SameShape<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+
+/** Chat-scoped routes declare 404, 409 and 500 beyond what the hooks add. */
+type ChatScopedErrorsExact<Response extends TreatyResponse> =
+  Equals<ErrorStatuses<Response>, ChatScopedStatus> extends true
+    ? SameShape<ErrorBodyAt<Response, 404 | 409 | 500>, ApiErrorResponse>
+    : false;
+
+/** The inbox has no chat to refuse, so it declares only 500. */
+type InboxErrorsExact<Response extends TreatyResponse> =
+  Equals<ErrorStatuses<Response>, InboxStatus> extends true
+    ? SameShape<ErrorBodyAt<Response, 500>, ApiErrorResponse>
+    : false;
+
+type GithubContextResponse = Awaited<ReturnType<typeof client.api.github.context.get>>;
+type GithubInboxResponse = Awaited<ReturnType<typeof client.api.github.inbox.get>>;
+type GithubPrsResponse = Awaited<ReturnType<typeof client.api.github.prs.get>>;
+type GithubIssuesResponse = Awaited<ReturnType<typeof client.api.github.issues.get>>;
+type GithubPrDetailResponse = Awaited<ReturnType<typeof client.api.github.pr.get>>;
+type GithubPrChecksResponse = Awaited<ReturnType<typeof client.api.github.pr.checks.get>>;
+type GithubPrThreadsResponse = Awaited<
+  ReturnType<(typeof client.api.github.pr)['review-threads']['get']>
+>;
+type GithubCreatePrResponse = Awaited<ReturnType<typeof client.api.github.pr.post>>;
+type GithubPrReadyResponse = Awaited<ReturnType<typeof client.api.github.pr.ready.post>>;
+type GithubPrCheckoutResponse = Awaited<ReturnType<typeof client.api.github.pr.checkout.post>>;
+
+assertType<ChatScopedErrorsExact<GithubContextResponse>>();
+assertType<InboxErrorsExact<GithubInboxResponse>>();
+assertType<ChatScopedErrorsExact<GithubPrsResponse>>();
+assertType<ChatScopedErrorsExact<GithubIssuesResponse>>();
+assertType<ChatScopedErrorsExact<GithubPrDetailResponse>>();
+assertType<ChatScopedErrorsExact<GithubPrChecksResponse>>();
+assertType<ChatScopedErrorsExact<GithubPrThreadsResponse>>();
+assertType<ChatScopedErrorsExact<GithubCreatePrResponse>>();
+assertType<ChatScopedErrorsExact<GithubPrReadyResponse>>();
+assertType<ChatScopedErrorsExact<GithubPrCheckoutResponse>>();
+
 describe('Eden treaty type seam', () => {
   it('keeps route input and output types inferable from App', () => {
     // The assertions above are enforced by `bun check`. Reaching this body
