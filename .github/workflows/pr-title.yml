@@ -1,0 +1,62 @@
+name: PR title
+
+# The squash subject is the pull request title, and git-cliff builds CHANGELOG.md and the release
+# notes from it. A title whose type cliff.toml does not group lands on main and drops out of both
+# without a warning (#2398 landed as `hardening(protocol): ...` and its entry is missing). This
+# checks the title against the types cliff.toml's commit_parsers name.
+#
+# Its own workflow, not a ci.yml job, so editing a title re-runs this check alone instead of the
+# whole pipeline. It is therefore not part of ci.yml's gates: the branch ruleset has to require the
+# `Title has a changelog type` context by name, or a red check here still merges. GitHub also takes
+# the squash subject from the PR title only while the repository's squash-title setting is
+# `PR_TITLE`; docs/reference/releasing.md records both settings this check depends on.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened]
+
+permissions: {}
+
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  title:
+    name: Title has a changelog type
+    runs-on: ubuntu-latest
+    timeout-minutes: 10 # setup-bun's two retry waits alone take four minutes
+    permissions:
+      contents: read # check out the base branch; nothing is written and no secret is read
+    steps:
+      # The base branch's tip, not the pull request's tree: a gate a pull request can edit is not a
+      # gate. Checking out the head would let a branch loosen the script or add a type to
+      # cliff.toml and pass itself. The cost is that a type added to cliff.toml cannot be used in
+      # its own PR's title until that change is on main, which is the right way round for a release
+      # gate. The branch ref rather than `base.sha`: that is the base as of the last synchronise,
+      # and a branch opened before this check landed would carry a base without the script.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.base.ref }}
+
+      # The checkout above is the base branch, so this is the base's copy of the action too.
+      - uses: ./.github/actions/setup-bun # zizmor: ignore[self-repository] load the action from the base branch checkout
+
+      # The title reaches the script through the environment, never interpolated into the shell
+      # text: on a fork pull request it is attacker-controlled.
+      - name: Check the title
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          # Reachable only from the pull request that adds the script, while no base has it yet.
+          # Once it is on main, check-pr-title.unit.test.ts runs it, so deleting it fails CI
+          # instead of turning this step into a silent pass.
+          if [ ! -f scripts/ci/check-pr-title.ts ]; then
+            echo "$BASE_REF has no scripts/ci/check-pr-title.ts;"
+            echo "this is the pull request that introduces it, so there is nothing to check against"
+            exit 0
+          fi
+          bun scripts/ci/check-pr-title.ts "$PR_TITLE"
