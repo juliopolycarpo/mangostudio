@@ -78,6 +78,17 @@ export function formatToolDuration(durationMs: number): string {
 }
 
 /**
+ * A running call's clock, in whole seconds. It ticks once a second, so a
+ * tenth-of-a-second reading would be a number that is never right; the settled
+ * row replaces it with the measured `formatToolDuration` once the call ends.
+ *
+ * // Usage: formatToolElapsed(12_900) // => '12s'
+ */
+export function formatToolElapsed(elapsedMs: number): string {
+  return `${Math.max(0, Math.floor(elapsedMs / 1000))}s`;
+}
+
+/**
  * The status glyph every tool row draws. Terminal states get a verdict mark; a
  * call still in flight gets its own tool icon, which is the only place tool
  * identity is drawn — a settled row is identified by its name alone.

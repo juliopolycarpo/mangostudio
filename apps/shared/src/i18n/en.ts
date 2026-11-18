@@ -3317,6 +3317,21 @@ export const messages: CoreMessages = {
       mcp: 'MCP',
       subagent: 'Subagent',
     },
+    /** Why a failed, cancelled or timed-out call ended, one entry per `ToolExecutionReasonCode`. */
+    reasons: {
+      timeout: 'Time limit reached',
+      user_cancelled: 'Cancelled by you',
+      turn_aborted: 'Turn stopped',
+      not_allowed: 'Not allowed',
+      tool_disabled: 'Tool disabled',
+      unknown_tool: 'Unknown tool',
+      validation_failed: 'Invalid arguments',
+      server_closed: 'Server closed',
+      execution_error: 'Execution error',
+      outcome_unknown: 'Outcome unknown',
+    },
+    /** A running call's clock beside its configured time limit, e.g. `12s of 30s`. */
+    elapsedOfLimit: '{elapsed} of {limit}',
     /** What a finished call produced, shown right-aligned on the timeline row. */
     summary: {
       item: '{count} item',
