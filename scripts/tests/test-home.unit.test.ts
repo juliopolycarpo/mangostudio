@@ -373,6 +373,16 @@ describe('runWithTestHome', () => {
     ['SIGKILL', 137],
     [15, 143],
     [34, 162],
+    // Linux real-time signals stop at 64; 1..64 passes through unchanged.
+    [1, 129],
+    [64, 192],
+    // Anything else is as unknown as an unrecognised name. 128 would give 256,
+    // which `process.exit` wraps to 0 and reports as a pass.
+    [65, 1],
+    [128, 1],
+    [-9, 1],
+    [1.5, 1],
+    [Number.NaN, 1],
     ['unknown-signal', 1],
   ] as const)(
     'maps injected %s status and removes its real temporary home',

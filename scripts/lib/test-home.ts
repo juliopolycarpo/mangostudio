@@ -132,6 +132,8 @@ function removeTestHome(root: string, host: TemporaryHomeHost = launcherHost()):
 }
 
 const SIGNAL_NUMBERS = { SIGHUP: 1, SIGINT: 2, SIGTERM: 15 } as const;
+/** The last Linux real-time signal; no child reports a number above it. */
+const MAX_SIGNAL_NUMBER = 64;
 const FORWARDED = Object.keys(SIGNAL_NUMBERS) as (keyof typeof SIGNAL_NUMBERS)[];
 
 /** The child status and signal operations the temporary-home launcher owns. */
@@ -215,10 +217,14 @@ export async function runWithTestHome(
  * The number of the signal that ended the child, whichever it was: the watchdog
  * keys its crash retry on 134 (SIGABRT) and triages 137 (SIGKILL, the OOM
  * killer) apart from a hang, so an unforwarded signal must not read as 143.
- * Signal numbers pass through; an unknown name reports plain failure.
+ * A number from 1 to 64 (Linux stops at its last real-time signal) passes
+ * through. Any other number, like an unknown name, reports plain failure: 128
+ * plus it would exceed 255 and `process.exit` would wrap it to a passing code.
  */
 function signalNumber(signal: string | number): number | null {
-  if (typeof signal === 'number') return signal;
+  if (typeof signal === 'number') {
+    return Number.isInteger(signal) && signal >= 1 && signal <= MAX_SIGNAL_NUMBER ? signal : null;
+  }
   const number = (constants.signals as Record<string, number | undefined>)[signal];
   return typeof number === 'number' ? number : null;
 }
