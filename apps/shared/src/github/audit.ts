@@ -7,6 +7,8 @@
  * the runtime's line was written to withhold.
  */
 
+import { GH_READ_OPERATIONS, GH_WRITE_OPERATIONS } from './gh-operations';
+
 /**
  * Summarizes a recognized `gh` operation for audit lines.
  *
@@ -25,16 +27,6 @@ export function summarizeGhSubcommand(args: readonly unknown[]): readonly string
 }
 
 const AUDIT_OPERATIONS: ReadonlySet<string> = new Set([
-  'auth status',
-  'repo view',
-  'pr view',
-  'pr list',
-  'pr status',
-  'pr checks',
-  'issue list',
-  'search prs',
-  'api graphql',
-  'pr create',
-  'pr ready',
-  'pr checkout',
+  ...GH_READ_OPERATIONS,
+  ...GH_WRITE_OPERATIONS,
 ]);
