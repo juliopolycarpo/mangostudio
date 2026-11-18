@@ -41,11 +41,16 @@ export -f fixture_linux_uname uname
 // `-w '%{http_code}'` prints the status after the body.
 // The answer comes from FIXTURE_GITHUB_STATUS, FIXTURE_GITHUB_HEADERS (header
 // lines joined by a literal \\r\\n) and FIXTURE_GITHUB_BODY.
+// When FIXTURE_CURL_LOG names a file, every call appends its argv ('argv: ...')
+// and, for \`--config -\`, the config read from stdin ('config: ...'), which is
+// where the installer hands curl the Authorization header.
 const FIXTURE_GITHUB_API_CURL = `
 fixture_github_api_curl() {
-  local headers_file='' body_file='' write_out='' fail_on_http_error=0
+  local headers_file='' body_file='' write_out='' fail_on_http_error=0 config_source=''
+  if [ -n "\${FIXTURE_CURL_LOG:-}" ]; then printf 'argv: %s\\n' "$*" >> "$FIXTURE_CURL_LOG"; fi
   while [ "$#" -gt 0 ]; do
     case "$1" in
+      -K | --config) config_source="$2"; shift ;;
       -D) headers_file="$2"; shift ;;
       -o) body_file="$2"; shift ;;
       -w) write_out="$2"; shift ;;
@@ -54,6 +59,12 @@ fixture_github_api_curl() {
     esac
     shift
   done
+  if [ "$config_source" = '-' ]; then
+    # Always drain stdin, as curl does, so the installer's printf never meets a closed pipe.
+    local config_text
+    config_text="$(cat)"
+    if [ -n "\${FIXTURE_CURL_LOG:-}" ]; then printf 'config: %s\\n' "$config_text" >> "$FIXTURE_CURL_LOG"; fi
+  fi
   local status="\${FIXTURE_GITHUB_STATUS:-200}"
   if [ "$fail_on_http_error" = 1 ] && [ "$status" -ge 400 ]; then
     printf 'curl: (22) The requested URL returned error: %s\\n' "$status" >&2
@@ -759,20 +770,49 @@ describe('install.sh internals (network-free)', () => {
     readonly body?: string;
   }
 
+  // A sentinel no real token looks like, so any leak into output is a plain substring match.
+  const TOKEN = 'ghp_FIXTURE_TOKEN_MUST_NOT_PRINT';
+
+  interface GithubLookupOptions {
+    /** Token variables exported to the installer; defaults to GITHUB_TOKEN=TOKEN. */
+    readonly tokens?: Readonly<Record<string, string>>;
+    /** Where the fake curl appends each call's argv and stdin config. */
+    readonly curlLog?: string;
+  }
+
   /** Run resolve_canary_tag against the named api.github.com fake, e.g. resolveCanaryFromGithub({ status: 200, body: '[]' }). */
-  function resolveCanaryFromGithub(answer: GithubAnswer): RunResult {
+  function resolveCanaryFromGithub(
+    answer: GithubAnswer,
+    options: GithubLookupOptions = {}
+  ): RunResult {
     const headers = (answer.headers ?? []).join('\\r\\n');
+    const tokens = options.tokens ?? { GITHUB_TOKEN: TOKEN };
+    const exports = Object.entries(tokens)
+      .map(([name, value]) => `export ${name}='${value}'`)
+      .join('\n');
+    const log = options.curlLog ? `export FIXTURE_CURL_LOG='${shellPath(options.curlLog)}'` : '';
     return sourceAndCall(`
       ${FIXTURE_GITHUB_API_CURL}
       export FIXTURE_GITHUB_STATUS='${answer.status}'
       export FIXTURE_GITHUB_HEADERS='${headers}'
       export FIXTURE_GITHUB_BODY='${answer.body ?? ''}'
-      # A token in the environment must never reach the output, whatever the installer does with it.
-      export GITHUB_TOKEN='ghp_FIXTURE_TOKEN_MUST_NOT_PRINT'
+      ${log}
+      # Start from a clean slate: the test host's own tokens must not decide the case.
+      unset GITHUB_TOKEN GH_TOKEN
+      ${exports}
       tag="$(resolve_canary_tag)"
       printf '%s\\n' "$tag"
     `);
   }
+
+  /** A fresh, empty fake-curl log, e.g. const log = newCurlLog(). */
+  function newCurlLog(): string {
+    const log = join(tempDir('mango-curl-log-'), 'curl.log');
+    writeFileSync(log, '');
+    return log;
+  }
+
+  const CANARY_BODY = '[{"tag_name":"v0.1.1-canary.abc1234"}]';
 
   const RESET_EPOCH = 1790000000;
   const RESET_UTC = '2026-09-21T14:13:20Z';
@@ -810,7 +850,7 @@ describe('install.sh internals (network-free)', () => {
     expect(result.stderr).toContain(`resets at ${RESET_UTC}`);
     expect(result.stderr).toContain('run the installer again');
     expect(result.stderr).not.toContain('no canary release found');
-    expect(result.stderr).not.toContain('ghp_FIXTURE_TOKEN_MUST_NOT_PRINT');
+    expect(result.stderr).not.toContain(TOKEN);
     expect(result.stdout).toBe('');
   });
 
@@ -841,6 +881,213 @@ describe('install.sh internals (network-free)', () => {
     expect(result.exitCode, JSON.stringify(result)).toBe(1);
     expect(result.stderr).toContain('GitHub API request failed (HTTP 502)');
     expect(result.stderr).not.toContain('no canary release found');
+  });
+
+  describe('GitHub API authentication', () => {
+    const AUTH_CONFIG = `config: header = "Authorization: Bearer ${TOKEN}"`;
+    const OTHER_TOKEN = 'ghp_FIXTURE_OTHER_TOKEN_MUST_NOT_PRINT';
+
+    /** The lines the fake curl logged, e.g. readCurlLog(log).filter((line) => line.startsWith('argv:')). */
+    function readCurlLog(log: string): string[] {
+      return readFileSync(log, 'utf8').split('\n').filter(Boolean);
+    }
+
+    /** Assert the token reached neither output stream nor any curl argv. */
+    function expectTokenOnlyInConfig(result: RunResult, log: string, token = TOKEN): void {
+      expect(result.stdout).not.toContain(token);
+      expect(result.stderr).not.toContain(token);
+      for (const line of readCurlLog(log).filter((entry) => entry.startsWith('argv:'))) {
+        expect(line, `curl argv must not carry the token: ${line}`).not.toContain(token);
+      }
+    }
+
+    test('GITHUB_TOKEN is sent to the releases API as a Bearer header read from stdin', () => {
+      const log = newCurlLog();
+      const result = resolveCanaryFromGithub({ status: 200, body: CANARY_BODY }, { curlLog: log });
+
+      expect(result.exitCode, JSON.stringify(result)).toBe(0);
+      expect(result.stdout.trim()).toBe('v0.1.1-canary.abc1234');
+      const entries = readCurlLog(log);
+      expect(entries).toContain(AUTH_CONFIG);
+      const argv = entries.find((entry) => entry.startsWith('argv:')) ?? '';
+      expect(argv).toContain('--config -');
+      expect(argv).toContain('https://api.github.com/repos/juliopolycarpo/mangostudio/releases');
+      expect(argv).not.toContain('Authorization');
+      expectTokenOnlyInConfig(result, log);
+    });
+
+    test('GH_TOKEN is used when GITHUB_TOKEN is unset', () => {
+      const log = newCurlLog();
+      const result = resolveCanaryFromGithub(
+        { status: 200, body: CANARY_BODY },
+        { curlLog: log, tokens: { GH_TOKEN: TOKEN } }
+      );
+
+      expect(result.exitCode, JSON.stringify(result)).toBe(0);
+      expect(readCurlLog(log)).toContain(AUTH_CONFIG);
+      expectTokenOnlyInConfig(result, log);
+    });
+
+    test('an empty GITHUB_TOKEN falls back to GH_TOKEN', () => {
+      const log = newCurlLog();
+      const result = resolveCanaryFromGithub(
+        { status: 200, body: CANARY_BODY },
+        { curlLog: log, tokens: { GITHUB_TOKEN: '', GH_TOKEN: TOKEN } }
+      );
+
+      expect(result.exitCode, JSON.stringify(result)).toBe(0);
+      expect(readCurlLog(log)).toContain(AUTH_CONFIG);
+    });
+
+    test('GITHUB_TOKEN wins over GH_TOKEN when both are set', () => {
+      const log = newCurlLog();
+      const result = resolveCanaryFromGithub(
+        { status: 200, body: CANARY_BODY },
+        { curlLog: log, tokens: { GITHUB_TOKEN: TOKEN, GH_TOKEN: OTHER_TOKEN } }
+      );
+
+      expect(result.exitCode, JSON.stringify(result)).toBe(0);
+      const entries = readCurlLog(log);
+      expect(entries).toContain(AUTH_CONFIG);
+      expect(entries.join('\n')).not.toContain(OTHER_TOKEN);
+    });
+
+    test('no token sends no Authorization header and no curl config', () => {
+      const log = newCurlLog();
+      const result = resolveCanaryFromGithub(
+        { status: 200, body: CANARY_BODY },
+        { curlLog: log, tokens: {} }
+      );
+
+      expect(result.exitCode, JSON.stringify(result)).toBe(0);
+      const logged = readCurlLog(log).join('\n');
+      expect(logged).toContain('argv:');
+      expect(logged).not.toContain('config:');
+      expect(logged).not.toContain('--config');
+      expect(logged).not.toContain('Authorization');
+    });
+
+    test('release asset downloads never receive the token', () => {
+      const log = newCurlLog();
+      const result = sourceAndCall(`
+        ${FIXTURE_GITHUB_API_CURL}
+        export FIXTURE_CURL_LOG='${shellPath(log)}'
+        export GITHUB_TOKEN='${TOKEN}'
+        export GH_TOKEN='${OTHER_TOKEN}'
+        # Load the token as the installer does, so a download routed through
+        # github_api_curl would carry it and fail this test.
+        load_github_api_token
+        scratch="$(mktemp -d)"
+        curl_download 'https://github.com/juliopolycarpo/mangostudio/releases/download/v0.1.1/SHA256SUMS' "$scratch/SHA256SUMS"
+        rm -rf "$scratch"
+      `);
+
+      expect(result.exitCode, JSON.stringify(result)).toBe(0);
+      const logged = readCurlLog(log).join('\n');
+      expect(logged).toContain('argv:');
+      expect(logged).not.toContain('config:');
+      expect(logged).not.toContain('--config');
+      expect(logged).not.toContain(TOKEN);
+      expect(logged).not.toContain(OTHER_TOKEN);
+      expect(result.stdout + result.stderr).not.toContain(TOKEN);
+    });
+
+    const RATE_LIMITED: GithubAnswer = {
+      status: 403,
+      headers: ['x-ratelimit-remaining: 0', `x-ratelimit-reset: ${RESET_EPOCH}`],
+    };
+
+    test('an anonymous rate-limited lookup suggests setting GITHUB_TOKEN', () => {
+      const result = resolveCanaryFromGithub(RATE_LIMITED, { tokens: {} });
+
+      expect(result.exitCode, JSON.stringify(result)).toBe(1);
+      expect(result.stderr).toContain('GitHub API rate limit exceeded (HTTP 403)');
+      expect(result.stderr).toContain('set GITHUB_TOKEN');
+    });
+
+    test('a rate-limited lookup that already sent a token does not suggest one', () => {
+      const result = resolveCanaryFromGithub(RATE_LIMITED, { tokens: { GH_TOKEN: TOKEN } });
+
+      expect(result.exitCode, JSON.stringify(result)).toBe(1);
+      expect(result.stderr).toContain('GitHub API rate limit exceeded (HTTP 403)');
+      expect(result.stderr).not.toContain('GITHUB_TOKEN');
+      expect(result.stderr).not.toContain(TOKEN);
+    });
+
+    test.each([
+      { name: 'a space', token: 'ghp_has space' },
+      { name: 'a double quote', token: 'ghp_has"quote' },
+      { name: 'a backslash', token: 'ghp_has\\\\slash' },
+    ])(
+      'a token containing $name is refused before any request, without echoing it',
+      ({ token }) => {
+        const log = newCurlLog();
+        const result = resolveCanaryFromGithub(
+          { status: 200, body: CANARY_BODY },
+          { curlLog: log, tokens: { GITHUB_TOKEN: token } }
+        );
+
+        expect(result.exitCode, JSON.stringify(result)).toBe(1);
+        expect(result.stderr).toContain('GITHUB_TOKEN/GH_TOKEN contains whitespace');
+        expect(result.stderr).not.toContain('failed to fetch canary releases');
+        expect(result.stderr).not.toContain('ghp_has');
+        expect(readCurlLog(log)).toEqual([]);
+      }
+    );
+
+    // Real curl against two local origins (different ports are different
+    // origins): the first answers 302 to the second. The installer's `-L` must
+    // keep the Authorization header on the first and drop it on the second.
+    test.skipIf(IS_WINDOWS)(
+      'real curl sends the header to the API origin and drops it on a cross-origin redirect',
+      async () => {
+        const seen: { origin: string; authorization: string | null }[] = [];
+        const target = Bun.serve({
+          port: 0,
+          fetch(request) {
+            seen.push({ origin: 'target', authorization: request.headers.get('authorization') });
+            return new Response(CANARY_BODY, { headers: { 'content-type': 'application/json' } });
+          },
+        });
+        const api = Bun.serve({
+          port: 0,
+          fetch(request) {
+            seen.push({ origin: 'api', authorization: request.headers.get('authorization') });
+            return Response.redirect(`http://127.0.0.1:${target.port}/releases`, 302);
+          },
+        });
+        try {
+          const child = Bun.spawn({
+            cmd: [
+              BASH,
+              '-c',
+              'source "$1"; GITHUB_API="http://127.0.0.1:$2/repos/x"; unset GH_TOKEN; export GITHUB_TOKEN="$3"; resolve_canary_tag',
+              'real-curl-fixture',
+              shellPath(INSTALL_SH),
+              String(api.port),
+              TOKEN,
+            ],
+            stdout: 'pipe',
+            stderr: 'pipe',
+          });
+          const [stdout, stderr, exitCode] = await Promise.all([
+            new Response(child.stdout).text(),
+            new Response(child.stderr).text(),
+            child.exited,
+          ]);
+
+          expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: '' });
+          expect(stdout.trim()).toBe('v0.1.1-canary.abc1234');
+          expect(seen).toEqual([
+            { origin: 'api', authorization: `Bearer ${TOKEN}` },
+            { origin: 'target', authorization: null },
+          ]);
+        } finally {
+          await api.stop(true);
+          await target.stop(true);
+        }
+      }
+    );
   });
 
   test('extract_canary_tag picks the newest per-commit canary tag_name', () => {

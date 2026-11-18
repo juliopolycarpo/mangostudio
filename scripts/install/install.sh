@@ -50,6 +50,8 @@ Environment:
   MANGOSTUDIO_INSTALL_DIR     Override the versioned install root
   MANGOSTUDIO_BIN_DIR         Override the user bin directory
   MANGOSTUDIO_INSTALL_ORIGIN  Set to "upgrade" when the hub itself runs this script
+  GITHUB_TOKEN                Authenticates api.github.com requests (GH_TOKEN if unset); raises the
+                              rate limit. Release downloads never receive it.
 USAGE
 }
 
@@ -207,6 +209,44 @@ parse_manifest_field() {
   printf '%s\n' "$value"
 }
 
+# Token for api.github.com requests, set by load_github_api_token and read by
+# github_api_curl and describe_github_api_failure. Empty means anonymous. A
+# global rather than a command substitution so a refused token exits the script
+# itself instead of only a subshell.
+GITHUB_API_TOKEN=''
+
+# GITHUB_TOKEN, else GH_TOKEN. An empty value counts as unset, because CI
+# systems export an empty GITHUB_TOKEN when no secret is wired.
+load_github_api_token() {
+  GITHUB_API_TOKEN="${GITHUB_TOKEN:-}"
+  [ -n "$GITHUB_API_TOKEN" ] || GITHUB_API_TOKEN="${GH_TOKEN:-}"
+  # The token goes inside a quoted curl-config value (see github_api_curl): a
+  # quote, a backslash or whitespace would end it early or add a config line.
+  # Real GitHub tokens are [A-Za-z0-9_]; refuse anything else without echoing it.
+  case "$GITHUB_API_TOKEN" in
+    *[![:graph:]]* | *'"'* | *\\*)
+      GITHUB_API_TOKEN=''
+      fail 'GITHUB_TOKEN/GH_TOKEN contains whitespace, control characters, a quote or a backslash; refusing to send it'
+      ;;
+  esac
+}
+
+# curl for an api.github.com URL, authenticated when load_github_api_token
+# found a token. The Authorization header goes in through a curl config on
+# stdin, not `-H`, because argv is readable by every local user in `ps`; printf
+# is a shell builtin, so the token never lands in an argv either. Only call this
+# for api.github.com: the release asset downloads (curl_download) stay
+# anonymous. curl itself drops a custom Authorization header when `--location`
+# follows a redirect to another host, so an API redirect off api.github.com
+# cannot leak it.
+github_api_curl() {
+  if [ -z "$GITHUB_API_TOKEN" ]; then
+    curl "$@"
+    return
+  fi
+  printf 'header = "Authorization: Bearer %s"\n' "$GITHUB_API_TOKEN" | curl --config - "$@"
+}
+
 # One response header (case-insensitive name) from a `curl -D` dump. Redirects
 # leave several header blocks in the file; the last one is the final response.
 # Prints nothing when the header is absent.
@@ -248,7 +288,13 @@ describe_github_api_failure() {
     elif [ -n "$retry_after" ]; then
       message="${message}; Retry-After: ${retry_after}"
     fi
-    printf '%s. Wait for it to reset, then run the installer again.\n' "$message"
+    # An anonymous request shares the caller's IP quota; a token raises it. When
+    # one was already sent, the suggestion would be wrong, so it is left out.
+    if [ -z "$GITHUB_API_TOKEN" ]; then
+      printf '%s. Wait for it to reset and run the installer again, or set GITHUB_TOKEN to raise the limit.\n' "$message"
+    else
+      printf '%s. Wait for it to reset, then run the installer again.\n' "$message"
+    fi
     return
   fi
 
@@ -260,8 +306,9 @@ describe_github_api_failure() {
 resolve_canary_tag() {
   local url="${GITHUB_API}/releases?per_page=30"
   local scratch status releases_json message tag
+  load_github_api_token
   scratch="$(mktemp -d)" || fail 'failed to create a scratch directory'
-  status="$(curl --retry 3 --retry-delay 2 -sSL -D "${scratch}/headers" -o "${scratch}/body" -w '%{http_code}' "$url")" \
+  status="$(github_api_curl --retry 3 --retry-delay 2 -sSL -D "${scratch}/headers" -o "${scratch}/body" -w '%{http_code}' "$url")" \
     || { rm -rf "$scratch"; fail "failed to fetch canary releases from ${url}"; }
   case "$status" in
     2??)
