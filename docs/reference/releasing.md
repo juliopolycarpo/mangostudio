@@ -1210,7 +1210,17 @@ cache under `~/.mango/dist/`.
 downloads the platform archive matching the crate version from the GitHub
 release into `~/.mango/dist/<version>/` (verified against `SHA256SUMS`, same
 layout as the shell installer) and execs the real binary. Both install paths
-report the same `mangostudio --version`. See
+report the same `mangostudio --version`. The workspace `[profile.release]` is
+not part of the published crate, so the launcher manifest repeats it (fat LTO,
+one codegen unit, stripped, `panic = "unwind"`, plus the overrides for the
+packages it links). Without the copy `cargo install` builds with Cargo's default
+release profile: 3.56 MB unstripped instead of 2.19 MB on linux-x64, in about
+half the compile time (19 s against 37 s on 28 cores). Cargo ignores the table
+inside the workspace and prints `warning: profiles for the non root package will
+be ignored` on each command (rust-lang/cargo#8264); the warning is expected.
+`scripts/tests/launcher-release-profile.unit.test.ts` fails when the copy drifts
+from the root profile, and `scripts/release/verify-launcher-package.sh` checks
+the packaged manifest. See
 [`crates/mangostudio-launcher/README.md`](../../crates/mangostudio-launcher/README.md).
 
 Design notes:

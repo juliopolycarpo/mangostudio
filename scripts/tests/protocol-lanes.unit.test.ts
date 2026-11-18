@@ -444,10 +444,11 @@ describe('the protocol tree at the repository root', () => {
     // it today; this pins that fact instead of relying on it staying true by
     // absence of a reason to add one. Checks every workspace member's own
     // manifest, not just the root: `[profile.*]` overrides in a *member*
-    // manifest are ignored by Cargo (profiles are workspace-wide, resolved
-    // from the root only), but a member Cargo.toml can still declare one
-    // that would be a false sense of safety if any tooling ever inspected
-    // per-crate manifests instead of the resolved workspace profile.
+    // manifest are ignored by Cargo inside the workspace (profiles are
+    // workspace-wide, resolved from the root only), but they apply when that
+    // member is built as a root. The published launcher declares one for
+    // `cargo install` (`launcher-release-profile.unit.test.ts` keeps it equal
+    // to the root's), so any member's profile must hold the same guarantee.
     const manifestPaths = [
       'Cargo.toml',
       'crates/mango-protocol/Cargo.toml',
