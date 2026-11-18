@@ -24,7 +24,7 @@ use super::capability::{
 };
 use super::grep_prefilter::LinePrefilter;
 use super::io::{check_cancel, io_error, path_error, read};
-use super::policy::{CompiledPolicy, PathPolicy};
+use super::policy::{CompiledPolicy, PathPolicy, absolute};
 use crate::result_value::object;
 use crate::workspace::lexically_normalize;
 
@@ -96,7 +96,14 @@ pub(super) fn glob(params: GlobParams, cancel: &CancellationToken) -> Result<Val
         &policy,
         None,
         cancel,
-        |relative, absolute, is_directory, _| {
+        |entry| {
+            let WalkEntry {
+                relative,
+                absolute,
+                is_directory,
+                allowed,
+                ..
+            } = entry;
             candidates += 1;
             if candidates > MAX_CANDIDATES {
                 truncated = true;
@@ -115,10 +122,8 @@ pub(super) fn glob(params: GlobParams, cancel: &CancellationToken) -> Result<Val
                 || (is_directory
                     && params.pattern.ends_with("/**")
                     && relative_text == params.pattern.trim_end_matches("/**"))
+                || !allowed
             {
-                return Ok(WalkControl::Continue);
-            }
-            if !policy.allows(absolute) {
                 return Ok(WalkControl::Continue);
             }
             if matches.len() >= params.max_results {
@@ -233,7 +238,14 @@ pub(super) fn grep(params: GrepParams, cancel: &CancellationToken) -> Result<Val
             &policy,
             opened_root,
             cancel,
-            |relative, absolute, is_directory, entry| {
+            |walked| {
+                let WalkEntry {
+                    relative,
+                    absolute,
+                    is_directory,
+                    allowed,
+                    file: entry,
+                } = walked;
                 candidates += 1;
                 if candidates > MAX_CANDIDATES {
                     truncated = true;
@@ -250,7 +262,7 @@ pub(super) fn grep(params: GrepParams, cancel: &CancellationToken) -> Result<Val
                 let relative_text = slash_path(&match_path);
                 if !file_matcher.is_match(&relative_text)
                     || (!params.include_dotfiles && !dot_components_allowed(filter, &relative_text))
-                    || !policy.allows(absolute)
+                    || !allowed
                 {
                     return Ok(WalkControl::Continue);
                 }
@@ -908,18 +920,29 @@ enum WalkControl {
     Stop,
 }
 
+/// One directory entry as a walk reports it.
+struct WalkEntry<'a> {
+    /// The entry's path below the walk root.
+    relative: &'a Path,
+    /// The entry's path in the spelling the caller requested.
+    absolute: &'a Path,
+    is_directory: bool,
+    /// Whether the path policy admits the entry. Decided once by the walk, so
+    /// a visitor never resolves the path again. A walk without a policy admits
+    /// everything.
+    allowed: bool,
+    /// The entry as a capability handle: set only for an allowed non-directory
+    /// of a capability walk, which must open it through this handle.
+    file: Option<&'a cap_std::fs::DirEntry>,
+}
+
 fn walk(
     root: &Path,
     missing_root_is_empty: bool,
     policy: &CompiledPolicy,
     opened_root: Option<BoundDir>,
     cancel: &CancellationToken,
-    visit: impl FnMut(
-        &Path,
-        &Path,
-        bool,
-        Option<&cap_std::fs::DirEntry>,
-    ) -> Result<WalkControl, RemoteError>,
+    visit: impl FnMut(WalkEntry<'_>) -> Result<WalkControl, RemoteError>,
 ) -> Result<(), RemoteError> {
     if policy.is_unrestricted() {
         walk_ambient(root, missing_root_is_empty, cancel, visit)
@@ -934,12 +957,7 @@ fn walk_ambient(
     root: &Path,
     missing_root_is_empty: bool,
     cancel: &CancellationToken,
-    mut visit: impl FnMut(
-        &Path,
-        &Path,
-        bool,
-        Option<&cap_std::fs::DirEntry>,
-    ) -> Result<WalkControl, RemoteError>,
+    mut visit: impl FnMut(WalkEntry<'_>) -> Result<WalkControl, RemoteError>,
 ) -> Result<(), RemoteError> {
     let mut directories = vec![PathBuf::new()];
     while let Some(relative_directory) = directories.pop() {
@@ -966,7 +984,13 @@ fn walk_ambient(
             let absolute = root.join(&relative);
             let is_directory = entry.file_type().map_err(io_error)?.is_dir();
             if matches!(
-                visit(&relative, &absolute, is_directory, None)?,
+                visit(WalkEntry {
+                    relative: &relative,
+                    absolute: &absolute,
+                    is_directory,
+                    allowed: true,
+                    file: None,
+                })?,
                 WalkControl::Stop
             ) {
                 return Ok(());
@@ -984,12 +1008,7 @@ fn walk_capability(
     missing_root_is_empty: bool,
     policy: &CompiledPolicy,
     cancel: &CancellationToken,
-    visit: impl FnMut(
-        &Path,
-        &Path,
-        bool,
-        Option<&cap_std::fs::DirEntry>,
-    ) -> Result<WalkControl, RemoteError>,
+    visit: impl FnMut(WalkEntry<'_>) -> Result<WalkControl, RemoteError>,
 ) -> Result<(), RemoteError> {
     walk_capability_with_hook(
         root,
@@ -1017,12 +1036,7 @@ fn walk_capability_with_hook(
     policy: &CompiledPolicy,
     cancel: &CancellationToken,
     hook: &dyn SearchHook,
-    visit: impl FnMut(
-        &Path,
-        &Path,
-        bool,
-        Option<&cap_std::fs::DirEntry>,
-    ) -> Result<WalkControl, RemoteError>,
+    visit: impl FnMut(WalkEntry<'_>) -> Result<WalkControl, RemoteError>,
 ) -> Result<(), RemoteError> {
     let root_path = root.to_path_buf();
     let root = match open_directory_if_present(policy, root)? {
@@ -1039,43 +1053,55 @@ fn walk_opened_capability(
     root: BoundDir,
     policy: &CompiledPolicy,
     cancel: &CancellationToken,
-    mut visit: impl FnMut(
-        &Path,
-        &Path,
-        bool,
-        Option<&cap_std::fs::DirEntry>,
-    ) -> Result<WalkControl, RemoteError>,
+    mut visit: impl FnMut(WalkEntry<'_>) -> Result<WalkControl, RemoteError>,
 ) -> Result<(), RemoteError> {
+    // Resolved once: every entry's policy check needs the absolute spelling.
+    let root_absolute = absolute(root_path)?;
     let mut directories = vec![(root, PathBuf::new())];
     while let Some((directory, relative_directory)) = directories.pop() {
         check_cancel(cancel)?;
-        let control = match directory.with_dir(|directory| {
-            let entries = directory.entries().map_err(io_error)?;
+        let requested_directory = root_absolute.join(&relative_directory);
+        // The directory was bound and checked when it was opened, so its
+        // non-symlink children are authorized from that one check instead of
+        // by resolving every entry's path again.
+        let plain_children = policy.plain_children_of(&requested_directory, directory.final_path());
+        let control = match directory.with_dir(|handle| {
+            let entries = handle.entries().map_err(io_error)?;
             for entry in entries {
                 check_cancel(cancel)?;
                 let entry = entry.map_err(io_error)?;
-                let relative = relative_directory.join(entry.file_name());
+                let name = entry.file_name();
+                let relative = relative_directory.join(&name);
                 // Preserve the requested spelling for matching and display. The
                 // capability helpers validate the handle's final host path before
                 // it can be read or traversed.
                 let absolute = root_path.join(&relative);
-                let is_directory = entry.file_type().map_err(io_error)?.is_dir();
-                let allowed = policy.allows(&absolute);
+                let file_type = entry.file_type().map_err(io_error)?;
+                let is_directory = file_type.is_dir();
+                // Only a child known to be a directory or a regular file takes
+                // the shortcut. A symlink may point anywhere, and a type the
+                // filesystem did not report (`DT_UNKNOWN`) may be one, so those
+                // are resolved in full; so is every entry off Unix, where a
+                // reparse point is not guaranteed to report as a symlink.
+                let allowed = if cfg!(unix) && (is_directory || file_type.is_file()) {
+                    plain_children.allows(&name)
+                } else {
+                    policy.allows(&absolute)
+                };
                 if matches!(
-                    visit(
-                        &relative,
-                        &absolute,
+                    visit(WalkEntry {
+                        relative: &relative,
+                        absolute: &absolute,
                         is_directory,
-                        (!is_directory && allowed).then_some(&entry)
-                    )?,
+                        allowed,
+                        file: (!is_directory && allowed).then_some(&entry),
+                    })?,
                     WalkControl::Stop
                 ) {
                     return Ok(WalkControl::Stop);
                 }
                 if is_directory && allowed {
-                    let child = directory
-                        .open_dir_nofollow(entry.file_name())
-                        .map_err(io_error)?;
+                    let child = handle.open_dir_nofollow(&name).map_err(io_error)?;
                     let child = bind_opened_directory(policy, &absolute, child)?;
                     directories.push((child, relative));
                 }
@@ -1689,20 +1715,133 @@ mod tests {
         };
         let mut offered_file = false;
 
-        walk_capability_with_hook(
-            &root,
-            false,
-            &policy,
-            &token(),
-            &hook,
-            |_, _, is_directory, entry| {
-                offered_file |= !is_directory && entry.is_some();
-                Ok(WalkControl::Continue)
-            },
-        )
+        walk_capability_with_hook(&root, false, &policy, &token(), &hook, |entry| {
+            offered_file |= !entry.is_directory && entry.file.is_some();
+            Ok(WalkControl::Continue)
+        })
         .unwrap();
 
         assert!(!offered_file, "the replacement path must never be opened");
+    }
+
+    /// A root with an in-policy file, a symlinked directory and a symlinked file
+    /// that both point outside the containment root, and an in-policy symlink.
+    #[cfg(unix)]
+    fn escape_fixture(name: &str) -> (crate::test_support::ScratchDir, PathBuf, PathPolicy) {
+        use std::os::unix::fs::symlink;
+
+        let sandbox = scratch_dir(name);
+        let root = sandbox.join("root");
+        let outside = sandbox.join("outside");
+        fs::create_dir_all(root.join("inside")).unwrap();
+        fs::create_dir_all(outside.join("deep")).unwrap();
+        fs::write(root.join("inside/kept.txt"), "needle kept\n").unwrap();
+        fs::write(outside.join("secret.txt"), "needle leaked\n").unwrap();
+        fs::write(outside.join("deep/secret.txt"), "needle leaked deep\n").unwrap();
+        symlink(&outside, root.join("linked-dir")).unwrap();
+        symlink(outside.join("secret.txt"), root.join("linked-file.txt")).unwrap();
+        // Relative, so the capability sandbox can follow it.
+        symlink("inside/kept.txt", root.join("linked-inside.txt")).unwrap();
+        let policy = PathPolicy {
+            allowed_roots: vec![root.clone()],
+            containment_root: Some(root.clone()),
+            ..PathPolicy::default()
+        };
+        (sandbox, root, policy)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restricted_glob_never_reports_or_follows_a_symlink_that_escapes_the_root() {
+        let (_sandbox, root, policy) = escape_fixture("filesystem-search-glob-escape");
+        let mut params = glob_params(&root, "**/*");
+        params.path_policy = policy;
+
+        let result = glob(params, &token()).unwrap();
+        let mut matches: Vec<&str> = result["matches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|path| path.as_str().unwrap())
+            .collect();
+        matches.sort_unstable();
+
+        assert_eq!(
+            matches,
+            ["inside", "inside/kept.txt", "linked-inside.txt"],
+            "expected only entries that resolve inside {} | a `linked-dir` or `linked-file.txt` entry means an escaping symlink was reported or followed",
+            root.display()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restricted_grep_never_reads_through_a_symlink_that_escapes_the_root() {
+        let (_sandbox, root, policy) = escape_fixture("filesystem-search-grep-escape");
+        let mut params = grep_params(&root, "needle");
+        params.path_policy = policy;
+
+        let result = grep(params, &token()).unwrap();
+        let mut files: Vec<&str> = result["matches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|hit| hit["file"].as_str().unwrap())
+            .collect();
+        files.sort_unstable();
+
+        assert_eq!(
+            files,
+            ["inside/kept.txt", "linked-inside.txt"],
+            "expected hits only from files that resolve inside {} | a `leaked` hit means an escaping symlink was followed",
+            root.display()
+        );
+        assert_eq!(result["filesScanned"], 2);
+    }
+
+    #[test]
+    fn restricted_glob_and_grep_skip_a_denied_root_below_the_search_root() {
+        let sandbox = scratch_dir("filesystem-search-denied-child");
+        let root = sandbox.join("root");
+        fs::create_dir_all(root.join("private/nested")).unwrap();
+        fs::create_dir_all(root.join("private-notes")).unwrap();
+        fs::write(root.join("public.txt"), "needle public\n").unwrap();
+        fs::write(root.join("private/secret.txt"), "needle private\n").unwrap();
+        fs::write(root.join("private/nested/deep.txt"), "needle deep\n").unwrap();
+        fs::write(root.join("private-notes/note.txt"), "needle note\n").unwrap();
+        let policy = PathPolicy {
+            allowed_roots: vec![root.to_path_buf()],
+            denied_roots: vec![root.join("private")],
+            ..PathPolicy::default()
+        };
+
+        let mut params = glob_params(&root, "**/*.txt");
+        params.path_policy = policy.clone();
+        let globbed = glob(params, &token()).unwrap();
+        let mut found: Vec<String> = globbed["matches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|path| path.as_str().unwrap().replace('\\', "/"))
+            .collect();
+        found.sort_unstable();
+        assert_eq!(
+            found,
+            ["private-notes/note.txt", "public.txt"],
+            "expected the denied `private` tree to vanish while the `private-notes` sibling stays"
+        );
+
+        let mut params = grep_params(&root, "needle");
+        params.path_policy = policy;
+        let grepped = grep(params, &token()).unwrap();
+        let mut files: Vec<String> = grepped["matches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|hit| hit["file"].as_str().unwrap().replace('\\', "/"))
+            .collect();
+        files.sort_unstable();
+        assert_eq!(files, ["private-notes/note.txt", "public.txt"]);
     }
 
     #[test]
