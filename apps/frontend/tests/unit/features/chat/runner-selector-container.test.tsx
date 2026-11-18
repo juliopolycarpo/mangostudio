@@ -70,7 +70,13 @@ const actualUseExternalAgents =
   await import('../../../../src/features/external-agents/useExternalAgents');
 
 void mock.module('@/lib/app-context', () => ({ useApp: () => appState }));
-void mock.module('@/features/chat/queries', () => ({ useMessagesQuery: () => messagesQuery }));
+// Applies `select` the way the real query does, so `useChatHasTurns` still sees
+// the boolean it asks for rather than the raw rows.
+void mock.module('@/features/chat/queries', () => ({
+  useMessagesQuery: (_chatId: unknown, select?: (data: unknown) => unknown) => ({
+    data: messagesQuery.data && select ? select(messagesQuery.data) : messagesQuery.data,
+  }),
+}));
 // Partially mocked: `capability-invalidation` reads the real `environmentKeys`
 // at import time, so replacing the whole module breaks the shared harness. The
 // real namespace is imported first because `mock.module` is not hoisted.

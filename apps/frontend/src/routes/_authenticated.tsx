@@ -126,8 +126,8 @@ function AuthenticatedLayout() {
   const routeEntrance = useRouteEntrance(activePage);
   // Only chats with a workdir can have git state. `app.chats` holds its
   // identity between query updates, so memoizing here hands the hook the same
-  // array on every one of this layout's per-token re-renders and it can bail
-  // out on the reference instead of re-sorting the whole list.
+  // array on every one of this layout's re-renders and it can bail out on the
+  // reference instead of re-sorting the whole list.
   const gitChatIds = useMemo(
     () => app.chats.filter((chat) => chat.workdir).map((chat) => chat.id),
     [app.chats]
@@ -157,8 +157,7 @@ function AuthenticatedLayout() {
   //
   // Read through a ref, not a dependency: `useChats()` hands back a fresh object
   // every render, so `handleNewChat` never memoizes and a dependency on it would
-  // re-register the window listener once per render — once per streamed token,
-  // since the generation state lives on this layout.
+  // re-register the window listener once per render.
   const handleNewChatRef = useRef(app.handleNewChat);
   handleNewChatRef.current = app.handleNewChat;
   const closeCommandPalette = commandPalette.close;
