@@ -141,11 +141,6 @@ toml = { version = "1.1", default-features = false, features = ["std", "parse", 
 toml_parser = { version = "1.1", default-features = false, features = ["std"] }
 
 [dev-dependencies]
-# The external-agent tests compile a released product's JSON Schema with it
-# (`external_agents/product_tests.rs`, `adapter/map_tests.rs`). Nothing the
-# binary runs needs it directly: results are checked by the contract's own
-# validators (`Contract::check_result`).
-jsonschema.workspace = true
 # Only this crate's own tests use the spawn launcher, standing in for a hub
 # that execs this very binary and speaks to it over stdio — proving the real
 # `stdio` subcommand keeps stdout protocol-only end to end, not just in an
