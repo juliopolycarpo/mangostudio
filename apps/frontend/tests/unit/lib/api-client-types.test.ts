@@ -15,6 +15,7 @@
 
 import { describe, expect, it } from 'bun:test';
 
+import type { ContextCompactionResponse } from '@mangostudio/shared/chat';
 import type { ApiErrorResponse } from '@mangostudio/shared/errors';
 
 import { client } from '../../../src/lib/api-client';
@@ -206,6 +207,36 @@ assertType<ErrorBodyIsApiError<AgentGetResponse, 404 | 409 | 500 | 503>>();
 // Its 422 is Elysia's own body validation, a `ValidationProblem`, so only the
 // handler's statuses are checked here.
 assertType<ErrorBodyIsApiError<RuleFilePreviewResponse, 404 | 500>>();
+
+// 10. Chat and message handlers once assigned `set.status` and returned a bare
+//     `ApiErrorResponse`. Eden typed that body into the successful `data`, so the
+//     callers cast `data` back to the contract type. They return
+//     `status(code, body)` now and declare each status in the route's `response`
+//     map: error bodies land in `error`, and `data` is the contract type as is.
+type ChatCompactResponse = Awaited<
+  ReturnType<ReturnType<typeof client.api.chats>['compact']['post']>
+>;
+type ChatUpdateResponse = Awaited<ReturnType<ReturnType<typeof client.api.chats>['put']>>;
+type MessageUpdateResponse = Awaited<ReturnType<ReturnType<typeof client.api.messages>['put']>>;
+
+assertType<Equals<ErrorBodyInData<ChatCompactResponse>, false>>();
+assertType<Equals<ErrorBodyInData<ChatUpdateResponse>, false>>();
+assertType<Equals<ErrorBodyInData<MessageUpdateResponse>, false>>();
+
+// `data` carries the success contract only, so callers need no cast.
+assertType<SameShape<NonNullable<ChatCompactResponse['data']>, ContextCompactionResponse>>();
+assertType<SameShape<NonNullable<ChatUpdateResponse['data']>, { success: true }>>();
+assertType<SameShape<NonNullable<MessageUpdateResponse['data']>, { success: true }>>();
+
+// Each route answers its own failures with an `ApiErrorResponse` body, beside
+// the 401 and 422 (Elysia's body validation) the hooks add and the 500 of the
+// error handler. The chat update's 422 is also its own validation refusal.
+assertType<Equals<ErrorStatuses<ChatCompactResponse>, 401 | 422 | 400 | 404 | 409 | 500 | 503>>();
+assertType<Equals<ErrorStatuses<ChatUpdateResponse>, 401 | 422 | 400 | 404 | 500>>();
+assertType<Equals<ErrorStatuses<MessageUpdateResponse>, 401 | 422 | 404 | 409 | 500>>();
+assertType<ErrorBodyIsApiError<ChatCompactResponse, 400 | 404 | 409 | 503>>();
+assertType<ErrorBodyIsApiError<ChatUpdateResponse, 400 | 404 | 422>>();
+assertType<ErrorBodyIsApiError<MessageUpdateResponse, 404 | 409>>();
 
 describe('Eden treaty type seam', () => {
   it('keeps route input and output types inferable from App', () => {
