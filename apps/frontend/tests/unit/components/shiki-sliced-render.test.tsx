@@ -19,7 +19,12 @@ import { stubClipboard } from '../../support/harness/clipboard';
 import { flushAsyncRender, render, waitFor } from '../../support/harness/render';
 import { FakeIdleScheduler } from '../../support/mocks/fake-idle-scheduler';
 import { SteppingClock } from '../../support/mocks/fake-stepping-clock';
-import { frozenTokenizerClock, withTokenizerClock } from '../../support/mocks/fake-tokenizer-clock';
+import {
+  frozenTokenizerClock,
+  SlowedTokenizerClock,
+  withTokenizerClock,
+  withTokenizerClockAsync,
+} from '../../support/mocks/fake-tokenizer-clock';
 
 const { MarkdownContentRenderer } = await import('../../../src/components/MarkdownContentRenderer');
 
@@ -37,8 +42,11 @@ let restore: (() => void) | undefined;
 beforeAll(async () => {
   await preloadCodeLanguages(['ts'], THEME);
   highlighter = await initHighlighter();
+  // The grammar compiles a rule's regexes on the first line that reaches it. Warm every construct
+  // the blocks below use (template strings, block comments, functions) under a frozen clock, so a
+  // slow runner cannot spend the tokenizer's 500 ms limit on a compile and draw the block plain.
   withTokenizerClock(frozenTokenizerClock, () => {
-    highlighter.codeToHtml('const value = 42;', { lang: 'typescript', theme: THEME });
+    highlighter.codeToHtml(typescriptSource('warm', 1), { lang: 'typescript', theme: THEME });
   });
 });
 
@@ -173,6 +181,27 @@ describe('a large code block drawn in slices', () => {
       oneShotCodeHtml(source)
     );
     expect(code.isConnected, 'the code element the first draw made').toBe(true);
+  });
+
+  it('still colours the first lines at once on a machine 20 times slower', async () => {
+    // Regression for #2429: on a slow macOS runner a rule compiled inside the test passed the
+    // tokenizer's 500 ms limit, the first draw stopped, and the block stayed plain.
+    installIdleScheduler();
+    useTenMillisecondClock();
+    const source = typescriptSource('slowRunner', 20);
+
+    const { container } = await withTokenizerClockAsync(
+      new SlowedTokenizerClock(20).now,
+      async () => {
+        const rendered = render(<MarkdownContentRenderer content={fence(source)} />);
+        await settleFirstDraw();
+        return rendered;
+      }
+    );
+
+    expect(colouredLines(codeOf(container)), 'coloured lines after the first draw').toBeGreaterThan(
+      0
+    );
   });
 
   it('writes each slice into the block alone and leaves the rest of the message untouched', async () => {
