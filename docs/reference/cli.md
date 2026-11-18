@@ -250,15 +250,15 @@ own path. A source checkout (`dev`) and a container refuse whatever launched
 them. `status` prints the answer as `Installed via:`; `doctor` has an
 `Installed via` row.
 
-| Installed via                        | Stable                                   | Canary (latest)                                     | Canary `<sha7>`                                       |
-| ------------------------------------ | ---------------------------------------- | --------------------------------------------------- | ----------------------------------------------------- |
-| install script (`install.sh`/`.ps1`) | archive + embedded script                | newest canary release's archive + embedded script   | npm platform tarball + embedded script; musl: refused |
-| npm / bun / pnpm                     | `<pm> … mangostudio@latest`              | `<pm> … mangostudio@canary`                         | `<pm> … mangostudio@<root>-canary.<sha7>`             |
-| Homebrew                             | `brew upgrade mangostudio`               | refused → shell installer `--canary`                | refused                                               |
-| Scoop                                | `scoop update mangostudio`               | refused → `install.ps1 -Canary`                     | refused                                               |
-| Cargo                                | `cargo install mangostudio --locked`     | `cargo install mangostudio --version <root>-canary` | refused                                               |
-| Docker                               | prints `docker pull ghcr.io/…:<version>` | prints `docker pull ghcr.io/…:canary`               | prints `docker pull ghcr.io/…:<root>-canary.<sha7>`   |
-| source checkout                      | `git pull && bun run build`              | same                                                | same                                                  |
+| Installed via                        | Stable                                   | Canary (latest)                                   | Canary `<sha7>`                                       |
+| ------------------------------------ | ---------------------------------------- | ------------------------------------------------- | ----------------------------------------------------- |
+| install script (`install.sh`/`.ps1`) | archive + embedded script                | newest canary release's archive + embedded script | npm platform tarball + embedded script; musl: refused |
+| npm / bun / pnpm                     | `<pm> … mangostudio@latest`              | `<pm> … mangostudio@canary`                       | `<pm> … mangostudio@<root>-canary.<sha7>`             |
+| Homebrew                             | `brew upgrade mangostudio`               | refused → shell installer `--canary`              | refused                                               |
+| Scoop                                | `scoop update mangostudio`               | refused → `install.ps1 -Canary`                   | refused                                               |
+| Cargo                                | `cargo install mangostudio --locked`     | refused → shell installer `--canary`              | refused                                               |
+| Docker                               | prints `docker pull ghcr.io/…:<version>` | prints `docker pull ghcr.io/…:canary`             | prints `docker pull ghcr.io/…:<root>-canary.<sha7>`   |
+| source checkout                      | `git pull && bun run build`              | same                                              | same                                                  |
 
 For an install-script layout the hub does the work itself: resolve the target
 (no channel flag means the channel this build came from), download the archive

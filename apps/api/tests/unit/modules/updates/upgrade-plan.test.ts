@@ -93,13 +93,21 @@ describe('planUpgrade', () => {
     });
   });
 
-  it('gives cargo the rolling canary crate but never a pinned commit', () => {
-    expect(planUpgrade('cargo', { channel: 'canary' }, linux)).toMatchObject({
-      command: 'cargo install mangostudio --version 0.1.1-canary --locked',
-    });
-    expect(planUpgrade('cargo', { channel: 'canary', sha: 'abc1234' }, linux)).toMatchObject({
-      kind: 'refused',
-      reason: 'channel-unsupported',
+  it('refuses canary for cargo, which has no published canary crate, and names the shell installer', () => {
+    // crates.io canaries are no longer published; the `<root>-canary` crate that
+    // exists is a frozen pre-2026-09-16 release, so delegating to it installs a
+    // stale launcher or fails to resolve.
+    for (const request of [
+      { channel: 'canary' },
+      { channel: 'canary', version: '0.1.2-canary.abc1234' },
+      { channel: 'canary', sha: 'abc1234' },
+    ] as const) {
+      const plan = planUpgrade('cargo', request, linux);
+      expect(plan).toMatchObject({ kind: 'refused', reason: 'channel-unsupported' });
+      expect(plan.kind === 'refused' && plan.command).toContain('install.sh | bash -s -- --canary');
+    }
+    expect(planUpgrade('cargo', { channel: 'stable' }, linux)).toMatchObject({
+      command: 'cargo install mangostudio --locked',
     });
   });
 

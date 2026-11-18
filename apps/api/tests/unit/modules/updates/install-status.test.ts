@@ -53,18 +53,18 @@ describe('resolveInstallStatus', () => {
     expect(status.plan.kind).toBe('self');
   });
 
-  it('threads a request’s pinned version into a delegate plan (cargo canary)', () => {
+  it('threads a request’s pinned version into a delegate plan (cargo stable)', () => {
     const status = resolveInstallStatus(
       probe({ env: { MANGOSTUDIO_LAUNCHER: 'cargo' } }),
       null,
       '0.1.1',
-      { channel: 'canary', version: '0.2.0' }
+      { channel: 'stable', version: '0.2.0' }
     );
 
     expect(status.plan).toEqual({
       kind: 'delegate',
-      command: 'cargo install mangostudio --version 0.2.0-canary --locked',
-      argv: ['cargo', 'install', 'mangostudio', '--version', '0.2.0-canary', '--locked'],
+      command: 'cargo install mangostudio --version 0.2.0 --locked',
+      argv: ['cargo', 'install', 'mangostudio', '--version', '0.2.0', '--locked'],
     });
   });
 });
