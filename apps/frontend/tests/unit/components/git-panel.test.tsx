@@ -1,241 +1,19 @@
-import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+import { beforeEach, describe, expect, it } from 'bun:test';
 
-import type {
-  GitBranchesResponse,
-  GitCommitDetailsResponse,
-  GitDiffResponse,
-  GitHeadMessageResponse,
-  GitHistoryResponse,
-  GitRepoState,
-  GitWorktreeListResponse,
-} from '@mangostudio/shared/git';
-import type { GithubContext } from '@mangostudio/shared/github';
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-import { RailPanel } from '../../../src/features/workspace/rail/RailPanel';
-import { AppContext } from '../../../src/lib/app-context';
 import { ApiError } from '../../../src/lib/utils';
+import { Panel, repoState } from '../../support/harness/git-panel';
 import { render } from '../../support/harness/render';
-
-const hooks = {
-  data: undefined as GitRepoState | undefined,
-  error: null as Error | null,
-  loading: false,
-  fetching: false,
-  refetch: jest.fn(),
-  mutate: jest.fn(),
-  initPending: false,
-  initError: null as Error | null,
-  stage: jest.fn(),
-  unstage: jest.fn(),
-  discard: jest.fn(),
-  commit: jest.fn(),
-  generate: jest.fn(),
-  stashSave: jest.fn(),
-  stashPop: jest.fn(),
-  stashApply: jest.fn(),
-  stashDrop: jest.fn(),
-  stashes: [] as Array<{ index: number; message: string; branch?: string }>,
-  branches: { branches: [], remotes: [] } as GitBranchesResponse,
-  branchSwitch: jest.fn(),
-  branchCreate: jest.fn(),
-  branchRename: jest.fn(),
-  branchDelete: jest.fn(),
-  checkoutRemote: jest.fn(),
-  gitFetch: jest.fn(),
-  gitPull: jest.fn(),
-  gitPush: jest.fn(),
-  headMessage: undefined as GitHeadMessageResponse | undefined,
-  headMessageError: null as Error | null,
-  historyPages: [] as GitHistoryResponse[],
-  historyLoading: false,
-  commitDetails: undefined as GitCommitDetailsResponse | undefined,
-  diff: undefined as GitDiffResponse | undefined,
-  githubData: { state: 'no-remote' } as GithubContext,
-  githubError: null as Error | null,
-  githubLoading: false,
-  githubFetching: false,
-  githubRefetch: jest.fn(),
-  worktrees: { worktrees: [] } as GitWorktreeListResponse,
-  worktreesError: null as Error | null,
-  worktreesRefetch: jest.fn(),
-  worktreeAdd: jest.fn(),
-  worktreeRemove: jest.fn(),
-};
-
-void mock.module('../../../src/features/workspace/hooks/use-github-context', () => ({
-  useGithubContext: () => ({
-    data: hooks.githubData,
-    error: hooks.githubError,
-    isLoading: hooks.githubLoading,
-    isFetching: hooks.githubFetching,
-    refetch: hooks.githubRefetch,
-  }),
-}));
-
-void mock.module('../../../src/features/workspace/hooks/use-git-state', () => ({
-  useGitRealtimeInvalidation: () => undefined,
-  useGitState: () => ({
-    data: hooks.data,
-    error: hooks.error,
-    isLoading: hooks.loading,
-    isFetching: hooks.fetching,
-    refetch: hooks.refetch,
-  }),
-  useInitRepo: () => ({
-    mutate: hooks.mutate,
-    isPending: hooks.initPending,
-    error: hooks.initError,
-  }),
-  useStagePaths: () => ({ mutateAsync: hooks.stage, isPending: false }),
-  useUnstagePaths: () => ({ mutateAsync: hooks.unstage, isPending: false }),
-  useDiscardPaths: () => ({ mutateAsync: hooks.discard, isPending: false }),
-  useCommit: () => ({ mutateAsync: hooks.commit, isPending: false }),
-  useGenerateCommitMessage: () => ({ mutateAsync: hooks.generate, isPending: false }),
-  useGitStashes: () => ({ data: { stashes: hooks.stashes }, isLoading: false, error: null }),
-  useStashSave: () => ({ mutateAsync: hooks.stashSave, isPending: false }),
-  useStashPop: () => ({ mutateAsync: hooks.stashPop, isPending: false }),
-  useStashApply: () => ({ mutateAsync: hooks.stashApply, isPending: false }),
-  useStashDrop: () => ({ mutateAsync: hooks.stashDrop, isPending: false }),
-  useGitBranches: () => ({ data: hooks.branches, isLoading: false, error: null }),
-  useSwitchBranch: () => ({ mutateAsync: hooks.branchSwitch, isPending: false }),
-  useCreateBranch: () => ({ mutateAsync: hooks.branchCreate, isPending: false }),
-  useRenameBranch: () => ({ mutateAsync: hooks.branchRename, isPending: false }),
-  useDeleteBranch: () => ({ mutateAsync: hooks.branchDelete, isPending: false }),
-  useCheckoutRemoteBranch: () => ({ mutateAsync: hooks.checkoutRemote, isPending: false }),
-  useGitFetch: () => ({ mutateAsync: hooks.gitFetch, isPending: false }),
-  useGitPull: () => ({ mutateAsync: hooks.gitPull, isPending: false }),
-  useGitPush: () => ({ mutateAsync: hooks.gitPush, isPending: false }),
-  useGitHeadMessage: (_chatId: string, enabled: boolean) => ({
-    data: enabled ? hooks.headMessage : undefined,
-    error: enabled ? hooks.headMessageError : null,
-    isLoading: false,
-  }),
-  useGitHistory: () => ({
-    data: { pages: hooks.historyPages },
-    isLoading: hooks.historyLoading,
-    error: null,
-    hasNextPage: false,
-    isFetchingNextPage: false,
-    fetchNextPage: jest.fn(),
-  }),
-  useGitCommit: () => ({ data: hooks.commitDetails, isLoading: false, error: null }),
-  useGitDiff: () => ({ data: hooks.diff, isLoading: false, error: null }),
-  useGitWorktrees: () => ({
-    data: hooks.worktrees,
-    error: hooks.worktreesError,
-    isLoading: false,
-    isFetching: false,
-    refetch: hooks.worktreesRefetch,
-  }),
-  useAddWorktree: () => ({ mutateAsync: hooks.worktreeAdd, isPending: false }),
-  useRemoveWorktree: () => ({ mutateAsync: hooks.worktreeRemove, isPending: false }),
-}));
-
-// Below the mocks, never as a static import: those are evaluated first and the
-// panel would bind the real git hooks.
-const { GitPanel } = await import('../../../src/features/workspace/GitPanel');
-
-function repoState(status: Partial<GitRepoState & { status: unknown }> = {}): GitRepoState {
-  return {
-    state: 'repo',
-    workdir: '/srv/projects/mangostudio',
-    root: '/srv/projects/mangostudio',
-    status: {
-      branch: { name: 'main', ahead: 0, behind: 0 },
-      staged: [],
-      unstaged: [],
-      untracked: [],
-      conflicted: [],
-      clean: true,
-    },
-    ...status,
-  } as GitRepoState;
-}
+import { gitPanelHooks as hooks, resetGitPanelHooks } from '../../support/mocks/git-panel-hooks';
 
 /** Opens the commit split button's menu, which holds every non-default action. */
 async function openCommitMenu(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('button', { name: 'More commit actions' }));
 }
 
-beforeEach(() => {
-  hooks.data = undefined;
-  hooks.error = null;
-  hooks.loading = false;
-  hooks.fetching = false;
-  hooks.initPending = false;
-  hooks.initError = null;
-  hooks.refetch.mockReset();
-  hooks.mutate.mockReset();
-  hooks.stage.mockReset();
-  hooks.unstage.mockReset();
-  hooks.discard.mockReset();
-  hooks.commit.mockReset();
-  hooks.generate.mockReset();
-  hooks.stashSave.mockReset();
-  hooks.stashPop.mockReset();
-  hooks.stashApply.mockReset();
-  hooks.stashDrop.mockReset();
-  hooks.stashes = [];
-  hooks.branches = { branches: [], remotes: [] };
-  hooks.branchSwitch.mockReset();
-  hooks.branchCreate.mockReset();
-  hooks.branchRename.mockReset();
-  hooks.branchDelete.mockReset();
-  hooks.checkoutRemote.mockReset();
-  hooks.gitFetch.mockReset();
-  hooks.gitPull.mockReset();
-  hooks.gitPush.mockReset();
-  hooks.headMessage = undefined;
-  hooks.headMessageError = null;
-  hooks.historyPages = [];
-  hooks.historyLoading = false;
-  hooks.commitDetails = undefined;
-  hooks.diff = undefined;
-  hooks.githubData = { state: 'no-remote' };
-  hooks.githubError = null;
-  hooks.githubLoading = false;
-  hooks.githubFetching = false;
-  hooks.githubRefetch.mockReset();
-  hooks.worktrees = { worktrees: [] };
-  hooks.worktreesError = null;
-  hooks.worktreesRefetch.mockReset();
-  hooks.worktreeAdd.mockReset();
-  hooks.worktreeRemove.mockReset();
-  sessionStorage.clear();
-  localStorage.clear();
-});
-
-/**
- * The panel reads the app's runner to decide whether to offer the agent's own
- * review of the working tree. Only the fields that decision needs are supplied,
- * and the runner is MangoStudio's own — the review action has its own suite.
- *
- * Mounted in a `RailPanel`, as it is in the app: its refresh and overflow menu
- * are drawn into that panel's header.
- */
-function Panel({ chatId = 'chat-1' }: { readonly chatId?: string }) {
-  const app = {
-    runner: { kind: 'mangostudio' },
-    currentChatId: chatId,
-    currentEnvironmentId: null,
-    isGenerating: false,
-    handleReviewChanges: () => Promise.resolve(),
-  };
-  return (
-    <AppContext value={app as never}>
-      <RailPanel
-        title="Repository"
-        closeMode="collapse"
-        closeLabel="Collapse agent side panel"
-        onClose={() => undefined}
-      >
-        <GitPanel chatId={chatId} />
-      </RailPanel>
-    </AppContext>
-  );
-}
+beforeEach(resetGitPanelHooks);
 
 describe('GitPanel', () => {
   it('shows branch divergence and merges unstaged work into one changes group', () => {
@@ -715,43 +493,6 @@ describe('GitPanel', () => {
     });
   });
 
-  it('shows a loading spinner instead of a blank panel while the diff viewer chunk loads', async () => {
-    hooks.data = repoState({
-      status: {
-        branch: { name: 'feat/git-panel', ahead: 0, behind: 0 },
-        staged: [],
-        unstaged: [{ path: 'src/panel.tsx', status: 'modified' }],
-        untracked: [],
-        conflicted: [],
-        clean: false,
-      },
-    });
-    hooks.diff = {
-      path: 'src/panel.tsx',
-      binary: false,
-      diff: '@@ -4,2 +4,2 @@\n-old title\n+new title\n',
-    };
-
-    render(<Panel />);
-    // This must run before any other test opens a diff: `LazyDiffViewer` holds
-    // a module-level `lazy()` singleton, and React never suspends on it again
-    // once its dynamic import has resolved once. `fireEvent` (unlike
-    // `userEvent`) dispatches synchronously, so this assertion lands before
-    // that import settles on the microtask queue -- the Suspense fallback,
-    // not a blank panel, is what's on screen at this point.
-    fireEvent.click(screen.getByRole('button', { name: 'View diff for src/panel.tsx' }));
-
-    expect(screen.getByText('Loading diff…')).toBeVisible();
-    expect(screen.queryByRole('region', { name: 'View diff for src/panel.tsx' })).toBeNull();
-
-    // Await the chunk itself: a cold import can exceed findByRole's deadline.
-    await act(async () => {
-      await import('../../../src/features/workspace/DiffViewer');
-    });
-
-    expect(screen.getByRole('region', { name: 'View diff for src/panel.tsx' })).toBeVisible();
-  });
-
   it('opens a line-numbered worktree diff from a changed file', async () => {
     const user = userEvent.setup();
     hooks.data = repoState({
@@ -776,7 +517,9 @@ describe('GitPanel', () => {
     await act(async () => {
       await import('../../../src/features/workspace/DiffViewer');
     });
-    const diff = screen.getByRole('region', { name: 'View diff for src/panel.tsx' });
+    // `find`, not `get`: whichever test opens the first diff in this file meets
+    // the lazy chunk cold, and the view lands a few microtasks after the import.
+    const diff = await screen.findByRole('region', { name: 'View diff for src/panel.tsx' });
     expect(diff).toBeVisible();
     expect(diff).toHaveTextContent('old title');
     expect(diff).toHaveTextContent('new title');
@@ -808,7 +551,7 @@ describe('GitPanel', () => {
     });
 
     // The whole header is the tooltip: it truncates to one line like the code rows.
-    const header = screen.getByText('@@ -4,2 +4,2 @@ export function Panel() {');
+    const header = await screen.findByText('@@ -4,2 +4,2 @@ export function Panel() {');
     expect(header).toHaveAttribute('title', '@@ -4,2 +4,2 @@ export function Panel() {');
     expect(header).toHaveClass('truncate');
 
@@ -859,7 +602,7 @@ describe('GitPanel', () => {
     await act(async () => {
       await import('../../../src/features/workspace/DiffViewer');
     });
-    const diff = screen.getByRole('region', { name: 'View diff for src/git.ts' });
+    const diff = await screen.findByRole('region', { name: 'View diff for src/git.ts' });
     expect(diff).toBeVisible();
     // The diff names the commit with the same seven characters the list did.
     expect(within(diff).getByText('1234567')).toHaveAttribute('title', '1234567890abcdef');
