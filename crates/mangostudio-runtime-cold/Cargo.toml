@@ -1,0 +1,78 @@
+[package]
+name = "mangostudio-runtime-cold"
+# An internal crate of the one shipped binary, versioned like `mangostudio-runtime-contract`
+# (the workspace version) so the app-release bump never has to touch it.
+version.workspace = true
+authors.workspace = true
+categories = ["command-line-utilities", "network-programming", "filesystem", "os"]
+edition.workspace = true
+keywords = ["mangostudio", "runtime", "mcp", "external-agents", "probing"]
+license.workspace = true
+# Not published: `mangostudio-runtime` links it into the one shipped binary.
+publish = false
+repository.workspace = true
+rust-version.workspace = true
+description = "MangoStudio runtime host, cold half: the MCP client, the external-agent host, machine probing and the toolchain commands, built for size because a request spends its time waiting in them"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = { version = "0.1.92", default-features = false }
+base64 = { version = "0.23", default-features = false, features = ["alloc"] }
+bytes = "1"
+futures-util = { workspace = true, features = ["alloc"] }
+getrandom = { version = "0.4", default-features = false }
+http = "1"
+mango-agent-acp = "=0.11.0"
+mango-agent-claude = "=0.11.0"
+mango-agent-codex = "=0.11.0"
+mango-external-agents = { version = "=0.11.0", default-features = false, features = ["stdio"] }
+mango-protocol = { workspace = true, features = ["tokio", "websocket"] }
+mangostudio-runtime-contract.workspace = true
+mangostudio-runtime-core.workspace = true
+regex = { version = "1.13", default-features = false, features = ["std", "unicode-perl"] }
+reqwest = { version = "0.13", default-features = false, features = [
+  "rustls-no-provider",
+  "stream",
+] }
+rmcp = { version = "=3.10.0", default-features = false, features = [
+  "client",
+  "transport-async-rw",
+  "transport-streamable-http-client",
+] }
+rustls.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sse-stream = "0.2"
+tokio = { version = "1.53.3", default-features = false, features = [
+  "fs",
+  "io-util",
+  "macros",
+  "net",
+  "process",
+  "rt-multi-thread",
+  "signal",
+  "sync",
+  "time",
+] }
+tokio-util = { workspace = true, features = ["rt"] }
+webpki-roots.workspace = true
+
+[dev-dependencies]
+jsonschema.workspace = true
+mango-agent-acp = { version = "=0.11.0", features = ["testing"] }
+mango-agent-claude = { version = "=0.11.0", features = ["testing"] }
+mango-agent-codex = { version = "=0.11.0", features = ["testing"] }
+mango-external-agents = { version = "=0.11.0", default-features = false, features = [
+  "stdio",
+  "testing",
+] }
+mango-protocol = { workspace = true, features = ["tokio", "spawn"] }
+mangostudio-runtime-core = { workspace = true, features = ["test-support"] }
+tokio = { version = "1.53.3", features = ["io-std", "test-util"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.189"
+nix = { workspace = true, features = ["hostname", "user", "fs"] }

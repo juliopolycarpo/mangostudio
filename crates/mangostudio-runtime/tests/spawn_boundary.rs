@@ -2,7 +2,7 @@
 //! the console window on Windows (`CREATE_NO_WINDOW`). A git, gh, shell, MCP, install, or probe
 //! child that bypassed it would flash a console window on a native-Windows runtime.
 //!
-//! This test scans the crate's own `src/` tree, outside test code, for the ways a process can be
+//! This test scans the `src/` tree of each of the host's three crates, outside test code, for the ways a process can be
 //! started or its window re-shown without that request, and pins each allowed site's exact call
 //! text and count, the way `config_boundary.rs` pins environment reads. A new direct spawn fails
 //! here, not in review.
@@ -10,46 +10,46 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-/// `(path relative to src/, call text, expected occurrence count, why it is allowed)`.
+/// `(path relative to crates/, call text, expected occurrence count, why it is allowed)`.
 const ALLOWED: &[(&str, &str, usize, &str)] = &[
     (
-        "subprocess/supervisor.rs",
+        "mangostudio-runtime-core/src/subprocess/supervisor.rs",
         "Command::new(",
         1,
         "portable fallback compiled only on targets that are neither Unix nor Windows",
     ),
     (
-        "subprocess/supervisor.rs",
+        "mangostudio-runtime-core/src/subprocess/supervisor.rs",
         "hide_window:",
         1,
         "the one default every request starts from: hidden",
     ),
     (
-        "subprocess/windows_job.rs",
+        "mangostudio-runtime-core/src/subprocess/windows_job.rs",
         "CreateProcessW(",
         2,
         "the bounded spawn takes its flags from the request; the ConPTY spawn must not hide",
     ),
     (
-        "external_agents/adapter/launcher.rs",
+        "mangostudio-runtime-cold/src/external_agents/adapter/launcher.rs",
         "hide_window =",
         1,
         "copies the vendor launch spec's own window policy",
     ),
     (
-        "cli/user_service.rs",
+        "mangostudio-runtime/src/cli/user_service.rs",
         "Command::new(",
         3,
         "operator CLI service verbs: systemctl/launchctl on the operator's console, powershell.exe hidden with CREATE_NO_WINDOW",
     ),
     (
-        "subprocess/supervisor.rs",
+        "mangostudio-runtime-core/src/subprocess/supervisor.rs",
         PROCESS_COMMAND_IMPORT,
         1,
         "tokio's Command for the portable fallback above",
     ),
     (
-        "cli/user_service.rs",
+        "mangostudio-runtime/src/cli/user_service.rs",
         PROCESS_COMMAND_IMPORT,
         1,
         "std's Command for the operator CLI service verbs above",
@@ -248,11 +248,26 @@ fn process_command_sites(lines: &[(usize, &str)]) -> Vec<(usize, &'static str)> 
     sites
 }
 
-fn spawn_sites(src_dir: &Path) -> BTreeMap<(String, String), Vec<usize>> {
+/// The crates that make up the runtime host, under `crates/`. Each is scanned through its `src/`.
+const HOST_CRATES: &[&str] = &[
+    "mangostudio-runtime",
+    "mangostudio-runtime-core",
+    "mangostudio-runtime-cold",
+];
+
+fn spawn_sites(crates_dir: &Path) -> BTreeMap<(String, String), Vec<usize>> {
     let mut sites: BTreeMap<(String, String), Vec<usize>> = BTreeMap::new();
-    let mut stack = vec![src_dir.to_path_buf()];
+    let mut stack: Vec<_> = HOST_CRATES
+        .iter()
+        .map(|name| crates_dir.join(name).join("src"))
+        .collect();
     while let Some(dir) = stack.pop() {
-        for entry in std::fs::read_dir(&dir).expect("src/ is readable") {
+        for entry in std::fs::read_dir(&dir).unwrap_or_else(|error| {
+            panic!(
+                "expected {} to be readable | received {error}",
+                dir.display()
+            )
+        }) {
             let path = entry.expect("dir entry reads").path();
             if path.is_dir() {
                 stack.push(path);
@@ -262,8 +277,8 @@ fn spawn_sites(src_dir: &Path) -> BTreeMap<(String, String), Vec<usize>> {
                 continue;
             }
             let relative = path
-                .strip_prefix(src_dir)
-                .expect("path is under src_dir")
+                .strip_prefix(crates_dir)
+                .expect("path is under crates_dir")
                 .to_string_lossy()
                 .replace('\\', "/");
             if is_test_file(&relative) {
@@ -294,8 +309,8 @@ fn spawn_sites(src_dir: &Path) -> BTreeMap<(String, String), Vec<usize>> {
 
 #[test]
 fn every_host_spawn_goes_through_the_hidden_window_request() {
-    let src_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let found = spawn_sites(&src_dir);
+    let crates_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let found = spawn_sites(&crates_dir);
     let expected: BTreeMap<(String, String), usize> = ALLOWED
         .iter()
         .map(|&(path, text, count, _)| ((path.to_string(), text.to_string()), count))
@@ -309,7 +324,7 @@ fn every_host_spawn_goes_through_the_hidden_window_request() {
         let Some(&expected_count) = expected.get(key) else {
             panic!(
                 "expected no `{shape}` in host code outside the allowlist | received {} at \
-                 src/{relative}:{lines:?}. Start the process through \
+                 {relative}:{lines:?}. Start the process through \
                  subprocess::ProcessRequest::new so it keeps CREATE_NO_WINDOW on Windows, or add \
                  the site to ALLOWED with the reason it cannot open a console window.",
                 lines.len()
@@ -318,7 +333,7 @@ fn every_host_spawn_goes_through_the_hidden_window_request() {
         assert_eq!(
             lines.len(),
             expected_count,
-            "expected {expected_count} `{shape}` site(s) in src/{relative} | received {} at \
+            "expected {expected_count} `{shape}` site(s) in {relative} | received {} at \
              lines {lines:?}. A grown count is a new spawn that bypasses \
              ProcessRequest::new; a shrunk count is a stale ALLOWED entry to drop.",
             lines.len()

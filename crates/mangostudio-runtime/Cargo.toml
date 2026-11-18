@@ -48,9 +48,6 @@ injected-version-fixture = []
 # under the `i` flag. Already in the graph at this version with these features
 # through `regex`.
 aho-corasick = { version = "1.1.5", default-features = false, features = ["std", "perf-literal"] }
-# The SDK's process and launcher ports are `async_trait` traits; already in the graph through
-# `mango-external-agents` at this version.
-async-trait = { version = "0.1.92", default-features = false }
 # `serve`'s token bootstrap (`generate_serve_token`, mirroring `runtime-home.ts`'s
 # `bootstrapServeToken`): base64url-encodes the 32 bytes `getrandom` (below)
 # draws from the operating system's CSPRNG. Already in the dependency graph
@@ -84,22 +81,15 @@ http = "1"
 # them; that order is wire-visible, so it needs a real collator rather than a
 # byte comparison. Wrapped by `crate::library::collation`.
 icu_collator = "2.3"
-# External-agent hosting (`external_agents/`): the SDK's harness and session traits
-# plus the three product targets. Stdio only: every harness speaks line-framed
-# stdio through this crate's own launcher, so neither `websocket` nor the SDK's
-# `launcher-tokio` spawner is compiled in. Exact pins while the adoption is
-# qualified; a bump is a deliberate `build(runtime)` change.
-mango-agent-acp = "=0.11.0"
-mango-agent-claude = "=0.11.0"
-mango-agent-codex = "=0.11.0"
-mango-external-agents = { version = "=0.11.0", default-features = false, features = ["stdio"] }
 # The `tokio` feature is what brings in `Contract`/`ContractHandlers`/`Guard`/
 # `Session` — this crate's whole reason to exist is serving a contract over a
 # session, so it is a normal dependency, not optional.
 # `websocket`: the `serve`/`connect` transports dial and accept over it.
 # `tokio` alone (the dispatcher's own dependency) has no socket of its own.
 mango-protocol = { workspace = true, features = ["tokio", "websocket"] }
+mangostudio-runtime-cold.workspace = true
 mangostudio-runtime-contract.workspace = true
+mangostudio-runtime-core.workspace = true
 # `fs.grep`'s literal prefilter: locates the line bounds around a literal hit
 # and counts the lines skipped. Already in the graph at this version through
 # `aho-corasick` and `regex`.
@@ -111,36 +101,12 @@ memchr = { version = "2.8.3", default-features = false, features = ["std"] }
 # `commands`, and for the audit log's credential-shape redaction, which needs
 # the same fixed set of patterns `apps/runtime/src/audit-log.ts` masks with.
 regex = { version = "1.13", default-features = false, features = ["std", "unicode-perl"] }
-# MCP over HTTP (`mcp/http.rs`, `mcp/sse.rs`). `rustls-no-provider` rather than
-# reqwest's default `rustls`, which enables `aws-lc-rs`: the client is handed a
-# preconfigured `ring` config with the webpki root store, the same TLS policy
-# `mango-protocol`'s WebSocket dialler uses.
-reqwest = { version = "0.13", default-features = false, features = [
-  "rustls-no-provider",
-  "stream",
-] }
-# MCP SDK access stays inside `mcp/`; the host owns the session and wire
-# mapping. Pin this version while the 2026-07-28 client API is integrated.
-# No `transport-child-process`: stdio servers are launched by the shared
-# guardian/Job supervisor and the SDK only receives their pipes
-# (`transport-async-rw`).
-# `transport-streamable-http-client` without the SDK's own reqwest backend:
-# `mcp/http.rs` implements the SDK's HTTP client trait so it owns status
-# handling (the legacy SSE fallback needs the initialize POST's status) and
-# the TLS provider.
-rmcp = { version = "=3.10.0", default-features = false, features = [
-  "client",
-  "transport-async-rw",
-  "transport-streamable-http-client",
-] }
 # `fs.grep` needs ECMAScript's non-Unicode RegExp semantics, including UTF-16
 # code units, named captures, and an engine interrupt hook for its hard deadline.
 rquickjs = { version = "0.14", default-features = false, features = ["std"] }
-rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-sse-stream = "0.2"
 # A normal dependency, not a dev one: `main.rs` builds its own multi-thread
 # runtime for `stdio`/`serve`/`connect` (never `#[tokio::main]` — the
 # consent/setup/token/lock work those subcommands do first is synchronous by
@@ -177,7 +143,6 @@ toml = { version = "1.1", default-features = false, features = ["std", "parse", 
 # locked): `src/library/smol_toml.rs` walks its events to judge each bare
 # scalar the way `smol-toml` does before the `toml` crate parses the document.
 toml_parser = { version = "1.1", default-features = false, features = ["std"] }
-webpki-roots.workspace = true
 
 [dev-dependencies]
 # The external-agent tests compile a released product's JSON Schema with it
@@ -204,6 +169,7 @@ mango-external-agents = { version = "=0.11.0", default-features = false, feature
   "testing",
 ] }
 mango-protocol = { workspace = true, features = ["tokio", "spawn"] }
+mangostudio-runtime-core = { workspace = true, features = ["test-support"] }
 tokio = { version = "1.53.3", features = ["io-std", "test-util"] }
 
 [target.'cfg(unix)'.dependencies]

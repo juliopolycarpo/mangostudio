@@ -376,8 +376,8 @@ impl TerminalFlow {
 
 #[cfg(test)]
 mod tests {
-    use crate::result_value::assert_wire_eq;
     use base64::Engine;
+    use mangostudio_runtime_core::assert_wire_eq;
 
     use super::{
         ByteRing, ExitInfo, INFLIGHT_WINDOW_BYTES, OutputFrame, PENDING_MAX_BYTES,

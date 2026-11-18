@@ -1205,8 +1205,8 @@ mod prefilter_parity_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::result_value::assert_wire_eq;
     use crate::test_support::scratch_dir;
+    use mangostudio_runtime_core::assert_wire_eq;
 
     fn token() -> CancellationToken {
         CancellationToken::new()

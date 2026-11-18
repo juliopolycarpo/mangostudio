@@ -122,28 +122,9 @@ pub fn resolve_workspace_path(
     Ok(lexically_normalize(&absolute))
 }
 
-/// The canonical form of an existing directory: `std::fs::canonicalize`
-/// (symlinks resolved, case folded to the on-disk spelling where the
-/// filesystem is case-insensitive), with Windows' verbatim prefix removed.
-/// `None` when `path` is not an existing directory.
-///
-/// This is the single canonicalization both `workspace.validate` (whose
-/// `resolvedPath` the hub stores as a chat workdir) and the external-agent
-/// workspace authorization use, so the hub's exact-equality check compares
-/// two strings produced by the same function.
-///
-/// ```ignore
-/// let canonical = canonical_directory(Path::new("/home/me/app-link"));
-/// ```
-pub(crate) fn canonical_directory(path: &std::path::Path) -> Option<PathBuf> {
-    if !std::fs::metadata(path).ok()?.is_dir() {
-        return None;
-    }
-    let canonical = std::fs::canonicalize(path).ok()?;
-    #[cfg(windows)]
-    let canonical = crate::filesystem::normalize_windows_final_path(&canonical);
-    Some(canonical)
-}
+// The canonical form of an existing directory lives in the core crate: the external-agent host
+// authorizes a workspace with the same function `workspace.validate` reports.
+pub(crate) use mangostudio_runtime_core::canonical::canonical_directory;
 
 #[cfg(test)]
 mod tests {

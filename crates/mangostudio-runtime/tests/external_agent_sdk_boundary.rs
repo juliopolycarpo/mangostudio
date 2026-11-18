@@ -7,10 +7,18 @@ const SDK_CRATES: &[&str] = &[
     "mango_agent_claude",
     "mango_agent_codex",
 ];
-const FIXTURES: &[&str] = &["examples/fake_cursor_agent.rs"];
+/// The crates that make up the runtime host, under `crates/`.
+const HOST_CRATES: &[&str] = &[
+    "mangostudio-runtime",
+    "mangostudio-runtime-core",
+    "mangostudio-runtime-cold",
+];
+/// Paths are relative to `crates/`, so they name the crate that owns the file.
+const ADAPTER_DIR: &str = "mangostudio-runtime-cold/src/external_agents/adapter/";
+const FIXTURES: &[&str] = &["mangostudio-runtime/examples/fake_cursor_agent.rs"];
 
 fn allowed(path: &str) -> bool {
-    path.starts_with("src/external_agents/adapter/") || FIXTURES.contains(&path)
+    path.starts_with(ADAPTER_DIR) || FIXTURES.contains(&path)
 }
 
 // Rust identifiers after removing comments and string literals. This catches imports, re-exports,
@@ -108,8 +116,16 @@ fn sdk_references(source: &str) -> Vec<&str> {
 
 #[test]
 fn product_sources_cannot_name_sdk_crates() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let mut pending = vec![root.join("src"), root.join("tests"), root.join("examples")];
+    let root = &Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let mut pending = Vec::new();
+    for name in HOST_CRATES {
+        for subdir in ["src", "tests", "examples"] {
+            let dir = root.join(name).join(subdir);
+            if dir.is_dir() {
+                pending.push(dir);
+            }
+        }
+    }
     let mut violations = Vec::new();
     while let Some(dir) = pending.pop() {
         for entry in std::fs::read_dir(dir).unwrap() {
@@ -140,7 +156,9 @@ fn product_sources_cannot_name_sdk_crates() {
         violations.is_empty(),
         "SDK references must stay inside the private adapter: {violations:#?}"
     );
-    let modules = std::fs::read_to_string(root.join("src/external_agents/mod.rs")).unwrap();
+    let modules =
+        std::fs::read_to_string(root.join("mangostudio-runtime-cold/src/external_agents/mod.rs"))
+            .unwrap();
     assert!(
         modules.lines().any(|line| line == "mod adapter;"),
         "the SDK adapter must remain private"
@@ -164,11 +182,20 @@ fn the_guard_catches_every_dependency_and_type_escape() {
             );
         }
     }
-    assert!(!allowed("src/external_agents/supervisor/tests.rs"));
-    assert!(!allowed("src/terminal/login.rs"));
-    assert!(!allowed("tests/new_sdk_fixture.rs"));
-    assert!(!allowed("src/external_agents/adapter.rs"));
-    assert!(allowed("src/external_agents/adapter/session.rs"));
+    assert!(!allowed(
+        "mangostudio-runtime-cold/src/external_agents/supervisor/tests.rs"
+    ));
+    assert!(!allowed("mangostudio-runtime-cold/src/login.rs"));
+    assert!(!allowed("mangostudio-runtime/tests/new_sdk_fixture.rs"));
+    assert!(!allowed(
+        "mangostudio-runtime-cold/src/external_agents/adapter.rs"
+    ));
+    assert!(!allowed(
+        "mangostudio-runtime/src/external_agents/adapter/session.rs"
+    ));
+    assert!(allowed(
+        "mangostudio-runtime-cold/src/external_agents/adapter/session.rs"
+    ));
 }
 
 #[test]

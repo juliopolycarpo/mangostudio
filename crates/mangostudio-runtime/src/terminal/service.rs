@@ -883,7 +883,7 @@ impl Prepared {
                 .as_deref()
                 .expect("login uses an explicit directory");
             let program =
-                super::login::resolve_cursor_alias(candidates, env, cwd, check, cancel).await?;
+                crate::login::resolve_cursor_alias(candidates, env, cwd, check, cancel).await?;
             if cancel.is_cancelled() {
                 return Err(open_cancelled());
             }
@@ -940,7 +940,7 @@ fn prepare(params: OpenParams, host: PathEnv) -> Result<Prepared, RemoteError> {
     };
     let mut cursor_alias = None;
     let (program, args) = if let Some(target) = params.login_target {
-        let descriptors = super::login::descriptors();
+        let descriptors = crate::login::descriptors();
         let descriptor = descriptors
             .get(&target)
             .ok_or_else(|| invalid_argument("login target", "a supported vendor"))?;
@@ -955,12 +955,14 @@ fn prepare(params: OpenParams, host: PathEnv) -> Result<Prepared, RemoteError> {
         } else {
             descriptor.program.clone()
         };
-        let candidate = path.and_then(|path| crate::health::which_in(&name, OsStr::new(path)));
+        let candidate = path.and_then(|path| {
+            mangostudio_runtime_core::executable_path::which_in(&name, OsStr::new(path))
+        });
         let program = match candidate {
             // Pin relative PATH entries before changing to the terminal workspace.
             Some(program) => std::path::absolute(program).map_err(pty_io)?,
             None if !windows && target == "cursor" => {
-                cursor_alias = Some(super::login::cursor_alias_candidates(path));
+                cursor_alias = Some(crate::login::cursor_alias_candidates(path));
                 // resolve_login_alias replaces this before native startup.
                 PathBuf::from(name)
             }
@@ -1037,11 +1039,14 @@ fn default_shell(host: &PathEnv) -> RuntimeShellKind {
 
 fn shell_program(shell: RuntimeShellKind, host: &PathEnv) -> Result<PathBuf, RemoteError> {
     // The rule `detect_shells` and `shell.run` also use: PowerShell is Windows-only.
-    let candidates = crate::health::shell_path_candidates(shell, host.is_windows());
+    let candidates =
+        mangostudio_runtime_core::executable_path::shell_path_candidates(shell, host.is_windows());
     let path = host.env.get("PATH").map(String::as_str).unwrap_or("");
     candidates
         .iter()
-        .find_map(|name| crate::health::which_in(name, OsStr::new(path)))
+        .find_map(|name| {
+            mangostudio_runtime_core::executable_path::which_in(name, OsStr::new(path))
+        })
         .ok_or_else(|| {
             RemoteError::new(
                 codes::INTERNAL,

@@ -22,12 +22,22 @@ three application workspaces and does not follow their lifecycle.
 | `packages/protocol/`                   | `@mangostudio/protocol` on npm            | TypeScript, TypeBox                                 |
 | `crates/mango-protocol/`               | `mango-protocol` on crates.io             | Rust, serde, tokio                                  |
 | `crates/mangostudio-runtime/`          | Application execution host                | Rust, application version                           |
+| `crates/mangostudio-runtime-core/`     | Host layer both halves build on           | Rust, workspace protocol version                    |
+| `crates/mangostudio-runtime-cold/`     | Host code built for size                  | Rust, workspace protocol version                    |
 | `crates/mangostudio-runtime-contract/` | Internal generated runtime contract       | Rust, workspace protocol version                    |
 | `crates/mangostudio-launcher/`         | `mangostudio` on crates.io (the launcher) | Rust, application version and shared workspace MSRV |
 
 The stable Rust crates belong to the root Cargo workspace and share its lockfile, edition,
 development toolchain, and lint policy. The protocol and application versions remain independent.
 `crates/mango-protocol/fuzz` is an excluded nightly-only workspace with its own lockfile.
+
+The runtime host is three crates linked into the one `mangostudio-runtime` binary. `-core` holds
+what both halves share: the method registry and its ports, consent, the runtime-home layout, the
+config parser and the subprocess runner. `-cold` holds the MCP client, the external-agent host,
+machine probing and the toolchain commands, and is built at `opt-level = "s"`. `mangostudio-runtime`
+keeps the filesystem tools, the relay, the PTY and the protocol transport at `opt-level = 3`, and
+re-exports the other two crates' modules under their old paths.
+[runtime-metrics.md](../reference/runtime-metrics.md#release-profile) has the measurements.
 
 The runtime and launcher follow application releases; the internal runtime-contract crate
 is not a separate public release train.

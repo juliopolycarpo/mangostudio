@@ -1,0 +1,71 @@
+[package]
+name = "mangostudio-runtime-core"
+# An internal crate of the one shipped binary, versioned like `mangostudio-runtime-contract`
+# (the workspace version) so the app-release bump never has to touch it.
+version.workspace = true
+authors.workspace = true
+categories = ["command-line-utilities", "network-programming", "filesystem", "os"]
+edition.workspace = true
+keywords = ["mangostudio", "runtime", "dispatcher", "runtime-home", "subprocess"]
+license.workspace = true
+# Not published: `mangostudio-runtime` links it into the one shipped binary.
+publish = false
+repository.workspace = true
+rust-version.workspace = true
+description = "MangoStudio runtime host, shared layer: the method registry and its ports, consent, the runtime-home layout, and the bounded subprocess runner that both the hot and the cold halves of the runtime build on"
+
+[lints]
+workspace = true
+
+[features]
+# Compiles the `#[cfg(test)]`-only helpers that the other two runtime crates' unit tests use
+# (`ProcessControl::pending`, `assert_wire_eq!`, `powershell_script_request`, ...). A `cfg(test)`
+# item does not exist when this crate is built as a dependency, so those crates turn this on in
+# their `[dev-dependencies]`. No release build enables it.
+test-support = []
+
+[dependencies]
+base64 = { version = "0.23", default-features = false, features = ["alloc"] }
+getrandom = { version = "0.4", default-features = false }
+mango-protocol = { workspace = true, features = ["tokio", "websocket"] }
+mangostudio-runtime-contract.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio = { version = "1.53.3", default-features = false, features = [
+  "fs",
+  "io-util",
+  "macros",
+  "net",
+  "process",
+  "rt-multi-thread",
+  "signal",
+  "sync",
+  "time",
+] }
+tokio-util = { workspace = true, features = ["rt"] }
+
+[dev-dependencies]
+mango-protocol = { workspace = true, features = ["tokio", "spawn"] }
+tokio = { version = "1.53.3", features = ["io-std", "test-util"] }
+
+# `file_identity` reads the inode through its `MetadataExt`; Windows reads the handle instead.
+[target.'cfg(not(windows))'.dependencies]
+cap-fs-ext = { version = "4.0.3", default-features = false, features = ["std"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.189"
+nix = { workspace = true, features = ["hostname", "user", "fs"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+  "Wdk_Storage_FileSystem",
+  "Win32_Globalization",
+  "Win32_Networking_WinSock",
+  "Win32_Storage_FileSystem",
+  "Win32_System_Console",
+  "Win32_System_IO",
+  "Win32_System_JobObjects",
+  "Win32_System_SystemInformation",
+  "Win32_System_Threading",
+] }

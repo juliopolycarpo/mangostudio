@@ -122,45 +122,32 @@ compile_error!(
      and panic = \"abort\" would turn one panicking request into a process exit"
 );
 
-mod abandoned_call;
+// Modules that moved to `mangostudio-runtime-core` (shared) and `mangostudio-runtime-cold` (built
+// for size) keep their old paths here, so this crate's own code and its integration tests still
+// say `crate::registry` and `mangostudio_runtime::mcp`.
+pub use mangostudio_runtime_cold::{commands, mcp, probing};
+pub(crate) use mangostudio_runtime_cold::{external_agents, login};
+pub(crate) use mangostudio_runtime_core::{
+    abandoned_call, diagnostics, file_identity, hex, json_size, lossy_utf8, probe_cache, release,
+    result_value, slot_update_lock, tool_argument,
+};
+pub use mangostudio_runtime_core::{
+    blocking, config, consent, discovery, event_check, manifest, panic, ports, registry,
+    runtime_home, serve, setup, slot_publish, subprocess,
+};
+
 pub mod audit;
-pub mod blocking;
 pub mod cli;
-pub mod commands;
-pub mod config;
-pub mod consent;
-mod diagnostics;
-pub mod discovery;
-pub mod event_check;
-mod external_agents;
-mod file_identity;
 pub mod filesystem;
 pub mod health;
-mod hex;
+#[cfg(test)]
+mod host_wiring_tests;
 mod install;
-mod json_size;
 mod library;
-mod lossy_utf8;
-pub mod manifest;
-pub mod mcp;
-pub mod panic;
-pub mod ports;
-mod probe_cache;
-pub mod probing;
-pub mod registry;
-mod release;
-mod result_value;
-pub mod runtime_home;
-pub mod serve;
-pub mod setup;
-pub mod slot_publish;
-mod slot_update_lock;
-pub mod subprocess;
 pub mod supervisor;
 pub mod terminal;
 #[cfg(test)]
 pub(crate) mod test_support;
-mod tool_argument;
 pub mod transport;
 mod update;
 mod update_transfer;

@@ -14,6 +14,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
+use mangostudio_runtime_core::verbatim_path::simplify_verbatim;
+
 use crate::filesystem::{ContainedOpenError, open_contained_file};
 
 /// What a scan needs from `stat` (symlinks followed, as Node's `stat`).
@@ -160,27 +162,6 @@ pub(crate) fn simplify_verbatim_path(path: &str) -> Option<String> {
     simplify_verbatim(path)
 }
 
-/// The Win32 spelling of a verbatim drive or UNC path, or `None` for any
-/// other path (including verbatim forms with no Win32 equivalent, such as a
-/// volume GUID). A text rule, the same on every host; callers that only
-/// mean it on Windows gate it, as [`simplify_verbatim_path`] does.
-///
-/// # Example
-///
-/// ```ignore
-/// assert_eq!(simplify_verbatim(r"\\?\C:\tools").as_deref(), Some(r"C:\tools"));
-/// ```
-pub(crate) fn simplify_verbatim(path: &str) -> Option<String> {
-    let rest = path.strip_prefix(r"\\?\")?;
-    if let Some(unc) = rest.strip_prefix(r"UNC\") {
-        return Some(format!(r"\\{unc}"));
-    }
-    let bytes = rest.as_bytes();
-    let drive =
-        bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'\\';
-    drive.then(|| rest.to_string())
-}
-
 /// Joins a posix-separated relative path one segment at a time, so it names
 /// the same file under any root spelling.
 pub(crate) fn join_relative(root: &Path, relative: &str) -> PathBuf {
@@ -245,24 +226,6 @@ pub(crate) fn mtime_ms(metadata: &std::fs::Metadata) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn verbatim_drive_and_unc_paths_simplify_to_win32_spellings() {
-        assert_eq!(
-            simplify_verbatim(r"\\?\C:\Users\u").as_deref(),
-            Some(r"C:\Users\u")
-        );
-        assert_eq!(
-            simplify_verbatim(r"\\?\UNC\srv\share\x").as_deref(),
-            Some(r"\\srv\share\x")
-        );
-        assert_eq!(simplify_verbatim(r"\\?\Volume{abc}\x"), None);
-        // A verbatim path is only a drive path with a letter, a colon, and a separator.
-        assert_eq!(simplify_verbatim(r"\\?\ab\c"), None);
-        assert_eq!(simplify_verbatim(r"\\?\a:b"), None);
-        assert_eq!(simplify_verbatim(r"C:\Users\u"), None);
-        assert_eq!(simplify_verbatim("/home/u"), None);
-    }
 
     #[test]
     fn relative_paths_join_segment_by_segment() {

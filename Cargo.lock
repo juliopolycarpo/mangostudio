@@ -1367,7 +1367,6 @@ name = "mangostudio-runtime"
 version = "0.1.1"
 dependencies = [
  "aho-corasick",
- "async-trait",
  "base64 0.23.1",
  "bytes",
  "cap-fs-ext",
@@ -1385,14 +1384,47 @@ dependencies = [
  "mango-agent-codex",
  "mango-external-agents",
  "mango-protocol",
+ "mangostudio-runtime-cold",
  "mangostudio-runtime-contract",
+ "mangostudio-runtime-core",
  "memchr",
+ "nix",
+ "regex",
+ "rquickjs",
+ "rustix",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tokio-util",
+ "toml",
+ "toml_parser",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "mangostudio-runtime-cold"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "base64 0.23.1",
+ "bytes",
+ "futures-util",
+ "getrandom 0.4.3",
+ "http",
+ "jsonschema",
+ "libc",
+ "mango-agent-acp",
+ "mango-agent-claude",
+ "mango-agent-codex",
+ "mango-external-agents",
+ "mango-protocol",
+ "mangostudio-runtime-contract",
+ "mangostudio-runtime-core",
  "nix",
  "regex",
  "reqwest",
  "rmcp",
- "rquickjs",
- "rustix",
  "rustls",
  "serde",
  "serde_json",
@@ -1400,10 +1432,7 @@ dependencies = [
  "sse-stream",
  "tokio",
  "tokio-util",
- "toml",
- "toml_parser",
  "webpki-roots",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1414,6 +1443,25 @@ dependencies = [
  "mango-protocol",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "mangostudio-runtime-core"
+version = "0.2.0"
+dependencies = [
+ "base64 0.23.1",
+ "cap-fs-ext",
+ "getrandom 0.4.3",
+ "libc",
+ "mango-protocol",
+ "mangostudio-runtime-contract",
+ "nix",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tokio-util",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
