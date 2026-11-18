@@ -4,13 +4,15 @@
  * process that reused the hub's pid after the hub died (see `server-state.ts`).
  *
  * Linux reads `/proc`, macOS asks `ps` for the elapsed time (locale-free, unlike
- * `lstart`), Windows asks PowerShell. `undefined` means "could not be read", never
- * "the process is gone": the caller checks liveness separately.
+ * `lstart`), Windows calls `GetProcessTimes` through `bun:ffi`. `undefined` means "could not be
+ * read", never "the process is gone": the caller checks liveness separately.
  */
 
 import { readFile } from 'node:fs/promises';
 
 import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
+
+import { readWindowsCreationFileTime } from './windows-process-times';
 
 /** Linux `USER_HZ`: the unit of `/proc/<pid>/stat` field 22, fixed by the kernel ABI. */
 const LINUX_CLOCK_TICKS_PER_SECOND = 100;
@@ -18,10 +20,23 @@ const LINUX_CLOCK_TICKS_PER_SECOND = 100;
 /** A query that hangs must not hang `stop`; the CLI falls back to "unconfirmed". */
 const QUERY_TIMEOUT_MS = 5_000;
 
+/** `FILETIME` ticks (100 ns since 1601-01-01 UTC) at the Unix epoch, 1970-01-01 UTC. */
+const FILETIME_TICKS_AT_UNIX_EPOCH = 116_444_736_000_000_000n;
+
+/** .NET `DateTime` ticks (100 ns since 0001-01-01 UTC) at 1601-01-01 UTC. */
+const DOTNET_TICKS_AT_FILETIME_EPOCH = 504_911_232_000_000_000n;
+
+const FILETIME_TICKS_PER_MS = 10_000n;
+
 export interface ProcessStartTimeHost {
   readonly platform: NodeJS.Platform;
   readonly now: () => number;
   readonly readText: (path: string) => Promise<string>;
+  /**
+   * Windows only: the creation time of `pid` as a `FILETIME` (100 ns ticks since 1601-01-01
+   * UTC), or `undefined` when the process cannot be opened or queried.
+   */
+  readonly readWindowsCreationTime: (pid: number) => Promise<bigint | undefined>;
   /**
    * Runs a command and returns its stdout, or `undefined` when it failed or timed out.
    * `env` entries are added to this process's environment.
@@ -66,10 +81,30 @@ export function psElapsedStartMs(output: string, now: number): number | undefine
   return now - elapsedSeconds * 1000;
 }
 
-/** Start time (epoch ms) from the Unix milliseconds PowerShell printed, or `undefined`. */
-export function windowsStartMs(output: string): number | undefined {
-  const text = output.trim();
-  return /^\d{10,}$/.test(text) ? Number(text) : undefined;
+/**
+ * Epoch milliseconds from a Windows `FILETIME`, rounded half up to the millisecond, or
+ * `undefined` for a value before 1970 (a zero or garbage buffer, never a real process start).
+ * `bigint` throughout: a current `FILETIME` is about 1.3e17, past what a double holds exactly.
+ *
+ * @example
+ * fileTimeToEpochMs(116_444_736_000_000_000n); // 0
+ */
+export function fileTimeToEpochMs(fileTime: bigint): number | undefined {
+  if (fileTime < FILETIME_TICKS_AT_UNIX_EPOCH) return undefined;
+  const sinceUnixEpoch = fileTime - FILETIME_TICKS_AT_UNIX_EPOCH;
+  return Number((sinceUnixEpoch + FILETIME_TICKS_PER_MS / 2n) / FILETIME_TICKS_PER_MS);
+}
+
+/**
+ * The .NET `DateTime` ticks (UTC) of a Windows `FILETIME`, as the decimal text
+ * `(Get-Process).StartTime.ToUniversalTime().Ticks` printed, so a start token written by a hub
+ * from before the native read still compares equal. `undefined` for a non-positive value.
+ *
+ * @example
+ * fileTimeToDotNetTicks(1n); // '504911232000000001'
+ */
+export function fileTimeToDotNetTicks(fileTime: bigint): string | undefined {
+  return fileTime > 0n ? String(fileTime + DOTNET_TICKS_AT_FILETIME_EPOCH) : undefined;
 }
 
 /**
@@ -93,14 +128,8 @@ export async function readProcessStartMs(
       return linuxStartMs(stat, uptime, host.now());
     }
     if (host.platform === 'win32') {
-      const output = await host.run([
-        'powershell.exe',
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        `[DateTimeOffset]::new((Get-Process -Id ${pid} -ErrorAction Stop).StartTime).ToUnixTimeMilliseconds()`,
-      ]);
-      return output === undefined ? undefined : windowsStartMs(output);
+      const fileTime = await host.readWindowsCreationTime(pid);
+      return fileTime === undefined ? undefined : fileTimeToEpochMs(fileTime);
     }
     const output = await host.run(['ps', '-o', 'etime=', '-p', String(pid)]);
     return output === undefined ? undefined : psElapsedStartMs(output, host.now());
@@ -113,6 +142,7 @@ export const REAL_START_TIME_HOST: ProcessStartTimeHost = {
   platform: process.platform,
   now: Date.now,
   readText: (path) => readFile(path, 'utf8'),
+  readWindowsCreationTime: readWindowsCreationFileTime,
   run: async (command, env) => {
     const child = Bun.spawn([...command], {
       env: { ...process.env, ...env },

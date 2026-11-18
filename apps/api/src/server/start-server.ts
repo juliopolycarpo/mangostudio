@@ -204,8 +204,9 @@ async function persistState(port: number, host: string, frontendDir: string): Pr
     ...(process.env[HUB_SERVICE_UNIT_ENV] ? { service: process.env[HUB_SERVICE_UNIT_ENV] } : {}),
   };
   if (process.platform === 'win32') {
-    // The token is a PowerShell query (hundreds of ms): write the file first so the hub is
-    // findable at once, then add the token. Until then the CLI treats the file as token-less.
+    // Write the file first so the hub is findable at once, then add the token, which on Windows
+    // is a native call that can still fail to load. Until then the CLI treats the file as
+    // token-less; the binary smoke asserts the compiled hub does get one.
     await writeState(state);
     void attachStartToken({
       readState,

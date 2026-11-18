@@ -20,12 +20,20 @@ function statWithStartTicks(startTicks: string, comm = 'bun'): string {
 class FakeTokenHost implements ProcessStartTimeHost {
   readonly commands: string[][] = [];
   readonly envs: Array<Readonly<Record<string, string>> | undefined> = [];
+  readonly creationTimeQueries: number[] = [];
   constructor(
     readonly platform: NodeJS.Platform,
     private readonly files: Record<string, string> = {},
-    private readonly output: string | undefined | Error = undefined
+    private readonly output: string | undefined | Error = undefined,
+    private readonly creationTime: bigint | undefined | Error = undefined
   ) {}
   now = () => 0;
+  readWindowsCreationTime = (pid: number): Promise<bigint | undefined> => {
+    this.creationTimeQueries.push(pid);
+    return this.creationTime instanceof Error
+      ? Promise.reject(this.creationTime)
+      : Promise.resolve(this.creationTime);
+  };
   readText = (path: string): Promise<string> => {
     const text = this.files[path];
     return text === undefined ? Promise.reject(new Error(`ENOENT ${path}`)) : Promise.resolve(text);
@@ -125,27 +133,21 @@ describe('readProcessStartToken', () => {
     }
   );
 
-  it('asks PowerShell for StartTime ticks on Windows', async () => {
-    const host = new FakeTokenHost('win32', {}, '639012345678901234\r\n');
+  it('turns the native creation time into .NET ticks on Windows, with no spawn', async () => {
+    // 134_507_000_000_000_000 FILETIME ticks plus the 1601 to 0001 offset.
+    const host = new FakeTokenHost('win32', {}, undefined, 134_507_000_000_000_000n);
 
-    expect(await readProcessStartToken(42, host)).toBe('639012345678901234');
-    expect(host.commands[0]?.[0]).toBe('powershell.exe');
-    expect(host.commands[0]?.at(-1)).toContain('Get-Process -Id 42');
+    expect(await readProcessStartToken(42, host)).toBe('639418232000000000');
+    expect(host.creationTimeQueries).toEqual([42]);
+    expect(host.commands).toEqual([]);
   });
 
-  it.each([
-    [
-      'a PowerShell error text',
-      'Get-Process : Cannot find a process with the process identifier 42.',
-    ],
-    ['empty output', ''],
-    ['a timed-out query (run resolves undefined)', undefined],
-  ])('is undefined on Windows for %s', async (_name, output) => {
-    expect(await readProcessStartToken(42, new FakeTokenHost('win32', {}, output))).toBeUndefined();
+  it('is undefined on Windows when the process cannot be opened or queried', async () => {
+    expect(await readProcessStartToken(42, new FakeTokenHost('win32'))).toBeUndefined();
   });
 
-  it('is undefined when the query itself throws', async () => {
-    const host = new FakeTokenHost('win32', {}, new Error('spawn powershell.exe ENOENT'));
+  it('is undefined when the native read throws, as when kernel32 cannot load', async () => {
+    const host = new FakeTokenHost('win32', {}, undefined, new Error('dlopen kernel32.dll failed'));
 
     expect(await readProcessStartToken(42, host)).toBeUndefined();
   });

@@ -13,12 +13,18 @@
  *   needs a full pid wrap in under a second. That is accepted rather than paid for: the only
  *   finer source, the `kern.proc.pid` sysctl, returns a binary struct the `sysctl` tool does
  *   not decode, and reading it needs a native call this module avoids.
- * - Windows: the process `StartTime` as .NET ticks, from one PowerShell query.
+ * - Windows: the process creation time as .NET ticks (UTC), from `GetProcessTimes` through
+ *   `bun:ffi`. The text is what the PowerShell query this replaced printed, so tokens already
+ *   in a state file still compare equal.
  *
  * `undefined` means "could not be read", never "the process is gone".
  */
 
-import { type ProcessStartTimeHost, REAL_START_TIME_HOST } from './process-start-time';
+import {
+  fileTimeToDotNetTicks,
+  type ProcessStartTimeHost,
+  REAL_START_TIME_HOST,
+} from './process-start-time';
 
 /**
  * Field 22 (start ticks) of `/proc/<pid>/stat` text. `comm`, field 2, is parenthesised and may
@@ -56,15 +62,8 @@ export async function readProcessStartToken(
       return ticks === undefined || boot === '' ? undefined : `${boot}:${ticks}`;
     }
     if (host.platform === 'win32') {
-      const output = await host.run([
-        'powershell.exe',
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`,
-      ]);
-      const ticks = output?.trim();
-      return ticks !== undefined && /^\d{10,}$/.test(ticks) ? ticks : undefined;
+      const fileTime = await host.readWindowsCreationTime(pid);
+      return fileTime === undefined ? undefined : fileTimeToDotNetTicks(fileTime);
     }
     // `lstart` prints the start instant in the caller's time zone and locale. The hub (often a
     // launchd service) and the CLI (a shell that may set `TZ`, or a laptop whose zone changed
