@@ -273,10 +273,26 @@ export const messagesQueryOptions = (chatId: string) =>
     getNextPageParam: (lastPage) => lastPage.nextCursor,
   });
 
-export function useMessagesQuery(chatId: string | null) {
+/**
+ * Observes the transcript. Pass `select` when the caller needs a fact about it
+ * rather than the rows: the observer then holds the selected value, and a
+ * streamed reply patching the cache once per chunk re-renders the caller only
+ * when that value changes.
+ *
+ * @example
+ * const isEmpty = useMessagesQuery(chatId, (cache) => cache.pages.length === 0).data;
+ */
+export function useMessagesQuery<TData = MessagesCache>(
+  chatId: string | null,
+  select: (data: MessagesCache) => TData = selectWholeTranscript as (data: MessagesCache) => TData
+) {
   const id = chatId ?? '';
   return useInfiniteQuery({
     ...messagesQueryOptions(id),
     enabled: !!chatId,
+    select,
   });
 }
+
+/** The default `select`: the whole cache, as an unselected query returns it. */
+const selectWholeTranscript = (data: MessagesCache): MessagesCache => data;

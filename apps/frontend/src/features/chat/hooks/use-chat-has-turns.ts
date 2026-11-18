@@ -1,4 +1,18 @@
 import { useMessagesQuery } from '@/features/chat/queries';
+import type { MessagesCache } from '@/features/chat/transcript-pages';
+
+/**
+ * True when every loaded page of the transcript is empty (also for no pages).
+ *
+ * It is the query's `select`, not a read after the fact: the observer then
+ * holds a boolean, and a streamed reply patching the cache once per chunk
+ * changes that boolean at most twice per turn. Reading `data` instead made
+ * every observer of this hook (the layout, the runner selector, the command
+ * registry) re-render once per chunk, and the layout carries the whole shell.
+ */
+export function selectTranscriptIsEmpty(data: MessagesCache): boolean {
+  return data.pages.every((page) => page.messages.length === 0);
+}
 
 /**
  * Whether the chat already carries turns — the signal that fixes its identity.
@@ -18,7 +32,6 @@ import { useMessagesQuery } from '@/features/chat/queries';
  * query never runs.
  */
 export function useChatHasTurns(chatId: string | null): boolean {
-  const messages = useMessagesQuery(chatId);
-  const transcriptIsEmpty = messages.data?.pages.every((page) => page.messages.length === 0);
+  const { data: transcriptIsEmpty } = useMessagesQuery(chatId, selectTranscriptIsEmpty);
   return chatId ? transcriptIsEmpty !== true : false;
 }
