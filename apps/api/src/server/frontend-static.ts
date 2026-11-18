@@ -477,6 +477,8 @@ interface FrontendFileStats {
   mtimeMs: number;
   dev: bigint;
   ino: bigint;
+  /** Hard link count; 0 when the filesystem does not report one. */
+  nlink: bigint;
 }
 
 /** A regular file's stat, or null when the entry is gone, unreadable or not a file. */
@@ -491,6 +493,7 @@ function statFile(path: string): FrontendFileStats | null {
       mtimeMs: Number(stats.mtimeMs),
       dev: stats.dev,
       ino: stats.ino,
+      nlink: stats.nlink,
     };
   } catch {
     return null;
@@ -521,7 +524,28 @@ function serveStattedFile(
 }
 
 /**
- * The absolute path of a file `pathname` names inside `frontendDir`,
+ * The canonical frontend directory for one request, resolved on first use and
+ * shared by every lookup that request makes.
+ *
+ * Deployers can switch a frontend directory link to a new release at runtime,
+ * so the root is resolved again for each request rather than once at boot. A
+ * request can look files up twice (the requested path, then the shell for a
+ * dotted deep link such as `/library/my-skill.md`), and both lookups must see
+ * the same root. It stays lazy because most requests that reach the fallback
+ * never need a root at all.
+ */
+type FrontendRootResolver = () => string | null;
+
+function createFrontendRootResolver(frontendDir: string): FrontendRootResolver {
+  let resolved: string | null | undefined;
+  return () => {
+    if (resolved === undefined) resolved = realpathSyncSafe(frontendDir);
+    return resolved;
+  };
+}
+
+/**
+ * The absolute path of a file `pathname` names inside the frontend root,
  * or null when the request does not name one that exists.
  *
  * Resolving per request keeps both newly hashed bundles and public files
@@ -532,7 +556,7 @@ function serveStattedFile(
  * (`/library/my-skill.md`) falling through to the shell as they do today.
  */
 function resolveFrontendFile(
-  frontendDir: string,
+  resolveRoot: FrontendRootResolver,
   pathname: string
 ): { filePath: string; stats: FrontendFileStats; urlPath: string } | null {
   let decoded: string;
@@ -554,9 +578,7 @@ function resolveFrontendFile(
   const segments = decoded.slice(1).split('/');
   if (segments.some((s) => s === '' || s === '.' || s === '..' || /[\\\0]/.test(s))) return null;
 
-  // Deployers can switch a frontend directory link to a new release at runtime.
-  // Resolve it for each file and use that same root for all eligibility checks.
-  const frontendRoot = realpathSyncSafe(frontendDir);
+  const frontendRoot = resolveRoot();
   if (!frontendRoot) return null;
   const filePath = join(frontendRoot, ...segments);
   // Defence in depth behind the segment check: a symlink inside dist/ could
@@ -572,6 +594,10 @@ function resolveFrontendFile(
   if (!stats) return null;
   // Hardlinks have different realpaths but share file identity with the private
   // metadata. Check per request because a rebuild can replace that metadata.
+  // An alias needs a link count of at least 2, so a file with exactly one link
+  // cannot be one and the build-state stat is skipped. A count of 0 means the
+  // filesystem reports none, which proves nothing, so that case still compares.
+  if (stats.nlink === 1n) return { filePath: real, stats, urlPath: decoded };
   const buildStateStats = statFile(join(frontendRoot, BUILD_STATE_FILE));
   // A zero inode means the volume reports no file ID (exFAT/FAT, some SMB or FUSE
   // mounts): every file would share it and the whole frontend would answer 404.
@@ -607,13 +633,13 @@ function realpathSyncSafe(path: string): string | null {
 function registerSpa(app: App, frontendDir: string): void {
   // The shell follows the same eligibility checks as every other disk file.
   // Missing files during a rebuild and ineligible links both answer 404.
-  const serveIndex = (request: Request): Response => {
-    const resolved = resolveFrontendFile(frontendDir, '/index.html');
+  const serveIndex = (request: Request, resolveRoot: FrontendRootResolver): Response => {
+    const resolved = resolveFrontendFile(resolveRoot, '/index.html');
     return resolved
       ? serveIndexFile(resolved.filePath, fileEtag(resolved.stats), request)
       : new Response(null, { status: 404 });
   };
-  app.get('/', ({ request }) => serveIndex(request));
+  app.get('/', ({ request }) => serveIndex(request, createFrontendRootResolver(frontendDir)));
 
   app.onError(NotFound, ({ request }) => frontendNotFound(request));
 
@@ -630,7 +656,10 @@ function registerSpa(app: App, frontendDir: string): void {
     if (isApiOwnedPath(pathname)) return undefined;
     // Files resolve here rather than through routes pinned at boot. A missing
     // asset or root file falls past `isSpaRoute` to a 404 instead of the shell.
-    const resolved = resolveFrontendFile(frontendDir, pathname);
+    // One resolver per request: a dotted deep link looks up the file, misses, and
+    // then serves the shell from the same resolved root.
+    const resolveRoot = createFrontendRootResolver(frontendDir);
+    const resolved = resolveFrontendFile(resolveRoot, pathname);
     if (resolved) {
       if (resolved.urlPath === '/index.html') {
         return serveIndexFile(resolved.filePath, fileEtag(resolved.stats), request);
@@ -642,7 +671,7 @@ function registerSpa(app: App, frontendDir: string): void {
         request
       );
     }
-    return isSpaRoute(pathname) ? serveIndex(request) : undefined;
+    return isSpaRoute(pathname) ? serveIndex(request, resolveRoot) : undefined;
   });
 }
 
