@@ -144,13 +144,71 @@ function Test-Checksum([string]$ManifestPath, [string]$ArchivePath, [string]$Ass
 # suffix is optional only so the frozen pre-2026-09 rolling tag still resolves.
 # GitHub lists newest first, so the first match is the newest build.
 function Select-CanaryTag($Releases) {
-  $match = $Releases | Where-Object { $_.tag_name -match '^v[0-9].*-canary(\.g?[0-9a-f]{7,40})?$' } | Select-Object -First 1
-  if ($match) { return $match.tag_name }
+  # An empty list reaches here as $null, which a pipeline still feeds through
+  # once, so each tag is read with Get-Prop rather than dot access.
+  $match = $Releases | Where-Object { (Get-Prop $_ 'tag_name') -match '^v[0-9].*-canary(\.g?[0-9a-f]{7,40})?$' } | Select-Object -First 1
+  return (Get-Prop $match 'tag_name')
+}
+
+# One header from a failed request's response. Windows PowerShell 5.1 raises a
+# WebException whose Response.Headers is a WebHeaderCollection; PowerShell 7
+# raises one whose Response is an HttpResponseMessage with HttpResponseHeaders.
+# $null when the header is absent.
+function Get-ResponseHeader($Response, [string]$Name) {
+  # Read the property directly: both header types are enumerable, and returning
+  # one from a function such as Get-Prop unrolls it into its header names.
+  if ($null -eq $Response -or $Response.PSObject.Properties.Name -notcontains 'Headers') { return $null }
+  $headers = $Response.Headers
+  if ($null -eq $headers) { return $null }
+  if ($headers -is [System.Net.WebHeaderCollection]) { return $headers[$Name] }
+  $values = $null
+  if ($headers.TryGetValues($Name, [ref]$values)) { return ($values | Select-Object -First 1) }
   return $null
 }
 
+# The error for a failed api.github.com call. GitHub signals a rate limit as
+# 429, or as 403 with X-RateLimit-Remaining 0 (primary limit) or Retry-After
+# (secondary limit); any other refusal keeps its plain status. Mirrors
+# describe_github_api_failure in install.sh.
+function Get-GitHubApiFailureMessage($ErrorRecord, [string]$Url) {
+  $response = Get-Prop $ErrorRecord.Exception 'Response'
+  if ($null -eq $response) {
+    return "failed to fetch canary releases from ${Url}: $($ErrorRecord.Exception.Message)"
+  }
+
+  $status = [int](Get-Prop $response 'StatusCode')
+  $remaining = Get-ResponseHeader $response 'X-RateLimit-Remaining'
+  $retryAfter = Get-ResponseHeader $response 'Retry-After'
+  if ($status -ne 429 -and -not ($status -eq 403 -and ($remaining -eq '0' -or $retryAfter))) {
+    return "GitHub API request failed (HTTP $status) for $Url"
+  }
+
+  $message = "GitHub API rate limit exceeded (HTTP $status)"
+  $reset = Get-ResponseHeader $response 'X-RateLimit-Reset'
+  $epoch = 0L
+  $resetUtc = $null
+  if ([long]::TryParse([string]$reset, [ref]$epoch)) {
+    try {
+      $resetUtc = [DateTimeOffset]::FromUnixTimeSeconds($epoch).UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [System.Globalization.CultureInfo]::InvariantCulture)
+    } catch {
+      $resetUtc = $null
+    }
+  }
+  if ($resetUtc) {
+    $message = "$message; the limit resets at $resetUtc (X-RateLimit-Reset: $reset)"
+  } elseif ($retryAfter) {
+    $message = "$message; Retry-After: $retryAfter"
+  }
+  return "$message. Wait for it to reset, then run the installer again."
+}
+
 function Get-CanaryTag {
-  $releases = Invoke-RestMethod -Uri "$GitHubApi/releases?per_page=30" -UseBasicParsing
+  $url = "$GitHubApi/releases?per_page=30"
+  try {
+    $releases = Invoke-RestMethod -Uri $url -UseBasicParsing
+  } catch {
+    Fail (Get-GitHubApiFailureMessage $_ $url)
+  }
   $tag = Select-CanaryTag $releases
   if (-not $tag) { Fail 'no canary release found' }
   return $tag

@@ -207,10 +207,73 @@ parse_manifest_field() {
   printf '%s\n' "$value"
 }
 
+# One response header (case-insensitive name) from a `curl -D` dump. Redirects
+# leave several header blocks in the file; the last one is the final response.
+# Prints nothing when the header is absent.
+response_header() {
+  local headers_file="$1" name="$2" value
+  value="$(tr -d '\r' < "$headers_file" \
+    | grep -i "^${name}:" \
+    | tail -n 1 \
+    | sed -E 's/^[^:]*:[[:space:]]*//')" || true
+  printf '%s\n' "$value"
+}
+
+# Epoch seconds as UTC ISO-8601. GNU date reads `-d @N`, BSD/macOS date `-r N`.
+format_epoch_utc() {
+  local epoch="$1" formatted
+  case "$epoch" in
+    '' | *[!0-9]*) return 1 ;;
+  esac
+  formatted="$(date -u -d "@${epoch}" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null \
+    || date -u -r "${epoch}" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null)" || return 1
+  printf '%s\n' "$formatted"
+}
+
+# The error for a non-2xx api.github.com answer. GitHub signals a rate limit as
+# 429, or as 403 with x-ratelimit-remaining 0 (primary limit) or a retry-after
+# header (secondary limit); any other refusal keeps its plain status.
+describe_github_api_failure() {
+  local status="$1" headers_file="$2" url="$3"
+  local remaining retry_after reset reset_utc message
+  remaining="$(response_header "$headers_file" 'x-ratelimit-remaining')"
+  retry_after="$(response_header "$headers_file" 'retry-after')"
+
+  if [ "$status" = 429 ] \
+    || { [ "$status" = 403 ] && { [ "$remaining" = 0 ] || [ -n "$retry_after" ]; }; }; then
+    reset="$(response_header "$headers_file" 'x-ratelimit-reset')"
+    message="GitHub API rate limit exceeded (HTTP ${status})"
+    if reset_utc="$(format_epoch_utc "$reset")"; then
+      message="${message}; the limit resets at ${reset_utc} (X-RateLimit-Reset: ${reset})"
+    elif [ -n "$retry_after" ]; then
+      message="${message}; Retry-After: ${retry_after}"
+    fi
+    printf '%s. Wait for it to reset, then run the installer again.\n' "$message"
+    return
+  fi
+
+  printf 'GitHub API request failed (HTTP %s) for %s\n' "$status" "$url"
+}
+
+# Reads the status and headers itself (no `curl -f`) so a refused request is
+# reported as such instead of being mistaken for an empty release list.
 resolve_canary_tag() {
-  local releases_json tag
-  releases_json="$(curl --retry 3 --retry-delay 2 -fsSL "${GITHUB_API}/releases?per_page=30")" \
-    || fail "failed to fetch canary releases from ${GITHUB_API}/releases?per_page=30"
+  local url="${GITHUB_API}/releases?per_page=30"
+  local scratch status releases_json message tag
+  scratch="$(mktemp -d)" || fail 'failed to create a scratch directory'
+  status="$(curl --retry 3 --retry-delay 2 -sSL -D "${scratch}/headers" -o "${scratch}/body" -w '%{http_code}' "$url")" \
+    || { rm -rf "$scratch"; fail "failed to fetch canary releases from ${url}"; }
+  case "$status" in
+    2??)
+      releases_json="$(cat "${scratch}/body")"
+      ;;
+    *)
+      message="$(describe_github_api_failure "$status" "${scratch}/headers" "$url")"
+      rm -rf "$scratch"
+      fail "$message"
+      ;;
+  esac
+  rm -rf "$scratch"
   tag="$(extract_canary_tag "$releases_json")"
   [ -n "$tag" ] || fail 'no canary release found'
   printf '%s\n' "$tag"
