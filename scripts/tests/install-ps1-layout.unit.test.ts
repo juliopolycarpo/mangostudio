@@ -1122,6 +1122,59 @@ describe('install.ps1 failed version probe (fake mangostudio.exe)', () => {
     90000
   );
 
+  /**
+   * What Test-SmokeOrFail throws when Invoke-VersionProbe reports `stdout` and `exitCode`, or
+   * '<no failure>'. The probe is replaced after dot-sourcing, so this needs no exe at all.
+   */
+  function stubbedProbeMessage(stdout: string, exitCode: number): string {
+    const l = layout();
+    const probe = `function Invoke-VersionProbe { [pscustomobject]@{ Stdout = @(${psQuote(stdout)}); Stderr = @(); ExitCode = ${exitCode}; StartError = $null } }`;
+    const result = runDotSourced(
+      l.scriptPath,
+      `${probe}; $m = '<no failure>'; try { Test-SmokeOrFail ${psQuote(l.root)} ${psQuote(EXPECTED)} $false } catch { $m = $_.Exception.Message }; [Console]::Out.Write($m)`
+    );
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `expected the stubbed probe to report a message | received exit ${result.exitCode}: ${result.stderr}`
+      );
+    }
+    return result.stdout.replace(/\r/g, '');
+  }
+
+  test.skipIf(!POWERSHELL)(
+    'a probe that prints the expected version but exits non-zero fails, as install.sh does',
+    () => {
+      const message = stubbedProbeMessage(EXPECTED, 3);
+
+      expect(message.split('\n')[0]).toBe(FIRST_LINE);
+      expect(message).toContain('expected: exit code: 0 | received: exit code: 3 (0x00000003)');
+    },
+    90000
+  );
+
+  test.skipIf(!POWERSHELL)(
+    'a probe that prints the expected version and exits zero passes',
+    () => {
+      expect(stubbedProbeMessage(EXPECTED, 0)).toBe('<no failure>');
+    },
+    90000
+  );
+
+  test.skipIf(!POWERSHELL || !NATIVE_FAKES)(
+    'a real exe that prints the expected version but exits non-zero fails the probe',
+    () => {
+      const l = fakeLayout((target) =>
+        compileFake(target, `Console.WriteLine("${EXPECTED}"); return 7;`)
+      );
+
+      const message = probeMessage(l);
+
+      expect(message.split('\n')[0]).toBe(FIRST_LINE);
+      expect(message).toContain('received: exit code: 7 (0x00000007)');
+    },
+    90000
+  );
+
   test.skipIf(!POWERSHELL || !NATIVE_FAKES)(
     'a probe that prints the expected version passes, with or without a stderr warning',
     () => {

@@ -655,15 +655,19 @@ function Format-StartError([string]$Message) {
 # Run "<dir>\mangostudio.exe --version" and compare to what we meant to
 # install, before the pointer moves. RemoveOnFailure=$true for a directory
 # this run just created (fresh install/local/canary); $false for -Use/
-# -Rollback, which reuse a directory that predates this run. A probe that
-# exits non-zero, writes to stderr or cannot be started has its exit code,
-# stderr and start error appended to the message, as install.sh does, so the
-# reason the hub did not run reaches the user.
+# -Rollback, which reuse a directory that predates this run. A failed check
+# has the probe's exit code, stderr and start error appended to the message,
+# as install.sh does, so the reason the hub did not run reaches the user. A
+# non-zero exit fails the check even when the probe printed the right version.
 function Test-SmokeOrFail([string]$Dir, [string]$Expected, [bool]$RemoveOnFailure) {
   $exePath = Join-Path $Dir 'mangostudio.exe'
   $probe = Invoke-VersionProbe $exePath 10
   $actual = $null
   if ($probe.Stdout.Count -gt 0) { $actual = $probe.Stdout[0].Trim() }
+  # A probe that printed the right version and then exited non-zero did not
+  # run cleanly, so what it printed does not count, as in install.sh's
+  # smoke_or_fail. A start failure has no exit code and no output either.
+  if ($null -ne $probe.ExitCode -and $probe.ExitCode -ne 0) { $actual = $null }
 
   if ($actual -eq $Expected) { return }
 
