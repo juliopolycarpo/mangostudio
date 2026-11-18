@@ -519,9 +519,11 @@ describe('GitPanel', () => {
     });
     // `find`, not `get`: whichever test opens the first diff in this file meets
     // the lazy chunk cold, and the view lands a few microtasks after the import.
+    // The frame (and so the region) renders before the lazy body, holding
+    // "Loading diff…" until it lands; wait for the body's text, not the region.
     const diff = await screen.findByRole('region', { name: 'View diff for src/panel.tsx' });
     expect(diff).toBeVisible();
-    expect(diff).toHaveTextContent('old title');
+    await waitFor(() => expect(diff).toHaveTextContent('old title'));
     expect(diff).toHaveTextContent('new title');
     expect(screen.getAllByText('4')).toHaveLength(2);
   });
@@ -605,7 +607,7 @@ describe('GitPanel', () => {
     const diff = await screen.findByRole('region', { name: 'View diff for src/git.ts' });
     expect(diff).toBeVisible();
     // The diff names the commit with the same seven characters the list did.
-    expect(within(diff).getByText('1234567')).toHaveAttribute('title', '1234567890abcdef');
+    expect(await within(diff).findByText('1234567')).toHaveAttribute('title', '1234567890abcdef');
   });
 
   it('sizes a commit on one grouped, signed line instead of three spelled-out clauses', async () => {

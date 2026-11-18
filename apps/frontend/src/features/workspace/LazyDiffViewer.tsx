@@ -7,6 +7,7 @@ import { useI18n } from '@/hooks/use-i18n';
 import { retryableLazy } from '@/lib/retryable-lazy';
 
 import type { DiffSelection } from './DiffViewer';
+import { DiffViewerFrame } from './DiffViewerFrame';
 
 interface LazyDiffViewerProps {
   readonly chatId: string;
@@ -14,7 +15,7 @@ interface LazyDiffViewerProps {
   readonly onClose: () => void;
 }
 
-const diffViewer = retryableLazy<LazyDiffViewerProps>(() =>
+const diffViewer = retryableLazy<Omit<LazyDiffViewerProps, 'onClose'>>(() =>
   import('./DiffViewer').then((module) => ({ default: module.DiffViewer }))
 );
 
@@ -27,16 +28,22 @@ const diffViewer = retryableLazy<LazyDiffViewerProps>(() =>
  * lazy binding, one fallback and one failure state (Retry and Reload) instead of
  * a copy per place a diff can open.
  *
+ * The frame (titled region, back control, file header) sits outside the lazy
+ * boundary: opening a diff unmounts the commit list, so while the chunk loads or
+ * fails the back control is the only way out and must not wait on the chunk.
+ *
  * @example
  * <LazyDiffViewer chatId={chatId} selection={diffSelection} onClose={close} />
  */
-export function LazyDiffViewer(props: LazyDiffViewerProps) {
+export function LazyDiffViewer({ chatId, selection, onClose }: LazyDiffViewerProps) {
   return (
-    <LazyChunkBoundary onRetry={diffViewer.reset}>
-      <Suspense fallback={<DiffViewerFallback />}>
-        <diffViewer.Component {...props} />
-      </Suspense>
-    </LazyChunkBoundary>
+    <DiffViewerFrame selection={selection} onClose={onClose}>
+      <LazyChunkBoundary onRetry={diffViewer.reset}>
+        <Suspense fallback={<DiffViewerFallback />}>
+          <diffViewer.Component chatId={chatId} selection={selection} />
+        </Suspense>
+      </LazyChunkBoundary>
+    </DiffViewerFrame>
   );
 }
 

@@ -90,7 +90,6 @@ function showDiff(source: string) {
     <DiffViewer
       chatId="chat-highlight-retry"
       selection={{ path: 'retry.ts', staged: false, title: 'View diff for retry.ts' }}
-      onClose={mock()}
     />
   );
 }

@@ -107,7 +107,6 @@ function showDiff(path: string, source: string) {
     <DiffViewer
       chatId="chat-highlight"
       selection={{ path, staged: false, title: `View diff for ${path}` }}
-      onClose={mock()}
     />
   );
 }
