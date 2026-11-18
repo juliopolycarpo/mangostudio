@@ -97,9 +97,12 @@ async function drain(events: AsyncGenerator<unknown>): Promise<void> {
   }
 }
 
-function expectOneActivityFrame(userId: string, terminal: string): void {
-  const received = bus.activityFramesFor(userId).length;
-  expect(received, `(${terminal}): expected activity frames: 1 | received: ${received}`).toBe(1);
+/** One chat-list frame and no activity frame: a finalizer moves the list, it adds no feed row. */
+function expectOneChatListFrame(userId: string, terminal: string): void {
+  const received = bus.chatListFramesFor(userId).length;
+  expect(received, `(${terminal}): expected chats frames: 1 | received: ${received}`).toBe(1);
+  const activity = bus.activityFramesFor(userId).length;
+  expect(activity, `(${terminal}): expected activity frames: 0 | received: ${activity}`).toBe(0);
 }
 
 beforeEach(() => {
@@ -110,14 +113,14 @@ afterEach(() => {
   restoreRealtimeBus();
 });
 
-describe('local turn finalizers publish one activity frame', () => {
+describe('local turn finalizers publish one chats frame', () => {
   it('finalizeToolLoopExhausted', async () => {
     const { session, userId, aiMsgId } = await createFinalizerFixture();
 
     await drain(finalizeToolLoopExhausted(session, 2));
 
     expect(await isStillGenerating(aiMsgId)).toBe(false);
-    expectOneActivityFrame(userId, 'tool loop exhausted');
+    expectOneChatListFrame(userId, 'tool loop exhausted');
   });
 
   it('finalizeTurnError', async () => {
@@ -126,7 +129,7 @@ describe('local turn finalizers publish one activity frame', () => {
     await drain(finalizeTurnError(session, new Error('provider exploded')));
 
     expect(await isStillGenerating(aiMsgId)).toBe(false);
-    expectOneActivityFrame(userId, 'turn error');
+    expectOneChatListFrame(userId, 'turn error');
   });
 
   it('finalizeTurnError on an aborted signal publishes once, through the interrupted path', async () => {
@@ -137,7 +140,7 @@ describe('local turn finalizers publish one activity frame', () => {
     await drain(finalizeTurnError(session, new Error('aborted')));
 
     expect(await isStillGenerating(aiMsgId)).toBe(false);
-    expectOneActivityFrame(userId, 'turn error after abort');
+    expectOneChatListFrame(userId, 'turn error after abort');
   });
 
   for (const reason of ['client_disconnect', 'user_cancelled', 'unknown'] as const) {
@@ -147,7 +150,7 @@ describe('local turn finalizers publish one activity frame', () => {
       await finalizeInterruptedTurn(session, reason);
 
       expect(await isStillGenerating(aiMsgId)).toBe(false);
-      expectOneActivityFrame(userId, `interrupted: ${reason}`);
+      expectOneChatListFrame(userId, `interrupted: ${reason}`);
     });
   }
 });
@@ -161,6 +164,6 @@ describe('local turn finalizers stay quiet when another writer already finalized
     await drain(finalizeTurnError(session, new Error('late failure')));
     await finalizeInterruptedTurn(session, 'user_cancelled');
 
-    expectOneActivityFrame(userId, 'first terminal only');
+    expectOneChatListFrame(userId, 'first terminal only');
   });
 });
