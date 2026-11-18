@@ -285,6 +285,35 @@ sobrescreve. `bun run check:versions` valida lockstep entre root, workspaces,
 `packages/cli`, `crates/mangostudio-launcher/Cargo.toml` e a entrada do launcher
 no `Cargo.lock` raiz. A versão do protocolo no mesmo lockfile continua independente.
 
+## Títulos de pull request
+
+O squash merge usa o título do PR como assunto do commit, e o `cliff.toml` define
+`filter_unconventional = true` e agrupa commits apenas pelos tipos que seus
+`commit_parsers` nomeiam. Um título com outro tipo chega à `main` e some do
+`CHANGELOG.md` e das notas da release sem aviso.
+
+O workflow `PR title` (`.github/workflows/pr-title.yml`, job `Title has a changelog type`)
+executa `scripts/ci/check-pr-title.ts` em todo PR para `main` e reprova um título que não seja
+`type(scope): summary` ou `type: summary`, com `!` opcional antes dos dois-pontos, um tipo da
+lista abaixo, um resumo e nenhum espaço no início ou no fim. A falha mostra o título recebido e o
+formato esperado. Os tipos são lidos do `cliff.toml` na hora da verificação, então os dois não
+divergem: um parser que agrupa o tipo inteiro (`^feat`) o adiciona, enquanto um parser de skip
+(`^chore\(release\)`) e um restrito a escopo (`^build\(deps\)`) não adicionam nada.
+
+Tipos permitidos: `feat`, `fix`, `perf`, `refactor`, `security`, `migration`, `docs`, `test`, `ci`,
+`build`, `style`, `chore`, `revert`.
+
+O workflow faz checkout da branch base, não do head do PR, então um PR não afrouxa a verificação
+nem adiciona um tipo ao `cliff.toml` para se aprovar. Um tipo novo passa a valer em títulos depois
+que sua mudança está na `main`. Duas configurações do repositório ficam fora do workflow e decidem
+se ele protege alguma coisa:
+
+- O ruleset da `main` precisa exigir o contexto `Title has a changelog type` pelo nome. O workflow
+  não faz parte de nenhum gate agregado, então uma verificação vermelha que não é exigida ainda
+  faz merge.
+- A configuração de título do squash precisa ser `PR_TITLE`. Com `COMMIT_OR_PR_TITLE`, o GitHub
+  faz squash de um PR de commit único com o assunto desse commit, e o título não é o que entra.
+
 ## Canal canary
 
 `.github/workflows/canary.yml` roda diariamente às 06:17 UTC e aceita
