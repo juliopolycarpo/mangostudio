@@ -8,8 +8,12 @@
 
 type ShutdownHandler = () => Promise<void>;
 
-/** Shorter than the successor's wait, so it never binds into a live predecessor. */
-const SHUTDOWN_BUDGET_MS = 12_000;
+/**
+ * Shorter than the successor's wait, so it never binds into a live predecessor. Exported because
+ * the CLI's wait after a shutdown request on Windows must outlast it: the hub's own watchdog, not
+ * a `TerminateProcess` from the CLI, decides when a stop has taken too long.
+ */
+export const SHUTDOWN_BUDGET_MS = 12_000;
 
 let handler: ShutdownHandler | null = null;
 let requested = false;

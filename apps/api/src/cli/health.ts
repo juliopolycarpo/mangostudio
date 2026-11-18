@@ -94,7 +94,7 @@ export function canProbeHealth(host: string): boolean {
  * host is not local. Bind-all addresses (`0.0.0.0`, `::`) are not routable as
  * client targets, so they map to loopback.
  */
-function resolveLocalTarget(host: string): string | null {
+export function resolveLocalTarget(host: string): string | null {
   const target = formatHostForUrl(host);
 
   if (target === '0.0.0.0') return '127.0.0.1';

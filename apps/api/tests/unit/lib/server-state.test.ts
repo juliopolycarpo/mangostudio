@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -262,4 +262,44 @@ describe('classifyStateProcess', () => {
   it('trusts liveness alone when the probe offers no identity query', async () => {
     expect(await classifyStateProcess(withToken, { isAlive: () => true })).toBe('hub');
   });
+});
+
+describe('server-state control token', () => {
+  let dir = '';
+  let path = '';
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'mango-state-token-'));
+    path = join(dir, 'server.json');
+  });
+
+  afterEach(async () => {
+    await rm(dir, { force: true, recursive: true });
+  });
+
+  it('round-trips the control token', async () => {
+    await writeState(makeState({ controlToken: 'control-token-round-trip' }), path);
+
+    expect((await readState(path))?.controlToken).toBe('control-token-round-trip');
+  });
+
+  it('reads a non-string control token as absent rather than as a credential', async () => {
+    await writeFile(path, JSON.stringify({ ...makeState(), controlToken: 12345 }), 'utf8');
+
+    const state = await readState(path);
+
+    expect(state, 'expected the file to stay readable').not.toBeNull();
+    expect(state?.controlToken).toBeUndefined();
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'writes the file owner-only, since it carries the token',
+    async () => {
+      await writeState(makeState({ controlToken: 'control-token-mode' }), path);
+
+      const mode = ((await stat(path)).mode & 0o777).toString(8);
+
+      expect(mode, `expected state file mode: 600 | received: ${mode}`).toBe('600');
+    }
+  );
 });

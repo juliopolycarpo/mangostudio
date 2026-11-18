@@ -25,6 +25,18 @@ const STATE: ServerState = {
   },
 };
 
+describe('describeHubProcess and the control token', () => {
+  it('never copies the control token into the status document', () => {
+    const status = describeHubProcess({
+      state: { ...STATE, controlToken: 'secret-control-token' },
+      alive: true,
+      now: 2_000,
+    });
+
+    expect(JSON.stringify(status)).not.toContain('secret-control-token');
+  });
+});
+
 describe('hubLaunchMode', () => {
   it('distinguishes service, detached and foreground starts', () => {
     expect(hubLaunchMode({ logFile: '', service: 'mangostudio.service' })).toBe('service');

@@ -1,10 +1,12 @@
 import { classifyStateProcess, readState, removeState } from '../lib/server-state';
 import { CliError } from './errors';
+import { type HubShutdownRequester, requestHubShutdown } from './hub-shutdown-request';
 import { writeError, writeLine } from './output';
 import {
   assertSignalsReachHub,
   createProcessController,
   type ProcessController,
+  terminateHub,
   waitForExit,
 } from './process-control';
 import { sleep } from './sleep';
@@ -18,8 +20,10 @@ export interface ServerShutdownDeps {
   exit: (code: number) => void;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
-  /** Picks the manual-stop command a refusal names (`kill` or `taskkill`). */
+  /** Picks how the hub is stopped and the manual-stop command a refusal names (`kill` or `taskkill`). */
   platform: NodeJS.Platform;
+  /** Asks the hub to shut itself down where a signal cannot (win32). */
+  requestShutdown: HubShutdownRequester;
 }
 
 interface RunServerStopCommandOptions {
@@ -30,15 +34,12 @@ interface RunServerStopCommandOptions {
   noInstanceMessage: string;
   successMessage: (pid: number) => string;
   failureMessage: (pid: number) => string;
-  removeStateAfterSignal?: boolean;
   /**
-   * Remove the state file once the pid is confirmed gone. For a signal the hub
-   * cannot catch, so its own cleanup never ran; a pid that outlives the wait
-   * keeps its file, since that file is the only way left to find it. The file
-   * is removed only while it still names the stopped pid: a supervisor restart
-   * or a `serve` right after may already have written a successor's.
+   * Remove the state file once the signal is sent, whether or not the pid went. For `kill`,
+   * which the hub never gets to answer. (`terminate` on win32 clears a stopped hub's file inside
+   * `terminateHub`, since a hub ended hard never removed it.)
    */
-  removeStateWhenStopped?: boolean;
+  removeStateAfterSignal?: boolean;
   /**
    * `killserver --force`: trust the state file's pid without comparing start tokens. A dead pid
    * is still "no instance", and a pid at or below 1 is still refused.
@@ -59,14 +60,8 @@ function resolveServerShutdownDeps(
     now: deps.now ?? Date.now,
     sleep: deps.sleep ?? sleep,
     platform: deps.platform ?? process.platform,
+    requestShutdown: deps.requestShutdown ?? requestHubShutdown,
   };
-}
-
-/** Remove the state file only when it still names `pid`. // Usage: await removeStateStillNaming(d, 42) */
-async function removeStateStillNaming(d: Required<ServerShutdownDeps>, pid: number): Promise<void> {
-  const current = await d.readState();
-  if (current?.pid !== pid) return;
-  await d.removeState();
 }
 
 export async function runServerStopCommand({
@@ -78,7 +73,6 @@ export async function runServerStopCommand({
   successMessage,
   failureMessage,
   removeStateAfterSignal = false,
-  removeStateWhenStopped = false,
   skipIdentityCheck = false,
 }: RunServerStopCommandOptions): Promise<void> {
   const d = resolveServerShutdownDeps(deps);
@@ -103,19 +97,22 @@ export async function runServerStopCommand({
       throw new CliError(`Refusing to signal PID ${state.pid}: expected a PID above 1.`);
     }
   } else await assertSignalsReachHub(d.controller, state, d.platform);
-  d.controller[signal](state.pid);
-  const stopped = await waitForExit(d.controller, state.pid, {
-    timeoutMs,
-    intervalMs,
-    now: d.now,
-    sleep: d.sleep,
-  });
-
-  if (removeStateAfterSignal) {
-    await d.removeState();
-  } else if (removeStateWhenStopped && stopped) {
-    await removeStateStillNaming(d, state.pid);
+  let stopped: boolean;
+  if (signal === 'terminate') {
+    // On Windows this asks the hub to stop itself first, so its graceful path runs.
+    stopped = await terminateHub({ ...d, notice: d.log }, state, { timeoutMs, intervalMs });
+    // A win32 hub that was ended hard never removed its file; `terminateHub` already cleared it.
+  } else {
+    d.controller.kill(state.pid);
+    stopped = await waitForExit(d.controller, state.pid, {
+      timeoutMs,
+      intervalMs,
+      now: d.now,
+      sleep: d.sleep,
+    });
   }
+
+  if (removeStateAfterSignal) await d.removeState();
 
   if (stopped) {
     d.log(successMessage(state.pid));

@@ -17,6 +17,7 @@ import {
   reloadSecretEnv,
 } from '../lib/config';
 import { hubListenOptions } from '../lib/hub-connection-limits';
+import { issueHubControlToken } from '../lib/hub-control';
 import { ensureRuntimeDirs } from '../lib/mango-paths';
 import { readProcessStartToken } from '../lib/process-start-token';
 import { getSourceFrontendDir } from '../lib/runtime-paths';
@@ -199,6 +200,9 @@ async function persistState(port: number, host: string, frontendDir: string): Pr
     version: getVersion(),
     buildInfo: getBuildInfo(),
     frontendDir,
+    // What the CLI presents to `POST /api/control/shutdown`: the stop it can ask for where it
+    // has no signal to send (Windows). Issued only here, so a hub without a state file has none.
+    controlToken: issueHubControlToken(),
     // Set by the unit a service manager installed, so `restart` knows to go
     // through the supervisor instead of respawning by hand.
     ...(process.env[HUB_SERVICE_UNIT_ENV] ? { service: process.env[HUB_SERVICE_UNIT_ENV] } : {}),
