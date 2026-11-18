@@ -106,7 +106,7 @@ already had. The API publishes it through `publishChatListInvalidation`
 `chats.updatedAt` announces it from the same place, `updateChatAfterTurn` and
 `persistImageTurn` in
 `apps/api/src/modules/generation/infrastructure/conversation-persistence.ts`;
-only chat create and chat update, which do not move that column, publish on
+only chat create, update and delete, which do not move that column, publish on
 their own. `chat-list-signal-boundary.test.ts` enforces both.
 
 Foreign Git topics remain unsubscribed and return the same non-enumerating

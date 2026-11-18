@@ -14,10 +14,11 @@
  *    and it announces from the same file (`updateChatAfterTurn`, and
  *    `persistImageTurn` after its commit). Behavior of each path is pinned by
  *    `conversation-persistence-chat-list-signal.test.ts`.
- * 2. Only three files may publish a `chats` frame: that persistence point, the
- *    chat create use case (a new row, no `updatedAt` move), and the chat update
- *    use case (list-visible fields that do not touch `updatedAt`). A caller of
- *    the persistence point that also publishes would send two frames.
+ * 2. Only four files may publish a `chats` frame: that persistence point, the
+ *    chat create use case (a new row, no `updatedAt` move), the chat update
+ *    use case (list-visible fields that do not touch `updatedAt`), and the chat
+ *    delete use case (a row that is gone, no `updatedAt` move). A caller of the
+ *    persistence point that also publishes would send two frames.
  */
 
 import { describe, expect, it } from 'bun:test';
@@ -33,6 +34,7 @@ const ALLOWED_PUBLISHERS: ReadonlySet<string> = new Set([
   PERSISTENCE_POINT,
   'modules/chats/application/create-chat.ts',
   'modules/chats/application/update-chat.ts',
+  'modules/chats/application/delete-chat.ts',
 ]);
 
 /** `updateTable('chats')` followed, before the statement ends, by a `.set({ ... updatedAt ... })`. */
@@ -75,7 +77,7 @@ describe('chat list signal boundary', () => {
     ).toEqual([PERSISTENCE_POINT]);
   });
 
-  it('lets only the persistence point, chat create and chat update publish a chats frame', () => {
+  it('lets only the persistence point and the chat create, update and delete use cases publish a chats frame', () => {
     const publishers = filesMatching(PUBLISH_CALL).filter((file) => file !== PUBLISHER_DEFINITION);
     const unexpected = publishers.filter((file) => !ALLOWED_PUBLISHERS.has(file));
 

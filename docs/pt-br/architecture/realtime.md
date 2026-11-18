@@ -113,7 +113,7 @@ cada uma respondida com o que a aba já tinha. A API o publica por
 `chats.updatedAt` o anuncia no mesmo lugar, `updateChatAfterTurn` e
 `persistImageTurn` em
 `apps/api/src/modules/generation/infrastructure/conversation-persistence.ts`;
-apenas a criação e a edição de chat, que não mexem nessa coluna, publicam por
+apenas a criação, a edição e a exclusão de chat, que não mexem nessa coluna, publicam por
 conta própria. `chat-list-signal-boundary.test.ts` garante as duas regras.
 
 Tópicos Git de outro usuário permanecem sem assinatura e retornam a mesma
