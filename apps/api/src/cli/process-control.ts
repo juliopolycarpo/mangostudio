@@ -10,6 +10,7 @@ import {
   type StateProcessProbe,
 } from '../lib/server-state';
 import { CliError } from './errors';
+import { type HubShutdownRequester, requestHubShutdown } from './hub-shutdown-request';
 
 export interface ProcessController extends StateProcessProbe {
   /** True when the pid refers to a live process. */
@@ -68,13 +69,78 @@ export async function waitForExit(
   return !controller.isAlive(pid);
 }
 
-/** What `stopPidOrThrow` needs from its caller's dependency bag. */
-export interface StopDeps {
+/**
+ * How long a hard stop is given after a graceful request ran out of time. Short: the hub had its
+ * whole budget already, and the total (this plus {@link STOP_TIMEOUT_MS}) must stay under the
+ * 15s a unit's `serve` waits on the state-file holder.
+ */
+export const HARD_STOP_TIMEOUT_MS = 3_000;
+
+/** What `terminateHub` needs from its caller's dependency bag. */
+export interface HubTerminationDeps {
   readonly controller: ProcessController;
   readonly now: () => number;
   readonly sleep: (ms: number) => Promise<void>;
-  /** Picks the manual-stop command a refusal names; the real platform when omitted. */
+  /** Picks how the hub is stopped and the manual-stop command a refusal names; the real platform when omitted. */
   readonly platform?: NodeJS.Platform;
+  /** Asks the hub to shut itself down; the real loopback request when omitted. */
+  readonly requestShutdown?: HubShutdownRequester;
+  /** Says that the graceful path was not used, and why. Silent when omitted. */
+  readonly notice?: (message: string) => void;
+}
+
+/** What `stopPidOrThrow` needs from its caller's dependency bag. */
+export type StopDeps = HubTerminationDeps;
+
+export interface TerminateHubOptions {
+  /** Budget for the hub to exit after the request (or, without one, after the signal). */
+  readonly timeoutMs?: number;
+  readonly intervalMs?: number;
+}
+
+/**
+ * End the hub and wait for its pid to go; true if it did.
+ *
+ * Where SIGTERM is catchable the signal is the graceful stop and nothing else is tried. On win32
+ * `terminate` is `TerminateProcess`, which skips the hub's cleanup (in-flight turns, runtime
+ * children, the SQLite WAL checkpoint), so the hub is first asked to stop itself over loopback.
+ * If it cannot be asked, declines, or outlives `timeoutMs`, the hard stop follows with a notice
+ * saying so, and gets {@link HARD_STOP_TIMEOUT_MS} more.
+ * // Usage: const stopped = await terminateHub(d, state, { timeoutMs: STOP_TIMEOUT_MS })
+ */
+export async function terminateHub(
+  d: HubTerminationDeps,
+  state: ServerState,
+  options: TerminateHubOptions = {}
+): Promise<boolean> {
+  const timeoutMs = options.timeoutMs ?? STOP_TIMEOUT_MS;
+  const intervalMs = options.intervalMs ?? STOP_POLL_INTERVAL_MS;
+  const wait = (budgetMs: number) =>
+    waitForExit(d.controller, state.pid, {
+      timeoutMs: budgetMs,
+      intervalMs,
+      now: d.now,
+      sleep: d.sleep,
+    });
+
+  if ((d.platform ?? process.platform) !== 'win32') {
+    d.controller.terminate(state.pid);
+    return await wait(timeoutMs);
+  }
+
+  const answer = await (d.requestShutdown ?? requestHubShutdown)(state);
+  if (answer.accepted) {
+    if (await wait(timeoutMs)) return true;
+    d.notice?.(
+      `MangoStudio (PID ${state.pid}) did not exit within ${timeoutMs / 1000}s of the shutdown request; ending it.`
+    );
+  } else {
+    d.notice?.(
+      `Could not ask MangoStudio (PID ${state.pid}) to shut down gracefully: ${answer.reason}. Ending it; in-flight work is not finished.`
+    );
+  }
+  d.controller.terminate(state.pid);
+  return await wait(HARD_STOP_TIMEOUT_MS);
 }
 
 /**
@@ -127,16 +193,8 @@ export async function stopPidOrThrow(
   state: ServerState,
   message: string
 ): Promise<void> {
-  const pid = state.pid;
   await assertSignalsReachHub(d.controller, state, d.platform);
-  d.controller.terminate(pid);
-  const stopped = await waitForExit(d.controller, pid, {
-    timeoutMs: STOP_TIMEOUT_MS,
-    intervalMs: STOP_POLL_INTERVAL_MS,
-    now: d.now,
-    sleep: d.sleep,
-  });
-  if (!stopped) throw new CliError(message);
+  if (!(await terminateHub(d, state))) throw new CliError(message);
 }
 
 /** Signal 0 probes existence; EPERM means alive-but-not-ours, ESRCH means dead. */

@@ -1,10 +1,12 @@
 import { classifyStateProcess, readState, removeState } from '../lib/server-state';
 import { CliError } from './errors';
+import { type HubShutdownRequester, requestHubShutdown } from './hub-shutdown-request';
 import { writeError, writeLine } from './output';
 import {
   assertSignalsReachHub,
   createProcessController,
   type ProcessController,
+  terminateHub,
   waitForExit,
 } from './process-control';
 import { sleep } from './sleep';
@@ -18,8 +20,10 @@ export interface ServerShutdownDeps {
   exit: (code: number) => void;
   now: () => number;
   sleep: (ms: number) => Promise<void>;
-  /** Picks the manual-stop command a refusal names (`kill` or `taskkill`). */
+  /** Picks how the hub is stopped and the manual-stop command a refusal names (`kill` or `taskkill`). */
   platform: NodeJS.Platform;
+  /** Asks the hub to shut itself down where a signal cannot (win32). */
+  requestShutdown: HubShutdownRequester;
 }
 
 interface RunServerStopCommandOptions {
@@ -59,6 +63,7 @@ function resolveServerShutdownDeps(
     now: deps.now ?? Date.now,
     sleep: deps.sleep ?? sleep,
     platform: deps.platform ?? process.platform,
+    requestShutdown: deps.requestShutdown ?? requestHubShutdown,
   };
 }
 
@@ -103,13 +108,19 @@ export async function runServerStopCommand({
       throw new CliError(`Refusing to signal PID ${state.pid}: expected a PID above 1.`);
     }
   } else await assertSignalsReachHub(d.controller, state, d.platform);
-  d.controller[signal](state.pid);
-  const stopped = await waitForExit(d.controller, state.pid, {
-    timeoutMs,
-    intervalMs,
-    now: d.now,
-    sleep: d.sleep,
-  });
+  let stopped: boolean;
+  if (signal === 'terminate') {
+    // On Windows this asks the hub to stop itself first, so its graceful path runs.
+    stopped = await terminateHub({ ...d, notice: d.log }, state, { timeoutMs, intervalMs });
+  } else {
+    d.controller.kill(state.pid);
+    stopped = await waitForExit(d.controller, state.pid, {
+      timeoutMs,
+      intervalMs,
+      now: d.now,
+      sleep: d.sleep,
+    });
+  }
 
   if (removeStateAfterSignal) {
     await d.removeState();

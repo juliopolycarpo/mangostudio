@@ -29,6 +29,12 @@ export interface ServerState {
    * until the query that fills it returns.
    */
   startToken?: string;
+  /**
+   * The secret that authorises `POST /api/control/shutdown` (see `lib/hub-control.ts`). Absent in
+   * a file an older hub wrote, and in a hub started without a state file. It is a credential:
+   * the file is written owner-only, and nothing that describes the hub to a caller may copy it.
+   */
+  controlToken?: string;
 }
 
 /** Read and parse the state file; null when absent or corrupt. // Usage: await readState() */
@@ -66,18 +72,30 @@ function isServerState(value: unknown): value is ServerState {
  * (identity falls back to the clock rule) rather than as a mismatch that would delete the file.
  */
 function withoutMalformedToken(state: ServerState): ServerState {
-  if (state.startToken === undefined || typeof state.startToken === 'string') return state;
-  const { startToken: _malformed, ...rest } = state;
-  return rest;
+  let result = state;
+  if (result.startToken !== undefined && typeof result.startToken !== 'string') {
+    const { startToken: _malformed, ...rest } = result;
+    result = rest;
+  }
+  // A control token that is not a string cannot authorise anything; read it as absent.
+  if (result.controlToken !== undefined && typeof result.controlToken !== 'string') {
+    const { controlToken: _malformed, ...rest } = result;
+    result = rest;
+  }
+  return result;
 }
 
-/** Atomically write the state file via a temp file + rename. // Usage: await writeState(state) */
+/**
+ * Atomically write the state file via a temp file + rename. Owner-only (0600) because it carries
+ * the control token; the mode is a no-op on Windows, where the profile directory's ACL applies.
+ * // Usage: await writeState(state)
+ */
 export async function writeState(
   state: ServerState,
   path: string = getPidFilePath()
 ): Promise<void> {
   const tmp = `${path}.${state.pid}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+  await writeFile(tmp, `${JSON.stringify(state, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
   await rename(tmp, path);
 }
 

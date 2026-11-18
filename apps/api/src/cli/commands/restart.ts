@@ -107,7 +107,7 @@ async function startInstalledService(d: Required<RestartDeps>): Promise<void> {
  */
 async function restartDetached(state: ServerState, d: Required<RestartDeps>): Promise<void> {
   await stopPidOrThrow(
-    d,
+    { ...d, notice: d.log },
     state,
     `MangoStudio (PID ${state.pid}) did not stop within 10s; try "mangostudio killserver" and then "mangostudio serve -d".`
   );
