@@ -10,6 +10,7 @@ import { ExternalTurnTranscript } from '../../../../src/modules/external-agents/
 import { CHECKPOINT_TEXT_INTERVAL_CHARS } from '../../../../src/modules/generation/application/turn-checkpoint';
 import { insertMessage } from '../../../../src/modules/messages/infrastructure/message-repository';
 import { insertTestChat, insertTestUser } from '../../../support/factories';
+import { ManualHeldTailClock } from '../../../support/held-tail-clock';
 
 const CHUNK = CHECKPOINT_TEXT_INTERVAL_CHARS;
 
@@ -144,19 +145,20 @@ function setup() {
   const db = new HeldTranscriptDb();
   const manual = new ManualDefer();
   const { transcript, append } = newTranscript();
-  const state = { now: 1_000 };
+  const clock = new ManualHeldTailClock(1_000);
   const writer = new ExternalTranscriptWriter(
     db.asKysely(),
     'message-1',
     transcript,
-    () => state.now,
-    manual.defer
+    clock.readNow,
+    manual.defer,
+    clock.schedule
   );
   const steer = (id = 'steer-1') => {
     transcript.recordSteerAttempt({ clientMessageId: id, text: 'redirect' }, 2_000);
     return id;
   };
-  return { db, manual, transcript, state, writer, append, steer };
+  return { db, manual, transcript, state: clock, clock, writer, append, steer };
 }
 
 describe('ExternalTranscriptWriter', () => {
@@ -490,6 +492,126 @@ describe('ExternalTranscriptWriter', () => {
     // would have persisted the text, so a trailing write must.
     expect(db.writes).toHaveLength(2);
     expect(db.writes[1]).toMatchObject({ text: 'x'.repeat(CHUNK), steerStatus: 'rejected' });
+  });
+});
+
+describe('ExternalTranscriptWriter held tail', () => {
+  beforeEach(() => {
+    spyOn(console, 'error').mockImplementation(() => undefined);
+    spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    mock.restore();
+  });
+
+  /** One accepted write at t = 1000 ms, then a delta the throttle skips at t = 1300 ms. */
+  async function stallAfterAcceptedWrite() {
+    const harness = setup();
+    harness.append(CHUNK);
+    void harness.writer.write();
+    harness.manual.fire();
+    await harness.writer.flush();
+    harness.clock.advance(300);
+    harness.append(100);
+    void harness.writer.write();
+    return harness;
+  }
+
+  it('writes the held tail one second after the last accepted write when no delta follows', async () => {
+    const { db, manual, clock, writer } = await stallAfterAcceptedWrite();
+    expect({ writes: db.writes.length, timers: clock.pending }).toEqual({ writes: 1, timers: 1 });
+
+    // 999 ms after the accepted write: the window has not run out.
+    clock.advance(699);
+    manual.fire();
+    await tick();
+    expect(db.writes).toHaveLength(1);
+
+    clock.advance(1);
+    manual.fire();
+    await writer.flush();
+    expect(db.writes.map((write) => write.text.length)).toEqual([CHUNK, CHUNK + 100]);
+  });
+
+  it('writes the held tail without a flush: the timer alone queues it', async () => {
+    const { db, manual, clock } = await stallAfterAcceptedWrite();
+
+    clock.advance(700);
+    manual.fire();
+    await tick();
+
+    expect(db.writes.map((write) => write.text.length)).toEqual([CHUNK, CHUNK + 100]);
+    expect(clock.pending).toBe(0);
+  });
+
+  it('lets an accepted delta supersede the timer without a second write', async () => {
+    const { db, manual, clock, writer, append } = await stallAfterAcceptedWrite();
+
+    clock.advance(200);
+    append(CHUNK);
+    void writer.write();
+    expect(clock.pending).toBe(0);
+    manual.fire();
+    await tick();
+    clock.advance(5_000);
+    manual.fire();
+    await tick();
+
+    expect(db.writes.map((write) => write.text.length)).toEqual([CHUNK, CHUNK * 2 + 100]);
+  });
+
+  it('cancels the timer when a forced write takes the tail', async () => {
+    const { db, clock, writer } = await stallAfterAcceptedWrite();
+
+    await writer.write({ force: true });
+    expect(clock.pending).toBe(0);
+    clock.advance(5_000);
+
+    expect(db.writes.map((write) => write.text.length)).toEqual([CHUNK, CHUNK + 100]);
+  });
+
+  it('cancels the timer on flush', async () => {
+    const { db, manual, clock, writer } = await stallAfterAcceptedWrite();
+
+    await writer.flush();
+    expect(clock.pending).toBe(0);
+    clock.advance(5_000);
+    manual.fire();
+    await writer.flush();
+
+    expect(db.writes).toHaveLength(1);
+  });
+
+  it('leaves no pending timer and writes nothing after close', async () => {
+    const { db, manual, clock, writer, append } = await stallAfterAcceptedWrite();
+
+    writer.close();
+    expect(clock.pending).toBe(0);
+    append(10);
+    void writer.write();
+    expect(clock.pending).toBe(0);
+    clock.advance(5_000);
+    manual.fire();
+    await writer.flush();
+
+    expect(db.writes).toHaveLength(1);
+  });
+
+  it('keeps the write count of a steady stream unchanged', async () => {
+    const { db, manual, clock, writer, append } = setup();
+
+    // 250 deltas of 8 characters, 10 ms apart: an accepted write at deltas 64, 128
+    // and 192. Each skipped delta arms the timer; no stall is long enough to fire it.
+    for (let delta = 0; delta < 250; delta++) {
+      clock.advance(10);
+      append(8);
+      void writer.write();
+      manual.fire();
+      await tick();
+    }
+
+    expect(db.writes).toHaveLength(3);
   });
 });
 

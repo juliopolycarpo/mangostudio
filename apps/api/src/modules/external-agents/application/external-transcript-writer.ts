@@ -3,6 +3,11 @@ import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import {
+  heldTailDelay,
+  type HeldTailScheduler,
+  HeldTailTimer,
+} from '../../generation/application/held-tail-timer';
+import {
   CHECKPOINT_MAX_INTERVAL_MS,
   CHECKPOINT_TEXT_INTERVAL_CHARS,
 } from '../../generation/application/turn-checkpoint';
@@ -34,6 +39,12 @@ function deferToMacrotask(run: () => void): void {
  * serialization, and a write queued behind one that failed persists the state
  * with that failure's correction already applied.
  *
+ * The throttle only runs when a delta arrives. A call it skips arms one trailing
+ * timer for the rest of the time window since the last accepted write; if no delta
+ * is accepted first, the timer writes the held tail, so a vendor stall leaves at
+ * most about a second of text unwritten. Every accepted write cancels the timer,
+ * and `flush()` and {@link close} cancel it for good.
+ *
  * A trailing write that lands after the turn's final row is a no-op: the update
  * is guarded by `isGenerating = 1`, so a late timer cannot overwrite it.
  *
@@ -56,20 +67,26 @@ export class ExternalTranscriptWriter {
    */
   #ticket: object | null = null;
   #timerArmed = false;
+  readonly #heldTail: HeldTailTimer;
 
   /**
    * @param defer Starts `run` on a later macrotask. Best-effort snapshots wait
    *   here so deltas that arrive meanwhile share one write. Defaults to
    *   `setTimeout(run, 0)`.
+   * @param scheduleHeldTail Starts the timer that writes a tail the throttle held
+   *   back once the time window since the last accepted write has run out.
+   *   Defaults to an unref'd `setTimeout`.
    */
   constructor(
     private readonly db: Kysely<Database>,
     private readonly messageId: string,
     private readonly transcript: ExternalTurnTranscript,
     private readonly now: () => number,
-    private readonly defer: (run: () => void) => void = deferToMacrotask
+    private readonly defer: (run: () => void) => void = deferToMacrotask,
+    scheduleHeldTail?: HeldTailScheduler
   ) {
     this.#lastWrittenAt = now();
+    this.#heldTail = new HeldTailTimer(scheduleHeldTail);
   }
 
   /**
@@ -82,10 +99,19 @@ export class ExternalTranscriptWriter {
     const at = this.now();
     const text = this.transcript.text;
     const force = options.force === true;
-    if (!force && !this.#shouldWrite(text.length, at)) return Promise.resolve();
+    if (!force && !this.#shouldWrite(text.length, at)) {
+      // Skipped, not dropped: if the vendor goes quiet no later call arrives to
+      // accept it, so a timer writes it when the time window runs out.
+      this.#heldTail.arm(heldTailDelay(this.#lastWrittenAt, at, CHECKPOINT_MAX_INTERVAL_MS), () =>
+        this.#writeHeldTail()
+      );
+      return Promise.resolve();
+    }
 
     this.#lastTextLength = text.length;
     this.#lastWrittenAt = at;
+    // Whatever the timer was holding is part of this write.
+    this.#heldTail.cancel();
     if (!force) {
       this.#dirty = true;
       this.#armTrailingWrite();
@@ -123,6 +149,8 @@ export class ExternalTranscriptWriter {
    * write finished, not that it succeeded.
    */
   async flush(): Promise<void> {
+    // The caller is about to write the complete state, so a timer for a skipped tail has no job.
+    this.#heldTail.cancel();
     for (;;) {
       if (this.#dirty) this.#queueTrailingWrite();
       const tail = this.#pending;
@@ -131,6 +159,21 @@ export class ExternalTranscriptWriter {
       // sets the dirty flag; it does not extend the chain this loop awaited.
       if (tail === this.#pending && !this.#dirty) return;
     }
+  }
+
+  /**
+   * Stops the held-tail timer for good: the turn is ending, so nothing is written
+   * on a timer after this. Call it once the turn's last `flush()` is done.
+   */
+  close(): void {
+    this.#heldTail.close();
+  }
+
+  /** The held-tail timer fired: no accepted write superseded the tail the throttle skipped. */
+  #writeHeldTail(): void {
+    this.#lastTextLength = this.transcript.text.length;
+    this.#lastWrittenAt = this.now();
+    this.#markDirty();
   }
 
   #enqueueRequired(onFailure?: () => void): Promise<void> {
