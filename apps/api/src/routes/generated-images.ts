@@ -1,6 +1,6 @@
 import { extname } from 'node:path';
 
-import { Elysia } from 'elysia';
+import { Elysia, status, t } from 'elysia';
 
 import { resolveContainedPath } from '../utils/paths';
 
@@ -25,23 +25,22 @@ function getGeneratedImageContentType(filePath: string): string | undefined {
 }
 
 export function createGeneratedImageRoutes(imagesDir: string) {
-  return new Elysia().get('/images/*', async ({ params, set }) => {
-    const filePath = resolveGeneratedImagePath(imagesDir, params['*']);
-    if (!filePath) {
-      set.status = 404;
-      return 'Not found';
+  return new Elysia().get(
+    '/images/*',
+    // The 200 body is a file stream, so only the plain-text 404 is declared.
+    { response: { 404: t.String() } },
+    async ({ params, set }) => {
+      const filePath = resolveGeneratedImagePath(imagesDir, params['*']);
+      if (!filePath) return status(404, 'Not found');
+
+      const file = Bun.file(filePath);
+      if (!(await file.exists())) return status(404, 'Not found');
+
+      set.headers['Cache-Control'] = GENERATED_IMAGE_CACHE_CONTROL;
+      const contentType = getGeneratedImageContentType(filePath);
+      if (contentType) set.headers['Content-Type'] = contentType;
+
+      return file;
     }
-
-    const file = Bun.file(filePath);
-    if (!(await file.exists())) {
-      set.status = 404;
-      return 'Not found';
-    }
-
-    set.headers['Cache-Control'] = GENERATED_IMAGE_CACHE_CONTROL;
-    const contentType = getGeneratedImageContentType(filePath);
-    if (contentType) set.headers['Content-Type'] = contentType;
-
-    return file;
-  });
+  );
 }

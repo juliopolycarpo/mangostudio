@@ -364,11 +364,10 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
             resolved.invalidationTarget
           );
           if (repoState.state !== 'repo') {
-            set.status = 409;
-            return {
+            return status(409, {
               error: 'Working directory is not a Git repository',
               code: ERROR_CODES.CONFLICT,
-            };
+            });
           }
           const settings = await getAppSettings(db, userId);
           return await generateCommitMessageUseCase({
@@ -387,24 +386,23 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         } catch (error) {
           if (error instanceof GitCliError) return gitCommandError(error, set);
           if (error instanceof NoCommitChangesError) {
-            set.status = 409;
-            return { error: error.message, code: ERROR_CODES.NOTHING_TO_COMMIT };
+            return status(409, { error: error.message, code: ERROR_CODES.NOTHING_TO_COMMIT });
           }
           if (error instanceof EmptyGeneratedCommitMessageError) {
-            set.status = 422;
-            return { error: error.message, code: ERROR_CODES.GENERATION_EMPTY };
+            return status(422, { error: error.message, code: ERROR_CODES.GENERATION_EMPTY });
           }
           if (error instanceof NoModelAvailableError) {
             const refusal = modelUnavailableResponse(error);
-            set.status = refusal.status;
-            return refusal.body;
+            return status(refusal.status, refusal.body);
           }
           // A cancelled request is the client hanging up, not a server fault worth logging.
           if (!request.signal.aborted) {
             console.error('[git] commit message generation failed', error);
           }
-          set.status = 500;
-          return { error: 'Commit message generation failed', code: ERROR_CODES.PROVIDER_ERROR };
+          return status(500, {
+            error: 'Commit message generation failed',
+            code: ERROR_CODES.PROVIDER_ERROR,
+          });
         }
       }
     )

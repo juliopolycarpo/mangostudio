@@ -238,6 +238,21 @@ assertType<ErrorBodyIsApiError<ChatCompactResponse, 400 | 404 | 409 | 503>>();
 assertType<ErrorBodyIsApiError<ChatUpdateResponse, 400 | 404 | 422>>();
 assertType<ErrorBodyIsApiError<MessageUpdateResponse, 404 | 409>>();
 
+// 11. Routes that declare a `response` map still lose the error channel when the
+//     handler assigns `set.status` and returns a bare body: the map types the
+//     status the schema declares, not the one the handler assigns. The chat todos
+//     read (404) and the app settings write (409) answer through
+//     `status(code, body)`, so each error body is an `error` arm and never `data`.
+type ChatTodosResponse = Awaited<ReturnType<ReturnType<typeof client.api.chats>['todos']['get']>>;
+type AppSettingsPutResponse = Awaited<ReturnType<typeof client.api.settings.app.put>>;
+
+assertType<Equals<ErrorBodyInData<ChatTodosResponse>, false>>();
+assertType<Equals<ErrorBodyInData<AppSettingsPutResponse>, false>>();
+assertType<Equals<Extract<ErrorStatuses<ChatTodosResponse>, 404>, 404>>();
+assertType<Equals<Extract<ErrorStatuses<AppSettingsPutResponse>, 409>, 409>>();
+assertType<ErrorBodyIsApiError<ChatTodosResponse, 404>>();
+assertType<ErrorBodyIsApiError<AppSettingsPutResponse, 409>>();
+
 describe('Eden treaty type seam', () => {
   it('keeps route input and output types inferable from App', () => {
     // The assertions above are enforced by `bun check`. Reaching this body
