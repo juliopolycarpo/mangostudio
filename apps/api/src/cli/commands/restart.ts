@@ -22,6 +22,7 @@ import { hubLaunchMode, hubUrl } from '../../modules/machine/domain/hub-process'
 import { restartExecutableOptions, spawnDetached } from '../detach';
 import { CliError } from '../errors';
 import { confirmsHealthy } from '../health';
+import { type HubShutdownRequester, requestHubShutdown } from '../hub-shutdown-request';
 import { writeLine } from '../output';
 import {
   createProcessController,
@@ -43,6 +44,8 @@ export interface RestartDeps {
   sleep: (ms: number) => Promise<void>;
   /** Picks the manual-stop command a refusal names (`kill` or `taskkill`). */
   platform: NodeJS.Platform;
+  /** Asks the hub to shut itself down where a signal cannot (win32). */
+  requestShutdown: HubShutdownRequester;
   /** What a unit (or a respawned detached instance) would run right now. */
   executable: () => HubExecutable;
   /**
@@ -165,6 +168,7 @@ function resolveDeps(deps: Partial<RestartDeps>): Required<RestartDeps> {
     now: deps.now ?? Date.now,
     sleep: deps.sleep ?? sleep,
     platform: deps.platform ?? process.platform,
+    requestShutdown: deps.requestShutdown ?? requestHubShutdown,
     executable: deps.executable ?? (() => currentHubExecutable()),
     launcherPath: deps.launcherPath ?? currentLauncherPath,
   };
