@@ -165,12 +165,16 @@ export function abbreviatePath(rawPath: unknown): string | null {
  * Produces an optional inline hint string that follows the label.
  * Filesystem tools show the path; shell tools show the command; others none.
  *
- * // Usage: getToolHint('read_file', { path: '/home/ada/notes.md' }) // => '~/notes.md'
+ * `formatAdditionalCount` words the "+N more" scope of a multi-file patch. It has
+ * no default on purpose: the string is user-visible, so every caller must supply
+ * the localized one from the i18n dictionary.
+ *
+ * // Usage: getToolHint('read_file', { path: '/home/ada/notes.md' }, formatMoreCount) // => '~/notes.md'
  */
 export function getToolHint(
   toolName: string,
   args: Record<string, unknown>,
-  formatAdditionalCount: (count: number) => string = (count) => `+${count} more`
+  formatAdditionalCount: (count: number) => string
 ): string | null {
   switch (toolName) {
     case 'read_file': {
