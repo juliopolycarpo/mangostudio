@@ -3,7 +3,99 @@ import { describe, expect, it } from 'bun:test';
 import {
   cleanupGithubFixtureDirectories,
   type GithubFixtureDirectory,
+  type RemovalRetryDependencies,
+  removeDirectoryWithRetry,
 } from '../support/github-fixture-cleanup';
+
+/** A file system that refuses a removal with `code` a set number of times, on a virtual clock. */
+class RefusingFileSystem implements RemovalRetryDependencies {
+  clock = 0;
+  attempts = 0;
+  readonly pauses: number[] = [];
+  readonly recoveries: string[] = [];
+  holderLookups = 0;
+
+  constructor(
+    private readonly refusals: number,
+    private readonly code = 'EBUSY'
+  ) {}
+
+  remove = (path: string): Promise<void> => {
+    this.attempts++;
+    if (this.attempts <= this.refusals) {
+      return Promise.reject(
+        Object.assign(new Error(`${this.code}: resource busy or locked, rm '${path}'`), {
+          code: this.code,
+        })
+      );
+    }
+    return Promise.resolve();
+  };
+  sleep = (milliseconds: number): Promise<void> => {
+    this.pauses.push(milliseconds);
+    this.clock += milliseconds;
+    return Promise.resolve();
+  };
+  now = (): number => this.clock;
+  describeHolders = (): Promise<string> => {
+    this.holderLookups++;
+    return Promise.resolve('controlled holder: gh.exe pid 4242');
+  };
+  onRecovered = (report: string): void => {
+    this.recoveries.push(report);
+  };
+}
+
+describe('removal retry', () => {
+  it.each(['EBUSY', 'EPERM', 'ENOTEMPTY'])(
+    'retries a transient %s until the removal succeeds and records the recovery',
+    async (code) => {
+      const fileSystem = new RefusingFileSystem(3, code);
+      await removeDirectoryWithRetry('/controlled/bin', 5_000, fileSystem);
+      expect(fileSystem.attempts).toBe(4);
+      expect(fileSystem.pauses).toEqual([50, 100, 200]);
+      expect(fileSystem.holderLookups).toBe(1);
+      expect(fileSystem.recoveries).toHaveLength(1);
+      expect(fileSystem.recoveries[0]).toContain(`refusals: ${code}, ${code}, ${code}`);
+      expect(fileSystem.recoveries[0]).toContain('gh.exe pid 4242');
+    }
+  );
+
+  it('removes without a pause or a report when nothing refuses', async () => {
+    const fileSystem = new RefusingFileSystem(0);
+    await removeDirectoryWithRetry('/controlled/bin', 5_000, fileSystem);
+    expect(fileSystem.attempts).toBe(1);
+    expect(fileSystem.pauses).toEqual([]);
+    expect(fileSystem.holderLookups).toBe(0);
+    expect(fileSystem.recoveries).toEqual([]);
+  });
+
+  it('gives up at the deadline naming the path, the attempts, the last error and the holders', async () => {
+    const fileSystem = new RefusingFileSystem(Number.POSITIVE_INFINITY);
+    const error = (await removeDirectoryWithRetry('/controlled/bin', 1_000, fileSystem).catch(
+      (cause: unknown) => cause
+    )) as Error;
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toContain('directory "/controlled/bin": expected removal within 1000 ms');
+    expect(error.message).toContain('EBUSY: resource busy or locked');
+    expect(error.message).toContain('gh.exe pid 4242');
+    expect((error.cause as NodeJS.ErrnoException).code).toBe('EBUSY');
+    // Bounded: the pauses never overshoot the deadline and the backoff caps at 500 ms.
+    expect(fileSystem.clock).toBeLessThanOrEqual(1_000);
+    expect(Math.max(...fileSystem.pauses)).toBeLessThanOrEqual(500);
+    expect(fileSystem.holderLookups).toBe(1);
+  });
+
+  it('fails at once on an error that waiting cannot clear', async () => {
+    const fileSystem = new RefusingFileSystem(1, 'EACCES');
+    const error = (await removeDirectoryWithRetry('/controlled/bin', 5_000, fileSystem).catch(
+      (cause: unknown) => cause
+    )) as NodeJS.ErrnoException;
+    expect(error.code).toBe('EACCES');
+    expect(fileSystem.attempts).toBe(1);
+    expect(fileSystem.pauses).toEqual([]);
+  });
+});
 
 class HeldFixtureCleanup {
   readonly closing = Promise.withResolvers<void>();
