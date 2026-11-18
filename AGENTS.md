@@ -83,6 +83,11 @@ Useful docs:
   including the published `mangostudio` launcher. `rust-toolchain.toml` pins the same development
   toolchain; policy tests enforce equality. The launcher keeps the application version, while
   `[workspace.package].version` remains the protocol version.
+- The published launcher repeats the root `[profile.release]` in its own manifest, because
+  `cargo install` builds the package as the root and never sees the workspace profile. Cargo
+  ignores that table inside the workspace and warns about it on every command; the warning is
+  expected. Change the root profile and the launcher copy together:
+  `scripts/tests/launcher-release-profile.unit.test.ts` fails on drift.
 - `.cargo/config.toml` sets `registry.global-min-publish-age = "3 days"`: when Cargo resolves or
   updates a lockfile it skips crate versions published less than three days ago. `--locked` builds
   do not resolve and `cargo install` ignores the setting. Run

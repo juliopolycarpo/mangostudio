@@ -78,8 +78,11 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 # The shipped `mangostudio-runtime` is the only release artifact this
-# workspace builds (the published launcher is built by `cargo install`, which
-# never reads this root profile). Measured on linux-x64 (see
+# workspace builds. The published launcher is built by `cargo install`, which
+# never reads this root profile, so `crates/mangostudio-launcher/Cargo.toml`
+# repeats the release keys and the overrides for the packages it links;
+# `scripts/tests/launcher-release-profile.unit.test.ts` keeps the two equal, so
+# change both together. Measured on linux-x64 (see
 # docs/reference/runtime-metrics.md): fat LTO with one codegen unit is about a
 # quarter smaller than cargo's default release profile, and thin LTO lands
 # between the two for roughly two thirds of fat's build time.
