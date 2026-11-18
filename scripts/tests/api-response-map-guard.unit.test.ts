@@ -11,14 +11,6 @@ import { ROOT_DIR as REPO_ROOT } from '../lib/config';
 
 const API_SRC = join(REPO_ROOT, 'apps/api/src');
 
-/**
- * Files still spreading an `as const` map while another change removes it.
- * #2394 drops it from the GitHub routes; delete this entry once that merges.
- */
-const PENDING_FIXES: ReadonlySet<string> = new Set([
-  'apps/api/src/modules/github/http/github-routes.ts',
-]);
-
 function scan(files: ReadonlyArray<{ file: string; source: string }>): ConstResponseSpread[] {
   const names = new Set(
     files.flatMap(({ file, source }) => collectConstAssertedObjectNames(source, file))
@@ -45,9 +37,7 @@ describe('API response map guard', () => {
       'apps/api/src/modules/api-keys/http/api-key-routes.ts'
     );
 
-    const offenders = scan(files)
-      .filter(({ file }) => !PENDING_FIXES.has(file))
-      .map(({ file, line, spread }) => `${file}:${line} (...${spread})`);
+    const offenders = scan(files).map(({ file, line, spread }) => `${file}:${line} (...${spread})`);
     expect(
       offenders,
       `expected no \`as const\` map spread into a route \`response\`; found: ${offenders.join(', ')}. ` +
