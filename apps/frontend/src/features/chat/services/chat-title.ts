@@ -8,5 +8,5 @@ export async function generateChatTitleSuggestion(
 ): Promise<GenerateChatTitleResponse> {
   const { data, error } = await client.api.chats['title-suggestion'].post(request);
   if (error) throw new ApiError(error.value);
-  return data as GenerateChatTitleResponse;
+  return data;
 }

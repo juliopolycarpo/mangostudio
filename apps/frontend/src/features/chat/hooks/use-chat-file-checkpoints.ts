@@ -1,4 +1,3 @@
-import type { ChatFileCheckpointsResponse } from '@mangostudio/shared/file-checkpoints';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { client } from '@/lib/api-client';
@@ -15,7 +14,7 @@ export function useChatFileCheckpoints(chatId: string | null) {
     queryFn: async () => {
       const { data, error } = await client.api.chats({ id: chatId ?? '' }).checkpoints.get();
       if (error) throw new ApiError(error.value);
-      return data as ChatFileCheckpointsResponse;
+      return data;
     },
     enabled: !!chatId,
   });

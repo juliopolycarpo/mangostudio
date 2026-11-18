@@ -2,10 +2,11 @@ import {
   ChatListSchema,
   ChatSchema,
   CompactChatBodySchema,
+  ContextCompactionResponseSchema,
   CreateChatBodySchema,
   GenerateChatTitleBodySchema,
+  GenerateChatTitleResponseSchema,
   ListChatMessagesQuerySchema,
-  type MessagesPage,
   MessagesPageSchema,
   SummarizeToNewChatBodySchema,
   UpdateChatBodySchema,
@@ -16,7 +17,7 @@ import {
   ERROR_CODES,
 } from '@mangostudio/shared/errors';
 import { WorkspacePathError } from '@mangostudio/shared/runtime-contract';
-import { type Elysia, t } from 'elysia';
+import { type Elysia, status, t } from 'elysia';
 
 import { getDb } from '../../../db/database';
 import { createJsonResponseEncoder } from '../../../lib/compiled-json-response';
@@ -59,6 +60,31 @@ function apiError(error: string, code: string): ApiErrorResponse {
   return { error, code };
 }
 
+/** The `{ success: true }` acknowledgement the chat update route answers with. */
+const SuccessResponseSchema = t.Object({ success: t.Literal(true) });
+
+/**
+ * Maps the failures `compact` and `summarize-to-new-chat` share to a typed
+ * status answer, so each body lands in Eden's `error` channel. Rethrows any
+ * other error to the framework's error handler.
+ */
+function compactionFailure(err: unknown) {
+  if (err instanceof ChatNotFoundError) {
+    return status(404, apiError('Chat not found', ERROR_CODES.NOT_FOUND));
+  }
+  if (err instanceof EmptyChatCompactionError) {
+    return status(400, apiError(err.message, ERROR_CODES.VALIDATION));
+  }
+  if (err instanceof ExternalChatCompactionUnsupportedError) {
+    return status(409, apiError(err.message, ERROR_CODES.UNSUPPORTED));
+  }
+  if (err instanceof NoModelAvailableError) {
+    const refusal = modelUnavailableResponse(err);
+    return status(refusal.status, refusal.body);
+  }
+  throw err;
+}
+
 export const chatRoutes = (app: Elysia) =>
   app.group('/chats', (app) =>
     app
@@ -80,8 +106,7 @@ export const chatRoutes = (app: Elysia) =>
             410: ApiErrorResponseSchema,
           },
         },
-        // Migrated from ESLint
-        async ({ body, user, set }) => {
+        async ({ body, user }) => {
           try {
             return await createChatUseCase(
               {
@@ -93,17 +118,14 @@ export const chatRoutes = (app: Elysia) =>
               getDb()
             );
           } catch (error) {
-            if (error instanceof OperationConflictError || error instanceof OperationExpiredError) {
-              const expired = error instanceof OperationExpiredError;
-              set.status = expired ? 410 : 409;
-              return apiError(
-                error.message,
-                expired ? ERROR_CODES.OPERATION_EXPIRED : ERROR_CODES.CONFLICT
-              );
+            if (error instanceof OperationExpiredError) {
+              return status(410, apiError(error.message, ERROR_CODES.OPERATION_EXPIRED));
+            }
+            if (error instanceof OperationConflictError) {
+              return status(409, apiError(error.message, ERROR_CODES.CONFLICT));
             }
             if (error instanceof ChatNotFoundError) {
-              set.status = 404;
-              return apiError('Chat not found', ERROR_CODES.NOT_FOUND);
+              return status(404, apiError('Chat not found', ERROR_CODES.NOT_FOUND));
             }
             throw error;
           }
@@ -112,8 +134,16 @@ export const chatRoutes = (app: Elysia) =>
 
       .post(
         '/title-suggestion',
-        { body: GenerateChatTitleBodySchema },
-        async ({ body, user, set }) => {
+        {
+          body: GenerateChatTitleBodySchema,
+          response: {
+            200: GenerateChatTitleResponseSchema,
+            400: ApiErrorResponseSchema,
+            500: ApiErrorResponseSchema,
+            503: ApiErrorResponseSchema,
+          },
+        },
+        async ({ body, user }) => {
           try {
             return await generateChatTitleUseCase({
               userId: user?.id ?? '',
@@ -122,16 +152,16 @@ export const chatRoutes = (app: Elysia) =>
             });
           } catch (err) {
             if (err instanceof EmptyChatTitlePromptError) {
-              set.status = 400;
-              return apiError(err.message, ERROR_CODES.VALIDATION);
+              return status(400, apiError(err.message, ERROR_CODES.VALIDATION));
             }
             if (err instanceof NoModelAvailableError) {
               const refusal = modelUnavailableResponse(err);
-              set.status = refusal.status;
-              return refusal.body;
+              return status(refusal.status, refusal.body);
             }
-            set.status = 500;
-            return apiError('Chat title generation failed.', ERROR_CODES.PROVIDER_ERROR);
+            return status(
+              500,
+              apiError('Chat title generation failed.', ERROR_CODES.PROVIDER_ERROR)
+            );
           }
         }
       )
@@ -142,8 +172,14 @@ export const chatRoutes = (app: Elysia) =>
         {
           params: t.Object({ id: t.String() }),
           body: UpdateChatBodySchema,
+          response: {
+            200: SuccessResponseSchema,
+            400: ApiErrorResponseSchema,
+            404: ApiErrorResponseSchema,
+            422: ApiErrorResponseSchema,
+          },
         },
-        async ({ params, body, user, set }) => {
+        async ({ params, body, user }) => {
           try {
             await updateChatUseCase(
               {
@@ -164,23 +200,20 @@ export const chatRoutes = (app: Elysia) =>
               },
               getDb()
             );
-            return { success: true };
+            return { success: true as const };
           } catch (error) {
             if (
               error instanceof WorkdirValidationError ||
               error instanceof EnvironmentSelectionError ||
               error instanceof RunnerKindImmutableError
             ) {
-              set.status = 422;
-              return apiError(error.message, ERROR_CODES.VALIDATION);
+              return status(422, apiError(error.message, ERROR_CODES.VALIDATION));
             }
             if (error instanceof ChatNotFoundError) {
-              set.status = 404;
-              return apiError('Chat not found', ERROR_CODES.NOT_FOUND);
+              return status(404, apiError('Chat not found', ERROR_CODES.NOT_FOUND));
             }
             if (error instanceof WorkspacePathError) {
-              set.status = 400;
-              return apiError(error.message, ERROR_CODES.VALIDATION);
+              return status(400, apiError(error.message, ERROR_CODES.VALIDATION));
             }
             throw error;
           }
@@ -192,32 +225,22 @@ export const chatRoutes = (app: Elysia) =>
         {
           params: t.Object({ id: t.String() }),
           body: CompactChatBodySchema,
+          response: {
+            200: ContextCompactionResponseSchema,
+            400: ApiErrorResponseSchema,
+            404: ApiErrorResponseSchema,
+            409: ApiErrorResponseSchema,
+            503: ApiErrorResponseSchema,
+          },
         },
-        async ({ params, body, user, set }) => {
+        async ({ params, body, user }) => {
           try {
             return await compactChatUseCase(
               { chatId: params.id, userId: user?.id ?? '', model: body.model },
               getDb()
             );
           } catch (err) {
-            if (err instanceof ChatNotFoundError) {
-              set.status = 404;
-              return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
-            }
-            if (err instanceof EmptyChatCompactionError) {
-              set.status = 400;
-              return { error: err.message, code: ERROR_CODES.VALIDATION };
-            }
-            if (err instanceof ExternalChatCompactionUnsupportedError) {
-              set.status = 409;
-              return { error: err.message, code: ERROR_CODES.UNSUPPORTED };
-            }
-            if (err instanceof NoModelAvailableError) {
-              const refusal = modelUnavailableResponse(err);
-              set.status = refusal.status;
-              return refusal.body;
-            }
-            throw err;
+            return compactionFailure(err);
           }
         }
       )
@@ -227,32 +250,22 @@ export const chatRoutes = (app: Elysia) =>
         {
           params: t.Object({ id: t.String() }),
           body: SummarizeToNewChatBodySchema,
+          response: {
+            200: ContextCompactionResponseSchema,
+            400: ApiErrorResponseSchema,
+            404: ApiErrorResponseSchema,
+            409: ApiErrorResponseSchema,
+            503: ApiErrorResponseSchema,
+          },
         },
-        async ({ params, body, user, set }) => {
+        async ({ params, body, user }) => {
           try {
             return await summarizeToNewChatUseCase(
               { chatId: params.id, userId: user?.id ?? '', model: body.model },
               getDb()
             );
           } catch (err) {
-            if (err instanceof ChatNotFoundError) {
-              set.status = 404;
-              return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
-            }
-            if (err instanceof EmptyChatCompactionError) {
-              set.status = 400;
-              return { error: err.message, code: ERROR_CODES.VALIDATION };
-            }
-            if (err instanceof ExternalChatCompactionUnsupportedError) {
-              set.status = 409;
-              return { error: err.message, code: ERROR_CODES.UNSUPPORTED };
-            }
-            if (err instanceof NoModelAvailableError) {
-              const refusal = modelUnavailableResponse(err);
-              set.status = refusal.status;
-              return refusal.body;
-            }
-            throw err;
+            return compactionFailure(err);
           }
         }
       )
@@ -275,7 +288,7 @@ export const chatRoutes = (app: Elysia) =>
             404: ApiErrorResponseSchema,
           },
         },
-        async ({ params, query, user, set }): Promise<ApiErrorResponse | MessagesPage> => {
+        async ({ params, query, user }) => {
           try {
             return await getChatMessagesUseCase(
               {
@@ -289,12 +302,10 @@ export const chatRoutes = (app: Elysia) =>
             );
           } catch (err) {
             if (err instanceof InvalidTranscriptCursorError) {
-              set.status = 400;
-              return apiError(err.message, ERROR_CODES.VALIDATION);
+              return status(400, apiError(err.message, ERROR_CODES.VALIDATION));
             }
             if (err instanceof ChatNotFoundError) {
-              set.status = 404;
-              return apiError('Chat not found', ERROR_CODES.NOT_FOUND);
+              return status(404, apiError('Chat not found', ERROR_CODES.NOT_FOUND));
             }
             throw err;
           }

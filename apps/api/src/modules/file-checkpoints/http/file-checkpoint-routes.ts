@@ -1,16 +1,10 @@
+import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import {
-  type ApiErrorResponse,
-  ApiErrorResponseSchema,
-  ERROR_CODES,
-} from '@mangostudio/shared/errors';
-import {
-  type ChatFileCheckpointsResponse,
   ChatFileCheckpointsResponseSchema,
-  type RevertChatFileCheckpointsResponse,
   RevertChatFileCheckpointsResponseSchema,
 } from '@mangostudio/shared/file-checkpoints';
 import { PathAccessError } from '@mangostudio/shared/runtime-contract';
-import { type Elysia, t } from 'elysia';
+import { type Elysia, status, t } from 'elysia';
 
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
@@ -34,14 +28,13 @@ export const fileCheckpointRoutes = (app: Elysia) =>
             404: ApiErrorResponseSchema,
           },
         },
-        async ({ params, user, set }): Promise<ApiErrorResponse | ChatFileCheckpointsResponse> => {
+        async ({ params, user }) => {
           const userId = user?.id ?? '';
           try {
             await assertChatOwnership(params.id, userId, getDb());
           } catch (err) {
             if (err instanceof ChatNotFoundError) {
-              set.status = 404;
-              return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
+              return status(404, { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND });
             }
             throw err;
           }
@@ -60,18 +53,13 @@ export const fileCheckpointRoutes = (app: Elysia) =>
             409: ApiErrorResponseSchema,
           },
         },
-        async ({
-          params,
-          user,
-          set,
-        }): Promise<ApiErrorResponse | RevertChatFileCheckpointsResponse> => {
+        async ({ params, user }) => {
           const userId = user?.id ?? '';
           try {
             await assertChatOwnership(params.id, userId, getDb());
           } catch (err) {
             if (err instanceof ChatNotFoundError) {
-              set.status = 404;
-              return { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND };
+              return status(404, { error: 'Chat not found', code: ERROR_CODES.NOT_FOUND });
             }
             throw err;
           }
@@ -79,12 +67,10 @@ export const fileCheckpointRoutes = (app: Elysia) =>
             return await revertMessageFileCheckpoints(getDb(), params.id, params.messageId);
           } catch (error) {
             if (error instanceof FileCheckpointConflictError) {
-              set.status = 409;
-              return { error: error.message, code: ERROR_CODES.CONFLICT };
+              return status(409, { error: error.message, code: ERROR_CODES.CONFLICT });
             }
             if (error instanceof PathAccessError) {
-              set.status = 403;
-              return { error: error.message, code: ERROR_CODES.PERMISSION_DENIED };
+              return status(403, { error: error.message, code: ERROR_CODES.PERMISSION_DENIED });
             }
             throw error;
           }

@@ -766,6 +766,64 @@ describe('PUT /chats/:id', () => {
   });
 });
 
+describe('POST /chats/:id/compact refusals', () => {
+  // These answer through `status(code, body)`; the wire code and body stay what
+  // the old `set.status` assignment produced.
+  it('answers 404 with a NOT_FOUND body for a chat the user does not own', async () => {
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request('http://localhost/chats/no-such-chat/compact', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'Chat not found', code: 'NOT_FOUND' });
+  });
+
+  it('answers 503 with a PROVIDER_ERROR body when no model is configured', async () => {
+    const { id: chatId } = await insertTestChat(TEST_USER.id);
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request(`http://localhost/chats/${chatId}/compact`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ code: 'PROVIDER_ERROR' });
+  });
+
+  it('answers 400 with a VALIDATION body for a chat with no history', async () => {
+    registerSummaryProvider('Unused summary');
+    await insertSummaryConnector('summary-model');
+    const { id: chatId } = await insertTestChat(TEST_USER.id);
+
+    const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, chatRoutes);
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      new Request(`http://localhost/chats/${chatId}/compact`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'summary-model' }),
+      })
+    );
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: 'VALIDATION' });
+  });
+});
+
 describe('POST /chats/:id/compact', () => {
   it('compacts a chat into a summary message without removing original history', async () => {
     registerSummaryProvider('Compact summary');
