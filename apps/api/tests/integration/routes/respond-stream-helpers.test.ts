@@ -1,21 +1,31 @@
-import { describe, expect, it } from 'bun:test';
+import { describe, expect, it, mock } from 'bun:test';
 
 import { ActivityEventSchema } from '@mangostudio/shared/activity';
 import { sql } from 'kysely';
 import Value from 'typebox/value';
 
+import * as databaseNs from '../../../src/db/database';
 import type { getDb } from '../../../src/db/database';
 import {
   ACTIVITY_RETENTION_MS,
   createActivityRepository,
 } from '../../../src/modules/activity/infrastructure/activity-repository';
+import * as appSettingsServiceNs from '../../../src/modules/app-settings/application/app-settings-service';
 import { recordTurnCompletedActivity } from '../../../src/modules/chats/application/record-turn-activity';
+import * as chatRepositoryNs from '../../../src/modules/chats/infrastructure/chat-repository';
+import * as messageRepositoryNs from '../../../src/modules/messages/infrastructure/message-repository';
+import * as providerSettingsRepositoryNs from '../../../src/modules/provider-settings/infrastructure/provider-settings-repository';
+import * as toolSettingsRepositoryNs from '../../../src/modules/tool-settings/infrastructure/tool-settings-repository';
+import * as geminiNs from '../../../src/services/gemini';
+import * as providerRegistryNs from '../../../src/services/providers/core/provider-registry';
+import * as toolsNs from '../../../src/services/tools';
 import { ActivityInsertCapture } from '../../support/activity-insert-capture';
 import {
   buildRespondStreamRequest,
   createTestStreamDb,
   mockDbWithFullCapture,
   mockPassThroughDb,
+  restoreAllMocks,
 } from './_respond-stream-helpers';
 
 describe('respond stream test helpers', () => {
@@ -176,6 +186,61 @@ describe('respond stream test helpers', () => {
       restrictToolsToWorkdir: null,
     });
   });
+});
+
+const PARTIAL_FAKE_LEAKED = () => 'partial fake leaked';
+
+// `restoreAllMocks` covers each of these; the specifier is the one the helper
+// registers, spelled from this directory like the helper's own.
+const RESTORED_MODULES = [
+  { specifier: '../../../src/db/database', live: databaseNs },
+  {
+    specifier: '../../../src/modules/chats/infrastructure/chat-repository',
+    live: chatRepositoryNs,
+  },
+  {
+    specifier: '../../../src/services/providers/core/provider-registry',
+    live: providerRegistryNs,
+  },
+  { specifier: '../../../src/services/tools', live: toolsNs },
+  {
+    specifier: '../../../src/modules/app-settings/application/app-settings-service',
+    live: appSettingsServiceNs,
+  },
+  { specifier: '../../../src/services/gemini', live: geminiNs },
+  {
+    specifier: '../../../src/modules/provider-settings/infrastructure/provider-settings-repository',
+    live: providerSettingsRepositoryNs,
+  },
+  {
+    specifier: '../../../src/modules/tool-settings/infrastructure/tool-settings-repository',
+    live: toolSettingsRepositoryNs,
+  },
+  {
+    specifier: '../../../src/modules/messages/infrastructure/message-repository',
+    live: messageRepositoryNs,
+  },
+] as const;
+
+describe('restoreAllMocks', () => {
+  for (const { specifier, live } of RESTORED_MODULES) {
+    it(`undoes a fake of every export of ${specifier.replace('../../../src/', '')}`, async () => {
+      const fake = Object.fromEntries(Object.keys(live).map((name) => [name, PARTIAL_FAKE_LEAKED]));
+      await mock.module(specifier, () => fake);
+
+      await restoreAllMocks();
+
+      // mock.module() merges into the live namespace, so an export the restore
+      // does not re-register keeps the fake.
+      const leaked = Object.entries(live)
+        .filter(([, value]) => value === PARTIAL_FAKE_LEAKED)
+        .map(([name]) => name);
+      expect(
+        leaked,
+        `(${specifier}): expected no export left as the partial fake | received: ${leaked.join(', ')}`
+      ).toEqual([]);
+    });
+  }
 });
 
 async function insertMessage(

@@ -5,38 +5,18 @@ import type { ChatRunnerConfiguration, ChatRunnerPermissions } from '@mangostudi
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { ProviderType } from '@mangostudio/shared/types';
 
-import { getDb } from '../../../src/db/database';
+import * as realDatabaseNs from '../../../src/db/database';
 import * as agentSettings from '../../../src/modules/agents/application/agent-settings-service';
 import { AgentSettingsError } from '../../../src/modules/agents/domain/agent-profile';
-import { getAppSettings } from '../../../src/modules/app-settings/application/app-settings-service';
-import {
-  createChat,
-  deleteChat,
-  getById,
-  getOwnedChat,
-  listByUserId,
-  updateChat,
-  verifyChatOwnership,
-} from '../../../src/modules/chats/infrastructure/chat-repository';
+import * as realAppSettingsServiceNs from '../../../src/modules/app-settings/application/app-settings-service';
+import * as realChatRepositoryNs from '../../../src/modules/chats/infrastructure/chat-repository';
 import { clearSubagentCache } from '../../../src/modules/generation/application/subagent-response-cache';
 import * as subagentRunner from '../../../src/modules/generation/application/subagent-runner';
-import {
-  insertMessage,
-  listByChatId as listMessagesByChatId,
-  listLegacyGalleryImages,
-  loadHistory,
-  loadRichHistory,
-  updateMessage,
-  verifyMessageOwnership,
-} from '../../../src/modules/messages/infrastructure/message-repository';
+import * as realMessageRepositoryNs from '../../../src/modules/messages/infrastructure/message-repository';
 import * as realProviderSettingsRepoNs from '../../../src/modules/provider-settings/infrastructure/provider-settings-repository';
 import * as realToolSettingsRepoNs from '../../../src/modules/tool-settings/infrastructure/tool-settings-repository';
 import * as realGeminiNs from '../../../src/services/gemini';
-import {
-  getProvider,
-  getProviderForModel,
-  registerProvider,
-} from '../../../src/services/providers/core/provider-registry';
+import * as realProviderRegistryNs from '../../../src/services/providers/core/provider-registry';
 import type { AgentTurnRequest } from '../../../src/services/providers/types';
 import * as realToolsNs from '../../../src/services/tools';
 import {
@@ -50,63 +30,46 @@ import type {
 } from '../../../src/services/tools/types';
 import { makeStreamChatRow, type StreamChatOverrides } from '../../support/stream-chat-row';
 
-// Snapshot real implementations at module-load time, before any test can call
-// mock.module(). Bun's mock.module() updates live namespace bindings, so
-// spreading a namespace object in afterEach would spread already-mocked values.
-// Capturing individual named exports as constants avoids that trap.
-const realGetDb = getDb;
-const realVerifyChatOwnership = verifyChatOwnership;
-const realListByUserId = listByUserId;
-const realGetById = getById;
-const realGetOwnedChat = getOwnedChat;
-const realCreateChat = createChat;
-const realUpdateChat = updateChat;
-const realDeleteChat = deleteChat;
-const realGetProviderForModel = getProviderForModel;
-const realGetProvider = getProvider;
-const realRegisterProvider = registerProvider;
+// Snapshot every module's whole namespace at module-load time, before any test
+// can call mock.module(). Bun's mock.module() updates live namespace bindings,
+// so spreading a namespace object in afterEach would spread already-mocked
+// values; the snapshot has to be taken here. It must also be the whole
+// namespace: mock.module() on a loaded module merges into it, so re-registering
+// a hand-listed subset leaves every export a partial fake added in place.
+const realDatabase = { ...realDatabaseNs };
+const realChatRepository = { ...realChatRepositoryNs };
+const realProviderRegistry = { ...realProviderRegistryNs };
 const realTools = { ...realToolsNs };
 export const realGetAllTools = realTools.getAllTools;
 export const realGetAllToolDefinitions = realTools.getAllToolDefinitions;
 export const realExecuteTool = realTools.executeTool;
 export const realGetTool = realTools.getTool;
 export const realGetSafeEffectiveToolSettings = realTools.getSafeEffectiveToolSettings;
-const realGetAppSettings = getAppSettings;
+const realAppSettingsService = { ...realAppSettingsServiceNs };
 
 const realGemini = { ...realGeminiNs };
 const realProviderSettingsRepo = { ...realProviderSettingsRepoNs };
 const realToolSettingsRepo = { ...realToolSettingsRepoNs };
-const realInsertMessage = insertMessage;
-const realUpdateMessage = updateMessage;
-const realListMessagesByChatId = listMessagesByChatId;
-const realLoadHistory = loadHistory;
-const realLoadRichHistory = loadRichHistory;
-const realVerifyMessageOwnership = verifyMessageOwnership;
-const realListLegacyGalleryImages = listLegacyGalleryImages;
+const realMessageRepository = { ...realMessageRepositoryNs };
 
 export { AgentSettingsError };
 
 export async function restoreAllMocks(): Promise<void> {
   clearSubagentCache();
-  await mock.module('../../../src/db/database', () => ({ getDb: realGetDb }));
-  await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
-    verifyChatOwnership: realVerifyChatOwnership,
-    listByUserId: realListByUserId,
-    getById: realGetById,
-    getOwnedChat: realGetOwnedChat,
-    createChat: realCreateChat,
-    updateChat: realUpdateChat,
-    deleteChat: realDeleteChat,
-  }));
-  await mock.module('../../../src/services/providers/core/provider-registry', () => ({
-    getProviderForModel: realGetProviderForModel,
-    getProvider: realGetProvider,
-    registerProvider: realRegisterProvider,
-  }));
+  await mock.module('../../../src/db/database', () => realDatabase);
+  await mock.module(
+    '../../../src/modules/chats/infrastructure/chat-repository',
+    () => realChatRepository
+  );
+  await mock.module(
+    '../../../src/services/providers/core/provider-registry',
+    () => realProviderRegistry
+  );
   await mock.module('../../../src/services/tools', () => realTools);
-  await mock.module('../../../src/modules/app-settings/application/app-settings-service', () => ({
-    getAppSettings: realGetAppSettings,
-  }));
+  await mock.module(
+    '../../../src/modules/app-settings/application/app-settings-service',
+    () => realAppSettingsService
+  );
   await mock.module('../../../src/services/gemini', () => realGemini);
   await mock.module(
     '../../../src/modules/provider-settings/infrastructure/provider-settings-repository',
@@ -120,15 +83,10 @@ export async function restoreAllMocks(): Promise<void> {
   agentProfileSpy = undefined;
   subagentRunnerSpy?.mockRestore();
   subagentRunnerSpy = undefined;
-  await mock.module('../../../src/modules/messages/infrastructure/message-repository', () => ({
-    insertMessage: realInsertMessage,
-    updateMessage: realUpdateMessage,
-    listByChatId: realListMessagesByChatId,
-    loadHistory: realLoadHistory,
-    loadRichHistory: realLoadRichHistory,
-    verifyMessageOwnership: realVerifyMessageOwnership,
-    listLegacyGalleryImages: realListLegacyGalleryImages,
-  }));
+  await mock.module(
+    '../../../src/modules/messages/infrastructure/message-repository',
+    () => realMessageRepository
+  );
 }
 
 /**
