@@ -123,6 +123,22 @@ jobs:
         with:
           artifact: ${{ inputs.runtime_artifact }}
 
+      # connect-ssh-runtime.integration.test.ts starts its own throwaway sshd
+      # (apps/api/tests/support/ssh-fixture.ts: loopback, high port, per-run
+      # keys, runs as this user) when MANGOSTUDIO_SSH_FIXTURE=1, and fails the
+      # file instead of skipping if it cannot. It only needs the sshd binary,
+      # not a running service, so install the package only when the image
+      # lacks it, and stop the service its postinst would start.
+      - name: Ensure the sshd binary
+        run: |
+          if [ -x /usr/sbin/sshd ]; then
+            echo "sshd preinstalled: $(/usr/sbin/sshd -V 2>&1 | head -n1)"
+          else
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq --no-install-recommends openssh-server
+            sudo systemctl stop ssh.service ssh.socket || true
+          fi
+
       # This shard's slice of every sharded lane; each takes `--shard`
       # directly. The frontend lane is not among them — its LCOV cannot be
       # merged across shards, so it runs whole in the `frontend` job below.
@@ -140,6 +156,8 @@ jobs:
         id: coverage
         env:
           SHARD: ${{ matrix.shard }}
+          # Both shards set it; only the one that owns the ssh file reads it.
+          MANGOSTUDIO_SSH_FIXTURE: "1"
         run: |
           bun ./scripts/ci/run-tests-watchdog.ts --label="${SHARD}" --timeout-seconds=480 \
             -- bun run test --coverage --shard="${SHARD}/${SHARD_COUNT}"
