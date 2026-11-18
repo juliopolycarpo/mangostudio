@@ -3,13 +3,14 @@ import { beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import { RemoteError } from '@mangostudio/protocol';
 import type { ToolchainSelection } from '@mangostudio/shared/environments';
 import type { ExternalAgentConfiguration } from '@mangostudio/shared/external-agents';
-import { UpdateQueryBuilder } from 'kysely';
+import { InsertQueryBuilder, UpdateQueryBuilder } from 'kysely';
 
 import { getDb } from '../../../../src/db/database';
 import {
   createExternalSessionManager,
   type EnsureExternalSessionInput,
   type ExternalSessionConsumer,
+  ExternalSessionOpenStoppedError,
   ExternalSessionReapedError,
   isUnconfirmedClose,
 } from '../../../../src/modules/external-agents/application/external-session-manager';
@@ -101,6 +102,34 @@ function refuseContinuationWrites() {
     return original.call(this);
   } as typeof original);
   return { refused: () => refused, restore: () => spy.mockRestore() };
+}
+
+/**
+ * Aborts `stop` right after the first statement whose SQL starts with `sqlPrefix` has run, as a
+ * Stop landing in the window between two awaits of the session open. Other statements run as usual.
+ */
+function abortAfterStatement(
+  builder: typeof InsertQueryBuilder | typeof UpdateQueryBuilder,
+  sqlPrefix: string,
+  stop: AbortController
+) {
+  // Both builders share the `execute()` shape; the cast only unifies their generics.
+  const prototype = builder.prototype as unknown as {
+    execute(): Promise<unknown>;
+    compile(): { sql: string };
+  };
+  const original = prototype.execute;
+  let fired = false;
+  const spy = spyOn(prototype, 'execute');
+  spy.mockImplementation(async function (this: typeof prototype) {
+    const result = await original.call(this);
+    if (!fired && this.compile().sql.startsWith(sqlPrefix)) {
+      fired = true;
+      stop.abort();
+    }
+    return result;
+  });
+  return { fired: () => fired, restore: () => spy.mockRestore() };
 }
 
 function recordingConsumer(): ExternalSessionConsumer & { readonly teardowns: string[] } {
@@ -769,6 +798,113 @@ describe('external session manager', () => {
     expect(runtime.calls.close).toEqual([{ sessionId: 'session-a' }]);
     expect(manager.liveSessionCount()).toBe(0);
     await expect(readContinuation(chatId, getDb())).resolves.toBeUndefined();
+  });
+
+  it('opens nothing for a caller whose stop signal already aborted', async () => {
+    const runtime = createFakeExternalRuntime();
+    const manager = managerFor(runtime, ['session-a']);
+    const stop = new AbortController();
+    stop.abort();
+
+    await expect(manager.ensureSession(baseInput({ signal: stop.signal }))).rejects.toBeInstanceOf(
+      ExternalSessionOpenStoppedError
+    );
+    expect(runtime.calls.open.length).toBe(0);
+    expect(manager.liveSessionCount()).toBe(0);
+  });
+
+  it('closes a session whose stop landed while the vendor was starting, writing no continuation', async () => {
+    const stop = new AbortController();
+    const runtime = createFakeExternalRuntime({ onOpen: () => stop.abort() });
+    const manager = managerFor(runtime, ['session-a']);
+
+    await expect(manager.ensureSession(baseInput({ signal: stop.signal }))).rejects.toBeInstanceOf(
+      ExternalSessionOpenStoppedError
+    );
+    expect(runtime.calls.close).toEqual([{ sessionId: 'session-a' }]);
+    expect(manager.liveSessionCount()).toBe(0);
+    await expect(readContinuation(chatId, getDb())).resolves.toBeUndefined();
+  });
+
+  it('keeps the continuation row when a stop lands while it is being written', async () => {
+    const stop = new AbortController();
+    const hook = abortAfterStatement(
+      InsertQueryBuilder,
+      'insert into "external_session_continuations"',
+      stop
+    );
+    try {
+      const runtime = createFakeExternalRuntime({ nativeSessionId: 'native-a' });
+      await expect(
+        managerFor(runtime, ['session-a']).ensureSession(baseInput({ signal: stop.signal }))
+      ).rejects.toBeInstanceOf(ExternalSessionOpenStoppedError);
+      expect(hook.fired()).toBe(true);
+      expect(runtime.calls.close).toEqual([{ sessionId: 'session-a' }]);
+    } finally {
+      hook.restore();
+    }
+
+    // A stop is not a reap: the row survives, so the next turn resumes instead of starting over.
+    const stored = await readContinuation(chatId, getDb());
+    expect(stored?.nativeSessionId).toBe('native-a');
+    const next = createFakeExternalRuntime({ nativeSessionId: 'native-a' });
+    await managerFor(next, ['session-b']).ensureSession(baseInput());
+    expect(next.calls.open[0]?.resumeRef).toBe('native-a');
+  });
+
+  it('keeps the continuation row when a stop lands during the adoption lease refresh', async () => {
+    await writeContinuation(
+      {
+        chatId,
+        userId,
+        environmentId: 'local',
+        targetId: 'codex',
+        canonicalWorkspacePath: '/work/repo',
+        vendorAccountFingerprint: 'account-a',
+        credentialHomeFingerprint: 'sha256:home-a',
+        runtimeSessionId: 'session-old',
+        nativeSessionId: 'native-a',
+        effectiveConfiguration: null,
+        updatedAt: 1,
+      },
+      getDb()
+    );
+    const stop = new AbortController();
+    const hook = abortAfterStatement(
+      UpdateQueryBuilder,
+      'update "external_session_adoption_leases"',
+      stop
+    );
+    try {
+      const runtime = createFakeExternalRuntime({ nativeSessionId: 'native-a' });
+      await expect(
+        managerFor(runtime, ['session-a']).ensureSession(baseInput({ signal: stop.signal }))
+      ).rejects.toBeInstanceOf(ExternalSessionOpenStoppedError);
+      expect(hook.fired()).toBe(true);
+      expect(runtime.calls.close).toEqual([{ sessionId: 'session-a' }]);
+    } finally {
+      hook.restore();
+    }
+
+    const stored = await readContinuation(chatId, getDb());
+    expect(stored?.nativeSessionId).toBe('native-a');
+    const next = createFakeExternalRuntime({ nativeSessionId: 'native-a' });
+    await managerFor(next, ['session-b']).ensureSession(baseInput());
+    expect(next.calls.open[0]?.resumeRef).toBe('native-a');
+  });
+
+  it('does not hand a caller with another stop signal the open of a stopped turn', async () => {
+    const stopped = new AbortController();
+    const runtime = createFakeExternalRuntime({ onOpen: () => stopped.abort() });
+    const manager = managerFor(runtime, ['session-a', 'session-b']);
+
+    const first = manager.ensureSession(baseInput({ signal: stopped.signal }));
+    const next = manager.ensureSession(baseInput());
+
+    await expect(first).rejects.toBeInstanceOf(ExternalSessionOpenStoppedError);
+    const handle = await next;
+    expect(handle.sessionId).toBe('session-b');
+    expect(manager.liveSessionCount()).toBe(1);
   });
 
   it('never sends a MangoStudio tool definition or environment to the vendor', async () => {
