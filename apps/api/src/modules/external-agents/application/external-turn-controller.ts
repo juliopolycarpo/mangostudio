@@ -1219,6 +1219,8 @@ export function createExternalTurnController(
     }
 
     await context.writer.flush();
+    // A delta that lands after this must not arm a timer to write over the final row.
+    context.writer.close();
     const finalized = await finalizeCheckpointedAiResponse(
       {
         id: context.assistantMessageId,

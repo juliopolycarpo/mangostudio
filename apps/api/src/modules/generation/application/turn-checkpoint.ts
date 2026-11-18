@@ -25,6 +25,7 @@ import {
   insertCheckpointDelta,
   rewriteCheckpointedRow,
 } from '../../messages/infrastructure/message-checkpoint-deltas';
+import { heldTailDelay, type HeldTailScheduler, HeldTailTimer } from './held-tail-timer';
 import { type CheckpointPlan, CheckpointPlanner } from './turn-checkpoint-delta';
 
 export const CHECKPOINT_TEXT_INTERVAL_CHARS = 512;
@@ -119,6 +120,12 @@ interface TurnCheckpointWriterOptions {
    * that arrive meanwhile share one write. Defaults to `setTimeout(run, 0)`.
    */
   readonly defer?: (run: () => void) => void;
+  /**
+   * Starts the timer that writes a tail the throttle held back once the time
+   * window since the last accepted write has run out. Defaults to an unref'd
+   * `setTimeout`.
+   */
+  readonly scheduleHeldTail?: HeldTailScheduler;
 }
 
 export interface WriteTurnCheckpointOptions {
@@ -170,6 +177,12 @@ interface PlannedWrite {
  * earlier checkpoint having landed. Readers fold the deltas over the row
  * (`foldCheckpointDeltasIntoRows`); finalizing the message removes them.
  *
+ * The throttle only runs when a delta arrives. A call it skips arms one trailing
+ * timer for the rest of the time window since the last accepted write; if no
+ * delta is accepted first, the timer writes the held tail, so a provider stall
+ * leaves at most about a second of text unwritten. Every accepted write cancels
+ * the timer, and `flush()`, `prepareFinal()` and `close()` cancel it for good.
+ *
  * @example
  * await writer.checkpoint(); // best-effort: accepted, written on a later tick
  * await writer.checkpoint({ force: true }); // required: resolves once written
@@ -189,6 +202,7 @@ export class TurnCheckpointWriter {
    */
   private bestEffortTicket: object | null = null;
   private bestEffortTimerArmed = false;
+  private readonly heldTail: HeldTailTimer;
   private readonly planner = new CheckpointPlanner();
   private nextDeltaSeq = 1;
   private failedWrites = 0;
@@ -197,6 +211,7 @@ export class TurnCheckpointWriter {
   constructor(private readonly options: TurnCheckpointWriterOptions) {
     this.now = options.now ?? Date.now;
     this.defer = options.defer ?? deferToMacrotask;
+    this.heldTail = new HeldTailTimer(options.scheduleHeldTail);
     this.lastWrittenAt = options.checkpoint.checkpointedAt;
   }
 
@@ -212,32 +227,47 @@ export class TurnCheckpointWriter {
     const durable = options.durable === true;
     const force = options.force === true || durable;
     if (!this.shouldWrite(content.text.length, now, force)) {
+      // Skipped, not dropped: if the provider goes quiet no later call arrives to
+      // accept it, so a timer writes it when the time window runs out.
+      this.heldTail.arm(heldTailDelay(this.lastWrittenAt, now, CHECKPOINT_MAX_INTERVAL_MS), () =>
+        this.writeHeldTail()
+      );
       return Promise.resolve(false);
     }
 
     this.lastTextLength = content.text.length;
     this.lastWrittenAt = now;
+    // Whatever the timer was holding is part of this write.
+    this.heldTail.cancel();
     // A status or reason code is state the recovery path reads, so it is never
     // deferred: such a call is written as a required checkpoint even without `force`.
     if (force || options.status !== undefined || options.reasonCode !== undefined) {
       return this.writeRequired(content, now, options);
     }
 
-    // Sequence and timestamp advance per accepted call so the persisted
-    // sequence counts checkpoints, however many writes they were merged into.
-    advanceTurnCheckpoint(this.options.checkpoint, now);
-    this.bestEffortDirty = true;
-    this.armBestEffortWrite();
+    this.acceptBestEffort(now);
     return Promise.resolve(true);
+  }
+
+  /**
+   * Stops the held-tail timer for good. The turn is ending: nothing is written
+   * on a timer after this. `prepareFinal` calls it; call it directly on a path
+   * that ends the turn without one.
+   */
+  close(): void {
+    this.heldTail.close();
   }
 
   /**
    * Resolve once every checkpoint accepted so far, including the trailing
    * best-effort one, is written. A required write queued while this waits
    * supersedes the waiting best-effort task and lands after it, so the wait
-   * continues until nothing newer is queued.
+   * continues until nothing newer is queued. It does not write a tail the
+   * throttle skipped: it cancels the timer that would, since the caller is
+   * about to write the complete state itself.
    */
   async flush(): Promise<void> {
+    this.heldTail.cancel();
     if (this.bestEffortDirty) this.queueBestEffortWrite();
     let tail: Promise<void>;
     do {
@@ -250,6 +280,8 @@ export class TurnCheckpointWriter {
     status: Exclude<TurnCheckpointStatus, 'active'>,
     reasonCode?: TurnInterruptionReasonCode
   ): Promise<TurnCheckpointContent> {
+    // Closed before the flush so no timer can write between it and the final row.
+    this.close();
     await this.flush();
     const content = this.options.getContent();
     refreshTurnCheckpointPart(this.options.checkpoint, content, this.now(), {
@@ -258,6 +290,23 @@ export class TurnCheckpointWriter {
       reasonCode,
     });
     return content;
+  }
+
+  /** Accepts a best-effort snapshot: it is written later, merged with any newer accepted ones. */
+  private acceptBestEffort(now: number): void {
+    // Sequence and timestamp advance per accepted call so the persisted
+    // sequence counts checkpoints, however many writes they were merged into.
+    advanceTurnCheckpoint(this.options.checkpoint, now);
+    this.bestEffortDirty = true;
+    this.armBestEffortWrite();
+  }
+
+  /** The held-tail timer fired: no accepted write superseded the tail the throttle skipped. */
+  private writeHeldTail(): void {
+    const now = this.now();
+    this.lastTextLength = this.options.getContent().text.length;
+    this.lastWrittenAt = now;
+    this.acceptBestEffort(now);
   }
 
   private writeRequired(

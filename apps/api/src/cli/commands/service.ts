@@ -193,7 +193,7 @@ async function stopPredecessor(
     `Stopping the instance started outside the service (PID ${state.pid}) so the service can take its place.`
   );
   await stopPidOrThrow(
-    d,
+    { ...d, notice: d.log },
     state,
     `The service (${unit}) is installed, but the instance started outside it (PID ${state.pid}) did not stop within 10s. Run "mangostudio killserver"; the service takes the port once that pid is gone.`
   );

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'bun:test';
 import { type RestartDeps, runRestart } from '../../../../src/cli/commands/restart';
 import { confirmsHealthy } from '../../../../src/cli/health';
 import type { ServerState } from '../../../../src/lib/server-state';
+import { FakeHubShutdown } from '../../../support/mocks/fake-hub-shutdown';
 import { FakeProcessController } from '../../../support/mocks/fake-process-controller';
 import {
   FakeServiceManager,
@@ -36,6 +37,8 @@ function baseDeps(overrides: Partial<RestartDeps> = {}) {
     // Hermetic by default: the real one probes this process's own install
     // origin, so leaving it out would make these cases read the host env.
     launcherPath: () => undefined,
+    // Hermetic by default: win32 would ask the hub over loopback and print a notice.
+    platform: 'linux',
     log: (msg) => lines.push(msg),
     now: () => now,
     sleep: (ms) => {
@@ -67,6 +70,47 @@ describe('runRestart', () => {
     expect(controller.terminated).toEqual([42]);
     expect(spawned).toEqual([[3001, '0.0.0.0', { waitForPid: 42 }]]);
     expect(lines[0]).toBe('MangoStudio restarted (PID 43, http://localhost:3001).');
+  });
+
+  it('on win32 asks the hub to stop itself before respawning, and never terminates it', async () => {
+    const controller = new FakeProcessController([42]);
+    const hub = new FakeHubShutdown({ accepted: true });
+    const { deps, lines } = baseDeps({
+      controller,
+      platform: 'win32',
+      requestShutdown: hub.request,
+      readState: () => Promise.resolve({ ...DETACHED, controlToken: 'control-token-restart' }),
+      sleep: () => {
+        controller.die(42);
+        return Promise.resolve();
+      },
+    });
+
+    await runRestart(deps);
+
+    expect(hub.requested.map((state) => state.pid)).toEqual([42]);
+    expect(controller.terminated).toEqual([]);
+    expect(lines[0]).toBe('MangoStudio restarted (PID 43, http://localhost:3001).');
+  });
+
+  it('on win32 says it fell back to terminate when the hub refuses the request', async () => {
+    const controller = new FakeProcessController([42]);
+    const hub = new FakeHubShutdown({ accepted: false, reason: 'the hub answered HTTP 401' });
+    const { deps, lines } = baseDeps({
+      controller,
+      platform: 'win32',
+      requestShutdown: hub.request,
+      readState: () => Promise.resolve({ ...DETACHED, controlToken: 'control-token-restart' }),
+      sleep: () => {
+        if (controller.terminated.length > 0) controller.die(42);
+        return Promise.resolve();
+      },
+    });
+
+    await runRestart(deps);
+
+    expect(controller.terminated).toEqual([42]);
+    expect(lines[0]).toContain('the hub answered HTTP 401');
   });
 
   it('respawns through the installer pointer when the executable resolves to it', async () => {

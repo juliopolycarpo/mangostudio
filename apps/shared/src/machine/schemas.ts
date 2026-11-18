@@ -243,6 +243,13 @@ export const MachineActionResponseSchema = Type.Object({
 export type MachineActionResponse = Static<typeof MachineActionResponseSchema>;
 
 /**
+ * The answer to the CLI's loopback shutdown request (`POST /api/control/shutdown`). It is sent
+ * before the stop begins; the CLI learns the hub is gone from its pid, not from this body.
+ */
+export const HubShutdownResponseSchema = Type.Object({ status: Type.Literal('stopping') });
+export type HubShutdownResponse = Static<typeof HubShutdownResponseSchema>;
+
+/**
  * The one writable key today: turning on guarded local installs from the page
  * rather than by hand-editing `config.toml`. Nested under `environments`
  * rather than flat because this endpoint is meant to grow other

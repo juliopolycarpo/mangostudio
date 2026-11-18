@@ -52,6 +52,7 @@ import { classifyRateLimit } from './plugins/rate-limit-policy';
 import { responseCompression } from './plugins/response-compression';
 import { authRoutes } from './routes/auth';
 import { createGeneratedImageRoutes } from './routes/generated-images';
+import { hubControlRoutes } from './routes/hub-control';
 import { settingsRoutes } from './routes/settings';
 import { uploadRoutes } from './routes/upload';
 import { createUploadedFileRoutes } from './routes/uploaded-files';
@@ -114,6 +115,8 @@ const api = new Elysia({ prefix: '/api' })
   .use(apiKeyGuard)
   // Register features
   .use(authRoutes)
+  // Token-authenticated, loopback-only: the CLI's way to stop this hub where it has no signal.
+  .use(hubControlRoutes)
   .use(apiKeyRoutes)
   .use(realtimeRoutes)
   // A peer endpoint rather than a bus topic: paired runtimes dial in here with

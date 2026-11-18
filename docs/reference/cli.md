@@ -36,7 +36,7 @@ commands introduced after that stable release.
 | `serve [host\|port\|host:port] -d`                                                                                    | Start the server in the background (detached) and return.                                                |
 | `status`                                                                                                              | Show whether a server is running, its URL, launch mode, and health.                                      |
 | `status --json`                                                                                                       | Emit the shared hub status document instead of plain text.                                               |
-| `stop`                                                                                                                | Gracefully stop the running server (SIGTERM).                                                            |
+| `stop`                                                                                                                | Gracefully stop the running server (SIGTERM; a loopback shutdown request on Windows).                    |
 | `restart`                                                                                                             | Restart the running server the way it was started.                                                       |
 | `killserver [--force]`                                                                                                | Force-kill the running server (SIGKILL). `--force` skips the check that the recorded PID is MangoStudio. |
 | `service <action> [host\|port\|host:port] [--json]`                                                                   | Keep the server running across logout and reboot.                                                        |
@@ -611,7 +611,7 @@ advanced debugging use `MANGO_CHATGPT_AUTH_BASE_URL` and `MANGO_CHATGPT_BASE_URL
 
 Only one server may run at a time. On startup the server writes a state file at
 `~/.mango/run/server.json`
-(`{ pid, port, host, startedAt, logFile, version, buildInfo, frontendDir, service, startToken }`)
+(`{ pid, port, host, startedAt, logFile, version, buildInfo, frontendDir, service, startToken, controlToken }`)
 once the port is bound, and removes it on graceful shutdown. A second
 `serve` / `serve -d` reads that file and refuses to start if the recorded
 process is still alive. A state file whose process has died is treated as stale
@@ -633,6 +633,26 @@ or `taskkill /PID <pid> /F` on Windows). `mangostudio killserver --force` skips 
 check and kills the recorded PID; it still refuses a PID of 1 or below. Read-only
 commands (`status`, `open`, `doctor`, `backup`) only check that the PID is alive
 and never remove the file because of an identity verdict.
+
+The file also records `controlToken`, a random secret minted at each start. It is
+a credential: the file is written owner-only (mode 0600 where the OS has one), and
+`status --json` and the machine API never include it. On Windows, where
+`process.kill` is `TerminateProcess` and the hub cannot catch it, `stop` (and the
+stop half of `restart`, `service install` and `upgrade`) uses the token to send
+`POST /api/control/shutdown` to the hub over loopback. The hub answers `202` and
+runs the same graceful stop as SIGTERM, so in-flight turns finish, runtime
+children are reaped and the SQLite handle closes, and it exits with code 0. The
+route accepts only a direct loopback peer (a request carrying `X-Forwarded-For`
+or another proxy header is refused with 403) and a matching
+`x-mangostudio-control-token` header (otherwise 401). If the hub cannot be asked
+(an older hub with no token, a bind to one non-loopback address), declines, or is
+still running 12.5 s after the request (the hub's own 12 s stop watchdog plus a
+margin to exit, so the CLI never ends a hub still inside its budget), `stop` says
+so and falls back to the hard kill, giving it 1 s more. The request, the wait and
+the hard stop share one 14.5 s deadline, under the 15 s a successor waits for its
+predecessor. Where `restart`, `service install` or `upgrade` ended the hub hard,
+they remove the state file it left behind, as `stop` does, unless a successor has
+already written its own. POSIX keeps SIGTERM.
 
 ## Runtime files
 
