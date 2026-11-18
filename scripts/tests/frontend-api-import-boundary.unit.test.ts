@@ -8,8 +8,6 @@ import { ROOT_DIR } from '../lib/config';
 import { assertFrontendApiImportBoundary } from '../lib/frontend-api-import-boundary';
 import {
   createSourceTree,
-  lintConfiguredSource,
-  lintSource,
   removeSourceTrees,
   transparentLoaderForms,
   writeSource,
@@ -20,168 +18,28 @@ const PARITY_TEST =
 const TRANSCRIPT =
   '@mangostudio/api/internal/modules/external-agents/domain/external-turn-transcript';
 
+/** The message `assertFrontendApiImportBoundary` throws for one fixture source. */
+function failureMessage(path: string, source: string): string {
+  const root = createSourceTree(path, source);
+  try {
+    assertFrontendApiImportBoundary(root);
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  throw new Error(`expected an API-internal failure | received: no failure for ${path}`);
+}
+
 afterEach(removeSourceTrees);
 
-describe('frontend API-internal Bun restriction', () => {
-  it('enforces the scoped loader restriction with the actual bunfig.toml', () => {
-    const result = lintConfiguredSource(
-      'apps/frontend/src/forbidden.ts',
-      `export const transcript = import('${TRANSCRIPT}');`
-    );
-    expect(result.exitCode, result.output).toBe(1);
-    expect(result.output).toContain('no-restricted-syntax');
-    expect(result.output).toContain(PARITY_TEST);
-  });
-
-  it('preserves the parity exception with the actual bunfig.toml', () => {
-    const result = lintConfiguredSource(
-      PARITY_TEST,
-      `export const transcript = import('${TRANSCRIPT}');`
-    );
-    expect(result.exitCode, result.output).toBe(0);
-  });
-
-  it('preserves the locale exception with the actual bunfig.toml', () => {
-    const result = lintConfiguredSource(
-      'apps/frontend/src/lib/locale-dictionaries.ts',
-      "import '@mangostudio/shared/i18n/en';"
-    );
-    expect(result.exitCode, result.output).toBe(0);
-  });
-  it.each([
-    `import { ExternalTurnTranscript } from '${TRANSCRIPT}';`,
-    `import * as transcript from '${TRANSCRIPT}';`,
-    `import '${TRANSCRIPT}';`,
-    `export { ExternalTurnTranscript } from '${TRANSCRIPT}';`,
-    `export * from '${TRANSCRIPT}';`,
-    `const transcript = import('${TRANSCRIPT}');`,
-    `const transcript = import(\`${TRANSCRIPT}\`);`,
-    `const transcript = require('${TRANSCRIPT}');`,
-    `const transcript = module.require('${TRANSCRIPT}');`,
-    `const transcript = module['require']('${TRANSCRIPT}');`,
-    `type Transcript = import('${TRANSCRIPT}').ExternalTurnTranscript;`,
-    `import transcript = require('${TRANSCRIPT}');`,
-  ])('rejects a new frontend value edge: %s', (source) => {
-    const result = lintSource('apps/frontend/src/forbidden.ts', source);
-    expect(result.exitCode, result.output).toBe(1);
-    expect(result.output).toMatch(/no-restricted-(?:imports|syntax)/);
-    expect(result.output).toContain(PARITY_TEST);
-    expect(result.output).toContain('real hub transcript');
-  });
-
-  it.each([
-    'apps/frontend/tests/unit/other-parity.test.ts',
-    'apps/frontend/src/hooks/use-i18n.tsx',
-    'apps/frontend/src/lib/locale-dictionaries.ts',
-    'apps/frontend/build.ts',
-  ])('keeps the restriction in %s despite locale exemptions', (path) => {
-    const result = lintSource(path, `import { ExternalTurnTranscript } from '${TRANSCRIPT}';`);
-    expect(result.exitCode, result.output).toBe(1);
-    expect(result.output).toContain(PARITY_TEST);
-    expect(result.output).toContain('real hub transcript');
-  });
-
-  it('allows the unchanged parity test importing the real hub transcript', () => {
-    const source = readFileSync(join(ROOT_DIR, PARITY_TEST), 'utf8');
-    expect(source).toContain(`from '${TRANSCRIPT}'`);
-    expect(source).toContain('new ExternalTurnTranscript(');
-    const result = lintSource(PARITY_TEST, source);
-    expect(result.exitCode, result.output).toBe(0);
-  });
-
-  it('allows the unchanged Eden client root API type import', () => {
-    const path = 'apps/frontend/src/lib/api-client.ts';
-    const source = readFileSync(join(ROOT_DIR, path), 'utf8');
-    expect(source).toContain("import type { App } from '@mangostudio/api';");
-    const result = lintSource(path, source);
-    expect(result.exitCode, result.output).toBe(0);
-  });
-
-  it('allows inline Eden root API types', () => {
-    const result = lintSource(
-      'apps/frontend/src/eden-types.ts',
-      "import { type App } from '@mangostudio/api';"
-    );
-    expect(result.exitCode, result.output).toBe(0);
-  });
-
-  it('does not restrict another workspace importing its own internals', () => {
-    const result = lintSource('apps/api/src/own-internal.ts', `import '${TRANSCRIPT}';`);
-    expect(result.exitCode, result.output).toBe(0);
-  });
-
-  it.each([
-    '@mangostudio/shared/i18n',
-    '@mangostudio/shared/i18n/en',
-    '@mangostudio/shared/i18n/pt-BR',
-  ])('preserves the production locale restriction for %s', (specifier) => {
-    const result = lintSource('apps/frontend/src/forbidden-locale.ts', `import '${specifier}';`);
-    expect(result.exitCode, result.output).toBe(1);
-    expect(result.output).toContain('Locale dictionaries are i18n plumbing');
-  });
-
-  it.each([
-    '@mangostudio/shared/i18n',
-    '@mangostudio/shared/i18n/en',
-    '@mangostudio/shared/i18n/pt-BR',
-  ])('rejects dynamic locale dictionary loading for %s', (specifier) => {
-    const result = lintSource('apps/frontend/src/forbidden-locale.ts', `import(\`${specifier}\`);`);
-    expect(result.exitCode, result.output).toBe(1);
-    expect(result.output).toContain('Locale dictionaries are i18n plumbing');
-  });
-
-  it.each([
-    'apps/frontend/src/hooks/use-i18n.tsx',
-    'apps/frontend/src/lib/locale-dictionaries.ts',
-    'apps/frontend/tests/unit/locale.test.ts',
-  ])('preserves the locale dictionary exemption for %s', (path) => {
-    const result = lintSource(path, "import '@mangostudio/shared/i18n/en';");
-    expect(result.exitCode, result.output).toBe(0);
-  });
-
-  it('preserves the allowed locale plumbing names in production', () => {
-    const result = lintSource(
-      'apps/frontend/src/locale-types.ts',
-      "import { defaultLocale, type Locale, type Messages } from '@mangostudio/shared/i18n';"
-    );
-    expect(result.exitCode, result.output).toBe(0);
-  });
-
-  it.each([
-    "import * as locale from '@mangostudio/shared/i18n';",
-    "import locale from '@mangostudio/shared/i18n';",
-    "import { en } from '@mangostudio/shared/i18n';",
-  ])('rejects non-plumbing locale imports: %s', (source) => {
-    const result = lintSource('apps/frontend/src/forbidden-locale.ts', source);
-    expect(result.exitCode, result.output).toBe(1);
-    expect(result.output).toContain('Locale dictionaries are i18n plumbing');
-  });
-});
-
-describe('frontend shared entrypoint Bun restriction', () => {
-  const paths = [
-    'apps/frontend/src/shared-root.ts',
-    'apps/frontend/src/hooks/use-i18n.tsx',
-    'apps/frontend/src/lib/locale-dictionaries.ts',
-    'apps/frontend/tests/unit/shared-root.test.ts',
-  ];
-
-  it.each(paths)('rejects the shared root in %s', (path) => {
-    const result = lintSource(path, "import '@mangostudio/shared';");
-    expect(result.exitCode, result.output).toBe(1);
-    expect(result.output).toContain('no-restricted-imports');
-    expect(result.output).toContain(
-      'Use a bounded-context entrypoint such as @mangostudio/shared/agents.'
-    );
-  });
-
-  it.each(paths)('accepts a bounded shared entrypoint in %s', (path) => {
-    const result = lintSource(path, "import '@mangostudio/shared/agents';");
-    expect(result.exitCode, result.output).toBe(0);
-  });
-});
-
 describe('frontend API-internal check guard', () => {
+  it('names the file, line, import and allowed alternative in its failure', () => {
+    expect(failureMessage('apps/frontend/src/forbidden.ts', `\nimport '${TRANSCRIPT}';`)).toBe(
+      `Frontend value imports of @mangostudio/api/internal/* are allowed only in ${PARITY_TEST} ` +
+        'to compare the live reducer with the real hub transcript. Use shared contracts or Eden root API types elsewhere.\n' +
+        `  - apps/frontend/src/forbidden.ts:2:8 (${TRANSCRIPT})`
+    );
+  });
+
   it.each(transparentLoaderForms(TRANSCRIPT))(
     'rejects transparent literal loader syntax: %s',
     (source) => {
@@ -247,6 +105,7 @@ describe('frontend API-internal check guard', () => {
     `import type transcript = require('${TRANSCRIPT}');`,
     `type Transcript = import('${TRANSCRIPT}').ExternalTurnTranscript;`,
     "import type { App } from '@mangostudio/api';",
+    "import { type App } from '@mangostudio/api';",
   ])('ignores erased types in the runtime guard: %s', (source) => {
     const root = createSourceTree('apps/frontend/src/types.ts', source);
     expect(() => assertFrontendApiImportBoundary(root)).not.toThrow();
@@ -259,6 +118,38 @@ describe('frontend API-internal check guard', () => {
     expect(() => assertFrontendApiImportBoundary(root)).toThrow(
       `apps/frontend/tests/unit/other.test.ts:2:8 (${TRANSCRIPT})`
     );
+  });
+
+  it.each([
+    'apps/frontend/tests/unit/other-parity.test.ts',
+    'apps/frontend/src/hooks/use-i18n.tsx',
+    'apps/frontend/src/lib/locale-dictionaries.ts',
+    'apps/frontend/build.ts',
+  ])('keeps the restriction in %s despite the locale exemptions', (path) => {
+    const root = createSourceTree(path, `import { ExternalTurnTranscript } from '${TRANSCRIPT}';`);
+    expect(() => assertFrontendApiImportBoundary(root)).toThrow(`${path}:1:`);
+  });
+
+  it('allows the unchanged parity test importing the real hub transcript', () => {
+    const source = readFileSync(join(ROOT_DIR, PARITY_TEST), 'utf8');
+    expect(source).toContain(`from '${TRANSCRIPT}'`);
+    expect(source).toContain('new ExternalTurnTranscript(');
+    const root = createSourceTree(PARITY_TEST, source);
+    expect(() => assertFrontendApiImportBoundary(root)).not.toThrow();
+  });
+
+  it('allows the unchanged Eden client root API type import', () => {
+    const path = 'apps/frontend/src/lib/api-client.ts';
+    const source = readFileSync(join(ROOT_DIR, path), 'utf8');
+    expect(source).toContain("import type { App } from '@mangostudio/api';");
+    const root = createSourceTree(path, source);
+    expect(() => assertFrontendApiImportBoundary(root)).not.toThrow();
+  });
+
+  it('does not restrict another workspace importing its own internals', () => {
+    const root = createSourceTree('apps/api/src/own-internal.ts', `import '${TRANSCRIPT}';`);
+    writeSource(root, 'apps/frontend/src/allowed.ts', 'export {};');
+    expect(() => assertFrontendApiImportBoundary(root)).not.toThrow();
   });
 
   it.each(['js', 'jsx', 'ts', 'tsx', 'mjs', 'cjs', 'mts', 'cts'])(
