@@ -11,7 +11,10 @@
  * Those stay with the explicit table in `local-unavailable.integration.test.ts`.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { delimiter, join } from 'node:path';
 
 import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import { DEFAULT_LIBRARY_LOCATION_SETTINGS } from '@mangostudio/shared/app-settings';
@@ -36,6 +39,39 @@ type OpenApiDocument = {
 let user: UserFixture;
 let restoreAuth: (() => void) | null = null;
 let manager: RuntimeConnectionManager;
+
+/**
+ * Recording fakes for the two container engine CLIs the hub probes, first on
+ * `PATH` for the whole file. They refuse to run (exit 127), so a sweep over the
+ * real application never starts a container engine on this machine. A real
+ * `podman` call leaves podman's rootless pause process (`catatonit -P`) behind,
+ * which the worker's leftover-process check then sees (#2329).
+ *
+ * POSIX only: the shims are `#!/bin/sh` scripts, which Windows cannot run.
+ */
+let engineShimDirectory = '';
+let engineCallsFile = '';
+let pathBeforeShims: string | undefined;
+
+beforeAll(async () => {
+  if (process.platform === 'win32') return;
+  engineShimDirectory = await mkdtemp(join(tmpdir(), 'local-unavailable-guard-engines-'));
+  engineCallsFile = join(engineShimDirectory, 'engine-calls.log');
+  for (const engine of ['docker', 'podman']) {
+    const shim = join(engineShimDirectory, engine);
+    await writeFile(shim, `#!/bin/sh\necho "${engine} $*" >> '${engineCallsFile}'\nexit 127\n`);
+    await chmod(shim, 0o755);
+  }
+  pathBeforeShims = process.env.PATH;
+  process.env.PATH = `${engineShimDirectory}${delimiter}${pathBeforeShims ?? ''}`;
+});
+
+afterAll(async () => {
+  if (!engineShimDirectory) return;
+  if (pathBeforeShims === undefined) delete process.env.PATH;
+  else process.env.PATH = pathBeforeShims;
+  await rm(engineShimDirectory, { recursive: true, force: true });
+});
 
 beforeEach(async () => {
   setLibraryLocationDefaultsForTest(null);
@@ -80,13 +116,31 @@ afterEach(async () => {
  */
 const FAILS_WITHOUT_LOCAL_TOO: ReadonlySet<string> = new Set(['/api/api-keys/']);
 
+/**
+ * Routes that probe this machine's own container engines and never reach Local.
+ * `GET /api/environments/containers` runs `docker version` and `podman version`
+ * on the host, and the first rootless `podman` call of a user starts podman's
+ * pause process (`catatonit -P`), which outlives the test worker (#2329). That
+ * route has no Local dependency to guard here; its own tests inject a fake run.
+ */
+const PROBES_HOST_CONTAINER_ENGINES: ReadonlySet<string> = new Set([
+  '/api/environments/containers',
+]);
+
 async function parameterlessGetPaths(): Promise<string[]> {
   const response = await app.handle(new Request('http://localhost/scalar/json'));
   const document = (await response.json()) as OpenApiDocument;
   return Object.entries(document.paths)
     .filter(([path, operations]) => {
       const get = operations.get;
-      if (!get || path.includes('{') || FAILS_WITHOUT_LOCAL_TOO.has(path)) return false;
+      if (
+        !get ||
+        path.includes('{') ||
+        FAILS_WITHOUT_LOCAL_TOO.has(path) ||
+        PROBES_HOST_CONTAINER_ENGINES.has(path)
+      ) {
+        return false;
+      }
       return !(get.parameters ?? []).some((parameter) => parameter.required === true);
     })
     .map(([path]) => path)
@@ -159,4 +213,21 @@ describe('every parameterless GET route with Local unavailable', () => {
       `(Local unavailable): expected every 503 to be {code: ENVIRONMENT_UNAVAILABLE, details.reason} without a path, pid or stack | received: ${failures.join(' ; ')}`
     ).toEqual([]);
   });
+
+  // Keep this test last: it reads what the sweeps above recorded. Reading the
+  // calls of the whole file, not of one sweep of its own, is deliberate: the
+  // container detection answer is cached for a few seconds, so a later sweep
+  // can be served without a spawn even when an earlier one started the CLI.
+  it.skipIf(process.platform === 'win32')(
+    'starts no container engine CLI on the host',
+    async () => {
+      const calls = (await readFile(engineCallsFile, 'utf8').catch(() => ''))
+        .split('\n')
+        .filter(Boolean);
+      expect(
+        calls,
+        `(host container engine): expected the GET sweeps to run no docker or podman command | received: ${calls.join(' ; ')}`
+      ).toEqual([]);
+    }
+  );
 });
