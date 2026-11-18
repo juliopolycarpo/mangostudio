@@ -143,6 +143,45 @@ class ExitDuringSnapshot {
   };
 }
 
+/**
+ * A Linux host where the command exits between `ps` listing its PID and the read of its procfs
+ * stat, so the kernel still returns teardown lineage `0 -1 -1`. Only the first census lists the
+ * command; later ones list the observer alone, as a real census would after the exit.
+ */
+class ReapedRootCensusHost {
+  private listed = false;
+  private commandPid = -1;
+  constructor(
+    private readonly pidFile: string,
+    private readonly exitFile: string
+  ) {}
+
+  capture = async (): Promise<string> => {
+    const observer = ` ${process.pid} 1 ${process.pid} Thu Oct 8 12:00:00 2026 observer\n`;
+    if (this.listed) return observer;
+    this.listed = true;
+    this.commandPid = await waitForFixturePid(this.pidFile);
+    // The command exits only after `ps` has listed it, which is the window the kernel leaves open.
+    await writeFile(this.exitFile, 'exit');
+    await waitForFixtureExit(this.commandPid);
+    return `${observer} ${this.commandPid} ${process.pid} ${this.commandPid} Thu Oct 8 12:00:00 2026 fixture\n`;
+  };
+
+  readStat = async (path: string, encoding: 'utf8'): Promise<string> => {
+    if (path === `/proc/${this.commandPid}/stat`)
+      return linuxStat({ parentPid: 0, group: -1, session: -1 });
+    return readFile(path, encoding);
+  };
+
+  read = (): Promise<NativeProcess[]> =>
+    snapshotNativeProcesses({
+      platform: 'linux',
+      findExecutable: () => null,
+      capture: this.capture,
+      readLinuxStat: this.readStat,
+    });
+}
+
 function exitingFixtureCommand(pidFile: string, exitFile: string): readonly string[] {
   return [
     process.execPath,
@@ -624,6 +663,35 @@ describe('native process census', () => {
     });
     expect(rows).toEqual([...expected]);
   });
+
+  // Regression for #1874/#2115: a metadata command that exited between `ps` and the stat read left
+  // `unexpected root origin ... parent 0, group -1`, so the cost driver stopped before its build.
+  test.skipIf(process.platform === 'win32')(
+    'settles a command whose root was reaped between ps and its stat read',
+    async () => {
+      const dir = await temporaryDirectory();
+      const host = new ReapedRootCensusHost(join(dir, 'pid'), join(dir, 'exit'));
+      const result = await runNativeCommand({
+        label: 'reaped-root',
+        command: exitingFixtureCommand(join(dir, 'pid'), join(dir, 'exit')),
+        root: dir,
+        out: dir,
+        env: { ...process.env },
+        timeoutSeconds: 10,
+        pollIntervalMs: 10,
+        settleMs: 0,
+        snapshot: host.read,
+        guardCompilerHelpers: false,
+        stream: new CapturedOutput(),
+      });
+      expect(result.exitCode).toBe(0);
+      expect(
+        result.settlement.snapshotErrors,
+        'census errors for a command that exited cleanly'
+      ).toEqual([]);
+      expect(result.settlement.empty, 'terminal settlement of a clean exit').toBe(true);
+    }
+  );
 
   test('gives a Windows census its own budget and a script that reports its phase', async () => {
     const created = '2026-10-19T23:15:06.0000000Z';
