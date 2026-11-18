@@ -938,6 +938,36 @@ describe('registerFrontend from the filesystem, over a listening server', () => 
   );
 
   test.each(['symlink', 'hardlink'])(
+    'answers HEAD with 404 for a %s alias for private build state, as GET does',
+    async (kind) => {
+      const server = await startFilesystemServer();
+      try {
+        const state = join(server.frontendDir, BUILD_STATE_FILE);
+        const alias = join(server.frontendDir, 'assets', 'state-AbCd1234.json');
+        const shell = join(server.frontendDir, 'index.html');
+        rmSync(shell);
+        if (kind === 'hardlink') {
+          linkSync(state, alias);
+          linkSync(state, shell);
+        } else {
+          symlinkSync(state, alias);
+          symlinkSync(state, shell);
+        }
+        for (const path of ['/assets/state-AbCd1234.json', BUILD_STATE_URL_PATH, ...SHELL_PATHS]) {
+          const head = await fetch(`${server.origin}${path}`, { method: 'HEAD' });
+          expect(`HEAD ${path} -> ${head.status}`).toBe(`HEAD ${path} -> 404`);
+          expect(
+            head.headers.get('etag'),
+            `HEAD ${path} must not carry a build-state ETag`
+          ).toBeNull();
+        }
+      } finally {
+        await server.stop();
+      }
+    }
+  );
+
+  test.each(['symlink', 'hardlink'])(
     'serves an asset %s that stays inside the frontend directory and off private build state',
     async (kind) => {
       const server = await startFilesystemServer();
