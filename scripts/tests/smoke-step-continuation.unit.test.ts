@@ -51,8 +51,17 @@ function stageWorkflowRun(seededOutputPlatforms: readonly string[] = []) {
   mkdirSync(join(root, 'scripts'));
   symlinkSync(join(ROOT_DIR, 'scripts', 'release'), join(root, 'scripts', 'release'), 'dir');
   const fakeSource = readText('scripts/tests/support/fake-smoke-workflow-command.ts');
-  for (const name of ['bun', 'docker', 'podman', 'curl', 'ss', 'sleep', 'apk', 'git', 'chown']) {
-    writeFileSync(join(fakeBin, name), `#!${process.execPath}\n${fakeSource}`, { mode: 0o755 });
+  const pollFakeSource = readText('scripts/tests/support/fake-smoke-workflow-poll.bash');
+  // The Bun fake serves the commands a run calls a handful of times. The bash
+  // fake serves the ones its 20-iteration polling loops call by the dozen, and
+  // delegates the rest of docker/podman to the Bun fake by its fixed name.
+  for (const name of ['bun', 'curl', 'apk', 'git', 'chown', 'fake-smoke-workflow-command']) {
+    writeFileSync(join(fakeBin, name), `#!${process.execPath}\n${fakeSource}`, {
+      mode: 0o755,
+    });
+  }
+  for (const name of ['docker', 'podman', 'ss', 'sleep']) {
+    writeFileSync(join(fakeBin, name), pollFakeSource, { mode: 0o755 });
   }
   for (const platform of ['linux-x64', 'linux-x64-musl']) {
     const target = join(root, '.mango', 'out', platform);
@@ -64,10 +73,18 @@ function stageWorkflowRun(seededOutputPlatforms: readonly string[] = []) {
     const target = join(root, '.mango', 'out', platform);
     mkdirSync(target, { recursive: true });
     for (const name of ['mangostudio', 'mangostudio-runtime']) {
-      writeFileSync(join(target, name), '#!/usr/bin/env true\n', { mode: 0o755 });
+      writeFileSync(join(target, name), '#!/usr/bin/env true\n', {
+        mode: 0o755,
+      });
     }
   }
-  return { root, fakeBin, stateDir, runnerTemp, eventsPath: join(root, 'commands.jsonl') };
+  return {
+    root,
+    fakeBin,
+    stateDir,
+    runnerTemp,
+    eventsPath: join(root, 'commands.jsonl'),
+  };
 }
 
 async function runWorkflowSteps(
@@ -131,7 +148,12 @@ async function runWorkflowSteps(
       new Response(child.stderr).text(),
       child.exited,
     ]);
-    expect(code, `${step.name}: ${stdout}${stderr}`).toBeOneOf([0, 1, 9]);
+    // The 10 s spawn timeout only bounds a hang: every fake answers at once and
+    // the polling loops advance by iteration, so a kill means a step is stuck.
+    expect(
+      code,
+      `step "${step.name}": expected exit code 0, 1 or 9 within 10000ms | received: code ${code}, signal ${child.signalCode ?? 'none'}\n${stdout}${stderr}`
+    ).toBeOneOf([0, 1, 9]);
     outcomes.push({ name: step.name ?? '', code });
   }
   const events = readFileSync(fixture.eventsPath, 'utf8')
@@ -393,6 +415,98 @@ describe.skipIf(process.platform === 'win32')('folded smoke command continuation
   );
 });
 
+describe.skipIf(process.platform === 'win32')('fake polling commands', () => {
+  function runFake(
+    fixture: ReturnType<typeof stageWorkflowRun>,
+    failure: string,
+    command: string,
+    args: string[]
+  ) {
+    const child = Bun.spawnSync([join(fixture.fakeBin, command), ...args], {
+      cwd: fixture.root,
+      env: {
+        PATH: `${fixture.fakeBin}:${process.env.PATH}`,
+        FAKE_SMOKE_WORKFLOW_EVENTS: fixture.eventsPath,
+        FAKE_SMOKE_WORKFLOW_STATE: fixture.stateDir,
+        FAKE_SMOKE_WORKFLOW_FAILURE: failure,
+      },
+    });
+    return {
+      code: child.exitCode,
+      stdout: child.stdout.toString(),
+      stderr: child.stderr.toString(),
+    };
+  }
+
+  const eventsOf = (fixture: ReturnType<typeof stageWorkflowRun>) =>
+    readFileSync(fixture.eventsPath, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as CommandEvent);
+
+  test('sleep returns at once and records its call, so loops advance by count and not by wall time', () => {
+    const fixture = stageWorkflowRun();
+    const started = performance.now();
+    const { code } = runFake(fixture, 'none', 'sleep', ['30']);
+    expect(code, 'fake sleep: expected exit code 0').toBe(0);
+    expect(
+      performance.now() - started,
+      'fake sleep 30: expected to return without waiting (under 5000ms)'
+    ).toBeLessThan(5_000);
+    expect(eventsOf(fixture)).toEqual([{ command: 'sleep', args: ['30'] }]);
+  });
+
+  test('ss reports a port held by a still-running container and by the ports failure only', () => {
+    const fixture = stageWorkflowRun();
+    const filter = ['-H', '-ltn', '( sport = :13002 )'];
+    expect(runFake(fixture, 'none', 'ss', filter).stdout).toBe('');
+    expect(runFake(fixture, 'ports', 'ss', filter).stdout).toContain('127.0.0.1:13002');
+    writeFileSync(join(fixture.stateDir, 'mangostudio-smoke-linux-amd64-13002'), 'running');
+    expect(runFake(fixture, 'none', 'ss', filter).stdout).toContain('127.0.0.1:13002');
+    expect(runFake(fixture, 'none', 'ss', ['-H', '-ltn', '( sport = :13001 )']).stdout).toBe('');
+  });
+
+  test('docker ps lists by name filter and docker rm removes the named container', () => {
+    const fixture = stageWorkflowRun();
+    writeFileSync(join(fixture.stateDir, 'mangostudio-smoke-linux-amd64-13002'), 'running');
+    writeFileSync(join(fixture.stateDir, 'unrelated'), 'running');
+    const listed = (filter: string) =>
+      runFake(fixture, 'none', 'docker', [
+        'ps',
+        '-a',
+        '--format',
+        '{{.Names}}',
+        '--filter',
+        `name=${filter}`,
+      ]).stdout.trim();
+    expect(listed('mangostudio-smoke')).toBe('mangostudio-smoke-linux-amd64-13002');
+    expect(listed('nothing-matches')).toBe('');
+    runFake(fixture, 'none', 'docker', ['rm', '-f', 'mangostudio-smoke-linux-amd64-13002']);
+    expect(readdirSync(fixture.stateDir)).toEqual(['unrelated']);
+  });
+
+  test('docker run is handed to the Bun fake under the engine name that was called', () => {
+    const fixture = stageWorkflowRun();
+    const { code, stdout, stderr } = runFake(fixture, 'none', 'podman', [
+      'run',
+      '-d',
+      '--name',
+      'mangostudio-smoke-linux-amd64-13002',
+      '-p',
+      '13002:3001',
+      'mangostudio:smoke',
+    ]);
+    expect(code, `podman run: expected exit code 0 | received: ${stdout}${stderr}`).toBe(0);
+    expect(eventsOf(fixture)).toEqual([
+      expect.objectContaining({
+        command: 'podman',
+        args: expect.arrayContaining(['run']),
+      }),
+    ]);
+    expect(readdirSync(fixture.stateDir)).toEqual(['mangostudio-smoke-linux-amd64-13002']);
+  });
+});
+
 // The container job's steps are one line each; these run the scripts behind
 // them directly, for the inputs a correct workflow never produces.
 const FAILING_SEQ_FAKE = `#!/usr/bin/env bash
@@ -408,7 +522,10 @@ async function runContainerScript(
   failingSeq = false
 ) {
   const fixture = stageWorkflowRun();
-  if (failingSeq) writeFileSync(join(fixture.fakeBin, 'seq'), FAILING_SEQ_FAKE, { mode: 0o755 });
+  if (failingSeq)
+    writeFileSync(join(fixture.fakeBin, 'seq'), FAILING_SEQ_FAKE, {
+      mode: 0o755,
+    });
   for (const name of leftovers) writeFileSync(join(fixture.stateDir, name), 'running');
   const child = Bun.spawn([join(ROOT_DIR, 'scripts', 'release', script)], {
     cwd: join(fixture.root, 'apps', 'api'),

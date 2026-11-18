@@ -1,15 +1,11 @@
 // Named command fakes for executing the workflow's real shell steps. Docker
 // containers are represented by files so the real smoke helper's EXIT trap
 // can be checked, including its name reuse between Bookworm and Alpine.
-// Usage: materialize this executable as bun/docker/podman/curl/ss in a fake PATH.
-import {
-  appendFileSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
+// Usage: materialize this executable as bun/curl/apk/git/chown and as
+// `fake-smoke-workflow-command` in a fake PATH. docker and podman are
+// fake-smoke-workflow-poll.bash, which handles `ps`/`rm`, ss and sleep itself
+// and hands every other call here with FAKE_SMOKE_WORKFLOW_COMMAND naming it.
+import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 
 const eventsPath = process.env.FAKE_SMOKE_WORKFLOW_EVENTS;
@@ -20,7 +16,9 @@ if (!eventsPath || !stateDir) {
   );
 }
 
-const command = basename(process.argv[1] ?? '');
+const command = process.env.FAKE_SMOKE_WORKFLOW_COMMAND ?? basename(process.argv[1] ?? '');
+// Children this fake spawns (the container's own `bun`) must name themselves.
+delete process.env.FAKE_SMOKE_WORKFLOW_COMMAND;
 const args = process.argv.slice(2);
 appendFileSync(
   eventsPath,
@@ -73,7 +71,9 @@ if (command === 'bun') {
     const target = join('.mango', 'out', built);
     mkdirSync(target, { recursive: true });
     for (const name of ['mangostudio', 'mangostudio-runtime']) {
-      writeFileSync(join(target, name), '#!/usr/bin/env true\n', { mode: 0o755 });
+      writeFileSync(join(target, name), '#!/usr/bin/env true\n', {
+        mode: 0o755,
+      });
     }
     if (process.env.FAKE_SMOKE_WORKFLOW_REJECT_BUILD === '1') {
       console.error('Deliberately rejected native build after staging both executables');
@@ -96,12 +96,6 @@ if (command === 'docker' || command === 'podman') {
     }
     console.log('fake-container-id');
   }
-  if (args[0] === 'rm') rmSync(join(stateDir, args.at(-1) ?? ''), { force: true });
-  if (args[0] === 'ps') {
-    const filter = args[args.indexOf('--filter') + 1]?.replace('name=', '') ?? '';
-    const containers = readdirSync(stateDir).filter((name) => name.includes(filter));
-    if (containers.length) console.log(containers.join('\n'));
-  }
   if (args[0] === 'build' && args.includes('-')) await Bun.stdin.text();
   process.exit(0);
 }
@@ -110,31 +104,9 @@ if (command === 'curl') {
   console.log(args.at(-1)?.endsWith('/api/health') ? '{"status":"ok"}' : '<html>fake UI</html>');
   process.exit(0);
 }
-if (command === 'ss') {
-  const fail = process.env.FAKE_SMOKE_WORKFLOW_FAILURE;
-  // A container that is still up holds its published port, like docker-proxy.
-  const published = readdirSync(stateDir).some((name) => name.endsWith('-13002'));
-  if ((fail === 'ports' || published) && args.some((arg) => arg.includes('13002'))) {
-    console.log('LISTEN 0 128 127.0.0.1:13002 0.0.0.0:*');
-  }
-  // docker-proxy can hold the port for a moment after `docker rm -f` returns:
-  // the first two probes of 13002 still see it, every later one finds it free.
-  if (fail === 'slow-port' && args.some((arg) => arg.includes('13002'))) {
-    const probes = readFileSync(eventsPath, 'utf8')
-      .split('\n')
-      .filter((line) => line.includes('"command":"ss"') && line.includes('13002'));
-    if (probes.length <= 2) console.log('LISTEN 0 128 127.0.0.1:13002 0.0.0.0:*');
-  }
-  // A native hub that outlived its smoke: only a filter naming 13001 sees it.
-  if (fail === 'native-port' && args.some((arg) => arg.includes('13001'))) {
-    console.log('LISTEN 0 128 127.0.0.1:13001 0.0.0.0:*');
-  }
-  process.exit(0);
-}
-if (command === 'sleep') process.exit(0);
 if (command === 'apk' || command === 'git' || command === 'chown') process.exit(0);
 throw new Error(
-  `Invalid fake command: ${JSON.stringify(command)}; expected bun, docker, podman, curl, ss, sleep, apk, git or chown`
+  `Invalid fake command: ${JSON.stringify(command)}; expected bun, docker, podman, curl, apk, git or chown`
 );
 
 // Run the container's real command with named I/O fakes and its bind-mounted cwd.
