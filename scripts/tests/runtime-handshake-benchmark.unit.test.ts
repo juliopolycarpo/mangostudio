@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import { Writable } from 'node:stream';
 
 import {
+  type NativeCommandReceipt,
   type NativeProcess,
   runNativeCommand,
   snapshotNativeProcesses,
@@ -14,6 +15,77 @@ import { fakeBenchmarkResources } from './support/benchmark-resource-observation
 import { fixtureChildEnvironment } from './support/child-supervision';
 
 const ROOT = resolve(import.meta.dir, '../..');
+
+// Every wait in this file is for an event: the benchmark exiting, a fixture publishing a marker,
+// the supervisor's census naming a process. None asserts how long it took, so these numbers
+// only bound a run that never finishes. A benchmark run takes 1 to 2 s on an idle host; with
+// four cores shared by 40 busy loops the same runs took 6 to 22 s, and the 8 and 10 s limits
+// this file used to pass to the supervisor killed them mid-run (`timedOut` true in 3 of 3
+// runs). 60 s is about three times the slowest of those and still ends a hang long before CI's
+// own watchdog does.
+const HANG_BOUND_SECONDS = 60;
+const HANG_BOUND_MS = HANG_BOUND_SECONDS * 1_000;
+/** After the command exits its leftovers get this long to leave the census; success returns at once. */
+const SETTLE_MS = 15_000;
+/** Above the hang bound plus settlement, so a hung wait reports its own name and not Bun's timeout. */
+const TEST_TIMEOUT_MS = 120_000;
+
+type Observation<T> = { readonly value: T } | { readonly state: string };
+
+/**
+ * Polls `observe` until it yields a value, and when the hang bound passes first fails naming
+ * what was waited for and the last state seen.
+ *
+ * @example
+ * const text = await waitForEvent('receipt', async () => ({ value: await Bun.file(path).text() }));
+ */
+async function waitForEvent<T>(
+  waitedFor: string,
+  observe: () => Promise<Observation<T>>
+): Promise<T> {
+  const deadline = Date.now() + HANG_BOUND_MS;
+  for (;;) {
+    const observation = await observe();
+    if ('value' in observation) return observation.value;
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `expected ${waitedFor} within ${HANG_BOUND_MS}ms | received: ${observation.state}`
+      );
+    }
+    await Bun.sleep(5);
+  }
+}
+
+/** Waits until `path` exists, then reads it. */
+function waitForFile(path: string, waitedFor: string): Promise<string> {
+  return waitForEvent<string>(waitedFor, async () =>
+    (await Bun.file(path).exists())
+      ? { value: await Bun.file(path).text() }
+      : { state: `no file at ${path}` }
+  );
+}
+
+/** What the supervisor's census file for a label has recorded so far. */
+async function readCensus(path: string): Promise<string> {
+  return Bun.file(path)
+    .text()
+    .catch(() => '');
+}
+
+/** Waits for a command that was told to stop, and fails naming it when it never settles. */
+async function settledAfterCancel(
+  label: string,
+  pending: Promise<NativeCommandReceipt>
+): Promise<NativeCommandReceipt> {
+  const settled = await Promise.race([pending, Bun.sleep(HANG_BOUND_MS).then(() => undefined)]);
+  if (!settled) {
+    throw new Error(
+      `expected command ${label} to settle within ${HANG_BOUND_MS}ms | received: still running`
+    );
+  }
+  return settled;
+}
+
 const scratch: string[] = [];
 const escapedFixtures: NativeProcess[] = [];
 afterEach(async () => {
@@ -154,9 +226,9 @@ describe.skipIf(process.platform === 'win32')('protocol startup receipts', () =>
         root: ROOT,
         out: directory,
         env: fixtureChildEnvironment({ ...process.env, ...fixture.environment, ...monitor.env }),
-        timeoutSeconds: 10,
+        timeoutSeconds: HANG_BOUND_SECONDS,
         pollIntervalMs: 20,
-        settleMs: 500,
+        settleMs: SETTLE_MS,
         stream: new DiscardedHandshakeOutput(),
       });
       expect(result.timedOut).toBe(false);
@@ -178,7 +250,8 @@ describe.skipIf(process.platform === 'win32')('protocol startup receipts', () =>
       expect(receipt.attempts[0].cleanupProven).toBe(false);
       expect(receipt.attempts[0].cleanupErrors.join(' ')).toContain('resource');
       expect(receipt.cleanupError).toContain(`retained scratch ${resolve(home, '..')}`);
-    }
+    },
+    TEST_TIMEOUT_MS
   );
 
   it.skipIf(process.platform !== 'linux')(
@@ -207,9 +280,9 @@ describe.skipIf(process.platform === 'win32')('protocol startup receipts', () =>
         root: ROOT,
         out: directory,
         env: fixtureChildEnvironment({ ...process.env, ...fixture.environment, ...monitor.env }),
-        timeoutSeconds: 10,
+        timeoutSeconds: HANG_BOUND_SECONDS,
         pollIntervalMs: 20,
-        settleMs: 500,
+        settleMs: SETTLE_MS,
         stream: new DiscardedHandshakeOutput(),
       });
       expect(result.timedOut).toBe(false);
@@ -233,164 +306,163 @@ describe.skipIf(process.platform === 'win32')('protocol startup receipts', () =>
         )
       ).toBe(false);
       expect(receipt.cleanupError).toBeNull();
-    }
+    },
+    TEST_TIMEOUT_MS
   );
 
-  it('does not accept a handshake or remove its home while an owned descendant survives', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'runtime-handshake-held-output-'));
-    const binary = await new FakeHeldOutputRuntime(root).create();
-    const output = join(root, 'receipt.json');
-    const phaseTimeoutMs = 4_000;
-    const cleanup = new AbortController();
-    const pending = runNativeCommand({
-      label: 'handshake-held-output',
-      command: [
-        process.execPath,
-        'scripts/bench/runtime-handshake.ts',
-        binary,
-        '--runs',
-        '1',
-        '--warmups',
-        '0',
-        '--json',
-        '--output',
-        output,
-      ],
-      root: ROOT,
-      out: root,
-      env: fixtureChildEnvironment({ ...process.env, BENCHMARK_FIXTURE_ROOT: root }),
-      // Allow the leaf and census windows before waiting for the handshake receipt.
-      timeoutSeconds: 20,
-      pollIntervalMs: 20,
-      settleMs: 500,
-      signal: cleanup.signal,
-      stream: new DiscardedHandshakeOutput(),
-    });
-    try {
-      const marker = join(root, 'leaf-pid');
-      const publicationDeadline = Date.now() + phaseTimeoutMs;
-      while (Date.now() < publicationDeadline && !(await Bun.file(marker).exists()))
-        await Bun.sleep(5);
-      expect(await Bun.file(marker).exists()).toBe(true);
-      const pid = Number(await Bun.file(marker).text());
-      const owned = (await snapshotNativeProcesses()).find((row) => row.pid === pid);
-      expect(owned).toBeDefined();
-      if (!owned) throw new Error(`expected owned leaf ${pid} | received: absent`);
-      escapedFixtures.push(owned);
-      const terminal = join(root, 'terminal-handshake-held-output.jsonl');
-      // The supervisor needs a census after the fixture publishes its leaf.
-      const observationDeadline = Date.now() + phaseTimeoutMs;
-      while (
-        Date.now() < observationDeadline &&
-        !(
-          await Bun.file(terminal)
+  it(
+    'does not accept a handshake or remove its home while an owned descendant survives',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'runtime-handshake-held-output-'));
+      const binary = await new FakeHeldOutputRuntime(root).create();
+      const output = join(root, 'receipt.json');
+      const cleanup = new AbortController();
+      const pending = runNativeCommand({
+        label: 'handshake-held-output',
+        command: [
+          process.execPath,
+          'scripts/bench/runtime-handshake.ts',
+          binary,
+          '--runs',
+          '1',
+          '--warmups',
+          '0',
+          '--json',
+          '--output',
+          output,
+        ],
+        root: ROOT,
+        out: root,
+        env: fixtureChildEnvironment({ ...process.env, BENCHMARK_FIXTURE_ROOT: root }),
+        timeoutSeconds: HANG_BOUND_SECONDS,
+        pollIntervalMs: 20,
+        settleMs: SETTLE_MS,
+        signal: cleanup.signal,
+        stream: new DiscardedHandshakeOutput(),
+      });
+      try {
+        const pid = Number(
+          await waitForFile(join(root, 'leaf-pid'), 'the fixture to publish its leaf pid')
+        );
+        const owned = (await snapshotNativeProcesses()).find((row) => row.pid === pid);
+        expect(owned).toBeDefined();
+        if (!owned) throw new Error(`expected owned leaf ${pid} | received: absent`);
+        escapedFixtures.push(owned);
+        const terminal = join(root, 'terminal-handshake-held-output.jsonl');
+        // The supervisor needs a census after the fixture publishes its leaf.
+        await waitForEvent(`the supervisor's census to name leaf ${owned.identity}`, async () => {
+          const census = await readCensus(terminal);
+          return census.includes(owned.identity)
+            ? { value: census }
+            : { state: `census holds ${census.length} bytes without the leaf` };
+        });
+        const home = await Bun.file(join(root, 'runtime-home')).text();
+        expect((await stat(home)).isDirectory()).toBe(true);
+        await Bun.write(join(root, 'allow-ready'), 'start handshake');
+        const receipt = await waitForEvent<{
+          complete: boolean;
+          attempts: unknown[];
+        }>('a receipt with attempts', async () => {
+          const text = await Bun.file(output)
             .text()
-            .catch(() => '')
-        ).includes(owned.identity)
-      )
-        await Bun.sleep(5);
-      expect(await Bun.file(terminal).text()).toContain(owned.identity);
-      const home = await Bun.file(join(root, 'runtime-home')).text();
-      expect((await stat(home)).isDirectory()).toBe(true);
-      await Bun.write(join(root, 'allow-ready'), 'start handshake');
-      let receipt: { complete: boolean; attempts: unknown[] } | undefined;
-      const receiptDeadline = Date.now() + 8_000;
-      while (Date.now() < receiptDeadline) {
-        const text = await Bun.file(output)
-          .text()
-          .catch(() => '');
-        try {
-          const candidate = JSON.parse(text) as { complete: boolean; attempts: unknown[] };
-          if (candidate.attempts.length) {
-            receipt = candidate;
-            break;
+            .catch(() => '');
+          try {
+            const candidate = JSON.parse(text) as { complete: boolean; attempts: unknown[] };
+            return candidate.attempts.length
+              ? { value: candidate }
+              : { state: 'receipt published with no attempts' };
+          } catch {
+            return { state: text ? 'receipt is not yet valid JSON' : 'no receipt file' };
           }
-        } catch {
-          /* Receipt may not yet be published. */
-        }
-        await Bun.sleep(5);
+        });
+        const survivors = await snapshotNativeProcesses();
+        const alive = survivors.some(
+          (row) => row.pid === owned.pid && row.identity === owned.identity
+        );
+        const homeState = await stat(home).catch((error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return undefined;
+          throw error;
+        });
+        const homeExists = homeState?.isDirectory() ?? false;
+        expect({ alive, homeExists }).not.toEqual({ alive: true, homeExists: false });
+        expect({ complete: receipt.complete, alive, homeExists }).not.toMatchObject({
+          complete: true,
+          alive: true,
+        });
+      } finally {
+        await Bun.write(join(root, 'leaf-release'), 'release held output');
+        cleanup.abort();
+        const settled = await settledAfterCancel('handshake-held-output', pending);
+        if (settled.settlement.empty && settled.settlement.rootObserved) scratch.push(root);
+        expect(settled.settlement.empty).toBe(true);
+        expect(settled.settlement.rootObserved).toBe(true);
       }
-      expect(receipt).toBeDefined();
-      const survivors = await snapshotNativeProcesses();
-      const alive = survivors.some(
-        (row) => row.pid === owned.pid && row.identity === owned.identity
-      );
-      const homeState = await stat(home).catch((error: NodeJS.ErrnoException) => {
-        if (error.code === 'ENOENT') return undefined;
-        throw error;
-      });
-      const homeExists = homeState?.isDirectory() ?? false;
-      expect({ alive, homeExists }).not.toEqual({ alive: true, homeExists: false });
-      expect({ complete: receipt?.complete, alive, homeExists }).not.toMatchObject({
-        complete: true,
-        alive: true,
-      });
-    } finally {
-      await Bun.write(join(root, 'leaf-release'), 'release held output');
-      cleanup.abort();
-      const settled = await Promise.race([pending, Bun.sleep(5_000).then(() => undefined)]);
-      if (settled?.settlement.empty && settled.settlement.rootObserved) scratch.push(root);
-      expect(settled?.settlement.empty).toBe(true);
-      expect(settled?.settlement.rootObserved).toBe(true);
-    }
-  }, 30_000);
+    },
+    TEST_TIMEOUT_MS
+  );
 
-  it('settles the version child when cancellation arrives before benchmark sampling', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'runtime-version-cancel-'));
-    const binary = await new FakeHangingRuntimeVersion(root).create();
-    const cleanup = new AbortController();
-    const pending = runNativeCommand({
-      label: 'version-cancel',
-      signal: cleanup.signal,
-      command: [process.execPath, 'scripts/bench/runtime-handshake.ts', binary, '--runs', '1'],
-      root: ROOT,
-      out: root,
-      env: fixtureChildEnvironment({ ...process.env, BENCHMARK_FIXTURE_ROOT: root }),
-      timeoutSeconds: 8,
-      pollIntervalMs: 20,
-      settleMs: 500,
-      stream: new DiscardedHandshakeOutput(),
-    });
-    const barrier = new FakeBenchmarkCancelBarrier(root);
-    try {
-      const owned = await barrier.observe(binary, pending);
-      escapedFixtures.push(...owned);
-      const rows = await snapshotNativeProcesses();
-      const benchmark = rows.find(
-        (row) =>
-          row.parentPid === process.pid &&
-          row.command.includes('scripts/bench/runtime-handshake.ts') &&
-          row.command.includes(binary)
-      );
-      expect(benchmark?.pid).toBeDefined();
-      const terminal = Bun.file(join(root, 'terminal-version-cancel.jsonl'));
-      const deadline = Date.now() + 2_000;
-      while (Date.now() < deadline) {
-        const contents = await terminal.text().catch(() => '');
-        if (
-          contents.includes(owned[0]?.identity ?? 'missing') &&
-          contents.includes(benchmark?.identity ?? 'missing')
-        )
-          break;
-        await Bun.sleep(5);
+  it(
+    'settles the version child when cancellation arrives before benchmark sampling',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'runtime-version-cancel-'));
+      const binary = await new FakeHangingRuntimeVersion(root).create();
+      const cleanup = new AbortController();
+      const pending = runNativeCommand({
+        label: 'version-cancel',
+        signal: cleanup.signal,
+        command: [process.execPath, 'scripts/bench/runtime-handshake.ts', binary, '--runs', '1'],
+        root: ROOT,
+        out: root,
+        env: fixtureChildEnvironment({ ...process.env, BENCHMARK_FIXTURE_ROOT: root }),
+        timeoutSeconds: HANG_BOUND_SECONDS,
+        pollIntervalMs: 20,
+        settleMs: SETTLE_MS,
+        stream: new DiscardedHandshakeOutput(),
+      });
+      const barrier = new FakeBenchmarkCancelBarrier(root, HANG_BOUND_MS);
+      try {
+        const owned = await barrier.observe(binary, pending);
+        escapedFixtures.push(...owned);
+        const rows = await snapshotNativeProcesses();
+        const benchmark = rows.find(
+          (row) =>
+            row.parentPid === process.pid &&
+            row.command.includes('scripts/bench/runtime-handshake.ts') &&
+            row.command.includes(binary)
+        );
+        expect(benchmark?.pid).toBeDefined();
+        const terminal = Bun.file(join(root, 'terminal-version-cancel.jsonl'));
+        const versionIdentity = owned[0]?.identity ?? 'missing version identity';
+        const benchmarkIdentity = benchmark?.identity ?? 'missing benchmark identity';
+        await waitForEvent(
+          `the terminal census to name the version child ${versionIdentity} and the benchmark ${benchmarkIdentity}`,
+          async () => {
+            const contents = await terminal.text().catch(() => '');
+            const missing = [versionIdentity, benchmarkIdentity].filter(
+              (identity) => !contents.includes(identity)
+            );
+            return missing.length === 0
+              ? { value: contents }
+              : { state: `census lacks ${missing.join(', ')}` };
+          }
+        );
+        await Bun.write(join(root, 'benchmark-pid'), String(benchmark?.pid));
+        await barrier.release();
+        const result = await pending;
+        escapedFixtures.push(...result.settlement.survivors);
+        expect(result.timedOut).toBe(false);
+        expect(result.settlement.empty).toBe(true);
+      } finally {
+        await Bun.write(join(root, 'finish-now'), 'finish controlled fixture');
+        cleanup.abort();
+        const settled = await settledAfterCancel('version-cancel', pending);
+        if (settled.settlement.empty && settled.settlement.rootObserved) scratch.push(root);
+        expect(settled.settlement.empty).toBe(true);
+        expect(settled.settlement.rootObserved).toBe(true);
       }
-      expect(await terminal.text()).toContain(owned[0]?.identity ?? 'missing identity');
-      expect(await terminal.text()).toContain(benchmark?.identity ?? 'missing identity');
-      await Bun.write(join(root, 'benchmark-pid'), String(benchmark?.pid));
-      await barrier.release();
-      const result = await pending;
-      escapedFixtures.push(...result.settlement.survivors);
-      expect(result.timedOut).toBe(false);
-      expect(result.settlement.empty).toBe(true);
-    } finally {
-      await Bun.write(join(root, 'finish-now'), 'finish controlled fixture');
-      cleanup.abort();
-      const settled = await Promise.race([pending, Bun.sleep(5_000).then(() => undefined)]);
-      if (settled?.settlement.empty && settled.settlement.rootObserved) scratch.push(root);
-      expect(settled?.settlement.empty).toBe(true);
-      expect(settled?.settlement.rootObserved).toBe(true);
-    }
-  }, 15_000);
+    },
+    TEST_TIMEOUT_MS
+  );
 
   it('keeps executable source independent of fixture paths and settings', async () => {
     const first = await mkdtemp(join(tmpdir(), 'benchmark-program-first-'));
@@ -401,149 +473,168 @@ describe.skipIf(process.platform === 'win32')('protocol startup receipts', () =>
     expect(await Bun.file(a).text()).toBe(await Bun.file(b).text());
   });
 
-  it('preserves completed handshakes when the intended later attempt cancels the benchmark', async () => {
-    const root = await mkdtemp(
-      join(tmpdir(), 'runtime-handshake-cancel-\'"`-' + '${' + 'literal}-')
-    );
-    scratch.push(root);
-    const fixture = new FakeRuntimeRefusingHandshake(root, 3, true);
-    const binary = await fixture.create();
-    const output = join(root, 'receipt.json');
-    const pending = runNativeCommand({
-      label: 'handshake-cancel',
-      command: [
-        process.execPath,
-        'scripts/bench/runtime-handshake.ts',
-        binary,
-        '--runs',
-        '2',
-        '--warmups',
-        '2',
-        '--json',
-        '--output',
-        output,
-      ],
-      root: ROOT,
-      out: root,
-      env: fixtureChildEnvironment({ ...process.env, ...fixture.environment }),
-      timeoutSeconds: 20,
-      pollIntervalMs: 20,
-      stream: new DiscardedHandshakeOutput(),
-    });
-    const barrier = new FakeBenchmarkCancelBarrier(root);
-    escapedFixtures.push(...(await barrier.observe(binary, pending)));
-    await barrier.release();
-    const result = await pending;
-    escapedFixtures.push(...result.settlement.survivors);
-    expect(await Bun.file(join(root, 'stall-reached')).exists()).toBe(true);
-    expect(result.timedOut).toBe(false);
-    expect(result.exitCode).toBe(1);
-    expect(result.settlement.empty).toBe(true);
-    expect(await Bun.file(`${output}.jsonl`).exists()).toBe(true);
-    const events = (await readFile(`${output}.jsonl`, 'utf8'))
-      .trim()
-      .split('\n')
-      .map((line) => JSON.parse(line) as { kind: string; phase?: string; status?: string });
-    expect(
-      events
-        .filter((event) => event.kind === 'finished')
-        .map(({ phase, status }) => ({ phase, status }))
-    ).toEqual([
-      { phase: 'warmup', status: 'success' },
-      { phase: 'warmup', status: 'success' },
-      { phase: 'measured', status: 'success' },
-      { phase: 'measured', status: 'failed' },
-    ]);
-    expect(events.at(-1)).toMatchObject({ kind: 'finished', phase: 'measured', status: 'failed' });
-    const progress = JSON.parse(await readFile(output, 'utf8')) as {
-      complete: boolean;
-      attempts: unknown[];
-    };
-    expect(progress.complete).toBe(false);
-    expect(progress.attempts).toHaveLength(4);
-  }, 30_000);
+  it(
+    'preserves completed handshakes when the intended later attempt cancels the benchmark',
+    async () => {
+      const root = await mkdtemp(
+        join(tmpdir(), 'runtime-handshake-cancel-\'"`-' + '${' + 'literal}-')
+      );
+      scratch.push(root);
+      const fixture = new FakeRuntimeRefusingHandshake(root, 3, true);
+      const binary = await fixture.create();
+      const output = join(root, 'receipt.json');
+      const pending = runNativeCommand({
+        label: 'handshake-cancel',
+        command: [
+          process.execPath,
+          'scripts/bench/runtime-handshake.ts',
+          binary,
+          '--runs',
+          '2',
+          '--warmups',
+          '2',
+          '--json',
+          '--output',
+          output,
+        ],
+        root: ROOT,
+        out: root,
+        env: fixtureChildEnvironment({ ...process.env, ...fixture.environment }),
+        timeoutSeconds: HANG_BOUND_SECONDS,
+        pollIntervalMs: 20,
+        settleMs: SETTLE_MS,
+        stream: new DiscardedHandshakeOutput(),
+      });
+      const barrier = new FakeBenchmarkCancelBarrier(root, HANG_BOUND_MS);
+      escapedFixtures.push(...(await barrier.observe(binary, pending)));
+      await barrier.release();
+      const result = await pending;
+      escapedFixtures.push(...result.settlement.survivors);
+      expect(await Bun.file(join(root, 'stall-reached')).exists()).toBe(true);
+      expect(result.timedOut).toBe(false);
+      expect(result.exitCode).toBe(1);
+      expect(result.settlement.empty).toBe(true);
+      expect(await Bun.file(`${output}.jsonl`).exists()).toBe(true);
+      const events = (await readFile(`${output}.jsonl`, 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as { kind: string; phase?: string; status?: string });
+      expect(
+        events
+          .filter((event) => event.kind === 'finished')
+          .map(({ phase, status }) => ({ phase, status }))
+      ).toEqual([
+        { phase: 'warmup', status: 'success' },
+        { phase: 'warmup', status: 'success' },
+        { phase: 'measured', status: 'success' },
+        { phase: 'measured', status: 'failed' },
+      ]);
+      expect(events.at(-1)).toMatchObject({
+        kind: 'finished',
+        phase: 'measured',
+        status: 'failed',
+      });
+      const progress = JSON.parse(await readFile(output, 'utf8')) as {
+        complete: boolean;
+        attempts: unknown[];
+      };
+      expect(progress.complete).toBe(false);
+      expect(progress.attempts).toHaveLength(4);
+    },
+    TEST_TIMEOUT_MS
+  );
 
-  it('retains protocol warmups and a successful request before a later failure', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'runtime-handshake-batch-test-'));
-    scratch.push(root);
-    const fixture = new FakeRuntimeRefusingHandshake(root, 3);
-    const binary = await fixture.create();
-    const result = await runNativeCommand({
-      label: 'handshake-batch',
-      command: [
-        process.execPath,
-        'scripts/bench/runtime-handshake.ts',
-        binary,
-        '--runs',
-        '2',
-        '--warmups',
-        '2',
-        '--json',
-      ],
-      root: ROOT,
-      out: root,
-      env: fixtureChildEnvironment({ ...process.env, ...fixture.environment }),
-      timeoutSeconds: 8,
-      pollIntervalMs: 20,
-      stream: new DiscardedHandshakeOutput(),
-    });
-    const stdout = await readFile(join(root, 'logs/handshake-batch.stdout.log'), 'utf8');
-    expect(result.timedOut).toBe(false);
-    expect(result.exitCode).toBe(1);
-    expect(result.settlement.empty).toBe(true);
-    const receipt = JSON.parse(stdout) as {
-      attempts: Array<{ phase: string; status: string; firstRequestMs: number | null }>;
-    };
-    expect(receipt.attempts.map(({ phase, status }) => ({ phase, status }))).toEqual([
-      { phase: 'warmup', status: 'success' },
-      { phase: 'warmup', status: 'success' },
-      { phase: 'measured', status: 'success' },
-      { phase: 'measured', status: 'failed' },
-    ]);
-    expect(receipt.attempts[2].firstRequestMs).toBeGreaterThan(0);
-  });
+  it(
+    'retains protocol warmups and a successful request before a later failure',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'runtime-handshake-batch-test-'));
+      scratch.push(root);
+      const fixture = new FakeRuntimeRefusingHandshake(root, 3);
+      const binary = await fixture.create();
+      const result = await runNativeCommand({
+        label: 'handshake-batch',
+        command: [
+          process.execPath,
+          'scripts/bench/runtime-handshake.ts',
+          binary,
+          '--runs',
+          '2',
+          '--warmups',
+          '2',
+          '--json',
+        ],
+        root: ROOT,
+        out: root,
+        env: fixtureChildEnvironment({ ...process.env, ...fixture.environment }),
+        timeoutSeconds: HANG_BOUND_SECONDS,
+        pollIntervalMs: 20,
+        settleMs: SETTLE_MS,
+        stream: new DiscardedHandshakeOutput(),
+      });
+      const stdout = await readFile(join(root, 'logs/handshake-batch.stdout.log'), 'utf8');
+      expect(result.timedOut).toBe(false);
+      expect(result.exitCode).toBe(1);
+      expect(result.settlement.empty).toBe(true);
+      const receipt = JSON.parse(stdout) as {
+        attempts: Array<{ phase: string; status: string; firstRequestMs: number | null }>;
+      };
+      expect(receipt.attempts.map(({ phase, status }) => ({ phase, status }))).toEqual([
+        { phase: 'warmup', status: 'success' },
+        { phase: 'warmup', status: 'success' },
+        { phase: 'measured', status: 'success' },
+        { phase: 'measured', status: 'failed' },
+      ]);
+      expect(receipt.attempts[2].firstRequestMs).toBeGreaterThan(0);
+    },
+    TEST_TIMEOUT_MS
+  );
 
-  it('retains the failed warmup and stops without silently discarding a broken handshake', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'runtime-handshake-receipt-test-'));
-    scratch.push(root);
-    const fixture = new FakeRuntimeRefusingHandshake(root);
-    const binary = await fixture.create();
-    const result = await runNativeCommand({
-      label: 'handshake-receipt',
-      command: [
-        process.execPath,
-        'scripts/bench/runtime-handshake.ts',
-        binary,
-        '--runs',
-        '2',
-        '--warmups',
-        '2',
-        '--json',
-      ],
-      root: ROOT,
-      out: root,
-      env: fixtureChildEnvironment({ ...process.env, ...fixture.environment }),
-      timeoutSeconds: 8,
-      pollIntervalMs: 20,
-      stream: new DiscardedHandshakeOutput(),
-    });
-    const stdout = await readFile(join(root, 'logs/handshake-receipt.stdout.log'), 'utf8');
-    expect(result.timedOut).toBe(false);
-    expect(result.exitCode).toBe(1);
-    expect(result.settlement.empty).toBe(true);
-    expect(stdout).toContain('Intentional fixture handshake refusal');
-    const receipt = JSON.parse(stdout) as {
-      complete: boolean;
-      phasesMs: { hello: unknown };
-      attempts: Array<{ phase: string; status: string; firstRequestMs: number | null }>;
-    };
-    expect(receipt.complete).toBe(false);
-    expect(receipt.phasesMs.hello).toBeNull();
-    expect(receipt.attempts).toHaveLength(1);
-    expect(receipt.attempts[0]).toMatchObject({
-      phase: 'warmup',
-      status: 'failed',
-      firstRequestMs: null,
-    });
-  });
+  it(
+    'retains the failed warmup and stops without silently discarding a broken handshake',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'runtime-handshake-receipt-test-'));
+      scratch.push(root);
+      const fixture = new FakeRuntimeRefusingHandshake(root);
+      const binary = await fixture.create();
+      const result = await runNativeCommand({
+        label: 'handshake-receipt',
+        command: [
+          process.execPath,
+          'scripts/bench/runtime-handshake.ts',
+          binary,
+          '--runs',
+          '2',
+          '--warmups',
+          '2',
+          '--json',
+        ],
+        root: ROOT,
+        out: root,
+        env: fixtureChildEnvironment({ ...process.env, ...fixture.environment }),
+        timeoutSeconds: HANG_BOUND_SECONDS,
+        pollIntervalMs: 20,
+        settleMs: SETTLE_MS,
+        stream: new DiscardedHandshakeOutput(),
+      });
+      const stdout = await readFile(join(root, 'logs/handshake-receipt.stdout.log'), 'utf8');
+      expect(result.timedOut).toBe(false);
+      expect(result.exitCode).toBe(1);
+      expect(result.settlement.empty).toBe(true);
+      expect(stdout).toContain('Intentional fixture handshake refusal');
+      const receipt = JSON.parse(stdout) as {
+        complete: boolean;
+        phasesMs: { hello: unknown };
+        attempts: Array<{ phase: string; status: string; firstRequestMs: number | null }>;
+      };
+      expect(receipt.complete).toBe(false);
+      expect(receipt.phasesMs.hello).toBeNull();
+      expect(receipt.attempts).toHaveLength(1);
+      expect(receipt.attempts[0]).toMatchObject({
+        phase: 'warmup',
+        status: 'failed',
+        firstRequestMs: null,
+      });
+    },
+    TEST_TIMEOUT_MS
+  );
 });

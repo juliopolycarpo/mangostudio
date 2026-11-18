@@ -8,7 +8,16 @@ import {
 
 /** A named fixture barrier which registers exact child identities before allowing cancellation. Example: const owned = await barrier.observe(binary, pending); await barrier.release(); */
 export class FakeBenchmarkCancelBarrier {
-  constructor(private readonly directory: string) {}
+  /**
+   * @param directory Fixture directory the stall marker is published in.
+   * @param startTimeoutMs How long `observe` waits for the marker before it reports the
+   *   command's outcome. It bounds a fixture that never reaches the stall; it is not an
+   *   expectation of how fast the benchmark gets there, so callers pass their own hang bound.
+   */
+  constructor(
+    private readonly directory: string,
+    private readonly startTimeoutMs = 15_000
+  ) {}
 
   async observe(binary: string, pending: Promise<NativeCommandReceipt>): Promise<NativeProcess[]> {
     const marker = join(this.directory, 'stall-reached');
@@ -21,7 +30,7 @@ export class FakeBenchmarkCancelBarrier {
         settled = true;
       }
     );
-    const deadline = Date.now() + 15_000;
+    const deadline = Date.now() + this.startTimeoutMs;
     while (!settled && Date.now() < deadline && !(await Bun.file(marker).exists()))
       await Bun.sleep(5);
     if (!(await Bun.file(marker).exists())) {
