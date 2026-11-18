@@ -813,6 +813,13 @@ line, and it does not hold for a pause process in the worker's own group, which 
 group SIGKILL would take with it. When one shares the group, the sweep sends no
 group signal and kills the token-carrying members by pid instead.
 
+A test must not start a container engine on the host to begin with. The sweep in
+`local-unavailable-guard.integration.test.ts` requests every parameterless `GET`
+route of the real application, and `GET /api/environments/containers` ran
+`docker version` and `podman version` there, which is what started the pause
+process. The sweep now skips that route and keeps recording fakes for both CLIs
+first on `PATH`, failing if any test in the file still runs one.
+
 On POSIX every worker of every lane, settling or not, leads a process group of
 its own. A test that signals its own group (`process.kill(0, ...)`) ends that one
 worker, which the lane reports by name, instead of the lane runner and `bun run`.
