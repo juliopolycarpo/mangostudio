@@ -19,6 +19,7 @@ import {
   SUBAGENT_FAILED_CODE,
   SUBAGENT_TIMEOUT_CODE,
   SubagentDelegationError,
+  SubagentModelUnavailableError,
   type SubagentProgressEvent,
   type SubagentRunResult,
   type SubagentRuntimeInput,
@@ -29,6 +30,7 @@ export {
   type DelegateToSubagentRequest,
   SUBAGENT_EMPTY_TEXT_FALLBACK,
   SubagentDelegationError,
+  SubagentModelUnavailableError,
   type SubagentProgressEvent,
   type SubagentRunResult,
   type SubagentRuntimeInput,
@@ -243,6 +245,9 @@ function normalizeSubagentFailure(
   }
   if (error instanceof SubagentDelegationError && error.code === 'TIMEOUT') {
     return { status: 'timeout', code: SUBAGENT_TIMEOUT_CODE, message: error.message };
+  }
+  if (error instanceof SubagentModelUnavailableError) {
+    return { status: 'failed', code: error.code, message: error.message };
   }
   if (error instanceof Error) {
     return { status: 'failed', code: SUBAGENT_FAILED_CODE, message: error.message };

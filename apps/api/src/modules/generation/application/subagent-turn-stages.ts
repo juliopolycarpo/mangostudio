@@ -11,6 +11,7 @@ import { isMcpToolName } from '../../../services/mcp/tool-naming';
 import {
   getProvider as getRegisteredProvider,
   getProviderForModel,
+  resolveProviderTypeForModel,
 } from '../../../services/providers/core/provider-registry';
 import type {
   AgentTurnRequest,
@@ -42,6 +43,7 @@ import {
   SUBAGENT_FAILED_CODE,
   SUBAGENT_SUMMARIZE_PROMPT,
   SubagentDelegationError,
+  SubagentModelUnavailableError,
   type SubagentRunResult,
 } from './subagent-turn-types';
 
@@ -90,6 +92,15 @@ export async function prepareSubagentTurn(
     userId: input.userId,
     type: 'text',
   });
+  // A pinned model outlives the connector that served it. `resolveModel` accepts
+  // any explicit id, so without this the turn only fails later, deep in provider
+  // resolution, with a registry message that names neither the agent nor the pin.
+  if (input.targetProfile.model) {
+    const route = await resolveProviderTypeForModel(resolvedModel.modelId, input.userId);
+    if (!route) {
+      throw new SubagentModelUnavailableError(input.targetProfile.id, resolvedModel.modelId);
+    }
+  }
   const provider = resolvedModel.providerType
     ? getRegisteredProvider(resolvedModel.providerType)
     : await getProviderForModel(resolvedModel.modelId, input.userId);
