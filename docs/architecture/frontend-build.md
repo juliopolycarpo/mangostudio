@@ -455,7 +455,10 @@ restarting the server. Files that escape that directory or alias private build s
 symbolic links or hardlinks return 404. The shell uses the same eligibility checks for `/`,
 `/index.html` and deep links. File identity retains bigint device and inode values, since NTFS
 IDs can exceed JavaScript's safe integer range; cache validators retain their numeric size
-and millisecond contract.
+and millisecond contract. A volume that reports no file ID (inode 0, as exFAT/FAT and some
+SMB or FUSE mounts do) has no identity to compare, so that check is skipped there: the
+realpath check still hides the build state and its symbolic links, but a hardlink to it is not
+detected. Those volumes generally do not support hardlinks.
 
 Hashed assets use `public, max-age=31536000, immutable`. Unhashed root files use
 `public, max-age=86400` with ETag revalidation; `/config.js` and the shell use `no-cache`.

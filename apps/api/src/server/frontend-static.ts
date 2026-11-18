@@ -573,7 +573,16 @@ function resolveFrontendFile(
   // Hardlinks have different realpaths but share file identity with the private
   // metadata. Check per request because a rebuild can replace that metadata.
   const buildStateStats = statFile(join(frontendRoot, BUILD_STATE_FILE));
-  if (stats.dev === buildStateStats?.dev && stats.ino === buildStateStats?.ino) {
+  // A zero inode means the volume reports no file ID (exFAT/FAT, some SMB or FUSE
+  // mounts): every file would share it and the whole frontend would answer 404.
+  // Without an identity there is nothing to compare, so only the realpath check
+  // above guards the build state there.
+  if (
+    buildStateStats &&
+    buildStateStats.ino !== 0n &&
+    stats.dev === buildStateStats.dev &&
+    stats.ino === buildStateStats.ino
+  ) {
     return null;
   }
   return { filePath: real, stats, urlPath: decoded };
