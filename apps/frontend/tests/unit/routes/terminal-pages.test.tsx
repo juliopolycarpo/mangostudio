@@ -7,14 +7,14 @@
  * `TerminalView.test.tsx`).
  */
 
-import { afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+import { afterAll, afterEach, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 
 import userEvent from '@testing-library/user-event';
 import type { ComponentType } from 'react';
 
 import { render, screen, waitFor, within } from '../../support/harness/render';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
-import { routerWithLinkStub } from '../../support/mocks/router';
+import { restoreRouter, routerWithLinkStub } from '../../support/mocks/router';
 
 function TerminalViewStub({ sessionId }: { sessionId: string }) {
   return <div data-testid="terminal-view-stub">{sessionId}</div>;
@@ -55,6 +55,9 @@ const TerminalIndexPage = (TerminalRoute as unknown as { options: { component: C
 const TerminalSessionRouteComponent = (
   TerminalSessionRoute as unknown as { options: { component: ComponentType } }
 ).options.component;
+
+// The router fake is process-wide: hand the real one back for later files.
+afterAll(restoreRouter);
 
 describe('/terminal route', () => {
   const fetchScenario = createFetchScenario();

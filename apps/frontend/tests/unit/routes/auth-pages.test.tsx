@@ -1,11 +1,11 @@
-import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 
 import { en } from '@mangostudio/shared/i18n';
 import userEvent from '@testing-library/user-event';
 import type { ComponentType } from 'react';
 
 import { render, screen, waitFor } from '../../support/harness/render';
-import { routerWithLinkStub } from '../../support/mocks/router';
+import { restoreRouter, routerWithLinkStub } from '../../support/mocks/router';
 import { setTestSession, setTestSignIn, setTestSignUp } from '../../support/setup/auth-client-stub';
 
 const { mockHistoryPush, mockNavigate, mockSignInEmail, mockSignUpEmail, searchState } = {
@@ -37,6 +37,10 @@ const LoginPage = (LoginRoute as unknown as { options: { component: ComponentTyp
   .component;
 const SignupPage = (SignupRoute as unknown as { options: { component: ComponentType } }).options
   .component;
+
+// The fake is process-wide: hand the real router back so a later file in the
+// same run does not render against this file's stubbed `useNavigate`/`useRouter`.
+afterAll(restoreRouter);
 
 describe('auth routes', () => {
   beforeEach(() => {
