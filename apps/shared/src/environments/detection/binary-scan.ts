@@ -1,6 +1,7 @@
 import { posix, win32 } from 'node:path';
 
 import type { PathEnv } from '../../runtime-env';
+import { mapWithConcurrency } from '../../utils/concurrency';
 import type {
   PathSource,
   RuntimeId,
@@ -173,27 +174,6 @@ async function resolveRealpath(path: string, deps: BinaryScanDeps): Promise<stri
   } catch {
     return path;
   }
-}
-
-async function mapWithConcurrency<T, Result>(
-  items: readonly T[],
-  concurrency: number,
-  mapper: (item: T) => Promise<Result>
-): Promise<Result[]> {
-  const results = new Array<Result>(items.length);
-  let nextIndex = 0;
-
-  const worker = async () => {
-    while (nextIndex < items.length) {
-      const index = nextIndex;
-      nextIndex += 1;
-      results[index] = await mapper(items[index] as T);
-    }
-  };
-
-  const workerCount = Math.min(items.length, Math.max(1, concurrency));
-  await Promise.all(Array.from({ length: workerCount }, () => worker()));
-  return results;
 }
 
 function probeWithTimeout(

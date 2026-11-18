@@ -1,4 +1,5 @@
 import type { GitStatus, GitSummary } from '@mangostudio/shared/git';
+import { mapWithConcurrency } from '@mangostudio/shared/utils/concurrency';
 
 import {
   GitCliError,
@@ -148,20 +149,4 @@ export async function getBatchGitSummaries(
   });
 
   return summaries;
-}
-
-async function mapWithConcurrency<T>(
-  items: readonly T[],
-  limit: number,
-  run: (item: T) => Promise<void>
-): Promise<void> {
-  let cursor = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (cursor < items.length) {
-      const item = items[cursor];
-      cursor += 1;
-      if (item !== undefined) await run(item);
-    }
-  });
-  await Promise.all(workers);
 }
