@@ -34,6 +34,15 @@ export interface NdjsonPortOptions {
   readonly sink: ByteSink;
   /** Largest line the decoder accepts; the 16 MiB default of §11 when absent. */
   readonly maxFrameBytes?: number;
+  /**
+   * Runs the failure the port finds itself, a sink that throws on `send`,
+   * behind whatever input the transport still holds queued, and at once when
+   * none is. A transport that delays reads must supply it: failing inline
+   * would drop the frames that arrived before the pipe broke and report the
+   * closure as a write failure ahead of the peer's own. Absent, the port
+   * fails at once.
+   */
+  readonly afterQueuedInput?: (event: () => void) => void;
 }
 
 /** The port plus the inputs a transport drives it with. */
@@ -83,10 +92,12 @@ class NdjsonPort implements Port {
   #why = '';
   #sinkWritable = true;
   #sinkEnded = false;
+  readonly #afterQueuedInput: ((event: () => void) => void) | undefined;
 
   constructor(options: NdjsonPortOptions) {
     this.maxFrameBytes = resolveFrameLimit(options);
     this.#sink = options.sink;
+    this.#afterQueuedInput = options.afterQueuedInput;
     this.#decoder = new LineDecoder({ maxFrameBytes: this.maxFrameBytes });
   }
 
@@ -185,8 +196,14 @@ class NdjsonPort implements Port {
       this.#sink.write(line);
       return true;
     } catch (cause) {
+      const error = cause instanceof Error ? cause : new Error(String(cause));
       this.#sinkWritable = false;
-      this.failed(cause instanceof Error ? cause : new Error(String(cause)));
+      // The port stays open until the failure lands, so a refused `send` in
+      // between still has to say why; `failed` sets the same text again.
+      this.#why = error.message;
+      const fail = (): void => this.failed(error);
+      if (this.#afterQueuedInput === undefined) fail();
+      else this.#afterQueuedInput(fail);
       return false;
     }
   }
@@ -249,6 +266,12 @@ class NdjsonPort implements Port {
   }
 
   #closedError(): Error {
+    if (this.#state === 'open') {
+      // Only a sink that threw, with the failure still waiting behind queued input.
+      return new Error(
+        `NDJSON port cannot write (${this.#why}); expected a writable sink, received a broken one — the port closes once frames already received are delivered.`
+      );
+    }
     return new Error(
       `NDJSON port is in state "${this.#state}" (${this.#why}); expected state "open" to send a frame.`
     );

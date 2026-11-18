@@ -87,6 +87,10 @@ function openPort(deferReads: boolean) {
     emitWriteError(message: string): void {
       writable.emit('error', new Error(message));
     },
+    /** The child's stdin is gone: the stream reports itself no longer writable. */
+    destroyWritable(): void {
+      writable.destroy();
+    },
   };
 }
 
@@ -159,6 +163,29 @@ describe('createStreamPort read delivery', () => {
     port.handle.failed(new Error('kill EPERM'));
 
     expect(port.closures).toEqual([{ kind: 'closed', reason: 'kill EPERM' }]);
+  });
+
+  it('delivers frames that arrived before a send on a dead stdin ahead of the closure', async () => {
+    const port = openPort(true);
+
+    port.emitData(PING);
+    port.destroyWritable();
+    expect(() => port.handle.port.send({ type: 'pong' })).toThrow(/the stream is not writable/);
+    await nextTurn();
+
+    expect(port.order).toEqual(['ping', 'closure:closed']);
+    expect(port.closures).toEqual([
+      { kind: 'closed', reason: expect.stringContaining('the stream is not writable') },
+    ]);
+  });
+
+  it('reports a send on a dead stdin at once when reads are not deferred', () => {
+    const port = openPort(false);
+
+    port.destroyWritable();
+    expect(() => port.handle.port.send({ type: 'pong' })).toThrow(/state "failed"/);
+
+    expect(port.order).toEqual(['closure:closed']);
   });
 
   it('still delivers the end of the stream after a frame listener throws', () => {

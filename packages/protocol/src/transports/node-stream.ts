@@ -51,6 +51,7 @@ export function createStreamPort(
   options: StreamPortOptions = {}
 ): NdjsonPortHandle {
   let detach = (): void => undefined;
+  const deliver = options.deferReads ? deliverLaterInOrder() : deliverNow;
   const handle = createNdjsonPort({
     sink: {
       write: (bytes) => writeTo(writable, bytes),
@@ -61,8 +62,10 @@ export function createStreamPort(
       },
     },
     ...(options.maxFrameBytes !== undefined ? { maxFrameBytes: options.maxFrameBytes } : {}),
+    // A `send` on a stdin that already died fails the port behind the frames
+    // the child wrote first, like every other failure on this port.
+    afterQueuedInput: (event) => deliver.after(event),
   });
-  const deliver = options.deferReads ? deliverLaterInOrder() : deliverNow;
   detach = readFramesFrom(readable, handle, deliver);
   // A duplex reports its write errors on the same object; two separate streams
   // need the writable watched too, or an EPIPE becomes an uncaught exception.
