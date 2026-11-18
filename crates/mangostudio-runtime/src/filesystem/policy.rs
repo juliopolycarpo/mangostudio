@@ -505,6 +505,11 @@ mod tests {
     /// `plain_children_of` replaces a filesystem walk with string work, so it
     /// must give the answer `allows` gives for every kind of policy root, and
     /// for a parent the policy itself refuses.
+    ///
+    /// Unix only, like the walk's shortcut: off Unix every entry goes through
+    /// `allows`, and the verified parent a Windows walk would hold is not the
+    /// `\\?\`-prefixed, long-name path `canonicalize` gives here.
+    #[cfg(unix)]
     #[test]
     fn plain_children_agree_with_allows_for_every_kind_of_policy_root() {
         let dir = scratch_dir("filesystem-policy-plain-child");
