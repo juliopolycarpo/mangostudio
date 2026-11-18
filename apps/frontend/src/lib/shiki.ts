@@ -11,7 +11,12 @@ import { createJavaScriptRegexEngine } from '@shikijs/engine-javascript';
 import { countHighlightableLines } from '@/lib/code-highlight-limits';
 import { resolveLanguageId, type ShikiLanguageId } from '@/lib/code-languages';
 import type { CodeThemeId } from '@/lib/code-themes';
-import type { HighlightSlice } from '@/lib/highlight-slices';
+import {
+  groupedLinesHtml,
+  HIGHLIGHT_GROUP_LINES,
+  type HighlightSlice,
+  isGroupedBlock,
+} from '@/lib/highlight-slices';
 import { createCheckedRenderers, IncompleteTokenizationError } from '@/lib/shiki-checked-render';
 
 export { CODE_THEMES, type CodeThemeId } from '@/lib/code-themes';
@@ -239,9 +244,10 @@ const highlightSessions: HighlightSession[] = [];
 /**
  * Lines tokenized between two reads of the clock when a call has a time budget. The budget is
  * only checked between batches, so a slice overshoots it by at most one batch: about 8 ms for 16
- * lines of TypeScript in Chromium (0.5 ms a line; Bun is about four times faster).
+ * lines of TypeScript in Chromium (0.5 ms a line; Bun is about four times faster). A batch is
+ * one group of a long block, so a slice swaps whole groups.
  */
-const SLICE_BATCH_LINES = 16;
+const SLICE_BATCH_LINES = HIGHLIGHT_GROUP_LINES;
 
 /**
  * A call with a time budget colours this many lines, or fewer, in one go. A short block is
@@ -547,6 +553,14 @@ function plainLinesHtml(rendering: BlockRendering, plan: BlockPlan, fromLine: nu
   return rendering.renderers.tokenLinesToHtml(tokens, rendering.htmlOptions);
 }
 
+/** The whole block around its serialized lines: flat, or in groups when it is long (`isGroupedBlock`). */
+function blockHtml(rendering: BlockRendering, lines: readonly string[]): string {
+  return rendering.renderers.htmlFromLines(
+    isGroupedBlock(lines.length) ? [groupedLinesHtml(lines)] : lines,
+    rendering.htmlOptions
+  );
+}
+
 function renderHighlightedBlock(
   code: string,
   language: ShikiLanguageId,
@@ -570,10 +584,7 @@ function renderHighlightedBlock(
     ...plainLinesHtml(rendering, plan, session.completedHtml.length + openHtml.length),
   ];
   return {
-    html: rendering.renderers.htmlFromLines(
-      [...session.completedHtml, ...trailing],
-      rendering.htmlOptions
-    ),
+    html: blockHtml(rendering, [...session.completedHtml, ...trailing]),
     complete: session.pendingLines === 0,
   };
 }
@@ -631,13 +642,7 @@ export function continueHighlight(
         ...openHtml,
         ...plainLinesHtml(rendering, plan, session.completedHtml.length + openHtml.length),
       ];
-      cacheHighlightedHtml(
-        key,
-        rendering.renderers.htmlFromLines(
-          [...session.completedHtml, ...trailing],
-          rendering.htmlOptions
-        )
-      );
+      cacheHighlightedHtml(key, blockHtml(rendering, [...session.completedHtml, ...trailing]));
       markPartialBlock(key, false);
     }
     return {

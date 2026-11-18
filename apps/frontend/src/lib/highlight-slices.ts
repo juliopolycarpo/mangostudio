@@ -7,15 +7,54 @@ import { scheduleIdle } from '@/features/chat/transcript-read-ahead';
  */
 export const HIGHLIGHT_FIRST_SLICE_MS = 20;
 
-/** The same for each idle slice after the first draw: tokenizing plus swapping the lines on screen. */
-export const HIGHLIGHT_SLICE_MS = 10;
+/**
+ * The same for each slice after the first draw. A warm slice is this long plus up to one batch
+ * of tokenizing past it, plus about 5 ms to swap the lines; 20 keeps that under 50 ms where 30
+ * mostly does and 40 does not (13 long tasks in a 2,000-line block, against 6).
+ */
+export const HIGHLIGHT_SLICE_MS = 20;
 
 /**
- * The longest a slice waits for an idle moment. A page that is never idle (a stream is running)
- * still colours its blocks, one slice at a time; where there is no idle callback a timer of this
- * length stands in.
+ * The longest a slice waits for an idle moment. The browser's idle periods come about once per
+ * frame, which stretched colouring a 2,000-line block from 1.7 s to 2.0 s against waiting only a
+ * millisecond: the slices then run back to back, each its own task, with a frame and any input
+ * handled between them. Where there is no idle callback a timer of this length stands in.
  */
-export const HIGHLIGHT_SLICE_IDLE_TIMEOUT_MS = 100;
+export const HIGHLIGHT_SLICE_IDLE_TIMEOUT_MS = 1;
+
+/** Lines in each group of a long block (`groupedLinesHtml`); also the batch a slice tokenizes between clock reads. */
+export const HIGHLIGHT_GROUP_LINES = 16;
+
+/** A block of this many lines or fewer is drawn as flat lines, with no groups. */
+export const HIGHLIGHT_UNGROUPED_MAX_LINES = 64;
+
+/** The class of a group's element; `markdown-content.css` gives it its containment. */
+export const HIGHLIGHT_GROUP_CLASS = 'code-line-group';
+
+/** Whether a block of `lineCount` lines is drawn in groups (and patched by group). */
+export function isGroupedBlock(lineCount: number): boolean {
+  return lineCount > HIGHLIGHT_UNGROUPED_MAX_LINES;
+}
+
+/**
+ * The inside of a long block's `<code>`: its serialized lines in groups of `HIGHLIGHT_GROUP_LINES`,
+ * each in a block element that contains its layout. Swapping the lines of one group then lays out
+ * that group, where one flat `<code>` lays out the whole block each time (10-25 ms for 2,000 lines).
+ *
+ * The text is the flat block's, character for character: every group but the last ends with the
+ * line break that the flat block has between its lines, so `textContent`, a selection across
+ * groups and a copy give the same text, and a group's last line break does not draw an empty line.
+ */
+// Usage: htmlFromLines([groupedLinesHtml(lines)], options)
+export function groupedLinesHtml(lines: readonly string[]): string {
+  let html = '';
+  for (let from = 0; from < lines.length; from += HIGHLIGHT_GROUP_LINES) {
+    const end = Math.min(lines.length, from + HIGHLIGHT_GROUP_LINES);
+    const lineBreak = end < lines.length ? '\n' : '';
+    html += `<span class="${HIGHLIGHT_GROUP_CLASS}">${lines.slice(from, end).join('\n')}${lineBreak}</span>`;
+  }
+  return html;
+}
 
 /**
  * One more stretch of a block that was drawn with only its first lines coloured: the HTML of
@@ -45,7 +84,8 @@ export interface SlicedBlock {
 /**
  * Swaps the lines of a drawn code block for the ones in `slice`. The block keeps the rest of its
  * nodes, so a slice costs the lines it carries and not the block, which is what the whole-block
- * replacement costs (64 ms for 2,000 lines). Returns false, and writes nothing, when `pre` is
+ * replacement costs (64 ms for 2,000 lines). A long block is in groups (`groupedLinesHtml`), so
+ * the lines are found inside their groups. Returns false, and writes nothing, when `pre` is
  * not the block the slice was made for: it left the page, or it is plain text with no line
  * elements, or its line count differs.
  */
@@ -54,22 +94,28 @@ export function patchCodeLines(pre: Element, slice: HighlightSlice): boolean {
   const code = pre.querySelector('code');
   if (!pre.isConnected || !code) return false;
   const current = code.children;
-  if (current.length !== slice.lineCount) return false;
+  const grouped = isGroupedBlock(slice.lineCount);
+  const childCount = grouped ? Math.ceil(slice.lineCount / HIGHLIGHT_GROUP_LINES) : slice.lineCount;
+  if (current.length !== childCount) return false;
   if (slice.lineHtml.length === 0) return true;
 
+  const lineAt = (index: number): Element | undefined =>
+    grouped
+      ? current[Math.floor(index / HIGHLIGHT_GROUP_LINES)]?.children[index % HIGHLIGHT_GROUP_LINES]
+      : current[index];
   const scratch = pre.ownerDocument.createElement('code');
   scratch.innerHTML = slice.lineHtml.join('\n');
   const replacements = [...scratch.children];
   if (replacements.length !== slice.lineHtml.length) return false;
   const last = slice.fromLine + replacements.length - 1;
   if (
-    !current[slice.fromLine]?.classList.contains('line') ||
-    !current[last]?.classList.contains('line')
+    !lineAt(slice.fromLine)?.classList.contains('line') ||
+    !lineAt(last)?.classList.contains('line')
   ) {
     return false;
   }
   for (const [offset, replacement] of replacements.entries()) {
-    current[slice.fromLine + offset]?.replaceWith(replacement);
+    lineAt(slice.fromLine + offset)?.replaceWith(replacement);
   }
   return true;
 }

@@ -1,6 +1,12 @@
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 
-import type { HighlightSlice } from '@/lib/highlight-slices';
+import {
+  groupedLinesHtml,
+  HIGHLIGHT_GROUP_CLASS,
+  HIGHLIGHT_GROUP_LINES,
+  type HighlightSlice,
+  isGroupedBlock,
+} from '@/lib/highlight-slices';
 import {
   continueHighlight,
   highlightCode,
@@ -77,11 +83,36 @@ function withFrozenDateNow<T>(run: () => T): T {
   return withTokenizerClock(frozenTokenizerClock, run);
 }
 
+/** The block as one tokenizer call draws it: in groups when it is long, the shape `highlightCode` makes. */
 function oneShotHtml(code: string, lang = 'typescript'): string {
   const renderers = createCheckedRenderers(highlighter);
   const options = { lang, theme: THEME };
   const tokens = renderers.codeToTokensBase(code, { ...options, tokenizeTimeLimit: 500 });
+  const lines = renderers.tokenLinesToHtml(tokens, options);
+  return renderers.htmlFromLines(
+    isGroupedBlock(lines.length) ? [groupedLinesHtml(lines)] : lines,
+    options
+  );
+}
+
+/** The same block with every line flat, whatever its length. */
+function flatOneShotHtml(code: string, lang = 'typescript'): string {
+  const renderers = createCheckedRenderers(highlighter);
+  const options = { lang, theme: THEME };
+  const tokens = renderers.codeToTokensBase(code, { ...options, tokenizeTimeLimit: 500 });
   return renderers.htmlFromLines(renderers.tokenLinesToHtml(tokens, options), options);
+}
+
+/** The text a reader sees: the markup taken out. */
+function textOfHtml(html: string | null): string {
+  return (html ?? '').replaceAll(/<[^>]+>/g, '');
+}
+
+/** The markup of each `<span class="line">` in `html`, whether the block is flat or in groups. */
+function lineMarkup(html: string | null): string[] {
+  const holder = document.createElement('div');
+  holder.innerHTML = html ?? '';
+  return [...holder.querySelectorAll('.line')].map((line) => line.outerHTML);
 }
 
 /** The block's html split at its line breaks: the first element also holds the `<pre><code>` opening. */
@@ -158,6 +189,37 @@ describe('highlightCode with a time budget', () => {
 
     expect(html, 'html of a 64-line block under a spent budget').toBe(oneShotHtml(code));
     expect(isHighlightContinuationPending(code, 'ts', THEME), 'continuation pending').toBe(false);
+  });
+
+  it('draws a block over 64 lines in groups with the text of the flat block, and a short one flat', () => {
+    const longCode = typescriptBlock('groupedLong', 20);
+    const shortCode = typescriptBlock('groupedShort', 6)
+      .split('\n')
+      .slice(0, UNSLICED_LINES)
+      .join('\n');
+
+    const longHtml = withFrozenDateNow(() => highlightCode(longCode, 'ts', THEME));
+    const shortHtml = withFrozenDateNow(() => highlightCode(shortCode, 'ts', THEME));
+
+    expect(longHtml, 'long block carries groups').toContain(`class="${HIGHLIGHT_GROUP_CLASS}"`);
+    expect(textOfHtml(longHtml), 'text of the long block').toBe(
+      textOfHtml(flatOneShotHtml(longCode))
+    );
+    expect(shortHtml, 'short block has no groups').not.toContain(HIGHLIGHT_GROUP_CLASS);
+    expect(shortHtml, 'short block markup').toBe(flatOneShotHtml(shortCode));
+  });
+
+  it('draws the lines of a first draw that is partly coloured in the same groups', () => {
+    const code = typescriptBlock('groupedPartial', 20);
+    setTimeStopClock(new SteppingClock(10).now);
+
+    const html = withFrozenDateNow(() => highlightCode(code, 'ts', THEME, { budgetMs: BUDGET_MS }));
+
+    const groupCount = (html ?? '').split(`class="${HIGHLIGHT_GROUP_CLASS}"`).length - 1;
+    expect(groupCount, 'groups of a 200-line block').toBe(Math.ceil(200 / HIGHLIGHT_GROUP_LINES));
+    expect(textOfHtml(html), 'text of the partly coloured block').toBe(
+      textOfHtml(flatOneShotHtml(code))
+    );
   });
 
   it('colours the whole block in one call when there is no budget', () => {
@@ -242,14 +304,14 @@ describe('continueHighlight', () => {
     const slices = sliceToTheEnd(code, 'ts');
 
     // The first draw's lines, with each slice laid over them where it lands.
-    const lines = htmlLines(firstDraw);
+    const lines = lineMarkup(firstDraw);
     for (const slice of slices) {
-      for (const [offset, html] of slice.lineHtml.entries()) lines[slice.fromLine + offset] = html;
+      for (const [offset, html] of slice.lineHtml.entries()) {
+        lines[slice.fromLine + offset] = lineMarkup(html)[0] ?? '';
+      }
     }
-    const expected = htmlLines(oneShotHtml(code));
 
-    // The first line also carries the opening `<pre><code>`, which a slice never touches.
-    expect(lines.slice(1, -1), 'lines after slicing').toEqual(expected.slice(1, -1));
+    expect(lines, 'lines after slicing').toEqual(lineMarkup(oneShotHtml(code)));
   });
 
   it('does nothing for a block that is not partly drawn', () => {

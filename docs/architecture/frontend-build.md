@@ -311,14 +311,21 @@ build):
 - **A long code block is coloured in slices, not in one task.** The first draw colours about
   20 ms of the block's lines (`HIGHLIGHT_FIRST_SLICE_MS`) and shows the rest as plain text;
   once the message has settled, `continueHighlightsInSlices` (`src/lib/highlight-slices.ts`)
-  colours about 10 ms more per idle callback and swaps only those lines in the block, so
-  the message around it is not drawn again. The slices resume the highlighter's session for
-  the block (the finished lines and Shiki's grammar state), so no line is tokenized twice. A
-  block of 64 lines or fewer is coloured in one go. Slices stop on unmount and on a content
-  change, wait for the message to stop streaming, and a slice the tokenizer stops on its time
-  limit gets the same single retry as the first draw. Each slice still pays a layout of the
-  block's lines, which grows with the coloured part, so a 2,000-line block takes longer end to end than
-  one task, in exchange for no task of that length.
+  colours about 20 ms more per slice, one slice per task with at most a millisecond's wait for
+  an idle moment, and swaps only those lines in the block, so the message around it is not
+  drawn again. The slices resume the highlighter's session for the block (the finished lines
+  and Shiki's grammar state), so no line is tokenized twice. A block of 64 lines or fewer is
+  coloured in one go. Slices stop on unmount and on a content change, wait for the message to
+  stop streaming, and a slice the tokenizer stops on its time limit gets the same single retry
+  as the first draw.
+- **A block over 64 lines is drawn in groups of 16 lines.** Replacing lines inside one flat
+  `<code>` lays out the whole block again (10 to 25 ms for 2,000 lines, growing as more of it
+  is coloured). `groupedLinesHtml` wraps each group in a `display: block; contain: layout style`
+  element (`.code-line-group`), so a slice lays out the groups it touched. The text is the flat
+  block's: each group but the last ends with the line break the flat block has between its
+  lines, so `textContent` and the copy button's text are the same (unit tests pin both), and
+  so were a selection across groups and Ctrl+C in Chromium (checked by hand, not in CI). The
+  line break at the end of a group does not draw an empty line: the block's height is the same.
 - **A streaming reply is lexed and rendered per block, not per chunk.** `markdown-blocks.ts`
   keeps the tokens of the settled prefix (everything before the last blank line that no list,
   indented code, open fence or HTML block can continue across), re-lexes only the tail with

@@ -1,6 +1,11 @@
 import { afterEach, beforeAll, describe, expect, it, spyOn } from 'bun:test';
 
-import { HIGHLIGHT_FIRST_SLICE_MS } from '@/lib/highlight-slices';
+import {
+  groupedLinesHtml,
+  HIGHLIGHT_FIRST_SLICE_MS,
+  HIGHLIGHT_GROUP_CLASS,
+  isGroupedBlock,
+} from '@/lib/highlight-slices';
 import {
   initHighlighter,
   observeTokenizedLines,
@@ -10,7 +15,8 @@ import {
 } from '@/lib/shiki';
 import { createCheckedRenderers } from '@/lib/shiki-checked-render';
 
-import { flushAsyncRender, render } from '../../support/harness/render';
+import { stubClipboard } from '../../support/harness/clipboard';
+import { flushAsyncRender, render, waitFor } from '../../support/harness/render';
 import { FakeIdleScheduler } from '../../support/mocks/fake-idle-scheduler';
 import { SteppingClock } from '../../support/mocks/fake-stepping-clock';
 import { frozenTokenizerClock, withTokenizerClock } from '../../support/mocks/fake-tokenizer-clock';
@@ -88,13 +94,37 @@ function oneShotCodeHtml(source: string): string {
   const renderers = createCheckedRenderers(highlighter);
   const options = { lang: 'typescript', theme: THEME };
   const tokens = renderers.codeToTokensBase(source, { ...options, tokenizeTimeLimit: 500 });
+  const lines = renderers.tokenLinesToHtml(tokens, options);
+  const holder = document.createElement('div');
+  holder.innerHTML = renderers.htmlFromLines(
+    isGroupedBlock(lines.length) ? [groupedLinesHtml(lines)] : lines,
+    options
+  );
+  return holder.querySelector('code')?.innerHTML ?? '';
+}
+
+/** The `<code>` markup of `source` with its lines flat, whatever grouping the block gets on screen. */
+function flatCodeHtml(source: string): string {
+  const renderers = createCheckedRenderers(highlighter);
+  const options = { lang: 'typescript', theme: THEME };
+  const tokens = renderers.codeToTokensBase(source, { ...options, tokenizeTimeLimit: 500 });
   const holder = document.createElement('div');
   holder.innerHTML = renderers.htmlFromLines(renderers.tokenLinesToHtml(tokens, options), options);
   return holder.querySelector('code')?.innerHTML ?? '';
 }
 
+/** Empty lines in `source` from line `from` up to `to`: Shiki draws them with no token, so none is coloured. */
+function blankLinesIn(source: string, from: number, to: number): number {
+  return source
+    .split('\n')
+    .slice(from, to)
+    .filter((line) => line === '').length;
+}
+
 function colouredLines(code: HTMLElement): number {
-  return [...code.children].filter((line) => line.querySelector('span[style*="color"]')).length;
+  return [...code.querySelectorAll('.line')].filter((line) =>
+    line.querySelector('span[style*="color"]')
+  ).length;
 }
 
 async function settleFirstDraw(): Promise<void> {
@@ -153,7 +183,7 @@ describe('a large code block drawn in slices', () => {
     await settleFirstDraw();
     const paragraphs = [...container.querySelectorAll('p')];
     const pre = container.querySelector('pre');
-    const firstLine = codeOf(container).children[0];
+    const firstLine = codeOf(container).querySelector('.line');
     expect(paragraphs, 'paragraphs in the message').toHaveLength(2);
 
     await scheduler.runIdle();
@@ -163,7 +193,81 @@ describe('a large code block drawn in slices', () => {
       paragraphs
     );
     expect(container.querySelector('pre'), 'pre node after two slices').toBe(pre);
-    expect(codeOf(container).children[0], 'first line, coloured by the first draw').toBe(firstLine);
+    expect(codeOf(container).querySelector('.line'), 'first line, coloured by the first draw').toBe(
+      firstLine
+    );
+  });
+
+  it('draws a long block in groups and a slice swaps lines only inside the groups it reaches', async () => {
+    const scheduler = installIdleScheduler();
+    useTenMillisecondClock();
+    const source = typescriptSource('groupsTouched', 20);
+    const { container } = render(<MarkdownContentRenderer content={fence(source)} />);
+    await settleFirstDraw();
+    const groups = [...codeOf(container).children];
+    const firstDrawGroups = FIRST_DRAW_LINES / BATCH_LINES;
+    expect(
+      groups.every((group) => group.classList.contains(HIGHLIGHT_GROUP_CLASS)),
+      'children of <code> that are groups'
+    ).toBe(true);
+    expect(groups[0]?.children, 'lines in the first group').toHaveLength(BATCH_LINES);
+
+    await scheduler.runIdle();
+
+    // The slice that follows the first draw reaches the group after the drawn ones.
+    const after = [...codeOf(container).children];
+    expect(after, 'group nodes after one slice').toHaveLength(groups.length);
+    expect(after[0], 'first group, coloured by the first draw').toBe(groups[0]);
+    expect(after[firstDrawGroups - 1], 'last group of the first draw').toBe(
+      groups[firstDrawGroups - 1]
+    );
+    expect(after.at(-1), 'last group, not reached yet').toBe(groups.at(-1));
+    expect(after[firstDrawGroups], 'group the slice reached').toBe(groups[firstDrawGroups]);
+    expect(
+      colouredLines(after[firstDrawGroups] as HTMLElement),
+      'coloured lines in that group'
+    ).toBe(BATCH_LINES - blankLinesIn(source, FIRST_DRAW_LINES, FIRST_DRAW_LINES + BATCH_LINES));
+  });
+
+  it('keeps a long block the same text as the flat block, and a short one flat', async () => {
+    installIdleScheduler();
+    useTenMillisecondClock();
+    const longSource = typescriptSource('longText', 20);
+    const shortSource = typescriptSource('shortText', 3);
+    const long = render(<MarkdownContentRenderer content={fence(longSource)} />);
+    const short = render(<MarkdownContentRenderer content={fence(shortSource)} />);
+    await settleFirstDraw();
+
+    expect(codeOf(long.container).textContent, 'text of the long block').toBe(longSource);
+    expect(codeOf(short.container).innerHTML, 'markup of the short block').toBe(
+      flatCodeHtml(shortSource)
+    );
+    expect(
+      codeOf(short.container).querySelector(`.${HIGHLIGHT_GROUP_CLASS}`),
+      'group in the short block'
+    ).toBeNull();
+  });
+
+  it('copies the whole source from the copy button while the block is half coloured and once it is done', async () => {
+    const scheduler = installIdleScheduler();
+    useTenMillisecondClock();
+    const copied: string[] = [];
+    stubClipboard((text) => {
+      copied.push(text);
+      return Promise.resolve();
+    });
+    const source = typescriptSource('copyWhole', 20);
+    const { container } = render(<MarkdownContentRenderer content={fence(source)} />);
+    await settleFirstDraw();
+    const button = container.querySelector<HTMLButtonElement>('.copy-code-btn');
+
+    button?.click();
+    await waitFor(() => expect(copied).toHaveLength(1));
+    for (let guard = 0; guard < 50 && scheduler.pending > 0; guard++) await scheduler.runIdle();
+    button?.click();
+    await waitFor(() => expect(copied).toHaveLength(2));
+
+    expect(copied, 'texts written to the clipboard').toEqual([source, source]);
   });
 
   it('does not tokenize a line twice', async () => {

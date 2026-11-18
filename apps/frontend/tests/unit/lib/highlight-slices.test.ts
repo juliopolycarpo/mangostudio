@@ -2,9 +2,14 @@ import { afterEach, describe, expect, it } from 'bun:test';
 
 import {
   continueHighlightsInSlices,
+  groupedLinesHtml,
+  HIGHLIGHT_GROUP_CLASS,
+  HIGHLIGHT_GROUP_LINES,
   HIGHLIGHT_SLICE_IDLE_TIMEOUT_MS,
   HIGHLIGHT_SLICE_MS,
+  HIGHLIGHT_UNGROUPED_MAX_LINES,
   type HighlightSlice,
+  isGroupedBlock,
   patchCodeLines,
   type SlicedBlock,
 } from '@/lib/highlight-slices';
@@ -119,6 +124,127 @@ describe('patchCodeLines', () => {
     const pre = drawBlock(['a']);
 
     expect(patchCodeLines(pre, sliceOf(1, [], 1))).toBe(true);
+  });
+});
+
+const LONG_BLOCK_LINES = HIGHLIGHT_UNGROUPED_MAX_LINES + 6;
+
+function lineHtmlOf(text: string): string {
+  return `<span class="line"><span>${text}</span></span>`;
+}
+
+function numberedLines(count: number): string[] {
+  return Array.from({ length: count }, (_, index) => `line ${index}`);
+}
+
+/** A drawn long block: its lines in groups, as `highlightCode` writes it. */
+function drawGroupedBlock(texts: readonly string[]): HTMLPreElement {
+  const pre = document.createElement('pre');
+  pre.innerHTML = `<code>${groupedLinesHtml(texts.map(lineHtmlOf))}</code>`;
+  document.body.append(pre);
+  mounted.push(pre);
+  return pre;
+}
+
+function allLineTexts(pre: Element): string[] {
+  return [...pre.querySelectorAll('.line')].map((line) => line.textContent ?? '');
+}
+
+describe('groupedLinesHtml', () => {
+  it('puts the lines in groups of the group size, the last group with what is left', () => {
+    const texts = numberedLines(LONG_BLOCK_LINES);
+    const holder = document.createElement('code');
+    holder.innerHTML = groupedLinesHtml(texts.map(lineHtmlOf));
+
+    const groups = [...holder.children];
+    expect(groups, 'groups for 70 lines').toHaveLength(
+      Math.ceil(LONG_BLOCK_LINES / HIGHLIGHT_GROUP_LINES)
+    );
+    expect(
+      groups.map((group) => group.className),
+      'group classes'
+    ).toEqual(groups.map(() => HIGHLIGHT_GROUP_CLASS));
+    expect(
+      groups.map((group) => group.children.length),
+      'lines per group'
+    ).toEqual([16, 16, 16, 16, LONG_BLOCK_LINES - 64]);
+  });
+
+  it('keeps the text of the flat block: a line break after every line but the last', () => {
+    const texts = numberedLines(LONG_BLOCK_LINES);
+    const holder = document.createElement('code');
+    holder.innerHTML = groupedLinesHtml(texts.map(lineHtmlOf));
+
+    expect(holder.textContent, 'text of the grouped block').toBe(texts.join('\n'));
+    expect(holder.innerHTML.endsWith('\n</span>'), 'line break at the end of the block').toBe(
+      false
+    );
+    expect(
+      holder.children[0]?.textContent?.endsWith('\n'),
+      'line break closing the first group'
+    ).toBe(true);
+  });
+
+  it('draws a block over the limit in groups and a block at the limit flat', () => {
+    expect(isGroupedBlock(HIGHLIGHT_UNGROUPED_MAX_LINES), 'lines at the limit').toBe(false);
+    expect(isGroupedBlock(HIGHLIGHT_UNGROUPED_MAX_LINES + 1), 'lines over the limit').toBe(true);
+  });
+});
+
+describe('patchCodeLines in a block of groups', () => {
+  it('replaces lines across a group boundary and keeps every group node and every other line', () => {
+    const texts = numberedLines(LONG_BLOCK_LINES);
+    const pre = drawGroupedBlock(texts);
+    const code = pre.querySelector('code');
+    const groupsBefore = [...(code?.children ?? [])];
+    const linesBefore = [...pre.querySelectorAll('.line')];
+    const from = HIGHLIGHT_GROUP_LINES - 2;
+
+    const patched = patchCodeLines(pre, sliceOf(from, ['A', 'B', 'C', 'D'], LONG_BLOCK_LINES));
+
+    expect(patched).toBe(true);
+    expect(allLineTexts(pre).slice(from - 1, from + 5), 'texts around the patch').toEqual([
+      'line 13',
+      'A',
+      'B',
+      'C',
+      'D',
+      'line 18',
+    ]);
+    expect([...(code?.children ?? [])], 'group nodes after the patch').toEqual(groupsBefore);
+    const linesAfter = [...pre.querySelectorAll('.line')];
+    expect(
+      linesAfter.filter((line, index) => line !== linesBefore[index]).length,
+      'lines that are new nodes'
+    ).toBe(4);
+    expect(code?.textContent?.split('\n'), 'line breaks of the block').toHaveLength(
+      LONG_BLOCK_LINES
+    );
+  });
+
+  it('patches the last line, which sits in the short last group', () => {
+    const pre = drawGroupedBlock(numberedLines(LONG_BLOCK_LINES));
+
+    const patched = patchCodeLines(pre, sliceOf(LONG_BLOCK_LINES - 1, ['last'], LONG_BLOCK_LINES));
+
+    expect(patched).toBe(true);
+    expect(allLineTexts(pre).at(-1), 'last line').toBe('last');
+  });
+
+  it('refuses a flat block for a slice of a long one, and writes nothing', () => {
+    const pre = drawBlock(numberedLines(LONG_BLOCK_LINES));
+
+    expect(patchCodeLines(pre, sliceOf(0, ['A'], LONG_BLOCK_LINES))).toBe(false);
+    expect(lineTexts(pre)[0], 'first line after a refused patch').toBe('line 0');
+  });
+
+  it('refuses a block of groups for a slice of another line count', () => {
+    const pre = drawGroupedBlock(numberedLines(LONG_BLOCK_LINES));
+
+    expect(patchCodeLines(pre, sliceOf(0, ['A'], LONG_BLOCK_LINES + HIGHLIGHT_GROUP_LINES))).toBe(
+      false
+    );
+    expect(allLineTexts(pre)[0], 'first line after a refused patch').toBe('line 0');
   });
 });
 
