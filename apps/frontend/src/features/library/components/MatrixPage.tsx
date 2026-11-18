@@ -18,6 +18,7 @@ import { formatMessage } from '@/lib/i18n-format';
 import { cn } from '@/lib/utils';
 
 import { useCandidateLocations } from '../hooks/use-candidate-locations';
+import { useEnabledLocationIds } from '../hooks/use-enabled-location-ids';
 import { useLibraryMatrix } from '../hooks/use-library-matrix';
 import { CoverageMatrix, MatrixLegend } from './CoverageMatrix';
 import { LibraryPageState } from './LibraryPageState';
@@ -45,6 +46,7 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
    * explained at all. Disabled locations are excluded — the API refuses them.
    */
   const candidates = useCandidateLocations(matrix.locations, kind);
+  const enabledLocationIds = useEnabledLocationIds();
 
   if (scope.environment && !scope.permitsLibrary) {
     return (
@@ -90,6 +92,7 @@ export function MatrixPage({ kind }: { readonly kind: ResourceKind }) {
         filters={matrix.filters}
         targets={matrix.targets}
         locations={matrix.locations}
+        enabledLocationIds={enabledLocationIds}
         onChange={matrix.setFilters}
       />
 
