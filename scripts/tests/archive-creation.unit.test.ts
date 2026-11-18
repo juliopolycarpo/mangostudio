@@ -6,15 +6,15 @@ import { join } from 'node:path';
 import { openTarArchive } from '../lib/archive';
 import { tarCreationCommand, zipCreationCommand } from '../lib/archive-creation';
 import { ROOT_DIR } from '../lib/config';
-import { zipArchiveCommands } from '../lib/zip-archive';
 import {
   FIXTURE_COMMAND_TIMEOUT_MS,
   FIXTURE_STOP_TIMEOUT_MS,
   FixtureCommands,
 } from './support/fixture-command';
+import { readZipMembers } from './support/zip-reader';
 
 const roots: string[] = [];
-// Native PowerShell archive commands can exceed the default fixture deadline on Windows CI.
+// Native PowerShell archive creation can exceed the default fixture deadline on Windows CI.
 const ARCHIVE_COMMAND_TIMEOUT_MS =
   process.platform === 'win32' ? 30_000 : FIXTURE_COMMAND_TIMEOUT_MS;
 const fixtureCommands = new FixtureCommands(undefined, ARCHIVE_COMMAND_TIMEOUT_MS);
@@ -131,30 +131,28 @@ describe('archive creation commands', () => {
     'creates a ZIP with literal paths, flat members and matching bytes',
     async () => {
       const { root, binaries } = stageSources();
+      writeFileSync(join(binaries, 'compressible.txt'), 'mango '.repeat(500));
       const archivePath = join(root, "bundle with spaces'.zip");
       const { command, cwd } = zipCreationCommand(archivePath, binaries);
       const result = await captureCommand([...command], { cwd });
       expect(result.exitCode, result.stderr || result.stdout).toBe(0);
-      const destination = join(root, 'extracted');
-      // Read independently of the writer. The native PowerShell reader handles
-      // literal Windows paths that MSYS unzip would parse as shell quotes.
-      const commands = zipArchiveCommands(
-        archivePath,
-        destination,
-        process.platform === 'win32' ? null : Bun.which('unzip')
-      );
-      const listing = await captureCommand([...commands.list]);
-      expect(listing.exitCode, listing.stderr).toBe(0);
-      expect(listing.stdout.trim().split(/\r?\n/).sort()).toEqual([
+      // Read in-process, independent of the writer: no PowerShell, unzip or tar to start, so the
+      // check behaves the same on every platform and cannot time out on a loaded runner.
+      const members = readZipMembers(new Uint8Array(readFileSync(archivePath)));
+      // Flat members: no directory prefix, one entry per staged file.
+      expect(members.map((member) => member.name).sort()).toEqual([
         'build-state.json',
+        'compressible.txt',
         'mangostudio',
       ]);
-      const extracted = await captureCommand([...commands.extract]);
-      expect(extracted.exitCode, extracted.stderr).toBe(0);
-      expect(readFileSync(join(destination, 'mangostudio'), 'utf8')).toBe('binary');
-      expect(readFileSync(join(destination, 'build-state.json'), 'utf8')).toBe('exclude');
+      for (const member of members) {
+        // Byte equality with the staged source, whichever method stored it.
+        expect(Buffer.from(member.bytes).equals(readFileSync(join(binaries, member.name)))).toBe(
+          true
+        );
+      }
     },
-    3 * COMMAND_BUDGET_MS + 5_000
+    COMMAND_BUDGET_MS + 5_000
   );
 
   test('keeps Windows drive prefixes out of tar output operands', () => {
