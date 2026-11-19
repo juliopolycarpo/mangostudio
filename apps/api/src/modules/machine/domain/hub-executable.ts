@@ -12,7 +12,7 @@ function joiner(platform: NodeJS.Platform): typeof posix.join {
   return platform === 'win32' ? win32.join : posix.join;
 }
 
-export type HubExecutablePointer = 'current' | 'versioned' | 'external' | 'source';
+export type HubExecutablePointer = 'current' | 'versioned' | 'external' | 'launcher' | 'source';
 
 export interface HubExecutableProbe {
   readonly platform: NodeJS.Platform;
@@ -104,6 +104,28 @@ export function isUnder(path: string, root: string, platform: NodeJS.Platform): 
   };
   const prefix = normalize(root).replace(/\/+$/, '');
   return normalize(path).startsWith(`${prefix}/`);
+}
+
+/**
+ * Swap an `external` executable for the launcher its package manager keeps
+ * pointing at the installed build. `external` means the path this process runs
+ * from, which for Homebrew, pnpm and Scoop carries the version: a unit that
+ * records it keeps starting the old build after an upgrade, and fails outright
+ * once the manager removes that directory. Every other pointer already
+ * survives an upgrade (or, for a source checkout, has none) and is returned
+ * as is. // Usage: withStableLauncher(resolveHubExecutable(probe), launcherPath)
+ */
+export function withStableLauncher(
+  executable: HubExecutable,
+  launcherPath: string | undefined
+): HubExecutable {
+  if (executable.pointer !== 'external' || !launcherPath) return executable;
+  const [recorded] = executable.argv;
+  return {
+    argv: [launcherPath],
+    pointer: 'launcher',
+    note: `The unit names the package manager's launcher, which follows its upgrades, instead of this version's path${recorded ? ` (${recorded})` : ''}.`,
+  };
 }
 
 /** Decide what the unit runs. // Usage: resolveHubExecutable(probe) */

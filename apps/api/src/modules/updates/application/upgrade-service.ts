@@ -18,6 +18,7 @@ import { mkdir, rm } from 'node:fs/promises';
 import { posix, win32 } from 'node:path';
 
 import type { HubLaunchMode } from '@mangostudio/shared/machine';
+import type { UserServiceManager } from '@mangostudio/shared/machine/service';
 import {
   SOURCE_SHA_MAX,
   UPDATE_ERROR_MAX,
@@ -63,6 +64,8 @@ import {
   createHubServiceManager,
   currentHubExecutable,
   currentInstallOriginProbe,
+  retargetStaleHubService,
+  type StaleUnitProbe,
 } from '../../machine/application/hub-service';
 import type { HubExecutable } from '../../machine/domain/hub-executable';
 import { hubLaunchMode } from '../../machine/domain/hub-process';
@@ -817,6 +820,22 @@ async function defaultStopHub(input: { state: ServerState; launch: HubLaunchMode
 }
 
 /**
+ * Bounce the hub's unit after an upgrade. A unit written before it named the
+ * manager's launcher still records the version the upgrade just replaced, so
+ * it is moved onto the launcher first; restarting it as it was would start that
+ * build, or nothing once the manager removed its directory.
+ * // Usage: await restartServiceUnit(createHubServiceManager(), launcherPath)
+ */
+export async function restartServiceUnit(
+  manager: UserServiceManager,
+  launcherPath: string | undefined,
+  probe?: StaleUnitProbe
+): Promise<void> {
+  await retargetStaleHubService(manager, launcherPath, probe);
+  await manager.restart();
+}
+
+/**
  * Real `restartHub` effect: service-managed bounces through the supervisor,
  * detached stops the old pid and spawns a successor through the manager's
  * launcher or the installer's `current` pointer when one applies, resolving
@@ -829,7 +848,7 @@ async function defaultRestartHub(input: {
   launcherPath?: string;
 }): Promise<void> {
   if (input.launch === 'service') {
-    await createHubServiceManager().restart();
+    await restartServiceUnit(createHubServiceManager(), input.launcherPath);
     return;
   }
   const controller = createProcessController();

@@ -57,6 +57,18 @@ export class FakeServiceManager implements UserServiceManager {
     return this.settle();
   }
 
+  /** Programs the unit was pointed at, in call order. */
+  readonly retargeted: string[] = [];
+  /** What `retarget` answers: whether it changed the unit. */
+  retargetChanges = true;
+
+  retarget(program: string): Promise<boolean> {
+    this.calls.push('retarget');
+    this.retargeted.push(program);
+    if (this.failWith) return Promise.reject(this.failWith);
+    return Promise.resolve(this.retargetChanges);
+  }
+
   readUnit(): Promise<string | null> {
     return Promise.resolve(null);
   }

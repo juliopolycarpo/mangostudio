@@ -88,6 +88,14 @@ export interface UserServiceManager {
    * with the old process when the caller is the service itself.
    */
   restart(): Promise<void>;
+  /**
+   * Point an installed unit at another program, keeping its arguments,
+   * environment, working directory and log file as they are. Returns whether
+   * the unit changed; false when nothing is installed or it already runs
+   * `program`. Does not bounce a running instance: the caller's `restart()` or
+   * `start()` is what brings the new program up.
+   */
+  retarget(program: string): Promise<boolean>;
   /** The installed unit body, or null when nothing is installed. */
   readUnit(): Promise<string | null>;
   /** Where the unit file lives on this platform; null for Windows. */
@@ -344,6 +352,32 @@ function renderScheduledTaskRestartScript(taskName: string): string {
   ].join('\n');
 }
 
+/**
+ * Rewrite the program inside an installed task's encoded runner script and
+ * leave the rest of the task (trigger, settings, environment, log file) alone.
+ * Prints `retargeted` when it changed the task, `unchanged` when the task is
+ * absent or already runs the program.
+ */
+export function renderScheduledTaskRetargetScript(taskName: string, program: string): string {
+  return [
+    "$ErrorActionPreference = 'Stop'",
+    `$task = Get-ScheduledTask -TaskName ${psQuote(taskName)} -ErrorAction SilentlyContinue`,
+    "if ($null -eq $task) { Write-Output 'unchanged'; exit 0 }",
+    '$action = @($task.Actions)[0]',
+    "$found = [regex]::Match([string]$action.Arguments, '-EncodedCommand\\s+(\\S+)')",
+    "if (-not $found.Success) { throw 'The task does not run an encoded runner script.' }",
+    '$runner = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($found.Groups[1].Value))',
+    `$replacement = '& ' + ${psQuote(psQuote(program))}`,
+    "$pattern = '(?m)^& ''(?:[^'']|'''')*'''",
+    '$updated = [regex]::Replace($runner, $pattern, [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $replacement })',
+    "if ($updated -ceq $runner) { Write-Output 'unchanged'; exit 0 }",
+    '$encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($updated))',
+    "$action.Arguments = [regex]::Replace([string]$action.Arguments, '-EncodedCommand\\s+\\S+', ('-EncodedCommand ' + $encoded))",
+    `Set-ScheduledTask -TaskName ${psQuote(taskName)} -Action $action | Out-Null`,
+    "Write-Output 'retargeted'",
+  ].join('\n');
+}
+
 /** Argv that runs a script through Windows PowerShell without shell quoting. */
 function powershellArgv(script: string): string[] {
   return [
@@ -421,9 +455,18 @@ export function execPathFromUnitBody(body: string): string | null {
 }
 
 function firstSystemdArg(execStart: string): string {
-  if (!execStart.startsWith('"')) return execStart.split(/\s+/)[0] ?? execStart;
+  return splitSystemdProgram(execStart).program;
+}
+
+/** The program an `ExecStart` value starts and the text after it, arguments included. */
+function splitSystemdProgram(execStart: string): { program: string; rest: string } {
+  if (!execStart.startsWith('"')) {
+    const program = execStart.split(/\s+/)[0] ?? execStart;
+    return { program, rest: execStart.slice(program.length) };
+  }
   let out = '';
-  for (let index = 1; index < execStart.length; index += 1) {
+  let index = 1;
+  for (; index < execStart.length; index += 1) {
     const char = execStart[index];
     if (char === '\\' && index + 1 < execStart.length) {
       out += execStart[index + 1];
@@ -433,7 +476,29 @@ function firstSystemdArg(execStart: string): string {
     if (char === '"') break;
     out += char;
   }
-  return out;
+  return { program: out, rest: execStart.slice(index + 1) };
+}
+
+/**
+ * The unit body with the program it starts replaced and everything else kept
+ * byte for byte, or null when the body names no program this can find.
+ * // Usage: replaceUnitProgram(body, '/opt/homebrew/bin/mangostudio')
+ */
+export function replaceUnitProgram(body: string, program: string): string | null {
+  const execStart = /^ExecStart=(.+)$/m.exec(body);
+  if (execStart?.[1]) {
+    const { rest } = splitSystemdProgram(execStart[1].trim());
+    const line = `ExecStart=${escapeSystemdArg(program, { execStart: true })}${rest}`;
+    return (
+      body.slice(0, execStart.index) + line + body.slice(execStart.index + execStart[0].length)
+    );
+  }
+  const plist = /(<key>ProgramArguments<\/key>\s*<array>\s*<string>)[^<]*(<\/string>)/.exec(body);
+  if (plist?.[1] && plist[2]) {
+    const replacement = `${plist[1]}${escapeXml(program)}${plist[2]}`;
+    return body.slice(0, plist.index) + replacement + body.slice(plist.index + plist[0].length);
+  }
+  return null;
 }
 
 function unescapeXml(value: string): string {
@@ -618,6 +683,20 @@ export function createUserServiceManager(
     }
   };
 
+  /** The unit body pointed at `program`, or null when nothing is installed or it already runs it. */
+  const retargetedUnitBody = async (program: string): Promise<string | null> => {
+    const body = await readUnit();
+    if (body === null) return null;
+    const updated = replaceUnitProgram(body, program);
+    if (updated === null) {
+      throw new RuntimeServiceManagementError(
+        'runtime_service_unsupported',
+        `The unit at ${unitPath} names no program to retarget; install it again.`
+      );
+    }
+    return updated === body ? null : updated;
+  };
+
   const linux = {
     async install(definition: UserServiceDefinition) {
       await requireSystemd();
@@ -695,6 +774,16 @@ export function createUserServiceManager(
           'systemctl restart'
         )
       ),
+    async retarget(program: string) {
+      await requireSystemd();
+      const updated = await retargetedUnitBody(program);
+      if (updated === null) return false;
+      await deps.writeFile(unitPath as string, updated);
+      // The running process keeps the old program until the caller's restart;
+      // systemd must reread the file first or that restart reuses the old one.
+      await requireCommand(['systemctl', '--user', 'daemon-reload'], 'systemctl daemon-reload');
+      return true;
+    },
   };
 
   const darwinTarget = `gui/${deps.uid}/${identity.launchdLabel}`;
@@ -772,6 +861,15 @@ export function createUserServiceManager(
     // of the domain — and every other backend restarts a stopped unit into a
     // running one.
     restart: () => darwinBounce(true),
+    async retarget(program: string) {
+      const updated = await retargetedUnitBody(program);
+      if (updated === null) return false;
+      await deps.writeFile(unitPath as string, updated);
+      // launchd keeps the plist it loaded, so the job leaves the domain here and
+      // the caller's `start()` or `restart()` bootstraps the rewritten file.
+      await run(['launchctl', 'bootout', darwinTarget]);
+      return true;
+    },
   };
 
   /** Run a PowerShell script, naming the cmdlet it stands for in any refusal. */
@@ -824,6 +922,19 @@ export function createUserServiceManager(
         renderScheduledTaskRestartScript(identity.taskName),
         'Stop-ScheduledTask/Start-ScheduledTask'
       ),
+    async retarget(program: string) {
+      const result = await run(
+        powershellArgv(renderScheduledTaskRetargetScript(identity.taskName, program))
+      );
+      if (result.exitCode !== 0) {
+        const detail = result.stderr.trim() || result.stdout.trim();
+        throw new RuntimeServiceManagementError(
+          'runtime_service_unsupported',
+          `Set-ScheduledTask failed (exit ${result.exitCode})${detail ? `: ${detail}` : ''}`
+        );
+      }
+      return result.stdout.trim() === 'retargeted';
+    },
   };
 
   const backend = () => {
@@ -869,6 +980,7 @@ export function createUserServiceManager(
     start: async () => await require().start(),
     stop: async () => await require().stop(),
     restart: async () => await require().restart(),
+    retarget: async (program) => await require().retarget(program),
   };
 }
 

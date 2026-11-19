@@ -104,10 +104,13 @@ The unit runs `serve` through whichever program survives an upgrade:
   on Windows — the junction, never the `bin` shim: a `.cmd` would make the
   supervisor supervise `cmd.exe`), so a new version is picked up without
   touching the unit.
-- **Package manager** — the resolved executable, wherever the manager put it.
-  Not the manager's own launcher: the npm wrapper and the Cargo shim on Windows
-  spawn the binary as a child, so a supervisor pointed at one would track the
-  wrapper and not the hub.
+- **Package manager** — the path the manager keeps pointing at the installed
+  build, so the unit follows its upgrades: Homebrew's `<prefix>/bin/mangostudio`,
+  pnpm's shim in the pnpm home (POSIX), Scoop's `current` directory. npm and bun
+  put no version in the resolved executable's path, so it is used as is. Never
+  the npm wrapper, which is a `.js` file. A unit written by an earlier release
+  with a versioned path is moved onto the launcher by `mangostudio restart` and
+  by an upgrade's restart, keeping its environment and arguments.
 - **Source checkout** — the workspace entry through Bun, with the directory
   `install` was run from as the unit's working directory.
 - **Installer layout with no launcher yet** — this version's own directory. The

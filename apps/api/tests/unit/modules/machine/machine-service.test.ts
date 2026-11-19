@@ -134,6 +134,8 @@ function makeService(
       pid: 42,
     }),
     executable: () => ({ argv: ['/home/j/.mango/dist/current/mangostudio'], pointer: 'current' }),
+    // Hermetic by default: the real one probes this process's own install origin.
+    launcherPath: () => undefined,
     serviceLogFile: () => '/home/j/.mango/logs/service.log',
     secretPersisted: () => true,
     spawnSuccessor: (next) => {
@@ -345,6 +347,18 @@ describe('machineService.service', () => {
     expect(recorder.shutdowns).toBe(0);
     await recorder.flush();
     expect(recorder.shutdowns).toBe(1);
+  });
+
+  it("installs the package manager's launcher, not the versioned path this hub runs from", async () => {
+    const { service, manager } = makeService({
+      executable: () => ({
+        argv: ['/opt/homebrew/Cellar/mangostudio/0.1.1/libexec/mangostudio'],
+        pointer: 'external',
+      }),
+      launcherPath: () => '/opt/homebrew/bin/mangostudio',
+    });
+    await service.service('install', LOCAL);
+    expect(manager.installed[0]?.argv).toEqual(['/opt/homebrew/bin/mangostudio', 'serve']);
   });
 
   it('bakes the running bind target into the unit when it differs from config', async () => {

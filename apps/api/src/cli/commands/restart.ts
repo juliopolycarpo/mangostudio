@@ -15,7 +15,9 @@ import {
 import {
   createHubServiceManager,
   currentHubExecutable,
+  currentHubExecutableProbe,
   currentLauncherPath,
+  retargetStaleHubService,
 } from '../../modules/machine/application/hub-service';
 import type { HubExecutable } from '../../modules/machine/domain/hub-executable';
 import { hubLaunchMode, hubUrl } from '../../modules/machine/domain/hub-process';
@@ -55,6 +57,8 @@ export interface RestartDeps {
    * directory this process runs from is the manager's to replace.
    */
   launcherPath: () => string | undefined;
+  /** Whether a path exists; the launcher a stale unit moves to must be one the manager left. */
+  pathExists: (path: string) => boolean;
   /** Runs the launcher with `--version` before the old hub is stopped; throws when it cannot run. */
   readTargetVersion: (argv: readonly string[]) => Promise<string>;
 }
@@ -77,6 +81,7 @@ export async function runRestart(deps: Partial<RestartDeps> = {}): Promise<void>
 
   const mode = hubLaunchMode(state);
   if (mode === 'service') {
+    await retargetUnit(d);
     await d.manager.restart();
     d.log(`Restart requested through ${state.service}.`);
     const next = await waitForComeback(state.pid, d);
@@ -99,11 +104,25 @@ async function startInstalledService(d: Required<RestartDeps>): Promise<void> {
       'No running instance to restart. Start one with "mangostudio serve -d", or install the service with "mangostudio service install".'
     );
   }
+  await retargetUnit(d);
   await d.manager.start();
   const next = await waitForComeback(null, d);
   d.log(
     `MangoStudio started through ${status.unitName} (PID ${next.pid}, ${hubUrl(next.host, next.port)}).`
   );
+}
+
+/**
+ * A unit installed before it named the manager's launcher records a versioned
+ * path that an upgrade replaced; bring it onto the launcher before the unit is
+ * started or bounced, or the restart runs the old build (or none at all).
+ */
+async function retargetUnit(d: Required<RestartDeps>): Promise<void> {
+  const moved = await retargetStaleHubService(d.manager, d.launcherPath(), {
+    platform: d.platform,
+    pathExists: d.pathExists,
+  });
+  if (moved) d.log(`Updated the service unit to run ${moved.to} (it named ${moved.from}).`);
 }
 
 /**
@@ -173,6 +192,7 @@ function resolveDeps(deps: Partial<RestartDeps>): Required<RestartDeps> {
     requestShutdown: deps.requestShutdown ?? requestHubShutdown,
     executable: deps.executable ?? (() => currentHubExecutable()),
     launcherPath: deps.launcherPath ?? currentLauncherPath,
+    pathExists: deps.pathExists ?? currentHubExecutableProbe().pathExists,
     readTargetVersion: deps.readTargetVersion ?? readRestartTargetVersion,
   };
 }

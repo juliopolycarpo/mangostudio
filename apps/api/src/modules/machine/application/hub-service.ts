@@ -28,6 +28,7 @@ import { readTomlDocument } from '../../../lib/toml';
 import {
   detectInstallOrigin,
   type InstallOriginProbe,
+  launcherForVersionedPath,
   restartLauncher,
 } from '../../updates/domain/install-origin';
 import {
@@ -237,6 +238,48 @@ export function currentLauncherPath(): string | undefined {
     execPath: probe.execPath,
     pathExists: currentHubExecutableProbe().pathExists,
   });
+}
+
+export interface StaleUnitProbe {
+  readonly platform: NodeJS.Platform;
+  readonly pathExists: (path: string) => boolean;
+}
+
+/** What {@link retargetStaleHubService} changed. */
+export interface RetargetedUnit {
+  readonly from: string;
+  readonly to: string;
+}
+
+/**
+ * Move a unit written before it named the manager's launcher onto it. Such a
+ * unit records the versioned path the install had when `service install` ran
+ * (Homebrew's Cellar entry, pnpm's `.pnpm` directory, Scoop's version
+ * directory), so a restart after an upgrade starts the replaced build, or
+ * fails once the manager removed that directory. Only a unit whose program is
+ * a versioned path of the same layout as `launcherPath` is touched; one the
+ * operator pointed somewhere else is left alone. The caller still bounces the
+ * unit: this rewrites the definition, not the running process.
+ * // Usage: await retargetStaleHubService(manager, currentLauncherPath())
+ */
+export async function retargetStaleHubService(
+  manager: UserServiceManager,
+  launcherPath: string | undefined,
+  probe: StaleUnitProbe = {
+    platform: process.platform,
+    pathExists: currentHubExecutableProbe().pathExists,
+  }
+): Promise<RetargetedUnit | null> {
+  if (!launcherPath) return null;
+  const { installed, execPath } = await manager.status();
+  if (!installed || !execPath) return null;
+  const sameFile = (a: string, b: string): boolean =>
+    probe.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+  if (sameFile(execPath, launcherPath)) return null;
+  const owner = launcherForVersionedPath(execPath, probe);
+  if (owner === undefined || !sameFile(owner, launcherPath)) return null;
+  if (!(await manager.retarget(launcherPath))) return null;
+  return { from: execPath, to: launcherPath };
 }
 
 /**

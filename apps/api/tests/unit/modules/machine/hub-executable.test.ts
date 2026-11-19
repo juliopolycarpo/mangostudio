@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 
 import {
+  type HubExecutable,
   type HubExecutableProbe,
   resolveHubExecutable,
+  withStableLauncher,
 } from '../../../../src/modules/machine/domain/hub-executable';
 
 function probe(overrides: Partial<HubExecutableProbe> = {}): HubExecutableProbe {
@@ -93,6 +95,32 @@ describe('resolveHubExecutable', () => {
   it('does not mistake a sibling directory for the dist root', () => {
     const result = resolveHubExecutable(probe({ execPath: '/home/j/.mango/dist-old/mangostudio' }));
     expect(result.pointer).toBe('external');
+  });
+});
+
+describe('withStableLauncher', () => {
+  const external: HubExecutable = {
+    argv: ['/opt/homebrew/Cellar/mangostudio/0.1.1/libexec/mangostudio'],
+    pointer: 'external',
+  };
+
+  it('names the launcher in place of an external path that carries the version', () => {
+    const result = withStableLauncher(external, '/opt/homebrew/bin/mangostudio');
+    expect(result.argv).toEqual(['/opt/homebrew/bin/mangostudio']);
+    expect(result.pointer).toBe('launcher');
+    expect(result.note).toContain('/opt/homebrew/Cellar/mangostudio/0.1.1/libexec/mangostudio');
+  });
+
+  it('keeps an external path when the install has no launcher', () => {
+    expect(withStableLauncher(external, undefined)).toBe(external);
+  });
+
+  it.each([
+    ['current', { argv: ['/home/j/.mango/dist/current/mangostudio'], pointer: 'current' }],
+    ['source', { argv: ['/usr/bin/bun', '/repo/cli.ts'], pointer: 'source' }],
+    ['versioned', { argv: ['/home/j/.mango/dist/0.1.1/mangostudio'], pointer: 'versioned' }],
+  ] as const)('leaves a %s executable alone even when a launcher is offered', (_, executable) => {
+    expect(withStableLauncher(executable, '/opt/homebrew/bin/mangostudio')).toBe(executable);
   });
 });
 

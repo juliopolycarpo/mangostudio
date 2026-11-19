@@ -85,7 +85,7 @@ import {
   type UpgradeService,
 } from '../../updates/application/upgrade-service';
 import { fitInstalledVia, type InstallOriginProbe } from '../../updates/domain/install-origin';
-import type { HubExecutable } from '../domain/hub-executable';
+import { type HubExecutable, withStableLauncher } from '../domain/hub-executable';
 import { describeHubProcess, hubLaunchMode } from '../domain/hub-process';
 import { hubServiceUnitName } from '../domain/hub-service-identity';
 import {
@@ -106,6 +106,7 @@ import {
   createHubServiceManager,
   currentHubExecutable,
   currentInstallOriginProbe,
+  currentLauncherPath,
   hubServiceLogPath,
   hubServiceTargetFor,
   isAuthSecretPersisted,
@@ -189,6 +190,8 @@ export interface MachineServiceDeps {
   readonly evaluateGuard: (clientIp: string | undefined) => InstallGuard;
   readonly environment: () => MachineEnvironment;
   readonly executable: () => HubExecutable;
+  /** The package manager's launcher that follows its upgrades, when this install has one. */
+  readonly launcherPath: () => string | undefined;
   readonly serviceLogFile: () => string;
   readonly secretPersisted: () => boolean;
   /** The canonical user config.toml path; never a hard-coded `~/.mango`. */
@@ -565,7 +568,8 @@ export function createMachineService(deps: Partial<MachineServiceDeps> = {}): Ma
       port: environment.serverPort,
     });
     const definition = buildHubServiceDefinition({
-      executable: d.executable(),
+      // A unit must not record this build's versioned path: see `withStableLauncher`.
+      executable: withStableLauncher(d.executable(), d.launcherPath()),
       unitName,
       logFile: d.serviceLogFile(),
       env: d.env,
@@ -750,6 +754,7 @@ function resolveDeps(deps: Partial<MachineServiceDeps>): MachineServiceDeps {
       }),
     environment,
     executable,
+    launcherPath: deps.launcherPath ?? currentLauncherPath,
     serviceLogFile: deps.serviceLogFile ?? hubServiceLogPath,
     secretPersisted: deps.secretPersisted ?? (() => isAuthSecretPersisted()),
     configFilePath: deps.configFilePath ?? (() => getConfig().configFilePath),

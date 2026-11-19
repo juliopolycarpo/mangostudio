@@ -17,6 +17,7 @@ import {
   renderScheduledTaskInstallScript,
   renderScheduledTaskRunnerScript,
   renderSystemdUnitFile,
+  replaceUnitProgram,
   systemdUserUnitPath,
   type UserServiceDefinition,
   type UserServiceExecDeps,
@@ -602,6 +603,141 @@ describe('createUserServiceManager on win32', () => {
     expect(script.indexOf('Stop-ScheduledTask')).toBeLessThan(script.indexOf('Start-Sleep'));
     expect(script.indexOf('Start-Sleep')).toBeLessThan(script.indexOf('Start-ScheduledTask'));
     expect(script).toContain("-eq 'Running'");
+  });
+});
+
+describe('replaceUnitProgram', () => {
+  const STABLE = '/opt/homebrew/bin/mangostudio';
+
+  it('replaces the systemd program and keeps arguments, environment and log lines', () => {
+    const body = renderSystemdUnitFile(DEFINITION);
+    const updated = replaceUnitProgram(body, STABLE) ?? '';
+    expect(updated).toBe(
+      body.replace('ExecStart="/opt/My Apps/example" serve', `ExecStart=${STABLE} serve`)
+    );
+    expect(execPathFromUnitBody(updated)).toBe(STABLE);
+  });
+
+  it('quotes a replacement program the way renderSystemdUnitFile would', () => {
+    const body = renderSystemdUnitFile({ ...DEFINITION, argv: ['/plain/example', 'serve'] });
+    const updated = replaceUnitProgram(body, '/opt/My Apps/new') ?? '';
+    expect(updated).toContain('ExecStart="/opt/My Apps/new" serve');
+  });
+
+  it('replaces the launchd program and keeps the rest of the plist', () => {
+    const body = renderLaunchdPlistFile('com.example.unit', DEFINITION);
+    const updated = replaceUnitProgram(body, STABLE) ?? '';
+    expect(updated).toBe(
+      body.replace('<string>/opt/My Apps/example</string>', `<string>${STABLE}</string>`)
+    );
+    expect(execPathFromUnitBody(updated)).toBe(STABLE);
+  });
+
+  it('returns null for a body that names no program', () => {
+    expect(replaceUnitProgram('nothing here', STABLE)).toBeNull();
+  });
+});
+
+describe('createUserServiceManager retarget', () => {
+  const STABLE = '/home/linuxbrew/.linuxbrew/bin/mangostudio';
+  const VERSIONED: UserServiceDefinition = {
+    ...DEFINITION,
+    argv: ['/home/linuxbrew/.linuxbrew/Cellar/mangostudio/0.1.1/libexec/mangostudio', 'serve'],
+  };
+
+  it('on linux rewrites only the program and reloads systemd before any restart', async () => {
+    const host = new FakeServiceHost();
+    const unitPath = '/home/test/.config/systemd/user/example.service';
+    host.files.set(unitPath, renderSystemdUnitFile(VERSIONED));
+    const manager = createUserServiceManager(IDENTITY, host.deps());
+
+    expect(await manager.retarget(STABLE)).toBe(true);
+
+    const written = host.files.get(unitPath) ?? '';
+    expect(execPathFromUnitBody(written)).toBe(STABLE);
+    expect(written).toContain(`ExecStart=${STABLE} serve`);
+    expect(written).toContain('WorkingDirectory="/opt/My Apps"');
+    expect(written).toContain('StandardOutput=append:/home/test/logs/example.log');
+    expect(host.argv).toEqual([['systemctl', '--user', 'daemon-reload']]);
+  });
+
+  it('on linux leaves a unit that already runs the program alone', async () => {
+    const host = new FakeServiceHost();
+    host.files.set(
+      '/home/test/.config/systemd/user/example.service',
+      renderSystemdUnitFile({ ...VERSIONED, argv: [STABLE, 'serve'] })
+    );
+
+    expect(await createUserServiceManager(IDENTITY, host.deps()).retarget(STABLE)).toBe(false);
+    expect(host.argv).toEqual([]);
+  });
+
+  it('on linux does nothing when no unit is installed', async () => {
+    const host = new FakeServiceHost();
+    expect(await createUserServiceManager(IDENTITY, host.deps()).retarget(STABLE)).toBe(false);
+    expect(host.files.size).toBe(0);
+  });
+
+  it('on darwin rewrites the plist and boots the loaded job out so the next start rereads it', async () => {
+    const host = new FakeServiceHost({ platform: 'darwin' });
+    const plistPath = '/home/test/Library/LaunchAgents/com.example.unit.plist';
+    host.files.set(plistPath, renderLaunchdPlistFile('com.example.unit', VERSIONED));
+
+    expect(await createUserServiceManager(IDENTITY, host.deps()).retarget(STABLE)).toBe(true);
+
+    expect(execPathFromUnitBody(host.files.get(plistPath) ?? '')).toBe(STABLE);
+    expect(host.argv).toEqual([['launchctl', 'bootout', 'gui/1000/com.example.unit']]);
+  });
+
+  it('on darwin leaves a plist that already runs the program alone', async () => {
+    const host = new FakeServiceHost({ platform: 'darwin' });
+    host.files.set(
+      '/home/test/Library/LaunchAgents/com.example.unit.plist',
+      renderLaunchdPlistFile('com.example.unit', { ...VERSIONED, argv: [STABLE, 'serve'] })
+    );
+
+    expect(await createUserServiceManager(IDENTITY, host.deps()).retarget(STABLE)).toBe(false);
+    expect(host.argv).toEqual([]);
+  });
+
+  it('on win32 rewrites the program inside the task action and reports the change', async () => {
+    const host = new FakeServiceHost({
+      platform: 'win32',
+      onExec: () => ({ exitCode: 0, stdout: 'retargeted\r\n', stderr: '' }),
+    });
+    const program = "C:\\Users\\it's me\\scoop\\apps\\mangostudio\\current\\mangostudio.exe";
+
+    expect(await createUserServiceManager(IDENTITY, host.deps()).retarget(program)).toBe(true);
+
+    const script = decodePowerShellArgv(host.argv[0] ?? []) ?? '';
+    expect(script).toContain("Get-ScheduledTask -TaskName 'Example Unit'");
+    expect(script).toContain("Set-ScheduledTask -TaskName 'Example Unit' -Action $action");
+    // The replacement is the program as `renderScheduledTaskRunnerScript` quotes
+    // it: single quotes doubled, then quoted once more for the script literal.
+    expect(script).toContain(
+      "$replacement = '& ' + '''C:\\Users\\it''''s me\\scoop\\apps\\mangostudio\\current\\mangostudio.exe'''"
+    );
+    expect(script).not.toContain('Register-ScheduledTask');
+  });
+
+  it('on win32 reports no change when the task is absent or already current', async () => {
+    const host = new FakeServiceHost({
+      platform: 'win32',
+      onExec: () => ({ exitCode: 0, stdout: 'unchanged\r\n', stderr: '' }),
+    });
+    expect(await createUserServiceManager(IDENTITY, host.deps()).retarget('C:\\x.exe')).toBe(false);
+  });
+
+  it('on win32 names the cmdlet and exit code when Task Scheduler refuses', async () => {
+    const host = new FakeServiceHost({
+      platform: 'win32',
+      onExec: () => ({ exitCode: 1, stdout: '', stderr: 'Access is denied' }),
+    });
+    await expect(
+      createUserServiceManager(IDENTITY, host.deps()).retarget('C:\\x.exe')
+    ).rejects.toMatchObject({
+      message: 'Set-ScheduledTask failed (exit 1): Access is denied',
+    });
   });
 });
 
