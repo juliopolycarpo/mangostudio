@@ -27,19 +27,26 @@ export default defineConfig({
   projects: [
     // The terminal spec runs first, on its own. A Local terminal needs the
     // single-user-host attestation, which the hub withdraws for the rest of its
-    // process once a second account connects — and `auth-flow.spec.ts` signs
-    // one up. Filename order is not a guarantee with more than one worker;
-    // a project dependency is.
+    // process once a second account connects: `auth-flow.spec.ts`,
+    // `two-tab-rename.spec.ts` and every `newSignedInContext` caller sign one
+    // up. Filename order is not a guarantee with more than one worker, and
+    // `terminal.spec.ts` sorts last anyway.
+    //
+    // The order comes from `teardown`, not from `dependencies`. Playwright skips
+    // a project whose dependency failed, so `chromium` depending on `terminal`
+    // turned one flaky terminal run into every other spec reported as skipped.
+    // A teardown project also waits for its setup project to finish, but it runs
+    // whether that project passed or failed.
     {
       name: 'terminal',
       use: { browserName: 'chromium' },
       testMatch: /terminal\.spec\.ts$/,
+      teardown: 'chromium',
     },
     {
       name: 'chromium',
       use: { browserName: 'chromium' },
       testIgnore: /terminal\.spec\.ts$/,
-      dependencies: ['terminal'],
     },
   ],
   use: {
