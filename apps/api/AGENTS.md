@@ -84,6 +84,9 @@ Unit tests that call `clearRegistry()` (e.g., `tool-registry.test.ts`, `list-pro
 MUST snapshot the registry in `beforeEach` and restore via `registerProviders()` /
 `registerTools()` in `afterEach`. After a test file completes, the global registries
 must be fully populated so that subsequent files see the expected runtime services.
+The preload backs this up for tools: it captures the registry after startup registration and
+puts it back after every test (`tests/support/setup/tool-registry-baseline.ts`), so a missed
+restore no longer hides a built-in tool from later files. Do not rely on it; keep restoring.
 
 When adding a new provider or tool, update `tests/support/registration-expectations.ts`
 so the expectation lists stay co-located with the registration points.

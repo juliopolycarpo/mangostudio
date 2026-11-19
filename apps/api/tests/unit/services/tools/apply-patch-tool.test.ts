@@ -17,6 +17,7 @@ import {
 import { executeReadFile } from '../../../../src/services/tools/builtin/read-file';
 import { executeReplaceRange } from '../../../../src/services/tools/builtin/replace-range';
 import { executeWriteFile } from '../../../../src/services/tools/builtin/write-file';
+import { registerTools } from '../../../../src/services/tools/register-tools';
 import { clearRegistry, executeTool } from '../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../src/services/tools/types';
 
@@ -32,6 +33,7 @@ beforeEach(() => {
 
 afterEach(() => {
   clearRegistry();
+  registerTools();
   rmSync(tempDir, { recursive: true, force: true });
 });
 
