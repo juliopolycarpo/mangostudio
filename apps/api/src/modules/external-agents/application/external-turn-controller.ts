@@ -82,6 +82,7 @@ import {
   type OpenRefusalPresentation,
 } from '../domain/external-open-refusal';
 import { endLeavesConversationUnresumable } from '../domain/external-resume-policy';
+import type { ExternalRuntimeSessionState } from '../domain/external-runtime-session-state';
 import { turnErrorRemedyFor } from '../domain/external-turn-error-remedy';
 import {
   classifySubmissionFailure,
@@ -137,13 +138,43 @@ const EXTERNAL_INTERACTION_MODE: Exclude<InteractionMode, 'image'> = 'agent';
 const STEER_TERMINATION_GRACE_MS = 3_000;
 
 /**
- * How long a turn may stay silent after an event the hub could not read before it is ended.
+ * How the hub decides that a turn whose last event it could not read is over.
  *
- * Long enough that a vendor mid-tool is not cut off by one unknown progress event (any event the
- * hub does understand clears the timer), short enough that a turn whose unreadable event was its
- * ending does not look alive for long.
+ * Silence alone proves nothing: a vendor mid-tool sends no events, and no heartbeat exists. So a
+ * quiet window only prompts the hub to ask the runtime whether the session still has a turn
+ * running (`runtime.health`); the answer decides.
  */
-const UNRECOGNIZED_EVENT_QUIET_MS = 30_000;
+export interface UnrecognizedEventPolicy {
+  /** The first quiet window after an unrecognized event, and the base of the recheck backoff. */
+  readonly quietMs: number;
+  /**
+   * The longest wait between rechecks. A health report runs the runtime's `git` and `gh` probes,
+   * so a turn that is simply busy is asked about less and less often, not every `quietMs`.
+   */
+  readonly maxRecheckMs: number;
+  /**
+   * The last resort: the turn ends this long after the last unrecognized event whatever the
+   * runtime says or fails to say. Just past the runtime's own hard turn timeout (one hour, approvals
+   * included), by which point it has ended the turn itself.
+   */
+  readonly lastResortMs: number;
+  /** The deadline on one health read. */
+  readonly healthDeadlineMs: number;
+  /**
+   * The pause between a health read that says `idle` and ending the turn. The runtime may mark a
+   * session idle just before its terminal event reaches the hub; that event settles the turn
+   * itself, so the hub must not race it with a second error.
+   */
+  readonly settleMs: number;
+}
+
+const DEFAULT_UNRECOGNIZED_EVENT_POLICY: UnrecognizedEventPolicy = {
+  quietMs: 30_000,
+  maxRecheckMs: 5 * 60_000,
+  lastResortMs: 65 * 60_000,
+  healthDeadlineMs: 5_000,
+  settleMs: 1_000,
+};
 
 /** The error code recorded on a turn the hub ended after an unreadable event went unanswered. */
 const UNRECOGNIZED_EVENT_ERROR_CODE = 'unrecognized_event';
@@ -297,8 +328,8 @@ export interface ExternalTurnControllerDependencies {
   readonly newId?: () => string;
   /** Overrides {@link STEER_TERMINATION_GRACE_MS}; a test's only hook for it. */
   readonly steerTerminationGraceMs?: number;
-  /** Overrides {@link UNRECOGNIZED_EVENT_QUIET_MS}; a test's only hook for it. */
-  readonly unrecognizedEventQuietMs?: number;
+  /** Overrides {@link DEFAULT_UNRECOGNIZED_EVENT_POLICY} field by field; a test's only hook for it. */
+  readonly unrecognizedEventPolicy?: Partial<UnrecognizedEventPolicy>;
   /** Backoff, cap and per-attempt deadline for resubmitting a turn. */
   readonly retryPolicy?: RetryPolicy;
   /** The backoff wait; a test injects a fake clock here. */
@@ -541,8 +572,10 @@ export function createExternalTurnController(
   const newId = dependencies.newId ?? generateId;
   const steerTerminationGraceMs =
     dependencies.steerTerminationGraceMs ?? STEER_TERMINATION_GRACE_MS;
-  const unrecognizedEventQuietMs =
-    dependencies.unrecognizedEventQuietMs ?? UNRECOGNIZED_EVENT_QUIET_MS;
+  const unrecognizedEventPolicy: UnrecognizedEventPolicy = {
+    ...DEFAULT_UNRECOGNIZED_EVENT_POLICY,
+    ...dependencies.unrecognizedEventPolicy,
+  };
   const retryPolicy = dependencies.retryPolicy ?? DEFAULT_RETRY_POLICY;
   const sleep = dependencies.sleep ?? sleepUnlessAborted;
   const random = dependencies.random ?? Math.random;
@@ -864,48 +897,142 @@ export function createExternalTurnController(
 
     /** Highest envelope sequence this consumer has seen, so a synthesized event continues it. */
     let lastSequence = 0;
-    let unrecognizedEventTimer: ReturnType<typeof setTimeout> | undefined;
+
+    /**
+     * One run of silence the hub is watching after an event it could not read. A new unrecognized
+     * event replaces it; a recognized event, a terminal state or a new session handle ends it.
+     */
+    interface UnrecognizedEventEpisode {
+      readonly type: string | undefined;
+      readonly since: number;
+      readonly watchedHandle: ExternalSessionHandle;
+      timer?: ReturnType<typeof setTimeout>;
+      settle?: { readonly cancel: () => void };
+    }
+    let unrecognizedEpisode: UnrecognizedEventEpisode | undefined;
 
     function disarmUnrecognizedEventWatchdog(): void {
-      clearTimeout(unrecognizedEventTimer);
-      unrecognizedEventTimer = undefined;
+      const episode = unrecognizedEpisode;
+      unrecognizedEpisode = undefined;
+      if (!episode) return;
+      clearTimeout(episode.timer);
+      episode.settle?.cancel();
+    }
+
+    function isCurrentEpisode(episode: UnrecognizedEventEpisode): boolean {
+      return !terminalReason && unrecognizedEpisode === episode && episode.watchedHandle === handle;
     }
 
     /**
-     * Ends the turn when the vendor goes quiet right after an event the hub could not read.
+     * Starts watching for the end of a turn whose last event the hub could not read.
      *
      * A runtime newer than the hub can end a turn with an event type this hub's schema does not
      * know. Dropping it is right for progress (#964), but a dropped ending leaves nothing to
      * finalize the turn, and the session is reused across turns so no teardown will either.
-     * Every unrecognized event rearms the timer and every recognized one clears it, so a vendor
-     * that carries on is never cut off. The turn ends as a vendor error that names the event
-     * type, and the vendor is told to stop in case the event was not an ending.
+     * Silence alone cannot say which it was: a vendor mid-tool sends nothing, and no heartbeat
+     * exists. So after a quiet window the hub asks the runtime whether the session still has a
+     * turn running, and ends the turn only when the answer is `idle` (see
+     * {@link checkUnrecognizedEpisode}). Every unrecognized event restarts the watch and every
+     * recognized one ends it, so a vendor that carries on is never asked about.
      */
     function armUnrecognizedEventWatchdog(type: string | undefined): void {
       if (terminalReason) return;
-      clearTimeout(unrecognizedEventTimer);
-      unrecognizedEventTimer = setTimeout(() => {
-        unrecognizedEventTimer = undefined;
-        if (terminalReason) return;
-        logger.warn('unrecognized_event_quiet', {
+      disarmUnrecognizedEventWatchdog();
+      const episode: UnrecognizedEventEpisode = { type, since: now(), watchedHandle: handle };
+      unrecognizedEpisode = episode;
+      scheduleEpisodeCheck(episode, 0);
+    }
+
+    /** The wait doubles per recheck, up to the policy's ceiling. */
+    function scheduleEpisodeCheck(episode: UnrecognizedEventEpisode, attempt: number): void {
+      const wait = Math.min(
+        unrecognizedEventPolicy.quietMs * 2 ** attempt,
+        unrecognizedEventPolicy.maxRecheckMs
+      );
+      episode.timer = setTimeout(() => {
+        void checkUnrecognizedEpisode(episode, attempt);
+      }, wait);
+    }
+
+    async function checkUnrecognizedEpisode(
+      episode: UnrecognizedEventEpisode,
+      attempt: number
+    ): Promise<void> {
+      if (!isCurrentEpisode(episode)) return;
+      // The runtime's own approval timeout ends a question nobody answers, and the answer or the
+      // lapse arrives as an event. A turn waiting on a person is quiet by design.
+      if (transcript.pendingApprovalIds().length > 0) {
+        scheduleEpisodeCheck(episode, attempt + 1);
+        return;
+      }
+      if (now() - episode.since >= unrecognizedEventPolicy.lastResortMs) {
+        logger.warn('unrecognized_event_last_resort', {
           sessionId: handle.sessionId,
-          type,
-          quietMs: unrecognizedEventQuietMs,
+          type: episode.type,
+          lastResortMs: unrecognizedEventPolicy.lastResortMs,
         });
-        applyVendorEvent(
-          {
-            type: 'error',
-            error: {
-              code: UNRECOGNIZED_EVENT_ERROR_CODE,
-              message: `The agent sent an event of type "${type ?? 'unknown'}" that this version of MangoStudio does not recognize and then went quiet, so the turn was ended.`,
-            },
+        endTurnAfterUnrecognizedEvent(episode, { cancelVendor: true });
+        return;
+      }
+
+      let state: ExternalRuntimeSessionState;
+      try {
+        state = await episode.watchedHandle.runtimeState({
+          timeoutMs: unrecognizedEventPolicy.healthDeadlineMs,
+        });
+      } catch (error) {
+        // Not knowing is not a reason to end a turn that may be healthy.
+        logger.warn('unrecognized_event_state_unavailable', {
+          sessionId: episode.watchedHandle.sessionId,
+          error: String(error),
+        });
+        if (isCurrentEpisode(episode)) scheduleEpisodeCheck(episode, attempt + 1);
+        return;
+      }
+      if (!isCurrentEpisode(episode)) return;
+      if (state !== 'idle') {
+        // `running` is a vendor at work. `closing`, a row cut by the report's cap and a state this
+        // hub has no word for prove nothing; a closing session reports its own teardown.
+        scheduleEpisodeCheck(episode, attempt + 1);
+        return;
+      }
+
+      // The runtime may mark the session idle just before its terminal event reaches the hub.
+      const settle = delay(unrecognizedEventPolicy.settleMs);
+      episode.settle = settle;
+      await settle.promise;
+      if (!isCurrentEpisode(episode)) return;
+      // The runtime says nothing is running, so there is nothing for the vendor to cancel.
+      endTurnAfterUnrecognizedEvent(episode, { cancelVendor: false });
+    }
+
+    /**
+     * Ends the turn as a vendor error naming the unreadable event, through the same path as a
+     * vendor event, so the stored transcript, the live stream and the terminal reason agree.
+     */
+    function endTurnAfterUnrecognizedEvent(
+      episode: UnrecognizedEventEpisode,
+      options: { readonly cancelVendor: boolean }
+    ): void {
+      unrecognizedEpisode = undefined;
+      logger.warn('unrecognized_event_ended_turn', {
+        sessionId: handle.sessionId,
+        type: episode.type,
+      });
+      applyVendorEvent(
+        {
+          type: 'error',
+          error: {
+            code: UNRECOGNIZED_EVENT_ERROR_CODE,
+            message: `The agent sent an event of type "${episode.type ?? 'unknown'}" that this version of MangoStudio does not recognize, and the turn stopped reporting, so it was ended.`,
           },
-          lastSequence
-        );
-        void handle.cancel(external.nativeTurnId).catch((error: unknown) => {
-          logger.warn('cancel_failed', { sessionId: handle.sessionId, error: String(error) });
-        });
-      }, unrecognizedEventQuietMs);
+        },
+        lastSequence
+      );
+      if (!options.cancelVendor) return;
+      void handle.cancel(external.nativeTurnId).catch((error: unknown) => {
+        logger.warn('cancel_failed', { sessionId: handle.sessionId, error: String(error) });
+      });
     }
 
     const consumer: ExternalSessionConsumer = {
@@ -1016,6 +1143,8 @@ export function createExternalTurnController(
       conversationReset = replacedAsNonresumable ? 'nonresumable' : (reported ?? conversationReset);
       if (conversationReset) transcript.markConversationReset(conversationReset);
       unsubscribe();
+      // An episode watches the session it saw the event on; the replacement starts with none.
+      disarmUnrecognizedEventWatchdog();
       handle = next;
       unsubscribe = handle.subscribe(consumer);
       external.sessionId = handle.sessionId;

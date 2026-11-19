@@ -640,10 +640,23 @@ two of nine ways a turn ends and the hub decides the other seven, so without it 
 only ever show two outcomes and a reload would replace them with a third.
 
 An event type this hub does not recognize is dropped as inert, because a runtime newer than the hub
-may send progress the hub cannot read. The hub cannot tell that from an unreadable ending, so each
-unrecognized event starts a quiet window (30 seconds by default) that any recognized event clears.
-If the vendor stays silent through it, the hub ends the turn as `vendor-error` with the error code
-`unrecognized_event`, the same way live and on reload, and asks the vendor to cancel.
+may send progress the hub cannot read. The hub cannot tell that from an unreadable ending, and
+silence does not tell it either: a vendor running a long tool sends nothing, and no heartbeat exists.
+So each unrecognized event starts a quiet window (30 seconds) that any recognized event clears. When
+it lapses the hub asks the runtime, through `runtime.health`, whether the session still has a turn
+running:
+
+- `idle` ends the turn as `vendor-error` with the error code `unrecognized_event`, identically live
+  and on reload. Nothing is cancelled, since the runtime reports nothing running.
+- `running`, `closing`, a session missing from the report (its rows are capped) and a failed or slow
+  read (5 seconds) all leave the turn running and ask again later, with a doubling wait up to five
+  minutes, because a health read runs the runtime's `git` and `gh` probes.
+- A pending approval suspends the check; the runtime's own approval timeout ends that wait.
+- 65 minutes after the last unrecognized event the hub ends the turn whatever the runtime says and
+  asks the vendor to cancel. The runtime's hard turn timeout is one hour, so by then it has ended
+  the turn itself.
+
+A protocol-level marker for terminal events would replace this wait (#2537).
 
 ## Steering
 
