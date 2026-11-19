@@ -109,10 +109,19 @@ pub(super) fn with_parents<T>(
 
 /// An immutable path below a filesystem-root capability.
 ///
-/// The descendant itself is deliberately not retained as the authority for a
-/// later operation: it may be renamed after it is checked. Every use starts
-/// at the filesystem/volume `root` and walks `relative` with no-follow
-/// directory opens.
+/// A mutation does not retain the checked descendant as its authority: it may
+/// be renamed after the check, and a write through the stale handle would land
+/// at its new, unchecked location. Every use therefore starts at the
+/// filesystem/volume `root` and walks `relative` with no-follow directory
+/// opens, so the operation always targets the namespace location that was
+/// checked.
+///
+/// This is not the only safe shape. A read-only walk may keep descendant
+/// handles for its whole run (see [`open_checked_child`]), because it never
+/// trusts a held handle's earlier check: every child is opened through the
+/// held parent and its own final path is checked against the policy before
+/// anything is listed or read. A parent renamed out of the policy mid-walk
+/// then fails that check for each of its children, rather than being read.
 struct AnchoredDir {
     root: Dir,
     relative: Vec<OsString>,
