@@ -18,7 +18,15 @@ import {
   type RemoveWorktreeBody,
   type StashListResponse,
 } from '@mangostudio/shared/git';
-import { GIT_SCOPES, type GitScope, gitTopic } from '@mangostudio/shared/realtime';
+import {
+  GIT_SCOPES,
+  type GitScope,
+  gitTopic,
+  isRepoKey,
+  MAX_REALTIME_TOPICS_PER_MESSAGE,
+  parseRepoTopic,
+  repoTopic,
+} from '@mangostudio/shared/realtime';
 import {
   type QueryClient,
   queryOptions,
@@ -29,13 +37,20 @@ import {
   useQueryClient,
   type UseQueryResult,
 } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 
 import { githubKeys } from '@/features/github/queries';
 import { client } from '@/lib/api-client';
-import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
+import {
+  useRealtimeInvalidation,
+  useRealtimeInvalidations,
+} from '@/lib/realtime/use-realtime-invalidation';
 import { ApiError } from '@/lib/utils';
 
+import {
+  createGitInvalidationCoalescer,
+  type GitInvalidationCoalescer,
+} from './git-invalidation-coalescer';
 import { createGitSummaryBatcher, type GitSummaryBatcher } from './git-summary-batcher';
 import { githubContextKeys } from './use-github-context';
 
@@ -365,16 +380,171 @@ export function useGitRealtimeInvalidation(chatId: string): void {
 
   useRealtimeInvalidation(gitTopic(chatId), 'git-state', (signal) => {
     if (signal.type === 'subscribed') {
-      return invalidateGitScopes(queryClient, chatId, GIT_SCOPES);
+      return scheduleGitScopeInvalidation(queryClient, chatId, GIT_SCOPES);
     }
     // The realtime client dispatches only exact-topic matches to this listener,
     // so a git subscription has already narrowed the validated event's scopes.
-    return invalidateGitScopes(
+    return scheduleGitScopeInvalidation(
       queryClient,
       chatId,
       (signal.message.scopes as readonly GitScope[] | undefined) ?? GIT_SCOPES
     );
   });
+
+  // The same writes, announced for the whole repository: a commit or a pull
+  // request made from a sibling chat, a linked worktree or a subdirectory never
+  // reaches `git:<chatId>`. The key comes from the git state this panel already
+  // holds, so a hub that does not issue one (or an older one that refuses the
+  // topic) leaves the per-chat subscription above doing all the work.
+  const repoKey = useCachedRepoKey(chatId);
+  useRealtimeInvalidation(
+    repoKey === undefined ? null : repoTopic(repoKey),
+    `git-repo-panel:${chatId}`,
+    (signal) => {
+      if (signal.type === 'invalidate') {
+        return scheduleGitScopeInvalidation(
+          queryClient,
+          chatId,
+          (signal.message.scopes as readonly GitScope[] | undefined) ?? GIT_SCOPES
+        );
+      }
+      // The ack right after the state loaded would refetch what was just read;
+      // only a read old enough to predate the subscription needs the barrier.
+      const stateUpdatedAt = queryClient.getQueryState(gitStateKeys.detail(chatId))?.dataUpdatedAt;
+      if (isFresherThanSubscription(stateUpdatedAt)) return;
+      return scheduleGitScopeInvalidation(queryClient, chatId, GIT_SCOPES);
+    }
+  );
+}
+
+/**
+ * How recent a read must be for the first ack of a repo subscription not to
+ * discard it. A repo key is learned from a read, so the subscription always
+ * starts after the data it protects; refetching on every ack would double the
+ * requests of every sidebar mount. The window is the round trip a write could
+ * hide in between; a read older than that, as after a reconnect, is refetched.
+ */
+const REPO_SUBSCRIPTION_FRESH_MS = 2_000;
+
+function isFresherThanSubscription(dataUpdatedAt: number | undefined): boolean {
+  return dataUpdatedAt !== undefined && Date.now() - dataUpdatedAt < REPO_SUBSCRIPTION_FRESH_MS;
+}
+
+/**
+ * The repo key of a chat's git state when one is cached. Reads the cache rather
+ * than observing the query: the panel and breadcrumb that mount this hook own
+ * the fetch, and a second observer here would be one more place that decides how
+ * that query is fetched.
+ */
+function useCachedRepoKey(chatId: string): string | undefined {
+  const queryClient = useQueryClient();
+  return useSyncExternalStore(
+    (notify) => queryClient.getQueryCache().subscribe(notify),
+    () => {
+      const state = queryClient.getQueryData<GitRepoState>(gitStateKeys.detail(chatId));
+      const repoKey = state?.state === 'repo' ? state.repoKey : undefined;
+      return repoKey !== undefined && isRepoKey(repoKey) ? repoKey : undefined;
+    }
+  );
+}
+
+/**
+ * Keeps every chat in the sidebar's repositories fresh when a git or GitHub
+ * write lands in any checkout of them.
+ *
+ * Subscribes to one `repo:<key>` topic per distinct repository among the rows
+ * in view (`MAX_REALTIME_TOPICS_PER_MESSAGE` at most, nearest rows first), and
+ * releases a topic when its last row leaves. A frame invalidates the per-chat
+ * keys of every chat the cache knows in that repo, not only those in view: a
+ * scrolled-away badge goes stale and refreshes when its row returns, while a
+ * visible one refetches, all through one batched request.
+ *
+ * @example
+ * useRepoRealtimeInvalidation(chatIdsInView, gitSummaries);
+ */
+export function useRepoRealtimeInvalidation(
+  chatIdsInView: readonly string[],
+  summaries: Readonly<Record<string, GitSummary | null>>
+): void {
+  const queryClient = useQueryClient();
+  const topics = useMemo(
+    () => repoTopicsForRows(chatIdsInView, summaries),
+    [chatIdsInView, summaries]
+  );
+
+  useRealtimeInvalidations(topics, 'git-repo-sidebar', (topic, signal) => {
+    const repoKey = parseRepoTopic(topic);
+    if (repoKey === undefined) return;
+    const cached = cachedChatsInRepo(queryClient, repoKey);
+    if (signal.type === 'invalidate') {
+      const scopes = (signal.message.scopes as readonly GitScope[] | undefined) ?? GIT_SCOPES;
+      return Promise.all(
+        cached.map(({ chatId }) => scheduleGitScopeInvalidation(queryClient, chatId, scopes))
+      ).then(() => undefined);
+    }
+    // Same barrier as the panel's: only badges older than the subscription.
+    return Promise.all(
+      cached
+        .filter(({ dataUpdatedAt }) => !isFresherThanSubscription(dataUpdatedAt))
+        .map(({ chatId }) => scheduleGitScopeInvalidation(queryClient, chatId, ['state']))
+    ).then(() => undefined);
+  });
+}
+
+/** The topics for the rows in view: distinct repositories, in row order, bounded. */
+function repoTopicsForRows(
+  chatIdsInView: readonly string[],
+  summaries: Readonly<Record<string, GitSummary | null>>
+): string[] {
+  const repoKeys = new Set<string>();
+  for (const chatId of chatIdsInView) {
+    const repoKey = summaries[chatId]?.repoKey;
+    if (repoKey !== undefined && isRepoKey(repoKey)) repoKeys.add(repoKey);
+    if (repoKeys.size === MAX_REALTIME_TOPICS_PER_MESSAGE) break;
+  }
+  return [...repoKeys].map((repoKey) => repoTopic(repoKey));
+}
+
+/** Every chat whose cached badge says it sits in `repoKey`, in view or not. */
+function cachedChatsInRepo(
+  queryClient: QueryClient,
+  repoKey: string
+): Array<{ chatId: string; dataUpdatedAt: number }> {
+  const chats: Array<{ chatId: string; dataUpdatedAt: number }> = [];
+  for (const query of queryClient.getQueryCache().findAll({ queryKey: gitSummaryKeys.all })) {
+    const summary = query.state.data as GitSummary | null | undefined;
+    const chatId = query.queryKey[1];
+    if (summary?.repoKey === repoKey && typeof chatId === 'string') {
+      chats.push({ chatId, dataUpdatedAt: query.state.dataUpdatedAt });
+    }
+  }
+  return chats;
+}
+
+/** Hold time for frames that describe one write; see `createGitInvalidationCoalescer`. */
+const GIT_FRAME_COALESCE_MS = 50;
+
+const gitInvalidationCoalescers = new WeakMap<QueryClient, GitInvalidationCoalescer>();
+
+/**
+ * Invalidates a chat's git slices once however many realtime frames announced
+ * the same write: the per-chat frame, the repository frame and every chat of the
+ * repository that frame fans out to. One coalescer per query client.
+ */
+function scheduleGitScopeInvalidation(
+  queryClient: QueryClient,
+  chatId: string,
+  scopes: readonly GitScope[]
+): Promise<void> {
+  let coalescer = gitInvalidationCoalescers.get(queryClient);
+  if (!coalescer) {
+    coalescer = createGitInvalidationCoalescer(
+      (id, merged) => invalidateGitScopes(queryClient, id, [...merged]),
+      GIT_FRAME_COALESCE_MS
+    );
+    gitInvalidationCoalescers.set(queryClient, coalescer);
+  }
+  return coalescer.schedule(chatId, scopes);
 }
 
 export function useInitRepo(chatId: string) {

@@ -269,6 +269,24 @@ Client rules the module enforces:
 | Heartbeat             | One timer at `REALTIME_IDLE_TIMEOUT_SECONDS / 2.5`; a missed pong forces a reconnect. Any inbound frame is proof of life. |
 | Backoff               | 1 s→30 s with half jitter, reset only after 10 s of proven stability rather than on `ready`.                              |
 
+Git state subscribes to two topics per surface. The git panel holds
+`git:<chatId>` and, once the cached `GET /git/state` carries a `repoKey`,
+`repo:<key>`. The sidebar holds one `repo:<key>` per repository among the rows in
+view (`useRepoRealtimeInvalidation`), capped at 32 so it always fits one
+subscribe frame, and releases a topic when its last row leaves the view. A repo
+frame invalidates the per-chat git queries of every cached chat in that
+repository, found by the `repoKey` on its badge.
+
+Frames that describe one write are merged before they touch the cache
+(`git-invalidation-coalescer.ts`). A fixed 50 ms window collects the chat frame,
+the repo frame and every chat the repo frame fans out to, merges scopes per chat,
+and applies all chats in one synchronous pass, so the summary batcher sends a
+single `POST /git/state/batch` for the whole repository instead of one request
+per chat. The `subscribed` ack on a repo topic skips entries read within the last
+2 s, which keeps a mount from refetching what it just fetched. An older hub
+answers a `repo:` subscription with `UNSUPPORTED`; that topic is dropped for the
+socket and the `git:<chatId>` path is unaffected.
+
 The heartbeat is derived from the shared idle timeout so the ping cadence and
 the window it must beat cannot drift. It also acts as a liveness watchdog: it is
 what detects a half-open socket after a laptop sleep, where `onclose` never

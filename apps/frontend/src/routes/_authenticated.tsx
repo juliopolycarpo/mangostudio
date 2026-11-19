@@ -30,7 +30,10 @@ import { RunnerSelectorContainer } from '@/features/external-agents/RunnerSelect
 import { environmentAlerts } from '@/features/home/lib/environment-health';
 import { appSettingsQueryOptions } from '@/features/settings/app/queries';
 import { WorkspaceBreadcrumb } from '@/features/workspace/components/WorkspaceBreadcrumb';
-import { useBatchedGitSummaries } from '@/features/workspace/hooks/use-git-state';
+import {
+  useBatchedGitSummaries,
+  useRepoRealtimeInvalidation,
+} from '@/features/workspace/hooks/use-git-state';
 import { useAppState } from '@/hooks/use-app-state';
 import { useI18n } from '@/hooks/use-i18n';
 import { activePageForPath } from '@/lib/active-page';
@@ -134,6 +137,9 @@ function AuthenticatedLayout() {
   // re-renders and bails out on the reference.
   const [gitChatIdsInView, setGitChatIdsInView] = useState<readonly string[]>(NO_CHAT_IDS);
   const gitSummaries = useBatchedGitSummaries(gitChatIdsInView, { includeCached: true });
+  // A commit, push or pull request from any chat in a repository, or from a
+  // linked worktree of it, refreshes the badges of the rows in that repository.
+  useRepoRealtimeInvalidation(gitChatIdsInView, gitSummaries);
   // The same rule the hub's health card applies, at the one scope a nav badge
   // can have: no chat, so no "the machine this session runs on is offline"
   // warning — only machines that actually reported a fault. Reads the list the

@@ -275,6 +275,25 @@ Regras que o módulo garante:
 | Heartbeat                   | Um timer em `REALTIME_IDLE_TIMEOUT_SECONDS / 2.5`; um pong perdido força a reconexão. Qualquer frame recebido prova vida.   |
 | Backoff                     | 1 s→30 s com meio jitter, reiniciado só após 10 s de estabilidade comprovada, não em `ready`.                               |
 
+O estado do git assina dois tópicos por superfície. O painel git mantém
+`git:<chatId>` e, assim que o `GET /git/state` em cache traz um `repoKey`,
+`repo:<key>`. A barra lateral mantém um `repo:<key>` por repositório entre as
+linhas visíveis (`useRepoRealtimeInvalidation`), limitado a 32 para sempre caber
+em um frame de subscribe, e libera o tópico quando a última linha sai da vista.
+Um frame de repositório invalida as queries git por chat de todo chat em cache
+naquele repositório, encontrado pelo `repoKey` do seu badge.
+
+Frames que descrevem uma mesma escrita são fundidos antes de tocar o cache
+(`git-invalidation-coalescer.ts`). Uma janela fixa de 50 ms reúne o frame do chat,
+o frame do repositório e todos os chats para os quais ele se espalha, funde os
+escopos por chat e aplica todos os chats em uma única passada síncrona, de modo
+que o batcher de resumos envia um único `POST /git/state/batch` para o
+repositório inteiro, e não uma requisição por chat. A confirmação `subscribed` de
+um tópico `repo:` ignora entradas lidas nos últimos 2 s, o que evita que uma
+montagem refaça a leitura que acabou de fazer. Um hub antigo responde à
+assinatura de `repo:` com `UNSUPPORTED`; esse tópico é descartado no socket e o
+caminho `git:<chatId>` não é afetado.
+
 O heartbeat é derivado do timeout de inatividade compartilhado, para que a
 cadência do ping e a janela que ele precisa vencer não se desalinhem. Ele também
 funciona como watchdog de liveness: é o que detecta um socket meio aberto depois

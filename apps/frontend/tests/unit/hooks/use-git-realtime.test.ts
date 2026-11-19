@@ -175,3 +175,84 @@ describe('useGitRealtimeInvalidation', () => {
     await waitFor(() => expect(refetchPrs).toHaveBeenCalledTimes(1));
   });
 });
+
+describe('useGitRealtimeInvalidation repo topic', () => {
+  const listeners = new Map<string, RealtimeTopicListener>();
+
+  const repoVariant = repoState as Extract<GitRepoState, { state: 'repo' }>;
+
+  function stateWithoutKey(): GitRepoState {
+    return { ...repoVariant };
+  }
+
+  function stateWithKey(): GitRepoState {
+    return { ...repoVariant, repoKey: 'sharedRepoKey' };
+  }
+
+  beforeEach(() => {
+    setTestSession({ user: { id: 'user-test' } });
+    listeners.clear();
+    mocks.subscribe.mockReset();
+    mocks.subscribe.mockImplementation((topic: string, nextListener: RealtimeTopicListener) => {
+      listeners.set(topic, nextListener);
+      return jest.fn();
+    });
+  });
+
+  async function deliver(topic: string, scopes: ReadonlyArray<'state' | 'branches'>) {
+    const topicListener = listeners.get(topic);
+    if (!topicListener) throw new Error(`(listeners): expected a listener on ${topic}`);
+    await act(async () => {
+      await topicListener({
+        type: 'invalidate',
+        message: { type: 'invalidate', topic, scopes: [...scopes] },
+      });
+    });
+  }
+
+  function mountPanel(state: GitRepoState) {
+    const refetchState = jest.fn().mockResolvedValue(state);
+    renderHook(() => {
+      useQuery({
+        queryKey: ['git-state', 'chat-1'],
+        queryFn: refetchState,
+        initialData: state,
+        staleTime: Number.POSITIVE_INFINITY,
+      });
+      useGitRealtimeInvalidation('chat-1');
+    });
+    return refetchState;
+  }
+
+  it('subscribes to the repo topic next to the chat topic when the state carries a key', () => {
+    mountPanel(stateWithKey());
+
+    expect([...listeners.keys()].sort()).toEqual(['git:chat-1', 'repo:sharedRepoKey']);
+  });
+
+  it('keeps only the chat topic when the state has no key, as against an older hub', () => {
+    mountPanel(stateWithoutKey());
+
+    expect([...listeners.keys()]).toEqual(['git:chat-1']);
+  });
+
+  it('refreshes the panel on a write from a sibling chat announced on the repo topic', async () => {
+    const refetchState = mountPanel(stateWithKey());
+
+    await deliver('repo:sharedRepoKey', ['state']);
+
+    await waitFor(() => expect(refetchState).toHaveBeenCalledTimes(1));
+  });
+
+  it('refetches once when one write is announced on both topics', async () => {
+    const refetchState = mountPanel(stateWithKey());
+
+    // The hub publishes the chat frame first and the repo frame right after it,
+    // so the tab receives both before either has been applied.
+    await Promise.all([deliver('git:chat-1', ['state']), deliver('repo:sharedRepoKey', ['state'])]);
+
+    await waitFor(() => expect(refetchState).toHaveBeenCalledTimes(1));
+    await Bun.sleep(100);
+    expect(refetchState).toHaveBeenCalledTimes(1);
+  });
+});

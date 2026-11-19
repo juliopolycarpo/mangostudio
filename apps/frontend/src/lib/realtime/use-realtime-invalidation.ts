@@ -105,16 +105,55 @@ export function useRealtimeInvalidation(
   concern: string,
   onSignal: SignalHandler
 ): void {
-  // Assigned during render so an inline arrow does not resubscribe every render;
-  // the effect therefore depends on the topic alone.
+  useRealtimeInvalidations(topic === null ? NO_TOPICS : [topic], concern, (_topic, signal) =>
+    onSignal(signal)
+  );
+}
+
+type TopicSignalHandler = (topic: string, signal: RealtimeSignal) => void | Promise<void>;
+
+const NO_TOPICS: readonly string[] = [];
+
+/**
+ * {@link useRealtimeInvalidation} for a set of topics that changes while the
+ * component stays mounted, such as one topic per repository whose rows are on
+ * screen.
+ *
+ * Each topic is its own ref-counted subscription under the same concern, and the
+ * handler is told which topic fired. When the set changes, only topics that
+ * entered it cost a `subscribe` frame and an ack: a topic that stays is released
+ * and re-acquired within the same commit, inside the client's linger window, so
+ * the socket never hears of it. A topic that left is unsubscribed after the
+ * linger. The caller bounds the set; the server caps a socket at 64 topics.
+ *
+ * @example
+ * useRealtimeInvalidations(repoTopics, 'git-repo-sidebar', (topic, signal) => refresh(topic));
+ */
+export function useRealtimeInvalidations(
+  topics: readonly string[],
+  concern: string,
+  onSignal: TopicSignalHandler
+): void {
+  // Same reasoning as the single-topic hook: assigned during render so an inline
+  // arrow does not resubscribe, with the effect keyed on the topic set alone.
   const onSignalRef = useRef(onSignal);
   onSignalRef.current = onSignal;
   const { data: session } = authClient.useSession();
   const userId = session?.user?.id;
+  // A topic never contains a newline, so the joined string is a faithful key that
+  // keeps a new array with the same members from resubscribing.
+  const topicsKey = topics.join('\n');
 
   useEffect(() => {
-    if (topic === null || userId === undefined) return;
+    if (topicsKey === '' || userId === undefined) return;
     bindRealtimeClientToUser(userId);
-    return acquire(topic, concern, onSignalRef);
-  }, [topic, concern, userId]);
+    const releases = topicsKey.split('\n').map((topic) =>
+      acquire(topic, concern, {
+        current: (signal) => onSignalRef.current(topic, signal),
+      })
+    );
+    return () => {
+      for (const release of releases) release();
+    };
+  }, [topicsKey, concern, userId]);
 }
