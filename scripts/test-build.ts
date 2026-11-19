@@ -23,6 +23,9 @@ import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync }
 import { tmpdir, uptime } from 'node:os';
 import { join } from 'node:path';
 
+// A workspace import: it resolves through node_modules. CI runs the bundle that
+// scripts/release/bundle-binary-smoke.ts builds from an installed checkout, so the
+// `--no-install` job never resolves it.
 import { startFakeChatGptServer } from '@mangostudio/api/test-support/chatgpt/fake-server';
 
 import { extractTarArchive } from './lib/archive';
