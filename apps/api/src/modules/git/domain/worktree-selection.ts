@@ -24,6 +24,8 @@ export interface WorktreePathSemantics {
   equals(left: string, right: string): boolean;
   /** Joins a relative path onto an absolute base; an absolute path wins over the base. */
   join(base: string, path: string): string;
+  /** True when `candidate` is `root` or a path below it. Both must be canonical. */
+  contains(root: string, candidate: string): boolean;
 }
 
 /**
@@ -51,6 +53,26 @@ export function findWorktree(
 ): GitWorktree | undefined {
   const target = paths.join(root, path);
   return worktrees.find((worktree) => paths.equals(worktree.path, target));
+}
+
+/**
+ * True when a chat's workdir is the worktree itself or a directory inside it.
+ *
+ * A chat can be bound to a package directory of a worktree rather than its
+ * root, and the stored string is whatever the user picked — a trailing
+ * separator, a `.` segment — so both sides are canonicalized first and the
+ * boundary is a whole path segment: `/work/feature-2` is not inside
+ * `/work/feature`.
+ *
+ * @example
+ * isWithinWorktree('/work/feature/packages/ui', '/work/feature', paths); // true
+ */
+export function isWithinWorktree(
+  workdir: string,
+  worktreePath: string,
+  paths: WorktreePathSemantics
+): boolean {
+  return paths.contains(paths.canonical(worktreePath), paths.canonical(workdir));
 }
 
 /** True when two paths name the same worktree once written the same way. */

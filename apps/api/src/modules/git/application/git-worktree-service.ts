@@ -16,6 +16,7 @@ import { parseWorktreeList } from '../domain/worktree-parser';
 import {
   findWorktree,
   isSameWorktreePath,
+  isWithinWorktree,
   type WorktreePathSemantics,
 } from '../domain/worktree-selection';
 import { GitCliError, type GitRuntimeSelection, runGit } from '../infrastructure/git-cli';
@@ -97,14 +98,22 @@ export function addWorktree(
 /**
  * Removes the worktree at `path` and answers with the refreshed list.
  *
+ * `otherChatWorkdirs` lists where every *other* chat of this user is bound on
+ * this machine. The git layer holds no database, so the route supplies it, and
+ * it is required rather than optional: leaving it out would silently skip the
+ * check that keeps a chat's worktree from being deleted under it.
+ *
  * @example
- * await removeWorktree('/repo', { path: '/wt/x', force: true }, target);
+ * await removeWorktree('/repo', { path: '/wt/x', force: true }, target, signal, () =>
+ *   listOtherChatWorkdirs(userId, environmentId, chatId, db)
+ * );
  */
 export function removeWorktree(
   workdir: string,
   input: Pick<RemoveWorktreeBody, 'path' | 'force'>,
   invalidationTarget: GitInvalidationTarget,
-  signal?: AbortSignal
+  signal: AbortSignal | undefined,
+  otherChatWorkdirs: () => Promise<readonly string[]>
 ): Promise<GitWorktreeListResponse> {
   return runWorktreeMutation(
     workdir,
@@ -128,6 +137,7 @@ export function removeWorktree(
         );
       }
       refuseUnremovableWorktree(worktree, root, paths);
+      refuseWorktreeBoundToAnotherChat(worktree, await otherChatWorkdirs(), paths);
       // Git's own canonical path goes on the command line, not the caller's
       // spelling of it: the entry has already been identified, and re-sending
       // an approximate path would let Git resolve it to a different worktree.
@@ -176,6 +186,29 @@ function refuseUnremovableWorktree(
       409,
       ERROR_CODES.CONFLICT,
       worktree.lockReason
+    );
+  }
+}
+
+/**
+ * Refuses a removal that would delete the directory a *different* chat works in.
+ *
+ * `refuseUnremovableWorktree` protects the calling chat's own worktree for a
+ * reason that holds for every chat: the directory goes, and each later request
+ * in that chat's Git and GitHub panels resolves against a path that no longer
+ * exists. Two chats on one repository are the ordinary case, so the check
+ * covers every chat bound at or below the worktree, not only the caller.
+ */
+function refuseWorktreeBoundToAnotherChat(
+  worktree: GitWorktree,
+  otherWorkdirs: readonly string[],
+  paths: WorktreePathSemantics
+): void {
+  if (otherWorkdirs.some((workdir) => isWithinWorktree(workdir, worktree.path, paths))) {
+    throw new GitWriteError(
+      'Another chat is working in that worktree. Point it elsewhere before removing it.',
+      409,
+      ERROR_CODES.CONFLICT
     );
   }
 }

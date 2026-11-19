@@ -5,6 +5,7 @@ import type { GitWorktree } from '@mangostudio/shared/git';
 import {
   findWorktree,
   isSameWorktreePath,
+  isWithinWorktree,
   type WorktreePathSemantics,
 } from '../../../../src/modules/git/domain/worktree-selection';
 import { createTargetPaths } from '../../../../src/services/runtime-client/target-paths';
@@ -126,5 +127,29 @@ describe('isSameWorktreePath', () => {
 
   it('does not fold case on posix, where casing is significant', () => {
     expect(isSameWorktreePath('/Work/Feature', '/work/feature', posixPaths)).toBe(false);
+  });
+});
+
+describe('isWithinWorktree', () => {
+  it('accepts the worktree itself and any directory below it', () => {
+    expect(isWithinWorktree('/work/feature', '/work/feature', posixPaths)).toBe(true);
+    expect(isWithinWorktree('/work/feature/packages/ui', '/work/feature', posixPaths)).toBe(true);
+  });
+
+  it('sees through separators and dot segments on either side', () => {
+    expect(isWithinWorktree('/work/./feature/', '/work/feature/', posixPaths)).toBe(true);
+    expect(isWithinWorktree('/work/feature/pkg/../ui/', '/work/feature', posixPaths)).toBe(true);
+  });
+
+  it('stops at a whole path segment, so a name sharing the prefix is outside', () => {
+    expect(isWithinWorktree('/work/feature-two', '/work/feature', posixPaths)).toBe(false);
+    expect(isWithinWorktree('/work', '/work/feature', posixPaths)).toBe(false);
+  });
+
+  it('folds case on a Windows runtime and not on posix', () => {
+    expect(isWithinWorktree('c:\\work\\feature\\pkg', 'C:\\Work\\Feature', pathsFor('win32'))).toBe(
+      true
+    );
+    expect(isWithinWorktree('/Work/Feature/pkg', '/work/feature', posixPaths)).toBe(false);
   });
 });

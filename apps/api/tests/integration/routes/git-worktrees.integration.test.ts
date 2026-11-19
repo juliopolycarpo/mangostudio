@@ -257,6 +257,70 @@ describe('Git worktree routes', () => {
     expect(await response.json()).toMatchObject({ code: ERROR_CODES.CONFLICT });
   });
 
+  /**
+   * With two chats on one repository, the calling chat's own worktree was the
+   * only one protected. Removing the one a sibling chat is bound to deleted the
+   * directory under it, and every later request in that chat's Git and GitHub
+   * panels resolved against a path that no longer existed.
+   */
+  it.skipIf(!hasGit)('refuses to remove a worktree another chat is bound to', async () => {
+    const { root, parent } = await createTempRepo();
+    const target = join(parent, 'feature');
+    await runFixtureGit(root, ['worktree', 'add', '-b', 'feat/panel', target]);
+    const { app, chatId, user } = await createChatFixture(root);
+    await addChat(user.id, target);
+
+    const response = await sendJson(app, 'DELETE', { chatId, path: target });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      code: ERROR_CODES.CONFLICT,
+      error: expect.stringContaining('Another chat'),
+    });
+    // Refused before Git ran: the worktree is still registered and on disk.
+    const listed = (await (await listWorktrees(app, chatId)).json()) as GitWorktreeListResponse;
+    expect(listed.worktrees.map((worktree) => worktree.path)).toContain(asGitPath(target));
+  });
+
+  it.skipIf(!hasGit)(
+    'refuses to remove a worktree a sibling chat is bound to by a subdirectory or a respelled path',
+    async () => {
+      const { root, parent } = await createTempRepo();
+      const target = join(parent, 'feature');
+      await runFixtureGit(root, ['worktree', 'add', '-b', 'feat/panel', target]);
+      const { app, chatId, user } = await createChatFixture(root);
+
+      for (const spelling of [join(target, 'packages', 'ui'), `${target}/`, `${target}/./`]) {
+        const siblingChatId = await addChat(user.id, spelling);
+
+        const response = await sendJson(app, 'DELETE', { chatId, path: target });
+
+        expect(response.status).toBe(409);
+        expect(await response.json()).toMatchObject({ code: ERROR_CODES.CONFLICT });
+        await getDb().deleteFrom('chats').where('id', '=', siblingChatId).execute();
+      }
+    }
+  );
+
+  it.skipIf(!hasGit)(
+    'still removes a worktree when sibling chats are bound only to other directories',
+    async () => {
+      const { root, parent } = await createTempRepo();
+      const target = join(parent, 'feature');
+      await runFixtureGit(root, ['worktree', 'add', '-b', 'feat/panel', target]);
+      const { app, chatId, user } = await createChatFixture(root);
+      // The main worktree, and a directory that merely shares the name's prefix.
+      await addChat(user.id, root);
+      await addChat(user.id, join(parent, 'feature-2'));
+
+      const response = await sendJson(app, 'DELETE', { chatId, path: target });
+      const payload = (await response.json()) as GitWorktreeListResponse;
+
+      expect(response.status).toBe(200);
+      expect(payload.worktrees.map((worktree) => worktree.path)).toEqual([asGitPath(root)]);
+    }
+  );
+
   it.skipIf(!hasGit)('refuses to remove a locked worktree and surfaces the reason', async () => {
     const { root, parent } = await createTempRepo();
     const target = join(parent, 'feature');

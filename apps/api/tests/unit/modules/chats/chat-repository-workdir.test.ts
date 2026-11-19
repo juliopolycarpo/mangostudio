@@ -4,6 +4,7 @@ import { getDb } from '../../../../src/db/database';
 import {
   listChatIdsByWorkdir,
   listChatIdsUnderWorktreeRoot,
+  listOtherChatWorkdirs,
 } from '../../../../src/modules/chats/infrastructure/chat-repository';
 import { insertTestChat, insertTestUser } from '../../../support/factories';
 
@@ -37,6 +38,32 @@ describe('listChatIdsByWorkdir', () => {
     const ids = await listChatIdsByWorkdir(owner.id, 'devbox', '/repo', getDb());
 
     expect([...ids].sort()).toEqual([first.id, second.id].sort());
+  });
+});
+
+describe('listOtherChatWorkdirs', () => {
+  it('returns the stored workdirs of one user on one machine, minus the excluded chat', async () => {
+    const owner = await insertTestUser();
+    const other = await insertTestUser();
+
+    const caller = await insertTestChat(owner.id);
+    const sibling = await insertTestChat(owner.id);
+    const subdir = await insertTestChat(owner.id);
+    const otherMachine = await insertTestChat(owner.id);
+    const unbound = await insertTestChat(owner.id);
+    const foreign = await insertTestChat(other.id);
+
+    await bindChat(caller.id, 'devbox', '/repo');
+    await bindChat(sibling.id, 'devbox', '/work/feature/');
+    await bindChat(subdir.id, 'devbox', '/work/feature/pkg');
+    await bindChat(otherMachine.id, 'laptop', '/work/other');
+    await bindChat(unbound.id, 'devbox', null);
+    await bindChat(foreign.id, 'devbox', '/work/foreign');
+
+    const workdirs = await listOtherChatWorkdirs(owner.id, 'devbox', caller.id, getDb());
+
+    // Verbatim: comparing them is the target machine's rule, not the database's.
+    expect([...workdirs].sort()).toEqual(['/work/feature/', '/work/feature/pkg']);
   });
 });
 

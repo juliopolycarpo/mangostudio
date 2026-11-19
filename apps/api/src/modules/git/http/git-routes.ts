@@ -56,7 +56,11 @@ import {
   chatWorkdirConflict,
   resolveChatWorkdir,
 } from '../../chats/application/chat-workdir';
-import { type ChatRecord, listByIdsForUser } from '../../chats/infrastructure/chat-repository';
+import {
+  type ChatRecord,
+  listByIdsForUser,
+  listOtherChatWorkdirs,
+} from '../../chats/infrastructure/chat-repository';
 import { NoModelAvailableError } from '../../generation/application/resolve-model';
 import { modelUnavailableResponse } from '../../generation/http/model-unavailable-response';
 import {
@@ -860,11 +864,13 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         const resolved = await routeWorkdir(body.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
         try {
+          const { userId, environmentId, chatId } = resolved.invalidationTarget;
           return await removeWorktree(
             resolved.workdir,
             body,
             resolved.invalidationTarget,
-            request.signal
+            request.signal,
+            () => listOtherChatWorkdirs(userId, environmentId, chatId, getDb())
           );
         } catch (error) {
           return gitWriteError(error, set);
