@@ -30,7 +30,6 @@ const CAPABILITIES: ModelCapabilities = {
   image: false,
   streaming: true,
   tools: true,
-  internalAgentTools: false,
 };
 
 interface RecordedCheckpointWrite {

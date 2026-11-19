@@ -65,10 +65,9 @@ import {
   handleTurnCompleted,
   synchronizeToolProgressForCheckpoint,
   upsertToolCallPart,
-  upsertToolResultPart,
 } from './stream-text-turn-helpers';
 import type { StreamEvent, StreamTextTurnInput } from './stream-text-turn-types';
-import { parseToolArgs, stringifyToolResult } from './tool-result-utils';
+import { parseToolArgs } from './tool-result-utils';
 import {
   createDatabaseCheckpointStore,
   createTurnCheckpointPart,
@@ -494,40 +493,6 @@ export async function* emitAgentStreamEvent(
       };
       await checkpointTurn(session, true);
       break;
-
-    case 'tool_result': {
-      // Only providers that run their own tool loop emit tool_result; the
-      // result marks the call satisfied so the orchestrator must not
-      // re-execute it.
-      if (!resolvedModel.capabilities?.internalAgentTools) break;
-      loop.inThinkingSegment = false;
-      const satisfiedCall = loop.pendingCalls.get(event.callId);
-      if (satisfiedCall) {
-        loop.pendingCalls.delete(event.callId);
-        upsertToolCallPart(session.allParts, {
-          type: 'tool_call',
-          toolCallId: event.callId,
-          name: satisfiedCall.name || event.name,
-          args: parseToolArgs(satisfiedCall.argsStr),
-        });
-      }
-      upsertToolResultPart(session.allParts, {
-        type: 'tool_result',
-        toolCallId: event.callId,
-        content:
-          typeof event.result === 'string' ? event.result : stringifyToolResult(event.result),
-        isError: event.isError ?? false,
-      });
-      yield {
-        type: 'tool_result',
-        callId: event.callId,
-        name: event.name,
-        result: event.result,
-        isError: event.isError ?? false,
-      };
-      await checkpointTurn(session, true);
-      break;
-    }
 
     case 'assistant_text_delta':
       loop.inThinkingSegment = false;
