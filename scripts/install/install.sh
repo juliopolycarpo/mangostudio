@@ -647,6 +647,17 @@ have_command() {
   command -v "$1" >/dev/null 2>&1
 }
 
+# A path as the user can paste it into their file manager or PowerShell. Git Bash
+# and MSYS2 hold C:\Users\me as /c/Users/me, which Windows tools do not resolve;
+# cygpath (only there) converts it. Anywhere else, or if cygpath fails, the path
+# is printed as given.
+display_path() {
+  if have_command cygpath; then
+    cygpath -w -- "$1" 2>/dev/null && return 0
+  fi
+  printf '%s\n' "$1"
+}
+
 # One non-blocking attempt at the lock on descriptor 200. Returns 0 when it is
 # taken, 1 when another process holds it, 2 when this host cannot lock at all
 # (no tool, or a file system without locking).
@@ -684,12 +695,13 @@ try_lock_fd() {
 # cannot lock is warned about and let through: that is how installs ran before
 # this lock existed, and failing there would turn a hardening into an outage.
 acquire_version_lock() {
-  local root="$1" version="$2" lock status waited=0 next_notice=0
+  local root="$1" version="$2" lock shown status waited=0 next_notice=0
   lock="${root}/.launcher-${version}.lock"
+  shown="$(display_path "$lock")"
 
   mkdir -p "$root"
   if ! { exec 200>>"$lock"; } 2>/dev/null; then
-    printf 'Warning: cannot open %s; continuing without the install lock\n' "$lock" >&2
+    printf 'Warning: cannot open %s; continuing without the install lock\n' "$shown" >&2
     return 0
   fi
 
@@ -701,7 +713,7 @@ acquire_version_lock() {
       1) ;;
       *)
         exec 200>&-
-        printf 'Warning: cannot lock %s (needs flock or perl, and a file system with locking); continuing without the install lock\n' "$lock" >&2
+        printf 'Warning: cannot lock %s (needs flock or perl, and a file system with locking); continuing without the install lock\n' "$shown" >&2
         return 0
         ;;
     esac
@@ -709,7 +721,7 @@ acquire_version_lock() {
     if [ "$waited" -ge "$INSTALL_LOCK_TIMEOUT" ]; then
       exec 200>&-
       printf 'Error: another installer is still using %s after %ss (lock %s); not waiting longer. Run the command again once it finishes.\n' \
-        "$version" "$waited" "$lock" >&2
+        "$version" "$waited" "$shown" >&2
       return 1
     fi
     if [ "$waited" -ge "$next_notice" ]; then

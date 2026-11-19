@@ -759,6 +759,29 @@ async function holdLauncherLock(root: string, version: string) {
   };
 }
 
+/**
+ * The spellings of `path` a Windows shell may print it in: native (`C:\a\b`), with forward
+ * slashes (`C:/a/b`), and as the MSYS path Git Bash uses (`/c/a/b`). Elsewhere only `path` itself.
+ */
+function pathSpellings(path: string): string[] {
+  if (!IS_WINDOWS) return [path];
+  const forward = path.replaceAll('\\', '/');
+  return [
+    path,
+    forward,
+    forward.replace(/^([A-Za-z]):/, (_, drive: string) => `/${drive.toLowerCase()}`),
+  ];
+}
+
+/** Assert `output` names `path`, in any spelling a shell on this platform prints it in. */
+function expectNamesPath(output: string, path: string): void {
+  const spellings = pathSpellings(path);
+  expect(
+    spellings.some((spelling) => output.includes(spelling)),
+    `expected output to name ${JSON.stringify(path)} (or ${JSON.stringify(spellings.slice(1))}) | received: ${JSON.stringify(output)}`
+  ).toBe(true);
+}
+
 /** Resolve once `process` has exited, or after `milliseconds`, whichever comes first. */
 async function waitForExit(
   process: ReturnType<typeof runInBackground>,
@@ -842,7 +865,7 @@ describe.skipIf(!PERL)('install.sh version lock', () => {
       const result = run(['--local', archive], { ...env, MANGOSTUDIO_INSTALL_LOCK_TIMEOUT: '2' });
 
       expect(result.exitCode, JSON.stringify(result)).toBe(1);
-      expect(result.stderr).toContain(launcherLockPath(root, '0.1.0'));
+      expectNamesPath(result.stderr, launcherLockPath(root, '0.1.0'));
       expect(result.stderr).toContain('still');
       expect(existsSync(marker), `expected ${marker} untouched`).toBe(true);
       expect(readdirSync(root).filter((entry) => entry.startsWith('.install-'))).toEqual([]);
@@ -982,6 +1005,30 @@ describe('install.sh lock primitive', () => {
       30000
     );
   }
+
+  // Git Bash holds C:\Users\me as /c/Users/me; a path in a message is for the user to paste into
+  // Explorer or PowerShell. A fake cygpath, named for what it does, stands in for the MSYS tool.
+  const FAKE_CYGPATH = 'have_command() { [ "$1" = cygpath ]; };';
+
+  // The fake marks its output instead of printing backslashes: a backslash in a script passed as
+  // an argument is rewritten on its way through the Windows process boundary.
+  test('display_path prints what cygpath -w returns when it converts the path', () => {
+    const result = sourceAndCall(
+      `${FAKE_CYGPATH} cygpath() { [ "$1" = -w ] && [ "$2" = -- ] && printf 'native(%s)\\n' "$3"; }; display_path /c/Users/me/root`
+    );
+
+    expect(result.stdout.trim(), JSON.stringify(result)).toBe('native(/c/Users/me/root)');
+  });
+
+  test('display_path prints the path as given when cygpath fails or is absent', () => {
+    const failing = sourceAndCall(
+      `${FAKE_CYGPATH} cygpath() { return 1; }; display_path /c/Users/me/root`
+    );
+    const absent = sourceAndCall('have_command() { return 1; }; display_path /c/Users/me/root');
+
+    expect(failing.stdout.trim(), JSON.stringify(failing)).toBe('/c/Users/me/root');
+    expect(absent.stdout.trim(), JSON.stringify(absent)).toBe('/c/Users/me/root');
+  });
 
   test('without flock or perl the installer warns that it runs without the lock and goes on', () => {
     const root = tempDir('mango-lock-none-');
