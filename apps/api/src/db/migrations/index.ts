@@ -67,6 +67,7 @@ import { chatSearchText } from './066_chat_search_text';
 import { messageExpandedText } from './067_message_expanded_text';
 import { fileCheckpointSource } from './068_file_checkpoint_source';
 import { messageCascadeLookupIndexes } from './069_message_cascade_lookup_indexes';
+import { fileCheckpointBlobKeyIndex } from './070_file_checkpoint_blob_key_index';
 
 export const allMigrations = {
   '001_initial_schema': initialSchema,
@@ -138,4 +139,5 @@ export const allMigrations = {
   '067_message_expanded_text': messageExpandedText,
   '068_file_checkpoint_source': fileCheckpointSource,
   '069_message_cascade_lookup_indexes': messageCascadeLookupIndexes,
+  '070_file_checkpoint_blob_key_index': fileCheckpointBlobKeyIndex,
 };
