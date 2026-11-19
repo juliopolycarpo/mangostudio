@@ -28,7 +28,7 @@ import {
   type WorkspacePanelSettings,
   type WorkspaceSettings,
 } from '@mangostudio/shared/workspaces';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { hashKey, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 
 import { useToast } from '@/components/ui/Toast';
@@ -47,6 +47,7 @@ import {
   recordAppSettingsConflict,
   refreshAppSettingsAfterConflict,
 } from '@/features/settings/app/queries';
+import { rebaseAppSettingsDraft } from '@/features/settings/app/rebase-draft';
 import { useI18n } from '@/hooks/use-i18n';
 import { ApiError } from '@/lib/utils';
 
@@ -93,9 +94,12 @@ export function useGlobalSettings() {
     readonly confirmedWrite: number | undefined;
   } | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const activeSaveRef = useRef<{ promise: Promise<unknown>; revision: string | undefined } | null>(
-    null
-  );
+  const activeSaveRef = useRef<{
+    promise: Promise<unknown>;
+    revision: string | undefined;
+    /** What this submission is writing: unconfirmed until its PUT answers. */
+    settings: AppSettings;
+  } | null>(null);
   /**
    * State to restore when a save fails, captured when an edit burst starts.
    * It cannot be read at mutate time: the setters write the cache immediately,
@@ -253,7 +257,11 @@ export function useGlobalSettings() {
       patch: appSettingsPatchExcludingProfiles(pendingSettings.settings),
       revision: pendingSettings.revision,
     });
-    const active = { promise, revision: pendingSettings.revision };
+    const active = {
+      promise,
+      revision: pendingSettings.revision,
+      settings: pendingSettings.settings,
+    };
     activeSaveRef.current = active;
     try {
       await promise;
@@ -274,6 +282,60 @@ export function useGlobalSettings() {
     },
     [flushPendingSave]
   );
+
+  /**
+   * Keeps unsent edits across a refetch.
+   *
+   * Anything can refetch the app settings while the user is typing: the
+   * realtime ack, the hub's detection event, another tab's write. The refetch
+   * replaces the cache the setters build from, so without this the edits made
+   * since the last answer vanish from the screen and from the next patch, which
+   * is only sent once the debounce settles. Rebasing the burst's edited fields
+   * over what arrived keeps them (see `rebaseAppSettingsDraft`) and re-anchors
+   * the queued save on the fetched revision, so `If-Match` names the snapshot
+   * the edit now sits on; if that is stale too, the save is rejected and the
+   * conflict path refreshes as usual.
+   *
+   * Only reads rebase: a cache write from this hook is `manual`, and a queue
+   * the conflict epoch already rejected is left to fail, since replaying it
+   * is exactly what that guard forbids.
+   */
+  useEffect(() => {
+    const currentHash = hashKey(appSettingsKeys.current());
+    return queryClient.getQueryCache().subscribe((event) => {
+      if (event.type !== 'updated' || event.action.type !== 'success') return;
+      if (event.action.manual === true || event.query.queryHash !== currentHash) return;
+
+      const burstStart = rollbackRef.current;
+      const pending = pendingSaveRef.current;
+      const draft = pending?.settings ?? activeSaveRef.current?.settings;
+      const fetched = event.query.state.data as AppSettings | undefined;
+      if (!burstStart || !draft || !fetched) return;
+      if (
+        pending &&
+        !appSettingsQueueCanSave(queryClient, pending.conflictEpoch, pending.confirmedWrite)
+      ) {
+        return;
+      }
+
+      const rebased = normalizeAppSettings(rebaseAppSettingsDraft(burstStart, draft, fetched));
+      const cache = queryClient.setQueryData<AppSettings>(
+        appSettingsKeys.current(),
+        keepAppSettingsMetadata(fetched, rebased)
+      );
+      // The fetched value is the new rollback target: a failed save restores
+      // what the server holds, not the settings from before the refetch.
+      rollbackRef.current = keepAppSettingsMetadata(fetched, normalizeAppSettings(fetched));
+      if (pending) {
+        pendingSaveRef.current = {
+          settings: rebased,
+          revision: appSettingsRevision(fetched),
+          conflictEpoch: pending.conflictEpoch,
+          confirmedWrite: appSettingsConfirmedWrite(cache),
+        };
+      }
+    });
+  }, [queryClient]);
 
   const saveSettings = useCallback(
     (updater: (current: AppSettings) => AppSettings) => {
