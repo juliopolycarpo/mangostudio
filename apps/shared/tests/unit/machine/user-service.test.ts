@@ -532,8 +532,26 @@ describe('createUserServiceManager on darwin', () => {
     });
   });
 
+  /** A darwin host whose job has left the domain: `print` and `kickstart` find nothing until a bootstrap loads it. */
+  function stoppedJobHost(bootstrap: UserServiceExecResult | null = null): FakeServiceHost {
+    let loaded = false;
+    return new FakeServiceHost({
+      platform: 'darwin',
+      onExec: (argv) => {
+        if (argv[1] === 'bootstrap') {
+          if (bootstrap) return bootstrap;
+          loaded = true;
+        }
+        if ((argv[1] === 'print' || argv[1] === 'kickstart') && !loaded) {
+          return { exitCode: 113, stdout: '', stderr: 'Could not find service' };
+        }
+        return undefined;
+      },
+    });
+  }
+
   it('bootstraps before kickstarting on restart, so a stopped job comes back', async () => {
-    const host = new FakeServiceHost({ platform: 'darwin' });
+    const host = stoppedJobHost();
 
     await createUserServiceManager(IDENTITY, host.deps()).restart();
 
@@ -541,6 +559,7 @@ describe('createUserServiceManager on darwin', () => {
     // with "Could not find service" while the CLI reported a restart. systemd
     // and Task Scheduler both start a stopped unit on restart.
     expect(host.argv).toEqual([
+      ['launchctl', 'print', 'gui/1000/com.example.unit'],
       [
         'launchctl',
         'bootstrap',
@@ -552,11 +571,12 @@ describe('createUserServiceManager on darwin', () => {
   });
 
   it('bootstraps before kickstarting, since a stopped job has left the domain', async () => {
-    const host = new FakeServiceHost({ platform: 'darwin' });
+    const host = stoppedJobHost();
 
     await createUserServiceManager(IDENTITY, host.deps()).start();
 
     expect(host.argv).toEqual([
+      ['launchctl', 'print', 'gui/1000/com.example.unit'],
       [
         'launchctl',
         'bootstrap',
@@ -565,6 +585,36 @@ describe('createUserServiceManager on darwin', () => {
       ],
       ['launchctl', 'kickstart', 'gui/1000/com.example.unit'],
     ]);
+  });
+
+  it('kickstarts a job that is already loaded without bootstrapping it again', async () => {
+    const host = new FakeServiceHost({ platform: 'darwin' });
+
+    await createUserServiceManager(IDENTITY, host.deps()).restart();
+
+    // A bootstrap of a loaded job only fails, so it is not attempted.
+    expect(host.argv).toEqual([
+      ['launchctl', 'print', 'gui/1000/com.example.unit'],
+      ['launchctl', 'kickstart', '-k', 'gui/1000/com.example.unit'],
+    ]);
+  });
+
+  // A restart that lost the race against a bootout left the job out of the
+  // domain. The single tolerated bootstrap failed too, the kickstart found
+  // nothing, and what surfaced was a kickstart error for a job that was never
+  // loaded — not the bootstrap refusal that explains it.
+  it('reports the failed bootstrap of an unloaded job instead of kickstarting nothing', async () => {
+    const host = stoppedJobHost({
+      exitCode: 5,
+      stdout: '',
+      stderr: 'Bootstrap failed: 5: Input/output error',
+    });
+
+    await expect(createUserServiceManager(IDENTITY, host.deps()).restart()).rejects.toMatchObject({
+      message: 'launchctl bootstrap failed (exit 5): Bootstrap failed: 5: Input/output error',
+    });
+
+    expect(host.argv.some((argv) => argv[1] === 'kickstart')).toBe(false);
   });
 });
 

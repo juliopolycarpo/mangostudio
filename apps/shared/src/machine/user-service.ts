@@ -852,18 +852,6 @@ export function createUserServiceManager(
   };
 
   const darwinTarget = `gui/${deps.uid}/${identity.launchdLabel}`;
-  /**
-   * Load the job into the domain, then kick it. `bootstrap` is tolerated
-   * failing: the job is already in the domain whenever it was never stopped,
-   * and it treats that as an error. `force` bounces one that is running.
-   */
-  const darwinBounce = async (force: boolean): Promise<void> => {
-    await run(['launchctl', 'bootstrap', `gui/${deps.uid}`, unitPath as string]);
-    await requireCommand(
-      ['launchctl', 'kickstart', ...(force ? ['-k'] : []), darwinTarget],
-      'launchctl kickstart'
-    );
-  };
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
   /** Whether launchd still has the job in its domain, running or on its way out. */
   const darwinJobLoaded = async (): Promise<boolean> =>
@@ -912,6 +900,21 @@ export function createUserServiceManager(
     await darwinBootout();
     await darwinBootstrapRequired();
     await requireCommand(['launchctl', 'kickstart', '-k', darwinTarget], 'launchctl kickstart');
+  };
+  /**
+   * Kick the job, loading it into the domain first when it is not there (after
+   * a `stop`, or a bootout whose bootstrap never landed). That load is the
+   * required one: it used to be a single tolerated attempt, so a job that
+   * failed to load reported a kickstart error for a job that never existed
+   * instead of the refusal that explains it. A loaded job is not bootstrapped
+   * again, which only fails. `force` bounces one that is running.
+   */
+  const darwinBounce = async (force: boolean): Promise<void> => {
+    if (!(await darwinJobLoaded())) await darwinBootstrapRequired();
+    await requireCommand(
+      ['launchctl', 'kickstart', ...(force ? ['-k'] : []), darwinTarget],
+      'launchctl kickstart'
+    );
   };
   const darwin = {
     async install(definition: UserServiceDefinition) {
