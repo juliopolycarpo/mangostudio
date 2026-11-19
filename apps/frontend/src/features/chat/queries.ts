@@ -1,10 +1,17 @@
-import type { Chat, MessagesPage, UpdateChatBody } from '@mangostudio/shared/chat';
+import {
+  type Chat,
+  CHAT_SEARCH_MAX_LENGTH,
+  type ChatListPage,
+  type MessagesPage,
+  PAGE_LIMIT_DEFAULT,
+  type UpdateChatBody,
+} from '@mangostudio/shared/chat';
 import { CHATS_TOPIC } from '@mangostudio/shared/realtime';
 import {
   infiniteQueryOptions,
+  keepPreviousData,
   type Query,
   type QueryClient,
-  queryOptions,
   type QueryPersister,
   useInfiniteQuery,
   type UseInfiniteQueryResult,
@@ -12,14 +19,24 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
 
-import type { ContextInfo } from '@/features/generation/types';
 import { invalidateAllGitScopes } from '@/features/workspace/hooks/use-git-state';
 import { client } from '@/lib/api-client';
 import { invalidateForSignal } from '@/lib/realtime/read-after-subscribe';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
 import { ApiError } from '@/lib/utils';
 
+import {
+  type ChatListCache,
+  type ChatPaging,
+  chatPagingOf,
+  type ChatWithContext,
+  flattenChatPages,
+  insertChatAtHead,
+  patchChatInPages,
+  removeChatFromPages,
+} from './chat-list-pages';
 import { invalidateChatCapabilities } from './hooks/capability-invalidation';
 import { catchUpNewestPages, loadOlderPage, type MessagesCache } from './transcript-pages';
 import { takeBackgroundRun } from './transcript-read-ahead';
@@ -32,29 +49,134 @@ export const chatKeys = {
   all: ['chats'] as const,
   lists: () => [...chatKeys.all, 'list'] as const,
   list: (filters: string) => [...chatKeys.lists(), { filters }] as const,
+  // A separate root from `lists`: a mutation's edit of the chat list must not
+  // reach a search result, which holds a different set of chats.
+  searches: () => [...chatKeys.all, 'search'] as const,
+  search: (text: string) => [...chatKeys.searches(), text] as const,
   details: () => [...chatKeys.all, 'detail'] as const,
   detail: (id: string) => [...chatKeys.details(), id] as const,
 };
 
-/** Chat with optional context snapshot from persisted provider state. */
-export type ChatWithContext = Chat & { contextInfo?: ContextInfo | null };
+export type { ChatWithContext } from './chat-list-pages';
 
+/** Chats per request. The server's default page, spelled out so a change there is not silent here. */
+const CHAT_LIST_PAGE_SIZE = PAGE_LIMIT_DEFAULT;
+
+/** How long typing must pause before the text is sent as a search. */
+const CHAT_SEARCH_DEBOUNCE_MS = 250;
+
+/** One page of the chat list, or of the chats whose title, folder or runner contains `text`. */
+async function fetchChatListPage(request: {
+  cursor: string | null;
+  text?: string;
+  signal?: AbortSignal;
+}): Promise<ChatListPage> {
+  const query = {
+    limit: CHAT_LIST_PAGE_SIZE,
+    ...(request.cursor ? { cursor: request.cursor } : {}),
+    ...(request.text ? { q: request.text } : {}),
+  };
+  const { data, error } = await client.api.chats.get(
+    request.signal ? { query, fetch: { signal: request.signal } } : { query }
+  );
+  if (error) throw new ApiError(error.value);
+  return data satisfies ChatListPage;
+}
+
+/**
+ * The chat list, read newest first one page at a time. `pages[0]` is the
+ * newest page and `getNextPageParam` walks to older ones (see `ChatListCache`).
+ */
 export const chatListQueryOptions = () =>
-  queryOptions({
+  infiniteQueryOptions({
     queryKey: chatKeys.lists(),
     // A shell bootstrap query: once refused, it is asked again by the bootstrap
     // panel's retry, not by whichever component mounts next — that would retry
     // a rate-limited request on every mount. See `features/bootstrap`.
     retryOnMount: false,
-    queryFn: async () => {
-      const { data, error } = await client.api.chats.get();
-      if (error) throw new ApiError(error.value);
-      return data as ChatWithContext[];
-    },
+    queryFn: ({ pageParam }: { pageParam: string | null }) =>
+      fetchChatListPage({ cursor: pageParam }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
   });
 
+/** The matches for `text`, paged like the list; `signal` drops a search typing has outrun. */
+const chatSearchQueryOptions = (text: string) =>
+  infiniteQueryOptions({
+    queryKey: chatKeys.search(text),
+    queryFn: ({ pageParam, signal }: { pageParam: string | null; signal: AbortSignal }) =>
+      fetchChatListPage({ cursor: pageParam, text, signal }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
+  });
+
+/** What a search box shows: the matches read so far and how to read more of them. */
+export interface ChatSearchResult {
+  /** The matches of the last search that returned, newest first; empty for a blank text. */
+  readonly chats: readonly ChatWithContext[];
+  readonly paging: ChatPaging;
+  /** Typing has not yet been answered: the text is waiting to be sent or the reply is. */
+  readonly isPending: boolean;
+  readonly isError: boolean;
+}
+
 /**
- * Applies a mutation's result to every cached chat list that holds one.
+ * Searches the whole history on the hub, so a list that is paged can say what
+ * matches without loading every page. Typing is debounced, and the previous
+ * text's matches stay in `chats` until the next text's arrive.
+ *
+ * @example
+ * const { chats, isPending } = useChatSearch(query);
+ */
+export function useChatSearch(input: string): ChatSearchResult {
+  // Longer than the hub accepts would be refused, so the tail is dropped: a
+  // search for the first hundred characters finds what a longer one would.
+  const text = input.trim().slice(0, CHAT_SEARCH_MAX_LENGTH);
+  // Starts empty, not at `text`: a hook mounted with text already in it still
+  // waits out the pause, so a burst of keystrokes is one request.
+  const [sent, setSent] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => setSent(text), CHAT_SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [text]);
+
+  const result = useInfiniteQuery({
+    ...chatSearchQueryOptions(sent),
+    enabled: sent.length > 0,
+    placeholderData: keepPreviousData,
+    select: flattenChatPages,
+  });
+  const searching = text.length > 0;
+  return {
+    chats: searching ? (result.data ?? []) : [],
+    paging: chatPagingOf(result),
+    isPending: searching && (sent !== text || result.isPending || result.isPlaceholderData),
+    isError: searching && sent === text && result.isError,
+  };
+}
+
+/**
+ * One chat by id: the open chat when it is outside the pages loaded. It shares
+ * the detail entry the mutations keep current, so a chat just created or renamed
+ * is served from there.
+ */
+export function useChatDetailQuery(chatId: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: chatKeys.detail(chatId ?? ''),
+    queryFn: async (): Promise<ChatWithContext> => {
+      const { data, error } = await client.api.chats({ id: chatId ?? '' }).get();
+      if (error) throw new ApiError(error.value);
+      return data satisfies Chat;
+    },
+    enabled: enabled && chatId !== null,
+    // A 404 means the chat is gone; asking again cannot change that.
+    retry: false,
+  });
+}
+
+/**
+ * Applies a mutation's result to every cached chat list that holds one, and to
+ * the cached searches when `searches` is set.
  *
  * A list that never loaded is left alone: seeding it from `[]` would turn a
  * refused chat list into a successful one holding only the chat just touched —
@@ -62,12 +184,15 @@ export const chatListQueryOptions = () =>
  */
 function updateChatListCache(
   queryClient: QueryClient,
-  updater: (current: ReadonlyArray<ChatWithContext>) => Array<ChatWithContext>
+  updater: (current: ChatListCache) => ChatListCache,
+  { searches = false }: { searches?: boolean } = {}
 ) {
-  queryClient.setQueriesData<ReadonlyArray<ChatWithContext>>(
-    { queryKey: chatKeys.lists() },
-    (current) => (current === undefined ? undefined : updater(current))
-  );
+  const apply = (current: ChatListCache | undefined) =>
+    current === undefined ? undefined : updater(current);
+  queryClient.setQueriesData<ChatListCache>({ queryKey: chatKeys.lists() }, apply);
+  if (searches) {
+    queryClient.setQueriesData<ChatListCache>({ queryKey: chatKeys.searches() }, apply);
+  }
 }
 
 /**
@@ -100,9 +225,20 @@ export function useChatsQuery() {
   // the fast path, and a dead socket degrades to exactly the behavior before
   // this subscription.
   useRealtimeInvalidation(CHATS_TOPIC, 'chat-list', (signal) =>
-    invalidateForSignal(queryClient, signal, { queryKey: chatKeys.lists() })
+    // The whole `chats` root, not just the list: a search result or an open
+    // chat read by id goes stale on the same turn the list does.
+    invalidateForSignal(queryClient, signal, { queryKey: chatKeys.all })
   );
-  return useQuery(chatListQueryOptions());
+  return useInfiniteQuery({ ...chatListQueryOptions(), select: flattenChatPages });
+}
+
+/**
+ * The chats loaded so far, as one list, for a reader that only displays them.
+ * It does not subscribe to the realtime signal or ask for more: whoever mounts
+ * `useChatsQuery` (the shell) owns both.
+ */
+export function useLoadedChatsQuery() {
+  return useInfiniteQuery({ ...chatListQueryOptions(), select: flattenChatPages });
 }
 
 export function useCreateChatMutation() {
@@ -115,10 +251,9 @@ export function useCreateChatMutation() {
     },
     onSuccess: (chat) => {
       queryClient.setQueryData(chatKeys.detail(chat.id), chat);
-      updateChatListCache(queryClient, (current) => [
-        chat,
-        ...current.filter((item) => item.id !== chat.id),
-      ]);
+      updateChatListCache(queryClient, (current) => insertChatAtHead(current, chat));
+      // A new chat may match a cached search; which ones is the hub's to say.
+      void queryClient.invalidateQueries({ queryKey: chatKeys.searches() });
     },
   });
 }
@@ -140,11 +275,17 @@ export function useUpdateChatMutation() {
         chatKeys.detail(variables.id),
         (current) => (current ? applyChatUpdates(current, variables.updates) : current)
       );
-      updateChatListCache(queryClient, (current) =>
-        current.map((item) =>
-          item.id === variables.id ? applyChatUpdates(item, variables.updates) : item
-        )
+      updateChatListCache(
+        queryClient,
+        (current) =>
+          patchChatInPages(current, variables.id, (item) =>
+            applyChatUpdates(item, variables.updates)
+          ),
+        { searches: true }
       );
+      // The patch shows the edit at once; the refetch settles whether the chat
+      // still matches the text it was found under.
+      void queryClient.invalidateQueries({ queryKey: chatKeys.searches() });
 
       const switchedEnvironment =
         variables.updates.environmentId !== undefined &&
@@ -182,7 +323,9 @@ export function useDeleteChatMutation() {
     },
     onSuccess: (_, chatId) => {
       queryClient.removeQueries({ queryKey: chatKeys.detail(chatId), exact: true });
-      updateChatListCache(queryClient, (current) => current.filter((chat) => chat.id !== chatId));
+      updateChatListCache(queryClient, (current) => removeChatFromPages(current, chatId), {
+        searches: true,
+      });
     },
   });
 }

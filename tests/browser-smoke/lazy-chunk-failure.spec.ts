@@ -202,10 +202,10 @@ test('after a hub upgrade a tab showing only markdown gets the notice and stops 
   const title = `lazy-markdown-stale-${Date.now()}`;
   await seedChat(page, title, { workdir: tmpdir(), text: 'first **message**' });
   for (const [index, text] of ['second', 'third'].entries()) {
-    const chats = (await (await page.request.get('/api/chats')).json()) as {
-      id: string;
-      title: string;
-    }[];
+    // A fresh hub holds only this test's chats, so the first page lists them all.
+    const { items: chats } = (await (await page.request.get('/api/chats')).json()) as {
+      items: { id: string; title: string }[];
+    };
     const chat = chats.find((candidate) => candidate.title === title);
     expect(
       chat,

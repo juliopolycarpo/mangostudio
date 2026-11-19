@@ -8,6 +8,7 @@ import { getRequiredTextArg } from '../arg-parsing';
 import {
   attachBeforeFields,
   type BeforeOmittedReason,
+  snapshotCaptureParams,
   withMutationPersistence,
 } from '../file-mutation-snapshot';
 import { registerTool } from '../registry';
@@ -83,6 +84,7 @@ export async function executeWriteFile(
   };
   const resolvedPath = resolveAndValidatePath(args.path, options);
 
+  const snapshotParams = await snapshotCaptureParams(context);
   const { result, captured } = await withMutationPersistence(context, [resolvedPath], () =>
     runtime.fs.writeFile(
       {
@@ -90,7 +92,7 @@ export async function executeWriteFile(
         inputPath: args.path,
         resolvedPath,
         content: args.content,
-        captureSnapshot: Boolean(context.assistantMessageId),
+        ...snapshotParams,
         ...runtimePathPolicy(options),
       },
       context.signal ? { signal: context.signal } : undefined

@@ -261,8 +261,9 @@ vouches for a build that failed.
 The hub uses Bun native AOT; `mangostudio-runtime` is the cargo binary from
 `crates/mangostudio-runtime`. `distribution-build.yml` prepares the frontend and
 binary smoke harness once and calls `.github/workflows/runtime-build.yml` for
-the eight Rust targets. Each native hub producer starts when the prepared
-frontend is ready and runs:
+the eight Rust targets in several calls: the Linux targets apart from macOS and Windows.
+Each native hub producer starts when the prepared frontend and the Linux
+runtimes are ready and runs:
 
 ```bash
 bun run build:binary --hub-only --platform <matching-host> --reuse-frontend
@@ -292,10 +293,20 @@ and the native hub artifact carries it. macOS and Windows producers compile once
 `distribution-build.yml` takes the platforms that must record through `aot_order_platforms` (space
 separated ids, or `all`; empty by default). `release.yml` passes `all`; `ci.yml` passes `all` for
 pushes, because daily Canary promotes those bundles, and only `linux-x64` for pull requests, the hub
-that the release dry run reuses. Recording adds about 5 s locally (allow more on a runner) to a Linux hub leg that finishes
-before the runtime jobs, so it does not lengthen the run. The recording hub has no runtime beside
-it; see [runtime-metrics.md](runtime-metrics.md#hub-binary-aot-function-order) for what that
-covers and what a recorded runtime would add.
+that the release dry run reuses.
+
+A recording Linux hub runs with its platform's runtime beside it, so the order also covers the code a
+hub runs once Local is attached. The hub job downloads `runtime-<source sha>-<platform>` into
+`.mango/runtime-prebuilt` and passes that directory as `--aot-runtime-dir` (or `AOT_RUNTIME_DIR`); the
+build places `<dir>/<platform>/mangostudio-runtime` beside the recording hub, and fails when the file
+is missing or when the hub did not launch it as a child after the workload. The runtime must carry the
+release version of the hub it runs beside, which the distribution's runtime call guarantees. Because
+of that, the hub jobs `need` the two calls that build Linux runtimes (`runtime` for x64 and x64 musl,
+`runtime-linux-arm64` for both arm64 targets, which its probe also waits for). The natively linked
+macOS and Windows runtimes are their own call (`runtime-hosts`), so the slow Windows legs do not hold
+the hubs back; only the packaging job waits for it. Replayed on 40 recent runs, that moves the
+packaging job by a median of 13 s on a pull request and by none on a shipping-profile push; see
+[runtime-metrics.md](runtime-metrics.md#hub-binary-aot-function-order) for the measurement.
 
 `--reuse-frontend` accepts `apps/frontend/dist/build-info.json` only when both
 the prepared build and checkout are clean, name the same HEAD and use the same
@@ -308,7 +319,11 @@ no effect. `.bun-version` stays on the floating `canary` channel.
 Each Rust producer records the source SHA, version, Cargo profile, and
 executable digest. When a producer cross-links a runtime, a separate job on
 the matching host runs that runtime's `--version` and records the result
-against the same digest.
+against the same digest. The distribution build calls `runtime-build.yml` once
+per cross-linked host plus twice for the rest (Linux, then macOS and Windows),
+and each host's probe
+(`runtime-probe.yml`) needs only its own call, so it starts when its targets are built instead of after the
+slowest of the eight.
 
 The aggregation job downloads both artifact sets, verifies the complete
 target inventory and both receipts for each pair, and checks the executable
@@ -1044,7 +1059,7 @@ summary, listed here in workflow order:
 | `verify-build`    | Smoke-tests the freshly built linux-x64 archive (`smoke-binary.sh`) before any channel publishes, so a broken binary fails the release early. Gates `github-release`, `docker`, and `npm-publish`.                                                                                                                                                                                                |
 | `github-release`  | Creates the GitHub Release with its assets in one call (`publish_release`); a re-run against an already-published release verifies its assets instead of re-uploading them, since immutable releases cannot be clobbered.                                                                                                                                                                         |
 | `docker`          | Stages Linux glibc and musl archives into `docker-ctx/` (`stage-docker-ctx.ts`) and publishes Bookworm and Alpine images for amd64 and arm64. It uses only `GITHUB_TOKEN` with `packages: write`.                                                                                                                                                                                                 |
-| `verify-image`    | Pulls each published GHCR image (Bookworm and Alpine, amd64 and arm64) and boots it (`smoke-docker-image.sh`). Depends on `docker`; its matrix legs are non-blocking for the other channels.                                                                                                                                                                                                      |
+| `verify-image`    | Pulls each published GHCR image (Bookworm and Alpine, amd64 and arm64) and boots it (`smoke-docker-image.sh`, which also checks the `tini` process model). Depends on `docker`; its matrix legs are non-blocking for the other channels.                                                                                                                                                          |
 | `npm-publish`     | Publishes the platform packages, then the `mangostudio` wrapper via npm Trusted Publishing (OIDC) by default; already-published versions are skipped, transient failures are retried, and provenance is **required** (never silently dropped). A legacy `NPM_TOKEN` path exists only when `workflow_dispatch` sets `allow_legacy_npm_token=true` and is labeled `legacy-explicit` in the summary. |
 | `homebrew`        | Renders `Formula/mangostudio.rb` from `SHA256SUMS` (`update-homebrew.ts`) and pushes it to `juliopolycarpo/homebrew-tap` (`push-dist-repo.ts`). No other job depends on it, so a tap failure never blocks npm or the Release.                                                                                                                                                                     |
 | `scoop`           | Renders `bucket/mangostudio.json` from `SHA256SUMS` (`update-scoop.ts`) and pushes it to `juliopolycarpo/scoop-bucket` (`push-dist-repo.ts`). No other job depends on it, so a bucket failure never blocks npm or the Release.                                                                                                                                                                    |

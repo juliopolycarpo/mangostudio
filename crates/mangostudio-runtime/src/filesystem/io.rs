@@ -42,6 +42,71 @@ struct ExpectedDestination<'a> {
     identity: ObjectIdentity,
 }
 
+/// The bytes an atomic replacement publishes: held in memory, or streamed
+/// from an open file whose SHA-256 the caller already verified, so a restore
+/// of a file too large to hold never buffers it.
+pub(super) enum Payload<'a> {
+    Bytes(&'a [u8]),
+    Stream {
+        source: &'a mut File,
+        sha256: &'a str,
+    },
+}
+
+/// Hashes everything written through it, so a streamed copy is checked
+/// against its expected digest without a second pass over the file.
+struct HashingWriter<'a, W: Write> {
+    inner: &'a mut W,
+    hasher: Sha256,
+}
+
+impl<W: Write> Write for HashingWriter<'_, W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let written = self.inner.write(buf)?;
+        self.hasher.update(&buf[..written]);
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+impl Payload<'_> {
+    fn write_to(&mut self, out: &mut impl Write) -> std::io::Result<()> {
+        match self {
+            Self::Bytes(bytes) => out.write_all(bytes),
+            Self::Stream { source, sha256 } => {
+                let mut hashing = HashingWriter {
+                    inner: out,
+                    hasher: Sha256::new(),
+                };
+                std::io::copy(source, &mut hashing)?;
+                let copied = hex(&hashing.hasher.finalize());
+                if copied == *sha256 {
+                    return Ok(());
+                }
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "streamed content hashes to {copied}, but its verified digest is {sha256}"
+                    ),
+                ))
+            }
+        }
+    }
+
+    /// The digest the published file must carry; the post-write identity
+    /// check compares the temporary file against it, so a stream that
+    /// delivers different bytes than its caller verified never publishes.
+    fn sha256(&self) -> String {
+        match self {
+            Self::Bytes(bytes) => sha256_hex(bytes),
+            Self::Stream { sha256, .. } => (*sha256).to_owned(),
+        }
+    }
+}
+
 pub(super) fn path_error(message: impl Into<String>) -> RemoteError {
     RemoteError::new(codes::INTERNAL, message).with_detail("kind", "path_access")
 }
@@ -269,6 +334,24 @@ fn open_read_scoped(policy: &CompiledPolicy, path: &Path) -> Result<File, Remote
     capability::open_existing_file(policy, path)
 }
 
+/// Opens a regular file for a caller that streams it, so no byte limit applies
+/// and nothing is buffered here. The type check runs on the opened handle.
+pub(super) fn open_regular_for_streaming(
+    policy: &CompiledPolicy,
+    path: &Path,
+) -> Result<File, RemoteError> {
+    let file = open_read_scoped(policy, path).map_err(|error| {
+        if windows_refused_directory(policy, path) {
+            return not_a_regular_file(path);
+        }
+        error
+    })?;
+    if !file.metadata().map_err(io_error)?.is_file() {
+        return Err(not_a_regular_file(path));
+    }
+    Ok(file)
+}
+
 fn too_large(path: &Path, observed: &str, max_bytes: usize) -> RemoteError {
     path_error(format!(
         "Cannot read \"{}\": file is too large ({observed}; limit is {max_bytes}).",
@@ -319,6 +402,74 @@ pub(super) fn path_is_file(policy: &CompiledPolicy, path: &Path) -> Result<bool,
     parent.with_parent(|dir, leaf| match dir.symlink_metadata(leaf) {
         Ok(metadata) => Ok(metadata.is_file()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(io_error(error)),
+    })
+}
+
+/// What `snapshot.hash` reports beside the digest, read from the path's own
+/// directory entry rather than from whatever a link points at.
+#[derive(Debug, PartialEq)]
+pub(super) struct SnapshotStat {
+    pub(super) len: u64,
+    /// Milliseconds since the Unix epoch; absent when the platform has none.
+    pub(super) modified_ms: Option<f64>,
+    pub(super) symlink: bool,
+}
+
+fn snapshot_stat_of(
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+    symlink: bool,
+) -> SnapshotStat {
+    let modified_ms = modified
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs_f64() * 1000.0);
+    SnapshotStat {
+        len,
+        modified_ms,
+        symlink,
+    }
+}
+
+/// `lstat`s `path` through a verified parent, so a link is reported as a link.
+///
+/// Lets a checkpoint caller tell a symlink from a regular file (the hash
+/// follows links), size its snapshot before loading content, and tell a file
+/// the command wrote from one that was already there.
+///
+/// # Example
+///
+/// ```ignore
+/// let Some(stat) = snapshot_stat(&policy, path)? else { return Ok(json!({"hash": null})) };
+/// ```
+pub(super) fn snapshot_stat(
+    policy: &CompiledPolicy,
+    path: &Path,
+) -> Result<Option<SnapshotStat>, RemoteError> {
+    if policy.is_unrestricted() {
+        return match fs::symlink_metadata(path) {
+            Ok(metadata) => Ok(Some(snapshot_stat_of(
+                metadata.len(),
+                metadata.modified().ok(),
+                metadata.file_type().is_symlink(),
+            ))),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(io_error(error)),
+        };
+    }
+    let Some(parent) = capability::verified_parent_if_present(policy, path)? else {
+        return Ok(None);
+    };
+    parent.with_parent(|dir, leaf| match dir.symlink_metadata(leaf) {
+        Ok(metadata) => Ok(Some(snapshot_stat_of(
+            metadata.len(),
+            metadata
+                .modified()
+                .ok()
+                .map(cap_std::time::SystemTime::into_std),
+            metadata.file_type().is_symlink(),
+        ))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(io_error(error)),
     })
 }
@@ -492,7 +643,42 @@ pub(super) fn write_atomic(
     parent.with_parent(|dir, leaf| {
         let mode = inspect_destination_in(dir, leaf, path, || {})?;
         let temp = temporary_name()?;
-        write_replacement_in(dir, leaf, path, &temp, bytes, mode)
+        write_replacement_in(dir, leaf, path, &temp, Payload::Bytes(bytes), mode)
+    })
+}
+
+/// Replaces `path` with the content of `source`, copied in fixed memory.
+///
+/// `sha256` is the digest the caller verified `source` against. The
+/// temporary file is checked against it before it is published, so a source
+/// that changed after verification never replaces the destination. The caller
+/// holds path locks.
+///
+/// # Example
+///
+/// ```ignore
+/// let mut staged = File::open(staged_path)?;
+/// write_atomic_stream(&policy, path, &mut staged, &verified_sha256)?;
+/// ```
+pub(super) fn write_atomic_stream(
+    policy: &CompiledPolicy,
+    path: &Path,
+    source: &mut File,
+    sha256: &str,
+) -> Result<f64, RemoteError> {
+    let payload = Payload::Stream { source, sha256 };
+    if policy.is_unrestricted() {
+        let parent = path.parent().unwrap_or(Path::new("."));
+        fs::create_dir_all(parent).map_err(io_error)?;
+        let mode = inspect_destination(path)?;
+        let temp = temporary_path(path)?;
+        return write_replacement(&temp, path, payload, mode);
+    }
+    let parent = capability::verified_parent(policy, path, true)?;
+    parent.with_parent(|dir, leaf| {
+        let mode = inspect_destination_in(dir, leaf, path, || {})?;
+        let temp = temporary_name()?;
+        write_replacement_in(dir, leaf, path, &temp, payload, mode)
     })
 }
 
@@ -530,7 +716,7 @@ pub(super) fn write_atomic_if_unchanged(
             path,
             &temp,
             Replacement {
-                bytes,
+                bytes: Payload::Bytes(bytes),
                 mode,
                 expected: Some(ExpectedDestination {
                     bytes: expected,
@@ -554,7 +740,7 @@ fn write_atomic_unrestricted(
     }
     let mode = inspect_destination(path)?;
     let temp = temporary_path(path)?;
-    write_replacement(&temp, path, bytes, mode)
+    write_replacement(&temp, path, Payload::Bytes(bytes), mode)
 }
 
 fn write_exclusive(path: &Path, bytes: &[u8]) -> std::io::Result<f64> {
@@ -653,7 +839,7 @@ fn temporary_name() -> Result<OsString, RemoteError> {
 fn write_replacement(
     temp: &Path,
     path: &Path,
-    bytes: &[u8],
+    bytes: Payload<'_>,
     mode: Option<fs::Permissions>,
 ) -> Result<f64, RemoteError> {
     write_replacement_with_hook(temp, path, bytes, mode, |_| {})
@@ -662,7 +848,7 @@ fn write_replacement(
 fn write_replacement_with_hook(
     temp: &Path,
     path: &Path,
-    bytes: &[u8],
+    mut bytes: Payload<'_>,
     mode: Option<fs::Permissions>,
     mut before_write: impl FnMut(&Path),
 ) -> Result<f64, RemoteError> {
@@ -677,7 +863,7 @@ fn write_replacement_with_hook(
     let mut file = options.open(temp).map_err(io_error)?;
     let prepared = (|| {
         before_write(temp);
-        file.write_all(bytes)?;
+        bytes.write_to(&mut file)?;
         if let Some(mode) = mode {
             file.set_permissions(mode)?;
         }
@@ -839,7 +1025,7 @@ fn write_replacement_in(
     leaf: &Path,
     path: &Path,
     temp: &OsString,
-    bytes: &[u8],
+    bytes: Payload<'_>,
     mode: Option<CapPermissions>,
 ) -> Result<f64, RemoteError> {
     write_replacement_in_with_hook(
@@ -864,7 +1050,7 @@ enum ReplacementHookPhase {
 }
 
 struct Replacement<'a> {
-    bytes: &'a [u8],
+    bytes: Payload<'a>,
     mode: Option<CapPermissions>,
     expected: Option<ExpectedDestination<'a>>,
 }
@@ -878,7 +1064,7 @@ fn write_replacement_in_with_hook(
     mut hook: impl FnMut(ReplacementHookPhase, &Path),
 ) -> Result<f64, RemoteError> {
     let Replacement {
-        bytes,
+        mut bytes,
         mode,
         expected,
     } = replacement;
@@ -891,24 +1077,34 @@ fn write_replacement_in_with_hook(
         options.mode(0o600);
     }
     let mut file = dir.open_with(temp, &options).map_err(io_error)?;
+    let streamed_payload = matches!(bytes, Payload::Stream { .. });
     let prepared = (|| -> std::io::Result<()> {
         hook(ReplacementHookPhase::BeforeWrite, Path::new(temp));
-        file.write_all(bytes)?;
+        bytes.write_to(&mut file)?;
         if let Some(mode) = mode {
             file.set_permissions(mode)?;
         }
         Ok(())
     })();
     let temp_path = Path::new(temp);
-    prepared.map_err(|cause| temporary_write_uncertain_error(path, temp_path, cause))?;
     let file = file.into_std();
+    if let Err(cause) = prepared {
+        // A failed stream can leave up to a gigabyte behind, so unlike the
+        // small in-memory payloads it cleans up when the name still holds the
+        // very file this call created: nothing was published, and the handle
+        // proves ownership.
+        if streamed_payload && remove_temporary_if_same_object(dir, temp, &file) {
+            return Err(io_error(cause));
+        }
+        return Err(temporary_write_uncertain_error(path, temp_path, cause));
+    }
     let metadata = file
         .metadata()
         .map_err(|cause| temporary_write_uncertain_error(path, temp_path, cause))?;
     let mtime = mtime(&metadata);
     let identity = object_identity(&file, &metadata)
         .map_err(|cause| temporary_write_uncertain_error(path, temp_path, cause))?;
-    let expected_hash = sha256_hex(bytes);
+    let expected_hash = bytes.sha256();
     hook(ReplacementHookPhase::Prepared, temp_path);
     if !temporary_matches(dir, temp_path, identity, &expected_hash) {
         return Err(temporary_write_uncertain_error(
@@ -979,6 +1175,31 @@ fn destination_changed_error(path: &Path) -> RemoteError {
         path.display()
     ))
     .with_detail("kind", "file_changed")
+}
+
+/// Removes `temp` only when it still names the file behind `owned`, the
+/// handle this call created it with. Returns whether the name is gone.
+fn remove_temporary_if_same_object(dir: &cap_std::fs::Dir, temp: &OsString, owned: &File) -> bool {
+    let Ok(owned_identity) = owned
+        .metadata()
+        .and_then(|metadata| object_identity(owned, &metadata))
+    else {
+        return false;
+    };
+    let Ok(named) = dir.open_with(temp, &read_nofollow_options()) else {
+        return false;
+    };
+    let named = named.into_std();
+    let Ok(named_identity) = named
+        .metadata()
+        .and_then(|metadata| object_identity(&named, &metadata))
+    else {
+        return false;
+    };
+    // Close our extra handle first; a name still open elsewhere cannot be
+    // removed on every platform.
+    drop(named);
+    named_identity == owned_identity && dir.remove_file(temp).is_ok()
 }
 
 fn temporary_matches(
@@ -3391,7 +3612,7 @@ mod tests {
         write_replacement_with_hook(
             &temporary,
             &destination,
-            b"after",
+            Payload::Bytes(b"after"),
             Some(mode),
             |temporary| capture.record(temporary),
         )
@@ -3410,7 +3631,7 @@ mod tests {
         write_replacement_with_hook(
             &new_temporary,
             &new_destination,
-            b"new",
+            Payload::Bytes(b"new"),
             None,
             |temporary| new_capture.record(temporary),
         )
@@ -3446,7 +3667,7 @@ mod tests {
                     &destination,
                     &temporary,
                     Replacement {
-                        bytes: b"after",
+                        bytes: Payload::Bytes(b"after"),
                         mode: Some(mode),
                         expected: None,
                     },
@@ -3478,7 +3699,7 @@ mod tests {
                     &new_destination,
                     &temporary,
                     Replacement {
-                        bytes: b"new",
+                        bytes: Payload::Bytes(b"new"),
                         mode: None,
                         expected: None,
                     },
@@ -4139,7 +4360,7 @@ mod tests {
                     &path,
                     &temp,
                     Replacement {
-                        bytes: b"ours",
+                        bytes: Payload::Bytes(b"ours"),
                         mode: None,
                         expected: None,
                     },
@@ -4184,7 +4405,7 @@ mod tests {
                     &path,
                     &temp,
                     Replacement {
-                        bytes: b"ours",
+                        bytes: Payload::Bytes(b"ours"),
                         mode: None,
                         expected: None,
                     },
@@ -4223,7 +4444,7 @@ mod tests {
                     &path,
                     &temp,
                     Replacement {
-                        bytes: b"ours",
+                        bytes: Payload::Bytes(b"ours"),
                         mode: None,
                         expected: Some(ExpectedDestination {
                             bytes: b"before",
@@ -4272,7 +4493,7 @@ mod tests {
                     &path,
                     &temp,
                     Replacement {
-                        bytes: b"ours",
+                        bytes: Payload::Bytes(b"ours"),
                         mode: None,
                         expected: Some(ExpectedDestination {
                             bytes: b"before",
@@ -4428,11 +4649,11 @@ mod tests {
         let temp = dir.join("temporary");
         let destination = dir.join("destination");
         fs::write(&temp, b"another writer").unwrap();
-        assert!(write_replacement(&temp, &destination, b"ours", None).is_err());
+        assert!(write_replacement(&temp, &destination, Payload::Bytes(b"ours"), None).is_err());
         assert_eq!(fs::read(&temp).unwrap(), b"another writer");
         fs::remove_file(&temp).unwrap();
         fs::create_dir(&destination).unwrap();
-        assert!(write_replacement(&temp, &destination, b"ours", None).is_err());
+        assert!(write_replacement(&temp, &destination, Payload::Bytes(b"ours"), None).is_err());
         assert!(!temp.exists());
         assert!(destination.is_dir());
     }
@@ -4478,5 +4699,83 @@ mod tests {
         assert!(write_atomic(&policy, &path, b"wrong", false).is_err());
         assert_eq!(fs::read(&path).unwrap(), b"after");
         fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+    }
+
+    fn streamed_bytes(len: usize) -> Vec<u8> {
+        (0..len).map(|index| (index * 31 % 253) as u8).collect()
+    }
+
+    fn assert_stream_writes_verified_bytes(policy: &CompiledPolicy, dir: &Path) {
+        let source_path = dir.join("staged");
+        let destination = dir.join("restored");
+        let bytes = streamed_bytes(3 * 1024 * 1024 + 17);
+        fs::write(&source_path, &bytes).unwrap();
+        fs::write(&destination, b"existing").unwrap();
+
+        let mut source = File::open(&source_path).unwrap();
+        write_atomic_stream(policy, &destination, &mut source, &sha256_hex(&bytes)).unwrap();
+
+        let written = fs::read(&destination).unwrap();
+        assert!(
+            written == bytes,
+            "(write_atomic_stream): expected {} identical bytes | received {} bytes that differ",
+            bytes.len(),
+            written.len()
+        );
+    }
+
+    fn assert_stream_refuses_a_digest_mismatch(policy: &CompiledPolicy, dir: &Path) {
+        let source_path = dir.join("staged-bad");
+        let destination = dir.join("untouched");
+        fs::write(&source_path, streamed_bytes(2 * 1024 * 1024)).unwrap();
+        fs::write(&destination, b"existing").unwrap();
+
+        let mut source = File::open(&source_path).unwrap();
+        let error = write_atomic_stream(
+            policy,
+            &destination,
+            &mut source,
+            &sha256_hex(b"some other content"),
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            fs::read(&destination).unwrap(),
+            b"existing",
+            "(write_atomic_stream): a digest mismatch must leave the destination as it was | received: {error:?}"
+        );
+        let leftovers: Vec<_> = fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .filter(|name| name.to_string_lossy().contains("mango"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "(write_atomic_stream): expected no temporary file left behind | received: {leftovers:?}"
+        );
+    }
+
+    #[test]
+    fn write_atomic_stream_writes_verified_bytes_without_a_policy() {
+        let dir = scratch_dir("fs-io-stream-open");
+        assert_stream_writes_verified_bytes(&unrestricted(), &dir);
+    }
+
+    #[test]
+    fn write_atomic_stream_writes_verified_bytes_under_a_policy() {
+        let dir = scratch_dir("fs-io-stream-bound");
+        assert_stream_writes_verified_bytes(&copy_fallback_policy(&dir), &dir);
+    }
+
+    #[test]
+    fn write_atomic_stream_refuses_a_digest_mismatch_without_a_policy() {
+        let dir = scratch_dir("fs-io-stream-open-bad");
+        assert_stream_refuses_a_digest_mismatch(&unrestricted(), &dir);
+    }
+
+    #[test]
+    fn write_atomic_stream_refuses_a_digest_mismatch_under_a_policy() {
+        let dir = scratch_dir("fs-io-stream-bound-bad");
+        assert_stream_refuses_a_digest_mismatch(&copy_fallback_policy(&dir), &dir);
     }
 }

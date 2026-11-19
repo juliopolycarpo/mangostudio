@@ -20,6 +20,7 @@ import {
   type Messages,
   ptBR,
 } from '@mangostudio/shared/i18n';
+import { messages as eagerEnglish } from '@mangostudio/shared/i18n/en';
 
 import {
   carriesNamespaces,
@@ -56,11 +57,12 @@ export const inMemoryLocaleDictionaries: LocaleDictionaryStore = {
         ),
 };
 
-/** The English dictionary the entry chunk ships: every namespace but the deferred ones. */
-export const englishWithoutDeferredNamespaces: CoreMessages = (() => {
-  const { settings: _settings, onboarding: _onboarding, ...core } = en;
-  return core;
-})();
+/**
+ * The English dictionary the entry chunk ships: the real `en.ts`, without the
+ * deferred namespaces or the keys of the feature namespaces that load with
+ * their lazy chunk, so a surface that reads one of those shows as a missing key.
+ */
+export const englishWithoutDeferredNamespaces: CoreMessages = eagerEnglish;
 
 interface PendingLoad<Value> {
   resolve: (value: Value) => void;

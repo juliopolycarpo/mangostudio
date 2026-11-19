@@ -87,6 +87,13 @@ interface ToolSettingsMetadata {
    * not write at all.
    */
   uncheckpointedWriteSource?: UncheckpointedWriteSource;
+  /**
+   * For a tool that can snapshot its own writes when asked to: returns true
+   * when this call's parameters make it do so. The dispatcher then skips the
+   * up-front `uncheckpointedWriteSource` note and the executor takes over,
+   * noting the source only when its snapshot did not cover the call.
+   */
+  checkpointsOwnWrites?: (parameters: Record<string, unknown>) => boolean;
 }
 
 /** A fully registered tool: its schema definition + its executor. */

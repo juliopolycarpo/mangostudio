@@ -77,7 +77,16 @@ describe('buildShellTool', () => {
       'maxOutputBytes',
       'allowedEnvVars',
       'deniedEnvVars',
+      'checkpointWorkspaceWrites',
     ]);
+  });
+
+  it('keeps workspace checkpointing off unless the setting is exactly true', () => {
+    const { settings } = buildShellTool('bash');
+    expect(settings.defaultParameters.checkpointWorkspaceWrites).toBe(false);
+    expect(settings.checkpointsOwnWrites?.({})).toBe(false);
+    expect(settings.checkpointsOwnWrites?.({ checkpointWorkspaceWrites: 'true' })).toBe(false);
+    expect(settings.checkpointsOwnWrites?.({ checkpointWorkspaceWrites: true })).toBe(true);
   });
 });
 
@@ -119,6 +128,18 @@ describe('normalizeShellToolSettings', () => {
 
     const fromString = normalizeShellToolSettings({ deniedEnvVars: 'HOME\n\nTMPDIR' });
     expect(fromString.deniedEnvVars).toEqual(['HOME', 'TMPDIR']);
+  });
+});
+
+describe('normalizeShellToolSettings workspace checkpointing', () => {
+  it('defaults checkpointWorkspaceWrites to false and accepts only a boolean true', () => {
+    expect(normalizeShellToolSettings({}).checkpointWorkspaceWrites).toBe(false);
+    expect(
+      normalizeShellToolSettings({ checkpointWorkspaceWrites: 1 }).checkpointWorkspaceWrites
+    ).toBe(false);
+    expect(
+      normalizeShellToolSettings({ checkpointWorkspaceWrites: true }).checkpointWorkspaceWrites
+    ).toBe(true);
   });
 });
 

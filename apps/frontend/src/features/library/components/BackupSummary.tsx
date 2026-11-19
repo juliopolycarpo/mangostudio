@@ -11,6 +11,7 @@ import type { Messages } from '@mangostudio/shared/i18n';
 import type { PropagationBackupUsage } from '@mangostudio/shared/library';
 
 import { formatBytes } from '@/features/environments/format';
+import { libraryMessages } from '@/features/library/library-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { cn } from '@/lib/utils';
@@ -38,7 +39,7 @@ interface BackupSummaryProps {
 }
 
 export function BackupSummary({ usage, perMachine = false, className }: BackupSummaryProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const labels = t.library.backups;
 
   return (

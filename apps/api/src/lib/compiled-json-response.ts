@@ -53,8 +53,8 @@ export const typeboxJsonResponseCompilers: JsonResponseCompilers = {
  * `schema` into a JSON `Response`, compiling both steps once on first use.
  *
  * @example
- * const encodeChatList = createJsonResponseEncoder(ChatListSchema);
- * app.get('/', { response: { 200: ChatListSchema } }, async () => encodeChatList(await list()));
+ * const encodeChatList = createJsonResponseEncoder(ChatListPageSchema);
+ * app.get('/', { response: { 200: ChatListPageSchema } }, async () => encodeChatList(await list()));
  */
 export function createJsonResponseEncoder<Schema extends TSchema>(
   schema: Schema,

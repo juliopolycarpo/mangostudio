@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from 'bun:test';
+import { beforeAll, describe, expect, test } from 'bun:test';
 import {
   existsSync,
   mkdirSync,
@@ -18,11 +18,10 @@ import { touchesProtocolSurface } from '../lib/protocol';
 import { classifyChangedPaths, RUST_WORKSPACE_PATHS } from '../lib/rust-lanes';
 import baseline from './support/lane-baseline.json';
 import { readText } from './support/read-text';
+import { useScratchDirs } from './support/scratch-dirs';
 import { extractJobBlock, extractStepBlocks } from './support/workflow-blocks';
 
 const encode = (paths: readonly string[]) => new TextEncoder().encode(`${paths.join('\0')}\0`);
-const root = mkdtempSync(join(tmpdir(), 'ci-paths-'));
-afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 function git(...args: string[]): string {
   const run = Bun.spawnSync(['git', ...args], { cwd: root, stdout: 'pipe', stderr: 'pipe' });
@@ -43,18 +42,6 @@ function cli(script: string, ...args: string[]) {
   });
 }
 
-git('init', '--quiet');
-git('config', 'user.email', 'ci-path-test@example.invalid');
-git('config', 'user.name', 'CI path test');
-git('config', 'commit.gpgsign', 'false');
-git('config', 'core.quotePath', 'true');
-write('README.md');
-write('crates/mangostudio-runtime/src/rename.rs');
-write('docs/protocol/rename.md');
-write('scripts/moved.ts');
-git('add', '--all');
-git('commit', '--quiet', '-m', 'fixture base');
-const base = git('rev-parse', 'HEAD').trim();
 const unusual = [
   'crates/mangostudio-runtime/src/café.rs',
   'crates/mangostudio-runtime/src/tab\tname.rs',
@@ -72,16 +59,40 @@ const unusual = [
 const fixtureNames = unusual.filter(
   (path) => process.platform !== 'win32' || (!/[\t\n]/.test(path) && !path.endsWith(' '))
 );
-for (const path of fixtureNames) write(path);
-renameSync(join(root, 'crates/mangostudio-runtime/src/rename.rs'), join(root, 'docs/renamed.md'));
-write('crates/mango-protocol/renamed.rs');
-renameSync(join(root, 'docs/protocol/rename.md'), join(root, 'crates/mango-protocol/renamed.rs'));
-mkdirSync(join(root, 'scripts/tests'), { recursive: true });
-renameSync(join(root, 'scripts/moved.ts'), join(root, 'scripts/tests/moved.unit.test.ts'));
-git('add', '--all');
-git('commit', '--quiet', '-m', 'fixture unusual paths and renames');
-const head = git('rev-parse', 'HEAD').trim();
-const pathsFile = join(root, 'paths.nul');
+let root = '';
+let base = '';
+let head = '';
+let pathsFile = '';
+
+const makeDir = useScratchDirs('all');
+// Built in beforeAll, not at collection: a run that selects none of this file's
+// tests (`--test-name-pattern`) must not create the repository, because its
+// afterAll would not run either.
+beforeAll(() => {
+  root = makeDir('ci-paths-');
+  git('init', '--quiet');
+  git('config', 'user.email', 'ci-path-test@example.invalid');
+  git('config', 'user.name', 'CI path test');
+  git('config', 'commit.gpgsign', 'false');
+  git('config', 'core.quotePath', 'true');
+  write('README.md');
+  write('crates/mangostudio-runtime/src/rename.rs');
+  write('docs/protocol/rename.md');
+  write('scripts/moved.ts');
+  git('add', '--all');
+  git('commit', '--quiet', '-m', 'fixture base');
+  base = git('rev-parse', 'HEAD').trim();
+  for (const path of fixtureNames) write(path);
+  renameSync(join(root, 'crates/mangostudio-runtime/src/rename.rs'), join(root, 'docs/renamed.md'));
+  write('crates/mango-protocol/renamed.rs');
+  renameSync(join(root, 'docs/protocol/rename.md'), join(root, 'crates/mango-protocol/renamed.rs'));
+  mkdirSync(join(root, 'scripts/tests'), { recursive: true });
+  renameSync(join(root, 'scripts/moved.ts'), join(root, 'scripts/tests/moved.unit.test.ts'));
+  git('add', '--all');
+  git('commit', '--quiet', '-m', 'fixture unusual paths and renames');
+  head = git('rev-parse', 'HEAD').trim();
+  pathsFile = join(root, 'paths.nul');
+});
 
 describe('literal Git path transport', () => {
   test('reproduces the Unicode quoted-name miss in the former newline collector', () => {
@@ -285,10 +296,10 @@ describe('relevance policy parity', () => {
   test.each([
     ['build', 'build'],
     ['distribution-build', 'prepare'],
-    ['distribution-build', 'runtime-version'],
     ['distribution-build', 'hub'],
     ['distribution-build', 'build'],
     ['runtime-build', 'runtime'],
+    ['runtime-probe', 'probe'],
     ['smoke-binary', 'binary'],
     ['smoke-container', 'container'],
     ['release-dry-run', 'dry-run-linux'],

@@ -16,6 +16,7 @@ import { ChevronRight } from 'lucide-react';
 
 import { Badge } from '@/components/ui/Badge';
 import { buttonClassName } from '@/components/ui/Button';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
 
@@ -38,7 +39,7 @@ const STATUS_VARIANT: Record<SetupRowStatus, 'success' | 'warning' | 'neutral'> 
 };
 
 export function SetupChecklist({ runtimes, agents, recipes, machine }: SetupChecklistProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const s = t.environments.overview.setup;
   const rows = buildSetupRows(t, runtimes, agents, recipes, machine);
 

@@ -16,6 +16,12 @@ interface RevertFileChangesDialogProps {
   isReverting: boolean;
   /** Classes of write this turn made that the revert will leave in place. */
   uncheckpointedSources?: ReadonlyArray<UncheckpointedWriteSource>;
+  /**
+   * Some rows were found by comparing the workspace around a shell command, so
+   * the revert can also undo another process's edit. Said only when true: most
+   * reverts have no such row and the sentence would be false there.
+   */
+  includesShellCapture?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -23,6 +29,7 @@ interface RevertFileChangesDialogProps {
 export function RevertFileChangesDialog({
   isReverting,
   uncheckpointedSources,
+  includesShellCapture,
   onConfirm,
   onCancel,
 }: RevertFileChangesDialogProps) {
@@ -48,6 +55,7 @@ export function RevertFileChangesDialog({
       }
     >
       {warning && <Callout tone="warning" title={warning} />}
+      {includesShellCapture && <Callout tone="warning" title={labels.shellCaptureNote} />}
     </Dialog>
   );
 }

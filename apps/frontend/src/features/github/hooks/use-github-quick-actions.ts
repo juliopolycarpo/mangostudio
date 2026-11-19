@@ -15,6 +15,7 @@ import {
   requestComposerFocus,
   setComposerDraft,
 } from '@/features/chat/lib/composer-draft-store';
+import { githubMessages } from '@/features/github/github-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 
 export interface GithubReferenceTarget {
@@ -39,7 +40,7 @@ export interface GithubQuickActions {
  * actions.copyReference({ url, number: 942, nameWithOwner: 'mango/studio' });
  */
 export function useGithubQuickActions(chatId: string): GithubQuickActions {
-  const { t } = useI18n();
+  const { t } = useI18n(githubMessages);
   const { toast } = useToast();
 
   const copy = useCallback(

@@ -20,6 +20,7 @@ import {
   requestComposerFocus,
   setComposerDraft,
 } from '@/features/chat/lib/composer-draft-store';
+import { githubMessages } from '@/features/github/github-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
@@ -60,7 +61,7 @@ const GITHUB_PR_DETAIL_TESTID = 'github-pr-detail';
  * <GithubPrDetail chatId={chatId} number={942} onBack={clearSelection} />
  */
 export function GithubPrDetail({ chatId, number, onBack }: GithubPrDetailProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(githubMessages);
   const queryClient = useQueryClient();
   // One flag for all three reads: the refresh control asks each of them to
   // bypass the API's read cache, and each reads the flag at the moment its own
@@ -126,7 +127,7 @@ function DetailBody({
   readonly number: number;
   readonly readForce: () => boolean;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(githubMessages);
 
   if (query.isPending) {
     return <EmptyState icon={<Spinner />} title={t.github.loading} className="min-h-24 py-4" />;
@@ -186,7 +187,7 @@ function MarkReadyAction({
   readonly number: number;
   readonly isDraft: boolean;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(githubMessages);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -240,7 +241,7 @@ function DetailQueryError({
   readonly label: string;
   readonly onRetry: () => Promise<unknown>;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(githubMessages);
 
   return (
     <Callout
@@ -273,7 +274,7 @@ function ChecksBlock({
   readonly number: number;
   readonly readForce: () => boolean;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(githubMessages);
   const query = useQuery(githubPrChecksQueryOptions(chatId, number, readForce));
 
   // A failed read is not a lost connection, and only the second one is already
@@ -349,7 +350,7 @@ function ReviewThreadsAction({
   readonly number: number;
   readonly readForce: () => boolean;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(githubMessages);
   const query = useQuery(githubPrThreadsQueryOptions(chatId, number, readForce));
 
   // Same reasoning as `ChecksBlock`: this GraphQL read fails independently of

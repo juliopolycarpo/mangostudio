@@ -28,6 +28,7 @@ import {
   createRuntimeAuthoritativeAgentDiscovery,
   type RuntimeClientResolver,
 } from '../../../../src/modules/external-agents/application/external-agent-discovery';
+import { createExternalIdentityIsolationRegistry } from '../../../../src/modules/external-agents/application/external-identity-isolation';
 
 const SCOPE: ProbeScope = { userId: 'user-1', environmentId: 'env-1' };
 
@@ -1295,6 +1296,151 @@ describe('external agent discovery — runtime authority', () => {
       models: [{ id: 'codex-default', displayName: 'Codex Default' }],
       account: { label: 'Ada', planType: 'Team', fingerprint: 'account-v1' },
     });
+  });
+});
+
+/**
+ * A runtime that attests one credential home and records who reached its
+ * `discover`. Each `discover` call is a vendor subprocess on the account the
+ * fingerprint names, so the list of callers is the number of probes that
+ * account was asked to run.
+ */
+function countingRuntimeFor(credentialHomeFingerprint: string) {
+  const discoverCallers: string[] = [];
+  const manifest = runtimeManifest({
+    externalAgents: ['codex'],
+    features: { ...runtimeManifest().features, externalAgents: true },
+    identityIsolation: { method: 'os-account', credentialHomeFingerprint },
+  });
+  const resolveRuntimeClient: RuntimeClientResolver = (userId, environmentId) =>
+    Promise.resolve({
+      manifest,
+      externalAgents: {
+        discover() {
+          discoverCallers.push(`${userId}/${environmentId}`);
+          return Promise.resolve({
+            descriptors: [
+              {
+                targetId: 'codex',
+                installed: true,
+                authState: 'signed-in',
+                capabilities: ALL_CAPABLE,
+                supportedConfigurations: [],
+              },
+            ],
+          });
+        },
+      },
+    });
+  return { discoverCallers, resolveRuntimeClient };
+}
+
+/** A registry whose reaper does nothing: these tests read probes, not session teardown. */
+function isolationRegistryWithoutSessions() {
+  return createExternalIdentityIsolationRegistry({
+    sessions: { reapScope: () => Promise.resolve() },
+  });
+}
+
+describe('external agent discovery — one credential home, many callers', () => {
+  const SHARED_HOME = 'sha256:shared-credential-home';
+  const ELIGIBLE_PROBE = { signal: new AbortController().signal };
+
+  it('probes an uncontested credential home', async () => {
+    const runtime = countingRuntimeFor(SHARED_HOME);
+    const authority = createRuntimeAuthoritativeAgentDiscovery(
+      runtime.resolveRuntimeClient,
+      undefined,
+      isolationRegistryWithoutSessions()
+    );
+
+    const [status] = await authority.describe(SCOPE, ['codex'], ELIGIBLE_PROBE);
+
+    expect(runtime.discoverCallers).toEqual(['user-1/env-1']);
+    expect(status?.unavailableReason).toBeUndefined();
+    expect(status?.capabilities).toEqual(ALL_CAPABLE);
+  });
+
+  it('never probes a credential home that two users reach', async () => {
+    const runtime = countingRuntimeFor(SHARED_HOME);
+    const authority = createRuntimeAuthoritativeAgentDiscovery(
+      runtime.resolveRuntimeClient,
+      undefined,
+      isolationRegistryWithoutSessions()
+    );
+
+    // user-b's attestation is what contests the fingerprint, for user-a as well.
+    const first = await authority.describe(
+      { userId: 'user-a', environmentId: 'env-1' },
+      ['codex'],
+      ELIGIBLE_PROBE
+    );
+    const second = await authority.describe(
+      { userId: 'user-b', environmentId: 'env-1' },
+      ['codex'],
+      ELIGIBLE_PROBE
+    );
+    const incumbentAgain = await authority.describe(
+      { userId: 'user-a', environmentId: 'env-1' },
+      ['codex'],
+      ELIGIBLE_PROBE
+    );
+
+    // user-a probed before the collision existed; nobody probes after it.
+    expect(runtime.discoverCallers).toEqual(['user-a/env-1']);
+    expect(first[0]?.unavailableReason).toBeUndefined();
+    expect(second[0]?.unavailableReason).toBe('isolation-unproven');
+    expect(incumbentAgain[0]?.unavailableReason).toBe('isolation-unproven');
+    expect(second[0]?.capabilities).toEqual(NO_EXTERNAL_AGENT_CAPABILITIES);
+  });
+
+  it('refuses a fingerprint already contested before the first discovery of either user', async () => {
+    const runtime = countingRuntimeFor(SHARED_HOME);
+    const registry = isolationRegistryWithoutSessions();
+    // Another path (a turn's authorization) saw both users on this home first.
+    for (const userId of ['user-a', 'user-b']) {
+      registry.resolve({
+        userId,
+        environmentId: 'env-1',
+        isolation: { method: 'os-account', credentialHomeFingerprint: SHARED_HOME },
+      });
+    }
+    const authority = createRuntimeAuthoritativeAgentDiscovery(
+      runtime.resolveRuntimeClient,
+      undefined,
+      registry
+    );
+
+    const statuses = await Promise.all(
+      ['user-a', 'user-b'].map((userId) =>
+        authority.describe({ userId, environmentId: 'env-1' }, ['codex'], ELIGIBLE_PROBE)
+      )
+    );
+
+    expect(runtime.discoverCallers).toEqual([]);
+    expect(statuses.map((answer) => answer[0]?.unavailableReason)).toEqual([
+      'isolation-unproven',
+      'isolation-unproven',
+    ]);
+  });
+
+  it("keeps one user's own environments on one credential home probeable", async () => {
+    // Pins the boundary the registry draws: it counts users, not environments, so
+    // aliases of one account by one owner are not a collision. The concurrency cap
+    // that bounds them is the per-(user, environment) one, and #833 records why
+    // that is left as is.
+    const runtime = countingRuntimeFor(SHARED_HOME);
+    const authority = createRuntimeAuthoritativeAgentDiscovery(
+      runtime.resolveRuntimeClient,
+      undefined,
+      isolationRegistryWithoutSessions()
+    );
+
+    for (const environmentId of ['env-1', 'env-2']) {
+      await authority.describe({ userId: 'user-a', environmentId }, ['codex'], ELIGIBLE_PROBE);
+    }
+
+    expect(runtime.discoverCallers).toEqual(['user-a/env-1', 'user-a/env-2']);
   });
 });
 

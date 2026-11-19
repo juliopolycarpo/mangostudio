@@ -2,6 +2,7 @@ import Type, { type Static } from 'typebox';
 
 import { RepoKeySchema } from '../realtime/schemas';
 import { ReadonlyArraySchema } from '../schema-helpers';
+import { GIT_BATCH_STATE_MAX_CHAT_IDS } from './limits';
 
 export const GitFileStatusSchema = Type.Union([
   Type.Literal('modified'),
@@ -60,9 +61,6 @@ export const GitRepoStateSchema = Type.Union([
 export const GitStateQuerySchema = Type.Object({
   chatId: Type.String({ minLength: 1 }),
 });
-
-/** Callers batch the rows they can see, not the whole chat history. */
-export const GIT_BATCH_STATE_MAX_CHAT_IDS = 50;
 
 export const GitBatchStateRequestSchema = Type.Object({
   chatIds: Type.Array(Type.String({ minLength: 1 }), {

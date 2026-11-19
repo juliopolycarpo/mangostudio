@@ -10,6 +10,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 
 import {
@@ -30,7 +31,7 @@ import { OverviewToolchainCard } from './OverviewToolchainCard';
 import { SetupChecklist } from './SetupChecklist';
 
 export function OverviewPage() {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const runtimes = useRuntimeStatuses();
   const agents = useAgentCliStatuses();
   const recipes = useInstallRecipes();
@@ -62,7 +63,7 @@ export function OverviewPage() {
 }
 
 function AgentsOverview() {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const e = t.environments;
   const agents = useAgentCliStatuses();
   const recipes = useInstallRecipes();
@@ -96,7 +97,7 @@ function AgentsOverview() {
 }
 
 function ToolchainsOverview() {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const e = t.environments;
   const runtimes = useRuntimeStatuses();
   const statuses = runtimes.data ?? [];

@@ -97,6 +97,7 @@ async function runWorkflowSteps(
     | 'ports'
     | 'native-port'
     | 'slow-port'
+    | 'no-init'
     | 'none',
   rebuild = false,
   leftoverContainers: readonly string[] = [],
@@ -228,6 +229,29 @@ describe.skipIf(process.platform === 'win32')('folded smoke command continuation
       );
     }
   }, 15_000);
+
+  test('an image whose PID 1 is not tini fails the Docker smoke before the stop check', async () => {
+    const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;
+    const matrix = smokeMatrixCases(job).find(({ platform }) => platform === 'linux-x64');
+    if (!matrix)
+      throw new Error('Missing linux-x64 matrix case; expected a native Linux smoke leg');
+    const { outcomes, events, containers } = await runWorkflowSteps(job, matrix, 'no-init');
+    const received = outcomes
+      .filter(({ name }) => name.includes('Docker smoke test'))
+      .map(({ name, code }) => `${name}=${code}`)
+      .join(', ');
+    const expected = 'Run Bookworm Docker smoke test=1, Run Alpine Docker smoke test=1';
+    if (received !== expected) {
+      throw new Error(
+        `expected an image with PID 1 "mangostudio" to fail both image smokes (${expected}) | received: ${received}`
+      );
+    }
+    expect(
+      events.filter(({ command, args }) => command === 'docker' && args[0] === 'stop'),
+      'a failed PID 1 check must stop before the SIGTERM check'
+    ).toEqual([]);
+    expect(containers).toEqual([]);
+  });
 
   test('a leaked native hub fails only the native teardown check, not the image assertions', async () => {
     const job = parseSmokeWorkflow(readText('.github/workflows/smoke-binary.yml')).jobs.binary;

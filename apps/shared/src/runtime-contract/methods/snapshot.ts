@@ -11,11 +11,60 @@
 import Type, { type Static } from 'typebox';
 
 import { ReadonlyArraySchema } from '../../schema-helpers';
+import { SNAPSHOT_CHUNK_MAX_BYTES } from '../limits';
+import { RuntimeAckResultSchema, RuntimeSnapshotMaxBytesSchema } from './common';
+
+/** Base64 length of {@link SNAPSHOT_CHUNK_MAX_BYTES} bytes, padding included. */
+const SNAPSHOT_CHUNK_MAX_BASE64_LENGTH = Math.ceil(SNAPSHOT_CHUNK_MAX_BYTES / 3) * 4;
 
 export const RuntimeSnapshotCaptureParamsSchema = Type.Object({
   path: Type.String(),
+  snapshotMaxBytes: Type.Optional(RuntimeSnapshotMaxBytesSchema),
 });
 export type RuntimeSnapshotCaptureParams = Static<typeof RuntimeSnapshotCaptureParamsSchema>;
+
+/** Identifies a snapshot staged on the runtime: the capture names it, an upload chooses it. */
+const RuntimeStagedIdSchema = Type.String({
+  minLength: 1,
+  maxLength: 64,
+  // The runtime enforces the alphabet itself: an id becomes a file name there.
+  description: 'Staged snapshot id, 1 to 64 characters from [A-Za-z0-9_-].',
+});
+
+export const RuntimeSnapshotReadChunkParamsSchema = Type.Object({
+  stagedId: RuntimeStagedIdSchema,
+  offset: Type.Integer({ minimum: 0 }),
+  length: Type.Integer({ minimum: 1, maximum: SNAPSHOT_CHUNK_MAX_BYTES }),
+});
+export type RuntimeSnapshotReadChunkParams = Static<typeof RuntimeSnapshotReadChunkParamsSchema>;
+
+export const RuntimeSnapshotReadChunkResultSchema = Type.Object({
+  /** Empty once `offset` reaches the end of the staged snapshot. */
+  contentBase64: Type.String(),
+});
+export type RuntimeSnapshotReadChunkResult = Static<typeof RuntimeSnapshotReadChunkResultSchema>;
+
+export const RuntimeSnapshotStageChunkParamsSchema = Type.Object({
+  /** The caller picks the id; the first chunk (offset 0) creates the staged snapshot. */
+  stagedId: RuntimeStagedIdSchema,
+  /** Must equal the bytes staged so far, so a lost or repeated chunk is refused. */
+  offset: Type.Integer({ minimum: 0 }),
+  contentBase64: Type.String({ maxLength: SNAPSHOT_CHUNK_MAX_BASE64_LENGTH }),
+});
+export type RuntimeSnapshotStageChunkParams = Static<typeof RuntimeSnapshotStageChunkParamsSchema>;
+
+export const RuntimeSnapshotStageChunkResultSchema = Type.Object({
+  stagedBytes: Type.Integer({ minimum: 0 }),
+});
+export type RuntimeSnapshotStageChunkResult = Static<typeof RuntimeSnapshotStageChunkResultSchema>;
+
+export const RuntimeSnapshotReleaseParamsSchema = Type.Object({
+  stagedId: RuntimeStagedIdSchema,
+});
+export type RuntimeSnapshotReleaseParams = Static<typeof RuntimeSnapshotReleaseParamsSchema>;
+
+export const RuntimeSnapshotReleaseResultSchema = RuntimeAckResultSchema;
+export type RuntimeSnapshotReleaseResult = Static<typeof RuntimeSnapshotReleaseResultSchema>;
 
 export const RuntimeSnapshotHashParamsSchema = Type.Object({
   path: Type.String(),
@@ -24,8 +73,32 @@ export type RuntimeSnapshotHashParams = Static<typeof RuntimeSnapshotHashParamsS
 
 export const RuntimeSnapshotHashResultSchema = Type.Object({
   hash: Type.Union([Type.String(), Type.Null()]),
+  /**
+   * The next three describe the path's own directory entry and are present only
+   * when `hash` is non-null. A runtime that predates them omits all three, so a
+   * caller that needs one must treat absence as "unknown", never as a default.
+   */
+  /** Bytes in the entry; the cheapest way to size a snapshot before loading content. */
+  size: Type.Optional(Type.Number()),
+  /** Last modification, ms since the Unix epoch; omitted when the platform has none. */
+  modifiedAtMs: Type.Optional(Type.Number()),
+  /** True when the entry is a symlink, which `hash` follows. */
+  symlink: Type.Optional(Type.Boolean()),
 });
 export type RuntimeSnapshotHashResult = Static<typeof RuntimeSnapshotHashResultSchema>;
+
+/**
+ * Where a restored file's bytes come from: `contentBase64` for a small file, or
+ * `stagedId` plus `hash` for one the caller uploaded with `snapshot.stage-chunk`.
+ * Exactly one source is required; the runtime refuses an operation with both or
+ * neither before it changes anything. `hash` is the SHA-256 the staged bytes
+ * must have, checked before the first operation runs.
+ */
+const RuntimeRestoreContentFields = {
+  contentBase64: Type.Optional(Type.String()),
+  stagedId: Type.Optional(RuntimeStagedIdSchema),
+  hash: Type.Optional(Type.String()),
+};
 
 export const RuntimeSnapshotRevertParamsSchema = Type.Object({
   chatId: Type.String(),
@@ -52,13 +125,13 @@ export const RuntimeSnapshotRevertParamsSchema = Type.Object({
       Type.Object({
         type: Type.Literal('restore'),
         path: Type.String(),
-        contentBase64: Type.String(),
+        ...RuntimeRestoreContentFields,
       }),
       Type.Object({
         type: Type.Literal('move'),
         path: Type.String(),
         movedTo: Type.String(),
-        contentBase64: Type.String(),
+        ...RuntimeRestoreContentFields,
       }),
     ])
   ),

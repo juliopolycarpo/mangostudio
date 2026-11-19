@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import {
+  CUSTOM_INSTRUCTION_LOCATION_ID,
   directoryHashDomainVersion,
   type LibraryInstance,
   type LibraryLocationId,
@@ -213,6 +214,17 @@ describe('previewLibraryRemoval classification', () => {
     const row = locationAt(firstEntry(result), 'claude-skills');
     expect(row.operation).toBe('blocked');
     expect(row.blockedReason).toBe('invalid-instance');
+  });
+
+  it('refuses the custom-instruction kind as a removal location', async () => {
+    const failure = preview(['instruction:custom'], [CUSTOM_INSTRUCTION_LOCATION_ID], {
+      resources: [],
+    });
+
+    await expect(failure).rejects.toMatchObject({
+      status: 422,
+      message: `Unknown library location: "${CUSTOM_INSTRUCTION_LOCATION_ID}".`,
+    });
   });
 
   it('offers only locations that store the resource kind', async () => {

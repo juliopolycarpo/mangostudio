@@ -381,22 +381,23 @@ export type RuntimeServiceStatus = Static<typeof RuntimeServiceStatusSchema>;
 export const RUNTIME_HEALTH_LIVE_SESSION_LIMIT = 128;
 
 /**
- * The `externalAgents` subtree of `runtime.health` is open: a member this build
- * has not named is accepted and ignored, like the rest of the report. The hub
- * reads health from a runtime that may be newer than itself, and one rejected
- * field takes the whole report with it — the manifest then stays frozen at its
- * handshake value with nothing to say so. Known members stay strictly typed,
- * so a wrong type is still refused.
+ * An enum-valued health member as health *reports* it: any bounded, URL-safe
+ * token, not the hub's closed enum. An additive enum member is the same kind of
+ * newer-peer change as an additive field, and it cannot be ignored by dropping
+ * an unknown key — the report would be refused whole and the manifest frozen.
+ * The hub decides what a value it does not know means, and logs it: it skips an
+ * unknown target id, and reads an unknown isolation method as unproven
+ * (`pruneUnknownExternalAgentHealth`, in the API).
  *
- * The identity attestation reuses {@link ExternalIdentityIsolationSchema}'s
- * members but not its closure: that schema stays closed where the attestation
- * is a reviewed, positive claim (`hello`, and the `isolation` the hub sends
- * back). Health is only a report of it, and the hub copies out the two members
- * it knows rather than forwarding the object (`manifest-from-health.ts`).
+ * Reader-side only. Everywhere the hub *produces* the value — the manifest's
+ * `externalAgents` and `identityIsolation`, a chat's runner, an external-agent
+ * call — the enum stays closed, so a value this build cannot name never leaves it.
  */
-const RuntimeHealthIdentityIsolationSchema = Type.Object(
-  ExternalIdentityIsolationSchema.properties
-);
+export const RuntimeHealthTokenSchema = Type.String({
+  minLength: 1,
+  maxLength: 64,
+  pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$',
+});
 
 /**
  * How many target ids health may list. Looser than today's three on purpose: a
@@ -406,32 +407,36 @@ const RuntimeHealthIdentityIsolationSchema = Type.Object(
 export const RUNTIME_HEALTH_TARGET_LIMIT = 32;
 
 /**
- * A target id as health *reports* it: any bounded, URL-safe token, not the
- * {@link ExternalAgentTargetIdSchema} enum. An additive enum member is the same
- * kind of newer-peer change as an additive field, and it cannot be ignored by
- * dropping an unknown key — the report would be refused whole and the manifest
- * frozen. The hub decides what an id it does not know means: it skips the entry
- * and logs it (`pruneUnknownExternalAgentTargets`, in the API).
- *
- * Reader-side only. Everywhere the hub *produces* a target id — the manifest's
- * `externalAgents`, a chat's runner, an external-agent call — the enum stays
- * closed, so an id this build cannot name never leaves it.
+ * The identity attestation reuses {@link ExternalIdentityIsolationSchema}'s
+ * members but not its closure or its method enum: that schema stays closed
+ * where the attestation is a reviewed, positive claim (`hello`, and the
+ * `isolation` the hub sends back). Health is only a report of it, and the hub
+ * copies out the two members it knows, and only for a method it knows, rather
+ * than forwarding the object (`manifest-from-health.ts`).
  */
-export const RuntimeHealthTargetIdSchema = Type.String({
-  minLength: 1,
-  maxLength: 64,
-  pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$',
+const RuntimeHealthIdentityIsolationSchema = Type.Object({
+  ...ExternalIdentityIsolationSchema.properties,
+  method: RuntimeHealthTokenSchema,
 });
 
 const RuntimeHealthLiveSessionSchema = Type.Object({
   sessionId: Type.String({ minLength: 1, maxLength: 256 }),
-  targetId: RuntimeHealthTargetIdSchema,
+  targetId: RuntimeHealthTokenSchema,
   ageMs: Type.Integer({ minimum: 0 }),
   state: Type.String({ minLength: 1, maxLength: 64 }),
 });
 
+/**
+ * The `externalAgents` subtree of `runtime.health` is open: a member this build
+ * has not named is accepted and ignored, like the rest of the report. The hub
+ * reads health from a runtime that may be newer than itself, and one rejected
+ * field takes the whole report with it — the manifest then stays frozen at its
+ * handshake value with nothing to say so. Known members stay strictly typed,
+ * so a wrong type is still refused; an enum-valued one is read as a
+ * {@link RuntimeHealthTokenSchema}.
+ */
 export const RuntimeExternalAgentHealthSchema = Type.Object({
-  targets: ReadonlyArraySchema(RuntimeHealthTargetIdSchema, {
+  targets: ReadonlyArraySchema(RuntimeHealthTokenSchema, {
     maxItems: RUNTIME_HEALTH_TARGET_LIMIT,
     uniqueItems: true,
   }),

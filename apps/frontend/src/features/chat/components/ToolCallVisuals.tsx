@@ -89,6 +89,18 @@ export function formatToolElapsed(elapsedMs: number): string {
 }
 
 /**
+ * A time limit as the settings spell it: whole seconds as `45s`, anything finer
+ * exactly (`1.5s`, `250ms`), so the card never rounds a limit to a number the
+ * call was not held to.
+ *
+ * // Usage: formatToolLimit(45_000) // => '45s'
+ */
+export function formatToolLimit(limitMs: number): string {
+  if (limitMs < 1000) return `${Math.round(limitMs)}ms`;
+  return `${Number((limitMs / 1000).toFixed(1))}s`;
+}
+
+/**
  * The status glyph every tool row draws. Terminal states get a verdict mark; a
  * call still in flight gets its own tool icon, which is the only place tool
  * identity is drawn — a settled row is identified by its name alone.

@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 
 import { ACTIVITY_TOPIC, CHATS_TOPIC } from '@mangostudio/shared/realtime';
 import { createMockChat } from '@mangostudio/shared/test-utils';
+import { useQueryClient } from '@tanstack/react-query';
 
 import type { RealtimeTopicListener } from '@/lib/realtime/realtime-client';
 
@@ -47,8 +48,15 @@ void mock.module('../../../src/lib/api-client', () => ({
 
 // Static imports are evaluated before any statement above runs, so the module
 // under test has to come in afterwards or it binds the real modules.
-const { useChatsQuery } = await import('../../../src/features/chat/queries');
+const { chatKeys, useChatsQuery } = await import('../../../src/features/chat/queries');
 const { resetRealtimeInvalidations } = await import('@/lib/realtime/use-realtime-invalidation');
+
+const chatNamed = (id: string) => createMockChat({ id, title: id, createdAt: 1, updatedAt: 1 });
+
+/** The Eden answer for a list that fits in one page. */
+function onePage() {
+  return { data: { items: [chatNamed('chat-1')], nextCursor: null }, error: null };
+}
 
 function subscriptionFor(topic: string): Subscription {
   const subscription = subscriptions.find((entry) => entry.topic === topic);
@@ -76,10 +84,7 @@ describe('useChatsQuery realtime invalidation', () => {
     resetRealtimeInvalidations();
     subscriptions = [];
     mockGet.mockClear();
-    mockGet.mockResolvedValue({
-      data: [createMockChat({ id: 'chat-1', title: 'Chat', createdAt: 1, updatedAt: 1 })],
-      error: null,
-    });
+    mockGet.mockResolvedValue(onePage());
   });
 
   it('subscribes to the chats topic on mount, and not to the activity topic', async () => {
@@ -99,6 +104,27 @@ describe('useChatsQuery realtime invalidation', () => {
     // Invalidation with a mounted observer refetches immediately — the row a
     // background turn just changed, not merely a stale flag for later.
     await waitFor(() => expect(mockGet.mock.calls.length).toBe(fetchesBefore + 1));
+  });
+
+  it('also marks a cached search and a chat read by id stale on a chats frame', async () => {
+    const { result } = renderHook(() => ({ list: useChatsQuery(), queryClient: useQueryClient() }));
+    await waitFor(() => expect(result.current.list.isSuccess).toBe(true));
+    act(() => {
+      result.current.queryClient.setQueryData(chatKeys.search('plan'), {
+        pages: [],
+        pageParams: [],
+      });
+      result.current.queryClient.setQueryData(chatKeys.detail('chat-9'), chatNamed('chat-9'));
+    });
+
+    await deliverFrame(CHATS_TOPIC);
+
+    const stale = (key: readonly unknown[]) =>
+      result.current.queryClient.getQueryState(key)?.isInvalidated;
+    expect(
+      { search: stale(chatKeys.search('plan')), detail: stale(chatKeys.detail('chat-9')) },
+      '(chats frame): expected search and detail invalidated: true | received'
+    ).toEqual({ search: true, detail: true });
   });
 
   it('does not refetch the chat list when an activity frame arrives', async () => {
@@ -125,6 +151,82 @@ describe('useChatsQuery realtime invalidation', () => {
     });
 
     await waitFor(() => expect(mockGet.mock.calls.length).toBe(fetchesBefore + 1));
+  });
+});
+
+describe('useChatsQuery with several pages loaded', () => {
+  /** Two pages behind one cursor; `bumped` is what the server answers after a chat moved. */
+  function twoPagedHub(state: { bumped: boolean }) {
+    mockGet.mockImplementation(({ query }: { query: { limit: number; cursor?: string } }) => {
+      if (query.cursor === 'after-page-1') {
+        return Promise.resolve({
+          data: { items: [chatNamed('chat-3'), chatNamed('chat-4')], nextCursor: null },
+          error: null,
+        });
+      }
+      const first = state.bumped ? ['chat-3', 'chat-1'] : ['chat-1', 'chat-2'];
+      return Promise.resolve({
+        data: { items: first.map(chatNamed), nextCursor: 'after-page-1' },
+        error: null,
+      });
+    });
+  }
+
+  beforeEach(() => {
+    setTestSession({ user: { id: 'user-test' } });
+    resetRealtimeInvalidations();
+    subscriptions = [];
+    mockGet.mockReset();
+  });
+
+  it('loads the next page behind the cursor the previous one handed back', async () => {
+    twoPagedHub({ bumped: false });
+    const { result } = renderHook(() => useChatsQuery());
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(result.current.hasNextPage).toBe(true);
+
+    await act(async () => {
+      await result.current.fetchNextPage();
+    });
+
+    await waitFor(() =>
+      expect(result.current.data?.map((chat) => chat.id)).toEqual([
+        'chat-1',
+        'chat-2',
+        'chat-3',
+        'chat-4',
+      ])
+    );
+    expect(result.current.hasNextPage).toBe(false);
+    expect(mockGet.mock.calls.map(([arg]) => arg)).toEqual([
+      { query: { limit: 50 } },
+      { query: { limit: 50, cursor: 'after-page-1' } },
+    ]);
+  });
+
+  it('re-reads every loaded page on a chats frame and lists a bumped chat once, newest first', async () => {
+    const hub = { bumped: false };
+    twoPagedHub(hub);
+    const { result } = renderHook(() => useChatsQuery());
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.hasNextPage).toBe(true);
+    await act(async () => {
+      await result.current.fetchNextPage();
+    });
+    await waitFor(() => expect(result.current.data).toHaveLength(4));
+    mockGet.mockClear();
+
+    // chat-3 was on page two; a turn moved it to the head, ahead of chat-1.
+    hub.bumped = true;
+    await deliverFrame(CHATS_TOPIC);
+
+    // The refetched first page now ends in chat-1 and the second page still
+    // carries chat-3; the flat list must show chat-3 once, at its new place.
+    await waitFor(() =>
+      expect(result.current.data?.map((chat) => chat.id)).toEqual(['chat-3', 'chat-1', 'chat-4'])
+    );
+    expect(mockGet.mock.calls).toHaveLength(2);
   });
 });
 
@@ -157,10 +259,7 @@ describe('useChatsQuery during a streaming turn', () => {
     resetRealtimeInvalidations();
     subscriptions = [];
     mockGet.mockClear();
-    mockGet.mockResolvedValue({
-      data: [createMockChat({ id: 'chat-1', title: 'Chat', createdAt: 1, updatedAt: 1 })],
-      error: null,
-    });
+    mockGet.mockResolvedValue(onePage());
   });
 
   it('refetches once for the turn that moved the chat, not once per activity frame', async () => {

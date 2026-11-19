@@ -13,6 +13,7 @@ import {
 } from './choices';
 
 export {
+  CUSTOM_INSTRUCTION_LOCATION_ID,
   LIBRARY_RESOURCE_SLUG_MAX_LENGTH,
   LIBRARY_RESOURCE_SLUG_PATTERN,
   LIBRARY_SCOPES,
@@ -285,6 +286,8 @@ export const SettingsFieldSchema = Type.Union([
 export const SettingsParseFailureReasonSchema = Type.Union([
   Type.Literal('invalid-json'),
   Type.Literal('invalid-toml'),
+  /** A Codex `.rules` file the hub could not interpret as Starlark rule calls. */
+  Type.Literal('invalid-rules'),
   Type.Literal('unreadable'),
   Type.Literal('not-regular-file'),
   Type.Literal('too-large'),

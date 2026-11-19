@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { registerTools } from '../../../../../src/services/tools/register-tools';
 import { clearRegistry } from '../../../../../src/services/tools/registry';
 import type { ToolContext } from '../../../../../src/services/tools/types';
 
@@ -79,7 +80,10 @@ export function useToolRegistry(
   });
 
   afterEach(() => {
+    // Back to the startup registry, not an empty one: later files in the same
+    // process expect every built-in tool to be registered.
     clearRegistry();
+    registerTools();
     rmSync(dir, { recursive: true, force: true });
   });
 

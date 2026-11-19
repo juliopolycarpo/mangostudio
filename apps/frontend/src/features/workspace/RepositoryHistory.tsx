@@ -8,6 +8,7 @@ import { Card } from '@/components/ui/Card';
 import { Chip } from '@/components/ui/Chip';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Spinner } from '@/components/ui/Spinner';
+import { gitMessages } from '@/features/workspace/git-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { usePlural } from '@/hooks/use-plural';
 import { formatMessage } from '@/lib/i18n-format';
@@ -44,7 +45,7 @@ export function RepositoryHistory({
   readonly chatId: string;
   readonly onOpenDiff: (selection: DiffSelection) => void;
 }) {
-  const { t, locale } = useI18n();
+  const { t, locale } = useI18n(gitMessages);
   const history = useGitHistory(chatId);
   const [selectedHash, setSelectedHash] = useState<string | null>(null);
   const details = useGitCommit(chatId, selectedHash);
@@ -135,7 +136,7 @@ function CommitDetails({
   readonly onBack: () => void;
   readonly onOpenDiff: (selection: DiffSelection) => void;
 }) {
-  const { t, locale } = useI18n();
+  const { t, locale } = useI18n(gitMessages);
   if (loading) {
     return <EmptyState icon={<Spinner />} title={t.git.history.loading} className="min-h-36" />;
   }
@@ -200,7 +201,7 @@ function CommitStats({
   readonly commit: GitCommitSummary;
   readonly compact?: boolean;
 }) {
-  const { t, locale } = useI18n();
+  const { t, locale } = useI18n(gitMessages);
   const plural = usePlural();
   const files = plural(
     { one: t.git.history.filesChangedOne, other: t.git.history.filesChangedOther },
@@ -244,7 +245,7 @@ function FileCounts({
   readonly additions: number | null;
   readonly deletions: number | null;
 }) {
-  const { t, locale } = useI18n();
+  const { t, locale } = useI18n(gitMessages);
   if (additions === null || deletions === null) {
     return (
       <span className="shrink-0 font-mono text-micro text-fg-subtle">{t.git.history.binary}</span>

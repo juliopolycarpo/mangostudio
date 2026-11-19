@@ -65,7 +65,7 @@ function makeConfig(): MangoConfig {
       backupRetentionCount: 10,
       backupRetentionBytes: 1024,
     },
-    checkpoints: { dir: '/data/checkpoints' },
+    checkpoints: { dir: '/data/checkpoints', maxFileBytes: 1024 },
     auth: { secret: 'x'.repeat(32), url: 'http://localhost:3001' },
     security: { trustProxy: false, allowDirectLoopback: true },
     updates: { check: true, channel: null },

@@ -4,6 +4,9 @@
   "private": true,
   "license": "MIT",
   "type": "module",
+  "sideEffects": [
+    "./src/library/registry.ts"
+  ],
   "scripts": {
     "check": "bun run check:quick && bun run check:cycles && bun run typecheck",
     "check:quick": "bun --cwd ../.. lint apps/shared && bun --cwd ../.. fmt --check apps/shared",
@@ -41,6 +44,10 @@
     "./i18n/en": "./src/i18n/en.ts",
     "./i18n/en-settings": "./src/i18n/en-settings.ts",
     "./i18n/en-onboarding": "./src/i18n/en-onboarding.ts",
+    "./i18n/en-environments": "./src/i18n/en-environments.ts",
+    "./i18n/en-library": "./src/i18n/en-library.ts",
+    "./i18n/en-git": "./src/i18n/en-git.ts",
+    "./i18n/en-github": "./src/i18n/en-github.ts",
     "./i18n/pt-BR": "./src/i18n/pt-BR.ts",
     "./markdown": "./src/markdown/index.ts",
     "./mcp": "./src/mcp/index.ts",
@@ -63,6 +70,7 @@
     "./workspaces": "./src/workspaces/index.ts",
     "./workspaces/host": "./src/workspaces/host.ts",
     "./git": "./src/git/index.ts",
+    "./git/limits": "./src/git/limits.ts",
     "./github": "./src/github/index.ts",
     "./file-checkpoints": "./src/file-checkpoints/index.ts",
     "./library": "./src/library/index.ts",
@@ -84,6 +92,7 @@
     "./runtime-home/values": "./src/runtime-home/values.ts",
     "./machine": "./src/machine/index.ts",
     "./machine/limits": "./src/machine/limits.ts",
+    "./machine/check-text-en": "./src/machine/check-text-en.ts",
     "./machine/service": "./src/machine/user-service.ts",
     "./updates": "./src/updates/index.ts",
     "./backup": "./src/backup/index.ts",

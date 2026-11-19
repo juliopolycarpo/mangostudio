@@ -1,16 +1,21 @@
 /**
  * The doctor rows, as the CLI prints them: a status glyph, the label, the detail.
- * Worst first, since the reason to open the list is at its top.
+ * Worst first, since the reason to open the list is at its top. A row that
+ * carries keys is worded from this locale's dictionary; any other row, and a key
+ * the dictionary does not have (a newer hub), shows the English the hub sent.
  */
 
-import type {
-  MachineCheck,
-  MachineCheckStatus,
-  MachineDoctorReport,
+import {
+  type MachineCheck,
+  type MachineCheckStatus,
+  type MachineDoctorReport,
+  resolveMachineCheckText,
 } from '@mangostudio/shared/machine';
 import { CircleCheck } from 'lucide-react';
+import { useMemo } from 'react';
 
 import { Badge } from '@/components/ui/Badge';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
@@ -40,9 +45,17 @@ function summaryVariant(doctor: MachineDoctorReport): 'error' | 'warning' | 'suc
 }
 
 export function DoctorSection() {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const m = t.environments.machine.doctor;
   const doctor = useMachineDoctor();
+  // An environments row is keyed by the runtime finding's code, so its sentence
+  // is the one the Environments page already shows; the finding templates sit
+  // beside the doctor's own for the resolver to look both up.
+  const templates = useMemo(
+    () => ({ ...m.checks, ...t.environments.findings }),
+    [m.checks, t.environments.findings]
+  );
+  const valueLabels = useMemo(() => ({ ltsStatus: t.environments.lts }), [t.environments.lts]);
 
   return (
     <MachineCard
@@ -75,20 +88,24 @@ export function DoctorSection() {
               (a second MCP server with the same name and the same finding), and
               a duplicate key drops one of them. The list is fully replaced on
               every fetch, so there is no identity to preserve across renders. */}
-          {sortChecks(doctor.data?.checks ?? []).map((check, index) => (
-            <li
-              // eslint-disable-next-line react/no-array-index-key -- Checks can have duplicate labels and are replaced as a list.
-              key={`${index}:${check.label}`}
-              className="flex items-start gap-2 text-sm"
-              data-check-status={check.status}
-            >
-              <CheckIcon status={check.status} />
-              <div className="min-w-0">
-                <span className="font-medium text-fg">{check.label}</span>
-                <span className="text-fg-muted"> — {check.detail}</span>
-              </div>
-            </li>
-          ))}
+          {sortChecks(doctor.data?.checks ?? []).map((check, index) => {
+            // A row's own English stands in for a key this build has no text for.
+            const text = resolveMachineCheckText(check, templates, valueLabels);
+            return (
+              <li
+                // eslint-disable-next-line react/no-array-index-key -- Checks can have duplicate labels and are replaced as a list.
+                key={`${index}:${check.label}`}
+                className="flex items-start gap-2 text-sm"
+                data-check-status={check.status}
+              >
+                <CheckIcon status={check.status} />
+                <div className="min-w-0">
+                  <span className="font-medium text-fg">{text.label}</span>
+                  <span className="text-fg-muted"> — {text.detail}</span>
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
     </MachineCard>

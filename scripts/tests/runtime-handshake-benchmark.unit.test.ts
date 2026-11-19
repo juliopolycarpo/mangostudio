@@ -86,6 +86,9 @@ async function settledAfterCancel(
   return settled;
 }
 
+// A benchmark that fails keeps its scratch directory as evidence, so a test that
+// expects a failure points the child's TMPDIR at its own `root`, which `scratch`
+// removes, instead of leaving the retained directory in the shared temp directory.
 const scratch: string[] = [];
 const escapedFixtures: NativeProcess[] = [];
 afterEach(async () => {
@@ -413,7 +416,11 @@ describe.skipIf(process.platform === 'win32')('protocol startup receipts', () =>
         command: [process.execPath, 'scripts/bench/runtime-handshake.ts', binary, '--runs', '1'],
         root: ROOT,
         out: root,
-        env: fixtureChildEnvironment({ ...process.env, BENCHMARK_FIXTURE_ROOT: root }),
+        env: fixtureChildEnvironment({
+          ...process.env,
+          BENCHMARK_FIXTURE_ROOT: root,
+          TMPDIR: root,
+        }),
         timeoutSeconds: HANG_BOUND_SECONDS,
         pollIntervalMs: 20,
         settleMs: SETTLE_MS,
@@ -565,7 +572,7 @@ describe.skipIf(process.platform === 'win32')('protocol startup receipts', () =>
         ],
         root: ROOT,
         out: root,
-        env: fixtureChildEnvironment({ ...process.env, ...fixture.environment }),
+        env: fixtureChildEnvironment({ ...process.env, ...fixture.environment, TMPDIR: root }),
         timeoutSeconds: HANG_BOUND_SECONDS,
         pollIntervalMs: 20,
         settleMs: SETTLE_MS,
@@ -610,7 +617,7 @@ describe.skipIf(process.platform === 'win32')('protocol startup receipts', () =>
         ],
         root: ROOT,
         out: root,
-        env: fixtureChildEnvironment({ ...process.env, ...fixture.environment }),
+        env: fixtureChildEnvironment({ ...process.env, ...fixture.environment, TMPDIR: root }),
         timeoutSeconds: HANG_BOUND_SECONDS,
         pollIntervalMs: 20,
         settleMs: SETTLE_MS,

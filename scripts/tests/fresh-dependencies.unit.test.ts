@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -11,6 +10,7 @@ import {
 import { reportFreshDependencies } from '../ci/report-fresh-dependencies.mjs';
 import { ROOT_DIR } from '../lib/config';
 import { readText } from './support/read-text';
+import { useScratchDirs } from './support/scratch-dirs';
 import {
   extractJobBlock,
   extractOnBlock,
@@ -191,6 +191,8 @@ const policyFailedNeeds = {
 };
 
 describe('fresh dependency receipt', () => {
+  const makeDir = useScratchDirs();
+
   test.each([
     ['success', 'success', 'success', 'passed'],
     ['success', 'failure', 'success', 'policy-failed'],
@@ -381,7 +383,7 @@ describe('fresh dependency receipt', () => {
   });
 
   test('the command writes the receipt file and the step summary from the environment', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'fresh-receipt-'));
+    const dir = makeDir('fresh-receipt-');
     const receiptPath = join(dir, 'receipt.json');
     const summaryPath = join(dir, 'summary.md');
     const run = Bun.spawnSync(['bun', './scripts/ci/fresh-dependencies-receipt.mjs', receiptPath], {

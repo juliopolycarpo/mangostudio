@@ -24,6 +24,7 @@ import {
   checkDatabase,
   checkDir,
   checkEmbeddedFrontend,
+  checkEmbeddedFrontendInServer,
   checkFrontend,
   checkInstance,
   type CheckResult,
@@ -34,8 +35,7 @@ import {
   checkSshClient,
   collectBuildIdentityChecks,
   type FsProbe,
-  ok,
-  warn,
+  keyedCheck,
 } from '../../../cli/doctor-checks';
 import { collectEnvironmentDoctorSection } from '../../../cli/environment-doctor-checks';
 import { collectLibraryDoctorSection } from '../../../cli/library-doctor-checks';
@@ -212,9 +212,9 @@ async function collectResults(
   ]);
 
   const results: CheckResult[] = [
-    checkDir('Home directory', getHomeMangoDir(), d.fs),
-    checkDir('Logs directory', getLogsDir(), d.fs),
-    checkDir('Run directory', getRunDir(), d.fs),
+    checkDir('core.label.homeDirectory', getHomeMangoDir(), d.fs),
+    checkDir('core.label.logsDirectory', getLogsDir(), d.fs),
+    checkDir('core.label.runDirectory', getRunDir(), d.fs),
     checkConfig(config),
     checkDatabase(config, d.fs),
     resolveFrontendCheck(frontendDir, embedded, d),
@@ -243,12 +243,7 @@ async function collectResults(
     // sitting there, which is also the evidence the removal cycle needs before
     // the connector and its secret can go.
     if (d.isCursorConfigured(config) || d.listCursorConnectors(config, options.userId).length > 0) {
-      results.push(
-        warn(
-          'Cursor connector',
-          'Deprecated provider. Use the Cursor CLI runner in the chat runner selector; this key no longer runs turns.'
-        )
-      );
+      results.push(keyedCheck('warn', 'cursor.label.connector', 'cursor.detail.deprecated'));
     }
 
     const chatgptConnectors = d.listChatGptConnectors(config, options.userId);
@@ -297,7 +292,7 @@ function resolveFrontendCheck(
     return checkEmbeddedFrontend(Object.keys(embedded).length);
   }
   if (frontendDir === EMBEDDED_FRONTEND_DIR) {
-    return ok('Frontend', 'embedded in running server binary');
+    return checkEmbeddedFrontendInServer();
   }
   return checkFrontend(frontendDir, d.fs);
 }
@@ -370,13 +365,14 @@ function resolveDoctorCollectDeps(deps: Partial<DoctorCollectDeps>): Required<Do
 
 /** `Installed via` doctor row: always `ok`, the channel and manager it resolved. */
 function collectInstalledViaDoctorRow(status: InstallStatus): CheckResult {
-  const legacyNote =
-    status.installedVia.manager === 'self-managed' && status.installedVia.legacy
-      ? ' · legacy layout, run mangostudio upgrade to migrate'
-      : '';
-  return ok(
-    'Installed via',
-    `${describeInstallManager(status.installedVia.manager)} · channel ${status.channel}${legacyNote}`
+  const legacy = status.installedVia.manager === 'self-managed' && status.installedVia.legacy;
+  return keyedCheck(
+    'ok',
+    'install.label.installedVia',
+    legacy ? 'install.detail.installedViaLegacy' : 'install.detail.installedVia',
+    // The manager's name is product wording (`Homebrew`, `npm (bun global)`),
+    // sent as the hub words it.
+    { manager: describeInstallManager(status.installedVia.manager), channel: status.channel }
   );
 }
 
@@ -391,22 +387,30 @@ async function collectUpdateDoctorRow(
   status: InstallStatus,
   d: Required<DoctorCollectDeps>
 ): Promise<CheckResult> {
+  const label = 'update.label.update';
   const skip = updateCheckSkipReason(config, d.env, getVersion());
-  if (skip === 'disabled') return ok('Update', 'checks disabled');
-  if (skip === 'env') return ok('Update', 'skipped (NO_UPDATE_NOTIFIER|DO_NOT_TRACK|CI)');
-  if (skip === 'dev') return ok('Update', 'skipped (development build)');
+  if (skip === 'disabled') return keyedCheck('ok', label, 'update.detail.disabled');
+  if (skip === 'env') return keyedCheck('ok', label, 'update.detail.skippedEnv');
+  if (skip === 'dev') return keyedCheck('ok', label, 'update.detail.skippedDev');
 
   const check = d.isTty() ? await d.checker.check() : d.checker.readCached();
-  if (check === null) return ok('Update', 'not checked yet');
-  if (check.error !== undefined) return warn('Update', `check failed (${check.error})`);
+  if (check === null) return keyedCheck('ok', label, 'update.detail.notChecked');
+  if (check.error !== undefined) {
+    return keyedCheck('warn', label, 'update.detail.checkFailed', { error: check.error });
+  }
   if (check.updateAvailable) {
-    return warn(
-      'Update',
-      `${check.latestVersion ?? 'a newer build'} available — run: ${status.command}`
-    );
+    return check.latestVersion === undefined
+      ? keyedCheck('warn', label, 'update.detail.availableUnnamed', { command: status.command })
+      : keyedCheck('warn', label, 'update.detail.available', {
+          version: check.latestVersion,
+          command: status.command,
+        });
   }
   const hoursAgo = Math.max(0, Math.floor((d.now() - check.checkedAt) / 3_600_000));
-  return ok('Update', `up to date (${check.currentVersion}, checked ${hoursAgo}h ago)`);
+  return keyedCheck('ok', label, 'update.detail.upToDate', {
+    version: check.currentVersion,
+    hours: hoursAgo,
+  });
 }
 
 /** True when a Cursor API key is present in env or config.toml. */

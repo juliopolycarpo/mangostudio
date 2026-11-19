@@ -11,6 +11,7 @@ import type { AgentCliStatus, InstallRecipePreview } from '@mangostudio/shared/e
 import { Link } from '@tanstack/react-router';
 import { Download } from 'lucide-react';
 
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
@@ -40,7 +41,7 @@ interface OverviewAgentCardProps {
 }
 
 export function OverviewAgentCard({ status, recipes }: OverviewAgentCardProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const e = t.environments;
   const probe = useProbeAgentCli();
   const { resolve, lookup } = useToolIdentities();

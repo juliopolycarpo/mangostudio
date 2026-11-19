@@ -1,6 +1,11 @@
 import type { Kysely } from 'kysely';
 
-import type { Database, FileCheckpointInsert, FileCheckpointSelect } from '../../../db/types';
+import type {
+  Database,
+  FileCheckpointInsert,
+  FileCheckpointRowSource,
+  FileCheckpointSelect,
+} from '../../../db/types';
 import { checkpointBlobSize, deleteCheckpointBlobIfUnreferenced } from './checkpoint-blob-store';
 import { deleteMessageUncheckpointedSources } from './uncheckpointed-source-repository';
 
@@ -46,9 +51,14 @@ export async function insertCheckpointRow(
 export async function updateCheckpointAfterHash(
   db: Kysely<Database>,
   id: number,
-  afterHash: string | null
+  afterHash: string | null,
+  options: { source?: FileCheckpointRowSource } = {}
 ): Promise<void> {
-  await db.updateTable('file_checkpoints').set({ afterHash }).where('id', '=', id).execute();
+  await db
+    .updateTable('file_checkpoints')
+    .set({ afterHash, ...(options.source ? { source: options.source } : {}) })
+    .where('id', '=', id)
+    .execute();
 }
 
 /**

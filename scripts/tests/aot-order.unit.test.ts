@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -25,10 +26,13 @@ import {
   compileWithAotOrder,
   type DeadlineTimer,
   parseAotOrder,
+  placeRuntimeBeside,
   recordAotOrder,
+  runtimeChildPids,
 } from '../lib/aot-order';
 
 const FAKE_HUB = join(import.meta.dir, 'support', 'fake-recording-hub.ts');
+const FAKE_RUNTIME_SOURCE = '#!/usr/bin/env bun\nsetInterval(() => undefined, 1000);\n';
 
 describe('parseAotOrder', () => {
   test('counts the functions of a multi-module program file', () => {
@@ -95,6 +99,89 @@ describe('aotOrderSkipReason', () => {
     expect(aotOrderSkipReason('native', 'linux', false)).toBe(
       'not requested (pass --production or --require-aot-order to record it)'
     );
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('placeRuntimeBeside', () => {
+  let workDir: string;
+
+  beforeEach(() => {
+    workDir = mkdtempSync(join(tmpdir(), 'aot-order-runtime-'));
+  });
+
+  afterEach(() => {
+    rmSync(workDir, { recursive: true, force: true });
+  });
+
+  test('copies the runtime next to the hub under the name the hub looks for, executable', () => {
+    const hub = join(workDir, 'record', 'mangostudio');
+    const source = join(workDir, 'build', 'whatever-name');
+    mkdirSync(dirname(hub), { recursive: true });
+    mkdirSync(dirname(source), { recursive: true });
+    // A prebuilt runtime from a download is not necessarily executable.
+    writeFileSync(source, 'runtime bytes', { mode: 0o644 });
+
+    const placed = placeRuntimeBeside(hub, source);
+
+    expect(placed).toBe(join(workDir, 'record', 'mangostudio-runtime'));
+    expect(readFileSync(placed, 'utf8')).toBe('runtime bytes');
+    const mode = statSync(placed).mode & 0o777;
+    expect(mode, `expected ${placed} mode 755 | received: ${mode.toString(8)}`).toBe(0o755);
+  });
+
+  test('names the missing runtime instead of leaving the hub to fail a launch', () => {
+    const hub = join(workDir, 'record', 'mangostudio');
+    mkdirSync(dirname(hub), { recursive: true });
+    const missing = join(workDir, 'nope', 'mangostudio-runtime');
+
+    expect(() => placeRuntimeBeside(hub, missing)).toThrow(
+      `aot order: expected the recording runtime at ${missing} | received: no such file`
+    );
+    expect(existsSync(join(workDir, 'record', 'mangostudio-runtime'))).toBe(false);
+  });
+});
+
+describe('runtimeChildPids', () => {
+  let procRoot: string;
+
+  /** One entry of a fake procfs: the `stat` line (`pid (comm) state ppid ...`) and the command line. */
+  const fakeProcess = (pid: number | string, comm: string, ppid: number, argv: string[]): void => {
+    const directory = join(procRoot, String(pid));
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, 'stat'), `${pid} (${comm}) S ${ppid} ${pid} ${pid} 0 -1 4194560`);
+    writeFileSync(join(directory, 'cmdline'), `${argv.join('\0')}\0`);
+  };
+
+  beforeEach(() => {
+    procRoot = mkdtempSync(join(tmpdir(), 'aot-order-proc-'));
+  });
+
+  afterEach(() => {
+    rmSync(procRoot, { recursive: true, force: true });
+  });
+
+  test('finds only the direct children of the hub that run the runtime', () => {
+    fakeProcess(100, 'mangostudio', 1, ['/opt/mangostudio', 'serve', '3001']);
+    fakeProcess(101, 'mangostudio-run', 100, ['/opt/mangostudio-runtime', '--stdio']);
+    // A child of the hub that is something else, and a runtime that belongs to another hub.
+    fakeProcess(102, 'git', 100, ['/usr/bin/git', 'status']);
+    fakeProcess(103, 'mangostudio-run', 999, ['/opt/mangostudio-runtime', '--stdio']);
+
+    expect(runtimeChildPids(100, 'mangostudio-runtime', procRoot)).toEqual([101]);
+  });
+
+  test('reads the parent after the last parenthesis and finds a runtime started through an interpreter', () => {
+    fakeProcess(201, 'my (odd) name', 200, ['bun', '/opt/mangostudio-runtime', '--stdio']);
+
+    expect(runtimeChildPids(200, 'mangostudio-runtime', procRoot)).toEqual([201]);
+  });
+
+  test('skips non-process entries and a process that ended while being read', () => {
+    mkdirSync(join(procRoot, 'self'));
+    // A numeric entry with no stat file: the process exited between the listing and the read.
+    mkdirSync(join(procRoot, '300'));
+
+    expect(runtimeChildPids(1, 'mangostudio-runtime', procRoot)).toEqual([]);
   });
 });
 
@@ -404,6 +491,86 @@ describe.skipIf(process.platform === 'win32')('recordAotOrder', () => {
     expect(env.MANGO_UPDATES_CHECK).toBe('0');
   });
 
+  describe('with a runtime to run beside the recording hub', () => {
+    /** The fake hub, copied into the work dir so a runtime placed beside it never lands in the repo. */
+    let recordingHub: string;
+    let runtime: string;
+    const siblingSeenByHub = (): {
+      present: boolean;
+      executable: boolean;
+      content: string | null;
+    } => JSON.parse(readFileSync(`${orderFile}.sibling.json`, 'utf8'));
+
+    beforeEach(() => {
+      recordingHub = join(workDir, 'record', 'mangostudio');
+      mkdirSync(dirname(recordingHub), { recursive: true });
+      copyFileSync(FAKE_HUB, recordingHub);
+      chmodSync(recordingHub, 0o755);
+      runtime = join(workDir, 'in', 'mangostudio-runtime');
+      mkdirSync(dirname(runtime), { recursive: true });
+      // A prebuilt runtime from a download is not executable until the recorder makes it so. This
+      // one only stays alive, the way `mangostudio-runtime --stdio` does while a hub holds it.
+      writeFileSync(runtime, FAKE_RUNTIME_SOURCE, { mode: 0o644 });
+    });
+
+    test('starts the hub with the runtime executable beside it, and the hub launches it', async () => {
+      fakeHubMode('records');
+
+      await recordAotOrder(recordingHub, orderFile, {
+        workload: noWorkload,
+        runtimeBinary: runtime,
+      });
+
+      expect(siblingSeenByHub()).toEqual({
+        present: true,
+        executable: true,
+        content: FAKE_RUNTIME_SOURCE,
+      });
+    });
+
+    test('fails when the hub never launches the runtime, since the order would not cover Local', async () => {
+      fakeHubMode('no-runtime-launch');
+
+      await expect(
+        recordAotOrder(recordingHub, orderFile, {
+          workload: noWorkload,
+          runtimeBinary: runtime,
+          runtimeAttachDeadlineMs: 300,
+        })
+      ).rejects.toThrow(
+        /expected the recording hub to launch mangostudio-runtime within 300 ms of the workload \| received: no child process of pid \d+ with that name/
+      );
+    });
+
+    test('does not look for a runtime child when no runtime was given', async () => {
+      fakeHubMode('no-runtime-launch');
+
+      await recordAotOrder(recordingHub, orderFile, { workload: noWorkload });
+
+      expect(siblingSeenByHub().present).toBe(false);
+    });
+
+    test('starts the hub alone when no runtime is given', async () => {
+      fakeHubMode('records');
+
+      await recordAotOrder(recordingHub, orderFile, { workload: noWorkload });
+
+      expect(siblingSeenByHub().present).toBe(false);
+    });
+
+    test('fails before starting a hub when the runtime file is missing', async () => {
+      fakeHubMode('records');
+      const missing = join(workDir, 'in', 'absent-runtime');
+
+      await expect(
+        recordAotOrder(recordingHub, orderFile, { workload: noWorkload, runtimeBinary: missing })
+      ).rejects.toThrow(
+        `aot order: expected the recording runtime at ${missing} | received: no such file`
+      );
+      expect(existsSync(`${orderFile}.pid`)).toBe(false);
+    });
+  });
+
   describe('when the build is cancelled mid-recording', () => {
     const RUNNER = join(import.meta.dir, 'support', 'record-order-runner.ts');
 
@@ -489,8 +656,14 @@ class FakeAotOrderSteps implements AotOrderSteps {
     });
   }
 
-  record(recordingBinary: string, orderFile: string): Promise<AotOrderSummary> {
-    this.calls.push(`record ${recordingBinary} -> ${orderFile}`);
+  record(
+    recordingBinary: string,
+    orderFile: string,
+    runtimeBinary?: string
+  ): Promise<AotOrderSummary> {
+    this.calls.push(
+      `record ${recordingBinary} -> ${orderFile}${runtimeBinary === undefined ? '' : ` with runtime ${runtimeBinary}`}`
+    );
     this.orderDirAtRecording = existsSync(this.orderDir)
       ? // Glob yields native separators; list with `/` so the expectation reads the same everywhere.
         [...new Bun.Glob('**/*').scanSync(this.orderDir)].map((path) => path.replaceAll('\\', '/'))
@@ -557,6 +730,40 @@ describe('compileWithAotOrder', () => {
     ]);
     expect(steps.logs.join('\n')).toContain('12 functions recorded in 2.5 s');
     expect(steps.warnings).toEqual([]);
+  });
+
+  test('hands the plan its runtime to the recorder, and records without one when it has none', async () => {
+    await compileWithAotOrder(
+      plan({ runtimeBinary: '/in/mangostudio-runtime' }),
+      steps,
+      '/out/hub'
+    );
+    expect(steps.calls[1]).toBe(
+      `record ${join(orderDir, 'record', 'mangostudio')} -> ${join(orderDir, 'hub.order')} with runtime /in/mangostudio-runtime`
+    );
+
+    steps.calls.length = 0;
+    await compileWithAotOrder(plan(), steps, '/out/hub');
+    expect(steps.calls[1]).toBe(
+      `record ${join(orderDir, 'record', 'mangostudio')} -> ${join(orderDir, 'hub.order')}`
+    );
+  });
+
+  test('fails a required build, naming the runtime, when the runtime for the recording is missing', async () => {
+    steps.recordingError = new Error(
+      'aot order: expected the recording runtime at /in/mangostudio-runtime | received: no such file'
+    );
+
+    const result = await compileWithAotOrder(
+      plan({ required: true, runtimeBinary: '/in/mangostudio-runtime' }),
+      steps,
+      '/out/hub'
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.failure).toBe(
+      'could not record the AOT function order for linux-x64: aot order: expected the recording runtime at /in/mangostudio-runtime | received: no such file'
+    );
   });
 
   test('logs the line kinds of an order file it does not know, and still ships with it', async () => {

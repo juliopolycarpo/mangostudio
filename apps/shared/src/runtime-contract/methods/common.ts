@@ -57,11 +57,31 @@ export type {
   ExternalAgentTurnResult,
 } from '../../external-agents';
 
-/** What a path held before a mutation touched it, when the call asked for a snapshot. */
+/**
+ * Largest file a checkpoint may hold. A file past it is refused before the call
+ * changes anything, with a `snapshot_too_large` error naming its size. Absent
+ * means the runtime's default; the runtime clamps a larger value to its ceiling.
+ */
+export const RuntimeSnapshotMaxBytesSchema = Type.Integer({
+  minimum: 1,
+  description:
+    'Largest file a checkpoint may hold, in bytes. A larger file is refused before anything changes.',
+});
+
+/**
+ * What a path held before a mutation touched it, when the call asked for a snapshot.
+ *
+ * A small file's bytes ride inline as `contentBase64`. A larger one is staged on
+ * the runtime instead: `stagedId` names the copy and `sizeBytes` its length, and
+ * the caller pulls it with `snapshot.read-chunk` and frees it with
+ * `snapshot.release`. `hash` is the SHA-256 of the whole content either way.
+ */
 export const RuntimeBeforeSnapshotSchema = Type.Object({
   exists: Type.Boolean(),
   contentBase64: Type.Optional(Type.String()),
   hash: Type.Optional(Type.String()),
+  sizeBytes: Type.Optional(Type.Integer({ minimum: 0 })),
+  stagedId: Type.Optional(Type.String()),
 });
 export type RuntimeBeforeSnapshot = Static<typeof RuntimeBeforeSnapshotSchema>;
 
@@ -116,4 +136,5 @@ export const RuntimeMutationParamsSchema = Type.Interface([RuntimePathPolicyPara
     description:
       'When true, the runtime also requires fsRead and checkpoints consent because the result returns prior file bytes for checkpointing.',
   }),
+  snapshotMaxBytes: Type.Optional(RuntimeSnapshotMaxBytesSchema),
 });

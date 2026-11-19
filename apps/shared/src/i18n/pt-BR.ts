@@ -328,6 +328,8 @@ export const messages = {
       confirmBody:
         'Isso restaura ou remove arquivos alterados neste turno do assistente. Edições suas depois disso podem impedir a reversão.',
       confirmAction: 'Reverter arquivos',
+      shellCaptureNote:
+        'As alterações de comandos de shell são encontradas comparando os arquivos antes e depois, então esta reversão também pode desfazer edições que outro programa fez enquanto um comando rodava.',
       cancel: 'Cancelar',
       uncheckpointedShell:
         'Este turno também executou comandos de shell. Quaisquer alterações feitas por comandos de shell não têm checkpoint e não serão revertidas.',
@@ -1551,6 +1553,9 @@ export const messages = {
     searchPlaceholder: 'Buscar chats…',
     searchNoResultsHint: 'Tente outro título, pasta ou agente.',
     clearSearch: 'Limpar busca',
+    loadingMore: 'Carregando mais chats…',
+    loadMore: 'Carregar mais chats',
+    currentChatGroup: 'Chat aberto',
     // Rótulos de harness estilo terminal — nomes de marca, iguais nos dois idiomas.
     runner: {
       mango: 'mango',
@@ -2665,6 +2670,7 @@ export const messages = {
       parseFailure: {
         'invalid-json': 'JSON inválido',
         'invalid-toml': 'TOML inválido',
+        'invalid-rules': 'Não foi possível interpretar as regras',
         unreadable: 'Não pôde ser lido',
         'not-regular-file': 'Não é um arquivo comum',
         'too-large': 'Grande demais para ler',
@@ -2787,6 +2793,205 @@ export const messages = {
         title: 'Doctor',
         summary: '{warnings} avisos, {failures} falhas',
         clear: 'Todas as verificações passaram.',
+        checks: {
+          'core.label.homeDirectory': 'Diretório base',
+          'core.label.logsDirectory': 'Diretório de logs',
+          'core.label.runDirectory': 'Diretório de execução',
+          'core.label.config': 'Configuração',
+          'core.label.database': 'Banco de dados',
+          'core.label.frontend': 'Frontend',
+          'core.label.authSecret': 'Segredo de autenticação',
+          'core.label.instance': 'Instância',
+          'core.label.runtime': 'Runtime',
+          'core.label.runtimeBinary': 'Binário do runtime',
+          'core.label.runtimeSlot': 'Slot do runtime ({slot})',
+          'core.label.runtimeCache': 'Cache do runtime',
+          'core.label.sshClient': 'Cliente SSH',
+          'core.label.serverBuild': 'Build do servidor',
+          'core.label.checkoutBuild': 'Build do checkout',
+          'core.label.frontendBuild': 'Build do frontend',
+          'core.detail.directoryWritable': '{path} (gravável)',
+          'core.detail.directoryNotWritable': '{path} (sem permissão de escrita)',
+          'core.detail.directoryWillBeCreated': '{path} (será criado)',
+          'core.detail.directoryParentNotWritable':
+            '{path} (diretório pai sem permissão de escrita)',
+          'core.detail.configFile': '{host}:{port} ({path})',
+          'core.detail.configDefaults': '{host}:{port} (padrões)',
+          'core.detail.databaseInMemory': 'em memória',
+          'core.detail.databasePath': '{path}',
+          'core.detail.frontendPresent': '{path} (presente)',
+          'core.detail.frontendMissing': '{path} (ausente — somente API)',
+          'core.detail.frontendEmbeddedFiles': 'embutido no binário ({count} arquivos)',
+          'core.detail.frontendEmbeddedInServer': 'embutido no binário do servidor em execução',
+          'core.detail.authSecretInvalid': '{message}',
+          'core.detail.authSecretSet': 'definido ({minLength}+ caracteres)',
+          'core.detail.instanceNotRunning': 'parada',
+          'core.detail.instanceStale': 'arquivo de estado obsoleto (PID {pid})',
+          'core.detail.instanceRunning':
+            'em execução (PID {pid}, porta {port}, saúde não verificada)',
+          'core.detail.runtimeStandalone': 'v{version} {platform}-{arch} standalone',
+          'core.detail.runtimeDevelopment': 'v{version} {platform}-{arch} dev',
+          'core.detail.runtimeBinaryNotBuilt':
+            'não compilado neste checkout do código-fonte; o Local não pode iniciar. Execute "{command}" na raiz do repositório',
+          'core.detail.runtimeBinaryMissing':
+            'não encontrado em {path}; o Local não pode iniciar. Reinstale o MangoStudio para que ele fique ao lado do hub, ou defina MANGOSTUDIO_RUNTIME_BINARY',
+          'core.detail.runtimeBinaryNoVersion': '{path} não informou uma versão ({reason})',
+          'core.detail.runtimeBinaryNoVersionUnknown':
+            '{path} não informou uma versão (motivo desconhecido)',
+          'core.detail.runtimeBinaryMismatch':
+            'v{version} não corresponde ao hub v{hubVersion}; reinstale para que ambos venham da mesma versão',
+          'core.detail.runtimeBinaryOk': 'v{version} em {path}',
+          'core.detail.runtimeSlotUnreadable':
+            '{file} em {directory} {error}; execute "{command}" para reescrevê-lo',
+          'core.detail.runtimeSlotPending':
+            'aguardando consentimento; execute "{command}" nessa máquina',
+          'core.detail.runtimeSlotConfigured': '{profile}  {directory}',
+          'core.detail.runtimeSlotConfiguredVersion': 'v{version}  {profile}  {directory}',
+          'core.detail.runtimeSlotDenied': '{profile} (negado: {denied})  {directory}',
+          'core.detail.runtimeSlotDeniedVersion':
+            'v{version}  {profile} (negado: {denied})  {directory}',
+          'core.detail.runtimeCacheEmpty': 'vazio  {directory}',
+          'core.detail.runtimeCacheVersions': '{versions}  {directory}',
+          'core.detail.sshClientMissing':
+            'nenhum ssh no PATH; os ambientes SSH não conseguem iniciar',
+          'core.detail.sshClientNoVersion': '{path} não informou uma versão ({reason})',
+          'core.detail.sshClientNoVersionUnknown':
+            '{path} não informou uma versão (motivo desconhecido)',
+          'core.detail.sshClientOk': '{version}  {path}',
+          'core.detail.buildStampClean':
+            '{sha} (compilado em {builtAt}, sem alterações, {buildType})',
+          'core.detail.buildStampDirty':
+            '{sha} (compilado em {builtAt}, com alterações, {buildType})',
+          'core.detail.buildStampDirtyUnknown':
+            '{sha} (compilado em {builtAt}, alterações desconhecidas, {buildType})',
+          'core.detail.serverBuildMissing':
+            'o servidor em execução não informou metadados de build',
+          'core.detail.checkoutBuildDiffers':
+            'o checkout {checkout} difere do servidor {server}; reinicie ou recompile se isso não for esperado',
+          'core.detail.frontendBuildMissing':
+            '{path} ausente; recompile os assets do frontend para comparar',
+          'core.detail.frontendBuildDiffers': 'o frontend {frontend} difere do servidor {server}',
+          'install.label.installedVia': 'Instalado via',
+          'install.detail.installedVia': '{manager} · canal {channel}',
+          'install.detail.installedViaLegacy':
+            '{manager} · canal {channel} · layout legado, execute mangostudio upgrade para migrar',
+          'update.label.update': 'Atualização',
+          'update.detail.disabled': 'verificações desativadas',
+          'update.detail.skippedEnv': 'ignorado (NO_UPDATE_NOTIFIER|DO_NOT_TRACK|CI)',
+          'update.detail.skippedDev': 'ignorado (build de desenvolvimento)',
+          'update.detail.notChecked': 'ainda não verificado',
+          'update.detail.checkFailed': 'falha na verificação ({error})',
+          'update.detail.available': '{version} disponível — execute: {command}',
+          'update.detail.availableUnnamed': 'um build mais novo disponível — execute: {command}',
+          'update.detail.upToDate': 'atualizado ({version}, verificado há {hours}h)',
+          'cursor.label.connector': 'Conector Cursor',
+          'cursor.detail.deprecated':
+            'Provedor descontinuado. Use o runner Cursor CLI no seletor de runner do chat; esta chave não executa mais turnos.',
+          'chatgpt.label.secrets': 'Segredos do ChatGPT',
+          'chatgpt.label.tokens': 'Tokens do ChatGPT',
+          'chatgpt.label.refresh': 'Renovação do ChatGPT',
+          'chatgpt.label.port': 'Porta do ChatGPT',
+          'chatgpt.label.auth': 'Autenticação do ChatGPT',
+          'chatgpt.label.backend': 'Backend do ChatGPT',
+          'chatgpt.detail.secretStoreUnavailable':
+            'armazenamento de segredos indisponível — os tokens salvos do ChatGPT não podem ser lidos',
+          'chatgpt.detail.secretStoreCorrupted':
+            'o armazenamento de segredos devolveu dados corrompidos em uma gravação do tamanho de um token',
+          'chatgpt.detail.secretStoreReachable':
+            'armazenamento de segredos acessível (gravação do tamanho de um token verificada)',
+          'chatgpt.detail.secretStoreWriteFailed':
+            'a gravação do tamanho de um token falhou — {error}',
+          'chatgpt.detail.connectorError': '{connector}: {error}',
+          'chatgpt.detail.tokensReauthRequired':
+            '{account} — a sessão expirou; entre com o ChatGPT novamente',
+          'chatgpt.detail.tokensExpired':
+            '{account} — o token de acesso expirou há {duration} (renova no próximo uso)',
+          'chatgpt.detail.tokensValid': '{account} — o token de acesso expira em {duration}',
+          'chatgpt.detail.refreshSkipped':
+            '{connector}: ignorado — nenhum pacote de tokens legível',
+          'chatgpt.detail.refreshRotated':
+            '{account} — token de renovação rotacionado; o novo token de acesso expira em {duration}',
+          'chatgpt.detail.refreshRejected':
+            '{connector}: renovação recusada (invalid_grant) — entre com o ChatGPT novamente',
+          'chatgpt.detail.portFree': '{port} livre (callback de login OAuth)',
+          'chatgpt.detail.portInUse':
+            '{port} em uso — novos logins do ChatGPT falharão até que seja liberada (o Codex CLI usa a mesma porta)',
+          'chatgpt.detail.endpointReachable': '{url} (HTTP {status})',
+          'chatgpt.detail.endpointFailed': '{url} ({error})',
+          'skills.label.config': 'Config de skills',
+          'skills.label.mango': 'Skills mango',
+          'skills.label.agents': 'Skills agents',
+          'skills.label.claude': 'Skills claude',
+          'skills.label.skill': 'Skill {key}',
+          'skills.detail.configFromDefault': '{dir} (padrão)',
+          'skills.detail.configFromToml': '{dir} (do toml)',
+          'skills.detail.configFromEnv': '{dir} (do ambiente)',
+          'skills.detail.sourceUnreadable': '{dir} (não legível)',
+          'skills.detail.sourceUnreadableDisabled': '{dir} (não legível, fonte desativada)',
+          'skills.detail.sourceMissing': '{dir} (ainda sem diretório de skills)',
+          'skills.detail.sourceMissingDisabled':
+            '{dir} (ainda sem diretório de skills) (fonte desativada)',
+          'skills.detail.sourceCountOne': '{dir} — 1 skill',
+          'skills.detail.sourceCountMany': '{dir} — {count} skills',
+          'skills.detail.sourceCountDisabledOne': '{dir} — 1 skill (fonte desativada)',
+          'skills.detail.sourceCountDisabledMany': '{dir} — {count} skills (fonte desativada)',
+          'skills.detail.invalid': '{error}',
+          'skills.detail.shadowed': 'sobreposta pela fonte {source} (maior precedência)',
+          'skills.detail.disabled': 'desativada nas configurações',
+          'skills.detail.precedenceUnverified':
+            'não foi possível varrer um local de skills de maior prioridade',
+          'mcp.label.probeNote': 'Sonda MCP',
+          'mcp.label.server': 'MCP {slug}',
+          'mcp.label.command': 'Comando do MCP {slug}',
+          'mcp.label.probe': 'Sonda do MCP {slug}',
+          'mcp.label.tools': 'Ferramentas do MCP {slug}',
+          'mcp.detail.probeNote':
+            'um servidor MangoStudio está em execução; a sonda inicia um segundo processo stdio por servidor (seguro para servidores por cliente)',
+          'mcp.detail.serverEnabled': '{transport}, ativado',
+          'mcp.detail.serverDisabled': '{transport}, desativado',
+          'mcp.detail.commandMissing':
+            'nenhum comando configurado (servidores MCP stdio exigem um comando)',
+          'mcp.detail.commandMissingDisabled':
+            'nenhum comando configurado (servidores MCP stdio exigem um comando, servidor desativado)',
+          'mcp.detail.commandFound': '{command} encontrado no PATH',
+          'mcp.detail.commandNotFound':
+            '{command} não encontrado no PATH (o início falharia com ENOENT)',
+          'mcp.detail.commandNotFoundDisabled':
+            '{command} não encontrado no PATH (servidor desativado)',
+          'mcp.detail.probeResult': '{result}',
+          'mcp.detail.longToolNamesOne':
+            '1 nome de ferramenta excede {max} caracteres e foi ignorado: {names}',
+          'mcp.detail.longToolNamesMany':
+            '{count} nomes de ferramenta excedem {max} caracteres e foram ignorados: {names}',
+          'library.label.locations': 'locais',
+          'library.label.location': '{id}',
+          'library.label.divergence': 'divergência',
+          'library.detail.locationsAllWritable':
+            '{present} de {supported} presentes, todos graváveis',
+          'library.detail.locationsSomeWritable':
+            '{present} de {supported} presentes, {writable} graváveis',
+          'library.detail.notWritable': 'sem permissão de escrita',
+          'library.detail.stagedRemoval':
+            'uma remoção interrompida deixou "{path}" para trás; inspecione e depois apague manualmente',
+          'library.detail.divergenceHint':
+            'execute `mangostudio library --divergent` para listar os recursos que diferem entre os locais',
+          'env.label.tool': '{tool}',
+          'env.label.wslExecutable': 'Executável do WSL',
+          'env.detail.versionAndPath': '{version}  {path}',
+          'env.detail.versionUnknownAndPath': 'versão desconhecida  {path}',
+          'env.detail.detected': 'detectado',
+          'env.detail.notDetected': 'não detectado',
+          'env.detail.needsAttention': 'precisa de atenção',
+          'env.detail.notInstalled': 'não instalado',
+          'env.detail.installed': 'instalado',
+          'env.detail.installedManagedOne': 'instalado  1 versão gerenciada',
+          'env.detail.installedManagedMany': 'instalado  {count} versões gerenciadas',
+          'env.detail.managerVersion': '{version}',
+          'env.detail.managerVersionManagedOne': '{version}  1 versão gerenciada',
+          'env.detail.managerVersionManagedMany': '{version}  {count} versões gerenciadas',
+          'env.detail.findingsJoined': '{findings}',
+          'env.detail.wslExecutable': '{path} ({source})',
+        },
       },
       logs: {
         title: 'Log',
@@ -3999,13 +4204,26 @@ export const messages = {
       rules:
         'Ele carrega as regras e a configura\u00e7\u00e3o de projeto versionadas nesta pasta e as segue.',
       mcp: 'Ele inicia os servidores MCP definidos nesta pasta, com o acesso que esses servidores t\u00eam.',
-      scope: 'Vale para esta pasta nesta máquina, em todos os chats que a utilizam.',
+      scope:
+        'Vale para esta pasta nesta máquina, em todos os chats que a utilizam, até você retirar em Configurações > Agentes externos.',
       warning:
         'Quem escreveu este reposit\u00f3rio escreveu essas instru\u00e7\u00f5es. S\u00f3 continue se confiar nele.',
       accept: 'Confiar nesta pasta',
       saving: 'Salvando\u2026',
       cancel: 'Agora n\u00e3o',
       saveFailed: 'N\u00e3o foi poss\u00edvel salvar sua escolha, ent\u00e3o nada foi enviado.',
+      manageTitle: 'Pastas confi\u00e1veis',
+      manageDescription:
+        'Pastas em que voc\u00ea permitiu que um agente carregue as regras e os servidores MCP do pr\u00f3prio reposit\u00f3rio.',
+      manageEmpty: 'Nenhuma pasta confi\u00e1vel ainda',
+      manageEmptyHint:
+        'Uma pasta \u00e9 registrada quando voc\u00ea escolhe confiar nela antes de um agente rodar ali pela primeira vez.',
+      manageHint:
+        'Retirar vale para todos os chats que usam a pasta. Um turno em andamento continua; a pr\u00f3xima mensagem pergunta de novo.',
+      grantedAt: '{vendor} \u00b7 {environment} \u00b7 Confiada em {date}',
+      revoke: 'Retirar',
+      revoking: 'Retirando\u2026',
+      revokeFailed: 'N\u00e3o foi poss\u00edvel retirar a confian\u00e7a nesta pasta.',
     },
     unsupported: {
       codexProfileDisallowed: 'A configuração do Codex nesta máquina não permite esse perfil',
@@ -4209,6 +4427,8 @@ export const messages = {
     },
     /** O relógio de uma chamada em execução ao lado do limite de tempo configurado, ex.: `12s de 30s`. */
     elapsedOfLimit: '{elapsed} de {limit}',
+    /** O limite de tempo ao qual uma chamada esgotada estava sujeita, ex.: `limite de 30s`. */
+    timeLimit: 'limite de {limit}',
     /** O que a chamada produziu, alinhado à direita na linha da timeline. */
     summary: {
       item: '{count} item',

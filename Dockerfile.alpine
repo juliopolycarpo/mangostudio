@@ -15,7 +15,8 @@ ARG TARGETARCH
 ARG VERSION=dev
 ARG SOURCE_URL=https://github.com/juliopolycarpo/mangostudio
 
-RUN apk add --no-cache ca-certificates libstdc++ \
+RUN apk add --no-cache ca-certificates libstdc++ tini \
+  && ln -s "$(command -v tini)" /usr/local/bin/tini \
   && addgroup -S mango \
   && adduser -S -D -H -h /data -G mango mango \
   && mkdir -p /data /tmp \
@@ -38,5 +39,8 @@ USER mango
 VOLUME ["/data"]
 EXPOSE 3001
 
-ENTRYPOINT ["/usr/local/bin/mangostudio"]
+# tini is PID 1: it reaps orphaned processes (vendor CLIs, shells, git) the hub
+# did not spawn itself, and forwards SIGTERM to the hub. No -g: the hub already
+# stops its own children, so signalling the whole group would race that.
+ENTRYPOINT ["/usr/local/bin/tini", "--", "/usr/local/bin/mangostudio"]
 CMD ["serve"]

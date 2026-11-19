@@ -508,6 +508,10 @@ describe('runtime profile callers and cache isolation', () => {
     expect(callers.sort(), 'update the profile policy for every new runtime-build caller').toEqual([
       '.github/workflows/ci.yml:runtime-cache-seed',
       `${DISTRIBUTION_WORKFLOW}:runtime`,
+      `${DISTRIBUTION_WORKFLOW}:runtime-darwin-x64`,
+      `${DISTRIBUTION_WORKFLOW}:runtime-hosts`,
+      `${DISTRIBUTION_WORKFLOW}:runtime-linux-arm64`,
+      `${DISTRIBUTION_WORKFLOW}:runtime-windows-arm64`,
       '.github/workflows/release-dry-run.yml:runtime',
       '.github/workflows/smoke-binary.yml:runtime',
     ]);
@@ -538,9 +542,17 @@ describe('runtime profile callers and cache isolation', () => {
     }
     const distribution = readText(DISTRIBUTION_WORKFLOW);
     expect(distribution).toMatch(/\n {6}runtime_profile:\n(?: {8}.*\n)*? {8}default: shipping\n/);
-    expect(extractJobBlock(distribution, 'runtime')).toContain(
-      `profile: ${EXPR} inputs.runtime_profile }}`
-    );
+    for (const job of [
+      'runtime',
+      'runtime-hosts',
+      'runtime-linux-arm64',
+      'runtime-darwin-x64',
+      'runtime-windows-arm64',
+    ]) {
+      expect(extractJobBlock(distribution, job), job).toContain(
+        `profile: ${EXPR} inputs.runtime_profile }}`
+      );
+    }
     expect(extractJobBlock(readText('.github/workflows/ci.yml'), 'distribution')).toContain(
       `runtime_profile: ${PROFILE_SELECTION}`
     );

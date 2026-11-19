@@ -107,3 +107,4 @@ On 2026-11-06, 37 of the 59 tracked Markdown, MDX, and MDC pages outside
 | [`reference/ci-optimization-evidence.md`](./reference/ci-optimization-evidence.md)                 | CI simplification evidence      |
 | [`reference/mcp.md`](./reference/mcp.md)                                                           | MCP servers                     |
 | [`reference/skills.md`](./reference/skills.md)                                                     | Skills                          |
+| [`reference/commands.md`](./reference/commands.md)                                                 | Slash commands                  |

@@ -35,6 +35,8 @@
       "workdir_validation",
       "snapshot_conflict",
       "snapshot_too_large",
+      "snapshot_stage_missing",
+      "snapshot_stage_corrupt",
       "runtime_update_refused",
       "runtime_service_unsupported",
       "runtime_service_no_session_bus",

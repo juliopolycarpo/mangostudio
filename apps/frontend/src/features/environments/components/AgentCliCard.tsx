@@ -7,6 +7,7 @@ import type { AgentCliStatus, InstallRecipePreview } from '@mangostudio/shared/e
 import type { Messages } from '@mangostudio/shared/i18n';
 
 import { MicroLabel } from '@/components/ui/MicroLabel';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 
@@ -33,7 +34,7 @@ interface AgentCliCardProps {
 }
 
 export function AgentCliCard({ status, recipes, environmentId }: AgentCliCardProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const e = t.environments;
   const probe = useProbeAgentCli(environmentId);
   const { resolve } = useToolIdentities();

@@ -160,8 +160,9 @@ dois não divirjam.
 O hub usa AOT nativo do Bun; `mangostudio-runtime` é o binário cargo de
 `crates/mangostudio-runtime`. `distribution-build.yml` prepara o frontend e o
 harness de smoke binário uma vez e chama `.github/workflows/runtime-build.yml`
-para os oito alvos Rust. Cada produtor nativo baixa o runtime correspondente e
-o frontend preparado, então executa:
+para os oito alvos Rust, em várias chamadas: os alvos Linux separados dos de
+macOS e Windows. Cada produtor nativo começa quando o frontend preparado e os
+runtimes Linux estão prontos, então executa:
 
 ```bash
 bun run build:binary --platform <host-correspondente> --runtime-dir .mango/runtime-prebuilt --reuse-frontend
@@ -192,11 +193,22 @@ o artefato do hub nativo o carrega. Produtores macOS e Windows compilam uma vez 
 O `distribution-build.yml` recebe as plataformas que precisam gravar em `aot_order_platforms` (ids
 separados por espaço, ou `all`; vazio por padrão). O `release.yml` passa `all`; o `ci.yml` passa
 `all` nos pushes, porque o Canary diário promove esses pacotes, e só `linux-x64` nos pull requests,
-o hub que o dry run de release reaproveita. A gravação adiciona cerca de 5 s localmente (conte mais num runner) a uma etapa de hub
-Linux que termina antes dos jobs de runtime, então não alonga a execução. O hub de gravação não tem
-runtime ao lado; veja
-[runtime-metrics.md](runtime-metrics.md#binário-do-hub-ordem-de-funções-aot) para o que isso cobre
-e o que um runtime gravado acrescentaria.
+o hub que o dry run de release reaproveita.
+
+Um hub Linux que grava roda com o runtime da sua plataforma ao lado, então a ordem cobre também o
+código que um hub executa com o Local conectado. O job do hub baixa
+`runtime-<sha do código>-<plataforma>` para `.mango/runtime-prebuilt` e passa esse diretório como
+`--aot-runtime-dir` (ou `AOT_RUNTIME_DIR`); o build coloca `<dir>/<plataforma>/mangostudio-runtime`
+ao lado do hub de gravação e falha quando o arquivo falta ou quando o hub não o lançou como processo
+filho depois da carga. O runtime precisa carregar a versão de release do hub ao lado do qual roda, o
+que a chamada de runtime da distribuição garante. Por isso os jobs do hub dependem (`needs`) das
+duas chamadas que constroem runtimes Linux (`runtime`, para x64 e x64 musl, e `runtime-linux-arm64`,
+para os dois alvos arm64, que a verificação dele também espera). Os runtimes de macOS e Windows
+ligados nativamente são uma chamada própria (`runtime-hosts`), que só o job de empacotamento espera,
+para que as etapas lentas do Windows não segurem os hubs. Reproduzido em 40 execuções recentes, isso move o
+job de empacotamento por uma mediana de 13 s num pull request e por nenhum tempo num push com perfil
+de distribuição; veja [runtime-metrics.md](runtime-metrics.md#binário-do-hub-ordem-de-funções-aot)
+para a medição.
 
 `--reuse-frontend` aceita `apps/frontend/dist/build-info.json` somente quando
 o build preparado e o checkout estão limpos, apontam para o mesmo HEAD e usam

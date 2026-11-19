@@ -14,6 +14,7 @@ import {
 } from '../../../../src/modules/generation/application/standard-tool-execution';
 import { buildShellTool } from '../../../../src/services/tools/builtin/_shell-tool';
 import { TODO_WRITE_TOOL_NAME } from '../../../../src/services/tools/builtin/todo';
+import { buildToolExecutionTimeoutDescriptor } from '../../../../src/services/tools/execution-timeout';
 import { clearRegistry, getAllTools, registerTool } from '../../../../src/services/tools/registry';
 import type { RegisteredTool } from '../../../../src/services/tools/types';
 import { waitUntil } from '../../../support/wait-until';
@@ -250,6 +251,91 @@ describe('executeStandardToolCallsWithProgress timeouts', () => {
     },
     15_000
   );
+});
+
+describe('executeStandardToolCallsWithProgress time budget', () => {
+  const BUDGET_TOOL_NAME = 'budgeted_fixture';
+  let snapshot: RegisteredTool[];
+
+  /** A builtin that declares the shared timeout parameter and returns at once. */
+  function registerBudgetTool(): void {
+    registerTool({
+      definition: { name: BUDGET_TOOL_NAME, description: 'Returns at once', parameters: {} },
+      settings: {
+        title: 'Budgeted',
+        description: 'Returns at once',
+        category: 'system',
+        enabledByDefault: true,
+        canDisable: true,
+        defaultParameters: { timeoutSeconds: 12 },
+        parameterDescriptors: [buildToolExecutionTimeoutDescriptor()],
+      },
+      execute: () => Promise.resolve({ ok: true }),
+    });
+  }
+
+  async function runBudgetTool(timeoutSeconds: number) {
+    const items = await collectProgress(
+      executeStandardToolCallsWithProgress(
+        [['budget-1', { name: BUDGET_TOOL_NAME, argsStr: '{}' }]],
+        {
+          userId: 'user-1',
+          chatId: 'chat-1',
+          environmentId: 'local',
+          settingsByToolName: new Map([
+            [BUDGET_TOOL_NAME, { enabled: true, parameters: { timeoutSeconds } }],
+          ]),
+          allowedToolNames: new Set([BUDGET_TOOL_NAME]),
+        }
+      )
+    );
+    return items.flatMap((item) =>
+      item.kind === 'event' && item.event.type === 'tool_execution' ? [item.event.execution] : []
+    );
+  }
+
+  beforeEach(() => {
+    snapshot = snapshotRegistry();
+    clearRegistry();
+    registerBudgetTool();
+  });
+
+  afterEach(() => {
+    restoreRegistry(snapshot);
+  });
+
+  it('stamps the configured limit on the running and terminal snapshots, not the queued one', async () => {
+    const snapshots = await runBudgetTool(45);
+
+    expect(snapshots.map((execution) => [execution.status, execution.timeoutMs])).toEqual([
+      ['queued', undefined],
+      ['running', 45_000],
+      ['succeeded', 45_000],
+    ]);
+  });
+
+  it('records no limit on a call rejected by policy before it started', async () => {
+    const items = await collectProgress(
+      executeStandardToolCallsWithProgress(
+        [['budget-2', { name: BUDGET_TOOL_NAME, argsStr: '{}' }]],
+        {
+          userId: 'user-1',
+          chatId: 'chat-1',
+          environmentId: 'local',
+          settingsByToolName: new Map(),
+          allowedToolNames: new Set(),
+        }
+      )
+    );
+    const execution = items.find((item) => item.kind === 'execution');
+    expect(execution?.kind).toBe('execution');
+    if (execution?.kind !== 'execution') return;
+    expect(execution.execution.execution).toMatchObject({
+      status: 'failed',
+      reasonCode: 'not_allowed',
+    });
+    expect(execution.execution.execution.timeoutMs).toBeUndefined();
+  });
 });
 
 describe('executeStandardToolCallsWithProgress result shaping', () => {

@@ -300,6 +300,19 @@ build):
   wrongly. The options are validators generated at build time or a hand-written subset
   checker proven equal to `Value.Check` by differential tests; both are larger than the
   saving justifies today.
+- **`@mangostudio/shared` declares `sideEffects`, and Bun honours it.** A frontend import of one
+  name from a shared barrel used to keep every module the barrel re-exports, along with the
+  TypeBox objects each one builds at load. The package now lists the one module that runs code at
+  load (`library/registry.ts`); every other module is dropped whole when nothing it exports is
+  used. That took the eager total from 384,516 to 381,238 B Brotli (-3.3 KB; 25 of the 110 shared
+  modules in the entry left). What it cannot do is drop a schema inside a module the frontend still
+  uses, so a constant that lives beside schemas goes in a `limits` or `values` subpath:
+  `GIT_BATCH_STATE_MAX_CHAT_IDS` moved to `git/limits` (about 1.1 KB more, 380,226 B). What is left of
+  shared in the entry is mostly `i18n/en` (113 KB raw, the English dictionary), then the settings
+  defaults (9.7 KB) and schemas the frontend validates with at runtime. The
+  `shared-barrel-eager-guard` test and `scripts/tests/shared-side-effects-declaration.unit.test.ts`
+  keep both halves honest. The first terminal use fetches about 1.7 KB more raw, because the wire
+  parser left the entry for the terminal chunk.
 - **The first fenced code block loads one grammar and one theme.** The highlighter starts
   empty; `preloadCodeLanguages(languages, theme)` loads the fence's own grammar and the active
   theme, and a theme switch loads just the new theme. A `md` block is the one grammar that
@@ -374,6 +387,19 @@ And the palette's frame (`PaletteFrame`: backdrop, panel and the search input, a
 owns focus and the keys from the first commit, so characters typed while the results chunk is
 in flight stay in the input and become the results' initial query rather than reaching the
 composer. Until the results mount, Enter and the navigation keys are swallowed; Escape closes.
+
+**English strings of lazy features ride with their chunk.** The Environments, Library, Git and
+GitHub namespaces are split by key: what the first paint reads stays in `en.ts`, the rest is
+`en-<name>.ts`, which the feature's own components import statically and pass to
+`useI18n(libraryMessages)`. The bundler places it in the feature's chunk (a chunk shared by several
+routes when more than one imports it), so the strings arrive in the same round as the code and
+no Suspense is added. A shared chunk is one more request in that round (the Library page makes
+two more, the Environments page one), never one more round; the Git, GitHub and Settings panels
+keep their request counts. Moving them out of the entry took 9.8 KB Brotli, 47 KB raw (see
+[i18n](i18n.md#feature-namespaces)); splitting `environments.entities` and `environments.machine`
+one level down took another 4.6 KB Brotli, 16.8 KB raw, with no new chunk and the same rounds. One static import of a feature module from anything the
+entry reaches puts them back; `tests/unit/i18n-feature-namespaces.test.ts` walks the entry's
+static imports and names the importer.
 
 **Lazy chunk failures stay local.** `LazyChunkBoundary` keeps a failed chunk where it sits,
 with Retry and Reload; a plain `React.lazy` would cache the rejection and take the whole

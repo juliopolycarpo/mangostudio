@@ -89,6 +89,13 @@ export const ToolExecutionSnapshotSchema = Type.Object({
   awaitingUserAt: Type.Optional(Type.Number()),
   finishedAt: Type.Optional(Type.Number()),
   durationMs: Type.Optional(Type.Number({ minimum: 0 })),
+  /**
+   * The wall-clock budget the call started under, in millis. Recorded when the
+   * call starts running so a settled card can name the limit a timeout hit even
+   * after the setting changed; absent when no timer governs the call and on
+   * parts persisted before this field existed.
+   */
+  timeoutMs: Type.Optional(Type.Number({ exclusiveMinimum: 0 })),
   reasonCode: Type.Optional(ToolExecutionReasonCodeSchema),
 });
 

@@ -12,6 +12,7 @@ import { sshPreflightCommands } from '@mangostudio/shared/environments/values';
 
 import { Callout } from '@/components/ui/Callout';
 import { Input } from '@/components/ui/Input';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 
 import { CopyLine } from '../components/CopyLine';
@@ -26,7 +27,7 @@ interface ReachStepProps {
 }
 
 export function ReachStep({ form, onChange, onContinue }: ReachStepProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.onboarding;
   const add = t.environments.entities.add;
   const invalid = validateSshForm(form);

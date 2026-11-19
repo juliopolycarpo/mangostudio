@@ -380,7 +380,7 @@ export async function assertRustRuntimeSnapshotMethods(
     contentBase64: before.toString('base64'),
     hash: beforeHash,
   });
-  expect(await client.snapshot.hash({ path })).toEqual({ hash: beforeHash });
+  expect(await client.snapshot.hash({ path })).toMatchObject({ hash: beforeHash });
   const after = Buffer.from('changed bytes');
   const afterHash = new Bun.CryptoHasher('sha256').update(after).digest('hex');
   await writeFile(path, after);
@@ -393,7 +393,7 @@ export async function assertRustRuntimeSnapshotMethods(
   expect(await client.snapshot.revert(revert)).toEqual({ revertedFiles: 1 });
   expect(await readFile(path)).toEqual(before);
   expect(await client.snapshot.revert(revert)).toEqual({ revertedFiles: 1 });
-  expect(await client.snapshot.hash({ path })).toEqual({ hash: beforeHash });
+  expect(await client.snapshot.hash({ path })).toMatchObject({ hash: beforeHash });
 }
 
 /**

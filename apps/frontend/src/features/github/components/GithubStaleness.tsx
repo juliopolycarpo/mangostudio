@@ -1,5 +1,6 @@
 import { RefreshCw } from 'lucide-react';
 
+import { githubMessages } from '@/features/github/github-i18n';
 import { IconButton } from '@/features/workspace/components/IconButton';
 import { useI18n } from '@/hooks/use-i18n';
 import { useNow } from '@/hooks/use-now';
@@ -31,7 +32,7 @@ const STALENESS_TICK_MS = 30_000;
  * <GithubStaleness cachedAt={data.cachedAt} refreshing={query.isFetching} />
  */
 export function GithubStaleness({ cachedAt, refreshing }: GithubStalenessProps) {
-  const { t, locale } = useI18n();
+  const { t, locale } = useI18n(githubMessages);
   // The panel deliberately never polls, so this component is the only thing
   // that can move the label — a render that says "updated now" is otherwise the
   // last word until the user refreshes. Off while there is nothing to age.
@@ -59,7 +60,7 @@ export function GithubRefreshButton({
   readonly onRefresh: () => void;
   readonly refreshing: boolean;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(githubMessages);
 
   return (
     <IconButton

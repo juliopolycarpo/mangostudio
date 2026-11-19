@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { ListActivityResponseSchema } from '@mangostudio/shared/activity';
 import { AgentProfileListResponseSchema } from '@mangostudio/shared/agents';
 import { ModelCatalogResponseSchema } from '@mangostudio/shared/catalog';
-import { ChatListSchema } from '@mangostudio/shared/chat';
+import { ChatListPageSchema } from '@mangostudio/shared/chat';
 import {
   AgentCliStatusListSchema,
   EnvironmentListSchema,
@@ -114,8 +114,8 @@ describe('Motion animation background reads', () => {
     await installMotionReadModels(page as unknown as Page, { emptyChatList: true });
     const empty = await page.dispatch('/api/chats?cursor=page');
     expect(empty.fallbacks).toBe(0);
-    expect(empty.fulfillments).toEqual([[]]);
-    expect(Value.Check(ChatListSchema, empty.fulfillments[0])).toBe(true);
+    expect(empty.fulfillments).toEqual([{ items: [], nextCursor: null }]);
+    expect(Value.Check(ChatListPageSchema, empty.fulfillments[0])).toBe(true);
     const create = await page.dispatch('/api/chats', 'POST');
     expect(create.fallbacks).toBe(1);
     expect(create.fulfillments).toEqual([]);

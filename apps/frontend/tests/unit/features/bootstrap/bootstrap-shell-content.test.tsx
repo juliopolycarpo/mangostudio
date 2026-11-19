@@ -16,7 +16,7 @@ import { act, fireEvent, renderHook, screen, waitFor } from '@testing-library/re
 import { BootstrapShellContent } from '../../../../src/features/bootstrap/BootstrapShellContent';
 import {
   loadShellBootstrap,
-  settleShellQuery,
+  settleShellChatList,
 } from '../../../../src/features/bootstrap/shell-bootstrap';
 import { useShellBootstrap } from '../../../../src/features/bootstrap/use-shell-bootstrap';
 import { chatListQueryOptions } from '../../../../src/features/chat/queries';
@@ -232,7 +232,7 @@ describe('useShellBootstrap', () => {
   it('flags an authentication failure so the layout shows nothing protected', async () => {
     hub = createShellBootstrapHub().refuse('chats', 'unauthorized').install();
     const queryClient = newQueryClient();
-    await settleShellQuery(queryClient, chatListQueryOptions());
+    await settleShellChatList(queryClient);
 
     const hook = renderWithClient(queryClient);
 

@@ -45,12 +45,37 @@ Para automação fora do navegador, use chaves de API com escopo (`x-api-key`). 
 
 | Método   | Path             | Auth | Finalidade                      |
 | -------- | ---------------- | ---- | ------------------------------- |
-| `GET`    | `/api/chats`     | Sim  | Listar chats do usuário         |
+| `GET`    | `/api/chats`     | Sim  | Paginar chats do usuário        |
+| `GET`    | `/api/chats/:id` | Sim  | Um chat pelo id                 |
 | `POST`   | `/api/chats`     | Sim  | Criar novo chat                 |
 | `PUT`    | `/api/chats/:id` | Sim  | Atualizar chat (título, modelo) |
 | `DELETE` | `/api/chats/:id` | Sim  | Deletar chat                    |
 
-Não há rota montada `GET /api/chats/:id`. Leia os metadados na lista autenticada de chats; atualize com `PUT /api/chats/:id` e `UpdateChatBodySchema`.
+`GET /api/chats` devolve uma página, `{ items, nextCursor }` (`ChatListPage` de
+`@mangostudio/shared/chat`), da atualização mais recente para a mais antiga. `limit` vai de 1 a 100
+(padrão 50). Envie o `nextCursor` da página anterior como `cursor` para ler a próxima; `nextCursor`
+é `null` na última página. Um `cursor` malformado responde 400 com `code: "VALIDATION"`.
+
+`q` mantém só os chats cujo título, nome da pasta do workdir (o último segmento do caminho) ou
+rótulo do runner (`mango` para o runner embutido, o id do alvo para um fornecedor) o contenha. A
+comparação é por substring literal (`%` e `_` são caracteres comuns), ignora maiúsculas e acentos,
+aparas de espaço nas pontas são removidas, e um `q` em branco lista tudo. Os dois lados passam por
+case folding Unicode e perdem as marcas de combinação, então `CONFIGURAÇÃO`, `configuração` e
+`configuracao` encontram `Configuração`, `STRASSE` encontra `Straße` e `ISTANBUL` encontra
+`İstanbul`. `q` tem no máximo 100 caracteres (`CHAT_SEARCH_MAX_LENGTH`), senão 422. Os resultados
+paginam com o mesmo `limit` e `cursor`. O texto normalizado de cada chat fica em `chats.searchText`,
+gravado junto com o título, o workdir e o runner. Uma busca por substring não usa índice: o SQLite
+percorre os chats da conta do mais novo ao mais antigo e testa cada um até encher a página. Um termo
+comum volta após as primeiras linhas; um termo raro ou ausente lê todos os chats da conta (cerca de
+1 ms com 2.000 chats e 8 ms com 10.000 na máquina de desenvolvimento). Um índice FTS5 trigram foi
+medido e não adotado: ganhou cerca de 7 ms nesse pior caso com 10.000 chats, perdeu para termos
+comuns e não responde a uma busca com menos de três caracteres.
+
+`GET /api/chats/:id` devolve o chat como a lista o mostra, para um cliente que guarda só algumas
+páginas da lista. Um chat inexistente e um chat de outra conta respondem igualmente 404 com
+`code: "NOT_FOUND"`.
+
+Atualize um chat com `PUT /api/chats/:id` e `UpdateChatBodySchema`.
 
 ## Endpoints De Mensagem
 
@@ -177,6 +202,8 @@ SSE com `Content-Type: text/event-stream`. Veja [../architecture/streaming.md](.
 
 O body de preview é `{ "path": "~/.mango/AGENTS.md" }` (`RuleFilePreviewBodySchema`); defaults retorna descritores, não o conteúdo dos arquivos.
 
+Todo descritor traz em `locationId` a location da Library pela qual o arquivo é lido. Os dois arquivos embutidos são `mango-instructions` e `claude-instructions` do registry, então seus caminhos seguem `MANGOSTUDIO_CONFIG_HOME` e `CLAUDE_CONFIG_DIR` como a Library. Um caminho informado pelo usuário é `custom-instruction`: somente leitura, nunca um destino de escrita e fora da matriz da Library.
+
 ## Endpoints De Machine
 
 A máquina do próprio hub: qual processo está servindo, se uma unidade de serviço
@@ -198,6 +225,18 @@ o mantém vivo, resultados do doctor, configuração e ações de atualização.
 conectores e toggles de skills pertencem a um usuário, não à máquina, então a
 página de uma conta nunca cita as de outra. O `mangostudio doctor` não tem esse
 limite — ele roda no teclado da própria máquina e relata a instalação inteira.
+
+Cada linha do doctor é `{ label, status, detail }` em inglês, o texto que a CLI
+imprime. Uma linha de uma verificação com chaves também tem `labelKey`,
+`detailKey` e `params` (valores string): a página procura as chaves no próprio
+dicionário (`environments.machine.doctor.checks`) e preenche os `params`, e mostra
+o `label` / `detail` em inglês para uma chave que não conhece ou uma linha sem
+chaves (um hub mais antigo não envia chaves, então os campos continuam opcionais
+no protocolo). Toda verificação que este hub monta tem chaves. Alguns valores
+ficam como o hub os escreveu, porque ele não tem um código para redigi-los: o
+nome do gerenciador de instalação, a frase de resultado da sonda MCP e as frases
+unidas de um gerenciador de versões com vários achados. Uma chave é um
+identificador de protocolo: adicione uma nova em vez de renomear uma em uso.
 `logs` aceita `?tail=` entre 1 e 2000, com padrão 200. Ele lê um
 sufixo limitado do arquivo, não o arquivo inteiro, então um log com linhas
 excepcionalmente longas pode responder com menos linhas do que as pedidas;

@@ -13,6 +13,7 @@ import { Link, type LinkProps } from '@tanstack/react-router';
 import { ChevronRight } from 'lucide-react';
 import type { ReactNode } from 'react';
 
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
 
@@ -39,7 +40,7 @@ export function OverviewSection({
   onRetry,
   children,
 }: OverviewSectionProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
 
   return (
     <section className="space-y-3" data-testid={testId}>

@@ -10,10 +10,11 @@ import {
   TOOL_EXECUTION_REASON_CODES,
   type ToolExecutionSnapshot,
 } from '@mangostudio/shared/tool-executions';
-import { screen, waitFor } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 
 import { ToolCallBlock } from '@/features/chat/components/ToolCallBlock';
-import { formatToolElapsed } from '@/features/chat/components/ToolCallVisuals';
+import { formatToolElapsed, formatToolLimit } from '@/features/chat/components/ToolCallVisuals';
+import { formatMessage } from '@/lib/i18n-format';
 
 import { render } from '../../support/harness/render';
 import { advanceTimersByTimeAsync, useFakeTimers } from '../../support/harness/timers';
@@ -61,6 +62,64 @@ describe('the terminal reason on a tool card', () => {
     const row = screen.getByRole('button');
     expect(row).toHaveTextContent('Timed out');
     expect(row).not.toHaveTextContent(en.tools.reasons.timeout);
+  });
+
+  it('names the limit a timed-out call was held to, from its own snapshot', () => {
+    render(
+      <ToolCallBlock
+        name="mcp__files__scan"
+        args={{}}
+        status="timed_out"
+        execution={snapshot({
+          status: 'timed_out',
+          source: 'mcp',
+          reasonCode: 'timeout',
+          timeoutMs: 60_000,
+          durationMs: 60_010,
+        })}
+      />
+    );
+    const row = screen.getByRole('button');
+    expect(row).toHaveTextContent(
+      `Timed out · ${formatMessage(en.tools.timeLimit, { limit: '60s' })}`
+    );
+    expect(row).not.toHaveTextContent(en.tools.reasons.timeout);
+  });
+
+  it('keeps a non-timeout reason on a timed-out call and still shows its limit', () => {
+    render(
+      <ToolCallBlock
+        name="bash"
+        args={{}}
+        status="timed_out"
+        execution={snapshot({
+          status: 'timed_out',
+          reasonCode: 'outcome_unknown',
+          timeoutMs: 5_000,
+        })}
+      />
+    );
+    const row = screen.getByRole('button');
+    expect(row).toHaveTextContent(en.tools.reasons.outcome_unknown);
+    expect(row).toHaveTextContent('5s');
+  });
+
+  it('shows the limit on a cancelled call only as a reason, not as a timeout', () => {
+    render(
+      <ToolCallBlock
+        name="bash"
+        args={{}}
+        status="cancelled"
+        execution={snapshot({
+          status: 'cancelled',
+          reasonCode: 'user_cancelled',
+          timeoutMs: 30_000,
+        })}
+      />
+    );
+    expect(screen.getByRole('button')).not.toHaveTextContent(
+      formatMessage(en.tools.timeLimit, { limit: '30s' })
+    );
   });
 
   it('shows no reason when the snapshot carries none', () => {
@@ -176,14 +235,14 @@ describe('a running tool card’s clock', () => {
   });
 });
 
-describe('a running built-in tool card’s time limit', () => {
+describe('a running tool card’s time limit', () => {
   const scenario = createFetchScenario();
 
   afterEach(() => {
     scenario.restore();
   });
 
-  /** Other queries on the card (the display settings) hit the same fetch. */
+  /** The tool settings list, which the card used to read the limit from. */
   function toolSettingsRequests() {
     return scenario.fetchMock.mock.calls.filter(([input]) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
@@ -191,80 +250,84 @@ describe('a running built-in tool card’s time limit', () => {
     });
   }
 
-  function respondWithToolSettings(timeoutSeconds: unknown) {
-    scenario
-      .respondWithJson('GET', '/api/settings/tools', {
-        body: {
-          tools: [
-            {
-              name: 'bash',
-              title: 'Bash',
-              description: 'Runs a shell command.',
-              category: 'system',
-              enabled: true,
-              canDisable: true,
-              parameters: { timeoutSeconds },
-              parameterDescriptors: [],
-            },
-          ],
-        },
-      })
-      .install();
-  }
-
-  it('shows the clock against the limit the tool settings give it', async () => {
-    respondWithToolSettings(45);
+  it('shows the clock against the limit the call started under, for a built-in tool', () => {
+    scenario.install();
     render(
       <ToolCallBlock
         name="bash"
         args={{ command: 'make' }}
         status="running"
-        execution={snapshot({ status: 'running', startedAt: Date.now() - 12_000 })}
+        execution={snapshot({
+          status: 'running',
+          startedAt: Date.now() - 12_000,
+          timeoutMs: 45_000,
+        })}
       />
     );
-
-    await waitFor(() => {
-      expect(screen.getByRole('button')).toHaveTextContent(/\d+s of 45s/);
-    });
+    expect(screen.getByRole('button')).toHaveTextContent(/\d+s of 45s/);
   });
 
-  it('shows the bare clock when the setting is not a usable number', async () => {
-    respondWithToolSettings('soon');
-    render(
-      <ToolCallBlock
-        name="bash"
-        args={{ command: 'make' }}
-        status="running"
-        execution={snapshot({ status: 'running', startedAt: Date.now() - 12_000 })}
-      />
-    );
-
-    await waitFor(() => expect(toolSettingsRequests().length).toBeGreaterThan(0));
-    expect(screen.getByRole('button')).toHaveTextContent(/\d+s/);
-    expect(screen.getByRole('button')).not.toHaveTextContent(' of ');
-  });
-
-  it('asks for the settings only while a built-in call is running', async () => {
-    respondWithToolSettings(45);
-    render(
-      <ToolCallBlock
-        name="bash"
-        args={{ command: 'make' }}
-        status="succeeded"
-        execution={snapshot({ status: 'succeeded', durationMs: 900 })}
-      />
-    );
+  it('shows the same for an MCP call, whose limit is the server’s, not a tool setting', () => {
+    scenario.install();
     render(
       <ToolCallBlock
         name="mcp__files__scan"
         args={{}}
         status="running"
-        execution={snapshot({ status: 'running', source: 'mcp' })}
+        execution={snapshot({
+          status: 'running',
+          source: 'mcp',
+          startedAt: Date.now() - 3_000,
+          timeoutMs: 60_000,
+        })}
+      />
+    );
+    expect(screen.getByRole('button')).toHaveTextContent(/\d+s of 60s/);
+  });
+
+  it('shows the bare clock when the snapshot carries no limit', () => {
+    scenario.install();
+    render(
+      <ToolCallBlock
+        name="bash"
+        args={{ command: 'make' }}
+        status="running"
+        execution={snapshot({ status: 'running', startedAt: Date.now() - 12_000 })}
+      />
+    );
+    expect(screen.getByRole('button')).toHaveTextContent(/\d+s/);
+    expect(screen.getByRole('button')).not.toHaveTextContent(' of ');
+  });
+
+  it('never asks the tool settings for a limit: the snapshot is the record', async () => {
+    scenario.install();
+    render(
+      <ToolCallBlock
+        name="bash"
+        args={{ command: 'make' }}
+        status="running"
+        execution={snapshot({ status: 'running', timeoutMs: 45_000 })}
       />
     );
 
     // Give a stray request time to land before asserting there was none.
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(toolSettingsRequests()).toHaveLength(0);
+  });
+});
+
+describe('formatToolLimit', () => {
+  it('reads whole seconds as seconds and keeps sub-second limits exact', () => {
+    expect(formatToolLimit(45_000)).toBe('45s');
+    expect(formatToolLimit(600_000)).toBe('600s');
+    expect(formatToolLimit(1_500)).toBe('1.5s');
+    expect(formatToolLimit(250)).toBe('250ms');
+  });
+});
+
+describe('tool time-limit copy', () => {
+  it('exists in both locales with its {limit} placeholder', () => {
+    expect(en.tools.timeLimit).toContain('{limit}');
+    expect(ptBR.tools.timeLimit).toContain('{limit}');
   });
 });

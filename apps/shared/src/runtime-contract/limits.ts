@@ -45,3 +45,53 @@ export const READ_FILE_MAX_BINARY_VIEW_BYTES = 256 * 1024;
 
 /** How many leading bytes a binary sniff looks at. */
 export const BINARY_SNIFF_BYTES = 8 * 1024;
+
+/**
+ * Most bytes one `snapshot.read-chunk` returns or `snapshot.stage-chunk`
+ * accepts. A checkpoint of any size crosses the wire as slices of this size, so
+ * no frame grows with the file.
+ */
+export const SNAPSHOT_CHUNK_MAX_BYTES = 1024 * 1024;
+
+/**
+ * Largest snapshot the runtime still returns inline in a `before` record, and
+ * the largest the hub still sends inline in a revert operation. Past it the
+ * bytes move through the staging methods instead. The runtime owns the capture
+ * side of this value (`SNAPSHOT_INLINE_MAX_BYTES` in its staging module); the
+ * hub reads it here for the revert side.
+ */
+export const SNAPSHOT_INLINE_MAX_BYTES = 1024 * 1024;
+
+/**
+ * Largest file a checkpoint may hold, whatever limit a call asks for. The
+ * runtime clamps `snapshotMaxBytes` to it so its staging area stays bounded.
+ */
+export const SNAPSHOT_HARD_MAX_BYTES = 1024 * 1024 * 1024;
+
+/** Limit a mutation uses when it does not name `snapshotMaxBytes`. */
+export const SNAPSHOT_DEFAULT_MAX_BYTES = 128 * 1024 * 1024;
+
+/**
+ * Largest snapshot a runtime that predates the staging methods captures, and so
+ * the largest blob the hub still restores inline to one. Such a runtime has no
+ * `snapshot.stage-chunk`, so a bigger blob (captured earlier by a newer runtime)
+ * cannot be restored to it.
+ */
+export const SNAPSHOT_LEGACY_INLINE_MAX_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Most bytes of staged-size blobs (past {@link SNAPSHOT_INLINE_MAX_BYTES}) one
+ * assistant message's checkpoints may hold. A revert uploads all of them to the
+ * runtime before it changes any file, so that every operation is validated
+ * before the first write; the runtime's staging area holds twice this, so a
+ * message under the cap can always be reverted. A capture that would cross it
+ * is refused before the mutation runs, like a file past the per-file limit.
+ */
+export const SNAPSHOT_MESSAGE_STAGED_MAX_BYTES = 1024 * 1024 * 1024;
+
+/**
+ * Most staged-size blobs one assistant message's checkpoints may hold, for the
+ * same reason as {@link SNAPSHOT_MESSAGE_STAGED_MAX_BYTES}: the runtime stages
+ * at most twice this many files at once.
+ */
+export const SNAPSHOT_MESSAGE_STAGED_MAX_BLOBS = 128;

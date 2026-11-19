@@ -60,7 +60,7 @@ function makeConfig(): MangoConfig {
     toolImages: { dir: join(dir, 'tool-images') },
     agents: { dir: join(dir, 'agents') },
     skills: { dir: join(dir, 'skills') },
-    checkpoints: { dir: join(dir, 'checkpoints') },
+    checkpoints: { dir: join(dir, 'checkpoints'), maxFileBytes: 1024 },
     auth: { secret: 'x'.repeat(32), url: 'http://localhost:3001' },
     security: { trustProxy: false, allowDirectLoopback: true },
     updates: { check: true, channel: null },
@@ -106,7 +106,13 @@ function recordingDeps() {
         return Promise.resolve([]);
       },
       getBuildInfo: () => null as never,
-      getCheckoutBuildInfo: () => null as never,
+      // The checkout stamp is never absent (`getCurrentCheckoutBuildInfo` falls back to `unknown`).
+      getCheckoutBuildInfo: () => ({
+        gitSha: 'unknown',
+        gitDirty: 'unknown' as const,
+        builtAt: 'dev',
+        buildType: 'dev',
+      }),
       readFrontendBuildInfo: () => null,
       collectSkillsChecks: () => [],
       collectMcpChecks: (rows: readonly McpServerSelect[]) => {

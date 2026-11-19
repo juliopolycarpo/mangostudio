@@ -265,6 +265,11 @@ describe('executeSubagentTools — abort signal threading', () => {
 
     await waitFor(() => fake.callCount >= 1, 'the subagent provider call to start');
     const observed = fake.observedSignal;
+    const abortedBeforeStop = observed?.aborted;
+    // The call hands the provider a deadline-bearing signal that follows the
+    // turn's, so the Stop has to reach the request through it.
+    controller.abort();
+    const abortedAfterStop = observed?.aborted;
     fake.releasePending();
     await loop;
 
@@ -272,6 +277,7 @@ describe('executeSubagentTools — abort signal threading', () => {
     // request as the parent's, so a Stop has to reach it the same way. Without
     // the forward this is `undefined` and the request outlives the turn.
     expect(observed).toBeInstanceOf(AbortSignal);
-    expect(observed).toBe(controller.signal);
+    expect(abortedBeforeStop).toBe(false);
+    expect(abortedAfterStop).toBe(true);
   }, 10_000);
 });

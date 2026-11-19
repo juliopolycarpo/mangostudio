@@ -14,8 +14,8 @@ export class ToolExecutionTimedOutError extends Error {
   }
 }
 
-// Re-exported so the API's tools and tests keep one import site; the name is
-// shared with the chat card that displays the budget.
+// Re-exported so the API's tools and tests keep one import site; the parameter
+// name lives in the shared tool-settings contract.
 export { TOOL_EXECUTION_TIMEOUT_PARAM };
 
 export const TOOL_EXECUTION_TIMEOUT_SECONDS_DEFAULT = 30;
@@ -82,6 +82,65 @@ export function resolveEffectiveToolTimeoutMs(
     return TOOL_EXECUTION_TIMEOUT_SECONDS_DEFAULT * 1000;
   }
   return seconds * 1000;
+}
+
+/** A running deadline for one tool call; see {@link startToolTimeout}. */
+export interface ToolTimeoutGuard {
+  /**
+   * Aborts when the parent aborts or the deadline passes. Hand this, not the
+   * parent signal, to whatever does the work, so the work itself is cancelled.
+   */
+  readonly signal: AbortSignal;
+  /** True only when the deadline fired; a parent abort never sets it. */
+  readonly timedOut: boolean;
+  /** Clears the timer and the parent listener. Safe to call more than once. */
+  dispose(): void;
+}
+
+/**
+ * Arms a wall-clock deadline for a tool call that does its own work in-process
+ * (no shared wrapper around it). The returned signal aborts with a
+ * {@link ToolExecutionTimedOutError} reason at the deadline, or with the
+ * parent's reason if the parent aborts first, so a user Stop is never recorded
+ * as a timeout.
+ *
+ * // Usage: const guard = startToolTimeout(turnSignal, 'generate_image', 30_000);
+ */
+export function startToolTimeout(
+  parent: AbortSignal | undefined,
+  name: string,
+  timeoutMs: number
+): ToolTimeoutGuard {
+  const controller = new AbortController();
+  let timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const onParentAbort = () => controller.abort(parent?.reason);
+  const dispose = () => {
+    if (timer !== undefined) clearTimeout(timer);
+    timer = undefined;
+    parent?.removeEventListener('abort', onParentAbort);
+  };
+
+  if (parent?.aborted) {
+    controller.abort(parent.reason);
+  } else {
+    parent?.addEventListener('abort', onParentAbort, { once: true });
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort(
+        new ToolExecutionTimedOutError(`Tool "${name}" timed out after ${timeoutMs}ms`)
+      );
+    }, timeoutMs);
+  }
+
+  return {
+    signal: controller.signal,
+    get timedOut() {
+      return timedOut;
+    },
+    dispose,
+  };
 }
 
 export function buildToolExecutionTimeoutDescriptor(): {

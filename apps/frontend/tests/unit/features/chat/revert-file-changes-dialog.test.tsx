@@ -15,11 +15,15 @@ import { render } from '../../../support/harness/render';
 
 const labels = en.chat.fileCheckpoints;
 
-function renderDialog(uncheckpointedSources?: ReadonlyArray<'shell' | 'mcp'>) {
+function renderDialog(
+  uncheckpointedSources?: ReadonlyArray<'shell' | 'mcp'>,
+  includesShellCapture?: boolean
+) {
   return render(
     <RevertFileChangesDialog
       isReverting={false}
       uncheckpointedSources={uncheckpointedSources}
+      includesShellCapture={includesShellCapture}
       onConfirm={jest.fn()}
       onCancel={jest.fn()}
     />
@@ -54,6 +58,24 @@ describe('RevertFileChangesDialog', () => {
     renderDialog(['shell', 'mcp']);
 
     expect(screen.getByText(labels.uncheckpointedBoth)).toBeTruthy();
+  });
+
+  it('warns that a revert may undo another program’s edits only when shell captures are in it', () => {
+    renderDialog([], true);
+
+    expect(screen.getByText(labels.shellCaptureNote)).toBeTruthy();
+  });
+
+  it.each([
+    ['a turn with no shell capture', [], false],
+    ['a turn whose preview did not say', undefined, undefined],
+    ['an MCP-only turn', ['mcp'] as const, false],
+  ])('says nothing about concurrent writers for %s', (_name, sources, includesShellCapture) => {
+    renderDialog(sources, includesShellCapture);
+
+    // The sentence would be false here: no row came from a before/after comparison.
+    expect(document.body.textContent ?? '').not.toContain(labels.shellCaptureNote);
+    expect(document.body.textContent ?? '').not.toMatch(/another program/i);
   });
 
   it('renders no warning when the caller has no preview to pass', () => {

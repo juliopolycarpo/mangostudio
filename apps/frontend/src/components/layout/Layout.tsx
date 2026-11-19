@@ -3,6 +3,8 @@ import type { GitSummary } from '@mangostudio/shared/git';
 import { CHAT_SIDEBAR_WIDTH_DEFAULT } from '@mangostudio/shared/workspaces';
 import { type ReactNode, useEffect, useState } from 'react';
 
+import type { ChatPaging } from '@/features/chat/chat-list-pages';
+import type { ChatSearchResult } from '@/features/chat/queries';
 import type { ContextInfo } from '@/features/generation/types';
 import { Sidebar } from '@/features/sidebar/components/Sidebar';
 import type { AppPage } from '@/hooks/use-chat-route-actions';
@@ -12,6 +14,13 @@ interface LayoutProps {
   currentPage: AppPage;
   onNavigate: (page: AppPage) => void;
   chats: Chat[];
+  /** Reads more of the chat list; see `Sidebar`. */
+  chatPaging?: ChatPaging;
+  /** The hub's matches for the sidebar's search text; see `Sidebar`. */
+  chatSearch?: ChatSearchResult;
+  onChatSearchTextChange?: (text: string) => void;
+  /** The open chat when the loaded pages do not hold it; see `Sidebar`. */
+  pinnedChat?: Chat | null;
   currentChatId: string | null;
   onSelectChat: (chatId: string) => void;
   onUpdateChatTitle: (chatId: string, title: string) => void;
@@ -34,6 +43,10 @@ export function Layout({
   currentPage,
   onNavigate,
   chats,
+  chatPaging,
+  chatSearch,
+  onChatSearchTextChange,
+  pinnedChat,
   currentChatId,
   onSelectChat,
   onUpdateChatTitle,
@@ -64,6 +77,10 @@ export function Layout({
         currentPage={currentPage}
         onNavigate={onNavigate}
         chats={chats}
+        chatPaging={chatPaging}
+        chatSearch={chatSearch}
+        onSearchTextChange={onChatSearchTextChange}
+        pinnedChat={pinnedChat}
         currentChatId={currentChatId}
         onSelectChat={onSelectChat}
         onUpdateChatTitle={onUpdateChatTitle}

@@ -68,11 +68,18 @@ function startLane(
   const dir = mkdtempSync(join(tmpdir(), 'mangostudio-cancel-'));
   dirs.push(dir);
   mkdirSync(join(dir, 'pids'));
+  // The lane's scratch directory lives in this one: a lane killed with SIGKILL
+  // cannot remove its own, and `dir` is removed after the test.
+  const laneTmp = join(dir, 'tmp');
+  mkdirSync(laneTmp);
   const child = Bun.spawn({
     cmd: [...command],
     cwd: API_DIR,
     env: {
       ...ambient,
+      TMPDIR: laneTmp,
+      TMP: laneTmp,
+      TEMP: laneTmp,
       MANGO_TEST_WORKERS: '3',
       MANGOSTUDIO_FAKE_WORKER_MODES: JSON.stringify({
         1: mode,

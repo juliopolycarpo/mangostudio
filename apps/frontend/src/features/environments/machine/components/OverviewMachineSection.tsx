@@ -10,6 +10,7 @@ import { useQuery } from '@tanstack/react-query';
 
 import { Card } from '@/components/ui/Card';
 import { MicroLabel } from '@/components/ui/MicroLabel';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { cn } from '@/lib/utils';
 
@@ -19,7 +20,7 @@ import { HUB_HEALTH_TONE, hubHealthLabel, launchModeLabel } from '../format';
 import { machineStatusQueryOptions } from '../queries';
 
 export function OverviewMachineSection() {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const e = t.environments;
   const status = useQuery(machineStatusQueryOptions());
   const data = status.data;

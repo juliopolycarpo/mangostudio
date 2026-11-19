@@ -34,12 +34,18 @@ import {
   ExternalAgentTargetIdSchema,
   ExternalAgentTurnParamsSchema,
   ExternalAgentTurnResultSchema,
+  ExternalApprovalAnswerAcceptedSchema,
+  ExternalApprovalAnswerRejectedSchema,
+  ExternalApprovalAnswerResultSchema,
   ExternalIdentityIsolationSchema,
   externalRemedyFor,
   externalRemedyForError,
   ExternalSteerDeliveryUnknownResultSchema,
+  ExternalSteerRejectedResultSchema,
   ExternalSteerRejectionReasonSchema,
   ExternalSteerResponseSchema,
+  ExternalSteerSuccessResponseSchema,
+  isExternalIdentityIsolationMethod,
   NO_EXTERNAL_AGENT_CAPABILITIES,
   normalizeApprovalRouting,
   normalizePermissionLevel,
@@ -378,6 +384,31 @@ describe('runtime external-agent protocol payloads', () => {
       false
     );
   });
+
+  it('narrows a method string to the ones this build can interpret', () => {
+    for (const method of ['single-user-host', 'os-account', 'container']) {
+      expect(isExternalIdentityIsolationMethod(method), `expected ${method} to be known`).toBe(
+        true
+      );
+    }
+    for (const method of ['micro-vm', '', 'Container']) {
+      expect(
+        isExternalIdentityIsolationMethod(method),
+        `expected ${JSON.stringify(method)} to be unknown`
+      ).toBe(false);
+    }
+  });
+
+  it('keeps the isolation method enum closed where the hub produces it', () => {
+    // Health reads an unknown method (#2570); a manifest or `isolation` argument never carries one.
+    expect(
+      Value.Check(ExternalIdentityIsolationSchema, {
+        method: 'micro-vm',
+        credentialHomeFingerprint: 'sha256:credential-home',
+      }),
+      'expected the closed attestation schema to refuse an isolation method it has no member for'
+    ).toBe(false);
+  });
 });
 
 describe('steering', () => {
@@ -441,6 +472,33 @@ describe('steering', () => {
     ).toBe(true);
   });
 
+  it('splits the steer route by status: 200 never admits a refusal, 409 only admits one', () => {
+    const accepted = { accepted: true };
+    const unknown = { accepted: false, deliveryUnknown: true };
+    const rejected = { accepted: false, reasonCode: 'turn-not-steerable' };
+
+    for (const body of [accepted, unknown]) {
+      expect(
+        Value.Check(ExternalSteerSuccessResponseSchema, body),
+        `(steer 200): expected ${JSON.stringify(body)} to be an accepted outcome`
+      ).toBe(true);
+      expect(
+        Value.Check(ExternalSteerRejectedResultSchema, body),
+        `(steer 409): expected ${JSON.stringify(body)} to be refused as a rejection`
+      ).toBe(false);
+    }
+    expect(
+      Value.Check(ExternalSteerSuccessResponseSchema, rejected),
+      `(steer 200): expected ${JSON.stringify(rejected)} to be refused as a success body`
+    ).toBe(false);
+    expect(Value.Check(ExternalSteerRejectedResultSchema, rejected)).toBe(true);
+    for (const reasonCode of EXTERNAL_STEER_REJECTION_REASONS) {
+      expect(Value.Check(ExternalSteerRejectedResultSchema, { accepted: false, reasonCode })).toBe(
+        true
+      );
+    }
+  });
+
   it('keeps the unknown-delivery result closed', () => {
     for (const value of [
       { accepted: false, deliveryUnknown: false },
@@ -451,6 +509,50 @@ describe('steering', () => {
       expect(
         Value.Check(ExternalSteerDeliveryUnknownResultSchema, value),
         `(steer response): expected ${JSON.stringify(value)} to be refused as an unknown-delivery result`
+      ).toBe(false);
+    }
+  });
+});
+
+describe('the approval answer contract', () => {
+  const accepted = { status: 'accepted', optionId: 'approve' };
+  const rejected = { status: 'rejected', reason: 'expired' };
+
+  it('admits only the accepted answer on 200 and only the rejection on 400, 404 and 409', () => {
+    expect(Value.Check(ExternalApprovalAnswerAcceptedSchema, accepted)).toBe(true);
+    expect(Value.Check(ExternalApprovalAnswerRejectedSchema, rejected)).toBe(true);
+    expect(
+      Value.Check(ExternalApprovalAnswerAcceptedSchema, rejected),
+      `(respond 200): expected ${JSON.stringify(rejected)} to be refused as an accepted answer`
+    ).toBe(false);
+    expect(
+      Value.Check(ExternalApprovalAnswerRejectedSchema, accepted),
+      `(respond 4xx): expected ${JSON.stringify(accepted)} to be refused as a rejection`
+    ).toBe(false);
+    expect(Value.Check(ExternalApprovalAnswerResultSchema, accepted)).toBe(true);
+    expect(Value.Check(ExternalApprovalAnswerResultSchema, rejected)).toBe(true);
+  });
+
+  it('keeps each arm closed and bounded', () => {
+    for (const value of [
+      { status: 'accepted' },
+      { status: 'accepted', optionId: '' },
+      { status: 'accepted', optionId: 'x'.repeat(EXTERNAL_VENDOR_ID_MAX_LENGTH + 1) },
+      { status: 'accepted', optionId: 'approve', reason: 'expired' },
+    ]) {
+      expect(
+        Value.Check(ExternalApprovalAnswerAcceptedSchema, value),
+        `(respond 200): expected ${JSON.stringify(value)} to be refused as an accepted answer`
+      ).toBe(false);
+    }
+    for (const value of [
+      { status: 'rejected' },
+      { status: 'rejected', reason: 'x'.repeat(129) },
+      { status: 'rejected', reason: 'expired', optionId: 'approve' },
+    ]) {
+      expect(
+        Value.Check(ExternalApprovalAnswerRejectedSchema, value),
+        `(respond 4xx): expected ${JSON.stringify(value)} to be refused as a rejection`
       ).toBe(false);
     }
   });

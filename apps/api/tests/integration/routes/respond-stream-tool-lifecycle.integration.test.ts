@@ -199,6 +199,13 @@ describe('POST /respond/stream — tool execution lifecycle', () => {
       expect(terminal?.startedAt).toBeGreaterThanOrEqual(terminal?.queuedAt ?? 0);
       expect(terminal?.finishedAt).toBeGreaterThanOrEqual(terminal?.startedAt ?? 0);
       expect(terminal?.durationMs).toBeGreaterThanOrEqual(0);
+      // The tool declares no timeout setting, so it runs under the 30s default;
+      // the budget is stamped at start, not on the queued snapshot.
+      expect(transitions.map((snapshot) => snapshot.timeoutMs)).toEqual([
+        undefined,
+        30_000,
+        30_000,
+      ]);
     }
 
     const aiMessage = insertedMessages.find((message) => message.role === 'ai');
@@ -206,7 +213,11 @@ describe('POST /respond/stream — tool execution lifecycle', () => {
     const toolCallParts = parts.filter((part) => part.type === 'tool_call');
     expect(toolCallParts).toHaveLength(2);
     for (const part of toolCallParts) {
-      expect(part.execution).toMatchObject({ status: 'succeeded', source: 'builtin' });
+      expect(part.execution).toMatchObject({
+        status: 'succeeded',
+        source: 'builtin',
+        timeoutMs: 30_000,
+      });
     }
     expect(parts).toContainEqual(
       expect.objectContaining({

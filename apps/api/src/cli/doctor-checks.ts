@@ -2,18 +2,28 @@
  * Individual diagnostic checks for the `doctor` command. Each returns a
  * CheckResult; pure functions over injected config/fs probes so they are
  * trivially testable.
+ *
+ * Every check is keyed: a row names its label and detail by a stable key and
+ * carries the values as params, and its English `label` and `detail` are
+ * rendered from the shared template for that key. The CLI prints that
+ * English; the machine page renders its own language from the same keys.
+ * `keyedCheck` is the only way to build a row, so a new check cannot ship as
+ * English prose alone.
  */
 
 import { dirname, join } from 'node:path';
 
 import { type FsProbe, nearestExistingWritable } from '@mangostudio/shared/library/host';
 import type { MachineCheck, MachineCheckStatus } from '@mangostudio/shared/machine';
+import {
+  type MachineCheckKey,
+  renderMachineCheckEnglish,
+} from '@mangostudio/shared/machine/check-text-en';
 import { deniedCapabilities, RUNTIME_CONFIG_FILE_NAME } from '@mangostudio/shared/runtime-home';
 
 import {
   BUILD_INFO_FILENAME,
   type BuildInfo,
-  formatBuildInfo,
   formatBuildSha,
   isKnownBuildSha,
 } from '../lib/build-info';
@@ -42,81 +52,132 @@ export interface BuildIdentityInput {
   frontendDir: string;
 }
 
-export function ok(label: string, detail: string): CheckResult {
-  return { label, status: 'ok', detail };
-}
+/** Values a keyed row's message is built from; numbers are sent as their decimal text. */
+export type CheckParams = Readonly<Record<string, string | number>>;
 
-export function warn(label: string, detail: string): CheckResult {
-  return { label, status: 'warn', detail };
-}
-
-export function fail(label: string, detail: string): CheckResult {
-  return { label, status: 'fail', detail };
+/**
+ * A keyed row. `label` and `detail` are the English of the two templates, so a
+ * row cannot say something its keys do not.
+ * // Usage: keyedCheck('ok', 'core.label.config', 'core.detail.configDefaults', { host, port })
+ */
+export function keyedCheck(
+  status: CheckStatus,
+  labelKey: MachineCheckKey,
+  detailKey: MachineCheckKey,
+  params: CheckParams = {}
+): CheckResult {
+  const stringParams = Object.fromEntries(
+    Object.entries(params).map(([name, value]) => [name, String(value)])
+  );
+  const keys = { labelKey, detailKey, params: stringParams };
+  // The keys are typed to exist in the English dictionary, so the draft text
+  // below is never what comes back; it only satisfies the row shape.
+  const { label, detail } = renderMachineCheckEnglish({
+    ...keys,
+    status,
+    label: labelKey,
+    detail: detailKey,
+  });
+  return { ...keys, status, label, detail };
 }
 
 /** Directory exists+writable, or is creatable because its parent is writable. */
-export function checkDir(label: string, path: string, fs: FsProbe): CheckResult {
+export function checkDir(labelKey: MachineCheckKey, path: string, fs: FsProbe): CheckResult {
+  const row = (status: CheckStatus, detailKey: MachineCheckKey) =>
+    keyedCheck(status, labelKey, detailKey, { path });
   if (fs.exists(path)) {
     return fs.isWritable(path)
-      ? ok(label, `${path} (writable)`)
-      : fail(label, `${path} (not writable)`);
+      ? row('ok', 'core.detail.directoryWritable')
+      : row('fail', 'core.detail.directoryNotWritable');
   }
   return nearestExistingWritable(path, fs)
-    ? ok(label, `${path} (will be created)`)
-    : fail(label, `${path} (parent not writable)`);
+    ? row('ok', 'core.detail.directoryWillBeCreated')
+    : row('fail', 'core.detail.directoryParentNotWritable');
 }
 
 export function checkConfig(config: MangoConfig): CheckResult {
-  return ok(
-    'Config',
-    `${config.server.host}:${config.server.port} (${config.configFilePath || 'defaults'})`
-  );
+  const { host, port } = config.server;
+  return config.configFilePath
+    ? keyedCheck('ok', 'core.label.config', 'core.detail.configFile', {
+        host,
+        port,
+        path: config.configFilePath,
+      })
+    : keyedCheck('ok', 'core.label.config', 'core.detail.configDefaults', { host, port });
 }
 
 export function checkDatabase(config: MangoConfig, fs: FsProbe): CheckResult {
   if (config.database.path === ':memory:') {
-    return ok('Database', 'in-memory');
+    return keyedCheck('ok', 'core.label.database', 'core.detail.databaseInMemory');
   }
   const dir = dirname(config.database.path);
   return isUsableDir(dir, fs)
-    ? ok('Database', config.database.path)
-    : fail('Database', `${dir} (not writable)`);
+    ? keyedCheck('ok', 'core.label.database', 'core.detail.databasePath', {
+        path: config.database.path,
+      })
+    : keyedCheck('fail', 'core.label.database', 'core.detail.directoryNotWritable', {
+        path: dir,
+      });
 }
 
 export function checkFrontend(frontendDir: string, fs: FsProbe): CheckResult {
   if (fs.exists(frontendDir) && fs.exists(join(frontendDir, 'index.html'))) {
-    return ok('Frontend', `${frontendDir} (present)`);
+    return keyedCheck('ok', 'core.label.frontend', 'core.detail.frontendPresent', {
+      path: frontendDir,
+    });
   }
-  return warn('Frontend', `${frontendDir} (missing — API only)`);
+  return keyedCheck('warn', 'core.label.frontend', 'core.detail.frontendMissing', {
+    path: frontendDir,
+  });
 }
 
 /** Frontend assets compiled into the standalone binary — always present. */
 export function checkEmbeddedFrontend(fileCount: number): CheckResult {
-  return ok('Frontend', `embedded in binary (${fileCount} files)`);
+  return keyedCheck('ok', 'core.label.frontend', 'core.detail.frontendEmbeddedFiles', {
+    count: fileCount,
+  });
+}
+
+/** A live instance reports the embedded sentinel while doctor runs from a source checkout. */
+export function checkEmbeddedFrontendInServer(): CheckResult {
+  return keyedCheck('ok', 'core.label.frontend', 'core.detail.frontendEmbeddedInServer');
 }
 
 export function checkAuthSecret(config: MangoConfig): CheckResult {
   const message = getAuthSecretValidationMessage(config.auth.secret);
   if (message) {
-    return fail('Auth secret', message);
+    // The sentence comes from config validation, which is not translated; it
+    // travels as a param rather than as a key of its own.
+    return keyedCheck('fail', 'core.label.authSecret', 'core.detail.authSecretInvalid', {
+      message,
+    });
   }
-  return ok('Auth secret', `set (${AUTH_SECRET_MIN_LENGTH}+ characters)`);
+  return keyedCheck('ok', 'core.label.authSecret', 'core.detail.authSecretSet', {
+    minLength: AUTH_SECRET_MIN_LENGTH,
+  });
 }
 
 export function checkInstance(state: ServerState | null, alive: boolean): CheckResult {
   if (!state) {
-    return ok('Instance', 'not running');
+    return keyedCheck('ok', 'core.label.instance', 'core.detail.instanceNotRunning');
   }
   if (!alive) {
-    return warn('Instance', `stale state file (PID ${state.pid})`);
+    return keyedCheck('warn', 'core.label.instance', 'core.detail.instanceStale', {
+      pid: state.pid,
+    });
   }
-  return ok('Instance', `running (PID ${state.pid}, port ${state.port}, health not probed)`);
+  return keyedCheck('ok', 'core.label.instance', 'core.detail.instanceRunning', {
+    pid: state.pid,
+    port: state.port,
+  });
 }
 
 export function checkRuntime(version: string, standalone: boolean): CheckResult {
-  return ok(
-    'Runtime',
-    `v${version} ${process.platform}-${process.arch} ${standalone ? 'standalone' : 'dev'}`
+  return keyedCheck(
+    'ok',
+    'core.label.runtime',
+    standalone ? 'core.detail.runtimeStandalone' : 'core.detail.runtimeDevelopment',
+    { version, platform: process.platform, arch: process.arch }
   );
 }
 
@@ -128,30 +189,38 @@ export function checkRuntime(version: string, standalone: boolean): CheckResult 
  */
 export function checkRuntimeBinary(probe: RuntimeBinaryProbe, hubVersion: string): CheckResult {
   if (!probe.path) {
-    return fail(
-      'Runtime binary',
-      `not built in this source checkout; Local cannot start. Run "${RUNTIME_BUILD_COMMAND}" from the repository root`
-    );
+    return keyedCheck('fail', 'core.label.runtimeBinary', 'core.detail.runtimeBinaryNotBuilt', {
+      command: RUNTIME_BUILD_COMMAND,
+    });
   }
   if (!probe.present) {
-    return fail(
-      'Runtime binary',
-      `missing at ${probe.path}; Local cannot start. Reinstall MangoStudio so it ships beside the hub, or set MANGOSTUDIO_RUNTIME_BINARY`
-    );
+    return keyedCheck('fail', 'core.label.runtimeBinary', 'core.detail.runtimeBinaryMissing', {
+      path: probe.path,
+    });
   }
   if (probe.error || !probe.version) {
-    return warn(
-      'Runtime binary',
-      `${probe.path} did not report a version (${probe.error ?? 'unknown reason'})`
-    );
+    return probe.error
+      ? keyedCheck('warn', 'core.label.runtimeBinary', 'core.detail.runtimeBinaryNoVersion', {
+          path: probe.path,
+          reason: probe.error,
+        })
+      : keyedCheck(
+          'warn',
+          'core.label.runtimeBinary',
+          'core.detail.runtimeBinaryNoVersionUnknown',
+          { path: probe.path }
+        );
   }
   if (!isDevelopmentVersion(hubVersion) && probe.version !== hubVersion) {
-    return warn(
-      'Runtime binary',
-      `v${probe.version} does not match hub v${hubVersion}; reinstall so both come from one release`
-    );
+    return keyedCheck('warn', 'core.label.runtimeBinary', 'core.detail.runtimeBinaryMismatch', {
+      version: probe.version,
+      hubVersion,
+    });
   }
-  return ok('Runtime binary', `v${probe.version} at ${probe.path}`);
+  return keyedCheck('ok', 'core.label.runtimeBinary', 'core.detail.runtimeBinaryOk', {
+    version: probe.version,
+    path: probe.path,
+  });
 }
 
 /**
@@ -164,23 +233,42 @@ export function checkRuntimeBinary(probe: RuntimeBinaryProbe, hubVersion: string
  * is reachable — is true and unhelpful without this line.
  */
 export function checkRuntimeSlot(probe: RuntimeSlotProbe): CheckResult {
-  const label = `Runtime slot (${probe.slot})`;
+  const slot = probe.slot;
   // Named, because `setup` run without it answers for the slot the binary sits
   // in — which is not the slot this row is about unless they happen to agree.
-  const setupCommand = `mangostudio-runtime setup --slot ${probe.slot}`;
+  const command = `mangostudio-runtime setup --slot ${slot}`;
   if (probe.error) {
-    return fail(
-      label,
-      `${RUNTIME_CONFIG_FILE_NAME} in ${probe.directory} ${probe.error}; run "${setupCommand}" to rewrite it`
-    );
+    return keyedCheck('fail', 'core.label.runtimeSlot', 'core.detail.runtimeSlotUnreadable', {
+      slot,
+      file: RUNTIME_CONFIG_FILE_NAME,
+      directory: probe.directory,
+      error: probe.error,
+      command,
+    });
   }
   if (probe.config.setup.state === 'pending') {
-    return warn(label, `waiting for consent; run "${setupCommand}" on that machine`);
+    return keyedCheck('warn', 'core.label.runtimeSlot', 'core.detail.runtimeSlotPending', {
+      slot,
+      command,
+    });
   }
-  const version = probe.config.version ? `v${probe.config.version}  ` : '';
+  const { version, profile } = probe.config;
   const denied = deniedCapabilities(probe.config.allow);
-  const detail = `${version}${probe.config.profile}${denied.length > 0 ? ` (denied: ${denied.join(', ')})` : ''}`;
-  return ok(label, `${detail}  ${probe.directory}`);
+  const detailKey: MachineCheckKey =
+    denied.length > 0
+      ? version
+        ? 'core.detail.runtimeSlotDeniedVersion'
+        : 'core.detail.runtimeSlotDenied'
+      : version
+        ? 'core.detail.runtimeSlotConfiguredVersion'
+        : 'core.detail.runtimeSlotConfigured';
+  return keyedCheck('ok', 'core.label.runtimeSlot', detailKey, {
+    slot,
+    profile,
+    directory: probe.directory,
+    ...(version ? { version } : {}),
+    ...(denied.length > 0 ? { denied: denied.join(', ') } : {}),
+  });
 }
 
 /**
@@ -191,11 +279,15 @@ export function checkRuntimeCache(input: {
   readonly directory: string;
   readonly versions: readonly string[];
 }): CheckResult {
-  const label = 'Runtime cache';
   if (input.versions.length === 0) {
-    return ok(label, `empty  ${input.directory}`);
+    return keyedCheck('ok', 'core.label.runtimeCache', 'core.detail.runtimeCacheEmpty', {
+      directory: input.directory,
+    });
   }
-  return ok(label, `${input.versions.join(', ')}  ${input.directory}`);
+  return keyedCheck('ok', 'core.label.runtimeCache', 'core.detail.runtimeCacheVersions', {
+    versions: input.versions.join(', '),
+    directory: input.directory,
+  });
 }
 
 /**
@@ -207,51 +299,72 @@ export function checkRuntimeCache(input: {
  */
 export function checkSshClient(probe: SshClientProbe): CheckResult {
   if (!probe.path) {
-    return warn('SSH client', 'no ssh on PATH; SSH environments cannot start');
+    return keyedCheck('warn', 'core.label.sshClient', 'core.detail.sshClientMissing');
   }
   if (probe.error || !probe.version) {
-    return warn(
-      'SSH client',
-      `${probe.path} did not report a version (${probe.error ?? 'unknown reason'})`
-    );
+    return probe.error
+      ? keyedCheck('warn', 'core.label.sshClient', 'core.detail.sshClientNoVersion', {
+          path: probe.path,
+          reason: probe.error,
+        })
+      : keyedCheck('warn', 'core.label.sshClient', 'core.detail.sshClientNoVersionUnknown', {
+          path: probe.path,
+        });
   }
-  return ok('SSH client', `${probe.version}  ${probe.path}`);
+  return keyedCheck('ok', 'core.label.sshClient', 'core.detail.sshClientOk', {
+    version: probe.version,
+    path: probe.path,
+  });
+}
+
+/** The `ok` row for a build stamp: its SHA, when it was built, and whether the tree was dirty. */
+function buildStampCheck(labelKey: MachineCheckKey, build: BuildInfo): CheckResult {
+  const detailKey: MachineCheckKey =
+    build.gitDirty === true
+      ? 'core.detail.buildStampDirty'
+      : build.gitDirty === false
+        ? 'core.detail.buildStampClean'
+        : 'core.detail.buildStampDirtyUnknown';
+  return keyedCheck('ok', labelKey, detailKey, {
+    sha: formatBuildSha(build),
+    builtAt: build.builtAt,
+    buildType: build.buildType,
+  });
 }
 
 export function collectBuildIdentityChecks(input: BuildIdentityInput): CheckResult[] {
   const results: CheckResult[] = [
     input.serverBuild
-      ? ok('Server build', formatBuildInfo(input.serverBuild))
-      : warn('Server build', 'running server did not report build metadata'),
+      ? buildStampCheck('core.label.serverBuild', input.serverBuild)
+      : keyedCheck('warn', 'core.label.serverBuild', 'core.detail.serverBuildMissing'),
   ];
 
   if (buildsDiffer(input.serverBuild, input.checkoutBuild)) {
     results.push(
-      warn(
-        'Checkout build',
-        `checkout ${formatBuildSha(input.checkoutBuild)} differs from server ${formatBuildSha(input.serverBuild)}; restart or rebuild if unexpected`
-      )
+      keyedCheck('warn', 'core.label.checkoutBuild', 'core.detail.checkoutBuildDiffers', {
+        checkout: formatBuildSha(input.checkoutBuild),
+        server: formatBuildSha(input.serverBuild),
+      })
     );
   } else {
-    results.push(ok('Checkout build', formatBuildInfo(input.checkoutBuild)));
+    results.push(buildStampCheck('core.label.checkoutBuild', input.checkoutBuild));
   }
 
   if (!input.frontendBuild) {
     results.push(
-      warn(
-        'Frontend build',
-        `${join(input.frontendDir, BUILD_INFO_FILENAME)} missing; rebuild frontend assets to compare`
-      )
+      keyedCheck('warn', 'core.label.frontendBuild', 'core.detail.frontendBuildMissing', {
+        path: join(input.frontendDir, BUILD_INFO_FILENAME),
+      })
     );
   } else if (buildsDiffer(input.serverBuild, input.frontendBuild)) {
     results.push(
-      warn(
-        'Frontend build',
-        `frontend ${formatBuildSha(input.frontendBuild)} differs from server ${formatBuildSha(input.serverBuild)}`
-      )
+      keyedCheck('warn', 'core.label.frontendBuild', 'core.detail.frontendBuildDiffers', {
+        frontend: formatBuildSha(input.frontendBuild),
+        server: formatBuildSha(input.serverBuild),
+      })
     );
   } else {
-    results.push(ok('Frontend build', formatBuildInfo(input.frontendBuild)));
+    results.push(buildStampCheck('core.label.frontendBuild', input.frontendBuild));
   }
 
   return results;

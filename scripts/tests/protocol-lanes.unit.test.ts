@@ -1,13 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { ROOT_DIR } from '../lib/config';
@@ -31,7 +23,11 @@ import {
   type ToolchainProbe,
 } from '../protocol/tasks';
 import { readText } from './support/read-text';
+import { useScratchDirs } from './support/scratch-dirs';
 import { extractJobBlock, extractOnBlock, extractStepBlocks } from './support/workflow-blocks';
+
+// Every temporary directory below is removed after its test.
+const makeDir = useScratchDirs();
 
 // The protocol ships on its own version line from inside this repository. These
 // tests pin the two things that silently break when it does not: the tag prefix
@@ -670,7 +666,7 @@ describe('the release workflow binds a run to its tag', () => {
     REF_NAME: string;
     REF_TYPE: string;
   }): { exitCode: number; version: string | null; stderr: string } => {
-    const outputFile = join(mkdtempSync(join(tmpdir(), 'protocol-resolve-')), 'GITHUB_OUTPUT');
+    const outputFile = join(makeDir('protocol-resolve-'), 'GITHUB_OUTPUT');
     writeFileSync(outputFile, '');
     const proc = Bun.spawnSync({
       cmd: ['bash', '-c', resolveScript()],
@@ -799,7 +795,7 @@ describe('the release workflow refuses a tag that is not on main', () => {
    * never merged — the shape of a tag cut from an unreviewed branch.
    */
   const scenario = (): { repo: string; first: string; head: string; side: string } => {
-    const repo = mkdtempSync(join(tmpdir(), 'ancestry-'));
+    const repo = makeDir('ancestry-');
     git(repo, 'init', '--initial-branch=main', '--quiet');
     const first = commit(repo, 'first');
     const head = commit(repo, 'second');
@@ -881,7 +877,7 @@ describe('the release job is rerunnable under immutability', () => {
 
   /** A workspace with the files the step copies, and a `gh` that records its argv. */
   const workspace = (state: ReleaseState): { dir: string; log: string; viewLog: string } => {
-    const dir = mkdtempSync(join(tmpdir(), 'release-step-'));
+    const dir = makeDir('release-step-');
     mkdirSync(join(dir, 'spec', 'schema', '1'), { recursive: true });
     writeFileSync(join(dir, 'spec', 'schema', '1', 'protocol.json'), '{}');
     writeFileSync(join(dir, 'spec', 'schema', '1', 'catalog.json'), '{}');

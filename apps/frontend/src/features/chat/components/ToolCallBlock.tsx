@@ -18,7 +18,6 @@ import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { cn } from '@/lib/utils';
 
-import { useConfiguredToolTimeoutSeconds } from '../hooks/use-configured-tool-timeout';
 import { buildFileChangePreview, isFileChangeTool } from './file-change-preview';
 import { FileChangePreviewBody } from './FileChangePreview';
 import { TimelineDisclosure } from './TimelineDisclosure';
@@ -33,6 +32,7 @@ import {
 import {
   formatToolDuration,
   formatToolElapsed,
+  formatToolLimit,
   getToolHint,
   StatusGlyph,
   toneTextClass,
@@ -123,6 +123,14 @@ export function ToolCallBlock({
     !(status === 'timed_out' && reasonCode === 'timeout')
       ? t.tools.reasons[reasonCode]
       : null;
+  // The limit a timed-out call hit, read from the snapshot the call started
+  // under: the tool setting may have changed since, and an MCP call's limit is
+  // its server's, which no tool setting records.
+  const limitLabel =
+    status === 'timed_out' && execution?.timeoutMs !== undefined
+      ? formatMessage(t.tools.timeLimit, { limit: formatToolLimit(execution.timeoutMs) })
+      : null;
+  const statusDetail = [reasonLabel, limitLabel].filter(Boolean).join(' · ');
   const resultLabels: Record<ResultKind, string> = {
     error: t.tools.errorLabel,
     result: t.tools.resultLabel,
@@ -131,26 +139,22 @@ export function ToolCallBlock({
   };
   const isActive = isActiveToolExecutionStatus(status);
   const duration = execution?.durationMs;
-  // A running call counts up beside the limit its tool is configured with. The
-  // clock only runs while the call does: a call waiting on the reader or queued
-  // is not spending its budget, and a settled call shows its measured duration.
+  // A running call counts up beside the limit it started under. The clock only
+  // runs while the call does: a call waiting on the reader or queued is not
+  // spending its budget, and a settled call shows its measured duration.
   const isRunning = status === 'running';
   const now = useNow(isRunning ? LIVE_ELAPSED_TICK_MS : null);
   // The hub's start time is the anchor; a legacy part with no snapshot counts
   // from when this card first saw the call running.
   const [firstSeenRunningAt] = useState(() => Date.now());
-  const configuredTimeoutSeconds = useConfiguredToolTimeoutSeconds(
-    name,
-    isRunning && source === 'builtin'
-  );
   const liveElapsed = isRunning
     ? formatToolElapsed(now - (execution?.startedAt ?? firstSeenRunningAt))
     : null;
   const liveClock =
-    liveElapsed !== null && configuredTimeoutSeconds !== null
+    liveElapsed !== null && execution?.timeoutMs !== undefined
       ? formatMessage(t.tools.elapsedOfLimit, {
           elapsed: liveElapsed,
-          limit: formatToolElapsed(configuredTimeoutSeconds * 1000),
+          limit: formatToolLimit(execution.timeoutMs),
         })
       : liveElapsed;
   // Parsed once and shared: the outcome on the row and the raw body below it
@@ -203,7 +207,7 @@ export function ToolCallBlock({
         {statusLabel && (
           <span className={cn('shrink-0', toneTextClass(tone))}>
             {statusLabel}
-            {reasonLabel && <span className="text-fg-subtle"> · {reasonLabel}</span>}
+            {statusDetail && <span className="text-fg-subtle"> · {statusDetail}</span>}
           </span>
         )}
       </TimelineRow>

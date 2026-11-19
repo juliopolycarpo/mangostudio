@@ -3,6 +3,7 @@ import { dirname, isAbsolute, relative, win32 } from 'node:path';
 
 import type { ResourceKind } from '@mangostudio/shared/library';
 import {
+  CUSTOM_INSTRUCTION_LOCATION_ID,
   LibraryLocationStatusSchema,
   LibraryTargetDescriptorSchema,
 } from '@mangostudio/shared/library';
@@ -10,6 +11,7 @@ import type { LocationFsProbe } from '@mangostudio/shared/library/host';
 import {
   assertLibraryRegistryConsistency,
   COMPARABLE_RESOURCE_KINDS,
+  defineCustomInstructionLocation,
   DIRECTORY_HASHED_RESOURCE_KINDS,
   getLibraryLocation,
   getLibraryTarget,
@@ -136,12 +138,23 @@ describe('library target registry', () => {
   });
 
   /**
-   * Absence here is a decision, not an omission: MangoStudio has no slash
-   * commands, so a location for it would report a coverage tick for files
-   * nothing loads.
+   * MangoStudio's native chats expand `/name` from this directory before the
+   * turn is built (`expandNativeSlashCommand`), so the tick in the coverage
+   * column is honest: something loads these files.
    */
-  it('claims no command home for the target that has no commands', () => {
-    expect(getLibraryTarget('mangostudio')?.reads.command).toEqual([]);
+  it('reads native slash commands from the MangoStudio config home', () => {
+    expect(getLibraryTarget('mangostudio')?.reads.command).toEqual(['mango-commands']);
+    expect(getLibraryLocation('mango-commands')).toMatchObject({
+      kind: 'command',
+      scope: 'home',
+      layout: 'directory-of-files',
+      format: 'markdown-frontmatter',
+      access: 'read-write',
+      readBy: ['mangostudio'],
+    });
+    expect(getLibraryLocation('mango-commands')?.resolvePath(LINUX_ENV)).toBe(
+      '/home/ada/.mango/commands'
+    );
   });
 
   it('resolves command locations under each vendor config home, override included', () => {
@@ -239,6 +252,7 @@ describe('library target registry', () => {
     );
     expect(mangoLocationIds.sort()).toEqual([
       'mango-agents',
+      'mango-commands',
       'mango-instructions',
       'mango-settings',
       'mango-skills',
@@ -302,7 +316,13 @@ describe('library target registry', () => {
       dirname(TEST_MANAGED_CONFIG_PATH)
     );
     expect(getConfig().configFilePath).toBe(TEST_MANAGED_CONFIG_PATH);
-    for (const id of ['mango-skills', 'mango-agents', 'mango-instructions', 'mango-settings']) {
+    for (const id of [
+      'mango-skills',
+      'mango-agents',
+      'mango-commands',
+      'mango-instructions',
+      'mango-settings',
+    ]) {
       const path = getLibraryLocation(id as never)?.resolvePath(env) ?? '';
       // The env is the host's, so the host's own path rules decide containment;
       // a "/" prefix check would never match a Windows path.
@@ -368,6 +388,46 @@ describe('library target registry', () => {
     expect(describeTargetLocations('claude', LINUX_ENV, fs).map((status) => status.id)).toEqual(
       ids
     );
+  });
+});
+
+describe('custom-instruction location kind', () => {
+  const custom = defineCustomInstructionLocation('/srv/rules/team.md');
+
+  it('is read-only, so it can never be a write destination', () => {
+    expect(custom.access).toBe('read-only');
+    expect(custom).toMatchObject({
+      id: CUSTOM_INSTRUCTION_LOCATION_ID,
+      kind: 'instruction',
+      layout: 'single-file',
+      readBy: ['mangostudio'],
+    });
+  });
+
+  it('carries the user path unchanged on every platform', () => {
+    expect(custom.resolvePath(LINUX_ENV)).toBe('/srv/rules/team.md');
+    expect(
+      custom.resolvePath({ platform: 'win32', homeDir: String.raw`C:\Users\Ada`, env: {} })
+    ).toBe('/srv/rules/team.md');
+  });
+
+  it('stays out of the closed table that every write destination resolves through', () => {
+    expect(getLibraryLocation(CUSTOM_INSTRUCTION_LOCATION_ID)).toBeUndefined();
+    expect(LIBRARY_LOCATION_DEFINITIONS.map((location) => location.id)).not.toContain(
+      CUSTOM_INSTRUCTION_LOCATION_ID
+    );
+    for (const target of LIBRARY_TARGET_DEFINITIONS) {
+      expect(Object.values(target.reads).flat()).not.toContain(CUSTOM_INSTRUCTION_LOCATION_ID);
+    }
+  });
+
+  it('does not share the vendors global-instruction slug', () => {
+    const slugs = LIBRARY_LOCATION_DEFINITIONS.filter(
+      (location) => location.kind === 'instruction' && location.layout === 'single-file'
+    ).map((location) => location.resourceSlug);
+
+    expect(slugs).toContain('global');
+    expect(custom.resourceSlug).toBe('custom');
   });
 });
 

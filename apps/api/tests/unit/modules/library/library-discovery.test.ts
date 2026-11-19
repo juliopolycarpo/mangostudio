@@ -73,6 +73,15 @@ describe('discoverLibraryResources', () => {
     expect(enabled.has('mango-agents')).toBe(true);
   });
 
+  it('always enables the native commands directory, which the chat loader reads unconditionally', () => {
+    const enabled = enabledLibraryLocations(
+      { home: { 'mango-commands': false }, workspace: {} },
+      'home'
+    );
+
+    expect(enabled.has('mango-commands')).toBe(true);
+  });
+
   it('does not force MangoStudio native locations on under another scope', () => {
     // Both are directories under the user's home. Forcing them on for a
     // workspace would enable a location that has no definition there.

@@ -3,9 +3,10 @@ import { describe, expect, it } from 'bun:test';
 import type { RuntimeFindingCode } from '@mangostudio/shared/environments';
 import { environmentFindingTemplatesEn } from '@mangostudio/shared/environments';
 
-import { fail, ok } from '../../../src/cli/doctor-checks';
+import type { CheckResult } from '../../../src/cli/doctor-checks';
 import {
   checkResultToFinding,
+  findingParams,
   findingSeverity,
   hasUnfilledPlaceholders,
   renderFinding,
@@ -69,15 +70,66 @@ describe('renderFinding', () => {
   });
 });
 
+describe('findingParams', () => {
+  it('names identifiers, counts PATH positions from one, and keeps an LTS status a code', () => {
+    expect(
+      findingParams({
+        code: 'shadowed-by-earlier-path',
+        params: {
+          runtime: 'node',
+          shadowedPath: '/a/node',
+          shadowedPathIndex: '0',
+          effectivePath: '/b/node',
+          effectivePathIndex: '3',
+          ltsStatus: 'end-of-life',
+        },
+      })
+    ).toEqual({
+      runtime: 'Node.js',
+      shadowedPath: '/a/node',
+      shadowedPathIndex: '1',
+      effectivePath: '/b/node',
+      effectivePathIndex: '4',
+      ltsStatus: 'end-of-life',
+    });
+  });
+
+  it("lets a version manager's `manager` stand in for the `{runtime}` of a shared template", () => {
+    expect(findingParams({ code: 'not-found', params: { manager: 'fnm' } })).toEqual({
+      manager: 'fnm',
+      runtime: 'fnm',
+    });
+  });
+
+  it('renders an LTS status as its English label, and leaves an unknown one unfilled', () => {
+    expect(
+      renderFinding({
+        code: 'outdated-lts',
+        params: { version: '20.1.0', ltsStatus: 'end-of-life' },
+      })
+    ).toBe('Version 20.1.0 is end of life and will stop receiving fixes.');
+    expect(
+      renderFinding({
+        code: 'outdated-lts',
+        params: { version: '20.1.0', ltsStatus: 'new-status' },
+      })
+    ).toBe('Version 20.1.0 is {ltsStatus} and will stop receiving fixes.');
+  });
+});
+
 describe('checkResultToFinding', () => {
   it('round-trips legacy detail into a renderable finding', () => {
-    const check = ok('Config', 'loaded from /data/config.toml');
+    const check: CheckResult = {
+      label: 'Config',
+      status: 'ok',
+      detail: 'loaded from /data/config.toml',
+    };
     const finding = checkResultToFinding(check);
     expect(renderFinding(finding)).toBe(check.detail);
   });
 
   it('preserves failure detail verbatim', () => {
-    const check = fail('Database', 'file missing');
+    const check: CheckResult = { label: 'Database', status: 'fail', detail: 'file missing' };
     expect(renderFinding(checkResultToFinding(check))).toBe('file missing');
   });
 });

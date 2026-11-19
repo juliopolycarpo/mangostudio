@@ -47,7 +47,7 @@ function makeConfig(overrides: Partial<MangoConfig> = {}): MangoConfig {
       backupRetentionCount: 10,
       backupRetentionBytes: 1024,
     },
-    checkpoints: { dir: '/data/checkpoints' },
+    checkpoints: { dir: '/data/checkpoints', maxFileBytes: 1024 },
     auth: { secret: 'x'.repeat(32), url: 'http://localhost:3001' },
     security: { trustProxy: false, allowDirectLoopback: true },
     updates: { check: true, channel: null },
@@ -73,17 +73,17 @@ function makeState(): ServerState {
 describe('checkDir', () => {
   it('passes when the directory exists and is writable', () => {
     const fs = new FakeFsProbe(new Set(['/data']), new Set(['/data']));
-    expect(checkDir('Data', '/data', fs).status).toBe('ok');
+    expect(checkDir('core.label.homeDirectory', '/data', fs).status).toBe('ok');
   });
 
   it('fails when the directory exists but is not writable', () => {
     const fs = new FakeFsProbe(new Set(['/data']), new Set());
-    expect(checkDir('Data', '/data', fs).status).toBe('fail');
+    expect(checkDir('core.label.homeDirectory', '/data', fs).status).toBe('fail');
   });
 
   it('passes when missing but the parent is writable', () => {
     const fs = new FakeFsProbe(new Set(['/data']), new Set(['/data']));
-    const result = checkDir('Logs', '/data/logs', fs);
+    const result = checkDir('core.label.logsDirectory', '/data/logs', fs);
     expect(result.status).toBe('ok');
     expect(result.detail).toContain('will be created');
   });
@@ -91,14 +91,14 @@ describe('checkDir', () => {
   it('passes when several levels are missing but an ancestor is writable', () => {
     // Fresh install: ~/.mango and ~/.mango/logs do not exist yet, but ~ does.
     const fs = new FakeFsProbe(new Set(['/home/user']), new Set(['/home/user']));
-    const result = checkDir('Logs', '/home/user/.mango/logs', fs);
+    const result = checkDir('core.label.logsDirectory', '/home/user/.mango/logs', fs);
     expect(result.status).toBe('ok');
     expect(result.detail).toContain('will be created');
   });
 
   it('fails when no existing ancestor is writable', () => {
     const fs = new FakeFsProbe(new Set(['/home/user']), new Set());
-    expect(checkDir('Logs', '/home/user/.mango/logs', fs).status).toBe('fail');
+    expect(checkDir('core.label.logsDirectory', '/home/user/.mango/logs', fs).status).toBe('fail');
   });
 });
 

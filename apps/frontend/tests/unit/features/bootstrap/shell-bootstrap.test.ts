@@ -17,8 +17,10 @@ import {
   isRateLimited,
   loadShellBootstrap,
   refetchShellResponsibility,
+  settleShellChatList,
   settleShellQuery,
 } from '../../../../src/features/bootstrap/shell-bootstrap';
+import { flattenChatPages } from '../../../../src/features/chat/chat-list-pages';
 import { chatListQueryOptions } from '../../../../src/features/chat/queries';
 import { agentSettingsListQueryOptions } from '../../../../src/features/settings/agents/queries';
 import { catalogQueryOptions } from '../../../../src/hooks/use-model-catalog';
@@ -68,9 +70,12 @@ describe('settleShellQuery', () => {
   it('hands back the data when the request succeeds', async () => {
     hub = createShellBootstrapHub().install();
 
-    const settled = await settleShellQuery(newQueryClient(), chatListQueryOptions());
+    const settled = await settleShellChatList(newQueryClient());
 
     expect(settled.ok).toBe(true);
+    expect(settled.ok ? flattenChatPages(settled.data).map((chat) => chat.id) : []).toEqual([
+      'chat-1',
+    ]);
   });
 
   it('hands back a refusal instead of throwing it', async () => {
@@ -102,9 +107,9 @@ describe('settleShellQuery', () => {
     hub = createShellBootstrapHub().refuse('chats', 'unauthorized').install();
     const queryClient = newQueryClient();
 
-    await settleShellQuery(queryClient, chatListQueryOptions());
+    await settleShellChatList(queryClient);
     hub.answer('chats');
-    const again = await settleShellQuery(queryClient, chatListQueryOptions());
+    const again = await settleShellChatList(queryClient);
 
     expect(hub.requestCount('chats')).toBe(2);
     expect(again.ok, 'expected the chat list after signing in again to load').toBe(true);
@@ -204,7 +209,10 @@ describe('loadShellBootstrap', () => {
   it('asks for no transcript when there is no chat to open', async () => {
     hub = createShellBootstrapHub().install();
     const queryClient = newQueryClient();
-    queryClient.setQueryData(chatListQueryOptions().queryKey, []);
+    queryClient.setQueryData(chatListQueryOptions().queryKey, {
+      pages: [{ items: [], nextCursor: null }],
+      pageParams: [null],
+    });
 
     const outcome = await loadShellBootstrap(queryClient);
 

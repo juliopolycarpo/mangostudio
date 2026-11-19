@@ -3,8 +3,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { CUSTOM_INSTRUCTION_LOCATION_ID } from '@mangostudio/shared/library';
+import { getLibraryLocation, LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
+import type { PathEnv } from '@mangostudio/shared/runtime-env';
+
 import {
+  FIXED_RULE_FILE_LOCATIONS,
   getDefaultRuleFileDescriptors,
+  loadFixedRuleFileContent,
   loadRuleFileContent,
   previewRuleFile,
   RuleFileError,
@@ -39,6 +45,11 @@ function createLargeFile(name: string, sizeBytes: number): string {
   return filePath;
 }
 
+/** A hub-shaped path env rooted in the test directory, so nothing reads the real home. */
+function pathEnvFor(env: Record<string, string> = {}): PathEnv {
+  return { platform: process.platform, homeDir: tmpDir, env };
+}
+
 describe('getDefaultRuleFileDescriptors', () => {
   it('returns AGENTS.md and CLAUDE.md descriptors', () => {
     const descriptors = getDefaultRuleFileDescriptors();
@@ -50,8 +61,63 @@ describe('getDefaultRuleFileDescriptors', () => {
 
     expect(agents).toBeDefined();
     expect(agents?.label).toBe('Mango AGENTS.md');
+    expect(agents?.locationId).toBe('mango-instructions');
     expect(claude).toBeDefined();
     expect(claude?.label).toBe('Claude CLAUDE.md');
+    expect(claude?.locationId).toBe('claude-instructions');
+  });
+
+  it('honours CLAUDE_CONFIG_DIR for the Claude file, as the library registry does', () => {
+    const claudeDir = createDirectory('claude-home');
+    writeFileSync(join(claudeDir, 'CLAUDE.md'), '# From the override', 'utf8');
+    const env = pathEnvFor({ CLAUDE_CONFIG_DIR: claudeDir });
+
+    const claude = getDefaultRuleFileDescriptors(env).find((d) => d.kind === 'claude');
+
+    expect(claude?.path, '(claude descriptor path): expected the CLAUDE_CONFIG_DIR file').toBe(
+      join(claudeDir, 'CLAUDE.md')
+    );
+    expect(claude?.exists).toBe(true);
+    expect(loadFixedRuleFileContent('claude', env)).toBe('# From the override');
+  });
+
+  it('follows the library registry path for every fixed file, not a table of its own', () => {
+    const envs = [
+      pathEnvFor(),
+      pathEnvFor({ CLAUDE_CONFIG_DIR: join(tmpDir, 'dotfiles', 'claude') }),
+      pathEnvFor({ MANGOSTUDIO_CONFIG_HOME: join(tmpDir, 'mango-home') }),
+    ];
+
+    for (const env of envs) {
+      for (const descriptor of getDefaultRuleFileDescriptors(env)) {
+        const location = getLibraryLocation(descriptor.locationId);
+        expect(
+          descriptor.path,
+          `(${descriptor.kind} path under ${JSON.stringify(env.env)}): expected the registry path of ${descriptor.locationId}`
+        ).toBe(location?.resolvePath(env) ?? '');
+      }
+    }
+  });
+
+  it('reads the fixed files from the same set of instruction locations as the library', () => {
+    // Every single-file instruction location MangoStudio's own prompts or Claude's
+    // CLAUDE.md read must be a prompt rule. A new one added to the registry fails
+    // here, so the two features cannot grow different path sets unnoticed.
+    const registryIds = LIBRARY_LOCATION_DEFINITIONS.filter(
+      (location) =>
+        location.kind === 'instruction' &&
+        location.layout === 'single-file' &&
+        (location.readBy.includes('mangostudio') || location.readBy.includes('claude'))
+    )
+      .map((location) => location.id)
+      .sort();
+    const promptRuleIds = Object.values(FIXED_RULE_FILE_LOCATIONS)
+      .map(({ locationId }) => locationId)
+      .sort();
+
+    expect(promptRuleIds, '(prompt-rules fixed location ids vs registry instruction ids)').toEqual(
+      registryIds
+    );
   });
 
   it('returns exists: false for missing default files', () => {
@@ -78,15 +144,20 @@ describe('previewRuleFile', () => {
     expect(result.sizeBytes).toBeGreaterThan(0);
   });
 
-  it('expands ~ to home directory', () => {
-    const homeRelative = '~/some-file.md';
-    void homeRelative;
-    const filePath = createFile('manual.md', 'test content');
+  it('expands ~ to the path env home directory', () => {
+    createFile('manual.md', 'test content');
 
-    const result = previewRuleFile(filePath);
+    const result = previewRuleFile('~/manual.md', pathEnvFor());
 
     expect(result.exists).toBe(true);
     expect(result.content).toBe('test content');
+    expect(result.path).toBe('~/manual.md');
+  });
+
+  it('reports a custom path as the read-only custom-instruction location kind', () => {
+    const filePath = createFile('team.md', '# Team');
+
+    expect(previewRuleFile(filePath).locationId).toBe(CUSTOM_INSTRUCTION_LOCATION_ID);
   });
 
   it('rejects non-.md extensions', () => {

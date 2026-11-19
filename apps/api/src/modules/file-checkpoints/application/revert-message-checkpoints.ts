@@ -5,17 +5,25 @@ import {
   RUNTIME_ABSENT_HASH,
   RuntimeSnapshotConflictError,
   type RuntimeSnapshotRevertParams,
+  SNAPSHOT_CHUNK_MAX_BYTES,
+  SNAPSHOT_INLINE_MAX_BYTES,
+  SNAPSHOT_LEGACY_INLINE_MAX_BYTES,
 } from '@mangostudio/shared/runtime-contract';
 import type { Kysely } from 'kysely';
 
 import type { Database, FileCheckpointSelect } from '../../../db/types';
-import { getRuntimeClient } from '../../../services/runtime-client';
+import { getRuntimeClient, runtimeStagesSnapshots } from '../../../services/runtime-client';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import {
   buildWorkdirPolicy,
   resolveEffectiveRestrictToolsToWorkdir,
 } from '../../workspaces/application/workdir-policy';
-import { readCheckpointBlob } from '../infrastructure/checkpoint-blob-store';
+import {
+  checkpointBlobExists,
+  checkpointBlobSize,
+  readCheckpointBlob,
+  readCheckpointBlobChunks,
+} from '../infrastructure/checkpoint-blob-store';
 import {
   listActiveCheckpointsForMessage,
   markMessageCheckpointsReverted,
@@ -51,7 +59,6 @@ export async function revertMessageFileCheckpoints(
   const rows = await listActiveCheckpointsForMessage(db, chatId, messageId);
   if (rows.length === 0) return { revertedFiles: 0, uncheckpointedSources };
 
-  const operations = await buildRevertOperations(rows);
   const reverted = revertedStateByPath(rows);
   const expected = [...finalStateByPath(rows)].map(([path, afterHash]) => {
     const revertedHash = reverted.get(path);
@@ -63,8 +70,19 @@ export async function revertMessageFileCheckpoints(
     checkpointEnvironmentId(rows)
   );
   const runtime = await getRuntimeClient(runtimeContext.userId, runtimeContext.environmentId);
+  const target: RevertTarget = {
+    runtime,
+    stagesSnapshots: await runtimeStagesSnapshots(
+      runtimeContext.userId,
+      runtimeContext.environmentId
+    ),
+  };
+  // Blobs too large for one frame are uploaded to the runtime first and named in
+  // the operation; the finally below frees those uploads however the revert ends.
+  const uploadedIds: string[] = [];
   let result: { revertedFiles: number };
   try {
+    const operations = await buildRevertOperations(target, rows, uploadedIds);
     result = await runtime.snapshot.revert({
       chatId,
       expected,
@@ -78,6 +96,10 @@ export async function revertMessageFileCheckpoints(
       throw new FileCheckpointConflictError(error.resolvedPath);
     }
     throw error;
+  } finally {
+    await Promise.all(
+      uploadedIds.map((stagedId) => runtime.snapshot.release({ stagedId }).catch(() => undefined))
+    );
   }
 
   await markMessageCheckpointsReverted(db, chatId, messageId, Date.now());
@@ -139,8 +161,25 @@ async function resolveRevertRuntimeContext(
   return policy?.restricted ? { ...base, containmentRoot: policy.root } : base;
 }
 
+/** The runtime a revert replays on, and whether it can take staged uploads. */
+interface RevertTarget {
+  readonly runtime: Awaited<ReturnType<typeof getRuntimeClient>>;
+  /** False for a runtime that predates the staging methods: restores must ride inline. */
+  readonly stagesSnapshots: boolean;
+}
+
+/** Where a restore's bytes come from: inline in the operation, or an upload the runtime holds. */
+type RestoreContent =
+  { readonly contentBase64: string } | { readonly stagedId: string; readonly hash: string };
+
+/**
+ * `uploadedIds` receives every upload as soon as it is created, so the caller can
+ * release them even when a later row fails to build.
+ */
 async function buildRevertOperations(
-  rows: readonly FileCheckpointSelect[]
+  target: RevertTarget,
+  rows: readonly FileCheckpointSelect[],
+  uploadedIds: string[]
 ): Promise<RuntimeSnapshotRevertParams['operations']> {
   const operations: RuntimeSnapshotRevertParams['operations'][number][] = [];
   for (const row of [...rows].reverse()) {
@@ -153,7 +192,7 @@ async function buildRevertOperations(
         operations.push({
           type: 'restore',
           path: row.path,
-          contentBase64: await readRequiredBlob(row),
+          ...(await restoreContent(target, row, uploadedIds)),
         });
         break;
       case 'move':
@@ -162,7 +201,7 @@ async function buildRevertOperations(
           type: 'move',
           path: row.path,
           movedTo: row.movedTo,
-          contentBase64: await readRequiredBlob(row),
+          ...(await restoreContent(target, row, uploadedIds)),
         });
         break;
       default:
@@ -172,7 +211,23 @@ async function buildRevertOperations(
   return operations;
 }
 
-async function readRequiredBlob(row: FileCheckpointSelect): Promise<string> {
+/**
+ * A blob up to {@link SNAPSHOT_INLINE_MAX_BYTES} rides in the operation. A
+ * bigger one is streamed to the runtime in bounded chunks and named by id and
+ * hash; the runtime verifies the hash before it changes any file, so a corrupt
+ * or truncated upload refuses the whole revert instead of half applying it.
+ *
+ * A runtime without the staging methods takes every blob inline, as before,
+ * up to what such a runtime could ever have captured
+ * ({@link SNAPSHOT_LEGACY_INLINE_MAX_BYTES}). A bigger blob was captured by a
+ * newer runtime and has no way onto this one, so the revert is refused up front
+ * instead of failing on an unknown method or parameter mid-upload.
+ */
+async function restoreContent(
+  { runtime, stagesSnapshots }: RevertTarget,
+  row: FileCheckpointSelect,
+  uploadedIds: string[]
+): Promise<RestoreContent> {
   if (!row.blobKey) {
     throw new FileCheckpointConflictError(
       row.path,
@@ -180,15 +235,52 @@ async function readRequiredBlob(row: FileCheckpointSelect): Promise<string> {
         'so there is nothing to restore.'
     );
   }
-  const bytes = await readCheckpointBlob(row.blobKey);
-  if (!bytes) {
+  if (!(await checkpointBlobExists(row.blobKey))) throw blobUnavailableError(row);
+
+  const size = checkpointBlobSize(row.blobKey);
+  const inlineMaxBytes = stagesSnapshots
+    ? SNAPSHOT_INLINE_MAX_BYTES
+    : SNAPSHOT_LEGACY_INLINE_MAX_BYTES;
+  if (size <= inlineMaxBytes) {
+    const bytes = await readCheckpointBlob(row.blobKey);
+    if (!bytes) throw blobUnavailableError(row);
+    return { contentBase64: Buffer.from(bytes).toString('base64') };
+  }
+  if (!stagesSnapshots) {
     throw new FileCheckpointConflictError(
       row.path,
-      `Cannot revert "${row.path}": its stored content from before this assistant message is no ` +
-        'longer available.'
+      `Cannot revert "${row.path}": its stored content is ${size} bytes, and the runtime on this ` +
+        `environment accepts at most ${SNAPSHOT_LEGACY_INLINE_MAX_BYTES} bytes per file. ` +
+        'Update that runtime to revert it.'
     );
   }
-  return Buffer.from(bytes).toString('base64');
+
+  const stagedId = crypto.randomUUID();
+  uploadedIds.push(stagedId);
+  let offset = 0;
+  try {
+    for await (const chunk of readCheckpointBlobChunks(row.blobKey, SNAPSHOT_CHUNK_MAX_BYTES)) {
+      await runtime.snapshot.stageChunk({
+        stagedId,
+        offset,
+        contentBase64: Buffer.from(chunk).toString('base64'),
+      });
+      offset += chunk.byteLength;
+    }
+  } catch (error) {
+    // The blob vanishing mid-read is the same condition as it being gone up front.
+    if (!(await checkpointBlobExists(row.blobKey))) throw blobUnavailableError(row);
+    throw error;
+  }
+  return { stagedId, hash: row.blobKey };
+}
+
+function blobUnavailableError(row: FileCheckpointSelect): FileCheckpointConflictError {
+  return new FileCheckpointConflictError(
+    row.path,
+    `Cannot revert "${row.path}": its stored content from before this assistant message is no ` +
+      'longer available.'
+  );
 }
 
 /**

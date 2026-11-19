@@ -32,7 +32,7 @@ pub const RESERVED_ERROR_CODES: [&str; 10] = codes::RESERVED;
 /// downstream reads only this array, so a kind added to
 /// `apps/shared/src/runtime-contract/errors.ts` and this array either match
 /// or a test in this module fails naming the mismatch.
-pub const RUNTIME_SERVICE_ERROR_KINDS: [&str; 29] = [
+pub const RUNTIME_SERVICE_ERROR_KINDS: [&str; 31] = [
     CONSENT_DENIED_KIND,
     "path_access",
     "tool_argument",
@@ -52,6 +52,8 @@ pub const RUNTIME_SERVICE_ERROR_KINDS: [&str; 29] = [
     "workdir_validation",
     "snapshot_conflict",
     "snapshot_too_large",
+    "snapshot_stage_missing",
+    "snapshot_stage_corrupt",
     "runtime_update_refused",
     "runtime_service_unsupported",
     "runtime_service_no_session_bus",

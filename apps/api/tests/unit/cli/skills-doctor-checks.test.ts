@@ -9,21 +9,22 @@ import {
   type SkillsDoctorInput,
 } from '../../../src/cli/skills-doctor-checks';
 
+let root: string;
 let mangoDir: string;
 let agentsDir: string;
 let claudeDir: string;
 
 beforeEach(() => {
-  const root = mkdtempSync(join(tmpdir(), 'skills-doctor-'));
+  root = mkdtempSync(join(tmpdir(), 'skills-doctor-'));
   mangoDir = join(root, 'mango');
   agentsDir = join(root, 'agents');
   claudeDir = join(root, 'claude');
 });
 
+// The three source directories live inside `root`; removing only them left
+// `root` itself behind on every test.
 afterEach(() => {
-  rmSync(mangoDir, { recursive: true, force: true });
-  rmSync(agentsDir, { recursive: true, force: true });
-  rmSync(claudeDir, { recursive: true, force: true });
+  rmSync(root, { recursive: true, force: true });
 });
 
 function writeSkill(dir: string, slug: string, frontmatter: string): void {
@@ -56,7 +57,7 @@ describe('collectSkillsDoctorChecks', () => {
     const results = run({ configOrigin: 'env' });
 
     expect(find(results, 'Skills config').detail).toContain('(from env)');
-    expect(find(results, 'Skills mango').detail).toContain('1 skill(s)');
+    expect(find(results, 'Skills mango').detail).toContain('— 1 skill');
     // A healthy active skill gets no dedicated row.
     expect(results.some((row) => row.label === 'Skill mango:alpha')).toBe(false);
   });

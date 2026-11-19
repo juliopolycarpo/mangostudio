@@ -15,8 +15,8 @@ import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-
  *
  * The chat list is the one response every authenticated first screen waits
  * for, so how it is encoded is free to change for speed — what it encodes is
- * not. These tests pin the exact bytes, headers, and failure answer for a
- * fixture that walks every branch of the public projection: both runner kinds,
+ * not. These tests pin the exact bytes, headers, and failure answer of a page
+ * for a fixture that walks every branch of the public projection: both runner kinds,
  * every permission and model axis, all three states of the workdir override,
  * each source of context info, a remote environment, and a title that
  * exercises JSON string escaping. The expected text was captured from the
@@ -218,7 +218,7 @@ describe('GET /chats wire parity', () => {
     const text = await response.text();
 
     expect(response.status).toBe(200);
-    expect(text).toBe(JSON.stringify(expectedChats('parity')));
+    expect(text).toBe(JSON.stringify({ items: expectedChats('parity'), nextCursor: null }));
   });
 
   it('encodes the same body for chats carrying large continuation state', async () => {
@@ -298,11 +298,14 @@ describe('GET /chats wire parity', () => {
 
     expect(response.status).toBe(200);
     expect(text).toBe(
-      JSON.stringify([
-        chat('large-snapshot', 'Snapshot over a large envelope', BASE_TIME + 3, 30_000, 0.3),
-        chat('large-legacy', 'Large envelope, no snapshot', BASE_TIME + 2, 20_000, 0.2),
-        chat('large-stale', 'Large envelope, stale snapshot shape', BASE_TIME + 1, 20_000, 0.2),
-      ])
+      JSON.stringify({
+        items: [
+          chat('large-snapshot', 'Snapshot over a large envelope', BASE_TIME + 3, 30_000, 0.3),
+          chat('large-legacy', 'Large envelope, no snapshot', BASE_TIME + 2, 20_000, 0.2),
+          chat('large-stale', 'Large envelope, stale snapshot shape', BASE_TIME + 1, 20_000, 0.2),
+        ],
+        nextCursor: null,
+      })
     );
   });
 
@@ -322,13 +325,13 @@ describe('GET /chats wire parity', () => {
     });
   });
 
-  it('encodes an empty list as an empty JSON array', async () => {
+  it('encodes an empty list as an empty page', async () => {
     const user = await insertTestUser();
 
     const response = await authenticatedApp(user).handle(new Request('http://localhost/chats'));
 
     expect(response.status).toBe(200);
-    expect(await response.text()).toBe('[]');
+    expect(await response.text()).toBe('{"items":[],"nextCursor":null}');
   });
 
   it('refuses a stored chat that breaks the response contract as a server error', async () => {

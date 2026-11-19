@@ -51,7 +51,8 @@ import { connectSshRuntime } from './connect-ssh-runtime';
 import { type HubWorkspaceBinding, STAND_IN_USER_ID } from './hub-workspace-authority';
 import {
   capabilityManifestFromHealth,
-  pruneUnknownExternalAgentTargets,
+  type PrunedHealthReport,
+  pruneUnknownExternalAgentHealth,
 } from './manifest-from-health';
 import { RuntimeClient } from './runtime-client';
 import { registerRuntimeConnectionRelease } from './runtime-connection-release';
@@ -259,6 +260,8 @@ interface RuntimeConnectionEntry {
    * them, so each id is reported once per environment rather than per read.
    */
   skippedTargetIdsLogged?: Set<string>;
+  /** Same rule for isolation methods this build has no enum member for. */
+  skippedIsolationMethodsLogged?: Set<string>;
   /**
    * Epoch ms before which a lazy connect fails fast instead of respawning.
    * `Infinity` latches the environment until someone connects it explicitly.
@@ -1428,20 +1431,31 @@ export class RuntimeConnectionManager {
     this.#publish(userId);
   }
 
-  /** Logs each target id the hub skipped from health, the first time this environment reports it. */
-  #logSkippedTargetIds(
+  /** Logs each health value the hub skipped (target id, isolation method) the first time this environment reports it. */
+  #logSkippedHealthValues(
     entry: RuntimeConnectionEntry,
     environmentId: string,
-    skippedTargetIds: readonly string[]
+    pruned: PrunedHealthReport
   ): void {
-    const logged = (entry.skippedTargetIdsLogged ??= new Set<string>());
-    const fresh = skippedTargetIds.filter((targetId) => !logged.has(targetId));
-    if (fresh.length === 0) return;
-    for (const targetId of fresh) logged.add(targetId);
-    this.#healthLogger.warn('unknown_external_agent_target_skipped', {
-      environmentId,
-      targetIds: fresh,
-    });
+    const loggedTargets = (entry.skippedTargetIdsLogged ??= new Set<string>());
+    const freshTargets = pruned.skippedTargetIds.filter((targetId) => !loggedTargets.has(targetId));
+    if (freshTargets.length > 0) {
+      for (const targetId of freshTargets) loggedTargets.add(targetId);
+      this.#healthLogger.warn('unknown_external_agent_target_skipped', {
+        environmentId,
+        targetIds: freshTargets,
+      });
+    }
+
+    const method = pruned.skippedIsolationMethod;
+    const loggedMethods = (entry.skippedIsolationMethodsLogged ??= new Set<string>());
+    if (method !== undefined && !loggedMethods.has(method)) {
+      loggedMethods.add(method);
+      this.#healthLogger.warn('unknown_identity_isolation_method_skipped', {
+        environmentId,
+        method,
+      });
+    }
   }
 
   /**
@@ -1467,11 +1481,12 @@ export class RuntimeConnectionManager {
     entry.manifestReadAtMs = Date.now();
 
     // Never unbounded: a caller that names no deadline gets the manager's.
-    const { report: health, skippedTargetIds } = pruneUnknownExternalAgentTargets(
+    const pruned = pruneUnknownExternalAgentHealth(
       await client.health({
         timeoutMs: options.timeoutMs ?? this.#manifestRefreshTimeoutMs,
       })
     );
+    const health = pruned.report;
     if (
       entry.revision !== revision ||
       entry.connection?.client !== client ||
@@ -1479,7 +1494,7 @@ export class RuntimeConnectionManager {
     ) {
       return this.getStatus(userId, environmentId);
     }
-    this.#logSkippedTargetIds(entry, environmentId, skippedTargetIds);
+    this.#logSkippedHealthValues(entry, environmentId, pruned);
     entry.health = health;
     entry.healthReadAtMs = entry.manifestReadAtMs;
     client.replaceManifest(

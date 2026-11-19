@@ -8,7 +8,7 @@
  * | Retired TypeScript assertion or implementation | Hub-level evidence here |
  * | --- | --- |
  * | `apps/runtime/src/services/snapshot.ts` capture and hash | exact UTF-8 and binary bytes, SHA-256 hashes, in-root symlink or junction traversal, directories, and absent paths agree over the real wire |
- * | `apps/runtime/tests/unit/services/snapshot.test.ts` snapshot size refusal | an 8 MiB plus one byte capture reports the same typed refusal and leaves the file intact |
+ * | `apps/runtime/tests/unit/services/snapshot.test.ts` snapshot size refusal | a capture past the requested or default limit reports a typed refusal naming its size and the limit, and leaves the file intact; the retired fixed 8 MiB ceiling is now that configurable limit, with files past the inline size moving as staged chunks |
  * | `apps/runtime/src/services/snapshot.ts` reverse replay | create removal, byte restoration, ordinary moves, and available Linux cross-device moves leave matching isolated trees |
  * | `apps/runtime/src/services/snapshot.ts` base64 decoding | unpadded, non-alphabet, and malformed base64 strings decode to the same restored bytes |
  * | `apps/runtime/src/services/snapshot.ts` `alreadyReverted` | completed retries converge, a repeated path replay lands at its earliest bytes, and a mixed state refuses untouched |
@@ -31,6 +31,7 @@ import {
   rm,
   stat,
   symlink,
+  truncate,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -43,6 +44,8 @@ import {
   RUNTIME_ABSENT_HASH,
   RuntimeSnapshotConflictError,
   type RuntimeSnapshotRevertParams,
+  SNAPSHOT_CHUNK_MAX_BYTES,
+  SNAPSHOT_DEFAULT_MAX_BYTES,
 } from '@mangostudio/shared/runtime-contract';
 
 import type { RuntimeClient } from '../../../src/services/runtime-client/runtime-client';
@@ -57,7 +60,8 @@ import {
 } from '../../support/rust-runtime-client';
 
 const binary = resolveRustRuntimeBinary();
-const SNAPSHOT_MAX_BYTES = 8 * 1024 * 1024;
+/** A debug-profile runtime moves 20 MiB in chunks slower than bun's 5 s default allows. */
+const LARGE_TRANSFER_TIMEOUT_MS = 60_000;
 
 interface CrossDevicePaths {
   readonly sourceRoot: string;
@@ -270,9 +274,11 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
     const expectedDirectoryHash = { hash: null };
 
     expect(await rust.snapshot.capture({ path })).toEqual(expectedCapture);
-    expect(await rust.snapshot.hash({ path })).toEqual({ hash: hashOf(bytes) });
+    expect(await rust.snapshot.hash({ path })).toMatchObject({ hash: hashOf(bytes) });
     expect(await rust.snapshot.capture({ path: linkedPath })).toEqual(expectedCapture);
-    expect(await rust.snapshot.hash({ path: linkedPath })).toEqual({ hash: hashOf(bytes) });
+    expect(await rust.snapshot.hash({ path: linkedPath })).toMatchObject({
+      hash: hashOf(bytes),
+    });
     expect(await rust.snapshot.capture({ path: absent })).toEqual({ exists: false });
     expect(await rust.snapshot.hash({ path: absent })).toEqual({ hash: null });
     expect(await rust.snapshot.capture({ path: missingParent })).toEqual({ exists: false });
@@ -283,13 +289,45 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
     expect(await rust.snapshot.hash({ path: targetDirectory })).toEqual(expectedDirectoryHash);
   });
 
-  it('rejects a snapshot above the byte limit with the exact Hub error', async () => {
+  it('reports the size, modification time and link-ness of the entry a hash describes', async () => {
+    const directory = await mkdtemp(join(root, 'stat-'));
+    const path = join(directory, 'regular.bin');
+    const bytes = new Uint8Array([1, 2, 3]);
+    await writeFile(path, bytes);
+
+    const regular = await rust.snapshot.hash({ path });
+    expect(regular).toMatchObject({ hash: hashOf(bytes), size: 3, symlink: false });
+    const modifiedAtMs = regular.modifiedAtMs ?? Number.NaN;
+    const onDisk = (await stat(path)).mtimeMs;
+    expect(
+      Math.abs(modifiedAtMs - onDisk),
+      `expected modifiedAtMs within 5 ms of the file's mtime ${onDisk} | received ${modifiedAtMs}`
+    ).toBeLessThan(5);
+
+    // The hash follows a link; the flag is how a caller tells it did.
+    if (process.platform !== 'win32') {
+      const linkPath = join(directory, 'link.bin');
+      await symlink(path, linkPath);
+      expect(await rust.snapshot.hash({ path: linkPath })).toMatchObject({
+        hash: hashOf(bytes),
+        symlink: true,
+      });
+    }
+    expect(await rust.snapshot.hash({ path: join(directory, 'absent.bin') })).toEqual({
+      hash: null,
+    });
+  });
+
+  it('rejects a snapshot above the requested byte limit, naming its size and the limit', async () => {
     const directory = await mkdtemp(join(root, 'limit-'));
     const path = join(directory, 'too-large.bin');
-    const sizeBytes = SNAPSHOT_MAX_BYTES + 1;
+    const limitBytes = 1024 * 1024;
+    const sizeBytes = limitBytes + 1;
     await writeFile(path, new Uint8Array(sizeBytes));
 
-    const actual = await rejectionFrom(RemoteError, () => rust.snapshot.capture({ path }));
+    const actual = await rejectionFrom(RemoteError, () =>
+      rust.snapshot.capture({ path, snapshotMaxBytes: limitBytes })
+    );
     expect({
       name: actual.name,
       message: actual.message,
@@ -297,11 +335,122 @@ describe.skipIf(!binary.available)('Rust snapshot methods match the TypeScript r
       details: actual.details,
     }).toEqual({
       name: 'RemoteError',
-      message: `Cannot checkpoint "${path}": it is ${sizeBytes} bytes, past the ${SNAPSHOT_MAX_BYTES}-byte snapshot limit.`,
+      message: `Cannot checkpoint "${path}": it is ${sizeBytes} bytes, past the ${limitBytes}-byte checkpoint limit, so it was left unchanged.`,
       code: 'INTERNAL',
-      details: { kind: 'snapshot_too_large', resolvedPath: path, sizeBytes },
+      details: { kind: 'snapshot_too_large', resolvedPath: path, sizeBytes, limitBytes },
     });
     expect((await stat(path)).size).toBe(sizeBytes);
+  });
+
+  it('rejects a snapshot above the default limit without reading the file', async () => {
+    const directory = await mkdtemp(join(root, 'default-limit-'));
+    const path = join(directory, 'sparse.bin');
+    const sizeBytes = SNAPSHOT_DEFAULT_MAX_BYTES + 1;
+    // Sparse: the runtime refuses on size alone, so no 128 MiB is ever written.
+    await writeFile(path, '');
+    await truncate(path, sizeBytes);
+
+    const actual = await rejectionFrom(RemoteError, () => rust.snapshot.capture({ path }));
+    expect(actual.details).toEqual({
+      kind: 'snapshot_too_large',
+      resolvedPath: path,
+      sizeBytes,
+      limitBytes: SNAPSHOT_DEFAULT_MAX_BYTES,
+    });
+  });
+
+  it(
+    'checkpoints a 20 MiB file through staged chunks and restores it byte-identical',
+    async () => {
+      const directory = await realpath(await mkdtemp(join(root, 'large-')));
+      const path = join(directory, 'large.bin');
+      const bytes = Buffer.alloc(20 * 1024 * 1024 + 3);
+      for (let index = 0; index < bytes.length; index += 1) bytes[index] = (index * 131) % 251;
+      await writeFile(path, bytes);
+
+      const captured = await rust.snapshot.capture({ path });
+      expect(captured).toEqual({
+        exists: true,
+        hash: hashOf(bytes),
+        sizeBytes: bytes.length,
+        stagedId: expect.any(String),
+      });
+      const stagedId = captured.stagedId as string;
+
+      const pulled: Buffer[] = [];
+      for (let offset = 0; offset < bytes.length;) {
+        const { contentBase64 } = await rust.snapshot.readChunk({
+          stagedId,
+          offset,
+          length: SNAPSHOT_CHUNK_MAX_BYTES,
+        });
+        const chunk = Buffer.from(contentBase64, 'base64');
+        expect(chunk.length).toBeLessThanOrEqual(SNAPSHOT_CHUNK_MAX_BYTES);
+        pulled.push(chunk);
+        offset += chunk.length;
+      }
+      expect(hashOf(Buffer.concat(pulled))).toBe(hashOf(bytes));
+      await rust.snapshot.release({ stagedId });
+
+      const uploadId = crypto.randomUUID();
+      for (let offset = 0; offset < bytes.length; offset += SNAPSHOT_CHUNK_MAX_BYTES) {
+        await rust.snapshot.stageChunk({
+          stagedId: uploadId,
+          offset,
+          contentBase64: bytes
+            .subarray(offset, offset + SNAPSHOT_CHUNK_MAX_BYTES)
+            .toString('base64'),
+        });
+      }
+      const changed = Buffer.from('changed after the mutation');
+      await writeFile(path, changed);
+      expect(
+        await rust.snapshot.revert({
+          chatId: 'snapshot-large',
+          containmentRoot: directory,
+          expected: [{ path, afterHash: hashOf(changed), revertedHash: hashOf(bytes) }],
+          operations: [{ type: 'restore', path, stagedId: uploadId, hash: hashOf(bytes) }],
+        })
+      ).toEqual({ revertedFiles: 1 });
+      await rust.snapshot.release({ stagedId: uploadId });
+
+      const restored = await readFile(path);
+      expect(restored.length).toBe(bytes.length);
+      expect(hashOf(restored)).toBe(hashOf(bytes));
+    },
+    LARGE_TRANSFER_TIMEOUT_MS
+  );
+
+  it('refuses a revert whose staged upload does not match its hash, changing nothing', async () => {
+    const directory = await realpath(await mkdtemp(join(root, 'corrupt-upload-')));
+    const path = join(directory, 'file.bin');
+    const changed = Buffer.from('changed after the mutation');
+    await writeFile(path, changed);
+    const uploaded = Buffer.alloc(2 * 1024 * 1024, 7);
+    const uploadId = crypto.randomUUID();
+    for (let offset = 0; offset < uploaded.length; offset += SNAPSHOT_CHUNK_MAX_BYTES) {
+      await rust.snapshot.stageChunk({
+        stagedId: uploadId,
+        offset,
+        contentBase64: uploaded
+          .subarray(offset, offset + SNAPSHOT_CHUNK_MAX_BYTES)
+          .toString('base64'),
+      });
+    }
+
+    const error = await rejectionFrom(RemoteError, () =>
+      rust.snapshot.revert({
+        chatId: 'snapshot-corrupt-upload',
+        containmentRoot: directory,
+        expected: [{ path, afterHash: hashOf(changed) }],
+        operations: [
+          { type: 'restore', path, stagedId: uploadId, hash: hashOf(Buffer.from('other bytes')) },
+        ],
+      })
+    );
+    expect(error.details?.kind).toBe('snapshot_stage_corrupt');
+    expect(await readFile(path)).toEqual(changed);
+    await rust.snapshot.release({ stagedId: uploadId });
   });
 
   it('reverses create, restore, and move operations in isolated trees, then accepts a retry', async () => {

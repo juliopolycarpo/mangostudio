@@ -36,6 +36,11 @@ export function ReadonlyArraySchema<T extends TSchema>(
  *   const EnvSchema = ReadonlyRecordSchema(Type.String());
  *   type Env = Static<typeof EnvSchema>; // Readonly<Record<string, string>>
  */
-export function ReadonlyRecordSchema<T extends TSchema>(value: T) {
-  return Type.Unsafe<Readonly<Record<string, Static<T>>>>(Type.Record(Type.String(), value));
+export function ReadonlyRecordSchema<T extends TSchema>(
+  value: T,
+  options?: Parameters<typeof Type.Record>[2]
+) {
+  return Type.Unsafe<Readonly<Record<string, Static<T>>>>(
+    Type.Record(Type.String(), value, options)
+  );
 }

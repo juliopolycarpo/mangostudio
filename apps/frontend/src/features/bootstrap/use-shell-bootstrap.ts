@@ -1,4 +1,4 @@
-import { useQueries, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQueries, useQueryClient } from '@tanstack/react-query';
 import { useRef } from 'react';
 
 import { chatListQueryOptions } from '@/features/chat/queries';
@@ -45,13 +45,16 @@ export interface ShellBootstrapState {
  */
 export function useShellBootstrap(): ShellBootstrapState {
   const queryClient = useQueryClient();
-  const results = useQueries({
+  // The chat list is an infinite query, which `useQueries` cannot hold, so it
+  // is observed on its own; only the three fields read below are shared.
+  const chatsResult = useInfiniteQuery({ ...chatListQueryOptions(), enabled: false });
+  const otherResults = useQueries({
     queries: [
-      { ...chatListQueryOptions(), enabled: false },
       { ...catalogQueryOptions(), enabled: false },
       { ...agentSettingsListQueryOptions(), enabled: false },
     ],
   });
+  const results = [chatsResult, ...otherResults];
   // The last error each responsibility reported. A retry clears the live one
   // while it runs, and the panel's headline (rate limited or not) should not
   // change under the person's cursor while they wait for it.

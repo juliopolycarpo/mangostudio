@@ -24,6 +24,12 @@ interface ChatsTable {
   runnerModel: string | null;
   runnerEffort: string | null;
   workdir: string | null;
+  /**
+   * Folded title, workdir folder and runner label the chat list's `?q=` looks in
+   * (`chatSearchKey`). Rewritten by `createChat` and `updateChat` whenever one of
+   * those three changes; never set it from anywhere else.
+   */
+  searchText: Generated<string>;
   environmentId: Generated<string>;
   /** null = inherit workspace default; 0/1 stored as boolean override */
   restrictToolsToWorkdir: number | null;
@@ -73,6 +79,8 @@ interface MessagesTable {
   interactionMode: InteractionMode;
   parts: string | null; // JSON-serialized MessagePart[]
   providerState: string | null; // opaque provider continuity JSON
+  /** What the model received in place of `text` for a slash-command user message; never sent to clients. */
+  expandedText: string | null;
 }
 
 interface MessageCheckpointDeltasTable {
@@ -302,7 +310,17 @@ interface FileCheckpointsTable {
   blobKey: string | null;
   createdAt: number;
   revertedAt: number | null;
+  /** How the row was found; see `FileCheckpointRowSource`. */
+  source: Generated<FileCheckpointRowSource>;
 }
+
+/**
+ * `builtin`: a mutator snapshotted the path under its lock, so the row holds
+ * exactly that call's change. `shell`: found by comparing the workspace before
+ * and after an opted-in command, so it also holds anything else that changed
+ * the path meanwhile.
+ */
+export type FileCheckpointRowSource = 'builtin' | 'shell';
 
 /**
  * Classes of tool a message ran whose writes no `file_checkpoints` row

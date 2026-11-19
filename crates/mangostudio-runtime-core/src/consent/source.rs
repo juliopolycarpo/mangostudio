@@ -57,6 +57,13 @@ impl ConsentSource {
         self.slot
     }
 
+    /// The runtime home this source reads `runtime.json` from, for a caller
+    /// that keeps its own private state beside it.
+    #[must_use]
+    pub fn mango_home(&self) -> &std::path::Path {
+        &self.mango_home
+    }
+
     /// Re-reads the config and resolves consent without reusing prior authority.
     ///
     /// # Example

@@ -11,7 +11,6 @@
  */
 
 import type { Chat } from '@mangostudio/shared/chat';
-import { useQuery } from '@tanstack/react-query';
 import { FolderGit2, GitBranch, MessageSquarePlus, Play } from 'lucide-react';
 import { useMemo } from 'react';
 
@@ -20,7 +19,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { SectionCard } from '@/components/ui/SectionCard';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { chatTitleLabel } from '@/features/chat/lib/chat-title';
-import { chatListQueryOptions } from '@/features/chat/queries';
+import { useLoadedChatsQuery } from '@/features/chat/queries';
 import { runnerBadge } from '@/features/sidebar/lib/runner-badge';
 import { useBatchedGitSummaries } from '@/features/workspace/hooks/use-git-state';
 import { useI18n } from '@/hooks/use-i18n';
@@ -54,7 +53,7 @@ export function WorkspacesList({
   const labels = t.home.workspaces;
   // One shared empty array, not a fresh `?? []`: an unsettled query would
   // otherwise hand every render a new identity and defeat the memo below.
-  const { data, isPending } = useQuery(chatListQueryOptions());
+  const { data, isPending } = useLoadedChatsQuery();
   const chats: readonly Chat[] = data ?? NO_CHATS;
   // Walks every chat in the account, so it is not something to redo on a
   // render that changed neither the sessions nor the remembered folders.

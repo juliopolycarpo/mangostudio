@@ -131,6 +131,42 @@ describe('Docker release wiring', () => {
     expect(dockerignore).toContain('!docker-ctx/**');
   });
 
+  test.each([
+    ['Dockerfile', /apt-get install -y --no-install-recommends [^\n]*\btini\b/],
+    ['Dockerfile.alpine', /apk add --no-cache [^\n]*\btini\b/],
+  ])('%s installs tini and runs the hub as its child', (file, installPattern) => {
+    const dockerfile = readText(file);
+
+    expect(dockerfile, `${file}: expected tini in the package install`).toMatch(installPattern);
+    // Each distro puts tini somewhere else (/usr/bin vs /sbin); the shared ENTRYPOINT uses one path.
+    expect(dockerfile, `${file}: expected a /usr/local/bin/tini symlink`).toContain(
+      'ln -s "$(command -v tini)" /usr/local/bin/tini'
+    );
+    expect(dockerfile, `${file}: expected tini as ENTRYPOINT ahead of the hub`).toContain(
+      'ENTRYPOINT ["/usr/local/bin/tini", "--", "/usr/local/bin/mangostudio"]'
+    );
+    expect(dockerfile, `${file}: expected CMD to stay the hub's serve subcommand`).toContain(
+      'CMD ["serve"]'
+    );
+  });
+
+  test('Docker smoke asserts the init process model', () => {
+    const smokeHelper = readText('scripts/release/smoke-docker-image.sh');
+
+    // PID 1 is tini and the hub is its child.
+    expect(smokeHelper).toContain('cat /proc/1/comm');
+    expect(smokeHelper).toContain('"tini"');
+    expect(smokeHelper).toContain('$2 == "mangostudio" && $4 == 1');
+    // An orphan must be seen under PID 1, then reaped, and no zombie may remain.
+    expect(smokeHelper).toContain('docker exec -d "$container_name" sh -c \'sleep 3 & exit 0\'');
+    expect(smokeHelper).toContain('expected the orphaned sleep reaped');
+    expect(smokeHelper).toContain('expected no zombie processes');
+    // SIGTERM through `docker stop` ends the hub cleanly inside the stop timeout.
+    expect(smokeHelper).toContain('docker stop -t 10 "$container_name"');
+    expect(smokeHelper).toContain("docker inspect -f '{{.State.ExitCode}}'");
+    expect(smokeHelper).toContain('expected exit code 0 after SIGTERM');
+  });
+
   test('publishes multi-arch GHCR images during release', () => {
     const workflow = readText('.github/workflows/release.yml');
     const repoExpression = '$' + '{{ github.repository }}';

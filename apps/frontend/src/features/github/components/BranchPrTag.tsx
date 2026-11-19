@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
 import { Badge } from '@/components/ui/Badge';
+import { githubMessages } from '@/features/github/github-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 
@@ -54,7 +55,7 @@ export function BranchPrTag({
 }: {
   readonly annotation: BranchPrAnnotation | undefined;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(githubMessages);
   if (!annotation) return null;
 
   const number = formatMessage(t.github.row.number, { number: String(annotation.number) });

@@ -204,7 +204,12 @@ production minification, and retains all 8 cross-compilation targets.
 On a Linux host a native build with `--production` (given explicitly) or `--require-aot-order`
 compiles twice: once with `--aot-record-order`, then — after `scripts/lib/aot-order.ts` has run that
 binary through `scripts/lib/hub-workload.ts` and checked the file it wrote — with
-`--aot-order=<file>`. A plain local, smoke or test build compiles once. The recording hub runs
+`--aot-order=<file>`. A plain local, smoke or test build compiles once. With
+`--aot-runtime-dir <dir>` (or `AOT_RUNTIME_DIR`; a `<dir>/<platform-id>/mangostudio-runtime[.exe]` layout
+like `--runtime-dir`) the recording hub runs with that platform's runtime beside it, so the order covers
+a hub with Local attached; the build fails when the runtime is missing or the hub does not launch it,
+and the runtime must carry the hub's release version. The distribution build passes it on Linux legs.
+The recording hub runs
 supervised (`ChildSupervisor`) with an allowlisted environment (`isolatedHubEnv` in
 `scripts/lib/hub-process.ts`, shared with the benchmarks), so a cancelled build leaves no hub or
 home behind. The build fails or warns if Bun prints its "is not an order file" warning. The order
@@ -594,7 +599,10 @@ each; a startup claim is only worth as much as its median and spread.
 isolated home, and reads `VmRSS`, `RssAnon`, `RssFile`, `RssShmem` and `VmHWM` from
 `/proc/<pid>/status`. `--idle-seconds` waits before the idle read; `--workload` signs in, lists
 chats and fetches the page and its largest script as br, gzip and identity, then reads memory
-after a 3 s settle. Keep both binaries on one filesystem (an executable on tmpfs counts as
+after a 3 s settle. It also saves the CPU time (`utime` plus `stime` from `/proc/<pid>/stat`, 10 ms
+ticks) the hub had used at its first healthy answer and the CPU it used over the idle wait. A
+`mangostudio-runtime` sitting beside a binary is launched by that hub, as in an installed layout.
+Keep both binaries on one filesystem (an executable on tmpfs counts as
 `RssShmem`) and run it while the host is quiet: the load average is saved per row.
 
 ```bash

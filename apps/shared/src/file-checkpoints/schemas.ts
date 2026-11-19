@@ -41,6 +41,14 @@ export const ChatFileCheckpointSummarySchema = Type.Object({
   ops: ReadonlyArraySchema(FileCheckpointOpSchema),
   /** Empty when every write this turn made was checkpointed. */
   uncheckpointedSources: ReadonlyArraySchema(UncheckpointedWriteSourceSchema),
+  /**
+   * True when at least one row came from a shell workspace capture
+   * (`checkpointWorkspaceWrites`) rather than from a builtin mutator's own
+   * before-state. Such rows are found by comparing the tree before and after the
+   * command, so a revert can also undo a change another process made meanwhile;
+   * the confirmation says so only for these turns.
+   */
+  includesShellCapture: Type.Boolean(),
   createdAt: Type.Number(),
 });
 

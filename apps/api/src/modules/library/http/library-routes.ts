@@ -41,6 +41,7 @@ import {
   type WorkdirValidationResult,
 } from '../../workspaces/application/workdir-validation';
 import {
+  type EnvironmentLibraryService,
   environmentLibraryService,
   type LibraryScope,
 } from '../application/environment-library-service';
@@ -103,8 +104,9 @@ const LOCATION_KIND_BY_ID = new Map(
 );
 
 /**
- * `discover` always scans every kind, so this channel needs the same
- * `kind`/`location` narrowing the resource list gets — and nothing more. It
+ * A scan without `kinds` covers every kind, and `location` is never forwarded,
+ * so this channel needs the same `kind`/`location` narrowing the resource list
+ * gets — and nothing more. It
  * takes {@link ScanFilters} rather than {@link ResourceFilters} so the coverage
  * filters are not merely ignored here but unavailable.
  */
@@ -274,11 +276,16 @@ function scopeFor(userId: string, environmentId: string | undefined): LibrarySco
 }
 
 export interface LibraryRouteService {
+  /**
+   * `kinds` restricts the scan itself, not only the answer: omit it for the full
+   * library. A narrowed scan is cached apart from the full one.
+   */
   discover(
     userId: string,
     force: boolean,
     workspaceRoot?: string,
-    environmentId?: string
+    environmentId?: string,
+    kinds?: readonly ResourceKind[]
   ): Promise<LibraryScanResult>;
   listLocations(
     userId: string,
@@ -295,28 +302,36 @@ export interface LibraryRouteService {
   ): Promise<LibraryResourceContent | null>;
 }
 
-const defaultLibraryRouteService: LibraryRouteService = {
-  discover: (userId, force, workspaceRoot, environmentId) =>
-    environmentLibraryService.discover(getDb(), scopeFor(userId, environmentId), {
-      force,
-      workspaceRoot,
-    }),
-  listLocations: (userId, workspaceRoot, environmentId) =>
-    environmentLibraryService.listLocations(
-      getDb(),
-      scopeFor(userId, environmentId),
-      workspaceRoot
-    ),
-  listTargets: listLibraryTargetDescriptors,
-  readContent: (userId, resource, locationId, workspaceRoot, environmentId) =>
-    environmentLibraryService.readContent(
-      getDb(),
-      scopeFor(userId, environmentId),
-      resource,
-      locationId,
-      workspaceRoot
-    ),
-};
+/**
+ * Binds the routes' service seam to an environment library service. A named
+ * factory rather than only the default instance so a test can drive the real
+ * glue with a service built over a fake runtime.
+ */
+export function createLibraryRouteService(
+  library: EnvironmentLibraryService = environmentLibraryService
+): LibraryRouteService {
+  return {
+    discover: (userId, force, workspaceRoot, environmentId, kinds) =>
+      library.discover(getDb(), scopeFor(userId, environmentId), {
+        force,
+        workspaceRoot,
+        kinds,
+      }),
+    listLocations: (userId, workspaceRoot, environmentId) =>
+      library.listLocations(getDb(), scopeFor(userId, environmentId), workspaceRoot),
+    listTargets: listLibraryTargetDescriptors,
+    readContent: (userId, resource, locationId, workspaceRoot, environmentId) =>
+      library.readContent(
+        getDb(),
+        scopeFor(userId, environmentId),
+        resource,
+        locationId,
+        workspaceRoot
+      ),
+  };
+}
+
+const defaultLibraryRouteService = createLibraryRouteService();
 
 export function createLibraryRoutes(service: LibraryRouteService = defaultLibraryRouteService) {
   return (
@@ -342,11 +357,14 @@ export function createLibraryRoutes(service: LibraryRouteService = defaultLibrar
           const workspace = await resolveWorkspaceRoot(query.workspaceRoot);
           if (!workspace.ok) return workspace.failure;
           try {
+            // The kind goes into the scan as well as the filter below: a
+            // single-kind answer must not pay for walking the other kinds.
             const scan = await service.discover(
               user?.id ?? '',
               false,
               workspace.root,
-              query.environmentId
+              query.environmentId,
+              filters.filters.kind ? [filters.filters.kind] : undefined
             );
             return filterLibraryScanResult(scan, filters.filters);
           } catch (error) {

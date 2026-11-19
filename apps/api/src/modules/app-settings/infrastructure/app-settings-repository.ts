@@ -10,6 +10,7 @@ import {
   libraryLocationsFor,
   mergeAppSettingsPatch,
   normalizeAppSettings,
+  preserveServerOwnedSettings,
 } from '@mangostudio/shared/app-settings';
 import type { Kysely } from 'kysely';
 
@@ -59,6 +60,12 @@ export async function getSavedAppSettingsSnapshot(
  * meaning: the normalizer maps a missing subtree to its default, so an explicit
  * clear and a never-set field arrive at the same place.
  *
+ * `fromClient` marks a patch that arrived over the settings PUT. Fields only a
+ * dedicated endpoint may change (the workspace trust grants) keep their stored
+ * value there, resolved from the same row this write compare-and-swaps, so a
+ * grant made between the client's read and this write cannot be lost either.
+ * Internal callers (the trust and revoke endpoints) leave it unset.
+ *
  * @example
  * await patchAppSettingsSnapshot(db, user.id, { thinkingEnabled: false }, undefined, revision);
  */
@@ -67,7 +74,8 @@ export async function patchAppSettingsSnapshot(
   userId: string,
   patch: AppSettingsPutBody,
   libraryLocationDefaults?: LibraryLocationSettings,
-  expectedRevision?: string
+  expectedRevision?: string,
+  options: { readonly fromClient?: boolean } = {}
 ): Promise<AppSettingsSnapshot> {
   const now = Date.now();
   const existing = await db
@@ -82,7 +90,10 @@ export async function patchAppSettingsSnapshot(
   const persisted = safeJsonParse(existing?.settingsJson);
   const preserved = isRecord(persisted) ? persisted : {};
   const normalized = normalizeAppSettings(
-    mergeAppSettingsPatch(preserved, patch),
+    mergeAppSettingsPatch(
+      preserved,
+      options.fromClient ? preserveServerOwnedSettings(preserved, patch) : patch
+    ),
     libraryLocationDefaults
   );
   const locations = libraryLocationsFor(normalized);

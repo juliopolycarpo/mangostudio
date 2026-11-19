@@ -28,6 +28,14 @@ const MCP_TOOL_LIST_BUDGET_MS = 3_000;
 /** Execution cap when the server row does not configure its own timeout. */
 export const MCP_TOOL_EXECUTE_TIMEOUT_MS = 60_000;
 
+/**
+ * The execution budget of one call to this server. Shared by the call itself
+ * and the lifecycle snapshot, so the limit a card shows is the one enforced.
+ */
+export function resolveMcpCallTimeoutMs(server: Pick<McpServerSelect, 'timeoutMs'>): number {
+  return server.timeoutMs ?? MCP_TOOL_EXECUTE_TIMEOUT_MS;
+}
+
 const logger = createDiagnosticLogger('mcp-bridge');
 
 /** One server tool resolved for the turn, with provenance for settings UIs. */
@@ -239,7 +247,7 @@ export async function executeResolvedMcpTool(
   // executors already read that as absent; MCP servers receive the payload
   // verbatim, so drop those keys before `callTool`.
   return handle.callTool(target.parsed.toolName, stripNullOptionals(args), {
-    timeoutMs: target.server.timeoutMs ?? MCP_TOOL_EXECUTE_TIMEOUT_MS,
+    timeoutMs: resolveMcpCallTimeoutMs(target.server),
     signal: options.signal,
     toolCallId: options.toolCallId,
   });

@@ -40,9 +40,11 @@
 import { ChatRunnerConfigurationSchema, ChatSchema } from '@mangostudio/shared/chat';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import {
-  ExternalAgentSteerResultSchema,
+  ExternalApprovalAnswerAcceptedSchema,
+  ExternalApprovalAnswerRejectedSchema,
   ExternalReviewTargetSchema,
-  ExternalSteerResponseSchema,
+  ExternalSteerRejectedResultSchema,
+  ExternalSteerSuccessResponseSchema,
   schemaMaxLengthFor,
 } from '@mangostudio/shared/external-agents';
 import { Elysia, status, t } from 'elysia';
@@ -73,13 +75,6 @@ const VendorIdSchema = t.String({ minLength: 1, maxLength: schemaMaxLengthFor('v
 const RespondBodySchema = t.Object({
   requestId: VendorIdSchema,
   optionId: VendorIdSchema,
-});
-
-const RespondResponseSchema = t.Object({
-  status: t.Union([t.Literal('accepted'), t.Literal('rejected')]),
-  /** Echoed back so a client that raced another answer can reconcile. */
-  optionId: t.Optional(VendorIdSchema),
-  reason: t.Optional(t.String({ maxLength: 128 })),
 });
 
 const SteerBodySchema = t.Object({
@@ -182,11 +177,13 @@ export function createExternalAgentTurnRoutes(
         params: t.Object({ id: t.String({ minLength: 1, maxLength: 256 }) }),
         body: RespondBodySchema,
         response: {
-          200: RespondResponseSchema,
-          400: RespondResponseSchema,
+          // 200 is the accepted answer only; each refusal status carries the
+          // rejected body, which is what lets Eden type `data` as accepted.
+          200: ExternalApprovalAnswerAcceptedSchema,
+          400: ExternalApprovalAnswerRejectedSchema,
           401: ApiErrorResponseSchema,
-          404: RespondResponseSchema,
-          409: RespondResponseSchema,
+          404: ExternalApprovalAnswerRejectedSchema,
+          409: ExternalApprovalAnswerRejectedSchema,
         },
       },
       async ({ params, body, user }) => {
@@ -208,9 +205,10 @@ export function createExternalAgentTurnRoutes(
         response: {
           // Includes `{ accepted: false, deliveryUnknown: true }`: the hub
           // learned that it cannot tell, which is an answer, not a failure.
-          200: ExternalSteerResponseSchema,
+          // Refusals are the 409's alone.
+          200: ExternalSteerSuccessResponseSchema,
           401: ApiErrorResponseSchema,
-          409: ExternalAgentSteerResultSchema,
+          409: ExternalSteerRejectedResultSchema,
         },
       },
       async ({ params, body, user }) => {

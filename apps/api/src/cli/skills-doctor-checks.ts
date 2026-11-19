@@ -6,6 +6,8 @@
  * module; this file is the CLI-facing seam.
  */
 
+import type { MachineCheckKey } from '@mangostudio/shared/machine/check-text-en';
+
 import {
   collectSkillsDiagnostics,
   type SkillDiagnostic,
@@ -13,13 +15,20 @@ import {
   type SkillSourceDiagnostic,
 } from '../modules/skills/application/skill-diagnostics';
 import { getThirdPartySkillDirs } from '../modules/skills/application/skill-discovery';
-import { type CheckResult, fail, ok, warn } from './doctor-checks';
+import { type CheckResult, keyedCheck } from './doctor-checks';
 
-const SOURCE_LABELS: Record<SkillSourceDiagnostic['source'], string> = {
-  mango: 'Skills mango',
-  agents: 'Skills agents',
-  claude: 'Skills claude',
-};
+const SOURCE_LABELS = {
+  mango: 'skills.label.mango',
+  agents: 'skills.label.agents',
+  claude: 'skills.label.claude',
+} as const satisfies Record<SkillSourceDiagnostic['source'], MachineCheckKey>;
+
+/** One sentence per origin, so each language words "from the env" its own way. */
+const CONFIG_DETAIL_KEYS = {
+  default: 'skills.detail.configFromDefault',
+  toml: 'skills.detail.configFromToml',
+  env: 'skills.detail.configFromEnv',
+} as const satisfies Record<SkillsConfigOrigin, MachineCheckKey>;
 
 /** DB/config-derived inputs the doctor command gathers for the collector. */
 export interface SkillsDoctorInput {
@@ -53,7 +62,9 @@ export function collectSkillsDoctorChecks(input: SkillsDoctorInput): CheckResult
   });
 
   const results: CheckResult[] = [
-    ok('Skills config', `${diagnostics.config.dir} (from ${diagnostics.config.origin})`),
+    keyedCheck('ok', 'skills.label.config', CONFIG_DETAIL_KEYS[diagnostics.config.origin], {
+      dir: diagnostics.config.dir,
+    }),
     ...diagnostics.sources.map(renderSource),
   ];
 
@@ -67,32 +78,55 @@ export function collectSkillsDoctorChecks(input: SkillsDoctorInput): CheckResult
 
 function renderSource(source: SkillSourceDiagnostic): CheckResult {
   const label = SOURCE_LABELS[source.source];
-  const suffix = source.enabled ? '' : ' (source disabled)';
+  const params = { dir: source.dir };
 
   if (source.health === 'unreadable') {
     // An enabled source that cannot be read hides skills the user expects;
     // a disabled one that is unreadable is only worth noting.
     return source.enabled
-      ? fail(label, `${source.dir} (not readable)`)
-      : warn(label, `${source.dir} (not readable, source disabled)`);
+      ? keyedCheck('fail', label, 'skills.detail.sourceUnreadable', params)
+      : keyedCheck('warn', label, 'skills.detail.sourceUnreadableDisabled', params);
   }
   if (source.health === 'missing') {
-    return ok(label, `${source.dir} (no skills directory yet)${suffix}`);
+    return keyedCheck(
+      'ok',
+      label,
+      source.enabled ? 'skills.detail.sourceMissing' : 'skills.detail.sourceMissingDisabled',
+      params
+    );
   }
-  return ok(label, `${source.dir} — ${source.skillCount} skill(s)${suffix}`);
+  // One sentence per count shape: "1 skill" and "2 skills" are different
+  // words in some languages, and only the plural one names the count.
+  const one = source.skillCount === 1;
+  const detailKey = source.enabled
+    ? one
+      ? 'skills.detail.sourceCountOne'
+      : 'skills.detail.sourceCountMany'
+    : one
+      ? 'skills.detail.sourceCountDisabledOne'
+      : 'skills.detail.sourceCountDisabledMany';
+  return keyedCheck('ok', label, detailKey, one ? params : { ...params, count: source.skillCount });
 }
 
 function renderSkill(skill: SkillDiagnostic): CheckResult | null {
-  const label = `Skill ${skill.key}`;
+  const label = 'skills.label.skill';
+  const params = { key: skill.key };
   switch (skill.state) {
     case 'invalid':
-      return fail(label, skill.error ?? 'invalid skill');
+      // The scan's own sentence about the file; it is not ours to translate.
+      return keyedCheck('fail', label, 'skills.detail.invalid', {
+        ...params,
+        error: skill.error ?? 'invalid skill',
+      });
     case 'shadowed':
-      return warn(label, `shadowed by ${skill.shadowedBy} source (higher precedence)`);
+      return keyedCheck('warn', label, 'skills.detail.shadowed', {
+        ...params,
+        source: skill.shadowedBy ?? '',
+      });
     case 'disabled':
-      return ok(label, 'disabled in settings');
+      return keyedCheck('ok', label, 'skills.detail.disabled', params);
     case 'precedence-unverified':
-      return warn(label, 'higher-priority skill location could not be scanned');
+      return keyedCheck('warn', label, 'skills.detail.precedenceUnverified', params);
     default:
       // Active skills are already counted in their source row; no separate line.
       return null;

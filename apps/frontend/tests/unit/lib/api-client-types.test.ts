@@ -17,6 +17,13 @@ import { describe, expect, it } from 'bun:test';
 
 import type { ContextCompactionResponse } from '@mangostudio/shared/chat';
 import type { ApiErrorResponse } from '@mangostudio/shared/errors';
+import type {
+  ExternalApprovalAnswerAccepted,
+  ExternalApprovalAnswerRejected,
+  ExternalSteerAcceptedResult,
+  ExternalSteerDeliveryUnknownResult,
+  ExternalSteerRejectedResult,
+} from '@mangostudio/shared/external-agents';
 
 import { client } from '../../../src/lib/api-client';
 
@@ -84,8 +91,11 @@ assertType<
   >
 >();
 
-// 6. A list route stays an array of the same entity rather than `unknown[]`.
-assertType<Equals<ChatsGetResponse['data'], ChatData[] | null>>();
+// 6. A list route stays a page of the same entity, with the cursor to the next
+//    page, rather than `unknown[]`.
+assertType<
+  Equals<ChatsGetResponse['data'], { items: ChatData[]; nextCursor: string | null } | null>
+>();
 
 // 7. The socket-adjacent route is still reachable through the same client, so
 //    a WebSocket route dropping out of `App` fails here rather than at runtime.
@@ -258,6 +268,40 @@ assertType<Equals<Extract<ErrorStatuses<ChatTodosResponse>, 404>, 404>>();
 assertType<Equals<Extract<ErrorStatuses<AppSettingsPutResponse>, 409>, 409>>();
 assertType<ErrorBodyIsApiError<ChatTodosResponse, 404>>();
 assertType<ErrorBodyIsApiError<AppSettingsPutResponse, 409>>();
+
+// 12. The external-agent steer and respond routes answer a refusal with its own
+//     status. Each declares its 200 as the accepted outcomes only and each
+//     refusal status as the rejected body, so a caller reading `data` can never
+//     be handed a refusal. They used one schema for both channels, which typed
+//     the refusal into `data` even though it arrives in `error`.
+type ExternalAgentRoutes = ReturnType<typeof client.api.chats>['external-agent'];
+type SteerResponse = Awaited<ReturnType<ExternalAgentRoutes['steer']['post']>>;
+type RespondResponse = Awaited<ReturnType<ExternalAgentRoutes['respond']['post']>>;
+
+// `data` is accepted or "delivery unknown", exactly: a rejection (`reasonCode`)
+// is not assignable to it and neither arm carries a reason.
+assertType<
+  SameShape<
+    NonNullable<SteerResponse['data']>,
+    ExternalSteerAcceptedResult | ExternalSteerDeliveryUnknownResult
+  >
+>();
+assertType<
+  Equals<[ExternalSteerRejectedResult] extends [SteerResponse['data']] ? true : false, false>
+>();
+assertType<Equals<Extract<SteerResponse['data'], { reasonCode: unknown }>, never>>();
+// The refusal is the 409 body, and only that status carries it.
+assertType<SameShape<ErrorBodyAt<SteerResponse, 409>, ExternalSteerRejectedResult>>();
+
+// Respond: `data` is the accepted answer; 400, 404 and 409 are the rejection.
+assertType<SameShape<NonNullable<RespondResponse['data']>, ExternalApprovalAnswerAccepted>>();
+assertType<
+  Equals<[ExternalApprovalAnswerRejected] extends [RespondResponse['data']] ? true : false, false>
+>();
+assertType<Equals<Extract<RespondResponse['data'], { status: 'rejected' }>, never>>();
+assertType<
+  SameShape<ErrorBodyAt<RespondResponse, 400 | 404 | 409>, ExternalApprovalAnswerRejected>
+>();
 
 describe('Eden treaty type seam', () => {
   it('keeps route input and output types inferable from App', () => {

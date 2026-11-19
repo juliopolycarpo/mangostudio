@@ -348,6 +348,21 @@ mod tests {
             .implement("snapshot.hash", |_params: Value, _context| async move {
                 Ok::<_, mango_protocol::RemoteError>(json!({ "hash": "deadbeef" }))
             })
+            .implement(
+                "snapshot.read-chunk",
+                |_params: Value, _context| async move {
+                    Ok::<_, mango_protocol::RemoteError>(json!({ "contentBase64": "" }))
+                },
+            )
+            .implement(
+                "snapshot.stage-chunk",
+                |_params: Value, _context| async move {
+                    Ok::<_, mango_protocol::RemoteError>(json!({ "stagedBytes": 0 }))
+                },
+            )
+            .implement("snapshot.release", |_params: Value, _context| async move {
+                Ok::<_, mango_protocol::RemoteError>(json!({ "ok": true }))
+            })
             .implement("snapshot.revert", |_params: Value, _context| async move {
                 Ok::<_, mango_protocol::RemoteError>(json!({ "revertedFiles": 0 }))
             })
