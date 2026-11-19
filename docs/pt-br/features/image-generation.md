@@ -73,6 +73,13 @@ As imagens são armazenadas no sistema de arquivos sob o diretório configurado 
 
 **Acesso por URL:** imagens são servidas por `GET /images/:filename`. A API mapeia essa rota para servir arquivos estáticos do diretório de imagens.
 
+**Recuperação de espaço:** os arquivos não são ligados às linhas por chave estrangeira, então a API os remove por conta própria:
+
+- Excluir um chat apaga os arquivos que suas linhas referenciavam, exceto qualquer arquivo que outra linha ainda referencie.
+- Uma varredura roda a cada 6 horas, a primeira depois da primeira passada de reconciliação de turnos obsoletos. Ela remove arquivos que nada referencia e que têm mais de 24 horas, o que cobre um turno que gravou uma imagem e morreu antes de registrá-la, e os arquivos de um usuário excluído. Ela só toca nomes que `saveGeneratedImage` grava (`<prefixo>-<epoch ms>-<uuid>.<ext>`), então outros arquivos em um `images.dir` personalizado são preservados.
+
+Um arquivo conta como referenciado quando uma URL `/images/<nome>` aparece em uma das colunas listadas em `IMAGE_REFERENCE_SOURCES` (`apps/api/src/modules/generated-images/infrastructure/image-reference-sources.ts`): `generated_images.imageUrl`; `messages.imageUrl`, `referenceImage`, `text`, `parts` e `providerState`; o `delta` das linhas de `message_checkpoint_deltas` de um turno em streaming; e `chats.lastProviderState` e `lastContextState`. Um teste de esquema falha quando uma coluna de texto é adicionada sem ser registrada ali ou classificada como sem URL de imagem.
+
 ## Galeria
 
 A galeria em `apps/frontend/src/features/gallery/GalleryPage.tsx` oferece:
