@@ -280,10 +280,20 @@ archives, the registry's `dist.integrity` for an npm tarball), then write the
 install script embedded in its own binary to a temp file and run it with
 `--local <archive>` (`bash` on POSIX; `pwsh` when present, else
 `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File`, on
-Windows). The script extracts, smokes `mangostudio --version`, moves the
-`current` pointer, rewrites `install-origin.json` with `origin: upgrade`, and
-prunes. No executable code is ever downloaded — only archives, verified before
-the script sees them. The script receives `MANGOSTUDIO_INSTALL_ORIGIN=upgrade`,
+Windows). The script extracts, smokes `mangostudio --version`, replaces the
+version directory while holding the per-version lock the Cargo launcher takes
+(`.launcher-<version>.lock` in the dist root), so a script and a launcher
+installing one version take turns, moves the `current` pointer, rewrites
+`install-origin.json` with `origin: upgrade`, and prunes. A prune takes the same
+lock before it removes a version, which creates that version's lock file if it
+was missing and leaves it behind: the empty `.launcher-<version>.lock` files of
+pruned versions stay in the dist root. They are harmless and are not deleted,
+because unlinking a lock file while another process holds it would let two
+installers lock different files of the same name. `MANGOSTUDIO_INSTALL_LOCK_TIMEOUT`
+(whole seconds, default 3600) bounds how long a script waits for the lock; a
+value that is not plain digits is replaced with the default after a warning.
+No executable code is ever downloaded — only archives, verified before the
+script sees them. The script receives `MANGOSTUDIO_INSTALL_ORIGIN=upgrade`,
 `MANGOSTUDIO_INSTALL_DIR` (the detected dist root) and, when the origin record
 names one, `MANGOSTUDIO_BIN_DIR`. A legacy layout (version directories with no
 `current` and no origin record) is migrated by that first run. `--rollback`

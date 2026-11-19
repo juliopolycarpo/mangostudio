@@ -50,6 +50,9 @@ Environment:
   MANGOSTUDIO_INSTALL_DIR     Override the versioned install root
   MANGOSTUDIO_BIN_DIR         Override the user bin directory
   MANGOSTUDIO_INSTALL_ORIGIN  Set to "upgrade" when the hub itself runs this script
+  MANGOSTUDIO_INSTALL_LOCK_TIMEOUT
+                              Seconds to wait for another installer or launcher of the same
+                              version before giving up (digits only, default 3600)
   GITHUB_TOKEN                Authenticates api.github.com requests (GH_TOKEN if unset); raises the
                               rate limit. Release downloads never receive it.
 USAGE
@@ -607,6 +610,141 @@ print_next_steps() {
   log 'Then open: http://localhost:3001'
 }
 
+# --- Version lock --------------------------------------------------------
+#
+# The Cargo launcher (crates/mangostudio-launcher) serializes every install of
+# one version on an exclusive advisory lock on "<install root>/.launcher-<version>.lock"
+# (flock(2) on Unix, LockFileEx on Windows, where install.ps1 takes it). Replacing
+# "<install root>/<version>" here without that lock lets a launcher's move land between
+# this script's rm and mv, or lets this rm delete the tree the launcher just moved in.
+# So the swap, and a prune's removal of a version, hold the same lock on the same file.
+#
+# The lock is on file descriptor 200, which stays open in this shell until
+# release_version_lock (or exit) and is inherited by the helper that takes it.
+# A launcher or script that dies drops the lock with its descriptors.
+
+# Seconds to wait for another installer of the same version before giving up.
+# The launcher's own ceiling is an hour; the variable exists for tests.
+INSTALL_LOCK_TIMEOUT="${MANGOSTUDIO_INSTALL_LOCK_TIMEOUT:-3600}"
+INSTALL_LOCK_TIMEOUT_DEFAULT=3600
+INSTALL_LOCK_NOTICE_EVERY=30
+
+# A value that is not a plain count of seconds ("10s", "-1", "1.5") would make
+# the `[ -ge ]` comparison in acquire_version_lock fail on every pass and the
+# wait never end, so it is replaced with the default, as install.ps1 does. At
+# most 9 digits, so the comparison stays inside a shell's integer range.
+validate_install_lock_timeout() {
+  case "$INSTALL_LOCK_TIMEOUT" in
+    '' | *[!0-9]* | ??????????*)
+      printf 'Warning: MANGOSTUDIO_INSTALL_LOCK_TIMEOUT=%s is not a whole number of seconds; using %s\n' \
+        "$INSTALL_LOCK_TIMEOUT" "$INSTALL_LOCK_TIMEOUT_DEFAULT" >&2
+      INSTALL_LOCK_TIMEOUT="$INSTALL_LOCK_TIMEOUT_DEFAULT"
+      ;;
+  esac
+}
+
+have_command() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+# A path as the user can paste it into their file manager or PowerShell. Git Bash
+# and MSYS2 hold C:\Users\me as /c/Users/me, which Windows tools do not resolve;
+# cygpath (only there) converts it. Anywhere else, or if cygpath fails, the path
+# is printed as given.
+display_path() {
+  if have_command cygpath; then
+    cygpath -w -- "$1" 2>/dev/null && return 0
+  fi
+  printf '%s\n' "$1"
+}
+
+# One non-blocking attempt at the lock on descriptor 200. Returns 0 when it is
+# taken, 1 when another process holds it, 2 when this host cannot lock at all
+# (no tool, or a file system without locking).
+# flock(1) is util-linux and busybox; macOS has neither, but always has perl,
+# whose flock is the same flock(2) call and acts on the descriptor it inherits.
+# util-linux exits 1 for a held lock and another code for any other failure.
+# busybox exits 1 for both (flock.c returns EXIT_FAILURE on EWOULDBLOCK and
+# dies with its default status 1 on any other errno, such as ENOLCK), but only
+# the second prints a message, so exit 1 with output is "cannot lock".
+try_lock_fd() {
+  local status=0 complaint=''
+  if have_command flock; then
+    complaint="$(flock -n 200 2>&1)" || status=$?
+    case "$status" in
+      0) return 0 ;;
+      1)
+        if [ -z "$complaint" ]; then return 1; fi
+        return 2
+        ;;
+      *) return 2 ;;
+    esac
+  fi
+  if have_command perl; then
+    perl -MFcntl=:flock -e 'open(my $lock, ">&=", 200) or exit 2; flock($lock, LOCK_EX | LOCK_NB) and exit 0; exit($!{EWOULDBLOCK} ? 1 : 2)' || status=$?
+    case "$status" in
+      0 | 1) return "$status" ;;
+      *) return 2 ;;
+    esac
+  fi
+  return 2
+}
+
+# Take the lock of <version>, waiting for another holder. Returns 1 (after
+# saying why) only when the holder outlasts INSTALL_LOCK_TIMEOUT. A host that
+# cannot lock is warned about and let through: that is how installs ran before
+# this lock existed, and failing there would turn a hardening into an outage.
+acquire_version_lock() {
+  local root="$1" version="$2" lock shown status waited=0 next_notice=0
+  lock="${root}/.launcher-${version}.lock"
+  shown="$(display_path "$lock")"
+
+  mkdir -p "$root"
+  if ! { exec 200>>"$lock"; } 2>/dev/null; then
+    printf 'Warning: cannot open %s; continuing without the install lock\n' "$shown" >&2
+    return 0
+  fi
+
+  while true; do
+    status=0
+    try_lock_fd || status=$?
+    case "$status" in
+      0) return 0 ;;
+      1) ;;
+      *)
+        exec 200>&-
+        printf 'Warning: cannot lock %s (needs flock or perl, and a file system with locking); continuing without the install lock\n' "$shown" >&2
+        return 0
+        ;;
+    esac
+
+    if [ "$waited" -ge "$INSTALL_LOCK_TIMEOUT" ]; then
+      exec 200>&-
+      printf 'Error: another installer is still using %s after %ss (lock %s); not waiting longer. Run the command again once it finishes.\n' \
+        "$version" "$waited" "$shown" >&2
+      return 1
+    fi
+    if [ "$waited" -ge "$next_notice" ]; then
+      log "Waiting for another installer to finish with ${version} (${waited}s so far)..."
+      next_notice=$((waited + INSTALL_LOCK_NOTICE_EVERY))
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+}
+
+# Drop the lock taken by acquire_version_lock. A no-op when none is held.
+release_version_lock() {
+  exec 200>&-
+}
+
+# The scratch directory this process extracts <version> into. $$ is the main
+# shell's pid even inside a command substitution, so finish_install can name the
+# directory (for the exit trap) before extract_archive creates it.
+install_scratch_path() {
+  printf '%s\n' "${1}/.install-${2}.$$"
+}
+
 # Extract into a scratch directory and return its path. Never touches
 # "<install_root>/<version>" — that swap only happens once finish_install has
 # smoke-checked these bytes, so a corrupt re-install of an already-installed
@@ -614,7 +752,8 @@ print_next_steps() {
 # strip=1 for an npm tarball, whose members live under package/.
 extract_archive() {
   local archive="$1" version="$2" install_root="$3" strip="${4:-0}"
-  local tmp_install="${install_root}/.install-${version}.$$"
+  local tmp_install
+  tmp_install="$(install_scratch_path "$install_root" "$version")"
 
   mkdir -p "$install_root"
   rm -rf "$tmp_install"
@@ -730,11 +869,21 @@ finish_install() {
   [ "$source_kind" = 'npm-registry' ] && strip=1
 
   local tmp_install install_dir="${INSTALL_ROOT}/${version}"
+  # Registered for the exit trap before it exists and until the mv below, so an
+  # interrupt (Ctrl-C during the up-to-an-hour lock wait, a SIGTERM) or any
+  # failure on the way removes it instead of leaving `.install-<version>.<pid>`.
+  INSTALL_SCRATCH="$(install_scratch_path "$INSTALL_ROOT" "$version")"
   tmp_install="$(extract_archive "$archive" "$version" "$INSTALL_ROOT" "$strip")"
   smoke_or_fail "$tmp_install" "$version" 1
 
+  # The smoke check ran on the scratch copy, so the lock is held only for the
+  # swap itself: no launcher or second installer can move a tree in between
+  # the rm and the mv.
+  acquire_version_lock "$INSTALL_ROOT" "$version" || exit 1
   rm -rf "$install_dir"
   mv "$tmp_install" "$install_dir"
+  INSTALL_SCRATCH=''
+  release_version_lock
 
   local old_version=''
   old_version="$(resolve_current_version_or_legacy "$INSTALL_ROOT")" || old_version=''
@@ -885,9 +1034,18 @@ do_prune() {
     [ "$name" = "$current" ] && continue
     [ -n "$previous" ] && [ "$name" = "$previous" ] && continue
 
+    # A launcher installing this version holds its lock while it moves a tree
+    # in; a prune that outwaits it leaves the version for the next run.
+    if ! acquire_version_lock "$INSTALL_ROOT" "$name"; then
+      log "Could not remove ${name} (another installer holds its lock; run again once it finishes)"
+      remaining+=("$name")
+      continue
+    fi
     if rm -rf "$dir" 2>/dev/null; then
+      release_version_lock
       log "Removed ${name}"
     else
+      release_version_lock
       log "Could not remove ${name} (close editors or stop the process, then run again)"
       remaining+=("$name")
     fi
@@ -952,9 +1110,15 @@ do_uninstall() {
 # class of abort in general, even though the specific "unbound variable"
 # crash this script used to hit is what the empty-array guards above
 # actually eliminate.
+#
+# It also removes INSTALL_SCRATCH, the `.install-<version>.<pid>` tree of an
+# install that has not been moved into place yet.
 cleanup_tmp_dir() {
   rc=$?
   rm -rf "$TMP_DIR"
+  if [ -n "${INSTALL_SCRATCH:-}" ]; then
+    rm -rf "$INSTALL_SCRATCH"
+  fi
   exit "$rc"
 }
 
@@ -1005,14 +1169,22 @@ main() {
   done
 
   PLATFORM="$(detect_platform)"
+  validate_install_lock_timeout
   INSTALL_ROOT="${MANGOSTUDIO_INSTALL_DIR:-${HOME}/.mango/dist}"
   BIN_DIR="${MANGOSTUDIO_BIN_DIR:-${HOME}/.local/bin}"
   BIN_LINK="${BIN_DIR}/mangostudio"
   ORIGIN_KIND='installer'
   [ "${MANGOSTUDIO_INSTALL_ORIGIN:-}" = 'upgrade' ] && ORIGIN_KIND='upgrade'
 
+  INSTALL_SCRATCH=''
   TMP_DIR="$(mktemp -d)"
   trap cleanup_tmp_dir EXIT
+  # Without these, a Ctrl-C that lands while bash forks a child (the lock
+  # wait's `sleep` and `flock` every second) is swallowed: the child shrugs the
+  # signal off before it execs, exits normally, and bash then carries on. A trap
+  # makes the interrupt always end the script, through the EXIT trap above.
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
 
   case "$ACTION" in
     install) do_install ;;
