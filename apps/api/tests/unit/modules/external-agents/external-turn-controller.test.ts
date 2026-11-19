@@ -4,6 +4,7 @@ import { RemoteError } from '@mangostudio/protocol';
 import type {
   ExternalAgentAttachment,
   ExternalAgentConfiguration,
+  ExternalAgentEvent,
   ExternalAgentSteerResult,
 } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
@@ -131,8 +132,13 @@ function harness(
  * this: everywhere else, the stub's shortcut past `RuntimeClient.externalAgents.onEvent`'s
  * own envelope filter is exactly what makes ordering and redelivery cheap to drive.
  */
-async function realHarness(options: Parameters<typeof createRealExternalRuntime>[0] = {}) {
-  const runtime = await createRealExternalRuntime(options);
+async function realHarness(
+  options: Parameters<typeof createRealExternalRuntime>[0] & {
+    readonly unrecognizedEventQuietMs?: number;
+  } = {}
+) {
+  const { unrecognizedEventQuietMs, ...runtimeOptions } = options;
+  const runtime = await createRealExternalRuntime(runtimeOptions);
   const sessions = createExternalSessionManager({
     resolveRuntimeClient: () => Promise.resolve(runtime.client),
     newSessionId: () => 'session-1',
@@ -149,6 +155,7 @@ async function realHarness(options: Parameters<typeof createRealExternalRuntime>
     approvals,
     commandCatalog,
     newId: () => ids.shift() ?? `id-${crypto.randomUUID()}`,
+    ...(unrecognizedEventQuietMs !== undefined ? { unrecognizedEventQuietMs } : {}),
   });
   return { runtime, sessions, approvals, commandCatalog, controller };
 }
@@ -162,6 +169,7 @@ function startTurn(
     readonly observer?: {
       readonly onSteer?: (steer: unknown) => void;
       readonly onTerminal?: (reason: ExternalTurnResult['reason']) => void;
+      readonly onEvent?: (event: ExternalAgentEvent) => void;
       readonly onSession?: (session: {
         readonly sessionId: string;
         readonly resumed: boolean;
@@ -638,6 +646,90 @@ describe('external turn controller', () => {
       warn.mockRestore();
       if (previousGate === undefined) delete process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS;
       else process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS = previousGate;
+      await runtime.close();
+    }
+  });
+
+  /**
+   * #988. A runtime newer than the hub can end a turn with an event type this hub's schema does
+   * not know. The controller drops it as inert, so nothing ever finalized the turn and
+   * `settled.promise` never resolved. Before the fix this test reports
+   * `turn state: still running after 1000ms`.
+   */
+  it('ends a turn whose last event was a type this hub does not recognize', async () => {
+    const { runtime, controller } = await realHarness({ unrecognizedEventQuietMs: 30 });
+    const liveEvents: ExternalAgentEvent[] = [];
+    try {
+      const running = startTurn(controller, {
+        observer: { onEvent: (event) => liveEvents.push(event) },
+      });
+      await waitFor(() => runtime.calls.turn.length === 1, 'the turn to reach the runtime');
+
+      runtime.emit({ type: 'text_delta', text: 'done' });
+      runtime.emitRawFrame({
+        sessionId: runtime.sessionId(),
+        nativeTurnId: 'native-turn-1',
+        sequence: runtime.nextSequence(),
+        emittedAtMs: Date.now(),
+        event: { type: 'future_terminal', outcome: 'finished' },
+      });
+
+      const outcome = await Promise.race([
+        running,
+        new Promise<'still-running'>((resolve) =>
+          setTimeout(() => resolve('still-running'), 1_000)
+        ),
+      ]);
+      if (outcome === 'still-running') {
+        throw new Error(
+          'turn state: still running after 1000ms | expected: a terminal result after an unrecognized event went quiet'
+        );
+      }
+
+      expect(outcome.reason).toBe('vendor-error');
+      expect(outcome.error?.code).toBe('unrecognized_event');
+      expect(outcome.error?.message).toContain('future_terminal');
+
+      // The reload and the live stream agree on how it ended.
+      const stored = await readAssistantRow();
+      expect(stored.generating).toBe(false);
+      expect(stored.text).toBe('done');
+      expect(turnPartOf(stored.parts).error?.code).toBe('unrecognized_event');
+      expect(liveEvents.at(-1)).toMatchObject({
+        type: 'error',
+        error: { code: 'unrecognized_event' },
+      });
+
+      // The vendor may still be running whatever the event announced, so it is told to stop.
+      expect(runtime.calls.cancel).toHaveLength(1);
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  it('keeps a turn running when a recognized event follows an unrecognized one', async () => {
+    const { runtime, controller } = await realHarness({ unrecognizedEventQuietMs: 30 });
+    try {
+      const running = startTurn(controller);
+      await waitFor(() => runtime.calls.turn.length === 1, 'the turn to reach the runtime');
+
+      runtime.emitRawFrame({
+        sessionId: runtime.sessionId(),
+        nativeTurnId: 'native-turn-1',
+        sequence: runtime.nextSequence(),
+        emittedAtMs: Date.now(),
+        event: { type: 'future_progress' },
+      });
+      runtime.emit({ type: 'text_delta', text: 'still here' });
+      // Far past the quiet window: the recognized event is what proves the vendor is alive.
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      runtime.emit({ type: 'completed' });
+
+      const result = await running;
+      expect(result.reason).toBe('completed');
+      expect(result.error).toBeUndefined();
+      expect((await readAssistantRow()).text).toBe('still here');
+    } finally {
       await runtime.close();
     }
   });

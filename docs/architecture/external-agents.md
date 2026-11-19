@@ -639,6 +639,12 @@ disagreeing.
 two of nine ways a turn ends and the hub decides the other seven, so without it a live view could
 only ever show two outcomes and a reload would replace them with a third.
 
+An event type this hub does not recognize is dropped as inert, because a runtime newer than the hub
+may send progress the hub cannot read. The hub cannot tell that from an unreadable ending, so each
+unrecognized event starts a quiet window (30 seconds by default) that any recognized event clears.
+If the vendor stays silent through it, the hub ends the turn as `vendor-error` with the error code
+`unrecognized_event`, the same way live and on reload, and asks the vendor to cancel.
+
 ## Steering
 
 Codex only. `turn/steer` is a first-class client operation in Codex's own protocol — the user
