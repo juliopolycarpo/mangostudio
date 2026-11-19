@@ -316,7 +316,9 @@ Cross-workspace imports use package names (`@mangostudio/shared`), never relativ
 
 Browser code imports UI constants and pure helpers through the `environments/values`,
 `external-agents/values`, `library/values`, `runtime-home/values`, and `generation/values`
-subpaths. Machine log bounds use `machine/limits`. For example:
+subpaths. Machine log bounds use `machine/limits` and the SSE frame bound uses
+`streaming/limits`; the frontend takes only types from the `streaming` barrel, because
+importing it at runtime puts every chunk schema in the entry chunk. For example:
 
 ```ts
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
