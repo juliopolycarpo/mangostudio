@@ -5,6 +5,9 @@ import type { MessagePart } from '@mangostudio/shared/types';
 import type { GenerateImageToolOutcome } from '../../../../src/services/tools/builtin/generate-image';
 import * as realGenerateImage from '../../../../src/services/tools/builtin/generate-image';
 import { registerTools } from '../../../../src/services/tools/register-tools';
+import { moduleMockerFor } from '../../../support/mocks/module-mocks';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 registerTools();
 
@@ -67,7 +70,7 @@ async function runImageCall(options: {
   const generator = new TruncatingImageGenerator(options.reachedCount, () => {
     if (options.aborted) controller.abort('client_disconnect');
   });
-  await mock.module('../../../../src/services/tools/builtin/generate-image', () => ({
+  await mockModule('../../../../src/services/tools/builtin/generate-image', () => ({
     ...realGenerateImage,
     generateImagesForToolPlan: generator.generate.bind(generator),
   }));

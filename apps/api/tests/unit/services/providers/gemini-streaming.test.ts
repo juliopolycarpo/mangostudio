@@ -1,6 +1,8 @@
-import { afterEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, describe, expect, it } from 'bun:test';
 
-import { restoreGoogleGenAI } from '../../../support/mocks/google-genai';
+import { moduleMockerFor } from '../../../support/mocks/module-mocks';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 /**
  * Unit tests for GeminiProvider.generateTextStream.
@@ -35,15 +37,12 @@ describe('GeminiProvider.generateTextStream', () => {
     const { resetGeminiClientCache } =
       await import('../../../../src/services/providers/gemini/client');
     resetGeminiClientCache();
-    // `mock.restore()` cannot undo `mock.module()`, so re-register the real SDK
-    // instead. This covers `@google/genai` only: the `providers/gemini/secret`
-    // fake below has no capture, so this file relies on the isolated unit lane
-    // to keep it from reaching another file.
-    await restoreGoogleGenAI();
+    // The SDK and `providers/gemini/secret` fakes are restored by the global
+    // afterEach (support/mocks/module-mocks.ts).
   });
 
   it('yields text chunks and a final done:true sentinel', async () => {
-    await mock.module('@google/genai/web', () => ({
+    await mockModule('@google/genai/web', () => ({
       GoogleGenAI: class {
         models = {
           generateContentStream: () => Promise.resolve(mockStream()),
@@ -52,7 +51,7 @@ describe('GeminiProvider.generateTextStream', () => {
     }));
 
     // Also mock the secret resolution so we don't need real API keys
-    await mock.module('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
+    await mockModule('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
 
     const { generateGeminiTextStream } =
       await import('../../../../src/services/providers/gemini/text');
@@ -78,7 +77,7 @@ describe('GeminiProvider.generateTextStream', () => {
   });
 
   it('throws when prompt is blocked', async () => {
-    await mock.module('@google/genai/web', () => ({
+    await mockModule('@google/genai/web', () => ({
       GoogleGenAI: class {
         models = {
           generateContentStream: () =>
@@ -96,7 +95,7 @@ describe('GeminiProvider.generateTextStream', () => {
       },
     }));
 
-    await mock.module('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
+    await mockModule('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
 
     const { generateGeminiTextStream } =
       await import('../../../../src/services/providers/gemini/text');
@@ -132,7 +131,7 @@ describe('GeminiProvider.generateTextStream', () => {
   });
 
   it('emits thinking chunks when thinkingEnabled is true', async () => {
-    await mock.module('@google/genai/web', () => ({
+    await mockModule('@google/genai/web', () => ({
       GoogleGenAI: class {
         models = {
           generateContentStream: () =>
@@ -157,7 +156,7 @@ describe('GeminiProvider.generateTextStream', () => {
       },
     }));
 
-    await mock.module('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
+    await mockModule('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
 
     const { generateGeminiTextStream } =
       await import('../../../../src/services/providers/gemini/text');
@@ -182,7 +181,7 @@ describe('GeminiProvider.generateTextStream', () => {
   it('does not add thinkingConfig when thinkingEnabled is false', async () => {
     let capturedConfig: Record<string, unknown> | undefined;
 
-    await mock.module('@google/genai/web', () => ({
+    await mockModule('@google/genai/web', () => ({
       GoogleGenAI: class {
         models = {
           generateContentStream: (opts: { config?: Record<string, unknown> }) => {
@@ -198,7 +197,7 @@ describe('GeminiProvider.generateTextStream', () => {
       },
     }));
 
-    await mock.module('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
+    await mockModule('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
 
     const { generateGeminiTextStream } =
       await import('../../../../src/services/providers/gemini/text');
@@ -222,7 +221,7 @@ describe('GeminiProvider.generateTextStream', () => {
   });
 
   it('falls back to chunk.text when candidate has no parts', async () => {
-    await mock.module('@google/genai/web', () => ({
+    await mockModule('@google/genai/web', () => ({
       GoogleGenAI: class {
         models = {
           generateContentStream: () =>
@@ -236,7 +235,7 @@ describe('GeminiProvider.generateTextStream', () => {
       },
     }));
 
-    await mock.module('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
+    await mockModule('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
 
     const { generateGeminiTextStream } =
       await import('../../../../src/services/providers/gemini/text');
@@ -265,7 +264,7 @@ describe('GeminiProvider generateTextStream delegation', () => {
   });
 
   it('generateTextStream returns an AsyncIterable', async () => {
-    await mock.module('@google/genai/web', () => ({
+    await mockModule('@google/genai/web', () => ({
       GoogleGenAI: class {
         models = {
           generateContentStream: () => Promise.resolve(mockStream()),
@@ -273,7 +272,7 @@ describe('GeminiProvider generateTextStream delegation', () => {
       },
     }));
 
-    await mock.module('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
+    await mockModule('../../../../src/services/providers/gemini/secret', mockGeminiSecretModule);
 
     const { geminiProvider } = await import('../../../../src/services/providers/gemini/index');
 

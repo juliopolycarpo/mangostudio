@@ -18,6 +18,9 @@ import * as realTurnHelpers from '../../../../src/modules/generation/application
 import type { StreamTextTurnSession } from '../../../../src/modules/generation/application/stream-text-turn-stages';
 import type { WriteTurnCheckpointOptions } from '../../../../src/modules/generation/application/turn-checkpoint';
 import type { AgentEvent, AgentTurnRequest } from '../../../../src/services/providers/types';
+import { moduleMockerFor } from '../../../support/mocks/module-mocks';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 type Call = readonly [callId: string, call: { name: string; argsStr: string }];
 
@@ -82,7 +85,7 @@ class RecordingCheckpointWriter {
 }
 
 async function runTurn(toolNames: string[]): Promise<RecordingCheckpointWriter['requests']> {
-  await mock.module(
+  await mockModule(
     '../../../../src/modules/generation/application/standard-tool-execution',
     () => ({
       ...realStandardToolExecution,
@@ -94,7 +97,7 @@ async function runTurn(toolNames: string[]): Promise<RecordingCheckpointWriter['
   );
   // The image call is not what this file is about; its own durable checkpoints
   // are covered in `image-generation-call.test.ts`.
-  await mock.module(
+  await mockModule(
     '../../../../src/modules/generation/application/stream-text-turn-helpers',
     () => ({
       ...realTurnHelpers,

@@ -9,7 +9,7 @@
  * it), and a named fake `realpathSync` keeps the requested spelling instead of
  * following them, as the case-insensitive volume does.
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -19,6 +19,9 @@ import { type AnyElysia, Elysia, NotFound } from 'elysia';
 
 import type { App } from '../../../src/app';
 import { clearFrontendFallback, frontendNotFound } from '../../../src/server/frontend-fallback';
+import { moduleMockerFor } from '../../support/mocks/module-mocks';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 const originalFs = { ...fs };
 const realStatSync = fs.statSync;
@@ -76,13 +79,8 @@ function fakeCaseInsensitiveFs() {
   };
 }
 
-/** Restore the original filesystem exports after the case-variant tests. */
-function originalFsModule() {
-  return originalFs;
-}
-
 async function startServer(): Promise<void> {
-  await mock.module('node:fs', fakeCaseInsensitiveFs);
+  await mockModule('node:fs', fakeCaseInsensitiveFs);
   const { registerFrontend } = await import('../../../src/server/frontend-static');
   app = new Elysia().onError(NotFound, ({ request }) => frontendNotFound(request));
   registerFrontend(app as unknown as App, frontendDir);
@@ -114,7 +112,6 @@ beforeEach(() => {
 
 afterEach(async () => {
   if (app?.server) await app.stop();
-  await mock.module('node:fs', originalFsModule);
   clearFrontendFallback();
   inodeReporting = 'real inode';
   originalFs.rmSync(frontendDir, { recursive: true, force: true });

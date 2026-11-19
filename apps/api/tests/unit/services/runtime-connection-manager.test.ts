@@ -40,7 +40,10 @@ import {
 import { RuntimeDiscoveryCache } from '../../../src/services/runtime-client/runtime-discovery-cache';
 import { insertTestChat, insertTestUser } from '../../support/factories';
 import { useLocalConnectDeadlines } from '../../support/local-connect-deadlines';
+import { moduleMockerFor } from '../../support/mocks/module-mocks';
 import { connectTestRuntime, type TestRuntime } from '../../support/runtime-fixture';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 const TEST_MANIFEST: RuntimeCapabilityManifest = {
   platform: 'linux',
@@ -2368,10 +2371,10 @@ describe('connectWslRuntime', () => {
 
     // The distribution already holds a matching runtime; only the runtime
     // launch itself — the second wsl.exe spawn — is under test here.
-    await mock.module('../../../src/modules/environments/infrastructure/wsl-provisioner', () => ({
+    await mockModule('../../../src/modules/environments/infrastructure/wsl-provisioner', () => ({
       wslProvisioner: { ensure: () => Promise.resolve() },
     }));
-    await mock.module('node:child_process', () => ({
+    await mockModule('node:child_process', () => ({
       ...realChildProcess,
       spawn: () => enoentChild(),
     }));

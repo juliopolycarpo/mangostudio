@@ -38,22 +38,6 @@ const UNMIGRATED_RAW_MOCK_MODULE_CALLS: Readonly<Record<string, number>> = {
   'integration/routes/settings-connectors.integration.test.ts': 7,
   'support/connectors/index.ts': 4,
   'support/mocks/google-genai.ts': 1,
-  'unit/modules/external-agents/external-account-limits-refresh.test.ts': 2,
-  'unit/modules/generation/agent-tool-loop-workdir.test.ts': 1,
-  'unit/modules/generation/deprecated-provider-guard.test.ts': 4,
-  'unit/modules/generation/image-generation-call.test.ts': 1,
-  'unit/modules/generation/legacy-text-stream.test.ts': 1,
-  'unit/modules/generation/tool-start-checkpoint-wiring.test.ts': 2,
-  'unit/modules/prompt-rules/prompt-composer.test.ts': 1,
-  'unit/server/frontend-build-state-case.test.ts': 2,
-  'unit/server/frontend-file-identity.test.ts': 2,
-  'unit/server/frontend-static-fs-calls.test.ts': 2,
-  'unit/server/frontend-zero-inode.test.ts': 2,
-  'unit/services/providers/chatgpt-provider.test.ts': 2,
-  'unit/services/providers/gemini-streaming.test.ts': 12,
-  'unit/services/providers/openai-provider.test.ts': 2,
-  'unit/services/providers/stream-abort.test.ts': 6,
-  'unit/services/runtime-connection-manager.test.ts': 2,
 };
 
 /** Matches `mock.module`, `mock . module`, and the `jest.mock` / `vi.mock` spellings of the same call. */

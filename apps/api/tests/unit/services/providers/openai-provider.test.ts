@@ -3,7 +3,6 @@ import { join } from 'node:path';
 
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 
-import { getDb } from '../../../../src/db/database';
 import { createProviderSecretService } from '../../../../src/services/providers/core/secret-service';
 import { createOpenAIClient } from '../../../../src/services/providers/openai/client';
 import {
@@ -13,17 +12,12 @@ import {
 } from '../../../../src/services/providers/openai/index';
 import type { SecretMetadataInput } from '../../../../src/services/secret-store/metadata';
 import { InMemorySecretStore } from '../../../support/mocks/mock-secret-store';
+import { moduleMockerFor } from '../../../support/mocks/module-mocks';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 const TEST_USER = 'test-user-openai';
 const NO_TOML = join(import.meta.dir, '.mangostudio-test-nonexistent-config.toml');
-
-// Snapshotted at module evaluation, before any `mock.module` below runs: an
-// ESM import is a live binding, so restoring `db/database` with `() => ({
-// getDb })` reads whatever `getDb` currently resolves to — including a fake
-// this file already installed — and the "restore" makes the fake permanent
-// for the rest of the (unisolated) `bun test tests/unit` process. A plain
-// variable captures the real function by value instead.
-const REAL_GET_DB = getDb;
 
 /**
  * Creates an in-memory metadata harness for test isolation.
@@ -437,9 +431,8 @@ describe('validateOpenAIAuthContext', () => {
 });
 
 describe('openai-provider listModels filtering', () => {
-  afterEach(async () => {
+  afterEach(() => {
     mock.restore();
-    await mock.module('../../../../src/db/database', () => ({ getDb: REAL_GET_DB }));
   });
 
   it('filters out embedding/tts/whisper/moderation model ids', () => {
@@ -493,7 +486,7 @@ describe('openai-provider listModels filtering', () => {
       }),
     };
 
-    await mock.module('../../../../src/db/database', () => ({
+    await mockModule('../../../../src/db/database', () => ({
       getDb: () => ({
         selectFrom: () => makeChain(undefined),
         insertInto: () => insertChain,

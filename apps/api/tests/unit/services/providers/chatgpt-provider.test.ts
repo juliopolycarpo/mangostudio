@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'bun:test';
 
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 
@@ -28,12 +28,14 @@ import { streamAgentTurnWithResponses } from '../../../../src/services/providers
 import type { AgentEvent, AgentTurnRequest } from '../../../../src/services/providers/types';
 import * as realMetadataNs from '../../../../src/services/secret-store/metadata';
 import { makeTokenBundle } from '../../../support/chatgpt';
+import { moduleMockerFor } from '../../../support/mocks/module-mocks';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 const realMetadata = { ...realMetadataNs };
 
-afterEach(async () => {
+afterEach(() => {
   setChatGptTokenServiceForTests(null);
-  await mock.module('../../../../src/services/secret-store/metadata', () => realMetadata);
 });
 
 // ---------------------------------------------------------------------------
@@ -392,7 +394,7 @@ describe('chatgpt provider — 401 refresh/retry policy', () => {
     });
     getConfig().chatgpt.apiBaseUrl = `http://127.0.0.1:${server.port}`;
 
-    await mock.module('../../../../src/services/secret-store/metadata', () => ({
+    await mockModule('../../../../src/services/secret-store/metadata', () => ({
       ...realMetadata,
       listSecretMetadata: () => Promise.resolve([connectorRow()]),
     }));

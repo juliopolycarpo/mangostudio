@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +8,9 @@ import { type AnyElysia, Elysia, NotFound } from 'elysia';
 
 import type { App } from '../../../src/app';
 import { clearFrontendFallback, frontendNotFound } from '../../../src/server/frontend-fallback';
+import { moduleMockerFor } from '../../support/mocks/module-mocks';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 const originalFs = { ...fs };
 const realStatSync = fs.statSync;
@@ -36,11 +39,6 @@ function fakeZeroInodeFs() {
   return { ...originalFs, statSync: fakeZeroInodeStatSync };
 }
 
-/** Restore the original filesystem exports after the zero-inode tests. */
-function originalFsModule() {
-  return originalFs;
-}
-
 beforeEach(async () => {
   frontendDir = originalFs.mkdtempSync(join(tmpdir(), 'frontend-zero-inode-'));
   originalFs.mkdirSync(join(frontendDir, 'assets'));
@@ -51,7 +49,7 @@ beforeEach(async () => {
     join(frontendDir, BUILD_STATE_FILE),
     join(frontendDir, 'assets', 'state-link-ZeroId.json')
   );
-  await mock.module('node:fs', fakeZeroInodeFs);
+  await mockModule('node:fs', fakeZeroInodeFs);
   const { registerFrontend } = await import('../../../src/server/frontend-static');
   app = new Elysia().onError(NotFound, ({ request }) => frontendNotFound(request));
   registerFrontend(app as unknown as App, frontendDir);
@@ -62,7 +60,6 @@ beforeEach(async () => {
 
 afterEach(async () => {
   if (app?.server) await app.stop();
-  await mock.module('node:fs', originalFsModule);
   clearFrontendFallback();
   originalFs.rmSync(frontendDir, { recursive: true, force: true });
 });
