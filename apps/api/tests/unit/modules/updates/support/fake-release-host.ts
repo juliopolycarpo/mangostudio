@@ -12,6 +12,12 @@ export interface FakeReleaseHostRoute {
   readonly headers?: Readonly<Record<string, string>>;
   /** Shorthand for a redirect route: sets status 302 and the `location` header. */
   readonly redirectTo?: string;
+  /**
+   * Answers 401 to any request that carries an `Authorization` header, the way
+   * GitHub treats an expired token even on a public endpoint. Without the
+   * header the route answers normally.
+   */
+  readonly rejectsAuthorization?: boolean;
 }
 
 export class FakeReleaseHost {
@@ -35,6 +41,11 @@ export class FakeReleaseHost {
     const route = this.routes.get(url);
     if (!route) {
       throw new Error(`FakeReleaseHost has no route for ${url}`);
+    }
+
+    const requestHeaders = this.requestHeaders[this.requestHeaders.length - 1];
+    if (route.rejectsAuthorization && requestHeaders?.authorization !== undefined) {
+      return Promise.resolve(new Response('Bad credentials', { status: 401 }));
     }
 
     const status = route.redirectTo ? 302 : (route.status ?? 200);

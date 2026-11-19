@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
+import { SafeFetchError } from '../../../../src/lib/safe-fetch';
 import {
   fetchCanaryManifestForTag,
   fetchReleaseChecksums,
@@ -7,6 +8,7 @@ import {
   resolveLatestCanaryVersion,
   resolveStableLatestVersion,
 } from '../../../../src/modules/updates/infrastructure/release-index';
+import { DiagnosticWarnCapture, expectHubLogEntry } from '../../../support/diagnostic-warn-capture';
 import { FakeReleaseHost } from './support/fake-release-host';
 
 describe('resolveStableLatestVersion', () => {
@@ -194,6 +196,77 @@ describe('resolveLatestCanaryVersion', () => {
 
       expect(host.calls).toEqual([releasesUrl, cdnUrl]);
       expect(host.authorizations()).toEqual([`Bearer ${DUMMY_TOKEN}`, undefined]);
+    });
+
+    it('retries once without it when GitHub answers 401, and logs the rejection without the token', async () => {
+      const host = new FakeReleaseHost({
+        [releasesUrl]: { body, rejectsAuthorization: true },
+      });
+      const capture = new DiagnosticWarnCapture();
+
+      const lines = await capture.during(async () => {
+        const resolved = await resolveLatestCanaryVersion(
+          { fetch: host.fetch, resolveHostname: host.resolveHostname },
+          DUMMY_TOKEN
+        );
+        expect(resolved).toBe('1.4.1-canary.abc1234');
+      });
+
+      expect(host.calls).toEqual([releasesUrl, releasesUrl]);
+      expect(host.authorizations()).toEqual([`Bearer ${DUMMY_TOKEN}`, undefined]);
+      expectHubLogEntry(lines, 'github_token_rejected', {
+        fields: { host: 'api.github.com', status: 401 },
+        fragment: 'api.github.com',
+      });
+      // The whole log line, header names included, must be free of the secret.
+      const logged = lines.join('\n');
+      expect(logged, `(hub log): expected no token | received: ${logged}`).not.toContain(
+        DUMMY_TOKEN
+      );
+      expect(logged.toLowerCase()).not.toContain('bearer');
+    });
+
+    it('retries only once when the anonymous request is refused too', async () => {
+      const host = new FakeReleaseHost({
+        [releasesUrl]: { status: 401, body: 'Requires authentication' },
+      });
+
+      const failure = await resolveLatestCanaryVersion(
+        { fetch: host.fetch, resolveHostname: host.resolveHostname },
+        DUMMY_TOKEN
+      ).catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(SafeFetchError);
+      expect((failure as SafeFetchError).status).toBe(401);
+      expect(host.authorizations()).toEqual([`Bearer ${DUMMY_TOKEN}`, undefined]);
+    });
+
+    it('does not retry a 401 for an anonymous request', async () => {
+      const host = new FakeReleaseHost({
+        [releasesUrl]: { status: 401, body: 'Requires authentication' },
+      });
+      const capture = new DiagnosticWarnCapture();
+
+      const lines = await capture.during(async () => {
+        await resolveLatestCanaryVersion({
+          fetch: host.fetch,
+          resolveHostname: host.resolveHostname,
+        }).catch(() => undefined);
+      });
+
+      expect(host.calls).toEqual([releasesUrl]);
+      expect(lines.join('\n')).not.toContain('github_token_rejected');
+    });
+
+    it('does not retry other failures such as a rate limit', async () => {
+      const host = new FakeReleaseHost({ [releasesUrl]: { status: 403, body: 'rate limited' } });
+
+      await resolveLatestCanaryVersion(
+        { fetch: host.fetch, resolveHostname: host.resolveHostname },
+        DUMMY_TOKEN
+      ).catch(() => undefined);
+
+      expect(host.calls).toEqual([releasesUrl]);
     });
 
     it('never puts the token in an error message', async () => {

@@ -44,7 +44,7 @@ import { fitToLimit } from '../../machine/domain/machine-limits';
 import { versionChannel } from '../domain/install-origin';
 import { RELEASES_BASE_URL } from '../domain/upgrade-plan';
 import { compareStableVersions, sharesShaPrefix, stripLeadingV } from '../domain/version-compare';
-import { githubApiCredentials, resolveLatestCanaryVersion } from '../infrastructure/release-index';
+import { fetchGithubApiBytes, resolveLatestCanaryVersion } from '../infrastructure/release-index';
 
 const logger = createDiagnosticLogger('update-check');
 
@@ -233,16 +233,16 @@ function errorMessage(error: unknown): string {
 }
 
 async function checkStable(d: ResolvedDeps, currentVersion: string): Promise<UpdateCheck> {
-  const result = await safeFetchBytes(
+  const result = await fetchGithubApiBytes(
     GITHUB_LATEST_RELEASE_API,
     {
       maxBytes: FETCH_MAX_BYTES,
       maxRedirects: FETCH_MAX_REDIRECTS,
       timeoutMs: FETCH_TIMEOUT_MS,
       headers: GITHUB_API_HEADERS,
-      ...githubApiCredentials(getGithubApiToken(d.env)),
     },
-    { fetch: d.fetch, resolveHostname: d.resolveHostname }
+    { fetch: d.fetch, resolveHostname: d.resolveHostname },
+    getGithubApiToken(d.env)
   );
   const parsed = JSON.parse(new TextDecoder().decode(result.bytes)) as { tag_name?: unknown };
   if (typeof parsed.tag_name !== 'string' || !parsed.tag_name) {

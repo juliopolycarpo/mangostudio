@@ -8,11 +8,13 @@
  * never needed — the tag "latest" resolves to right now, for each channel.
  */
 
+import { createDiagnosticLogger } from '../../../lib/logger';
 import {
   safeFetchBytes,
   type SafeFetchDeps,
   SafeFetchError,
   type SafeFetchOptions,
+  type SafeFetchResult,
 } from '../../../lib/safe-fetch';
 import {
   CANARY_MANIFEST_ASSET,
@@ -20,6 +22,8 @@ import {
   parseCanaryManifest,
 } from '../../environments/domain/canary-manifest';
 import { releaseAssetUrl } from '../../environments/domain/wsl-runtime-release';
+
+const logger = createDiagnosticLogger('release-index');
 
 export const UPDATES_REPOSITORY = 'juliopolycarpo/mangostudio';
 const GITHUB_RELEASES_BASE = `https://github.com/${UPDATES_REPOSITORY}`;
@@ -47,6 +51,37 @@ export function githubApiCredentials(
   return {
     credentialsForHost: { host: GITHUB_API_HOST, headers: { Authorization: `Bearer ${token}` } },
   };
+}
+
+/**
+ * Fetches an `api.github.com` URL with the caller's token, and again without it
+ * if GitHub answers 401. An expired or revoked token makes GitHub refuse even
+ * public endpoints, so a stale `GITHUB_TOKEN` in the environment would
+ * otherwise break lookups that work anonymously. The retry is single and only
+ * happens when a credential was sent; a 401 on an anonymous request is a real
+ * answer and surfaces as is. The `github_token_rejected` event names the host
+ * and status only — never the token or any header.
+ * // Usage: fetchGithubApiBytes(url, options, deps, token)
+ */
+export async function fetchGithubApiBytes(
+  url: string,
+  options: SafeFetchOptions,
+  deps: SafeFetchDeps,
+  githubToken: string | undefined
+): Promise<SafeFetchResult> {
+  const credentials = githubApiCredentials(githubToken);
+  try {
+    return await safeFetchBytes(url, { ...options, ...credentials }, deps);
+  } catch (error) {
+    const rejected =
+      credentials.credentialsForHost !== undefined &&
+      error instanceof SafeFetchError &&
+      error.kind === 'http' &&
+      error.status === 401;
+    if (!rejected) throw error;
+    logger.warn('github_token_rejected', { host: GITHUB_API_HOST, status: 401 });
+    return safeFetchBytes(url, options, deps);
+  }
 }
 
 /**
@@ -123,16 +158,16 @@ export async function resolveLatestCanaryVersion(
   deps: SafeFetchDeps,
   githubToken?: string
 ): Promise<string> {
-  const result = await safeFetchBytes(
+  const result = await fetchGithubApiBytes(
     `${GITHUB_API_BASE}/releases?per_page=30`,
     {
       maxBytes: MAX_RELEASE_LIST_BYTES,
       maxRedirects: 3,
       timeoutMs: LOOKUP_TIMEOUT_MS,
       headers: GITHUB_API_HEADERS,
-      ...githubApiCredentials(githubToken),
     },
-    deps
+    deps,
+    githubToken
   );
   const parsed: unknown = JSON.parse(new TextDecoder().decode(result.bytes));
   if (!Array.isArray(parsed)) {

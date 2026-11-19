@@ -17,6 +17,7 @@ import {
   type UpdateCheckerDeps,
   updateCheckSkipReason,
 } from '../../../../src/modules/updates/application/update-check';
+import { FakeReleaseHost } from './support/fake-release-host';
 
 const PUBLIC_ADDRESS = { address: '93.184.216.34', family: 4 as const };
 const publicResolver = () => Promise.resolve([PUBLIC_ADDRESS]);
@@ -346,6 +347,59 @@ describe('createUpdateChecker', () => {
 
       expect(fake.calls).toEqual([RELEASES_URL, MANIFEST_URL('v0.1.1-canary.cafebee')]);
       expect(fake.authorizations).toEqual(['Bearer dummy-token-not-a-secret', null]);
+    });
+
+    it('still completes the stable check anonymously when GitHub rejects the token', async () => {
+      const latestUrl = 'https://api.github.com/repos/juliopolycarpo/mangostudio/releases/latest';
+      const host = new FakeReleaseHost({
+        [latestUrl]: { body: JSON.stringify({ tag_name: 'v0.2.0' }), rejectsAuthorization: true },
+      });
+      const { deps } = harness({
+        fetch: host.fetch,
+        env: { GITHUB_TOKEN: 'dummy-token-not-a-secret' },
+      });
+
+      const result = await createUpdateChecker(deps).check();
+
+      expect(result).toMatchObject({ channel: 'stable', latestVersion: '0.2.0' });
+      expect(result).not.toHaveProperty('error');
+      expect(host.authorizations()).toEqual(['Bearer dummy-token-not-a-secret', undefined]);
+    });
+
+    it('still completes the canary check anonymously when GitHub rejects the token', async () => {
+      const host = new FakeReleaseHost({
+        [RELEASES_URL]: {
+          body: JSON.stringify([{ tag_name: 'v0.1.1-canary.cafebee', prerelease: true }]),
+          rejectsAuthorization: true,
+        },
+        [MANIFEST_URL('v0.1.1-canary.cafebee')]: {
+          body: JSON.stringify({
+            schemaVersion: 1,
+            channel: 'canary',
+            version: '0.1.1-canary.cafebee',
+            assetVersion: '0.1.1-canary',
+            sourceSha: 'cafebabe00',
+            builtAt: '2026-09-01T00:00:00Z',
+            pairs: [],
+          }),
+        },
+      });
+      const { deps } = harness({
+        fetch: host.fetch,
+        env: { GH_TOKEN: 'dummy-token-not-a-secret' },
+        getCurrentVersion: () => '0.1.1-canary.deadbee',
+        getConfig: () => configWith(true, 'canary'),
+      });
+
+      const result = await createUpdateChecker(deps).check();
+
+      expect(result).toMatchObject({ channel: 'canary', latestVersion: '0.1.1-canary.cafebee' });
+      expect(result).not.toHaveProperty('error');
+      expect(host.authorizations()).toEqual([
+        'Bearer dummy-token-not-a-secret',
+        undefined,
+        undefined,
+      ]);
     });
 
     it('stays anonymous when no token is set', async () => {
