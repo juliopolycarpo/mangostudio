@@ -110,6 +110,32 @@ describe('capabilityManifestFromHealth', () => {
     });
   });
 
+  it('copies only the attestation members it knows from a health report with newer ones', () => {
+    // Health tolerates an additive member; the manifest, and the `isolation` the hub sends back
+    // on every external-agent call, are closed shapes that would refuse it.
+    const attestation = {
+      method: 'single-user-host',
+      credentialHomeFingerprint: 'credential-home-v1',
+      attestedBy: 'a-newer-runtime',
+    } as const;
+    const report: RuntimeHealthReport = {
+      ...baseReport,
+      profile: 'full',
+      allow: { ...RUNTIME_CONSENT_PRESETS.full, externalAgents: true },
+      externalAgents: {
+        targets: ['codex'],
+        identityIsolation: attestation,
+        liveSessionCount: 0,
+        liveSessions: [],
+      },
+    };
+
+    expect(capabilityManifestFromHealth(report).identityIsolation).toEqual({
+      method: 'single-user-host',
+      credentialHomeFingerprint: 'credential-home-v1',
+    });
+  });
+
   /**
    * Health answers what the owner allowed and what the machine has. What the
    * peer's *build* can do only ever arrives on `hello`, so a refresh that

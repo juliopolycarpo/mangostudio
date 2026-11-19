@@ -324,4 +324,78 @@ describe('RuntimeHealthReportSchema', () => {
     ).toBe(true);
     expect(Value.Check(RuntimeHealthReportSchema, baseReport)).toBe(true);
   });
+
+  describe('externalAgents forward compatibility', () => {
+    const externalAgents = {
+      targets: ['codex'],
+      identityIsolation: {
+        method: 'single-user-host',
+        credentialHomeFingerprint: 'sha256:credential-home',
+      },
+      liveSessionCount: 1,
+      liveSessions: [{ sessionId: 'session-1', targetId: 'codex', ageMs: 250, state: 'running' }],
+    } as const;
+    const withExternalAgents = (subtree: unknown) => ({ ...baseReport, externalAgents: subtree });
+
+    it('accepts a member this build has not named at every level of the subtree', () => {
+      expect(Value.Check(RuntimeHealthReportSchema, withExternalAgents(externalAgents))).toBe(true);
+      const extraAtSubtree = { ...externalAgents, queuedTurns: 0 };
+      const extraAtIsolation = {
+        ...externalAgents,
+        identityIsolation: { ...externalAgents.identityIsolation, attestedBy: 'newer-runtime' },
+      };
+      const extraAtSession = {
+        ...externalAgents,
+        liveSessions: [{ ...externalAgents.liveSessions[0], pid: 4242 }],
+      };
+      for (const [where, subtree] of [
+        ['externalAgents', extraAtSubtree],
+        ['externalAgents.identityIsolation', extraAtIsolation],
+        ['externalAgents.liveSessions[]', extraAtSession],
+      ] as const) {
+        expect(
+          Value.Check(RuntimeHealthReportSchema, withExternalAgents(subtree)),
+          `expected an additive member under ${where} to be accepted`
+        ).toBe(true);
+      }
+    });
+
+    it('still rejects a wrong type on a known member', () => {
+      const wrong: readonly (readonly [string, unknown])[] = [
+        ['liveSessionCount as a string', { ...externalAgents, liveSessionCount: '1' }],
+        ['a target that is not a known id', { ...externalAgents, targets: ['not-a-target'] }],
+        [
+          'an isolation method that is not a known one',
+          {
+            ...externalAgents,
+            identityIsolation: { method: 'vm', credentialHomeFingerprint: 'x' },
+          },
+        ],
+        [
+          'an isolation without its fingerprint',
+          { ...externalAgents, identityIsolation: { method: 'container' } },
+        ],
+        [
+          'a session age as a string',
+          {
+            ...externalAgents,
+            liveSessions: [{ ...externalAgents.liveSessions[0], ageMs: '250' }],
+          },
+        ],
+        [
+          'a session with no id',
+          {
+            ...externalAgents,
+            liveSessions: [{ targetId: 'codex', ageMs: 250, state: 'running' }],
+          },
+        ],
+      ];
+      for (const [what, subtree] of wrong) {
+        expect(
+          Value.Check(RuntimeHealthReportSchema, withExternalAgents(subtree)),
+          `expected a report with ${what} to be rejected`
+        ).toBe(false);
+      }
+    });
+  });
 });

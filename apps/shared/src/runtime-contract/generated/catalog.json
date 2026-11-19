@@ -10257,8 +10257,7 @@
                     "minLength": 1,
                     "maxLength": 128
                   }
-                },
-                "additionalProperties": false
+                }
               },
               "liveSessionCount": {
                 "type": "integer",
@@ -10305,13 +10304,11 @@
                       "minLength": 1,
                       "maxLength": 64
                     }
-                  },
-                  "additionalProperties": false
+                  }
                 },
                 "maxItems": 128
               }
-            },
-            "additionalProperties": false
+            }
           },
           "terminal": {
             "type": "boolean"

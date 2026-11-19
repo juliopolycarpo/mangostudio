@@ -383,29 +383,42 @@ export type RuntimeServiceStatus = Static<typeof RuntimeServiceStatusSchema>;
  */
 export const RUNTIME_HEALTH_LIVE_SESSION_LIMIT = 128;
 
-export const RuntimeExternalAgentHealthSchema = Type.Object(
-  {
-    targets: ReadonlyArraySchema(ExternalAgentTargetIdSchema, {
-      maxItems: ExternalAgentTargetIdSchema.anyOf.length,
-      uniqueItems: true,
-    }),
-    identityIsolation: Type.Optional(ExternalIdentityIsolationSchema),
-    liveSessionCount: Type.Integer({ minimum: 0 }),
-    liveSessions: ReadonlyArraySchema(
-      Type.Object(
-        {
-          sessionId: Type.String({ minLength: 1, maxLength: 256 }),
-          targetId: ExternalAgentTargetIdSchema,
-          ageMs: Type.Integer({ minimum: 0 }),
-          state: Type.String({ minLength: 1, maxLength: 64 }),
-        },
-        { additionalProperties: false }
-      ),
-      { maxItems: RUNTIME_HEALTH_LIVE_SESSION_LIMIT }
-    ),
-  },
-  { additionalProperties: false }
+/**
+ * The `externalAgents` subtree of `runtime.health` is open: a member this build
+ * has not named is accepted and ignored, like the rest of the report. The hub
+ * reads health from a runtime that may be newer than itself, and one rejected
+ * field takes the whole report with it — the manifest then stays frozen at its
+ * handshake value with nothing to say so. Known members stay strictly typed,
+ * so a wrong type is still refused.
+ *
+ * The identity attestation reuses {@link ExternalIdentityIsolationSchema}'s
+ * members but not its closure: that schema stays closed where the attestation
+ * is a reviewed, positive claim (`hello`, and the `isolation` the hub sends
+ * back). Health is only a report of it, and the hub copies out the two members
+ * it knows rather than forwarding the object (`manifest-from-health.ts`).
+ */
+const RuntimeHealthIdentityIsolationSchema = Type.Object(
+  ExternalIdentityIsolationSchema.properties
 );
+
+const RuntimeHealthLiveSessionSchema = Type.Object({
+  sessionId: Type.String({ minLength: 1, maxLength: 256 }),
+  targetId: ExternalAgentTargetIdSchema,
+  ageMs: Type.Integer({ minimum: 0 }),
+  state: Type.String({ minLength: 1, maxLength: 64 }),
+});
+
+export const RuntimeExternalAgentHealthSchema = Type.Object({
+  targets: ReadonlyArraySchema(ExternalAgentTargetIdSchema, {
+    maxItems: ExternalAgentTargetIdSchema.anyOf.length,
+    uniqueItems: true,
+  }),
+  identityIsolation: Type.Optional(RuntimeHealthIdentityIsolationSchema),
+  liveSessionCount: Type.Integer({ minimum: 0 }),
+  liveSessions: ReadonlyArraySchema(RuntimeHealthLiveSessionSchema, {
+    maxItems: RUNTIME_HEALTH_LIVE_SESSION_LIMIT,
+  }),
+});
 export type RuntimeExternalAgentHealth = Static<typeof RuntimeExternalAgentHealthSchema>;
 
 /**

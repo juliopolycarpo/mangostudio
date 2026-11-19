@@ -9,14 +9,16 @@
  * from a newer peer is already accepted by a plain `Value.Check`, with no
  * help needed from this module. A schema that *is* closed
  * (`external-agent.*`'s params, results and event payload; `ToolchainSelection`;
- * `runtime.health`'s `externalAgents` subtree; `identityIsolation`) is closed
- * deliberately, as a review boundary — `contract.ts`: "a member nobody
- * declared is a vendor surface nobody reviewed." Relaxing those here would be
- * a second, contradicting interpretation of a schema-first contract, which is
- * exactly what this repo's shared-contract rule forbids: the TypeBox schema
- * in `apps/shared` is the single source of truth. A closed shape that proves
- * too brittle across releases gets opened there, once, with a regenerated
- * catalog — not tolerated a second time at this boundary.
+ * the `hello` manifest's `identityIsolation`) is closed deliberately, as a
+ * review boundary — `contract.ts`: "a member nobody declared is a vendor
+ * surface nobody reviewed." Relaxing those here would be a second,
+ * contradicting interpretation of a schema-first contract, which is exactly
+ * what this repo's shared-contract rule forbids: the TypeBox schema in
+ * `apps/shared` is the single source of truth. A closed shape that proves too
+ * brittle across releases gets opened there, once, with a regenerated catalog
+ * — not tolerated a second time at this boundary. `runtime.health`'s
+ * `externalAgents` subtree was one: it is now open, because a rejected health
+ * report freezes the manifest without any signal.
  */
 
 import type { TSchema } from 'typebox';
