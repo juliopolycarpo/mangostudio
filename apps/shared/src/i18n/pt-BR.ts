@@ -3339,6 +3339,9 @@ export const messages = {
         pulling: 'Baixando imagem',
         boundElsewhere: 'Vinculado a outro',
       },
+      handshakingLabel: 'Iniciando runtime',
+      handshakingHint:
+        'O processo do runtime foi iniciado e ainda não respondeu. A primeira inicialização pode levar vários segundos; o hub desiste se ele continuar em silêncio.',
       transport: {
         'in-process': 'Iniciado pelo hub',
         stdio: 'Processo local',

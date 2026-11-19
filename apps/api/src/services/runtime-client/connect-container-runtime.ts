@@ -71,7 +71,7 @@ export interface ContainerRuntimeConnection {
  * Reports something the card has to name: a long phase to wait through, or a
  * launch that only worked because the hub fell back to its own cache.
  */
-export type ContainerConnectProgress = (phase: 'pulling' | 'offline-cache') => void;
+export type ContainerConnectProgress = (phase: 'pulling' | 'offline-cache' | 'handshaking') => void;
 
 /**
  * What the attempt gives this launch. Structurally the manager's connect
@@ -176,6 +176,7 @@ export async function connectContainerRuntime(
             });
       },
       onClosed: onUnavailable,
+      onHandshakeStart: () => report?.('handshaking'),
       ...(context.signal ? { signal: context.signal } : {}),
     });
   } catch (error) {

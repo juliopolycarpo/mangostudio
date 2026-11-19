@@ -110,6 +110,9 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
   const busy = connect.isPending || disconnect.isPending || update.isPending || remove.isPending;
   const state = environment.status.state;
   const updating = environment.status.updating === true;
+  // The flag only means something while the attempt is still open; a stale one
+  // on a settled status would read as a hang that is already over.
+  const handshaking = state === 'connecting' && environment.status.handshaking === true;
 
   const runConnectionAction = async () => {
     setActionError(null);
@@ -220,11 +223,19 @@ function EnvironmentEntityCard({ environment }: { environment: Environment }) {
             ? labels.status.updating
             : environment.status.pullingImage
               ? labels.status.pulling
-              : environment.status.boundElsewhere
-                ? labels.status.boundElsewhere
-                : labels.status[state]}
+              : handshaking
+                ? labels.handshakingLabel
+                : environment.status.boundElsewhere
+                  ? labels.status.boundElsewhere
+                  : labels.status[state]}
         </span>
       </div>
+
+      {handshaking ? (
+        <p className="text-xs text-fg-muted" data-testid="environment-handshaking">
+          {labels.handshakingHint}
+        </p>
+      ) : null}
 
       {environment.status.boundElsewhere ? (
         <Callout tone="warning" data-testid="environment-bound-elsewhere">

@@ -211,6 +211,35 @@ describe('connectContainerRuntime progress', () => {
 
     expect(phases).toEqual(['offline-cache']);
   });
+
+  it('names the handshake once the engine client is spawned, after the pull', async () => {
+    const phases: string[] = [];
+
+    await expect(
+      connectContainerRuntime(
+        definition({ image: 'node:22' }),
+        noop,
+        { report: (phase) => phases.push(phase) },
+        {
+          engines: engines({
+            prepare: (_config, hooks) => {
+              hooks?.onPullStart?.();
+              return Promise.resolve('linux-x64' as const);
+            },
+          }),
+          resolveRuntimeBinary: () => Promise.resolve(RUNTIME_BINARY),
+          // Stands in for `spawnRuntimeChild`: it raises the callback the real
+          // one raises when the launcher returned a process.
+          spawn: (options) => {
+            options.onHandshakeStart?.();
+            return Promise.reject(new Error('handshake is not this test'));
+          },
+        }
+      )
+    ).rejects.toThrow(/handshake is not this test/);
+
+    expect(phases).toEqual(['pulling', 'handshaking']);
+  });
 });
 
 describe('connectContainerRuntime cancellation', () => {
