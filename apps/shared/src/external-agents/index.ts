@@ -229,6 +229,7 @@ export {
   ExternalVendorIdSchema,
   isExternalAgentTargetId,
   NO_EXTERNAL_AGENT_CAPABILITIES,
+  VendorText,
 } from './schemas';
 export { externalActivityStatusForTerminal } from './terminal-status';
 export { type ExternalContextUsage, externalContextUsage, externalReportedTokens } from './usage';

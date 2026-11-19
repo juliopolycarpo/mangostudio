@@ -83,8 +83,11 @@ export {
  * against `String.prototype.length`, i.e. UTF-16 units, so the schema bound is
  * the code-point limit doubled: a correctly bounded string can never be
  * rejected here, and an unbounded one is still refused before it is persisted.
+ *
+ * Exported so the SSE chunks that project these events carry the same bound
+ * from the same table, instead of restating the numbers in `streaming/`.
  */
-function VendorText(limit: ExternalTextLimit, options?: { minLength?: number }) {
+export function VendorText(limit: ExternalTextLimit, options?: { minLength?: number }) {
   return Type.String({ ...options, maxLength: schemaMaxLengthFor(limit) });
 }
 
