@@ -1,6 +1,5 @@
-import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { describe, expect, test } from 'bun:test';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -12,6 +11,7 @@ import {
   parseTestExecutables,
   summarizeResults,
 } from '../bench/rust-test-inventory';
+import { useScratchDirs } from './support/scratch-dirs';
 
 describe('logicalId', () => {
   test('keeps the binary name of an ordinary target', () => {
@@ -144,12 +144,14 @@ describe('parseTestExecutables', () => {
 // `compare`; its exit code is the gate. These tests run the real CLI so a
 // `compare` that stops failing on a mismatch fails here, not in a silent CI step.
 describe('compare command exit code', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'rust-test-inventory-'));
-  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+  // One directory per case, made when the case runs: a run that filters this
+  // describe out (`--test-name-pattern`) then creates nothing.
+  const makeDir = useScratchDirs();
 
   const libtest = { 'p/test/a::x': { ignored: false }, 'p/test/a::y': { ignored: true } };
 
   function compare(name: string, nextest: object) {
+    const dir = makeDir('rust-test-inventory-');
     const before = join(dir, `${name}-libtest.json`);
     const after = join(dir, `${name}-nextest.json`);
     writeFileSync(before, JSON.stringify(libtest));

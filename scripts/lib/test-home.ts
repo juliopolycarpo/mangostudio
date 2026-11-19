@@ -13,10 +13,17 @@
  * `RUSTUP_HOME`, `BUN_INSTALL`, Bun's install cache
  * are pinned to the real ones. `MANGOSTUDIO_RUNTIME_BINARY` and every other
  * inherited variable except the standard home/storage roots pass through untouched.
+ *
+ * The launcher also gives the tests a temp directory of their own (`TMPDIR`,
+ * `TMP`, `TEMP`), removes it afterwards, and fails a run that exited 0 but left
+ * entries in it, naming them. A test that forgets to remove a directory it made
+ * therefore fails its lane instead of filling the machine's `/tmp` over days, and
+ * a process killed before it could clean up still leaves nothing behind.
  */
 
+import { readdirSync } from 'node:fs';
 import { constants } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import {
   createTemporaryHome,
@@ -121,6 +128,58 @@ export function testChildEnv(
   return { ...rest, ...testHomeEnv(root, ambient, host) };
 }
 
+/** Prefix of every directory {@link createTestTemp} creates. */
+export const TEST_TMP_PREFIX = 'mangostudio-test-tmp-';
+
+/** Names the per-run temp directory for the shared shape check and its error messages. */
+const TEST_TMP_KIND: TemporaryHomeKind = {
+  prefix: TEST_TMP_PREFIX,
+  context: 'api-tests',
+  noun: 'test temp directory',
+};
+
+/**
+ * Points every way a process finds the OS temp directory at `root`: `TMPDIR`
+ * for POSIX and Rust's `std::env::temp_dir`, `TMP`/`TEMP` for Windows.
+ *
+ * @example
+ * testTempEnv('/tmp/mangostudio-test-tmp-a1b2c3').TMPDIR; // => '/tmp/mangostudio-test-tmp-a1b2c3'
+ */
+export function testTempEnv(root: string): Record<string, string> {
+  return { TMPDIR: root, TMP: root, TEMP: root };
+}
+
+/**
+ * The entries a run left in its temp directory, sorted. Every test that made
+ * one was meant to remove it, so each name is a leak.
+ *
+ * @example
+ * listTempLeftovers('/tmp/mangostudio-test-tmp-a1b2c3'); // => ['skills-doctor-x1y2z3']
+ */
+export function listTempLeftovers(root: string): string[] {
+  return readdirSync(root).sort();
+}
+
+/**
+ * The message for a run that left entries behind, naming each one.
+ *
+ * @example
+ * describeTempLeak('/tmp/t', ['a-1', 'a-2']);
+ * // => 'with-test-home: tests left 2 entries in their temp directory /tmp/t | expected: none | received: a-1, a-2. Create ...'
+ */
+export function describeTempLeak(root: string, names: readonly string[]): string {
+  const shown = names.slice(0, MAX_LEAKS_SHOWN).join(', ');
+  const more = names.length > MAX_LEAKS_SHOWN ? `, … (${names.length - MAX_LEAKS_SHOWN} more)` : '';
+  return (
+    `with-test-home: tests left ${names.length} ${names.length === 1 ? 'entry' : 'entries'} in their temp directory ` +
+    `${root} | expected: none | received: ${shown}${more}. ` +
+    'Create temporary directories through useScratchDirs() (scripts/tests/support/scratch-dirs.ts) or remove them in afterEach/afterAll.'
+  );
+}
+
+/** How many leaked names the message lists before it counts the rest. */
+const MAX_LEAKS_SHOWN = 20;
+
 /** Creates a fresh test home under the OS temp directory. */
 function createTestHome(host: TemporaryHomeHost = launcherHost()): string {
   return createTemporaryHome(TEST_HOME_KIND, host);
@@ -177,6 +236,11 @@ export function shellExitCode(exitCode: number | null, signal: number | null): n
  * Termination signals are forwarded to the child instead of ending this
  * process, so the home is still removed after an interrupted run.
  *
+ * The child also gets a temp directory of its own (`TMPDIR`, `TMP`, `TEMP`),
+ * which holds the home and is removed with it. A run that exits 0 but left
+ * another entry there is reported as a failure naming the entry, so a test
+ * that forgets to remove its `mkdtemp` directory fails its lane.
+ *
  * @example
  * const code = await runWithTestHome(['bun', 'test', 'tests/unit']);
  */
@@ -189,14 +253,21 @@ export async function runWithTestHome(
     throw new Error('with-test-home: expected a command to run | received: none');
   }
   const host = launcherHost(ambient);
-  const root = createTestHome(host);
+  // The home lives inside the temp directory, not beside it: the lane's own
+  // shape check wants the home to be a direct child of the temp directory the
+  // lane sees, and a test that asserts its temp directory is outside the home
+  // keeps passing (the temp directory is the home's parent, not its child).
+  const tempRoot = createTemporaryHome(TEST_TMP_KIND, host);
+  const tempHost = { ...host, tmpDir: tempRoot };
+  let root: string | undefined;
   const [program, ...args] = command as [string, ...string[]];
   const forwarders: (() => void)[] = [];
   try {
+    root = createTestHome(tempHost);
     const child = dependencies.spawn(
       // The same Bun that runs the launcher, not whatever PATH says next.
       [program === 'bun' ? process.execPath : program, ...args],
-      testChildEnv(root, ambient, host)
+      { ...testChildEnv(root, ambient, host), ...testTempEnv(tempRoot) }
     );
     for (const name of FORWARDED) {
       const forward = (): void => {
@@ -206,11 +277,25 @@ export async function runWithTestHome(
       forwarders.push(() => process.off(name, forward));
     }
     const exitCode = await child.exited;
-    return shellExitCode(exitCode, child.signalCode ? signalNumber(child.signalCode) : null);
+    const code = shellExitCode(exitCode, child.signalCode ? signalNumber(child.signalCode) : null);
+    return reportTempLeaks(tempRoot, basename(root), code);
   } finally {
     for (const detach of forwarders) detach();
-    removeHomeQuietly(root, host);
+    if (root) removeHomeQuietly(root, tempHost);
+    removeTempQuietly(tempRoot, host);
   }
+}
+
+/**
+ * Fails a run that exited 0 but left entries in its temp directory, and names
+ * them. A run that already failed keeps its own code (the watchdog reads it),
+ * but its leftovers are listed too, so the cause is not hidden behind it.
+ */
+function reportTempLeaks(tempRoot: string, homeName: string, code: number): number {
+  const leftovers = listTempLeftovers(tempRoot).filter((name) => name !== homeName);
+  if (leftovers.length === 0) return code;
+  process.stderr.write(`${describeTempLeak(tempRoot, leftovers)}\n`);
+  return code === 0 ? 1 : code;
 }
 
 /**
@@ -234,6 +319,15 @@ function removeHomeQuietly(root: string, host: TemporaryHomeHost): void {
     removeTestHome(root, host);
   } catch (caught) {
     // A leftover directory must not turn a green run red or hide its exit code.
+    const reason = caught instanceof Error ? caught.message : String(caught);
+    process.stderr.write(`with-test-home: could not remove ${root}: ${reason}\n`);
+  }
+}
+
+function removeTempQuietly(root: string, host: TemporaryHomeHost): void {
+  try {
+    removeTemporaryHome(root, TEST_TMP_KIND, host);
+  } catch (caught) {
     const reason = caught instanceof Error ? caught.message : String(caught);
     process.stderr.write(`with-test-home: could not remove ${root}: ${reason}\n`);
   }
