@@ -475,6 +475,18 @@ pub fn windows_default_fnm_dir(path_env: &PathEnv) -> Option<String> {
     Some(join_path("win32", &[appdata, "fnm"]))
 }
 
+/// Volta's root on Windows when `VOLTA_HOME` is unset: its installer
+/// defaults to `%LOCALAPPDATA%\Volta`, which has no `.volta` segment for the
+/// POSIX path fallback to match.
+#[must_use]
+pub fn windows_default_volta_dir(path_env: &PathEnv) -> Option<String> {
+    if !path_env.is_windows() {
+        return None;
+    }
+    let local_app_data = path_env.non_blank_var("LOCALAPPDATA")?;
+    Some(join_path("win32", &[local_app_data, "Volta"]))
+}
+
 fn detect_version_manager(
     raw_path: &str,
     realpath: &str,
@@ -498,7 +510,10 @@ fn detect_version_manager(
         ),
         (
             VersionManagerId::Volta,
-            vec![path_env.env_var("VOLTA_HOME").map(str::to_string)],
+            vec![
+                path_env.env_var("VOLTA_HOME").map(str::to_string),
+                windows_default_volta_dir(path_env),
+            ],
         ),
     ];
 
@@ -1073,6 +1088,22 @@ mod tests {
             home_dir: "/home/tester".to_string(),
             env: env(&[("PATH", path)]),
         }
+    }
+
+    #[test]
+    fn classifies_a_windows_volta_node_under_the_default_local_app_data_root() {
+        let path_env = PathEnv {
+            platform: "win32".to_string(),
+            home_dir: r"C:\Users\x".to_string(),
+            env: env(&[("PATH", ""), ("LOCALAPPDATA", r"C:\Users\x\AppData\Local")]),
+        };
+        let node_path = r"C:\Users\x\AppData\Local\Volta\bin\node.exe";
+
+        assert_eq!(
+            detect_version_manager(node_path, node_path, &path_env),
+            Some(VersionManagerId::Volta),
+            "win32 Volta default root with no VOLTA_HOME: expected Volta for {node_path}"
+        );
     }
 
     #[tokio::test]
