@@ -521,6 +521,7 @@ MANGO_API_KEY='mango_…' bun run scripts/examples/external-api-smoke.ts http://
 | `hub-footprint.ts`           | Compiled hubs side by side: binary size, start → first healthy `/api/health`, idle and post-workload RSS (Linux `/proc`)                                  |
 | `runtime-handshake.ts`       | Runtime child over stdio: process start → `hello` → first request, min/median/p95/max                                                                     |
 | `grep.ts`                    | Runtime `fs.grep` over stdio: 1/100/1000 small files, a large file, peak RSS, cancel                                                                      |
+| `fs-walk.ts`                 | Runtime `fs.glob` and `fs.grep` over one tree, with and without a path policy (capability walk against ambient walk)                                      |
 | `runtime-results.ts`         | Runtime `fs.list-directory` and `fs.read-file` over stdio, and start → first answer; peak RSS, answer digest compared across binaries                     |
 | `runtime-requests.ts`        | Runtime `fs.glob` and small-request and large-params round trips over one session; paired median delta and pairs won                                      |
 | `line-decoder.ts`            | Protocol NDJSON `LineDecoder`: ns per byte for large records in small pieces and for many short records, peak RSS                                         |
@@ -660,6 +661,18 @@ bun run scripts/bench/grep.ts target/release/mangostudio-runtime --runs 15
 bun run scripts/bench/grep.ts <binary> --scenario files-1000,cancel --json
 bun run scripts/bench/grep.ts base=<old> head=<new> --scenario large-file --large-mib 64 --runs 10
 bun run scripts/bench/grep.ts <binary> --scenario large-file --pattern '(\d+)-NEEDLE$' --ignore-case
+```
+
+`fs-walk.ts` times `fs.glob` (`**/*.ts`) and `fs.grep` (a literal, `glob: "**/*.ts"`) over one tree,
+each with and without a path policy, which is the ratio a restricted chat pays for the capability walk.
+The tree is generated (`--dirs` directories of `--files-per-dir` files, every fifth a `.ts` file) or
+named with `--tree`. Like `grep.ts` it spawns one fresh child per sample and rotates the run order
+of several binaries; the page cache is shared, so keep `--warmup` above zero. `--case` runs one of
+`glob-ambient`, `glob-restricted`, `grep-ambient`, `grep-restricted`.
+
+```bash
+bun run scripts/bench/fs-walk.ts base=<old> head=<new> --runs 25 --warmup 3
+bun run scripts/bench/fs-walk.ts <binary> --tree "$PWD" --case glob-restricted --json
 ```
 
 `runtime-results.ts` measures the calls whose answer is large: `fs.list-directory` over `--entries`
