@@ -9,6 +9,7 @@ import { join } from 'node:path';
 
 import {
   createUserServiceManager,
+  RestartRetargetedError,
   type UserServiceDefinition,
   type UserServiceExecDeps,
   type UserServiceManager,
@@ -292,11 +293,15 @@ export interface RestartHubServiceOptions {
 /**
  * Bring the hub's unit up, first moving a stale one onto the launcher as part
  * of the same supervisor operation (see `UserServiceManager.restartRetargeted`).
- * The move is a repair, not the point of the call: when it fails the unit is
- * brought up as installed after a warning that names the stale path and the
- * command that rewrites the unit, so an upgrade or a restart never ends with
- * the hub down because a unit file could not be rewritten. Returns the move it
- * made, if any.
+ * The move is a repair, not the point of the call: when the rewrite fails the
+ * unit is brought up as installed after a warning that names the stale path and
+ * the command that rewrites the unit, so an upgrade or a restart never ends
+ * with the hub down because a unit file could not be rewritten.
+ *
+ * A failure after the rewrite is a different thing: the unit is already moved
+ * and its restart failed, so a second restart as installed would only meet the
+ * same refusal. That error is thrown as it is, saying the unit was updated.
+ * Returns the move it made, if any.
  * // Usage: const moved = await restartHubService(manager, currentLauncherPath())
  */
 export async function restartHubService(
@@ -310,7 +315,13 @@ export async function restartHubService(
       await manager.restartRetargeted(stale.to);
       return stale;
     } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
+      if (error instanceof RestartRetargetedError && error.phase === 'restart') throw error;
+      const reason =
+        error instanceof RestartRetargetedError
+          ? error.reason
+          : error instanceof Error
+            ? error.message
+            : String(error);
       (options.warn ?? ((message) => process.stderr.write(`mangostudio: ${message}\n`)))(
         `Could not move the service unit off ${stale.from} onto ${stale.to} (${reason}); starting it as installed. Run "mangostudio service install" to repair the unit.`
       );

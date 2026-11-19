@@ -4,6 +4,7 @@ import {
   createUserServiceManager,
   decodePowerShellArgv,
   execPathFromUnitBody,
+  RestartRetargetedError,
   type UserServiceManager,
 } from '@mangostudio/shared/machine/service';
 import type { InstallManager } from '@mangostudio/shared/updates';
@@ -286,6 +287,61 @@ describe('a unit written before the launcher was recorded', () => {
     expect(warnings[0]).toContain('launchctl bootstrap failed (exit 5)');
   });
 
+  it('says the unit could not be moved only for a failed rewrite, and then restarts it as installed', async () => {
+    const [layout] = LAYOUTS;
+    if (!layout) throw new Error('no layouts');
+    const manager = new FakeServiceManager({
+      ...installedAndRunning(),
+      execPath: layout.versioned,
+    });
+    manager.restartRetargetedFailWith = new RestartRetargetedError({
+      phase: 'rewrite',
+      program: layout.launcher,
+      unitMoved: false,
+      cause: new Error('EACCES: permission denied'),
+    });
+    const warnings: string[] = [];
+
+    await restartHubService(manager, layout.launcher, {
+      probe: { platform: 'linux', pathExists: () => true },
+      warn: (message) => warnings.push(message),
+    });
+
+    expect(manager.calls).toEqual(['status', 'restartRetargeted', 'restart']);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('Could not move the service unit');
+    // The reason once, not the phase wording wrapped around it a second time.
+    expect(warnings[0]).toContain('(EACCES: permission denied)');
+    expect(warnings[0]).not.toContain('Could not move the service unit onto');
+  });
+
+  it('surfaces a failed restart of an updated unit and does not restart it again', async () => {
+    const [layout] = LAYOUTS;
+    if (!layout) throw new Error('no layouts');
+    const manager = new FakeServiceManager({
+      ...installedAndRunning(),
+      execPath: layout.versioned,
+    });
+    const restartFailure = new RestartRetargetedError({
+      phase: 'restart',
+      program: layout.launcher,
+      unitMoved: true,
+      cause: new Error('systemctl restart failed (exit 1): Unit is masked'),
+    });
+    manager.restartRetargetedFailWith = restartFailure;
+    const warnings: string[] = [];
+
+    const failure = await restartHubService(manager, layout.launcher, {
+      probe: { platform: 'linux', pathExists: () => true },
+      warn: (message) => warnings.push(message),
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBe(restartFailure);
+    expect(manager.calls).toEqual(['status', 'restartRetargeted']);
+    // Not the "could not move" advice: the unit was moved.
+    expect(warnings).toEqual([]);
+  });
+
   it('does not run a plain restart after a retarget that worked', async () => {
     const [layout] = LAYOUTS;
     if (!layout) throw new Error('no layouts');
@@ -346,30 +402,48 @@ describe('a unit written before the launcher was recorded', () => {
       expect(execPathFromUnitBody(host.unitBody() ?? '')).toBe(layout.launcher);
     });
 
-    it('surfaces a bootstrap that never succeeds instead of reporting a restart of an unloaded job', async () => {
+    // The unit was rewritten and the job booted out when the bootstrap gave up.
+    // Restarting again as installed would run into the same refusal (or start
+    // the new program through a second path), so the failure is the answer.
+    it('surfaces a bootstrap that never succeeds as a failed restart of an updated unit, without a second restart', async () => {
       const { host, manager, layout } = await staleDarwinUnit();
       host.failLaunchctl('bootstrap', EIO, 50);
-      host.lingerAfterBootout = 10;
-
+      host.lingerAfterBootout = 4;
       const warnings: string[] = [];
 
-      // The fallback restart cannot kick a job that never loaded either, so the
-      // call fails rather than reporting a bounce of an unloaded job.
-      await expect(
-        restartHubService(manager, layout.launcher, {
-          probe: { platform: 'darwin', pathExists: () => true },
-          warn: (message) => warnings.push(message),
-        })
-      ).rejects.toMatchObject({
-        message: expect.stringContaining('launchctl kickstart failed (exit 113)'),
-      });
+      const failure = await restartHubService(manager, layout.launcher, {
+        probe: { platform: 'darwin', pathExists: () => true },
+        warn: (message) => warnings.push(message),
+      }).catch((error: unknown) => error);
 
-      // The retarget itself never kicked: its bootstrap was required and failed.
-      expect(host.commands.filter((command) => command.includes('kickstart'))).toHaveLength(1);
-      expect(host.jobLoaded).toBe(false);
-      expect(warnings.join('\n')).toContain(
+      expect(failure).toBeInstanceOf(RestartRetargetedError);
+      expect(failure).toMatchObject({ phase: 'restart', unitMoved: true });
+      expect((failure as Error).message).toContain(`updated to run ${layout.launcher}`);
+      expect((failure as Error).message).toContain(
         'launchctl bootstrap failed (exit 5): Bootstrap failed: 5: Input/output error'
       );
+      // Neither a kickstart nor a bootstrap beyond the retarget's own bounded attempts.
+      expect(host.commands.filter((command) => command.includes('kickstart'))).toEqual([]);
+      expect(host.commands.filter((command) => command.includes('bootstrap'))).toHaveLength(5);
+      expect(host.jobLoaded).toBe(false);
+      // The plist is on the new program, so a later `service start` runs it.
+      expect(execPathFromUnitBody(host.unitBody() ?? '')).toBe(layout.launcher);
+      expect(warnings).toEqual([]);
+    });
+
+    it('a later start loads the job from the rewritten plist after that failed restart', async () => {
+      const { host, manager, layout } = await staleDarwinUnit();
+      host.failLaunchctl('bootstrap', EIO, 5);
+      // Listed for exactly the four waits between the five attempts.
+      host.lingerAfterBootout = 4;
+      await restartHubService(manager, layout.launcher, {
+        probe: { platform: 'darwin', pathExists: () => true },
+      }).catch(() => undefined);
+      expect(host.jobLoaded).toBe(false);
+
+      await manager.start();
+
+      expect(host.jobLoaded).toBe(true);
     });
   });
 });

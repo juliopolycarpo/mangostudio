@@ -18,12 +18,14 @@ import {
   renderScheduledTaskRunnerScript,
   renderSystemdUnitFile,
   replaceUnitProgram,
+  RestartRetargetedError,
   retargetScheduledTaskArguments,
   systemdUserUnitPath,
   type UserServiceDefinition,
   type UserServiceExecDeps,
   type UserServiceExecResult,
   type UserServiceIdentity,
+  type UserServiceManager,
 } from '../../../src/machine/user-service';
 import { RuntimeServiceManagementError } from '../../../src/runtime-contract';
 import { UserServiceStatusSchema } from '../../../src/runtime-home';
@@ -854,7 +856,8 @@ describe('createUserServiceManager restartRetargeted', () => {
     await expect(
       createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE)
     ).rejects.toMatchObject({
-      message: `launchctl bootstrap failed (exit 5): ${EIO_STDERR}`,
+      phase: 'restart',
+      reason: `launchctl bootstrap failed (exit 5): ${EIO_STDERR}`,
     });
 
     // Bounded: a handful of attempts, not the twenty the host would answer.
@@ -870,7 +873,7 @@ describe('createUserServiceManager restartRetargeted', () => {
     await expect(
       createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE)
     ).rejects.toMatchObject({
-      message: 'launchctl bootstrap failed (exit 1): Load failed: 1: bad plist',
+      reason: 'launchctl bootstrap failed (exit 1): Load failed: 1: bad plist',
     });
 
     expect(host.argv.filter((argv) => argv[1] === 'bootstrap')).toHaveLength(1);
@@ -884,7 +887,7 @@ describe('createUserServiceManager restartRetargeted', () => {
 
     await expect(
       createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE)
-    ).rejects.toMatchObject({ message: `launchctl bootstrap failed (exit 5): ${EIO_STDERR}` });
+    ).rejects.toMatchObject({ reason: `launchctl bootstrap failed (exit 5): ${EIO_STDERR}` });
 
     expect(host.argv.filter((argv) => argv[1] === 'bootstrap')).toHaveLength(1);
     expect(host.sleeps).toEqual([]);
@@ -906,7 +909,7 @@ describe('createUserServiceManager restartRetargeted', () => {
 
     await expect(
       createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE)
-    ).rejects.toMatchObject({ message: `launchctl bootstrap failed (exit 1): ${EIO_STDERR}` });
+    ).rejects.toMatchObject({ reason: `launchctl bootstrap failed (exit 1): ${EIO_STDERR}` });
 
     expect(host.argv.filter((argv) => argv[1] === 'bootstrap')).toHaveLength(1);
   });
@@ -939,7 +942,7 @@ describe('createUserServiceManager restartRetargeted', () => {
     await expect(
       createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE)
     ).rejects.toMatchObject({
-      message: 'launchctl bootout failed (exit 1): Operation not permitted',
+      reason: 'launchctl bootout failed (exit 1): Operation not permitted',
     });
 
     expect(host.argv.some((argv) => argv[1] === 'bootstrap')).toBe(false);
@@ -979,6 +982,108 @@ describe('createUserServiceManager restartRetargeted', () => {
     expect(host.argv.at(-1)).toEqual(['launchctl', 'kickstart', '-k', LAUNCHD_TARGET]);
   });
 
+  describe('failure phases', () => {
+    const LINUX_UNIT_PATH = '/home/test/.config/systemd/user/example.service';
+
+    function linuxHost(failing?: string): FakeServiceHost {
+      const host = new FakeServiceHost({
+        onExec: (argv) =>
+          failing !== undefined && argv.includes(failing)
+            ? { exitCode: 1, stdout: '', stderr: `${failing} refused` }
+            : undefined,
+      });
+      host.files.set(LINUX_UNIT_PATH, renderSystemdUnitFile(VERSIONED));
+      return host;
+    }
+
+    async function failureOf(manager: UserServiceManager): Promise<unknown> {
+      return await manager.restartRetargeted(STABLE).catch((error: unknown) => error);
+    }
+
+    it('on linux names the rewrite phase when systemd cannot reread the unit, without restarting', async () => {
+      const host = linuxHost('daemon-reload');
+
+      const failure = await failureOf(createUserServiceManager(IDENTITY, host.deps()));
+
+      expect(failure).toBeInstanceOf(RestartRetargetedError);
+      expect(failure).toMatchObject({ phase: 'rewrite', unitMoved: false });
+      expect(host.argv.some((argv) => argv.includes('restart'))).toBe(false);
+    });
+
+    it('on linux names the rewrite phase for a unit that names no program', async () => {
+      const host = new FakeServiceHost();
+      host.files.set(LINUX_UNIT_PATH, '[Service]\nType=simple\n');
+
+      const failure = await failureOf(createUserServiceManager(IDENTITY, host.deps()));
+
+      expect(failure).toMatchObject({ phase: 'rewrite', unitMoved: false });
+      expect((failure as Error).message).toContain('names no program to retarget');
+    });
+
+    it('on linux names the restart phase, with the unit already moved, when the restart fails', async () => {
+      const host = linuxHost('restart');
+
+      const failure = await failureOf(createUserServiceManager(IDENTITY, host.deps()));
+
+      expect(failure).toBeInstanceOf(RestartRetargetedError);
+      expect(failure).toMatchObject({ phase: 'restart', unitMoved: true });
+      expect((failure as Error).message).toContain(`updated to run ${STABLE}`);
+      expect((failure as Error).message).toContain('restart refused');
+      // The file stays moved, so a later start or restart runs the new program.
+      expect(execPathFromUnitBody(host.files.get(LINUX_UNIT_PATH) ?? '')).toBe(STABLE);
+    });
+
+    it('on linux names the restart phase without a move when the unit already ran the program', async () => {
+      const host = linuxHost('restart');
+      host.files.set(
+        LINUX_UNIT_PATH,
+        renderSystemdUnitFile({ ...VERSIONED, argv: [STABLE, 'serve'] })
+      );
+
+      await expect(
+        failureOf(createUserServiceManager(IDENTITY, host.deps()))
+      ).resolves.toMatchObject({ phase: 'restart', unitMoved: false });
+    });
+
+    it('on darwin names the rewrite phase for a plist that names no program, leaving the job loaded', async () => {
+      const host = darwinHost();
+      host.files.set(PLIST_PATH, '<plist><dict></dict></plist>');
+
+      const failure = await failureOf(createUserServiceManager(IDENTITY, host.deps()));
+
+      expect(failure).toMatchObject({ phase: 'rewrite', unitMoved: false });
+      // Nothing was rewritten, so nothing was booted out either.
+      expect(host.argv).toEqual([]);
+    });
+
+    it('on darwin names the restart phase, with the plist already moved, when the bootstrap gives up', async () => {
+      const host = darwinHost(Array.from({ length: 20 }, eio));
+
+      const failure = await failureOf(createUserServiceManager(IDENTITY, host.deps()));
+
+      expect(failure).toBeInstanceOf(RestartRetargetedError);
+      expect(failure).toMatchObject({ phase: 'restart', unitMoved: true });
+      expect((failure as Error).message).toContain('launchctl bootstrap failed (exit 5)');
+      expect(execPathFromUnitBody(host.files.get(PLIST_PATH) ?? '')).toBe(STABLE);
+    });
+
+    it('on darwin names the restart phase without a move when the kickstart of an unchanged plist fails', async () => {
+      const host = new FakeServiceHost({
+        platform: 'darwin',
+        onExec: (argv) =>
+          argv[1] === 'kickstart' ? { exitCode: 113, stdout: '', stderr: 'no service' } : undefined,
+      });
+      host.files.set(
+        PLIST_PATH,
+        renderLaunchdPlistFile('com.example.unit', { ...VERSIONED, argv: [STABLE, 'serve'] })
+      );
+
+      await expect(
+        failureOf(createUserServiceManager(IDENTITY, host.deps()))
+      ).resolves.toMatchObject({ phase: 'restart', unitMoved: false });
+    });
+  });
+
   describe('on win32', () => {
     const OLD_PROGRAM = 'C:\\Users\\me\\scoop\\apps\\mangostudio\\0.1.1\\mangostudio.exe';
     const NEW_PROGRAM = "C:\\Users\\it's me\\scoop\\apps\\mangostudio\\current\\mangostudio.exe";
@@ -1005,7 +1110,11 @@ describe('createUserServiceManager restartRetargeted', () => {
     }
 
     /** A host that answers the status script with `taskArguments` and records every script. */
-    function hostWithTask(taskArguments: string | null, setExit = 0): FakeServiceHost {
+    function hostWithTask(
+      taskArguments: string | null,
+      setExit = 0,
+      startExit = 0
+    ): FakeServiceHost {
       return new FakeServiceHost({
         platform: 'win32',
         onExec: (argv) => {
@@ -1029,6 +1138,9 @@ describe('createUserServiceManager restartRetargeted', () => {
           }
           if (script.includes('Set-ScheduledTask') && setExit !== 0) {
             return { exitCode: setExit, stdout: '', stderr: 'Access is denied' };
+          }
+          if (script.includes('Start-ScheduledTask') && startExit !== 0) {
+            return { exitCode: startExit, stdout: '', stderr: 'The task is disabled' };
           }
           return { exitCode: 0, stdout: '', stderr: '' };
         },
@@ -1112,10 +1224,43 @@ describe('createUserServiceManager restartRetargeted', () => {
       await expect(
         createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(NEW_PROGRAM)
       ).rejects.toMatchObject({
-        message: 'Set-ScheduledTask failed (exit 1): Access is denied',
+        phase: 'rewrite',
+        reason: 'Set-ScheduledTask failed (exit 1): Access is denied',
       });
       // A task left as it was is not started as if it had been moved.
       expect(scriptsRun(host).some((script) => script.includes('Start-ScheduledTask'))).toBe(false);
+    });
+
+    it('names the restart phase, with the task already moved, when Start-ScheduledTask fails', async () => {
+      const host = hostWithTask(taskArgumentsFor(WINDOWS_DEFINITION), 0, 1);
+
+      const failure = await createUserServiceManager(IDENTITY, host.deps())
+        .restartRetargeted(NEW_PROGRAM)
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(RestartRetargetedError);
+      expect(failure).toMatchObject({ phase: 'restart', unitMoved: true });
+      expect((failure as Error).message).toContain('The service unit was updated to run');
+      expect((failure as Error).message).toContain('The task is disabled');
+    });
+
+    it('names the rewrite phase, with the task untouched, when Set-ScheduledTask fails', async () => {
+      const host = hostWithTask(taskArgumentsFor(WINDOWS_DEFINITION), 1);
+
+      const failure = await createUserServiceManager(IDENTITY, host.deps())
+        .restartRetargeted(NEW_PROGRAM)
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(RestartRetargetedError);
+      expect(failure).toMatchObject({ phase: 'rewrite', unitMoved: false });
+    });
+
+    it('names the restart phase without a move when the task already ran the program', async () => {
+      const host = hostWithTask(taskArgumentsFor(WINDOWS_DEFINITION), 0, 1);
+
+      await expect(
+        createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(OLD_PROGRAM)
+      ).rejects.toMatchObject({ phase: 'restart', unitMoved: false });
     });
 
     it('replaces only the first program line of the runner script', () => {

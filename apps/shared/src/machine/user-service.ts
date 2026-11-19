@@ -78,6 +78,53 @@ export interface UserServiceDefinition {
   readonly logFile?: string;
 }
 
+/**
+ * Which half of {@link UserServiceManager.restartRetargeted} failed. `rewrite`
+ * is everything up to the supervisor reading the new definition: the unit is
+ * as it was. `restart` is the bounce after it: the unit already names the new
+ * program.
+ */
+export type RestartRetargetedPhase = 'rewrite' | 'restart';
+
+/**
+ * A failed {@link UserServiceManager.restartRetargeted}, naming the phase. A
+ * caller that wants the unit up as installed after a failed rewrite must not do
+ * the same after a failed restart: the unit is already moved, and a second
+ * restart would run into whatever the first one hit.
+ * // Usage: if (error instanceof RestartRetargetedError && error.phase === 'restart') throw error
+ */
+export class RestartRetargetedError extends RuntimeServiceManagementError {
+  readonly phase: RestartRetargetedPhase;
+  /** Whether the unit on disk (or in Task Scheduler) was repointed before the failure. */
+  readonly unitMoved: boolean;
+  /** The underlying message, without the phase wording around it. */
+  readonly reason: string;
+  override readonly cause: unknown;
+
+  constructor(input: {
+    readonly phase: RestartRetargetedPhase;
+    readonly program: string;
+    readonly unitMoved: boolean;
+    readonly cause: unknown;
+  }) {
+    const reason = input.cause instanceof Error ? input.cause.message : String(input.cause);
+    super(
+      'runtime_service_unsupported',
+      input.phase === 'rewrite'
+        ? `Could not move the service unit onto ${input.program}: ${reason}`
+        : input.unitMoved
+          ? `The service unit was updated to run ${input.program}, but restarting it failed: ${reason}`
+          : `Restarting the service unit failed: ${reason}`,
+      { phase: input.phase, program: input.program }
+    );
+    this.name = 'RestartRetargetedError';
+    this.phase = input.phase;
+    this.unitMoved = input.unitMoved;
+    this.reason = reason;
+    this.cause = input.cause;
+  }
+}
+
 export interface UserServiceManager {
   install(definition: UserServiceDefinition): Promise<void>;
   uninstall(): Promise<void>;
@@ -100,10 +147,11 @@ export interface UserServiceManager {
    * One operation rather than a retarget followed by `restart()` because on
    * launchd the loaded job only rereads its plist across a bootout and a
    * bootstrap, and a bootstrap that is allowed to fail there leaves the job
-   * unloaded. A failure leaves the rewritten definition on disk; `restart()`
-   * or `start()` still brings the unit up from it. Like `restart()`, a caller
-   * that is the service itself is stopped partway on launchd, so it must run
-   * this from a process outside the unit.
+   * unloaded. A failure is a {@link RestartRetargetedError} naming the phase:
+   * a failed `rewrite` leaves the unit as it was, a failed `restart` leaves the
+   * rewritten definition in place (`start()` still brings the unit up from it).
+   * Like `restart()`, a caller that is the service itself is stopped partway on
+   * launchd, so it must run this from a process outside the unit.
    */
   restartRetargeted(program: string): Promise<boolean>;
   /** The installed unit body, or null when nothing is installed. */
@@ -839,15 +887,17 @@ export function createUserServiceManager(
     restart: restartSystemd,
     async restartRetargeted(program: string) {
       await requireSystemd();
-      const updated = await retargetedUnitBody(program);
-      if (updated !== null) {
+      const moved = await retargetPhase('rewrite', program, false, async () => {
+        const updated = await retargetedUnitBody(program);
+        if (updated === null) return false;
         await deps.writeFile(unitPath as string, updated);
         // The running process keeps the old program until the restart; systemd
         // must reread the file first or that restart reuses the old one.
         await requireCommand(['systemctl', '--user', 'daemon-reload'], 'systemctl daemon-reload');
-      }
-      await restartSystemd();
-      return updated !== null;
+        return true;
+      });
+      await retargetPhase('restart', program, moved, restartSystemd);
+      return moved;
     },
   };
 
@@ -974,16 +1024,17 @@ export function createUserServiceManager(
     // running one.
     restart: () => darwinBounce(true),
     async restartRetargeted(program: string) {
-      const updated = await retargetedUnitBody(program);
-      if (updated === null) {
-        await darwinBounce(true);
-        return false;
-      }
-      await deps.writeFile(unitPath as string, updated);
+      const updated = await retargetPhase('rewrite', program, false, async () => {
+        const body = await retargetedUnitBody(program);
+        if (body !== null) await deps.writeFile(unitPath as string, body);
+        return body !== null;
+      });
       // launchd keeps the plist it loaded: only a bootout and a bootstrap make
       // the job read the rewritten file, so both belong to this one operation.
-      await darwinReload();
-      return true;
+      await retargetPhase('restart', program, updated, () =>
+        updated ? darwinReload() : darwinBounce(true)
+      );
+      return updated;
     },
   };
 
@@ -1034,8 +1085,10 @@ export function createUserServiceManager(
       runPowerShell(renderScheduledTaskVerbScript('stop', identity.taskName), 'Stop-ScheduledTask'),
     restart: restartTask,
     async restartRetargeted(program: string) {
-      const retargeted = await retargetTask(program);
-      await restartTask();
+      const retargeted = await retargetPhase('rewrite', program, false, () =>
+        retargetTask(program)
+      );
+      await retargetPhase('restart', program, retargeted, restartTask);
       return retargeted;
     },
   };
@@ -1074,6 +1127,20 @@ export function createUserServiceManager(
     if (chosen) return chosen;
     return refuseUnsupported('No user-level service manager is supported on this platform.');
   };
+
+  /** Runs one half of `restartRetargeted`, so a failure names the half it came from. */
+  async function retargetPhase<T>(
+    phase: RestartRetargetedPhase,
+    program: string,
+    unitMoved: boolean,
+    work: () => Promise<T>
+  ): Promise<T> {
+    try {
+      return await work();
+    } catch (cause) {
+      throw new RestartRetargetedError({ phase, program, unitMoved, cause });
+    }
+  }
 
   async function run(argv: readonly string[]): Promise<UserServiceExecResult> {
     const env = argv[0] === 'systemctl' ? ((await sessionBus()) ?? deps.env) : deps.env;
