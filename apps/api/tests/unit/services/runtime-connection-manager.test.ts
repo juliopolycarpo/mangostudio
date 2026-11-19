@@ -42,6 +42,7 @@ import { RuntimeDiscoveryCache } from '../../../src/services/runtime-client/runt
 import { insertTestChat, insertTestUser } from '../../support/factories';
 import { useLocalConnectDeadlines } from '../../support/local-connect-deadlines';
 import { moduleMockerFor } from '../../support/mocks/module-mocks';
+import { RecordingDiagnosticLogger } from '../../support/mocks/recording-diagnostic-logger';
 import { connectTestRuntime, type TestRuntime } from '../../support/runtime-fixture';
 
 const mockModule = moduleMockerFor(import.meta.dir);
@@ -1374,6 +1375,69 @@ describe('RuntimeConnectionManager', () => {
       targets = ['codex', 'cursor'];
       const refreshed = await manager.refreshManifest('user-1', 'devbox');
       expect(refreshed.manifest?.externalAgents).toEqual(['codex', 'cursor']);
+    } finally {
+      manager.disconnect('user-1', 'devbox');
+      await runtime.close();
+    }
+  });
+
+  // A newer runtime that hosts one more vendor reports its id in `targets` and in a live
+  // session. That is an additive enum member, which the closed id union refused, taking the
+  // whole report with it and leaving the manifest frozen with nothing logged.
+  it('refreshes the manifest from a health report that names a target this hub does not know, and logs it once', async () => {
+    const hello: RuntimeCapabilityManifest = {
+      ...TEST_MANIFEST,
+      features: { ...TEST_MANIFEST.features, externalAgents: true },
+    };
+    let targets = ['codex', 'gemini'];
+    const runtime = await connectTestRuntime({
+      manifest: hello,
+      handlers: {
+        'runtime.health': () => ({
+          ...HEALTH_REPORT,
+          allow: { ...HEALTH_REPORT.allow, externalAgents: true },
+          externalAgents: {
+            targets,
+            liveSessionCount: 2,
+            liveSessions: [
+              { sessionId: 's-1', targetId: 'codex', ageMs: 5, state: 'running' },
+              { sessionId: 's-2', targetId: 'gemini', ageMs: 6, state: 'running' },
+            ],
+          },
+        }),
+      },
+    });
+    const healthLogger = new RecordingDiagnosticLogger();
+    const manager = new RuntimeConnectionManager({
+      resolveEnvironment: () => Promise.resolve(definition()),
+      connectors: { stdio: () => Promise.resolve(runtime) },
+      healthLogger,
+    });
+    try {
+      const client = await manager.getClient('user-1', 'devbox');
+      expect(
+        client.manifest.externalAgents,
+        'expected the known target from health: a rejected report keeps the handshake manifest'
+      ).toEqual(['codex']);
+
+      targets = ['codex', 'gemini', 'cursor'];
+      const refreshed = await manager.refreshManifest('user-1', 'devbox');
+      expect(refreshed.manifest?.externalAgents).toEqual(['codex', 'cursor']);
+
+      const retained = manager.getCachedHealth('user-1', 'devbox')?.health.externalAgents;
+      expect(retained?.targets).toEqual(['codex', 'cursor']);
+      expect(retained?.liveSessions.map((session) => session.sessionId)).toEqual(['s-1']);
+
+      expect(
+        healthLogger.entries,
+        'expected one warning for gemini across both health reads'
+      ).toEqual([
+        {
+          level: 'warn',
+          event: 'unknown_external_agent_target_skipped',
+          metadata: { environmentId: 'devbox', targetIds: ['gemini'] },
+        },
+      ]);
     } finally {
       manager.disconnect('user-1', 'devbox');
       await runtime.close();

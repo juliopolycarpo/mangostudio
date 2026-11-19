@@ -23,10 +23,7 @@
 
 import Type, { type Static } from 'typebox';
 
-import {
-  ExternalAgentTargetIdSchema,
-  ExternalIdentityIsolationSchema,
-} from '../external-agents/schemas';
+import { ExternalIdentityIsolationSchema } from '../external-agents/schemas';
 import { ReadonlyArraySchema, ReadonlyRecordSchema } from '../schema-helpers';
 import {
   type ResolvedRuntimeCapabilityAllow,
@@ -401,16 +398,41 @@ const RuntimeHealthIdentityIsolationSchema = Type.Object(
   ExternalIdentityIsolationSchema.properties
 );
 
+/**
+ * How many target ids health may list. Looser than today's three on purpose: a
+ * runtime hosting a fourth vendor must still pass this cap, or the new id would
+ * fail the report through the array bound instead of the enum.
+ */
+export const RUNTIME_HEALTH_TARGET_LIMIT = 32;
+
+/**
+ * A target id as health *reports* it: any bounded, URL-safe token, not the
+ * {@link ExternalAgentTargetIdSchema} enum. An additive enum member is the same
+ * kind of newer-peer change as an additive field, and it cannot be ignored by
+ * dropping an unknown key — the report would be refused whole and the manifest
+ * frozen. The hub decides what an id it does not know means: it skips the entry
+ * and logs it (`pruneUnknownExternalAgentTargets`, in the API).
+ *
+ * Reader-side only. Everywhere the hub *produces* a target id — the manifest's
+ * `externalAgents`, a chat's runner, an external-agent call — the enum stays
+ * closed, so an id this build cannot name never leaves it.
+ */
+export const RuntimeHealthTargetIdSchema = Type.String({
+  minLength: 1,
+  maxLength: 64,
+  pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$',
+});
+
 const RuntimeHealthLiveSessionSchema = Type.Object({
   sessionId: Type.String({ minLength: 1, maxLength: 256 }),
-  targetId: ExternalAgentTargetIdSchema,
+  targetId: RuntimeHealthTargetIdSchema,
   ageMs: Type.Integer({ minimum: 0 }),
   state: Type.String({ minLength: 1, maxLength: 64 }),
 });
 
 export const RuntimeExternalAgentHealthSchema = Type.Object({
-  targets: ReadonlyArraySchema(ExternalAgentTargetIdSchema, {
-    maxItems: ExternalAgentTargetIdSchema.anyOf.length,
+  targets: ReadonlyArraySchema(RuntimeHealthTargetIdSchema, {
+    maxItems: RUNTIME_HEALTH_TARGET_LIMIT,
     uniqueItems: true,
   }),
   identityIsolation: Type.Optional(RuntimeHealthIdentityIsolationSchema),
