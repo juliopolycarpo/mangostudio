@@ -5,6 +5,9 @@ import type {
   StreamingChunk,
   TextGenerationRequest,
 } from '../../../../src/services/providers/types';
+import { moduleMockerFor } from '../../../support/mocks/module-mocks';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 function createSession(
   chunks: StreamingChunk[],
@@ -54,7 +57,7 @@ function createSession(
 }
 
 async function mockMessageRepository(): Promise<void> {
-  await mock.module('../../../../src/modules/messages/infrastructure/message-repository', () => ({
+  await mockModule('../../../../src/modules/messages/infrastructure/message-repository', () => ({
     insertMessage: () => Promise.resolve(),
     updateMessage: () => Promise.resolve(),
     listByChatId: () => Promise.resolve([]),

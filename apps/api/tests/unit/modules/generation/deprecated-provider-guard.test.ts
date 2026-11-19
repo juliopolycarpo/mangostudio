@@ -8,26 +8,18 @@
  * the deprecated provider forever, and it arrives with no catalog entry at all.
  */
 
-import { afterEach, describe, expect, mock, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 
 import type { NoModelAvailableError } from '../../../../src/modules/generation/application/resolve-model';
 import {
-  getCachedModelMetadata,
-  getUnifiedModelCatalog,
-} from '../../../../src/services/providers/catalog';
-import {
   getProviderObservabilityMetrics,
   resetProviderObservability,
 } from '../../../../src/services/providers/core/provider-observability';
-import { resolveProviderTypeForModel } from '../../../../src/services/providers/core/provider-registry';
+import { moduleMockerFor } from '../../../support/mocks/module-mocks';
 
-// Captured before any mock.module() call: Bun updates live namespace bindings,
-// so restoring from a spread namespace in afterEach would restore the mock.
-const realGetCachedModelMetadata = getCachedModelMetadata;
-const realGetUnifiedModelCatalog = getUnifiedModelCatalog;
-const realResolveProviderTypeForModel = resolveProviderTypeForModel;
+const mockModule = moduleMockerFor(import.meta.dir);
 
 const USER_ID = 'user-deprecation-guard';
 
@@ -38,7 +30,7 @@ interface CatalogStub {
 }
 
 async function stubResolution(stub: CatalogStub): Promise<void> {
-  await mock.module('../../../../src/services/providers/catalog', () => ({
+  await mockModule('../../../../src/services/providers/catalog', () => ({
     getCachedModelMetadata: () =>
       stub.cachedProvider
         ? { providerType: stub.cachedProvider, capabilities: undefined }
@@ -46,7 +38,7 @@ async function stubResolution(stub: CatalogStub): Promise<void> {
     getUnifiedModelCatalog: () =>
       Promise.resolve({ textModels: stub.textModels ?? [], imageModels: [] }),
   }));
-  await mock.module('../../../../src/services/providers/core/provider-registry', () => ({
+  await mockModule('../../../../src/services/providers/core/provider-registry', () => ({
     resolveProviderTypeForModel: () => Promise.resolve(stub.connectorProvider),
   }));
 }
@@ -56,14 +48,8 @@ function loadResolveModel() {
   return import('../../../../src/modules/generation/application/resolve-model');
 }
 
-afterEach(async () => {
-  await mock.module('../../../../src/services/providers/catalog', () => ({
-    getCachedModelMetadata: realGetCachedModelMetadata,
-    getUnifiedModelCatalog: realGetUnifiedModelCatalog,
-  }));
-  await mock.module('../../../../src/services/providers/core/provider-registry', () => ({
-    resolveProviderTypeForModel: realResolveProviderTypeForModel,
-  }));
+// The faked modules are restored by the global afterEach (support/mocks/module-mocks.ts).
+afterEach(() => {
   resetProviderObservability();
 });
 

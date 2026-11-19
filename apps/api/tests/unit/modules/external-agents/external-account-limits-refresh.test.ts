@@ -1,6 +1,10 @@
-import { afterEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 
 import type { ExternalAccountLimits } from '@mangostudio/shared/external-agents';
+
+import { moduleMockerFor } from '../../../support/mocks/module-mocks';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 const refreshAccountUsage = mock(() => Promise.resolve({ limits: undefined }));
 const getRuntimeClient = mock(() =>
@@ -12,18 +16,26 @@ const writeExternalAccountLimitsCache = mock(() =>
   Promise.reject(new Error('account limits cache write failed'))
 );
 
-await mock.module('../../../../src/services/runtime-client', () => ({
-  getRuntimeClient,
-}));
+/** The registry restores faked modules after every test, so each test installs them again. */
+async function installFakes(): Promise<void> {
+  await mockModule('../../../../src/services/runtime-client', () => ({
+    getRuntimeClient,
+  }));
 
-await mock.module(
-  '../../../../src/modules/external-agents/infrastructure/external-account-limits-cache',
-  () => ({
-    writeExternalAccountLimitsCache,
-    // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
-    readExternalAccountLimitsCache: async () => undefined,
-  })
-);
+  await mockModule(
+    '../../../../src/modules/external-agents/infrastructure/external-account-limits-cache',
+    () => ({
+      writeExternalAccountLimitsCache,
+      // eslint-disable-next-line @typescript-eslint/require-await -- The test double preserves its Promise-returning interface contract.
+      readExternalAccountLimitsCache: async () => undefined,
+    })
+  );
+}
+
+// Installed before the dynamic import below so the module under test binds the fakes.
+await installFakes();
+
+beforeEach(installFakes);
 
 const { cacheExternalAccountLimitsBestEffort, refreshExternalAccountLimits } =
   await import('../../../../src/modules/external-agents/application/external-account-limits');

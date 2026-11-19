@@ -2,9 +2,12 @@ import { afterEach, describe, expect, it, mock } from 'bun:test';
 
 import type { StreamTextTurnSession } from '../../../../src/modules/generation/application/stream-text-turn-stages';
 import type { AgentTurnRequest } from '../../../../src/services/providers/types';
+import { moduleMockerFor } from '../../../support/mocks/module-mocks';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 async function mockMessageRepository(): Promise<void> {
-  await mock.module('../../../../src/modules/messages/infrastructure/message-repository', () => ({
+  await mockModule('../../../../src/modules/messages/infrastructure/message-repository', () => ({
     insertMessage: () => Promise.resolve(),
     updateMessage: () => Promise.resolve(),
     listByChatId: () => Promise.resolve([]),

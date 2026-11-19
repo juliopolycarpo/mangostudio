@@ -12,7 +12,10 @@ import { recordTurnCompletedActivity } from '../../../../src/modules/chats/appli
 import { respondStreamRoutes } from '../../../../src/modules/generation/http/respond-stream-routes';
 import { ActivityInsertCapture } from '../../../support/activity-insert-capture';
 import { createAuthenticatedApiTestApp } from '../../../support/harness/create-api-test-app';
+import { moduleMockerFor } from '../../../support/mocks/module-mocks';
 import { makeStreamChatRow } from '../../../support/stream-chat-row';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 const TEST_USER = { id: 'abort-test-user', name: 'Abort User', email: 'abort@test.test' };
 
@@ -120,7 +123,7 @@ describe('respond-stream abort signal', () => {
     let receivedSignal: AbortSignal | undefined;
     let signalAbortedDuringStream = false;
 
-    await mock.module('../../../../src/services/providers/core/provider-registry', () => ({
+    await mockModule('../../../../src/services/providers/core/provider-registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           providerType: 'openai-compatible',
@@ -135,11 +138,11 @@ describe('respond-stream abort signal', () => {
         }),
     }));
 
-    await mock.module('../../../../src/services/providers/catalog', () => ({
+    await mockModule('../../../../src/services/providers/catalog', () => ({
       getUnifiedModelCatalog: () => Promise.resolve({ textModels: [{ modelId: 'test-model' }] }),
     }));
 
-    await mock.module('../../../../src/db/database', () => ({
+    await mockModule('../../../../src/db/database', () => ({
       getDb: makeDb,
     }));
 
@@ -164,7 +167,7 @@ describe('respond-stream abort signal', () => {
   it('stream cancel callback aborts the signal', async () => {
     const aborted: boolean[] = [];
 
-    await mock.module('../../../../src/services/providers/core/provider-registry', () => ({
+    await mockModule('../../../../src/services/providers/core/provider-registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           providerType: 'openai-compatible',
@@ -182,11 +185,11 @@ describe('respond-stream abort signal', () => {
         }),
     }));
 
-    await mock.module('../../../../src/services/providers/catalog', () => ({
+    await mockModule('../../../../src/services/providers/catalog', () => ({
       getUnifiedModelCatalog: () => Promise.resolve({ textModels: [{ modelId: 'test-model' }] }),
     }));
 
-    await mock.module('../../../../src/db/database', () => ({
+    await mockModule('../../../../src/db/database', () => ({
       getDb: makeDb,
     }));
 

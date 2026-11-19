@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import type { PromptSettings } from '@mangostudio/shared/prompt-rules';
 
 import { composePrompt } from '../../../../src/modules/prompt-rules/application/prompt-composer';
+import { moduleMockerFor } from '../../../support/mocks/module-mocks';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 function makeSettings(overrides?: Partial<PromptSettings>): PromptSettings {
   return {
@@ -31,27 +34,23 @@ function makeSettings(overrides?: Partial<PromptSettings>): PromptSettings {
 
 let fileContents: Map<string, string | null> = new Map();
 
-beforeEach(() => {
+// The registry restores the module after every test, so it is faked again before each one.
+beforeEach(async () => {
   fileContents = new Map();
+  await mockModule('../../../../src/modules/prompt-rules/application/rule-file-resolver', () => ({
+    loadRuleFileContent: (path: string) => {
+      if (fileContents.has(path)) return fileContents.get(path) ?? null;
+      return null;
+    },
+  }));
 });
 
 afterEach(() => {
   mock.restore();
 });
 
-function setupMock() {
-  void mock.module('../../../../src/modules/prompt-rules/application/rule-file-resolver', () => ({
-    loadRuleFileContent: (path: string) => {
-      if (fileContents.has(path)) return fileContents.get(path) ?? null;
-      return null;
-    },
-  }));
-}
-
 describe('composePrompt', () => {
   it('returns base prompts unchanged when settings is undefined', () => {
-    setupMock();
-
     const result = composePrompt({
       settings: undefined,
       baseSystemPrompt: 'You are a helpful assistant.',
@@ -65,8 +64,6 @@ describe('composePrompt', () => {
   });
 
   it('returns base prompts unchanged when all rules are disabled', () => {
-    setupMock();
-
     const result = composePrompt({
       settings: makeSettings(),
       baseSystemPrompt: 'You are a helpful assistant.',
@@ -81,7 +78,6 @@ describe('composePrompt', () => {
 
   it('appends enabled system rule content to effectiveSystemPrompt on first turn', () => {
     fileContents.set('~/.mango/AGENTS.md', '# Custom Rules\nBe concise.');
-    setupMock();
 
     const result = composePrompt({
       settings: makeSettings({
@@ -111,7 +107,6 @@ describe('composePrompt', () => {
 
   it('does not apply first-turn rules on subsequent turns', () => {
     fileContents.set('~/.mango/AGENTS.md', '# Custom Rules');
-    setupMock();
 
     const result = composePrompt({
       settings: makeSettings({
@@ -135,7 +130,6 @@ describe('composePrompt', () => {
 
   it('applies every-turn rules on subsequent turns', () => {
     fileContents.set('~/.mango/AGENTS.md', '# Always On');
-    setupMock();
 
     const result = composePrompt({
       settings: makeSettings({
@@ -160,7 +154,6 @@ describe('composePrompt', () => {
 
   it('wraps user-role rules around visible prompt with delimiters', () => {
     fileContents.set('~/.claude/CLAUDE.md', '# User Context');
-    setupMock();
 
     const result = composePrompt({
       settings: makeSettings({
@@ -191,7 +184,6 @@ describe('composePrompt', () => {
   it('combines system and user rules correctly', () => {
     fileContents.set('~/.mango/AGENTS.md', '# System Rules');
     fileContents.set('~/.claude/CLAUDE.md', '# User Rules');
-    setupMock();
 
     const result = composePrompt({
       settings: makeSettings({
@@ -226,8 +218,6 @@ describe('composePrompt', () => {
   });
 
   it('skips enabled rules when file content is not available', () => {
-    setupMock();
-
     const result = composePrompt({
       settings: makeSettings({
         agentsMd: {
@@ -251,7 +241,6 @@ describe('composePrompt', () => {
   it('handles custom rules alongside fixed rules', () => {
     fileContents.set('~/.mango/AGENTS.md', '# Fixed');
     fileContents.set('/etc/custom.md', '# Custom');
-    setupMock();
 
     const result = composePrompt({
       settings: makeSettings({
@@ -286,7 +275,6 @@ describe('composePrompt', () => {
 
   it('preserves base system prompt when composing with system rules', () => {
     fileContents.set('~/.mango/AGENTS.md', '# Extra');
-    setupMock();
 
     const result = composePrompt({
       settings: makeSettings({
@@ -309,7 +297,6 @@ describe('composePrompt', () => {
 
   it('generates deterministic output for the same inputs', () => {
     fileContents.set('~/.mango/AGENTS.md', '# Content');
-    setupMock();
 
     const a = composePrompt({
       settings: makeSettings({

@@ -3,7 +3,7 @@
  * tests pin how much: the root is resolved once per request, and the build-state
  * file is only stat-ed for a file that could be a hardlink to it.
  */
-import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, expect, test } from 'bun:test';
 import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,6 +13,9 @@ import { type AnyElysia, Elysia, NotFound } from 'elysia';
 
 import type { App } from '../../../src/app';
 import { clearFrontendFallback, frontendNotFound } from '../../../src/server/frontend-fallback';
+import { moduleMockerFor } from '../../support/mocks/module-mocks';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 const originalFs = { ...fs };
 const realStatSync = fs.statSync;
@@ -50,11 +53,6 @@ function countingFs() {
   return { ...originalFs, statSync: countingStatSync, realpathSync: countingRealpathSync };
 }
 
-/** Restore the original filesystem exports after the counting tests. */
-function originalFsModule() {
-  return originalFs;
-}
-
 beforeEach(async () => {
   // Canonical already, so the root realpath the fake counts is a call with this exact path.
   frontendDir = originalFs.realpathSync(
@@ -66,7 +64,7 @@ beforeEach(async () => {
   originalFs.writeFileSync(buildStatePath, PRIVATE_BODY);
   originalFs.writeFileSync(join(frontendDir, 'assets', 'index-FsCalls.js'), ASSET_BODY);
   originalFs.writeFileSync(join(frontendDir, 'favicon.ico'), 'icon');
-  await mock.module('node:fs', countingFs);
+  await mockModule('node:fs', countingFs);
   const { registerFrontend } = await import('../../../src/server/frontend-static');
   app = new Elysia().onError(NotFound, ({ request }) => frontendNotFound(request));
   registerFrontend(app as unknown as App, frontendDir);
@@ -78,7 +76,6 @@ beforeEach(async () => {
 
 afterEach(async () => {
   if (app?.server) await app.stop();
-  await mock.module('node:fs', originalFsModule);
   clearFrontendFallback();
   originalFs.rmSync(frontendDir, { recursive: true, force: true });
 });
