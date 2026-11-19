@@ -282,11 +282,15 @@ move the pointer.
 Delegated commands (the package-manager rows) are **printed** by default. With
 `--yes` they are **run** on macOS and Linux with the hub's allowlisted env
 (never its secrets), and a live hub is then restarted the same way a
-self-managed upgrade restarts it. Cargo's Unix shim is the restart target when
-it announced itself, since `cargo install` has just replaced what this process's
-own path points at and the shim `exec`s the new binary in place. Every other
-manager re-execs this process's path: their launchers run the binary as a child,
-whose pid the restart handshake would never match. On Windows the npm managers delete the
+self-managed upgrade restarts it. The restart goes through the path the manager
+repoints on upgrade, since this process's own path names the build the manager
+just replaced: Cargo's shim when it announced itself, Homebrew's
+`<prefix>/bin/mangostudio` symlink, and the shim in the pnpm home. npm and bun
+re-exec this process's path, which carries no version. Before the old hub is
+stopped the launcher runs with `--version`; if it cannot, the upgrade still
+reports `upgraded`, the restart is `manual`, and the old hub keeps running. A launcher
+that runs the binary as a child is fine: the restart accepts the hub that started
+after the spawn instead of requiring the spawned pid. On Windows the npm managers delete the
 package that holds the running `mangostudio.exe`, so `--yes` there stops a live
 hub first (a foreground hub is refused: press Ctrl-C in its terminal), then
 hands the command to a detached waiter (`Wait-Process` on this pid and the
