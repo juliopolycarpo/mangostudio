@@ -2,6 +2,7 @@ import type { ChatAttachment, ChatRunnerConfiguration } from '@mangostudio/share
 import type { Kysely } from 'kysely';
 
 import type { Database } from '../../../db/types';
+import { generateTextWithIdleDeadline } from '../../../services/providers/core/generate-text-with-idle-deadline';
 import { warmProviderForRequest } from '../../../services/providers/core/provider-readiness';
 import {
   getProvider,
@@ -46,6 +47,8 @@ export interface SendTextMessageInput {
   attachmentIds?: string[];
   model?: string;
   systemPrompt?: string;
+  /** Aborts the vendor call, e.g. when the HTTP client disconnects. */
+  signal?: AbortSignal;
 }
 
 export interface SendTextMessageResult {
@@ -128,7 +131,9 @@ export async function sendTextMessage(
 
   const startTime = Date.now();
   await warmupPromise;
-  const result = await provider.generateText({
+  // A reply may run for minutes, so it is bounded by its silence rather than by
+  // a whole-response deadline, and a client that hangs up cancels the vendor call.
+  const result = await generateTextWithIdleDeadline(provider, {
     userId: input.userId,
     environmentId: chat.environmentId,
     chatId: input.chatId,
@@ -136,6 +141,7 @@ export async function sendTextMessage(
     prompt: input.prompt,
     systemPrompt: input.systemPrompt,
     modelName: modelId,
+    signal: input.signal,
     attachments: runtimeAttachments,
     modelCapabilities: capabilities,
   });

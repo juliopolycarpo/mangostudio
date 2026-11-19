@@ -4,6 +4,7 @@ import type { Elysia } from 'elysia';
 
 import { getDb } from '../../../db/database';
 import { apiErrorStatus } from '../../../lib/api-error-status';
+import { generationDeadlineResponse } from '../../../lib/generation-deadline-response';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { ChatAttachmentNotFoundError } from '../../attachments/infrastructure/attachment-repository';
 import { ChatNotFoundError } from '../../chats/domain/chat-ownership';
@@ -31,7 +32,7 @@ export const respondRoutes = (app: Elysia) =>
        * POST /api/respond
        * Text-chat: persists user message, calls provider, persists AI reply, returns both.
        */
-      .post('/respond', { body: GenerateTextBodySchema }, async ({ body, user }) => {
+      .post('/respond', { body: GenerateTextBodySchema }, async ({ body, request, user }) => {
         const db = getDb();
         const userId = user?.id ?? '';
         const operationId = body.operationId;
@@ -102,6 +103,9 @@ export const respondRoutes = (app: Elysia) =>
               attachmentIds: body.attachmentIds,
               model: body.model,
               systemPrompt: body.systemPrompt,
+              // The client hanging up cancels the vendor call. The keyed path
+              // above does not pass it: that work outlives its request on purpose.
+              signal: request.signal,
             },
             getDb()
           );
@@ -119,7 +123,10 @@ export const respondRoutes = (app: Elysia) =>
           if (err instanceof UnsupportedChatRunnerError) {
             return apiErrorStatus(409, { error: err.message, code: ERROR_CODES.UNSUPPORTED });
           }
-          console.error('[respond] Error:', err);
+          // A client that hung up is not a server fault worth logging.
+          if (!request.signal.aborted) console.error('[respond] Error:', err);
+          const timedOut = generationDeadlineResponse(err);
+          if (timedOut) return timedOut;
           return apiErrorStatus(500, {
             error: 'Text generation failed. Please try again.',
             code: ERROR_CODES.PROVIDER_ERROR,

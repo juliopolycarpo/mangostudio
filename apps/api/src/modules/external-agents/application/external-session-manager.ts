@@ -61,6 +61,10 @@ import {
 } from '../domain/external-event-sequencer';
 import { resumeModeFor } from '../domain/external-resume-policy';
 import {
+  type ExternalRuntimeSessionState,
+  runtimeSessionStateOf,
+} from '../domain/external-runtime-session-state';
+import {
   EXTERNAL_ADOPTION_LEASE_TTL_MS,
   refreshAdoptionLease,
   releaseAdoptionLease,
@@ -342,6 +346,12 @@ export interface ExternalSessionHandle {
    */
   sendReview(params: ExternalAgentStartReviewParams): Promise<ExternalAgentStartReviewResult>;
   cancel(nativeTurnId?: string): Promise<void>;
+  /**
+   * Asks the runtime whether it still has a turn running on this session (`runtime.health`).
+   * Rejects when the runtime cannot answer within `timeoutMs`; the caller decides what silence
+   * means. Only `idle` proves the turn is over.
+   */
+  runtimeState(options: { readonly timeoutMs: number }): Promise<ExternalRuntimeSessionState>;
 }
 
 /** The native review input, without the session owned by its handle. */
@@ -638,6 +648,10 @@ export function createExternalSessionManager(
           { sessionId: record.sessionId, ...(nativeTurnId ? { nativeTurnId } : {}) },
           { timeoutMs: callTimeoutMs }
         );
+      },
+      async runtimeState(options) {
+        const health = await record.client.health({ timeoutMs: options.timeoutMs });
+        return runtimeSessionStateOf(health.externalAgents, record.sessionId);
       },
     };
   }

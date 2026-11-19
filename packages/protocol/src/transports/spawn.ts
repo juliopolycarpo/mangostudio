@@ -20,7 +20,7 @@ import { resolveFrameLimit } from '../codec/ndjson';
 import type { Port, PortClosure } from '../port';
 import type { Frame } from '../schemas/frames';
 import { type ByteSink, createNdjsonPort, type NdjsonPortHandle } from './ndjson-port';
-import { asError, createStreamPort, toBytes } from './node-stream';
+import { asError, createStreamPort, type StreamPortHandle, toBytes } from './node-stream';
 import { lastNonEmptyLine } from './text';
 
 /** How the child ended: an exit code, or the signal that killed it. */
@@ -108,6 +108,11 @@ export interface SpawnedPeer {
    * resolves `{ code: null, signal: null }`; `stderrTail()` carries the reason.
    * Unlike `terminate()`, this is unbounded on purpose: it is the one promise
    * that always tells the truth about whether the child actually exited.
+   *
+   * `spawnPort` resolves it behind the stdout frames it had already received
+   * when the exit landed, so closing the port in response does not drop them.
+   * Bytes still in the pipe at that moment are not waited for; the port's
+   * closure is what says the stream ended.
    */
   readonly exited: Promise<ExitStatus>;
   /**
@@ -262,11 +267,14 @@ export function spawnPort(options: SpawnOptions, spawnChild: SpawnChild = spawn)
 
   const child = start(spawnChild, command, options.argv.slice(1), options, tail, exit, launch);
   const limit = { maxFrameBytes };
-  const handle =
+  const handle: StreamPortHandle =
     child?.stdin && child.stdout
       ? // Every answer is written from a read callback otherwise; see `deferReads`.
         createStreamPort(child.stdout, child.stdin, { ...limit, deferReads: true })
-      : createNdjsonPort({ sink: unspawnedSink(), ...limit });
+      : {
+          ...createNdjsonPort({ sink: unspawnedSink(), ...limit }),
+          drained: () => Promise.resolve(),
+        };
   wire(child, handle, options, tail, exit, launch);
 
   let termination: Promise<ExitStatus | undefined> | undefined;
@@ -357,7 +365,7 @@ function start(
 /** Connects the child's three pipes to the port, the tail and the exit promise. */
 function wire(
   child: ChildProcess | undefined,
-  handle: NdjsonPortHandle,
+  handle: StreamPortHandle,
   options: SpawnOptions,
   tail: BoundedTail,
   exit: DeferredExit,
@@ -374,7 +382,15 @@ function wire(
   // Node documents that `exit` may precede the stdio close, but Bun and Node
   // both delivered the child's whole stderr first in every probe up to 1 MiB,
   // so the tail a caller reads at `exited` was complete each time.
-  child.on('exit', (code, signal) => exit.settle({ code, signal }));
+  //
+  // `exited` is settled behind the stdout reads already queued (`drained`), so
+  // a caller that closes the port when it resolves does not discard frames the
+  // child wrote first. Bytes the pipe has not yet handed over are not waited
+  // for: that would be waiting on `close` again.
+  child.on(
+    'exit',
+    (code, signal) => void handle.drained().then(() => exit.settle({ code, signal }))
+  );
   child.on('error', (cause) => {
     const error = withErrorCode(asError(cause));
     // `pid` is undefined exactly when no process was created, which is what
@@ -384,7 +400,7 @@ function wire(
     tail.appendText(`\n${error.message}\n`);
     // Behind any stdout frames still waiting for their turn; see `deferReads`.
     handle.failed(error);
-    exit.settle({ code: null, signal: null });
+    void handle.drained().then(() => exit.settle({ code: null, signal: null }));
   });
   if (child.stderr) {
     child.stderr.on('data', (chunk: unknown) => {

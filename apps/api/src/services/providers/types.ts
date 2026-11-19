@@ -51,8 +51,6 @@ export interface ModelCapabilities {
   streaming: boolean;
   reasoning?: boolean;
   tools?: boolean;
-  /** Provider runs its own agent tool loop (not MangoStudio-managed tools). */
-  internalAgentTools?: boolean;
   statefulContinuation?: boolean;
   promptCaching?: boolean;
   parallelToolCalls?: boolean;
@@ -183,6 +181,13 @@ export interface TextGenerationRequest {
   modelName: string;
   /** Optional signal to cancel the generation mid-stream. */
   signal?: AbortSignal;
+  /**
+   * Whole-response deadline in milliseconds for `generateText`
+   * (`TEXT_GENERATION_TIMEOUT_MS` when omitted). A short call site (a title, a
+   * commit message) passes a tighter budget; the DeepSeek stream, which carries
+   * its own whole-response deadline, honors it too.
+   */
+  timeoutMs?: number;
   generationConfig?: GenerationConfig;
   providerState?: string; // for cross-turn continuity
   attachments?: ProviderRuntimeAttachment[];

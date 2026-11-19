@@ -203,6 +203,23 @@ describe('embedded grammars', () => {
     expect(countHighlightableLines(`${line}\n`.repeat(6), 'xml'), 'xml embeds java').toBe(4);
   });
 
+  for (const language of ['vue', 'svelte'] as const) {
+    it(`caps a ${language} block at the script grammar's character limit, not the default one`, () => {
+      // 90,000 characters in short lines: inside the default cap (100,000), past the script cap (80,000).
+      const source = 'const a = 1;\n'.repeat(7_000);
+      const lines = source.split('\n').length;
+
+      expect(
+        countHighlightableLines(source, language),
+        `${language} highlightable lines of ${lines} | expected: fewer than all`
+      ).toBeLessThan(lines);
+      expect(
+        countHighlightableLines(source, 'html'),
+        `html highlightable lines of ${lines} | expected: all`
+      ).toBe(lines);
+    });
+  }
+
   interface Registration {
     readonly name?: string;
     readonly embeddedLangsLazy?: readonly string[];

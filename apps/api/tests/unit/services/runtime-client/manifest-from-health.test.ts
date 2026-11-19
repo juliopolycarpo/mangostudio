@@ -4,7 +4,10 @@ import type { RuntimeImplementation } from '@mangostudio/shared/runtime-contract
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 
-import { capabilityManifestFromHealth } from '../../../../src/services/runtime-client/manifest-from-health';
+import {
+  capabilityManifestFromHealth,
+  pruneUnknownExternalAgentTargets,
+} from '../../../../src/services/runtime-client/manifest-from-health';
 
 const baseReport = {
   schemaVersion: 1,
@@ -107,6 +110,92 @@ describe('capabilityManifestFromHealth', () => {
         method: 'single-user-host',
         credentialHomeFingerprint: 'credential-home-v1',
       },
+    });
+  });
+
+  it('copies only the attestation members it knows from a health report with newer ones', () => {
+    // Health tolerates an additive member; the manifest, and the `isolation` the hub sends back
+    // on every external-agent call, are closed shapes that would refuse it.
+    const attestation = {
+      method: 'single-user-host',
+      credentialHomeFingerprint: 'credential-home-v1',
+      attestedBy: 'a-newer-runtime',
+    } as const;
+    const report: RuntimeHealthReport = {
+      ...baseReport,
+      profile: 'full',
+      allow: { ...RUNTIME_CONSENT_PRESETS.full, externalAgents: true },
+      externalAgents: {
+        targets: ['codex'],
+        identityIsolation: attestation,
+        liveSessionCount: 0,
+        liveSessions: [],
+      },
+    };
+
+    expect(capabilityManifestFromHealth(report).identityIsolation).toEqual({
+      method: 'single-user-host',
+      credentialHomeFingerprint: 'credential-home-v1',
+    });
+  });
+
+  describe('a health report naming a target id this build has no enum member for', () => {
+    const newerPeer: RuntimeHealthReport = {
+      ...baseReport,
+      profile: 'full',
+      allow: { ...RUNTIME_CONSENT_PRESETS.full, externalAgents: true },
+      externalAgents: {
+        targets: ['codex', 'gemini', 'cursor'],
+        liveSessionCount: 3,
+        liveSessions: [
+          { sessionId: 's-1', targetId: 'codex', ageMs: 5, state: 'running' },
+          { sessionId: 's-2', targetId: 'gemini', ageMs: 6, state: 'running' },
+          { sessionId: 's-3', targetId: 'gemini', ageMs: 7, state: 'idle' },
+        ],
+      },
+    };
+
+    it('projects only the known targets into the manifest', () => {
+      expect(capabilityManifestFromHealth(newerPeer).externalAgents).toEqual(['codex', 'cursor']);
+    });
+
+    it('omits externalAgents when every reported target is unknown', () => {
+      const onlyUnknown: RuntimeHealthReport = {
+        ...newerPeer,
+        externalAgents: { targets: ['gemini'], liveSessionCount: 0, liveSessions: [] },
+      };
+      expect(
+        'externalAgents' in capabilityManifestFromHealth(onlyUnknown),
+        'expected no externalAgents key: an empty list would claim the peer hosts none'
+      ).toBe(false);
+    });
+
+    it('prunes unknown targets and sessions, names each skipped id once, and keeps the true count', () => {
+      const pruned = pruneUnknownExternalAgentTargets(newerPeer);
+
+      expect(pruned.skippedTargetIds).toEqual(['gemini']);
+      expect(pruned.report.externalAgents).toEqual({
+        targets: ['codex', 'cursor'],
+        liveSessionCount: 3,
+        liveSessions: [{ sessionId: 's-1', targetId: 'codex', ageMs: 5, state: 'running' }],
+      });
+    });
+
+    it('returns the same report when every target is known or there is no subtree', () => {
+      const known: RuntimeHealthReport = {
+        ...newerPeer,
+        externalAgents: { targets: ['codex'], liveSessionCount: 0, liveSessions: [] },
+      };
+      const { externalAgents: _omitted, ...withoutSubtree } = newerPeer;
+
+      expect(pruneUnknownExternalAgentTargets(known)).toEqual({
+        report: known,
+        skippedTargetIds: [],
+      });
+      expect(pruneUnknownExternalAgentTargets(withoutSubtree)).toEqual({
+        report: withoutSubtree,
+        skippedTargetIds: [],
+      });
     });
   });
 

@@ -37,6 +37,8 @@ function baseDeps(overrides: Partial<RestartDeps> = {}) {
     // Hermetic by default: the real one probes this process's own install
     // origin, so leaving it out would make these cases read the host env.
     launcherPath: () => undefined,
+    // Hermetic by default: the real check runs the launcher with --version.
+    readTargetVersion: () => Promise.resolve('0.1.2'),
     // Hermetic by default: win32 would ask the hub over loopback and print a notice.
     platform: 'linux',
     log: (msg) => lines.push(msg),
@@ -154,6 +156,33 @@ describe('runRestart', () => {
     await runRestart(deps);
 
     expect(spawned).toEqual([{ waitForPid: 42, executable: ['/home/j/.cargo/bin/mangostudio'] }]);
+  });
+
+  it('leaves the running hub alone when the launcher cannot run', async () => {
+    const controller = new FakeProcessController([42]);
+    const checked: (readonly string[])[] = [];
+    let spawns = 0;
+    const { deps } = baseDeps({
+      controller,
+      readState: () => Promise.resolve(DETACHED),
+      spawnDetached: () => {
+        spawns += 1;
+        return Promise.resolve({ pid: 43, port: 3001, logFile: '/x.log' });
+      },
+      executable: () => ({ pointer: 'versioned', argv: ['/opt/homebrew/Cellar/x/mangostudio'] }),
+      launcherPath: () => '/opt/homebrew/bin/mangostudio',
+      readTargetVersion: (argv) => {
+        checked.push(argv);
+        return Promise.reject(
+          new Error('Cannot run "/opt/homebrew/bin/mangostudio --version" (exited with code 1)')
+        );
+      },
+    });
+
+    await expect(runRestart(deps)).rejects.toThrow('exited with code 1');
+
+    expect(checked).toEqual([['/opt/homebrew/bin/mangostudio']]);
+    expect({ terminated: controller.terminated, spawns }).toEqual({ terminated: [], spawns: 0 });
   });
 
   it('bounces a service-managed instance through the supervisor and waits for the successor', async () => {

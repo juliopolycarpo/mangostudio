@@ -4,6 +4,7 @@ import { RemoteError } from '@mangostudio/protocol';
 import type {
   ExternalAgentAttachment,
   ExternalAgentConfiguration,
+  ExternalAgentEvent,
   ExternalAgentSteerResult,
 } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
@@ -31,6 +32,7 @@ import {
   type ExternalTurnResult,
   ExternalTurnRunnerMismatchError,
   ExternalTurnWorkspaceMissingError,
+  type UnrecognizedEventPolicy,
 } from '../../../../src/modules/external-agents/application/external-turn-controller';
 import { reconcileExternalTurns } from '../../../../src/modules/external-agents/application/external-turn-recovery';
 import type { CancellableSleep } from '../../../../src/modules/external-agents/application/external-turn-submission';
@@ -96,9 +98,16 @@ function harness(
     readonly steerTerminationGraceMs?: number;
     readonly sleep?: CancellableSleep;
     readonly capacityRetryMs?: number;
+    readonly unrecognizedEventPolicy?: Partial<UnrecognizedEventPolicy>;
   } = {}
 ) {
-  const { steerTerminationGraceMs, sleep, capacityRetryMs, ...runtimeOptions } = options;
+  const {
+    steerTerminationGraceMs,
+    sleep,
+    capacityRetryMs,
+    unrecognizedEventPolicy,
+    ...runtimeOptions
+  } = options;
   const runtime = createFakeExternalRuntime(runtimeOptions);
   // One id per open, so a reopen is told apart from the session it replaces.
   let opened = 0;
@@ -120,6 +129,7 @@ function harness(
     newId: () => ids.shift() ?? `id-${crypto.randomUUID()}`,
     ...(steerTerminationGraceMs !== undefined ? { steerTerminationGraceMs } : {}),
     ...(sleep ? { sleep } : {}),
+    ...(unrecognizedEventPolicy ? { unrecognizedEventPolicy } : {}),
   });
   return { runtime, sessions, approvals, commandCatalog, controller, ids };
 }
@@ -131,8 +141,13 @@ function harness(
  * this: everywhere else, the stub's shortcut past `RuntimeClient.externalAgents.onEvent`'s
  * own envelope filter is exactly what makes ordering and redelivery cheap to drive.
  */
-async function realHarness(options: Parameters<typeof createRealExternalRuntime>[0] = {}) {
-  const runtime = await createRealExternalRuntime(options);
+async function realHarness(
+  options: Parameters<typeof createRealExternalRuntime>[0] & {
+    readonly unrecognizedEventPolicy?: Partial<UnrecognizedEventPolicy>;
+  } = {}
+) {
+  const { unrecognizedEventPolicy, ...runtimeOptions } = options;
+  const runtime = await createRealExternalRuntime(runtimeOptions);
   const sessions = createExternalSessionManager({
     resolveRuntimeClient: () => Promise.resolve(runtime.client),
     newSessionId: () => 'session-1',
@@ -149,6 +164,7 @@ async function realHarness(options: Parameters<typeof createRealExternalRuntime>
     approvals,
     commandCatalog,
     newId: () => ids.shift() ?? `id-${crypto.randomUUID()}`,
+    ...(unrecognizedEventPolicy ? { unrecognizedEventPolicy } : {}),
   });
   return { runtime, sessions, approvals, commandCatalog, controller };
 }
@@ -162,6 +178,7 @@ function startTurn(
     readonly observer?: {
       readonly onSteer?: (steer: unknown) => void;
       readonly onTerminal?: (reason: ExternalTurnResult['reason']) => void;
+      readonly onEvent?: (event: ExternalAgentEvent) => void;
       readonly onSession?: (session: {
         readonly sessionId: string;
         readonly resumed: boolean;
@@ -640,6 +657,352 @@ describe('external turn controller', () => {
       else process.env.MANGOSTUDIO_DIAGNOSTIC_LOGS = previousGate;
       await runtime.close();
     }
+  });
+
+  /**
+   * #988. A runtime newer than the hub can end a turn with an event type this hub's schema does
+   * not know. The controller drops it as inert, so nothing ever finalized the turn and
+   * `settled.promise` never resolved. Before the fix this test reports
+   * `turn state: still running after 1000ms`.
+   *
+   * Through a real `RuntimeClient`, whose runtime answers no `runtime.health`: the hub cannot ask
+   * whether the session is idle, so the last-resort cap is what ends the turn, and it also asks
+   * the vendor to stop.
+   */
+  it('ends a turn whose last event was a type this hub does not recognize', async () => {
+    const { runtime, controller } = await realHarness({
+      unrecognizedEventPolicy: { quietMs: 10, maxRecheckMs: 20, lastResortMs: 80 },
+    });
+    const liveEvents: ExternalAgentEvent[] = [];
+    try {
+      const running = startTurn(controller, {
+        observer: { onEvent: (event) => liveEvents.push(event) },
+      });
+      await waitFor(() => runtime.calls.turn.length === 1, 'the turn to reach the runtime');
+
+      runtime.emit({ type: 'text_delta', text: 'done' });
+      runtime.emitRawFrame({
+        sessionId: runtime.sessionId(),
+        nativeTurnId: 'native-turn-1',
+        sequence: runtime.nextSequence(),
+        emittedAtMs: Date.now(),
+        event: { type: 'future_terminal', outcome: 'finished' },
+      });
+
+      const outcome = await Promise.race([
+        running,
+        new Promise<'still-running'>((resolve) =>
+          setTimeout(() => resolve('still-running'), 1_000)
+        ),
+      ]);
+      if (outcome === 'still-running') {
+        throw new Error(
+          'turn state: still running after 1000ms | expected: a terminal result after an unrecognized event went quiet'
+        );
+      }
+
+      expect(outcome.reason).toBe('vendor-error');
+      expect(outcome.error?.code).toBe('unrecognized_event');
+      expect(outcome.error?.message).toContain('future_terminal');
+
+      // The reload and the live stream agree on how it ended.
+      const stored = await readAssistantRow();
+      expect(stored.generating).toBe(false);
+      expect(stored.text).toBe('done');
+      expect(turnPartOf(stored.parts).error?.code).toBe('unrecognized_event');
+      expect(liveEvents.at(-1)).toMatchObject({
+        type: 'error',
+        error: { code: 'unrecognized_event' },
+      });
+
+      // The vendor may still be running whatever the event announced, so it is told to stop.
+      expect(runtime.calls.cancel).toHaveLength(1);
+    } finally {
+      await runtime.close();
+    }
+  });
+
+  describe('a turn whose last event this hub could not read', () => {
+    const FAST_POLICY = {
+      quietMs: 20,
+      maxRecheckMs: 40,
+      healthDeadlineMs: 1_234,
+      settleMs: 5,
+    } as const;
+
+    /** An envelope for a type this hub's schema lacks, delivered the way a newer runtime sends it. */
+    function emitUnrecognized(runtime: FakeExternalRuntime, type = 'future_terminal'): void {
+      runtime.emitEnvelope({
+        sessionId: runtime.sessionId(),
+        nativeTurnId: 'native-turn-1',
+        sequence: runtime.nextSequence(),
+        emittedAtMs: Date.now(),
+        event: { type } as never,
+      });
+    }
+
+    /** Fails with the state of the turn instead of hanging the test when nothing ends it. */
+    async function settledWithin(
+      running: Promise<ExternalTurnResult>,
+      ms: number
+    ): Promise<ExternalTurnResult> {
+      const outcome = await Promise.race([
+        running,
+        new Promise<'still-running'>((resolve) => setTimeout(() => resolve('still-running'), ms)),
+      ]);
+      if (outcome === 'still-running') {
+        throw new Error(
+          `turn state: still running after ${ms}ms | expected: a terminal result from the controller`
+        );
+      }
+      return outcome;
+    }
+
+    /** The scripted answers to `runtime.health`, one per read, the last repeating. */
+    function sessionHealthScript(
+      ...answers: ReturnType<NonNullable<FakeExternalRuntimeOptions['sessionHealth']>>[]
+    ) {
+      let reads = 0;
+      return () => answers[Math.min(reads++, answers.length - 1)] ?? 'running';
+    }
+
+    it('ends the turn when the runtime says the session is idle', async () => {
+      const { runtime, controller } = harness({
+        unrecognizedEventPolicy: FAST_POLICY,
+        sessionHealth: () => 'idle',
+      });
+      const liveEvents: ExternalAgentEvent[] = [];
+      const running = startTurn(controller, {
+        observer: { onEvent: (event) => liveEvents.push(event) },
+      });
+      await waitForTurnStart(runtime);
+
+      runtime.emit({ type: 'text_delta', text: 'done' });
+      emitUnrecognized(runtime);
+
+      const result = await settledWithin(running, 1_000);
+      expect(result.reason).toBe('vendor-error');
+      expect(result.error?.code).toBe('unrecognized_event');
+      expect(result.error?.message).toContain('future_terminal');
+
+      // The reload and the live stream agree on how it ended.
+      const stored = await readAssistantRow();
+      expect(stored.generating).toBe(false);
+      expect(stored.text).toBe('done');
+      expect(turnPartOf(stored.parts).error?.code).toBe('unrecognized_event');
+      expect(liveEvents.at(-1)).toMatchObject({
+        type: 'error',
+        error: { code: 'unrecognized_event' },
+      });
+
+      // The runtime reported nothing running, so there is nothing to cancel.
+      expect(runtime.calls.cancel).toHaveLength(0);
+      // The read carried the policy's deadline.
+      expect(runtime.calls.healthTimeoutMs[0]).toBe(1_234);
+    });
+
+    it('keeps the turn running, and asks again later, while the runtime says it is running', async () => {
+      const { runtime, controller } = harness({
+        unrecognizedEventPolicy: FAST_POLICY,
+        sessionHealth: sessionHealthScript('running', 'running', 'idle'),
+      });
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      emitUnrecognized(runtime);
+
+      const result = await settledWithin(running, 2_000);
+      expect(result.reason).toBe('vendor-error');
+      // Two running answers each re-armed the watch; only the idle one ended the turn.
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(3);
+    });
+
+    it('does not end the turn while a running vendor keeps being reported running', async () => {
+      const { runtime, controller } = harness({
+        unrecognizedEventPolicy: FAST_POLICY,
+        sessionHealth: () => 'running',
+      });
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      emitUnrecognized(runtime);
+      await waitFor(() => runtime.calls.healthTimeoutMs.length >= 3, 'three health reads');
+      runtime.emit({ type: 'text_delta', text: 'a long tool finished' });
+      runtime.emit({ type: 'completed' });
+
+      const result = await running;
+      expect(result.reason).toBe('completed');
+      expect(result.error).toBeUndefined();
+    });
+
+    it('asks again, and does not end the turn, when the runtime cannot answer', async () => {
+      const { runtime, controller } = harness({
+        unrecognizedEventPolicy: FAST_POLICY,
+        sessionHealth: sessionHealthScript(new Error('health timed out'), 'idle'),
+      });
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      emitUnrecognized(runtime);
+
+      const result = await settledWithin(running, 2_000);
+      expect(result.reason).toBe('vendor-error');
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(2);
+    });
+
+    it.each(['unlisted', 'closing'] as const)(
+      'asks again, and does not end the turn, when the session is %s in the report',
+      async (state) => {
+        const { runtime, controller } = harness({
+          unrecognizedEventPolicy: FAST_POLICY,
+          sessionHealth: sessionHealthScript(state, 'idle'),
+        });
+        const running = startTurn(controller);
+        await waitForTurnStart(runtime);
+
+        emitUnrecognized(runtime);
+
+        const result = await settledWithin(running, 2_000);
+        expect(result.reason).toBe('vendor-error');
+        expect(runtime.calls.healthTimeoutMs).toHaveLength(2);
+      }
+    );
+
+    it('ends the turn at the last-resort cap even when the runtime keeps saying running', async () => {
+      const { runtime, controller } = harness({
+        unrecognizedEventPolicy: { ...FAST_POLICY, lastResortMs: 100 },
+        sessionHealth: () => 'running',
+      });
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      emitUnrecognized(runtime);
+
+      const result = await settledWithin(running, 2_000);
+      expect(result.reason).toBe('vendor-error');
+      expect(result.error?.code).toBe('unrecognized_event');
+      // The runtime still claims a turn, so the vendor is told to stop.
+      expect(runtime.calls.cancel).toHaveLength(1);
+    });
+
+    it('never asks while an approval is pending', async () => {
+      const { runtime, controller, approvals } = harness({
+        unrecognizedEventPolicy: { ...FAST_POLICY, lastResortMs: 60 },
+        sessionHealth: () => 'idle',
+      });
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      runtime.emit({
+        type: 'approval_requested',
+        request: {
+          requestId: 'req-1',
+          kind: 'command',
+          title: 'Run the migration',
+          options: [{ id: 'approve', isDestructive: false }],
+          expiresAtMs: Date.now() + 60_000,
+        },
+      });
+      await waitFor(
+        () => approvals.pendingCount(chatId) === 1,
+        'the approval to reach the registry'
+      );
+      emitUnrecognized(runtime);
+
+      // Several windows, and past the last-resort cap, with a person still deciding.
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(0);
+      expect(runtime.calls.cancel).toHaveLength(0);
+
+      runtime.emit({ type: 'completed' });
+      const result = await running;
+      expect(result.reason).toBe('completed');
+    });
+
+    it('leaves the turn alone when a recognized event follows', async () => {
+      const { runtime, controller } = harness({
+        unrecognizedEventPolicy: FAST_POLICY,
+        sessionHealth: () => 'idle',
+      });
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      emitUnrecognized(runtime, 'future_progress');
+      runtime.emit({ type: 'text_delta', text: 'still here' });
+      // Well past the quiet window: the recognized event is what proves the vendor is alive.
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(0);
+      runtime.emit({ type: 'completed' });
+
+      const result = await running;
+      expect(result.reason).toBe('completed');
+      expect(result.error).toBeUndefined();
+      expect((await readAssistantRow()).text).toBe('still here');
+    });
+
+    it('restarts the quiet window on each consecutive unrecognized event', async () => {
+      const { runtime, controller } = harness({
+        unrecognizedEventPolicy: { ...FAST_POLICY, quietMs: 150, maxRecheckMs: 300 },
+        sessionHealth: () => 'running',
+      });
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      emitUnrecognized(runtime, 'future_a');
+      await new Promise((resolve) => setTimeout(resolve, 90));
+      emitUnrecognized(runtime, 'future_b');
+      await new Promise((resolve) => setTimeout(resolve, 90));
+      // 180ms after the first event, but only 90ms after the latest: not yet asked.
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(0);
+
+      await waitFor(() => runtime.calls.healthTimeoutMs.length === 1, 'the first health read');
+      runtime.emit({ type: 'completed' });
+      expect((await running).reason).toBe('completed');
+    });
+
+    it('does not end, or cancel, a turn the vendor already completed', async () => {
+      const { runtime, controller } = harness({
+        unrecognizedEventPolicy: FAST_POLICY,
+        sessionHealth: () => 'idle',
+      });
+      const liveEvents: ExternalAgentEvent[] = [];
+      const running = startTurn(controller, {
+        observer: { onEvent: (event) => liveEvents.push(event) },
+      });
+      await waitForTurnStart(runtime);
+
+      emitUnrecognized(runtime);
+      runtime.emit({ type: 'completed' });
+      const result = await running;
+      // Past the quiet window and the settle pause.
+      await new Promise((resolve) => setTimeout(resolve, 120));
+
+      expect(result.reason).toBe('completed');
+      expect(result.error).toBeUndefined();
+      expect(liveEvents.some((event) => event.type === 'error')).toBe(false);
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(0);
+      expect(runtime.calls.cancel).toHaveLength(0);
+    });
+
+    it('does not cancel again when the user already stopped the turn', async () => {
+      const { runtime, controller } = harness({
+        unrecognizedEventPolicy: FAST_POLICY,
+        sessionHealth: () => 'idle',
+      });
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      emitUnrecognized(runtime);
+      expect(cancelActiveTurn(assistantMessageId, userId, chatId, 'user_cancelled')).toBe(true);
+      const result = await running;
+      await new Promise((resolve) => setTimeout(resolve, 120));
+
+      expect(result.reason).toBe('cancelled-by-user');
+      expect(result.error).toBeUndefined();
+      // The stop's own cancel, and nothing from the watch behind it.
+      expect(runtime.calls.cancel).toHaveLength(1);
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(0);
+    });
   });
 
   it('drops events a vendor emits after saying it was done', async () => {

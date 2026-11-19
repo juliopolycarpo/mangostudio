@@ -281,7 +281,9 @@ never inherits the Hub's configured directories. Reads open files through
 `crates/mangostudio-runtime/tests/fixtures/ts-library/corpus.json` records what the TypeScript
 readers answered for a fixed corpus: hash domains, `localeCompare` ordering, frontmatter scalars,
 scans, bounded reads, read-tree, settings sources and location resolution. `library::ts_compat_tests`
-replays that corpus. It is frozen: its generator was deleted with the TypeScript runtime, and the
+replays that corpus. Which TOML documents are valid is one case table,
+`crates/mangostudio-runtime/tests/fixtures/library-toml/validity-cases.json`, that the hub's
+`Bun.TOML.parse` and the runtime's `toml_document` both replay. It is frozen: its generator was deleted with the TypeScript runtime, and the
 fixture freshness job pins its git tree instead. `assertRustRuntimeLibraryMethods` runs the
 five reads over stdio, direct URL serve and paired connect, and diffs the scan against
 `scanLibraryInstances` on the same tree. `crates/mangostudio-runtime/tests/it/library_stdio.rs`

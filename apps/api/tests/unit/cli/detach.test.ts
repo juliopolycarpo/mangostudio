@@ -79,6 +79,79 @@ describe('spawnDetached', () => {
 
     await expect(spawnDetached(3001, 'localhost', deps)).rejects.toThrow(/did not become healthy/i);
   });
+
+  describe('when the executable is a launcher that supervises the hub as a child', () => {
+    // The spawned pid is the launcher's; the hub (pid 200) writes its own.
+    const HUB_PID = 200;
+    const PREDECESSOR_PID = 50;
+
+    function supervisedDeps(
+      state: Partial<ServerState>,
+      alive: number[] = [CHILD_PID, HUB_PID]
+    ): Partial<DetachDeps> {
+      // The spawn happens at t=1000; the hub's state file is stamped at t=1500.
+      let now = 1_000;
+      return baseDeps({
+        controller: new FakeProcessController(alive),
+        now: () => now,
+        sleep: (ms) => {
+          now += ms;
+          return Promise.resolve();
+        },
+        readState: () =>
+          Promise.resolve({ ...makeState(), pid: HUB_PID, startedAt: 1_500, ...state }),
+      });
+    }
+
+    it('accepts the hub it started and reports the hub pid, not the launcher pid', async () => {
+      const result = await spawnDetached(3001, 'localhost', supervisedDeps({}));
+
+      expect(result.pid).toBe(HUB_PID);
+    });
+
+    it('accepts it while a restart waits on the predecessor', async () => {
+      const result = await spawnDetached(3001, 'localhost', supervisedDeps({}), {
+        waitForPid: PREDECESSOR_PID,
+        executable: ['/home/j/.local/share/pnpm/mangostudio'],
+      });
+
+      expect(result.pid).toBe(HUB_PID);
+    });
+
+    it("does not take the predecessor's leftover state file for the successor", async () => {
+      // The old hub is still alive and its state file is newer than the spawn,
+      // which is what the pid equality used to rule out.
+      const deps = supervisedDeps({ pid: PREDECESSOR_PID }, [CHILD_PID, PREDECESSOR_PID]);
+
+      await expect(
+        spawnDetached(3001, 'localhost', deps, { waitForPid: PREDECESSOR_PID })
+      ).rejects.toThrow(/did not become healthy/i);
+    });
+
+    it('does not take a state file written before the spawn for the successor', async () => {
+      const deps = supervisedDeps({ startedAt: 10 });
+
+      await expect(spawnDetached(3001, 'localhost', deps)).rejects.toThrow(
+        /did not become healthy/i
+      );
+    });
+
+    it('does not take a state file naming a dead pid for the successor', async () => {
+      const deps = supervisedDeps({}, [CHILD_PID]);
+
+      await expect(spawnDetached(3001, 'localhost', deps)).rejects.toThrow(
+        /did not become healthy/i
+      );
+    });
+
+    it('still requires the successor to answer the health probe', async () => {
+      const deps = { ...supervisedDeps({}), confirmsHealthy: () => Promise.resolve(false) };
+
+      await expect(spawnDetached(3001, 'localhost', deps)).rejects.toThrow(
+        /did not become healthy/i
+      );
+    });
+  });
 });
 
 describe('restartExecutableOptions', () => {

@@ -50,12 +50,8 @@ class FakeSiblingIndex {
     return { listSiblingChatIds: this.list, repoInvalidation: UNRESOLVED_REPOSITORY };
   }
 
-  list = (
-    userId: string,
-    environmentId: string,
-    workdir: string,
-    root?: string
-  ): Promise<string[]> => {
+  list = (target: GithubInvalidationTarget): Promise<string[]> => {
+    const { userId, environmentId, workdir, root } = target;
     this.queries.push({ userId, environmentId, workdir, ...(root ? { root } : {}) });
     return Promise.resolve([...this.chatIds]);
   };

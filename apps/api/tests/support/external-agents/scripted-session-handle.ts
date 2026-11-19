@@ -66,5 +66,6 @@ export function createScriptedSessionHandle(sessionId = 'session-1'): ScriptedSe
     sendReview: () => Promise.reject(new Error('sendReview is not scripted')),
     startReview: () => Promise.reject(new Error('startReview is not scripted')),
     cancel: () => Promise.resolve(),
+    runtimeState: () => Promise.resolve('running' as const),
   };
 }

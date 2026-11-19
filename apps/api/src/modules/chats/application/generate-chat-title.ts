@@ -4,6 +4,7 @@ import {
   sanitizeGeneratedChatTitle,
 } from '@mangostudio/shared/chat';
 
+import { SHORT_TEXT_GENERATION_TIMEOUT_MS } from '../../../services/providers/core/generation-deadline';
 import { warmProviderForRequest } from '../../../services/providers/core/provider-readiness';
 import {
   getProvider,
@@ -55,6 +56,7 @@ export async function generateChatTitleUseCase(
     systemPrompt: CHAT_TITLE_SYSTEM_PROMPT,
     modelName: modelId,
     modelCapabilities: capabilities,
+    timeoutMs: SHORT_TEXT_GENERATION_TIMEOUT_MS,
     generationConfig: {
       thinkingEnabled: false,
       reasoningEffort: 'low',
