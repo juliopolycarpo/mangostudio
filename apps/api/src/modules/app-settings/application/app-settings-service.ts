@@ -184,19 +184,46 @@ export async function writeAppSettings(
   return answer(await persistAppSettings(db, userId, patch, expectedRevision, writerId), false);
 }
 
-async function persistAppSettings(
+/**
+ * `writeAppSettings` for a patch that came from a client over the settings PUT.
+ *
+ * Server-owned fields keep their stored value whatever the body carries: the
+ * workspace trust grants change only through the trust and revoke endpoints,
+ * which derive the canonical path and stamp the trust-text version. Internal
+ * callers such as those endpoints use `writeAppSettings`, which applies the
+ * patch as given.
+ *
+ * @example
+ * return writeClientAppSettings(db, user.id, body, headers['if-match']);
+ */
+export async function writeClientAppSettings(
   db: Kysely<Database>,
   userId: string,
   patch: AppSettingsPutBody,
   expectedRevision?: string,
   writerId?: string
+): Promise<AppSettingsResponse> {
+  return answer(
+    await persistAppSettings(db, userId, patch, expectedRevision, writerId, true),
+    false
+  );
+}
+
+async function persistAppSettings(
+  db: Kysely<Database>,
+  userId: string,
+  patch: AppSettingsPutBody,
+  expectedRevision?: string,
+  writerId?: string,
+  fromClient = false
 ) {
   const snapshot = await patchAppSettingsSnapshot(
     db,
     userId,
     patch,
     await libraryLocationDefaultsForWrite(),
-    expectedRevision
+    expectedRevision,
+    { fromClient }
   );
   publishSettingsInvalidation(userId, 'app', writerId);
   return snapshot;

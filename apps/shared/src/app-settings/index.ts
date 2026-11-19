@@ -42,6 +42,7 @@ export {
   libraryLocationsPatch,
   mergeAppSettingsPatch,
   onboardingPatch,
+  preserveServerOwnedSettings,
 } from './patch';
 export {
   type AppSettings,
