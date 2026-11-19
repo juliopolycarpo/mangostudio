@@ -691,6 +691,8 @@ const SKILLS_CASES: readonly SectionCase[] = [
           name: 'a skill whose higher-priority location could not be scanned',
           rows: () => {
             writeSkill(WITHHELD_DIRS.claude, 'fallback', 'name: fallback\ndescription: Claude');
+            // Each group reads its cases more than once, so the setup must be repeatable.
+            rmSync(WITHHELD_DIRS.agents, { recursive: true, force: true });
             symlinkSync(join(WITHHELD_DIRS.mango, 'missing'), WITHHELD_DIRS.agents, 'dir');
             return skillsRows(WITHHELD_DIRS, {
               origin: 'default',
@@ -1233,7 +1235,7 @@ const GROUPS: readonly SectionGroup[] = [
     cases: SERVICE_CASES,
   },
   { name: 'ChatGPT', prefixes: ['chatgpt'], keyed: true, cases: CHATGPT_CASES },
-  { name: 'skills', prefixes: ['skills'], keyed: false, cases: SKILLS_CASES },
+  { name: 'skills', prefixes: ['skills'], keyed: true, cases: SKILLS_CASES },
   { name: 'MCP', prefixes: ['mcp'], keyed: false, cases: MCP_CASES },
   { name: 'environments', prefixes: ['env'], keyed: false, cases: ENVIRONMENT_CASES },
   { name: 'library', prefixes: ['library'], keyed: false, cases: LIBRARY_CASES },

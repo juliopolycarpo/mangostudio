@@ -464,6 +464,32 @@ describe('MachinePage', () => {
         label: 'Porta do ChatGPT',
         detail: '1455 livre (callback de login OAuth)',
       },
+      {
+        section: 'Skills source',
+        check: {
+          label: 'Skills agents',
+          labelKey: 'skills.label.agents',
+          status: 'ok',
+          detail: '/home/u/.agents/skills — 3 skill(s) (source disabled)',
+          detailKey: 'skills.detail.sourceCountDisabled',
+          params: { dir: '/home/u/.agents/skills', count: '3' },
+        },
+        label: 'Skills agents',
+        detail: '/home/u/.agents/skills — 3 skill(s) (fonte desativada)',
+      },
+      {
+        section: 'Skill',
+        check: {
+          label: 'Skill agents:shared',
+          labelKey: 'skills.label.skill',
+          status: 'warn',
+          detail: 'shadowed by mango source (higher precedence)',
+          detailKey: 'skills.detail.shadowed',
+          params: { key: 'agents:shared', source: 'mango' },
+        },
+        label: 'Skill agents:shared',
+        detail: 'sobreposta pela fonte mango (maior precedência)',
+      },
     ];
 
     it.each(SECTION_ROWS.map((entry) => [entry.section, entry] as const))(
