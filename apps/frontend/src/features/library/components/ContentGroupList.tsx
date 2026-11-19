@@ -10,6 +10,7 @@
 import type { LibraryLocationId, PropagationSourceGroup } from '@mangostudio/shared/library';
 
 import { formatBytes } from '@/features/environments/format';
+import { libraryMessages } from '@/features/library/library-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { usePlural } from '@/hooks/use-plural';
 import { formatMessage, formatRelativeTime } from '@/lib/i18n-format';
@@ -30,7 +31,7 @@ export function ContentGroupList({
   onSelect,
   locationLabel,
 }: ContentGroupListProps) {
-  const { t, locale } = useI18n();
+  const { t, locale } = useI18n(libraryMessages);
   const plural = usePlural();
   const l = t.library;
 

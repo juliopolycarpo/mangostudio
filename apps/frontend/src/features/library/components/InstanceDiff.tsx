@@ -18,6 +18,7 @@ import { useMemo } from 'react';
 import { Callout } from '@/components/ui/Callout';
 import { diffTextLines } from '@/features/chat/components/file-change-preview';
 import { FileChangePreviewBody } from '@/features/chat/components/FileChangePreview';
+import { libraryMessages } from '@/features/library/library-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 
 import { hashPrefix } from '../format';
@@ -54,7 +55,7 @@ export function InstanceDiff({
   whitespaceOnly,
   environmentId,
 }: InstanceDiffProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
 
   const [leftQuery, rightQuery] = useQueries({

@@ -8,6 +8,7 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
 import { Textarea } from '@/components/ui/Textarea';
 import { useToast } from '@/components/ui/Toast';
+import { gitMessages } from '@/features/workspace/git-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { cn, resolveApiErrorMessage } from '@/lib/utils';
@@ -41,7 +42,7 @@ export function CommitForm({
   readonly onExitAmend: () => void;
   readonly onRemoteFailure: (error: unknown) => void;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(gitMessages);
   const { toast } = useToast();
   const labels = t.git.commit;
   const overwriteLabels = t.git.commitMessageOverwrite;

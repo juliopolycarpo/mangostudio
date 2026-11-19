@@ -21,6 +21,7 @@ import type { LibraryLocationId, LibraryResource } from '@mangostudio/shared/lib
 import { Fragment } from 'react';
 
 import { Badge } from '@/components/ui/Badge';
+import { libraryMessages } from '@/features/library/library-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 
 import { coverageCell, type ShadowedCopyComparison, shadowedCopyComparison } from '../format';
@@ -39,7 +40,7 @@ const COMPARISON_VARIANTS = {
 } as const satisfies Record<ShadowedCopyComparison, 'neutral' | 'warning'>;
 
 export function CoverageList({ resource, locationLabel }: CoverageListProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
 
   return (

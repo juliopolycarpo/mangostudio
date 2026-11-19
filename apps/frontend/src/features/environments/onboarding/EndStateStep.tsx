@@ -18,6 +18,7 @@ import { PickOneRow } from '@/components/settings/PickOneRow';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Input } from '@/components/ui/Input';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
@@ -62,7 +63,7 @@ export function EndStateStep({
   onContinue,
   onBack,
 }: EndStateStepProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.onboarding;
   const add = t.environments.entities.add;
   const create = useCreateEnvironmentMutation();

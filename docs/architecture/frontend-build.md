@@ -388,6 +388,18 @@ owns focus and the keys from the first commit, so characters typed while the res
 in flight stay in the input and become the results' initial query rather than reaching the
 composer. Until the results mount, Enter and the navigation keys are swallowed; Escape closes.
 
+**English strings of lazy features ride with their chunk.** The Environments, Library, Git and
+GitHub namespaces are split by key: what the first paint reads stays in `en.ts`, the rest is
+`en-<name>.ts`, which the feature's own components import statically and pass to
+`useI18n(libraryMessages)`. The bundler places it in the feature's chunk (a chunk shared by several
+routes when more than one imports it), so the strings arrive in the same round as the code and
+no Suspense is added. A shared chunk is one more request in that round (the Library page makes
+two more, the Environments page one), never one more round; the Git, GitHub and Settings panels
+keep their request counts. Moving them out of the entry took 9.8 KB Brotli, 47 KB raw (see
+[i18n](i18n.md#feature-namespaces)). One static import of a feature module from anything the
+entry reaches puts them back; `tests/unit/i18n-feature-namespaces.test.ts` walks the entry's
+static imports and names the importer.
+
 **Lazy chunk failures stay local.** `LazyChunkBoundary` keeps a failed chunk where it sits,
 with Retry and Reload; a plain `React.lazy` would cache the rejection and take the whole
 page down through the route's error component. These go through `retryableLazy` and that

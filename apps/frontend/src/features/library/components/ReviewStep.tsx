@@ -15,6 +15,7 @@ import type {
 } from '@mangostudio/shared/library';
 
 import { MicroLabel } from '@/components/ui/MicroLabel';
+import { libraryMessages } from '@/features/library/library-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 
@@ -67,7 +68,7 @@ export function ReviewStep({
   onSelectStrategy,
   onToggleAcknowledged,
 }: ReviewStepProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
   const writes = plannedWrites(preview, draft);
   const summary = applySummary(writes);
@@ -190,7 +191,7 @@ function ReviewRow({
   readonly onSelectStrategy: ReviewStepProps['onSelectStrategy'];
   readonly onToggleAcknowledged: ReviewStepProps['onToggleAcknowledged'];
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
   const entry = preview.entries.find((candidate) => candidate.resourceKey === write.resourceKey);
   const winner = entry

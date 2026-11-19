@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 
 import { Callout } from '@/components/ui/Callout';
 import { SignInCommand } from '@/features/external-agents/SignInCommand';
+import { githubMessages } from '@/features/github/github-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 
 type UnavailableKind = GithubUnavailableState['state'];
@@ -66,7 +67,7 @@ function HintWithCommand({ hint, command }: { readonly hint: string; readonly co
  * if (data.state !== 'ok') return <GithubNotConnected state={data.state} />;
  */
 export function GithubNotConnected({ state, action }: GithubNotConnectedProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(githubMessages);
   const hint = t.github.connectionHint[state];
 
   return (

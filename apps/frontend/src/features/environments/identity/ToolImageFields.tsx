@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { Input } from '@/components/ui/Input';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 
 export type ToolImageMode = 'monogram' | 'upload' | 'url';
@@ -51,7 +52,7 @@ export function ToolImageFields({
   onCacheChange,
   urlInvalid,
 }: ToolImageFieldsProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.identity;
   const groupId = useId();
   const cacheId = useId();

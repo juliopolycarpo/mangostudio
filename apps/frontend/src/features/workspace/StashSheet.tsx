@@ -10,6 +10,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Input } from '@/components/ui/Input';
 import { Spinner } from '@/components/ui/Spinner';
 import { useToast } from '@/components/ui/Toast';
+import { gitMessages } from '@/features/workspace/git-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
@@ -33,7 +34,7 @@ export function StashSheet({
   readonly chatId: string;
   readonly onClose: () => void;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(gitMessages);
   const { toast } = useToast();
   const labels = t.git.stash;
   const stashesQuery = useGitStashes(chatId);

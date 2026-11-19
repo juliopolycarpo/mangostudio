@@ -12,6 +12,7 @@ import { EmptyState } from '@/components/ui/EmptyState';
 import { Spinner } from '@/components/ui/Spinner';
 import { StatusDot, type StatusDotTone } from '@/components/ui/StatusDot';
 import { useToast } from '@/components/ui/Toast';
+import { gitMessages } from '@/features/workspace/git-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { workdirLabel } from '@/lib/paths';
@@ -46,7 +47,7 @@ type WorktreeLabels = Messages['git']['worktrees'];
  * <WorktreeSection chatId={chatId} />
  */
 export function WorktreeSection({ chatId }: { readonly chatId: string }) {
-  const { t } = useI18n();
+  const { t } = useI18n(gitMessages);
   const { toast } = useToast();
   const labels = t.git.worktrees;
   const worktreesQuery = useGitWorktrees(chatId);
@@ -156,7 +157,7 @@ function WorktreeList({
   readonly onRetry: () => void;
   readonly onRemove: (worktree: GitWorktree) => void;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(gitMessages);
   const labels = t.git.worktrees;
 
   if (error) {
@@ -206,7 +207,7 @@ function WorktreeRow({
   readonly pending: boolean;
   readonly onRemove: () => void;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(gitMessages);
   const labels = t.git.worktrees;
   const removable = !worktree.isMain && !isCurrent;
   const removeLabel = labels.removeLabel.replace('{path}', worktree.path);

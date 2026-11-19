@@ -17,6 +17,7 @@ import type { PropagationPreview, PropagationPreviewEntry } from '@mangostudio/s
 
 import { Badge } from '@/components/ui/Badge';
 import { Textarea } from '@/components/ui/Textarea';
+import { libraryMessages } from '@/features/library/library-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 
@@ -37,7 +38,7 @@ interface ConflictStepProps {
 }
 
 export function ConflictStep({ preview, draft, unresolved, onResolve }: ConflictStepProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
   const divergent = preview.entries.filter((entry) => entry.requiresWinnerSelection);
 
@@ -76,7 +77,7 @@ function ConflictEntry({
   readonly resolved: boolean;
   readonly onResolve: ConflictStepProps['onResolve'];
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
   const choice = resolutionFor(draft, entry.resourceKey);
 
@@ -143,7 +144,7 @@ function EditOption({
   readonly draft: WizardDraft;
   readonly onResolve: ConflictStepProps['onResolve'];
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
   const choice = resolutionFor(draft, entry.resourceKey);
   const editing = choice.resolution === 'edit-then-adopt';
