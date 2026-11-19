@@ -1883,36 +1883,50 @@ mod tests {
         );
     }
 
-    /// The number of descriptors this process holds, read from `/proc`.
+    /// The descriptors this process holds on a directory at or below `root`,
+    /// read from `/proc`. Counting only this test's own scratch tree keeps the
+    /// measurement independent of descriptors that tests running on other
+    /// threads open and close; a count of every descriptor would flake under
+    /// `cargo test`, which runs them in one process.
     #[cfg(target_os = "linux")]
-    fn open_descriptor_count() -> usize {
-        fs::read_dir("/proc/self/fd").unwrap().count()
+    fn descriptors_held_below(root: &Path) -> usize {
+        fs::read_dir("/proc/self/fd")
+            .unwrap()
+            .filter_map(|descriptor| fs::read_link(descriptor.ok()?.path()).ok())
+            .filter(|target| target.starts_with(root))
+            .count()
     }
 
     #[cfg(target_os = "linux")]
     #[test]
     fn capability_walk_holds_descriptors_for_the_current_path_not_for_every_sibling() {
         const SIBLINGS: usize = 300;
-        let root = scratch_dir("filesystem-search-walk-descriptors");
+        let scratch = scratch_dir("filesystem-search-walk-descriptors");
+        // `/proc` reports resolved paths, so compare against the resolved root.
+        let root = fs::canonicalize(&scratch).unwrap();
         for index in 0..SIBLINGS {
             let directory = root.join(format!("dir-{index}"));
             fs::create_dir(&directory).unwrap();
             fs::write(directory.join("file.txt"), "x").unwrap();
         }
         let policy = PathPolicy {
-            allowed_roots: vec![root.to_path_buf()],
+            allowed_roots: vec![root.clone()],
             ..PathPolicy::default()
         }
         .compile()
         .unwrap();
-        let baseline = open_descriptor_count();
+        assert_eq!(
+            descriptors_held_below(&root),
+            0,
+            "expected no descriptor on the fixture before the walk starts"
+        );
         let mut most_held = 0;
         let mut files = 0;
 
         walk(&root, false, &policy, None, &token(), |entry| {
             if !entry.is_directory {
                 files += 1;
-                most_held = most_held.max(open_descriptor_count());
+                most_held = most_held.max(descriptors_held_below(&root));
             }
             Ok(WalkControl::Continue)
         })
@@ -1920,16 +1934,21 @@ mod tests {
 
         assert_eq!(files, SIBLINGS, "expected one file in each directory");
         assert!(
-            most_held - baseline < 32,
-            "expected a walk over {SIBLINGS} sibling directories to hold a handful of descriptors | baseline: {baseline} | most held during the walk: {most_held}"
+            (1..8).contains(&most_held),
+            "expected a walk over {SIBLINGS} sibling directories to hold the root and the current directory, a handful of descriptors | most held below {} during the walk: {most_held}",
+            root.display()
         );
     }
 
-    /// Swaps the directory `victim` for a symlink to `outside` the first time
-    /// the walk reports it: after its parent was listed, before it is entered.
+    /// Swaps the directory `victim` for a symlink to `outside` the moment the
+    /// walk reports `victim` itself. The walk enters a directory only after it
+    /// listed its parent in full, so the swap always lands between listing and
+    /// descent.
     #[cfg(unix)]
     struct SwapListedDirectory {
         victim: PathBuf,
+        /// `victim` as the walk reports it, relative to the search root.
+        victim_relative: PathBuf,
         parked: PathBuf,
         outside: PathBuf,
         done: std::cell::Cell<bool>,
@@ -1937,8 +1956,8 @@ mod tests {
 
     #[cfg(unix)]
     impl SwapListedDirectory {
-        fn swap_once(&self) {
-            if self.done.replace(true) {
+        fn swap_when_reported(&self, reported: &Path) {
+            if reported != self.victim_relative || self.done.replace(true) {
                 return;
             }
             fs::rename(&self.victim, &self.parked).unwrap();
@@ -1960,6 +1979,7 @@ mod tests {
         fs::write(outside.join("secret.txt"), "leaked").unwrap();
         let swap = SwapListedDirectory {
             victim: root.join("victim"),
+            victim_relative: PathBuf::from("victim"),
             parked: sandbox.join("parked"),
             outside,
             done: std::cell::Cell::new(false),
@@ -1975,16 +1995,26 @@ mod tests {
 
         walk(&root, false, &policy, None, &token(), |entry| {
             seen.push(entry.relative.to_path_buf());
-            // The root is listed in full before any subdirectory is entered, so
-            // swapping on the first entry lands between listing and descent.
-            swap.swap_once();
+            swap.swap_when_reported(entry.relative);
             Ok(WalkControl::Continue)
         })
         .unwrap();
 
         assert!(
-            !seen.iter().any(|path| path.ends_with("secret.txt")),
-            "expected the walk never to enter the symlink that replaced `victim` | seen: {seen:?}"
+            swap.done.get(),
+            "expected the walk to report `victim` and trigger the swap | seen: {seen:?}"
+        );
+        // `victim` was reported as a directory, so the walk tried to enter it
+        // and `open_checked_child` had to refuse the symlink in its place. An
+        // entry below it, from the symlink target or the parked directory,
+        // means the walk entered one of them.
+        let below_victim: Vec<_> = seen
+            .iter()
+            .filter(|path| path.starts_with("victim") && path.as_path() != Path::new("victim"))
+            .collect();
+        assert!(
+            below_victim.is_empty(),
+            "expected the walk to skip the symlink that replaced `victim` and list nothing below it | entries below victim: {below_victim:?}"
         );
         assert!(
             seen.contains(&Path::new("bystander").join("kept.txt")),
