@@ -26,6 +26,9 @@ export class FakeUnitHost {
   readonly sleeps: number[] = [];
   /** Whether launchd has the job in its domain; bootout drops it, bootstrap loads it. */
   jobLoaded = false;
+  /** How many `launchctl print` calls still list a job after its bootout, as one that is exiting does. */
+  lingerAfterBootout = 0;
+  private lingeringPrints = 0;
   private readonly launchctlFailures = new Map<string, UserServiceExecResult[]>();
 
   constructor(readonly platform: 'linux' | 'darwin' | 'win32') {}
@@ -119,12 +122,28 @@ export class FakeUnitHost {
     return ok();
   }
 
-  /** launchd's domain, reduced to whether the job is loaded: `kickstart` needs it, `bootstrap` loads it. */
+  /**
+   * launchd's domain, reduced to whether the job is loaded: `kickstart` needs
+   * it, `print` reports it, `bootstrap` loads it. After a successful `bootout`
+   * the job still shows in `print` for `lingerAfterBootout` calls, the way a job
+   * that is exiting does.
+   */
   private runLaunchctl(verb: string): UserServiceExecResult {
     const failure = this.launchctlFailures.get(verb)?.shift();
     if (failure) return failure;
-    if (verb === 'bootout') this.jobLoaded = false;
+    if (verb === 'bootout') {
+      this.jobLoaded = false;
+      this.lingeringPrints = this.lingerAfterBootout;
+    }
     if (verb === 'bootstrap') this.jobLoaded = true;
+    if (verb === 'print') {
+      if (this.jobLoaded) return { exitCode: 0, stdout: '', stderr: '' };
+      if (this.lingeringPrints > 0) {
+        this.lingeringPrints -= 1;
+        return { exitCode: 0, stdout: '', stderr: '' };
+      }
+      return { exitCode: 113, stdout: '', stderr: 'Could not find service in domain' };
+    }
     if (verb === 'kickstart' && !this.jobLoaded) {
       return { exitCode: 113, stdout: '', stderr: 'Could not find service in domain' };
     }

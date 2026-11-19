@@ -686,18 +686,43 @@ describe('createUserServiceManager restartRetargeted', () => {
   const BOOTSTRAP = ['launchctl', 'bootstrap', 'gui/1000', PLIST_PATH];
   const EIO_STDERR = 'Bootstrap failed: 5: Input/output error';
 
-  /** A darwin host whose `launchctl bootstrap` answers from `bootstrapResults`, then succeeds. */
-  function darwinHost(bootstrapResults: readonly UserServiceExecResult[] = []): FakeServiceHost {
-    const queue = [...bootstrapResults];
+  /**
+   * A darwin host whose `launchctl bootstrap`, `bootout` and `print` answer from
+   * the queued results, then succeed. A `print` that succeeds is a job launchd
+   * still has in its domain.
+   */
+  function darwinHost(
+    bootstrapResults: readonly UserServiceExecResult[] = [],
+    others: {
+      readonly bootout?: readonly UserServiceExecResult[];
+      readonly print?: readonly UserServiceExecResult[];
+    } = {}
+  ): FakeServiceHost {
+    const queues: Record<string, UserServiceExecResult[]> = {
+      bootstrap: [...bootstrapResults],
+      bootout: [...(others.bootout ?? [])],
+      print: [...(others.print ?? [])],
+    };
     const host = new FakeServiceHost({
       platform: 'darwin',
-      onExec: (argv) => (argv[1] === 'bootstrap' ? queue.shift() : undefined),
+      onExec: (argv) => queues[argv[1] ?? '']?.shift(),
     });
     host.files.set(PLIST_PATH, renderLaunchdPlistFile('com.example.unit', VERSIONED));
     return host;
   }
 
   const eio = (): UserServiceExecResult => ({ exitCode: 5, stdout: '', stderr: EIO_STDERR });
+  const inProgress = (): UserServiceExecResult => ({
+    exitCode: 37,
+    stdout: '',
+    stderr: 'Boot-out failed: 37: Operation already in progress',
+  });
+  /** What `launchctl print` answers for a job that is not in the domain. */
+  const notLoaded = (): UserServiceExecResult => ({
+    exitCode: 113,
+    stdout: '',
+    stderr: 'Could not find service "com.example.unit" in domain for user gui: 1000',
+  });
 
   it('on linux rewrites only the program and reloads systemd before the restart', async () => {
     const host = new FakeServiceHost();
@@ -800,6 +825,85 @@ describe('createUserServiceManager restartRetargeted', () => {
 
     expect(host.argv.filter((argv) => argv[1] === 'bootstrap')).toHaveLength(1);
     expect(host.sleeps).toEqual([]);
+  });
+
+  // Error 5 also answers a bootstrap that failed for any other reason. Only a
+  // job launchd still lists is one that is exiting, which is the wait's reason.
+  it('on darwin gives up at once on error 5 when the job is no longer in the domain', async () => {
+    const host = darwinHost([eio()], { print: [notLoaded()] });
+
+    await expect(
+      createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE)
+    ).rejects.toMatchObject({ message: `launchctl bootstrap failed (exit 5): ${EIO_STDERR}` });
+
+    expect(host.argv.filter((argv) => argv[1] === 'bootstrap')).toHaveLength(1);
+    expect(host.sleeps).toEqual([]);
+  });
+
+  it('on darwin retries error 37 (operation in progress) while the job is still loaded', async () => {
+    const host = darwinHost([
+      { exitCode: 37, stdout: '', stderr: 'Bootstrap failed: 37: Operation already in progress' },
+    ]);
+
+    await createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE);
+
+    expect(host.argv.filter((argv) => argv[1] === 'bootstrap')).toHaveLength(2);
+    expect(host.argv.at(-1)).toEqual(['launchctl', 'kickstart', '-k', LAUNCHD_TARGET]);
+  });
+
+  it('on darwin retries on the exit code alone, not on an error text under another code', async () => {
+    const host = darwinHost([{ exitCode: 1, stdout: '', stderr: EIO_STDERR }]);
+
+    await expect(
+      createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE)
+    ).rejects.toMatchObject({ message: `launchctl bootstrap failed (exit 1): ${EIO_STDERR}` });
+
+    expect(host.argv.filter((argv) => argv[1] === 'bootstrap')).toHaveLength(1);
+  });
+
+  it('on darwin waits for a job that is still exiting when the bootout says it is in progress', async () => {
+    const stillLoaded = (): UserServiceExecResult => ({ exitCode: 0, stdout: '', stderr: '' });
+    const host = darwinHost([], {
+      bootout: [inProgress()],
+      print: [stillLoaded(), stillLoaded(), notLoaded()],
+    });
+
+    await createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE);
+
+    expect(host.argv.map((argv) => argv[1])).toEqual([
+      'bootout',
+      'print',
+      'print',
+      'print',
+      'bootstrap',
+      'kickstart',
+    ]);
+    expect(host.sleeps).toHaveLength(2);
+  });
+
+  it('on darwin names a bootout that failed with the job still loaded, without a bootstrap', async () => {
+    const host = darwinHost([], {
+      bootout: [{ exitCode: 1, stdout: '', stderr: 'Operation not permitted' }],
+    });
+
+    await expect(
+      createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE)
+    ).rejects.toMatchObject({
+      message: 'launchctl bootout failed (exit 1): Operation not permitted',
+    });
+
+    expect(host.argv.some((argv) => argv[1] === 'bootstrap')).toBe(false);
+  });
+
+  it('on darwin carries on past a bootout that failed because nothing was loaded', async () => {
+    const host = darwinHost([], {
+      bootout: [{ exitCode: 3, stdout: '', stderr: 'No such process' }],
+      print: [notLoaded()],
+    });
+
+    await createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE);
+
+    expect(host.argv.at(-1)).toEqual(['launchctl', 'kickstart', '-k', LAUNCHD_TARGET]);
   });
 
   it('on darwin only restarts a plist that already runs the program', async () => {

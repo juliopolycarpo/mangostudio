@@ -240,6 +240,9 @@ const SCHEDULED_TASK_ARGUMENT_MAX = 8_192;
 /** Waits between `launchctl bootstrap` attempts: five tries over about four seconds. */
 const LAUNCHD_BOOTSTRAP_RETRY_DELAYS_MS: readonly number[] = [250, 500, 1_000, 2_000];
 
+/** launchctl exit codes for a job that is exiting: 5 is EIO, 37 is "operation already in progress". */
+const LAUNCHD_TRANSIENT_EXIT_CODES: readonly number[] = [5, 37];
+
 /** The encoded runner script inside a task's action arguments. */
 const TASK_ENCODED_COMMAND = /-EncodedCommand\s+(\S+)/;
 /**
@@ -861,27 +864,52 @@ export function createUserServiceManager(
       'launchctl kickstart'
     );
   };
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
+  /** Whether launchd still has the job in its domain, running or on its way out. */
+  const darwinJobLoaded = async (): Promise<boolean> =>
+    (await run(['launchctl', 'print', darwinTarget])).exitCode === 0;
+  /**
+   * Take the job out of the domain. A failure is only a failure while the job
+   * is still there: `bootout` also fails when there is nothing to remove, which
+   * is the state asked for. Error 5 and 37 mean the job is already on its way
+   * out, so that one is waited for (bounded) instead of raced.
+   */
+  const darwinBootout = async (): Promise<void> => {
+    const result = await run(['launchctl', 'bootout', darwinTarget]);
+    if (result.exitCode === 0 || !(await darwinJobLoaded())) return;
+    if (!LAUNCHD_TRANSIENT_EXIT_CODES.includes(result.exitCode)) {
+      throw commandFailure('launchctl bootout', result);
+    }
+    for (const delay of LAUNCHD_BOOTSTRAP_RETRY_DELAYS_MS) {
+      await sleep(delay);
+      if (!(await darwinJobLoaded())) return;
+    }
+    throw commandFailure('launchctl bootout', result);
+  };
   /**
    * Load the plist, which must not fail: a job that is not in the domain after
    * this is not running and will not come back. Right after a `bootout` the
-   * bootstrap often answers error 5 (EIO) while the old job is still exiting,
-   * so that one answer is retried with a growing, bounded wait.
+   * bootstrap answers error 5 (EIO) or 37 while the old job is still exiting,
+   * so those are retried with a growing, bounded wait — but only while
+   * `launchctl print` still lists the job. The same codes answer a bootstrap
+   * that failed for another reason, and waiting does not help that one.
    */
   const darwinBootstrapRequired = async (): Promise<void> => {
-    const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
     for (let attempt = 0; ; attempt += 1) {
       const result = await run(['launchctl', 'bootstrap', `gui/${deps.uid}`, unitPath as string]);
       if (result.exitCode === 0) return;
       const delay = LAUNCHD_BOOTSTRAP_RETRY_DELAYS_MS[attempt];
-      const stillExiting =
-        result.exitCode === 5 || /input\/output error/i.test(`${result.stderr}${result.stdout}`);
-      if (!stillExiting || delay === undefined) throw commandFailure('launchctl bootstrap', result);
+      const retry =
+        delay !== undefined &&
+        LAUNCHD_TRANSIENT_EXIT_CODES.includes(result.exitCode) &&
+        (await darwinJobLoaded());
+      if (!retry) throw commandFailure('launchctl bootstrap', result);
       await sleep(delay);
     }
   };
   /** Replace the loaded job with the plist on disk and start it. */
   const darwinReload = async (): Promise<void> => {
-    await run(['launchctl', 'bootout', darwinTarget]);
+    await darwinBootout();
     await darwinBootstrapRequired();
     await requireCommand(['launchctl', 'kickstart', '-k', darwinTarget], 'launchctl kickstart');
   };

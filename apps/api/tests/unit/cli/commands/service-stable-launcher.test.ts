@@ -324,6 +324,8 @@ describe('a unit written before the launcher was recorded', () => {
     it('retries the bootstrap that races the old job still exiting, then kicks the job', async () => {
       const { host, manager, layout } = await staleDarwinUnit();
       host.failLaunchctl('bootstrap', EIO, 2);
+      // The old job is still listed while it exits, which is what makes the wait worthwhile.
+      host.lingerAfterBootout = 2;
 
       await restartHubService(manager, layout.launcher, {
         probe: { platform: 'darwin', pathExists: () => true },
@@ -333,7 +335,9 @@ describe('a unit written before the launcher was recorded', () => {
         'print', // the status read that finds the stale unit
         'bootout',
         'bootstrap',
+        'print', // still loaded: the failure is the old job exiting
         'bootstrap',
+        'print',
         'bootstrap',
         'kickstart',
       ]);
@@ -345,6 +349,7 @@ describe('a unit written before the launcher was recorded', () => {
     it('surfaces a bootstrap that never succeeds instead of reporting a restart of an unloaded job', async () => {
       const { host, manager, layout } = await staleDarwinUnit();
       host.failLaunchctl('bootstrap', EIO, 50);
+      host.lingerAfterBootout = 10;
 
       const warnings: string[] = [];
 
