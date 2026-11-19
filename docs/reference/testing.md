@@ -1633,14 +1633,7 @@ Frontend support lives in `apps/frontend/tests/support/`:
   preload-registered `afterAll` fires once per process in the unisolated lane, not
   once per file.
   `unit/support/module-mock-guard.test.ts` fails, naming file and line, on any raw
-  `mock.module(` under `apps/api/tests` outside that wrapper, except in files on
-  its allowlist of not-yet-migrated suites. The allowlist records a call count per
-  file and only shrinks. Until a suite migrates it keeps its own restore:
-  `support/mocks/google-genai.ts` for the Gemini SDK,
-  `support/connectors/index.ts` for the first-party provider modules, and
-  `integration/routes/_respond-stream-helpers.ts` for the modules the respond-stream
-  suites fake (`respond-stream-helpers.test.ts` fakes every export of each and
-  fails if `restoreAllMocks` leaves one behind).
+  `mock.module(` under `apps/api/tests` outside that wrapper.
   Reproduce a leak on the pinned Bun (`packageManager` in `package.json`): a newer
   canary (1.4.5-canary.1) did not carry a raw `mock.module` into the next file in
   a plain `bun test`, so a leak proof run there passes for the wrong reason.

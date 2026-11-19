@@ -1,38 +1,23 @@
 /**
  * Shared helpers for connector route integration tests.
  *
- * Connector tests repeatedly (a) stub `globalThis.fetch` so provider key
- * validation does not hit the network, and (b) re-register the real
- * openai / base-url-policy / gemini modules afterwards, because
- * `mock.restore()` does NOT revert `mock.module()` overrides. Centralizing
- * both removes the most error-prone boilerplate from individual tests.
+ * Connector tests stub `globalThis.fetch` so provider key validation does not
+ * hit the network and fake base-url validation so it does not resolve DNS.
+ * Module fakes go through `mockModule`, so the global afterEach restores them.
  */
-
-import { mock } from 'bun:test';
 
 import type { ChatGptUsageSnapshot } from '@mangostudio/shared/connectors';
 import Type from 'typebox';
 
-import * as geminiService from '../../../src/services/gemini';
 import * as baseUrlPolicy from '../../../src/services/providers/core/base-url-policy';
-import * as openaiModule from '../../../src/services/providers/openai/index';
-import { restoreGoogleGenAI } from '../mocks/google-genai';
+import { moduleMockerFor } from '../mocks/module-mocks';
 
-// Capture the real implementations at module-load time, before any test can
-// override them via mock.module().
-//
-// Whole namespaces, not hand-listed subsets. The overrides tests install are
-// *partial* (one gemini fake names only `updateConnectorModels`), and
-// `mock.module()` on an already-loaded module *merges* rather than replaces —
-// so re-registering only the exports a fake happened to name leaves the rest of
-// that fake installed. `openai/index` also exports `openAIProvider` and
-// `streamWithResponsesAPI`, and the route modules bind
-// `InvalidGeminiApiKeyError` / `GeminiValidationUnavailableError` for
-// `instanceof` checks; a subset restore would leave the same hole a different
-// shape.
-const realOpenAIModule = { ...openaiModule };
+const mockModule = moduleMockerFor(import.meta.dir);
+
+// The fake below spreads the real base-url-policy namespace. It is captured at
+// module-load time because mock.module() updates live bindings: a later spread
+// would read the fake.
 const realBaseUrlPolicy = { ...baseUrlPolicy };
-const realGeminiService = { ...geminiService };
 
 type FetchImpl = typeof globalThis.fetch;
 
@@ -154,24 +139,8 @@ export async function withFetch<T>(fetchImpl: FetchImpl, body: () => Promise<T>)
 
 /** Mocks base-url validation to always pass (avoids DNS lookups in tests). */
 export async function allowAnyBaseUrl(): Promise<void> {
-  await mock.module('../../../src/services/providers/core/base-url-policy', () => ({
+  await mockModule('../../../src/services/providers/core/base-url-policy', () => ({
     ...realBaseUrlPolicy,
     validateBaseUrl: () => Promise.resolve(),
   }));
-}
-
-/**
- * Re-registers the real openai, base-url-policy, gemini and `@google/genai`
- * modules. Call in `afterEach` of any connector test that used mock.module on
- * them, so the overrides do not leak into other tests.
- * // Usage: afterEach(restoreConnectorProviderMocks)
- */
-export async function restoreConnectorProviderMocks(): Promise<void> {
-  await mock.module('../../../src/services/providers/openai/index', () => realOpenAIModule);
-  await mock.module(
-    '../../../src/services/providers/core/base-url-policy',
-    () => realBaseUrlPolicy
-  );
-  await mock.module('../../../src/services/gemini', () => realGeminiService);
-  await restoreGoogleGenAI();
 }

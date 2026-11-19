@@ -31,7 +31,8 @@
  * It is pulled into the bunfig preload's module graph through
  * `test-environment.ts`. A module in that graph that a test mocks is re-evaluated
  * by the mock and yields a second, uninitialized `test-environment.ts` (see
- * `tests/support/mocks/google-genai.ts`). `bun:test` is the only import here, and
+ * docs/reference/testing.md, "Never add a direct import of a mocked module to the
+ * bunfig preload", for the measurement). `bun:test` is the only import here, and
  * `preload.ts` itself still imports only its `./` siblings.
  */
 

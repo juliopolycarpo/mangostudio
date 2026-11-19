@@ -13,11 +13,12 @@
  * file. Mocking a module this one imports at top level re-evaluates the
  * preload's graph, which produces a second `test-environment.ts` with
  * `initialized` back to false — every later `createApiTestApp` then throws the
- * not-initialized guard. See tests/support/mocks/google-genai.ts for the
- * measurement. Transitive reachability is not the trigger: `test-environment.ts`
- * already pulls in `@google/genai`, `src/services/gemini` and the openai
- * modules through `registerApplicationServices()`, and connector tests mock all
- * of them without hitting this.
+ * not-initialized guard. See docs/reference/testing.md ("Never add a direct
+ * import of a mocked module to the bunfig preload") for the measurement.
+ * Transitive reachability is not the trigger: `test-environment.ts` already
+ * pulls in `@google/genai`, `src/services/gemini` and the openai modules
+ * through `registerApplicationServices()`, and connector tests mock all of them
+ * without hitting this.
  *
  * tests/unit/support/preload-imports.test.ts enforces the rule: every import
  * here must start with `./`.

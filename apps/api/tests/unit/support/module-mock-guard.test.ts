@@ -10,22 +10,6 @@ const TESTS_ROOT = join(import.meta.dir, '../..');
 /** The one file allowed to call `mock.module()`: it is the wrapper every other file goes through. */
 const WRAPPER_PATH = 'support/mocks/module-mocks.ts';
 
-/**
- * Files that still call `mock.module()` directly, with how many call sites each
- * has. Paths are relative to `apps/api/tests`.
- *
- * This list only shrinks. A raw call in a file that is not here fails the guard,
- * and so does a count above the one recorded; a count below it fails too, so a
- * migrated call site takes its entry down with it instead of leaving headroom for
- * a new raw call. Migrate a file to `moduleMockerFor(import.meta.dir)` (see
- * tests/support/mocks/module-mocks.ts) and delete its line.
- */
-const UNMIGRATED_RAW_MOCK_MODULE_CALLS: Readonly<Record<string, number>> = {
-  'integration/routes/settings-connectors.integration.test.ts': 7,
-  'support/connectors/index.ts': 4,
-  'support/mocks/google-genai.ts': 1,
-};
-
 /** Matches `mock.module`, `mock . module`, and the `jest.mock` / `vi.mock` spellings of the same call. */
 const RAW_MODULE_MOCK = /\b(?:mock\s*\.\s*module|jest\s*\.\s*mock|vi\s*\.\s*mock)\b/g;
 
@@ -54,33 +38,16 @@ async function scanTestsForRawModuleMocks(): Promise<Map<string, number[]>> {
 }
 
 describe('raw mock.module() guard', () => {
-  test('no file outside the allowlist calls mock.module() directly', async () => {
+  test('no file calls mock.module() directly', async () => {
     const found = await scanTestsForRawModuleMocks();
 
-    const offenders = [...found]
-      .filter(([path]) => !(path in UNMIGRATED_RAW_MOCK_MODULE_CALLS))
-      .flatMap(([path, lines]) => lines.map((line) => `tests/${path}:${line}`));
+    const offenders = [...found].flatMap(([path, lines]) =>
+      lines.map((line) => `tests/${path}:${line}`)
+    );
 
     expect(
       offenders,
       `(raw mock.module): expected no direct call outside ${WRAPPER_PATH} | received: ${offenders.join(', ')}. Use \`const mockModule = moduleMockerFor(import.meta.dir)\` from tests/support/mocks/module-mocks.ts: it snapshots the real module and the global afterEach restores it, so the fake cannot leak into a later file`
-    ).toEqual([]);
-  });
-
-  test('an allowlisted file has exactly the recorded number of raw calls', async () => {
-    const found = await scanTestsForRawModuleMocks();
-
-    const mismatches = Object.entries(UNMIGRATED_RAW_MOCK_MODULE_CALLS)
-      .map(([path, allowed]) => ({ path, allowed, lines: found.get(path) ?? [] }))
-      .filter(({ allowed, lines }) => lines.length !== allowed)
-      .map(
-        ({ path, allowed, lines }) =>
-          `tests/${path}: allowlist records ${allowed}, found ${lines.length} (lines ${lines.join(', ') || 'none'})`
-      );
-
-    expect(
-      mismatches,
-      `(raw mock.module allowlist): expected each count to match the file | received: ${mismatches.join('; ')}. The list only shrinks: lower the count or delete the entry after migrating call sites, and never raise it`
     ).toEqual([]);
   });
 
