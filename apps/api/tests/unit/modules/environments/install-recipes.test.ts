@@ -4,6 +4,7 @@ import type { InstallPlatform } from '@mangostudio/shared/environments';
 import { AGENT_CLI_DEFINITIONS } from '@mangostudio/shared/environments/detection';
 
 import {
+  bunRootOf,
   getInstallRecipe,
   hasInstallRecipeForRuntime,
   INSTALL_RECIPES,
@@ -18,6 +19,16 @@ import {
 const RUNTIME_IDS = ['bun', 'node', 'fnm', 'winget', 'git'];
 const VERSION_MANAGER_IDS = ['nvm', 'fnm'];
 const AGENT_TARGET_IDS = AGENT_CLI_DEFINITIONS.map((definition) => definition.targetId);
+
+/** A Bun detected under a `.bun` root, one per platform spelling. */
+const BUN_POSIX_CONTEXT = {
+  platform: 'linux',
+  binaryPaths: { bun: '/srv/tools/.bun/bin/bun' },
+} as const;
+const BUN_WIN32_CONTEXT = {
+  platform: 'win32',
+  binaryPaths: { bun: 'D:\\tools\\.bun\\bin\\bun.exe' },
+} as const;
 
 /** winget's HRESULT for "no applicable update found" (0x8A15002B), signed. */
 const WINGET_NO_APPLICABLE_UPGRADE = -1978335189;
@@ -238,22 +249,65 @@ describe('install recipes', () => {
   it('never expands $BUN_INSTALL into the directory it deletes', () => {
     const recipe = getInstallRecipe('bun.uninstall');
 
-    const posix = recipe.argv?.({ kind: 'none' }, { platform: 'linux', binaryPaths: {} });
-    const win32 = recipe.argv?.({ kind: 'none' }, { platform: 'win32', binaryPaths: {} });
+    const posix = recipe.argv?.({ kind: 'none' }, BUN_POSIX_CONTEXT);
+    const win32 = recipe.argv?.({ kind: 'none' }, BUN_WIN32_CONTEXT);
 
     expect(posix?.at(-1)).not.toContain('BUN_INSTALL');
     expect(win32?.at(-1)).not.toContain('BUN_INSTALL');
     expect(recipe.writes).not.toContain('$BUN_INSTALL');
   });
 
+  it('removes the root of the detected Bun, not a hard-coded home path', () => {
+    const recipe = getInstallRecipe('bun.uninstall');
+
+    const posix = recipe.argv?.({ kind: 'none' }, BUN_POSIX_CONTEXT);
+    const win32 = recipe.argv?.({ kind: 'none' }, BUN_WIN32_CONTEXT);
+
+    expect(posix?.at(-1)).toContain('root=/srv/tools/.bun\n');
+    expect(win32?.at(-1)).toContain("$root = 'D:\\tools\\.bun'");
+  });
+
+  // A root that is not literally `.bun` is never vouched for: a package-manager
+  // Bun has a `bin/bun` whose parent holds other tools. The recipe refuses
+  // when it runs instead of throwing, so the card can still preview it.
+  it.each([
+    ['linux', '/usr/local/bin/bun'],
+    ['linux', '/opt/homebrew/bin/bun'],
+    ['linux', '/home/me/.bun-old/bin/bun'],
+    ['linux', 'bun'],
+    ['win32', 'C:\\Program Files\\Bun\\bin\\bun.exe'],
+    ['win32', 'C:\\tools\\notbun\\bin\\bun.exe'],
+  ] as const)(
+    'refuses to remove the root of a Bun detected at %s %s, outside a .bun directory',
+    (platform, binary) => {
+      const recipe = getInstallRecipe('bun.uninstall');
+
+      const argv = recipe.argv?.({ kind: 'none' }, { platform, binaryPaths: { bun: binary } });
+
+      const script = argv?.at(-1) ?? '';
+      expect(script, `${platform} uninstall script for ${binary}`).toContain('refusing to remove');
+      expect(script, `${platform} uninstall script for ${binary}`).toContain('exit 1');
+      expect(script, `${platform} uninstall script for ${binary}`).not.toMatch(
+        /rm -rf|uninstall\.ps1"/
+      );
+    }
+  );
+
+  it('reads the Bun root with the separators the target platform uses', () => {
+    expect(bunRootOf('/home/me/.bun/bin/bun')).toBe('/home/me/.bun');
+    expect(bunRootOf('C:\\Users\\me\\.bun\\bin\\bun.exe')).toBe('C:\\Users\\me\\.bun');
+    expect(bunRootOf('/home/me/.bun/bin/node')).toBeNull();
+    expect(bunRootOf('/usr/local/bin/bun')).toBeNull();
+  });
+
   it('refuses to remove a default root that does not hold a Bun binary', () => {
     const recipe = getInstallRecipe('bun.uninstall');
 
-    const posix = recipe.argv?.({ kind: 'none' }, { platform: 'linux', binaryPaths: {} });
+    const posix = recipe.argv?.({ kind: 'none' }, BUN_POSIX_CONTEXT);
     expect(posix?.at(-1)).toContain('[ -x "$root/bin/bun" ]');
     expect(posix?.at(-1)).toContain('exit 1');
 
-    const win32 = recipe.argv?.({ kind: 'none' }, { platform: 'win32', binaryPaths: {} });
+    const win32 = recipe.argv?.({ kind: 'none' }, BUN_WIN32_CONTEXT);
     expect(win32?.at(-1)).toContain('Test-Path -LiteralPath "$root\\uninstall.ps1"');
     expect(win32?.at(-1)).toContain('exit 1');
     // PowerShell reads a bare `$name:` as a drive-qualified variable and
@@ -274,8 +328,10 @@ describe('install recipes', () => {
   // deletes but does not declare understates the delete and hides the
   // installation from its own uninstall.
   it('declares every home path its uninstall argv removes', () => {
+    // A recipe that resolves its target from a detected binary removes a
+    // literal path, covered by its own tests above.
     const uninstalls = INSTALL_RECIPES.filter(
-      (recipe) => recipe.action === 'uninstall' && recipe.argv
+      (recipe) => recipe.action === 'uninstall' && recipe.argv && recipe.requires.length === 0
     );
     expect(uninstalls.length).toBeGreaterThan(0);
 
