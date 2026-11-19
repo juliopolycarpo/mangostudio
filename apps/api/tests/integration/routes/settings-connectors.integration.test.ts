@@ -26,12 +26,14 @@ import {
   makeModelsEndpointFetch,
   makeOpenAISuccessFetch,
   type ModelCatalogPayload,
-  restoreConnectorProviderMocks,
   type SuccessPayload,
   withFetch,
 } from '../../support/connectors';
 import { ensureTestUsers, insertTestConnector, insertTestUser } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { moduleMockerFor } from '../../support/mocks/module-mocks';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 const TEST_USER = {
   id: 'test-user-connectors',
@@ -56,13 +58,9 @@ let restoreAuth: (() => void) | null = null;
  * the block comment on the project-scoped block.
  */
 
-afterEach(async () => {
+afterEach(() => {
   restoreAuth?.();
   restoreAuth = null;
-  // Re-register the real openai/base-url/gemini/@google/genai modules so
-  // mock.module overrides do not leak into later test files (mock.restore()
-  // does not revert mock.module()).
-  await restoreConnectorProviderMocks();
 });
 
 describe('settings connectors routes', () => {
@@ -336,13 +334,11 @@ describe('deprecated cursor connector routes', () => {
 describe('Gemini aliases API', () => {
   beforeAll(() => ensureTestUsers(TEST_USER));
 
-  // Per test, not once per block: the file-level `afterEach` restores the real
-  // `@google/genai` after every test (`mock.restore()` does not revert
-  // `mock.module()`, so that restore is the only thing that keeps this fake
-  // from following the process into the next file), which would leave a
-  // `beforeAll` fake installed for the first test only.
+  // Per test, not once per block: the global afterEach restores the real
+  // `@google/genai` after every test (support/mocks/module-mocks.ts), which would
+  // leave a `beforeAll` fake installed for the first test only.
   beforeEach(async () => {
-    await mock.module('@google/genai/web', () => {
+    await mockModule('@google/genai/web', () => {
       return {
         GoogleGenAI: class {
           models = {
@@ -365,7 +361,7 @@ describe('Gemini aliases API', () => {
 
   it('POST /settings/connectors/gemini adds a connector', async () => {
     // We mock the gemini module to bypass actual validation which uses real fetch
-    await mock.module('../../../src/services/gemini', () => {
+    await mockModule('../../../src/services/gemini', () => {
       return {
         getGeminiSecretStatus: () => Promise.resolve({ connectors: [] }),
         addGeminiConnector: () =>
@@ -409,7 +405,7 @@ describe('Gemini aliases API', () => {
   });
 
   it('PUT /settings/connectors/gemini/:id/models updates models', async () => {
-    await mock.module('../../../src/services/gemini', () => {
+    await mockModule('../../../src/services/gemini', () => {
       return {
         updateConnectorModels: () => Promise.resolve(),
       };
@@ -433,7 +429,7 @@ describe('Gemini aliases API', () => {
   });
 
   it('PUT /settings/connectors/gemini/:id/models returns 404 for a missing connector', async () => {
-    await mock.module('../../../src/services/gemini', () => {
+    await mockModule('../../../src/services/gemini', () => {
       return {
         updateConnectorModels: () => Promise.reject(new ConnectorNotFoundError()),
       };
@@ -458,7 +454,7 @@ describe('Gemini aliases API', () => {
   });
 
   it('DELETE /settings/connectors/gemini/:id removes a connector', async () => {
-    await mock.module('../../../src/services/gemini', () => {
+    await mockModule('../../../src/services/gemini', () => {
       return {
         deleteGeminiConnector: () => Promise.resolve(),
         refreshGeminiModelCatalog: () => Promise.resolve(),
@@ -982,7 +978,7 @@ describe('openai project-scoped connector routes', () => {
 
   it('POST /settings/connectors returns 401 when OpenAI rejects credentials', async () => {
     // Stub validateOpenAIAuthContext at the module level so the route sees it.
-    await mock.module('../../../src/services/providers/openai/index', () => ({
+    await mockModule('../../../src/services/providers/openai/index', () => ({
       validateOpenAIAuthContext: () =>
         Promise.reject(
           new OpenAIAuthError(
@@ -1017,7 +1013,7 @@ describe('openai project-scoped connector routes', () => {
   });
 
   it('POST /settings/connectors returns 403 when OpenAI denies org/project access', async () => {
-    await mock.module('../../../src/services/providers/openai/index', () => ({
+    await mockModule('../../../src/services/providers/openai/index', () => ({
       validateOpenAIAuthContext: () =>
         Promise.reject(
           new OpenAIAuthError(
