@@ -812,6 +812,17 @@ export const messages: FeatureMessages<'environments'> = {
           'mcp.detail.probeResult': '{result}',
           'mcp.detail.longToolNames':
             '{count} tool name(s) exceed {max} chars and are skipped: {names}',
+          'library.label.locations': 'locations',
+          'library.label.location': '{id}',
+          'library.label.divergence': 'divergence',
+          'library.detail.locationsAllWritable': '{present} of {supported} present, all writable',
+          'library.detail.locationsSomeWritable':
+            '{present} of {supported} present, {writable} writable',
+          'library.detail.notWritable': 'not writable',
+          'library.detail.stagedRemoval':
+            'an interrupted removal left "{path}" behind; inspect it, then delete it by hand',
+          'library.detail.divergenceHint':
+            'run `mangostudio library --divergent` to list resources that differ across locations',
         },
       },
       logs: {

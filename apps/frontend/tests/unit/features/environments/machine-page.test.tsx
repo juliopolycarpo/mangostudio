@@ -516,6 +516,19 @@ describe('MachinePage', () => {
         label: 'MCP github',
         detail: 'stdio, desativado',
       },
+      {
+        section: 'Library locations',
+        check: {
+          label: 'locations',
+          labelKey: 'library.label.locations',
+          status: 'warn',
+          detail: '2 of 3 present, 1 writable',
+          detailKey: 'library.detail.locationsSomeWritable',
+          params: { present: '2', supported: '3', writable: '1' },
+        },
+        label: 'locais',
+        detail: '2 de 3 presentes, 1 graváveis',
+      },
     ];
 
     it.each(SECTION_ROWS.map((entry) => [entry.section, entry] as const))(

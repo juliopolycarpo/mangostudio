@@ -171,6 +171,14 @@ const DOCTOR_KEYS = [
   'mcp.detail.commandNotFoundDisabled',
   'mcp.detail.probeResult',
   'mcp.detail.longToolNames',
+  'library.label.locations',
+  'library.label.location',
+  'library.label.divergence',
+  'library.detail.locationsAllWritable',
+  'library.detail.locationsSomeWritable',
+  'library.detail.notWritable',
+  'library.detail.stagedRemoval',
+  'library.detail.divergenceHint',
 ] as const;
 
 describe('doctor check keys', () => {

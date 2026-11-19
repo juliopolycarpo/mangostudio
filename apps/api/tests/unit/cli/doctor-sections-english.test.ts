@@ -1238,7 +1238,7 @@ const GROUPS: readonly SectionGroup[] = [
   { name: 'skills', prefixes: ['skills'], keyed: true, cases: SKILLS_CASES },
   { name: 'MCP', prefixes: ['mcp'], keyed: true, cases: MCP_CASES },
   { name: 'environments', prefixes: ['env'], keyed: false, cases: ENVIRONMENT_CASES },
-  { name: 'library', prefixes: ['library'], keyed: false, cases: LIBRARY_CASES },
+  { name: 'library', prefixes: ['library'], keyed: true, cases: LIBRARY_CASES },
 ];
 
 describe('doctor sections beyond the core, English text', () => {

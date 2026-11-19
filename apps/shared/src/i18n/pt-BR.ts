@@ -2957,6 +2957,18 @@ export const messages = {
           'mcp.detail.probeResult': '{result}',
           'mcp.detail.longToolNames':
             '{count} nome(s) de ferramenta excedem {max} caracteres e foram ignorados: {names}',
+          'library.label.locations': 'locais',
+          'library.label.location': '{id}',
+          'library.label.divergence': 'divergência',
+          'library.detail.locationsAllWritable':
+            '{present} de {supported} presentes, todos graváveis',
+          'library.detail.locationsSomeWritable':
+            '{present} de {supported} presentes, {writable} graváveis',
+          'library.detail.notWritable': 'sem permissão de escrita',
+          'library.detail.stagedRemoval':
+            'uma remoção interrompida deixou "{path}" para trás; inspecione e depois apague manualmente',
+          'library.detail.divergenceHint':
+            'execute `mangostudio library --divergent` para listar os recursos que diferem entre os locais',
         },
       },
       logs: {
