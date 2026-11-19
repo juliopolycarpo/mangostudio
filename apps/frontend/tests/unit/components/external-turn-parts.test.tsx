@@ -761,6 +761,31 @@ describe('a conversation the agent did not continue', () => {
   });
 });
 
+describe('a turn the runtime has not taken yet', () => {
+  it.each([
+    ['runtime-unreachable', en.externalAgents.turn.waiting['runtime-unreachable']],
+    ['runtime-busy', en.externalAgents.turn.waiting['runtime-busy']],
+  ] as const)('says why for %s, under the turn', (cause, words) => {
+    renderParts([turnPart({ status: 'active', terminalReason: undefined, waiting: cause })]);
+
+    const notice = screen.getByRole('status');
+    expect(
+      { text: notice.textContent, cause: notice.getAttribute('data-external-turn-waiting') },
+      `expected the ${cause} notice under the turn`
+    ).toEqual({ text: words, cause });
+  });
+
+  it('says nothing for an active turn that is not waiting', () => {
+    renderParts([turnPart({ status: 'active', terminalReason: undefined })]);
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('says nothing once the turn is settled, even if the record still names a wait', () => {
+    renderParts([turnPart({ status: 'terminal', waiting: 'runtime-busy' })]);
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+});
+
 describe('an unfinished section', () => {
   it('marks the trailing text as cut off', () => {
     renderParts([

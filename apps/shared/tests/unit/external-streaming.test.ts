@@ -8,6 +8,7 @@ import {
   externalSessionStartedChunk,
   externalSteerChunk,
   externalTurnCompletedChunk,
+  externalTurnWaitingChunk,
   StreamChunkSchema,
 } from '../../src/streaming';
 
@@ -183,6 +184,39 @@ describe('externalTurnCompletedChunk', () => {
       ).toBe(true);
     }
   );
+});
+
+describe('externalTurnWaitingChunk', () => {
+  it.each(['runtime-unreachable', 'runtime-busy'] as const)(
+    'projects the %s cause onto a valid, non-final chunk',
+    (cause) => {
+      const chunk = externalTurnWaitingChunk(cause);
+
+      expect(chunk).toEqual({ type: 'external_turn_waiting', cause, done: false });
+      expect(
+        Value.Check(StreamChunkSchema, chunk),
+        `(external_turn_waiting): expected '${cause}' chunk to satisfy StreamChunkSchema`
+      ).toBe(true);
+    }
+  );
+
+  it('ends the wait with a chunk that carries no cause', () => {
+    const chunk = externalTurnWaitingChunk(undefined);
+
+    expect(chunk).toEqual({ type: 'external_turn_waiting', done: false });
+    expect(Value.Check(StreamChunkSchema, chunk)).toBe(true);
+  });
+
+  it('rejects a cause the contract does not name', () => {
+    expect(
+      Value.Check(StreamChunkSchema, {
+        type: 'external_turn_waiting',
+        cause: 'stuck',
+        done: false,
+      }),
+      `(external_turn_waiting): expected 'stuck' cause to violate StreamChunkSchema`
+    ).toBe(false);
+  });
 });
 
 describe('externalSteerChunk', () => {

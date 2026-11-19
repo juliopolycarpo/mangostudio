@@ -45,6 +45,7 @@ import {
   type ExternalSteerRejectionReason,
   type ExternalSteerResponse,
   type ExternalTurnTerminalReason,
+  type ExternalTurnWaitCause,
   type ExternalUsage,
 } from '@mangostudio/shared/external-agents';
 import { RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
@@ -266,6 +267,12 @@ interface ExternalTurnObserver {
     readonly reasonCode?: ExternalSteerRejectionReason;
   }): void;
   onTerminal?(reason: ExternalTurnTerminalReason, error?: ExternalAgentError): void;
+  /**
+   * The turn has waited longer than one backoff cap for the runtime to take it, for `cause`; or,
+   * with `undefined`, it no longer is. Reported after the transcript recorded it, like every other
+   * live report.
+   */
+  onWaiting?(cause: ExternalTurnWaitCause | undefined): void;
 }
 
 interface StartExternalTurnInput {
@@ -1342,6 +1349,14 @@ export function createExternalTurnController(
         },
         onSessionRetired: (state) => {
           if (state === 'nonresumable') replacedAsNonresumable = true;
+        },
+        onWaiting: (cause) => {
+          // A turn that already ended has nothing to wait for; the terminal path settled the record.
+          if (terminalReason) return;
+          transcript.markWaiting(cause);
+          // Durable like the stream chunk, so a reload mid-wait says what the stream said.
+          void writer.write({ force: true });
+          input.observer?.onWaiting?.(cause);
         },
         onLateAcceptance: (lateHandle, nativeTurnId) => {
           void lateHandle.cancel(nativeTurnId).catch((error: unknown) => {

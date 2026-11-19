@@ -4298,6 +4298,13 @@ export const messages = {
         unavailable:
           'O agente não encontrou a conversa anterior, então esta resposta começou uma nova, sem as mensagens anteriores.',
       },
+      // Mostrado enquanto um turno que o agente ainda não recebeu fica retido para reenvio.
+      waiting: {
+        'runtime-unreachable':
+          'Aguardando o runtime reconectar. O turno é enviado assim que ele voltar; interrompa-o para cancelar.',
+        'runtime-busy':
+          'O runtime ainda não aceitou este turno. O agente pode estar ocupado com um turno anterior. O hub continua tentando; interrompa o turno para cancelar.',
+      },
       terminal: {
         completed: 'Concluído.',
         'cancelled-by-user': 'Você interrompeu este turno.',

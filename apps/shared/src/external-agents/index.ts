@@ -248,6 +248,8 @@ export {
   ExternalThreadUsageSchema,
   type ExternalTurnTerminalReason,
   ExternalTurnTerminalReasonSchema,
+  type ExternalTurnWaitCause,
+  ExternalTurnWaitCauseSchema,
   type ExternalUsage,
   ExternalUsageSchema,
   ExternalVendorIdSchema,

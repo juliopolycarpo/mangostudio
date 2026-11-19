@@ -24,6 +24,7 @@ import type {
   ExternalConversationResetReason,
   ExternalSteerRejectionReason,
   ExternalTurnTerminalReason,
+  ExternalTurnWaitCause,
 } from '../external-agents/schemas';
 import type { StreamChunk } from './events';
 
@@ -64,6 +65,22 @@ export interface ExternalStreamSession {
  */
 export function externalTurnCompletedChunk(reason: ExternalTurnTerminalReason): StreamChunk {
   return { type: 'external_turn_completed', reason, done: false };
+}
+
+/**
+ * Announces that a turn the vendor has not received is waiting to be resubmitted, or, with no
+ * cause, that it no longer is. Hub-originated: no vendor event describes it.
+ *
+ * @example
+ * externalTurnWaitingChunk('runtime-busy'); // the turn is waiting
+ * externalTurnWaitingChunk(undefined); // the wait is over
+ */
+export function externalTurnWaitingChunk(cause: ExternalTurnWaitCause | undefined): StreamChunk {
+  return {
+    type: 'external_turn_waiting',
+    ...(cause !== undefined ? { cause } : {}),
+    done: false,
+  };
 }
 
 /** Announces the session a turn is running in, before any vendor output. */

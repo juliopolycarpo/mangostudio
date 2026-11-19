@@ -1898,3 +1898,58 @@ describe('browser detach', () => {
     });
   });
 });
+
+describe('a turn the runtime has not taken yet', () => {
+  it('tells the live stream once the wait has run long, and again when it ends, and stores nothing past the end', async () => {
+    const busy = () =>
+      new RemoteError('INTERNAL', 'The vendor session is busy.', {
+        kind: 'external_agent_busy',
+        dispatch: 'not-submitted',
+      });
+    // Six waits of 875, 1750, 3500, 7000, 14000 and 26250 ms: the sixth is the first to pass
+    // one 30 s backoff cap in total.
+    let failures = 6;
+    const clock = createFakeBackoffClock({ auto: true });
+    const { runtime, stream } = harness({
+      turnFailure: () => {
+        if (failures === 0) return undefined;
+        failures -= 1;
+        return busy();
+      },
+      sleep: clock.sleep,
+    });
+    const result = await stream(
+      {
+        userId,
+        chat: chatRecord(),
+        chatId,
+        prompt: 'summarize the repo',
+        attachmentIds: [],
+        externalTurn: undefined,
+      },
+      getDb()
+    );
+    if (!result.ok) throw new Error('the send was refused');
+
+    const reading = readChunks(result.response);
+    await waitFor(() => runtime.calls.turn.length === 7, 'the seventh submission attempt');
+    runtime.emit({ type: 'completed' });
+    const chunks = await reading;
+
+    expect(
+      chunks.filter((chunk) => chunk.type === 'external_turn_waiting'),
+      'expected one waiting chunk naming the cause, then one clearing it'
+    ).toEqual([
+      { type: 'external_turn_waiting', cause: 'runtime-busy', done: false },
+      { type: 'external_turn_waiting', done: false },
+    ]);
+    const { messages } = await getChatMessagesUseCase({ chatId, userId }, getDb());
+    const stored = messages
+      .find((message) => message.role === 'ai')
+      ?.parts?.find((part) => part.type === 'external_turn');
+    expect(
+      stored,
+      'expected the stored turn to carry no waiting cause once settled'
+    ).not.toHaveProperty('waiting');
+  });
+});

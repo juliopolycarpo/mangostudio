@@ -32,7 +32,13 @@
  *    is honoured once per turn, so the worst case is two extra opens and a third refusal ends the
  *    turn. A refusal that follows an unanswered request never replaces the session, because that
  *    request may have been accepted, and a native review never does.
- * 7. **Stopping wins.** Abort, revocation and shutdown end the loop through
+ * 7. **Say when the wait is long.** Rule 3 has no count cutoff, so a turn the vendor has not
+ *    received would look like a running one. Once the backoff waits spent on a proven-absent
+ *    request add up to more than one backoff cap, `onWaiting` names why (`runtime-unreachable` for
+ *    a request the hub could not write or a connection that is gone, `runtime-busy` for one the
+ *    runtime declined), and it is told again, with no cause, when the connection returns or the
+ *    loop ends. Reporting changes nothing the loop does.
+ * 8. **Stopping wins.** Abort, revocation and shutdown end the loop through
  *    `signal`; every state write is a compare-and-set, so a reply that arrives
  *    afterwards cannot revive the attempt.
  */
@@ -43,6 +49,7 @@ import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import type {
   ExternalAgentStartReviewParams,
   ExternalAgentTurnParams,
+  ExternalTurnWaitCause,
 } from '@mangostudio/shared/external-agents';
 import type { ExternalAgentSessionState } from '@mangostudio/shared/runtime-contract';
 import type { Kysely } from 'kysely';
@@ -151,6 +158,11 @@ interface SubmissionContext {
    * about to replace it. Called before the session is retired.
    */
   readonly onSessionRetired?: (state: ExternalAgentSessionState) => void;
+  /**
+   * The turn has been waiting on the runtime longer than one backoff cap, for `cause`; or, with
+   * `undefined`, it no longer is. Told only on a change, so a caller can repaint on every call.
+   */
+  readonly onWaiting?: (cause: ExternalTurnWaitCause | undefined) => void;
 }
 
 /** One turn or native review; both use the existing durable attempt ledger. */
@@ -190,9 +202,28 @@ export async function submitExternalTurn(
   let retries = 0;
   const replaced = new Set<ExternalAgentSessionState>();
 
-  const wait = async (): Promise<void> => {
+  // Backoff spent waiting on a proven-absent request, and the cause last announced. Counted from the
+  // delays the loop chose rather than a clock, so the threshold is the same under a fake sleep.
+  let waitedMs = 0;
+  let announced: ExternalTurnWaitCause | undefined;
+  const announce = (cause: ExternalTurnWaitCause | undefined): void => {
+    if (cause === announced) return;
+    announced = cause;
+    input.onWaiting?.(cause);
+  };
+  const waitOver = (): void => {
+    waitedMs = 0;
+    announce(undefined);
+  };
+
+  /** `cause` is set only for a wait that is the runtime's doing; other waits are not announced. */
+  const wait = async (cause?: ExternalTurnWaitCause): Promise<void> => {
     const ms = backoffDelay(retries, input.policy, input.random);
     retries += 1;
+    if (cause) {
+      waitedMs += ms;
+      if (waitedMs > input.policy.maxDelayMs) announce(cause);
+    }
     await input.sleep(ms, input.signal);
   };
 
@@ -204,16 +235,20 @@ export async function submitExternalTurn(
       } catch (error) {
         if (input.signal.aborted) break;
         if (input.isTerminalConnectFailure(error) || !isConnectionUnavailable(error)) {
+          waitOver();
           return { kind: 'refused', error };
         }
         // Includes an environment latched after repeated connect failures: the
         // loop keeps waiting for someone to reconnect it rather than forcing a
         // connect itself or treating the latch as the end.
         logger.info('submission_waiting_for_connection', { messageId: input.messageId });
-        await wait();
+        await wait('runtime-unreachable');
         continue;
       }
       if (input.signal.aborted) break;
+      // The connection is back, so what the person was told about it no longer holds. A runtime
+      // that then declines the turn starts its own count.
+      waitOver();
     }
 
     const attempt = await runAttempt(input, handle, wait, replaced);
@@ -226,8 +261,10 @@ export async function submitExternalTurn(
       await handle.retire({ dropContinuation: attempt.state === 'nonresumable' });
       continue;
     }
+    waitOver();
     return attempt.outcome;
   }
+  waitOver();
   return { kind: 'stopped' };
 }
 
@@ -275,7 +312,7 @@ async function startReviewTurn(
 async function runAttempt(
   input: SubmitExternalTurnInput,
   handle: ExternalSessionHandle,
-  wait: () => Promise<void>,
+  wait: (cause?: ExternalTurnWaitCause) => Promise<void>,
   replaced: ReadonlySet<ExternalAgentSessionState>
 ): Promise<AttemptResult> {
   const request = input.review
@@ -354,7 +391,9 @@ async function runAttempt(
         // Preserve review's one-call Busy/NotSubmitted policy. An ordinary
         // turn may retry proven absence, but a review is an explicit action.
         if (input.review) return { kind: 'done', outcome: { kind: 'refused', error } };
-        await wait();
+        // The hub's own proof means the frame never left, so the connection is the problem; the
+        // runtime's means it answered and declined.
+        await wait(isRequestNotSent(error) ? 'runtime-unreachable' : 'runtime-busy');
         return { kind: 'retry' };
       }
       // Only the first request of the attempt: after an unanswered one, the refused session may

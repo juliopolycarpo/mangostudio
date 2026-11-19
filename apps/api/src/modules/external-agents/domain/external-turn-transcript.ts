@@ -20,6 +20,7 @@ import type {
   ExternalConversationResetReason,
   ExternalSteerRejectionReason,
   ExternalTurnTerminalReason,
+  ExternalTurnWaitCause,
   ExternalUsage,
 } from '@mangostudio/shared/external-agents';
 import {
@@ -154,6 +155,20 @@ export class ExternalTurnTranscript {
     this.#turnPart.conversationReset = reason;
   }
 
+  /**
+   * Records that the turn is waiting on the runtime to be resubmitted, or, with no cause, that it
+   * is not any more. A settled turn keeps nothing: {@link finalize} has already cleared it.
+   *
+   * @example
+   * transcript.markWaiting('runtime-unreachable');
+   * transcript.markWaiting(undefined);
+   */
+  markWaiting(cause: ExternalTurnWaitCause | undefined): void {
+    if (this.#terminated) return;
+    if (cause === undefined) delete this.#turnPart.waiting;
+    else this.#turnPart.waiting = cause;
+  }
+
   bindNativeTurn(nativeTurnId: string): void {
     this.#turnPart.nativeTurnId = nativeTurnId;
   }
@@ -245,6 +260,8 @@ export class ExternalTurnTranscript {
       if (activityStatus === 'failed') activity.isError = true;
     }
     this.#turnPart.status = 'terminal';
+    // A settled turn is not waiting for anything.
+    delete this.#turnPart.waiting;
     this.#turnPart.terminalReason = reason;
     this.#turnPart.updatedAt = at;
   }

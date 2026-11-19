@@ -5,6 +5,7 @@ import type {
   ExternalAgentTargetId,
   ExternalThreadUsage,
   ExternalTurnTerminalReason,
+  ExternalTurnWaitCause,
   ExternalUsage,
 } from '@mangostudio/shared/external-agents';
 import {
@@ -261,6 +262,8 @@ export function reduceTextGenerationStreamChunk(
         ...(chunk.unavailableReason ? { unavailableReason: chunk.unavailableReason } : {}),
         ...(chunk.requiredVersion ? { requiredVersion: chunk.requiredVersion } : {}),
       });
+    case 'external_turn_waiting':
+      return reduceExternalTurnWaiting(nextState, chunk.cause);
     case 'external_turn_completed':
       return reduceExternalTurnCompleted(nextState, chunk.reason);
     case 'done':
@@ -1000,6 +1003,23 @@ function reduceExternalNotice(
   return withAiMessageUpdate({ ...state, parts }, { parts });
 }
 
+/**
+ * Records that the turn is waiting on the runtime to be resubmitted, or that it no longer is.
+ *
+ * Mirrors `ExternalTurnTranscript#markWaiting`. A settled turn never gets here: the reducer drops
+ * every `external_*` chunk once the turn part is terminal, so a late chunk cannot revive a wait.
+ */
+function reduceExternalTurnWaiting(
+  state: TextGenerationStreamState,
+  cause: ExternalTurnWaitCause | undefined
+) {
+  const parts = updateExternalTurn(state.parts, (part) => {
+    const { waiting: _earlier, ...kept } = part;
+    return cause === undefined ? kept : { ...kept, waiting: cause };
+  });
+  return withAiMessageUpdate({ ...state, parts }, { parts });
+}
+
 function reduceExternalError(
   state: TextGenerationStreamState,
   error: ExternalAgentError,
@@ -1037,9 +1057,12 @@ function reduceExternalTurnCompleted(
       ...(activityStatus === 'failed' ? { isError: true } : {}),
     };
   });
-  const parts = updateExternalTurn(settled, (part) =>
-    part.status === 'terminal' ? part : { ...part, status: 'terminal', terminalReason: reason }
-  );
+  const parts = updateExternalTurn(settled, (part) => {
+    if (part.status === 'terminal') return part;
+    // A settled turn is not waiting for anything; `finalize` drops the field the same way.
+    const { waiting: _waiting, ...kept } = part;
+    return { ...kept, status: 'terminal', terminalReason: reason };
+  });
   return withAiMessageUpdate({ ...state, parts, openExternalThinkingIndex: null }, { parts });
 }
 

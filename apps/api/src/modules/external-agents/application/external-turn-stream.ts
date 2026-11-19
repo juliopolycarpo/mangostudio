@@ -31,6 +31,7 @@ import {
   externalSessionStartedChunk,
   externalSteerChunk,
   externalTurnCompletedChunk,
+  externalTurnWaitingChunk,
 } from '@mangostudio/shared/streaming';
 import type { Kysely } from 'kysely';
 
@@ -594,6 +595,9 @@ function openStream(
                   refusal
                 );
                 if (chunk) send(chunk);
+              },
+              onWaiting(cause) {
+                send(externalTurnWaitingChunk(cause));
               },
               onSteer(steer) {
                 if (steer.status === 'rejected') {

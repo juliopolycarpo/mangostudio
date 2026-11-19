@@ -1735,6 +1735,13 @@ export const messages: CoreMessages = {
         unavailable:
           'The agent could not find the earlier conversation, so this reply started a new one without the earlier messages.',
       },
+      // Shown while a turn the agent has not received is held for resubmission.
+      waiting: {
+        'runtime-unreachable':
+          'Waiting for the runtime to reconnect. The turn is sent as soon as it is back; stop it to cancel.',
+        'runtime-busy':
+          'The runtime has not taken this turn yet. The agent may still be busy with an earlier one. The hub keeps retrying; stop the turn to cancel.',
+      },
       terminal: {
         completed: 'Finished.',
         'cancelled-by-user': 'You stopped this turn.',
