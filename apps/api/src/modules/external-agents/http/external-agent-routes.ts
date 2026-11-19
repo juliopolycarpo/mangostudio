@@ -17,6 +17,11 @@
  * otherwise. Acknowledging needs the descriptor, so it names the environment
  * whose descriptor the user was shown — consent is to what a specific machine
  * said the agent could do, not to the vendor's name in the abstract.
+ *
+ * The workspace-trust list and revoke live here for the same reason: a grant is
+ * the user's, keyed by machine and folder, and withdrawing one has no chat to
+ * hang off. Granting stays on the chat, because only a chat can say which
+ * folder the user was just shown.
  */
 
 import { EnvironmentIdSchema, LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
@@ -28,12 +33,16 @@ import {
   type ExternalAgentDescriptor,
   ExternalAgentDescriptorListResponseSchema,
   externalRemedyFor,
+  ExternalWorkspaceTrustListResponseSchema,
+  ExternalWorkspaceTrustRevokeBodySchema,
+  ExternalWorkspaceTrustRevokeResponseSchema,
   isExternalAgentTargetId,
 } from '@mangostudio/shared/external-agents';
 import { Elysia, status, t } from 'elysia';
 
 import { getDb } from '../../../db/database';
 import { requireAuth } from '../../../plugins/auth-middleware';
+import { AppSettingsConflict } from '../../app-settings/domain/app-settings-conflict';
 import {
   readCachedExternalAccountLimits,
   refreshExternalAccountLimits,
@@ -57,6 +66,7 @@ import {
   type ExternalSessionManager,
   externalSessionManager,
 } from '../application/external-session-manager';
+import { listWorkspaceTrust, revokeWorkspaceTrust } from '../application/external-workspace-trust';
 
 /**
  * Which machine the question is about. Omitted means the hub's own, matching
@@ -261,6 +271,62 @@ export function createExternalAgentRoutes(dependencies: ExternalAgentRouteDepend
         await sessions.reapScope({ userId, targetId: params.targetId }, 'consent-revoked', {
           keepContinuation: true,
         });
+        return { revoked: true as const };
+      }
+    )
+    .get(
+      '/external-agents/workspace-trust',
+      {
+        response: {
+          200: ExternalWorkspaceTrustListResponseSchema,
+          401: ApiErrorResponseSchema,
+        },
+      },
+      async ({ user }) => {
+        const userId = authenticatedUserId(user);
+        if (!userId) {
+          return status(401, UNAUTHENTICATED);
+        }
+        return { grants: [...(await listWorkspaceTrust(userId, getDb()))] };
+      }
+    )
+    .delete(
+      '/external-agents/workspace-trust',
+      {
+        body: ExternalWorkspaceTrustRevokeBodySchema,
+        response: {
+          200: ExternalWorkspaceTrustRevokeResponseSchema,
+          401: ApiErrorResponseSchema,
+          404: ApiErrorResponseSchema,
+          409: ApiErrorResponseSchema,
+        },
+      },
+      async ({ body, user }) => {
+        const userId = authenticatedUserId(user);
+        if (!userId) {
+          return status(401, UNAUTHENTICATED);
+        }
+        // The user id comes from the session and nothing else: the grants live
+        // in that user's own settings row, so there is no way to name another
+        // user's. A key this user never granted answers 404, the same as one
+        // that does not exist at all.
+        //
+        // Live sessions are deliberately not reaped, unlike the disclosure
+        // revoke above. A turn already running keeps running; the next turn in
+        // this workspace is refused and asks again. See `revokeWorkspaceTrust`.
+        let removed: boolean;
+        try {
+          removed = await revokeWorkspaceTrust({ userId, ...body }, getDb());
+        } catch (error) {
+          if (!(error instanceof AppSettingsConflict)) throw error;
+          return status(409, { error: error.message, code: ERROR_CODES.CONFLICT });
+        }
+        if (!removed) {
+          return status(404, {
+            error: 'No trusted workspace matches that request.',
+            code: ERROR_CODES.NOT_FOUND,
+          });
+        }
         return { revoked: true as const };
       }
     )
