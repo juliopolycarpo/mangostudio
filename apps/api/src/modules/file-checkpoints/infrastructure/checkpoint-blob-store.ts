@@ -1,11 +1,21 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, rename, rm } from 'node:fs/promises';
+import { mkdir, open, readdir, rename, rm, stat } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { getConfig } from '../../../lib/config';
 
 /** Directory under the checkpoint root where a blob lives until its hash is known. */
 const INCOMING_DIR = '.incoming';
+
+/** Suffix of a stream in progress; a finished blob is renamed to its hash, which has none. */
+const INCOMING_SUFFIX = '.part';
+
+/**
+ * How long a partial stream may sit untouched before it counts as abandoned. A
+ * live stream rewrites its file on every chunk, so only a hub that died
+ * mid-transfer leaves one this old.
+ */
+export const INCOMING_STALE_AFTER_MS = 60 * 60 * 1000;
 
 /** The streamed bytes did not hash to the digest the caller expected. */
 export class CheckpointBlobHashMismatchError extends Error {
@@ -55,7 +65,8 @@ export async function storeCheckpointBlobStream(
 ): Promise<{ readonly blobKey: string; readonly size: number }> {
   const incomingDir = join(getConfig().checkpoints.dir, INCOMING_DIR);
   await mkdir(incomingDir, { recursive: true });
-  const incomingPath = join(incomingDir, `${randomUUID()}.part`);
+  await sweepStaleIncomingBlobs(incomingDir, Date.now());
+  const incomingPath = join(incomingDir, `${randomUUID()}${INCOMING_SUFFIX}`);
   const hasher = new Bun.CryptoHasher('sha256');
   const handle = await open(incomingPath, 'wx');
   let handleOpen = true;
@@ -86,6 +97,40 @@ export async function storeCheckpointBlobStream(
     await rm(incomingPath, { force: true }).catch(() => undefined);
     throw error;
   }
+}
+
+/**
+ * Removes partial streams a hub that stopped mid-transfer left behind. Such a
+ * file is not a blob: it has no content-addressed name, no row references it,
+ * and retention (which works from row blob keys) neither counts nor deletes it,
+ * so without this sweep it would sit in the checkpoint directory for good.
+ *
+ * Age is by modification time, so a stream still writing is never touched.
+ * Returns how many files it removed. Per-file failures are ignored: a file that
+ * vanished or cannot be removed is tried again on the next stream.
+ *
+ * // Usage: await sweepStaleIncomingBlobs(join(checkpointDir, '.incoming'), Date.now())
+ */
+export async function sweepStaleIncomingBlobs(incomingDir: string, now: number): Promise<number> {
+  const names = await readdir(incomingDir).catch(() => [] as string[]);
+  let removed = 0;
+  for (const name of names) {
+    if (!name.endsWith(INCOMING_SUFFIX)) continue;
+    const path = join(incomingDir, name);
+    const modifiedAt = await stat(path).then(
+      (info) => info.mtimeMs,
+      () => undefined
+    );
+    if (modifiedAt === undefined || now - modifiedAt < INCOMING_STALE_AFTER_MS) continue;
+    if (
+      await rm(path, { force: true }).then(
+        () => true,
+        () => false
+      )
+    )
+      removed += 1;
+  }
+  return removed;
 }
 
 export async function readCheckpointBlob(blobKey: string): Promise<Uint8Array | null> {
