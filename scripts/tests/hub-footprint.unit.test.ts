@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import { resolve } from 'node:path';
 
-import { parseCandidates, parseCheckpoints, parseProcessStatus } from '../bench/hub-footprint';
+import {
+  parseCandidates,
+  parseCheckpoints,
+  parseProcessCpuMs,
+  parseProcessStatus,
+} from '../bench/hub-footprint';
 import { referencedAssetPaths } from '../lib/hub-workload';
 
 const STATUS = [
@@ -28,6 +33,25 @@ describe('parseProcessStatus', () => {
   it('names the missing field instead of returning NaN', () => {
     const withoutShmem = STATUS.replace(/RssShmem:.*\n/, '');
     expect(() => parseProcessStatus(withoutShmem)).toThrow(/expected a "RssShmem: <n> kB" line/);
+  });
+});
+
+describe('parseProcessCpuMs', () => {
+  // Fields 14 and 15 (utime 31, stime 7) are 38 ticks of 10 ms each.
+  const STAT = '4242 (mangostudio) S 1 4242 4242 0 -1 4194560 1 0 0 0 31 7 0 0 20 0 14 0 99';
+
+  it('adds user and system ticks and converts them to milliseconds', () => {
+    expect(parseProcessCpuMs(STAT)).toBe(380);
+  });
+
+  it('counts fields from the last parenthesis when the command name holds spaces and parentheses', () => {
+    expect(parseProcessCpuMs(STAT.replace('(mangostudio)', '(my (odd) name)'))).toBe(380);
+  });
+
+  it('names the stat line when utime and stime are missing', () => {
+    expect(() => parseProcessCpuMs('4242 (mangostudio) S 1')).toThrow(
+      /expected integer utime and stime in fields 14 and 15 \| received: 4242 \(mangostudio\) S 1/
+    );
   });
 });
 
