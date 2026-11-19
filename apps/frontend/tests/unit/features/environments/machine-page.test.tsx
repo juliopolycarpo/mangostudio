@@ -359,6 +359,32 @@ describe('MachinePage', () => {
       expect(doctor.textContent).toContain('v0.9.0 does not match hub v1.0.0');
       expect(doctor.textContent).not.toContain('{hubVersion}');
     });
+
+    it('words a row keyed by a runtime finding code, and its LTS status, in the reader locale', async () => {
+      localStorage.setItem(LOCALE_STORAGE_KEY, 'pt-BR');
+      mountScenario(STATUS, UPDATE_STATUS, {
+        checks: [
+          {
+            label: 'Node.js',
+            status: 'warn',
+            detail: 'Version 20.1.0 is superseded LTS and will stop receiving fixes.',
+            detailKey: 'outdated-lts',
+            params: { version: '20.1.0', ltsStatus: 'lts-superseded' },
+          },
+        ],
+        warnings: 1,
+        failures: 0,
+      });
+      render(<MachinePage />);
+
+      const doctor = await screen.findByTestId('machine-doctor');
+      await waitFor(() =>
+        expect(doctor.textContent).toContain(
+          'A versão 20.1.0 está em LTS substituído e deixará de receber correções.'
+        )
+      );
+      expect(doctor.textContent).not.toContain('superseded LTS');
+    });
   });
 
   it('confirms a restart, posts it, and announces the hand-over', async () => {

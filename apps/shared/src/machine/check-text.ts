@@ -60,18 +60,46 @@ function resolveText(
 }
 
 /**
+ * Labels for a param whose value is a code, not a sentence: by param name, then
+ * by the code the hub sent. `{ ltsStatus: { 'end-of-life': 'fim de vida' } }`
+ * turns an `ltsStatus` of `end-of-life` into the words of the reader's locale.
+ */
+export type MachineCheckValueLabels = Readonly<
+  Record<string, Readonly<Record<string, string | undefined>> | undefined>
+>;
+
+/** `params` with every code a `valueLabels` entry names replaced by its label; unknown codes pass through. */
+function labelParamValues(
+  params: MachineCheck['params'],
+  valueLabels: MachineCheckValueLabels | undefined
+): MachineCheck['params'] {
+  if (params === undefined || valueLabels === undefined) return params;
+  return Object.fromEntries(
+    Object.entries(params).map(([name, value]) => {
+      const labels = Object.hasOwn(valueLabels, name) ? valueLabels[name] : undefined;
+      const label =
+        labels !== undefined && Object.hasOwn(labels, value) ? labels[value] : undefined;
+      return [name, label ?? value];
+    })
+  );
+}
+
+/**
  * The label and detail to show for `check`. Each is rendered from its key when
  * `templates` has one and every placeholder has a param; otherwise it is the
- * check's own English `label` / `detail`.
+ * check's own English `label` / `detail`. `valueLabels` words the params that
+ * carry a code (see {@link MachineCheckValueLabels}).
  *
- * // Usage: resolveMachineCheckText(check, t.environments.machine.doctor.checks)
+ * // Usage: resolveMachineCheckText(check, templates, { ltsStatus: t.environments.lts })
  */
 export function resolveMachineCheckText(
   check: MachineCheck,
-  templates: MachineCheckTemplates
+  templates: MachineCheckTemplates,
+  valueLabels?: MachineCheckValueLabels
 ): MachineCheckText {
+  const params = labelParamValues(check.params, valueLabels);
   return {
-    label: resolveText(check.labelKey, check.label, templates, check.params),
-    detail: resolveText(check.detailKey, check.detail, templates, check.params),
+    label: resolveText(check.labelKey, check.label, templates, params),
+    detail: resolveText(check.detailKey, check.detail, templates, params),
   };
 }

@@ -16,6 +16,7 @@ import {
 } from '../../src/machine';
 import {
   MACHINE_CHECK_TEMPLATES_EN,
+  MACHINE_DOCTOR_TEMPLATES_EN,
   renderMachineCheckEnglish,
 } from '../../src/machine/check-text-en';
 
@@ -35,12 +36,13 @@ const MISMATCH_ROW: MachineCheck = {
 };
 
 /**
- * Every key the core checks can attach to a row. A key is a wire identifier a
+ * Every key the doctor's checks can attach to a row (the runtime findings are
+ * keyed by their own codes, pinned by the findings schema). A key is a wire identifier a
  * newer or older peer may hold a different copy of, so renaming one is a
  * breaking change: add the new key and keep the old one until no supported
  * peer sends it. This list is the pin that makes a rename show up as a diff.
  */
-const CORE_KEYS = [
+const DOCTOR_KEYS = [
   'core.detail.authSecretInvalid',
   'core.detail.authSecretSet',
   'core.detail.buildStampClean',
@@ -104,8 +106,14 @@ const CORE_KEYS = [
 ] as const;
 
 describe('doctor check keys', () => {
-  it('keeps the wire keys the core checks send stable', () => {
-    expect(Object.keys(MACHINE_CHECK_TEMPLATES_EN).sort()).toEqual([...CORE_KEYS]);
+  it('keeps the wire keys the checks send stable', () => {
+    expect(Object.keys(MACHINE_DOCTOR_TEMPLATES_EN).sort()).toEqual([...DOCTOR_KEYS].sort());
+  });
+
+  it('keeps a runtime finding code from colliding with a doctor key', () => {
+    const doctorKeys = new Set(Object.keys(MACHINE_DOCTOR_TEMPLATES_EN));
+    const clashes = Object.keys(en.environments.findings).filter((code) => doctorKeys.has(code));
+    expect(clashes, '(finding codes that are also doctor keys)').toEqual([]);
   });
 
   it('has the same keys in English and Portuguese', () => {
@@ -115,7 +123,7 @@ describe('doctor check keys', () => {
     );
   });
 
-  it.each(Object.entries(MACHINE_CHECK_TEMPLATES_EN))(
+  it.each(Object.entries(MACHINE_DOCTOR_TEMPLATES_EN))(
     'uses the same placeholders in both languages for %s',
     (key, english) => {
       const portuguese = (ptBR.environments.machine.doctor.checks as Record<string, string>)[key];
@@ -209,6 +217,39 @@ describe('resolveMachineCheckText', () => {
     };
 
     expect(resolveMachineCheckText(row, {})).toEqual({ label: 'Safe', detail: 'safe detail' });
+  });
+
+  it('renders an environments row from the finding sentence its detail key names', () => {
+    const row: MachineCheck = {
+      label: 'Node.js',
+      labelKey: 'env.label.tool',
+      status: 'warn',
+      detail: 'Version 20.1.0 is superseded LTS and will stop receiving fixes.',
+      detailKey: 'outdated-lts',
+      params: { tool: 'Node.js', version: '20.1.0', ltsStatus: 'lts-superseded' },
+    };
+    const templates = { ...ptBR.environments.machine.doctor.checks, ...ptBR.environments.findings };
+
+    expect(resolveMachineCheckText(row, templates, { ltsStatus: ptBR.environments.lts })).toEqual({
+      label: 'Node.js',
+      detail: 'A versão 20.1.0 está em LTS substituído e deixará de receber correções.',
+    });
+    expect(renderMachineCheckEnglish(row).detail).toBe(row.detail);
+  });
+
+  it('words a code param from the value labels, and passes an unknown code through', () => {
+    const row: MachineCheck = {
+      label: 'Node.js',
+      status: 'warn',
+      detail: 'x',
+      detailKey: 'outdated-lts',
+      params: { version: '20.1.0', ltsStatus: 'a-status-from-a-newer-hub' },
+    };
+    const templates = ptBR.environments.findings;
+
+    expect(
+      resolveMachineCheckText(row, templates, { ltsStatus: ptBR.environments.lts }).detail
+    ).toBe('A versão 20.1.0 está em a-status-from-a-newer-hub e deixará de receber correções.');
   });
 
   it('puts a param value in as written, braces included', () => {
