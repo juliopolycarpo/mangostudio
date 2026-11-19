@@ -36,6 +36,9 @@ const STEP_HANG_BOUND_MS = 60_000;
 /** A workflow run is a dozen or so steps in sequence, each under the bound above. */
 const WORKFLOW_RUN_TIMEOUT_MS = 120_000;
 
+/** Stands in for the home the launcher records, which marks the pairing script's second pass. */
+const FIXTURE_REAL_HOME = '/home/fixture';
+
 const scratchRoots: string[] = [];
 afterEach(() => {
   for (const root of scratchRoots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -147,6 +150,10 @@ async function runWorkflowSteps(
         ...process.env,
         ...stepEnv,
         PATH: `${fixture.fakeBin}:${process.env.PATH}`,
+        // The pairing script re-runs itself under the temporary-home launcher
+        // unless the launcher already set this; the fakes stand in for that
+        // second pass, so the suite's own commands are what they record.
+        MANGOSTUDIO_REAL_HOME: FIXTURE_REAL_HOME,
         RUNNER_TEMP: fixture.runnerTemp,
         GITHUB_RUN_ID: '1234',
         GITHUB_RUN_ATTEMPT: '1',
@@ -603,6 +610,7 @@ async function runContainerScript(
     cwd: join(fixture.root, 'apps', 'api'),
     env: {
       PATH: `${fixture.fakeBin}:${process.env.PATH}`,
+      MANGOSTUDIO_REAL_HOME: FIXTURE_REAL_HOME,
       FAKE_SMOKE_WORKFLOW_EVENTS: fixture.eventsPath,
       FAKE_SMOKE_WORKFLOW_STATE: fixture.stateDir,
       FAKE_SMOKE_WORKFLOW_FAILURE: 'none',
@@ -698,6 +706,28 @@ describe.skipIf(process.platform === 'win32')('container smoke scripts', () => {
       'podman pull debian:bookworm-slim',
       'podman tag debian:bookworm-slim mango-container-smoke:glibc',
     ]);
+  });
+
+  test('a pairing started outside the launcher re-runs itself under it, keeping VERSION', async () => {
+    const { code, commands, stdout, stderr } = await runContainerScript(
+      'smoke-container-pairing.sh',
+      (root) => ({
+        ...pairing,
+        // An empty marker is what a run outside the launcher looks like.
+        MANGOSTUDIO_REAL_HOME: '',
+        MANGO_CONTAINER_E2E_RUNTIME: join(root, '.mango/out/linux-x64-musl/mangostudio-runtime'),
+      })
+    );
+    // The script derives the launcher from its own directory, so `..` stays unresolved.
+    const releaseDir = join(ROOT_DIR, 'scripts', 'release');
+    const launcher = `${releaseDir}/../with-test-home.ts`;
+    const script = join(releaseDir, 'smoke-container-pairing.sh');
+
+    expect(code, `${stdout}${stderr}`).toBe(0);
+    expect(
+      commands,
+      'expected only the launcher call: bun <with-test-home.ts> --keep-build-version bash <script>'
+    ).toEqual([`bun ${launcher} --keep-build-version bash ${script}`]);
   });
 
   test('a pairing names the runtime path it could not execute and skips the suite', async () => {

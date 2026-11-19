@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 
-import { SUITE_FLAGS } from '../ci/rust-lanes';
+import { qualifyCommand, SUITE_FLAGS } from '../ci/rust-lanes';
 import { ROOT_DIR } from '../lib/config';
 import { extractCrateInputs, scanCrateInputs } from '../lib/crate-inputs';
 import {
@@ -309,6 +309,22 @@ describe('discoverQualificationTests', () => {
     expect(SUITE_FLAGS.integration).not.toContain('--parallel=1');
     for (const file of discovered.unit) expect(file.startsWith('tests/unit/')).toBe(true);
     for (const file of discovered.integration) expect(file.startsWith('tests/unit/')).toBe(false);
+  });
+
+  test('qualify starts bun test through the temporary-home launcher', () => {
+    // The API test preload refuses a bare `bun test` on the real home; the
+    // macOS and Windows qualification jobs failed on it before this.
+    for (const suite of ['unit', 'integration'] as const) {
+      const command = qualifyCommand(suite, discovered[suite]);
+      const launcher = command[1]?.replaceAll('\\', '/') ?? '';
+
+      expect(
+        launcher.endsWith('/scripts/with-test-home.ts'),
+        `${suite}: expected the command to start through scripts/with-test-home.ts | received: ${command.join(' ')}`
+      ).toBe(true);
+      expect(command.slice(2, 4)).toEqual(['bun', 'test']);
+      expect(command.slice(4)).toEqual([...SUITE_FLAGS[suite], ...discovered[suite]]);
+    }
   });
 
   describe('on a synthetic tree', () => {

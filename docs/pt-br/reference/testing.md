@@ -242,7 +242,13 @@ termina. `test:unit` e `test:integration` chegam ao launcher pelo runner de work
 (`scripts/run-test-workers.ts`), que dá a cada processo seu próprio home. Isso cobre
 `bun run test`, os shards de CI atrás do watchdog, o
 orquestrador de cobertura e um `bun run test:unit` direto em `apps/api`; o workflow noturno de
-ordem aleatória encapsula o seu `bun test` da mesma forma.
+ordem aleatória encapsula o seu `bun test` da mesma forma. Os outros pontos de entrada de CI que
+iniciam testes da API fazem o mesmo: a qualificação com o binário real
+(`scripts/ci/rust-lanes.ts qualify`) e o smoke de container
+(`scripts/release/smoke-container-pairing.sh`, que se reexecuta sob o launcher com
+`--keep-build-version`, para que o runtime de release montado continue igual ao `VERSION` do hub).
+`scripts/tests/api-lanes-hermetic.unit.test.ts` falha se um novo workflow ou script de CI iniciar
+esses testes sem o launcher.
 
 O que o launcher define, além do home:
 

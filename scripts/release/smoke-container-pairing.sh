@@ -24,6 +24,17 @@
 # image preparation and the suite use the same engine.
 set -euo pipefail
 
+# The API test preload refuses a run on the real home, so the suite has to start
+# under the temporary-HOME launcher. Re-run the whole script under it rather than
+# only `bun test`: podman keeps its image store under HOME, so the image prepared
+# below must be prepared with the same home the suite later inspects it from.
+# MANGOSTUDIO_REAL_HOME is set by the launcher, so the second pass skips this.
+# VERSION is kept: the mounted release runtime and the hub must report the same one.
+if [ -z "${MANGOSTUDIO_REAL_HOME:-}" ]; then
+  exec bun "$(dirname "${BASH_SOURCE[0]}")/../with-test-home.ts" --keep-build-version \
+    bash "${BASH_SOURCE[0]}" "$@"
+fi
+
 container_cli="${CONTAINER_CLI:-}"
 base_image="${BASE_IMAGE:-}"
 packages="${PACKAGES:-}"

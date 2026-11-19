@@ -112,20 +112,55 @@ export function testHomeEnv(
  * exported version is offered no live update. The lanes are written for a dev
  * build, and a test that needs a release version sets it itself. Only the lanes
  * go through this launcher; a release job that runs one test file on purpose
- * with `VERSION` set (the container smoke) calls `bun test` directly and keeps
- * it.
+ * with `VERSION` set (the container smoke, which mounts a release runtime that
+ * must report the hub's version) passes `keepBuildVersion` and keeps it.
  *
  * @example
  * testChildEnv('/tmp/mangostudio-test-home-a1b2c3', { VERSION: '1.2.3', PATH: '/bin' }).VERSION;
  * // => undefined
+ * testChildEnv('/tmp/mangostudio-test-home-a1b2c3', { VERSION: '1.2.3' }, undefined, {
+ *   keepBuildVersion: true,
+ * }).VERSION;
+ * // => '1.2.3'
  */
 export function testChildEnv(
   root: string,
   ambient: NodeJS.ProcessEnv = process.env,
-  host: TemporaryHomeHost = launcherHost(ambient)
+  host: TemporaryHomeHost = launcherHost(ambient),
+  options: TestHomeOptions = {}
 ): NodeJS.ProcessEnv {
-  const { VERSION: _inheritedBuildVersion, ...rest } = ambient;
-  return { ...rest, ...testHomeEnv(root, ambient, host) };
+  const { VERSION: inheritedBuildVersion, ...rest } = ambient;
+  const kept = options.keepBuildVersion && inheritedBuildVersion !== undefined;
+  return {
+    ...rest,
+    ...(kept ? { VERSION: inheritedBuildVersion } : {}),
+    ...testHomeEnv(root, ambient, host),
+  };
+}
+
+/** The launcher flag that sets {@link TestHomeOptions.keepBuildVersion}. */
+export const KEEP_BUILD_VERSION_FLAG = '--keep-build-version';
+
+/**
+ * Splits the launcher's own flag from the command it runs. Only a flag before
+ * the command counts, so the command's arguments are never reinterpreted.
+ *
+ * @example
+ * parseLauncherArgs(['--keep-build-version', 'bash', 'run.sh']);
+ * // => { options: { keepBuildVersion: true }, command: ['bash', 'run.sh'] }
+ */
+export function parseLauncherArgs(argv: readonly string[]): {
+  options: TestHomeOptions;
+  command: string[];
+} {
+  const keepBuildVersion = argv[0] === KEEP_BUILD_VERSION_FLAG;
+  return { options: { keepBuildVersion }, command: argv.slice(keepBuildVersion ? 1 : 0) };
+}
+
+/** What a caller may change about the launched lane's environment. */
+export interface TestHomeOptions {
+  /** Keep an exported `VERSION` instead of dropping it (a release job under test). */
+  readonly keepBuildVersion?: boolean;
 }
 
 /** Prefix of every directory {@link createTestTemp} creates. */
@@ -247,7 +282,8 @@ export function shellExitCode(exitCode: number | null, signal: number | null): n
 export async function runWithTestHome(
   command: readonly string[],
   ambient: NodeJS.ProcessEnv = process.env,
-  dependencies: TestHomeDependencies = { spawn: spawnTestChild }
+  dependencies: TestHomeDependencies = { spawn: spawnTestChild },
+  options: TestHomeOptions = {}
 ): Promise<number> {
   if (command.length === 0) {
     throw new Error('with-test-home: expected a command to run | received: none');
@@ -267,7 +303,7 @@ export async function runWithTestHome(
     const child = dependencies.spawn(
       // The same Bun that runs the launcher, not whatever PATH says next.
       [program === 'bun' ? process.execPath : program, ...args],
-      { ...testChildEnv(root, ambient, host), ...testTempEnv(tempRoot) }
+      { ...testChildEnv(root, ambient, host, options), ...testTempEnv(tempRoot) }
     );
     for (const name of FORWARDED) {
       const forward = (): void => {

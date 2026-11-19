@@ -1458,7 +1458,12 @@ ends. `test:unit` and `test:integration` reach it through the
 [worker runner](#api-unit-workers), which starts every worker through the
 launcher, so each worker has a home of its own. That covers `bun run test`, the CI shards behind the watchdog, the coverage
 orchestrator and a direct `bun run test:unit` from `apps/api`; the nightly randomized-order
-workflow wraps its `bun test` the same way.
+workflow wraps its `bun test` the same way. So do the other CI entry points that start API
+tests: the real-binary qualification (`scripts/ci/rust-lanes.ts qualify`) and the container
+smoke (`scripts/release/smoke-container-pairing.sh`, which re-runs itself under the launcher
+with `--keep-build-version` so the mounted release runtime still matches the hub's `VERSION`).
+`scripts/tests/api-lanes-hermetic.unit.test.ts` fails a new workflow or CI script that starts
+them bare.
 
 `fixtureHomeEnv()` also pins `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_STATE_HOME` and
 `XDG_CACHE_HOME` below the temporary home, and uses that private home itself for

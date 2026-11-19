@@ -15,6 +15,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -52,6 +53,13 @@ const scripts = JSON.parse(readFileSync(join(API_DIR, 'package.json'), 'utf8')).
   string,
   string
 >;
+
+/** The files directly under `dir` whose name matches `pattern`, as absolute paths. */
+function listFiles(dir: string, pattern: RegExp): string[] {
+  return readdirSync(dir)
+    .filter((name) => pattern.test(name))
+    .map((name) => join(dir, name));
+}
 
 /** The developer's real home: the one an outer launcher recorded, else this process's own. */
 const realHome = process.env[REAL_HOME_ENV]?.trim() || homedir();
@@ -100,6 +108,31 @@ describe('API lane scripts start bun test through the temporary-home launcher', 
         launcherCommand(script),
         `apps/api script ${name} runs bun test with the real home | expected: through ${LAUNCHER} | received: ${script}`
       ).not.toBeNull();
+    }
+  });
+
+  test('no workflow or CI/release script starts apps/api tests without the launcher', () => {
+    // The API test preload refuses a bare `bun test` on the real home, so a caller
+    // outside the package scripts fails its lane (the real-binary qualification
+    // and the container smoke did) unless it names the launcher.
+    const callers = [
+      ...listFiles(join(ROOT, '.github', 'workflows'), /\.ya?ml$/),
+      ...listFiles(join(ROOT, 'scripts', 'ci'), /\.ts$/),
+      ...listFiles(join(ROOT, 'scripts', 'release'), /\.(sh|ts)$/),
+    ];
+    const startsBunTest = /\bbun test\b|'bun',\s*'test'/;
+    const touchesApiTests = /apps\/api|API_DIR|tests\/(unit|integration)/;
+    for (const file of callers) {
+      // Prose in a comment may name `bun test` without running it.
+      const text = readFileSync(file, 'utf8')
+        .split('\n')
+        .filter((line) => !/^\s*(\/\/|\*|\/\*|#)/.test(line))
+        .join('\n');
+      if (!startsBunTest.test(text) || !touchesApiTests.test(text)) continue;
+      expect(
+        text.includes('with-test-home'),
+        `${relative(ROOT, file)} starts bun test on apps/api tests without the temporary-home launcher | expected: through ${LAUNCHER} | received: a bare bun test`
+      ).toBe(true);
     }
   });
 

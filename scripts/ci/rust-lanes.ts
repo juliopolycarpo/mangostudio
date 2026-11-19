@@ -31,6 +31,26 @@ export const SUITE_FLAGS: Readonly<Record<keyof QualificationSuites, readonly st
   integration: ['--timeout', '15000'],
 };
 
+/** The launcher that gives `bun test` a temporary HOME; the API test preload refuses a run without it. */
+const TEST_HOME_LAUNCHER = join(ROOT, 'scripts', 'with-test-home.ts');
+
+/**
+ * The command that runs one suite's files: `bun test` started through the
+ * temporary-HOME launcher, from `apps/api`. A bare `bun test` there is refused
+ * by the API test preload (`hermetic-home.ts`), because its tests would read and
+ * write the real `~/.mango`.
+ *
+ * @example
+ * qualifyCommand('unit', ['tests/unit/a.test.ts']);
+ * // => [bun, '<root>/scripts/with-test-home.ts', 'bun', 'test', '--timeout', '15000', '--parallel=1', 'tests/unit/a.test.ts']
+ */
+export function qualifyCommand(
+  suite: keyof QualificationSuites,
+  files: readonly string[]
+): string[] {
+  return [process.execPath, TEST_HOME_LAUNCHER, 'bun', 'test', ...SUITE_FLAGS[suite], ...files];
+}
+
 function parseSuite(value: string | undefined): keyof QualificationSuites {
   if (value === 'unit' || value === 'integration') return value;
   throw new Error(`rust-lanes: --suite must be "unit" or "integration" | received: ${value}`);
@@ -57,7 +77,7 @@ function qualify(args: readonly string[]): number {
     throw new Error(`rust-lanes qualify: discovered no ${suite} test files under ${API_DIR}/tests`);
   }
   console.log(`rust-lanes: running ${files.length} ${suite} file(s):\n  ${files.join('\n  ')}`);
-  const run = Bun.spawnSync(['bun', 'test', ...SUITE_FLAGS[suite], ...files], {
+  const run = Bun.spawnSync(qualifyCommand(suite, files), {
     cwd: join(ROOT, API_DIR),
     stdio: ['inherit', 'inherit', 'inherit'],
   });
