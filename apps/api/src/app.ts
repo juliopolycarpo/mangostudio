@@ -45,9 +45,11 @@ import { todoRoutes } from './modules/todos/http/todo-routes';
 import { toolIdentityRoutes } from './modules/tool-identity/http/tool-identity-routes';
 import { workspaceRoutes } from './modules/workspaces/http/workspace-routes';
 import { apiKeyGuard } from './plugins/api-key-guard';
+import { apiKeyVerifier } from './plugins/api-key-verification';
 import { errorHandler } from './plugins/error-handler';
 import { handlerIdleTimeout } from './plugins/handler-idle-timeout';
 import { rateLimit } from './plugins/rate-limit';
+import { createRateLimitClientIdResolver } from './plugins/rate-limit-client-id';
 import { classifyRateLimit } from './plugins/rate-limit-policy';
 import { responseCompression } from './plugins/response-compression';
 import { authRoutes } from './routes/auth';
@@ -104,7 +106,15 @@ const api = new Elysia({ prefix: '/api' })
   // into `api-key`, and everything else into the baseline `general` bucket.
   // `trustProxy` lets proxied deployments (e.g. Docker behind nginx) resolve
   // the real client IP from forwarded headers; off by default (see config).
-  .use(rateLimit({ classify: classifyRateLimit, trustProxy: getConfig().security.trustProxy }))
+  // `api-key` counters key on the verified key id; the verification is shared
+  // with `apiKeyGuard` below, so a request still verifies its key once.
+  .use(
+    rateLimit({
+      classify: classifyRateLimit,
+      trustProxy: getConfig().security.trustProxy,
+      resolveClientId: createRateLimitClientIdResolver(apiKeyVerifier),
+    })
+  )
   // Health check — covered by its own generous bucket (registered after the
   // limiter so the limiter's hooks apply to it).
   .get('/health', () => ({ status: 'ok', timestamp: Date.now() }))

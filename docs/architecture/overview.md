@@ -196,8 +196,11 @@ into a named bucket — `health`, `auth`, `general` (cookie traffic), and
 cannot starve browser sessions on the same IP. `general` is the widest of them:
 the narrower buckets each bound one expensive operation, while `general` bounds
 ordinary page loads, and one page load is many requests. Client id is the caller
-IP for every bucket today (per-key ids need a verified key id after
-`apiKeyGuard`; see issue #737). Limited requests return a `429` `ApiErrorResponse`
+IP, except in the `api-key` bucket, which counts per verified Better Auth key id
+(`rate-limit-client-id.ts`). The limiter and `apiKeyGuard` share one memoized
+verification per request (`api-key-verification.ts`), and a key that does not
+verify keeps the IP counter, so rotating garbage `x-api-key` values cannot mint
+fresh counters. Limited requests return a `429` `ApiErrorResponse`
 (`code: RATE_LIMITED`) with a `Retry-After` header. Expired counters are cleaned
 up lazily. Proxy headers affect the client id only when `trustProxy` is
 explicitly enabled behind a trusted reverse proxy.

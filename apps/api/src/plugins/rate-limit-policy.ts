@@ -16,10 +16,10 @@
  * page load is many requests. Isolation, not a low ceiling, is what keeps a
  * flood in one bucket off the others.
  *
- * The api-key bucket is keyed by client IP for now. Hashing the raw header for
- * a per-key counter would let an unauthenticated caller rotate `x-api-key` and
- * escape both buckets; verified Better Auth key ids arrive only after
- * `apiKeyGuard`, which runs after this limiter (see issue #737).
+ * Which counter a request lands on is `rate-limit-client-id.ts`'s call, not this
+ * file's: the api-key bucket keys on the verified Better Auth key id and falls
+ * back to client IP for a key that does not verify. Hashing the raw header would
+ * let an unauthenticated caller rotate `x-api-key` and escape both buckets.
  */
 
 import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
@@ -68,8 +68,9 @@ export const RATE_LIMIT_BUCKETS = {
   health: { name: 'health', max: 240, windowMs: ONE_MINUTE_MS },
   /**
    * Key-authenticated automation traffic. Counted separately from `general` so a
-   * noisy script cannot starve a browser session on the same host IP. Client id
-   * is the caller IP until verified key ids can key the bucket (#737).
+   * noisy script cannot starve a browser session on the same host IP. Each
+   * verified key has its own counter; keys that fail verification share their
+   * caller's IP counter, so rotating garbage values cannot mint fresh ones.
    *
    * Below `general` and staying there: a script makes the requests it means to,
    * one at a time, so it has no page-load fan-out to pay for. Isolation is what
@@ -156,19 +157,6 @@ function trimmedApiKeyHeader(headers: RateLimitHeaderLookup | null | undefined):
   if (!raw) return null;
   const trimmed = raw.trim();
   return trimmed.length > 0 ? trimmed : null;
-}
-
-/**
- * Resolve the counter key for a bucket. All buckets use `clientIp` today; the
- * api-key bucket still classifies separately so automation does not share the
- * general counter. Per-key client ids need a verified key id (#737).
- */
-export function resolveRateLimitClientId(
-  _bucket: RateLimitBucket,
-  _headers: RateLimitHeaderLookup | null | undefined,
-  clientIp: string
-): string {
-  return clientIp;
 }
 
 /**
