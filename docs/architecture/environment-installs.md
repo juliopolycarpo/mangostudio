@@ -174,6 +174,8 @@ Each run has:
   mid-write;
 - a combined one-MiB output and log-file cap with a truncation event;
 - one active process per recipe ID, with same-user duplicate requests attaching to that run;
+- one active recipe per runtime per machine: while `bun.update` runs, `bun.uninstall` is refused with
+  `409 INSTALL_RUNTIME_BUSY` and `details.{runtimeId,runningRecipeId,runningRunId}`, whichever tab asks;
 - raw line-by-line SSE output, followed by refreshed runtime, version-manager, or agent status;
 - a user-scoped audit record containing the exact argv, timestamps, terminal status, exit code,
   and truncation state.

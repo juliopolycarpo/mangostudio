@@ -23,6 +23,7 @@ import {
   InstallConflictError,
   InstallPreparationError,
   type InstallRequestContext,
+  InstallRuntimeBusyError,
   type InstallService,
   installService,
   InstallUnavailableError,
@@ -68,6 +69,17 @@ function mapInstallError(error: unknown) {
   }
   if (error instanceof InstallUnavailableError) {
     return status(409, unavailableResponse(error));
+  }
+  if (error instanceof InstallRuntimeBusyError) {
+    return status(409, {
+      error: error.message,
+      code: ERROR_CODES.INSTALL_RUNTIME_BUSY,
+      details: {
+        runtimeId: error.runtimeId,
+        runningRecipeId: error.runningRecipeId,
+        ...(error.runningRunId && { runningRunId: error.runningRunId }),
+      },
+    });
   }
   if (error instanceof InstallConflictError || error instanceof InstallPreparationError) {
     return status(409, { error: error.message, code: ERROR_CODES.CONFLICT });
