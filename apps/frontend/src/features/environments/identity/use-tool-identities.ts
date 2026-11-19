@@ -23,7 +23,7 @@ import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidatio
 import { displayName, type ToolNameLookup } from '../format';
 import { resetToolIdentity, updateToolIdentity, uploadToolIdentityImage } from './api';
 import { toolIdentitiesQueryOptions, toolIdentityKeys } from './queries';
-import { type ResolvedToolIdentity, resolveToolIdentity } from './resolve';
+import { isIdentityNameEditable, type ResolvedToolIdentity, resolveToolIdentity } from './resolve';
 
 const EMPTY_IDENTITIES: ToolIdentityMap = {};
 
@@ -74,7 +74,10 @@ export function useToolIdentities(): ToolIdentityResolver {
   );
 
   const lookup = useCallback<ToolNameLookup>(
-    (subjectKey) => identities[subjectKey]?.displayName ?? undefined,
+    (subjectKey) =>
+      isIdentityNameEditable(subjectKey)
+        ? (identities[subjectKey]?.displayName ?? undefined)
+        : undefined,
     [identities]
   );
 

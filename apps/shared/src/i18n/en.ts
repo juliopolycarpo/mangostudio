@@ -2136,8 +2136,12 @@ export const messages: CoreMessages = {
     identity: {
       menu: 'Identity options for {name}',
       rename: 'Rename…',
+      // For a subject whose name is not the registry's to change (an MCP server's
+      // is its configured name): the same dialog without the name field.
+      customize: 'Set avatar…',
       reset: 'Reset to default',
       dialogTitle: 'Rename {name}',
+      customizeDialogTitle: 'Set avatar for {name}',
       nameLabel: 'Display name',
       namePlaceholder: '{name}',
       nameHint: 'Leave empty to keep the default name. Only what you read changes.',
