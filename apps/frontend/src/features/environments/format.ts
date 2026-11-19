@@ -578,6 +578,30 @@ export function nodeInstallStep(
   return recipe ? { recipe, input: nodeRecipeInput(recipe) } : undefined;
 }
 
+/** The set-default recipe that completes each manager's Node install. winget needs none. */
+const NODE_SET_DEFAULT_BY_INSTALL: Partial<Record<InstallRecipeId, InstallRecipeId>> = {
+  'nvm.node.install': 'nvm.node.set-default',
+  'fnm.node.install': 'fnm.node.set-default',
+};
+
+/**
+ * The steps that must follow `step` for a fresh Node to be the one that runs.
+ * `nvm install` writes no `default` alias and `fnm install --lts` only writes
+ * `lts-latest`, so without these the install reports success while `auto`
+ * still finds nothing to put on PATH. Empty for winget, or when the catalog
+ * has no runnable set-default for the chosen manager.
+ * // Usage: <RecipeAction step={step} followUpSteps={nodeInstallFollowUp(recipes, step)} />
+ */
+export function nodeInstallFollowUp(
+  recipes: readonly InstallRecipePreview[],
+  step: InstallChainStep | undefined
+): InstallChainStep[] {
+  const setDefaultId = step && NODE_SET_DEFAULT_BY_INSTALL[step.recipe.id];
+  if (!setDefaultId) return [];
+  const recipe = recipes.find((candidate) => candidate.id === setDefaultId && candidate.supported);
+  return recipe ? [{ recipe, input: nodeRecipeInput(recipe) }] : [];
+}
+
 /**
  * The step that installs `runtimeId` on this machine, or undefined when the
  * catalog offers none. Node is the one runtime whose install is a choice
