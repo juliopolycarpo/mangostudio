@@ -61,7 +61,11 @@ import { type GetGithubContext, getGithubContext } from '../application/github-c
 import { type GithubReadService, githubReadService } from '../application/github-read-service';
 import { type GithubWriteService, githubWriteService } from '../application/github-write-service';
 import { GithubOutputError } from '../domain/gh-output';
-import { GhCliError, type GhRuntimeSelection } from '../infrastructure/gh-cli';
+import {
+  GhCliError,
+  GhMutationDeniedError,
+  type GhRuntimeSelection,
+} from '../infrastructure/gh-cli';
 
 /** Everything a chat-scoped GitHub call needs, resolved once per request. */
 interface GithubTarget {
@@ -124,6 +128,9 @@ export function createGithubRoutes(deps: GithubRouteDeps = {}) {
           query: GithubInboxQuerySchema,
           response: {
             200: GithubInboxResponseSchema,
+            // Declared because `guard` can answer it for any route; the inbox
+            // never runs a write, so in practice it is not sent here.
+            403: ApiErrorResponseSchema,
             500: ApiErrorResponseSchema,
             503: ApiErrorResponseSchema,
           },
@@ -303,7 +310,8 @@ function writeRequest(target: GithubTarget, signal: AbortSignal) {
 }
 
 /**
- * Runs one GitHub call and turns any failure into a fixed 500.
+ * Runs one GitHub call and turns any failure into a fixed 500 — except an
+ * unreachable environment (503) and a write the machine's consent refuses (403).
  *
  * gh's own output never reaches the body. Its stderr routinely carries the
  * repository, the branch, the account and occasionally an API URL with a
@@ -321,7 +329,10 @@ async function guard<T>(
   }
 }
 
-type GithubFailure = ElysiaStatus<503, ApiErrorResponse> | ElysiaStatus<500, ApiErrorResponse>;
+type GithubFailure =
+  | ElysiaStatus<503, ApiErrorResponse>
+  | ElysiaStatus<500, ApiErrorResponse>
+  | ElysiaStatus<403, ApiErrorResponse>;
 
 function githubFailure(
   error: unknown,
@@ -329,6 +340,13 @@ function githubFailure(
 ): GithubFailure {
   const unavailable = environmentUnavailableResponse(error, set);
   if (unavailable) return unavailable;
+
+  // The owner's consent setting, not a fault: say so, and 403 tells a client
+  // that retrying cannot help. Nothing here comes from `gh`, so the message is
+  // the error's own.
+  if (error instanceof GhMutationDeniedError) {
+    return status(403, { error: error.message, code: ERROR_CODES.PERMISSION_DENIED });
+  }
 
   if (error instanceof GhCliError) {
     // A cancelled request is the client hanging up, not a server fault worth logging.

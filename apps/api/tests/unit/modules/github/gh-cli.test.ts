@@ -4,9 +4,11 @@ import { RemoteError } from '@mangostudio/protocol';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 
 import {
+  canMutateGh,
   createGhCli,
   GhCliError,
   type GhCommandRunner,
+  GhMutationDeniedError,
   isGhAvailable,
   runGh,
 } from '../../../../src/modules/github/infrastructure/gh-cli';
@@ -33,6 +35,25 @@ const TEST_MANIFEST: RuntimeCapabilityManifest = {
     checkpoints: true,
   },
 };
+
+/**
+ * The consent a `readonly` machine grants: `git` yes, `shell` no. `gh.exec`
+ * needs only `git`, so reads work, while `gh.mutate` also needs `shell`.
+ */
+const READONLY_ALLOW = {
+  fsRead: true,
+  fsWrite: false,
+  shell: false,
+  git: true,
+  probing: true,
+  mcp: false,
+  library: false,
+  checkpoints: false,
+  update: false,
+} as const;
+
+/** Same machine as {@link TEST_MANIFEST}, with consent that refuses `shell`. */
+const READONLY_MANIFEST: RuntimeCapabilityManifest = { ...TEST_MANIFEST, allow: READONLY_ALLOW };
 
 /** A manifest from a runtime released before the `gh` probe existed. */
 const OLDER_MANIFEST: RuntimeCapabilityManifest = (({ gh: _gh, ...rest }) => rest)(TEST_MANIFEST);
@@ -252,6 +273,68 @@ describe('hub gh CLI facade', () => {
     new FakeGhRuntime(OLDER_MANIFEST).install();
 
     expect(await isGhAvailable({ userId: 'user-1', environmentId: 'devbox' })).toBe(false);
+  });
+
+  /**
+   * `gh.available` is gated on `git` consent alone, because `gh.exec` is. A
+   * machine granting `git` but not `shell` therefore reports `gh` as available
+   * while `gh.mutate`, which also needs `shell`, is refused before any handler
+   * runs. Availability cannot tell the two apart; this is the question that can.
+   */
+  it('reports writes as unavailable when the machine grants git but refuses shell', async () => {
+    new FakeGhRuntime(READONLY_MANIFEST).install();
+    const selection = { userId: 'user-1', environmentId: 'devbox' };
+
+    expect(await isGhAvailable(selection)).toBe(true);
+    expect(await canMutateGh(selection)).toBe(false);
+  });
+
+  it('reports writes as available when consent grants shell, or when the peer reports none', async () => {
+    const selection = { userId: 'user-1', environmentId: 'devbox' };
+
+    new FakeGhRuntime({ ...TEST_MANIFEST, allow: { ...READONLY_ALLOW, shell: true } }).install();
+    expect(await canMutateGh(selection)).toBe(true);
+
+    // An older peer announces no consent at all; absent is not a refusal.
+    new FakeGhRuntime(TEST_MANIFEST).install();
+    expect(await canMutateGh(selection)).toBe(true);
+  });
+
+  it('reports writes as unavailable when git consent is withdrawn, or gh is absent, or the runtime is unreachable', async () => {
+    const selection = { userId: 'user-1', environmentId: 'devbox' };
+
+    new FakeGhRuntime({
+      ...TEST_MANIFEST,
+      allow: { ...READONLY_ALLOW, shell: true, git: false },
+    }).install();
+    expect(await canMutateGh(selection)).toBe(false);
+
+    new FakeGhRuntime(OLDER_MANIFEST).install();
+    expect(await canMutateGh(selection)).toBe(false);
+
+    setRuntimeConnectionManagerForTests(
+      new RuntimeConnectionManager({
+        resolveEnvironment: () => Promise.reject(new Error('environment is gone')),
+        connectors: { stdio: () => Promise.reject(new Error('unreachable')) },
+      })
+    );
+    expect(await canMutateGh(selection)).toBe(false);
+  });
+
+  it('refuses a mutation on a machine that refuses shell, before any call is sent', async () => {
+    const runtime = new FakeGhRuntime(READONLY_MANIFEST);
+    runtime.install();
+
+    const refusal = await runGh(['pr', 'create'], { cwd: '/remote/repo', mutation: true }).catch(
+      (cause: unknown) => cause
+    );
+
+    expect(refusal).toBeInstanceOf(GhMutationDeniedError);
+    expect(runtime.calls).toEqual([]);
+
+    // Reads still go through: `gh.exec` needs only `git`.
+    await runGh(['pr', 'list'], { cwd: '/remote/repo' });
+    expect(runtime.calls.map((call) => call.method)).toEqual(['exec']);
   });
 
   it('treats an unreachable runtime as not having gh', async () => {

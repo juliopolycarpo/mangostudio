@@ -270,8 +270,9 @@ describe('GitHub write service', () => {
   it('drops the cached reads for that machine, so the list cannot lag the action', async () => {
     const client = createClient();
     const cache = createGithubCache();
+    const readClient = new FakeGithubCli({ stdout: { 'repo.view': repoOutput, 'pr.list': '[]' } });
     const reads = createGithubReadService({
-      client: new FakeGithubCli({ stdout: { 'repo.view': repoOutput, 'pr.list': '[]' } }),
+      client: readClient,
       cache,
       homeCwd: () => Promise.resolve('/remote/home'),
     });
@@ -293,12 +294,19 @@ describe('GitHub write service', () => {
         limit: 20,
       });
 
-    const before = await listOnce();
-    expect(await listOnce()).toBe(before);
+    // Counted at the `gh` boundary rather than by comparing responses: the list
+    // answer is rebuilt on every call (its write flag follows current consent),
+    // so object identity no longer says whether the cache was hit.
+    const listCalls = () => readClient.ids().filter((id) => id === 'pr.list').length;
+
+    await listOnce();
+    await listOnce();
+    expect(listCalls()).toBe(1);
 
     await writes.markPullRequestReady(REQUEST, { chatId: 'chat-1', number: 7 });
+    await listOnce();
 
-    expect(await listOnce()).not.toBe(before);
+    expect(listCalls()).toBe(2);
   });
 
   it('reports a non-ok state instead of attempting the write', async () => {

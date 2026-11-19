@@ -45,6 +45,20 @@ export const GithubUnavailableStateSchema = Type.Union([...GITHUB_UNAVAILABLE_ME
  */
 const CachedAtSchema = Type.Integer({ minimum: 0 });
 
+/**
+ * Whether the machine this chat runs on lets the hub run `gh` writes.
+ *
+ * Reading needs only `git` consent and writing also needs `shell`, and an owner
+ * can grant the first without the second (the `readonly` profile). `gh` then
+ * reads as available while every write is refused, so the panel needs this flag
+ * to stop offering Create PR, Mark ready and Check out on such a machine.
+ *
+ * Required on the two responses the write controls hang off, and read fresh on
+ * every request rather than stored with the cached payload, so a consent change
+ * shows without waiting out the cache.
+ */
+const CanMutateSchema = Type.Boolean();
+
 export const GithubPrStateSchema = Type.Union([
   Type.Literal('OPEN'),
   Type.Literal('CLOSED'),
@@ -498,6 +512,7 @@ export const GithubPrsResponseSchema = Type.Union([
   Type.Object({
     state: Type.Literal('ok'),
     cachedAt: CachedAtSchema,
+    canMutate: CanMutateSchema,
     repo: GithubRepoSchema,
     prs: Type.Array(GithubPrSummarySchema),
   }),
@@ -536,6 +551,7 @@ export const GithubPrDetailResponseSchema = Type.Union([
   Type.Object({
     state: Type.Literal('ok'),
     cachedAt: CachedAtSchema,
+    canMutate: CanMutateSchema,
     repo: GithubRepoSchema,
     pr: GithubPrDetailSchema,
   }),

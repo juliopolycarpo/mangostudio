@@ -30,6 +30,8 @@ export interface RecordedGhCall {
 export interface FakeGithubCliOptions {
   readonly available?: boolean;
   readonly authenticated?: boolean;
+  /** Whether the machine's consent lets `gh.mutate` run. Defaults to true. */
+  readonly canMutate?: boolean;
   /** Per-command stdout. A command with no entry answers with empty stdout. */
   readonly stdout?: Partial<Record<GhCommandId, string>>;
   /**
@@ -52,6 +54,9 @@ export class FakeGithubCli implements GithubCli {
 
   isAuthenticated = (_selection: GhRuntimeSelection): Promise<boolean> =>
     Promise.resolve(this.options.authenticated ?? true);
+
+  canMutate = (_selection: GhRuntimeSelection): Promise<boolean> =>
+    Promise.resolve(this.options.canMutate ?? true);
 
   run = <I extends GhCommandId>(
     id: I,

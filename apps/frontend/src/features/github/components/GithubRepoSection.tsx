@@ -247,6 +247,12 @@ function PrsPane({
   // unmounts with this pane either way; a flag that outlived it brought the
   // form back empty, discarding the draft while still looking like it was open.
   const [creating, setCreating] = useState(false);
+  // False until the list has answered, and on a machine whose consent refuses
+  // `gh` writes: the runtime would deny every press of a write control there,
+  // so none is offered. Read from the list because that is the response the
+  // write controls sit under.
+  const canMutate = query.data?.state === 'ok' && query.data.canMutate;
+  const listPending = query.isPending;
 
   useEffect(() => {
     if (!openCreateForm) return;
@@ -254,13 +260,15 @@ function PrsPane({
     // detached checkout from a branch that just hasn't loaded — consuming it
     // here would open nothing and never get another chance. Wait for the
     // query so the outcome below is a real answer, not a guess mid-flight.
-    if (branchLoading) return;
+    // The list is waited on for the same reason: until it answers, "may this
+    // machine write" has no answer yet.
+    if (branchLoading || listPending) return;
     // A detached checkout has no branch for `readCurrentBranch()` to name, and
     // `gh pr create` needs one — opening the form here would only trade the
     // button's own gate below for a submit that fails with a generic error.
-    if (branchName) setCreating(true);
+    if (branchName && canMutate) setCreating(true);
     onCreateFormOpened();
-  }, [openCreateForm, onCreateFormOpened, branchName, branchLoading]);
+  }, [openCreateForm, onCreateFormOpened, branchName, branchLoading, listPending, canMutate]);
 
   const checkout = useMutation({
     mutationFn: (number: number) => checkoutPullRequest({ chatId, number }),
@@ -298,31 +306,15 @@ function PrsPane({
             labels={t.github.prFilter}
             onSelect={(prFilter) => onPrefsChange({ ...prefs, prFilter })}
           />
-          {creating ? (
-            <CreatePrForm
-              chatId={chatId}
-              needsPush={needsPush}
-              defaultTitle={branchName ?? ''}
-              onDone={() => setCreating(false)}
-            />
-          ) : branchName ? (
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => setCreating(true)}
-              className="w-full"
-            >
-              <Plus size={ICON_SM} />
-              {t.github.actions.createPr}
-            </Button>
-          ) : (
-            // A detached HEAD (or a checkout `readCurrentBranch()` otherwise
-            // cannot name) has no branch for `gh pr create` to push, and the
-            // command fails with a generic server error rather than explaining
-            // why — so this state is caught here instead.
-            <p className="text-xs text-fg-muted">{t.github.createPr.noBranch}</p>
-          )}
+          <CreatePrControl
+            chatId={chatId}
+            listState={query.data?.state ?? null}
+            canMutate={canMutate}
+            creating={creating}
+            onCreatingChange={setCreating}
+            needsPush={needsPush}
+            branchName={branchName}
+          />
         </>
       )}
       <ListGate
@@ -340,12 +332,80 @@ function PrsPane({
               pr={pr}
               onOpen={onSelectPr}
               onCheckout={(number) => checkout.mutate(number)}
+              canMutate={payload.canMutate}
             />
           ))
         }
       </ListGate>
     </div>
   );
+}
+
+/**
+ * The create-pull-request affordance under the pull request filters: the
+ * button, the open form, or the sentence that says why neither is offered.
+ *
+ * Split out so the four outcomes are a run of early returns instead of a
+ * nested ternary:
+ *  - the list has not answered yet: nothing, because whether this machine may
+ *    write is not known and offering a write control on a guess is what this
+ *    gate exists to stop;
+ *  - the machine refuses `gh` writes: one quiet line saying so;
+ *  - a form is open: the form;
+ *  - otherwise the button, or the no-branch explanation.
+ */
+function CreatePrControl({
+  chatId,
+  listState,
+  canMutate,
+  creating,
+  onCreatingChange,
+  needsPush,
+  branchName,
+}: {
+  readonly chatId: string;
+  readonly listState: GithubPrsResponse['state'] | null;
+  readonly canMutate: boolean;
+  readonly creating: boolean;
+  readonly onCreatingChange: (creating: boolean) => void;
+  readonly needsPush: boolean;
+  readonly branchName: string | null;
+}) {
+  const { t } = useI18n();
+
+  if (listState === 'ok' && !canMutate) {
+    return <p className="text-xs text-fg-muted">{t.github.createPr.readOnly}</p>;
+  }
+  if (!canMutate) return null;
+  if (creating) {
+    return (
+      <CreatePrForm
+        chatId={chatId}
+        needsPush={needsPush}
+        defaultTitle={branchName ?? ''}
+        onDone={() => onCreatingChange(false)}
+      />
+    );
+  }
+  if (branchName) {
+    return (
+      <Button
+        type="button"
+        variant="secondary"
+        size="sm"
+        onClick={() => onCreatingChange(true)}
+        className="w-full"
+      >
+        <Plus size={ICON_SM} />
+        {t.github.actions.createPr}
+      </Button>
+    );
+  }
+  // A detached HEAD (or a checkout `readCurrentBranch()` otherwise cannot name)
+  // has no branch for `gh pr create` to push, and the command fails with a
+  // generic server error rather than explaining why — so this state is caught
+  // here instead.
+  return <p className="text-xs text-fg-muted">{t.github.createPr.noBranch}</p>;
 }
 
 function IssuesPane({

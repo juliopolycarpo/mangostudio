@@ -108,7 +108,13 @@ function installScenario(overrides: ScenarioOverrides = {}) {
       body: overrides.inbox ?? { state: 'ok', cachedAt: Date.now(), items: [] },
     })
     .respondWithJson('GET', `/api/github/prs?chatId=${CHAT_ID}&filter=open`, {
-      body: overrides.prs ?? { state: 'ok', cachedAt: Date.now(), repo: REPO, prs: [] },
+      body: overrides.prs ?? {
+        state: 'ok',
+        cachedAt: Date.now(),
+        canMutate: true,
+        repo: REPO,
+        prs: [],
+      },
     })
     .install();
 }
@@ -203,7 +209,7 @@ describe('GithubPanel', () => {
 
   it('lists pull requests with their check state', async () => {
     const { scenario } = await renderPanel({
-      prs: { state: 'ok', cachedAt: Date.now(), repo: REPO, prs: [PR] },
+      prs: { state: 'ok', cachedAt: Date.now(), canMutate: true, repo: REPO, prs: [PR] },
     });
     try {
       expect(await screen.findByText('Build the GitHub rail panel')).toBeVisible();
@@ -392,6 +398,78 @@ describe('GithubPanel', () => {
     } finally {
       scenario.restore();
     }
+  });
+
+  /**
+   * `readonly` consent grants `git` and refuses `shell`, so `gh` reads as
+   * available while every write is refused by the runtime. The server says so
+   * with `canMutate`, and the panel must stop offering the actions it knows
+   * will fail — and say why, instead of leaving a gap that looks like a bug.
+   */
+  describe('on a machine that refuses GitHub writes', () => {
+    const READ_ONLY_PRS = {
+      state: 'ok',
+      cachedAt: Date.now(),
+      canMutate: false,
+      repo: REPO,
+      prs: [PR],
+    };
+
+    it('offers no create button, explains why, and ignores a create-pr request', async () => {
+      const { scenario } = await renderPanel({ prs: READ_ONLY_PRS });
+      try {
+        const repo = within(screen.getByTestId('github-repo-section'));
+        expect(await repo.findByText('Build the GitHub rail panel')).toBeVisible();
+
+        expect(repo.queryByRole('button', { name: 'Create pull request' })).toBeNull();
+        expect(
+          repo.getByText(
+            'GitHub writes are turned off on this machine, so pull requests can only be read here.'
+          )
+        ).toBeVisible();
+
+        act(() => {
+          requestGithubCreatePr();
+        });
+        await flushAsyncRender();
+        expect(screen.queryByLabelText('Title')).toBeNull();
+      } finally {
+        scenario.restore();
+      }
+    });
+
+    it('leaves the row menu without a checkout entry', async () => {
+      const user = userEvent.setup();
+      const { scenario } = await renderPanel({ prs: READ_ONLY_PRS });
+      try {
+        const repo = within(screen.getByTestId('github-repo-section'));
+        await repo.findByText('Build the GitHub rail panel');
+
+        await user.click(repo.getByRole('button', { name: 'Open menu' }));
+
+        // The read-only entries are still there: the menu is not what is refused.
+        expect(await screen.findByText('Open in browser')).toBeVisible();
+        expect(screen.queryByText('Check out this branch')).toBeNull();
+      } finally {
+        scenario.restore();
+      }
+    });
+
+    it('still offers both on a machine that allows writes', async () => {
+      const user = userEvent.setup();
+      const { scenario } = await renderPanel({ prs: { ...READ_ONLY_PRS, canMutate: true } });
+      try {
+        const repo = within(screen.getByTestId('github-repo-section'));
+        await repo.findByText('Build the GitHub rail panel');
+        expect(repo.getByRole('button', { name: 'Create pull request' })).toBeVisible();
+
+        await user.click(repo.getByRole('button', { name: 'Open menu' }));
+
+        expect(await screen.findByText('Check out this branch')).toBeVisible();
+      } finally {
+        scenario.restore();
+      }
+    });
   });
 
   it('degrades each section on its own when a read fails', async () => {
