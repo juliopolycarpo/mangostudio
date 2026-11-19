@@ -734,9 +734,15 @@ export function toolchainProcessLine(
   const canonical = groupInstallations(status.installations).find(
     (group) => group.canonical.path === selection
   )?.canonical;
+  // A pin is validated only when written. One that names a path the latest
+  // probe did not find (`nvm uninstall`) is not in force, so it must not be
+  // rendered under "Processes run …" as though it were.
+  if (!canonical) {
+    return formatMessage(t.environments.runtimes.toolchainPinMissing, { path: selection });
+  }
   return formatMessage(t.environments.runtimes.toolchainPinned, {
-    version: versionLabel(t, canonical?.version ?? null),
-    path: canonical?.rawPath ?? selection,
+    version: versionLabel(t, canonical.version),
+    path: canonical.rawPath,
   });
 }
 

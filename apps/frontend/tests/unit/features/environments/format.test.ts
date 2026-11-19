@@ -992,11 +992,19 @@ describe('toolchainProcessLine', () => {
     );
   });
 
-  it('still names a pinned path once its installation drops out of the latest probe', () => {
+  it('says the pin is gone, not in force, once its installation drops out of the latest probe', () => {
     const status = runtimeStatus({ id: 'node', installations: [] });
 
     expect(toolchainProcessLine(en, identityResolver, status, '/opt/node/bin/node')).toBe(
-      'Processes run unknown version from /opt/node/bin/node.'
+      'The pinned installation at /opt/node/bin/node is no longer installed. Processes fall back to PATH until you pick another version or return to automatic.'
+    );
+  });
+
+  it('renders the pt-BR missing-pin sentence', () => {
+    const status = runtimeStatus({ id: 'node', installations: [] });
+
+    expect(toolchainProcessLine(ptBR, identityResolver, status, '/opt/node/bin/node')).toContain(
+      'não está mais instalada'
     );
   });
 });
