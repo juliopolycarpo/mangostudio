@@ -48,6 +48,7 @@ function worktree(path: string, overrides: Partial<GitWorktree> = {}): GitWorktr
     isLocked: false,
     isPrunable: false,
     isCurrent: false,
+    boundByOtherChat: false,
     ...overrides,
   };
 }
@@ -146,6 +147,37 @@ describe('WorktreeSection', () => {
     });
     expect(remove).toBeDisabled();
     expect(remove.title).toBe(labels.lockedReason.replace('{reason}', 'held for review'));
+  });
+
+  /**
+   * The server refuses to remove a worktree another chat works in, and reports
+   * that in the list. Offering a live Delete for it sent the user through the
+   * confirm dialog to a 409.
+   */
+  it('disables the removal of a worktree another chat is bound to, and says why', () => {
+    hooks.data = {
+      worktrees: [mainWorktree, worktree('/work/shared', { boundByOtherChat: true })],
+    };
+
+    renderSection();
+
+    expect(screen.getByText(labels.badges.otherChat)).toBeInTheDocument();
+    const remove = screen.getByRole('button', {
+      name: labels.removeLabel.replace('{path}', '/work/shared'),
+    });
+    expect(remove).toBeDisabled();
+    expect(remove.title).toBe(labels.otherChatReason);
+  });
+
+  it('keeps a removal available for a worktree no other chat is bound to', () => {
+    hooks.data = { worktrees: [mainWorktree, linkedWorktree] };
+
+    renderSection();
+
+    expect(
+      screen.getByRole('button', { name: labels.removeLabel.replace('{path}', '/work/feature') })
+    ).toBeEnabled();
+    expect(screen.queryByText(labels.badges.otherChat)).toBeNull();
   });
 
   it('names a detached worktree by its commit instead of a branch', () => {

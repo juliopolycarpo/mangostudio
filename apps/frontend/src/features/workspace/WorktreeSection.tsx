@@ -36,9 +36,11 @@ type WorktreeLabels = Messages['git']['worktrees'];
  * groups.
  *
  * The row the chat is working in is the one the server flags `isCurrent`; it is
- * marked and kept out of reach of the remove button. The client does not
- * compare paths itself, since the server's comparison honours the runtime's
- * separators and casing and a string match here would not.
+ * marked and kept out of reach of the remove button. A row another chat works
+ * in is flagged `boundByOtherChat`; it is marked, and its remove button is
+ * disabled with the reason. The client does not compare paths itself, since the
+ * server's comparison honours the runtime's separators, symlinks and casing and
+ * a string match here would not.
  *
  * @example
  * <WorktreeSection chatId={chatId} />
@@ -208,6 +210,13 @@ function WorktreeRow({
   const labels = t.git.worktrees;
   const removable = !worktree.isMain && !isCurrent;
   const removeLabel = labels.removeLabel.replace('{path}', worktree.path);
+  // Why the button is offered but cannot be pressed. Both reasons are ones the
+  // server also refuses with a 409, so the panel states them up front.
+  const blockedReason = worktree.isLocked
+    ? lockTitle(worktree, labels)
+    : worktree.boundByOtherChat
+      ? labels.otherChatReason
+      : undefined;
 
   return (
     <li className="flex min-w-0 items-start gap-2 px-3 py-2">
@@ -229,10 +238,10 @@ function WorktreeRow({
         <IconButton
           label={removeLabel}
           tone="danger"
-          disabled={pending || worktree.isLocked}
+          disabled={pending || blockedReason !== undefined}
           onClick={onRemove}
-          // The tooltip carries the lock reason while the button is unavailable.
-          title={worktree.isLocked ? lockTitle(worktree, labels) : undefined}
+          // The tooltip carries the reason while the button is unavailable.
+          title={blockedReason}
         >
           <Trash2 size={ICON_SM} />
         </IconButton>
@@ -254,6 +263,9 @@ function WorktreeBadges({
     [];
   if (isCurrent) badges.push({ key: 'current', text: labels.badges.current, variant: 'accent' });
   if (worktree.isMain) badges.push({ key: 'main', text: labels.badges.main, variant: 'neutral' });
+  if (worktree.boundByOtherChat) {
+    badges.push({ key: 'otherChat', text: labels.badges.otherChat, variant: 'neutral' });
+  }
   if (worktree.isDetached) {
     badges.push({ key: 'detached', text: labels.badges.detached, variant: 'neutral' });
   }
@@ -287,6 +299,7 @@ function badgeTitle(
   labels: WorktreeLabels
 ): string | undefined {
   if (key === 'locked') return lockTitle(worktree, labels);
+  if (key === 'otherChat') return labels.otherChatReason;
   if (key === 'prunable' && worktree.prunableReason) {
     return labels.prunableReason.replace('{reason}', worktree.prunableReason);
   }

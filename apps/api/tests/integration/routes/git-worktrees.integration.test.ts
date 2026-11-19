@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -32,7 +32,26 @@ const hostPaths = createTargetPaths({
   pathStyle: process.platform === 'win32' ? 'win32' : 'posix',
   homeDir: tmpdir(),
 } as Parameters<typeof createTargetPaths>[0]);
+// A junction needs no privilege on Windows, where a directory symlink does; the
+// type argument is ignored everywhere else.
+const symlinkType = process.platform === 'win32' ? 'junction' : 'dir';
 const tempDirs: string[] = [];
+
+/** True when the temp volume treats `a` and `A` as one name, as APFS does by default. */
+async function detectCaseInsensitiveTmpdir(): Promise<boolean> {
+  const probe = await mkdtemp(join(tmpdir(), 'mango-case-probe-'));
+  try {
+    await writeFile(join(probe, 'lower'), '');
+    return await stat(join(probe, 'LOWER')).then(
+      () => true,
+      () => false
+    );
+  } finally {
+    await rm(probe, { recursive: true, force: true });
+  }
+}
+
+const caseInsensitiveTmpdir = await detectCaseInsensitiveTmpdir();
 let restoreAuth: (() => void) | null = null;
 
 type TestApp = ReturnType<typeof createAuthenticatedApiTestApp>['app'];
@@ -335,6 +354,102 @@ describe('Git worktree routes', () => {
         expect(await response.json()).toMatchObject({ code: ERROR_CODES.CONFLICT });
         await getDb().deleteFrom('chats').where('id', '=', siblingChatId).execute();
       }
+    }
+  );
+
+  /**
+   * A stored workdir is whatever spelling the chat was bound with, and Git lists
+   * the real path. Compared as strings, a binding through a symlinked directory
+   * (a symlinked home, `/tmp` -> `/private/tmp` on macOS) named neither the
+   * worktree nor anything below it, so the removal went through and deleted the
+   * directory under the sibling chat.
+   */
+  it.skipIf(!hasGit)(
+    'refuses to remove a worktree a sibling chat is bound to through a symlink',
+    async () => {
+      const { root, parent } = await createTempRepo();
+      const target = join(parent, 'feature');
+      await runFixtureGit(root, ['worktree', 'add', '-b', 'feat/panel', target]);
+      await mkdir(join(target, 'packages'));
+      const alias = join(parent, 'alias');
+      await symlink(parent, alias, symlinkType);
+      const { app, chatId, user } = await createChatFixture(root);
+
+      for (const spelling of [join(alias, 'feature'), join(alias, 'feature', 'packages')]) {
+        const siblingChatId = await addChat(user.id, spelling);
+
+        const response = await sendJson(app, 'DELETE', { chatId, path: target });
+
+        expect(response.status).toBe(409);
+        expect(await response.json()).toMatchObject({
+          code: ERROR_CODES.CONFLICT,
+          error: expect.stringContaining('Another chat'),
+        });
+        await getDb().deleteFrom('chats').where('id', '=', siblingChatId).execute();
+      }
+      // Refused before Git ran: the directory the sibling works in is still there.
+      expect((await stat(join(target, 'packages'))).isDirectory()).toBe(true);
+    }
+  );
+
+  /**
+   * On a case-insensitive volume (the macOS default) `Feature` and `feature` are
+   * one directory, and the posix path rules the runtime reports compare them
+   * as two. Only a filesystem that really folds case can show it.
+   */
+  it.skipIf(!hasGit || !caseInsensitiveTmpdir)(
+    'refuses to remove a worktree a sibling chat is bound to under a different casing',
+    async () => {
+      const { root, parent } = await createTempRepo();
+      const target = join(parent, 'feature');
+      await runFixtureGit(root, ['worktree', 'add', '-b', 'feat/panel', target]);
+      const { app, chatId, user } = await createChatFixture(root);
+      await addChat(user.id, join(parent, 'FEATURE'));
+
+      const response = await sendJson(app, 'DELETE', { chatId, path: target });
+
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ code: ERROR_CODES.CONFLICT });
+    }
+  );
+
+  /**
+   * The list and the removal guard answer one question. A row the guard would
+   * refuse for a sibling chat is flagged in the list, so the panel never offers
+   * a delete the server answers with a 409.
+   */
+  it.skipIf(!hasGit)(
+    'flags the worktree a sibling chat is bound to, through the same comparison as the guard',
+    async () => {
+      const { root, parent } = await createTempRepo();
+      const bound = join(parent, 'bound');
+      const free = join(parent, 'free');
+      await runFixtureGit(root, ['worktree', 'add', '-b', 'feat/bound', bound]);
+      await runFixtureGit(root, ['worktree', 'add', '-b', 'feat/free', free]);
+      const alias = join(parent, 'alias');
+      await symlink(parent, alias, symlinkType);
+      const { app, chatId, user } = await createChatFixture(root);
+      await addChat(user.id, join(alias, 'bound'));
+
+      const listed = (await (await listWorktrees(app, chatId)).json()) as GitWorktreeListResponse;
+      const refusal = await sendJson(app, 'DELETE', { chatId, path: bound });
+      const removal = await sendJson(app, 'DELETE', { chatId, path: free });
+
+      expect(Value.Check(GitWorktreeListResponseSchema, listed)).toBe(true);
+      expect(
+        listed.worktrees.map(({ path, boundByOtherChat }) => [path, boundByOtherChat])
+      ).toEqual([
+        [asGitPath(root), false],
+        [asGitPath(bound), true],
+        [asGitPath(free), false],
+      ]);
+      expect(refusal.status).toBe(409);
+      expect(removal.status).toBe(200);
+      // The list a removal answers with carries the flag too.
+      const remaining = (await removal.json()) as GitWorktreeListResponse;
+      expect(remaining.worktrees.find(({ path }) => path === asGitPath(bound))).toMatchObject({
+        boundByOtherChat: true,
+      });
     }
   );
 

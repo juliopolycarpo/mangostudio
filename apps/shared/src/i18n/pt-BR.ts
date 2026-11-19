@@ -1877,10 +1877,13 @@ export const messages = {
       badges: {
         main: 'Principal',
         current: 'Este chat',
+        otherChat: 'Outro chat',
         detached: 'Destacada',
         locked: 'Bloqueada',
         prunable: 'Removível',
       },
+      otherChatReason:
+        'Outro chat está trabalhando nesta worktree. Aponte-o para outro lugar antes de removê-la.',
       lockedReason: 'Bloqueada: {reason}',
       prunableReason: 'Removível: {reason}',
       detached: 'Destacada em {commit}',

@@ -973,10 +973,13 @@ export const messages: CoreMessages = {
       badges: {
         main: 'Main',
         current: 'This chat',
+        otherChat: 'Other chat',
         detached: 'Detached',
         locked: 'Locked',
         prunable: 'Prunable',
       },
+      otherChatReason:
+        'Another chat is working in this worktree. Point it elsewhere before removing it.',
       lockedReason: 'Locked: {reason}',
       prunableReason: 'Prunable: {reason}',
       detached: 'Detached at {commit}',

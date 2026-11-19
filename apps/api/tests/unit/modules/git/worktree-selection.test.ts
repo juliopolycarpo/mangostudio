@@ -2,10 +2,12 @@ import { describe, expect, it } from 'bun:test';
 
 import type { GitWorktree } from '@mangostudio/shared/git';
 
+import type { ParsedWorktree } from '../../../../src/modules/git/domain/worktree-parser';
 import {
   findWorktree,
   isSameWorktreePath,
   isWithinWorktree,
+  markBoundByOtherChat,
   markCurrentWorktree,
   type WorktreePathSemantics,
 } from '../../../../src/modules/git/domain/worktree-selection';
@@ -36,8 +38,15 @@ function worktree(path: string, overrides: Partial<GitWorktree> = {}): GitWorktr
     isLocked: false,
     isPrunable: false,
     isCurrent: false,
+    boundByOtherChat: false,
     ...overrides,
   };
+}
+
+/** The worktree as Git lists it, before the two per-caller flags are stamped on. */
+function listed(path: string, overrides: Partial<ParsedWorktree> = {}): ParsedWorktree {
+  const { isCurrent: _current, boundByOtherChat: _bound, ...rest } = worktree(path);
+  return { ...rest, ...overrides };
 }
 
 const worktrees = [worktree('/repo', { isMain: true }), worktree('/work/feature')];
@@ -104,8 +113,8 @@ describe('findWorktree', () => {
 });
 
 describe('markCurrentWorktree', () => {
-  const { isCurrent: _unused, ...parsedMain } = worktree('/repo', { isMain: true });
-  const { isCurrent: _unusedToo, ...parsedLinked } = worktree('/work/feature');
+  const parsedMain = listed('/repo', { isMain: true });
+  const parsedLinked = listed('/work/feature');
 
   it('flags only the worktree the root names', () => {
     const marked = markCurrentWorktree([parsedMain, parsedLinked], '/work/feature', posixPaths);
@@ -171,24 +180,105 @@ describe('isSameWorktreePath', () => {
 
 describe('isWithinWorktree', () => {
   it('accepts the worktree itself and any directory below it', () => {
-    expect(isWithinWorktree('/work/feature', '/work/feature', posixPaths)).toBe(true);
-    expect(isWithinWorktree('/work/feature/packages/ui', '/work/feature', posixPaths)).toBe(true);
+    expect(isWithinWorktree(['/work/feature'], ['/work/feature'], posixPaths)).toBe(true);
+    expect(isWithinWorktree(['/work/feature/packages/ui'], ['/work/feature'], posixPaths)).toBe(
+      true
+    );
   });
 
   it('sees through separators and dot segments on either side', () => {
-    expect(isWithinWorktree('/work/./feature/', '/work/feature/', posixPaths)).toBe(true);
-    expect(isWithinWorktree('/work/feature/pkg/../ui/', '/work/feature', posixPaths)).toBe(true);
+    expect(isWithinWorktree(['/work/./feature/'], ['/work/feature/'], posixPaths)).toBe(true);
+    expect(isWithinWorktree(['/work/feature/pkg/../ui/'], ['/work/feature'], posixPaths)).toBe(
+      true
+    );
   });
 
   it('stops at a whole path segment, so a name sharing the prefix is outside', () => {
-    expect(isWithinWorktree('/work/feature-two', '/work/feature', posixPaths)).toBe(false);
-    expect(isWithinWorktree('/work', '/work/feature', posixPaths)).toBe(false);
+    expect(isWithinWorktree(['/work/feature-two'], ['/work/feature'], posixPaths)).toBe(false);
+    expect(isWithinWorktree(['/work'], ['/work/feature'], posixPaths)).toBe(false);
   });
 
   it('folds case on a Windows runtime and not on posix', () => {
-    expect(isWithinWorktree('c:\\work\\feature\\pkg', 'C:\\Work\\Feature', pathsFor('win32'))).toBe(
-      true
+    expect(
+      isWithinWorktree(['c:\\work\\feature\\pkg'], ['C:\\Work\\Feature'], pathsFor('win32'))
+    ).toBe(true);
+    expect(isWithinWorktree(['/Work/Feature/pkg'], ['/work/feature'], posixPaths)).toBe(false);
+  });
+
+  /**
+   * A stored workdir and Git's listed path can name one directory through
+   * different spellings (a symlinked parent, another casing on a case-insensitive
+   * volume). Either pairing of the spellings the runtime reported is enough.
+   */
+  it('matches when any spelling of the workdir sits under any spelling of the worktree', () => {
+    expect(
+      isWithinWorktree(
+        ['/tmp/x/feature/pkg', '/private/tmp/x/feature/pkg'],
+        ['/private/tmp/x/feature'],
+        posixPaths
+      )
+    ).toBe(true);
+    expect(isWithinWorktree(['/home/me/wt'], ['/data/wt', '/home/me/wt'], posixPaths)).toBe(true);
+    expect(isWithinWorktree(['/tmp/x/feature'], ['/private/tmp/x/feature'], posixPaths)).toBe(
+      false
     );
-    expect(isWithinWorktree('/Work/Feature/pkg', '/work/feature', posixPaths)).toBe(false);
+  });
+
+  it('is false when either side has no spelling to compare', () => {
+    expect(isWithinWorktree([], ['/work/feature'], posixPaths)).toBe(false);
+    expect(isWithinWorktree(['/work/feature'], [], posixPaths)).toBe(false);
+  });
+});
+
+describe('markBoundByOtherChat', () => {
+  const marked = markCurrentWorktree(
+    [listed('/repo', { isMain: true }), listed('/work/feature'), listed('/work/other')],
+    '/repo',
+    posixPaths
+  );
+  const identity = (path: string) => [path];
+
+  it('flags only the worktrees another chat is at or below', () => {
+    const result = markBoundByOtherChat(
+      marked,
+      identity,
+      [['/work/feature/packages/ui']],
+      posixPaths
+    );
+
+    expect(result.map(({ path, boundByOtherChat }) => [path, boundByOtherChat])).toEqual([
+      ['/repo', false],
+      ['/work/feature', true],
+      ['/work/other', false],
+    ]);
+  });
+
+  it('keeps the isCurrent flag it was handed', () => {
+    const result = markBoundByOtherChat(marked, identity, [['/repo']], posixPaths);
+
+    expect(
+      result.map(({ path, isCurrent, boundByOtherChat }) => [path, isCurrent, boundByOtherChat])
+    ).toEqual([
+      ['/repo', true, true],
+      ['/work/feature', false, false],
+      ['/work/other', false, false],
+    ]);
+  });
+
+  it('uses the spellings supplied for each worktree, not only its listed path', () => {
+    const result = markBoundByOtherChat(
+      marked,
+      (path) => (path === '/work/feature' ? [path, '/real/feature'] : [path]),
+      [['/real/feature/pkg']],
+      posixPaths
+    );
+
+    expect(result.map((entry) => entry.boundByOtherChat)).toEqual([false, true, false]);
+  });
+
+  it('flags nothing when no other chat is bound', () => {
+    const result = markBoundByOtherChat(marked, identity, [], posixPaths);
+
+    expect(result.map((entry) => entry.boundByOtherChat)).toEqual([false, false, false]);
   });
 });

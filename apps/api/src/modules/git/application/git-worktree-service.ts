@@ -13,12 +13,7 @@ import {
   GitWorktreeArgumentError,
 } from '../domain/worktree-command';
 import { parseWorktreeList } from '../domain/worktree-parser';
-import {
-  findWorktree,
-  isWithinWorktree,
-  markCurrentWorktree,
-  type WorktreePathSemantics,
-} from '../domain/worktree-selection';
+import { findWorktree, type WorktreePathSemantics } from '../domain/worktree-selection';
 import { GitCliError, type GitRuntimeSelection, runGit } from '../infrastructure/git-cli';
 import { withRepoMutationLock } from './git-mutation-lock';
 import { type GitInvalidationTarget, publishGitWriteInvalidation } from './git-realtime-service';
@@ -29,6 +24,11 @@ import {
   mapWriteFailure,
   requireRepoRoot,
 } from './git-write-service';
+import {
+  createWorktreeOwnership,
+  type OtherChatWorkdirs,
+  type WorktreeOwnership,
+} from './worktree-ownership';
 
 // Adding a worktree checks out a whole tree, so it gets the same headroom a
 // commit gets rather than the default read timeout.
@@ -37,19 +37,30 @@ const WORKTREE_CHECKOUT_TIMEOUT_MS = 60_000;
 type WorktreeMutation = 'worktreeAdd' | 'worktreeRemove';
 
 /**
- * Every worktree of one repository, as Git lists them.
+ * Every worktree of one repository, as Git lists them, each marked with whether
+ * it is the calling chat's own (`isCurrent`) or another chat's (`boundByOtherChat`).
+ *
+ * `otherChatWorkdirs` is required, here and on the two mutations: every list
+ * this module builds carries `boundByOtherChat`, and a caller that skipped it
+ * would report every worktree as free to remove.
  *
  * @example
- * await listWorktrees('/repo/src', signal, selection); // { worktrees: [...] }
+ * await listWorktrees('/repo/src', signal, selection, otherChatWorkdirs); // { worktrees: [...] }
  */
 export async function listWorktrees(
   workdir: string,
   signal: AbortSignal | undefined,
-  selection: GitRuntimeSelection
+  selection: GitRuntimeSelection,
+  otherChatWorkdirs: OtherChatWorkdirs
 ): Promise<GitWorktreeListResponse> {
   try {
     const root = await requireRepoRoot(workdir, signal, selection);
-    return await readWorktreeList(root, await readTargetPaths(selection), signal, selection);
+    const ownership = createWorktreeOwnership(
+      await readTargetPaths(selection),
+      selection,
+      otherChatWorkdirs
+    );
+    return await readWorktreeList(root, ownership, signal, selection);
   } catch (error) {
     return mapWorktreeFailure(error, 'Listing worktrees');
   }
@@ -60,18 +71,21 @@ export async function listWorktrees(
  * creating one, and answers with the refreshed list.
  *
  * @example
- * await addWorktree('/repo', { path: '/wt/x', mode: 'new-branch', branch: 'feat/x' }, target);
+ * await addWorktree('/repo', { path: '/wt/x', mode: 'new-branch', branch: 'feat/x' }, target,
+ *   signal, otherChatWorkdirs);
  */
 export function addWorktree(
   workdir: string,
   input: Pick<AddWorktreeBody, 'path' | 'mode' | 'branch'>,
   invalidationTarget: GitInvalidationTarget,
-  signal?: AbortSignal
+  signal: AbortSignal | undefined,
+  otherChatWorkdirs: OtherChatWorkdirs
 ): Promise<GitWorktreeListResponse> {
   return runWorktreeMutation(
     workdir,
     invalidationTarget,
     signal,
+    otherChatWorkdirs,
     'Adding worktree',
     'worktreeAdd',
     async (root, selection) => {
@@ -98,10 +112,18 @@ export function addWorktree(
 /**
  * Removes the worktree at `path` and answers with the refreshed list.
  *
- * `otherChatWorkdirs` lists where every *other* chat of this user is bound on
- * this machine. The git layer holds no database, so the route supplies it, and
- * it is required rather than optional: leaving it out would silently skip the
- * check that keeps a chat's worktree from being deleted under it.
+ * The refusals read the flags the list reports (`isCurrent`, `boundByOtherChat`)
+ * from the very list built here, so a row the panel offers to delete is one the
+ * guard lets through for those reasons.
+ *
+ * There is a window this does not close: a chat can be pointed at the worktree
+ * after the list below is read and before `git worktree remove` runs. The
+ * repository lock held here serializes Git mutations; it does not cover
+ * `updateChatUseCase`, which writes a chat's workdir without touching Git, and
+ * taking it there would cost a Git probe (to find the lock's key) and a
+ * dependency from chats on the git module on every workdir change, most of
+ * which are not in a repository at all. The window is the milliseconds between
+ * the read and the removal.
  *
  * @example
  * await removeWorktree('/repo', { path: '/wt/x', force: true }, target, signal, () =>
@@ -113,16 +135,17 @@ export function removeWorktree(
   input: Pick<RemoveWorktreeBody, 'path' | 'force'>,
   invalidationTarget: GitInvalidationTarget,
   signal: AbortSignal | undefined,
-  otherChatWorkdirs: () => Promise<readonly string[]>
+  otherChatWorkdirs: OtherChatWorkdirs
 ): Promise<GitWorktreeListResponse> {
   return runWorktreeMutation(
     workdir,
     invalidationTarget,
     signal,
+    otherChatWorkdirs,
     'Removing worktree',
     'worktreeRemove',
-    async (root, selection, paths) => {
-      const { worktrees } = await readWorktreeList(root, paths, signal, selection);
+    async (root, selection, ownership, paths) => {
+      const { worktrees } = await readWorktreeList(root, ownership, signal, selection);
       // The target machine's path semantics, not the hub's: these are paths on
       // that filesystem, and comparing them through `node:path` here would
       // match nothing at all whenever the two platforms disagree. Reused from
@@ -137,7 +160,6 @@ export function removeWorktree(
         );
       }
       refuseUnremovableWorktree(worktree);
-      refuseWorktreeBoundToAnotherChat(worktree, await otherChatWorkdirs(), paths);
       // Git's own canonical path goes on the command line, not the caller's
       // spelling of it: the entry has already been identified, and re-sending
       // an approximate path would let Git resolve it to a different worktree.
@@ -151,15 +173,25 @@ export function removeWorktree(
 }
 
 /**
- * The three removals this API refuses outright, before Git is asked.
+ * The four removals this API refuses outright, before Git is asked.
  *
  * Removing the main worktree is impossible — Git refuses it too, but saying so
  * in the API's own words beats surfacing a `fatal:`. Removing the worktree the
  * calling chat is bound to would delete the directory the chat is working in
- * and leave every later request in this panel pointing at nothing. A locked
- * worktree is locked for a reason its author wrote down, so the reason is
- * surfaced and the caller is sent to unlock it rather than being offered an
- * escalation to the `-f -f` that would override it.
+ * and leave every later request in this panel pointing at nothing, and the same
+ * holds for a worktree a different chat is bound to: two chats on one
+ * repository are the ordinary case, so the check covers every chat bound at or
+ * below the worktree, not only the caller. A locked worktree is locked for a
+ * reason its author wrote down, so the reason is surfaced and the caller is
+ * sent to unlock it rather than being offered an escalation to the `-f -f` that
+ * would override it.
+ *
+ * The current and bound-by-another-chat refusals read the flags the list
+ * reports (`isCurrent`, `boundByOtherChat`) instead of comparing paths again, so
+ * the panel never offers what this refuses. Main and locked are reported by the
+ * same entry (`isMain`, `isLocked`). A row with none of the four set is the
+ * only kind this guard lets through; Git may still refuse it (uncommitted work,
+ * below).
  *
  * A worktree with uncommitted work is deliberately *not* on this list: Git
  * already refuses it without `--force` and knows far better than a second
@@ -169,10 +201,16 @@ function refuseUnremovableWorktree(worktree: GitWorktree): void {
   if (worktree.isMain) {
     throw new GitWriteError('The main worktree cannot be removed.', 409, ERROR_CODES.CONFLICT);
   }
-  // The same flag the list reports, so the panel never offers what this refuses.
   if (worktree.isCurrent) {
     throw new GitWriteError(
       'This chat is working in that worktree. Point it elsewhere before removing it.',
+      409,
+      ERROR_CODES.CONFLICT
+    );
+  }
+  if (worktree.boundByOtherChat) {
+    throw new GitWriteError(
+      'Another chat is working in that worktree. Point it elsewhere before removing it.',
       409,
       ERROR_CODES.CONFLICT
     );
@@ -183,29 +221,6 @@ function refuseUnremovableWorktree(worktree: GitWorktree): void {
       409,
       ERROR_CODES.CONFLICT,
       worktree.lockReason
-    );
-  }
-}
-
-/**
- * Refuses a removal that would delete the directory a *different* chat works in.
- *
- * `refuseUnremovableWorktree` protects the calling chat's own worktree for a
- * reason that holds for every chat: the directory goes, and each later request
- * in that chat's Git and GitHub panels resolves against a path that no longer
- * exists. Two chats on one repository are the ordinary case, so the check
- * covers every chat bound at or below the worktree, not only the caller.
- */
-function refuseWorktreeBoundToAnotherChat(
-  worktree: GitWorktree,
-  otherWorkdirs: readonly string[],
-  paths: WorktreePathSemantics
-): void {
-  if (otherWorkdirs.some((workdir) => isWithinWorktree(workdir, worktree.path, paths))) {
-    throw new GitWriteError(
-      'Another chat is working in that worktree. Point it elsewhere before removing it.',
-      409,
-      ERROR_CODES.CONFLICT
     );
   }
 }
@@ -222,11 +237,13 @@ async function runWorktreeMutation(
   workdir: string,
   target: GitInvalidationTarget,
   signal: AbortSignal | undefined,
+  otherChatWorkdirs: OtherChatWorkdirs,
   operation: string,
   invalidationOperation: WorktreeMutation,
   mutation: (
     root: string,
     selection: GitRuntimeSelection,
+    ownership: WorktreeOwnership,
     paths: WorktreePathSemantics
   ) => Promise<void>
 ): Promise<GitWorktreeListResponse> {
@@ -237,12 +254,13 @@ async function runWorktreeMutation(
     // needs to compare worktree paths: they are paths on the runtime, not the
     // hub, and every caller of this function is about that same machine.
     const paths = await readTargetPaths(selection);
+    const ownership = createWorktreeOwnership(paths, selection, otherChatWorkdirs);
     const worktrees = await withRepoMutationLock(
       selection,
       root,
       async () => {
-        await mutation(root, selection, paths);
-        return await readWorktreeList(root, paths, signal, selection);
+        await mutation(root, selection, ownership, paths);
+        return await readWorktreeList(root, ownership, signal, selection);
       },
       signal
     );
@@ -256,7 +274,7 @@ async function runWorktreeMutation(
 /** `root` is the calling chat's repository root, which is what `isCurrent` is measured against. */
 async function readWorktreeList(
   root: string,
-  paths: WorktreePathSemantics,
+  ownership: WorktreeOwnership,
   signal: AbortSignal | undefined,
   selection: GitRuntimeSelection
 ): Promise<GitWorktreeListResponse> {
@@ -265,7 +283,7 @@ async function readWorktreeList(
     signal,
     ...selection,
   });
-  return { worktrees: markCurrentWorktree(parseWorktreeList(result.stdout), root, paths) };
+  return { worktrees: await ownership.annotate(parseWorktreeList(result.stdout), root) };
 }
 
 /** How the machine that owns the repository writes and compares its own paths. */
