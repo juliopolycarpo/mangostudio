@@ -30,6 +30,18 @@ cut short by a power loss; it does not authenticate anything and has the same
 trust as the binary it describes. Trees made by the install scripts or an older
 launcher have no record and start as they are.
 
+The record also names the release platform of the archive (`platform\t<id>`,
+for example `linux-x64`). The install directory is keyed by version only, so a
+home directory shared by two platforms (a WSL distro and Windows, a network
+home used from Linux and macOS) holds one tree per version. A launcher whose
+platform differs from the recorded one treats that tree as unusable: it
+downloads its own archive over it, and fails without starting anything when it
+cannot, rather than exec a binary built for another platform. The two platforms
+then replace each other's tree whenever they alternate; keep a separate
+`MANGOSTUDIO_INSTALL_DIR` per platform to avoid that. A record from before the
+platform line, and a tree with no record, say nothing about the platform and
+are started as they are.
+
 One rule decides every start that follows a failed repair (offline, lock
 trouble, an install in use, a bad download): a binary or runtime whose size
 differs from its record line is never started, and the launcher fails with the

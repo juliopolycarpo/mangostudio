@@ -63,8 +63,12 @@ const LOCK_NOTICE_EVERY: Duration = Duration::from_secs(30);
 const LOCK_POLL: Duration = Duration::from_millis(100);
 /// Written last into a freshly unpacked tree, inside the staging directory, so
 /// it reaches the version directory with the same rename as the files it
-/// describes. One `<bytes>\t<name>` line per top-level file.
+/// describes. One `<bytes>\t<name>` line per top-level file, preceded by one
+/// `platform\t<id>` line naming the archive the files came from.
 const INSTALL_RECORD: &str = ".launcher-record";
+/// Key of the record line that names the release platform of the tree. A size
+/// line starts with digits, so the two never collide.
+const RECORD_PLATFORM_KEY: &str = "platform";
 
 fn main() {
     if let Err(message) = run() {
@@ -79,8 +83,10 @@ fn run() -> Result<(), String> {
     let binary_path = install_dir.join(BINARY_NAME);
     // Inspected here as well as inside `ensure_install` so a start that needs
     // nothing never builds a `Release`, which fails on an unsupported platform.
-    if inspect_install(&install_dir) == InstallState::Complete {
-        tidy_leftovers(VERSION, &install_root, &install_dir);
+    // On such a platform no record can name this one, so none is compared.
+    let platform = platform_id().ok();
+    if inspect_install(&install_dir, platform) == InstallState::Complete {
+        tidy_leftovers(VERSION, platform, &install_root, &install_dir);
     } else {
         match ensure_install(&Release::for_this_build()?, &install_dir)? {
             InstallStart::Complete | InstallStart::Installed => {}
@@ -306,7 +312,30 @@ enum RecordReading {
     /// There is a record file but it does not parse, or does not list the hub
     /// binary. It is treated as no knowledge, not as a verdict.
     Unreadable,
-    Entries(Vec<(String, u64)>),
+    Entries(InstallRecord),
+}
+
+/// A parsed `.launcher-record`.
+#[derive(Debug, PartialEq, Eq)]
+struct InstallRecord {
+    /// The release platform of the archive the tree was unpacked from. A record
+    /// written before launchers recorded it has none, and says nothing about
+    /// which platform the tree is for.
+    platform: Option<String>,
+    entries: Vec<(String, u64)>,
+}
+
+impl InstallRecord {
+    /// True when the record names a platform other than `platform`: the tree
+    /// holds another platform's binaries (a home directory shared between
+    /// platforms), which cannot run here. No record platform, or no platform
+    /// for this build, is no evidence of a mismatch.
+    fn is_for_another_platform(&self, platform: Option<&str>) -> bool {
+        match (self.platform.as_deref(), platform) {
+            (Some(recorded), Some(this_build)) => recorded != this_build,
+            _ => false,
+        }
+    }
 }
 
 fn read_record(directory: &Path) -> RecordReading {
@@ -317,10 +346,17 @@ fn read_record(directory: &Path) -> RecordReading {
     }
 }
 
-fn parse_record(text: &str) -> Option<Vec<(String, u64)>> {
+fn parse_record(text: &str) -> Option<InstallRecord> {
+    let mut platform = None;
     let mut entries = Vec::new();
     for line in text.lines() {
         let (bytes, name) = line.split_once('\t')?;
+        if bytes == RECORD_PLATFORM_KEY {
+            if name.is_empty() || platform.replace(name.to_string()).is_some() {
+                return None;
+            }
+            continue;
+        }
         if Path::new(name).file_name() != Some(OsStr::new(name)) {
             return None;
         }
@@ -329,7 +365,7 @@ fn parse_record(text: &str) -> Option<Vec<(String, u64)>> {
     entries
         .iter()
         .any(|(name, _)| name == BINARY_NAME)
-        .then_some(entries)
+        .then_some(InstallRecord { platform, entries })
 }
 
 fn file_size(path: &Path) -> Option<u64> {
@@ -363,14 +399,21 @@ fn compare_record(directory: &Path, entries: &[(String, u64)]) -> (bool, bool) {
 /// rewrite the other). A tree with no record was laid down by the install
 /// scripts or an older launcher; nothing is known about it beyond the binary,
 /// so a non-empty binary counts and a good install is never downloaded again.
-fn inspect_install(install_dir: &Path) -> InstallState {
+///
+/// `platform` is this build's release platform. A record that names another
+/// one means the binaries are for a platform that shares this install root, so
+/// the tree is unusable here however intact it is.
+fn inspect_install(install_dir: &Path, platform: Option<&str>) -> InstallState {
     if file_size(&install_dir.join(BINARY_NAME)).is_none_or(|bytes| bytes == 0) {
         return InstallState::Unusable;
     }
     match read_record(install_dir) {
         RecordReading::Missing => InstallState::Complete,
         RecordReading::Unreadable => InstallState::Startable,
-        RecordReading::Entries(entries) => match compare_record(install_dir, &entries) {
+        RecordReading::Entries(record) if record.is_for_another_platform(platform) => {
+            InstallState::Unusable
+        }
+        RecordReading::Entries(record) => match compare_record(install_dir, &record.entries) {
             (_, false) => InstallState::Unusable,
             (true, true) => InstallState::Complete,
             (false, true) => InstallState::Startable,
@@ -378,11 +421,14 @@ fn inspect_install(install_dir: &Path) -> InstallState {
     }
 }
 
-/// True for a tree that has a record and matches it entirely: what a launcher
-/// leaves in staging once the unpack, the record and the flush are done.
-fn staging_is_verified(staging: &Path) -> bool {
+/// True for a tree that has a record for `platform` and matches it entirely:
+/// what a launcher leaves in staging once the unpack, the record and the flush
+/// are done.
+fn staging_is_verified(staging: &Path, platform: Option<&str>) -> bool {
     match read_record(staging) {
-        RecordReading::Entries(entries) => compare_record(staging, &entries).0,
+        RecordReading::Entries(record) => {
+            !record.is_for_another_platform(platform) && compare_record(staging, &record.entries).0
+        }
         RecordReading::Missing | RecordReading::Unreadable => false,
     }
 }
@@ -397,11 +443,12 @@ fn staging_is_verified(staging: &Path) -> bool {
 /// what a launcher without any of this would have done. An install whose
 /// binary is short or missing is never started.
 fn ensure_install(release: &Release<'_>, install_dir: &Path) -> Result<InstallStart, String> {
-    if inspect_install(install_dir) == InstallState::Complete {
+    let platform = Some(release.platform);
+    if inspect_install(install_dir, platform) == InstallState::Complete {
         return Ok(InstallStart::Complete);
     }
     repair_install(release, install_dir).or_else(|failure| {
-        if inspect_install(install_dir) == InstallState::Unusable {
+        if inspect_install(install_dir, platform) == InstallState::Unusable {
             Err(failure)
         } else {
             Ok(InstallStart::KeptInstalled { reason: failure })
@@ -419,10 +466,11 @@ fn repair_install(release: &Release<'_>, install_dir: &Path) -> Result<InstallSt
     // launcher: the sweeps below are safe because of it, and for no other
     // reason. An install is never run without it.
     let _lock = acquire_install_lock(release, install_root)?;
+    let platform = Some(release.platform);
 
     // Another launcher may have finished while this one waited.
-    if inspect_install(install_dir) == InstallState::Complete {
-        sweep_scratch_dirs(release.version, install_root, install_dir);
+    if inspect_install(install_dir, platform) == InstallState::Complete {
+        sweep_scratch_dirs(release.version, platform, install_root, install_dir);
         return Ok(InstallStart::Complete);
     }
 
@@ -439,8 +487,8 @@ fn repair_install(release: &Release<'_>, install_dir: &Path) -> Result<InstallSt
             eprintln!("mangostudio launcher: warning: {failure}");
             restore_failure = Some(failure);
         }
-        if inspect_install(install_dir) == InstallState::Complete {
-            sweep_scratch_dirs(release.version, install_root, install_dir);
+        if inspect_install(install_dir, platform) == InstallState::Complete {
+            sweep_scratch_dirs(release.version, platform, install_root, install_dir);
             return Ok(InstallStart::Complete);
         }
     }
@@ -452,17 +500,17 @@ fn repair_install(release: &Release<'_>, install_dir: &Path) -> Result<InstallSt
     // A launcher that died after unpacking and verifying, before moving the
     // tree in, left a staging tree with its record: finish that install
     // instead of downloading again, which also works offline.
-    if let Some(staged) = verified_staging_tree(release.version, install_root) {
+    if let Some(staged) = verified_staging_tree(release.version, platform, install_root) {
         replace_install(release, install_root, &staged, install_dir)
             .map_err(&note_restore_failure)?;
         eprintln!(
             "Completed an interrupted install of MangoStudio {}.",
             release.version
         );
-        sweep_scratch_dirs(release.version, install_root, install_dir);
+        sweep_scratch_dirs(release.version, platform, install_root, install_dir);
         return Ok(InstallStart::Installed);
     }
-    sweep_scratch_dirs(release.version, install_root, install_dir);
+    sweep_scratch_dirs(release.version, platform, install_root, install_dir);
 
     // Find out cheaply, before downloading ~60 MB, whether the existing tree
     // can be replaced at all, without moving it.
@@ -478,7 +526,7 @@ fn repair_install(release: &Release<'_>, install_dir: &Path) -> Result<InstallSt
     install_archive(release, install_root, install_dir, &manifest)
         .map_err(&note_restore_failure)?;
     // The new install is complete here, so the old tree in trash goes now.
-    sweep_scratch_dirs(release.version, install_root, install_dir);
+    sweep_scratch_dirs(release.version, platform, install_root, install_dir);
     Ok(InstallStart::Installed)
 }
 
@@ -576,12 +624,16 @@ fn scratch_dirs(version: &str, install_root: &Path) -> Vec<(ScratchKind, PathBuf
 }
 
 /// A staging tree a dead launcher finished: unpacked, recorded and flushed.
-fn verified_staging_tree(version: &str, install_root: &Path) -> Option<PathBuf> {
+fn verified_staging_tree(
+    version: &str,
+    platform: Option<&str>,
+    install_root: &Path,
+) -> Option<PathBuf> {
     scratch_dirs(version, install_root)
         .into_iter()
         .filter(|(kind, _)| *kind == ScratchKind::Staging)
         .map(|(_, path)| path)
-        .find(|staging| staging_is_verified(staging))
+        .find(|staging| staging_is_verified(staging, platform))
 }
 
 /// Move the first trash tree that can still run back to `install_dir`. Only
@@ -599,7 +651,7 @@ fn restore_from_trash(
         .into_iter()
         .filter(|(kind, _)| *kind == ScratchKind::Trash)
         .map(|(_, path)| path)
-        .find(|trash| inspect_install(trash) != InstallState::Unusable);
+        .find(|trash| inspect_install(trash, Some(release.platform)) != InstallState::Unusable);
     let Some(trash) = usable else {
         return Ok(());
     };
@@ -625,12 +677,17 @@ fn restore_from_trash(
 /// is missing or not complete, a trash tree that `inspect_install` does not
 /// call unusable is kept, whatever the caller did or failed to do before. It
 /// is swept once `install_dir` is complete.
-fn sweep_scratch_dirs(version: &str, install_root: &Path, install_dir: &Path) {
-    let install_is_complete = inspect_install(install_dir) == InstallState::Complete;
+fn sweep_scratch_dirs(
+    version: &str,
+    platform: Option<&str>,
+    install_root: &Path,
+    install_dir: &Path,
+) {
+    let install_is_complete = inspect_install(install_dir, platform) == InstallState::Complete;
     for (kind, leftover) in scratch_dirs(version, install_root) {
         let may_be_only_copy = kind == ScratchKind::Trash
             && !install_is_complete
-            && inspect_install(&leftover) != InstallState::Unusable;
+            && inspect_install(&leftover, platform) != InstallState::Unusable;
         if !may_be_only_copy {
             let _ = fs::remove_dir_all(leftover);
         }
@@ -643,7 +700,7 @@ fn sweep_scratch_dirs(version: &str, install_root: &Path, install_dir: &Path) {
 /// (`try_lock`, never waiting): a held lock means a launcher is installing and
 /// its scratch directories are not leftovers. If the file can't be opened or
 /// locked, the sweep is skipped; the next install sweeps.
-fn tidy_leftovers(version: &str, install_root: &Path, install_dir: &Path) {
+fn tidy_leftovers(version: &str, platform: Option<&str>, install_root: &Path, install_dir: &Path) {
     if scratch_dirs(version, install_root).is_empty() {
         return;
     }
@@ -655,7 +712,7 @@ fn tidy_leftovers(version: &str, install_root: &Path, install_dir: &Path) {
         return;
     };
     if lock.try_lock().is_ok() {
-        sweep_scratch_dirs(version, install_root, install_dir);
+        sweep_scratch_dirs(version, platform, install_root, install_dir);
     }
 }
 
@@ -742,7 +799,7 @@ fn install_archive(
     // that reached the disk never sits beside files whose blocks did not.
     persist_tree(staging.path())
         .map_err(|error| format!("cannot flush the unpacked files: {error}"))?;
-    write_record(staging.path())
+    write_record(staging.path(), release.platform)
         .map_err(|error| format!("cannot record the unpacked files: {error}"))?;
 
     if let Err(failure) = replace_install(release, install_root, staging.path(), install_dir) {
@@ -785,6 +842,14 @@ impl Drop for ScratchDir {
             let _ = fs::remove_dir_all(&self.path);
         }
     }
+}
+
+/// The whole record: the platform line, then the file lines.
+fn record_text(directory: &Path, platform: &str) -> io::Result<String> {
+    Ok(format!(
+        "{RECORD_PLATFORM_KEY}\t{platform}\n{}",
+        completion_record(directory)?
+    ))
 }
 
 /// The `<bytes>\t<name>` lines for the top-level files of a freshly unpacked
@@ -833,9 +898,9 @@ fn persist_tree(directory: &Path) -> io::Result<()> {
 /// (`FlushFileBuffers`) but std has no way to flush a directory entry there,
 /// so after a power loss the rename itself may be lost; the install is then
 /// simply missing and the next start repairs it.
-fn write_record(directory: &Path) -> io::Result<()> {
+fn write_record(directory: &Path, platform: &str) -> io::Result<()> {
     let record_path = directory.join(INSTALL_RECORD);
-    fs::write(&record_path, completion_record(directory)?)?;
+    fs::write(&record_path, record_text(directory, platform)?)?;
     sync_file(&record_path)?;
     sync_directory(directory);
     Ok(())
@@ -1235,9 +1300,17 @@ mod tests {
         }
 
         fn release_at(&self, base_url: String) -> Release<'static> {
+            self.release_for_platform(TEST_PLATFORM, base_url)
+        }
+
+        fn release_for_platform(
+            &self,
+            platform: &'static str,
+            base_url: String,
+        ) -> Release<'static> {
             Release {
                 version: self.version,
-                platform: TEST_PLATFORM,
+                platform,
                 base_url,
                 scratch_tag: TEST_TAG.to_string(),
                 retry_delay: Duration::ZERO,
@@ -1258,12 +1331,35 @@ mod tests {
         }
 
         fn publish(&self, binary_body: &str) {
+            self.publish_for_platform(TEST_PLATFORM, binary_body);
+        }
+
+        /// Publish the archive of `platform`, as a release does for each of its
+        /// platforms. `SHA256SUMS` lists the latest publication only, which is
+        /// all a test that installs one platform at a time needs.
+        fn publish_for_platform(&self, platform: &str, binary_body: &str) {
+            let asset = asset_name(self.version, platform);
             let archive = archive_with_binary(binary_body);
             self.server.serve(
                 "/SHA256SUMS",
-                manifest_listing(&self.asset(), &archive).into_bytes(),
+                manifest_listing(&asset, &archive).into_bytes(),
             );
-            self.server.serve(&format!("/{}", self.asset()), archive);
+            self.server.serve(&format!("/{asset}"), archive);
+        }
+
+        /// Install `binary_body` as a launcher of `platform` would.
+        fn install_as_platform(&self, platform: &'static str, binary_body: &str) {
+            self.publish_for_platform(platform, binary_body);
+            let outcome = ensure_install(
+                &self.release_for_platform(platform, self.server.base_url()),
+                &self.install_dir(),
+            );
+            assert_eq!(
+                outcome,
+                Ok(InstallStart::Installed),
+                "expected a {platform} install to land"
+            );
+            self.server.forget_requests();
         }
 
         fn start(&self) -> Result<InstallStart, String> {
@@ -1312,12 +1408,17 @@ mod tests {
         /// file and a record of both. `directory` is the install directory or
         /// a staging directory.
         fn lay_down_tree(&self, directory: &Path, binary_body: &str) {
+            self.lay_down_tree_for_platform(directory, TEST_PLATFORM, binary_body);
+        }
+
+        /// `lay_down_tree` as a launcher of `platform` would have recorded it.
+        fn lay_down_tree_for_platform(&self, directory: &Path, platform: &str, binary_body: &str) {
             fs::create_dir_all(directory).expect("expected the tree directory");
             fs::write(directory.join(BINARY_NAME), binary_body).expect("expected the binary");
             fs::write(directory.join("README.md"), "readme").expect("expected the readme");
             #[cfg(unix)]
             make_executable(&directory.join(BINARY_NAME)).expect("expected an executable");
-            let record = completion_record(directory).expect("expected a record");
+            let record = record_text(directory, platform).expect("expected a record");
             fs::write(directory.join(INSTALL_RECORD), record).expect("expected the record file");
         }
 
@@ -1371,38 +1472,62 @@ mod tests {
         let install = fixture.install_dir();
 
         // Nothing there.
-        assert_eq!(inspect_install(&install), InstallState::Unusable);
+        assert_eq!(
+            inspect_install(&install, Some(TEST_PLATFORM)),
+            InstallState::Unusable
+        );
 
         // Laid down by the install scripts: no record, non-empty binary.
         fs::create_dir_all(&install).expect("expected the install dir");
         fs::write(fixture.binary_path(), "script-installed").expect("expected a binary");
-        assert_eq!(inspect_install(&install), InstallState::Complete);
+        assert_eq!(
+            inspect_install(&install, Some(TEST_PLATFORM)),
+            InstallState::Complete
+        );
         fs::write(fixture.binary_path(), "").expect("expected an empty binary");
-        assert_eq!(inspect_install(&install), InstallState::Unusable);
+        assert_eq!(
+            inspect_install(&install, Some(TEST_PLATFORM)),
+            InstallState::Unusable
+        );
         fs::remove_dir_all(&install).expect("expected a clean slate");
 
         // Recorded and intact.
         fixture.lay_down_complete_install("binary one");
-        assert_eq!(inspect_install(&install), InstallState::Complete);
+        assert_eq!(
+            inspect_install(&install, Some(TEST_PLATFORM)),
+            InstallState::Complete
+        );
 
         // A sibling is off: the binaries are fine, so it can still start.
         fixture.damage_sibling();
-        assert_eq!(inspect_install(&install), InstallState::Startable);
+        assert_eq!(
+            inspect_install(&install, Some(TEST_PLATFORM)),
+            InstallState::Startable
+        );
 
         // The hub binary is shorter than recorded: never startable.
         fixture.lay_down_complete_install("binary one");
         fixture.shorten_binary();
-        assert_eq!(inspect_install(&install), InstallState::Unusable);
+        assert_eq!(
+            inspect_install(&install, Some(TEST_PLATFORM)),
+            InstallState::Unusable
+        );
 
         // The runtime is listed and shorter than recorded: never startable.
         fixture.lay_down_complete_install("binary one");
         let runtime = install.join(RUNTIME_BINARY_NAME);
         fs::write(&runtime, "a runtime binary").expect("expected a runtime");
-        let record = completion_record(&install).expect("expected a record");
+        let record = record_text(&install, TEST_PLATFORM).expect("expected a record");
         fs::write(install.join(INSTALL_RECORD), record).expect("expected the record");
-        assert_eq!(inspect_install(&install), InstallState::Complete);
+        assert_eq!(
+            inspect_install(&install, Some(TEST_PLATFORM)),
+            InstallState::Complete
+        );
         fs::write(&runtime, "rt").expect("expected a short runtime");
-        assert_eq!(inspect_install(&install), InstallState::Unusable);
+        assert_eq!(
+            inspect_install(&install, Some(TEST_PLATFORM)),
+            InstallState::Unusable
+        );
     }
 
     #[test]
@@ -1421,7 +1546,7 @@ mod tests {
                 .expect("expected the record to be overwritten");
 
             assert_eq!(
-                inspect_install(&fixture.install_dir()),
+                inspect_install(&fixture.install_dir(), Some(TEST_PLATFORM)),
                 InstallState::Startable,
                 "expected record {record:?} to leave a non-empty binary startable but not complete"
             );
@@ -1445,7 +1570,7 @@ mod tests {
             "expected the record to list the binary with its size | received {record:?}"
         );
         assert_eq!(
-            inspect_install(&fixture.install_dir()),
+            inspect_install(&fixture.install_dir(), Some(TEST_PLATFORM)),
             InstallState::Complete
         );
         assert_eq!(fixture.leftover_scratch(), Vec::<String>::new());
@@ -1487,8 +1612,158 @@ mod tests {
         assert_eq!(fixture.start(), Ok(InstallStart::Installed));
         assert_eq!(fixture.installed_binary_body(), "binary one");
         assert_eq!(
-            inspect_install(&fixture.install_dir()),
+            inspect_install(&fixture.install_dir(), Some(TEST_PLATFORM)),
             InstallState::Complete
+        );
+    }
+
+    // --- a root shared between platforms ---
+
+    const OTHER_PLATFORM: &str = "other-platform";
+
+    #[test]
+    fn a_tree_installed_for_another_platform_is_replaced_instead_of_started() {
+        let fixture = InstallFixture::new();
+        fixture.install_as_platform(OTHER_PLATFORM, "other platform binary");
+        fixture.publish("this platform binary");
+
+        let outcome = fixture.start();
+
+        assert_eq!(
+            outcome,
+            Ok(InstallStart::Installed),
+            "expected the {OTHER_PLATFORM} tree in {} to be replaced, not started",
+            fixture.install_dir().display()
+        );
+        assert_eq!(fixture.installed_binary_body(), "this platform binary");
+        assert_eq!(fixture.archive_requests(), 1);
+        assert_eq!(fixture.leftover_scratch(), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_tree_installed_for_another_platform_is_never_started_when_the_repair_fails() {
+        let offline = ClosedConnectionServer::start();
+        let fixture = InstallFixture::new();
+        fixture.install_as_platform(OTHER_PLATFORM, "other platform binary");
+
+        let outcome = ensure_install(
+            &fixture.release_at(offline.base_url()),
+            &fixture.install_dir(),
+        );
+
+        assert!(
+            matches!(&outcome, Err(message) if message.contains("cannot download")),
+            "expected the download failure, not a start of the {OTHER_PLATFORM} binary | received {outcome:?}"
+        );
+    }
+
+    #[test]
+    fn a_tree_installed_for_this_platform_starts_with_no_request() {
+        let fixture = InstallFixture::new();
+        fixture.install_as_platform(TEST_PLATFORM, "this platform binary");
+
+        assert_eq!(fixture.start(), Ok(InstallStart::Complete));
+        assert!(fixture.no_requests());
+    }
+
+    #[test]
+    fn a_record_from_before_platforms_were_recorded_still_starts_with_no_request() {
+        let fixture = InstallFixture::new();
+        fixture.lay_down_complete_install("binary one");
+        // The record an earlier launcher wrote: sizes only, no platform line.
+        let record = completion_record(&fixture.install_dir()).expect("expected a record");
+        fs::write(fixture.install_dir().join(INSTALL_RECORD), record)
+            .expect("expected the record to be rewritten");
+
+        assert_eq!(fixture.start(), Ok(InstallStart::Complete));
+        assert!(fixture.no_requests());
+    }
+
+    #[test]
+    fn a_staged_tree_of_another_platform_is_not_adopted() {
+        let fixture = InstallFixture::new();
+        fixture.publish("this platform binary");
+        let staging = fixture.staging_dir("11-1");
+        fixture.lay_down_tree_for_platform(&staging, OTHER_PLATFORM, "other platform binary");
+
+        assert_eq!(fixture.start(), Ok(InstallStart::Installed));
+
+        assert_eq!(
+            fixture.installed_binary_body(),
+            "this platform binary",
+            "expected a download instead of adopting the {OTHER_PLATFORM} staging tree"
+        );
+        assert_eq!(fixture.archive_requests(), 1);
+    }
+
+    #[test]
+    fn a_trash_tree_of_another_platform_is_not_put_back() {
+        let offline = ClosedConnectionServer::start();
+        let fixture = InstallFixture::new();
+        let trash = fixture.trash_dir("11-2");
+        fixture.lay_down_tree_for_platform(&trash, OTHER_PLATFORM, "other platform binary");
+
+        let outcome = ensure_install(
+            &fixture.release_at(offline.base_url()),
+            &fixture.install_dir(),
+        );
+
+        assert!(
+            matches!(&outcome, Err(message) if message.contains("cannot download")),
+            "expected the download failure, not a restore of the {OTHER_PLATFORM} tree | received {outcome:?}"
+        );
+        assert!(!fixture.install_dir().exists());
+    }
+
+    #[test]
+    fn parse_record_reads_the_platform_line_and_rejects_a_malformed_one() {
+        let binary_line = format!("10\t{BINARY_NAME}\n");
+
+        let recorded = parse_record(&format!("platform\tlinux-x64\n{binary_line}"));
+        assert_eq!(
+            recorded,
+            Some(InstallRecord {
+                platform: Some("linux-x64".to_string()),
+                entries: vec![(BINARY_NAME.to_string(), 10)],
+            })
+        );
+        assert_eq!(
+            parse_record(&binary_line).map(|record| record.platform),
+            Some(None),
+            "expected a record with no platform line to parse as platform-less"
+        );
+        for malformed in [
+            format!("platform\t\n{binary_line}"),
+            format!("platform\ta\nplatform\tb\n{binary_line}"),
+            "platform\tlinux-x64\n".to_string(),
+        ] {
+            assert_eq!(
+                parse_record(&malformed),
+                None,
+                "expected {malformed:?} to be unreadable"
+            );
+        }
+    }
+
+    #[test]
+    fn inspect_install_judges_a_recorded_platform_against_this_build() {
+        let fixture = InstallFixture::new();
+        let install = fixture.install_dir();
+        fixture.lay_down_tree_for_platform(&install, OTHER_PLATFORM, "binary one");
+
+        assert_eq!(
+            inspect_install(&install, Some(TEST_PLATFORM)),
+            InstallState::Unusable,
+            "expected a {OTHER_PLATFORM} tree to be unusable on {TEST_PLATFORM}"
+        );
+        assert_eq!(
+            inspect_install(&install, Some(OTHER_PLATFORM)),
+            InstallState::Complete
+        );
+        assert_eq!(
+            inspect_install(&install, None),
+            InstallState::Complete,
+            "expected a build with no release platform to compare nothing"
         );
     }
 
@@ -1974,7 +2249,12 @@ mod tests {
         drop(fixture.hold_lock());
         assert_eq!(fixture.start(), Ok(InstallStart::Complete));
 
-        tidy_leftovers(fixture.version, &fixture.root.0, &fixture.install_dir());
+        tidy_leftovers(
+            fixture.version,
+            Some(TEST_PLATFORM),
+            &fixture.root.0,
+            &fixture.install_dir(),
+        );
 
         assert!(!trash.exists(), "expected the trash directory to be swept");
         assert_eq!(fixture.installed_binary_body(), "new binary");
@@ -1989,14 +2269,24 @@ mod tests {
         fixture.lay_down_tree(&staging, "being unpacked");
         let installer_lock = fixture.hold_lock();
 
-        tidy_leftovers(fixture.version, &fixture.root.0, &fixture.install_dir());
+        tidy_leftovers(
+            fixture.version,
+            Some(TEST_PLATFORM),
+            &fixture.root.0,
+            &fixture.install_dir(),
+        );
 
         assert!(
             staging.exists(),
             "expected a live installer's staging tree to survive"
         );
         drop(installer_lock);
-        tidy_leftovers(fixture.version, &fixture.root.0, &fixture.install_dir());
+        tidy_leftovers(
+            fixture.version,
+            Some(TEST_PLATFORM),
+            &fixture.root.0,
+            &fixture.install_dir(),
+        );
         assert!(!staging.exists());
     }
 
@@ -2222,7 +2512,10 @@ mod tests {
         fixture.lay_down_tree(&trash, "the only good copy");
         fs::write(trash.join("README.md"), "damaged by a crash")
             .expect("expected a damaged sibling");
-        assert_eq!(inspect_install(&trash), InstallState::Startable);
+        assert_eq!(
+            inspect_install(&trash, Some(TEST_PLATFORM)),
+            InstallState::Startable
+        );
         assert!(!fixture.install_dir().exists());
         trash
     }
@@ -2285,19 +2578,34 @@ mod tests {
         fs::write(unusable.join(BINARY_NAME), "bin").expect("expected a short binary");
 
         // Version directory missing.
-        sweep_scratch_dirs(fixture.version, &fixture.root.0, &fixture.install_dir());
+        sweep_scratch_dirs(
+            fixture.version,
+            Some(TEST_PLATFORM),
+            &fixture.root.0,
+            &fixture.install_dir(),
+        );
         assert!(startable.exists(), "expected the startable tree kept");
         assert!(!unusable.exists(), "expected the unusable tree swept");
 
         // Version directory present but not complete.
         fixture.lay_down_complete_install("new binary");
         fixture.damage_sibling();
-        sweep_scratch_dirs(fixture.version, &fixture.root.0, &fixture.install_dir());
+        sweep_scratch_dirs(
+            fixture.version,
+            Some(TEST_PLATFORM),
+            &fixture.root.0,
+            &fixture.install_dir(),
+        );
         assert!(startable.exists(), "expected the startable tree kept");
 
         // Complete.
         fixture.lay_down_complete_install("new binary");
-        sweep_scratch_dirs(fixture.version, &fixture.root.0, &fixture.install_dir());
+        sweep_scratch_dirs(
+            fixture.version,
+            Some(TEST_PLATFORM),
+            &fixture.root.0,
+            &fixture.install_dir(),
+        );
         assert!(!startable.exists(), "expected the tree swept");
     }
 
@@ -2436,7 +2744,7 @@ mod tests {
         // Damage a sibling so the install is replaced while the hub runs.
         fixture.damage_sibling();
         assert_eq!(
-            inspect_install(&fixture.install_dir()),
+            inspect_install(&fixture.install_dir(), Some(TEST_PLATFORM)),
             InstallState::Startable
         );
 
