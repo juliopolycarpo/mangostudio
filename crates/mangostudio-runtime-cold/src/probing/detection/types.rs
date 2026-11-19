@@ -185,6 +185,10 @@ pub enum PathSource {
     Bun,
     /// Reserved for a MangoStudio-managed install.
     MangostudioManaged,
+    /// Attributed to Scoop. Detected only: MangoStudio drives no recipe.
+    Scoop,
+    /// Attributed to mise. Detected only: MangoStudio drives no recipe.
+    Mise,
 }
 
 /// Where a candidate binary was discovered, before version-manager

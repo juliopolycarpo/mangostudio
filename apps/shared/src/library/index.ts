@@ -1,3 +1,4 @@
+export * from './builtin-commands';
 export * from './formats';
 export * from './hash';
 export * from './keys';

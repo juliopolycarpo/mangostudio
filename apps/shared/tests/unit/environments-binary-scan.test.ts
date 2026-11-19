@@ -172,6 +172,53 @@ describe('scanRuntime', () => {
     });
   });
 
+  it.each([
+    [
+      'win32',
+      'C:\\Users\\x',
+      'C:\\Users\\x\\scoop\\shims',
+      'C:\\Users\\x\\scoop\\shims\\node.exe',
+      'scoop',
+    ],
+    [
+      'win32',
+      'C:\\Users\\x',
+      'C:\\Users\\x\\scoop\\apps\\nodejs-lts\\current',
+      'C:\\Users\\x\\scoop\\apps\\nodejs-lts\\current\\node.exe',
+      'scoop',
+    ],
+    [
+      'win32',
+      'C:\\Users\\x',
+      'C:\\Users\\x\\AppData\\Local\\mise\\shims',
+      'C:\\Users\\x\\AppData\\Local\\mise\\shims\\node.exe',
+      'mise',
+    ],
+    [
+      'linux',
+      '/home/tester',
+      '/home/tester/.local/share/mise/shims',
+      '/home/tester/.local/share/mise/shims/node',
+      'mise',
+    ],
+  ] as const)(
+    'attributes the %s Node in %s ... %s to %s, not an unattributed system install',
+    async (platform, homeDir, pathDir, nodePath, expected) => {
+      const result = await scanRuntime(
+        NODE_RUNTIME_DEFINITION,
+        fakeDeps({
+          platform,
+          homeDir,
+          env: { PATH: pathDir },
+          pathExists: (path) => path === nodePath,
+          probeVersion: (path) => Promise.resolve(path === nodePath ? 'v22.13.0' : null),
+        })
+      );
+
+      expect(result.installations[0]?.pathSource).toBe(expected);
+    }
+  );
+
   it('classifies a win32 fnm Node under the default %APPDATA%\\fnm alias with no FNM_DIR set', async () => {
     const nodePath = 'C:\\Users\\x\\AppData\\Roaming\\fnm\\aliases\\default\\node.exe';
 
@@ -191,6 +238,26 @@ describe('scanRuntime', () => {
       managedBy: 'fnm',
       pathSource: 'fnm',
     });
+  });
+
+  it('classifies a win32 Volta Node under the default %LOCALAPPDATA%\\Volta with no VOLTA_HOME set', async () => {
+    const nodePath = 'C:\\Users\\x\\AppData\\Local\\Volta\\bin\\node.exe';
+
+    const result = await scanRuntime(
+      NODE_RUNTIME_DEFINITION,
+      fakeDeps({
+        platform: 'win32',
+        homeDir: 'C:\\Users\\x',
+        env: { PATH: '', LOCALAPPDATA: 'C:\\Users\\x\\AppData\\Local' },
+        pathExists: (path) => path === nodePath,
+        probeVersion: (path) => Promise.resolve(path === nodePath ? 'v22.13.0' : null),
+      })
+    );
+
+    expect(
+      result.installations[0],
+      `win32 Volta default root: expected managedBy volta | received ${JSON.stringify(result.installations[0])}`
+    ).toMatchObject({ rawPath: nodePath, managedBy: 'volta', pathSource: 'volta' });
   });
 
   it('still classifies fnm on win32 when FNM_DIR points somewhere else', async () => {

@@ -6274,6 +6274,14 @@
                           {
                             "type": "string",
                             "const": "mangostudio-managed"
+                          },
+                          {
+                            "type": "string",
+                            "const": "scoop"
+                          },
+                          {
+                            "type": "string",
+                            "const": "mise"
                           }
                         ]
                       }
@@ -6385,6 +6393,14 @@
                         {
                           "type": "string",
                           "const": "mangostudio-managed"
+                        },
+                        {
+                          "type": "string",
+                          "const": "scoop"
+                        },
+                        {
+                          "type": "string",
+                          "const": "mise"
                         }
                       ]
                     }
@@ -7078,6 +7094,14 @@
                           {
                             "type": "string",
                             "const": "mangostudio-managed"
+                          },
+                          {
+                            "type": "string",
+                            "const": "scoop"
+                          },
+                          {
+                            "type": "string",
+                            "const": "mise"
                           }
                         ]
                       }
@@ -7189,6 +7213,14 @@
                         {
                           "type": "string",
                           "const": "mangostudio-managed"
+                        },
+                        {
+                          "type": "string",
+                          "const": "scoop"
+                        },
+                        {
+                          "type": "string",
+                          "const": "mise"
                         }
                       ]
                     }

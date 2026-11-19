@@ -15,6 +15,7 @@
  * environment still expands from the hub's directory.
  */
 
+import { isBuiltInSlashCommand } from '@mangostudio/shared/library';
 import { parseMarkdownFrontmatter } from '@mangostudio/shared/markdown';
 import type { Kysely } from 'kysely';
 
@@ -40,6 +41,9 @@ export async function expandNativeSlashCommand(
 ): Promise<string> {
   const invocation = parseSlashInvocation(prompt);
   if (!invocation) return prompt;
+  // A built-in is the composer's own action; a file of the same name never
+  // shadows it, so it is not looked up at all.
+  if (isBuiltInSlashCommand(invocation.name)) return prompt;
 
   // Callers run this before the user message is stored, so nothing below may
   // fail the turn: a broken scan or file is a prompt sent as typed.

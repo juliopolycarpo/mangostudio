@@ -217,6 +217,17 @@ export function windowsDefaultFnmDir(env: Pick<PathEnv, 'platform' | 'env'>): st
   return appData ? win32.join(appData, 'fnm') : undefined;
 }
 
+/**
+ * Volta's root on Windows when `VOLTA_HOME` is unset: its installer defaults
+ * to `%LOCALAPPDATA%\Volta`, which has no `.volta` segment for the POSIX
+ * path fallback to match.
+ */
+function windowsDefaultVoltaDir(env: Pick<PathEnv, 'platform' | 'env'>): string | undefined {
+  if (env.platform !== 'win32') return undefined;
+  const localAppData = env.env.LOCALAPPDATA?.trim();
+  return localAppData ? win32.join(localAppData, 'Volta') : undefined;
+}
+
 function detectVersionManager(
   rawPath: string,
   realpath: string,
@@ -226,7 +237,7 @@ function detectVersionManager(
   const configuredRoots = [
     ['nvm', deps.env.NVM_DIR, deps.env.NVM_HOME, deps.env.NVM_SYMLINK],
     ['fnm', deps.env.FNM_DIR, windowsDefaultFnmDir(deps)],
-    ['volta', deps.env.VOLTA_HOME],
+    ['volta', deps.env.VOLTA_HOME, windowsDefaultVoltaDir(deps)],
   ] as const;
 
   for (const [manager, ...roots] of configuredRoots) {
@@ -283,7 +294,28 @@ function resolvePathSource(
 ): PathSource {
   if (managedBy) return managedBy;
   if (isBunManagedPath(rawPath, deps) || isBunManagedPath(resolvedPath, deps)) return 'bun';
+  // Managers MangoStudio detects but does not drive: they carry no
+  // `VersionManagerId`, so the card reads them as managed elsewhere instead of
+  // offering the winget install on top of them.
+  for (const path of [rawPath, resolvedPath]) {
+    const source = detectUnmanagedSource(normalizedPath(path));
+    if (source) return source;
+  }
   return 'system';
+}
+
+/**
+ * Scoop and mise installs by their fixed layouts: `scoop\shims` and
+ * `scoop\apps\nodejs*`, `mise/shims` and `mise/installs`. `normalizedPath`
+ * lowercases and turns backslashes into `/`, so one pattern covers both
+ * platforms.
+ */
+function detectUnmanagedSource(normalized: string): 'scoop' | 'mise' | undefined {
+  if (normalized.includes('/scoop/shims/') || normalized.includes('/scoop/apps/nodejs')) {
+    return 'scoop';
+  }
+  if (normalized.includes('/mise/shims/') || normalized.includes('/mise/installs/')) return 'mise';
+  return undefined;
 }
 
 export async function scanRuntime(

@@ -77,6 +77,9 @@ function ChatRoute() {
         onModelChange: (model) => {
           if (app.currentChatId) void app.handleUpdateChatModel(app.currentChatId, model);
         },
+        // What the composer's built-in `/clear` runs: the same action as the
+        // sidebar's New chat button.
+        onNewChat: app.handleNewChat,
         externalDescriptor: descriptor,
         externalModel: app.externalTurnRequest.model ?? null,
         externalEffort: app.externalTurnRequest.effort ?? null,

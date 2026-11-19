@@ -504,7 +504,9 @@ export const EnvironmentConnectionStatusSchema = Type.Object(
  * `nvm | fnm | volta` come from the version-manager classification; `winget`
  * is not visible by path (winget's MSI and the nodejs.org MSI both land in
  * `Program Files\nodejs`), so a win32 probe asks winget once per scan and
- * marks the match. `system` is everything the scanner could not attribute.
+ * marks the match. `scoop | mise` are detected by path layout only: they read
+ * as managed elsewhere, and MangoStudio drives no recipe for them. `system` is
+ * everything the scanner could not attribute.
  */
 export const PathSourceSchema = Type.Union([
   Type.Literal('system'),
@@ -514,6 +516,8 @@ export const PathSourceSchema = Type.Union([
   Type.Literal('winget'),
   Type.Literal('bun'),
   Type.Literal('mangostudio-managed'),
+  Type.Literal('scoop'),
+  Type.Literal('mise'),
 ]);
 
 export const EnvironmentSchema = Type.Object(
