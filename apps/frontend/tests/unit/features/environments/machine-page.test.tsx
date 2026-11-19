@@ -529,6 +529,32 @@ describe('MachinePage', () => {
         label: 'locais',
         detail: '2 de 3 presentes, 1 graváveis',
       },
+      {
+        section: 'Environments, a finding',
+        check: {
+          label: 'Node.js',
+          labelKey: 'env.label.tool',
+          status: 'fail',
+          detail: 'Node.js was not found on PATH or in any well-known location.',
+          detailKey: 'not-found',
+          params: { runtime: 'Node.js', tool: 'Node.js' },
+        },
+        label: 'Node.js',
+        detail: 'Node.js não foi encontrado no PATH nem nos locais conhecidos.',
+      },
+      {
+        section: 'Environments, versions managed',
+        check: {
+          label: 'Volta',
+          labelKey: 'env.label.tool',
+          status: 'ok',
+          detail: '2.0.0  2 versions managed',
+          detailKey: 'env.detail.managerVersionManagedMany',
+          params: { tool: 'Volta', version: '2.0.0', count: '2' },
+        },
+        label: 'Volta',
+        detail: '2.0.0  2 versões gerenciadas',
+      },
     ];
 
     it.each(SECTION_ROWS.map((entry) => [entry.section, entry] as const))(

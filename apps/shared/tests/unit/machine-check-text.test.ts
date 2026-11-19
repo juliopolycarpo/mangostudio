@@ -179,6 +179,21 @@ const DOCTOR_KEYS = [
   'library.detail.notWritable',
   'library.detail.stagedRemoval',
   'library.detail.divergenceHint',
+  'env.label.tool',
+  'env.label.wslExecutable',
+  'env.detail.versionAndPath',
+  'env.detail.detected',
+  'env.detail.notDetected',
+  'env.detail.needsAttention',
+  'env.detail.notInstalled',
+  'env.detail.installed',
+  'env.detail.installedManagedOne',
+  'env.detail.installedManagedMany',
+  'env.detail.managerVersion',
+  'env.detail.managerVersionManagedOne',
+  'env.detail.managerVersionManagedMany',
+  'env.detail.findingsJoined',
+  'env.detail.wslExecutable',
 ] as const;
 
 describe('doctor check keys', () => {

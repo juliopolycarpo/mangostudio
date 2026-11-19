@@ -1042,6 +1042,7 @@ const ENVIRONMENT_CASES: readonly SectionCase[] = [
             versions: [managedVersion('22.0.0'), managedVersion('20.1.0')],
           }),
           managerStatus('nvm', { versions: [managedVersion('22.0.0')] }),
+          managerStatus('nvm', { versions: [managedVersion('22.0.0'), managedVersion('20.1.0')] }),
           managerStatus('nvm'),
         ],
       }),
@@ -1056,6 +1057,7 @@ const ENVIRONMENT_CASES: readonly SectionCase[] = [
       { label: 'fnm', status: 'ok', detail: '1.37.0  1 version managed' },
       { label: 'Volta', status: 'ok', detail: '2.0.0  2 versions managed' },
       { label: 'nvm', status: 'ok', detail: 'installed  1 version managed' },
+      { label: 'nvm', status: 'ok', detail: 'installed  2 versions managed' },
       { label: 'nvm', status: 'ok', detail: 'installed' },
     ],
   },
@@ -1237,7 +1239,7 @@ const GROUPS: readonly SectionGroup[] = [
   { name: 'ChatGPT', prefixes: ['chatgpt'], keyed: true, cases: CHATGPT_CASES },
   { name: 'skills', prefixes: ['skills'], keyed: true, cases: SKILLS_CASES },
   { name: 'MCP', prefixes: ['mcp'], keyed: true, cases: MCP_CASES },
-  { name: 'environments', prefixes: ['env'], keyed: false, cases: ENVIRONMENT_CASES },
+  { name: 'environments', prefixes: ['env'], keyed: true, cases: ENVIRONMENT_CASES },
   { name: 'library', prefixes: ['library'], keyed: true, cases: LIBRARY_CASES },
 ];
 

@@ -4,6 +4,7 @@
 
 import type {
   AgentCliStatus,
+  RuntimeFinding,
   RuntimeStatus,
   VersionManagerStatus,
 } from '@mangostudio/shared/environments';
@@ -20,8 +21,13 @@ import {
   type WslExecutableSource,
 } from '../modules/environments/infrastructure/wsl-executable';
 import type { CheckResult } from './doctor-checks';
-import { fail, ok, warn } from './doctor-checks';
-import { findingSeverity, renderFinding, runtimeHealthToCheckStatus } from './finding-renderer';
+import { keyedCheck } from './doctor-checks';
+import {
+  findingParams,
+  findingSeverity,
+  renderFinding,
+  runtimeHealthToCheckStatus,
+} from './finding-renderer';
 
 export interface EnvironmentDoctorDeps {
   readonly listRuntimes: (options?: ProbeOptions) => Promise<RuntimeStatus[]>;
@@ -36,67 +42,118 @@ function displayName(id: string): string {
   return (environmentDisplayNamesEn as Record<string, string | undefined>)[id] ?? id;
 }
 
+/** The tool's product name, which reads the same in every language, so it is a param. */
+function toolParams(id: string): { tool: string } {
+  return { tool: displayName(id) };
+}
+
+/**
+ * A row for one finding. The finding's code is the row's detail key: the
+ * sentence for it already exists in the shared findings templates, in every
+ * language, and the params are the ones that template reads.
+ */
+function findingRow(id: string, finding: RuntimeFinding): CheckResult {
+  return keyedCheck(findingSeverity(finding), 'env.label.tool', finding.code, {
+    ...findingParams(finding),
+    ...toolParams(id),
+  });
+}
+
+/** A row for an installation the probe found: version and where it is. */
+function installationRow(id: string, effective: NonNullable<RuntimeStatus['effective']>) {
+  return keyedCheck('ok', 'env.label.tool', 'env.detail.versionAndPath', {
+    ...toolParams(id),
+    // `String` keeps the old output for a probe that reported no version: "null".
+    version: String(effective.version),
+    path: effective.path,
+  });
+}
+
 function runtimeRow(status: RuntimeStatus): CheckResult {
-  const label = displayName(status.id);
   if (status.effective) {
-    return ok(label, `${status.effective.version}  ${status.effective.path}`);
+    return installationRow(status.id, status.effective);
   }
   const finding = status.findings[0];
   if (finding) {
-    const severity = findingSeverity(finding);
-    const detail = renderFinding(finding);
-    return severity === 'fail' ? fail(label, detail) : warn(label, detail);
+    return findingRow(status.id, finding);
   }
   const health = runtimeHealthToCheckStatus(status.health);
-  return health === 'fail'
-    ? fail(label, 'not detected')
-    : health === 'warn'
-      ? warn(label, 'needs attention')
-      : ok(label, 'detected');
+  const detailKey =
+    health === 'fail'
+      ? 'env.detail.notDetected'
+      : health === 'warn'
+        ? 'env.detail.needsAttention'
+        : 'env.detail.detected';
+  return keyedCheck(health, 'env.label.tool', detailKey, toolParams(status.id));
 }
 
 function versionManagerRow(status: VersionManagerStatus): CheckResult {
-  const label = displayName(status.id);
   if (!status.installed) {
     const finding = status.findings[0];
-    if (finding) {
-      const severity = findingSeverity(finding);
-      const detail = renderFinding(finding);
-      return severity === 'fail' ? fail(label, detail) : warn(label, detail);
-    }
-    return warn(label, 'not installed');
+    return finding
+      ? findingRow(status.id, finding)
+      : keyedCheck('warn', 'env.label.tool', 'env.detail.notInstalled', toolParams(status.id));
   }
-  const version = status.managerVersion ?? 'installed';
-  const managed = status.versions.length;
-  const detail =
-    managed > 0 ? `${version}  ${managed} version${managed === 1 ? '' : 's'} managed` : version;
+
   const worst = status.findings.reduce<CheckResult['status']>((current, finding) => {
     const next = findingSeverity(finding);
     if (next === 'fail') return 'fail';
     if (next === 'warn' && current === 'ok') return 'warn';
     return current;
   }, 'ok');
-  if (worst === 'fail') {
-    return fail(label, status.findings.map((f) => renderFinding(f)).join('; '));
+  if (worst !== 'ok') {
+    const [only, ...others] = status.findings;
+    if (only && others.length === 0) return findingRow(status.id, only);
+    // Several findings share one row; the row joins their English sentences,
+    // as the CLI always has, and the page shows that text as it is.
+    return keyedCheck(worst, 'env.label.tool', 'env.detail.findingsJoined', {
+      ...toolParams(status.id),
+      findings: status.findings.map((finding) => renderFinding(finding)).join('; '),
+    });
   }
-  if (worst === 'warn') {
-    return warn(label, status.findings.map((f) => renderFinding(f)).join('; ') || detail);
+
+  // One sentence per count shape, since "1 version" and "2 versions" are
+  // different words in some languages; only the plural sentence names the count.
+  const managed = status.versions.length;
+  const managerVersion = status.managerVersion ?? null;
+  const base = toolParams(status.id);
+  const params = {
+    ...base,
+    ...(managerVersion === null ? {} : { version: managerVersion }),
+    ...(managed > 1 ? { count: managed } : {}),
+  };
+  if (managerVersion === null) {
+    return keyedCheck(
+      'ok',
+      'env.label.tool',
+      managed === 0
+        ? 'env.detail.installed'
+        : managed === 1
+          ? 'env.detail.installedManagedOne'
+          : 'env.detail.installedManagedMany',
+      params
+    );
   }
-  return ok(label, detail);
+  return keyedCheck(
+    'ok',
+    'env.label.tool',
+    managed === 0
+      ? 'env.detail.managerVersion'
+      : managed === 1
+        ? 'env.detail.managerVersionManagedOne'
+        : 'env.detail.managerVersionManagedMany',
+    params
+  );
 }
 
 function agentRow(status: AgentCliStatus): CheckResult {
-  const label = displayName(status.targetId);
   if (status.effective) {
-    return ok(label, `${status.effective.version}  ${status.effective.path}`);
+    return installationRow(status.targetId, status.effective);
   }
   const finding = status.findings[0];
-  if (finding) {
-    const severity = findingSeverity(finding);
-    const detail = renderFinding(finding);
-    return severity === 'fail' ? fail(label, detail) : warn(label, detail);
-  }
-  return fail(label, 'not installed');
+  return finding
+    ? findingRow(status.targetId, finding)
+    : keyedCheck('fail', 'env.label.tool', 'env.detail.notInstalled', toolParams(status.targetId));
 }
 
 /**
@@ -107,7 +164,12 @@ function agentRow(status: AgentCliStatus): CheckResult {
  */
 function wslExecutableRow(executable: WslExecutable): CheckResult {
   const source: WslExecutableSource = executable.source;
-  return ok('WSL executable', `${executable.path} (${source})`);
+  return keyedCheck('ok', 'env.label.wslExecutable', 'env.detail.wslExecutable', {
+    path: executable.path,
+    // The source is the resolver's own identifier (`override`, `program-files`),
+    // the word a support transcript quotes, so it stays as it is in every language.
+    source,
+  });
 }
 
 export async function collectEnvironmentDoctorSection(
