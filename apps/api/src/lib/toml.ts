@@ -9,6 +9,23 @@ import { readUtf8FileOrNull } from './safe-file';
 export type TomlStringSections = Record<string, Record<string, string>>;
 
 /**
+ * The one error this module throws for a document that does not parse. The
+ * message is fixed and carries nothing from the parser or the source, so what
+ * the API exposes never depends on how Bun words a diagnostic. Bun reports no
+ * TOML position (its `line` and `column` point into the calling script), so the
+ * error has none either.
+ *
+ * @example
+ * throw new TomlParseError();
+ */
+export class TomlParseError extends Error {
+  constructor() {
+    super('Invalid TOML document.');
+    this.name = 'TomlParseError';
+  }
+}
+
+/**
  * Project the string-valued entries of a parsed TOML document into sections.
  *
  * @example
@@ -83,41 +100,13 @@ export function readTomlDocument(filePath: string): Record<string, unknown> {
 }
 
 /**
- * Keep parser diagnostics while withholding quoted source values from errors and causes.
- * Native diagnostics can embed an unquoted secret or a duplicate private key.
- * Only punctuation in known expected-shape diagnostics is retained verbatim.
- *
- * @example
- * safeTomlParserError(new SyntaxError('TOML Parse error: Strings must be quoted: "secret"'));
- */
-function safeTomlParserError(error: unknown): Error {
-  const message = error instanceof Error ? error.message : String(error);
-  let safeMessage = message;
-  const describesShape =
-    /^TOML Parse error: (?:Expected |Invalid (?:date|time|date-time offset): expected |Unterminated (?:array|inline table); expected |Missing value after '=')/.test(
-      message
-    );
-  for (let index = 0; index < message.length; index++) {
-    if (message[index] !== '"' && message[index] !== "'") continue;
-    const punctuation = describesShape && message.slice(index).match(/^'[[\]{}=,:.-]+'/);
-    if (punctuation) {
-      index += punctuation[0].length - 1;
-      continue;
-    }
-    safeMessage = `${message.slice(0, index)}<source value omitted>`;
-    break;
-  }
-  const ParserError =
-    error instanceof SyntaxError ? SyntaxError : error instanceof RangeError ? RangeError : Error;
-  return new ParserError(safeMessage);
-}
-
-/**
- * Parse a complete TOML document without reading from disk. Throws on
- * malformed TOML. Date/time values stay as Bun's Temporal types, so writing
- * an unrelated setting preserves local date/time forms and fractional precision.
- * Offset datetimes normalize to UTC while preserving their exact instant.
- * Diagnostics withhold source values so config logs and API callers cannot expose secrets.
+ * Parse a complete TOML document without reading from disk. Throws a
+ * {@link TomlParseError} on malformed TOML. Date/time values stay as Bun's
+ * Temporal types, so writing an unrelated setting preserves local date/time
+ * forms and fractional precision. Offset datetimes normalize to UTC while
+ * preserving their exact instant. The error never carries Bun's diagnostic:
+ * native text can embed an unquoted secret or a duplicate private key, and
+ * filtering it would tie redaction to the parser's wording.
  *
  * @example
  * const doc = parseTomlDocument('[auth]\nsecret = "s"');
@@ -126,8 +115,9 @@ export function parseTomlDocument(content: string): Record<string, unknown> {
   try {
     const parsed = Bun.TOML.parse(content);
     return isTomlTable(parsed) ? parsed : {};
-  } catch (error) {
-    throw safeTomlParserError(error);
+  } catch {
+    // Deliberately drops the parser's error, cause included.
+    throw new TomlParseError();
   }
 }
 
