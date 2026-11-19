@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,6 +11,7 @@ import type { AgentTurnRequest } from '../../../src/services/providers/types';
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
 import { SseRecorder } from '../../support/harness/sse-recorder';
+import { moduleMockerFor } from '../../support/mocks/module-mocks';
 import {
   buildRespondStreamRequest,
   createTestStreamDb,
@@ -24,8 +25,10 @@ import {
   realGetAllTools,
   realGetSafeEffectiveToolSettings,
   realGetTool,
-  restoreAllMocks,
+  resetStreamTestState,
 } from './_respond-stream-helpers';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 let TEST_USER!: UserFixture;
 
@@ -52,7 +55,7 @@ async function waitFor(predicate: () => boolean, label: string): Promise<void> {
 afterEach(async () => {
   restoreAuth?.();
   restoreAuth = null;
-  await restoreAllMocks();
+  resetStreamTestState();
   await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
@@ -70,7 +73,7 @@ describe('POST /respond/stream — tools', () => {
 
     await mockVerifiedChatOwnership();
 
-    await mock.module('../../../src/services/tools', () => ({
+    await mockModule('../../../src/services/tools', () => ({
       getAllTools: realGetAllTools,
       getAllToolDefinitions: realGetAllToolDefinitions,
       executeTool: realExecuteTool,
@@ -114,7 +117,7 @@ describe('POST /respond/stream — tools', () => {
       },
     });
 
-    await mock.module('../../../src/db/database', () => ({ getDb: () => dbMock }));
+    await mockModule('../../../src/db/database', () => ({ getDb: () => dbMock }));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -241,7 +244,7 @@ describe('POST /respond/stream — tools', () => {
 
     await mockVerifiedChatOwnership();
 
-    await mock.module('../../../src/services/tools', () => ({
+    await mockModule('../../../src/services/tools', () => ({
       getAllTools: realGetAllTools,
       getAllToolDefinitions: realGetAllToolDefinitions,
       executeTool: realExecuteTool,
@@ -269,7 +272,7 @@ describe('POST /respond/stream — tools', () => {
     );
 
     const dbMock = createTestStreamDb({ userId: TEST_USER.id });
-    await mock.module('../../../src/db/database', () => ({ getDb: () => dbMock }));
+    await mockModule('../../../src/db/database', () => ({ getDb: () => dbMock }));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -319,7 +322,7 @@ describe('POST /respond/stream — tools', () => {
 
     await mockVerifiedChatOwnership();
 
-    await mock.module(
+    await mockModule(
       '../../../src/modules/tool-settings/infrastructure/tool-settings-repository',
       () => ({
         listSavedToolSettings: () =>
@@ -339,7 +342,7 @@ describe('POST /respond/stream — tools', () => {
       yield { type: 'turn_completed', providerState: null };
     });
 
-    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
+    await mockModule('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -363,7 +366,7 @@ describe('POST /respond/stream — tools', () => {
 
     await mockVerifiedChatOwnership();
 
-    await mock.module(
+    await mockModule(
       '../../../src/modules/tool-settings/infrastructure/tool-settings-repository',
       () => ({
         listSavedToolSettings: () =>
@@ -397,7 +400,7 @@ describe('POST /respond/stream — tools', () => {
       yield { type: 'turn_completed', providerState: null };
     });
 
-    await mock.module('../../../src/services/tools', () => ({
+    await mockModule('../../../src/services/tools', () => ({
       getAllTools: realGetAllTools,
       getAllToolDefinitions: realGetAllToolDefinitions,
       executeTool: realExecuteTool,
@@ -405,7 +408,7 @@ describe('POST /respond/stream — tools', () => {
       getSafeEffectiveToolSettings: realGetSafeEffectiveToolSettings,
     }));
 
-    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
+    await mockModule('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -435,14 +438,14 @@ describe('POST /respond/stream — tools', () => {
       let capturedSystemPrompt: string | undefined;
 
       await mockVerifiedChatOwnership(workdir);
-      await mock.module(
+      await mockModule(
         '../../../src/modules/tool-settings/infrastructure/tool-settings-repository',
         () => ({
           listSavedToolSettings: () =>
             Promise.resolve(new Map([['bash', { enabled: true, parameters: {} }]])),
         })
       );
-      await mock.module('../../../src/services/tools', () => ({
+      await mockModule('../../../src/services/tools', () => ({
         getAllTools: realGetAllTools,
         getAllToolDefinitions: realGetAllToolDefinitions,
         executeTool: realExecuteTool,
@@ -469,7 +472,7 @@ describe('POST /respond/stream — tools', () => {
         };
         yield { type: 'turn_completed', providerState: null };
       });
-      await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
+      await mockModule('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
       const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
       restoreAuth = restore;

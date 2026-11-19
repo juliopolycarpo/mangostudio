@@ -21,20 +21,6 @@ const WRAPPER_PATH = 'support/mocks/module-mocks.ts';
  * tests/support/mocks/module-mocks.ts) and delete its line.
  */
 const UNMIGRATED_RAW_MOCK_MODULE_CALLS: Readonly<Record<string, number>> = {
-  'integration/routes/_respond-stream-helpers.ts': 13,
-  'integration/routes/messages.integration.test.ts': 4,
-  'integration/routes/respond-stream-agents.integration.test.ts': 6,
-  'integration/routes/respond-stream-chatgpt.integration.test.ts': 7,
-  'integration/routes/respond-stream-context.integration.test.ts': 8,
-  'integration/routes/respond-stream-external.integration.test.ts': 4,
-  'integration/routes/respond-stream-helpers.test.ts': 1,
-  'integration/routes/respond-stream-provider-turn.integration.test.ts': 13,
-  'integration/routes/respond-stream-providers.integration.test.ts': 12,
-  'integration/routes/respond-stream-subagents.integration.test.ts': 7,
-  'integration/routes/respond-stream-tool-edge-cases.integration.test.ts': 13,
-  'integration/routes/respond-stream-tool-lifecycle.integration.test.ts': 3,
-  'integration/routes/respond-stream-tools.integration.test.ts': 12,
-  'integration/routes/respond-stream-validation.integration.test.ts': 4,
   'integration/routes/settings-connectors.integration.test.ts': 7,
   'support/connectors/index.ts': 4,
   'support/mocks/google-genai.ts': 1,

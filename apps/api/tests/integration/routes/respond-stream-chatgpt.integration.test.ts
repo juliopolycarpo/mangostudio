@@ -5,7 +5,7 @@
  * infrastructure (DB, secrets, tools registry) is mocked.
  */
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 
@@ -18,6 +18,7 @@ import * as realMetadataNs from '../../../src/services/secret-store/metadata';
 import { makeTokenBundle, TEST_ACCOUNT_ID } from '../../support/chatgpt';
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { moduleMockerFor } from '../../support/mocks/module-mocks';
 import {
   buildRespondStreamRequest,
   createTestStreamDb,
@@ -26,8 +27,10 @@ import {
   mockVerifiedChatOwnership,
   parsePersistedParts,
   parseSseEvents,
-  restoreAllMocks,
+  resetStreamTestState,
 } from './_respond-stream-helpers';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 const realCatalog = { ...realCatalogNs };
 const realMetadata = { ...realMetadataNs };
@@ -120,12 +123,10 @@ beforeEach(() => {
   chatGptProvider.invalidateModelCache?.();
 });
 
-afterEach(async () => {
+afterEach(() => {
   restoreAuth?.();
   restoreAuth = null;
-  await mock.module('../../../src/services/providers/catalog', () => realCatalog);
-  await mock.module('../../../src/services/secret-store/metadata', () => realMetadata);
-  await restoreAllMocks();
+  resetStreamTestState();
 });
 
 // ---------------------------------------------------------------------------
@@ -152,12 +153,12 @@ function connectorRow(): SecretMetadataRow {
 async function mockChatGptHarness(insertedMessages: Array<Record<string, unknown>>): Promise<void> {
   await mockVerifiedChatOwnership();
 
-  await mock.module('../../../src/services/secret-store/metadata', () => ({
+  await mockModule('../../../src/services/secret-store/metadata', () => ({
     ...realMetadata,
     listSecretMetadata: () => Promise.resolve([connectorRow()]),
   }));
 
-  await mock.module('../../../src/services/providers/catalog', () => ({
+  await mockModule('../../../src/services/providers/catalog', () => ({
     ...realCatalog,
     getCachedModelMetadata: () => ({
       providerType: 'chatgpt' as const,
@@ -172,14 +173,14 @@ async function mockChatGptHarness(insertedMessages: Array<Record<string, unknown
     }),
   }));
 
-  await mock.module('../../../src/services/providers/core/provider-registry', () => ({
+  await mockModule('../../../src/services/providers/core/provider-registry', () => ({
     getProvider: () => chatGptProvider,
     getProviderForModel: () => Promise.resolve(chatGptProvider),
   }));
 
   await mockToolsModule([READ_FILE_TOOL]);
 
-  await mock.module('../../../src/modules/messages/infrastructure/message-repository', () => ({
+  await mockModule('../../../src/modules/messages/infrastructure/message-repository', () => ({
     loadHistory: () => Promise.resolve([]),
     loadRichHistory: () => Promise.resolve([]),
     insertMessage: (message: Record<string, unknown>) => {
@@ -197,7 +198,7 @@ async function mockChatGptHarness(insertedMessages: Array<Record<string, unknown
     insertedMessages,
     chatOverrides: { lastProviderState: null },
   });
-  await mock.module('../../../src/db/database', () => ({ getDb: () => dbMock }));
+  await mockModule('../../../src/db/database', () => ({ getDb: () => dbMock }));
 }
 
 // ---------------------------------------------------------------------------

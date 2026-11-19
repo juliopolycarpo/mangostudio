@@ -1,9 +1,10 @@
-import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
 import type { AgentTurnRequest } from '../../../src/services/providers/types';
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { moduleMockerFor } from '../../support/mocks/module-mocks';
 import {
   AgentSettingsError,
   buildRespondStreamRequest,
@@ -16,8 +17,10 @@ import {
   mockVerifiedChatOwnership,
   parsePersistedRecord,
   parseSseEvents,
-  restoreAllMocks,
+  resetStreamTestState,
 } from './_respond-stream-helpers';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 let TEST_USER!: UserFixture;
 
@@ -27,10 +30,10 @@ beforeAll(async () => {
 
 let restoreAuth: (() => void) | null = null;
 
-afterEach(async () => {
+afterEach(() => {
   restoreAuth?.();
   restoreAuth = null;
-  await restoreAllMocks();
+  resetStreamTestState();
 });
 
 describe('POST /respond/stream — agent resolution', () => {
@@ -133,7 +136,7 @@ describe('POST /respond/stream — agent resolution', () => {
       yield { type: 'assistant_text_delta', text: 'Agent response' };
       yield { type: 'turn_completed', providerState: null };
     });
-    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
+    await mockModule('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -199,7 +202,7 @@ describe('POST /respond/stream — agent resolution', () => {
 
     await mockNoopTools();
 
-    await mock.module('../../../src/db/database', dbMock.moduleFactory);
+    await mockModule('../../../src/db/database', dbMock.moduleFactory);
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -237,7 +240,7 @@ describe('POST /respond/stream — agent resolution', () => {
 
     await mockVerifiedChatOwnership();
 
-    await mock.module(
+    await mockModule(
       '../../../src/modules/provider-settings/infrastructure/provider-settings-repository',
       () => ({
         getProviderSettings: () =>
@@ -274,7 +277,7 @@ describe('POST /respond/stream — agent resolution', () => {
 
     await mockNoopTools();
 
-    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
+    await mockModule('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -297,7 +300,7 @@ describe('POST /respond/stream — agent resolution', () => {
 
     await mockVerifiedChatOwnership();
 
-    await mock.module(
+    await mockModule(
       '../../../src/modules/provider-settings/infrastructure/provider-settings-repository',
       () => ({
         getProviderSettings: () =>
@@ -334,7 +337,7 @@ describe('POST /respond/stream — agent resolution', () => {
 
     await mockNoopTools();
 
-    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
+    await mockModule('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;

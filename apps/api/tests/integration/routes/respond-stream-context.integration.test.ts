@@ -1,9 +1,10 @@
-import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
 import type { AgentTurnRequest } from '../../../src/services/providers/types';
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { moduleMockerFor } from '../../support/mocks/module-mocks';
 import {
   buildRespondStreamRequest,
   createTestStreamDb,
@@ -17,8 +18,10 @@ import {
   mockVerifiedChatOwnership,
   parsePersistedParts,
   parseSseEvents,
-  restoreAllMocks,
+  resetStreamTestState,
 } from './_respond-stream-helpers';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 const NOOP_TOOL = makeRegisteredTool('noop', 'no-op', () => Promise.resolve({ ok: true }));
 
@@ -30,15 +33,15 @@ beforeAll(async () => {
 
 let restoreAuth: (() => void) | null = null;
 
-afterEach(async () => {
+afterEach(() => {
   restoreAuth?.();
   restoreAuth = null;
-  await restoreAllMocks();
+  resetStreamTestState();
 });
 
 describe('POST /respond/stream — context and continuation', () => {
   it('returns 503 when model catalog is not configured', async () => {
-    await mock.module('../../../src/services/gemini', () => ({
+    await mockModule('../../../src/services/gemini', () => ({
       getGeminiModelCatalog: () =>
         Promise.resolve({
           configured: false,
@@ -54,7 +57,7 @@ describe('POST /respond/stream — context and continuation', () => {
       clearGeminiModelCatalog: () => undefined as undefined,
     }));
 
-    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
+    await mockModule('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -96,7 +99,7 @@ describe('POST /respond/stream — context and continuation', () => {
 
     await mockNoopTools();
 
-    await mock.module('../../../src/db/database', dbMock.moduleFactory);
+    await mockModule('../../../src/db/database', dbMock.moduleFactory);
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -174,7 +177,7 @@ describe('POST /respond/stream — context and continuation', () => {
 
     await mockNoopTools();
 
-    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
+    await mockModule('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -227,7 +230,7 @@ describe('POST /respond/stream — context and continuation', () => {
 
     await mockNoopTools();
 
-    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
+    await mockModule('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -335,7 +338,7 @@ describe('POST /respond/stream — context and continuation', () => {
         return undefined;
       },
     });
-    await mock.module('../../../src/db/database', () => ({ getDb: () => dbMock }));
+    await mockModule('../../../src/db/database', () => ({ getDb: () => dbMock }));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -373,7 +376,7 @@ describe('POST /respond/stream — context and continuation', () => {
 
     await mockToolsModule([NOOP_TOOL]);
 
-    await mock.module('../../../src/db/database', dbMock.moduleFactory);
+    await mockModule('../../../src/db/database', dbMock.moduleFactory);
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -413,7 +416,7 @@ describe('POST /respond/stream — context and continuation', () => {
 
     await mockToolsModule([NOOP_TOOL]);
 
-    await mock.module('../../../src/db/database', dbMock.moduleFactory);
+    await mockModule('../../../src/db/database', dbMock.moduleFactory);
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;

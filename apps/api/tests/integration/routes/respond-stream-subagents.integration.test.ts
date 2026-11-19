@@ -1,9 +1,10 @@
-import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
 import type { AgentTurnRequest } from '../../../src/services/providers/types';
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { moduleMockerFor } from '../../support/mocks/module-mocks';
 import {
   buildRespondStreamRequest,
   makeRegisteredTool,
@@ -17,8 +18,10 @@ import {
   mockVerifiedChatOwnership,
   parsePersistedParts,
   parseSseEvents,
-  restoreAllMocks,
+  resetStreamTestState,
 } from './_respond-stream-helpers';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 async function mockSubagentTools(): Promise<void> {
   await mockToolsModule([
@@ -35,10 +38,10 @@ beforeAll(async () => {
 
 let restoreAuth: (() => void) | null = null;
 
-afterEach(async () => {
+afterEach(() => {
   restoreAuth?.();
   restoreAuth = null;
-  await restoreAllMocks();
+  resetStreamTestState();
 });
 
 describe('POST /respond/stream — subagent delegation', () => {
@@ -78,7 +81,7 @@ describe('POST /respond/stream — subagent delegation', () => {
       yield { type: 'turn_completed', providerState: null };
     });
 
-    await mock.module('../../../src/db/database', dbMock.moduleFactory);
+    await mockModule('../../../src/db/database', dbMock.moduleFactory);
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -153,7 +156,7 @@ describe('POST /respond/stream — subagent delegation', () => {
       yield { type: 'turn_completed', providerState: null };
     });
 
-    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
+    await mockModule('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -232,7 +235,7 @@ describe('POST /respond/stream — subagent delegation', () => {
       yield { type: 'turn_completed', providerState: null };
     });
 
-    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
+    await mockModule('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -306,7 +309,7 @@ describe('POST /respond/stream — subagent delegation', () => {
       yield { type: 'turn_completed', providerState: null };
     });
 
-    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
+    await mockModule('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -364,7 +367,7 @@ describe('POST /respond/stream — subagent delegation', () => {
       yield { type: 'turn_completed', providerState: null };
     });
 
-    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
+    await mockModule('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -421,7 +424,7 @@ describe('POST /respond/stream — subagent delegation', () => {
       yield { type: 'turn_completed', providerState: null };
     });
 
-    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
+    await mockModule('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -503,7 +506,7 @@ describe('POST /respond/stream — subagent delegation', () => {
       yield { type: 'turn_completed', providerState: null };
     });
 
-    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
+    await mockModule('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;

@@ -1,4 +1,4 @@
-import { describe, expect, it, mock } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 
 import { ActivityEventSchema } from '@mangostudio/shared/activity';
 import { sql } from 'kysely';
@@ -20,13 +20,15 @@ import * as geminiNs from '../../../src/services/gemini';
 import * as providerRegistryNs from '../../../src/services/providers/core/provider-registry';
 import * as toolsNs from '../../../src/services/tools';
 import { ActivityInsertCapture } from '../../support/activity-insert-capture';
+import { moduleMockerFor, restoreMockedModules } from '../../support/mocks/module-mocks';
 import {
   buildRespondStreamRequest,
   createTestStreamDb,
   mockDbWithFullCapture,
   mockPassThroughDb,
-  restoreAllMocks,
 } from './_respond-stream-helpers';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 describe('respond stream test helpers', () => {
   it('records a schema-valid completed activity through the shared stream database', async () => {
@@ -190,8 +192,9 @@ describe('respond stream test helpers', () => {
 
 const PARTIAL_FAKE_LEAKED = () => 'partial fake leaked';
 
-// `restoreAllMocks` covers each of these; the specifier is the one the helper
-// registers, spelled from this directory like the helper's own.
+// The modules the respond-stream suites fake, spelled from this directory. This is
+// coverage of the restore against the real namespaces, not a list the restore
+// depends on: the registry restores whatever `mockModule` faked.
 const RESTORED_MODULES = [
   { specifier: '../../../src/db/database', live: databaseNs },
   {
@@ -222,13 +225,13 @@ const RESTORED_MODULES = [
   },
 ] as const;
 
-describe('restoreAllMocks', () => {
+describe('restoreMockedModules', () => {
   for (const { specifier, live } of RESTORED_MODULES) {
     it(`undoes a fake of every export of ${specifier.replace('../../../src/', '')}`, async () => {
       const fake = Object.fromEntries(Object.keys(live).map((name) => [name, PARTIAL_FAKE_LEAKED]));
-      await mock.module(specifier, () => fake);
+      await mockModule(specifier, () => fake);
 
-      await restoreAllMocks();
+      await restoreMockedModules();
 
       // mock.module() merges into the live namespace, so an export the restore
       // does not re-register keeps the fake.

@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, it, mock, spyOn } from 'bun:test';
+import { afterEach, beforeAll, describe, expect, it, spyOn } from 'bun:test';
 
 import * as externalStream from '../../../src/modules/external-agents/application/external-turn-stream';
 import { type ExternalTurnStreamResult } from '../../../src/modules/external-agents/application/external-turn-stream';
@@ -7,12 +7,15 @@ import { NoModelAvailableError } from '../../../src/modules/generation/applicati
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { moduleMockerFor } from '../../support/mocks/module-mocks';
 import {
   buildRespondStreamRequest,
   mockPassThroughDb,
   mockVerifiedChatOwnership,
-  restoreAllMocks,
+  resetStreamTestState,
 } from './_respond-stream-helpers';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 let streamSpy: ReturnType<typeof spyOn<typeof externalStream, 'streamExternalTurn'>> | undefined;
 let modelSpy: ReturnType<typeof spyOn<typeof modelResolver, 'resolveModel'>> | undefined;
@@ -24,10 +27,10 @@ beforeAll(async () => {
 
 let restoreAuth: (() => void) | null = null;
 
-afterEach(async () => {
+afterEach(() => {
   restoreAuth?.();
   restoreAuth = null;
-  await restoreAllMocks();
+  resetStreamTestState();
   streamSpy?.mockRestore();
   streamSpy = undefined;
   modelSpy?.mockRestore();
@@ -65,7 +68,7 @@ function mountRoutes() {
 describe('POST /respond/stream — external runner', () => {
   it('branches before MangoStudio model resolution', async () => {
     await mockVerifiedChatOwnership('/work/repo', { kind: 'external', targetId: 'codex' });
-    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
+    await mockModule('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
     mockUnresolvableModel();
     const { calls } = mockExternalStream({
       ok: true,
@@ -85,7 +88,7 @@ describe('POST /respond/stream — external runner', () => {
 
   it('forwards the vendor model and effort the composer chose', async () => {
     await mockVerifiedChatOwnership('/work/repo', { kind: 'external', targetId: 'codex' });
-    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
+    await mockModule('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
     const { calls } = mockExternalStream({ ok: true, response: new Response('') });
 
     await mountRoutes().handle(
@@ -110,7 +113,7 @@ describe('POST /respond/stream — external runner', () => {
     ['validation', 400],
   ] as const)('answers a %s preflight failure with %i and no stream', async (kind, status) => {
     await mockVerifiedChatOwnership('/work/repo', { kind: 'external', targetId: 'codex' });
-    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
+    await mockModule('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
     mockExternalStream({ ok: false, failure: { kind, message: 'refused' } });
 
     const response = await mountRoutes().handle(
@@ -124,7 +127,7 @@ describe('POST /respond/stream — external runner', () => {
 
   it('leaves a MangoStudio chat on the internal path', async () => {
     await mockVerifiedChatOwnership();
-    await mock.module('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
+    await mockModule('../../../src/db/database', mockPassThroughDb(TEST_USER.id));
     mockUnresolvableModel();
     const { calls } = mockExternalStream({ ok: true, response: new Response('') });
 
