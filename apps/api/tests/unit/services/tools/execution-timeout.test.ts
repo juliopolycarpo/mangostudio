@@ -4,10 +4,12 @@ import { buildShellTool } from '../../../../src/services/tools/builtin/_shell-to
 import {
   migrateLegacyToolParameters,
   resolveEffectiveToolTimeoutMs,
+  startToolTimeout,
   TOOL_EXECUTION_TIMEOUT_PARAM,
   TOOL_EXECUTION_TIMEOUT_SECONDS_DEFAULT,
   TOOL_EXECUTION_TIMEOUT_SECONDS_MAX,
   TOOL_EXECUTION_TIMEOUT_SECONDS_MIN,
+  ToolExecutionTimedOutError,
   toolSupportsExecutionTimeout,
 } from '../../../../src/services/tools/execution-timeout';
 import {
@@ -124,6 +126,59 @@ describe('migrateLegacyToolParameters', () => {
   it('leaves non-shell tools untouched', () => {
     const params = { timeoutMs: 5000 };
     expect(migrateLegacyToolParameters('grep', params)).toBe(params);
+  });
+});
+
+describe('startToolTimeout', () => {
+  it('aborts with a ToolExecutionTimedOutError at the deadline and reports timedOut', async () => {
+    const guard = startToolTimeout(undefined, 'slow_tool', 20);
+    try {
+      expect(guard.signal.aborted).toBe(false);
+      await new Promise((resolve) => setTimeout(resolve, 60));
+
+      expect(guard.signal.aborted).toBe(true);
+      expect(guard.timedOut).toBe(true);
+      expect(guard.signal.reason).toBeInstanceOf(ToolExecutionTimedOutError);
+      expect((guard.signal.reason as Error).message).toBe('Tool "slow_tool" timed out after 20ms');
+    } finally {
+      guard.dispose();
+    }
+  });
+
+  it('follows a parent abort without reporting a timeout', () => {
+    const parent = new AbortController();
+    const guard = startToolTimeout(parent.signal, 'slow_tool', 60_000);
+    try {
+      parent.abort('client_disconnect');
+
+      expect(guard.signal.aborted).toBe(true);
+      expect(guard.signal.reason).toBe('client_disconnect');
+      expect(guard.timedOut).toBe(false);
+    } finally {
+      guard.dispose();
+    }
+  });
+
+  it('starts aborted, and never arms a timer, when the parent already aborted', async () => {
+    const parent = new AbortController();
+    parent.abort('already_stopped');
+    const guard = startToolTimeout(parent.signal, 'slow_tool', 10);
+
+    await new Promise((resolve) => setTimeout(resolve, 40));
+
+    expect(guard.signal.reason).toBe('already_stopped');
+    expect(guard.timedOut).toBe(false);
+  });
+
+  it('does not fire after dispose', async () => {
+    const guard = startToolTimeout(undefined, 'slow_tool', 20);
+    guard.dispose();
+    guard.dispose();
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    expect(guard.signal.aborted).toBe(false);
+    expect(guard.timedOut).toBe(false);
   });
 });
 

@@ -23,6 +23,7 @@ import {
 import {
   buildToolExecutionTimeoutDescriptor,
   TOOL_EXECUTION_TIMEOUT_SECONDS_DEFAULT,
+  ToolExecutionTimedOutError,
 } from '../execution-timeout';
 import { registerTool } from '../registry';
 import type { EffectiveToolSettings, ToolContext, ToolDefinition } from '../types';
@@ -170,18 +171,29 @@ export async function* generateImagesForToolPlan(
     return;
   }
 
-  for (const imageId of plan.imageIds) {
-    if (context.signal?.aborted) return;
+  for (const [index, imageId] of plan.imageIds.entries()) {
+    if (context.signal?.aborted) {
+      // A deadline, unlike a Stop, is something this call reports itself: the
+      // caller's abandon step words every unreached image as "interrupted".
+      const deadline = findTimeoutReason(context.signal);
+      if (deadline) {
+        yield* failImagesWithMessage(plan, plan.imageIds.slice(index), deadline.message, modelName);
+      }
+      return;
+    }
 
     const startedAt = Date.now();
     try {
-      const { imageUrl } = await providerGenerateImage({
-        userId: context.userId,
-        prompt: plan.prompt,
-        imageSize: plan.quality,
-        modelName,
-        signal: context.signal,
-      });
+      const { imageUrl } = await rejectAtDeadline(
+        providerGenerateImage({
+          userId: context.userId,
+          prompt: plan.prompt,
+          imageSize: plan.quality,
+          modelName,
+          signal: context.signal,
+        }),
+        context.signal
+      );
 
       yield {
         type: 'completed',
@@ -202,12 +214,16 @@ export async function* generateImagesForToolPlan(
       // is what names the cause: `error.name === 'AbortError'` misses
       // `APIUserAbortError`, and a provider that swallows the signal and
       // throws something else is still a turn the user stopped.
-      const interrupted = context.signal?.aborted === true;
+      //
+      // An expired deadline is the exception: nobody stopped anything, so the
+      // card says the call timed out instead of claiming an interruption.
+      const deadline = findTimeoutReason(context.signal);
+      const interrupted = context.signal?.aborted === true && !deadline;
       yield {
         type: 'failed',
         imageId,
         prompt: plan.prompt,
-        error: interrupted ? IMAGE_ABANDONED_ERROR : errorToMessage(error),
+        error: deadline?.message ?? (interrupted ? IMAGE_ABANDONED_ERROR : errorToMessage(error)),
         ...(interrupted ? { errorCode: IMAGE_ABANDONED_ERROR_CODE } : {}),
         modelName,
         generationTime: formatDurationSince(startedAt),
@@ -419,13 +435,52 @@ function isQualityOption(value: string): value is (typeof QUALITY_OPTIONS)[numbe
   return QUALITY_OPTIONS.includes(value as (typeof QUALITY_OPTIONS)[number]);
 }
 
+/** The deadline error a {@link startToolTimeout} signal aborted with, if that is why it aborted. */
+function findTimeoutReason(
+  signal: AbortSignal | undefined
+): ToolExecutionTimedOutError | undefined {
+  return signal?.aborted && signal.reason instanceof ToolExecutionTimedOutError
+    ? signal.reason
+    : undefined;
+}
+
+/**
+ * Settles with the deadline error as soon as `signal` aborts because its
+ * deadline passed, even when the provider never honors the signal. The signal
+ * is still what cancels the request; this only keeps a provider that ignores it
+ * from holding the call open past the limit, and drops its late result.
+ *
+ * A user Stop is deliberately not raced: an image a provider finishes after
+ * the Stop is paid for and kept, and `generateImagesForToolPlan` has always
+ * recorded it.
+ */
+function rejectAtDeadline<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return work;
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => {
+      const deadline = findTimeoutReason(signal);
+      if (deadline) reject(deadline);
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+  });
+}
+
 function* failEveryPlannedImage(
   plan: GenerateImageToolPlan,
   error: unknown,
   modelName: string | undefined
 ): Generator<GenerateImageToolFailedOutcome> {
-  const message = errorToMessage(error);
-  for (const imageId of plan.imageIds) {
+  yield* failImagesWithMessage(plan, plan.imageIds, errorToMessage(error), modelName);
+}
+
+function* failImagesWithMessage(
+  plan: GenerateImageToolPlan,
+  imageIds: readonly string[],
+  message: string,
+  modelName: string | undefined
+): Generator<GenerateImageToolFailedOutcome> {
+  for (const imageId of imageIds) {
     yield {
       type: 'failed',
       imageId,

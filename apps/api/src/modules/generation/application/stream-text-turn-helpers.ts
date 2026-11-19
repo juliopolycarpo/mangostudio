@@ -38,6 +38,11 @@ import {
   type GenerateImageToolOutcome,
   summarizeGenerateImageToolResult,
 } from '../../../services/tools/builtin/generate-image';
+import {
+  resolveEffectiveToolTimeoutMs,
+  startToolTimeout,
+  type ToolTimeoutGuard,
+} from '../../../services/tools/execution-timeout';
 import type { EffectiveToolSettings } from '../../../services/tools/types';
 import type { PersistedGeneratedImageInput } from '../infrastructure/conversation-persistence';
 import { IMAGE_ABANDONED_ERROR, IMAGE_ABANDONED_ERROR_CODE } from './image-interruption';
@@ -262,6 +267,7 @@ export async function* executeImageGenerationCall(
   /** Images the generator never reached — see `abandonUnreachedImages`. */
   // eslint-disable-next-line no-useless-assignment -- The initial value is retained across asynchronous control flow and failure paths.
   let abandonedCount = 0;
+  let timeout: ToolTimeoutGuard | undefined;
 
   // This path yields stream events directly instead of routing through the
   // async queue, so lifecycle transitions buffer here and drain between stages.
@@ -329,9 +335,17 @@ export async function* executeImageGenerationCall(
     }
 
     const outcomes: GenerateImageToolOutcome[] = [];
+    // The budget covers the whole call, not each image, and starts here: the
+    // checkpoint writes above are not the provider's time. The guard's signal,
+    // not the turn's, goes to the provider so the deadline aborts the request.
+    timeout = startToolTimeout(
+      ctx.signal,
+      name,
+      resolveEffectiveToolTimeoutMs(imageTool, effectiveSettings)
+    );
     for await (const outcome of generateImagesForToolPlan(plan, {
       userId: ctx.userId,
-      signal: ctx.signal,
+      signal: timeout.signal,
     })) {
       outcomes.push(outcome);
       const part = imagePartsById.get(outcome.imageId);
@@ -405,9 +419,15 @@ export async function* executeImageGenerationCall(
     result = { error: errorToToolMessage(error) };
     isError = true;
     thrown = { error };
+  } finally {
+    timeout?.dispose();
   }
 
-  if (thrown) {
+  if ((thrown || isError) && timeout?.timedOut) {
+    // The deadline, not the turn signal, ended the call. A user Stop that lands
+    // first never sets `timedOut`, so it still settles as cancelled below.
+    lifecycle.transition('timed_out', 'timeout');
+  } else if (thrown) {
     const failure = classifyToolExecutionFailure(thrown.error, ctx.signal);
     lifecycle.transition(failure.status, failure.reasonCode);
   } else if (isError) {
