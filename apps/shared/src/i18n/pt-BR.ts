@@ -3795,6 +3795,10 @@ export const messages = {
       toolchainAutoSystem:
         'Os processos rodam a escolha automática: {version}, uma instalação do sistema.',
       toolchainPinned: 'Os processos rodam {version} a partir de {path}.',
+      // O pin aponta para um caminho que a última sondagem não encontrou mais,
+      // então não pode estar em vigor: os processos voltam ao que o PATH resolver.
+      toolchainPinMissing:
+        'A instalação fixada em {path} não está mais instalada. Os processos voltam ao PATH até você escolher outra versão ou voltar ao automático.',
       toolchainUpdateFailed: 'A seleção de toolchain não pôde ser atualizada.',
     },
     // De onde o binário de uma instalação veio, anexado à linha da instalação

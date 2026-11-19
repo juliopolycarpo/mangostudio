@@ -1246,6 +1246,10 @@ export const messages: CoreMessages = {
       // template above — same reasoning as `managedBySystem`.
       toolchainAutoSystem: 'Processes run the automatic choice: {version}, a system install.',
       toolchainPinned: 'Processes run {version} from {path}.',
+      // The pin names a path the latest probe no longer found, so it cannot be
+      // in force: spawned processes fall back to whatever PATH resolves.
+      toolchainPinMissing:
+        'The pinned installation at {path} is no longer installed. Processes fall back to PATH until you pick another version or return to automatic.',
       toolchainUpdateFailed: 'The toolchain selection could not be updated.',
     },
     // Where an installation's binary was found to come from, appended to the
