@@ -54,12 +54,17 @@ export function authRunsOverRealDatabase(auth: ReturnType<typeof getAuth>): bool
   return isRealKysely(database?.db);
 }
 
+/** The unpatched `getSession` of each `auth.api` while any mock session is installed on it. */
+const realGetSessions = new WeakMap<object, unknown>();
+
 /**
  * Creates a test app that bypasses auth by temporarily monkey-patching
  * `auth.api.getSession` to return the given mock user.
  *
  * Returns the app and a `restore()` function. Always call `restore()` in
  * `afterEach`/`finally` to prevent the mock from leaking into other tests.
+ * `restore()` reinstates the real `getSession`, not the previous mount's mock, so one call
+ * undoes every mount in the test; a later mount still wins while it is live.
  *
  * @param mockUser - User object to return from the mock session.
  * @param plugins  - Route plugins to mount on the test app.
@@ -92,7 +97,11 @@ export function createAuthenticatedApiTestApp(
     );
   }
   const api = auth.api as Record<string, unknown>;
-  const originalGetSession = auth.api.getSession.bind(auth.api);
+  // Remember the real getSession the first time this `auth.api` is patched and always restore
+  // to it. Restoring to "whatever was installed before this mount" chains mounts: a test that
+  // mounts twice and keeps only the last restore() would reinstate the first mount's mock.
+  const originalGetSession = realGetSessions.get(api) ?? auth.api.getSession;
+  realGetSessions.set(api, originalGetSession);
 
   api.getSession = () =>
     Promise.resolve({
@@ -121,6 +130,7 @@ export function createAuthenticatedApiTestApp(
 
   const restore = () => {
     api.getSession = originalGetSession;
+    realGetSessions.delete(api);
     // A suite that fakes `getDb` before building its app can be the first caller of
     // `getAuth()`, which memoizes an instance over the fake. Dropping it here keeps the fake
     // from outliving the test; an instance already over the real database stays.
