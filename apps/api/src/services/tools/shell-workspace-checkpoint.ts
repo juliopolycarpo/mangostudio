@@ -68,7 +68,8 @@ export type WorkspaceUnavailableReason =
   | 'too_many_files'
   | 'too_many_bytes'
   | 'too_slow'
-  | 'capture_refused';
+  | 'capture_refused'
+  | 'stat_unsupported';
 
 /** A file as it stood before the command. `hash: null` means it was absent. */
 export interface BaselineFile {
@@ -309,23 +310,37 @@ async function captureBaseline(
       return;
     }
     const path = paths.join(root, relative);
+    const observed = await statFile(runtime, path, signal);
+    if (!observed) {
+      // Only a runtime refusing the capability, not one file, fails this many.
+      incomplete = true;
+      failures += 1;
+      if (failures > MAX_CAPTURE_FAILURES) abort = 'capture_refused';
+      return;
+    }
+    // A runtime that predates the stat fields cannot say what a path is, and
+    // the one thing that matters here is that it is not a link.
+    if (observed.hash !== null && observed.size === undefined) {
+      abort = 'stat_unsupported';
+      return;
+    }
+    // A link is not ours to restore: capture follows it, so a revert would write
+    // bytes over whatever it points at. The listing still names it, which keeps
+    // a later create from claiming the path.
+    if (observed.symlink) return;
+    if (observed.hash === null) {
+      files.set(path, { hash: null });
+      return;
+    }
     let snapshot: RuntimeBeforeSnapshot;
     try {
       snapshot = await runtime.snapshot.capture({ path }, requestOptions(signal));
     } catch (error) {
       if (signal?.aborted) throw error;
-      // Typically the runtime's per-file size refusal. The file is still worth
-      // hashing: unchanged, it costs the call nothing. Only when the hash is
-      // refused too is the runtime refusing the capability rather than a file.
-      const hash = await hashOrNull(runtime, path, signal);
-      if (hash === undefined) {
-        incomplete = true;
-        failures += 1;
-        if (failures > MAX_CAPTURE_FAILURES) abort = 'capture_refused';
-      } else {
-        files.set(path, { hash });
-        hashOnly.add(path);
-      }
+      // Typically the runtime's per-file size refusal. The hash above still
+      // says whether the file changed, which is worth having when it did not.
+      files.set(path, { hash: observed.hash });
+      hashOnly.add(path);
       return;
     }
     if (!snapshot.exists) {
@@ -418,14 +433,21 @@ async function recordWorkspaceChanges(
   }
 
   const candidates = [...baseline.files.keys(), ...added];
-  const hashed = await mapWithConcurrency(candidates, HASH_CONCURRENCY, async (path) => ({
+  const observedFiles = await mapWithConcurrency(candidates, HASH_CONCURRENCY, async (path) => ({
     path,
-    hash: await hashOrNull(runtime, path),
+    observed: await statFile(runtime, path),
   }));
   const current = new Map<string, string | null>();
-  for (const { path, hash } of hashed) {
-    if (hash === undefined) complete = false;
-    else current.set(path, hash);
+  for (const { path, observed } of observedFiles) {
+    if (!observed) {
+      complete = false;
+    } else if (observed.symlink) {
+      // A regular file the command replaced with a link cannot be restored in
+      // place; one it newly created is outside what is covered, like any link.
+      if (baseline.files.get(path)?.hash != null) complete = false;
+    } else {
+      current.set(path, observed.hash);
+    }
   }
 
   const changes = planWorkspaceChanges(baseline.files, current).filter((change) => {
@@ -452,13 +474,13 @@ async function recordWorkspaceChanges(
       for (const change of changes) {
         // Under the path lock the hash is final for this call's purposes: it
         // is what a later builtin mutation of the path will collapse onto.
-        const afterHash = await hashOrNull(runtime, change.path);
-        if (afterHash === undefined) {
+        const final = await statFile(runtime, change.path);
+        if (!final || final.symlink) {
           complete = false;
           continue;
         }
-        if (afterHash === change.before.hash) continue;
-        mutations.push(toMutation(change, afterHash));
+        if (final.hash === change.before.hash) continue;
+        mutations.push(toMutation(change, final.hash));
       }
       return { result: undefined, mutations };
     }
@@ -479,14 +501,30 @@ function toMutation(change: WorkspaceChange, afterHash: string | null): RuntimeM
   };
 }
 
-/** `undefined` means the hash could not be read; `null` means the path is absent. */
-async function hashOrNull(
+/** A path as `snapshot.hash` reports it; `hash: null` means the path is absent. */
+interface ObservedFile {
+  readonly hash: string | null;
+  /** Undefined from a runtime that predates the stat fields. */
+  readonly size: number | undefined;
+  readonly modifiedAtMs: number | undefined;
+  /** `hash` follows links, so this is what tells a link from the file it points at. */
+  readonly symlink: boolean;
+}
+
+/** `undefined` means the runtime could not be asked or refused. */
+async function statFile(
   runtime: RuntimeClient,
   path: string,
   signal?: AbortSignal
-): Promise<string | null | undefined> {
+): Promise<ObservedFile | undefined> {
   try {
-    return (await runtime.snapshot.hash({ path }, requestOptions(signal))).hash;
+    const result = await runtime.snapshot.hash({ path }, requestOptions(signal));
+    return {
+      hash: result.hash,
+      size: result.size,
+      modifiedAtMs: result.modifiedAtMs,
+      symlink: result.symlink === true,
+    };
   } catch (error) {
     if (signal?.aborted) throw error;
     return undefined;

@@ -154,7 +154,14 @@ class FakeWorkspaceRuntime {
 
   constructor(
     private readonly gitOutcome: { exitCode: number; stdout: string } | 'throw',
-    private readonly refuseSnapshots = false
+    private readonly refuseSnapshots = false,
+    /** What `snapshot.hash` answers; a runtime older than the stat fields sends only `hash`. */
+    private readonly hashResult: {
+      hash: string | null;
+      size?: number;
+      modifiedAtMs?: number;
+      symlink?: boolean;
+    } = { hash: null }
   ) {}
 
   readonly git = {
@@ -174,7 +181,7 @@ class FakeWorkspaceRuntime {
     hash: (params: { path: string }) => {
       this.hashCalls.push(params.path);
       if (this.refuseSnapshots) return Promise.reject(new Error('checkpoints consent denied'));
-      return Promise.resolve({ hash: null });
+      return Promise.resolve(this.hashResult);
     },
   };
 }
@@ -265,13 +272,36 @@ describe('runWithWorkspaceCheckpoint degradation', () => {
     expect(runtime.gitCalls).toEqual([]);
   });
 
-  it('stops capturing once the runtime refuses both capture and hash', async () => {
+  it('stops statting once the runtime refuses its snapshot methods', async () => {
     const listing = Array.from({ length: 40 }, (_, index) => `f${index}.txt`).join(NUL);
     const runtime = new FakeWorkspaceRuntime({ exitCode: 0, stdout: listing }, true);
 
     expect(await runDegraded(runtime)).toEqual({ ran: 1, result: 'command-result' });
     // A consent refusal is refused 40 times over if each file is tried; the
     // limit keeps a denied capability from costing a round trip per file.
-    expect(runtime.captureCalls.length).toBeLessThan(40);
+    expect(runtime.hashCalls.length).toBeLessThan(40);
+    expect(runtime.captureCalls).toEqual([]);
+  });
+
+  it('degrades without capturing when the runtime cannot say whether a path is a link', async () => {
+    const runtime = new FakeWorkspaceRuntime({ exitCode: 0, stdout: 'a.txt' }, false, {
+      hash: 'h-a',
+    });
+
+    expect(await runDegraded(runtime)).toEqual({ ran: 1, result: 'command-result' });
+    // `hash` alone follows links, so a restore could write through one: without
+    // `size`/`symlink` in the answer, nothing is captured at all.
+    expect(runtime.captureCalls).toEqual([]);
+  });
+
+  it('does not capture a symlink the runtime reports', async () => {
+    const runtime = new FakeWorkspaceRuntime({ exitCode: 0, stdout: 'link.txt' }, false, {
+      hash: 'h-target',
+      size: 4,
+      symlink: true,
+    });
+
+    await runDegraded(runtime);
+    expect(runtime.captureCalls).toEqual([]);
   });
 });

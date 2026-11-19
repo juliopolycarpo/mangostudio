@@ -13,11 +13,14 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -366,6 +369,23 @@ describe.skipIf(!runnable)('shell workspace checkpoints', () => {
       const survivors = readdirSync(workdir).filter((name) => name.toLowerCase() === 'foo.ts');
       expect(survivors.length).toBe(1);
       expect(read(survivors[0] as string)).toBe('export const foo = 1;\n');
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'leaves an untracked symlink a command wrote through exactly as it was',
+    async () => {
+      initRepository({ 'a.txt': 'a\n' }, 'real.txt\n');
+      writeFileSync(join(workdir, 'real.txt'), 'real-original\n');
+      symlinkSync('real.txt', join(workdir, 'link.txt'));
+      await runBash("printf 'through the link\\n' > link.txt");
+
+      // The target is ignored, so nothing covers it; the link is not a regular
+      // file, so nothing may restore bytes over it.
+      expect(await revert()).toEqual({ revertedFiles: 0, uncheckpointedSources: [] });
+      expect(lstatSync(join(workdir, 'link.txt')).isSymbolicLink()).toBe(true);
+      expect(readlinkSync(join(workdir, 'link.txt'))).toBe('real.txt');
+      expect(read('real.txt')).toBe('through the link\n');
     }
   );
 
