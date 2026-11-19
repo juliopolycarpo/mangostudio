@@ -9,6 +9,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { appendAttachmentFallbackNotes } from '../core/attachment-content';
 import { isReasoningModel } from '../core/capability-detector';
 import { getModelContextLimit } from '../core/context-policy';
+import { TEXT_GENERATION_TIMEOUT_MS, withGenerationDeadline } from '../core/generation-deadline';
 import { withModelCache } from '../core/model-cache';
 import { withAbortTimeout } from '../core/probe-timeout';
 import { createProviderLifecycle } from '../core/provider-lifecycle';
@@ -193,29 +194,49 @@ const lifecycle = createProviderLifecycle<PreparedAnthropicRuntime>({
   syncConfigFileConnectors: secretService.syncConfigFileConnectors,
 });
 
+/**
+ * One non-streaming Anthropic reply, bounded by `options.timeoutMs`
+ * ({@link TEXT_GENERATION_TIMEOUT_MS} by default) on top of the caller's own signal.
+ *
+ * @example
+ * const { text } = await generateAnthropicText(client, req);
+ */
+export async function generateAnthropicText(
+  client: Pick<Anthropic, 'messages'>,
+  req: TextGenerationRequest,
+  options: { readonly timeoutMs?: number } = {}
+): Promise<TextGenerationResult> {
+  const response = await withGenerationDeadline(
+    'Anthropic generateText',
+    req.signal,
+    options.timeoutMs ?? TEXT_GENERATION_TIMEOUT_MS,
+    (signal) =>
+      client.messages.create(
+        {
+          model: req.modelName,
+          max_tokens: 8192,
+          ...(req.systemPrompt?.trim() ? { system: req.systemPrompt } : {}),
+          messages: buildMessages(req),
+        },
+        { signal }
+      )
+  );
+
+  const text = response.content
+    .filter((block): block is Anthropic.TextBlock => block.type === 'text')
+    .map((block) => block.text)
+    .join('');
+
+  if (!text) throw new Error('No text returned from Anthropic API.');
+  return { text };
+}
+
 const anthropicProvider: AIProvider = {
   providerType: 'anthropic',
 
   async generateText(req: TextGenerationRequest): Promise<TextGenerationResult> {
     const { client } = await lifecycle.prepareRuntime(req.userId, req.modelName);
-
-    const response = await client.messages.create(
-      {
-        model: req.modelName,
-        max_tokens: 8192,
-        ...(req.systemPrompt?.trim() ? { system: req.systemPrompt } : {}),
-        messages: buildMessages(req),
-      },
-      { signal: req.signal }
-    );
-
-    const text = response.content
-      .filter((block): block is Anthropic.TextBlock => block.type === 'text')
-      .map((block) => block.text)
-      .join('');
-
-    if (!text) throw new Error('No text returned from Anthropic API.');
-    return { text };
+    return generateAnthropicText(client, req);
   },
 
   async *generateAgentTurnStream(req: AgentTurnRequest): AsyncIterable<AgentEvent> {
