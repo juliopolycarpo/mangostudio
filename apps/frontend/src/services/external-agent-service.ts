@@ -15,6 +15,9 @@ import type {
   ExternalNativeSession,
   ExternalNativeSessionListResponse,
   ExternalSteerResponse,
+  ExternalWorkspaceTrust,
+  ExternalWorkspaceTrustListResponse,
+  ExternalWorkspaceTrustRevokeBody,
 } from '@mangostudio/shared/external-agents';
 
 import { client } from '@/lib/api-client';
@@ -119,6 +122,31 @@ export async function trustExternalWorkspace(
   const { data, error } = await chat['external-agent']['trust-workspace'].post(scope);
   if (error) throw new ApiError(error.value);
   return (data as { workspacePath: string }).workspacePath;
+}
+
+/** Every folder the user has trusted a vendor to load configuration from. */
+export async function listExternalWorkspaceTrust(): Promise<readonly ExternalWorkspaceTrust[]> {
+  const { data, error } = await client.api['external-agents']['workspace-trust'].get();
+  if (error) throw new ApiError(error.value);
+  return (data as ExternalWorkspaceTrustListResponse).grants;
+}
+
+/**
+ * Withdraws one grant, named by the key the list returned it under.
+ *
+ * The path goes back exactly as listed: the server matches the stored string and
+ * never re-spells it. A turn already running is not stopped; the next one in that
+ * folder asks again.
+ */
+export async function revokeExternalWorkspaceTrust(
+  grant: ExternalWorkspaceTrustRevokeBody
+): Promise<void> {
+  const { error } = await client.api['external-agents']['workspace-trust'].delete({
+    targetId: grant.targetId,
+    environmentId: grant.environmentId,
+    workspacePath: grant.workspacePath,
+  });
+  if (error) throw new ApiError(error.value);
 }
 
 /**

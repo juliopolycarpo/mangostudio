@@ -30,12 +30,18 @@ export {
   ExternalAgentTargetDefaultsSchema,
   type ExternalWorkspaceTrust,
   type ExternalWorkspaceTrustKey,
+  type ExternalWorkspaceTrustListResponse,
+  ExternalWorkspaceTrustListResponseSchema,
+  type ExternalWorkspaceTrustRevokeBody,
+  ExternalWorkspaceTrustRevokeBodySchema,
+  ExternalWorkspaceTrustRevokeResponseSchema,
   ExternalWorkspaceTrustSchema,
   effectivePermissionDefaultOf,
   externalCapabilitiesFingerprint,
   externalDisclosureContextFingerprint,
   needsExternalDisclosure,
   needsWorkspaceTrust,
+  withoutWorkspaceTrust,
   withWorkspaceTrust,
 } from './disclosure';
 export {

@@ -17,6 +17,7 @@ import {
   EXTERNAL_WORKSPACE_TRUST_VERSION,
   type ExternalWorkspaceTrust,
   needsWorkspaceTrust,
+  withoutWorkspaceTrust,
   withWorkspaceTrust,
 } from '@mangostudio/shared/external-agents';
 
@@ -91,6 +92,48 @@ describe('withWorkspaceTrust', () => {
         workspacePath: `/repo/${EXTERNAL_WORKSPACE_TRUST_MAX_ENTRIES}`,
       })
     ).toBe(false);
+  });
+});
+
+describe('withoutWorkspaceTrust', () => {
+  it('removes only the grant whose three-part key matches', () => {
+    const kept = [
+      ...withWorkspaceTrust([], { ...KEY, workspacePath: '/home/dev/other' }, 1_000),
+      ...withWorkspaceTrust([], { ...KEY, environmentId: 'laptop' }, 1_000),
+      ...withWorkspaceTrust([], { ...KEY, workspacePath: '/home/dev/repo/packages' }, 1_000),
+    ];
+    const entries = [...withWorkspaceTrust([], KEY, 1_000), ...kept];
+
+    const remaining = withoutWorkspaceTrust(entries, KEY);
+
+    expect(remaining).toEqual(kept);
+    expect(needsWorkspaceTrust(remaining, KEY)).toBe(true);
+  });
+
+  it('returns an equal list when nothing matches, so a caller can tell nothing was there', () => {
+    const entries = withWorkspaceTrust([], KEY, 1_000);
+
+    expect(withoutWorkspaceTrust(entries, { ...KEY, workspacePath: '/home/dev/none' })).toEqual(
+      entries
+    );
+  });
+
+  it('matches the stored string literally, never a re-spelled form of it', () => {
+    const entries = withWorkspaceTrust([], KEY, 1_000);
+
+    // A trailing slash is a different string here; canonicalizing it would need
+    // the machine's runtime, which may be offline.
+    expect(withoutWorkspaceTrust(entries, { ...KEY, workspacePath: '/home/dev/repo/' })).toEqual(
+      entries
+    );
+  });
+
+  it('removes a grant left over from an older text version as well', () => {
+    const stale: ExternalWorkspaceTrust[] = [
+      { ...KEY, version: EXTERNAL_WORKSPACE_TRUST_VERSION + 1, acceptedAt: 1_000 },
+    ];
+
+    expect(withoutWorkspaceTrust(stale, KEY)).toEqual([]);
   });
 });
 

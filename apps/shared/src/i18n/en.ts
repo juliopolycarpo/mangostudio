@@ -2041,17 +2041,29 @@ export const messages: CoreMessages = {
       rules:
         'It loads the rules and project configuration committed in this folder, and follows them.',
       mcp: 'It starts the MCP servers this folder defines, with the access those servers have.',
-      // No revocation control exists yet, so this no longer promises one. It
-      // names the real breadth of the grant instead: the key is the user, the
-      // machine and the folder, which means every chat pointed at this folder,
-      // not just this one.
-      scope: 'This applies to this folder on this machine, in every chat that uses it.',
+      // Names the real breadth of the grant: the key is the user, the machine
+      // and the folder, which means every chat pointed at this folder, not just
+      // this one. Settings > External agents lists it and can withdraw it.
+      scope:
+        'This applies to this folder on this machine, in every chat that uses it, until you withdraw it under Settings > External agents.',
       warning:
         'Whoever wrote this repository wrote those instructions. Only continue if you trust it.',
       accept: 'Trust this folder',
       saving: 'Saving\u2026',
       cancel: 'Not now',
       saveFailed: 'Your choice could not be saved, so nothing was sent.',
+      manageTitle: 'Trusted folders',
+      manageDescription:
+        'Folders where you let an agent load the repository’s own rules and MCP servers.',
+      manageEmpty: 'No trusted folders yet',
+      manageEmptyHint:
+        'A folder is recorded when you choose to trust it before an agent first runs there.',
+      manageHint:
+        'Withdrawing covers every chat that uses the folder. A turn already running keeps going; the next message asks again.',
+      grantedAt: '{vendor} · {environment} · Trusted {date}',
+      revoke: 'Withdraw',
+      revoking: 'Withdrawing…',
+      revokeFailed: 'Your trust in this folder could not be withdrawn.',
     },
     unsupported: {
       codexProfileDisallowed: "This machine's Codex configuration does not allow that profile",
