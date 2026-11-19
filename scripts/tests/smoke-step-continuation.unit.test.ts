@@ -708,26 +708,55 @@ describe.skipIf(process.platform === 'win32')('container smoke scripts', () => {
     ]);
   });
 
-  test('a pairing started outside the launcher re-runs itself under it, keeping VERSION', async () => {
-    const { code, commands, stdout, stderr } = await runContainerScript(
+  test('a pairing started outside the launcher prepares the image with the real environment and gives only the suite the scratch home', async () => {
+    const { code, commands, events, stdout, stderr } = await runContainerScript(
       'smoke-container-pairing.sh',
       (root) => ({
         ...pairing,
+        HOME: FIXTURE_REAL_HOME,
+        XDG_RUNTIME_DIR: '/run/user/1001',
         // An empty marker is what a run outside the launcher looks like.
         MANGOSTUDIO_REAL_HOME: '',
         MANGO_CONTAINER_E2E_RUNTIME: join(root, '.mango/out/linux-x64-musl/mangostudio-runtime'),
       })
     );
     // The script derives the launcher from its own directory, so `..` stays unresolved.
-    const releaseDir = join(ROOT_DIR, 'scripts', 'release');
-    const launcher = `${releaseDir}/../with-test-home.ts`;
-    const script = join(releaseDir, 'smoke-container-pairing.sh');
+    const launcher = `${join(ROOT_DIR, 'scripts', 'release')}/../with-test-home.ts`;
 
     expect(code, `${stdout}${stderr}`).toBe(0);
     expect(
       commands,
-      'expected only the launcher call: bun <with-test-home.ts> --keep-build-version bash <script>'
-    ).toEqual([`bun ${launcher} --keep-build-version bash ${script}`]);
+      'expected engine commands first, then only the suite under the launcher with the real engine roots restored'
+    ).toEqual([
+      'podman build -t mango-container-smoke:musl -',
+      'podman image inspect mango-container-smoke:musl',
+      `bun ${launcher} --keep-build-version env XDG_DATA_HOME=${FIXTURE_REAL_HOME}/.local/share XDG_CONFIG_HOME=${FIXTURE_REAL_HOME}/.config DOCKER_CONFIG=${FIXTURE_REAL_HOME}/.docker XDG_RUNTIME_DIR=/run/user/1001 bun test tests/integration/services/connect-container-runtime.integration.test.ts`,
+    ]);
+    expect(
+      events.slice(0, 2).map(({ engine }) => engine),
+      'engine commands must run outside the launcher'
+    ).toEqual(['podman', 'podman']);
+  });
+
+  test('a pairing without a runtime dir leaves XDG_RUNTIME_DIR unset for the suite', async () => {
+    const { code, commands, stdout, stderr } = await runContainerScript(
+      'smoke-container-pairing.sh',
+      (root) => ({
+        ...pairing,
+        HOME: FIXTURE_REAL_HOME,
+        XDG_DATA_HOME: '/data/real',
+        MANGOSTUDIO_REAL_HOME: '',
+        MANGO_CONTAINER_E2E_RUNTIME: join(root, '.mango/out/linux-x64-musl/mangostudio-runtime'),
+      })
+    );
+    expect(code, `${stdout}${stderr}`).toBe(0);
+    const launched = commands.at(-1) ?? '';
+    expect(launched, 'expected an explicit XDG_DATA_HOME from the real environment').toContain(
+      ' env XDG_DATA_HOME=/data/real '
+    );
+    expect(launched, `expected no XDG_RUNTIME_DIR | received: ${launched}`).not.toContain(
+      'XDG_RUNTIME_DIR'
+    );
   });
 
   test('a pairing names the runtime path it could not execute and skips the suite', async () => {

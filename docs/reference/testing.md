@@ -1460,8 +1460,11 @@ launcher, so each worker has a home of its own. That covers `bun run test`, the 
 orchestrator and a direct `bun run test:unit` from `apps/api`; the nightly randomized-order
 workflow wraps its `bun test` the same way. So do the other CI entry points that start API
 tests: the real-binary qualification (`scripts/ci/rust-lanes.ts qualify`) and the container
-smoke (`scripts/release/smoke-container-pairing.sh`, which re-runs itself under the launcher
-with `--keep-build-version` so the mounted release runtime still matches the hub's `VERSION`).
+smoke (`scripts/release/smoke-container-pairing.sh`, which prepares the image with the real
+environment and starts only the suite under the launcher with `--keep-build-version`, so the
+mounted release runtime still matches the hub's `VERSION`; the suite gets the real `XDG_DATA_HOME`,
+`XDG_CONFIG_HOME`, `XDG_RUNTIME_DIR` and `DOCKER_CONFIG` back so a rootless engine finds its image
+store and session).
 `scripts/tests/api-lanes-hermetic.unit.test.ts` fails a new workflow or CI script that starts
 them bare.
 

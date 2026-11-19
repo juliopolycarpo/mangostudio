@@ -245,8 +245,11 @@ orquestrador de cobertura e um `bun run test:unit` direto em `apps/api`; o workf
 ordem aleatória encapsula o seu `bun test` da mesma forma. Os outros pontos de entrada de CI que
 iniciam testes da API fazem o mesmo: a qualificação com o binário real
 (`scripts/ci/rust-lanes.ts qualify`) e o smoke de container
-(`scripts/release/smoke-container-pairing.sh`, que se reexecuta sob o launcher com
-`--keep-build-version`, para que o runtime de release montado continue igual ao `VERSION` do hub).
+(`scripts/release/smoke-container-pairing.sh`, que prepara a imagem com o ambiente real e inicia
+só a suíte sob o launcher com `--keep-build-version`, para que o runtime de release montado
+continue igual ao `VERSION` do hub; a suíte recebe de volta os `XDG_DATA_HOME`, `XDG_CONFIG_HOME`,
+`XDG_RUNTIME_DIR` e `DOCKER_CONFIG` reais, para que um engine rootless ache seu armazenamento e
+sessão).
 `scripts/tests/api-lanes-hermetic.unit.test.ts` falha se um novo workflow ou script de CI iniciar
 esses testes sem o launcher.
 

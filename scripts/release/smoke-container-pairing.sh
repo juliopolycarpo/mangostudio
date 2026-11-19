@@ -24,17 +24,6 @@
 # image preparation and the suite use the same engine.
 set -euo pipefail
 
-# The API test preload refuses a run on the real home, so the suite has to start
-# under the temporary-HOME launcher. Re-run the whole script under it rather than
-# only `bun test`: podman keeps its image store under HOME, so the image prepared
-# below must be prepared with the same home the suite later inspects it from.
-# MANGOSTUDIO_REAL_HOME is set by the launcher, so the second pass skips this.
-# VERSION is kept: the mounted release runtime and the hub must report the same one.
-if [ -z "${MANGOSTUDIO_REAL_HOME:-}" ]; then
-  exec bun "$(dirname "${BASH_SOURCE[0]}")/../with-test-home.ts" --keep-build-version \
-    bash "${BASH_SOURCE[0]}" "$@"
-fi
-
 container_cli="${CONTAINER_CLI:-}"
 base_image="${BASE_IMAGE:-}"
 packages="${PACKAGES:-}"
@@ -71,4 +60,30 @@ if [ ! -x "$MANGO_CONTAINER_E2E_RUNTIME" ]; then
   fail "expected MANGO_CONTAINER_E2E_RUNTIME: path of an executable runtime binary | received: '${MANGO_CONTAINER_E2E_RUNTIME}'"
 fi
 "$container_cli" image inspect "$MANGO_CONTAINER_E2E_IMAGE" >/dev/null
-bun test tests/integration/services/connect-container-runtime.integration.test.ts
+
+suite=(bun test tests/integration/services/connect-container-runtime.integration.test.ts)
+# MANGOSTUDIO_REAL_HOME is set when a launcher already started this script.
+if [ -n "${MANGOSTUDIO_REAL_HOME:-}" ]; then
+  "${suite[@]}"
+  exit
+fi
+
+# The API test preload refuses a run on the real home, so only the suite starts
+# under the temporary-HOME launcher; the engine commands above ran with the real
+# environment. The launcher moves HOME and every XDG_* root, which breaks a
+# rootless engine (podman's build needs the real XDG_RUNTIME_DIR for its
+# systemd/cgroup session and keeps its image store under XDG_DATA_HOME), so the
+# suite's own engine calls get the real engine roots back through `env`, which
+# runs inside the launcher and wins over its overrides. HOME stays the scratch
+# one, which is all the preload checks. VERSION is kept: the mounted release
+# runtime and the hub must report the same one.
+engine_env=(
+  "XDG_DATA_HOME=${XDG_DATA_HOME:-$HOME/.local/share}"
+  "XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-$HOME/.config}"
+  "DOCKER_CONFIG=${DOCKER_CONFIG:-$HOME/.docker}"
+)
+if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+  engine_env+=("XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR")
+fi
+exec bun "$(dirname "${BASH_SOURCE[0]}")/../with-test-home.ts" --keep-build-version \
+  env "${engine_env[@]}" "${suite[@]}"
