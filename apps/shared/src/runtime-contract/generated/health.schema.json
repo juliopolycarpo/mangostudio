@@ -367,20 +367,10 @@
           ],
           "properties": {
             "method": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "const": "single-user-host"
-                },
-                {
-                  "type": "string",
-                  "const": "os-account"
-                },
-                {
-                  "type": "string",
-                  "const": "container"
-                }
-              ]
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
             },
             "credentialHomeFingerprint": {
               "type": "string",

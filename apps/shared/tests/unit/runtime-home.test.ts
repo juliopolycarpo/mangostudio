@@ -377,6 +377,40 @@ describe('RuntimeHealthReportSchema', () => {
       ).toBe(true);
     });
 
+    it('accepts an isolation method this build has no enum member for', () => {
+      // Regression for #2570: an additive method failed the whole report.
+      const withNewMethod = {
+        ...externalAgents,
+        identityIsolation: { method: 'micro-vm', credentialHomeFingerprint: 'sha256:home' },
+      };
+      expect(
+        Value.Check(RuntimeHealthReportSchema, withExternalAgents(withNewMethod)),
+        'expected a report naming an unknown but well-formed isolation method to be accepted'
+      ).toBe(true);
+    });
+
+    it('still rejects an isolation method that is not a bounded, URL-safe token', () => {
+      const fingerprint = 'sha256:home';
+      const methods: readonly (readonly [string, unknown])[] = [
+        ['a method that is not a string', 3],
+        ['an empty method', ''],
+        ['a method that is not URL-safe', 'micro vm/../x'],
+        ['a method past 64 characters', 'a'.repeat(65)],
+      ];
+      for (const [label, method] of methods) {
+        expect(
+          Value.Check(
+            RuntimeHealthReportSchema,
+            withExternalAgents({
+              ...externalAgents,
+              identityIsolation: { method, credentialHomeFingerprint: fingerprint },
+            })
+          ),
+          `expected ${label} (${JSON.stringify(method)}) to be rejected`
+        ).toBe(false);
+      }
+    });
+
     it('still rejects a wrong type on a known member', () => {
       const wrong: readonly (readonly [string, unknown])[] = [
         ['liveSessionCount as a string', { ...externalAgents, liveSessionCount: '1' }],
@@ -396,13 +430,6 @@ describe('RuntimeHealthReportSchema', () => {
           {
             ...externalAgents,
             targets: Array.from({ length: 33 }, (_, index) => `vendor-${index}`),
-          },
-        ],
-        [
-          'an isolation method that is not a known one',
-          {
-            ...externalAgents,
-            identityIsolation: { method: 'vm', credentialHomeFingerprint: 'x' },
           },
         ],
         [
