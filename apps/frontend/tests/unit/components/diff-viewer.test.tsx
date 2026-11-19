@@ -67,6 +67,8 @@ describe('DiffViewer', () => {
     ['crates/app/src/lib.rs', 'rust'],
     ['tsconfig.jsonc', 'json'],
     ['changes/fix.diff', 'diff'],
+    ['src/components/Card.vue', 'vue'],
+    ['src/routes/+page.svelte', 'svelte'],
   ];
   for (const [path, grammar] of extensionCases) {
     it(`asks for the ${grammar} grammar when the file is ${path}`, async () => {

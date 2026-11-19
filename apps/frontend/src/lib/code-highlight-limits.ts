@@ -92,6 +92,10 @@ const OWN_PROFILES: Partial<Record<ShikiLanguageId, CostProfile>> = {
   jsx: SCRIPT_PROFILE,
   tsx: SCRIPT_PROFILE,
   typescript: SCRIPT_PROFILE,
+  // A single-file component is mostly its `<script>`, so the per-character cap is the script's
+  // throughout; the quadratic budget is the strictest of the embedded grammars either way.
+  svelte: SCRIPT_PROFILE,
+  vue: SCRIPT_PROFILE,
   java: LINE_PROFILE,
   yaml: LINE_PROFILE,
   json: CHEAP_PROFILE,
@@ -149,6 +153,8 @@ export const EMBEDDED_LANGUAGES: Partial<Record<ShikiLanguageId, readonly ShikiL
     'xml',
     'yaml',
   ],
+  svelte: ['css', 'javascript', 'markdown', 'typescript'],
+  vue: ['css', 'html', 'javascript', 'json', 'jsx', 'markdown', 'tsx', 'typescript', 'yaml'],
   xml: ['java'],
 };
 
