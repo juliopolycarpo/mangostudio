@@ -41,19 +41,21 @@ export async function expandNativeSlashCommand(
   const invocation = parseSlashInvocation(prompt);
   if (!invocation) return prompt;
 
-  const scan = await discoverLibraryResources(db, userId, { kinds: ['command'] });
-  const resource = scan.resources.find(
-    (candidate) => candidate.ref.kind === 'command' && candidate.ref.slug === invocation.name
-  );
-  const coverage = resource?.coverage.find((entry) => entry.targetId === 'mangostudio');
-  if (coverage?.effectiveLocationId !== NATIVE_COMMAND_LOCATION_ID) return prompt;
-
-  const instance = resource?.instances.find(
-    (candidate) => candidate.locationId === NATIVE_COMMAND_LOCATION_ID
-  );
-  if (!instance?.valid) return prompt;
-
+  // Callers run this before the user message is stored, so nothing below may
+  // fail the turn: a broken scan or file is a prompt sent as typed.
   try {
+    const scan = await discoverLibraryResources(db, userId, { kinds: ['command'] });
+    const resource = scan.resources.find(
+      (candidate) => candidate.ref.kind === 'command' && candidate.ref.slug === invocation.name
+    );
+    const coverage = resource?.coverage.find((entry) => entry.targetId === 'mangostudio');
+    if (coverage?.effectiveLocationId !== NATIVE_COMMAND_LOCATION_ID) return prompt;
+
+    const instance = resource?.instances.find(
+      (candidate) => candidate.locationId === NATIVE_COMMAND_LOCATION_ID
+    );
+    if (!instance?.valid) return prompt;
+
     const { content } = readRegularFileUtf8(instance.path, { maxBytes: MAX_COMMAND_FILE_BYTES });
     const expanded = expandCommandTemplate(parseMarkdownFrontmatter(content).body, invocation.args);
     // A blank template would send the model an empty turn; the typed prompt is

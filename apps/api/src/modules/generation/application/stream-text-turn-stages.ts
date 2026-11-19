@@ -214,6 +214,14 @@ export async function prepareStreamTextTurn(
 
   input.onTurnPrepared?.(aiMsgId);
 
+  // The model gets the expanded template; the transcript keeps what the user
+  // typed, and the expansion is stored beside it so later turns replay what
+  // the model actually acted on. A resumed turn's prompt is the internal
+  // recovery text, never a user command, so it is not looked up.
+  const effectivePrompt = input.preparedTurn
+    ? input.prompt
+    : await expandNativeSlashCommand(db, userId, input.prompt);
+
   if (!input.preparedTurn) {
     await persistTextTurnStart(
       {
@@ -223,6 +231,7 @@ export async function prepareStreamTextTurn(
         assistantMessageId: aiMsgId,
         chatId: input.chatId,
         displayPrompt: input.prompt,
+        effectivePrompt,
         attachmentIds,
         timestamp: now,
         interactionMode: 'agent',
@@ -253,12 +262,7 @@ export async function prepareStreamTextTurn(
     allowedToolNames,
     effectiveSystemPrompt,
     continuationSystemPrompt,
-    // The model gets the expanded template; the transcript (`displayPrompt`
-    // above) keeps what the user typed. A resumed turn's prompt is the internal
-    // recovery text, never a user command, so it is not looked up.
-    effectivePrompt: input.preparedTurn
-      ? input.prompt
-      : await expandNativeSlashCommand(db, userId, input.prompt),
+    effectivePrompt,
     thinkingEnabled: runtimeSettings.thinkingEnabled ?? true,
     reasoningEffort: runtimeSettings.reasoningEffort ?? 'medium',
     attachmentIds,

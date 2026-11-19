@@ -28,7 +28,9 @@ byte for byte.
 Typing `/` at the start of a message opens the palette; it lists these commands next to
 the user's skills. When a message starts with `/name` and `name` is one of these files,
 the hub replaces the message with the template before the model sees it. The transcript
-keeps what the user typed.
+keeps what the user typed. The expansion is stored beside the message (`messages.expandedText`,
+never returned to clients), so later turns replay what the model acted on rather than the
+bare `/name args`. A message stored before that column existed replays as typed.
 
 | Placeholder  | Replaced with                                                     |
 | ------------ | ----------------------------------------------------------------- |
@@ -55,6 +57,4 @@ and agents directories.
 
 ## Not yet
 
-A later turn replays the stored message (`/name args`), not the expansion, so the model
-does not see the template again in history. Built-in commands such as `/clear` and
-`/model` are not part of this.
+Built-in commands such as `/clear` and `/model` are not part of this.

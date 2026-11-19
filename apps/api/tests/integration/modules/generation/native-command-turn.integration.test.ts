@@ -13,6 +13,7 @@ import { getDb } from '../../../../src/db/database';
 import { loadConfigForTest } from '../../../../src/lib/config';
 import { streamTextTurn } from '../../../../src/modules/generation/application/stream-text-turn';
 import { resetLibraryDiscoveryCache } from '../../../../src/modules/library/application/library-discovery';
+import { listByChatId } from '../../../../src/modules/messages/infrastructure/message-repository';
 import {
   getProvider,
   registerProvider,
@@ -138,5 +139,46 @@ describe('native slash command turn', () => {
     await runTurn('/nope src/app.ts');
 
     expect(provider.requests[0]?.prompt).toBe('/nope src/app.ts');
+  });
+
+  /**
+   * Regression: the model acted on the expansion in turn 1, but history was
+   * rebuilt from the stored `/review src/app.ts`, so from turn 2 on a follow-up
+   * lost the instructions it was answering.
+   */
+  it('replays the expansion, not the typed command, in a later turn’s history', async () => {
+    writeFileSync(join(configHome, 'commands', 'review.md'), 'Review $1 for bugs.\n', 'utf8');
+
+    await runTurn('/review src/app.ts');
+    await runTurn('and the tests too');
+
+    const replayedUserTurns = (provider.requests[1]?.history ?? [])
+      .filter((turn) => turn.role === 'user')
+      .map((turn) => turn.text);
+    expect(
+      replayedUserTurns,
+      '(turn 2 history, user turns): expected turn 1 replayed as its expansion'
+    ).toEqual(['Review src/app.ts for bugs.']);
+  });
+
+  it('keeps showing what the user typed in the transcript, with no extra field', async () => {
+    writeFileSync(join(configHome, 'commands', 'review.md'), 'Review $1 for bugs.\n', 'utf8');
+
+    await runTurn('/review src/app.ts');
+
+    const { messages } = await listByChatId(chatId, {}, getDb());
+    const userMessage = messages.find((message) => message.role === 'user');
+    expect(userMessage?.text).toBe('/review src/app.ts');
+    expect(Object.keys(userMessage ?? {})).not.toContain('expandedText');
+  });
+
+  it('replays a message stored without an expansion exactly as typed', async () => {
+    await runTurn('/nope src/app.ts');
+    await runTurn('and the tests too');
+
+    const replayedUserTurns = (provider.requests[1]?.history ?? [])
+      .filter((turn) => turn.role === 'user')
+      .map((turn) => turn.text);
+    expect(replayedUserTurns).toEqual(['/nope src/app.ts']);
   });
 });

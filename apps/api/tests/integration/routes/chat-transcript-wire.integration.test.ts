@@ -320,6 +320,9 @@ describe('GET /chats/:id/messages with stored values outside the written unions'
   });
 });
 
+/** Columns that only feed the model's history and must never reach a client. */
+const HISTORY_ONLY_COLUMNS: ReadonlySet<string> = new Set(['expandedText']);
+
 describe('transcript row schema coverage', () => {
   it('declares every column of the messages table', async () => {
     // The route selects `*`, and the response is serialised from the schema, so a
@@ -327,7 +330,9 @@ describe('transcript row schema coverage', () => {
     // dropped from every transcript.
     const { rows } = await sql<{ name: string }>`PRAGMA table_info(messages)`.execute(getDb());
     const declared = new Set(Object.keys(MessageSchema.properties));
-    const missing = rows.map((row) => row.name).filter((column) => !declared.has(column));
+    const missing = rows
+      .map((row) => row.name)
+      .filter((column) => !declared.has(column) && !HISTORY_ONLY_COLUMNS.has(column));
     if (missing.length > 0) {
       throw new Error(
         `expected MessageSchema to declare every messages column | missing: ${JSON.stringify(missing)}`

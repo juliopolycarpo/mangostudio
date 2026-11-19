@@ -106,6 +106,9 @@ export async function sendTextMessage(
 
   const now = Date.now();
   const userMsgId = generateId();
+  // The model gets the expanded command; the stored message keeps what was
+  // typed, with the expansion beside it so later turns replay what the model saw.
+  const effectivePrompt = await expandNativeSlashCommand(db, input.userId, input.prompt);
 
   const attachments = await persistUserMessage(
     {
@@ -114,6 +117,7 @@ export async function sendTextMessage(
       admittedRunnerKind: input.admittedChat?.runner.kind,
       chatId: input.chatId,
       text: input.prompt,
+      expandedPrompt: effectivePrompt,
       attachmentIds,
       timestamp: now,
     },
@@ -145,8 +149,7 @@ export async function sendTextMessage(
       environmentId: chat.environmentId,
       chatId: input.chatId,
       history,
-      // The model gets the expanded command; the stored message keeps what was typed.
-      prompt: await expandNativeSlashCommand(db, input.userId, input.prompt),
+      prompt: effectivePrompt,
       systemPrompt: input.systemPrompt,
       modelName: modelId,
       signal: input.signal,
