@@ -259,6 +259,13 @@ selected machine's. MangoStudio's own directories are forced on by the
 normalizer and render locked. A tab that comes back empty is worth checking
 against that switch before it is read as "there is nothing on disk".
 
+Location ids are code-defined, never user input: every write destination resolves through the closed
+`LIBRARY_LOCATION_DEFINITIONS` table, so a client cannot name a path to write to. The one location kind that
+carries a user path is `custom-instruction` (a prompt-rules file the user pointed at). It is `read-only`, is not a
+row of that table, and is in no target's `reads`, so `getLibraryLocation('custom-instruction')` is `undefined` and a
+preview or apply that names it is refused as an unknown location. It is hub-local and absent from the matrix: the
+scan runs on each machine's runtime from the closed table, and a hub path means nothing on a remote one.
+
 There is no canonical copy of a resource: every location on every environment is
 a peer. When versions diverge, only a human picks the winner. The API refuses an
 apply that does not name one, and the UI is built so a user cannot reach that
@@ -676,6 +683,13 @@ Open these first:
 - `apps/api/src/modules/prompt-rules/http/rule-file-routes.ts`
 - `apps/frontend/src/components/settings/PromptSettings.tsx`
 - `apps/frontend/src/components/settings/RuleFileCard.tsx`
+
+Prompt rules keep no table of paths. The built-in `agents` and `claude` files are the library registry's
+`mango-instructions` and `claude-instructions` locations (`FIXED_RULE_FILE_LOCATIONS` holds ids only), so
+`CLAUDE_CONFIG_DIR` and `MANGOSTUDIO_CONFIG_HOME` move them here as they move the matrix. The composer reads a
+built-in file through that location and ignores the stored `path`, which is only its label. A user-named path is
+the registry's read-only `custom-instruction` kind (`defineCustomInstructionLocation`), checked by
+`validateCustomPath` first. See [Library](#library-coverage-divergence-propagation) for what that kind is not.
 
 ## Settings (App, Provider, Tool)
 

@@ -177,6 +177,8 @@ SSE com `Content-Type: text/event-stream`. Veja [../architecture/streaming.md](.
 
 O body de preview é `{ "path": "~/.mango/AGENTS.md" }` (`RuleFilePreviewBodySchema`); defaults retorna descritores, não o conteúdo dos arquivos.
 
+Todo descritor traz em `locationId` a location da Library pela qual o arquivo é lido. Os dois arquivos embutidos são `mango-instructions` e `claude-instructions` do registry, então seus caminhos seguem `MANGOSTUDIO_CONFIG_HOME` e `CLAUDE_CONFIG_DIR` como a Library. Um caminho informado pelo usuário é `custom-instruction`: somente leitura, nunca um destino de escrita e fora da matriz da Library.
+
 ## Endpoints De Machine
 
 A máquina do próprio hub: qual processo está servindo, se uma unidade de serviço
