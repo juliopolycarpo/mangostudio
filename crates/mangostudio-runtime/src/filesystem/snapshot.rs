@@ -3,6 +3,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
 use mango_protocol::error::{RemoteError, codes};
 use mango_protocol::session::CallContext;
 use serde_json::{Value, json};
@@ -11,21 +13,27 @@ use tokio_util::sync::CancellationToken;
 use super::freshness::{ContentDigest, ReadObservation};
 use super::io;
 use super::params::{
-    SnapshotCaptureParams, SnapshotExpectedPath, SnapshotHashParams, SnapshotRevertOperation,
-    SnapshotRevertParams,
+    SnapshotCaptureParams, SnapshotExpectedPath, SnapshotHashParams, SnapshotReadChunkParams,
+    SnapshotReleaseParams, SnapshotRevertOperation, SnapshotRevertParams, SnapshotStageChunkParams,
 };
 use super::policy::PathPolicy;
-use super::service::{ResponseBudget, Service, before_json, run_locked, snapshot_limit};
+use super::service::{
+    ResponseBudget, Service, before_json, run_locked, snapshot_limit, snapshot_limit_bytes,
+};
+use super::stage::{SNAPSHOT_CHUNK_MAX_BYTES, SNAPSHOT_INLINE_MAX_BYTES, StageStore, Staged};
+use crate::blocking::run_blocking;
 use crate::ports::audit::lock;
 use crate::registry::Registry;
 
-pub(super) const SNAPSHOT_MAX_BYTES: usize = 8 * 1024 * 1024;
 const ABSENT_HASH: &str = "absent";
 
 /// Registers the snapshot methods beside the filesystem methods that produce their data.
 pub(super) fn register(registry: Registry, service: Arc<Service>) -> Registry {
     let capture = Arc::clone(&service);
     let hash = Arc::clone(&service);
+    let read_chunk = Arc::clone(&service);
+    let stage_chunk = Arc::clone(&service);
+    let release = Arc::clone(&service);
     registry
         .implement("snapshot.capture", move |params, context: CallContext| {
             let response = ResponseBudget::from_context(&context);
@@ -33,6 +41,21 @@ pub(super) fn register(registry: Registry, service: Arc<Service>) -> Registry {
         })
         .implement("snapshot.hash", move |params, context: CallContext| {
             Arc::clone(&hash).hash_snapshot(params, context.cancel().clone())
+        })
+        .implement(
+            "snapshot.read-chunk",
+            move |params, context: CallContext| {
+                Arc::clone(&read_chunk).read_snapshot_chunk(params, context.cancel().clone())
+            },
+        )
+        .implement(
+            "snapshot.stage-chunk",
+            move |params, context: CallContext| {
+                Arc::clone(&stage_chunk).stage_snapshot_chunk(params, context.cancel().clone())
+            },
+        )
+        .implement("snapshot.release", move |params, context: CallContext| {
+            Arc::clone(&release).release_snapshot(params, context.cancel().clone())
         })
         .implement("snapshot.revert", move |params, context: CallContext| {
             let response = ResponseBudget::from_context(&context);
@@ -58,11 +81,113 @@ impl Service {
                 return Ok(result);
             }
             let (size, _) = io::current_metadata(&policy, &params.path)?;
-            snapshot_limit(&params.path, size)?;
-            let observed = io::read(&policy, &params.path, SNAPSHOT_MAX_BYTES, &cancel)?;
-            let result = before_json(Some(&observed.bytes));
-            let result = response.preflight_snapshot(result)?;
+            let captured = self.capture_file(
+                &policy,
+                &params.path,
+                size,
+                snapshot_limit_bytes(params.snapshot_max_bytes),
+                &cancel,
+            )?;
+            let result = response.preflight_snapshot(captured.json())?;
+            captured.keep_staged();
             Ok(result)
+        })
+        .await
+    }
+
+    /// Reads a file for a checkpoint: inline when it is small, otherwise
+    /// streamed into the staging area in fixed memory.
+    ///
+    /// `size` is the length the caller already observed; it decides the limit
+    /// check and the inline-or-staged choice, while the stream itself enforces
+    /// the limit again on the bytes that actually arrive.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// let captured = service.capture_file(&policy, path, size, limit, &cancel)?;
+    /// let before = captured.json();
+    /// ```
+    pub(super) fn capture_file(
+        &self,
+        policy: &super::policy::CompiledPolicy,
+        path: &Path,
+        size: u64,
+        max_bytes: u64,
+        cancel: &CancellationToken,
+    ) -> Result<CapturedFile<'_>, RemoteError> {
+        snapshot_limit(path, size, max_bytes)?;
+        if size <= SNAPSHOT_INLINE_MAX_BYTES {
+            let observed = io::read(policy, path, SNAPSHOT_INLINE_MAX_BYTES as usize, cancel)?;
+            return Ok(CapturedFile::Inline(observed.bytes));
+        }
+        let mut source = io::open_regular_for_streaming(policy, path)?;
+        let staged = self
+            .state
+            .stage
+            .stage_stream(&mut source, size, max_bytes, cancel)
+            .map_err(|error| oversized_while_streaming(path, max_bytes, error))?;
+        Ok(CapturedFile::Staged(StagedGuard::new(
+            &self.state.stage,
+            staged,
+        )))
+    }
+
+    async fn read_snapshot_chunk(
+        self: Arc<Self>,
+        params: SnapshotReadChunkParams,
+        cancel: CancellationToken,
+    ) -> Result<Value, RemoteError> {
+        run_blocking(move || {
+            io::check_cancel(&cancel)?;
+            self.authorize("snapshot.read-chunk", false)?;
+            let length = params.length.min(SNAPSHOT_CHUNK_MAX_BYTES);
+            let bytes = self
+                .state
+                .stage
+                .read_chunk(&params.staged_id, params.offset, length)?;
+            Ok(json!({"contentBase64": STANDARD.encode(bytes)}))
+        })
+        .await
+    }
+
+    async fn stage_snapshot_chunk(
+        self: Arc<Self>,
+        params: SnapshotStageChunkParams,
+        cancel: CancellationToken,
+    ) -> Result<Value, RemoteError> {
+        run_blocking(move || {
+            io::check_cancel(&cancel)?;
+            self.authorize("snapshot.stage-chunk", false)?;
+            let bytes = decode_node_base64(&params.content_base64);
+            if bytes.len() as u64 > SNAPSHOT_CHUNK_MAX_BYTES {
+                return Err(RemoteError::new(
+                    codes::INVALID_PARAMS,
+                    format!(
+                        "Cannot stage {} bytes at once: a chunk holds at most {SNAPSHOT_CHUNK_MAX_BYTES} bytes.",
+                        bytes.len()
+                    ),
+                ));
+            }
+            let staged_bytes =
+                self.state
+                    .stage
+                    .append_chunk(&params.staged_id, params.offset, &bytes)?;
+            Ok(json!({"stagedBytes": staged_bytes}))
+        })
+        .await
+    }
+
+    async fn release_snapshot(
+        self: Arc<Self>,
+        params: SnapshotReleaseParams,
+        cancel: CancellationToken,
+    ) -> Result<Value, RemoteError> {
+        run_blocking(move || {
+            io::check_cancel(&cancel)?;
+            self.authorize("snapshot.release", false)?;
+            self.state.stage.release(&params.staged_id)?;
+            Ok(json!({"ok": true}))
         })
         .await
     }
@@ -138,6 +263,11 @@ impl Service {
             };
             let all_paths = revert_paths(&params);
             assert_initial_containment(params.containment_root.as_deref(), &all_paths)?;
+            // Refuse a malformed content source now, while nothing has been
+            // touched, rather than halfway down the replay.
+            for operation in &params.operations {
+                operation.restore_source()?;
+            }
             let checked_paths = all_paths.iter().map(PathBuf::as_path).collect::<Vec<_>>();
             let policy = compiler.compile(
                 &self,
@@ -148,6 +278,11 @@ impl Service {
                 &cancel,
             )?;
             let reverted = decide_revert(&policy, &params.expected, &cancel, &mut hasher)?;
+            if !reverted {
+                // An upload the hub got wrong must fail here, before the
+                // first mutation, not as a half-applied replay.
+                verify_staged_sources(&self.state.stage, &params.operations, &cancel)?;
+            }
             // The expected-state pass is the last safe cancellation point. The
             // replay below is one reverse transaction from the caller's point
             // of view, so a cancellation after the first mutation must not
@@ -187,19 +322,20 @@ impl Service {
                         remove_created_file(&policy, path)?;
                         lock(&self.state.ledger).forget(&params.chat_id, path);
                     }
-                    SnapshotRevertOperation::Restore {
-                        path,
-                        content_base64,
-                    } => restore_bytes(&self, &policy, &params.chat_id, path, content_base64)?,
-                    SnapshotRevertOperation::Move {
-                        path,
-                        moved_to,
-                        content_base64,
-                    } => {
+                    SnapshotRevertOperation::Restore { path, .. } => {
+                        let source = operation
+                            .restore_source()?
+                            .expect("a restore carries a content source");
+                        restore_content(&self, &policy, &params.chat_id, path, source)?;
+                    }
+                    SnapshotRevertOperation::Move { path, moved_to, .. } => {
+                        let source = operation
+                            .restore_source()?
+                            .expect("a move carries a content source");
                         io::assert_regular(&policy, moved_to, "revert move")?;
                         io::move_no_overwrite(&policy, moved_to, path)?;
                         lock(&self.state.ledger).rekey(&params.chat_id, moved_to, path);
-                        restore_bytes(&self, &policy, &params.chat_id, path, content_base64)?;
+                        restore_content(&self, &policy, &params.chat_id, path, source)?;
                     }
                 }
             }
@@ -209,7 +345,135 @@ impl Service {
     }
 }
 
+/// A file's pre-mutation bytes as a checkpoint records them.
+pub(super) enum CapturedFile<'a> {
+    /// Small enough to ride in the response as base64.
+    Inline(Vec<u8>),
+    /// Held in the staging area; the response names it and the hub pulls it.
+    Staged(StagedGuard<'a>),
+}
+
+impl CapturedFile<'_> {
+    /// The SHA-256 of the captured bytes.
+    pub(super) fn sha256(&self) -> String {
+        match self {
+            Self::Inline(bytes) => io::sha256_hex(bytes),
+            Self::Staged(guard) => guard.staged.sha256.clone(),
+        }
+    }
+
+    /// The `before` value of a `mutations[]` record.
+    pub(super) fn json(&self) -> Value {
+        match self {
+            Self::Inline(bytes) => before_json(Some(bytes)),
+            Self::Staged(guard) => json!({
+                "exists": true,
+                "hash": guard.staged.sha256,
+                "sizeBytes": guard.staged.size,
+                "stagedId": guard.staged.id,
+            }),
+        }
+    }
+
+    /// Keeps a staged copy alive past this value, because the response that
+    /// names it is being returned. A capture that errors instead drops the
+    /// guard, which releases the copy nobody will ever pull.
+    pub(super) fn keep_staged(self) {
+        if let Self::Staged(guard) = self {
+            guard.keep();
+        }
+    }
+}
+
+/// Releases a staged copy when dropped, unless the response naming it went out.
+pub(super) struct StagedGuard<'a> {
+    store: &'a StageStore,
+    staged: Staged,
+    keep: bool,
+}
+
+impl<'a> StagedGuard<'a> {
+    pub(super) fn new(store: &'a StageStore, staged: Staged) -> Self {
+        Self {
+            store,
+            staged,
+            keep: false,
+        }
+    }
+
+    fn keep(mut self) {
+        self.keep = true;
+    }
+}
+
+impl Drop for StagedGuard<'_> {
+    fn drop(&mut self) {
+        if !self.keep {
+            let _ = self.store.release(&self.staged.id);
+        }
+    }
+}
+
+/// Names the file in a refusal raised while streaming it into the staging
+/// area, where the stage itself only knows byte counts.
+fn oversized_while_streaming(path: &Path, max_bytes: u64, error: RemoteError) -> RemoteError {
+    let too_large = error
+        .details
+        .as_ref()
+        .and_then(|details| details.get("kind"))
+        .and_then(Value::as_str)
+        == Some("snapshot_too_large");
+    if !too_large {
+        return error;
+    }
+    error
+        .with_detail("resolvedPath", path.to_string_lossy().as_ref())
+        .with_detail("limitBytes", max_bytes)
+}
+
+/// Where a revert operation's restored bytes come from.
+enum RestoreSource<'a> {
+    Inline(&'a str),
+    Staged { id: &'a str, hash: &'a str },
+}
+
 impl SnapshotRevertOperation {
+    /// The content source of a restore or move, or `None` for a create.
+    /// Exactly one of `contentBase64` or `stagedId` (with its `hash`) must
+    /// be present.
+    fn restore_source(&self) -> Result<Option<RestoreSource<'_>>, RemoteError> {
+        let (path, content, staged_id, hash) = match self {
+            Self::Create { .. } => return Ok(None),
+            Self::Restore {
+                path,
+                content_base64,
+                staged_id,
+                hash,
+            }
+            | Self::Move {
+                path,
+                content_base64,
+                staged_id,
+                hash,
+                ..
+            } => (path, content_base64, staged_id, hash),
+        };
+        match (content, staged_id, hash) {
+            (Some(content), None, _) => Ok(Some(RestoreSource::Inline(content))),
+            (None, Some(id), Some(hash)) => Ok(Some(RestoreSource::Staged { id, hash })),
+            _ => Err(RemoteError::new(
+                codes::INVALID_PARAMS,
+                format!(
+                    "Cannot revert \"{}\": expected contentBase64, or stagedId with hash, received contentBase64: {}, stagedId: {}, hash: {}.",
+                    path.display(),
+                    content.is_some(),
+                    staged_id.is_some(),
+                    hash.is_some()
+                ),
+            )),
+        }
+    }
+
     fn path(&self) -> &Path {
         match self {
             Self::Create { path } | Self::Restore { path, .. } | Self::Move { path, .. } => path,
@@ -368,6 +632,64 @@ fn already_reverted(
     Ok(reverted_path.is_some())
 }
 
+/// Proves every staged upload a revert names still matches the digest the hub
+/// sent for it, reading each in fixed memory.
+fn verify_staged_sources(
+    store: &StageStore,
+    operations: &[SnapshotRevertOperation],
+    cancel: &CancellationToken,
+) -> Result<(), RemoteError> {
+    for operation in operations {
+        if let Some(RestoreSource::Staged { id, hash }) = operation.restore_source()? {
+            store.open_verified(id, hash, cancel)?;
+        }
+    }
+    Ok(())
+}
+
+fn restore_content(
+    service: &Service,
+    policy: &super::policy::CompiledPolicy,
+    chat_id: &str,
+    path: &Path,
+    source: RestoreSource<'_>,
+) -> Result<(), RemoteError> {
+    match source {
+        RestoreSource::Inline(content_base64) => {
+            restore_bytes(service, policy, chat_id, path, content_base64)
+        }
+        RestoreSource::Staged { id, hash } => {
+            restore_staged(service, policy, chat_id, path, id, hash)
+        }
+    }
+}
+
+/// Publishes a staged upload over `path` by copying it in fixed memory; the
+/// copy is checked against `hash` before it replaces anything.
+fn restore_staged(
+    service: &Service,
+    policy: &super::policy::CompiledPolicy,
+    chat_id: &str,
+    path: &Path,
+    staged_id: &str,
+    hash: &str,
+) -> Result<(), RemoteError> {
+    let (mut staged, size) = service.state.stage.open(staged_id)?;
+    let mtime = io::write_atomic_stream(policy, path, &mut staged, hash)?;
+    let digest = ContentDigest {
+        sha256: hash.to_owned(),
+        size,
+    };
+    lock(&service.state.ledger).record_read_digest(
+        chat_id,
+        path,
+        &digest,
+        mtime,
+        ReadObservation::WholeFile,
+    );
+    Ok(())
+}
+
 fn restore_bytes(
     service: &Service,
     policy: &super::policy::CompiledPolicy,
@@ -463,6 +785,7 @@ mod tests {
     use crate::consent::source::ConsentSource;
     use crate::filesystem::io::sha256_hex as hash_bytes;
     use crate::filesystem::service::{NativeMoveIo, NativeWriteIo, State, WriteIo};
+    use crate::filesystem::stage::{SNAPSHOT_DEFAULT_MAX_BYTES, SNAPSHOT_HARD_MAX_BYTES};
     use crate::runtime_home::{RuntimeSlot, write_runtime_slot_config};
     use crate::test_support::{ScratchDir, scratch_dir};
 
@@ -684,7 +1007,9 @@ mod tests {
     fn restore(path: PathBuf, content_base64: &str) -> SnapshotRevertOperation {
         SnapshotRevertOperation::Restore {
             path,
-            content_base64: content_base64.to_owned(),
+            content_base64: Some(content_base64.to_owned()),
+            staged_id: None,
+            hash: None,
         }
     }
 
@@ -710,7 +1035,10 @@ mod tests {
         for path in [&missing, &directory] {
             let result = Arc::clone(&service)
                 .capture_snapshot(
-                    SnapshotCaptureParams { path: path.clone() },
+                    SnapshotCaptureParams {
+                        path: path.clone(),
+                        snapshot_max_bytes: None,
+                    },
                     ResponseBudget::unbounded(),
                     CancellationToken::new(),
                 )
@@ -727,7 +1055,10 @@ mod tests {
             std::os::unix::fs::symlink(&target, &link).unwrap();
             let result = Arc::clone(&service)
                 .capture_snapshot(
-                    SnapshotCaptureParams { path: link },
+                    SnapshotCaptureParams {
+                        path: link,
+                        snapshot_max_bytes: None,
+                    },
                     ResponseBudget::unbounded(),
                     CancellationToken::new(),
                 )
@@ -749,7 +1080,10 @@ mod tests {
 
         let refused = Arc::clone(&service)
             .capture_snapshot(
-                SnapshotCaptureParams { path },
+                SnapshotCaptureParams {
+                    path,
+                    snapshot_max_bytes: None,
+                },
                 ResponseBudget::unbounded(),
                 cancel,
             )
@@ -764,29 +1098,358 @@ mod tests {
         );
     }
 
+    fn pattern_bytes(len: usize) -> Vec<u8> {
+        (0..len).map(|index| (index * 7 % 251) as u8).collect()
+    }
+
+    /// Uploads `bytes` the way the hub does: sequential bounded chunks.
+    async fn upload_staged(service: &Arc<Service>, staged_id: &str, bytes: &[u8]) {
+        let mut offset = 0_u64;
+        for chunk in bytes.chunks(SNAPSHOT_CHUNK_MAX_BYTES as usize) {
+            let result = Arc::clone(service)
+                .stage_snapshot_chunk(
+                    SnapshotStageChunkParams {
+                        staged_id: staged_id.to_owned(),
+                        offset,
+                        content_base64: STANDARD.encode(chunk),
+                    },
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            offset += chunk.len() as u64;
+            assert_eq!(result["stagedBytes"], offset);
+        }
+    }
+
+    /// Pulls a staged capture the way the hub does: sequential bounded chunks.
+    async fn download_staged(service: &Arc<Service>, staged_id: &str) -> Vec<u8> {
+        let mut downloaded = Vec::new();
+        loop {
+            let result = Arc::clone(service)
+                .read_snapshot_chunk(
+                    SnapshotReadChunkParams {
+                        staged_id: staged_id.to_owned(),
+                        offset: downloaded.len() as u64,
+                        length: SNAPSHOT_CHUNK_MAX_BYTES,
+                    },
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            let chunk = STANDARD
+                .decode(result["contentBase64"].as_str().unwrap())
+                .unwrap();
+            if chunk.is_empty() {
+                return downloaded;
+            }
+            downloaded.extend_from_slice(&chunk);
+        }
+    }
+
     #[tokio::test]
-    async fn capture_enforces_the_eight_mebibyte_limit_and_preflights_its_frame() {
+    async fn capture_refuses_a_file_past_the_requested_limit_and_names_size_and_limit() {
         let (home, service) = fixture();
         let oversized = home.join("oversized");
-        std::fs::File::create(&oversized)
-            .unwrap()
-            .set_len((SNAPSHOT_MAX_BYTES + 1) as u64)
-            .unwrap();
+        std::fs::write(&oversized, vec![b'x'; 2048]).unwrap();
         let error = Arc::clone(&service)
             .capture_snapshot(
-                SnapshotCaptureParams { path: oversized },
+                SnapshotCaptureParams {
+                    path: oversized.clone(),
+                    snapshot_max_bytes: Some(1024),
+                },
                 ResponseBudget::unbounded(),
                 CancellationToken::new(),
             )
             .await
             .unwrap_err();
-        assert_eq!(error.details.unwrap()["kind"], "snapshot_too_large");
+        let details = error.details.as_ref().unwrap();
+        assert_eq!(
+            (
+                details["kind"].as_str(),
+                details["sizeBytes"].as_u64(),
+                details["limitBytes"].as_u64(),
+            ),
+            (Some("snapshot_too_large"), Some(2048), Some(1024)),
+            "(snapshot.capture): expected snapshot_too_large naming size 2048 and limit 1024 | received: {error:?}"
+        );
+        assert!(
+            error.message.contains("2048") && error.message.contains("1024"),
+            "(snapshot.capture): the refusal must state the size and the limit | received: {}",
+            error.message
+        );
+    }
 
+    #[tokio::test]
+    async fn capture_clamps_a_requested_limit_to_the_hard_ceiling() {
+        assert_eq!(snapshot_limit_bytes(None), SNAPSHOT_DEFAULT_MAX_BYTES);
+        assert_eq!(snapshot_limit_bytes(Some(5)), 5);
+        assert_eq!(
+            snapshot_limit_bytes(Some(u64::MAX)),
+            SNAPSHOT_HARD_MAX_BYTES
+        );
+    }
+
+    #[tokio::test]
+    async fn capture_of_a_file_past_the_inline_size_stages_it_and_the_chunks_reassemble_it() {
+        let (home, service) = fixture();
+        let large = home.join("large.bin");
+        let bytes = pattern_bytes(3 * 1024 * 1024 + 123);
+        std::fs::write(&large, &bytes).unwrap();
+
+        let result = Arc::clone(&service)
+            .capture_snapshot(
+                SnapshotCaptureParams {
+                    path: large,
+                    snapshot_max_bytes: None,
+                },
+                ResponseBudget::limited(4096),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+
+        assert!(
+            result.get("contentBase64").is_none(),
+            "(snapshot.capture): a staged capture must not inline its bytes | received keys: {:?}",
+            result
+                .as_object()
+                .map(|object| object.keys().collect::<Vec<_>>())
+        );
+        assert_eq!(result["exists"], true);
+        assert_eq!(result["sizeBytes"], bytes.len());
+        assert_eq!(result["hash"], hash_bytes(&bytes));
+        let staged_id = result["stagedId"].as_str().unwrap().to_owned();
+        let downloaded = download_staged(&service, &staged_id).await;
+        assert_eq!(
+            downloaded.len(),
+            bytes.len(),
+            "(snapshot.read-chunk): expected {} downloaded bytes",
+            bytes.len()
+        );
+        assert!(downloaded == bytes, "(snapshot.read-chunk): bytes differ");
+
+        Arc::clone(&service)
+            .release_snapshot(
+                SnapshotReleaseParams { staged_id },
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(service.state.stage.staged_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn capture_releases_its_staged_copy_when_the_response_cannot_be_sent() {
+        let (home, service) = fixture();
+        let large = home.join("large.bin");
+        std::fs::write(&large, pattern_bytes(2 * 1024 * 1024)).unwrap();
+
+        let error = Arc::clone(&service)
+            .capture_snapshot(
+                SnapshotCaptureParams {
+                    path: large,
+                    snapshot_max_bytes: None,
+                },
+                ResponseBudget::limited(16),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.code, codes::FRAME_TOO_LARGE);
+        assert_eq!(
+            service.state.stage.staged_count(),
+            0,
+            "(snapshot.capture): a refused response must not leave a staged copy behind"
+        );
+    }
+
+    #[tokio::test]
+    async fn revert_restores_a_staged_upload_byte_identical() {
+        let (home, service) = fixture();
+        let path = home.join("restored.bin");
+        std::fs::write(&path, b"after").unwrap();
+        let bytes = pattern_bytes(20 * 1024 * 1024 + 11);
+        upload_staged(&service, "upload-restore", &bytes).await;
+
+        let result = revert(
+            &service,
+            SnapshotRevertParams {
+                chat_id: "chat".to_owned(),
+                containment_root: None,
+                expected: vec![expected(path.clone(), b"after", None)],
+                operations: vec![SnapshotRevertOperation::Restore {
+                    path: path.clone(),
+                    content_base64: None,
+                    staged_id: Some("upload-restore".to_owned()),
+                    hash: Some(hash_bytes(&bytes)),
+                }],
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result, json!({"revertedFiles":1}));
+        let restored = std::fs::read(&path).unwrap();
+        assert_eq!(restored.len(), bytes.len());
+        assert!(
+            restored == bytes,
+            "(snapshot.revert): restored bytes differ"
+        );
+        let entry = lock(&service.state.ledger)
+            .complete_entry("chat", &path)
+            .unwrap();
+        assert_eq!(
+            (entry.sha256, entry.size),
+            (hash_bytes(&bytes), bytes.len() as u64)
+        );
+    }
+
+    #[tokio::test]
+    async fn revert_refuses_a_staged_upload_with_the_wrong_hash_before_changing_anything() {
+        let (home, service) = fixture();
+        let small = home.join("small");
+        let large = home.join("large.bin");
+        std::fs::write(&small, b"after-small").unwrap();
+        std::fs::write(&large, b"after-large").unwrap();
+        let bytes = pattern_bytes(2 * 1024 * 1024);
+        upload_staged(&service, "upload-corrupt", &bytes).await;
+
+        let error = revert(
+            &service,
+            SnapshotRevertParams {
+                chat_id: "chat".to_owned(),
+                containment_root: None,
+                expected: vec![
+                    expected(small.clone(), b"after-small", None),
+                    expected(large.clone(), b"after-large", None),
+                ],
+                operations: vec![
+                    restore(small.clone(), "YmVmb3JlLXNtYWxs"),
+                    SnapshotRevertOperation::Restore {
+                        path: large.clone(),
+                        content_base64: None,
+                        staged_id: Some("upload-corrupt".to_owned()),
+                        hash: Some(hash_bytes(b"not the uploaded bytes")),
+                    },
+                ],
+            },
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(
+            error.details.as_ref().unwrap()["kind"],
+            "snapshot_stage_corrupt",
+            "(snapshot.revert): expected snapshot_stage_corrupt | received: {error:?}"
+        );
+        assert_eq!(
+            std::fs::read(&small).unwrap(),
+            b"after-small",
+            "(snapshot.revert): the first operation must not run when a later upload fails verification"
+        );
+        assert_eq!(std::fs::read(&large).unwrap(), b"after-large");
+    }
+
+    #[tokio::test]
+    async fn revert_refuses_a_missing_staged_upload_before_changing_anything() {
+        let (home, service) = fixture();
+        let small = home.join("small");
+        let large = home.join("large.bin");
+        std::fs::write(&small, b"after-small").unwrap();
+        std::fs::write(&large, b"after-large").unwrap();
+
+        let error = revert(
+            &service,
+            SnapshotRevertParams {
+                chat_id: "chat".to_owned(),
+                containment_root: None,
+                expected: vec![
+                    expected(small.clone(), b"after-small", None),
+                    expected(large.clone(), b"after-large", None),
+                ],
+                operations: vec![
+                    restore(small.clone(), "YmVmb3JlLXNtYWxs"),
+                    SnapshotRevertOperation::Restore {
+                        path: large,
+                        content_base64: None,
+                        staged_id: Some("never-uploaded".to_owned()),
+                        hash: Some(hash_bytes(b"x")),
+                    },
+                ],
+            },
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(
+            error.details.as_ref().unwrap()["kind"],
+            "snapshot_stage_missing",
+            "(snapshot.revert): expected snapshot_stage_missing | received: {error:?}"
+        );
+        assert_eq!(std::fs::read(&small).unwrap(), b"after-small");
+    }
+
+    #[tokio::test]
+    async fn revert_refuses_an_operation_with_both_or_neither_content_source() {
+        let (home, service) = fixture();
+        let path = home.join("file");
+        std::fs::write(&path, b"after").unwrap();
+        let both = SnapshotRevertOperation::Restore {
+            path: path.clone(),
+            content_base64: Some("YQ==".to_owned()),
+            staged_id: Some("up".to_owned()),
+            hash: Some(hash_bytes(b"a")),
+        };
+        let neither = SnapshotRevertOperation::Restore {
+            path: path.clone(),
+            content_base64: None,
+            staged_id: None,
+            hash: None,
+        };
+        let staged_without_hash = SnapshotRevertOperation::Restore {
+            path: path.clone(),
+            content_base64: None,
+            staged_id: Some("up".to_owned()),
+            hash: None,
+        };
+        for (label, operation) in [
+            ("both", both),
+            ("neither", neither),
+            ("stagedId without hash", staged_without_hash),
+        ] {
+            let error = revert(
+                &service,
+                SnapshotRevertParams {
+                    chat_id: "chat".to_owned(),
+                    containment_root: None,
+                    expected: vec![expected(path.clone(), b"after", None)],
+                    operations: vec![operation],
+                },
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(
+                error.code,
+                codes::INVALID_PARAMS,
+                "(snapshot.revert {label}): expected INVALID_PARAMS | received: {error:?}"
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), b"after");
+        }
+    }
+
+    #[tokio::test]
+    async fn capture_preflights_its_frame() {
+        let (home, service) = fixture();
         let framed = home.join("framed");
         std::fs::write(&framed, vec![b'x'; 1024]).unwrap();
         let error = Arc::clone(&service)
             .capture_snapshot(
-                SnapshotCaptureParams { path: framed },
+                SnapshotCaptureParams {
+                    path: framed,
+                    snapshot_max_bytes: None,
+                },
                 ResponseBudget::limited(128),
                 CancellationToken::new(),
             )
@@ -921,7 +1584,9 @@ mod tests {
                 operations: vec![SnapshotRevertOperation::Move {
                     path: source.clone(),
                     moved_to: moved_to.clone(),
-                    content_base64: "YmVmb3JlLW1vdmU=".to_owned(),
+                    content_base64: Some("YmVmb3JlLW1vdmU=".to_owned()),
+                    staged_id: None,
+                    hash: None,
                 }],
             },
         )
@@ -1001,7 +1666,9 @@ mod tests {
                     SnapshotRevertOperation::Move {
                         path: source,
                         moved_to: destination,
-                        content_base64: "c291cmNl".to_owned(),
+                        content_base64: Some("c291cmNl".to_owned()),
+                        staged_id: None,
+                        hash: None,
                     },
                 ],
             },
@@ -1196,7 +1863,10 @@ mod tests {
             .await
             .unwrap();
         let pending = Arc::clone(&service).capture_snapshot(
-            SnapshotCaptureParams { path },
+            SnapshotCaptureParams {
+                path,
+                snapshot_max_bytes: None,
+            },
             ResponseBudget::unbounded(),
             cancel,
         );
@@ -1235,7 +1905,10 @@ mod tests {
         let capture = tokio::spawn(async move {
             capture_service
                 .capture_snapshot(
-                    SnapshotCaptureParams { path: capture_path },
+                    SnapshotCaptureParams {
+                        path: capture_path,
+                        snapshot_max_bytes: None,
+                    },
                     ResponseBudget::unbounded(),
                     CancellationToken::new(),
                 )

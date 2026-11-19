@@ -5,7 +5,7 @@
 
 import { getRuntimeClient } from '../../runtime-client';
 import { getOptionalBoolean, getRequiredTextArg } from '../arg-parsing';
-import { withMutationPersistence } from '../file-mutation-snapshot';
+import { snapshotCaptureParams, withMutationPersistence } from '../file-mutation-snapshot';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -88,6 +88,7 @@ export async function executeEditFile(
   };
   const resolvedPath = resolveAndValidatePath(args.path, options);
 
+  const snapshotParams = await snapshotCaptureParams(context);
   const { result } = await withMutationPersistence(context, [resolvedPath], () =>
     runtime.fs.editFile(
       {
@@ -97,7 +98,7 @@ export async function executeEditFile(
         oldString: args.oldString,
         newString: args.newString,
         ...(args.replaceAll !== undefined ? { replaceAll: args.replaceAll } : {}),
-        captureSnapshot: Boolean(context.assistantMessageId),
+        ...snapshotParams,
         ...runtimePathPolicy(options),
       },
       context.signal ? { signal: context.signal } : undefined

@@ -23,6 +23,8 @@ pub(super) struct ReadParams {
 pub(super) struct Mutation {
     pub chat_id: String,
     pub capture_snapshot: bool,
+    /// Largest file a checkpoint may hold; absent means the runtime default.
+    pub snapshot_max_bytes: Option<u64>,
     pub path_policy: Option<PathPolicy>,
 }
 
@@ -89,8 +91,33 @@ pub(super) struct ListParams {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(super) struct SnapshotCaptureParams {
     pub path: PathBuf,
+    /// Largest file a checkpoint may hold; absent means the runtime default.
+    pub snapshot_max_bytes: Option<u64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct SnapshotReadChunkParams {
+    pub staged_id: String,
+    pub offset: u64,
+    pub length: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct SnapshotStageChunkParams {
+    pub staged_id: String,
+    pub offset: u64,
+    pub content_base64: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct SnapshotReleaseParams {
+    pub staged_id: String,
 }
 
 #[derive(Deserialize)]
@@ -127,11 +154,15 @@ pub(super) enum SnapshotRevertOperation {
     },
     Restore {
         path: PathBuf,
-        content_base64: String,
+        content_base64: Option<String>,
+        staged_id: Option<String>,
+        hash: Option<String>,
     },
     Move {
         path: PathBuf,
         moved_to: PathBuf,
-        content_base64: String,
+        content_base64: Option<String>,
+        staged_id: Option<String>,
+        hash: Option<String>,
     },
 }

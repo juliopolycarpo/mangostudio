@@ -524,6 +524,70 @@ The deliberate contrast is with checkpoints, which stream bytes to hub-owned blo
 only remaining copy of a file the machine owned, and it belongs where a restore can reach it
 without a hub.
 
+### Checkpoints of large files
+
+A file whose bytes fit one frame travels inline: `snapshot.capture` and a mutation's
+`before` carry `contentBase64`, and a revert operation carries it back. Past 1 MiB
+(`SNAPSHOT_INLINE_MAX_BYTES`) the bytes move as bounded slices instead, so no frame and no
+process buffer grows with the file:
+
+- **Capture.** The runtime copies the file into its staging directory while hashing it, and
+  the `before` record carries `sizeBytes`, `hash` and a `stagedId` instead of content. The
+  hub reads the capture with `snapshot.read-chunk` (at most 1 MiB per call) into a temporary
+  blob that it renames to its content hash only once the digest matches, then calls
+  `snapshot.release`. A copy the hub never releases is swept after 15 minutes; every call
+  into the staging area, reads included, sweeps the expired ones.
+- **Bounded pull.** The hub does not trust the runtime to stay inside its own bounds. The pull
+  stops at the smaller of the reported size and the checkpoint limit, asks for no more than is
+  left of that, and fails on a chunk longer than requested or an empty one before the reported
+  size, so a faulty peer cannot make the hub write past the limit.
+- **Hub partials.** A stream interrupted before the rename leaves a `.part` file in
+  `<checkpoints dir>/.incoming`. No row references it, so retention never counts or deletes
+  it; each new stream deletes the ones untouched for an hour.
+- **Staging area.** It is private to the account running the runtime: a directory under the
+  runtime home (`~/.mango/runtime/stage`, or the OS temp directory when that cannot be
+  secured), created owner-only (`0700`, or an owner-only DACL on Windows) under a fresh random
+  name that is never adopted if it already exists, and removed whenever nothing is staged.
+  Staged files are created exclusively (`0600`) and reopened without following symlinks. The
+  area holds at most 2 GiB and 256 files. A capture reserves its size before it copies a
+  byte, so one that cannot fit is refused up front and a failed copy gives the bytes back.
+- **Revert.** The hub uploads a stored blob over 1 MiB with `snapshot.stage-chunk` (sequential
+  offsets) and names it in the operation as `stagedId` plus `hash`. The runtime verifies every
+  staged upload against its hash before the first file changes, then streams each one through
+  the same temporary-file-and-rename write a small restore uses, checking the digest again as
+  it writes. A missing or corrupt upload therefore refuses the whole revert untouched.
+- **Limit.** `checkpoints.max_file_bytes` (env `MANGO_CHECKPOINTS_MAX_FILE_BYTES`, default
+  128 MiB) is sent as `snapshotMaxBytes` with every checkpointed mutation, and the runtime
+  clamps it to 1 GiB (`SNAPSHOT_HARD_MAX_BYTES`). A mutation of a bigger file is refused
+  before it changes anything, with a `snapshot_too_large` error that names the size and the
+  limit, so no edit lands that undo could not reverse. The 128 MiB default stays under the
+  256 MiB per-chat blob budget retention enforces.
+
+- **Message budget.** A revert stages every large blob of the message before it writes the
+  first file, which is what lets the runtime validate the whole set and refuse a bad one with
+  nothing changed. The staging area is bounded, so the hub bounds the capture side instead of
+  batching the uploads (a failure in a second batch would leave the first one written): one
+  message may hold at most 1 GiB and 128 blobs past 1 MiB
+  (`SNAPSHOT_MESSAGE_STAGED_MAX_BYTES`, `SNAPSHOT_MESSAGE_STAGED_MAX_BLOBS`), half of what the
+  runtime stages. `snapshotMaxBytes` shrinks to what is left of that budget, down to 1 MiB, so a
+  larger file is refused before it changes, with the `snapshot_too_large` error naming the
+  reduced limit. Files of 1 MiB or less are never refused for the budget. Rows are counted when
+  stored, so tool calls of one message that capture at the same moment can overshoot it; the
+  runtime's own staging bounds then fail that revert before any file changes.
+- **Older runtimes.** SSH and HTTP environments connect without requiring the hub's release,
+  so a runtime may predate all of this. The hub reads the runtime's method list
+  (`runtime.discover`, cached per build fingerprint) and uses `snapshotMaxBytes` and the
+  staging methods only when `snapshot.read-chunk`, `snapshot.stage-chunk` and
+  `snapshot.release` are all there. Otherwise a capture keeps the runtime's own 8 MiB inline
+  ceiling, and a revert sends every blob inline up to that size
+  (`SNAPSHOT_LEGACY_INLINE_MAX_BYTES`). A bigger blob, captured earlier by a newer runtime,
+  is refused before the revert sends anything, with a message that names its size. A runtime
+  that cannot answer `runtime.discover` counts as an older one.
+
+Edit, write and delete still require a complete earlier read, which caps a text file at
+10 MiB and a binary one at 256 KiB, so in practice `move_file` and revert are what reach
+files this large.
+
 Because of that, listing backups by reading manifests only works for machines the hub can
 reach — so an offline machine's sets would silently vanish from the page that promises them.
 A hub-side index (`library_backups`) says _that_ a set exists; the manifest on the machine

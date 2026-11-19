@@ -8,6 +8,7 @@ import { getRequiredInteger, getRequiredTextArg } from '../arg-parsing';
 import {
   attachBeforeFields,
   type BeforeOmittedReason,
+  snapshotCaptureParams,
   withMutationPersistence,
 } from '../file-mutation-snapshot';
 import { registerTool } from '../registry';
@@ -98,6 +99,7 @@ export async function executeReplaceRange(
   };
   const resolvedPath = resolveAndValidatePath(args.path, options);
 
+  const snapshotParams = await snapshotCaptureParams(context);
   const { result, captured } = await withMutationPersistence(context, [resolvedPath], () =>
     runtime.fs.replaceRange(
       {
@@ -107,7 +109,7 @@ export async function executeReplaceRange(
         startLine: args.startLine,
         endLine: args.endLine,
         content: args.content,
-        captureSnapshot: Boolean(context.assistantMessageId),
+        ...snapshotParams,
         ...runtimePathPolicy(options),
       },
       context.signal ? { signal: context.signal } : undefined

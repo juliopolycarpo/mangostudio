@@ -175,6 +175,11 @@
             "type": "boolean",
             "description": "When true, the runtime also requires fsRead and checkpoints consent because the result returns prior file bytes for checkpointing."
           },
+          "snapshotMaxBytes": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Largest file a checkpoint may hold, in bytes. A larger file is refused before anything changes."
+          },
           "inputPath": {
             "type": "string"
           },
@@ -267,6 +272,13 @@
                     },
                     "hash": {
                       "type": "string"
+                    },
+                    "sizeBytes": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "stagedId": {
+                      "type": "string"
                     }
                   }
                 },
@@ -327,6 +339,11 @@
           "captureSnapshot": {
             "type": "boolean",
             "description": "When true, the runtime also requires fsRead and checkpoints consent because the result returns prior file bytes for checkpointing."
+          },
+          "snapshotMaxBytes": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Largest file a checkpoint may hold, in bytes. A larger file is refused before anything changes."
           },
           "inputPath": {
             "type": "string"
@@ -416,6 +433,13 @@
                     },
                     "hash": {
                       "type": "string"
+                    },
+                    "sizeBytes": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "stagedId": {
+                      "type": "string"
                     }
                   }
                 },
@@ -477,6 +501,11 @@
           "captureSnapshot": {
             "type": "boolean",
             "description": "When true, the runtime also requires fsRead and checkpoints consent because the result returns prior file bytes for checkpointing."
+          },
+          "snapshotMaxBytes": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Largest file a checkpoint may hold, in bytes. A larger file is refused before anything changes."
           },
           "inputPath": {
             "type": "string"
@@ -576,6 +605,13 @@
                     },
                     "hash": {
                       "type": "string"
+                    },
+                    "sizeBytes": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "stagedId": {
+                      "type": "string"
                     }
                   }
                 },
@@ -638,6 +674,11 @@
           "captureSnapshot": {
             "type": "boolean",
             "description": "When true, the runtime also requires fsRead and checkpoints consent because the result returns prior file bytes for checkpointing."
+          },
+          "snapshotMaxBytes": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Largest file a checkpoint may hold, in bytes. A larger file is refused before anything changes."
           },
           "inputPath": {
             "type": "string"
@@ -737,6 +778,13 @@
                     },
                     "hash": {
                       "type": "string"
+                    },
+                    "sizeBytes": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "stagedId": {
+                      "type": "string"
                     }
                   }
                 },
@@ -796,6 +844,11 @@
           "captureSnapshot": {
             "type": "boolean",
             "description": "When true, the runtime also requires fsRead and checkpoints consent because the result returns prior file bytes for checkpointing."
+          },
+          "snapshotMaxBytes": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Largest file a checkpoint may hold, in bytes. A larger file is refused before anything changes."
           },
           "inputPath": {
             "type": "string"
@@ -879,6 +932,13 @@
                     },
                     "hash": {
                       "type": "string"
+                    },
+                    "sizeBytes": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "stagedId": {
+                      "type": "string"
                     }
                   }
                 },
@@ -940,6 +1000,11 @@
           "captureSnapshot": {
             "type": "boolean",
             "description": "When true, the runtime also requires fsRead and checkpoints consent because the result returns prior file bytes for checkpointing."
+          },
+          "snapshotMaxBytes": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Largest file a checkpoint may hold, in bytes. A larger file is refused before anything changes."
           },
           "inputFrom": {
             "type": "string"
@@ -1032,6 +1097,13 @@
                       "type": "string"
                     },
                     "hash": {
+                      "type": "string"
+                    },
+                    "sizeBytes": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "stagedId": {
                       "type": "string"
                     }
                   }
@@ -1386,6 +1458,11 @@
             "type": "boolean",
             "description": "When true, the runtime also requires fsRead and checkpoints consent because the result returns prior file bytes for checkpointing."
           },
+          "snapshotMaxBytes": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Largest file a checkpoint may hold, in bytes. A larger file is refused before anything changes."
+          },
           "operations": {
             "type": "array",
             "items": {
@@ -1733,6 +1810,13 @@
                       "type": "string"
                     },
                     "hash": {
+                      "type": "string"
+                    },
+                    "sizeBytes": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "stagedId": {
                       "type": "string"
                     }
                   }
@@ -2148,6 +2232,11 @@
         "properties": {
           "path": {
             "type": "string"
+          },
+          "snapshotMaxBytes": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Largest file a checkpoint may hold, in bytes. A larger file is refused before anything changes."
           }
         }
       },
@@ -2164,6 +2253,13 @@
             "type": "string"
           },
           "hash": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "stagedId": {
             "type": "string"
           }
         }
@@ -2207,6 +2303,127 @@
       "capabilities": [
         "checkpoints",
         "fsRead"
+      ]
+    },
+    {
+      "name": "snapshot.read-chunk",
+      "description": "Reads one bounded slice of a snapshot staged by a capture too large to return inline.",
+      "params": {
+        "type": "object",
+        "required": [
+          "stagedId",
+          "offset",
+          "length"
+        ],
+        "properties": {
+          "stagedId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Staged snapshot id, 1 to 64 characters from [A-Za-z0-9_-]."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "length": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1048576
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "contentBase64"
+        ],
+        "properties": {
+          "contentBase64": {
+            "type": "string"
+          }
+        }
+      },
+      "capabilities": [
+        "checkpoints",
+        "fsRead"
+      ]
+    },
+    {
+      "name": "snapshot.stage-chunk",
+      "description": "Appends one slice of a snapshot to stage for a revert whose content is too large to send inline.",
+      "params": {
+        "type": "object",
+        "required": [
+          "stagedId",
+          "offset",
+          "contentBase64"
+        ],
+        "properties": {
+          "stagedId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Staged snapshot id, 1 to 64 characters from [A-Za-z0-9_-]."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "contentBase64": {
+            "type": "string",
+            "maxLength": 1398104
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "stagedBytes"
+        ],
+        "properties": {
+          "stagedBytes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "capabilities": [
+        "checkpoints",
+        "fsWrite"
+      ]
+    },
+    {
+      "name": "snapshot.release",
+      "description": "Frees a staged snapshot. Releasing an id the runtime no longer holds succeeds.",
+      "params": {
+        "type": "object",
+        "required": [
+          "stagedId"
+        ],
+        "properties": {
+          "stagedId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Staged snapshot id, 1 to 64 characters from [A-Za-z0-9_-]."
+          }
+        }
+      },
+      "result": {
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          }
+        }
+      },
+      "capabilities": [
+        "checkpoints"
       ]
     },
     {
@@ -2270,8 +2487,7 @@
                   "type": "object",
                   "required": [
                     "type",
-                    "path",
-                    "contentBase64"
+                    "path"
                   ],
                   "properties": {
                     "type": {
@@ -2283,6 +2499,15 @@
                     },
                     "contentBase64": {
                       "type": "string"
+                    },
+                    "stagedId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "description": "Staged snapshot id, 1 to 64 characters from [A-Za-z0-9_-]."
+                    },
+                    "hash": {
+                      "type": "string"
                     }
                   }
                 },
@@ -2291,8 +2516,7 @@
                   "required": [
                     "type",
                     "path",
-                    "movedTo",
-                    "contentBase64"
+                    "movedTo"
                   ],
                   "properties": {
                     "type": {
@@ -2306,6 +2530,15 @@
                       "type": "string"
                     },
                     "contentBase64": {
+                      "type": "string"
+                    },
+                    "stagedId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "description": "Staged snapshot id, 1 to 64 characters from [A-Za-z0-9_-]."
+                    },
+                    "hash": {
                       "type": "string"
                     }
                   }

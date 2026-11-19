@@ -149,7 +149,7 @@ mod tests {
     #[test]
     fn the_catalog_carries_the_current_baseline_of_methods_and_topics() {
         let catalog = catalog();
-        assert_eq!(catalog.methods.len(), 68);
+        assert_eq!(catalog.methods.len(), 71);
         assert_eq!(catalog.events.len(), 6);
     }
 

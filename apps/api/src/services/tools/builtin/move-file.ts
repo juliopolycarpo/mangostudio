@@ -4,7 +4,7 @@
  */
 
 import { getRuntimeClient } from '../../runtime-client';
-import { withMutationPersistence } from '../file-mutation-snapshot';
+import { snapshotCaptureParams, withMutationPersistence } from '../file-mutation-snapshot';
 import { registerTool } from '../registry';
 import type { ToolContext } from '../types';
 import {
@@ -82,6 +82,7 @@ export async function executeMoveFile(
     throw new PathAccessError('Source and destination must be different paths.');
   }
 
+  const snapshotParams = await snapshotCaptureParams(context);
   const { result } = await withMutationPersistence(context, [from, to], () =>
     runtime.fs.moveFile(
       {
@@ -90,7 +91,7 @@ export async function executeMoveFile(
         inputTo: args.to,
         resolvedFrom: from,
         resolvedTo: to,
-        captureSnapshot: Boolean(context.assistantMessageId),
+        ...snapshotParams,
         ...runtimePathPolicy(validationOptions),
       },
       context.signal ? { signal: context.signal } : undefined
