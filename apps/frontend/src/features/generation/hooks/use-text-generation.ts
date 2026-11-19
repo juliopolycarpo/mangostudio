@@ -49,6 +49,7 @@ import {
 import { sendWithExternalConsent } from '@/features/external-agents/send-with-consent';
 import { externalUnavailableText } from '@/features/external-agents/useExternalAgents';
 import type { useOptimisticMessages } from '@/features/generation/hooks/use-optimistic-messages';
+import { StreamUpdateCoalescer } from '@/features/generation/stream-update-coalescer';
 import {
   createTextGenerationStreamState,
   reduceTextGenerationStreamChunk,
@@ -290,6 +291,19 @@ function applyStreamMessageUpdate(
   if (!update) return;
   updateOptimisticMessage(chatId, update.targetMessageId, update.patch);
 }
+
+/**
+ * The chunks that only grow the text of a row: the ones a fast provider sends faster than
+ * the display refreshes, and so the ones written to the cache once per frame rather than
+ * once per chunk. Every other chunk (a tool call, an id swap, `done`) changes what the row
+ * is, and is written when it arrives.
+ */
+const STREAMED_DELTA_CHUNK_TYPES: ReadonlySet<StreamChunk['type']> = new Set([
+  'text',
+  'thinking',
+  'external_text',
+  'external_reasoning',
+]);
 
 /** Handles text generation: creates messages, drives SSE stream, updates optimistic UI. */
 export function useTextGeneration({
@@ -561,6 +575,11 @@ export function useTextGeneration({
       // refusal and its sign-in command exist. A re-read would replace them with the server's
       // rows, which hold neither.
       let refusedBeforeStart = false;
+      // Text deltas reach the cache once per frame; see `STREAMED_DELTA_CHUNK_TYPES`. Every other
+      // write below flushes first, so the cache never sees a row's updates out of order.
+      const streamUpdates = new StreamUpdateCoalescer((update) =>
+        updateOptimisticMessage(activeChatId, update.targetMessageId, update.patch)
+      );
 
       try {
         // Late on purpose. The turn is dispatched on the runner the hub has
@@ -581,16 +600,21 @@ export function useTextGeneration({
             streamState = reduceTextGenerationStreamChunk(streamState, chunk, {
               pendingSubagentName,
             });
-            applyStreamMessageUpdate(
-              activeChatId,
-              streamState.userMessageUpdate,
-              updateOptimisticMessage
-            );
-            applyStreamMessageUpdate(
-              activeChatId,
-              streamState.aiMessageUpdate,
-              updateOptimisticMessage
-            );
+            if (STREAMED_DELTA_CHUNK_TYPES.has(chunk.type) && streamState.aiMessageUpdate) {
+              streamUpdates.push(streamState.aiMessageUpdate);
+            } else {
+              streamUpdates.flush();
+              applyStreamMessageUpdate(
+                activeChatId,
+                streamState.userMessageUpdate,
+                updateOptimisticMessage
+              );
+              applyStreamMessageUpdate(
+                activeChatId,
+                streamState.aiMessageUpdate,
+                updateOptimisticMessage
+              );
+            }
 
             if (chunk.type === 'assistant_message_id') {
               activeTurnRef.current = { chatId: activeChatId, messageId: chunk.messageId };
@@ -691,6 +715,9 @@ export function useTextGeneration({
               );
         });
 
+        // The last deltas may still be held for the frame; the writes below patch on top of them.
+        streamUpdates.flush();
+
         // A stream can close cleanly without ever having sealed the row.
         // `finalizeInterruptedTurn` ends a cancelled turn without yielding
         // `done` — and since Stop keeps reading, that is now its ordinary path —
@@ -715,6 +742,7 @@ export function useTextGeneration({
           });
         }
       } catch (error: unknown) {
+        streamUpdates.flush();
         streamThrew = true;
         const isAbort = error instanceof Error && error.name === 'AbortError';
         // Every end that reaches this catch is one a card at `generating` never
@@ -767,6 +795,8 @@ export function useTextGeneration({
         // refusal where it clicked as well as in the transcript.
         if (recovery || review) throw error;
       } finally {
+        streamUpdates.flush();
+        streamUpdates.dispose();
         activeTurnRef.current = null;
         stopRequestedRef.current = null;
         stream.setAbortController(null);

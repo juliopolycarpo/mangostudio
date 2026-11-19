@@ -312,6 +312,109 @@ describe('useTextGeneration — thinking segment tracking', () => {
   });
 });
 
+describe('useTextGeneration — text deltas reach the cache once per frame', () => {
+  beforeEach(() => {
+    mockStream.mockReset();
+    mockGenerateChatTitle.mockReset();
+  });
+
+  type TextPatchCall = [string, string, { text?: string; isGenerating?: boolean }];
+
+  /** The text the cache was handed by delta writes; the `done` patch also carries `text`, so it is left out. */
+  const deltaWrites = (calls: TextPatchCall[]) =>
+    calls.flatMap(([, , patch]) =>
+      patch.text === undefined || patch.isGenerating !== undefined ? [] : [patch.text]
+    );
+
+  it('writes a burst of deltas as the first one plus the newest, before the next chunk kind', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      makeStreamFn([
+        { type: 'text', text: 'a', done: false },
+        { type: 'text', text: 'b', done: false },
+        { type: 'text', text: 'c', done: false },
+        { type: 'text', text: 'd', done: false },
+        { type: 'tool_call_started', callId: 'c1', name: 'search', done: false },
+        { type: 'done', done: true, generationTime: '1.0s' },
+      ])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+    await act(async () => {
+      await result.current.handleRespond('test prompt');
+    });
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+
+    const calls = props.updateOptimisticMessage.mock.calls as TextPatchCall[];
+    const written = deltaWrites(calls);
+    expect(
+      written,
+      `(text writes): expected the first delta, then the merged newest | received: ${JSON.stringify(written)}`
+    ).toEqual(['a', 'abcd']);
+  });
+
+  it('puts the held text in the cache before the write that ends the turn', async () => {
+    const props = makeProps();
+    mockStream.mockImplementation(
+      makeStreamFn([
+        { type: 'text', text: 'one ', done: false },
+        { type: 'text', text: 'two', done: false },
+        { type: 'done', done: true, generationTime: '1.0s' },
+      ])
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+    await act(async () => {
+      await result.current.handleRespond('test prompt');
+    });
+    await waitFor(() => expect(result.current.isGenerating).toBe(false));
+
+    const calls = props.updateOptimisticMessage.mock.calls as TextPatchCall[];
+    const deltaIndexes = calls.flatMap(([, , patch], index) =>
+      patch.text !== undefined && patch.isGenerating === undefined ? [index] : []
+    );
+    const lastTextWrite = deltaIndexes.at(-1) ?? -1;
+    const sealingWrite = calls.findIndex(([, , patch]) => patch.isGenerating === false);
+    expect(calls[lastTextWrite]?.[2].text).toBe('one two');
+    expect(
+      lastTextWrite,
+      `(write order): expected the text write before the sealing write | received: text at ${lastTextWrite}, sealing at ${sealingWrite}`
+    ).toBeLessThan(sealingWrite);
+  });
+
+  it('writes the held text when the stream is stopped before it ends', async () => {
+    const props = makeProps();
+    const controllerDone = createDeferred<void>();
+    mockStream.mockImplementation(
+      (_req: unknown, onChunk: (chunk: { type: 'text'; text: string; done: false }) => void) => {
+        onChunk({ type: 'text', text: 'a', done: false });
+        onChunk({ type: 'text', text: 'b', done: false });
+        return controllerDone.promise.then(() => {
+          throw createAbortError();
+        });
+      }
+    );
+
+    const { result } = renderHook(() => useTextGeneration(props));
+    let turn: Promise<void> = Promise.resolve();
+    await act(async () => {
+      turn = result.current.handleRespond('test prompt');
+      await Promise.resolve();
+    });
+    await act(async () => {
+      controllerDone.resolve();
+      await turn;
+    });
+
+    const calls = props.updateOptimisticMessage.mock.calls as TextPatchCall[];
+    const written = deltaWrites(calls);
+    expect(
+      written.at(-1),
+      `(last text write on abort): expected the newest text | received: ${JSON.stringify(written)}`
+    ).toBe('ab');
+  });
+});
+
 describe('useTextGeneration — maxToolIterations forwarding', () => {
   beforeEach(() => {
     mockStream.mockReset();
