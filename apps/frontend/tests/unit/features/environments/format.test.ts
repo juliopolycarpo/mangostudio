@@ -1029,6 +1029,38 @@ describe('toolchainProcessLine', () => {
     );
   });
 
+  it('names the installation auto resolves to, not the inherited-PATH one a spawn would not run', () => {
+    const nvmPath = '/home/dev/.nvm/versions/node/v20/bin/node';
+    const status = runtimeStatus({
+      id: 'node',
+      installations: [
+        installation({ path: '/usr/bin/node', version: '18.19.0', effective: true }),
+        installation({ path: nvmPath, version: '20.11.0', pathSource: 'nvm' }),
+      ],
+      autoSelection: {
+        reason: 'manager-default',
+        dir: '/home/dev/.nvm/versions/node/v20/bin',
+        installationPath: nvmPath,
+      },
+    });
+
+    expect(toolchainProcessLine(en, identityResolver, status, 'auto')).toBe(
+      'Processes run the automatic choice: 20.11.0 from nvm.'
+    );
+  });
+
+  it('keeps reading the effective installation when auto resolves to the inherited PATH', () => {
+    const status = runtimeStatus({
+      id: 'node',
+      installations: [installation({ path: '/usr/bin/node', version: '18.19.0', effective: true })],
+      autoSelection: { reason: 'inherited-path', installationPath: '/usr/bin/node' },
+    });
+
+    expect(toolchainProcessLine(en, identityResolver, status, 'auto')).toBe(
+      'Processes run the automatic choice: 18.19.0, a system install.'
+    );
+  });
+
   it('has nothing to say on auto when nothing is effective', () => {
     const status = runtimeStatus({ id: 'node', installations: [] });
     expect(toolchainProcessLine(en, identityResolver, status, 'auto')).toBeUndefined();

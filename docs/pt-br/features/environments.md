@@ -59,6 +59,12 @@ Windows isso inclui `%ProgramFiles%\nodejs`, porque o MSI do Node edita o `PATH`
 runtime que já está rodando nunca vê essa edição. A seleção é omitida para um runtime cujo
 manifesto não anuncia `features.toolchain`; esse par mantém seu próprio `PATH` como antes.
 
+Os status de runtime de Node e Bun trazem essa resposta como `autoSelection`: `reason`
+(`manager-default`, `well-known-directory` ou `inherited-path`), o `dir` colocado na frente e o
+`installationPath` da instalação detectada em que ele cai. Vem da mesma resolução que monta o
+`PATH` de um processo, então a linha "Os processos rodam …" do cartão nomeia a instalação que os
+processos recebem, e não a que o `PATH` herdado coloca primeiro.
+
 ## O que o scanner sabe
 
 Cada instalação carrega um `pathSource`: `nvm`, `fnm` e `volta` vêm da classificação de

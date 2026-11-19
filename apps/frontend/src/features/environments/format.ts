@@ -739,7 +739,15 @@ export function toolchainProcessLine(
   selection: ToolchainChoice
 ): string | undefined {
   if (selection === 'auto') {
-    const { installation } = effectiveInstallation(status);
+    // The runtime resolves `auto` with the code that builds a spawn's PATH, so
+    // its answer wins over the inherited-PATH effective installation, which a
+    // manager default may sit in front of. Older runtimes send no answer.
+    const autoPath = status.autoSelection?.installationPath;
+    const installation =
+      (autoPath === undefined
+        ? undefined
+        : status.installations.find((candidate) => candidate.path === autoPath)) ??
+      effectiveInstallation(status).installation;
     if (!installation) return undefined;
     const source = installation.pathSource ?? 'system';
     return source === 'system'
