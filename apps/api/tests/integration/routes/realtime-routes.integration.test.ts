@@ -10,6 +10,7 @@ import {
   gitTopic,
   REALTIME_CLOSE_CODES,
   type RealtimeServerMessage,
+  repoTopic,
   SETTINGS_TOPIC,
 } from '@mangostudio/shared/realtime';
 import type { Elysia } from 'elysia';
@@ -692,6 +693,70 @@ describe('realtime WebSocket subscriptions', () => {
     });
     await Bun.sleep(50);
     expect(client.messages).toHaveLength(beforeForeignPublish);
+  });
+
+  it('delivers repo frames to every socket of the owner and to no other user, with no ownership lookup', async () => {
+    // A repo key is an opaque digest and the bus is user-scoped, so a stranger
+    // who subscribes to a key they guessed still receives only their own frames.
+    const { bus, httpUrl, wsUrl } = await startServer({
+      ownsChat: () => Promise.reject(new Error('repo topics must not look up chat ownership')),
+    });
+    const owner = await signUp(httpUrl);
+    const stranger = await signUp(httpUrl);
+    const topic = repoTopic('Ab3_-sharedKey');
+    const ownerFirstTab = connect(wsUrl, { Cookie: owner.cookie });
+    const ownerSecondTab = connect(wsUrl, { Cookie: owner.cookie });
+    const strangerTab = connect(wsUrl, { Cookie: stranger.cookie });
+
+    await Promise.all([ownerFirstTab.opened, ownerSecondTab.opened, strangerTab.opened]);
+    await Promise.all([
+      ownerFirstTab.nextMessage(),
+      ownerSecondTab.nextMessage(),
+      strangerTab.nextMessage(),
+    ]);
+    for (const client of [ownerFirstTab, ownerSecondTab, strangerTab]) {
+      send(client.socket, { type: 'subscribe', topics: [topic] });
+      expect(await client.nextMessage()).toEqual({ type: 'subscribed', topics: [topic] });
+    }
+
+    bus.publish(owner.id, { type: 'invalidate', topic, scopes: ['state', 'github'] });
+    const frame: RealtimeServerMessage = {
+      type: 'invalidate',
+      topic,
+      scopes: ['state', 'github'],
+    };
+    expect(await ownerFirstTab.nextMessage()).toEqual(frame);
+    expect(await ownerSecondTab.nextMessage()).toEqual(frame);
+    await Bun.sleep(50);
+    expect(strangerTab.messages.some((message) => message.type === 'invalidate')).toBe(false);
+
+    // Unsubscribing stops delivery for that socket only.
+    send(ownerFirstTab.socket, { type: 'unsubscribe', topics: [topic] });
+    await Bun.sleep(50);
+    bus.publish(owner.id, { type: 'invalidate', topic });
+    expect(await ownerSecondTab.nextMessage()).toEqual({ type: 'invalidate', topic });
+    await Bun.sleep(50);
+    expect(ownerFirstTab.messages.filter((message) => message.type === 'invalidate')).toHaveLength(
+      1
+    );
+  });
+
+  it('rejects a malformed repo topic as unsupported and keeps the socket open', async () => {
+    const { httpUrl, wsUrl } = await startServer();
+    const user = await signUp(httpUrl);
+    const client = connect(wsUrl, { Cookie: user.cookie });
+
+    await client.opened;
+    await client.nextMessage();
+    send(client.socket, { type: 'subscribe', topics: ['repo:/home/user/project'] });
+    expect(await client.nextMessage()).toEqual({
+      type: 'error',
+      error: 'Unsupported realtime topic',
+      code: ERROR_CODES.UNSUPPORTED,
+    });
+
+    send(client.socket, { type: 'ping' });
+    expect(await client.nextMessage()).toEqual({ type: 'pong' });
   });
 
   it('acknowledges idempotent re-subscribe of already-active topics', async () => {

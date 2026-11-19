@@ -7,6 +7,7 @@ import {
   isGitAvailable,
   runGit,
 } from '../infrastructure/git-cli';
+import { resolveRepoKey } from './git-repo-key';
 
 const NOT_A_REPOSITORY_EXIT_CODE = 128;
 /**
@@ -65,10 +66,17 @@ export async function getRepoState(
   const root = await getRepoRoot(workdir, signal, selection);
   if (!root) return { state: 'not-a-repo', workdir };
 
+  // The key read is independent of the status read, so they overlap; a failed
+  // key resolves to `undefined` and costs the state nothing.
+  const [status, repoKey] = await Promise.all([
+    getRepoStatus(root, signal, selection),
+    selection ? resolveRepoKey(selection, root) : undefined,
+  ]);
   return {
     state: 'repo',
     workdir,
     root,
-    status: await getRepoStatus(root, signal, selection),
+    status,
+    ...(repoKey ? { repoKey } : {}),
   };
 }

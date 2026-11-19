@@ -1,6 +1,7 @@
 import { GIT_SCOPES, type GitScope, gitTopic } from '@mangostudio/shared/realtime';
 
 import { getRealtimeBus } from '../../../services/realtime/realtime-bus';
+import { publishRepoInvalidationForChat } from './repo-invalidation';
 
 const FILE_MUTATION_SCOPES = ['state', 'diffs'] as const satisfies readonly GitScope[];
 const TURN_COMPLETION_SCOPES = [
@@ -55,12 +56,18 @@ function invalidationKey(target: GitInvalidationTarget): string {
   return `${target.userId}\0${target.chatId}`;
 }
 
+/**
+ * The per-chat frame goes out synchronously. The repository-wide frame follows
+ * it from a lookup (the chat's workdir, then its repository key) that never
+ * rejects, so a write is never reported failed because the key was unavailable.
+ */
 function publishGitInvalidation(target: GitInvalidationTarget, scopes: readonly GitScope[]): void {
   getRealtimeBus().publish(target.userId, {
     type: 'invalidate',
     topic: gitTopic(target.chatId),
     scopes: [...scopes],
   });
+  void publishRepoInvalidationForChat(target, scopes);
 }
 
 /** Publishes only after the owning application mutation has succeeded. */

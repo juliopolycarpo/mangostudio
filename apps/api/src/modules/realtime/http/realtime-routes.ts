@@ -7,6 +7,7 @@ import {
   HUB_WEBSOCKET_BACKPRESSURE_LIMIT_BYTES,
   HUB_WEBSOCKET_MAX_PAYLOAD_BYTES,
   parseGitTopic,
+  parseRepoTopic,
   REALTIME_CLOSE_CODES,
   REALTIME_IDLE_TIMEOUT_SECONDS,
   type RealtimeClientMessage,
@@ -62,8 +63,16 @@ const USER_SCOPED_TOPICS: ReadonlySet<string> = new Set<string>([
   CHATS_TOPIC,
 ]);
 
+/**
+ * `repo:<key>` is user-scoped too, though it names a resource. The key is an
+ * opaque digest of a repository the hub resolved, and a repo frame is published
+ * to the bus under the id of the user whose write it was, so a socket only ever
+ * receives frames for the repositories of its own account. A key that matches
+ * nothing the user owns is simply a topic that never fires; there is nothing to
+ * enumerate and no ownership to check.
+ */
 function isUserScopedTopic(topic: string): boolean {
-  return USER_SCOPED_TOPICS.has(topic);
+  return USER_SCOPED_TOPICS.has(topic) || parseRepoTopic(topic) !== undefined;
 }
 
 type RejectionReason = BrowserSocketRejection;

@@ -1,5 +1,6 @@
 import Type, { type Static } from 'typebox';
 
+import { RepoKeySchema } from '../realtime/schemas';
 import { ReadonlyArraySchema } from '../schema-helpers';
 
 export const GitFileStatusSchema = Type.Union([
@@ -47,6 +48,12 @@ export const GitRepoStateSchema = Type.Union([
     workdir: Type.String(),
     root: Type.String(),
     status: GitStatusSchema,
+    /**
+     * The `repo:<key>` realtime topic's key. Absent when the hub could not
+     * resolve the repository's common directory; the panel then relies on
+     * `git:<chatId>` alone.
+     */
+    repoKey: Type.Optional(RepoKeySchema),
   }),
 ]);
 
@@ -82,6 +89,8 @@ export const GitSummarySchema = Type.Object({
   behind: Type.Integer({ minimum: 0 }),
   changedFileCount: Type.Integer({ minimum: 0 }),
   workdir: Type.String(),
+  /** Same key as `GitRepoState.repoKey`: chats that share it share one repository. */
+  repoKey: Type.Optional(RepoKeySchema),
 });
 
 /**
