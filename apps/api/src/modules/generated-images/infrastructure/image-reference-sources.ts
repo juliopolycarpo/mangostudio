@@ -32,6 +32,9 @@ export const IMAGE_REFERENCE_SOURCES: readonly ImageReferenceSource[] = [
   // URLs inside larger text or JSON: the image part and tool result a turn
   // checkpoints before its artifact rows exist, and the provider's own history.
   { table: 'messages', column: 'text', ...MESSAGE_ROW },
+  // The prompt a model actually saw, derived from `text`, so it can repeat any
+  // `/images/<name>` URL the message text carries.
+  { table: 'messages', column: 'expandedText', ...MESSAGE_ROW },
   { table: 'messages', column: 'parts', ...MESSAGE_ROW },
   { table: 'messages', column: 'providerState', ...MESSAGE_ROW },
   // A streaming turn checkpoints full MessageParts as deltas, and only folds

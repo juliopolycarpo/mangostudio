@@ -81,6 +81,29 @@ describe('listChatGeneratedImageFilenames', () => {
     expect([...found].sort()).toEqual([artifactUrl, legacyUrl, partUrl].map(filenameOf).sort());
   });
 
+  it('finds an image only a message expandedText references, and only for that chat', async () => {
+    const user = await insertTestUser();
+    const chat = await insertTestChat(user.id);
+    const otherChat = await insertTestChat(user.id);
+    const expandedUrl = await images.save();
+    const otherExpandedUrl = await images.save();
+    for (const [chatId, url] of [
+      [chat.id, expandedUrl],
+      [otherChat.id, otherExpandedUrl],
+    ] as const) {
+      const messageId = await insertImageMessage({ chatId, userId: user.id });
+      await getDb()
+        .updateTable('messages')
+        .set({ expandedText: `expanded ${url}` })
+        .where('id', '=', messageId)
+        .execute();
+    }
+
+    const found = await listChatGeneratedImageFilenames(getDb(), chat.id);
+
+    expect([...found]).toEqual([filenameOf(expandedUrl)]);
+  });
+
   it('finds an image only a streaming checkpoint delta references, and only for that chat', async () => {
     const user = await insertTestUser();
     const chat = await insertTestChat(user.id);
@@ -331,6 +354,26 @@ describe('sweepUnreferencedGeneratedImages', () => {
     expect({ removed, kept: everything.map((url) => images.exists(url)) }).toEqual({
       removed: 0,
       kept: [true, true, true],
+    });
+  });
+
+  it('keeps an old file that only a message expandedText references', async () => {
+    const user = await insertTestUser();
+    const chat = await insertTestChat(user.id);
+    const expandedOnlyUrl = await images.save();
+    const messageId = await insertImageMessage({ chatId: chat.id, userId: user.id });
+    await getDb()
+      .updateTable('messages')
+      .set({ text: '/review', expandedText: `Review this: ${expandedOnlyUrl}` })
+      .where('id', '=', messageId)
+      .execute();
+    await images.age(expandedOnlyUrl, UNREFERENCED_IMAGE_GRACE_MS + HOUR_MS);
+
+    const removed = await sweepUnreferencedGeneratedImages(getDb());
+
+    expect({ removed, expandedOnlyKept: images.exists(expandedOnlyUrl) }).toEqual({
+      removed: 0,
+      expandedOnlyKept: true,
     });
   });
 
