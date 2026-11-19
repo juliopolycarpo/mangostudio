@@ -1,10 +1,11 @@
 import type { GitWorktree } from '@mangostudio/shared/git';
 
 /**
- * A worktree as Git lists it. `isCurrent` is not in Git's output: it depends on
- * which chat is asking, so it is added afterwards by `markCurrentWorktree`.
+ * A worktree as Git lists it. `isCurrent` and `boundByOtherChat` are not in
+ * Git's output: they depend on which chat is asking, so they are added
+ * afterwards by `markCurrentWorktree` and `markBoundByOtherChat`.
  */
-export type ParsedWorktree = Omit<GitWorktree, 'isCurrent'>;
+export type ParsedWorktree = Omit<GitWorktree, 'isCurrent' | 'boundByOtherChat'>;
 
 const WORKTREE_ATTRIBUTE = 'worktree';
 const BRANCH_REF_PREFIX = 'refs/heads/';

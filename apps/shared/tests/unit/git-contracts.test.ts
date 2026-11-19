@@ -187,6 +187,7 @@ describe('Git write contracts', () => {
       head: '0a44a0f9bbf9a15117d5bbc4d543442f2b169d87',
       branch: 'feat/panel',
       isCurrent: false,
+      boundByOtherChat: false,
       isMain: false,
       isBare: false,
       isDetached: false,
@@ -195,9 +196,12 @@ describe('Git write contracts', () => {
     };
 
     expect(Value.Check(GitWorktreeSchema, linked)).toBe(true);
-    // The server answers who is current; an entry without the flag is not a valid one.
-    const { isCurrent: _omitted, ...withoutFlag } = linked;
-    expect(Value.Check(GitWorktreeSchema, withoutFlag)).toBe(false);
+    // The server answers who is current and who else is bound; an entry without
+    // either flag is not a valid one.
+    const { isCurrent: _omitted, ...withoutCurrent } = linked;
+    const { boundByOtherChat: _alsoOmitted, ...withoutBound } = linked;
+    expect(Value.Check(GitWorktreeSchema, withoutCurrent)).toBe(false);
+    expect(Value.Check(GitWorktreeSchema, withoutBound)).toBe(false);
     expect(
       Value.Check(GitWorktreeSchema, { ...linked, head: null, branch: null, isBare: true })
     ).toBe(true);

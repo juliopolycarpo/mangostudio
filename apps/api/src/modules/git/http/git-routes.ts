@@ -56,7 +56,11 @@ import {
   chatWorkdirConflict,
   resolveChatWorkdir,
 } from '../../chats/application/chat-workdir';
-import { type ChatRecord, listByIdsForUser } from '../../chats/infrastructure/chat-repository';
+import {
+  type ChatRecord,
+  listByIdsForUser,
+  listOtherChatWorkdirs,
+} from '../../chats/infrastructure/chat-repository';
 import { NoModelAvailableError } from '../../generation/application/resolve-model';
 import { modelUnavailableResponse } from '../../generation/http/model-unavailable-response';
 import {
@@ -96,6 +100,7 @@ import {
   switchBranch,
   unstagePaths,
 } from '../application/git-write-service';
+import type { OtherChatWorkdirs } from '../application/worktree-ownership';
 import { GitCliError } from '../infrastructure/git-cli';
 
 type GitCommandFailure = ElysiaStatus<503, ApiErrorResponse> | ElysiaStatus<500, ApiErrorResponse>;
@@ -160,6 +165,15 @@ async function routeWorkdir(
     return { error: chatWorkdirConflict() };
   }
   return { error: chatAccessDenied(resolution) };
+}
+
+/**
+ * Where the caller's other chats are bound on the caller's machine: the one
+ * input every worktree list needs that the git layer, which holds no database,
+ * cannot read itself.
+ */
+function otherChatWorkdirsOf(target: GitInvalidationTarget): OtherChatWorkdirs {
+  return () => listOtherChatWorkdirs(target.userId, target.environmentId, target.chatId, getDb());
 }
 
 export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
@@ -807,7 +821,12 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
         const resolved = await routeWorkdir(query.chatId, user?.id ?? '');
         if ('error' in resolved) return resolved.error;
         try {
-          return await listWorktrees(resolved.workdir, request.signal, resolved.invalidationTarget);
+          return await listWorktrees(
+            resolved.workdir,
+            request.signal,
+            resolved.invalidationTarget,
+            otherChatWorkdirsOf(resolved.invalidationTarget)
+          );
         } catch (error) {
           return gitWriteError(error, set);
         }
@@ -835,7 +854,8 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
             resolved.workdir,
             body,
             resolved.invalidationTarget,
-            request.signal
+            request.signal,
+            otherChatWorkdirsOf(resolved.invalidationTarget)
           );
         } catch (error) {
           return gitWriteError(error, set);
@@ -864,7 +884,8 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
             resolved.workdir,
             body,
             resolved.invalidationTarget,
-            request.signal
+            request.signal,
+            otherChatWorkdirsOf(resolved.invalidationTarget)
           );
         } catch (error) {
           return gitWriteError(error, set);

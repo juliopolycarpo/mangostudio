@@ -341,6 +341,34 @@ export async function listChatIdsUnderWorktreeRoot(
     .map((row) => row.id);
 }
 
+/**
+ * The workdir of every other chat one user has bound to a folder on one
+ * machine — everything except `excludeChatId`.
+ *
+ * Returned as the stored strings and left to the caller to compare: whether
+ * two paths name one directory is the target machine's rule (case folding on
+ * Windows, say), not the database's.
+ *
+ * @example
+ * const workdirs = await listOtherChatWorkdirs(userId, environmentId, chatId, db);
+ */
+export async function listOtherChatWorkdirs(
+  userId: string,
+  environmentId: string,
+  excludeChatId: string,
+  db: Kysely<Database>
+): Promise<string[]> {
+  const rows = await db
+    .selectFrom('chats')
+    .select('workdir')
+    .where('userId', '=', userId)
+    .where('environmentId', '=', environmentId)
+    .where('id', '!=', excludeChatId)
+    .where('workdir', 'is not', null)
+    .execute();
+  return rows.flatMap((row) => (row.workdir === null ? [] : [row.workdir]));
+}
+
 export async function getById(id: string, db: Kysely<Database>): Promise<ChatRecord | undefined> {
   const row = await db
     .selectFrom('chats')
