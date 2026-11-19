@@ -875,6 +875,39 @@ pub(crate) enum Event {
     },
 }
 
+impl Event {
+    /// Whether this event ends the turn it belongs to.
+    ///
+    /// Exhaustive on purpose: a new event kind does not compile until someone decides whether it
+    /// ends a turn, which is what lets a hub that has never heard of the kind still end the turn
+    /// from the envelope's `terminal` marker.
+    ///
+    /// # Example
+    /// ```ignore
+    /// assert!(Event::Completed.is_terminal());
+    /// assert!(!Event::ReasoningStarted.is_terminal());
+    /// ```
+    pub(crate) fn is_terminal(&self) -> bool {
+        match self {
+            Self::Cancelled | Self::Completed | Self::Error { .. } => true,
+            Self::CommandsAvailable { .. }
+            | Self::TextDelta { .. }
+            | Self::ReasoningDelta { .. }
+            | Self::ReasoningStarted
+            | Self::ReasoningEnded
+            | Self::ActivityStarted { .. }
+            | Self::ActivityUpdated { .. }
+            | Self::ActivityCompleted { .. }
+            | Self::ApprovalRequested { .. }
+            | Self::ApprovalResolved { .. }
+            | Self::Usage { .. }
+            | Self::ThreadUsage { .. }
+            | Self::AccountLimits { .. }
+            | Self::Notice { .. } => false,
+        }
+    }
+}
+
 /// `ExternalAgentEventEnvelope`: what the topic carries.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -884,5 +917,10 @@ pub(crate) struct EventEnvelope {
     pub native_turn_id: Option<String>,
     pub sequence: u64,
     pub emitted_at_ms: u64,
+    /// `true` on an event that ends the turn, and only to a hub that announced it reads the key
+    /// (see `hub_reads_terminal_marker`): the envelope is closed, so a hub built before the key
+    /// drops the whole event. Absent otherwise, never `false`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<bool>,
     pub event: Event,
 }

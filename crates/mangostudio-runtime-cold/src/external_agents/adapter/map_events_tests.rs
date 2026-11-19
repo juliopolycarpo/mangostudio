@@ -44,6 +44,7 @@ fn assert_valid_event(event: &wire::Event) {
         native_turn_id: Some(String::from("turn-1")),
         sequence: 1,
         emitted_at_ms: EVENT_AT_MS,
+        terminal: event.is_terminal().then_some(true),
         event: event.clone(),
     };
     let payload = serde_json::to_value(&envelope).expect("envelope serializes");

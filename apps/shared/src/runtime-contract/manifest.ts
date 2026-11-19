@@ -251,6 +251,21 @@ export const HubExternalAgentIsolationSchema = Type.Union([
 export type HubExternalAgentIsolation = Static<typeof HubExternalAgentIsolationSchema>;
 
 /**
+ * The `hello.capabilities` key a hub sets to `true` to say its external-agent event envelope
+ * schema declares `terminal`, so the runtime may mark ending events with it.
+ *
+ * Direction matters. The envelope is closed: a hub built before `terminal` existed fails the
+ * frame check on the key and drops the whole event, and a runtime cannot see that hub's schema.
+ * So the runtime emits `terminal` only after the hub announced this key, and a hub that never
+ * does (every older build) keeps receiving envelopes it can read. The Rust runtime spells the
+ * same key in `crates/mangostudio-runtime-cold/src/external_agents/mod.rs`.
+ *
+ * It rides beside `hub`, like `externalAgentIsolation`, because {@link HubIdentitySchema} refuses
+ * unknown members.
+ */
+export const HUB_TERMINAL_MARKER_CAPABILITY = 'externalAgentTerminalMarker';
+
+/**
  * Who is speaking for the hub on this connection. Additive-optional: older
  * hubs omit it, and the runtime's audit log records those as an unidentified
  * hub rather than refusing the handshake.

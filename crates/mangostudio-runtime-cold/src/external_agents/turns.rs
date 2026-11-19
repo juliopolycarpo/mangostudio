@@ -23,6 +23,7 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use super::failure::{AgentFailure, FailureCause, FailureContext, SessionUsability};
+use super::hub_reads_terminal_marker;
 use super::port::Dispatch;
 use super::port::{
     Attachment as OwnedAttachment, CancelReason, ReviewStream, Steer, TurnEvent, TurnRequest,
@@ -165,6 +166,20 @@ impl TurnState {
         })
     }
 
+    /// The envelope's `terminal` marker for `event`: `Some(true)` when it ends the turn and the hub
+    /// announced it reads the key, otherwise absent. Only a terminal event reads the hub's hello,
+    /// so the delta stream never pays for it.
+    fn terminal_marker_for(&self, event: &Event) -> Option<bool> {
+        if !event.is_terminal() {
+            return None;
+        }
+        let reads_marker = self
+            .hub
+            .remote()
+            .is_ok_and(|remote| hub_reads_terminal_marker(&remote.capabilities));
+        reads_marker.then_some(true)
+    }
+
     /// Publishes one event, until the hub stops taking them, when its
     /// envelope fits in `remaining` bytes. Answers whether it reached a hub.
     ///
@@ -188,6 +203,7 @@ impl TurnState {
             native_turn_id: native_turn_id.map(str::to_owned),
             sequence: *sequence + 1,
             emitted_at_ms,
+            terminal: self.terminal_marker_for(&event),
             event,
         };
         let Ok(payload) = serde_json::to_value(&envelope) else {
@@ -1084,6 +1100,13 @@ mod tests {
     }
 
     async fn pair() -> (HubSession, HubSession) {
+        pair_with_hub_capabilities(serde_json::Map::new()).await
+    }
+
+    /// A runtime session and a hub session whose hello announces `hub_capabilities`.
+    async fn pair_with_hub_capabilities(
+        hub_capabilities: serde_json::Map<String, serde_json::Value>,
+    ) -> (HubSession, HubSession) {
         let (port, peer) = port_pair();
         let info = |role: &str| PeerInfo {
             name: "turn-state-test".into(),
@@ -1091,7 +1114,10 @@ mod tests {
             role: role.into(),
         };
         let (runtime, _) = HubSession::spawn(port, SessionOptions::new(info("runtime")));
-        let (hub, _) = HubSession::spawn(peer, SessionOptions::new(info("hub")));
+        let (hub, _) = HubSession::spawn(
+            peer,
+            SessionOptions::new(info("hub")).with_capabilities(hub_capabilities),
+        );
         let (a, b) = tokio::join!(runtime.ready(), hub.ready());
         a.expect("runtime handshake");
         b.expect("hub handshake");
@@ -1102,6 +1128,146 @@ mod tests {
         Event::TextDelta {
             text: format!("chunk {n}"),
         }
+    }
+
+    fn error_event() -> Event {
+        Event::Error {
+            error: AgentError {
+                code: "vendor".into(),
+                message: "the vendor failed".into(),
+                request_id: None,
+                retryable: Some(false),
+                vendor_code: None,
+                truncated: None,
+            },
+        }
+    }
+
+    /// Emits `events` in order and returns each published payload.
+    async fn published(
+        hub_capabilities: serde_json::Map<String, serde_json::Value>,
+        events: Vec<Event>,
+    ) -> Vec<serde_json::Value> {
+        let (runtime, hub) = pair_with_hub_capabilities(hub_capabilities).await;
+        let mut stream = hub.events();
+        let state = TurnState::new(runtime);
+        let count = events.len();
+        for event in events {
+            let emitted = state.emit("s", Some("t"), 0, event, usize::MAX);
+            assert!(
+                matches!(emitted, Emitted::Delivered(_)),
+                "expected every frame delivered"
+            );
+        }
+        let mut payloads = Vec::new();
+        while payloads.len() < count {
+            payloads.push(
+                stream
+                    .recv()
+                    .await
+                    .expect("expected a published frame")
+                    .payload,
+            );
+        }
+        payloads
+    }
+
+    fn announcing_terminal_marker() -> serde_json::Map<String, serde_json::Value> {
+        let serde_json::Value::Object(map) =
+            serde_json::json!({ "externalAgentTerminalMarker": true })
+        else {
+            unreachable!("a json! object literal is an object")
+        };
+        map
+    }
+
+    #[test]
+    fn exactly_the_ending_event_kinds_are_terminal() {
+        assert!(
+            Event::Completed.is_terminal(),
+            "expected completed terminal"
+        );
+        assert!(
+            Event::Cancelled.is_terminal(),
+            "expected cancelled terminal"
+        );
+        assert!(error_event().is_terminal(), "expected error terminal");
+        for event in [
+            text(1),
+            Event::ReasoningStarted,
+            Event::ReasoningEnded,
+            Event::ReasoningDelta { text: "r".into() },
+        ] {
+            assert!(
+                !event.is_terminal(),
+                "expected a progress event to be non-terminal | received {event:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn every_ending_event_is_marked_for_a_hub_that_reads_the_marker() {
+        let payloads = published(
+            announcing_terminal_marker(),
+            vec![text(1), Event::Completed, Event::Cancelled, error_event()],
+        )
+        .await;
+        let marked: Vec<_> = payloads
+            .iter()
+            .map(|payload| payload.get("terminal").cloned())
+            .collect();
+        assert_eq!(
+            marked,
+            [
+                None,
+                Some(serde_json::json!(true)),
+                Some(serde_json::json!(true)),
+                Some(serde_json::json!(true)),
+            ],
+            "expected terminal: true on completed, cancelled and error only | received {payloads:?}"
+        );
+    }
+
+    /// An older hub never announces the capability, and its closed envelope schema would drop an
+    /// event carrying the key, so the runtime must leave the key off.
+    #[tokio::test]
+    async fn no_event_is_marked_for_a_hub_that_never_announced_the_marker() {
+        let payloads = published(
+            serde_json::Map::new(),
+            vec![text(1), Event::Completed, error_event()],
+        )
+        .await;
+        for payload in &payloads {
+            assert!(
+                payload.get("terminal").is_none(),
+                "expected no terminal key for a hub without the capability | received {payload}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_an_explicit_true_announcement_counts_as_reading_the_marker() {
+        let announced = |value: serde_json::Value| {
+            let mut map = serde_json::Map::new();
+            map.insert("externalAgentTerminalMarker".into(), value);
+            crate::external_agents::hub_reads_terminal_marker(&map)
+        };
+        assert!(announced(serde_json::json!(true)), "expected true to count");
+        for value in [
+            serde_json::json!(false),
+            serde_json::json!("true"),
+            serde_json::json!(1),
+            serde_json::Value::Null,
+        ] {
+            assert!(
+                !announced(value.clone()),
+                "expected {value} not to count as announcing the marker"
+            );
+        }
+        assert!(
+            !crate::external_agents::hub_reads_terminal_marker(&serde_json::Map::new()),
+            "expected an absent key not to count"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

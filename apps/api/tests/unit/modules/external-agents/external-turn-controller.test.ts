@@ -1005,6 +1005,158 @@ describe('external turn controller', () => {
     });
   });
 
+  /**
+   * #2537. The runtime marks any event it considers an ending with `terminal: true`, including a
+   * kind this hub has no schema for. The hub ends the turn on the marker alone, without waiting for
+   * silence or asking `runtime.health`: both policies below would take seconds, and the fake
+   * answers `running` forever, so only the marker can end the turn inside the deadline.
+   */
+  describe('an unrecognized event the runtime marked terminal', () => {
+    const SLOW_POLICY = {
+      quietMs: 60_000,
+      maxRecheckMs: 60_000,
+      lastResortMs: 600_000,
+    } as const;
+
+    function emitFutureEvent(
+      runtime: FakeExternalRuntime,
+      type: string,
+      terminal: boolean | undefined
+    ): void {
+      runtime.emitEnvelope({
+        sessionId: runtime.sessionId(),
+        nativeTurnId: 'native-turn-1',
+        sequence: runtime.nextSequence(),
+        emittedAtMs: Date.now(),
+        event: { type } as never,
+        ...(terminal === undefined ? {} : { terminal }),
+      });
+    }
+
+    async function settledWithin(
+      running: Promise<ExternalTurnResult>,
+      ms: number
+    ): Promise<ExternalTurnResult> {
+      const outcome = await Promise.race([
+        running,
+        new Promise<'still-running'>((resolve) => setTimeout(() => resolve('still-running'), ms)),
+      ]);
+      if (outcome === 'still-running') {
+        throw new Error(
+          `turn state: still running after ${ms}ms | expected: a terminal result from an envelope marked terminal: true`
+        );
+      }
+      return outcome;
+    }
+
+    it('ends the turn at once as a vendor error that names the unreadable kind', async () => {
+      const { runtime, controller } = harness({
+        unrecognizedEventPolicy: SLOW_POLICY,
+        sessionHealth: () => 'running',
+      });
+      const liveEvents: ExternalAgentEvent[] = [];
+      const running = startTurn(controller, {
+        observer: { onEvent: (event) => liveEvents.push(event) },
+      });
+      await waitForTurnStart(runtime);
+
+      runtime.emit({ type: 'text_delta', text: 'done' });
+      emitFutureEvent(runtime, 'future_terminal', true);
+
+      const result = await settledWithin(running, 1_000);
+      expect(result.reason).toBe('vendor-error');
+      expect(result.error?.code).toBe('unrecognized_terminal_event');
+      expect(result.error?.message).toContain('future_terminal');
+
+      // The reload and the live stream agree on how it ended.
+      const stored = await readAssistantRow();
+      expect(stored.generating).toBe(false);
+      expect(stored.text).toBe('done');
+      expect(turnPartOf(stored.parts).error?.code).toBe('unrecognized_terminal_event');
+      expect(liveEvents.at(-1)).toMatchObject({
+        type: 'error',
+        error: { code: 'unrecognized_terminal_event' },
+      });
+
+      // The runtime said the turn is over: no health read, and nothing left to cancel.
+      expect(runtime.calls.healthTimeoutMs).toHaveLength(0);
+      expect(runtime.calls.cancel).toHaveLength(0);
+    });
+
+    it('ignores an unrecognized event that is not marked terminal', async () => {
+      const { runtime, controller } = harness({
+        unrecognizedEventPolicy: SLOW_POLICY,
+        sessionHealth: () => 'running',
+      });
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      emitFutureEvent(runtime, 'future_progress', undefined);
+      emitFutureEvent(runtime, 'future_progress', false);
+      // Long enough for a wrongly honoured marker to have ended the turn.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      runtime.emit({ type: 'text_delta', text: 'still here' });
+      runtime.emit({ type: 'completed' });
+
+      const result = await settledWithin(running, 1_000);
+      expect(result.reason).toBe('completed');
+      expect(result.error).toBeUndefined();
+      expect((await readAssistantRow()).text).toBe('still here');
+    });
+
+    it('leaves a known event kind to its own handling whatever the marker says', async () => {
+      const { runtime, controller } = harness({ unrecognizedEventPolicy: SLOW_POLICY });
+      const running = startTurn(controller);
+      await waitForTurnStart(runtime);
+
+      // A known, non-terminal kind carrying the marker is still just progress.
+      runtime.emitEnvelope({
+        sessionId: runtime.sessionId(),
+        nativeTurnId: 'native-turn-1',
+        sequence: runtime.nextSequence(),
+        emittedAtMs: Date.now(),
+        event: { type: 'text_delta', text: 'a' },
+        terminal: true,
+      });
+      runtime.emitEnvelope({
+        sessionId: runtime.sessionId(),
+        nativeTurnId: 'native-turn-1',
+        sequence: runtime.nextSequence(),
+        emittedAtMs: Date.now(),
+        event: { type: 'completed' },
+        terminal: true,
+      });
+
+      const result = await settledWithin(running, 1_000);
+      expect(result.reason).toBe('completed');
+      expect(result.error).toBeUndefined();
+      expect((await readAssistantRow()).text).toBe('a');
+    });
+
+    it('survives the real frame check an envelope with the marker goes through', async () => {
+      const { runtime, controller } = await realHarness({ unrecognizedEventPolicy: SLOW_POLICY });
+      try {
+        const running = startTurn(controller);
+        await waitFor(() => runtime.calls.turn.length === 1, 'the turn to reach the runtime');
+
+        runtime.emitRawFrame({
+          sessionId: runtime.sessionId(),
+          nativeTurnId: 'native-turn-1',
+          sequence: runtime.nextSequence(),
+          emittedAtMs: Date.now(),
+          event: { type: 'future_terminal', outcome: 'finished' },
+          terminal: true,
+        });
+
+        const result = await settledWithin(running, 1_000);
+        expect(result.reason).toBe('vendor-error');
+        expect(result.error?.code).toBe('unrecognized_terminal_event');
+      } finally {
+        await runtime.close();
+      }
+    });
+  });
+
   it('drops events a vendor emits after saying it was done', async () => {
     const { runtime, controller } = harness();
     const running = startTurn(controller);

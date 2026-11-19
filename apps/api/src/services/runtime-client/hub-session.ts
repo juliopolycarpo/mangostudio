@@ -26,6 +26,7 @@ import {
 import { ExternalAgentEventEnvelopeFrameSchema } from '@mangostudio/shared/external-agents';
 import {
   acceptedRuntimeImplementation,
+  HUB_TERMINAL_MARKER_CAPABILITY,
   type HubExternalAgentIsolation,
   type HubIdentity,
   RUNTIME_CONTRACT,
@@ -301,6 +302,8 @@ export async function openHubSession(
     capabilities: {
       contracts: { [RUNTIME_CONTRACT_NAME]: RUNTIME_CONTRACT_VERSION },
       ...(hub ? { hub } : {}),
+      // This build's envelope schema declares `terminal`, so the runtime may use it.
+      [HUB_TERMINAL_MARKER_CAPABILITY]: true,
       ...(options.externalAgentIsolation
         ? { externalAgentIsolation: options.externalAgentIsolation }
         : {}),

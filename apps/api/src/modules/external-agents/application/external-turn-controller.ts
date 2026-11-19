@@ -179,6 +179,9 @@ const DEFAULT_UNRECOGNIZED_EVENT_POLICY: UnrecognizedEventPolicy = {
 /** The error code recorded on a turn the hub ended after an unreadable event went unanswered. */
 const UNRECOGNIZED_EVENT_ERROR_CODE = 'unrecognized_event';
 
+/** The error code on a turn the runtime ended with a marked event kind this hub cannot read. */
+const UNRECOGNIZED_TERMINAL_EVENT_ERROR_CODE = 'unrecognized_terminal_event';
+
 function delay(ms: number): { readonly promise: Promise<void>; readonly cancel: () => void } {
   let timer: ReturnType<typeof setTimeout>;
   const promise = new Promise<void>((resolve) => {
@@ -1042,6 +1045,32 @@ export function createExternalTurnController(
       });
     }
 
+    /**
+     * Ends the turn on an event the runtime marked terminal but this hub's schema does not know.
+     *
+     * The outcome is unknown, so it is recorded as a vendor error naming the kind, through the same
+     * path as every other ending. Nothing is cancelled: the runtime said the turn is over. The
+     * vendor's payload stays dropped; the kind is logged for diagnostics. A turn ends once, so this
+     * logs once per turn.
+     */
+    function endTurnOnUnrecognizedTerminalEvent(type: string | undefined): void {
+      disarmUnrecognizedEventWatchdog();
+      logger.warn('unrecognized_terminal_event_ended_turn', {
+        sessionId: handle.sessionId,
+        type,
+      });
+      applyVendorEvent(
+        {
+          type: 'error',
+          error: {
+            code: UNRECOGNIZED_TERMINAL_EVENT_ERROR_CODE,
+            message: `The agent ended the turn with an event of type "${type ?? 'unknown'}" that this version of MangoStudio does not recognize, so how it ended is unknown.`,
+          },
+        },
+        lastSequence
+      );
+    }
+
     const consumer: ExternalSessionConsumer = {
       onEnvelope(envelope, verdict) {
         if (terminalReason) return;
@@ -1092,6 +1121,13 @@ export function createExternalTurnController(
         lastSequence = envelope.sequence;
         if (!Value.Check(ExternalAgentEventSchema, envelope.event)) {
           const type = readEventType(envelope.event);
+          // The runtime marked it as the turn's ending, so no wait is needed (#2537). Only an event
+          // this hub cannot read gets here: a known kind keeps its own terminal handling, whatever
+          // the marker says.
+          if (envelope.terminal === true) {
+            endTurnOnUnrecognizedTerminalEvent(type);
+            return;
+          }
           logger.warn('unrecognized_event_type', { sessionId: handle.sessionId, type });
           // Inert is right for progress and wrong for an ending: if this was the terminal event,
           // nothing else will ever finalize the turn. The hub cannot tell which it was, so it

@@ -677,7 +677,19 @@ running:
   asks the vendor to cancel. The runtime's hard turn timeout is one hour, so by then it has ended
   the turn itself.
 
-A protocol-level marker for terminal events would replace this wait (#2537).
+The wait is the fallback for a runtime that does not say. A runtime marks every event it treats as an
+ending with `terminal: true` on the envelope (`completed`, `cancelled`, `error`, and any ending kind
+added later), and the hub ends the turn on an unrecognized event that carries it, at once and without
+reading `runtime.health`. The outcome is unknown, so the turn ends as `vendor-error` with the error
+code `unrecognized_terminal_event`, the kind is logged, and the vendor's payload is dropped as before.
+Nothing is cancelled, because the runtime has said the turn is over. A recognized kind keeps its own
+handling whatever the marker says, and an unrecognized event without the marker still takes the quiet
+window above.
+
+The envelope is closed, so a hub built before the key would drop any event that carries it. The
+runtime therefore sets `terminal` only for a hub that announced `externalAgentTerminalMarker: true`
+in its hello (`HUB_TERMINAL_MARKER_CAPABILITY`); an older hub never does, and keeps receiving
+envelopes it can read, with the quiet window as its only ending signal.
 
 ## Steering
 

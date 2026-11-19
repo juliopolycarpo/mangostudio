@@ -347,6 +347,32 @@ describe('runtime external-agent protocol payloads', () => {
   });
 
   /**
+   * #2537. `terminal` is declared on the envelope and on its frame, so a hub that announced the
+   * capability reads it on an event kind it does not know.
+   */
+  it('declares the terminal marker on the envelope and on its frame', () => {
+    const envelope = {
+      sessionId: 'session-1',
+      nativeTurnId: 'turn-1',
+      sequence: 2,
+      emittedAtMs: 1_700_000_000_000,
+      terminal: true,
+      event: { type: 'completed' },
+    } as const;
+
+    expect(Value.Check(ExternalAgentEventEnvelopeSchema, envelope)).toBe(true);
+    expect(
+      Value.Check(ExternalAgentEventEnvelopeFrameSchema, {
+        ...envelope,
+        event: { type: 'future_terminal' },
+      })
+    ).toBe(true);
+    expect(Value.Check(ExternalAgentEventEnvelopeSchema, { ...envelope, terminal: 'yes' })).toBe(
+      false
+    );
+  });
+
+  /**
    * #964. A hub and a runtime never upgrade in lockstep, so the frame schema
    * has to accept an `event` this build's `ExternalAgentEventSchema` has never
    * seen — that is exactly the envelope a newer runtime sends, and the whole
