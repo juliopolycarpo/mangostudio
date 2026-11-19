@@ -509,6 +509,7 @@ describe('runtime profile callers and cache isolation', () => {
       '.github/workflows/ci.yml:runtime-cache-seed',
       `${DISTRIBUTION_WORKFLOW}:runtime`,
       `${DISTRIBUTION_WORKFLOW}:runtime-darwin-x64`,
+      `${DISTRIBUTION_WORKFLOW}:runtime-hosts`,
       `${DISTRIBUTION_WORKFLOW}:runtime-linux-arm64`,
       `${DISTRIBUTION_WORKFLOW}:runtime-windows-arm64`,
       '.github/workflows/release-dry-run.yml:runtime',
@@ -543,6 +544,7 @@ describe('runtime profile callers and cache isolation', () => {
     expect(distribution).toMatch(/\n {6}runtime_profile:\n(?: {8}.*\n)*? {8}default: shipping\n/);
     for (const job of [
       'runtime',
+      'runtime-hosts',
       'runtime-linux-arm64',
       'runtime-darwin-x64',
       'runtime-windows-arm64',

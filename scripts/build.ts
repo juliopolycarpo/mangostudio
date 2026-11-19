@@ -57,6 +57,7 @@ import {
 import {
   cargoRuntimeOutputPath,
   cargoTargetDir,
+  prebuiltRuntimePath,
   resolveRuntimeSource,
   RUNTIME_RELEASE_VERSION_ENV,
   type RuntimeSource,
@@ -74,6 +75,11 @@ interface BinaryBuildOptions {
   requireAotOrder: boolean;
   /** Record an AOT function order for the hub: `--production` or `--require-aot-order` asked for it. */
   recordAotOrder: boolean;
+  /**
+   * Directory of prebuilt runtimes (`<dir>/<platform-id>/mangostudio-runtime`) whose runtime for the
+   * hub's own platform runs beside the recording hub. Without it the recording hub runs alone.
+   */
+  aotRuntimeDir?: string;
   dryRun: boolean;
   onlyPlatform?: string;
   /**
@@ -113,6 +119,9 @@ Binary flags:
   --require-aot-order Record the hub's AOT function order and fail when it cannot be recorded or
                       applied (Linux only). With --production alone a failure only warns; a plain
                       build does not record
+  --aot-runtime-dir <dir>
+                      Run the recording hub with the runtime from <dir>/<platform-id>/ beside it, so
+                      the AOT function order covers a hub with Local attached (env: AOT_RUNTIME_DIR)
   --platform <id>     Limit binary output to one target (example: linux-x64)
   --runtime-dir <dir> Stage prebuilt cargo runtimes from <dir>/<platform-id>/ (env: RUNTIME_DIR);
                       without it, only the host target's runtime is built (cargo build)
@@ -264,10 +273,14 @@ async function compileBinary(
       required: options.requireAotOrder,
       orderDir: join(ROOT_DIR, '.mango', 'aot-order', target.arch),
       binaryName: target.name,
+      runtimeBinary: options.aotRuntimeDir
+        ? prebuiltRuntimePath(options.aotRuntimeDir, target)
+        : undefined,
     },
     {
       compile: compileWith,
-      record: recordAotOrder,
+      record: (recordingBinary, orderFile, runtimeBinary) =>
+        recordAotOrder(recordingBinary, orderFile, { runtimeBinary }),
       log: (message) => console.log(message),
       warn: (message) => console.warn(message),
       now: () => performance.now(),
@@ -709,7 +722,7 @@ const { workspaces, flags, values, positional, usedDefaultSelection } = parseArg
     '--require-aot-order',
     '--hub-only',
   ],
-  valueFlags: ['--platform', '--runtime-dir', '--compiler'],
+  valueFlags: ['--platform', '--runtime-dir', '--compiler', '--aot-runtime-dir'],
 });
 
 if (flags['--help']) {
@@ -739,10 +752,11 @@ if (
     flags['--require-aot-order'] ||
     values['--platform'] ||
     values['--runtime-dir'] ||
+    values['--aot-runtime-dir'] ||
     values['--compiler'])
 ) {
   fatal(
-    '`--platform`, `--runtime-dir`, `--compiler`, `--production`, `--development`, `--refresh-runtimes`, `--reuse-frontend`, `--require-aot-order`, and `--hub-only` require `--binary`.'
+    '`--platform`, `--runtime-dir`, `--aot-runtime-dir`, `--compiler`, `--production`, `--development`, `--refresh-runtimes`, `--reuse-frontend`, `--require-aot-order`, and `--hub-only` require `--binary`.'
   );
 }
 
@@ -773,6 +787,7 @@ if (isBinaryBuild) {
     recordAotOrder: isProductionBuild || (flags['--require-aot-order'] ?? false),
     dryRun: flags['--dry-run'] ?? process.env.DRY_RUN === '1',
     onlyPlatform: values['--platform'] ?? process.env.ONLY_PLATFORM,
+    aotRuntimeDir: resolveRuntimeDir(values['--aot-runtime-dir'] ?? process.env.AOT_RUNTIME_DIR),
     runtimeDir: resolveRuntimeDir(values['--runtime-dir'] ?? process.env.RUNTIME_DIR),
     refreshRuntimes,
     version,

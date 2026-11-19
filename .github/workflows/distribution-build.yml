@@ -83,14 +83,32 @@ jobs:
   # that needs only that call, so a probe starts when its own legs finish
   # rather than after the slowest leg of all eight. A matrix job cannot be
   # waited on per leg, which is why the platforms split across calls. Together
-  # the four calls cover every release target; the runtime tests pin that.
+  # the five calls cover every release target; the runtime tests pin that.
+  #
+  # A Linux hub records its AOT function order with its platform's runtime
+  # beside it, so the hub jobs wait for the two calls that build the Linux
+  # runtimes (`runtime` and `runtime-linux-arm64`) and for no macOS or Windows
+  # call. That is why the natively linked hosts are two calls: the Linux pair
+  # here, and `runtime-hosts` for the slower macOS and Windows legs.
   runtime:
     name: Runtime
     uses: $/.github/workflows/runtime-build.yml
     with:
       version: ${{ inputs.version }}
       source_sha: ${{ inputs.source_sha }}
-      platforms: '["linux-x64","linux-x64-musl","darwin-arm64","windows-x64"]'
+      platforms: '["linux-x64","linux-x64-musl"]'
+      artifact_prefix: runtime-${{ inputs.source_sha }}
+      profile: ${{ inputs.runtime_profile }}
+      record_receipts: true
+      cache: ${{ inputs.cache }}
+
+  runtime-hosts:
+    name: Runtime
+    uses: $/.github/workflows/runtime-build.yml
+    with:
+      version: ${{ inputs.version }}
+      source_sha: ${{ inputs.source_sha }}
+      platforms: '["darwin-arm64","windows-x64"]'
       artifact_prefix: runtime-${{ inputs.source_sha }}
       profile: ${{ inputs.runtime_profile }}
       record_receipts: true
@@ -207,7 +225,10 @@ jobs:
 
   hub:
     name: Native hub ${{ matrix.platform }}
-    needs: [prepare]
+    # A Linux hub that records its AOT function order runs the runtime of its own platform beside
+    # the recording hub, so the hubs wait for the two calls that build Linux runtimes. The macOS and
+    # Windows calls are not waited on here.
+    needs: [prepare, runtime, runtime-linux-arm64]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 25
     defaults:
@@ -259,13 +280,27 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
           AOT_ORDER_PLATFORMS: ${{ inputs.aot_order_platforms }}
         # A listed hub records its order and fails without it; macOS and Windows legs skip
-        # recording whatever is listed, which is not a failure.
+        # recording whatever is listed, which is not a failure. A recording Linux hub runs with
+        # its platform's runtime beside it, so it asks for that runtime (`runtime_dir`).
         run: |
           flag=""
+          runtime_dir=""
           case " $AOT_ORDER_PLATFORMS " in
-            *" all "* | *" $PLATFORM "*) flag="--require-aot-order" ;;
+            *" all "* | *" $PLATFORM "*)
+              flag="--require-aot-order"
+              case "$PLATFORM" in
+                linux-*) runtime_dir=".mango/runtime-prebuilt" ;;
+              esac
+              ;;
           esac
           echo "flag=$flag" >> "$GITHUB_OUTPUT"
+          echo "runtime_dir=$runtime_dir" >> "$GITHUB_OUTPUT"
+      - name: Download the runtime the recording hub runs beside
+        if: ${{ steps.aot.outputs.runtime_dir != '' }}
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: runtime-${{ inputs.source_sha }}-${{ matrix.platform }}
+          path: ${{ steps.aot.outputs.runtime_dir }}
       - name: Build native hub
         if: ${{ !matrix.musl }}
         env:
@@ -273,6 +308,7 @@ jobs:
           VERSION: ${{ inputs.version }}
           GITHUB_TOKEN: ${{ github.token }}
           AOT_ORDER_FLAG: ${{ steps.aot.outputs.flag }}
+          AOT_RUNTIME_DIR: ${{ steps.aot.outputs.runtime_dir }}
         run: bun run build --binary --hub-only --platform "$PLATFORM" --reuse-frontend ${AOT_ORDER_FLAG:+"$AOT_ORDER_FLAG"}
       - name: Build native musl hub in Alpine
         if: ${{ matrix.musl }}
@@ -283,13 +319,15 @@ jobs:
           FRONTEND_ARTIFACT: ${{ inputs.frontend_artifact }}
           PRODUCER_BUN_REVISION: ${{ inputs.frontend_bun_revision }}
           AOT_ORDER_FLAG: ${{ steps.aot.outputs.flag }}
+          AOT_RUNTIME_DIR: ${{ steps.aot.outputs.runtime_dir }}
         # No glibc install runs in these legs. Bun and the frozen dependency
-        # install both run in Alpine on the matching host architecture.
+        # install both run in Alpine on the matching host architecture. The musl runtime is
+        # static, so the recording hub runs it inside the container.
         run: |
           set -euo pipefail
           BUN_CHANNEL="$(tr -d '\r\n' < .bun-version)"
           docker run --rm -v "$PWD:/workspace" -w /workspace \
-            -e VERSION -e PLATFORM -e GITHUB_TOKEN -e FRONTEND_ARTIFACT -e PRODUCER_BUN_REVISION -e AOT_ORDER_FLAG \
+            -e VERSION -e PLATFORM -e GITHUB_TOKEN -e FRONTEND_ARTIFACT -e PRODUCER_BUN_REVISION -e AOT_ORDER_FLAG -e AOT_RUNTIME_DIR \
             "oven/bun:${BUN_CHANNEL}-alpine" sh -ec '
               apk add --no-cache git bash libstdc++ libgcc
               git config --global --add safe.directory /workspace
@@ -320,6 +358,7 @@ jobs:
       [
         hub,
         runtime,
+        runtime-hosts,
         runtime-linux-arm64,
         runtime-darwin-x64,
         runtime-windows-arm64,

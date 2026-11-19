@@ -17,8 +17,16 @@
  */
 
 import { createHash } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import {
+  chmodSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 
 import {
   createIsolatedHubHome,
@@ -29,6 +37,7 @@ import {
   reserveEphemeralPort,
 } from './hub-process';
 import { runHubWorkload } from './hub-workload';
+import { type ReleaseBinaryName, runtimeBinaryName } from './release-targets';
 
 /** The first line of an order file Bun accepts. */
 const ORDER_FILE_HEADER = 'aot-order v1';
@@ -137,6 +146,89 @@ export interface RecordAotOrderOptions {
   readonly deadlineMs?: number;
   /** Starts that ceiling. Defaults to a `setTimeout`. */
   readonly setDeadline?: DeadlineTimer;
+  /**
+   * A `mangostudio-runtime` for this platform. It is copied beside the recording hub, where an
+   * installed hub finds its runtime, so the order covers the code a hub runs with Local attached.
+   * Without it the hub starts alone and a Local launch finds no binary.
+   */
+  readonly runtimeBinary?: string;
+  /** How long after the workload the hub gets to have launched that runtime. Defaults to 15 s. */
+  readonly runtimeAttachDeadlineMs?: number;
+}
+
+/**
+ * Puts `runtimeBinary` next to the recording hub under the name the hub looks for, and returns that
+ * path. A missing file throws here, with its path, instead of as a Local launch failure the
+ * recording would carry on past.
+ * Example: placeRuntimeBeside('.mango/aot-order/linux-x64/record/mangostudio', '/in/mangostudio-runtime')
+ */
+export function placeRuntimeBeside(recordingBinary: string, runtimeBinary: string): string {
+  if (!existsSync(runtimeBinary)) {
+    throw new Error(
+      `aot order: expected the recording runtime at ${runtimeBinary} | received: no such file`
+    );
+  }
+  const sibling = join(
+    dirname(recordingBinary),
+    runtimeBinaryName(basename(recordingBinary) as ReleaseBinaryName)
+  );
+  copyFileSync(runtimeBinary, sibling);
+  chmodSync(sibling, 0o755);
+  return sibling;
+}
+
+/**
+ * Pids of the direct children of `parentPid` whose command line names `runtimeName`, read from
+ * procfs (Linux, which is the only place an order is recorded). The hub launches Local as a
+ * `<runtime> --stdio` child, so this is how a recording proves the runtime was attached and not
+ * refused or never started, which the hub survives without a word. `procRoot` is replaceable so a
+ * test can use a fake procfs.
+ * Example: runtimeChildPids(4242, 'mangostudio-runtime') // [4243]
+ */
+export function runtimeChildPids(
+  parentPid: number,
+  runtimeName: string,
+  procRoot = '/proc'
+): number[] {
+  const found: number[] = [];
+  for (const entry of readdirSync(procRoot)) {
+    if (!/^\d+$/.test(entry)) continue;
+    try {
+      const stat = readFileSync(join(procRoot, entry, 'stat'), 'utf8');
+      // The command name is parenthesised and may hold spaces: count fields from the last `)`.
+      const parent = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[1]);
+      if (parent !== parentPid) continue;
+      // A script runs as `<interpreter> <script>`, a binary as itself: accept the name anywhere.
+      const argv = readFileSync(join(procRoot, entry, 'cmdline'), 'utf8').split('\0');
+      if (argv.some((argument) => basename(argument) === runtimeName)) found.push(Number(entry));
+    } catch {
+      // The process ended while it was being read.
+    }
+  }
+  return found;
+}
+
+/** How long a hub that has finished the workload gets to have launched its runtime. */
+const RUNTIME_ATTACH_DEADLINE_MS = 15_000;
+
+/**
+ * Waits until `hubPid` has the runtime as a child, or throws naming what it waited for.
+ * Example: await waitForRuntimeChild(hub.pid, 'mangostudio-runtime')
+ */
+async function waitForRuntimeChild(
+  hubPid: number,
+  runtimeName: string,
+  deadlineMs: number
+): Promise<void> {
+  const until = Date.now() + deadlineMs;
+  while (runtimeChildPids(hubPid, runtimeName).length === 0) {
+    if (Date.now() > until) {
+      throw new Error(
+        `aot order: expected the recording hub to launch ${runtimeName} within ${deadlineMs} ms of the workload | received: no child process of pid ${hubPid} with that name, so the order would not cover a hub with Local attached`
+      );
+    }
+    await Bun.sleep(100);
+  }
 }
 
 /**
@@ -153,9 +245,10 @@ export interface RecordAotOrderOptions {
  * A healthy answer is not trusted until the hub's own state file in that home names its pid and
  * port, because another process can take the port between its choice and the hub binding it.
  *
- * This hub starts with no `mangostudio-runtime` beside it, so the order covers the hub's start-up
- * and request paths, and a Local runtime launch that finds no binary (see the AOT section of
- * `docs/reference/runtime-metrics.md` for what a recorded runtime would add).
+ * With `options.runtimeBinary` the hub runs with that runtime beside it, so the order also covers
+ * the code a hub runs once Local is attached. Without it the order covers the hub's start-up and
+ * request paths and a Local launch that finds no binary (see the AOT section of
+ * `docs/reference/runtime-metrics.md`).
  * Example: await recordAotOrder('.mango/aot-order/linux-x64/record/mangostudio', '.mango/aot-order/linux-x64/hub.order')
  */
 export async function recordAotOrder(
@@ -173,6 +266,10 @@ export async function recordAotOrder(
   let releaseGuard: (() => void) | undefined;
   let cancelDeadline: (() => void) | undefined;
   try {
+    const runtimeSibling =
+      options.runtimeBinary === undefined
+        ? undefined
+        : placeRuntimeBeside(recordingBinary, options.runtimeBinary);
     const port = await reserveEphemeralPort();
     const spawnedAt = Date.now();
     hub = Bun.spawn([recordingBinary, 'serve', String(port)], {
@@ -197,6 +294,14 @@ export async function recordAotOrder(
       });
       progress = 'running the workload';
       await workload(`http://127.0.0.1:${port}`);
+      if (runtimeSibling !== undefined) {
+        progress = 'waiting for the hub to launch its runtime';
+        await waitForRuntimeChild(
+          running.pid,
+          basename(runtimeSibling),
+          options.runtimeAttachDeadlineMs ?? RUNTIME_ATTACH_DEADLINE_MS
+        );
+      }
       progress = 'waiting for the hub to exit and write its order file';
       running.kill('SIGTERM');
       const exited = await Promise.race([
@@ -298,7 +403,12 @@ export interface CompileOutcome {
 export interface AotOrderSteps {
   /** One compile of the hub with `extraFlags` appended, into `outfile`. */
   compile(extraFlags: readonly string[], outfile: string): Promise<CompileOutcome>;
-  record(recordingBinary: string, orderFile: string): Promise<AotOrderSummary>;
+  /** Runs the recording hub; `runtimeBinary` is the runtime to place beside it, when there is one. */
+  record(
+    recordingBinary: string,
+    orderFile: string,
+    runtimeBinary?: string
+  ): Promise<AotOrderSummary>;
   log(message: string): void;
   warn(message: string): void;
   /** Milliseconds clock. */
@@ -317,6 +427,8 @@ export interface AotOrderPlan {
   readonly orderDir: string;
   /** The binary name inside `orderDir`. */
   readonly binaryName: string;
+  /** A runtime to run beside the recording hub, so the order covers a hub with Local attached. */
+  readonly runtimeBinary?: string;
 }
 
 /** Final result: the shipping compile's outcome, and what the build must record about the order. */
@@ -377,7 +489,7 @@ export async function compileWithAotOrder(
       failure = `the recording binary did not compile (${AOT_RECORD_ORDER_FLAG})`;
     } else {
       try {
-        const summary = await steps.record(recordingBinary, orderFile);
+        const summary = await steps.record(recordingBinary, orderFile, plan.runtimeBinary);
         steps.log(
           `   ${summary.functionCount} functions recorded in ${((steps.now() - startedAt) / 1000).toFixed(1)} s`
         );
