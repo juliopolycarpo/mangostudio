@@ -1364,7 +1364,8 @@
               "title": "date-apr-31-datetime",
               "contentHash": "a385095e6f77cf509f4b89c006b6ad623ea8c1c36f3fdca21d10e72129358263",
               "sizeBytes": 30,
-              "valid": true
+              "valid": false,
+              "invalidReason": "invalid-metadata"
             },
             "whitespaceHash": "8466c89241e1f2e2d2d257e4aea13fdcfdbe0f85195a66877013e5e102661253"
           },
@@ -1380,7 +1381,8 @@
               "title": "date-as-name",
               "contentHash": "41f0ae7c3e74885291f84ff5265306e90c3b5b6b0549c6d722173b66408231b5",
               "sizeBytes": 18,
-              "valid": true
+              "valid": false,
+              "invalidReason": "invalid-metadata"
             },
             "whitespaceHash": "551dc2445441f18ef13109a0b4e27b45152bdc5c78e07197a0b25c6e2246f8cf"
           },
@@ -1396,7 +1398,8 @@
               "title": "date-day-00-glued-offset-hour-99",
               "contentHash": "637907398cad9860b2e996156880a7218d5fbb4df9642526dc301a5ccf80b596",
               "sizeBytes": 26,
-              "valid": true
+              "valid": false,
+              "invalidReason": "invalid-metadata"
             },
             "whitespaceHash": "bf9eff7aa711a739a513d9b1778921408046c65ec32869073dd56c8a211a0a77"
           },
@@ -1429,7 +1432,8 @@
               "title": "date-day-00-glued-time",
               "contentHash": "2ee4b5cf6dca82eb898afafafbf7f2fbf0fea72574fb4be9337c4d31536e002d",
               "sizeBytes": 52,
-              "valid": true
+              "valid": false,
+              "invalidReason": "invalid-metadata"
             },
             "whitespaceHash": "9508438f89f76296a7eef6e8f002d36bc7f10a15a6021e1aab000c7b1ac59685"
           },
@@ -1496,7 +1500,8 @@
               "title": "date-feb-29-non-leap",
               "contentHash": "61adc357b56f80608fa4e292c1d0c562bd86cb1ee7159661c192bfa79a5a8955",
               "sizeBytes": 15,
-              "valid": true
+              "valid": false,
+              "invalidReason": "invalid-metadata"
             },
             "whitespaceHash": "42595ef39decdacf841715c124e471cf3670f4a1a64168ec3d68a14f0e45b365"
           },
@@ -1512,7 +1517,8 @@
               "title": "date-feb-30",
               "contentHash": "f44fdec54f391c0e988b56572cbe2c49df897ec181b78ac63107d588ec374c40",
               "sizeBytes": 15,
-              "valid": true
+              "valid": false,
+              "invalidReason": "invalid-metadata"
             },
             "whitespaceHash": "100491bd6273c098b411cc459373845a324f97a80e551ce08a6542cb5c6c71f3"
           },
@@ -1545,7 +1551,8 @@
               "title": "date-space-z",
               "contentHash": "29bc13f35c31e5eba518cc6cbdc7664ea1fb08648f02fbeef1a00fca541c5a46",
               "sizeBytes": 34,
-              "valid": true
+              "valid": false,
+              "invalidReason": "invalid-metadata"
             },
             "whitespaceHash": "125c4a6a0621e8090bd308d3cebb7d1cb474930c6e4c81ff7232dbeace4ae93c"
           },
@@ -1595,7 +1602,8 @@
               "title": "date-with-z",
               "contentHash": "62e578ebf9b7a4d6b79d0c884b8d8092ffe4e3cbd746ed30e04af20b6451c2b1",
               "sizeBytes": 16,
-              "valid": true
+              "valid": false,
+              "invalidReason": "invalid-metadata"
             },
             "whitespaceHash": "f8a336925ab2fca53a61361c8bd877abdd4fb1bfa4cb6ab5416fdfb4aa935e8a"
           },
@@ -1611,8 +1619,7 @@
               "title": "datetime-leap-second",
               "contentHash": "05fd3f847b5738d43cd740e922ce94f59829b6e7e9651fdaf9d9ed617ef841b3",
               "sizeBytes": 26,
-              "valid": false,
-              "invalidReason": "invalid-metadata"
+              "valid": true
             },
             "whitespaceHash": "da81b849ca21735ec8886a7a9c9c9c4756db6f4828b1a396595a81b930b5af83"
           },
@@ -2058,8 +2065,7 @@
               "title": "time-leap-second",
               "contentHash": "7c2b01341596bd4404f4ef8bae5b0aa67292902295e843c6529e1f37bc01baa5",
               "sizeBytes": 13,
-              "valid": false,
-              "invalidReason": "invalid-metadata"
+              "valid": true
             },
             "whitespaceHash": "6ffee172372ef5648a54de9094fbc4da1e30240c4033ff373b8890cc558c8ebc"
           },
@@ -2075,7 +2081,8 @@
               "title": "time-with-offset",
               "contentHash": "3659b5b738ff2f561ff40ef79b5e09cb531398f5da8a9a10a618210b6ec72cb9",
               "sizeBytes": 30,
-              "valid": true
+              "valid": false,
+              "invalidReason": "invalid-metadata"
             },
             "whitespaceHash": "d93fbf312a992cdb599655fa9263d3f5d809dfbafcf4be8294711967a5c7cf17"
           },
