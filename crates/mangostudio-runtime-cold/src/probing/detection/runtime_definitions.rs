@@ -12,6 +12,7 @@ use super::path_env::{PathEnv, join_path};
 use super::types::{RuntimeId, SemVer};
 
 pub use super::binary_scan::windows_default_fnm_dir;
+use super::binary_scan::windows_default_volta_dir;
 
 static OPTIONAL_V_PATTERN: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^v?(\d+)\.(\d+)\.(\d+)").expect("a fixed, hand-checked pattern"));
@@ -105,8 +106,12 @@ pub fn well_known_node_directories(env: &PathEnv) -> Vec<String> {
         if let Some(fnm_dir) = fnm_dir {
             dirs.push(join_path("win32", &[&fnm_dir, "aliases", "default"]));
         }
-        if let Some(volta_home) = present(env.env_var("VOLTA_HOME")) {
-            dirs.push(join_path("win32", &[volta_home, "bin"]));
+        // Volta's installer defaults to %LOCALAPPDATA%\Volta when VOLTA_HOME is unset.
+        let volta_home = present(env.env_var("VOLTA_HOME"))
+            .map(str::to_string)
+            .or_else(|| windows_default_volta_dir(env));
+        if let Some(volta_home) = volta_home {
+            dirs.push(join_path("win32", &[&volta_home, "bin"]));
         }
         return dirs;
     }
@@ -276,6 +281,29 @@ mod tests {
             home_dir: "/home/tester".to_string(),
             env: HashMap::new(),
         }
+    }
+
+    #[test]
+    fn resolves_the_win32_volta_bin_directory_from_volta_home_then_local_app_data() {
+        let default_bin = join_path(
+            "win32",
+            &["C:\\Users\\tester\\AppData\\Local\\Volta", "bin"],
+        );
+        assert!(
+            well_known_node_directories(&win32_env()).contains(&default_bin),
+            "no VOLTA_HOME: expected well-known Node dirs to include {default_bin}"
+        );
+
+        let mut with_volta_home = win32_env();
+        with_volta_home
+            .env
+            .insert("VOLTA_HOME".to_string(), "D:\\volta".to_string());
+        let dirs = well_known_node_directories(&with_volta_home);
+        assert!(dirs.contains(&join_path("win32", &["D:\\volta", "bin"])));
+        assert!(
+            !dirs.contains(&default_bin),
+            "VOLTA_HOME must win over the default"
+        );
     }
 
     #[test]

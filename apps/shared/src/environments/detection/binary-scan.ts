@@ -217,6 +217,17 @@ export function windowsDefaultFnmDir(env: Pick<PathEnv, 'platform' | 'env'>): st
   return appData ? win32.join(appData, 'fnm') : undefined;
 }
 
+/**
+ * Volta's root on Windows when `VOLTA_HOME` is unset: its installer defaults
+ * to `%LOCALAPPDATA%\Volta`, which has no `.volta` segment for the POSIX
+ * path fallback to match.
+ */
+function windowsDefaultVoltaDir(env: Pick<PathEnv, 'platform' | 'env'>): string | undefined {
+  if (env.platform !== 'win32') return undefined;
+  const localAppData = env.env.LOCALAPPDATA?.trim();
+  return localAppData ? win32.join(localAppData, 'Volta') : undefined;
+}
+
 function detectVersionManager(
   rawPath: string,
   realpath: string,
@@ -226,7 +237,7 @@ function detectVersionManager(
   const configuredRoots = [
     ['nvm', deps.env.NVM_DIR, deps.env.NVM_HOME, deps.env.NVM_SYMLINK],
     ['fnm', deps.env.FNM_DIR, windowsDefaultFnmDir(deps)],
-    ['volta', deps.env.VOLTA_HOME],
+    ['volta', deps.env.VOLTA_HOME, windowsDefaultVoltaDir(deps)],
   ] as const;
 
   for (const [manager, ...roots] of configuredRoots) {

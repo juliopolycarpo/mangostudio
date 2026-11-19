@@ -240,6 +240,26 @@ describe('scanRuntime', () => {
     });
   });
 
+  it('classifies a win32 Volta Node under the default %LOCALAPPDATA%\\Volta with no VOLTA_HOME set', async () => {
+    const nodePath = 'C:\\Users\\x\\AppData\\Local\\Volta\\bin\\node.exe';
+
+    const result = await scanRuntime(
+      NODE_RUNTIME_DEFINITION,
+      fakeDeps({
+        platform: 'win32',
+        homeDir: 'C:\\Users\\x',
+        env: { PATH: '', LOCALAPPDATA: 'C:\\Users\\x\\AppData\\Local' },
+        pathExists: (path) => path === nodePath,
+        probeVersion: (path) => Promise.resolve(path === nodePath ? 'v22.13.0' : null),
+      })
+    );
+
+    expect(
+      result.installations[0],
+      `win32 Volta default root: expected managedBy volta | received ${JSON.stringify(result.installations[0])}`
+    ).toMatchObject({ rawPath: nodePath, managedBy: 'volta', pathSource: 'volta' });
+  });
+
   it('still classifies fnm on win32 when FNM_DIR points somewhere else', async () => {
     const nodePath = 'D:\\tools\\fnm\\aliases\\default\\node.exe';
 
