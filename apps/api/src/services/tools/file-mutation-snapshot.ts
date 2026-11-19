@@ -9,6 +9,7 @@ import {
 } from '@mangostudio/shared/runtime-contract';
 
 import { getDb } from '../../db/database';
+import type { FileCheckpointRowSource } from '../../db/types';
 import { getConfig } from '../../lib/config';
 import { createDiagnosticLogger } from '../../lib/logger';
 import {
@@ -108,12 +109,17 @@ export async function snapshotCaptureParams(context: ToolContext): Promise<{
  * write if blob or database I/O then fails, so that path still reports a tool
  * failure for a mutation that already landed and has no row to revert.
  *
+ * `source` says how the rows were found. Builtin mutators (the default) snapshot
+ * one path under its lock; `shell` rows come from comparing the workspace around
+ * a command, and the revert preview reports that distinction.
+ *
  * // Usage: await withMutationPersistence(context, [resolvedPath], () => runtime.fs.editFile(params))
  */
 export async function withMutationPersistence<T>(
   context: ToolContext,
   paths: readonly string[],
-  mutate: () => Promise<RuntimeMutationResult<T>>
+  mutate: () => Promise<RuntimeMutationResult<T>>,
+  source: FileCheckpointRowSource = 'builtin'
 ): Promise<{ result: T; captured: readonly CapturedBefore[] }> {
   if (!context.assistantMessageId) {
     const { result, mutations } = await mutate();
@@ -122,7 +128,7 @@ export async function withMutationPersistence<T>(
 
   return await withPersistenceLocks(paths, async () => {
     const { result, mutations } = await mutate();
-    return { result, captured: await persistLockedMutations(context, mutations) };
+    return { result, captured: await persistLockedMutations(context, mutations, source) };
   });
 }
 
@@ -133,14 +139,15 @@ export async function withMutationPersistence<T>(
  */
 async function persistLockedMutations(
   context: ToolContext,
-  mutations: readonly RuntimeMutationSnapshot[]
+  mutations: readonly RuntimeMutationSnapshot[],
+  source: FileCheckpointRowSource
 ): Promise<readonly CapturedBefore[]> {
   if (mutations.length === 0) return [];
 
   const captured: CapturedBefore[] = [];
   try {
     for (const mutation of mutations) {
-      captured.push(await persistRuntimeMutation(context, mutation));
+      captured.push(await persistRuntimeMutation(context, mutation, source));
     }
   } finally {
     // A persist that threw leaves the staged copies of the mutations after it
@@ -157,12 +164,13 @@ async function persistLockedMutations(
 
 async function persistRuntimeMutation(
   context: ToolContext,
-  mutation: RuntimeMutationSnapshot
+  mutation: RuntimeMutationSnapshot,
+  source: FileCheckpointRowSource
 ): Promise<CapturedBefore> {
   const messageId = context.assistantMessageId;
   if (!messageId) return emptyCapturedBefore();
   try {
-    return await persistCheckpointRow(context, messageId, mutation);
+    return await persistCheckpointRow(context, messageId, mutation, source);
   } finally {
     // Whether the staged copy was pulled, skipped (a later mutation of the same
     // path collapses onto the first row) or failed, the runtime can drop it now.
@@ -173,7 +181,8 @@ async function persistRuntimeMutation(
 async function persistCheckpointRow(
   context: ToolContext,
   messageId: string,
-  mutation: RuntimeMutationSnapshot
+  mutation: RuntimeMutationSnapshot,
+  source: FileCheckpointRowSource
 ): Promise<CapturedBefore> {
   const db = context.db ?? getDb();
 
@@ -182,7 +191,12 @@ async function persistCheckpointRow(
       ? undefined
       : await findCheckpointRow(db, context.chatId, messageId, mutation.path);
   if (existing) {
-    await updateCheckpointAfterHash(db, existing.id, mutation.afterHash);
+    // A shell capture that lands on a path a builtin call already snapshotted
+    // widens the row: its after-state now includes whatever the command (or a
+    // bystander) wrote, so the row is no longer a single call's own change.
+    await updateCheckpointAfterHash(db, existing.id, mutation.afterHash, {
+      source: source === 'shell' ? 'shell' : undefined,
+    });
     return {
       rowId: existing.id,
       beforeHash: existing.beforeHash,
@@ -216,6 +230,7 @@ async function persistCheckpointRow(
     afterHash: mutation.afterHash,
     movedTo: mutation.movedTo ?? null,
     blobKey,
+    source,
   });
   await enforceChatRetention(db, context.chatId);
   return {

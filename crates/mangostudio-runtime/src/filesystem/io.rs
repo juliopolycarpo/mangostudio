@@ -406,6 +406,74 @@ pub(super) fn path_is_file(policy: &CompiledPolicy, path: &Path) -> Result<bool,
     })
 }
 
+/// What `snapshot.hash` reports beside the digest, read from the path's own
+/// directory entry rather than from whatever a link points at.
+#[derive(Debug, PartialEq)]
+pub(super) struct SnapshotStat {
+    pub(super) len: u64,
+    /// Milliseconds since the Unix epoch; absent when the platform has none.
+    pub(super) modified_ms: Option<f64>,
+    pub(super) symlink: bool,
+}
+
+fn snapshot_stat_of(
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+    symlink: bool,
+) -> SnapshotStat {
+    let modified_ms = modified
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs_f64() * 1000.0);
+    SnapshotStat {
+        len,
+        modified_ms,
+        symlink,
+    }
+}
+
+/// `lstat`s `path` through a verified parent, so a link is reported as a link.
+///
+/// Lets a checkpoint caller tell a symlink from a regular file (the hash
+/// follows links), size its snapshot before loading content, and tell a file
+/// the command wrote from one that was already there.
+///
+/// # Example
+///
+/// ```ignore
+/// let Some(stat) = snapshot_stat(&policy, path)? else { return Ok(json!({"hash": null})) };
+/// ```
+pub(super) fn snapshot_stat(
+    policy: &CompiledPolicy,
+    path: &Path,
+) -> Result<Option<SnapshotStat>, RemoteError> {
+    if policy.is_unrestricted() {
+        return match fs::symlink_metadata(path) {
+            Ok(metadata) => Ok(Some(snapshot_stat_of(
+                metadata.len(),
+                metadata.modified().ok(),
+                metadata.file_type().is_symlink(),
+            ))),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(io_error(error)),
+        };
+    }
+    let Some(parent) = capability::verified_parent_if_present(policy, path)? else {
+        return Ok(None);
+    };
+    parent.with_parent(|dir, leaf| match dir.symlink_metadata(leaf) {
+        Ok(metadata) => Ok(Some(snapshot_stat_of(
+            metadata.len(),
+            metadata
+                .modified()
+                .ok()
+                .map(cap_std::time::SystemTime::into_std),
+            metadata.file_type().is_symlink(),
+        ))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(io_error(error)),
+    })
+}
+
 /// Checks whether a path resolves to a regular file without opening it.
 ///
 /// Callers still open through the capability after this classification, so the

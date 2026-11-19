@@ -176,6 +176,7 @@ export function TurnSeparator({
                   chatId={chatId}
                   messageId={msg.id}
                   uncheckpointedSources={fileCheckpoint.uncheckpointedSources}
+                  includesShellCapture={fileCheckpoint.includesShellCapture}
                 />
               )}
             </div>

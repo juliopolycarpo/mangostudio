@@ -73,6 +73,17 @@ export type RuntimeSnapshotHashParams = Static<typeof RuntimeSnapshotHashParamsS
 
 export const RuntimeSnapshotHashResultSchema = Type.Object({
   hash: Type.Union([Type.String(), Type.Null()]),
+  /**
+   * The next three describe the path's own directory entry and are present only
+   * when `hash` is non-null. A runtime that predates them omits all three, so a
+   * caller that needs one must treat absence as "unknown", never as a default.
+   */
+  /** Bytes in the entry; the cheapest way to size a snapshot before loading content. */
+  size: Type.Optional(Type.Number()),
+  /** Last modification, ms since the Unix epoch; omitted when the platform has none. */
+  modifiedAtMs: Type.Optional(Type.Number()),
+  /** True when the entry is a symlink, which `hash` follows. */
+  symlink: Type.Optional(Type.Boolean()),
 });
 export type RuntimeSnapshotHashResult = Static<typeof RuntimeSnapshotHashResultSchema>;
 

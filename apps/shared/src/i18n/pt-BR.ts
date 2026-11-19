@@ -328,6 +328,8 @@ export const messages = {
       confirmBody:
         'Isso restaura ou remove arquivos alterados neste turno do assistente. Edições suas depois disso podem impedir a reversão.',
       confirmAction: 'Reverter arquivos',
+      shellCaptureNote:
+        'As alterações de comandos de shell são encontradas comparando os arquivos antes e depois, então esta reversão também pode desfazer edições que outro programa fez enquanto um comando rodava.',
       cancel: 'Cancelar',
       uncheckpointedShell:
         'Este turno também executou comandos de shell. Quaisquer alterações feitas por comandos de shell não têm checkpoint e não serão revertidas.',
