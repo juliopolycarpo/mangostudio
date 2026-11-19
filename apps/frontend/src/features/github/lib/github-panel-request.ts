@@ -28,17 +28,25 @@ import { onRailPanelRequestDropped } from '../../workspace/rail/rail-panel-reque
 
 const channel = createLatchedRequestChannel();
 
-onRailPanelRequestDropped((panelId) => {
+const stopClearingOnDrop = onRailPanelRequestDropped((panelId) => {
   if (panelId === 'github') channel.clear();
 });
+
+// A module-level subscription outlives a hot reload of this file: the old copy
+// would keep clearing a channel nobody reads while the new one subscribes again.
+import.meta.hot?.dispose(stopClearingOnDrop);
 
 /**
  * Asks the mounted GitHub panel to switch to the pull requests tab and open
  * the create-pull-request form. Latched if no panel is mounted yet.
  *
+ * Call this before `requestRailPanel('github')`: a mounted rail that rejects
+ * the panel answers synchronously, and the latch must already exist for that
+ * rejection to clear it.
+ *
  * @example
- * requestRailPanel('github');
  * requestGithubCreatePr();
+ * requestRailPanel('github');
  */
 export const requestGithubCreatePr = channel.request;
 

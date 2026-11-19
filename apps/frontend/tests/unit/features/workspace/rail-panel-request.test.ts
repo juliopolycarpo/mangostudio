@@ -24,6 +24,7 @@ import {
   onRailPanelRequest,
   onRailPanelRequestDropped,
   RAIL_PANEL_REQUEST_WINDOW_MS,
+  rejectRailPanelRequest,
   requestRailPanel,
 } from '../../../../src/features/workspace/rail/rail-panel-request';
 import { advanceTimersByTimeAsync, useFakeTimers } from '../../../support/harness/timers';
@@ -119,10 +120,29 @@ describe('rail panel request window', () => {
     expect(dropped).toEqual(['github']);
   });
 
+  it('does not announce a drop when a request for the same panel replaces the held one', () => {
+    const dropped = jest.fn();
+    track(onRailPanelRequestDropped(dropped));
+
+    requestRailPanel('github');
+    requestRailPanel('github');
+
+    expect(dropped).not.toHaveBeenCalled();
+  });
+
+  it('announces a request the rail rejected', () => {
+    const dropped: WorkspacePanelId[] = [];
+    track(onRailPanelRequestDropped((panelId) => dropped.push(panelId)));
+
+    rejectRailPanelRequest('github');
+
+    expect(dropped).toEqual(['github']);
+  });
+
   describe('paired latches', () => {
     it('keeps the create-pull-request latch for a rail that arrives in time', () => {
-      requestRailPanel('github');
       requestGithubCreatePr();
+      requestRailPanel('github');
 
       track(onRailPanelRequest(jest.fn()));
       const createForm = jest.fn();
@@ -131,9 +151,32 @@ describe('rail panel request window', () => {
       expect(createForm).toHaveBeenCalledTimes(1);
     });
 
-    it('clears the create-pull-request latch when its rail request is dropped', async () => {
-      requestRailPanel('github');
+    it('keeps the create-pull-request latch when a repeated request replaces the held one', () => {
       requestGithubCreatePr();
+      requestRailPanel('github');
+      requestRailPanel('github');
+
+      track(onRailPanelRequest(jest.fn()));
+      const createForm = jest.fn();
+      track(onGithubCreatePrRequest(createForm));
+
+      expect(createForm).toHaveBeenCalledTimes(1);
+    });
+
+    it('clears the create-pull-request latch when a mounted rail rejects the panel', () => {
+      track(onRailPanelRequest(rejectRailPanelRequest));
+
+      requestGithubCreatePr();
+      requestRailPanel('github');
+
+      const createForm = jest.fn();
+      track(onGithubCreatePrRequest(createForm));
+      expect(createForm, 'create form armed by a request the rail rejected').not.toHaveBeenCalled();
+    });
+
+    it('clears the create-pull-request latch when its rail request is dropped', async () => {
+      requestGithubCreatePr();
+      requestRailPanel('github');
 
       await advanceTimersByTimeAsync(RAIL_PANEL_REQUEST_WINDOW_MS);
 
@@ -146,8 +189,8 @@ describe('rail panel request window', () => {
     });
 
     it('clears the new-terminal-session latch when its rail request is dropped', async () => {
-      requestRailPanel('terminal');
       requestNewTerminalSession();
+      requestRailPanel('terminal');
 
       await advanceTimersByTimeAsync(RAIL_PANEL_REQUEST_WINDOW_MS);
 
@@ -160,8 +203,8 @@ describe('rail panel request window', () => {
     });
 
     it('leaves the other panel latch alone when a rail request is dropped', async () => {
-      requestRailPanel('terminal');
       requestGithubCreatePr();
+      requestRailPanel('terminal');
 
       await advanceTimersByTimeAsync(RAIL_PANEL_REQUEST_WINDOW_MS);
 

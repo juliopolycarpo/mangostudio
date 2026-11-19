@@ -15,17 +15,21 @@ import { onRailPanelRequestDropped } from '../workspace/rail/rail-panel-request'
 
 const channel = createLatchedRequestChannel();
 
-onRailPanelRequestDropped((panelId) => {
+const stopClearingOnDrop = onRailPanelRequestDropped((panelId) => {
   if (panelId === 'terminal') channel.clear();
 });
 
+// Unsubscribed on a hot reload so the old copy stops clearing a dead channel.
+import.meta.hot?.dispose(stopClearingOnDrop);
+
 /**
  * Asks the mounted terminal panel to open a new session. Latched if no panel
- * is mounted yet.
+ * is mounted yet. Call it before `requestRailPanel('terminal')`, so a rail that
+ * rejects the panel finds a latch to clear.
  *
  * @example
- * requestRailPanel('terminal');
  * requestNewTerminalSession();
+ * requestRailPanel('terminal');
  */
 export const requestNewTerminalSession = channel.request;
 

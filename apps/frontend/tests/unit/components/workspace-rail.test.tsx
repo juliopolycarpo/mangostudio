@@ -6,6 +6,10 @@ import userEvent from '@testing-library/user-event';
 import { useEffect } from 'react';
 
 import {
+  onGithubCreatePrRequest,
+  requestGithubCreatePr,
+} from '../../../src/features/github/lib/github-panel-request';
+import {
   RAIL_PANEL_REQUEST_WINDOW_MS,
   requestRailPanel,
 } from '../../../src/features/workspace/rail/rail-panel-request';
@@ -286,6 +290,52 @@ describe('WorkspaceRail', () => {
 
     expect(await screen.findByTestId('github-panel-content')).toBeVisible();
     expect(screen.queryByTestId('git-panel-content')).not.toBeInTheDocument();
+  });
+
+  /**
+   * "Create pull request" from the palette arms the create-form latch and asks
+   * the rail for the GitHub panel. A rail whose chat does not offer that panel
+   * cannot honour the request, and the latch must not survive it: it would open
+   * the form in whichever chat shows the GitHub panel next.
+   */
+  describe('a panel request for a panel this rail does not offer', () => {
+    const githubHidden = {
+      ...DEFAULT_WORKSPACE_SETTINGS.sidePanel,
+      visiblePanelIds: ['git' as const],
+    };
+
+    it('leaves the rail on its panel and clears the create-form latch when already mounted', async () => {
+      renderRail({ settings: githubHidden });
+      expect(await screen.findByTestId('git-panel-content')).toBeVisible();
+
+      act(() => {
+        requestGithubCreatePr();
+        requestRailPanel('github');
+      });
+
+      expect(screen.getByTestId('git-panel-content')).toBeVisible();
+      const createForm = jest.fn();
+      onGithubCreatePrRequest(createForm)();
+      expect(
+        createForm,
+        'create form latch left armed by a rejected request'
+      ).not.toHaveBeenCalled();
+    });
+
+    it('clears the create-form latch when the rail mounts afterwards and rejects the replay', async () => {
+      requestGithubCreatePr();
+      requestRailPanel('github');
+
+      renderRail({ settings: githubHidden });
+      expect(await screen.findByTestId('git-panel-content')).toBeVisible();
+
+      const createForm = jest.fn();
+      onGithubCreatePrRequest(createForm)();
+      expect(
+        createForm,
+        'create form latch left armed by a rejected replay'
+      ).not.toHaveBeenCalled();
+    });
   });
 
   it('ignores a request that was made long before the rail mounted', async () => {

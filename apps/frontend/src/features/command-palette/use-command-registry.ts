@@ -185,12 +185,14 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
       },
       onCreateGithubPr: async () => {
         onRun();
-        // Same ordering as onOpenGithubPanel, for the same reason. The create
+        // Same navigation as onOpenGithubPanel, for the same reason. The create
         // request is latched and the rail request windowed; a rail request
-        // that goes unheard clears the latch, so the two cannot disagree.
+        // that goes unheard or is rejected clears the latch, so the two cannot
+        // disagree. The latch is armed first: a mounted rail answers
+        // synchronously, and a rejection with no latch yet would clear nothing.
         await navigate({ to: '/' });
-        requestRailPanel('github');
         requestGithubCreatePr();
+        requestRailPanel('github');
       },
       onOpenTerminalPanel: async () => {
         onRun();
@@ -200,8 +202,9 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
       onNewTerminalSession: async () => {
         onRun();
         await navigate({ to: '/' });
-        requestRailPanel('terminal');
+        // Latch first, as for the GitHub create row above.
         requestNewTerminalSession();
+        requestRailPanel('terminal');
       },
     });
 

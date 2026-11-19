@@ -462,8 +462,8 @@ describe('GithubPanel', () => {
    */
   it('does not open the create form for a request whose rail request was dropped', async () => {
     useFakeTimers();
-    requestRailPanel('github');
     requestGithubCreatePr();
+    requestRailPanel('github');
     await advanceTimersByTimeAsync(RAIL_PANEL_REQUEST_WINDOW_MS);
     await restoreRealTimers();
 

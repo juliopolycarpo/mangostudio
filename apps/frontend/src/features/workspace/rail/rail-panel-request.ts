@@ -27,10 +27,16 @@
  *   whenever the user next opens a chat. At most one request is held; a newer
  *   one replaces it.
  *
- * A request that is dropped, expired or replaced is announced through
+ * A request that is dropped, expired, replaced by one for another panel, or
+ * rejected by a rail that does not offer the panel is announced through
  * `onRailPanelRequestDropped`. Panel-specific latches paired with the request
  * (the GitHub create-pull-request form) listen to it and clear themselves, so
  * the panel never opens later than the rail would have, or at all.
+ *
+ * Ordering contract for a caller pairing a latch with a request: arm the latch
+ * first, then call `requestRailPanel`. A rail that is already mounted answers
+ * synchronously, so a rejection announced before the latch exists would clear
+ * nothing and leave the latch armed afterwards.
  */
 
 import type { WorkspacePanelId } from '@mangostudio/shared/workspaces';
@@ -38,12 +44,20 @@ import type { WorkspacePanelId } from '@mangostudio/shared/workspaces';
 type RailPanelListener = (panelId: WorkspacePanelId) => void;
 
 /**
- * How long a request waits for a rail to subscribe. It only has to bridge the
- * gap between `navigate()` resolving and the chat surface committing its first
- * render, which is a few frames, so it is kept far shorter than anything a
- * user could mistake for "the palette armed something for later".
+ * How long a request waits for a rail to subscribe.
+ *
+ * A safety margin, not a measured gap. Measured in Chromium against the built
+ * app, running the palette's "Open GitHub panel" from `/settings`, both after
+ * in-app navigation and after a full load of `/settings` (so the chat route's
+ * chunk is fetched during the navigation), and again with 6x CPU throttling and
+ * a 400 ms-latency, 200 kB/s link: the rail was already subscribed when the
+ * request fired every time, because the router resolves `navigate()` after the
+ * chat surface commits. The window exists for a commit that lands later than
+ * that, say behind a suspended boundary, and 1 s is far past any frame
+ * budget while staying well short of anything a user could mistake for "the
+ * palette armed something for later".
  */
-export const RAIL_PANEL_REQUEST_WINDOW_MS = 2000;
+export const RAIL_PANEL_REQUEST_WINDOW_MS = 1000;
 
 const listeners = new Set<RailPanelListener>();
 const droppedListeners = new Set<RailPanelListener>();
@@ -76,8 +90,11 @@ function takeHeld(): WorkspacePanelId | null {
  * requestRailPanel('github');
  */
 export function requestRailPanel(panelId: WorkspacePanelId): void {
+  // A newer request for the same panel supersedes the held one without
+  // dropping it: the caller has already re-armed any paired latch, and clearing
+  // it here would undo that.
   const replaced = takeHeld();
-  if (replaced) notifyDropped(replaced);
+  if (replaced && replaced !== panelId) notifyDropped(replaced);
 
   if (listeners.size > 0) {
     for (const listener of listeners) listener(panelId);
@@ -110,9 +127,21 @@ export function onRailPanelRequest(listener: RailPanelListener): () => void {
 }
 
 /**
- * Subscribes to requests the channel gave up on: expired with no rail, or
- * replaced by a newer one. Used by the latches that ride along with a rail
- * request to clear themselves.
+ * Called by a rail that received a request it cannot honour, because the panel
+ * is hidden or not available for its chat. Announced like any other drop, so a
+ * paired latch clears instead of waiting for some later chat to show the panel.
+ *
+ * @example
+ * if (!offers(panelId)) rejectRailPanelRequest(panelId);
+ */
+export function rejectRailPanelRequest(panelId: WorkspacePanelId): void {
+  notifyDropped(panelId);
+}
+
+/**
+ * Subscribes to requests the channel gave up on: expired with no rail,
+ * replaced by a request for another panel, or rejected by the rail. Used by the
+ * latches that ride along with a rail request to clear themselves.
  *
  * @example
  * onRailPanelRequestDropped((panelId) => {
