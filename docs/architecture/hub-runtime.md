@@ -556,6 +556,17 @@ process buffer grows with the file:
   limit, so no edit lands that undo could not reverse. The 128 MiB default stays under the
   256 MiB per-chat blob budget retention enforces.
 
+- **Message budget.** A revert stages every large blob of the message before it writes the
+  first file, which is what lets the runtime validate the whole set and refuse a bad one with
+  nothing changed. The staging area is bounded, so the hub bounds the capture side instead of
+  batching the uploads (a failure in a second batch would leave the first one written): one
+  message may hold at most 1 GiB and 128 blobs past 1 MiB
+  (`SNAPSHOT_MESSAGE_STAGED_MAX_BYTES`, `SNAPSHOT_MESSAGE_STAGED_MAX_BLOBS`), half of what the
+  runtime stages. `snapshotMaxBytes` shrinks to what is left of that budget, down to 1 MiB, so a
+  larger file is refused before it changes, with the `snapshot_too_large` error naming the
+  reduced limit. Files of 1 MiB or less are never refused for the budget. Rows are counted when
+  stored, so tool calls of one message that capture at the same moment can overshoot it; the
+  runtime's own staging bounds then fail that revert before any file changes.
 - **Older runtimes.** SSH and HTTP environments connect without requiring the hub's release,
   so a runtime may predate all of this. The hub reads the runtime's method list
   (`runtime.discover`, cached per build fingerprint) and uses `snapshotMaxBytes` and the

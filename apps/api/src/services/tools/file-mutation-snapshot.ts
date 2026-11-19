@@ -11,6 +11,10 @@ import { getDb } from '../../db/database';
 import { getConfig } from '../../lib/config';
 import { createDiagnosticLogger } from '../../lib/logger';
 import {
+  messageStagedUsage,
+  stagedCaptureLimit,
+} from '../../modules/file-checkpoints/application/staged-capture-limit';
+import {
   checkpointBlobExists,
   CheckpointBlobHashMismatchError,
   checkpointBlobSize,
@@ -64,17 +68,26 @@ export interface CapturedBefore {
  * that predates them keeps its own inline ceiling (8 MiB) and never sees the
  * field, so a remote runtime running an older release behaves as it did before.
  *
+ * The limit also shrinks as the message fills its staged-checkpoint budget (see
+ * {@link stagedCaptureLimit}), so everything a message captures can still be
+ * reverted in one call.
+ *
  * // Usage: runtime.fs.writeFile({ ...params, ...(await snapshotCaptureParams(context)) })
  */
 export async function snapshotCaptureParams(context: ToolContext): Promise<{
   captureSnapshot: boolean;
   snapshotMaxBytes?: number;
 }> {
-  if (!context.assistantMessageId) return { captureSnapshot: false };
+  const messageId = context.assistantMessageId;
+  if (!messageId) return { captureSnapshot: false };
   if (!(await runtimeStagesSnapshots(context.userId, context.environmentId))) {
     return { captureSnapshot: true };
   }
-  return { captureSnapshot: true, snapshotMaxBytes: getConfig().checkpoints.maxFileBytes };
+  const used = await messageStagedUsage(context.db ?? getDb(), context.chatId, messageId);
+  return {
+    captureSnapshot: true,
+    snapshotMaxBytes: stagedCaptureLimit(getConfig().checkpoints.maxFileBytes, used),
+  };
 }
 
 /**
