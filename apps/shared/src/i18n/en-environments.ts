@@ -269,6 +269,12 @@ export const messages: FeatureMessages<'environments'> = {
       },
       boundElsewhereHint:
         'Another environment record, on this hub or another one, is connected to this runtime. It takes one hub connection at a time, so this record tries again at most once a minute, without disturbing that connection. Disconnect or remove the other record to use this one.',
+      // A card whose runtime process has started and not said hello yet. Kept
+      // beside the hint, outside the eager `status` map, so the entry bundle
+      // does not pay for a phase only this page renders.
+      handshakingLabel: 'Starting runtime',
+      handshakingHint:
+        'The runtime process started and has not answered yet. A first start can take several seconds; the hub gives up if it stays silent.',
       connect: 'Connect',
       disconnect: 'Disconnect',
       edit: 'Edit name',

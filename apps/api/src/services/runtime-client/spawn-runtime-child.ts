@@ -119,6 +119,13 @@ export interface SpawnRuntimeChildOptions {
   /** Fires once when the child or its pipes die after a successful handshake. */
   readonly onClosed: () => void;
   /**
+   * Fires once, after the launcher returned a process and before the hub waits
+   * for its hello — the point the handshake budget starts counting from. It
+   * lets a caller say "the child is starting" while the wait is on. Never
+   * fires for a launch cancelled before the spawn.
+   */
+  readonly onHandshakeStart?: () => void;
+  /**
    * Aborted when the caller gives up before the handshake completes — a
    * disconnect, a newer attempt superseding this one, or shutdown. Without
    * this, a cancelled attempt still ran its spawn and handshake to completion
@@ -175,6 +182,7 @@ export async function spawnRuntimeChild(
 
   let hub: ProtocolHubSession;
   try {
+    options.onHandshakeStart?.();
     const handshake = openHubSession(peer.port, {
       hubVersion: options.hubVersion,
       workspaceBinding: options.workspaceBinding,

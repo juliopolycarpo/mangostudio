@@ -1251,6 +1251,14 @@ long enough to read as a hub that has stopped answering. The launch itself passe
 `--pull=never`: by then the image is present, and a silent download inside the handshake window
 is the one shape this must not have.
 
+The handshake is a phase too, for every launch that spawns a child (Local, `stdio`, `wsl`, `ssh`,
+`container`). `spawnRuntimeChild` raises `onHandshakeStart` once the launcher has returned a
+process, which is where the handshake budget starts counting; the manager sets `handshaking` on
+the `connecting` status and the card says "Starting runtime" with a line explaining the wait.
+The flag names the wait and decides nothing: a slow cold start and a wedged child look the same
+until the budget runs out, because the runtime shows no sign of life before its `hello`. A
+container launch drops `pullingImage` when the handshake starts, since the pull is over by then.
+
 ### Consent, and which direction the isolation points
 
 There is no setup step. The mounted binary lives outside the runtime home, so

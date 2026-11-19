@@ -324,6 +324,56 @@ describe('OverviewPage', () => {
     );
   });
 
+  // A cold start that takes seconds is a named step, not a spinner the user has to
+  // interpret; the same flag on a settled status must not keep claiming it.
+  it.each([
+    { state: 'connecting', shown: true },
+    { state: 'connected', shown: false },
+  ] as const)(
+    'shows the handshake line only while connecting (state: $state)',
+    async ({ state, shown }) => {
+      const remoteBase = ENVIRONMENTS.find((environment) => environment.id === 'remote-dev');
+      if (!remoteBase) throw new Error('expected remote fixture');
+      const handshaking: Environment = {
+        ...remoteBase,
+        status: { ...remoteBase.status, state, handshaking: true },
+      };
+      scenario
+        .respondWithJson('GET', '/api/tool-identities', { body: { identities: {} } })
+        .respondWithJson('GET', '/api/machine/status', { body: MACHINE_STATUS })
+        .respondWithJson('GET', '/api/environments', { body: [ENVIRONMENTS[0], handshaking] })
+        .respondWithJson('GET', '/api/environments/agents', { body: AGENTS })
+        .respondWithJson('GET', '/api/environments/runtimes', { body: RUNTIMES })
+        .respondWithJson('GET', '/api/environments/install/recipes', { body: [] })
+        .respondWithJson('GET', '/api/library/resources', {
+          body: { resources: RESOURCES, unreadableEntries: [] },
+        })
+        .respondWithJson('GET', '/api/library/targets', { body: TARGETS })
+        .install();
+
+      await renderWithRouter(<OverviewPage />);
+
+      const remote = await waitFor(() => {
+        const card = screen
+          .getAllByTestId('environment-entity-card')
+          .find((candidate) => candidate.getAttribute('data-environment-id') === 'remote-dev');
+        expect(card).toBeDefined();
+        return card as HTMLElement;
+      });
+
+      const labels = en.environments.entities;
+      if (shown) {
+        expect(within(remote).getByText(labels.handshakingLabel)).toBeInTheDocument();
+        expect(within(remote).getByTestId('environment-handshaking')).toHaveTextContent(
+          labels.handshakingHint
+        );
+      } else {
+        expect(within(remote).queryByTestId('environment-handshaking')).not.toBeInTheDocument();
+        expect(within(remote).queryByText(labels.handshakingLabel)).not.toBeInTheDocument();
+      }
+    }
+  );
+
   // A live self-update ends with a deliberate disconnect. Reporting that as an
   // outage would train an operator to treat the working case as a failure.
   it('reads a binary handoff as updating rather than as a dropped connection', async () => {
