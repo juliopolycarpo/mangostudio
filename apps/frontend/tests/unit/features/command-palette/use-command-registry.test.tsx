@@ -15,9 +15,12 @@ import { describe, expect, it, jest, mock } from 'bun:test';
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
 import type { Chat } from '@mangostudio/shared/chat';
+import { useQuery } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 
 import type { CommandItem } from '@/features/command-palette/lib/command-item';
 import { onGithubCreatePrRequest } from '@/features/github/lib/github-panel-request';
+import { githubPrsQueryOptions } from '@/features/github/queries';
 import {
   onRailPanelRequest,
   RAIL_PANEL_REQUEST_WINDOW_MS,
@@ -97,9 +100,27 @@ function Registry({ onRun, seen }: { onRun: () => void; seen: { items: readonly 
   return null;
 }
 
-async function setup() {
+/**
+ * Stands in for the GitHub panel having read the chat's pull request list: the
+ * same query, so the palette finds the answer in the cache it shares.
+ */
+function PanelListRead({ chatId }: { chatId: string }) {
+  useQuery(githubPrsQueryOptions(chatId, 'open'));
+  return null;
+}
+
+/**
+ * @param extra Rendered beside the registry, in the same query client, for a
+ *   test that needs another component filling a cache the registry reads.
+ * @param configure Registers further responses before anything renders.
+ */
+async function setup(
+  extra: ReactNode = null,
+  configure: (scenario: ReturnType<typeof createFetchScenario>) => void = () => undefined
+) {
   const scenario = createFetchScenario();
   scenario.install();
+  configure(scenario);
   scenario.respondWithJson('GET', '/api/environments', { body: [] });
   // The shell above has no environment, so discovery falls back to local — the
   // machine a new chat starts on. What matters is that the query runs at all:
@@ -120,11 +141,25 @@ async function setup() {
 
   const seen: { items: readonly CommandItem[] } = { items: [] };
   const onRun = jest.fn();
-  const { rerender } = render(<Probe app={appState()} onRun={onRun} seen={seen} />);
+  const { rerender } = render(
+    <>
+      <Probe app={appState()} onRun={onRun} seen={seen} />
+      {extra}
+    </>
+  );
   // The environments query settles after the first render. Letting it land here
   // keeps the assertion about the shell object rather than about a cache fill.
   await flushAsyncRender();
-  return { scenario, seen, onRun, rerender };
+  // Re-rendered through the same fragment: a bare `<Probe>` would be a different
+  // element type at the root and remount the registry instead of updating it.
+  const rerenderRegistry = (ui: ReactNode) =>
+    rerender(
+      <>
+        {ui}
+        {extra}
+      </>
+    );
+  return { scenario, seen, onRun, rerender: rerenderRegistry };
 }
 
 describe('useCommandRegistry', () => {
@@ -200,6 +235,70 @@ describe('useCommandRegistry', () => {
     expect(railPanel, 'rail panel request replayed after the window').not.toHaveBeenCalled();
     expect(createForm, 'create form latch replayed after the window').not.toHaveBeenCalled();
     scenario.restore();
+  });
+
+  /**
+   * "Create pull request" runs the panel's create form, which the panel
+   * withholds on a machine that refuses `gh` writes (`canMutate: false`). The
+   * palette reads the panel's own answer from the query cache they share.
+   */
+  describe('Create pull request row on a machine that may refuse writes', () => {
+    const PRS_PATH = '/api/github/prs?chatId=c1&filter=open';
+    const CREATE_PR_ID = 'action:github-create-pr';
+
+    function mountWithPanelRead(canMutate: boolean) {
+      return setup(<PanelListRead chatId="c1" />, (scenario) => {
+        scenario.respondWithJson('GET', PRS_PATH, {
+          body: {
+            state: 'ok',
+            cachedAt: 1_000,
+            canMutate,
+            repo: { nameWithOwner: 'mango/studio', defaultBranch: 'main', url: 'https://x.test' },
+            prs: [],
+          },
+        });
+      });
+    }
+
+    it('hides the row once the panel has read that the machine refuses writes', async () => {
+      const { scenario, seen } = await mountWithPanelRead(false);
+      try {
+        await waitFor(() => {
+          expect(seen.items.map((item) => item.id)).not.toContain(CREATE_PR_ID);
+        });
+        // Only the write row goes; the rows that just open the panel stay.
+        expect(seen.items.map((item) => item.id)).toContain('action:github-panel');
+      } finally {
+        scenario.restore();
+      }
+    });
+
+    it('keeps the row when the panel has read that writes are allowed', async () => {
+      const { scenario, seen } = await mountWithPanelRead(true);
+      try {
+        await waitFor(() => {
+          expect(seen.items.map((item) => item.id)).toContain(CREATE_PR_ID);
+        });
+      } finally {
+        scenario.restore();
+      }
+    });
+
+    it('keeps the row, and reads nothing itself, before the panel has read the list', async () => {
+      const { scenario, seen } = await setup();
+      try {
+        expect(seen.items.map((item) => item.id)).toContain(CREATE_PR_ID);
+        const requested = scenario.fetchMock.mock.calls.map(([input]) =>
+          input instanceof Request ? input.url : input.toString()
+        );
+        expect(
+          requested.filter((url) => url.includes('/api/github/')),
+          'GitHub requests made by opening the palette'
+        ).toEqual([]);
+      } finally {
+        scenario.restore();
+      }
+    });
   });
 
   /**

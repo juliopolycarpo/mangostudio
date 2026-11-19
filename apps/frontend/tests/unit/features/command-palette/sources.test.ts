@@ -210,6 +210,7 @@ describe('actionCommands', () => {
       resolvedTheme: 'dark',
       hasChat: true,
       githubPanelVisible: true,
+      githubCreatePrAllowed: true,
       terminalPanelVisible: true,
       isGenerating: false,
       chatHasTurns: false,
@@ -323,6 +324,19 @@ describe('actionCommands', () => {
     expect(ids).not.toContain('action:github-panel');
     expect(ids).not.toContain('action:github-create-pr');
     expect(ids).not.toContain('action:github-review-requests');
+  });
+
+  /**
+   * A machine that refuses `gh` writes gets no Create pull request button in
+   * the panel, so the row would open the panel and do nothing visible. The
+   * read-only rows around it stay.
+   */
+  it('omits only the Create pull request row when the machine refuses writes', () => {
+    const ids = build({ githubCreatePrAllowed: false }).map((item) => item.id);
+
+    expect(ids).not.toContain('action:github-create-pr');
+    expect(ids).toContain('action:github-panel');
+    expect(ids).toContain('action:github-review-requests');
   });
 
   it('offers the Terminal rows and runs each from the row of that name', async () => {

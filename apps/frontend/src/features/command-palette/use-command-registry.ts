@@ -25,6 +25,7 @@ import {
   externalAgentSelectable,
   useExternalAgents,
 } from '@/features/external-agents/useExternalAgents';
+import { useCachedGithubWriteAccess } from '@/features/github/hooks/use-github-write-access';
 import { requestGithubCreatePr } from '@/features/github/lib/github-panel-request';
 import { requestNewTerminalSession } from '@/features/terminal/terminal-panel-request';
 import { isWorkspacePanelVisible } from '@/features/workspace/rail/panel-registry';
@@ -74,6 +75,10 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
     'github',
     app.settings.workspaceSettings.sidePanel
   );
+  // The panel's own answer about writing, read from the cache it fills. Only a
+  // known refusal hides the row: before the panel has read the list there is no
+  // answer, and the panel then declines the request itself.
+  const githubCreatePrAllowed = useCachedGithubWriteAccess(currentChatId) !== 'refused';
   const terminalPanelVisible = isWorkspacePanelVisible(
     'terminal',
     app.settings.workspaceSettings.sidePanel
@@ -130,6 +135,7 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
       resolvedTheme,
       hasChat: currentChatId !== null,
       githubPanelVisible,
+      githubCreatePrAllowed,
       terminalPanelVisible,
       isGenerating,
       chatHasTurns,
@@ -233,6 +239,7 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
     currentChatId,
     environmentsQuery.data,
     external.agents,
+    githubCreatePrAllowed,
     githubPanelVisible,
     isGenerating,
     locale,
