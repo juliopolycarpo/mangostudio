@@ -94,14 +94,15 @@ export const RuntimeProbeAgentClisParamsSchema = Type.Interface([RuntimeProbePar
   targetIds: Type.Optional(ReadonlyArraySchema(LibraryTargetIdSchema)),
   installable: Type.Optional(Type.Partial(Type.Record(LibraryTargetIdSchema, Type.Boolean()))),
   /**
-   * What the hub is, for the `mangostudio` target. `configHome` and
-   * `executablePath` are sent only when this host *is* the hub's machine;
-   * elsewhere the runtime answers with its own, which is the honest reading of
-   * "what MangoStudio looks like over there".
+   * What the hub is, for the `mangostudio` target. `executablePath` is sent
+   * only when this host *is* the hub's machine; elsewhere the runtime answers
+   * with its own, which is the honest reading of "what MangoStudio looks like
+   * over there". The config home is not a field here: it travels in `pathEnv`
+   * (`MANGOSTUDIO_CONFIG_HOME`), so it and the `mango-*` locations share one
+   * source.
    */
   self: Type.Object({
     version: Type.String(),
-    configHome: Type.Optional(Type.String()),
     executablePath: Type.Optional(Type.String()),
   }),
 });

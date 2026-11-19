@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'bun:test';
+import { dirname } from 'node:path';
 
-import { LIBRARY_LOCATION_DEFINITIONS } from '@mangostudio/shared/library/host';
+import {
+  LIBRARY_LOCATION_DEFINITIONS,
+  MANGO_CONFIG_HOME_ENV_KEY,
+} from '@mangostudio/shared/library/host';
 import type { RuntimeCapabilityManifest } from '@mangostudio/shared/runtime-contract';
 
+import { getConfig } from '../../../../src/lib/config';
 import {
   createEnvironmentProbingService,
   type ProbeScope,
@@ -345,8 +350,23 @@ describe('what the hub sends down with a probe', () => {
     await service.listAgentCliStatuses(LOCAL);
 
     expect(local.selfParams).toMatchObject({ version: '9.9.9' });
-    expect(local.selfParams).toHaveProperty('configHome');
     expect(local.pathEnvParams).toHaveProperty('env');
+  });
+
+  it('sends the config home once, in the pins, and not again as a self field', async () => {
+    const local = fakeClient();
+    const service = serviceFor(() => local);
+
+    await service.listAgentCliStatuses(LOCAL);
+
+    expect(
+      (local.pathEnvParams as { env: Record<string, string> }).env[MANGO_CONFIG_HOME_ENV_KEY],
+      '(probing pathEnv): expected MANGOSTUDIO_CONFIG_HOME = the directory of the loaded config file'
+    ).toBe(dirname(getConfig().configFilePath));
+    expect(
+      local.selfParams,
+      '(probing self): expected no configHome | received a second source for it'
+    ).not.toHaveProperty('configHome');
   });
 
   it('sends no hub paths to a machine where they would name nothing', async () => {

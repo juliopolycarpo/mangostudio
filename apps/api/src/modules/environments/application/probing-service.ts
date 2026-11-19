@@ -9,7 +9,7 @@
  * dropped rather than carried across the gap.
  */
 
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
 import type {
   AgentCliStatus,
@@ -632,10 +632,10 @@ export function createEnvironmentProbingService(
               // Remote mangostudio is whatever that runtime handshaked as —
               // the hub's own release is the wrong answer for another machine.
               version: local ? getSelfVersion() : client.runtimeVersion,
-              ...(local && {
-                configHome: dirname(getConfig().configFilePath),
-                executablePath: process.execPath,
-              }),
+              // The config home is not sent: it rides `pathEnv` with the other
+              // hub pins, so `configHome` and the `mango-*` locations resolve
+              // from the same value.
+              ...(local && { executablePath: process.execPath }),
             },
             ...pathEnvFor(scope.environmentId),
           },
