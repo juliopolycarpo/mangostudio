@@ -43,9 +43,13 @@ const SHIKI_LANGUAGES = {
   ruby: () => import('@shikijs/langs/ruby'),
   rust: () => import('@shikijs/langs/rust'),
   sql: () => import('@shikijs/langs/sql'),
+  svelte: () => import('@shikijs/langs/svelte'),
   swift: () => import('@shikijs/langs/swift'),
   tsx: () => import('@shikijs/langs/tsx'),
   typescript: () => import('@shikijs/langs/typescript'),
+  // The vue and svelte grammars import the html/css/js/ts grammars they embed, so their chunks
+  // pull those in when they are not loaded yet; a first use costs more than any other fence.
+  vue: () => import('@shikijs/langs/vue'),
   xml: () => import('@shikijs/langs/xml'),
   yaml: () => import('@shikijs/langs/yaml'),
 } as const satisfies Record<ShikiLanguageId, () => Promise<unknown>>;

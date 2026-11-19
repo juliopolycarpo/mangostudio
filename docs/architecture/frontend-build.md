@@ -312,7 +312,11 @@ build):
   as the source holds a fence with a complete info line that names a supported language (a
   bare fence or an unsupported language never fetches it), in parallel with the renderer
   chunk, which takes the first block from three rounds to two. The load report models it the
-  same way: renderer and highlighter in one round, then grammar and theme.
+  same way: renderer and highlighter in one round, then grammar and theme. `vue` and `svelte`
+  are the costly first uses, because their grammars import the html, css, javascript and
+  typescript grammars they embed: about 50 KB Brotli cold for `vue` and 39 KB for `svelte`,
+  and 4 to 5 KB once those are loaded. They are lazy chunks like the rest; each adds only its
+  stub to the eager chunk table.
 - **A long code block is coloured in slices, not in one task.** The first draw colours about
   20 ms of the block's lines (`HIGHLIGHT_FIRST_SLICE_MS`) and shows the rest as plain text;
   once the message has settled, `continueHighlightsInSlices` (`src/lib/highlight-slices.ts`)
