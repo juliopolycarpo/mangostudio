@@ -335,7 +335,7 @@ export const messages: CoreMessages = {
       reverting: 'Reverting…',
       confirmTitle: 'Revert this message’s file changes?',
       confirmBody:
-        'This restores or removes files touched during this assistant turn. Changes you made afterward may block the revert.',
+        'This restores or removes files touched during this assistant turn. Changes you made afterward may block the revert. Shell commands are tracked by comparing files before and after, so the revert can also undo changes another program made while a command ran.',
       confirmAction: 'Revert files',
       cancel: 'Cancel',
       uncheckpointedShell:

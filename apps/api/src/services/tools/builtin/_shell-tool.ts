@@ -244,8 +244,10 @@ function buildSettings(label: string, description: string): RegisteredTool['sett
           'working directory (up to 500 files and 16 MiB), then record what the command ' +
           'changed so a revert can restore it. Adds a snapshot cost to every command. Files ' +
           'git ignores, paths outside the working directory, and git state itself are not ' +
-          'covered. When the workspace is not a git repository or is over the limits, the ' +
-          'revert dialog keeps its shell warning.',
+          'covered. Changes are found by comparing files before and after the command, so a ' +
+          'file another program edits while the command runs is recorded as the command’s ' +
+          'and a revert undoes it too. When the workspace is not a git repository or is over ' +
+          'the limits, the revert dialog keeps its shell warning.',
         type: 'boolean',
         required: false,
         defaultValue: false,

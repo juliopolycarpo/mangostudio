@@ -326,7 +326,7 @@ export const messages = {
       reverting: 'Revertendo…',
       confirmTitle: 'Reverter as alterações em arquivos desta mensagem?',
       confirmBody:
-        'Isso restaura ou remove arquivos alterados neste turno do assistente. Edições suas depois disso podem impedir a reversão.',
+        'Isso restaura ou remove arquivos alterados neste turno do assistente. Edições suas depois disso podem impedir a reversão. Comandos de shell são acompanhados comparando os arquivos antes e depois, então a reversão também pode desfazer alterações que outro programa fez enquanto um comando rodava.',
       confirmAction: 'Reverter arquivos',
       cancel: 'Cancelar',
       uncheckpointedShell:

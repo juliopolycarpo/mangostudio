@@ -154,6 +154,40 @@ export function planWorkspaceChanges(
   return changes;
 }
 
+/** Wall-clock span of the command on the hub's clock. */
+export interface CommandWindow {
+  readonly startedAt: number;
+  readonly endedAt: number;
+}
+
+/**
+ * Slack on each side of the window: coarse filesystem timestamps (FAT keeps two
+ * seconds) and a runtime whose clock is not the hub's. It fails safe — a clock
+ * further off than this makes a create read as not the command's, which leaves a
+ * file behind and says so, where the other direction would delete one.
+ */
+export const COMMAND_WINDOW_SLACK_MS = 2_000;
+
+/**
+ * Whether a file's modification time places its write inside the command's run.
+ *
+ * This keeps out what the snapshot window lets in: a file written by someone
+ * else while the baseline was being taken, or while the post-run listing was.
+ * It cannot tell the command's write from another process's during the command
+ * itself, and no file system call can; that remains a stated limit. An unknown
+ * time (a platform that has none) is not evidence of anything.
+ */
+export function wasWrittenDuringCommand(
+  modifiedAtMs: number | undefined,
+  window: CommandWindow
+): boolean {
+  if (modifiedAtMs === undefined || !Number.isFinite(modifiedAtMs)) return false;
+  return (
+    modifiedAtMs >= window.startedAt - COMMAND_WINDOW_SLACK_MS &&
+    modifiedAtMs <= window.endedAt + COMMAND_WINDOW_SLACK_MS
+  );
+}
+
 /**
  * The key under which two spellings of a path collide on a case-insensitive
  * filesystem. NFC first, because macOS stores names decomposed.
@@ -245,13 +279,18 @@ export async function runWithWorkspaceCheckpoint<T>(
   const root = resolved.root;
 
   let fullyCovered = false;
+  // The window starts after the snapshot, not before: a file another process
+  // wrote while the baseline was being taken is in neither listing's "before"
+  // and must not read as the command's.
+  const window = { startedAt: Date.now(), endedAt: Date.now() };
   try {
     return await run();
   } finally {
+    window.endedAt = Date.now();
     // Whatever ended the command, it may already have written: a failure, a
     // timeout or an abort is exactly when the files are half-changed.
     try {
-      fullyCovered = await recordWorkspaceChanges(input, root, baseline, limits);
+      fullyCovered = await recordWorkspaceChanges(input, root, baseline, limits, window);
     } catch (error) {
       logger.warn('shell_workspace_checkpoint_not_recorded', {
         chatId: context.chatId,
@@ -409,7 +448,8 @@ async function recordWorkspaceChanges(
   input: ShellWorkspaceCheckpointInput<unknown>,
   root: string,
   baseline: Extract<Baseline, { ok: true }>,
-  limits: ShellWorkspaceLimits
+  limits: ShellWorkspaceLimits,
+  window: CommandWindow
 ): Promise<boolean> {
   const { runtime, paths, context } = input;
   let complete = !baseline.incomplete;
@@ -438,6 +478,7 @@ async function recordWorkspaceChanges(
     observed: await statFile(runtime, path),
   }));
   const current = new Map<string, string | null>();
+  const modifiedAt = new Map<string, number | undefined>();
   for (const { path, observed } of observedFiles) {
     if (!observed) {
       complete = false;
@@ -447,16 +488,32 @@ async function recordWorkspaceChanges(
       if (baseline.files.get(path)?.hash != null) complete = false;
     } else {
       current.set(path, observed.hash);
+      modifiedAt.set(path, observed.modifiedAtMs);
     }
   }
 
-  const changes = planWorkspaceChanges(baseline.files, current).filter((change) => {
-    if (
-      change.op === 'create' &&
-      isHiddenBeforeCommand(relativeTo(paths, root, change.path), baseline.ignoredEntries)
-    ) {
-      complete = false;
-      return false;
+  const planned = planWorkspaceChanges(baseline.files, current);
+  // Bytes the command moved away from a path. A move keeps its modification
+  // time, so a created path holding exactly these bytes is the command's even
+  // though its timestamp predates the window.
+  const vanishedHashes = new Set(
+    planned.flatMap((change) => (change.op === 'create' ? [] : [change.before.hash]))
+  );
+  const changes = planned.filter((change) => {
+    if (change.op === 'create') {
+      if (isHiddenBeforeCommand(relativeTo(paths, root, change.path), baseline.ignoredEntries)) {
+        complete = false;
+        return false;
+      }
+      // Deleting a created file is the revert, so a create must be the command's.
+      // Another process's file, written outside the window, is not.
+      if (
+        !wasWrittenDuringCommand(modifiedAt.get(change.path), window) &&
+        !vanishedHashes.has(change.afterHash)
+      ) {
+        complete = false;
+        return false;
+      }
     }
     if (baseline.hashOnly.has(change.path)) {
       complete = false;

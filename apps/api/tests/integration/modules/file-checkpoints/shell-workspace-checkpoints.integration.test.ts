@@ -21,6 +21,7 @@ import {
   readlinkSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -371,6 +372,27 @@ describe.skipIf(!runnable)('shell workspace checkpoints', () => {
       expect(read(survivors[0] as string)).toBe('export const foo = 1;\n');
     }
   );
+
+  it('does not claim a file whose modification time says the command did not write it', async () => {
+    initRepository({ 'a.txt': 'a\n' });
+    // Another process's file looks the same from the listing: new, regular and
+    // not ignored. Its timestamp is the only thing that places it before the run.
+    await runBash("printf 'not ours\\n' > older.txt; touch -d '2001-01-01 00:00:00' older.txt");
+
+    await revert();
+    expect(read('older.txt')).toBe('not ours\n');
+    expect(await storedSources()).toEqual(['shell']);
+  });
+
+  it('still reverts a file the command moved, though a move keeps its modification time', async () => {
+    initRepository({ 'a.txt': 'a-original\n' });
+    utimesSync(join(workdir, 'a.txt'), new Date('2001-01-01'), new Date('2001-01-01'));
+    await runBash('mv a.txt moved.txt');
+
+    expect(await revert()).toEqual({ revertedFiles: 2, uncheckpointedSources: [] });
+    expect(read('a.txt')).toBe('a-original\n');
+    expect(existsSync(join(workdir, 'moved.txt'))).toBe(false);
+  });
 
   it.skipIf(process.platform === 'win32')(
     'leaves an untracked symlink a command wrote through exactly as it was',

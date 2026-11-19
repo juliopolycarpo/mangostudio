@@ -6,6 +6,7 @@ import type { RuntimeClient } from '../../../../src/services/runtime-client/runt
 import { createTargetPaths } from '../../../../src/services/runtime-client/target-paths';
 import {
   type BaselineFile,
+  COMMAND_WINDOW_SLACK_MS,
   foldPathKey,
   isHiddenBeforeCommand,
   parseWorkspaceListing,
@@ -13,6 +14,7 @@ import {
   runWithWorkspaceCheckpoint,
   selectAddedPaths,
   SHELL_WORKSPACE_LIMITS,
+  wasWrittenDuringCommand,
 } from '../../../../src/services/tools/shell-workspace-checkpoint';
 import type { ToolContext } from '../../../../src/services/tools/types';
 
@@ -136,6 +138,26 @@ describe('selectAddedPaths', () => {
       added: ['fresh.txt'],
       renamedByCase: ['foo.ts'],
     });
+  });
+});
+
+describe('wasWrittenDuringCommand', () => {
+  const window = { startedAt: 100_000, endedAt: 105_000 };
+
+  it('accepts a time inside the window and within the clock slack of either edge', () => {
+    expect(wasWrittenDuringCommand(102_000, window)).toBe(true);
+    expect(wasWrittenDuringCommand(100_000 - COMMAND_WINDOW_SLACK_MS, window)).toBe(true);
+    expect(wasWrittenDuringCommand(105_000 + COMMAND_WINDOW_SLACK_MS, window)).toBe(true);
+  });
+
+  it('rejects a file written before the snapshot finished or after the diff began', () => {
+    expect(wasWrittenDuringCommand(100_000 - COMMAND_WINDOW_SLACK_MS - 1, window)).toBe(false);
+    expect(wasWrittenDuringCommand(105_000 + COMMAND_WINDOW_SLACK_MS + 1, window)).toBe(false);
+  });
+
+  it('treats an unknown or non-finite time as no evidence', () => {
+    expect(wasWrittenDuringCommand(undefined, window)).toBe(false);
+    expect(wasWrittenDuringCommand(Number.NaN, window)).toBe(false);
   });
 });
 
