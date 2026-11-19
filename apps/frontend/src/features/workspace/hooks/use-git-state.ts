@@ -23,7 +23,7 @@ import {
   type GitScope,
   gitTopic,
   isRepoKey,
-  MAX_REALTIME_TOPICS_PER_MESSAGE,
+  MAX_REALTIME_ACTIVE_TOPICS,
   parseRepoTopic,
   repoTopic,
 } from '@mangostudio/shared/realtime';
@@ -214,6 +214,44 @@ export async function invalidateGitScopes(
   chatId: string,
   scopes: readonly GitScope[]
 ): Promise<void> {
+  await Promise.all([
+    invalidateChatGitScopes(queryClient, chatId, scopes),
+    invalidateGithubPanelForScopes(queryClient, scopes),
+  ]);
+}
+
+/**
+ * The `github` scope's panel reads, which are unscoped by chat and so are not a
+ * chat's to invalidate. Callers that apply many chats at once call this once for
+ * the lot: each call cancels and restarts the PR list's in-flight refetch, so one
+ * per chat is one request per chat.
+ *
+ * `githubContextKeys` (the small branch-scoped context widget) stays per chat,
+ * in {@link invalidateChatGitScopes}.
+ *
+ * The PR/issue/check/thread reads the GitHub panel itself renders live under
+ * `githubKeys`, unscoped by chat because that is how every other caller already
+ * invalidates them (see GithubRepoSection's own checkout handler). Without this,
+ * a same-client write still looks right — it invalidates `githubKeys` explicitly
+ * alongside the chat's scopes — but a second mounted client reachable only
+ * through a realtime event would keep showing the pre-write panel state
+ * indefinitely.
+ */
+function invalidateGithubPanelForScopes(
+  queryClient: QueryClient,
+  scopes: Iterable<GitScope>
+): Promise<void> {
+  return [...scopes].includes('github')
+    ? queryClient.invalidateQueries({ queryKey: githubKeys.all })
+    : Promise.resolve();
+}
+
+/** Every per-chat slice for `scopes`; everything `invalidateGitScopes` does but the GitHub panel. */
+async function invalidateChatGitScopes(
+  queryClient: QueryClient,
+  chatId: string,
+  scopes: readonly GitScope[]
+): Promise<void> {
   const keys: Record<GitScope, readonly unknown[]> = {
     state: gitStateKeys.detail(chatId),
     stashes: gitStashKeys.detail(chatId),
@@ -236,17 +274,6 @@ export async function invalidateGitScopes(
     // server publishes the same scope for both.
     ...(scopes.includes('branches')
       ? [queryClient.invalidateQueries({ queryKey: gitWorktreeKeys.detail(chatId) })]
-      : []),
-    // `githubContextKeys` above is the small branch-scoped context widget;
-    // the PR/issue/check/thread reads the GitHub panel itself renders live
-    // under `githubKeys`, unscoped by chat because that is how every other
-    // caller already invalidates them (see GithubRepoSection's own checkout
-    // handler). Without this, a same-client write still looks right — it
-    // invalidates `githubKeys` explicitly alongside this call — but a second
-    // mounted client reachable only through this `git:<chatId>` event would
-    // keep showing the pre-write panel state indefinitely.
-    ...(scopes.includes('github')
-      ? [queryClient.invalidateQueries({ queryKey: githubKeys.all })]
       : []),
   ]);
 }
@@ -408,26 +435,31 @@ export function useGitRealtimeInvalidation(chatId: string): void {
           (signal.message.scopes as readonly GitScope[] | undefined) ?? GIT_SCOPES
         );
       }
-      // The ack right after the state loaded would refetch what was just read;
-      // only a read old enough to predate the subscription needs the barrier.
+      // The ack is the barrier for whatever the topic missed before it took
+      // hold; only a read taken after the frame was sent is already covered.
       const stateUpdatedAt = queryClient.getQueryState(gitStateKeys.detail(chatId))?.dataUpdatedAt;
-      if (isFresherThanSubscription(stateUpdatedAt)) return;
+      if (isReadAfterSubscribe(stateUpdatedAt, signal.requestedAt)) return;
       return scheduleGitScopeInvalidation(queryClient, chatId, GIT_SCOPES);
     }
   );
 }
 
 /**
- * How recent a read must be for the first ack of a repo subscription not to
- * discard it. A repo key is learned from a read, so the subscription always
- * starts after the data it protects; refetching on every ack would double the
- * requests of every sidebar mount. The window is the round trip a write could
- * hide in between; a read older than that, as after a reconnect, is refetched.
+ * Whether a read already reflects everything the new subscription would have
+ * announced, so its ack has nothing left to refresh.
+ *
+ * That holds only for a read taken after the subscribe frame was sent: a write
+ * after the frame reaches the tab as its own frame, while one between the read
+ * and the hub processing the frame is in neither. Comparing against the ack's
+ * arrival, or against a fixed window before it, would count such a read as
+ * covered and hide that write. A read made before the frame, which is every read
+ * that supplied the repo key, is refetched.
  */
-const REPO_SUBSCRIPTION_FRESH_MS = 2_000;
-
-function isFresherThanSubscription(dataUpdatedAt: number | undefined): boolean {
-  return dataUpdatedAt !== undefined && Date.now() - dataUpdatedAt < REPO_SUBSCRIPTION_FRESH_MS;
+function isReadAfterSubscribe(
+  dataUpdatedAt: number | undefined,
+  requestedAt: number | undefined
+): boolean {
+  return dataUpdatedAt !== undefined && requestedAt !== undefined && dataUpdatedAt >= requestedAt;
 }
 
 /**
@@ -453,7 +485,7 @@ function useCachedRepoKey(chatId: string): string | undefined {
  * write lands in any checkout of them.
  *
  * Subscribes to one `repo:<key>` topic per distinct repository among the rows
- * in view (`MAX_REALTIME_TOPICS_PER_MESSAGE` at most, nearest rows first), and
+ * in view (`MAX_SIDEBAR_REPO_TOPICS` at most, nearest rows first), and
  * releases a topic when its last row leaves. A frame invalidates the per-chat
  * keys of every chat the cache knows in that repo, not only those in view: a
  * scrolled-away badge goes stale and refreshes when its row returns, while a
@@ -482,14 +514,25 @@ export function useRepoRealtimeInvalidation(
         cached.map(({ chatId }) => scheduleGitScopeInvalidation(queryClient, chatId, scopes))
       ).then(() => undefined);
     }
-    // Same barrier as the panel's: only badges older than the subscription.
+    // Same barrier as the panel's: only badges read after the frame was sent skip it.
     return Promise.all(
       cached
-        .filter(({ dataUpdatedAt }) => !isFresherThanSubscription(dataUpdatedAt))
+        .filter(({ dataUpdatedAt }) => !isReadAfterSubscribe(dataUpdatedAt, signal.requestedAt))
         .map(({ chatId }) => scheduleGitScopeInvalidation(queryClient, chatId, ['state']))
     ).then(() => undefined);
   });
 }
+
+/**
+ * Repo topics the sidebar may hold, a quarter of what one socket can have active.
+ *
+ * The hub counts a topic until the client unsubscribes it, and the client keeps
+ * a topic that left the view for a linger window. A fast scroll therefore holds
+ * the set it left and the set it reached at once, and both sit beside every topic
+ * the rest of the tab holds. Two sidebar sets at a quarter each leave half the
+ * limit for those, and a frame the hub refuses over the limit is refused whole.
+ */
+export const MAX_SIDEBAR_REPO_TOPICS = Math.floor(MAX_REALTIME_ACTIVE_TOPICS / 4);
 
 /** The topics for the rows in view: distinct repositories, in row order, bounded. */
 function repoTopicsForRows(
@@ -500,7 +543,7 @@ function repoTopicsForRows(
   for (const chatId of chatIdsInView) {
     const repoKey = summaries[chatId]?.repoKey;
     if (repoKey !== undefined && isRepoKey(repoKey)) repoKeys.add(repoKey);
-    if (repoKeys.size === MAX_REALTIME_TOPICS_PER_MESSAGE) break;
+    if (repoKeys.size === MAX_SIDEBAR_REPO_TOPICS) break;
   }
   return [...repoKeys].map((repoKey) => repoTopic(repoKey));
 }
@@ -539,8 +582,11 @@ function scheduleGitScopeInvalidation(
   let coalescer = gitInvalidationCoalescers.get(queryClient);
   if (!coalescer) {
     coalescer = createGitInvalidationCoalescer(
-      (id, merged) => invalidateGitScopes(queryClient, id, [...merged]),
-      GIT_FRAME_COALESCE_MS
+      (id, merged) => invalidateChatGitScopes(queryClient, id, [...merged]),
+      GIT_FRAME_COALESCE_MS,
+      // The GitHub panel is not a chat's: a repo frame names every chat of the
+      // repository, and once per chat would restart the PR list's refetch each time.
+      (windowScopes) => invalidateGithubPanelForScopes(queryClient, windowScopes)
     );
     gitInvalidationCoalescers.set(queryClient, coalescer);
   }

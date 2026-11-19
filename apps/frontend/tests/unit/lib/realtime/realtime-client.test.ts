@@ -233,13 +233,47 @@ describe('createRealtimeClient', () => {
     socket.emit({ type: 'invalidate', topic: 'git:chat-9' });
 
     expect(settings.signals).toEqual([
-      { type: 'subscribed' },
+      { type: 'subscribed', requestedAt: expect.any(Number) },
       {
         type: 'invalidate',
         message: { type: 'invalidate', topic: 'settings', scopes: ['provider'] },
       },
     ]);
-    expect(git.signals).toEqual([{ type: 'subscribed' }]);
+    expect(git.signals).toEqual([{ type: 'subscribed', requestedAt: expect.any(Number) }]);
+  });
+
+  it('stamps a subscribed signal with when its subscribe frame was sent, not when it was acked', async () => {
+    const client = createClient();
+    const settings = collect();
+    client.subscribe('settings', settings.listener);
+    const socket = makeReady();
+    const sentAt = Date.now();
+
+    await advanceTimersByTimeAsync(800);
+    socket.emit({ type: 'subscribed', topics: ['settings'] });
+
+    expect(settings.signals).toEqual([{ type: 'subscribed', requestedAt: sentAt }]);
+  });
+
+  it('stamps each topic with its own frame: a topic added later carries the later time', async () => {
+    const client = createClient();
+    const settings = collect();
+    const git = collect();
+    client.subscribe('settings', settings.listener);
+    const socket = makeReady();
+    socket.emit({ type: 'subscribed', topics: ['settings'] });
+    const settingsSentAt = Date.now();
+
+    await advanceTimersByTimeAsync(1_000);
+    client.subscribe('git:chat-1', git.listener);
+    await advanceTimersByTimeAsync(0);
+    const gitSentAt = Date.now();
+    await advanceTimersByTimeAsync(300);
+    socket.emit({ type: 'subscribed', topics: ['git:chat-1'] });
+
+    expect(settings.signals).toEqual([{ type: 'subscribed', requestedAt: settingsSentAt }]);
+    expect(git.signals).toEqual([{ type: 'subscribed', requestedAt: gitSentAt }]);
+    expect(gitSentAt).toBeGreaterThan(settingsSentAt);
   });
 
   it('fans a signal out to every listener on the topic', () => {
@@ -274,7 +308,7 @@ describe('createRealtimeClient', () => {
     expect(socket.closedWith).toBeUndefined();
 
     socket.emit({ type: 'subscribed', topics: ['settings'] });
-    expect(settings.signals).toEqual([{ type: 'subscribed' }]);
+    expect(settings.signals).toEqual([{ type: 'subscribed', requestedAt: expect.any(Number) }]);
   });
 
   it('contains a throwing listener', () => {
@@ -703,6 +737,103 @@ describe('createRealtimeClient', () => {
     expect(frames(makeReady())).toEqual([
       { type: 'subscribe', topics: ['settings', 'git:chat-1'] },
     ]);
+  });
+
+  describe('a subscribe frame the server rejects for the active-topic limit', () => {
+    const RATE_LIMITED_ERROR = {
+      type: 'error',
+      error: 'Realtime subscription limit exceeded',
+      code: 'RATE_LIMITED',
+    };
+
+    /** `settings` stays; `git:old` is acked, then released and left lingering. */
+    function lingeringOldTopic() {
+      const client = createClient();
+      const settings = collect();
+      const fresh = collect();
+      client.subscribe('settings', settings.listener);
+      const releaseOld = client.subscribe('git:old', () => undefined);
+      const socket = makeReady();
+      socket.emit({ type: 'subscribed', topics: ['settings', 'git:old'] });
+      releaseOld();
+      return { client, socket, settings, fresh };
+    }
+
+    it('drops the unacked topics and resends them once the linger reconcile frees room', async () => {
+      const { client, socket, fresh } = lingeringOldTopic();
+      client.subscribe('git:new', fresh.listener);
+      await advanceTimersByTimeAsync(0);
+      expect(frames(socket).at(-1)).toEqual({ type: 'subscribe', topics: ['git:new'] });
+
+      // The hub counted `git:old` against the limit and refused the whole frame.
+      socket.emit(RATE_LIMITED_ERROR);
+      await advanceTimersByTimeAsync(LINGER_MS);
+      // The resend rides the same zero-delay flush a new subscribe does; a timer
+      // armed inside the advance above fires on the next tick of the fake clock.
+      await advanceTimersByTimeAsync(1);
+
+      expect(frames(socket).slice(1)).toEqual([
+        { type: 'subscribe', topics: ['git:new'] },
+        { type: 'unsubscribe', topics: ['git:old'] },
+        { type: 'subscribe', topics: ['git:new'] },
+      ]);
+
+      socket.emit({ type: 'subscribed', topics: ['git:new'] });
+      expect(fresh.signals).toEqual([{ type: 'subscribed', requestedAt: expect.any(Number) }]);
+    });
+
+    it('resends the unrelated topics that shared the rejected frame', async () => {
+      const { client, socket } = lingeringOldTopic();
+      client.subscribe('git:new-1', () => undefined);
+      client.subscribe('chats', () => undefined);
+      await advanceTimersByTimeAsync(0);
+      expect(frames(socket).at(-1)).toEqual({
+        type: 'subscribe',
+        topics: ['git:new-1', 'chats'],
+      });
+
+      socket.emit(RATE_LIMITED_ERROR);
+      await advanceTimersByTimeAsync(LINGER_MS);
+      await advanceTimersByTimeAsync(1);
+
+      expect(frames(socket).at(-1)).toEqual({
+        type: 'subscribe',
+        topics: ['git:new-1', 'chats'],
+      });
+    });
+
+    it('does not retry on its own when the reconcile freed nothing', async () => {
+      const client = createClient();
+      client.subscribe('settings', () => undefined);
+      const socket = makeReady();
+      socket.emit({ type: 'subscribed', topics: ['settings'] });
+      client.subscribe('git:new', () => undefined);
+      await advanceTimersByTimeAsync(0);
+      const framesBeforeRejection = frames(socket).length;
+
+      socket.emit(RATE_LIMITED_ERROR);
+      await advanceTimersByTimeAsync(LINGER_MS * 4);
+
+      // Nothing was lingering, so the same frame would fail the same way.
+      expect(frames(socket)).toHaveLength(framesBeforeRejection);
+    });
+
+    it('leaves the acked topics alone', async () => {
+      const { client, socket, settings } = lingeringOldTopic();
+      client.subscribe('git:new', () => undefined);
+      await advanceTimersByTimeAsync(0);
+
+      socket.emit(RATE_LIMITED_ERROR);
+      await advanceTimersByTimeAsync(LINGER_MS);
+      await advanceTimersByTimeAsync(1);
+
+      const resubscribed = (frames(socket) as Array<{ type: string; topics: string[] }>)
+        .filter((frame) => frame.type === 'subscribe')
+        .flatMap((frame) => frame.topics);
+      // `settings` was acked before the rejection and must not be asked for again.
+      expect(resubscribed.filter((topic) => topic === 'settings')).toHaveLength(1);
+      expect(settings.signals).toEqual([{ type: 'subscribed', requestedAt: expect.any(Number) }]);
+    });
   });
 
   it('treats a socket constructor throw as a connection failure', async () => {

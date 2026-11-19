@@ -255,7 +255,9 @@ liberado.
 `useRealtimeInvalidation(topic, onSignal)` assina durante o ciclo de vida de um
 componente e entrega cada sinal a um callback. Quem chama invalida com o próprio
 query client, portanto o módulo não conhece query keys nem tópicos. Os dois
-sinais são `{ type: 'invalidate', message }` e `{ type: 'subscribed' }`.
+sinais são `{ type: 'invalidate', message }` e
+`{ type: 'subscribed', requestedAt }`, em que `requestedAt` é o instante em que o
+frame que pediu o tópico foi enviado.
 
 `subscribed` é a barreira de "considere desatualizado". Como eventos publicados
 enquanto o socket estava fora são perdidos, uma confirmação — na primeira
@@ -266,20 +268,24 @@ invalidation é confirmado, então isso só causaria uma segunda atualização.
 
 Regras que o módulo garante:
 
-| Regra                       | Comportamento                                                                                                               |
-| --------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Nenhum frame antes de ready | Os envios são limitados pela fase do protocolo, não por `readyState`, que também cobre OPEN antes de `ready`.               |
-| Subscribes agrupados        | Adições no mesmo tick são agrupadas em um frame, fatiado em 32 tópicos.                                                     |
-| Tópicos rejeitados          | Um tópico respondido com `error` em vez de confirmação é terminal naquele socket e só é tentado de novo na próxima conexão. |
-| Linger                      | Perder o último listener inicia uma reconciliação única de ~5 s, então a repetição do StrictMode não custa frames.          |
-| Heartbeat                   | Um timer em `REALTIME_IDLE_TIMEOUT_SECONDS / 2.5`; um pong perdido força a reconexão. Qualquer frame recebido prova vida.   |
-| Backoff                     | 1 s→30 s com meio jitter, reiniciado só após 10 s de estabilidade comprovada, não em `ready`.                               |
+| Regra                       | Comportamento                                                                                                                                   |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Nenhum frame antes de ready | Os envios são limitados pela fase do protocolo, não por `readyState`, que também cobre OPEN antes de `ready`.                                   |
+| Subscribes agrupados        | Adições no mesmo tick são agrupadas em um frame, fatiado em 32 tópicos.                                                                         |
+| Tópicos rejeitados          | Um tópico respondido com `error` em vez de confirmação é terminal naquele socket e só é tentado de novo na próxima conexão.                     |
+| Limite de tópicos           | Um erro `RATE_LIMITED` recusa o frame inteiro; os tópicos sem confirmação são reenviados após a próxima reconciliação do linger liberar espaço. |
+| Linger                      | Perder o último listener inicia uma reconciliação única de ~5 s, então a repetição do StrictMode não custa frames.                              |
+| Heartbeat                   | Um timer em `REALTIME_IDLE_TIMEOUT_SECONDS / 2.5`; um pong perdido força a reconexão. Qualquer frame recebido prova vida.                       |
+| Backoff                     | 1 s→30 s com meio jitter, reiniciado só após 10 s de estabilidade comprovada, não em `ready`.                                                   |
 
 O estado do git assina dois tópicos por superfície. O painel git mantém
 `git:<chatId>` e, assim que o `GET /git/state` em cache traz um `repoKey`,
 `repo:<key>`. A barra lateral mantém um `repo:<key>` por repositório entre as
-linhas visíveis (`useRepoRealtimeInvalidation`), limitado a 32 para sempre caber
-em um frame de subscribe, e libera o tópico quando a última linha sai da vista.
+linhas visíveis (`useRepoRealtimeInvalidation`), limitado a um quarto dos 64
+tópicos ativos do socket (`MAX_REALTIME_ACTIVE_TOPICS`). Uma rolagem rápida mantém
+o conjunto que saiu da vista, ainda em linger, ao lado do conjunto que chegou, e
+ambos ficam junto de todos os outros tópicos da aba; o hub recusa um frame que
+passaria de 64. A barra lateral libera o tópico quando a última linha sai da vista.
 Um frame de repositório invalida as queries git por chat de todo chat em cache
 naquele repositório, encontrado pelo `repoKey` do seu badge.
 
@@ -288,9 +294,13 @@ Frames que descrevem uma mesma escrita são fundidos antes de tocar o cache
 o frame do repositório e todos os chats para os quais ele se espalha, funde os
 escopos por chat e aplica todos os chats em uma única passada síncrona, de modo
 que o batcher de resumos envia um único `POST /git/state/batch` para o
-repositório inteiro, e não uma requisição por chat. A confirmação `subscribed` de
-um tópico `repo:` ignora entradas lidas nos últimos 2 s, o que evita que uma
-montagem refaça a leitura que acabou de fazer. Um hub antigo responde à
+repositório inteiro, e não uma requisição por chat; as queries do painel GitHub,
+que não pertencem a um chat, são invalidadas uma única vez por janela. A
+confirmação `subscribed` de um tópico `repo:` ignora apenas entradas lidas depois
+que o frame de subscribe foi enviado, pois uma escrita entre uma leitura anterior e
+o processamento do frame pelo hub não está em nenhum dos dois. A leitura que
+forneceu o repo key é anterior ao frame, então a primeira confirmação de uma
+montagem refaz a leitura. Um hub antigo responde à
 assinatura de `repo:` com `UNSUPPORTED`; esse tópico é descartado no socket e o
 caminho `git:<chatId>` não é afetado.
 

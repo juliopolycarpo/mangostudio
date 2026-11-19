@@ -9,12 +9,10 @@
 import { beforeEach, describe, expect, it, jest, mock, setSystemTime } from 'bun:test';
 
 import type { GitBatchStateRequest, GitSummary } from '@mangostudio/shared/git';
-import {
-  type GitScope,
-  MAX_REALTIME_TOPICS_PER_MESSAGE,
-  repoTopic,
-} from '@mangostudio/shared/realtime';
+import { type GitScope, MAX_REALTIME_ACTIVE_TOPICS, repoTopic } from '@mangostudio/shared/realtime';
+import { useQuery } from '@tanstack/react-query';
 
+import { githubKeys } from '@/features/github/queries';
 import type { RealtimeSignal, RealtimeTopicListener } from '@/lib/realtime/realtime-client';
 
 import type * as ApiClient from '../../../src/lib/api-client';
@@ -90,7 +88,7 @@ void mock.module('@/lib/api-client', () => ({
 
 // Static imports are evaluated before any statement above runs, so the hooks
 // under test have to come in afterwards or they bind the real modules.
-const { useBatchedGitSummaries, useRepoRealtimeInvalidation } =
+const { MAX_SIDEBAR_REPO_TOPICS, useBatchedGitSummaries, useRepoRealtimeInvalidation } =
   await import('@/features/workspace/hooks/use-git-state');
 const { resetRealtimeInvalidations } = await import('@/lib/realtime/use-realtime-invalidation');
 
@@ -117,10 +115,22 @@ function respondPerRequest() {
   }));
 }
 
+/** Each start of the GitHub PR-list request, the panel a `github` scope write refreshes. */
+const requestPrList = jest.fn();
+
 /** Both hooks the shell mounts, over the rows it reports in view. */
 function useShellBadges(chatIdsInView: readonly string[]) {
   const summaries = useBatchedGitSummaries(chatIdsInView, { includeCached: true });
   useRepoRealtimeInvalidation(chatIdsInView, summaries);
+  // A mounted PR list: unscoped by chat, as the GitHub panel's own queries are.
+  useQuery({
+    queryKey: [...githubKeys.all, 'prs'],
+    queryFn: () => {
+      requestPrList();
+      return Promise.resolve([]);
+    },
+    staleTime: Number.POSITIVE_INFINITY,
+  });
   return summaries;
 }
 
@@ -145,6 +155,7 @@ describe('sidebar repo realtime invalidation', () => {
     socket.listeners.clear();
     socket.released.length = 0;
     mockBatch.mockReset();
+    requestPrList.mockReset();
     setSystemTime();
     repoKeyByChat = {};
     respondPerRequest();
@@ -200,6 +211,29 @@ describe('sidebar repo realtime invalidation', () => {
     expect(batchedIds(0)).toHaveLength(chatIds.length);
   });
 
+  it('refetches the PR list once for a github write that fans out to every chat of the repository', async () => {
+    const chatIds = Array.from(
+      { length: 40 },
+      (_, index) => `chat-${String(index).padStart(2, '0')}`
+    );
+    repoKeyByChat = Object.fromEntries(chatIds.map((chatId) => [chatId, SHARED_REPO]));
+    await mountSidebar(chatIds);
+    await waitFor(() => expect(requestPrList).toHaveBeenCalledTimes(1));
+    requestPrList.mockClear();
+
+    await socket.deliverWrite(repoTopic(SHARED_REPO), ['state', 'github']);
+    await waitFor(() => expect(requestPrList).toHaveBeenCalled());
+    await Bun.sleep(100);
+
+    // Invalidating the unscoped PR list per chat cancels and restarts its fetch
+    // once for each of the 40 chats in the same pass.
+    const requests = requestPrList.mock.calls.length;
+    expect(
+      requests,
+      `(github PR list): expected 1 request for one repo frame naming ${chatIds.length} chats | received: ${requests}`
+    ).toBe(1);
+  });
+
   it('folds a burst of frames for one write into one refetch', async () => {
     repoKeyByChat = { a: SHARED_REPO, b: SHARED_REPO };
     await mountSidebar(['a', 'b']);
@@ -229,15 +263,49 @@ describe('sidebar repo realtime invalidation', () => {
     expect(mockBatch).not.toHaveBeenCalled();
   });
 
-  it('does not refetch badges that were read moments before the subscription was acked', async () => {
+  it('does not refetch badges read after the subscribe frame was sent', async () => {
+    repoKeyByChat = { a: SHARED_REPO, b: SHARED_REPO };
+    await mountSidebar(['a', 'b']);
+    mockBatch.mockClear();
+
+    // The frame left before the badges were read, so any write after the read
+    // reaches the tab as its own frame and the ack has nothing to add.
+    await socket.deliver(repoTopic(SHARED_REPO), {
+      type: 'subscribed',
+      requestedAt: Date.now() - 1_000,
+    });
+    await Bun.sleep(100);
+
+    expect(mockBatch).not.toHaveBeenCalled();
+  });
+
+  it('refetches a badge read before the subscribe frame was sent, however recently', async () => {
+    repoKeyByChat = { a: SHARED_REPO, b: SHARED_REPO };
+    await mountSidebar(['a', 'b']);
+    mockBatch.mockClear();
+
+    // Read at T. The subscribe frame left a moment later, a sibling chat wrote
+    // at T+0.5 s before the hub had processed it, and the ack lands at T+0.8 s.
+    // The write was neither in the read nor announced, so only a refetch sees it.
+    const readAt = Date.now();
+    setSystemTime(new Date(readAt + 800));
+    await socket.deliver(repoTopic(SHARED_REPO), {
+      type: 'subscribed',
+      requestedAt: readAt + 100,
+    });
+
+    await waitFor(() => expect(mockBatch).toHaveBeenCalledTimes(1));
+    expect(batchedIds(0)).toEqual(['a', 'b']);
+  });
+
+  it('refetches badges when the ack carries no send time', async () => {
     repoKeyByChat = { a: SHARED_REPO, b: SHARED_REPO };
     await mountSidebar(['a', 'b']);
     mockBatch.mockClear();
 
     await socket.deliver(repoTopic(SHARED_REPO), { type: 'subscribed' });
-    await Bun.sleep(100);
 
-    expect(mockBatch).not.toHaveBeenCalled();
+    await waitFor(() => expect(mockBatch).toHaveBeenCalledTimes(1));
   });
 
   it('refetches badges older than the subscription when it is acked again after a reconnect', async () => {
@@ -247,7 +315,10 @@ describe('sidebar repo realtime invalidation', () => {
 
     // The socket was down for a while: whatever happened meanwhile was lost.
     setSystemTime(new Date(Date.now() + 60_000));
-    await socket.deliver(repoTopic(SHARED_REPO), { type: 'subscribed' });
+    await socket.deliver(repoTopic(SHARED_REPO), {
+      type: 'subscribed',
+      requestedAt: Date.now(),
+    });
 
     await waitFor(() => expect(mockBatch).toHaveBeenCalledTimes(1));
     expect(batchedIds(0)).toEqual(['a', 'b']);
@@ -275,7 +346,14 @@ describe('sidebar repo realtime invalidation', () => {
     expect(socket.topics).toEqual([repoTopic(SHARED_REPO)]);
   });
 
-  it('bounds the subscriptions to one frame of topics however many repositories are in view', async () => {
+  it('budgets the sidebar well under the socket limit so a lingering set fits beside the current one', () => {
+    // The set in view and the set that just scrolled away (held for the linger
+    // window) are both counted by the hub, next to every other topic the tab
+    // holds. Two sidebar sets must leave at least half the limit to the rest.
+    expect(MAX_SIDEBAR_REPO_TOPICS * 2).toBeLessThanOrEqual(MAX_REALTIME_ACTIVE_TOPICS / 2);
+  });
+
+  it('bounds the subscriptions to the sidebar budget however many repositories are in view', async () => {
     const chatIds = Array.from(
       { length: 50 },
       (_, index) => `chat-${String(index).padStart(2, '0')}`
@@ -284,7 +362,7 @@ describe('sidebar repo realtime invalidation', () => {
 
     await mountSidebar(chatIds);
 
-    expect(socket.topics).toHaveLength(MAX_REALTIME_TOPICS_PER_MESSAGE);
+    expect(socket.topics).toHaveLength(MAX_SIDEBAR_REPO_TOPICS);
     // The nearest rows win: the first rows in the list are the ones subscribed.
     expect(socket.topics).toContain(repoTopic('repo0'));
     expect(socket.topics).not.toContain(repoTopic('repo49'));

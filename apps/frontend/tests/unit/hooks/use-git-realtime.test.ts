@@ -244,6 +244,33 @@ describe('useGitRealtimeInvalidation repo topic', () => {
     await waitFor(() => expect(refetchState).toHaveBeenCalledTimes(1));
   });
 
+  async function ackRepoTopic(requestedAt: number) {
+    const topicListener = listeners.get('repo:sharedRepoKey');
+    if (!topicListener) throw new Error('(listeners): expected a listener on repo:sharedRepoKey');
+    await act(async () => {
+      await topicListener({ type: 'subscribed', requestedAt });
+    });
+  }
+
+  it('skips the ack barrier for a state read after the subscribe frame was sent', async () => {
+    const refetchState = mountPanel(stateWithKey());
+
+    await ackRepoTopic(Date.now() - 1_000);
+    await Bun.sleep(100);
+
+    expect(refetchState).not.toHaveBeenCalled();
+  });
+
+  it('refetches at the ack when the state was read before the subscribe frame was sent', async () => {
+    const refetchState = mountPanel(stateWithKey());
+
+    // Read at T, subscribe frame at T+0.1 s: a sibling write at T+0.5 s that
+    // the hub processed before the subscription is in neither the read nor a frame.
+    await ackRepoTopic(Date.now() + 100);
+
+    await waitFor(() => expect(refetchState).toHaveBeenCalledTimes(1));
+  });
+
   it('refetches once when one write is announced on both topics', async () => {
     const refetchState = mountPanel(stateWithKey());
 

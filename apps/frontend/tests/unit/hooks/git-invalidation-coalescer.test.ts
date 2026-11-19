@@ -67,6 +67,24 @@ describe('createGitInvalidationCoalescer', () => {
     expect(applied).toEqual([{ chatId: 'chat-a', scopes: ['branches', 'state'] }]);
   });
 
+  it('applies the window-wide work once, with the scopes of every chat in the window', async () => {
+    const { applied, apply } = recordingApply();
+    const windows: GitScope[][] = [];
+    const coalescer = createGitInvalidationCoalescer(apply, 5, (scopes) => {
+      windows.push([...scopes].sort());
+      return Promise.resolve();
+    });
+
+    await Promise.all([
+      coalescer.schedule('chat-a', ['state', 'github']),
+      coalescer.schedule('chat-b', ['github']),
+      coalescer.schedule('chat-c', ['branches']),
+    ]);
+
+    expect(applied).toHaveLength(3);
+    expect(windows).toEqual([['branches', 'github', 'state']]);
+  });
+
   it('resolves, and keeps working, when applying a window fails', async () => {
     const applied: string[] = [];
     let failNext = true;

@@ -1,3 +1,4 @@
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import {
   REALTIME_CLOSE_CODES,
   type RealtimeClientMessage,
@@ -30,7 +31,17 @@ const STABILITY_MS = 10_000;
 
 export type RealtimeSignal =
   /** The topic is active on a live socket, so anything cached for it may predate it. */
-  | { readonly type: 'subscribed' }
+  | {
+      readonly type: 'subscribed';
+      /**
+       * When the frame that asked for this topic was sent (`Date.now()`). Data
+       * read before it can have missed a write the hub processed before the
+       * subscription took hold; data read after it cannot, since every later
+       * write arrives as its own frame. Absent when the sender cannot say, which
+       * a consumer must read as "the data may predate the subscription".
+       */
+      readonly requestedAt?: number;
+    }
   | { readonly type: 'invalidate'; readonly message: RealtimeInvalidateMessage };
 
 export type RealtimeTopicListener = (signal: RealtimeSignal) => void | Promise<void>;
@@ -67,8 +78,6 @@ export interface RealtimeClientOptions {
  */
 type Phase = 'idle' | 'connecting' | 'ready' | 'waiting' | 'stopped';
 
-const SUBSCRIBED_SIGNAL: RealtimeSignal = { type: 'subscribed' };
-
 export function createRealtimeClient(options: RealtimeClientOptions = {}): RealtimeClient {
   const createSocket = options.createSocket ?? ((url: string) => new WebSocket(url));
   const resolveUrl = options.resolveUrl ?? (() => `${getWebSocketBaseUrl()}${REALTIME_PATH}`);
@@ -80,8 +89,17 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
   let socket: WebSocket | null = null;
   /** Desired topic set — the keys *are* the desired set, values are the listeners. */
   const listeners = new Map<string, Set<RealtimeTopicListener>>();
-  /** Sent to the current socket; cleared on close so the next one re-sends. */
-  let requestedTopics = new Set<string>();
+  /**
+   * Sent to the current socket, with the time the frame left; cleared on close
+   * so the next one re-sends.
+   */
+  let requestedTopics = new Map<string, number>();
+  /**
+   * The hub refused a subscribe frame for the active-topic limit. Holds the
+   * topics it refused back from the next flush until a reconcile has had a chance
+   * to free room, since the same frame would fail the same way.
+   */
+  let subscriptionLimitHit = false;
   /** Acknowledged by the current socket. */
   let activeTopics = new Set<string>();
   let failureCount = 0;
@@ -163,12 +181,28 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
 
   function flushTopics(): void {
     clearFlushTimer();
-    if (phase !== 'ready') return;
+    if (phase !== 'ready' || subscriptionLimitHit) return;
     const toAdd = [...listeners.keys()].filter((topic) => !requestedTopics.has(topic));
     if (toAdd.length === 0) return;
+    const sentAt = Date.now();
     // Only delivered chunks are marked as requested, so a failed send leaves its
     // topics for the next connect instead of stranding them.
-    for (const topic of sendTopicFrames('subscribe', toAdd)) requestedTopics.add(topic);
+    for (const topic of sendTopicFrames('subscribe', toAdd)) requestedTopics.set(topic, sentAt);
+  }
+
+  /**
+   * The hub refused a subscribe frame for the active-topic limit, whole and with
+   * no ack. Topics that were asked for and never acked are not subscribed, so
+   * they go back to wanted-but-unrequested and are resent once a reconcile has
+   * unsubscribed enough lingering ones to make room.
+   */
+  function handleSubscriptionLimit(): void {
+    for (const topic of requestedTopics.keys()) {
+      if (!activeTopics.has(topic)) requestedTopics.delete(topic);
+    }
+    subscriptionLimitHit = true;
+    // Make sure a reconcile is coming even when nothing was just released.
+    scheduleLinger();
   }
 
   function scheduleFlush(): void {
@@ -199,7 +233,7 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
     clearFlushTimer();
     clearLingerTimer();
     closeSocket();
-    requestedTopics = new Set();
+    requestedTopics = new Map();
     activeTopics = new Set();
     phase = 'idle';
   }
@@ -207,7 +241,7 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
   function stop(): void {
     phase = 'stopped';
     socket = null;
-    requestedTopics = new Set();
+    requestedTopics = new Map();
     activeTopics = new Set();
     clearReconnectTimer();
     clearFlushTimer();
@@ -223,14 +257,21 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
       return;
     }
     if (phase !== 'ready') return;
+    const retryRefused = subscriptionLimitHit;
+    subscriptionLimitHit = false;
     // A pure reconciler over current state, so the churn that armed this timer no
     // longer matters: a topic wanted again by fire time simply is not unwanted.
     const unwanted = [...activeTopics].filter((topic) => !listeners.has(topic));
     if (unwanted.length === 0) return;
-    for (const topic of sendTopicFrames('unsubscribe', unwanted)) {
+    const freed = sendTopicFrames('unsubscribe', unwanted);
+    for (const topic of freed) {
       activeTopics.delete(topic);
       requestedTopics.delete(topic);
     }
+    // Retry only when room was made: with nothing to free, the refused frame
+    // would be refused again, once per linger window, for as long as the page
+    // wants more than the limit.
+    if (retryRefused && freed.length > 0) scheduleFlush();
   }
 
   function scheduleLinger(): void {
@@ -249,7 +290,7 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
     // socket's own close (identity-guarded), a forced reconnect that nulls the
     // socket first, and a constructor throw — so the socket-identity guard is
     // what keeps this a single-owner timer.
-    requestedTopics = new Set();
+    requestedTopics = new Map();
     activeTopics = new Set();
     if (listeners.size === 0) {
       phase = 'idle';
@@ -317,7 +358,10 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
             continue;
           }
           activeTopics.add(topic);
-          dispatch(topic, SUBSCRIBED_SIGNAL);
+          dispatch(topic, {
+            type: 'subscribed',
+            requestedAt: requestedTopics.get(topic) ?? Date.now(),
+          });
         }
         if (stale.length > 0) {
           sendTopicFrames('unsubscribe', stale);
@@ -328,10 +372,15 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
       case 'invalidate':
         dispatch(message.topic, { type: 'invalidate', message });
         return;
+      case 'error':
+        // A topic the server refused for ownership or support stays in
+        // requestedTopics so this socket stops asking, and the next connect
+        // retries it once ownership may differ. The topic limit is different: it
+        // refuses a whole frame over a transient count, so it is retried here.
+        if (message.code === ERROR_CODES.RATE_LIMITED) handleSubscriptionLimit();
+        return;
       default:
-        // `pong` needs nothing beyond the liveness clear above. An `error` names a
-        // topic the server refused; it stays in requestedTopics so this socket
-        // stops asking, and the next connect retries it once ownership may differ.
+        // `pong` needs nothing beyond the liveness clear above.
         return;
     }
   }
@@ -360,7 +409,8 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
 
   function connect(): void {
     phase = 'connecting';
-    requestedTopics = new Set();
+    subscriptionLimitHit = false;
+    requestedTopics = new Map();
     activeTopics = new Set();
     awaitingPong = false;
 
@@ -394,7 +444,7 @@ export function createRealtimeClient(options: RealtimeClientOptions = {}): Realt
     clearFlushTimer();
     clearLingerTimer();
     closeSocket();
-    requestedTopics = new Set();
+    requestedTopics = new Map();
     activeTopics = new Set();
     awaitingPong = false;
     if (listeners.size === 0) {

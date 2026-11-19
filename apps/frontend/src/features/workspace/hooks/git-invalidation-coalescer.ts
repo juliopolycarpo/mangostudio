@@ -3,6 +3,13 @@ import type { GitScope } from '@mangostudio/shared/realtime';
 /** Applies one chat's merged scopes; the coalescer calls it once per chat per window. */
 export type ApplyGitInvalidation = (chatId: string, scopes: ReadonlySet<GitScope>) => Promise<void>;
 
+/**
+ * Applies what is not one chat's: called once per window with the union of every
+ * chat's scopes, so a query shared by all of them is invalidated once rather
+ * than once per chat.
+ */
+export type ApplyGitInvalidationWindow = (scopes: ReadonlySet<GitScope>) => Promise<void>;
+
 export interface GitInvalidationCoalescer {
   /**
    * Queues the scopes for the chat and resolves once the window they landed in
@@ -35,7 +42,8 @@ export interface GitInvalidationCoalescer {
  */
 export function createGitInvalidationCoalescer(
   apply: ApplyGitInvalidation,
-  windowMs: number
+  windowMs: number,
+  applyWindow?: ApplyGitInvalidationWindow
 ): GitInvalidationCoalescer {
   let pending = new Map<string, Set<GitScope>>();
   let settled: Promise<void> | null = null;
@@ -44,9 +52,14 @@ export function createGitInvalidationCoalescer(
     const batch = pending;
     pending = new Map();
     settled = null;
+    const windowScopes = new Set<GitScope>();
+    for (const scopes of batch.values()) for (const scope of scopes) windowScopes.add(scope);
     // Started in one synchronous pass: every chat's refetch begins in the same
     // turn, which is what lets the batcher share a request between them.
-    await Promise.all([...batch].map(([chatId, scopes]) => apply(chatId, scopes)));
+    await Promise.all([
+      ...[...batch].map(([chatId, scopes]) => apply(chatId, scopes)),
+      ...(applyWindow ? [applyWindow(windowScopes)] : []),
+    ]);
   };
 
   return {

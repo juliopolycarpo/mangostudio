@@ -249,7 +249,8 @@ server-side subscription is dropped only once the last one releases it.
 component and hands every signal to a callback. Callers invalidate with their
 own query client, so the module carries no query-key or topic knowledge.
 The two signals are `{ type: 'invalidate', message }` and
-`{ type: 'subscribed' }`.
+`{ type: 'subscribed', requestedAt }`, where `requestedAt` is when the frame that
+asked for the topic was sent.
 
 `subscribed` is the assume-stale barrier. Because events published while a
 socket was down are lost, an ack — on first connect, on reconnect, and on an
@@ -260,20 +261,24 @@ a second refresh.
 
 Client rules the module enforces:
 
-| Rule                  | Behavior                                                                                                                  |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| No frame before ready | Sends are gated on the protocol phase, not `readyState`, which also spans OPEN-before-`ready`.                            |
-| Batched subscribes    | Same-tick adds coalesce into one frame, chunked at 32 topics.                                                             |
-| Rejected topics       | A topic answered with an `error` instead of an ack is terminal for that socket and retried on the next connect.           |
-| Linger                | Dropping the last listener starts a single-shot ~5 s reconcile, so StrictMode churn costs no frames.                      |
-| Heartbeat             | One timer at `REALTIME_IDLE_TIMEOUT_SECONDS / 2.5`; a missed pong forces a reconnect. Any inbound frame is proof of life. |
-| Backoff               | 1 s→30 s with half jitter, reset only after 10 s of proven stability rather than on `ready`.                              |
+| Rule                  | Behavior                                                                                                                   |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| No frame before ready | Sends are gated on the protocol phase, not `readyState`, which also spans OPEN-before-`ready`.                             |
+| Batched subscribes    | Same-tick adds coalesce into one frame, chunked at 32 topics.                                                              |
+| Rejected topics       | A topic answered with an `error` instead of an ack is terminal for that socket and retried on the next connect.            |
+| Topic limit           | A `RATE_LIMITED` error refuses a whole frame, so its unacked topics are resent after the next linger reconcile frees room. |
+| Linger                | Dropping the last listener starts a single-shot ~5 s reconcile, so StrictMode churn costs no frames.                       |
+| Heartbeat             | One timer at `REALTIME_IDLE_TIMEOUT_SECONDS / 2.5`; a missed pong forces a reconnect. Any inbound frame is proof of life.  |
+| Backoff               | 1 s→30 s with half jitter, reset only after 10 s of proven stability rather than on `ready`.                               |
 
 Git state subscribes to two topics per surface. The git panel holds
 `git:<chatId>` and, once the cached `GET /git/state` carries a `repoKey`,
 `repo:<key>`. The sidebar holds one `repo:<key>` per repository among the rows in
-view (`useRepoRealtimeInvalidation`), capped at 32 so it always fits one
-subscribe frame, and releases a topic when its last row leaves the view. A repo
+view (`useRepoRealtimeInvalidation`), capped at a quarter of the socket's 64 active
+topics (`MAX_REALTIME_ACTIVE_TOPICS`). A fast scroll holds the set it left, still
+lingering, beside the set it reached, and both sit next to every other topic the tab
+holds; the hub refuses a frame that would pass 64. The sidebar releases a topic when
+its last row leaves the view. A repo
 frame invalidates the per-chat git queries of every cached chat in that
 repository, found by the `repoKey` on its badge.
 
@@ -282,8 +287,11 @@ Frames that describe one write are merged before they touch the cache
 the repo frame and every chat the repo frame fans out to, merges scopes per chat,
 and applies all chats in one synchronous pass, so the summary batcher sends a
 single `POST /git/state/batch` for the whole repository instead of one request
-per chat. The `subscribed` ack on a repo topic skips entries read within the last
-2 s, which keeps a mount from refetching what it just fetched. An older hub
+per chat; the GitHub panel's queries, which are not a chat's, are invalidated once
+for the window. The `subscribed` ack on a repo topic skips only entries read after
+its subscribe frame was sent, since a write between an earlier read and the hub
+processing the frame is in neither. A read that supplied the repo key predates the
+frame, so a mount's first ack refetches it. An older hub
 answers a `repo:` subscription with `UNSUPPORTED`; that topic is dropped for the
 socket and the `git:<chatId>` path is unaffected.
 
