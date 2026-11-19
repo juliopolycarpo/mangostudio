@@ -11,7 +11,7 @@ import {
   mockNoopTools,
   mockProviderRegistry,
   mockVerifiedChatOwnership,
-  restoreAllMocks,
+  resetStreamTestState,
 } from './_respond-stream-helpers';
 
 let testUser!: UserFixture;
@@ -22,12 +22,12 @@ beforeAll(async () => {
   testUser = await insertTestUser();
 });
 
-afterEach(async () => {
+afterEach(() => {
   restoreAuth?.();
   restoreAuth = null;
   getDbSpy?.mockRestore();
   getDbSpy = undefined;
-  await restoreAllMocks();
+  resetStreamTestState();
 });
 
 async function createRegistrationHarness(insertError?: Error) {

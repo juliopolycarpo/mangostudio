@@ -1,9 +1,12 @@
-import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
-import { restoreAllMocks } from './_respond-stream-helpers';
+import { moduleMockerFor } from '../../support/mocks/module-mocks';
+import { resetStreamTestState } from './_respond-stream-helpers';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 let TEST_USER!: UserFixture;
 
@@ -13,15 +16,15 @@ beforeAll(async () => {
 
 let restoreAuth: (() => void) | null = null;
 
-afterEach(async () => {
+afterEach(() => {
   restoreAuth?.();
   restoreAuth = null;
-  await restoreAllMocks();
+  resetStreamTestState();
 });
 
 describe('POST /respond/stream — validation', () => {
   it('returns 404 when chat is not found', async () => {
-    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+    await mockModule('../../../src/modules/chats/infrastructure/chat-repository', () => ({
       getOwnedChat: () => Promise.resolve(undefined),
     }));
 
@@ -42,7 +45,7 @@ describe('POST /respond/stream — validation', () => {
   });
 
   it('accepts thinkingVisibility in request body without error', async () => {
-    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+    await mockModule('../../../src/modules/chats/infrastructure/chat-repository', () => ({
       getOwnedChat: () => Promise.resolve(undefined),
     }));
 
@@ -66,7 +69,7 @@ describe('POST /respond/stream — validation', () => {
   });
 
   it('accepts thinkingEnabled and reasoningEffort in request body', async () => {
-    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+    await mockModule('../../../src/modules/chats/infrastructure/chat-repository', () => ({
       getOwnedChat: () => Promise.resolve(undefined),
     }));
 
@@ -91,7 +94,7 @@ describe('POST /respond/stream — validation', () => {
   });
 
   it('accepts legacy requests without thinkingVisibility', async () => {
-    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+    await mockModule('../../../src/modules/chats/infrastructure/chat-repository', () => ({
       getOwnedChat: () => Promise.resolve(undefined),
     }));
 

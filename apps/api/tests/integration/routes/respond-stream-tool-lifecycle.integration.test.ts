@@ -1,10 +1,11 @@
-import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 
 import type { ToolExecutionSnapshot } from '@mangostudio/shared/tool-executions';
 
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { moduleMockerFor } from '../../support/mocks/module-mocks';
 import {
   buildRespondStreamRequest,
   createTestStreamDb,
@@ -19,8 +20,10 @@ import {
   realGetAllTools,
   realGetSafeEffectiveToolSettings,
   realGetTool,
-  restoreAllMocks,
+  resetStreamTestState,
 } from './_respond-stream-helpers';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 let TEST_USER!: UserFixture;
 
@@ -30,10 +33,10 @@ beforeAll(async () => {
 
 let restoreAuth: (() => void) | null = null;
 
-afterEach(async () => {
+afterEach(() => {
   restoreAuth?.();
   restoreAuth = null;
-  await restoreAllMocks();
+  resetStreamTestState();
 });
 
 interface ToolExecutionEvent {
@@ -56,7 +59,7 @@ function toolExecutionEvents(
 }
 
 async function mockRealTools(): Promise<void> {
-  await mock.module('../../../src/services/tools', () => ({
+  await mockModule('../../../src/services/tools', () => ({
     getAllTools: realGetAllTools,
     getAllToolDefinitions: realGetAllToolDefinitions,
     executeTool: realExecuteTool,
@@ -102,7 +105,7 @@ async function mockRejectedToolPolicy(options: {
         })
       ),
   }));
-  await mock.module('../../../src/services/tools', () => ({
+  await mockModule('../../../src/services/tools', () => ({
     getAllTools: () => [tool],
     getAllToolDefinitions: () => [definition],
     getTool: () => (options.exists ? tool : undefined),
@@ -136,7 +139,7 @@ async function streamSingleToolCall(name: string) {
 
 function mockMessageCapturingDb(insertedMessages: Array<Record<string, unknown>>) {
   const dbMock = createTestStreamDb({ userId: TEST_USER.id, insertedMessages });
-  return mock.module('../../../src/db/database', () => ({ getDb: () => dbMock }));
+  return mockModule('../../../src/db/database', () => ({ getDb: () => dbMock }));
 }
 
 describe('POST /respond/stream — tool execution lifecycle', () => {

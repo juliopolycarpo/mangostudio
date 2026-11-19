@@ -1,9 +1,10 @@
-import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 
 import { respondStreamRoutes } from '../../../src/modules/generation/http/respond-stream-routes';
 import type { AgentTurnRequest } from '../../../src/services/providers/types';
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { moduleMockerFor } from '../../support/mocks/module-mocks';
 import {
   createTestStreamDb,
   makeAgentProfile,
@@ -11,8 +12,10 @@ import {
   mockSubagentRunner,
   parsePersistedParts,
   parseSseEvents,
-  restoreAllMocks,
+  resetStreamTestState,
 } from './_respond-stream-helpers';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 let TEST_USER!: UserFixture;
 
@@ -22,10 +25,10 @@ beforeAll(async () => {
 
 let restoreAuth: (() => void) | null = null;
 
-afterEach(async () => {
+afterEach(() => {
   restoreAuth?.();
   restoreAuth = null;
-  await restoreAllMocks();
+  resetStreamTestState();
 });
 
 describe('POST /respond/stream — tool execution edge cases', () => {
@@ -33,7 +36,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
     const insertedMessages: Array<Record<string, unknown>> = [];
     let iteration = 0;
 
-    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+    await mockModule('../../../src/modules/chats/infrastructure/chat-repository', () => ({
       verifyChatOwnership: () => Promise.resolve(true),
       getOwnedChat: () =>
         Promise.resolve({
@@ -58,7 +61,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
         ),
     }));
 
-    await mock.module('../../../src/services/tools', () => {
+    await mockModule('../../../src/services/tools', () => {
       const toolDefinition = {
         name: 'get_current_datetime',
         description: 'Get current time',
@@ -91,7 +94,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
       };
     });
 
-    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
+    await mockModule('../../../src/services/providers/core/provider-registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           providerType: 'openai-compatible',
@@ -125,7 +128,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
     }));
 
     const dbMock = createTestStreamDb({ userId: TEST_USER.id, insertedMessages });
-    await mock.module('../../../src/db/database', () => ({ getDb: () => dbMock }));
+    await mockModule('../../../src/db/database', () => ({ getDb: () => dbMock }));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -168,7 +171,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
     const insertedMessages: Array<Record<string, unknown>> = [];
     let iteration = 0;
 
-    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+    await mockModule('../../../src/modules/chats/infrastructure/chat-repository', () => ({
       verifyChatOwnership: () => Promise.resolve(true),
       getOwnedChat: () =>
         Promise.resolve({
@@ -193,7 +196,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
         ),
     }));
 
-    await mock.module('../../../src/services/tools', () => {
+    await mockModule('../../../src/services/tools', () => {
       const toolDefinition = {
         name: 'get_current_datetime',
         description: 'Get current time',
@@ -221,7 +224,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
       };
     });
 
-    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
+    await mockModule('../../../src/services/providers/core/provider-registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           providerType: 'openai-compatible',
@@ -255,7 +258,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
     }));
 
     const dbMock = createTestStreamDb({ userId: TEST_USER.id, insertedMessages });
-    await mock.module('../../../src/db/database', () => ({ getDb: () => dbMock }));
+    await mockModule('../../../src/db/database', () => ({ getDb: () => dbMock }));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -293,7 +296,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
     // eslint-disable-next-line prefer-const -- This binding is assigned after a callback closes over it.
     let cancelStream: (() => void) | undefined;
 
-    await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+    await mockModule('../../../src/modules/chats/infrastructure/chat-repository', () => ({
       verifyChatOwnership: () => Promise.resolve(true),
       getOwnedChat: () =>
         Promise.resolve({
@@ -304,7 +307,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
         }),
     }));
 
-    await mock.module('../../../src/modules/app-settings/application/app-settings-service', () => ({
+    await mockModule('../../../src/modules/app-settings/application/app-settings-service', () => ({
       getAppSettings: () =>
         Promise.resolve({
           multiAgentSettings: {
@@ -353,7 +356,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
       },
     }));
 
-    await mock.module('../../../src/services/tools', () => {
+    await mockModule('../../../src/services/tools', () => {
       const delegateTool = {
         definition: { name: 'delegate_to_agent', description: 'delegate', parameters: {} },
         settings: {
@@ -377,7 +380,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
       };
     });
 
-    await mock.module('../../../src/services/providers/core/provider-registry', () => ({
+    await mockModule('../../../src/services/providers/core/provider-registry', () => ({
       getProviderForModel: () =>
         Promise.resolve({
           providerType: 'openai-compatible',
@@ -406,7 +409,7 @@ describe('POST /respond/stream — tool execution edge cases', () => {
     }));
 
     const dbMock = createTestStreamDb({ userId: TEST_USER.id });
-    await mock.module('../../../src/db/database', () => ({ getDb: () => dbMock }));
+    await mockModule('../../../src/db/database', () => ({ getDb: () => dbMock }));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;

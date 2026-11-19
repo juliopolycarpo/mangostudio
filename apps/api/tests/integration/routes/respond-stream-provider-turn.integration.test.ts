@@ -9,7 +9,7 @@
  * asserted at the end, on the route where it matters most.
  */
 
-import { afterEach, beforeAll, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeAll, describe, expect, it } from 'bun:test';
 
 import { ERROR_CODES } from '@mangostudio/shared/errors';
 import { SSEErrorEventSchema } from '@mangostudio/shared/streaming';
@@ -24,6 +24,7 @@ import type {
 } from '../../../src/services/providers/types';
 import { insertTestUser, type UserFixture } from '../../support/factories';
 import { createAuthenticatedApiTestApp } from '../../support/harness/create-api-test-app';
+import { moduleMockerFor } from '../../support/mocks/module-mocks';
 import {
   KEY_REJECTING_PROVIDER_TYPES,
   KeyRejectingProviderFake,
@@ -36,8 +37,10 @@ import {
   mockVerifiedChatOwnership,
   parsePersistedParts,
   parseSseEvents,
-  restoreAllMocks,
+  resetStreamTestState,
 } from './_respond-stream-helpers';
+
+const mockModule = moduleMockerFor(import.meta.dir);
 
 const realCatalog = { ...realCatalogNs };
 
@@ -56,7 +59,7 @@ async function mockLegacyStreamProvider(
   await mockVerifiedChatOwnership();
   await mockNoopTools();
 
-  await mock.module('../../../src/modules/messages/infrastructure/message-repository', () => ({
+  await mockModule('../../../src/modules/messages/infrastructure/message-repository', () => ({
     loadHistory: () => Promise.resolve([]),
     loadRichHistory: () => Promise.resolve([]),
     insertMessage: (message: Record<string, unknown>) => {
@@ -69,7 +72,7 @@ async function mockLegacyStreamProvider(
     listLegacyGalleryImages: () => Promise.resolve([]),
   }));
 
-  await mock.module('../../../src/services/providers/core/provider-registry', () => ({
+  await mockModule('../../../src/services/providers/core/provider-registry', () => ({
     getProviderForModel: () =>
       Promise.resolve({
         providerType: 'openai',
@@ -99,7 +102,7 @@ async function mockAgentTurnProvider(
   await mockVerifiedChatOwnership();
   await mockNoopTools();
 
-  await mock.module('../../../src/modules/messages/infrastructure/message-repository', () => ({
+  await mockModule('../../../src/modules/messages/infrastructure/message-repository', () => ({
     loadHistory: () => Promise.resolve([]),
     loadRichHistory: () => Promise.resolve([]),
     insertMessage: (message: Record<string, unknown>) => {
@@ -112,7 +115,7 @@ async function mockAgentTurnProvider(
     listLegacyGalleryImages: () => Promise.resolve([]),
   }));
 
-  await mock.module('../../../src/services/providers/catalog', () => ({
+  await mockModule('../../../src/services/providers/catalog', () => ({
     ...realCatalog,
     getCachedModelMetadata: () => ({
       providerType: 'openai' as const,
@@ -136,17 +139,16 @@ async function mockAgentTurnProvider(
     validateApiKey: () => Promise.resolve(),
     resolveApiKey: () => Promise.resolve('provider-test-key'),
   };
-  await mock.module('../../../src/services/providers/core/provider-registry', () => ({
+  await mockModule('../../../src/services/providers/core/provider-registry', () => ({
     getProvider: () => provider,
     getProviderForModel: () => Promise.resolve(provider),
   }));
 }
 
-afterEach(async () => {
+afterEach(() => {
   restoreAuth?.();
   restoreAuth = null;
-  await mock.module('../../../src/services/providers/catalog', () => realCatalog);
-  await restoreAllMocks();
+  resetStreamTestState();
 });
 
 describe('POST /respond/stream — legacy text-stream provider', () => {
@@ -158,7 +160,7 @@ describe('POST /respond/stream — legacy text-stream provider', () => {
       yield { type: 'text', text: 'Hi from the provider', done: false };
       yield { type: 'text', text: '', done: true };
     }, insertedMessages);
-    await mock.module('../../../src/db/database', mockStreamDb(insertedMessages));
+    await mockModule('../../../src/db/database', mockStreamDb(insertedMessages));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -194,7 +196,7 @@ describe('POST /respond/stream — legacy text-stream provider', () => {
       };
       yield { type: 'error', content: 'The provider run failed.', done: true };
     }, insertedMessages);
-    await mock.module('../../../src/db/database', mockStreamDb(insertedMessages));
+    await mockModule('../../../src/db/database', mockStreamDb(insertedMessages));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -276,7 +278,7 @@ describe('POST /respond/stream — agent-turn provider', () => {
       yield { type: 'assistant_text_delta', text: 'The README describes MangoStudio.' };
       yield { type: 'turn_completed' };
     }, insertedMessages);
-    await mock.module('../../../src/db/database', mockStreamDb(insertedMessages));
+    await mockModule('../../../src/db/database', mockStreamDb(insertedMessages));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -351,7 +353,7 @@ describe('POST /respond/stream — agent-turn provider', () => {
       yield { type: 'assistant_text_delta', text: 'Done.' };
       yield { type: 'turn_completed' };
     }, insertedMessages);
-    await mock.module('../../../src/db/database', mockStreamDb(insertedMessages));
+    await mockModule('../../../src/db/database', mockStreamDb(insertedMessages));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -386,7 +388,7 @@ describe('POST /respond/stream — agent-turn provider', () => {
         error: 'The model exceeded the maximum number of tool interactions.',
       };
     }, insertedMessages);
-    await mock.module('../../../src/db/database', mockStreamDb(insertedMessages));
+    await mockModule('../../../src/db/database', mockStreamDb(insertedMessages));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
     restoreAuth = restore;
@@ -430,7 +432,7 @@ describe('POST /respond/stream — agent-turn provider', () => {
       const fake = new KeyRejectingProviderFake(providerType, 401);
 
       await mockAgentTurnProvider((req) => fake.streamAgentTurn(req), insertedMessages);
-      await mock.module('../../../src/db/database', mockStreamDb(insertedMessages));
+      await mockModule('../../../src/db/database', mockStreamDb(insertedMessages));
 
       const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
       restoreAuth = restore;
@@ -477,7 +479,7 @@ describe('POST /respond/stream — deprecated provider', () => {
   it('refuses a stored cursor model with the typed reason and its action', async () => {
     await mockVerifiedChatOwnership();
     await mockNoopTools();
-    await mock.module('../../../src/services/providers/catalog', () => ({
+    await mockModule('../../../src/services/providers/catalog', () => ({
       ...realCatalog,
       getCachedModelMetadata: () => ({ providerType: 'cursor' as const, capabilities: undefined }),
     }));

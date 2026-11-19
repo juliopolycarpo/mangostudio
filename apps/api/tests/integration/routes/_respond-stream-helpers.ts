@@ -1,22 +1,14 @@
-import { mock, spyOn } from 'bun:test';
+import { spyOn } from 'bun:test';
 
 import type { AgentProfile } from '@mangostudio/shared/agents';
 import type { ChatRunnerConfiguration, ChatRunnerPermissions } from '@mangostudio/shared/chat';
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type { ProviderType } from '@mangostudio/shared/types';
 
-import * as realDatabaseNs from '../../../src/db/database';
 import * as agentSettings from '../../../src/modules/agents/application/agent-settings-service';
 import { AgentSettingsError } from '../../../src/modules/agents/domain/agent-profile';
-import * as realAppSettingsServiceNs from '../../../src/modules/app-settings/application/app-settings-service';
-import * as realChatRepositoryNs from '../../../src/modules/chats/infrastructure/chat-repository';
 import { clearSubagentCache } from '../../../src/modules/generation/application/subagent-response-cache';
 import * as subagentRunner from '../../../src/modules/generation/application/subagent-runner';
-import * as realMessageRepositoryNs from '../../../src/modules/messages/infrastructure/message-repository';
-import * as realProviderSettingsRepoNs from '../../../src/modules/provider-settings/infrastructure/provider-settings-repository';
-import * as realToolSettingsRepoNs from '../../../src/modules/tool-settings/infrastructure/tool-settings-repository';
-import * as realGeminiNs from '../../../src/services/gemini';
-import * as realProviderRegistryNs from '../../../src/services/providers/core/provider-registry';
 import type { AgentTurnRequest } from '../../../src/services/providers/types';
 import * as realToolsNs from '../../../src/services/tools';
 import {
@@ -28,65 +20,34 @@ import type {
   RegisteredTool,
   ToolContext,
 } from '../../../src/services/tools/types';
+import { moduleMockerFor } from '../../support/mocks/module-mocks';
 import { makeStreamChatRow, type StreamChatOverrides } from '../../support/stream-chat-row';
 
-// Snapshot every module's whole namespace at module-load time, before any test
-// can call mock.module(). Bun's mock.module() updates live namespace bindings,
-// so spreading a namespace object in afterEach would spread already-mocked
-// values; the snapshot has to be taken here. It must also be the whole
-// namespace: mock.module() on a loaded module merges into it, so re-registering
-// a hand-listed subset leaves every export a partial fake added in place.
-const realDatabase = { ...realDatabaseNs };
-const realChatRepository = { ...realChatRepositoryNs };
-const realProviderRegistry = { ...realProviderRegistryNs };
+const mockModule = moduleMockerFor(import.meta.dir);
+
+// The real tools namespace, captured at module-load time: the fakes below spread it,
+// and suites pass individual real functions through. It must be a snapshot, because
+// mock.module() updates live namespace bindings and a later spread would read the fake.
 const realTools = { ...realToolsNs };
 export const realGetAllTools = realTools.getAllTools;
 export const realGetAllToolDefinitions = realTools.getAllToolDefinitions;
 export const realExecuteTool = realTools.executeTool;
 export const realGetTool = realTools.getTool;
 export const realGetSafeEffectiveToolSettings = realTools.getSafeEffectiveToolSettings;
-const realAppSettingsService = { ...realAppSettingsServiceNs };
-
-const realGemini = { ...realGeminiNs };
-const realProviderSettingsRepo = { ...realProviderSettingsRepoNs };
-const realToolSettingsRepo = { ...realToolSettingsRepoNs };
-const realMessageRepository = { ...realMessageRepositoryNs };
 
 export { AgentSettingsError };
 
-export async function restoreAllMocks(): Promise<void> {
+/**
+ * Clears the state a suite's fakes leave behind that is not a module registration:
+ * the subagent response cache and the two spies. The faked modules themselves are
+ * restored by the global afterEach (support/mocks/module-mocks.ts).
+ */
+export function resetStreamTestState(): void {
   clearSubagentCache();
-  await mock.module('../../../src/db/database', () => realDatabase);
-  await mock.module(
-    '../../../src/modules/chats/infrastructure/chat-repository',
-    () => realChatRepository
-  );
-  await mock.module(
-    '../../../src/services/providers/core/provider-registry',
-    () => realProviderRegistry
-  );
-  await mock.module('../../../src/services/tools', () => realTools);
-  await mock.module(
-    '../../../src/modules/app-settings/application/app-settings-service',
-    () => realAppSettingsService
-  );
-  await mock.module('../../../src/services/gemini', () => realGemini);
-  await mock.module(
-    '../../../src/modules/provider-settings/infrastructure/provider-settings-repository',
-    () => realProviderSettingsRepo
-  );
-  await mock.module(
-    '../../../src/modules/tool-settings/infrastructure/tool-settings-repository',
-    () => realToolSettingsRepo
-  );
   agentProfileSpy?.mockRestore();
   agentProfileSpy = undefined;
   subagentRunnerSpy?.mockRestore();
   subagentRunnerSpy = undefined;
-  await mock.module(
-    '../../../src/modules/messages/infrastructure/message-repository',
-    () => realMessageRepository
-  );
 }
 
 /**
@@ -165,7 +126,7 @@ export async function mockVerifiedChatOwnership(
   runner: ChatRunnerConfiguration = { kind: 'mangostudio', agentId: 'default' },
   runnerPermissions: ChatRunnerPermissions = {}
 ): Promise<void> {
-  await mock.module('../../../src/modules/chats/infrastructure/chat-repository', () => ({
+  await mockModule('../../../src/modules/chats/infrastructure/chat-repository', () => ({
     verifyChatOwnership: () => Promise.resolve(true),
     getOwnedChat: () =>
       Promise.resolve({
@@ -278,7 +239,7 @@ export async function mockProviderRegistry(
   streamFactory: AgentStreamFactory,
   options: ProviderRegistryMockOptions = {}
 ): Promise<void> {
-  await mock.module('../../../src/services/providers/core/provider-registry', () => ({
+  await mockModule('../../../src/services/providers/core/provider-registry', () => ({
     getProviderForModel: () => Promise.resolve(createProviderMock(streamFactory, options)),
   }));
 }
@@ -293,7 +254,7 @@ export async function mockToolsModule(tools: RegisteredTool[]): Promise<void> {
   const getAllTools = () => Array.from(toolsByName.values());
   const getTool = (name: string) => toolsByName.get(name);
 
-  await mock.module('../../../src/services/tools', () => ({
+  await mockModule('../../../src/services/tools', () => ({
     ...realTools,
     registerTool: (tool: RegisteredTool) => toolsByName.set(tool.definition.name, tool),
     getTool,
@@ -381,7 +342,7 @@ export function mockSubagentAgentSettings(options: SubagentProfileMockOptions = 
 export async function mockMultiAgentAppSettings(
   overrides: MultiAgentSettingsOverrides = {}
 ): Promise<void> {
-  await mock.module('../../../src/modules/app-settings/application/app-settings-service', () => ({
+  await mockModule('../../../src/modules/app-settings/application/app-settings-service', () => ({
     getAppSettings: () => Promise.resolve({ multiAgentSettings: multiAgentSettings(overrides) }),
   }));
 }
