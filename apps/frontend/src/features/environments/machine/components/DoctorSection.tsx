@@ -11,6 +11,7 @@ import type {
 import { CircleCheck } from 'lucide-react';
 
 import { Badge } from '@/components/ui/Badge';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
@@ -40,7 +41,7 @@ function summaryVariant(doctor: MachineDoctorReport): 'error' | 'warning' | 'suc
 }
 
 export function DoctorSection() {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const m = t.environments.machine.doctor;
   const doctor = useMachineDoctor();
 

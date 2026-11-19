@@ -6,6 +6,7 @@
 import type { MachineStatus } from '@mangostudio/shared/machine';
 
 import { Badge } from '@/components/ui/Badge';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 
 import { formatDuration } from '../../format';
@@ -20,7 +21,7 @@ interface HubProcessCardProps {
 }
 
 export function HubProcessCard({ status, isRestarting, onRestart }: HubProcessCardProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const m = t.environments.machine;
   const { hub } = status;
 

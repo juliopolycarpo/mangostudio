@@ -13,6 +13,7 @@ import { useState } from 'react';
 
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
@@ -32,7 +33,7 @@ interface RuntimePairingPanelProps {
 }
 
 export function RuntimePairingPanel({ environmentId }: RuntimePairingPanelProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.entities.pairing;
   const pairing = useRuntimePairingQuery(environmentId, true);
   const issue = useIssueRuntimePairingMutation(environmentId);
@@ -144,7 +145,7 @@ function SetupSteps({
   readonly token: string;
   readonly environmentId: string;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.entities.pairing;
   const lifecycle = useRuntimeLifecycleQuery(environmentId, true);
   const serviceInstall = lifecycle.data?.manualCommands?.serviceInstall;

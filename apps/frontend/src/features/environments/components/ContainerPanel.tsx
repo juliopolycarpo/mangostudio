@@ -16,6 +16,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
@@ -35,7 +36,7 @@ interface ContainerPanelProps {
 }
 
 export function ContainerPanel({ environment }: ContainerPanelProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.entities.container;
   const update = useUpdateEnvironmentMutation();
   const stored = useMemo(() => containerConfigToForm(environment.config), [environment.config]);

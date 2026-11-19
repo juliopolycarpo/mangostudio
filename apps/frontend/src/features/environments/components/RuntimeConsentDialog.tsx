@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { Dialog } from '@/components/ui/Dialog';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 
@@ -49,7 +50,7 @@ export function RuntimeConsentDialog({
   onConfirm,
   onCancel,
 }: RuntimeConsentDialogProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.entities.runtime.consent;
   const [profile, setProfile] = useState<RuntimeConsentProfile>(initialProfile);
   const [allow, setAllow] = useState<RuntimeCapabilityAllow>(

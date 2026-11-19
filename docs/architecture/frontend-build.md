@@ -396,7 +396,8 @@ routes when more than one imports it), so the strings arrive in the same round a
 no Suspense is added. A shared chunk is one more request in that round (the Library page makes
 two more, the Environments page one), never one more round; the Git, GitHub and Settings panels
 keep their request counts. Moving them out of the entry took 9.8 KB Brotli, 47 KB raw (see
-[i18n](i18n.md#feature-namespaces)). One static import of a feature module from anything the
+[i18n](i18n.md#feature-namespaces)); splitting `environments.entities` and `environments.machine`
+one level down took another 4.6 KB Brotli, 16.8 KB raw, with no new chunk and the same rounds. One static import of a feature module from anything the
 entry reaches puts them back; `tests/unit/i18n-feature-namespaces.test.ts` walks the entry's
 static imports and names the importer.
 
