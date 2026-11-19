@@ -18,6 +18,7 @@ import type { Chat } from '@mangostudio/shared/chat';
 import { useQuery } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
+import { type ChatPaging, NO_MORE_CHATS } from '@/features/chat/chat-list-pages';
 import type { CommandItem } from '@/features/command-palette/lib/command-item';
 import { onGithubCreatePrRequest } from '@/features/github/lib/github-panel-request';
 import { githubPrsQueryOptions } from '@/features/github/queries';
@@ -61,10 +62,11 @@ const agents: AgentProfile[] = [];
  * One render's worth of shell state. Deliberately rebuilt per call with the
  * same field values — that is exactly what a streamed token produces.
  */
-function appState(): AppState {
+function appState(chatPaging: ChatPaging = NO_MORE_CHATS): AppState {
   return {
     agents,
     chats,
+    chatPaging,
     currentChatId: 'c1',
     currentEnvironmentId: null,
     runner: { kind: 'mangostudio', agentId: 'default' },
@@ -161,6 +163,64 @@ async function setup(
     );
   return { scenario, seen, onRun, rerender: rerenderRegistry };
 }
+
+describe('useCommandRegistry chat paging', () => {
+  /** A paging handle that records asks and reports the state a test names. */
+  function pagingWith(overrides: Partial<ChatPaging>) {
+    const loadMore = jest.fn(() => Promise.resolve());
+    const paging: ChatPaging = {
+      hasMore: true,
+      isLoadingMore: false,
+      loadFailed: false,
+      loadMore,
+      ...overrides,
+    };
+    return { paging, loadMore };
+  }
+
+  it('reads the pages the shell has not loaded, so a session can be found by typing', async () => {
+    const { paging, loadMore } = pagingWith({});
+    const scenario = createFetchScenario();
+    scenario.install();
+    scenario.respondWithJson('GET', '/api/environments', { body: [] });
+    scenario.respondWithJson('GET', '/api/external-agents?environmentId=local', {
+      body: { agents: [] },
+    });
+    const seen: { items: readonly CommandItem[] } = { items: [] };
+
+    render(<Probe app={appState(paging)} onRun={jest.fn()} seen={seen} />);
+    await flushAsyncRender();
+
+    expect(
+      loadMore.mock.calls.length,
+      'expected the palette to ask for the next chat page while one remains'
+    ).toBeGreaterThan(0);
+    scenario.restore();
+  });
+
+  it('does not retry a page that failed, or ask while one is loading', async () => {
+    const failed = pagingWith({ loadFailed: true });
+    const loading = pagingWith({ isLoadingMore: true });
+    const scenario = createFetchScenario();
+    scenario.install();
+    scenario.respondWithJson('GET', '/api/environments', { body: [] });
+    scenario.respondWithJson('GET', '/api/external-agents?environmentId=local', {
+      body: { agents: [] },
+    });
+    const seen: { items: readonly CommandItem[] } = { items: [] };
+
+    const { rerender } = render(
+      <Probe app={appState(failed.paging)} onRun={jest.fn()} seen={seen} />
+    );
+    await flushAsyncRender();
+    rerender(<Probe app={appState(loading.paging)} onRun={jest.fn()} seen={seen} />);
+    await flushAsyncRender();
+
+    expect(failed.loadMore).not.toHaveBeenCalled();
+    expect(loading.loadMore).not.toHaveBeenCalled();
+    scenario.restore();
+  });
+});
 
 describe('useCommandRegistry', () => {
   it('rebuilds no rows when only the shell object identity changed', async () => {

@@ -651,6 +651,8 @@ export const messages: CoreMessages = {
     searchPlaceholder: 'Search chats…',
     searchNoResultsHint: 'Try another title, folder or agent.',
     clearSearch: 'Clear search',
+    loadingMore: 'Loading more chats…',
+    loadMore: 'Load more chats',
     // Terminal-style harness labels — brand names, identical in both locales.
     runner: {
       mango: 'mango',

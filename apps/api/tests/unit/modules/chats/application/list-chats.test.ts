@@ -4,6 +4,7 @@ import type { ContextInfo } from '@mangostudio/shared/chat';
 
 import { getDb } from '../../../../../src/db/database';
 import { listChatsUseCase } from '../../../../../src/modules/chats/application/list-chats';
+import { decodeChatListCursor } from '../../../../../src/modules/chats/domain/chat-list-cursor';
 import { insertTestChat, insertTestUser } from '../../../../support/factories';
 
 /**
@@ -121,7 +122,7 @@ describe('listChatsUseCase context info', () => {
       }
     }
 
-    const chats = await listChatsUseCase(user.id, getDb());
+    const { items: chats } = await listChatsUseCase({ userId: user.id, limit: 100 }, getDb());
 
     expect(chats.length, `expected chats: ${offset} | received: ${chats.length}`).toBe(offset);
     for (const chat of chats) {
@@ -139,7 +140,9 @@ describe('listChatsUseCase context info', () => {
       lastProviderState: envelope('c'.repeat(64)),
     });
 
-    const [chat] = await listChatsUseCase(user.id, getDb());
+    const {
+      items: [chat],
+    } = await listChatsUseCase({ userId: user.id }, getDb());
 
     const received = chat?.contextInfo?.estimatedInputTokens;
     expect(received, `expected context tokens: 20000 | received: ${received}`).toBe(20_000);
@@ -150,12 +153,34 @@ describe('listChatsUseCase context info', () => {
     const user = await insertTestUser();
     await seedChat(user.id, 'no-state', BASE_TIME, {});
 
-    const [chat] = await listChatsUseCase(user.id, getDb());
+    const {
+      items: [chat],
+    } = await listChatsUseCase({ userId: user.id }, getDb());
 
     const received = chat?.contextInfo;
     expect(
       received,
       `expected contextInfo: null | received: ${JSON.stringify(received)}`
     ).toBeNull();
+  });
+});
+
+describe('listChatsUseCase paging', () => {
+  it('derives the cursor from the last chat of the page and hands it back for the next', async () => {
+    const user = await insertTestUser();
+    for (const [index, id] of ['a', 'b', 'c'].entries()) {
+      await seedChat(user.id, `page-${id}`, BASE_TIME + index, {});
+    }
+
+    const first = await listChatsUseCase({ userId: user.id, limit: 2 }, getDb());
+    const second = await listChatsUseCase(
+      { userId: user.id, limit: 2, after: decodeChatListCursor(first.nextCursor ?? '') },
+      getDb()
+    );
+
+    expect(first.items.map((chat) => chat.id)).toEqual(['page-c', 'page-b']);
+    expect(first.nextCursor).toMatch(/^\d+:\d+$/);
+    expect(second.items.map((chat) => chat.id)).toEqual(['page-a']);
+    expect(second.nextCursor).toBeNull();
   });
 });

@@ -24,6 +24,10 @@ type ChatsQueryResult = {
   isLoading: boolean;
   error: Error | null;
   refetch: ReturnType<typeof jest.fn>;
+  hasNextPage?: boolean;
+  isFetchingNextPage?: boolean;
+  isFetchNextPageError?: boolean;
+  fetchNextPage?: () => Promise<unknown>;
 };
 
 const { mockCreateChat, mockUpdateChat, mockDeleteChat, mockLoadChats, mockChatsQueryResult } = {
@@ -393,6 +397,70 @@ describe('useChats', () => {
       });
 
       expect(mockLoadChats).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('chatPaging', () => {
+    const fetchNextPage = jest.fn(() => Promise.resolve());
+
+    function pagedQuery(paging: Partial<ChatsQueryResult>) {
+      mockChatsQueryResult.mockReturnValue({
+        data: [CHAT_A],
+        isLoading: false,
+        error: null,
+        refetch: mockLoadChats,
+        hasNextPage: true,
+        isFetchingNextPage: false,
+        isFetchNextPageError: false,
+        fetchNextPage,
+        ...paging,
+      });
+    }
+
+    it('reports what the query reports about the pages behind the loaded ones', () => {
+      pagedQuery({ isFetchingNextPage: true, isFetchNextPageError: true });
+
+      const { result } = renderHook(() => useChats());
+
+      expect(result.current.chatPaging).toMatchObject({
+        hasMore: true,
+        isLoadingMore: true,
+        loadFailed: true,
+      });
+    });
+
+    it('reads the next page when one remains', async () => {
+      pagedQuery({});
+      const { result } = renderHook(() => useChats());
+
+      await act(async () => {
+        await result.current.chatPaging.loadMore();
+      });
+
+      expect(fetchNextPage).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not restart a page already loading, which fetchNextPage would cancel', async () => {
+      pagedQuery({ isFetchingNextPage: true });
+      const { result } = renderHook(() => useChats());
+
+      await act(async () => {
+        await result.current.chatPaging.loadMore();
+      });
+
+      expect(fetchNextPage).not.toHaveBeenCalled();
+    });
+
+    it('asks for nothing when the last page is loaded', async () => {
+      pagedQuery({ hasNextPage: false });
+      const { result } = renderHook(() => useChats());
+
+      await act(async () => {
+        await result.current.chatPaging.loadMore();
+      });
+
+      expect(result.current.chatPaging.hasMore).toBe(false);
+      expect(fetchNextPage).not.toHaveBeenCalled();
     });
   });
 });

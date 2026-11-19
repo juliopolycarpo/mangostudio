@@ -1,7 +1,7 @@
 import type { ListActivityResponse } from '@mangostudio/shared/activity';
 import type { AgentProfileListResponse } from '@mangostudio/shared/agents';
 import type { ModelCatalogResponse } from '@mangostudio/shared/catalog';
-import type { Chat } from '@mangostudio/shared/chat';
+import type { ChatListPage } from '@mangostudio/shared/chat';
 import type {
   AgentCliStatusList,
   Environment,
@@ -70,7 +70,7 @@ export async function installMotionReadModels(
     if (request.method() !== 'GET') return route.fallback();
     const path = new URL(request.url()).pathname;
     if (path === '/api/chats' && options.emptyChatList) {
-      return route.fulfill({ json: [] satisfies Chat[] });
+      return route.fulfill({ json: { items: [], nextCursor: null } satisfies ChatListPage });
     }
     if (!Object.hasOwn(BACKGROUND_READS, path)) return route.fallback();
     return route.fulfill({ json: BACKGROUND_READS[path] });

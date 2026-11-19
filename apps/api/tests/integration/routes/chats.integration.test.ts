@@ -102,8 +102,12 @@ describe('GET /chats', () => {
 
     const response = await app.handle(new Request('http://localhost/chats'));
     expect(response.status).toBe(200);
-    const body = await response.json();
-    expect(Array.isArray(body)).toBe(true);
+    const body = (await response.json()) as { items: unknown; nextCursor: unknown };
+    expect(
+      Array.isArray(body.items),
+      `(GET /chats): expected body.items: array | received: ${JSON.stringify(body)}`
+    ).toBe(true);
+    expect(body.nextCursor === null || typeof body.nextCursor === 'string').toBe(true);
   });
 
   it('returns the selected environment without persistence-only fields', async () => {
@@ -113,8 +117,8 @@ describe('GET /chats', () => {
     restoreAuth = restore;
 
     const response = await app.handle(new Request('http://localhost/chats'));
-    const body = (await response.json()) as Array<Record<string, unknown>>;
-    const result = body.find((item) => item.id === chat.id);
+    const body = (await response.json()) as { items: Array<Record<string, unknown>> };
+    const result = body.items.find((item) => item.id === chat.id);
 
     expect(response.status).toBe(200);
     expect(result?.environmentId).toBe('local');
@@ -157,8 +161,8 @@ describe('GET /chats', () => {
     const response = await app.handle(new Request('http://localhost/chats'));
     expect(response.status).toBe(200);
 
-    const body = (await response.json()) as Array<Record<string, unknown>>;
-    const chat = body.find((item) => item.id === chatId);
+    const body = (await response.json()) as { items: Array<Record<string, unknown>> };
+    const chat = body.items.find((item) => item.id === chatId);
 
     expect(chat?.contextInfo).toMatchObject({
       estimatedInputTokens: 90_000,
@@ -551,7 +555,7 @@ describe('PUT /chats/:id', () => {
     ).toEqual({ runnerModel: 'opus', runnerEffort: 'high' });
 
     const listed = await app.handle(new Request('http://localhost/chats'));
-    const chats = (await listed.json()) as Chat[];
+    const { items: chats } = (await listed.json()) as { items: Chat[] };
 
     expect(chats.find((candidate) => candidate.id === chatId)?.runnerModelSelection).toEqual({
       model: 'opus',
@@ -585,7 +589,7 @@ describe('PUT /chats/:id', () => {
     restoreAuth = restore;
 
     const response = await app.handle(new Request('http://localhost/chats'));
-    const chats = (await response.json()) as Chat[];
+    const { items: chats } = (await response.json()) as { items: Chat[] };
 
     expect(response.status).toBe(200);
     expect(chats.find((candidate) => candidate.id === chatId)?.runnerModelSelection).toEqual({});

@@ -33,6 +33,7 @@ import { MicroLabel } from '@/components/ui/MicroLabel';
 import { SELECTION_BAR } from '@/components/ui/selection-bar';
 import { StatusDot } from '@/components/ui/StatusDot';
 import { useToast } from '@/components/ui/Toast';
+import { type ChatPaging, NO_MORE_CHATS } from '@/features/chat/chat-list-pages';
 import { chatTitleLabel } from '@/features/chat/lib/chat-title';
 import type { ContextInfo } from '@/features/generation/types';
 import type { AppPage } from '@/hooks/use-chat-route-actions';
@@ -43,6 +44,7 @@ import { ICON_LG, ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { newChatShortcutHint } from '@/lib/keyboard';
 import { cn } from '@/lib/utils';
 
+import { LIST_END_ATTRIBUTE, useLoadMoreOnVisible } from '../hooks/use-load-more-on-visible';
 import { useLocalDayStart } from '../hooks/use-local-day-start';
 import { ROW_IN_VIEW_ATTRIBUTE, useRowsInView } from '../hooks/use-rows-in-view';
 import { filterChats } from '../lib/filter-chats';
@@ -64,7 +66,15 @@ const GIT_DETAIL_MIN_WIDTH = 320;
 interface Props {
   currentPage: AppPage;
   onNavigate: (page: AppPage) => void;
+  /** The chats loaded so far, newest first; the list may continue past them (`chatPaging`). */
   chats: Chat[];
+  /**
+   * How to read the chats beyond `chats`. The list asks for the next page when
+   * its end scrolls into view, and for every remaining page while a search is
+   * typed, so a search covers the whole history rather than what happens to be
+   * loaded. Omitted when the list is complete.
+   */
+  chatPaging?: ChatPaging | undefined;
   currentChatId: string | null;
   onSelectChat: (chatId: string) => void;
   onUpdateChatTitle: (chatId: string, title: string) => void;
@@ -106,6 +116,7 @@ export function Sidebar({
   currentPage,
   onNavigate,
   chats,
+  chatPaging = NO_MORE_CHATS,
   currentChatId,
   onSelectChat,
   onUpdateChatTitle,
@@ -268,6 +279,24 @@ export function Sidebar({
     onChange: (ids) => onGitRowsInViewChange?.(ids),
   });
 
+  // A failed page is not retried on its own, or a hub that refuses it would be
+  // asked again by every effect run: the reader retries with the button below.
+  const canLoadMore = chatPaging.hasMore && !chatPaging.isLoadingMore && !chatPaging.loadFailed;
+  const listEndRef = useRef<HTMLDivElement>(null);
+  useLoadMoreOnVisible({
+    rootRef: listRef,
+    sentinelRef: listEndRef,
+    enabled: canLoadMore,
+    loadedKey: chats.length,
+    onVisible: () => void chatPaging.loadMore(),
+  });
+  // A search filters what is loaded, so it reads the rest first: otherwise
+  // "no results" would be said about the newest pages only.
+  const { loadMore } = chatPaging;
+  useEffect(() => {
+    if (searching && canLoadMore) void loadMore();
+  }, [searching, canLoadMore, loadMore]);
+
   return (
     <>
       {/* Mobile overlay backdrop. `z-[45]`: above the sticky header (`z-40`) so the veil covers it, below the drawer (`z-50`). */}
@@ -390,7 +419,7 @@ export function Sidebar({
           className="hide-scrollbar flex-1 overflow-y-auto px-3 pb-2"
           aria-label={t.chat.sectionLabel}
         >
-          {searching && visibleCount === 0 ? (
+          {searching && visibleCount === 0 && !chatPaging.hasMore ? (
             <EmptyState
               icon={<SearchX size={ICON_LG} />}
               title={formatMessage(t.common.noResultsFor, { query: deferredQuery.trim() })}
@@ -571,6 +600,29 @@ export function Sidebar({
               </ul>
             </div>
           ))}
+          {chatPaging.hasMore ? (
+            // The observed end of the list. It stays mounted while a page loads,
+            // so the observer is not rebuilt around a node that keeps changing.
+            <div
+              ref={listEndRef}
+              {...{ [LIST_END_ATTRIBUTE]: '' }}
+              className="flex min-h-8 items-center justify-center py-2"
+            >
+              {chatPaging.loadFailed ? (
+                <Button
+                  variant="subtle"
+                  onClick={() => void chatPaging.loadMore()}
+                  data-testid="sidebar-load-more"
+                >
+                  {t.sidebar.loadMore}
+                </Button>
+              ) : (
+                <output className="text-xs text-fg-subtle">
+                  {chatPaging.isLoadingMore ? t.sidebar.loadingMore : null}
+                </output>
+              )}
+            </div>
+          ) : null}
         </nav>
 
         {/* `px-3`, the chat list's own inset, so a selected page's pill and its

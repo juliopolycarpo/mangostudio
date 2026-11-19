@@ -118,7 +118,9 @@ function installScenario(overrides: ScenarioOverrides = {}) {
     .respondWithJson('GET', `/api/git/state?chatId=${CHAT_ID}`, {
       body: overrides.gitState ?? { state: 'no-workdir' },
     })
-    .respondWithJson('GET', '/api/chats', { body: overrides.chats ?? [] })
+    .respondWithJson('GET', '/api/chats?limit=50', {
+      body: { items: overrides.chats ?? [], nextCursor: null },
+    })
     .respondWithJson('POST', '/api/git/state/batch', {
       body: { states: overrides.gitBatch ?? {} },
     })

@@ -66,7 +66,10 @@ describe('capability invalidation registry', () => {
     const unregister = registerCapabilityInvalidationSources(queryClient);
     queryClient.setQueryData(CAPABILITIES_KEY, { runtimeHash: 'cached' });
 
-    queryClient.setQueryData(chatKeys.lists(), []);
+    queryClient.setQueryData(chatKeys.lists(), {
+      pages: [{ items: [], nextCursor: null }],
+      pageParams: [null],
+    });
     await flushScheduledInvalidation();
 
     expect(queryClient.getQueryState(CAPABILITIES_KEY)?.isInvalidated).toBe(false);

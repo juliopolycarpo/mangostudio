@@ -13,16 +13,40 @@ import {
   useUpdateChatMutation,
 } from '@/features/chat/queries';
 
+import type { ChatPaging } from '../chat-list-pages';
+
 export function useChats() {
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
 
-  const { data: chatsData, isLoading, error: queryError, refetch } = useChatsQuery();
+  const {
+    data: chatsData,
+    isLoading,
+    error: queryError,
+    refetch,
+    hasNextPage,
+    isFetchingNextPage,
+    isFetchNextPageError,
+    fetchNextPage,
+  } = useChatsQuery();
   const createMutation = useCreateChatMutation();
   const updateMutation = useUpdateChatMutation();
   const deleteMutation = useDeleteChatMutation();
 
   const chats = useMemo(() => chatsData || [], [chatsData]);
   const error = queryError ? queryError.message : null;
+
+  // `fetchNextPage` cancels a read already in flight by default, so a second
+  // call while one runs would restart it instead of joining it.
+  const loadMoreChats = useCallback(async () => {
+    if (!hasNextPage || isFetchingNextPage) return;
+    await fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+  const chatPaging: ChatPaging = {
+    hasMore: hasNextPage === true,
+    isLoadingMore: isFetchingNextPage === true,
+    loadFailed: isFetchNextPageError === true,
+    loadMore: loadMoreChats,
+  };
 
   // Derive effective chat ID: explicit selection takes precedence, otherwise auto-select first.
   const effectiveChatId = currentChatId ?? (chats.length > 0 ? chats[0].id : null);
@@ -179,6 +203,7 @@ export function useChats() {
 
   return {
     chats,
+    chatPaging,
     currentChatId: effectiveChatId,
     currentChat,
     isLoading,

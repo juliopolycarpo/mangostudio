@@ -1,25 +1,35 @@
-import type { Chat, MessagesPage, UpdateChatBody } from '@mangostudio/shared/chat';
+import {
+  type ChatListPage,
+  type MessagesPage,
+  PAGE_LIMIT_DEFAULT,
+  type UpdateChatBody,
+} from '@mangostudio/shared/chat';
 import { CHATS_TOPIC } from '@mangostudio/shared/realtime';
 import {
   infiniteQueryOptions,
   type Query,
   type QueryClient,
-  queryOptions,
   type QueryPersister,
   useInfiniteQuery,
   type UseInfiniteQueryResult,
   useMutation,
-  useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
 
-import type { ContextInfo } from '@/features/generation/types';
 import { invalidateAllGitScopes } from '@/features/workspace/hooks/use-git-state';
 import { client } from '@/lib/api-client';
 import { invalidateForSignal } from '@/lib/realtime/read-after-subscribe';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
 import { ApiError } from '@/lib/utils';
 
+import {
+  type ChatListCache,
+  type ChatWithContext,
+  flattenChatPages,
+  insertChatAtHead,
+  patchChatInPages,
+  removeChatFromPages,
+} from './chat-list-pages';
 import { invalidateChatCapabilities } from './hooks/capability-invalidation';
 import { catchUpNewestPages, loadOlderPage, type MessagesCache } from './transcript-pages';
 import { takeBackgroundRun } from './transcript-read-ahead';
@@ -36,21 +46,32 @@ export const chatKeys = {
   detail: (id: string) => [...chatKeys.details(), id] as const,
 };
 
-/** Chat with optional context snapshot from persisted provider state. */
-export type ChatWithContext = Chat & { contextInfo?: ContextInfo | null };
+export type { ChatWithContext } from './chat-list-pages';
 
+/** Chats per request. The server's default page, spelled out so a change there is not silent here. */
+const CHAT_LIST_PAGE_SIZE = PAGE_LIMIT_DEFAULT;
+
+/**
+ * The chat list, read newest first one page at a time. `pages[0]` is the
+ * newest page and `getNextPageParam` walks to older ones (see `ChatListCache`).
+ */
 export const chatListQueryOptions = () =>
-  queryOptions({
+  infiniteQueryOptions({
     queryKey: chatKeys.lists(),
     // A shell bootstrap query: once refused, it is asked again by the bootstrap
     // panel's retry, not by whichever component mounts next — that would retry
     // a rate-limited request on every mount. See `features/bootstrap`.
     retryOnMount: false,
-    queryFn: async () => {
-      const { data, error } = await client.api.chats.get();
+    queryFn: async ({ pageParam }: { pageParam: string | null }) => {
+      const query = pageParam
+        ? { limit: CHAT_LIST_PAGE_SIZE, cursor: pageParam }
+        : { limit: CHAT_LIST_PAGE_SIZE };
+      const { data, error } = await client.api.chats.get({ query });
       if (error) throw new ApiError(error.value);
-      return data as ChatWithContext[];
+      return data satisfies ChatListPage;
     },
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
   });
 
 /**
@@ -62,11 +83,10 @@ export const chatListQueryOptions = () =>
  */
 function updateChatListCache(
   queryClient: QueryClient,
-  updater: (current: ReadonlyArray<ChatWithContext>) => Array<ChatWithContext>
+  updater: (current: ChatListCache) => ChatListCache
 ) {
-  queryClient.setQueriesData<ReadonlyArray<ChatWithContext>>(
-    { queryKey: chatKeys.lists() },
-    (current) => (current === undefined ? undefined : updater(current))
+  queryClient.setQueriesData<ChatListCache>({ queryKey: chatKeys.lists() }, (current) =>
+    current === undefined ? undefined : updater(current)
   );
 }
 
@@ -102,7 +122,16 @@ export function useChatsQuery() {
   useRealtimeInvalidation(CHATS_TOPIC, 'chat-list', (signal) =>
     invalidateForSignal(queryClient, signal, { queryKey: chatKeys.lists() })
   );
-  return useQuery(chatListQueryOptions());
+  return useInfiniteQuery({ ...chatListQueryOptions(), select: flattenChatPages });
+}
+
+/**
+ * The chats loaded so far, as one list, for a reader that only displays them.
+ * It does not subscribe to the realtime signal or ask for more: whoever mounts
+ * `useChatsQuery` (the shell) owns both.
+ */
+export function useLoadedChatsQuery() {
+  return useInfiniteQuery({ ...chatListQueryOptions(), select: flattenChatPages });
 }
 
 export function useCreateChatMutation() {
@@ -115,10 +144,7 @@ export function useCreateChatMutation() {
     },
     onSuccess: (chat) => {
       queryClient.setQueryData(chatKeys.detail(chat.id), chat);
-      updateChatListCache(queryClient, (current) => [
-        chat,
-        ...current.filter((item) => item.id !== chat.id),
-      ]);
+      updateChatListCache(queryClient, (current) => insertChatAtHead(current, chat));
     },
   });
 }
@@ -141,9 +167,7 @@ export function useUpdateChatMutation() {
         (current) => (current ? applyChatUpdates(current, variables.updates) : current)
       );
       updateChatListCache(queryClient, (current) =>
-        current.map((item) =>
-          item.id === variables.id ? applyChatUpdates(item, variables.updates) : item
-        )
+        patchChatInPages(current, variables.id, (item) => applyChatUpdates(item, variables.updates))
       );
 
       const switchedEnvironment =
@@ -182,7 +206,7 @@ export function useDeleteChatMutation() {
     },
     onSuccess: (_, chatId) => {
       queryClient.removeQueries({ queryKey: chatKeys.detail(chatId), exact: true });
-      updateChatListCache(queryClient, (current) => current.filter((chat) => chat.id !== chatId));
+      updateChatListCache(queryClient, (current) => removeChatFromPages(current, chatId));
     },
   });
 }

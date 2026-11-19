@@ -45,10 +45,15 @@ Para automação fora do navegador, use chaves de API com escopo (`x-api-key`). 
 
 | Método   | Path             | Auth | Finalidade                      |
 | -------- | ---------------- | ---- | ------------------------------- |
-| `GET`    | `/api/chats`     | Sim  | Listar chats do usuário         |
+| `GET`    | `/api/chats`     | Sim  | Paginar chats do usuário        |
 | `POST`   | `/api/chats`     | Sim  | Criar novo chat                 |
 | `PUT`    | `/api/chats/:id` | Sim  | Atualizar chat (título, modelo) |
 | `DELETE` | `/api/chats/:id` | Sim  | Deletar chat                    |
+
+`GET /api/chats` devolve uma página, `{ items, nextCursor }` (`ChatListPage` de
+`@mangostudio/shared/chat`), da atualização mais recente para a mais antiga. `limit` vai de 1 a 100
+(padrão 50). Envie o `nextCursor` da página anterior como `cursor` para ler a próxima; `nextCursor`
+é `null` na última página. Um `cursor` malformado responde 400 com `code: "VALIDATION"`.
 
 Não há rota montada `GET /api/chats/:id`. Leia os metadados na lista autenticada de chats; atualize com `PUT /api/chats/:id` e `UpdateChatBodySchema`.
 

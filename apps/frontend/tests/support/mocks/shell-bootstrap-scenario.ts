@@ -14,7 +14,7 @@ import { createFetchScenario } from './create-fetch-scenario';
 
 /** The request path each shell responsibility is loaded from. */
 const SHELL_PATHS = {
-  chats: '/api/chats',
+  chats: '/api/chats?limit=50',
   catalog: '/api/settings/models',
   agents: '/api/settings/agents',
 } as const;
@@ -37,7 +37,7 @@ const REFUSALS: Record<Exclude<ShellRefusal, 'network'>, { status: number; body:
 };
 
 const HEALTHY: Record<ShellPathKey, unknown> = {
-  chats: [{ id: 'chat-1', title: 'First chat' }],
+  chats: { items: [{ id: 'chat-1', title: 'First chat' }], nextCursor: null },
   catalog: { textModels: [], imageModels: [] },
   agents: { agents: [] },
 };

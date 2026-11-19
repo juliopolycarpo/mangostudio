@@ -28,10 +28,11 @@ import { ERROR_CODES } from '@mangostudio/shared/errors';
 import type { EnsureQueryDataOptions, QueryClient, QueryKey } from '@tanstack/react-query';
 
 import {
-  chatListQueryOptions,
+  type ChatListCache,
   type ChatWithContext,
-  messagesQueryOptions,
-} from '@/features/chat/queries';
+  flattenChatPages,
+} from '@/features/chat/chat-list-pages';
+import { chatListQueryOptions, messagesQueryOptions } from '@/features/chat/queries';
 import { agentSettingsListQueryOptions } from '@/features/settings/agents/queries';
 import { catalogQueryOptions } from '@/hooks/use-model-catalog';
 import { ApiError } from '@/lib/utils';
@@ -121,12 +122,35 @@ export async function settleShellQuery<TData, TKey extends QueryKey>(
   queryClient: QueryClient,
   options: EnsureQueryDataOptions<TData, Error, TData, TKey>
 ): Promise<ShellSettlement<TData>> {
-  const state = queryClient.getQueryState(options.queryKey);
-  if (hasFailedWithoutData(queryClient, options.queryKey) && !isAuthFailure(state?.error)) {
+  return settleEnsured(queryClient, options.queryKey, () => queryClient.ensureQueryData(options));
+}
+
+/**
+ * {@link settleShellQuery} for the chat list, which is an infinite query: it
+ * settles with the loaded pages, `pages[0]` being the newest.
+ *
+ * @example const settled = await settleShellChatList(queryClient);
+ */
+export function settleShellChatList(
+  queryClient: QueryClient
+): Promise<ShellSettlement<ChatListCache>> {
+  const options = chatListQueryOptions();
+  return settleEnsured(queryClient, options.queryKey, () =>
+    queryClient.ensureInfiniteQueryData(options)
+  );
+}
+
+async function settleEnsured<TData>(
+  queryClient: QueryClient,
+  queryKey: QueryKey,
+  ensure: () => Promise<TData>
+): Promise<ShellSettlement<TData>> {
+  const state = queryClient.getQueryState(queryKey);
+  if (hasFailedWithoutData(queryClient, queryKey) && !isAuthFailure(state?.error)) {
     return { ok: false, error: state?.error };
   }
   try {
-    return { ok: true, data: await queryClient.ensureQueryData(options) };
+    return { ok: true, data: await ensure() };
   } catch (error) {
     return { ok: false, error };
   }
@@ -163,13 +187,14 @@ function startDeferredShellQueries(queryClient: QueryClient): void {
  */
 export async function loadShellBootstrap(queryClient: QueryClient): Promise<ShellBootstrapOutcome> {
   startDeferredShellQueries(queryClient);
-  const chats = await settleShellQuery(queryClient, chatListQueryOptions());
+  const chats = await settleShellChatList(queryClient);
   if (!chats.ok) {
     return { chats: undefined, authFailure: isAuthFailure(chats.error) ? chats.error : undefined };
   }
-  const firstChatId = chats.data[0]?.id;
+  const loaded = flattenChatPages(chats.data);
+  const firstChatId = loaded[0]?.id;
   if (firstChatId) await queryClient.prefetchInfiniteQuery(messagesQueryOptions(firstChatId));
-  return { chats: chats.data, authFailure: undefined };
+  return { chats: loaded, authFailure: undefined };
 }
 
 /**
@@ -184,7 +209,7 @@ export function refetchShellResponsibility(
   queryClient: QueryClient,
   responsibility: ShellResponsibility
 ): Promise<unknown> {
-  if (responsibility === 'chats') return queryClient.fetchQuery(chatListQueryOptions());
+  if (responsibility === 'chats') return queryClient.fetchInfiniteQuery(chatListQueryOptions());
   if (responsibility === 'catalog') return queryClient.fetchQuery(catalogQueryOptions());
   return queryClient.fetchQuery(agentSettingsListQueryOptions());
 }

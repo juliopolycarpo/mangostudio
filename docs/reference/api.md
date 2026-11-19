@@ -39,11 +39,16 @@ examples.
 
 | Method   | Path                   | Auth | Purpose                    |
 | -------- | ---------------------- | ---- | -------------------------- |
-| `GET`    | `/api/chats`           | Yes  | List user's chats          |
+| `GET`    | `/api/chats`           | Yes  | Page user's chats          |
 | `POST`   | `/api/chats`           | Yes  | Create new chat            |
 | `PUT`    | `/api/chats/:id`       | Yes  | Update chat (title, model) |
 | `DELETE` | `/api/chats/:id`       | Yes  | Delete chat                |
 | `GET`    | `/api/chats/:id/todos` | Yes  | Current todo list state    |
+
+`GET /api/chats` returns one page, `{ items, nextCursor }` (`ChatListPage` from
+`@mangostudio/shared/chat`), most recently updated first. `limit` is 1 to 100 (default 50). Pass
+the previous page's `nextCursor` as `cursor` to read the next; `nextCursor` is `null` on the last
+page. A malformed `cursor` answers 400 with `code: "VALIDATION"`.
 
 `GET /api/chats/:id/todos` returns `{ todos, updatedAt }` (`ChatTodosResponse` from
 `@mangostudio/shared/todos`); `updatedAt` is `null` when the chat has no todo list yet.

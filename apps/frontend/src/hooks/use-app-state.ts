@@ -119,6 +119,7 @@ export function useAppState() {
     isWorkdirPickerOpen: runnerSelection.isWorkdirPickerOpen,
     isGenerating: textGen.isGenerating,
     chats: chats.chats,
+    chatPaging: chats.chatPaging,
     currentChatId: chats.currentChatId,
     currentEnvironmentId: currentChat?.environmentId ?? null,
     catalog: catalog.catalog,

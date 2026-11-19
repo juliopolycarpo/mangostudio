@@ -16,6 +16,7 @@ import { type Kysely, type Selectable, sql, type Updateable } from 'kysely';
 
 import type { Database } from '../../../db/types';
 import { generateId } from '../../../utils/id';
+import type { ChatListCursor } from '../domain/chat-list-cursor';
 
 class ChatRunnerCorruptionError extends Error {
   constructor(chatId: string, reason: string) {
@@ -230,25 +231,60 @@ export interface ChatRecordWithState extends ChatRecord {
   lastContextState: string | null;
 }
 
+/** A listed chat with the `rowid` that places it inside a tie of `updatedAt`. */
+export interface ListedChat extends ChatRecordWithState {
+  rowid: number;
+}
+
+/** One page of one user's chats, in list order. */
+export interface ChatListSlice {
+  chats: ListedChat[];
+  /** Whether a chat follows the last one returned. */
+  hasMore: boolean;
+}
+
 /**
- * Every chat one user owns, most recently updated first, with the state the
- * list needs to show each chat's context usage. Chats that share a millisecond
- * keep creation order (`rowid` ascending), as messages do with `timestamp, rowid`.
- * The `(userId, updatedAt DESC)` index supplies both keys, so SQLite streams rows
- * instead of sorting them; `rowid DESC` or `id` would bring the sort back.
+ * One page of the chats one user owns, most recently updated first, with the
+ * state the list needs to show each chat's context usage. Chats that share a
+ * millisecond keep creation order (`rowid` ascending), as messages do with
+ * `timestamp, rowid`. `after` is the last chat of the previous page: the page
+ * starts at the first chat behind it in that order, so a chat created, bumped
+ * or deleted between two requests moves no row of a later page.
+ *
+ * The `(userId, updatedAt DESC)` index supplies both keys, so SQLite streams
+ * rows instead of sorting them; `rowid DESC` or `id` would bring the sort back.
+ * The `updatedAt <=` bound is what the index can seek on; the `OR` beneath it
+ * then drops only the chats of the tied millisecond that precede the cursor.
+ * One extra row is read to learn whether another page exists.
  */
-export async function listByUserId(
+export async function listPageByUserId(
   userId: string,
+  page: { limit: number; after?: ChatListCursor },
   db: Kysely<Database>
-): Promise<ChatRecordWithState[]> {
-  const rows = await db
+): Promise<ChatListSlice> {
+  let query = db
     .selectFrom('chats')
-    .select([...CHAT_COLUMNS, ...CHAT_STATE_COLUMNS])
-    .where('userId', '=', userId)
+    .select([...CHAT_COLUMNS, ...CHAT_STATE_COLUMNS, sql<number>`rowid`.as('rowid')])
+    .where('userId', '=', userId);
+  const { after } = page;
+  if (after) {
+    query = query
+      .where('updatedAt', '<=', after.updatedAt)
+      .where((eb) =>
+        eb.or([eb('updatedAt', '<', after.updatedAt), eb(sql`rowid`, '>', after.rowid)])
+      );
+  }
+  const rows = await query
     .orderBy('updatedAt', 'desc')
     .orderBy(sql`rowid`, 'asc')
+    .limit(page.limit + 1)
     .execute();
-  return rows.map(mapChatRowWithState);
+  return {
+    chats: rows
+      .slice(0, page.limit)
+      .map((row) => ({ ...mapChatRowWithState(row), rowid: row.rowid })),
+    hasMore: rows.length > page.limit,
+  };
 }
 
 /** Exactly what the batched git state read consumes; narrow on purpose so a

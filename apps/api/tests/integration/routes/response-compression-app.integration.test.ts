@@ -12,6 +12,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { networkInterfaces } from 'node:os';
 
+import { PAGE_LIMIT_MAX } from '@mangostudio/shared/chat';
 import { PROBLEM_JSON_ACCEPT, PROBLEM_JSON_MEDIA_TYPE } from '@mangostudio/shared/errors';
 
 import { app, COMPRESSED_API_ROUTES } from '../../../src/app';
@@ -193,15 +194,18 @@ describe.skipIf(lanAddress === undefined && !requireLanAddress)(
     });
 
     it('gzips the chat list and keeps the rate-limit headers', async () => {
-      const response = await get(remote, '/api/chats');
+      const response = await get(remote, `/api/chats?limit=${PAGE_LIMIT_MAX}`);
       expect(response.status).toBe(200);
       expect(response.headers.get('content-encoding')).toBe('gzip');
       expect(response.headers.get('vary')).toContain('Accept-Encoding');
       expect(response.headers.get('x-ratelimit-limit')).not.toBeNull();
-      const chats = JSON.parse(
+      const page = JSON.parse(
         new TextDecoder().decode(Bun.gunzipSync(await response.arrayBuffer()))
-      );
-      expect(chats).toHaveLength(CHAT_COUNT + SEEDED_TRANSCRIPT_CHATS);
+      ) as { items: unknown[]; nextCursor: string | null };
+      // More chats than one page holds: a full page and a cursor to the rest.
+      expect(CHAT_COUNT + SEEDED_TRANSCRIPT_CHATS).toBeGreaterThan(PAGE_LIMIT_MAX);
+      expect(page.items).toHaveLength(PAGE_LIMIT_MAX);
+      expect(page.nextCursor).not.toBeNull();
     });
 
     it('leaves a below-threshold allowlisted answer byte for byte as Elysia serializes it', async () => {
@@ -234,11 +238,9 @@ describe.skipIf(lanAddress === undefined && !requireLanAddress)(
 
 describe('the composed app, seen from the same machine', () => {
   it('sends the chat list as identity', async () => {
-    const response = await get('127.0.0.1', '/api/chats');
+    const response = await get('127.0.0.1', `/api/chats?limit=${PAGE_LIMIT_MAX}`);
     expect(response.status).toBe(200);
     expect(response.headers.get('content-encoding')).toBeNull();
-    expect(((await response.json()) as unknown[]).length).toBe(
-      CHAT_COUNT + SEEDED_TRANSCRIPT_CHATS
-    );
+    expect(((await response.json()) as { items: unknown[] }).items).toHaveLength(PAGE_LIMIT_MAX);
   });
 });

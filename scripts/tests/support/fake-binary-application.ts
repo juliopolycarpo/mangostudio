@@ -120,7 +120,9 @@ export class FakeBinaryApplication {
       return Response.json({ success: this.fault !== 'bad-delete' });
     }
     if (method === 'GET' && path === '/api/chats/')
-      return Response.json(this.fault === 'bad-list' ? {} : this.chat ? [this.chat] : []);
+      return Response.json(
+        this.fault === 'bad-list' ? {} : { items: this.chat ? [this.chat] : [], nextCursor: null }
+      );
     const fingerprint = 'a'.repeat(64);
     const implementation = {
       schema: 1,

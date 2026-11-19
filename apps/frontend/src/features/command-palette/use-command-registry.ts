@@ -4,13 +4,14 @@
  *
  * Mounted only while the palette is open — the host renders nothing otherwise —
  * so the environments list and external-agent discovery are paid for by opening
- * it, not by every page load. The chat list is already warm from the
- * authenticated route's loader, which is why sessions never show a skeleton.
+ * it, not by every page load. The newest page of the chat list is already warm
+ * from the authenticated route's loader, which is why sessions never show a
+ * skeleton; the older pages are read once the palette is open.
  */
 
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
 import { useNavigate } from '@tanstack/react-router';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useChatHasTurns } from '@/features/chat/hooks/use-chat-has-turns';
 import type { CommandItem } from '@/features/command-palette/lib/command-item';
@@ -66,8 +67,16 @@ export function useCommandRegistry(onRun: () => void): CommandRegistry {
   // `isGenerating` flips at turn boundaries, not per streamed token, so keying
   // the memo on it does not reintroduce the per-token rebuild the ref below
   // exists to avoid.
-  const { agents, chats, currentChatId, isGenerating } = app;
+  const { agents, chats, currentChatId, isGenerating, chatPaging } = app;
   const chatHasTurns = useChatHasTurns(currentChatId);
+
+  // The shell loads the chat list a page at a time, but the palette finds a
+  // session by typing, so it reads the rest on opening. Each page that lands
+  // re-runs this until none remains; a failed page is not retried from here.
+  const { hasMore, isLoadingMore, loadFailed, loadMore } = chatPaging;
+  useEffect(() => {
+    if (hasMore && !isLoadingMore && !loadFailed) void loadMore();
+  }, [hasMore, isLoadingMore, loadFailed, loadMore]);
   // Settings, not availability: the panel's own gate is a chat, which the rows
   // already require. Read here rather than passed in, because the palette is
   // mounted beside the rail and not by it.

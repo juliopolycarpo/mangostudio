@@ -144,9 +144,41 @@ export const ChatSchema = Type.Object({
   contextInfo: Type.Optional(Type.Union([ContextInfoSchema, Type.Null()])),
 });
 
-export const ChatListSchema = Type.Array(ChatSchema);
-
 export type Chat = Static<typeof ChatSchema>;
+
+/** Query of `GET /api/chats`. */
+export const ListChatsQuerySchema = Type.Object({
+  /**
+   * Chats per page, 1 to `PAGE_LIMIT_MAX`; `PAGE_LIMIT_DEFAULT` when absent. A value outside
+   * that range or not an integer is refused with a 422, like the other paged routes.
+   */
+  limit: Type.Optional(
+    Type.Integer({ minimum: 1, maximum: PAGE_LIMIT_MAX, default: PAGE_LIMIT_DEFAULT })
+  ),
+  /**
+   * The `nextCursor` of the previous page, passed back unchanged. The value is
+   * opaque: it encodes the position of the last chat of that page in the list
+   * order, so a chat created, bumped or deleted meanwhile moves no later page.
+   * A value that is not a cursor this server issued is rejected with a 400.
+   */
+  cursor: Type.Optional(Type.String()),
+});
+
+export type ListChatsQuery = Static<typeof ListChatsQuerySchema>;
+
+/**
+ * One page of the chat list, most recently updated first (chats that share a
+ * millisecond keep creation order).
+ *
+ * `nextCursor` is `null` on the last page; otherwise it is an opaque token to
+ * send back as `cursor`.
+ */
+export const ChatListPageSchema = Type.Object({
+  items: Type.Array(ChatSchema),
+  nextCursor: Type.Union([Type.String(), Type.Null()]),
+});
+
+export type ChatListPage = Static<typeof ChatListPageSchema>;
 
 export const ContextSettingsSchema = Type.Object({
   compactionBehavior: ContextCompactionBehaviorSchema,
