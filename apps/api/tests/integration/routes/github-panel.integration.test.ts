@@ -613,6 +613,36 @@ describe('GitHub panel writes', () => {
     expect(client.ids().filter((id) => id === 'pr.list')).toHaveLength(2);
   });
 
+  /**
+   * The detail view's refresh control sends `refresh=true` to all three per-PR
+   * reads. Each one has its own cache entry, so each has to bypass it on its
+   * own: a refresh that refreshed the detail but served stale checks would be
+   * the exact failure the control exists to fix.
+   */
+  it('bypasses the read cache on every per-PR read when asked to refresh', async () => {
+    const { user, chat } = await createChatWithWorkdir();
+    const { plugin, client } = createPanelPlugin();
+    const { app, restore } = createAuthenticatedApiTestApp(user, plugin);
+    restoreAuth = restore;
+    const reads: Array<[path: string, command: string]> = [
+      ['/github/pr', 'pr.view'],
+      ['/github/pr/checks', 'pr.checks'],
+      ['/github/pr/review-threads', 'pr.review-threads'],
+    ];
+
+    for (const [path, command] of reads) {
+      const ran = () => client.ids().filter((id) => id === command).length;
+
+      await get(app, path, { chatId: chat.id, number: '7' });
+      await get(app, path, { chatId: chat.id, number: '7' });
+      expect(ran(), `${command} runs after two plain reads`).toBe(1);
+
+      const refreshed = await get(app, path, { chatId: chat.id, number: '7', refresh: 'true' });
+      expect(refreshed.status).toBe(200);
+      expect(ran(), `${command} runs after a refresh=true read`).toBe(2);
+    }
+  });
+
   it('reports a non-ok state from a write rather than failing the request', async () => {
     const { user, chat } = await createChatWithWorkdir();
     const { plugin } = createPanelPlugin({ authenticated: false });

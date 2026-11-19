@@ -1,5 +1,11 @@
-import type { GithubCheckBucket } from '@mangostudio/shared/github';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import type { GithubCheckBucket, GithubPrDetailResponse } from '@mangostudio/shared/github';
+import {
+  useIsFetching,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type UseQueryResult,
+} from '@tanstack/react-query';
 import { ArrowLeft, CheckCircle2, MessageSquareQuote } from 'lucide-react';
 
 import { Button } from '@/components/ui/Button';
@@ -20,6 +26,7 @@ import { ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
 
 import { markPullRequestReady } from '../api';
+import { useForceRefresh } from '../hooks/use-force-refresh';
 import { reviewThreadsToTask } from '../lib/review-thread-task';
 import {
   githubKeys,
@@ -28,6 +35,7 @@ import {
   githubPrThreadsQueryOptions,
 } from '../queries';
 import { GithubNotConnected } from './GithubNotConnected';
+import { GithubRefreshButton, GithubStaleness } from './GithubStaleness';
 
 interface GithubPrDetailProps {
   readonly chatId: string;
@@ -53,26 +61,72 @@ const GITHUB_PR_DETAIL_TESTID = 'github-pr-detail';
  */
 export function GithubPrDetail({ chatId, number, onBack }: GithubPrDetailProps) {
   const { t } = useI18n();
+  const queryClient = useQueryClient();
+  // One flag for all three reads: the refresh control asks each of them to
+  // bypass the API's read cache, and each reads the flag at the moment its own
+  // request fires.
+  const forceRefresh = useForceRefresh();
+  const detailQuery = useQuery(githubPrDetailQueryOptions(chatId, number, forceRefresh.read));
+  const checksKey = githubKeys.checks(chatId, number);
+  const threadsKey = githubKeys.threads(chatId, number);
+  // Checks and threads are observed by their own blocks, which only mount once
+  // the detail is ok. Counting them through the client keeps this header from
+  // observing — and so fetching — them itself.
+  const sectionsFetching =
+    useIsFetching({ queryKey: checksKey, exact: true }) +
+      useIsFetching({ queryKey: threadsKey, exact: true }) >
+    0;
+  const refreshing = detailQuery.isFetching || sectionsFetching;
+  const cachedAt = detailQuery.data?.state === 'ok' ? detailQuery.data.cachedAt : null;
+
+  const refresh = () =>
+    void forceRefresh.trigger(() =>
+      Promise.all([
+        detailQuery.refetch(),
+        queryClient.refetchQueries({ queryKey: checksKey, exact: true }),
+        queryClient.refetchQueries({ queryKey: threadsKey, exact: true }),
+      ])
+    );
 
   return (
     <div data-testid={GITHUB_PR_DETAIL_TESTID} className="space-y-2">
-      <Button type="button" variant="subtle" size="sm" onClick={onBack} className="-ml-2">
-        <ArrowLeft size={ICON_SM} aria-hidden="true" />
-        {t.github.panel.back}
-      </Button>
-      <DetailBody chatId={chatId} number={number} />
+      <div className="flex items-center justify-between gap-2">
+        <Button type="button" variant="subtle" size="sm" onClick={onBack} className="-ml-2">
+          <ArrowLeft size={ICON_SM} aria-hidden="true" />
+          {t.github.panel.back}
+        </Button>
+        <div className="flex items-center gap-2">
+          <GithubStaleness cachedAt={cachedAt} refreshing={refreshing} />
+          <GithubRefreshButton onRefresh={refresh} refreshing={refreshing} />
+        </div>
+      </div>
+      <DetailBody
+        query={detailQuery}
+        chatId={chatId}
+        number={number}
+        readForce={forceRefresh.read}
+      />
     </div>
   );
 }
 
 /**
  * Split from the shell so the four-way degradation is a run of early returns
- * rather than nested ternaries inside JSX. The query is re-read rather than
- * passed down — React Query serves both calls from one cache entry.
+ * rather than nested ternaries inside JSX. The detail query is owned by the
+ * shell, which needs it for the header's staleness label and refresh.
  */
-function DetailBody({ chatId, number }: { readonly chatId: string; readonly number: number }) {
+function DetailBody({
+  query,
+  chatId,
+  number,
+  readForce,
+}: {
+  readonly query: UseQueryResult<GithubPrDetailResponse, Error>;
+  readonly chatId: string;
+  readonly number: number;
+  readonly readForce: () => boolean;
+}) {
   const { t } = useI18n();
-  const query = useQuery(githubPrDetailQueryOptions(chatId, number));
 
   if (query.isPending) {
     return <EmptyState icon={<Spinner />} title={t.github.loading} className="min-h-24 py-4" />;
@@ -117,8 +171,8 @@ function DetailBody({ chatId, number }: { readonly chatId: string; readonly numb
       {query.data.canMutate ? (
         <MarkReadyAction chatId={chatId} number={number} isDraft={pr.isDraft} />
       ) : null}
-      <ChecksBlock chatId={chatId} number={number} />
-      <ReviewThreadsAction chatId={chatId} number={number} />
+      <ChecksBlock chatId={chatId} number={number} readForce={readForce} />
+      <ReviewThreadsAction chatId={chatId} number={number} readForce={readForce} />
     </div>
   );
 }
@@ -170,9 +224,10 @@ function MarkReadyAction({
 /**
  * A failed sub-query of the detail view, with the retry it needs.
  *
- * The rail's header refresh button refetches the *list* query behind whichever
- * tab is open, not the three this view runs, so a checks or threads read that
- * failed on its own has no other way back. A `Callout` rather than an
+ * The section header's refresh button refetches the *list* query behind
+ * whichever tab is open, not the three this view runs. The detail header's own
+ * refresh re-reads all three from GitHub, but a block that failed on its own
+ * should not need it to retry just that one. A `Callout` rather than an
  * `EmptyState` because it sits between two blocks that are already rendering.
  *
  * @example
@@ -209,9 +264,17 @@ const CHECK_TONES: Readonly<Record<GithubCheckBucket, StatusDotTone>> = {
   cancel: 'neutral',
 };
 
-function ChecksBlock({ chatId, number }: { readonly chatId: string; readonly number: number }) {
+function ChecksBlock({
+  chatId,
+  number,
+  readForce,
+}: {
+  readonly chatId: string;
+  readonly number: number;
+  readonly readForce: () => boolean;
+}) {
   const { t } = useI18n();
-  const query = useQuery(githubPrChecksQueryOptions(chatId, number));
+  const query = useQuery(githubPrChecksQueryOptions(chatId, number, readForce));
 
   // A failed read is not a lost connection, and only the second one is already
   // explained above. `gh pr checks` answers separately from `gh pr view`, so it
@@ -280,12 +343,14 @@ function ChecksBlock({ chatId, number }: { readonly chatId: string; readonly num
 function ReviewThreadsAction({
   chatId,
   number,
+  readForce,
 }: {
   readonly chatId: string;
   readonly number: number;
+  readonly readForce: () => boolean;
 }) {
   const { t } = useI18n();
-  const query = useQuery(githubPrThreadsQueryOptions(chatId, number));
+  const query = useQuery(githubPrThreadsQueryOptions(chatId, number, readForce));
 
   // Same reasoning as `ChecksBlock`: this GraphQL read fails independently of
   // the detail above it, and the action this panel exists for silently missing

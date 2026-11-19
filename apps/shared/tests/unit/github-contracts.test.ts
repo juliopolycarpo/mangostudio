@@ -382,6 +382,15 @@ describe('GitHub query and body contracts', () => {
     expect(Value.Check(GithubPrRefQuerySchema, { number: 42 })).toBe(false);
   });
 
+  it('accepts a boolean refresh on the per-PR reads, as the lists do', () => {
+    expect(
+      Value.Check(GithubPrRefQuerySchema, { chatId: 'chat-1', number: 42, refresh: true })
+    ).toBe(true);
+    expect(
+      Value.Check(GithubPrRefQuerySchema, { chatId: 'chat-1', number: 42, refresh: 'yes' })
+    ).toBe(false);
+  });
+
   it('validates the write bodies', () => {
     const body: GithubCreatePrBody = { chatId: 'chat-1', title: 'Add the panel' };
     expect(Value.Check(GithubCreatePrBodySchema, body)).toBe(true);

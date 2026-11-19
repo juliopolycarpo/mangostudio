@@ -198,7 +198,11 @@ export function createGithubRoutes(deps: GithubRouteDeps = {}) {
           const target = await resolveTarget(query.chatId, user?.id ?? '');
           if ('error' in target) return target.error;
           return await guard(set, () =>
-            reads.getPullRequest({ ...repoRequest(target, request.signal), number: query.number })
+            reads.getPullRequest({
+              ...repoRequest(target, request.signal),
+              number: query.number,
+              refresh: query.refresh,
+            })
           );
         }
       )
@@ -215,6 +219,7 @@ export function createGithubRoutes(deps: GithubRouteDeps = {}) {
             reads.getPullRequestChecks({
               ...repoRequest(target, request.signal),
               number: query.number,
+              refresh: query.refresh,
             })
           );
         }
@@ -229,7 +234,11 @@ export function createGithubRoutes(deps: GithubRouteDeps = {}) {
           const target = await resolveTarget(query.chatId, user?.id ?? '');
           if ('error' in target) return target.error;
           return await guard(set, () =>
-            reads.getReviewThreads({ ...repoRequest(target, request.signal), number: query.number })
+            reads.getReviewThreads({
+              ...repoRequest(target, request.signal),
+              number: query.number,
+              refresh: query.refresh,
+            })
           );
         }
       )
