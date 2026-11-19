@@ -3,6 +3,7 @@ import { describe, expect, it } from 'bun:test';
 import type { LibraryTargetId, SettingsField, SettingsSnapshot } from '@mangostudio/shared/library';
 
 import { compareSettingsSnapshots } from '../../../../src/modules/library/domain/settings-concepts';
+import { parsePermissionRules } from '../../../../src/modules/library/infrastructure/settings-parsers/rules';
 
 function snapshot(targetId: LibraryTargetId, fields: SettingsField[]): SettingsSnapshot {
   return {
@@ -18,6 +19,10 @@ function snapshot(targetId: LibraryTargetId, fields: SettingsField[]): SettingsS
       },
     ],
   };
+}
+
+function fieldValue(field: SettingsField): string | undefined {
+  return field.presentation === 'value' ? field.value : undefined;
 }
 
 describe('settings concepts', () => {
@@ -114,7 +119,7 @@ describe('settings concepts', () => {
         {
           path: 'default.rules[2].decision',
           presentation: 'value',
-          value: 'deny',
+          value: 'forbidden',
         },
       ]),
     ]);
@@ -136,6 +141,58 @@ describe('settings concepts', () => {
     });
   });
 
+  it('reads a real Codex .rules file: forbidden is the deny list, prompt is neither list', () => {
+    // The file is parsed rather than hand-built so the decision value reaching
+    // the concept is the one the parser extracts from Codex's own spelling.
+    const parsed = parsePermissionRules(
+      [
+        {
+          name: 'default.rules',
+          content: [
+            '# Codex rules: decisions are allow | prompt | forbidden',
+            'prefix_rule(pattern = ["git", "status"], decision = "allow")',
+            'prefix_rule(pattern = ["git", "push"], decision = "prompt")',
+            'prefix_rule(pattern = ["rm", "-rf"], decision = "forbidden")',
+          ].join('\n'),
+        },
+      ],
+      { homeDir: '/home/ada' }
+    );
+    const comparisons = compareSettingsSnapshots([snapshot('codex', [...parsed.fields])]);
+    const codexEntry = (concept: string) =>
+      comparisons
+        .find((comparison) => comparison.concept === concept)
+        ?.entries.find(({ targetId }) => targetId === 'codex');
+
+    expect({
+      deny: codexEntry('deny-list')?.fields.map(fieldValue),
+      allow: codexEntry('allow-list')?.fields.map(fieldValue),
+    }).toEqual({
+      deny: ['["rm", "-rf"]'],
+      allow: ['["git", "status"]'],
+    });
+    expect(codexEntry('deny-list')?.state).toBe('detected');
+  });
+
+  it('reports not-detected when Codex rules hold no forbidden decision', () => {
+    const comparisons = compareSettingsSnapshots([
+      snapshot('codex', [
+        { path: 'default.rules[1].pattern', presentation: 'value', value: '["git"]' },
+        { path: 'default.rules[1].decision', presentation: 'value', value: 'prompt' },
+      ]),
+    ]);
+
+    const entries = comparisons.flatMap((comparison) =>
+      comparison.entries
+        .filter(({ targetId }) => targetId === 'codex')
+        .map(({ state }) => [comparison.concept, state])
+    );
+    expect(Object.fromEntries(entries)).toMatchObject({
+      'allow-list': 'not-detected',
+      'deny-list': 'not-detected',
+    });
+  });
+
   it('keeps the complete concept table aligned with vendor field paths', () => {
     const comparisons = compareSettingsSnapshots([
       snapshot('claude', [
@@ -150,7 +207,7 @@ describe('settings concepts', () => {
         { path: 'default.rules[1].pattern', presentation: 'value', value: '["git"]' },
         { path: 'default.rules[1].decision', presentation: 'value', value: 'allow' },
         { path: 'default.rules[2].pattern', presentation: 'value', value: '["rm"]' },
-        { path: 'default.rules[2].decision', presentation: 'value', value: 'deny' },
+        { path: 'default.rules[2].decision', presentation: 'value', value: 'forbidden' },
         { path: 'model', presentation: 'value', value: 'gpt-5' },
         { path: 'model_reasoning_effort', presentation: 'value', value: 'high' },
       ]),

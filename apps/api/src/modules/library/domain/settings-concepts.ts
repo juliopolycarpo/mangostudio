@@ -13,7 +13,15 @@ type ComparedTargetId = Exclude<LibraryTargetId, 'mangostudio'>;
 type FieldSelector =
   | { readonly kind: 'exact'; readonly paths: readonly string[] }
   | { readonly kind: 'prefix'; readonly path: string }
-  | { readonly kind: 'rules-decision'; readonly decision: 'allow' | 'deny' };
+  | { readonly kind: 'rules-decision'; readonly decision: CodexRuleDecision };
+
+/**
+ * The `decision` values a Codex `prefix_rule` can carry. The concept names are
+ * the hub's (`deny-list`); the spelling is Codex's, which says `forbidden`.
+ * `prompt` belongs to neither list: it asks the user, so it neither grants nor
+ * refuses, and no concept selects it.
+ */
+type CodexRuleDecision = 'allow' | 'prompt' | 'forbidden';
 
 interface ConceptDefinition {
   readonly concept: SettingsConcept;
@@ -51,7 +59,7 @@ const CONCEPT_DEFINITIONS: readonly ConceptDefinition[] = [
     concept: 'deny-list',
     selectors: {
       claude: { kind: 'prefix', path: 'permissions.deny[' },
-      codex: { kind: 'rules-decision', decision: 'deny' },
+      codex: { kind: 'rules-decision', decision: 'forbidden' },
       cursor: { kind: 'prefix', path: 'permissions.deny[' },
     },
   },
@@ -119,7 +127,7 @@ function selectFields(fields: readonly SettingsField[], selector: FieldSelector)
 
 function selectRulePatterns(
   fields: readonly SettingsField[],
-  decision: 'allow' | 'deny'
+  decision: CodexRuleDecision
 ): SettingsField[] {
   const patternsByPath = new Map(
     fields
