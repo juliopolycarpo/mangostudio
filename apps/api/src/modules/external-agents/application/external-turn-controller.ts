@@ -82,6 +82,7 @@ import {
   type OpenRefusalPresentation,
 } from '../domain/external-open-refusal';
 import { endLeavesConversationUnresumable } from '../domain/external-resume-policy';
+import type { ExternalRuntimeSessionState } from '../domain/external-runtime-session-state';
 import { turnErrorRemedyFor } from '../domain/external-turn-error-remedy';
 import {
   classifySubmissionFailure,
@@ -135,6 +136,48 @@ const EXTERNAL_INTERACTION_MODE: Exclude<InteractionMode, 'image'> = 'agent';
  * broken.
  */
 const STEER_TERMINATION_GRACE_MS = 3_000;
+
+/**
+ * How the hub decides that a turn whose last event it could not read is over.
+ *
+ * Silence alone proves nothing: a vendor mid-tool sends no events, and no heartbeat exists. So a
+ * quiet window only prompts the hub to ask the runtime whether the session still has a turn
+ * running (`runtime.health`); the answer decides.
+ */
+export interface UnrecognizedEventPolicy {
+  /** The first quiet window after an unrecognized event, and the base of the recheck backoff. */
+  readonly quietMs: number;
+  /**
+   * The longest wait between rechecks. A health report runs the runtime's `git` and `gh` probes,
+   * so a turn that is simply busy is asked about less and less often, not every `quietMs`.
+   */
+  readonly maxRecheckMs: number;
+  /**
+   * The last resort: the turn ends this long after the last unrecognized event whatever the
+   * runtime says or fails to say. Just past the runtime's own hard turn timeout (one hour, approvals
+   * included), by which point it has ended the turn itself.
+   */
+  readonly lastResortMs: number;
+  /** The deadline on one health read. */
+  readonly healthDeadlineMs: number;
+  /**
+   * The pause between a health read that says `idle` and ending the turn. The runtime may mark a
+   * session idle just before its terminal event reaches the hub; that event settles the turn
+   * itself, so the hub must not race it with a second error.
+   */
+  readonly settleMs: number;
+}
+
+const DEFAULT_UNRECOGNIZED_EVENT_POLICY: UnrecognizedEventPolicy = {
+  quietMs: 30_000,
+  maxRecheckMs: 5 * 60_000,
+  lastResortMs: 65 * 60_000,
+  healthDeadlineMs: 5_000,
+  settleMs: 1_000,
+};
+
+/** The error code recorded on a turn the hub ended after an unreadable event went unanswered. */
+const UNRECOGNIZED_EVENT_ERROR_CODE = 'unrecognized_event';
 
 function delay(ms: number): { readonly promise: Promise<void>; readonly cancel: () => void } {
   let timer: ReturnType<typeof setTimeout>;
@@ -285,6 +328,8 @@ export interface ExternalTurnControllerDependencies {
   readonly newId?: () => string;
   /** Overrides {@link STEER_TERMINATION_GRACE_MS}; a test's only hook for it. */
   readonly steerTerminationGraceMs?: number;
+  /** Overrides {@link DEFAULT_UNRECOGNIZED_EVENT_POLICY} field by field; a test's only hook for it. */
+  readonly unrecognizedEventPolicy?: Partial<UnrecognizedEventPolicy>;
   /** Backoff, cap and per-attempt deadline for resubmitting a turn. */
   readonly retryPolicy?: RetryPolicy;
   /** The backoff wait; a test injects a fake clock here. */
@@ -527,6 +572,10 @@ export function createExternalTurnController(
   const newId = dependencies.newId ?? generateId;
   const steerTerminationGraceMs =
     dependencies.steerTerminationGraceMs ?? STEER_TERMINATION_GRACE_MS;
+  const unrecognizedEventPolicy: UnrecognizedEventPolicy = {
+    ...DEFAULT_UNRECOGNIZED_EVENT_POLICY,
+    ...dependencies.unrecognizedEventPolicy,
+  };
   const retryPolicy = dependencies.retryPolicy ?? DEFAULT_RETRY_POLICY;
   const sleep = dependencies.sleep ?? sleepUnlessAborted;
   const random = dependencies.random ?? Math.random;
@@ -706,6 +755,7 @@ export function createExternalTurnController(
           ? 'acceptance-unknown'
           : requested;
       terminalReason = reason;
+      disarmUnrecognizedEventWatchdog();
       stop.abort();
       const live = liveTurns.get(input.chatId);
       if (live?.transcript === transcript) live.terminating = true;
@@ -777,6 +827,214 @@ export function createExternalTurnController(
       });
     }
 
+    /**
+     * Applies one event the hub recognizes: transcript, live report, side effects, and the turn's
+     * end when the event is terminal. The hub's own synthesized events take the same path, so a
+     * turn it ends reads the same live and on reload.
+     */
+    function applyVendorEvent(event: ExternalAgentEvent, sequence: number): void {
+      const application = transcript.apply(event, { sequence, at: now() });
+      // `session_started` carries the vendor's own resumable session handle,
+      // which is server-owned for the same reason the transcript omits it: a
+      // client rendering the turn must see the hub-minted id `onSession`
+      // reports and nothing that could address the vendor directly.
+      if (event.type !== 'session_started') {
+        const live = liveTurns.get(input.chatId);
+        const emit = () => input.observer?.onEvent?.(event);
+        // A pending steer's durable record already sits ahead of this event
+        // in `transcript.parts`. Reporting the event now, before that steer
+        // has been reported, would let a live listener see them in the
+        // opposite order — held back until `steer` (or the terminal path's
+        // grace fallback) flushes it, so live and reload always agree.
+        if (live?.transcript === transcript && live.pendingSteerIds.size > 0) {
+          live.deferredEvents.push(emit);
+        } else {
+          emit();
+        }
+      }
+
+      if (event.type === 'account_limits') {
+        // Discardable vendor state: a cache write must never disturb the turn.
+        cacheExternalAccountLimitsBestEffort(
+          {
+            userId: input.userId,
+            environmentId: context.chat.environmentId,
+            targetId,
+            vendorAccountFingerprint: input.vendorAccountFingerprint ?? null,
+          },
+          event.limits,
+          { sessionId: handle.sessionId }
+        );
+      }
+
+      if (event.type === 'error' && turnErrorRemedyFor(targetId, event.error)?.kind === 'sign-in') {
+        notifyDiscoveryStale({
+          userId: input.userId,
+          environmentId: context.chat.environmentId,
+          targetId,
+        });
+      }
+
+      if (event.type === 'commands_available') {
+        // Last-known, not this chat's: a reload before this chat's own first
+        // turn re-announces its catalog reads whatever a turn against this
+        // (user, environment, target) wrote most recently, even one from a
+        // different chat.
+        commandCatalog.write(
+          { userId: input.userId, environmentId: context.chat.environmentId, targetId },
+          event.commands
+        );
+      }
+
+      if (application.approvalRequested) bindApproval(application.approvalRequested);
+
+      void writer.write({ force: application.durable });
+      if (application.terminal) {
+        terminate(application.terminal);
+        cancelVendorAfter(application.terminal);
+      }
+    }
+
+    /** Highest envelope sequence this consumer has seen, so a synthesized event continues it. */
+    let lastSequence = 0;
+
+    /**
+     * One run of silence the hub is watching after an event it could not read. A new unrecognized
+     * event replaces it; a recognized event, a terminal state or a new session handle ends it.
+     */
+    interface UnrecognizedEventEpisode {
+      readonly type: string | undefined;
+      readonly since: number;
+      readonly watchedHandle: ExternalSessionHandle;
+      timer?: ReturnType<typeof setTimeout>;
+      settle?: { readonly cancel: () => void };
+    }
+    let unrecognizedEpisode: UnrecognizedEventEpisode | undefined;
+
+    function disarmUnrecognizedEventWatchdog(): void {
+      const episode = unrecognizedEpisode;
+      unrecognizedEpisode = undefined;
+      if (!episode) return;
+      clearTimeout(episode.timer);
+      episode.settle?.cancel();
+    }
+
+    function isCurrentEpisode(episode: UnrecognizedEventEpisode): boolean {
+      return !terminalReason && unrecognizedEpisode === episode && episode.watchedHandle === handle;
+    }
+
+    /**
+     * Starts watching for the end of a turn whose last event the hub could not read.
+     *
+     * A runtime newer than the hub can end a turn with an event type this hub's schema does not
+     * know. Dropping it is right for progress (#964), but a dropped ending leaves nothing to
+     * finalize the turn, and the session is reused across turns so no teardown will either.
+     * Silence alone cannot say which it was: a vendor mid-tool sends nothing, and no heartbeat
+     * exists. So after a quiet window the hub asks the runtime whether the session still has a
+     * turn running, and ends the turn only when the answer is `idle` (see
+     * {@link checkUnrecognizedEpisode}). Every unrecognized event restarts the watch and every
+     * recognized one ends it, so a vendor that carries on is never asked about.
+     */
+    function armUnrecognizedEventWatchdog(type: string | undefined): void {
+      if (terminalReason) return;
+      disarmUnrecognizedEventWatchdog();
+      const episode: UnrecognizedEventEpisode = { type, since: now(), watchedHandle: handle };
+      unrecognizedEpisode = episode;
+      scheduleEpisodeCheck(episode, 0);
+    }
+
+    /** The wait doubles per recheck, up to the policy's ceiling. */
+    function scheduleEpisodeCheck(episode: UnrecognizedEventEpisode, attempt: number): void {
+      const wait = Math.min(
+        unrecognizedEventPolicy.quietMs * 2 ** attempt,
+        unrecognizedEventPolicy.maxRecheckMs
+      );
+      episode.timer = setTimeout(() => {
+        void checkUnrecognizedEpisode(episode, attempt);
+      }, wait);
+    }
+
+    async function checkUnrecognizedEpisode(
+      episode: UnrecognizedEventEpisode,
+      attempt: number
+    ): Promise<void> {
+      if (!isCurrentEpisode(episode)) return;
+      // The runtime's own approval timeout ends a question nobody answers, and the answer or the
+      // lapse arrives as an event. A turn waiting on a person is quiet by design.
+      if (transcript.pendingApprovalIds().length > 0) {
+        scheduleEpisodeCheck(episode, attempt + 1);
+        return;
+      }
+      if (now() - episode.since >= unrecognizedEventPolicy.lastResortMs) {
+        logger.warn('unrecognized_event_last_resort', {
+          sessionId: handle.sessionId,
+          type: episode.type,
+          lastResortMs: unrecognizedEventPolicy.lastResortMs,
+        });
+        endTurnAfterUnrecognizedEvent(episode, { cancelVendor: true });
+        return;
+      }
+
+      let state: ExternalRuntimeSessionState;
+      try {
+        state = await episode.watchedHandle.runtimeState({
+          timeoutMs: unrecognizedEventPolicy.healthDeadlineMs,
+        });
+      } catch (error) {
+        // Not knowing is not a reason to end a turn that may be healthy.
+        logger.warn('unrecognized_event_state_unavailable', {
+          sessionId: episode.watchedHandle.sessionId,
+          error: String(error),
+        });
+        if (isCurrentEpisode(episode)) scheduleEpisodeCheck(episode, attempt + 1);
+        return;
+      }
+      if (!isCurrentEpisode(episode)) return;
+      if (state !== 'idle') {
+        // `running` is a vendor at work. `closing`, a row cut by the report's cap and a state this
+        // hub has no word for prove nothing; a closing session reports its own teardown.
+        scheduleEpisodeCheck(episode, attempt + 1);
+        return;
+      }
+
+      // The runtime may mark the session idle just before its terminal event reaches the hub.
+      const settle = delay(unrecognizedEventPolicy.settleMs);
+      episode.settle = settle;
+      await settle.promise;
+      if (!isCurrentEpisode(episode)) return;
+      // The runtime says nothing is running, so there is nothing for the vendor to cancel.
+      endTurnAfterUnrecognizedEvent(episode, { cancelVendor: false });
+    }
+
+    /**
+     * Ends the turn as a vendor error naming the unreadable event, through the same path as a
+     * vendor event, so the stored transcript, the live stream and the terminal reason agree.
+     */
+    function endTurnAfterUnrecognizedEvent(
+      episode: UnrecognizedEventEpisode,
+      options: { readonly cancelVendor: boolean }
+    ): void {
+      unrecognizedEpisode = undefined;
+      logger.warn('unrecognized_event_ended_turn', {
+        sessionId: handle.sessionId,
+        type: episode.type,
+      });
+      applyVendorEvent(
+        {
+          type: 'error',
+          error: {
+            code: UNRECOGNIZED_EVENT_ERROR_CODE,
+            message: `The agent sent an event of type "${episode.type ?? 'unknown'}" that this version of MangoStudio does not recognize, and the turn stopped reporting, so it was ended.`,
+          },
+        },
+        lastSequence
+      );
+      if (!options.cancelVendor) return;
+      void handle.cancel(external.nativeTurnId).catch((error: unknown) => {
+        logger.warn('cancel_failed', { sessionId: handle.sessionId, error: String(error) });
+      });
+    }
+
     const consumer: ExternalSessionConsumer = {
       onEnvelope(envelope, verdict) {
         if (terminalReason) return;
@@ -824,80 +1082,20 @@ export function createExternalTurnController(
         // Inertness is decided here, at the one call site that would otherwise
         // break, not by refusing the envelope earlier — its sequence is already
         // spent, and that is the fix.
+        lastSequence = envelope.sequence;
         if (!Value.Check(ExternalAgentEventSchema, envelope.event)) {
-          logger.warn('unrecognized_event_type', {
-            sessionId: handle.sessionId,
-            type: readEventType(envelope.event),
-          });
+          const type = readEventType(envelope.event);
+          logger.warn('unrecognized_event_type', { sessionId: handle.sessionId, type });
+          // Inert is right for progress and wrong for an ending: if this was the terminal event,
+          // nothing else will ever finalize the turn. The hub cannot tell which it was, so it
+          // waits to see whether the vendor keeps talking (#988).
+          armUnrecognizedEventWatchdog(type);
           return;
         }
 
-        const application = transcript.apply(envelope.event, {
-          sequence: envelope.sequence,
-          at: now(),
-        });
-        // `session_started` carries the vendor's own resumable session handle,
-        // which is server-owned for the same reason the transcript omits it: a
-        // client rendering the turn must see the hub-minted id `onSession`
-        // reports and nothing that could address the vendor directly.
-        if (envelope.event.type !== 'session_started') {
-          const live = liveTurns.get(input.chatId);
-          const emit = () => input.observer?.onEvent?.(envelope.event);
-          // A pending steer's durable record already sits ahead of this event
-          // in `transcript.parts`. Reporting the event now, before that steer
-          // has been reported, would let a live listener see them in the
-          // opposite order — held back until `steer` (or the terminal path's
-          // grace fallback) flushes it, so live and reload always agree.
-          if (live?.transcript === transcript && live.pendingSteerIds.size > 0) {
-            live.deferredEvents.push(emit);
-          } else {
-            emit();
-          }
-        }
-
-        if (envelope.event.type === 'account_limits') {
-          // Discardable vendor state: a cache write must never disturb the turn.
-          cacheExternalAccountLimitsBestEffort(
-            {
-              userId: input.userId,
-              environmentId: context.chat.environmentId,
-              targetId,
-              vendorAccountFingerprint: input.vendorAccountFingerprint ?? null,
-            },
-            envelope.event.limits,
-            { sessionId: handle.sessionId }
-          );
-        }
-
-        if (
-          envelope.event.type === 'error' &&
-          turnErrorRemedyFor(targetId, envelope.event.error)?.kind === 'sign-in'
-        ) {
-          notifyDiscoveryStale({
-            userId: input.userId,
-            environmentId: context.chat.environmentId,
-            targetId,
-          });
-        }
-
-        if (envelope.event.type === 'commands_available') {
-          // Last-known, not this chat's: a reload before this chat's own first
-          // turn re-announces its catalog reads whatever a turn against this
-          // (user, environment, target) wrote most recently, even one from a
-          // different chat.
-          commandCatalog.write(
-            { userId: input.userId, environmentId: context.chat.environmentId, targetId },
-            envelope.event.commands
-          );
-        }
-
-        if (application.approvalRequested) bindApproval(application.approvalRequested);
-
-        void writer.write({ force: application.durable });
-        if (application.terminal) {
-          terminate(application.terminal);
-          cancelVendorAfter(application.terminal);
-        }
+        // Any event the hub understands shows the vendor is still working.
+        disarmUnrecognizedEventWatchdog();
+        applyVendorEvent(envelope.event, envelope.sequence);
       },
 
       onTeardown(reason) {
@@ -945,6 +1143,8 @@ export function createExternalTurnController(
       conversationReset = replacedAsNonresumable ? 'nonresumable' : (reported ?? conversationReset);
       if (conversationReset) transcript.markConversationReset(conversationReset);
       unsubscribe();
+      // An episode watches the session it saw the event on; the replacement starts with none.
+      disarmUnrecognizedEventWatchdog();
       handle = next;
       unsubscribe = handle.subscribe(consumer);
       external.sessionId = handle.sessionId;
