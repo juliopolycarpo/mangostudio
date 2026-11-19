@@ -294,7 +294,28 @@ function resolvePathSource(
 ): PathSource {
   if (managedBy) return managedBy;
   if (isBunManagedPath(rawPath, deps) || isBunManagedPath(resolvedPath, deps)) return 'bun';
+  // Managers MangoStudio detects but does not drive: they carry no
+  // `VersionManagerId`, so the card reads them as managed elsewhere instead of
+  // offering the winget install on top of them.
+  for (const path of [rawPath, resolvedPath]) {
+    const source = detectUnmanagedSource(normalizedPath(path));
+    if (source) return source;
+  }
   return 'system';
+}
+
+/**
+ * Scoop and mise installs by their fixed layouts: `scoop\shims` and
+ * `scoop\apps\nodejs*`, `mise/shims` and `mise/installs`. `normalizedPath`
+ * lowercases and turns backslashes into `/`, so one pattern covers both
+ * platforms.
+ */
+function detectUnmanagedSource(normalized: string): 'scoop' | 'mise' | undefined {
+  if (normalized.includes('/scoop/shims/') || normalized.includes('/scoop/apps/nodejs')) {
+    return 'scoop';
+  }
+  if (normalized.includes('/mise/shims/') || normalized.includes('/mise/installs/')) return 'mise';
+  return undefined;
 }
 
 export async function scanRuntime(

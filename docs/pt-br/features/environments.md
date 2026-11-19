@@ -116,5 +116,5 @@ a mesma seleção que o seletor, para quem está via SSH. Veja [`cli.md`](../ref
 ## Adiado
 
 Gerenciadores de Node além do winget LTS e do fnm (nvm-windows v2 quando tiver id no winget, um
-`fnm.install` POSIX, classificação apenas de detecção para Scoop e mise) estão registrados em
+`fnm.install` POSIX) estão registrados em
 [#1011](https://github.com/juliopolycarpo/mangostudio/issues/1011).

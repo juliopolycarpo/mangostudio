@@ -21,7 +21,7 @@ export interface SlashCommandEntry {
   readonly name: string;
   readonly description?: string;
   /** Where the name came from, which is what the palette's secondary label says. */
-  readonly origin: 'session' | 'library' | 'skill';
+  readonly origin: 'session' | 'library' | 'skill' | 'builtin';
 }
 
 /** How many rows the palette will show at once. */

@@ -55,6 +55,23 @@ as it was.
 The location is always scanned: the Locations setting cannot switch it off, like the skills
 and agents directories.
 
-## Not yet
+## Built-in commands
 
-Built-in commands such as `/clear` and `/model` are not part of this.
+Two commands are the composer's own. They act on the chat and are never sent to the model:
+
+| Command         | Does                                                                                                                                   |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| `/clear`        | Starts a new chat, the same as the sidebar's New chat button.                                                                          |
+| `/model <name>` | Switches the chat's model, like the model selector. `<name>` is a model id or display name, or a fragment that fits exactly one model. |
+
+They are listed first in the palette, only for a MangoStudio chat (an external runner's
+vendor owns its own `/` namespace), and only when they can run: `/model` needs a chat whose
+model selector is enabled, and honours the provider lock after the first turn. A name that
+matches no model, or more than one, leaves the text in the composer and says why. When a
+built-in is not on offer, it is ordinary text.
+
+A file in `~/.mango/commands` never shadows a built-in: `clear.md` and `model.md` are not
+listed in the palette and the hub does not expand them, the way the vendors' CLIs behave.
+
+The replay of an expanded command in later turns is described above; a built-in produces no
+message, so it has nothing to replay.
