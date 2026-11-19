@@ -31,6 +31,28 @@ const FEATURE_NAMESPACES: readonly FeatureNamespace[] = [
 ];
 const featureFiles = { environments, git, github, library };
 
+/** Every message of a tree as a dotted path (`entities.status.connected`). */
+function messagePaths(tree: object, prefix = ''): string[] {
+  return Object.entries(tree).flatMap(([key, value]) =>
+    typeof value === 'object' && value !== null
+      ? messagePaths(value, `${prefix}${key}.`)
+      : [`${prefix}${key}`]
+  );
+}
+
+/** `base` with `added` laid over it, joining a key both hold as a tree instead of replacing it. */
+function joinMessages(base: object, added: object): object {
+  const joined: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(added)) {
+    const held = joined[key];
+    joined[key] =
+      typeof held === 'object' && held !== null && typeof value === 'object' && value !== null
+        ? joinMessages(held, value)
+        : value;
+  }
+  return joined;
+}
+
 describe('English dictionary pieces', () => {
   it('keeps every deferred namespace out of the eager dictionary', () => {
     const leaked = DEFERRED.filter((namespace) => namespace in core);
@@ -55,37 +77,52 @@ describe('English dictionary pieces', () => {
 
   describe.each(FEATURE_NAMESPACES)('the split %s namespace', (namespace) => {
     const file: Record<string, object> = featureFiles[namespace];
-    const eagerKeys = Object.keys(core[namespace]);
-    const featureKeys = Object.keys(file[namespace] ?? {});
+    // A key split one level down (`environments.entities`) is half in each file, so
+    // the halves are compared by the path of every message, not by top-level key.
+    const eagerPaths = messagePaths(core[namespace]);
+    const featurePaths = messagePaths(file[namespace] ?? {});
 
     it('gives its feature file exactly its own namespace', () => {
       expect(Object.keys(file)).toEqual([namespace]);
     });
 
-    it('holds each key in exactly one of the two English files', () => {
-      const doubled = eagerKeys.filter((key) => featureKeys.includes(key));
+    it('holds each message in exactly one of the two English files', () => {
+      const doubled = eagerPaths.filter((path) => featurePaths.includes(path));
 
       expect(
         doubled,
-        `expected no ${namespace} key in both en.ts and en-${namespace}.ts | received: ${doubled.join(', ')}`
+        `expected no ${namespace} message in both en.ts and en-${namespace}.ts | received: ${doubled.join(', ')}`
       ).toEqual([]);
     });
 
-    it('loses no key of the pt-BR source of truth', () => {
-      expect([...eagerKeys, ...featureKeys].sort()).toEqual(Object.keys(ptBR[namespace]).sort());
+    it('loses no message of the pt-BR source of truth', () => {
+      expect([...eagerPaths, ...featurePaths].sort()).toEqual(messagePaths(ptBR[namespace]).sort());
       expect(
-        featureKeys.length,
-        `expected en-${namespace}.ts to hold keys (an empty file defers nothing) | received: none`
+        featurePaths.length,
+        `expected en-${namespace}.ts to hold messages (an empty file defers nothing) | received: none`
       ).toBeGreaterThan(0);
     });
 
-    it('is joined back, key for key, in the complete dictionary', () => {
-      const joined: object = { ...core[namespace], ...file[namespace] };
-
+    it('is joined back, message for message, in the complete dictionary', () => {
       const complete: object = en[namespace];
 
-      expect(complete).toEqual(joined);
+      expect(messagePaths(complete).sort()).toEqual([...eagerPaths, ...featurePaths].sort());
+      expect(complete).toEqual(joinMessages(core[namespace], file[namespace] ?? {}));
     });
+  });
+
+  it('splits environments.entities and environments.machine one level down', () => {
+    // Pins the nested split itself: each key is in both files with different sub-keys.
+    for (const key of ['entities', 'machine'] as const) {
+      const eagerSubKeys = Object.keys(core.environments[key]);
+      const lazySubKeys = Object.keys(environments.environments[key]);
+
+      expect(
+        eagerSubKeys.length > 0 && lazySubKeys.length > 0,
+        `expected environments.${key} in both en.ts and en-environments.ts | received: eager ${eagerSubKeys.length} sub-keys, lazy ${lazySubKeys.length}`
+      ).toBe(true);
+      expect(eagerSubKeys.filter((subKey) => lazySubKeys.includes(subKey))).toEqual([]);
+    }
   });
 
   it('keeps the strings the first paint reads in the eager dictionary', () => {

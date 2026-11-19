@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { MicroLabel } from '@/components/ui/MicroLabel';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
@@ -49,7 +50,7 @@ interface RuntimeLifecyclePanelProps {
 }
 
 export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.entities.runtime;
   const enabled =
     environment.transportKind === 'wsl' ||
@@ -225,7 +226,7 @@ export function RuntimeLifecyclePanel({ environment }: RuntimeLifecyclePanelProp
 }
 
 function HealthSummary({ view }: { view: RuntimeLifecycleView }) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.entities.runtime;
   const health = view.health;
   if (!health) {
@@ -255,7 +256,7 @@ function HealthSummary({ view }: { view: RuntimeLifecycleView }) {
  * against a machine that has not spoken.
  */
 function UnenforcedContainment({ view }: { view: RuntimeLifecycleView }) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   if (view.enforcesPathPolicy !== false) return null;
 
   return (
@@ -286,7 +287,7 @@ function UnenforcedContainment({ view }: { view: RuntimeLifecycleView }) {
  * healthy, up-to-date card.
  */
 function RuntimeOffer({ view }: { view: RuntimeLifecycleView }) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.entities.runtime.staged;
   const staged = view.stagedRuntime;
   const offersPush = view.actions.some((action) =>
@@ -342,7 +343,7 @@ function RuntimeOffer({ view }: { view: RuntimeLifecycleView }) {
  * that cannot pass would be worse than saying nothing.
  */
 function StagedRuntime({ view }: { view: RuntimeLifecycleView }) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.entities.runtime.staged;
   const staged = view.stagedRuntime;
   if (!staged?.present) return null;
@@ -357,7 +358,7 @@ function StagedRuntime({ view }: { view: RuntimeLifecycleView }) {
 }
 
 function ManualCommands({ view }: { view: RuntimeLifecycleView }) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.entities.runtime.manual;
   const commands = view.manualCommands;
   if (!commands) return null;

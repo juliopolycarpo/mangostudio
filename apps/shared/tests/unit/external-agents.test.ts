@@ -45,6 +45,7 @@ import {
   ExternalSteerRejectionReasonSchema,
   ExternalSteerResponseSchema,
   ExternalSteerSuccessResponseSchema,
+  isExternalIdentityIsolationMethod,
   NO_EXTERNAL_AGENT_CAPABILITIES,
   normalizeApprovalRouting,
   normalizePermissionLevel,
@@ -382,6 +383,31 @@ describe('runtime external-agent protocol payloads', () => {
     expect(Value.Check(ExternalIdentityIsolationSchema, { ...isolation, inferred: true })).toBe(
       false
     );
+  });
+
+  it('narrows a method string to the ones this build can interpret', () => {
+    for (const method of ['single-user-host', 'os-account', 'container']) {
+      expect(isExternalIdentityIsolationMethod(method), `expected ${method} to be known`).toBe(
+        true
+      );
+    }
+    for (const method of ['micro-vm', '', 'Container']) {
+      expect(
+        isExternalIdentityIsolationMethod(method),
+        `expected ${JSON.stringify(method)} to be unknown`
+      ).toBe(false);
+    }
+  });
+
+  it('keeps the isolation method enum closed where the hub produces it', () => {
+    // Health reads an unknown method (#2570); a manifest or `isolation` argument never carries one.
+    expect(
+      Value.Check(ExternalIdentityIsolationSchema, {
+        method: 'micro-vm',
+        credentialHomeFingerprint: 'sha256:credential-home',
+      }),
+      'expected the closed attestation schema to refuse an isolation method it has no member for'
+    ).toBe(false);
   });
 });
 

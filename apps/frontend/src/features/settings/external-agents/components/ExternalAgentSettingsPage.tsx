@@ -13,9 +13,12 @@
  * accidental confirmation is a conversation already sent.
  */
 
-import type { ExternalAgentTargetId } from '@mangostudio/shared/external-agents';
+import type {
+  ExternalAgentTargetId,
+  ExternalWorkspaceTrust,
+} from '@mangostudio/shared/external-agents';
 import { isExternalAgentTargetId } from '@mangostudio/shared/external-agents/values';
-import { ShieldCheck } from 'lucide-react';
+import { FolderLock, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 
 import { SettingsPage } from '@/components/settings/SettingsPage';
@@ -25,7 +28,9 @@ import { Button } from '@/components/ui/Button';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { useToast } from '@/components/ui/Toast';
+import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
 import { useExternalDisclosures } from '@/features/external-agents/useExternalDisclosures';
+import { useExternalWorkspaceTrust } from '@/features/external-agents/useExternalWorkspaceTrust';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_LG } from '@/lib/icon-sizes';
@@ -87,8 +92,92 @@ export function ExternalAgentSettingsPage() {
           ))
         )}
       </SettingsSection>
+      <WorkspaceTrustSection locale={locale} />
     </SettingsPage>
   );
+}
+
+/**
+ * The folders a vendor may load configuration from, each withdrawable.
+ *
+ * Same stance as the notices above: withdrawing is the safe direction, so there
+ * is no confirm step. The hint says what a click does beyond the row — every chat
+ * on that folder is affected, and a turn already running is not stopped.
+ */
+function WorkspaceTrustSection({ locale }: { readonly locale: string }) {
+  const { t } = useI18n('settings');
+  const { toast } = useToast();
+  const trust = useExternalWorkspaceTrust();
+  const environments = useEnvironmentEntitiesQuery();
+  const labels = t.externalAgents.workspaceTrust;
+  const [revokingKey, setRevokingKey] = useState<string | null>(null);
+
+  const withdraw = (grant: ExternalWorkspaceTrust) => {
+    setRevokingKey(grantKey(grant));
+    void trust
+      .revoke(grant)
+      .catch(() => toast(labels.revokeFailed, 'error'))
+      .finally(() => setRevokingKey(null));
+  };
+
+  return (
+    <SettingsSection
+      title={labels.manageTitle}
+      description={trust.grants.length > 0 ? labels.manageHint : labels.manageDescription}
+    >
+      {trust.isLoading ? (
+        <div
+          // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- The status live region announces changes without implying a calculation output.
+          role="status"
+          className="px-4 py-3"
+        >
+          <Skeleton className="h-8 w-full" />
+          <span className="sr-only">{t.common.loading}</span>
+        </div>
+      ) : trust.grants.length === 0 ? (
+        <EmptyState
+          icon={<FolderLock size={ICON_LG} />}
+          title={labels.manageEmpty}
+          hint={labels.manageEmptyHint}
+        />
+      ) : (
+        trust.grants.map((grant) => {
+          const environmentName =
+            environments.data?.find((candidate) => candidate.id === grant.environmentId)?.name ??
+            grant.environmentId;
+          const busy = revokingKey === grantKey(grant);
+          return (
+            <SettingsRow
+              key={grantKey(grant)}
+              label={<span className="break-all font-mono text-xs">{grant.workspacePath}</span>}
+              hint={formatMessage(labels.grantedAt, {
+                vendor: t.externalAgents.target[grant.targetId],
+                environment: environmentName,
+                date: formatAcknowledgedAt(grant.acceptedAt, locale),
+              })}
+            >
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={busy}
+                onClick={() => {
+                  withdraw(grant);
+                }}
+              >
+                {busy ? labels.revoking : labels.revoke}
+              </Button>
+            </SettingsRow>
+          );
+        })
+      )}
+    </SettingsSection>
+  );
+}
+
+/** The three-part key a grant is stored under, for React keys and the busy marker. */
+function grantKey(grant: ExternalWorkspaceTrust): string {
+  return JSON.stringify([grant.targetId, grant.environmentId, grant.workspacePath]);
 }
 
 interface DisclosureRowProps {

@@ -17,6 +17,7 @@ import { useId } from 'react';
 
 import { PickOneRow } from '@/components/settings/PickOneRow';
 import { Badge } from '@/components/ui/Badge';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
@@ -32,7 +33,7 @@ export function WslDistributionPicker({
   selected,
   onSelect,
 }: WslDistributionPickerProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.entities.add;
   const groupName = useId();
 

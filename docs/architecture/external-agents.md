@@ -406,6 +406,18 @@ in an untrusted workspace is refused before the stream opens, with the canonical
 machine spells, and the client turns that refusal into one dialog and one retry. The grant covers
 exactly that directory: a parent's grant does not cover a child.
 
+A grant can be withdrawn: `GET /api/external-agents/workspace-trust` lists the signed-in user's
+current grants and `DELETE` on the same path removes one, named by the stored
+`(targetId, environmentId, workspacePath)`. The path is matched literally and never canonicalized
+again, so a grant stays revocable while its machine is offline. A key the user never granted
+answers 404, whoever else granted it. Settings > External agents lists the grants and wires the
+button. Both the grant and the revoke write a `workspace_trust_*` diagnostic log entry.
+
+Withdrawing does not reap sessions, unlike withdrawing a vendor disclosure. The gate runs on every
+send, so the next turn in that folder is refused and asks again; a turn already running keeps
+going, because the vendor loaded the folder's configuration when the session opened and stopping
+the turn would not unload it.
+
 Only vendors that have declared what they load are gated. Extending that list is how another
 adapter opts in — a disclosure that cannot name what it covers is a dialog people learn to dismiss.
 
@@ -487,6 +499,15 @@ The **runtime** attests what it can establish about itself, in
 namespace and filesystem both still say "isolated". So the mount table is read and any mount at the
 credential home — or at `~/.claude`, `~/.codex`, `~/.cursor` and their XDG equivalents — withdraws
 the attestation. A container whose mount table cannot be read attests nothing.
+
+A runtime newer than the hub may attest a method this table does not list. `runtime.health` reads
+the method as a bounded, URL-safe string, so the report is still accepted and the rest of the
+manifest still refreshes. The hub reads an unknown method as **unproven isolation**: it drops the
+attestation, so the manifest carries no `identityIsolation` (even when `hello` announced a known
+method — the newest answer wins) and everything gated on it fails closed with
+`EXTERNAL_ISOLATION_UNPROVEN`. It logs `unknown_identity_isolation_method_skipped` once per
+environment. The enum stays closed wherever the hub produces the value: the manifest and the
+`isolation` it sends back never carry a method this build cannot name.
 
 The attestation carries a `credentialHomeFingerprint`: a non-reversible digest of the credential
 home's identity, never its contents and never a path that would leak a username. It exists so the

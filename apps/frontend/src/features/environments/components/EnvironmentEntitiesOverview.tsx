@@ -11,6 +11,7 @@ import { Chip } from '@/components/ui/Chip';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { FIELD_CLASS } from '@/components/ui/Input';
 import { StatusDot } from '@/components/ui/StatusDot';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
@@ -42,7 +43,7 @@ import { SshPanel } from './SshPanel';
 import { TOOL_CARD_SURFACE } from './ToolCard';
 
 export function EnvironmentEntitiesOverview() {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const environments = useEnvironmentEntitiesQuery();
   const [adding, setAdding] = useState(false);
   const [onboarding, setOnboarding] = useState(false);
@@ -92,7 +93,7 @@ export function EnvironmentEntitiesOverview() {
 }
 
 function EnvironmentEntityCard({ environment }: { environment: Environment }) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.entities;
   const connect = useConnectEnvironmentMutation();
   const disconnect = useDisconnectEnvironmentMutation();
@@ -372,7 +373,7 @@ function formatSlotBytes(bytes: number | null): string {
  * loading state — the line either has an answer or it does not exist yet.
  */
 function ToolchainSummaryLine({ environment }: { environment: Environment }) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const runtimes = useCachedRuntimeStatuses(environment.id);
   const summary = toolchainSummary(t, runtimes.data);
   if (!summary) return null;
@@ -394,7 +395,7 @@ function ToolchainSummaryLine({ environment }: { environment: Environment }) {
  * silently is something nobody fixes.
  */
 function RuntimeRelease({ environment }: { environment: Environment }) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const { runtimeVersion, runtimeVersionDrift } = environment.status;
   if (!runtimeVersion || !runtimeVersionDrift) return null;
 
@@ -406,7 +407,7 @@ function RuntimeRelease({ environment }: { environment: Environment }) {
 }
 
 function CapabilityChips({ environment }: { environment: Environment }) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.entities;
   const manifest = environment.status.manifest;
   if (!manifest) {
@@ -454,7 +455,7 @@ const FEATURE_KEYS = [
  * disconnected `noManifest` copy above.
  */
 function PermissionsRow({ environment }: { environment: Environment }) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.entities.permissions;
   const manifest = environment.status.manifest;
   const lifecycle = useRuntimeLifecycleQuery(environment.id, Boolean(manifest));

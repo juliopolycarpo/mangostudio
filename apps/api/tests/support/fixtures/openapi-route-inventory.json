@@ -54,6 +54,7 @@
   "/api/external-agents": ["get"],
   "/api/external-agents/disclosures": ["get"],
   "/api/external-agents/sessions": ["get"],
+  "/api/external-agents/workspace-trust": ["delete", "get"],
   "/api/external-agents/{targetId}/account-limits": ["get"],
   "/api/external-agents/{targetId}/account-limits/refresh": ["post"],
   "/api/external-agents/{targetId}/commands": ["get"],

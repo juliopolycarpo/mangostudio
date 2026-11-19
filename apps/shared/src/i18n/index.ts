@@ -17,7 +17,13 @@ export const en: Messages = {
   ...settings,
   ...onboarding,
   // A feature namespace is split across `en.ts` and `en-<namespace>.ts`: join its halves.
-  environments: { ...core.environments, ...environments.environments },
+  environments: {
+    ...core.environments,
+    ...environments.environments,
+    // `entities` and `machine` are split one level down: join their halves too.
+    entities: { ...core.environments.entities, ...environments.environments.entities },
+    machine: { ...core.environments.machine, ...environments.environments.machine },
+  },
   git: { ...core.git, ...git.git },
   github: { ...core.github, ...github.github },
   library: { ...core.library, ...library.library },

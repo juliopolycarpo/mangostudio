@@ -37,7 +37,6 @@ interface EagerFeatureKeys {
   environments:
     | 'nav'
     | 'tabs'
-    | 'entities'
     | 'names'
     | 'lts'
     | 'status'
@@ -47,10 +46,29 @@ interface EagerFeatureKeys {
     | 'findings'
     | 'pathSources'
     | 'runtimes'
-    | 'machine'
     | 'actions';
   git: 'title' | 'refresh' | 'remote' | 'diff';
   github: 'title' | 'actions' | 'panel' | 'chip';
+}
+
+/**
+ * A namespace key that is split one level down: only the sub-keys listed here
+ * stay eager, the rest of that key ships with the feature's lazy chunk. Use it
+ * for a key the first paint reads a little of and a lazy page reads most of
+ * (`environments.entities`, `environments.machine`). A key listed here must not
+ * also be in `EagerFeatureKeys`, which would keep all of it eager.
+ */
+interface EagerNestedFeatureKeys {
+  environments: {
+    entities:
+      | 'status'
+      | 'transport'
+      | 'disabled'
+      | 'toolchainSummaryNode'
+      | 'toolchainSummaryBun'
+      | 'toolchainSummaryMissing';
+    machine: 'service' | 'actions' | 'update';
+  };
 }
 
 /**
@@ -66,14 +84,34 @@ type EagerKeysOf<Namespace extends FeatureNamespace> = Extract<
   keyof Messages[Namespace]
 >;
 
+/** The keys of a namespace that are split one level down (none for a namespace without nested keys). */
+type SplitKeysOf<Namespace extends FeatureNamespace> =
+  Namespace extends keyof EagerNestedFeatureKeys
+    ? Extract<keyof EagerNestedFeatureKeys[Namespace], keyof Messages[Namespace]>
+    : never;
+
+/** The eager sub-keys of one split key. */
+type EagerSubKeysOf<
+  Namespace extends FeatureNamespace,
+  Key extends SplitKeysOf<Namespace>,
+> = Namespace extends keyof EagerNestedFeatureKeys
+  ? Key extends keyof EagerNestedFeatureKeys[Namespace]
+    ? Extract<EagerNestedFeatureKeys[Namespace][Key], keyof Messages[Namespace][Key]>
+    : never
+  : never;
+
 /** The English keys of a feature namespace that are not in the eager dictionary. */
 export type FeatureMessages<Namespace extends FeatureNamespace> = {
-  [N in Namespace]: Omit<Messages[N], EagerKeysOf<N>>;
+  [N in Namespace]: Omit<Messages[N], EagerKeysOf<N> | SplitKeysOf<N>> & {
+    [K in SplitKeysOf<N>]: Omit<Messages[N][K], EagerSubKeysOf<N, K>>;
+  };
 };
 
 /** What the eager dictionary holds: every namespace that is not deferred, and the eager keys of the split ones. */
 export type CoreMessages = Omit<Messages, DeferredNamespace | FeatureNamespace> & {
-  [N in FeatureNamespace]: Pick<Messages[N], EagerKeysOf<N>>;
+  [N in FeatureNamespace]: Pick<Messages[N], EagerKeysOf<N>> & {
+    [K in SplitKeysOf<N>]: Pick<Messages[N][K], EagerSubKeysOf<N, K>>;
+  };
 };
 
 /**

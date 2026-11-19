@@ -5,7 +5,7 @@
  */
 
 import type { InstallGuardReason } from '@mangostudio/shared/environments';
-import type { CoreMessages } from '@mangostudio/shared/i18n';
+import type { CoreMessages, LoadedMessages } from '@mangostudio/shared/i18n';
 import type {
   HubHealth,
   HubLaunchMode,
@@ -23,11 +23,11 @@ import { formatMessage } from '@/lib/i18n-format';
 
 import { guardReasonLabel } from '../format';
 
-export function launchModeLabel(t: CoreMessages, launch: HubLaunchMode): string {
+export function launchModeLabel(t: LoadedMessages<'environments'>, launch: HubLaunchMode): string {
   return t.environments.machine.hub.launch[launch];
 }
 
-export function hubHealthLabel(t: CoreMessages, health: HubHealth): string {
+export function hubHealthLabel(t: LoadedMessages<'environments'>, health: HubHealth): string {
   return t.environments.machine.hub.health[health];
 }
 
