@@ -41,6 +41,7 @@ import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 
 import { githubKeys } from '@/features/github/queries';
 import { client } from '@/lib/api-client';
+import { isReadAfterSubscribe } from '@/lib/realtime/read-after-subscribe';
 import {
   useRealtimeInvalidation,
   useRealtimeInvalidations,
@@ -442,24 +443,6 @@ export function useGitRealtimeInvalidation(chatId: string): void {
       return scheduleGitScopeInvalidation(queryClient, chatId, GIT_SCOPES);
     }
   );
-}
-
-/**
- * Whether a read already reflects everything the new subscription would have
- * announced, so its ack has nothing left to refresh.
- *
- * That holds only for a read taken after the subscribe frame was sent: a write
- * after the frame reaches the tab as its own frame, while one between the read
- * and the hub processing the frame is in neither. Comparing against the ack's
- * arrival, or against a fixed window before it, would count such a read as
- * covered and hide that write. A read made before the frame, which is every read
- * that supplied the repo key, is refetched.
- */
-function isReadAfterSubscribe(
-  dataUpdatedAt: number | undefined,
-  requestedAt: number | undefined
-): boolean {
-  return dataUpdatedAt !== undefined && requestedAt !== undefined && dataUpdatedAt >= requestedAt;
 }
 
 /**
