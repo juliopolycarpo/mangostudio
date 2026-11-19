@@ -139,7 +139,7 @@ describe('useBatchedGitSummaries', () => {
     expect(reads).toBe(settled);
   });
 
-  it('fetches again once the id list really changes', async () => {
+  it('asks only about the ids it has not already answered when the list grows', async () => {
     respondPerRequest();
 
     const { result, rerender } = renderHook(
@@ -153,7 +153,55 @@ describe('useBatchedGitSummaries', () => {
 
     await flushAsyncRender();
     await waitFor(() => expect(result.current.b).toEqual(summaryFor('b')));
-    expect(mockBatch).toHaveBeenLastCalledWith({ chatIds: ['a', 'b'] });
+    expect(mockBatch).toHaveBeenCalledTimes(2);
+    expect(mockBatch).toHaveBeenLastCalledWith({ chatIds: ['b'] });
+    expect(result.current.a).toEqual(summaryFor('a'));
+  });
+
+  it('keeps the answer for an id that leaves the list and serves it again without a request', async () => {
+    respondPerRequest();
+
+    const { result, rerender } = renderHook(
+      ({ chatIds }: { chatIds: string[] }) => useBatchedGitSummaries(chatIds),
+      { initialProps: { chatIds: ['a', 'b'] } }
+    );
+
+    await flushAsyncRender();
+    await waitFor(() => expect(Object.keys(result.current)).toHaveLength(2));
+    rerender({ chatIds: ['c'] });
+    await flushAsyncRender();
+    await waitFor(() => expect(result.current.c).toEqual(summaryFor('c')));
+    expect(result.current.a).toBeUndefined();
+
+    mockBatch.mockClear();
+    rerender({ chatIds: ['a', 'b'] });
+    await flushAsyncRender();
+
+    // Served from the cache on the same render, not after a round trip.
+    expect(result.current.a).toEqual(summaryFor('a'));
+    expect(result.current.b).toEqual(summaryFor('b'));
+    expect(mockBatch).not.toHaveBeenCalled();
+  });
+
+  it('includeCached keeps returning the badges of ids that left the list', async () => {
+    respondPerRequest();
+
+    const { result, rerender } = renderHook(
+      ({ chatIds }: { chatIds: string[] }) =>
+        useBatchedGitSummaries(chatIds, { includeCached: true }),
+      { initialProps: { chatIds: ['a', 'b'] } }
+    );
+
+    await flushAsyncRender();
+    await waitFor(() => expect(Object.keys(result.current)).toHaveLength(2));
+    rerender({ chatIds: ['c'] });
+    await flushAsyncRender();
+    await waitFor(() => expect(result.current.c).toEqual(summaryFor('c')));
+
+    // `a` and `b` are no longer asked for, and are still answered.
+    expect(result.current.a).toEqual(summaryFor('a'));
+    expect(result.current.b).toEqual(summaryFor('b'));
+    expect(mockBatch).toHaveBeenCalledTimes(2);
   });
 
   it('resolves a failed chunk to null instead of a permanent pending state', async () => {
@@ -173,32 +221,65 @@ describe('useBatchedGitSummaries', () => {
     expect(Object.keys(result.current)).toHaveLength(0);
   });
 
-  it('refetches only the chunk containing a chat when a git write invalidates it', async () => {
+  it('refetches only the chat a git write invalidated', async () => {
     respondPerRequest();
     mockCommit.mockResolvedValue({ data: { hash: 'abc123', subject: 'feat' }, error: null });
-    const otherChunkSpy = jest.fn(() => Promise.resolve({ states: { unrelated: null } }));
+    const otherChatSpy = jest.fn(() => Promise.resolve(null));
 
     const { result } = renderHook(() => {
-      // A second, already-populated chunk that must survive the invalidation.
+      // A second, already-populated badge that must survive the invalidation.
       useQuery({
-        queryKey: ['git-summaries', ['unrelated']],
-        queryFn: otherChunkSpy,
-        initialData: { states: { unrelated: null } },
+        queryKey: ['git-summary', 'unrelated'],
+        queryFn: otherChatSpy,
+        initialData: null,
         staleTime: Number.POSITIVE_INFINITY,
       });
-      const summaries = useBatchedGitSummaries(['chat-1']);
+      const summaries = useBatchedGitSummaries(['chat-1', 'chat-2']);
       return { summaries, commit: useCommit('chat-1') };
     });
 
     await flushAsyncRender();
-    await waitFor(() => expect(result.current.summaries['chat-1']).toEqual(summaryFor('chat-1')));
+    await waitFor(() => expect(Object.keys(result.current.summaries)).toHaveLength(2));
     expect(mockBatch).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       await result.current.commit.mutateAsync({ title: 'feat: land' });
     });
 
+    // The write names chat-1; chat-2's badge is neither refetched nor sent.
     await waitFor(() => expect(mockBatch).toHaveBeenCalledTimes(2));
-    expect(otherChunkSpy).not.toHaveBeenCalled();
+    expect(mockBatch).toHaveBeenLastCalledWith({ chatIds: ['chat-1'] });
+    expect(otherChatSpy).not.toHaveBeenCalled();
+  });
+
+  it('refreshes the badge of a chat scrolled out of view the next time it returns', async () => {
+    respondPerRequest();
+    mockCommit.mockResolvedValue({ data: { hash: 'abc123', subject: 'feat' }, error: null });
+
+    const { result, rerender } = renderHook(
+      ({ chatIds }: { chatIds: string[] }) => ({
+        summaries: useBatchedGitSummaries(chatIds),
+        commit: useCommit('chat-1'),
+      }),
+      { initialProps: { chatIds: ['chat-1'] } }
+    );
+
+    await flushAsyncRender();
+    await waitFor(() => expect(result.current.summaries['chat-1']).toBeDefined());
+    rerender({ chatIds: ['chat-2'] });
+    await flushAsyncRender();
+    await waitFor(() => expect(result.current.summaries['chat-2']).toBeDefined());
+    mockBatch.mockClear();
+
+    await act(async () => {
+      await result.current.commit.mutateAsync({ title: 'feat: land' });
+    });
+    // Off screen: marked stale, not refetched.
+    await flushAsyncRender();
+    expect(mockBatch).not.toHaveBeenCalled();
+
+    rerender({ chatIds: ['chat-1'] });
+    await flushAsyncRender();
+    await waitFor(() => expect(mockBatch).toHaveBeenCalledWith({ chatIds: ['chat-1'] }));
   });
 });

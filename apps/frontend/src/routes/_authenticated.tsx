@@ -104,6 +104,9 @@ export const Route = createFileRoute('/_authenticated')({
   errorComponent: BootstrapErrorPanel,
 });
 
+/** Before the sidebar has reported a window, no chat is in view. */
+const NO_CHAT_IDS: readonly string[] = [];
+
 /** What the shell shows while a lazy page's chunk is on its way. */
 function RouteFallback() {
   const { t } = useI18n();
@@ -124,15 +127,13 @@ function AuthenticatedLayout() {
   const commandPalette = useCommandPalette();
   const activePage = activePageForPath(currentPath);
   const routeEntrance = useRouteEntrance(activePage);
-  // Only chats with a workdir can have git state. `app.chats` holds its
-  // identity between query updates, so memoizing here hands the hook the same
-  // array on every one of this layout's re-renders and it can bail out on the
-  // reference instead of re-sorting the whole list.
-  const gitChatIds = useMemo(
-    () => app.chats.filter((chat) => chat.workdir).map((chat) => chat.id),
-    [app.chats]
-  );
-  const gitSummaries = useBatchedGitSummaries(gitChatIds);
+  // Git badges are asked for only the sidebar rows in view (plus a lookahead),
+  // not every chat in the account: each id costs a `git status` on its host.
+  // The sidebar reports the ids once its scroll window settles, as a state
+  // value, so the hook sees the same array on every one of this layout's
+  // re-renders and bails out on the reference.
+  const [gitChatIdsInView, setGitChatIdsInView] = useState<readonly string[]>(NO_CHAT_IDS);
+  const gitSummaries = useBatchedGitSummaries(gitChatIdsInView, { includeCached: true });
   // The same rule the hub's health card applies, at the one scope a nav badge
   // can have: no chat, so no "the machine this session runs on is offline"
   // warning — only machines that actually reported a fault. Reads the list the
@@ -201,6 +202,7 @@ function AuthenticatedLayout() {
         onNewChat={() => void app.handleNewChat()}
         contextCache={app.contextCache}
         gitSummaries={gitSummaries}
+        onGitRowsInViewChange={setGitChatIdsInView}
         environmentAlertCount={environmentAlertCount}
         isMobileSidebarOpen={isMobileSidebarOpen}
         onMobileSidebarClose={() => setIsMobileSidebarOpen(false)}
