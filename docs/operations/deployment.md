@@ -77,6 +77,30 @@ volumes:
   mango-data:
 ```
 
+### Process model
+
+Both image variants install [`tini`](https://github.com/krallin/tini) from the distribution
+package and start the hub through it:
+
+```text
+tini -- mangostudio serve
+```
+
+`tini` is PID 1. It reaps orphaned processes (a vendor CLI's grandchild, a shell or `git` whose
+parent died, an interrupted `docker exec`), which the hub cannot do because it only reaps what
+it spawned. It also forwards `SIGTERM` from `docker stop` to the hub, so the hub's graceful
+shutdown runs and the container exits with status 0. It does not use `tini -g`: the hub
+already stops its own runtime and tool processes, and a group-wide signal would race that.
+
+You do not need `docker run --init` or Compose `init: true`; the image already has an init, and
+a second one in front of it only adds a layer. If you override `--entrypoint`, keep an init in
+front of `mangostudio`.
+
+`scripts/release/smoke-docker-image.sh` asserts this on every image: PID 1 is `tini`, the hub is
+its child, an orphaned process is reaped and leaves no zombie, and `docker stop` ends the
+container with exit code 0 inside the stop timeout. Pull requests that touch a Dockerfile run
+it through the `Smoke — Binary` job.
+
 The first GHCR package may need its visibility changed to public in the GitHub
 package settings after the first release push.
 
