@@ -794,10 +794,22 @@ async function sessionBusEnv(deps: UserServiceExecDeps): Promise<NodeJS.ProcessE
   return { ...deps.env, XDG_RUNTIME_DIR: runtimeDir, DBUS_SESSION_BUS_ADDRESS: dbus };
 }
 
+export interface UserServiceManagerOptions {
+  /**
+   * Where the launchd retarget helper's plist lives: the owner's own state
+   * directory, never `~/Library/LaunchAgents`. launchd loads every plist in that
+   * directory at login, so a helper left there would run `restart` again then;
+   * `launchctl bootstrap` accepts a plist from any path, and one outside it is
+   * inert if a cleanup is missed. Without it the helper cannot be started.
+   */
+  readonly retargetHelperDir?: string;
+}
+
 /** Creates the manager for one unit identity. // Usage: createUserServiceManager(identity).status() */
 export function createUserServiceManager(
   identity: UserServiceIdentity,
-  deps: UserServiceExecDeps = defaultUserServiceExecDeps()
+  deps: UserServiceExecDeps = defaultUserServiceExecDeps(),
+  options: UserServiceManagerOptions = {}
 ): UserServiceManager {
   const warn =
     deps.warn ?? ((message: string) => process.stderr.write(`${identity.cliName}: ${message}\n`));
@@ -1207,10 +1219,13 @@ export function createUserServiceManager(
   };
 
   const retargetHelperLabel = `${identity.launchdLabel}.retarget`;
-  const retargetHelperPlist = launchdAgentPlistPath(deps.home, retargetHelperLabel);
+  const retargetHelperPlist =
+    options.retargetHelperDir === undefined
+      ? null
+      : posix.join(options.retargetHelperDir, `${retargetHelperLabel}.plist`);
 
   async function removeRetargetHelper(): Promise<void> {
-    if (deps.platform !== 'darwin') return;
+    if (deps.platform !== 'darwin' || retargetHelperPlist === null) return;
     // The plist is the helper's record: without it there is nothing loaded
     // worth a launchctl call, which keeps every hub start from spawning one.
     try {
@@ -1226,10 +1241,13 @@ export function createUserServiceManager(
     if (deps.platform !== 'darwin') {
       refuseUnsupported('The launchd retarget helper runs only on macOS.');
     }
+    if (retargetHelperPlist === null || options.retargetHelperDir === undefined) {
+      return refuseUnsupported('No state directory was given to keep the retarget helper in.');
+    }
     // A leftover would make the bootstrap fail as already loaded.
     await removeRetargetHelper();
     const unit = await readUnit();
-    await deps.mkdir(posix.join(deps.home, 'Library', 'LaunchAgents'));
+    await deps.mkdir(options.retargetHelperDir);
     await deps.writeFile(
       retargetHelperPlist,
       renderLaunchdRetargetHelperPlistFile(retargetHelperLabel, {
@@ -1240,7 +1258,6 @@ export function createUserServiceManager(
     );
     const result = await run(['launchctl', 'bootstrap', `gui/${deps.uid}`, retargetHelperPlist]);
     if (result.exitCode !== 0) {
-      // Left in LaunchAgents it would run `restart` again at the next login.
       await deps.unlink(retargetHelperPlist).catch(() => undefined);
       throw commandFailure('launchctl bootstrap (retarget helper)', result);
     }

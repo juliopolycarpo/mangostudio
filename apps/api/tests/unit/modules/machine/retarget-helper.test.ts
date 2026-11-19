@@ -13,7 +13,9 @@ import { FakeUnitHost } from '../../../support/mocks/fake-unit-host';
 const LAUNCHER = '/opt/homebrew/bin/mangostudio';
 const LOG_FILE = '/Users/test/.mango/logs/service-retarget.log';
 const HELPER_LABEL = 'com.mangostudio.hub.retarget';
-const HELPER_PLIST = `/home/test/Library/LaunchAgents/${HELPER_LABEL}.plist`;
+/** The hub's run directory: state the hub owns, not a place launchd scans at login. */
+const STATE_DIR = '/home/test/.mango/run';
+const HELPER_PLIST = `${STATE_DIR}/${HELPER_LABEL}.plist`;
 const HUB_PLIST = '/home/test/Library/LaunchAgents/com.mangostudio.hub.plist';
 const HELPER_TARGET = `gui/1000/${HELPER_LABEL}`;
 const HUB_TARGET = 'gui/1000/com.mangostudio.hub';
@@ -21,7 +23,9 @@ const HUB_TARGET = 'gui/1000/com.mangostudio.hub';
 /** A darwin host with the hub's own unit installed, the way `service install` leaves it. */
 async function darwinHostWithHub(): Promise<{ host: FakeUnitHost; manager: UserServiceManager }> {
   const host = new FakeUnitHost('darwin');
-  const manager = createUserServiceManager(HUB_SERVICE_IDENTITY, host.deps());
+  const manager = createUserServiceManager(HUB_SERVICE_IDENTITY, host.deps(), {
+    retargetHelperDir: STATE_DIR,
+  });
   await manager.install(
     buildHubServiceDefinition({
       executable: {
@@ -112,17 +116,21 @@ describe('the launchd retarget helper', () => {
     await manager.startRetargetHelper(LAUNCHER, LOG_FILE);
     const order: string[] = [];
     const deps = host.deps();
-    const manager2 = createUserServiceManager(HUB_SERVICE_IDENTITY, {
-      ...deps,
-      unlink: (path) => {
-        order.push(`unlink ${path}`);
-        return deps.unlink(path);
+    const manager2 = createUserServiceManager(
+      HUB_SERVICE_IDENTITY,
+      {
+        ...deps,
+        unlink: (path) => {
+          order.push(`unlink ${path}`);
+          return deps.unlink(path);
+        },
+        exec: (argv, options) => {
+          order.push(argv.join(' '));
+          return deps.exec(argv, options);
+        },
       },
-      exec: (argv, options) => {
-        order.push(argv.join(' '));
-        return deps.exec(argv, options);
-      },
-    });
+      { retargetHelperDir: STATE_DIR }
+    );
 
     await manager2.removeRetargetHelper();
 
@@ -150,13 +158,41 @@ describe('the launchd retarget helper', () => {
         'launchctl bootstrap (retarget helper) failed (exit 1): Load failed: 1: Input/output error',
     });
 
-    // A plist left in LaunchAgents would run `restart` again at the next login.
     expect(host.files.has(HELPER_PLIST)).toBe(false);
+  });
+
+  // launchd loads every plist in ~/Library/LaunchAgents at login, and this one
+  // runs `restart`. Anywhere else, a leftover from a missed cleanup is inert.
+  it('keeps the plist outside LaunchAgents, so a leftover cannot run `restart` at login', async () => {
+    const { host, manager } = await darwinHostWithHub();
+
+    await manager.startRetargetHelper(LAUNCHER, LOG_FILE);
+
+    const helperPaths = [...host.files.keys()].filter((path) => path.endsWith('.retarget.plist'));
+    expect(helperPaths).toEqual([HELPER_PLIST]);
+    expect(helperPaths.join('\n')).not.toContain('LaunchAgents');
+    // Loaded from where it is: launchctl takes any path.
+    expect(host.commands).toEqual([`launchctl bootstrap gui/1000 ${HELPER_PLIST}`]);
+  });
+
+  it('refuses to start a helper without a state directory to keep its plist in', async () => {
+    const host = new FakeUnitHost('darwin');
+    const manager = createUserServiceManager(HUB_SERVICE_IDENTITY, host.deps());
+
+    await expect(manager.startRetargetHelper(LAUNCHER, LOG_FILE)).rejects.toMatchObject({
+      message: expect.stringContaining('No state directory'),
+    });
+
+    // Never falls back to LaunchAgents.
+    expect(host.files.size).toBe(0);
+    expect(host.commands).toEqual([]);
   });
 
   it('is only for launchd: another platform neither starts nor has anything to remove', async () => {
     const host = new FakeUnitHost('linux');
-    const manager = createUserServiceManager(HUB_SERVICE_IDENTITY, host.deps());
+    const manager = createUserServiceManager(HUB_SERVICE_IDENTITY, host.deps(), {
+      retargetHelperDir: STATE_DIR,
+    });
 
     await manager.removeRetargetHelper();
     await expect(manager.startRetargetHelper(LAUNCHER, LOG_FILE)).rejects.toMatchObject({

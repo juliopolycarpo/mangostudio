@@ -119,7 +119,8 @@ The unit runs `serve` through whichever program survives an upgrade:
   ends, so it loads a one-shot LaunchAgent (`com.mangostudio.hub.retarget`) that
   runs `mangostudio restart` and removes itself at the end, logging to
   `~/.mango/logs/service-retarget.log`; the next hub start removes one that never
-  got there. If that agent cannot be loaded the unit is kicked in place.
+  got there. Its plist lives in `~/.mango/run`, not `~/Library/LaunchAgents`, so
+  a missed cleanup can never run `restart` at login. If that agent cannot be loaded the unit is kicked in place.
 - **Source checkout** — the workspace entry through Bun, with the directory
   `install` was run from as the unit's working directory.
 - **Installer layout with no launcher yet** — this version's own directory. The

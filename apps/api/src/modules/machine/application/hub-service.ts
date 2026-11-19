@@ -23,7 +23,7 @@ import {
   type MangoConfig,
   RUNTIME_CONFIG_ENV_KEYS,
 } from '../../../lib/config';
-import { getLogsDir } from '../../../lib/mango-paths';
+import { getLogsDir, getRunDir } from '../../../lib/mango-paths';
 import { isStandaloneExecutable } from '../../../lib/runtime-paths';
 import { readTomlDocument } from '../../../lib/toml';
 import {
@@ -391,7 +391,11 @@ export function isAuthSecretPersisted(config: MangoConfig = getConfig()): boolea
   }
 }
 
-/** The manager for the hub's unit. // Usage: createHubServiceManager().status() */
+/**
+ * The manager for the hub's unit. The launchd retarget helper's plist lives in
+ * the hub's run directory, not in LaunchAgents, so a leftover never runs at login.
+ * // Usage: createHubServiceManager().status()
+ */
 export function createHubServiceManager(deps?: UserServiceExecDeps): UserServiceManager {
-  return createUserServiceManager(HUB_SERVICE_IDENTITY, deps);
+  return createUserServiceManager(HUB_SERVICE_IDENTITY, deps, { retargetHelperDir: getRunDir() });
 }
