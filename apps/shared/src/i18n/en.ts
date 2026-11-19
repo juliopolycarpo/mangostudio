@@ -79,7 +79,17 @@ export const messages: CoreMessages = {
         session: 'session',
         library: 'on disk',
         skill: 'skill',
+        builtin: 'built-in',
       },
+      /** What each built-in slash command does, as the palette describes it. */
+      slashBuiltIn: {
+        clear: 'Start a new chat',
+        model: 'Switch this chat’s model: /model <name>',
+      },
+      slashModelSwitched: 'Model set to {model}.',
+      slashModelUsage: 'Name the model to switch to: /model <name>. Current model: {model}.',
+      slashModelNone: 'No model matches “{query}”.',
+      slashModelAmbiguous: '“{query}” fits more than one model: {models}. Type more of the name.',
       mcpPromptArgsTitle: 'Prompt arguments',
       mcpPromptInsert: 'Insert',
       mcpPromptCancel: 'Cancel',

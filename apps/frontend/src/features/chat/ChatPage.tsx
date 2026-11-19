@@ -106,6 +106,7 @@ type ComposerRunnerProps = Pick<
   | 'lockedProvider'
   | 'isModelSelectorDisabled'
   | 'onModelChange'
+  | 'onNewChat'
   | 'externalDescriptor'
   | 'externalModel'
   | 'externalEffort'
