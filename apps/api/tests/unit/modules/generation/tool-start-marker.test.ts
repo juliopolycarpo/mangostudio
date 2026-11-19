@@ -160,6 +160,9 @@ function logsWhenExecuted(name: string, log: EventLog, gate?: Promise<void>): Re
       canDisable: true,
       defaultParameters: {},
       parameterDescriptors: [],
+      // The read-only fixture declares what the real `read_file` declares; the
+      // marker is skipped for a tool the registry says is a read.
+      ...(name === READ_ONLY_TOOL ? { retrySafety: 'safe_read' as const } : {}),
     },
     execute: async (args) => {
       const id = typeof args.id === 'string' ? args.id : '';

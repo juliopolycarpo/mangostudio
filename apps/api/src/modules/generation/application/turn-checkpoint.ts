@@ -7,7 +7,6 @@ import {
   type CompletedToolCall,
   type IncompleteToolCall,
   type IncompleteToolCallOutcome,
-  type ToolRetrySafety,
   TURN_RECOVERY_MAX_CALLS,
   TURN_RECOVERY_MAX_RESULT_LENGTH,
   TURN_RECOVERY_MAX_TEXT_LENGTH,
@@ -25,20 +24,12 @@ import {
   insertCheckpointDelta,
   rewriteCheckpointedRow,
 } from '../../messages/infrastructure/message-checkpoint-deltas';
+import { CHECKPOINT_MAX_INTERVAL_MS, CHECKPOINT_TEXT_INTERVAL_CHARS } from './checkpoint-cadence';
 import { heldTailDelay, type HeldTailScheduler, HeldTailTimer } from './held-tail-timer';
+import { classifyToolRetrySafety } from './tool-retry-safety';
 import { type CheckpointPlan, CheckpointPlanner } from './turn-checkpoint-delta';
 
-export const CHECKPOINT_TEXT_INTERVAL_CHARS = 512;
-export const CHECKPOINT_MAX_INTERVAL_MS = 1_000;
-
-const READ_ONLY_BUILTIN_TOOLS = new Set([
-  'get_current_datetime',
-  'glob',
-  'grep',
-  'list_directory',
-  'read_file',
-  'skill',
-]);
+export { CHECKPOINT_MAX_INTERVAL_MS, CHECKPOINT_TEXT_INTERVAL_CHARS };
 
 export interface TurnCheckpointContent {
   readonly text: string;
@@ -426,11 +417,6 @@ export class TurnCheckpointWriter {
       now - this.lastWrittenAt >= CHECKPOINT_MAX_INTERVAL_MS
     );
   }
-}
-
-export function classifyToolRetrySafety(name: string): ToolRetrySafety {
-  if (name.startsWith('mcp__') || name === 'delegate_to_agent') return 'unknown';
-  return READ_ONLY_BUILTIN_TOOLS.has(name) ? 'safe_read' : 'confirmation_required';
 }
 
 export function createTurnCheckpointPart(input: {

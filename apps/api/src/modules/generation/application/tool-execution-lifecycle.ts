@@ -12,6 +12,7 @@ import {
   type ToolExecutionSnapshot,
   type ToolExecutionSource,
   type ToolExecutionStatus,
+  type ToolRetrySafety,
 } from '@mangostudio/shared/tool-executions';
 
 import { classifyMcpCallFailure } from '../../../services/mcp/call-failure';
@@ -81,21 +82,25 @@ export class ToolExecutionLifecycle {
    * Moves the call to `running`, recording the wall-clock budget it is held to
    * when a timer governs it. The budget is resolved by the caller from the same
    * source that arms the timer, so the snapshot cannot drift from enforcement.
+   * The retry policy is stamped alongside it, so a settled card can offer Retry
+   * without consulting the registry.
    */
-  start(timeoutMs?: number): void {
-    this.transition('running', undefined, timeoutMs);
+  start(timeoutMs?: number, retrySafety?: ToolRetrySafety): void {
+    this.transition('running', undefined, timeoutMs, retrySafety);
   }
 
   transition(
     status: ToolExecutionStatus,
     reasonCode?: ToolExecutionReasonCode,
-    timeoutMs?: number
+    timeoutMs?: number,
+    retrySafety?: ToolRetrySafety
   ): void {
     const terminal = isTerminalToolExecutionStatus(status);
     const next = applyToolExecutionTransition(this.snapshot, {
       status,
       at: Date.now(),
       ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+      ...(retrySafety !== undefined ? { retrySafety } : {}),
       ...(terminal
         ? { durationMs: performance.now() - (this.runningMonotonic ?? this.queuedMonotonic) }
         : {}),

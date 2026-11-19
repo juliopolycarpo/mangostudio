@@ -12,7 +12,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 
 import type { ChatCapabilitiesResponse } from '@mangostudio/shared/capabilities';
 import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
-import type { LibraryResource, LibraryScanResult } from '@mangostudio/shared/library';
+import type {
+  BuiltInSlashCommandName,
+  LibraryResource,
+  LibraryScanResult,
+} from '@mangostudio/shared/library';
 import type { SkillListResponse } from '@mangostudio/shared/skills';
 import { waitFor } from '@testing-library/react';
 
@@ -423,5 +427,82 @@ describe('useSlashCommands — native commands', () => {
       requested.filter((url) => url.includes('/api/library/resources')),
       '(library requests): expected the hub-local scan without an environmentId'
     ).toEqual([expect.not.stringContaining('environmentId=')]);
+  });
+});
+
+/**
+ * Built-in commands (issue #2599): acted on by the composer, offered first, and
+ * never shadowed by a file or a skill of the same name.
+ */
+describe('useSlashCommands — built-in commands', () => {
+  function renderWithBuiltIns(
+    builtIns: readonly BuiltInSlashCommandName[],
+    runner: ChatRunnerConfiguration = RUNNER
+  ) {
+    return renderHook(() =>
+      useSlashCommands({ chatId: null, runner, environmentId: null, builtIns, active: true })
+    );
+  }
+
+  it('lists the built-ins ahead of library commands and skills, described and labelled', async () => {
+    scenario.respondWithJson('GET', '/api/library/resources?kind=command', {
+      body: {
+        resources: [libraryResource('command', 'review', 'mangostudio')],
+        unreadableEntries: [],
+      },
+    });
+
+    const { result } = renderWithBuiltIns(['clear', 'model']);
+
+    await waitFor(() => {
+      expect(result.current.entries.map((entry) => entry.name)).toEqual([
+        'clear',
+        'model',
+        'review',
+        'dataviz',
+      ]);
+    });
+    expect(result.current.entries[0]).toEqual({
+      name: 'clear',
+      description: 'Start a new chat',
+      origin: 'builtin',
+    });
+  });
+
+  it('keeps a user file from shadowing a built-in name', async () => {
+    scenario.respondWithJson('GET', '/api/library/resources?kind=command', {
+      body: {
+        resources: [libraryResource('command', 'clear', 'mangostudio')],
+        unreadableEntries: [],
+      },
+    });
+
+    const { result } = renderWithBuiltIns(['clear']);
+
+    await waitFor(() => {
+      expect(result.current.entries.map((entry) => entry.name)).toEqual(['clear', 'dataviz']);
+    });
+    expect(result.current.entries[0]?.origin).toBe('builtin');
+  });
+
+  it('offers only the built-ins it was handed', async () => {
+    const { result } = renderWithBuiltIns(['model']);
+
+    await waitFor(() => {
+      expect(result.current.entries.map((entry) => entry.name)).toEqual(['model', 'dataviz']);
+    });
+  });
+
+  it('never offers a built-in to an external runner, whose vendor owns the namespace', async () => {
+    scenario.respondWithJson('GET', '/api/library/resources?kind=command', { body: EMPTY_SCAN });
+    scenario.respondWithJson('GET', '/api/external-agents/codex/commands?environmentId=local', {
+      body: { commands: [{ name: 'clear' }] },
+    });
+
+    const { result } = renderWithBuiltIns(['clear', 'model'], CODEX_RUNNER);
+
+    await waitFor(() => {
+      expect(result.current.entries).toEqual([{ name: 'clear', origin: 'session' }]);
+    });
   });
 });

@@ -27,6 +27,7 @@ import {
   findInstallRecipe,
   type IdentityResolver,
   installStep,
+  nodeInstallFollowUp,
   nodeUpdateAffordance,
   pathPosition,
   pathSourceLabel,
@@ -138,6 +139,7 @@ export function RuntimeCard({ status, recipes, environmentId, children }: Runtim
               catalog={recipes}
               name={name}
               environmentId={environmentId}
+              {...(isNode && { followUpSteps: nodeInstallFollowUp(recipes, installStepValue) })}
             />
           ) : null
         ) : hasInstalledFooter ? (

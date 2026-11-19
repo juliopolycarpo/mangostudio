@@ -25,6 +25,7 @@ import { capabilityRoutes } from './modules/generation/http/capability-routes';
 import { generateRoutes } from './modules/generation/http/generate-routes';
 import { respondRoutes } from './modules/generation/http/respond-routes';
 import { respondStreamRoutes } from './modules/generation/http/respond-stream-routes';
+import { toolCallRetryRoutes } from './modules/generation/http/tool-call-retry-routes';
 import { turnRecoveryRoutes } from './modules/generation/http/turn-recovery-routes';
 import { gitRoutes } from './modules/git/http/git-routes';
 import { githubRoutes } from './modules/github/http/github-routes';
@@ -149,6 +150,7 @@ const api = new Elysia({ prefix: '/api' })
   .use(respondRoutes)
   .use(respondStreamRoutes)
   .use(turnRecoveryRoutes)
+  .use(toolCallRetryRoutes)
   .use(gitRoutes)
   .use(githubRoutes)
   .use(libraryRoutes)

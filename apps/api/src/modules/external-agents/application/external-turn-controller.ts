@@ -69,7 +69,6 @@ import {
   type ActiveExternalTurn,
   findActiveTurnByChat,
   registerActiveTurn,
-  unregisterActiveTurn,
 } from '../../generation/application/active-turn-registry';
 import {
   finalizeCheckpointedAiResponse,
@@ -1216,7 +1215,7 @@ export function createExternalTurnController(
       return handle;
     }
 
-    registerActiveTurn(assistantMessageId, {
+    const releaseActiveTurn = registerActiveTurn(assistantMessageId, {
       userId: input.userId,
       chatId: input.chatId,
       external,
@@ -1433,7 +1432,7 @@ export function createExternalTurnController(
       stop.abort();
       releaseHold();
       unsubscribe();
-      unregisterActiveTurn(assistantMessageId);
+      releaseActiveTurn();
       if (liveTurns.get(input.chatId)?.transcript === transcript) liveTurns.delete(input.chatId);
     }
   }

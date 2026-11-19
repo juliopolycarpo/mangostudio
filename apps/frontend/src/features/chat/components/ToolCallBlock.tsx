@@ -29,6 +29,7 @@ import {
   parseToolResult,
   summarizeParsedToolResult,
 } from './tool-result-summary';
+import { ToolCallRetryControl } from './ToolCallRetryControl';
 import {
   formatToolDuration,
   formatToolElapsed,
@@ -43,6 +44,10 @@ import {
 const LIVE_ELAPSED_TICK_MS = 1_000;
 
 interface ToolCallBlockProps {
+  /** The call's id; with it the card can offer Retry inside a `ToolCallRetryProvider`. */
+  toolCallId?: string;
+  /** The reader, not the model, asked for this call (a retry). */
+  initiatedByUser?: boolean;
   name: string;
   args: Record<string, unknown>;
   result?: string | null;
@@ -59,6 +64,8 @@ interface ToolCallBlockProps {
 }
 
 export function ToolCallBlock({
+  toolCallId,
+  initiatedByUser = false,
   name,
   args,
   result,
@@ -203,6 +210,7 @@ export function ToolCallBlock({
       >
         <span className={cn('shrink-0 font-mono font-medium', toneTextClass(tone))}>{label}</span>
         {source !== 'builtin' && <Badge>{t.tools.sources[source]}</Badge>}
+        {initiatedByUser && <Badge>{t.tools.retry.byYou}</Badge>}
         {hint && <span className="truncate font-mono text-fg-muted">{hint}</span>}
         {statusLabel && (
           <span className={cn('shrink-0', toneTextClass(tone))}>
@@ -211,6 +219,20 @@ export function ToolCallBlock({
           </span>
         )}
       </TimelineRow>
+
+      {/* Outside the row: the row is a button, and a button cannot hold one. */}
+      {toolCallId !== undefined && (
+        <div className="flex pl-6">
+          <ToolCallRetryControl
+            toolCallId={toolCallId}
+            name={name}
+            args={args}
+            status={status}
+            execution={execution}
+            isLiveTurn={isLiveTurn}
+          />
+        </div>
+      )}
 
       <TimelineDisclosure open={expanded}>
         <div className="app-scrollbar max-h-48 overflow-y-auto text-xs sm:max-h-72 md:max-h-96">

@@ -20,6 +20,7 @@
   "/api/chats/{id}/messages": ["get"],
   "/api/chats/{id}/messages/{messageId}/recovery/cancel": ["post"],
   "/api/chats/{id}/messages/{messageId}/recovery/dismiss": ["post"],
+  "/api/chats/{id}/messages/{messageId}/tool-calls/{callId}/retry": ["post"],
   "/api/chats/{id}/summarize-to-new-chat": ["post"],
   "/api/chats/{id}/todos": ["get"],
   "/api/environments": ["get", "post"],
