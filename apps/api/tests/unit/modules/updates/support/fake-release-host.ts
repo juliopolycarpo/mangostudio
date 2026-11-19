@@ -18,6 +18,8 @@ export class FakeReleaseHost {
   readonly calls: string[] = [];
   /** The `AbortSignal` each call carried — undefined when no deadline was armed. */
   readonly signals: (AbortSignal | undefined)[] = [];
+  /** The request headers each call carried, parallel to `calls`, names lower-cased. */
+  readonly requestHeaders: Record<string, string>[] = [];
   private readonly routes: Map<string, FakeReleaseHostRoute>;
 
   constructor(routes: Readonly<Record<string, FakeReleaseHostRoute>>) {
@@ -29,6 +31,7 @@ export class FakeReleaseHost {
     const url = String(input);
     this.calls.push(url);
     this.signals.push(init?.signal ?? undefined);
+    this.requestHeaders.push(Object.fromEntries(new Headers(init?.headers).entries()));
     const route = this.routes.get(url);
     if (!route) {
       throw new Error(`FakeReleaseHost has no route for ${url}`);
@@ -39,6 +42,11 @@ export class FakeReleaseHost {
     if (route.redirectTo) headers.set('location', route.redirectTo);
     return Promise.resolve(new Response(route.body ?? '', { status, headers }));
   }) as typeof fetch;
+
+  /** The `authorization` value of each call, in order; undefined where none was sent. */
+  authorizations(): (string | undefined)[] {
+    return this.requestHeaders.map((headers) => headers.authorization);
+  }
 
   /** Every hostname resolves to one fixed public address — no test here checks the address policy itself. */
   readonly resolveHostname = (_hostname: string): Promise<{ address: string; family: 4 | 6 }[]> =>

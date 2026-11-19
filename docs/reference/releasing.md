@@ -439,8 +439,14 @@ Two consequences worth knowing:
   send it as `Authorization: Bearer <token>` on that call and nothing else:
   release asset downloads from `github.com` never carry it. `install.sh` hands the
   header to curl through a config on stdin, so it never shows up in `ps`. An
-  empty value counts as unset. The hub's `mangostudio upgrade` does not forward
-  either variable to the embedded script.
+  empty value counts as unset. The hub reads the same variables for its own
+  `api.github.com` calls (the stable update check, and the canary release list
+  behind the update check and `mangostudio upgrade --canary`) and scopes the
+  header to that host: it is dropped on a redirect elsewhere and never sent to
+  `github.com` downloads. `mangostudio upgrade` hands the embedded script a
+  downloaded archive, so the script makes no API call and does not receive
+  either variable. A hub started with `serve -d` only sees them when they
+  survive its detached environment, which they do not today.
 - **Old canary releases are pruned**, tag included, to a keep-window
   (`scripts/release/prune-canary-releases.ts`, 14 by default, roughly fourteen
   days when main advances daily, and ~15 GB of release storage at ~1.1 GB per

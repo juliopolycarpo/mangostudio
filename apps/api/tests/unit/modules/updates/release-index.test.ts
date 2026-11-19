@@ -3,6 +3,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   fetchCanaryManifestForTag,
   fetchReleaseChecksums,
+  githubApiCredentials,
   resolveLatestCanaryVersion,
   resolveStableLatestVersion,
 } from '../../../../src/modules/updates/infrastructure/release-index';
@@ -149,6 +150,78 @@ describe('resolveLatestCanaryVersion', () => {
     await expect(
       resolveLatestCanaryVersion({ fetch: host.fetch, resolveHostname: host.resolveHostname })
     ).rejects.toThrow('No canary pre-release');
+  });
+
+  describe('with a GitHub token', () => {
+    const DUMMY_TOKEN = 'dummy-token-not-a-secret';
+    const releasesUrl =
+      'https://api.github.com/repos/juliopolycarpo/mangostudio/releases?per_page=30';
+    const body = JSON.stringify([{ tag_name: 'v1.4.1-canary.abc1234', prerelease: true }]);
+
+    it('sends it as a bearer credential to api.github.com', async () => {
+      const host = new FakeReleaseHost({ [releasesUrl]: { body } });
+
+      await resolveLatestCanaryVersion(
+        { fetch: host.fetch, resolveHostname: host.resolveHostname },
+        DUMMY_TOKEN
+      );
+
+      expect(host.authorizations()).toEqual([`Bearer ${DUMMY_TOKEN}`]);
+    });
+
+    it('stays anonymous without one', async () => {
+      const host = new FakeReleaseHost({ [releasesUrl]: { body } });
+
+      await resolveLatestCanaryVersion({
+        fetch: host.fetch,
+        resolveHostname: host.resolveHostname,
+      });
+
+      expect(host.authorizations()).toEqual([undefined]);
+    });
+
+    it('drops it on a redirect to another host', async () => {
+      const cdnUrl = 'https://objects.githubusercontent.com/releases/list.json';
+      const host = new FakeReleaseHost({
+        [releasesUrl]: { redirectTo: cdnUrl },
+        [cdnUrl]: { body },
+      });
+
+      await resolveLatestCanaryVersion(
+        { fetch: host.fetch, resolveHostname: host.resolveHostname },
+        DUMMY_TOKEN
+      );
+
+      expect(host.calls).toEqual([releasesUrl, cdnUrl]);
+      expect(host.authorizations()).toEqual([`Bearer ${DUMMY_TOKEN}`, undefined]);
+    });
+
+    it('never puts the token in an error message', async () => {
+      const host = new FakeReleaseHost({ [releasesUrl]: { status: 403, body: 'rate limited' } });
+
+      const failure = await resolveLatestCanaryVersion(
+        { fetch: host.fetch, resolveHostname: host.resolveHostname },
+        DUMMY_TOKEN
+      ).catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as Error).message).not.toContain(DUMMY_TOKEN);
+    });
+  });
+});
+
+describe('githubApiCredentials', () => {
+  it('scopes the bearer header to api.github.com', () => {
+    expect(githubApiCredentials('dummy-token-not-a-secret')).toEqual({
+      credentialsForHost: {
+        host: 'api.github.com',
+        headers: { Authorization: 'Bearer dummy-token-not-a-secret' },
+      },
+    });
+  });
+
+  it('is empty without a token', () => {
+    expect(githubApiCredentials(undefined)).toEqual({});
   });
 });
 

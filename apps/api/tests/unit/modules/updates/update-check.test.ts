@@ -40,13 +40,16 @@ class FakeUpdateCheckStore {
 /** Named fake fetch keyed by exact URL, so a call to an unmapped URL fails loudly. */
 class FakeFetch {
   readonly calls: string[] = [];
+  /** The `Authorization` header of each call, parallel to `calls`; null where none was sent. */
+  readonly authorizations: (string | null)[] = [];
 
   constructor(private readonly responses: Record<string, () => Response>) {}
 
-  readonly fetch = ((input: Parameters<typeof fetch>[0]) => {
+  readonly fetch = ((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The existing conversion accepts URL or arbitrary input and preserves its diagnostic representation.
     const url = String(input);
     this.calls.push(url);
+    this.authorizations.push(new Headers(init?.headers).get('authorization'));
     const make = this.responses[url];
     if (!make) return Promise.reject(new Error(`Unexpected fetch: ${url}`));
     return Promise.resolve(make());
@@ -309,6 +312,52 @@ describe('createUpdateChecker', () => {
       });
       expect(store.read()).toEqual(result);
       expect(fake.calls).toHaveLength(1);
+    });
+
+    it('authenticates the stable lookup with GITHUB_TOKEN', async () => {
+      const fake = new FakeFetch({
+        'https://api.github.com/repos/juliopolycarpo/mangostudio/releases/latest': () =>
+          STABLE_TAG_RESPONSE('v0.2.0'),
+      });
+      const { deps } = harness({
+        fetch: fake.fetch,
+        env: { GITHUB_TOKEN: 'dummy-token-not-a-secret' },
+      });
+
+      await createUpdateChecker(deps).check();
+
+      expect(fake.authorizations).toEqual(['Bearer dummy-token-not-a-secret']);
+    });
+
+    it('authenticates the canary release list but not the github.com manifest', async () => {
+      const fake = new FakeFetch({
+        [RELEASES_URL]: () => CANARY_LIST_RESPONSE('v0.1.1-canary.cafebee'),
+        [MANIFEST_URL('v0.1.1-canary.cafebee')]: () =>
+          CANARY_MANIFEST_RESPONSE({ version: '0.1.1-canary.cafebee', sourceSha: 'cafebabe00' }),
+      });
+      const { deps } = harness({
+        fetch: fake.fetch,
+        env: { GH_TOKEN: 'dummy-token-not-a-secret' },
+        getCurrentVersion: () => '0.1.1-canary.deadbee',
+        getConfig: () => configWith(true, 'canary'),
+      });
+
+      await createUpdateChecker(deps).check();
+
+      expect(fake.calls).toEqual([RELEASES_URL, MANIFEST_URL('v0.1.1-canary.cafebee')]);
+      expect(fake.authorizations).toEqual(['Bearer dummy-token-not-a-secret', null]);
+    });
+
+    it('stays anonymous when no token is set', async () => {
+      const fake = new FakeFetch({
+        'https://api.github.com/repos/juliopolycarpo/mangostudio/releases/latest': () =>
+          STABLE_TAG_RESPONSE('v0.2.0'),
+      });
+      const { deps } = harness({ fetch: fake.fetch, env: { GITHUB_TOKEN: '' } });
+
+      await createUpdateChecker(deps).check();
+
+      expect(fake.authorizations).toEqual([null]);
     });
 
     it('reports no update when the stable tag matches the current version', async () => {

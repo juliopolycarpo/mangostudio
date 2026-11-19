@@ -162,6 +162,57 @@ describe('upgrade-service self-managed', () => {
     expect(capturedContext?.buildSha).toBeUndefined();
   });
 
+  it('hands the target resolver the GitHub token the hub was started with', async () => {
+    let capturedContext: { readonly githubToken?: string } | undefined;
+    const service = createUpgradeService(
+      baseDeps({
+        env: { GITHUB_TOKEN: 'dummy-token-not-a-secret' },
+        resolveUpgradeTarget: (_request, context) => {
+          capturedContext = context;
+          return Promise.resolve(newerTarget());
+        },
+      })
+    );
+
+    await collect(service);
+
+    expect(capturedContext?.githubToken).toBe('dummy-token-not-a-secret');
+  });
+
+  it('resolves anonymously when no token is set', async () => {
+    let capturedContext: { readonly githubToken?: string } | undefined;
+    const service = createUpgradeService(
+      baseDeps({
+        env: { GITHUB_TOKEN: '' },
+        resolveUpgradeTarget: (_request, context) => {
+          capturedContext = context;
+          return Promise.resolve(newerTarget());
+        },
+      })
+    );
+
+    await collect(service);
+
+    expect(capturedContext?.githubToken).toBeUndefined();
+  });
+
+  it('does not hand the token to the install script', async () => {
+    const script = fakeRunScript(0);
+    const service = createUpgradeService(
+      baseDeps({
+        env: { PATH: '/usr/bin', GITHUB_TOKEN: 'dummy-token-not-a-secret' },
+        runScript: script.runScript,
+      })
+    );
+
+    await collect(service);
+
+    expect(script.calls.length).toBeGreaterThan(0);
+    for (const call of script.calls) {
+      expect(Object.keys(call.env)).not.toContain('GITHUB_TOKEN');
+    }
+  });
+
   it('upgrades, restarts a detached hub, and reports every stage in order', async () => {
     const script = fakeRunScript(0, [{ stream: 'stdout', line: 'Installed MangoStudio 0.1.2' }]);
     const restartCalls: { state: ServerState; launch: string }[] = [];
