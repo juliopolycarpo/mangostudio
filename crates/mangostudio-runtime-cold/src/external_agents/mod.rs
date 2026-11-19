@@ -9,7 +9,8 @@
 //!
 //! - [`port`] defines the small owned backend, session and stream operations.
 //! - The private `adapter/` owns all SDK imports, harness construction, mapping and launcher glue.
-//! - [`isolation`] proves whose vendor credentials this process would use.
+//! - [`isolation`] proves whose vendor credentials this process would use;
+//!   `host_secret` keys the digests it publishes.
 //! - [`interactions`] routes product-visible approvals and questions separately.
 //! - [`wire`] reuses the product contracts, without introducing another serialized shape.
 //! - [`supervisor`] owns admission and sessions; [`turns`] owns receipts and the hub relay.
@@ -17,6 +18,7 @@
 
 mod adapter;
 pub(crate) mod failure;
+pub(crate) mod host_secret;
 pub(crate) mod hub_authority;
 pub(crate) mod interactions;
 pub mod isolation;
