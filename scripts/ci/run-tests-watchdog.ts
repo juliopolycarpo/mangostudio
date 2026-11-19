@@ -32,13 +32,16 @@
 // Findings reported before a hang still fail the invocation after a clean
 // retry, independently of the crash-retry option below.
 //
+// Whatever the cause, a retry never overwrites attempt 1's log: it is renamed
+// to `<logFile>.attempt-1` first. Attempt 1 may hold the only record of
+// findings reported before the hang or crash cut it off, and the retry's
+// `createWriteStream('w')` would otherwise erase it.
+//
 // `retryOnCrash` (opt-in, unset for every merge-gate caller) extends the same
 // bound to a second failure class: the isolate runner aborting outright
 // (`panic(main thread): abort()`, the #889 class of oven-sh/bun#39709) rather
 // than hanging. A crash truncates whatever file list was left, so it gets the
-// same one same-seed retry as a hang — and, since the point is not losing a
-// night's findings, the attempt log a crash would otherwise clobber is kept
-// alongside the retry's instead of overwritten.
+// same one same-seed retry as a hang.
 //
 // Usage: bun ./scripts/ci/run-tests-watchdog.ts --label=3 -- bun run test --coverage --shard=3/3
 
@@ -101,13 +104,6 @@ export interface WatchdogOptions {
    * fail-once-and-surface contract.
    */
   readonly retryOnCrash?: boolean;
-  /**
-   * Before a retry, rename the first attempt's log to `<logFile>.attempt-1`
-   * instead of letting the retry's `createWriteStream('w')` overwrite it. The
-   * nightly's whole reason to run under this watchdog is that attempt 1 may
-   * hold the night's only ordering finding when a crash cuts it off.
-   */
-  readonly preserveAttemptLogs?: boolean;
   /** Process-group signalling; defaults to `process.kill`. Injected by tests. */
   readonly processGroups?: ProcessGroupPort;
 }
@@ -571,9 +567,7 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
   };
 
   const retry = async (): Promise<AttemptResult> => {
-    if (options.preserveAttemptLogs) {
-      logPreserved = await preserveAttemptLog(options.logFile, mirror);
-    }
+    logPreserved = await preserveAttemptLog(options.logFile, mirror);
     await restoreTimings(timingsDir, backup);
     attempts = 2;
     return runAttempt(options);
@@ -672,9 +666,7 @@ export const runTestsWithWatchdog = async (options: WatchdogOptions): Promise<Wa
     // Separate from `crashed`: a hung attempt that retries clean also leaves
     // an `.attempt-1` log on disk, and the caller needs to know to upload it
     // even though `crashedAny` never went true for a plain hang.
-    if (options.preserveAttemptLogs) {
-      await appendFile(githubOutput, `log-preserved=${logPreserved}\n`);
-    }
+    await appendFile(githubOutput, `log-preserved=${logPreserved}\n`);
   }
 
   return { exitCode, attempts, durationSeconds };
@@ -724,9 +716,6 @@ if (import.meta.main) {
     metaFile,
     cwd: process.cwd(),
     retryOnCrash,
-    // The CLI has one on/off switch; the two options are only independent at
-    // the function-level API tests exercise directly.
-    preserveAttemptLogs: retryOnCrash,
   });
   process.exit(result.exitCode);
 }
