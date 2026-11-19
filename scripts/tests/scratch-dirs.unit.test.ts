@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
+import { testTempEnv } from '../lib/test-home';
 import { createScratchDirs, useScratchDirs } from './support/scratch-dirs';
 
 describe('createScratchDirs', () => {
@@ -103,13 +104,15 @@ describe('a scope whose tests are all filtered out', () => {
       // Bun exits 1 when the pattern selects nothing; only what is left matters.
       Bun.spawnSync([process.execPath, 'test', '--test-name-pattern', 'matches nothing', fixture], {
         cwd: root,
-        env: { ...process.env, TMPDIR: scoped },
+        // TMPDIR alone is not enough: Windows' os.tmpdir() reads TEMP and TMP, which the
+        // worker's own guarded temp directory sets, so the fixture's leak would land there.
+        env: { ...process.env, ...testTempEnv(scoped) },
         stdout: 'pipe',
         stderr: 'pipe',
       });
       return readdirSync(scoped);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   }
 
