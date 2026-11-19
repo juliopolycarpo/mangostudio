@@ -17,7 +17,7 @@ import {
   currentHubExecutable,
   currentHubExecutableProbe,
   currentLauncherPath,
-  retargetStaleHubService,
+  restartHubService,
 } from '../../modules/machine/application/hub-service';
 import type { HubExecutable } from '../../modules/machine/domain/hub-executable';
 import { hubLaunchMode, hubUrl } from '../../modules/machine/domain/hub-process';
@@ -81,8 +81,7 @@ export async function runRestart(deps: Partial<RestartDeps> = {}): Promise<void>
 
   const mode = hubLaunchMode(state);
   if (mode === 'service') {
-    await retargetUnit(d);
-    await d.manager.restart();
+    await bringUpUnit(d, { start: false });
     d.log(`Restart requested through ${state.service}.`);
     const next = await waitForComeback(state.pid, d);
     d.log(`MangoStudio restarted (PID ${next.pid}, ${hubUrl(next.host, next.port)}).`);
@@ -104,8 +103,7 @@ async function startInstalledService(d: Required<RestartDeps>): Promise<void> {
       'No running instance to restart. Start one with "mangostudio serve -d", or install the service with "mangostudio service install".'
     );
   }
-  await retargetUnit(d);
-  await d.manager.start();
+  await bringUpUnit(d, { start: true });
   const next = await waitForComeback(null, d);
   d.log(
     `MangoStudio started through ${status.unitName} (PID ${next.pid}, ${hubUrl(next.host, next.port)}).`
@@ -114,13 +112,14 @@ async function startInstalledService(d: Required<RestartDeps>): Promise<void> {
 
 /**
  * A unit installed before it named the manager's launcher records a versioned
- * path that an upgrade replaced; bring it onto the launcher before the unit is
- * started or bounced, or the restart runs the old build (or none at all).
+ * path that an upgrade replaced; the supervisor moves it onto the launcher as
+ * part of the start or bounce, or the restart runs the old build (or none at
+ * all).
  */
-async function retargetUnit(d: Required<RestartDeps>): Promise<void> {
-  const moved = await retargetStaleHubService(d.manager, d.launcherPath(), {
-    platform: d.platform,
-    pathExists: d.pathExists,
+async function bringUpUnit(d: Required<RestartDeps>, options: { start: boolean }): Promise<void> {
+  const moved = await restartHubService(d.manager, d.launcherPath(), {
+    ...options,
+    probe: { platform: d.platform, pathExists: d.pathExists },
   });
   if (moved) d.log(`Updated the service unit to run ${moved.to} (it named ${moved.from}).`);
 }

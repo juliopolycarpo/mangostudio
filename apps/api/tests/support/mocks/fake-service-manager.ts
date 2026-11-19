@@ -59,12 +59,15 @@ export class FakeServiceManager implements UserServiceManager {
 
   /** Programs the unit was pointed at, in call order. */
   readonly retargeted: string[] = [];
-  /** What `retarget` answers: whether it changed the unit. */
+  /** What `restartRetargeted` answers: whether it repointed the unit. */
   retargetChanges = true;
+  /** Fails only `restartRetargeted`, the way a supervisor refuses a rewrite but not a plain restart. */
+  restartRetargetedFailWith: Error | null = null;
 
-  retarget(program: string): Promise<boolean> {
-    this.calls.push('retarget');
+  restartRetargeted(program: string): Promise<boolean> {
+    this.calls.push('restartRetargeted');
     this.retargeted.push(program);
+    if (this.restartRetargetedFailWith) return Promise.reject(this.restartRetargetedFailWith);
     if (this.failWith) return Promise.reject(this.failWith);
     return Promise.resolve(this.retargetChanges);
   }

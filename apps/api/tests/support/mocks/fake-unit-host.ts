@@ -22,6 +22,11 @@ export class FakeUnitHost {
   readonly commands: string[] = [];
   readonly retargetScripts: string[] = [];
   taskArguments: string | null = null;
+  /** Backoffs the manager asked for; none is waited. */
+  readonly sleeps: number[] = [];
+  /** Whether launchd has the job in its domain; bootout drops it, bootstrap loads it. */
+  jobLoaded = false;
+  private readonly launchctlFailures = new Map<string, UserServiceExecResult[]>();
 
   constructor(readonly platform: 'linux' | 'darwin' | 'win32') {}
 
@@ -54,6 +59,10 @@ export class FakeUnitHost {
       mkdir: () => Promise.resolve(),
       pathExists: () => Promise.resolve(true),
       warn: () => undefined,
+      sleep: (ms) => {
+        this.sleeps.push(ms);
+        return Promise.resolve();
+      },
     };
   }
 
@@ -62,12 +71,23 @@ export class FakeUnitHost {
     return [...this.files.values()][0] ?? null;
   }
 
+  /**
+   * Make the next `times` `launchctl <verb>` calls answer `result` instead of
+   * succeeding, the way launchd answers error 5 to a bootstrap that races the
+   * bootout before it. Every later call succeeds again.
+   */
+  failLaunchctl(verb: string, result: UserServiceExecResult, times = 1): void {
+    const queue = this.launchctlFailures.get(verb) ?? [];
+    for (let i = 0; i < times; i += 1) queue.push(result);
+    this.launchctlFailures.set(verb, queue);
+  }
+
   private run(argv: readonly string[]): UserServiceExecResult {
     const ok = (stdout = ''): UserServiceExecResult => ({ exitCode: 0, stdout, stderr: '' });
     const script = decodePowerShellArgv(argv);
     if (script === null) {
       this.commands.push(argv.join(' '));
-      return ok();
+      return argv[0] === 'launchctl' ? this.runLaunchctl(argv[1] ?? '') : ok();
     }
     this.commands.push(script);
     if (script.includes('Register-ScheduledTask')) {
@@ -97,5 +117,17 @@ export class FakeUnitHost {
       );
     }
     return ok();
+  }
+
+  /** launchd's domain, reduced to whether the job is loaded: `kickstart` needs it, `bootstrap` loads it. */
+  private runLaunchctl(verb: string): UserServiceExecResult {
+    const failure = this.launchctlFailures.get(verb)?.shift();
+    if (failure) return failure;
+    if (verb === 'bootout') this.jobLoaded = false;
+    if (verb === 'bootstrap') this.jobLoaded = true;
+    if (verb === 'kickstart' && !this.jobLoaded) {
+      return { exitCode: 113, stdout: '', stderr: 'Could not find service in domain' };
+    }
+    return { exitCode: 0, stdout: '', stderr: '' };
   }
 }

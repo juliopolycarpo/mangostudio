@@ -50,6 +50,8 @@ export interface UserServiceExecDeps {
   readonly pathExists: (path: string) => Promise<boolean>;
   /** Where non-fatal advice goes; defaults to stderr prefixed with the CLI name. */
   readonly warn?: (message: string) => void;
+  /** Waits between `launchctl bootstrap` retries; defaults to a timer. */
+  readonly sleep?: (ms: number) => Promise<void>;
 }
 
 /** What a unit is called under each supervisor, and who to blame in messages. */
@@ -89,13 +91,21 @@ export interface UserServiceManager {
    */
   restart(): Promise<void>;
   /**
-   * Point an installed unit at another program, keeping its arguments,
-   * environment, working directory and log file as they are. Returns whether
-   * the unit changed; false when nothing is installed or it already runs
-   * `program`. Does not bounce a running instance: the caller's `restart()` or
-   * `start()` is what brings the new program up.
+   * Restart the unit onto `program`: point an installed unit at it, keeping its
+   * arguments, environment, working directory and log file as they are, and
+   * bring it up from that definition. Returns whether the unit was repointed;
+   * false when nothing is installed or it already runs `program`, in which
+   * case this is a plain `restart()`.
+   *
+   * One operation rather than a retarget followed by `restart()` because on
+   * launchd the loaded job only rereads its plist across a bootout and a
+   * bootstrap, and a bootstrap that is allowed to fail there leaves the job
+   * unloaded. A failure leaves the rewritten definition on disk; `restart()`
+   * or `start()` still brings the unit up from it. Like `restart()`, a caller
+   * that is the service itself is stopped partway on launchd, so it must run
+   * this from a process outside the unit.
    */
-  retarget(program: string): Promise<boolean>;
+  restartRetargeted(program: string): Promise<boolean>;
   /** The installed unit body, or null when nothing is installed. */
   readUnit(): Promise<string | null>;
   /** Where the unit file lives on this platform; null for Windows. */
@@ -226,6 +236,9 @@ ${optional.map((entry) => `${entry}\n`).join('')}  <key>RunAtLoad</key>
  * argument per character of script.
  */
 const SCHEDULED_TASK_ARGUMENT_MAX = 8_192;
+
+/** Waits between `launchctl bootstrap` attempts: five tries over about four seconds. */
+const LAUNCHD_BOOTSTRAP_RETRY_DELAYS_MS: readonly number[] = [250, 500, 1_000, 2_000];
 
 /** The encoded runner script inside a task's action arguments. */
 const TASK_ENCODED_COMMAND = /-EncodedCommand\s+(\S+)/;
@@ -742,6 +755,14 @@ export function createUserServiceManager(
     return updated === body ? null : updated;
   };
 
+  const restartSystemd = (): Promise<void> =>
+    requireSystemd().then(() =>
+      requireCommand(
+        ['systemctl', '--user', '--no-block', 'restart', identity.unitName],
+        'systemctl restart'
+      )
+    );
+
   const linux = {
     async install(definition: UserServiceDefinition) {
       await requireSystemd();
@@ -812,22 +833,18 @@ export function createUserServiceManager(
       requireSystemd().then(() =>
         requireCommand(['systemctl', '--user', 'stop', identity.unitName], 'systemctl stop')
       ),
-    restart: () =>
-      requireSystemd().then(() =>
-        requireCommand(
-          ['systemctl', '--user', '--no-block', 'restart', identity.unitName],
-          'systemctl restart'
-        )
-      ),
-    async retarget(program: string) {
+    restart: restartSystemd,
+    async restartRetargeted(program: string) {
       await requireSystemd();
       const updated = await retargetedUnitBody(program);
-      if (updated === null) return false;
-      await deps.writeFile(unitPath as string, updated);
-      // The running process keeps the old program until the caller's restart;
-      // systemd must reread the file first or that restart reuses the old one.
-      await requireCommand(['systemctl', '--user', 'daemon-reload'], 'systemctl daemon-reload');
-      return true;
+      if (updated !== null) {
+        await deps.writeFile(unitPath as string, updated);
+        // The running process keeps the old program until the restart; systemd
+        // must reread the file first or that restart reuses the old one.
+        await requireCommand(['systemctl', '--user', 'daemon-reload'], 'systemctl daemon-reload');
+      }
+      await restartSystemd();
+      return updated !== null;
     },
   };
 
@@ -844,6 +861,30 @@ export function createUserServiceManager(
       'launchctl kickstart'
     );
   };
+  /**
+   * Load the plist, which must not fail: a job that is not in the domain after
+   * this is not running and will not come back. Right after a `bootout` the
+   * bootstrap often answers error 5 (EIO) while the old job is still exiting,
+   * so that one answer is retried with a growing, bounded wait.
+   */
+  const darwinBootstrapRequired = async (): Promise<void> => {
+    const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
+    for (let attempt = 0; ; attempt += 1) {
+      const result = await run(['launchctl', 'bootstrap', `gui/${deps.uid}`, unitPath as string]);
+      if (result.exitCode === 0) return;
+      const delay = LAUNCHD_BOOTSTRAP_RETRY_DELAYS_MS[attempt];
+      const stillExiting =
+        result.exitCode === 5 || /input\/output error/i.test(`${result.stderr}${result.stdout}`);
+      if (!stillExiting || delay === undefined) throw commandFailure('launchctl bootstrap', result);
+      await sleep(delay);
+    }
+  };
+  /** Replace the loaded job with the plist on disk and start it. */
+  const darwinReload = async (): Promise<void> => {
+    await run(['launchctl', 'bootout', darwinTarget]);
+    await darwinBootstrapRequired();
+    await requireCommand(['launchctl', 'kickstart', '-k', darwinTarget], 'launchctl kickstart');
+  };
   const darwin = {
     async install(definition: UserServiceDefinition) {
       await deps.mkdir(posix.join(deps.home, 'Library', 'LaunchAgents'));
@@ -851,12 +892,7 @@ export function createUserServiceManager(
         unitPath as string,
         renderLaunchdPlistFile(identity.launchdLabel, definition)
       );
-      await run(['launchctl', 'bootout', darwinTarget]);
-      await requireCommand(
-        ['launchctl', 'bootstrap', `gui/${deps.uid}`, unitPath as string],
-        'launchctl bootstrap'
-      );
-      await requireCommand(['launchctl', 'kickstart', '-k', darwinTarget], 'launchctl kickstart');
+      await darwinReload();
     },
     async uninstall() {
       await deps.unlink(unitPath as string).catch(() => undefined);
@@ -906,13 +942,16 @@ export function createUserServiceManager(
     // of the domain — and every other backend restarts a stopped unit into a
     // running one.
     restart: () => darwinBounce(true),
-    async retarget(program: string) {
+    async restartRetargeted(program: string) {
       const updated = await retargetedUnitBody(program);
-      if (updated === null) return false;
+      if (updated === null) {
+        await darwinBounce(true);
+        return false;
+      }
       await deps.writeFile(unitPath as string, updated);
-      // launchd keeps the plist it loaded, so the job leaves the domain here and
-      // the caller's `start()` or `restart()` bootstraps the rewritten file.
-      await run(['launchctl', 'bootout', darwinTarget]);
+      // launchd keeps the plist it loaded: only a bootout and a bootstrap make
+      // the job read the rewritten file, so both belong to this one operation.
+      await darwinReload();
       return true;
     },
   };
@@ -962,31 +1001,35 @@ export function createUserServiceManager(
       ),
     stop: () =>
       runPowerShell(renderScheduledTaskVerbScript('stop', identity.taskName), 'Stop-ScheduledTask'),
-    restart: () =>
-      runPowerShell(
-        renderScheduledTaskRestartScript(identity.taskName),
-        'Stop-ScheduledTask/Start-ScheduledTask'
-      ),
-    async retarget(program: string) {
-      const read = await run(powershellArgv(renderScheduledTaskStatusScript(identity.taskName)));
-      if (read.exitCode !== 0) {
-        const detail = read.stderr.trim() || read.stdout.trim();
-        throw new RuntimeServiceManagementError(
-          'runtime_service_unsupported',
-          `Get-ScheduledTask failed (exit ${read.exitCode})${detail ? `: ${detail}` : ''}`
-        );
-      }
-      const task = parseScheduledTaskJson(read.stdout);
-      if (!task?.installed || !task.arguments) return false;
-      const updated = retargetScheduledTaskArguments(identity.taskName, task.arguments, program);
-      if (updated === null) return false;
-      await runPowerShell(
-        renderScheduledTaskSetArgumentsScript(identity.taskName, updated),
-        'Set-ScheduledTask'
-      );
-      return true;
+    restart: restartTask,
+    async restartRetargeted(program: string) {
+      const retargeted = await retargetTask(program);
+      await restartTask();
+      return retargeted;
     },
   };
+
+  /** Store the task's new action arguments; false when nothing was installed or it already runs `program`. */
+  async function retargetTask(program: string): Promise<boolean> {
+    const read = await run(powershellArgv(renderScheduledTaskStatusScript(identity.taskName)));
+    if (read.exitCode !== 0) throw commandFailure('Get-ScheduledTask', read);
+    const task = parseScheduledTaskJson(read.stdout);
+    if (!task?.installed || !task.arguments) return false;
+    const updated = retargetScheduledTaskArguments(identity.taskName, task.arguments, program);
+    if (updated === null) return false;
+    await runPowerShell(
+      renderScheduledTaskSetArgumentsScript(identity.taskName, updated),
+      'Set-ScheduledTask'
+    );
+    return true;
+  }
+
+  function restartTask(): Promise<void> {
+    return runPowerShell(
+      renderScheduledTaskRestartScript(identity.taskName),
+      'Stop-ScheduledTask/Start-ScheduledTask'
+    );
+  }
 
   const backend = () => {
     if (deps.platform === 'linux') return linux;
@@ -1006,14 +1049,17 @@ export function createUserServiceManager(
     return await deps.exec(argv, { env });
   }
 
-  async function requireCommand(argv: readonly string[], label: string): Promise<void> {
-    const result = await run(argv);
-    if (result.exitCode === 0) return;
+  function commandFailure(label: string, result: UserServiceExecResult): Error {
     const detail = result.stderr.trim() || result.stdout.trim();
-    throw new RuntimeServiceManagementError(
+    return new RuntimeServiceManagementError(
       'runtime_service_unsupported',
       `${label} failed (exit ${result.exitCode})${detail ? `: ${detail}` : ''}`
     );
+  }
+
+  async function requireCommand(argv: readonly string[], label: string): Promise<void> {
+    const result = await run(argv);
+    if (result.exitCode !== 0) throw commandFailure(label, result);
   }
 
   return {
@@ -1031,7 +1077,7 @@ export function createUserServiceManager(
     start: async () => await require().start(),
     stop: async () => await require().stop(),
     restart: async () => await require().restart(),
-    retarget: async (program) => await require().retarget(program),
+    restartRetargeted: async (program) => await require().restartRetargeted(program),
   };
 }
 

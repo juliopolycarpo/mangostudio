@@ -13,10 +13,9 @@ import { runService, type ServiceDeps } from '../../../../src/cli/commands/servi
 import type { ServerState } from '../../../../src/lib/server-state';
 import {
   buildHubServiceDefinition,
-  retargetStaleHubService,
+  restartHubService,
 } from '../../../../src/modules/machine/application/hub-service';
 import { HUB_SERVICE_IDENTITY } from '../../../../src/modules/machine/domain/hub-service-identity';
-import { restartServiceUnit } from '../../../../src/modules/updates/application/upgrade-service';
 import { restartLauncher } from '../../../../src/modules/updates/domain/install-origin';
 import { FakeProcessController } from '../../../../tests/support/mocks/fake-process-controller';
 import { FakeUnitHost } from '../../../support/mocks/fake-unit-host';
@@ -161,9 +160,8 @@ describe('a unit written before the launcher was recorded', () => {
       expect(await unitProgram(manager)).toBe(layout.versioned);
       host.commands.length = 0;
 
-      await restartServiceUnit(manager, layout.launcher, {
-        platform: layout.platform,
-        pathExists: () => true,
+      await restartHubService(manager, layout.launcher, {
+        probe: { platform: layout.platform, pathExists: () => true },
       });
 
       if (layout.platform === 'win32') {
@@ -192,9 +190,8 @@ describe('a unit written before the launcher was recorded', () => {
       await installStaleUnit(layout, manager);
       const before = host.unitBody() ?? '';
 
-      await retargetStaleHubService(manager, layout.launcher, {
-        platform: layout.platform,
-        pathExists: () => true,
+      await restartHubService(manager, layout.launcher, {
+        probe: { platform: layout.platform, pathExists: () => true },
       });
 
       expect(host.unitBody()).toBe(before.replace(layout.versioned, layout.launcher));
@@ -218,13 +215,14 @@ describe('a unit written before the launcher was recorded', () => {
       })
     );
 
-    const moved = await retargetStaleHubService(manager, layout.launcher, {
-      platform: 'linux',
-      pathExists: () => true,
+    const moved = await restartHubService(manager, layout.launcher, {
+      probe: { platform: 'linux', pathExists: () => true },
     });
 
     expect(moved).toBeNull();
     expect(await unitProgram(manager)).toBe('/srv/custom/mangostudio');
+    // Still bounced, as it was installed.
+    expect(host.commands.some((command) => /restart/.test(command))).toBe(true);
   });
 
   it('leaves a unit that already runs the launcher alone', async () => {
@@ -236,9 +234,8 @@ describe('a unit written before the launcher was recorded', () => {
     const before = host.unitBody();
     host.commands.length = 0;
 
-    const moved = await retargetStaleHubService(manager, layout.launcher, {
-      platform: 'linux',
-      pathExists: () => true,
+    const moved = await restartHubService(manager, layout.launcher, {
+      probe: { platform: 'linux', pathExists: () => true },
     });
 
     expect(moved).toBeNull();
@@ -255,12 +252,65 @@ describe('a unit written before the launcher was recorded', () => {
     await installStaleUnit(layout, manager);
 
     // Only the launcher exists on disk; the Cellar entry the unit names is gone.
-    const moved = await retargetStaleHubService(manager, layout.launcher, {
-      platform: 'linux',
-      pathExists: (path) => path === layout.launcher,
+    const moved = await restartHubService(manager, layout.launcher, {
+      probe: { platform: 'linux', pathExists: (path) => path === layout.launcher },
     });
 
     expect(moved).toEqual({ from: layout.versioned, to: layout.launcher });
+  });
+
+  describe('on launchd, where the job only rereads its plist across a bootout and a bootstrap', () => {
+    const DARWIN = LAYOUTS.find((entry) => entry.platform === 'darwin');
+    const EIO = { exitCode: 5, stdout: '', stderr: 'Bootstrap failed: 5: Input/output error' };
+
+    async function staleDarwinUnit(): Promise<{
+      host: FakeUnitHost;
+      manager: UserServiceManager;
+      layout: ManagedLayout;
+    }> {
+      if (!DARWIN) throw new Error('no darwin layout');
+      const host = new FakeUnitHost('darwin');
+      const manager = createUserServiceManager(HUB_SERVICE_IDENTITY, host.deps());
+      await installStaleUnit(DARWIN, manager);
+      host.commands.length = 0;
+      return { host, manager, layout: DARWIN };
+    }
+
+    it('retries the bootstrap that races the old job still exiting, then kicks the job', async () => {
+      const { host, manager, layout } = await staleDarwinUnit();
+      host.failLaunchctl('bootstrap', EIO, 2);
+
+      await restartHubService(manager, layout.launcher, {
+        probe: { platform: 'darwin', pathExists: () => true },
+      });
+
+      expect(host.commands.map((command) => command.split(' ')[1])).toEqual([
+        'print', // the status read that finds the stale unit
+        'bootout',
+        'bootstrap',
+        'bootstrap',
+        'bootstrap',
+        'kickstart',
+      ]);
+      expect(host.sleeps).toHaveLength(2);
+      expect(host.jobLoaded).toBe(true);
+      expect(execPathFromUnitBody(host.unitBody() ?? '')).toBe(layout.launcher);
+    });
+
+    it('surfaces a bootstrap that never succeeds instead of reporting a restart of an unloaded job', async () => {
+      const { host, manager, layout } = await staleDarwinUnit();
+      host.failLaunchctl('bootstrap', EIO, 50);
+
+      await expect(
+        restartHubService(manager, layout.launcher, {
+          probe: { platform: 'darwin', pathExists: () => true },
+        })
+      ).rejects.toMatchObject({
+        message: 'launchctl bootstrap failed (exit 5): Bootstrap failed: 5: Input/output error',
+      });
+
+      expect(host.commands.some((command) => command.includes('kickstart'))).toBe(false);
+    });
   });
 });
 

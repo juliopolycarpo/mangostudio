@@ -245,24 +245,24 @@ export interface StaleUnitProbe {
   readonly pathExists: (path: string) => boolean;
 }
 
-/** What {@link retargetStaleHubService} changed. */
+/** A unit's recorded program and the launcher it should run instead. */
 export interface RetargetedUnit {
   readonly from: string;
   readonly to: string;
 }
 
 /**
- * Move a unit written before it named the manager's launcher onto it. Such a
- * unit records the versioned path the install had when `service install` ran
- * (Homebrew's Cellar entry, pnpm's `.pnpm` directory, Scoop's version
- * directory), so a restart after an upgrade starts the replaced build, or
- * fails once the manager removed that directory. Only a unit whose program is
- * a versioned path of the same layout as `launcherPath` is touched; one the
- * operator pointed somewhere else is left alone. The caller still bounces the
- * unit: this rewrites the definition, not the running process.
- * // Usage: await retargetStaleHubService(manager, currentLauncherPath())
+ * The move a unit written before it named the manager's launcher needs, or
+ * null when it needs none. Such a unit records the versioned path the install
+ * had when `service install` ran (Homebrew's Cellar entry, pnpm's `.pnpm`
+ * directory, Scoop's version directory), so a restart after an upgrade starts
+ * the replaced build, or fails once the manager removed that directory. Only a
+ * unit whose program is a versioned path of the same layout as `launcherPath`
+ * qualifies; one the operator pointed somewhere else does not. Reads the unit,
+ * changes nothing.
+ * // Usage: const stale = await staleHubServiceMove(manager, currentLauncherPath())
  */
-export async function retargetStaleHubService(
+export async function staleHubServiceMove(
   manager: UserServiceManager,
   launcherPath: string | undefined,
   probe: StaleUnitProbe = {
@@ -278,8 +278,28 @@ export async function retargetStaleHubService(
   if (sameFile(execPath, launcherPath)) return null;
   const owner = launcherForVersionedPath(execPath, probe);
   if (owner === undefined || !sameFile(owner, launcherPath)) return null;
-  if (!(await manager.retarget(launcherPath))) return null;
   return { from: execPath, to: launcherPath };
+}
+
+/**
+ * Bring the hub's unit up, first moving a stale one onto the launcher as part
+ * of the same supervisor operation (see `UserServiceManager.restartRetargeted`).
+ * `start` brings up a stopped unit; the default bounces a running one. Returns
+ * the move it made, if any.
+ * // Usage: const moved = await restartHubService(manager, currentLauncherPath())
+ */
+export async function restartHubService(
+  manager: UserServiceManager,
+  launcherPath: string | undefined,
+  options: { readonly start?: boolean; readonly probe?: StaleUnitProbe } = {}
+): Promise<RetargetedUnit | null> {
+  const stale = await staleHubServiceMove(manager, launcherPath, options.probe);
+  if (stale) {
+    await manager.restartRetargeted(stale.to);
+    return stale;
+  }
+  await (options.start ? manager.start() : manager.restart());
+  return null;
 }
 
 /**

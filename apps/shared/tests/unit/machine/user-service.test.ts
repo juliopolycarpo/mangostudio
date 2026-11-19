@@ -58,6 +58,8 @@ class FakeServiceHost {
   busSocket: boolean;
   /** How often the manager looked for the bus socket. */
   busLookups = 0;
+  /** Every backoff the manager asked for; none is actually waited. */
+  readonly sleeps: number[] = [];
 
   constructor(
     private readonly options: {
@@ -117,6 +119,10 @@ class FakeServiceHost {
       },
       warn: (message) => {
         this.warnings.push(message);
+      },
+      sleep: (ms) => {
+        this.sleeps.push(ms);
+        return Promise.resolve();
       },
     };
   }
@@ -669,66 +675,154 @@ describe('replaceUnitProgram', () => {
   });
 });
 
-describe('createUserServiceManager retarget', () => {
+describe('createUserServiceManager restartRetargeted', () => {
   const STABLE = '/home/linuxbrew/.linuxbrew/bin/mangostudio';
   const VERSIONED: UserServiceDefinition = {
     ...DEFINITION,
     argv: ['/home/linuxbrew/.linuxbrew/Cellar/mangostudio/0.1.1/libexec/mangostudio', 'serve'],
   };
+  const PLIST_PATH = '/home/test/Library/LaunchAgents/com.example.unit.plist';
+  const LAUNCHD_TARGET = 'gui/1000/com.example.unit';
+  const BOOTSTRAP = ['launchctl', 'bootstrap', 'gui/1000', PLIST_PATH];
+  const EIO_STDERR = 'Bootstrap failed: 5: Input/output error';
 
-  it('on linux rewrites only the program and reloads systemd before any restart', async () => {
+  /** A darwin host whose `launchctl bootstrap` answers from `bootstrapResults`, then succeeds. */
+  function darwinHost(bootstrapResults: readonly UserServiceExecResult[] = []): FakeServiceHost {
+    const queue = [...bootstrapResults];
+    const host = new FakeServiceHost({
+      platform: 'darwin',
+      onExec: (argv) => (argv[1] === 'bootstrap' ? queue.shift() : undefined),
+    });
+    host.files.set(PLIST_PATH, renderLaunchdPlistFile('com.example.unit', VERSIONED));
+    return host;
+  }
+
+  const eio = (): UserServiceExecResult => ({ exitCode: 5, stdout: '', stderr: EIO_STDERR });
+
+  it('on linux rewrites only the program and reloads systemd before the restart', async () => {
     const host = new FakeServiceHost();
     const unitPath = '/home/test/.config/systemd/user/example.service';
     host.files.set(unitPath, renderSystemdUnitFile(VERSIONED));
     const manager = createUserServiceManager(IDENTITY, host.deps());
 
-    expect(await manager.retarget(STABLE)).toBe(true);
+    expect(await manager.restartRetargeted(STABLE)).toBe(true);
 
     const written = host.files.get(unitPath) ?? '';
     expect(execPathFromUnitBody(written)).toBe(STABLE);
     expect(written).toContain(`ExecStart=${STABLE} serve`);
     expect(written).toContain('WorkingDirectory="/opt/My Apps"');
     expect(written).toContain('StandardOutput=append:/home/test/logs/example.log');
-    expect(host.argv).toEqual([['systemctl', '--user', 'daemon-reload']]);
+    expect(host.argv).toEqual([
+      ['systemctl', '--user', 'daemon-reload'],
+      ['systemctl', '--user', '--no-block', 'restart', 'example.service'],
+    ]);
   });
 
-  it('on linux leaves a unit that already runs the program alone', async () => {
+  it('on linux only restarts a unit that already runs the program', async () => {
     const host = new FakeServiceHost();
-    host.files.set(
-      '/home/test/.config/systemd/user/example.service',
-      renderSystemdUnitFile({ ...VERSIONED, argv: [STABLE, 'serve'] })
+    const unitPath = '/home/test/.config/systemd/user/example.service';
+    const body = renderSystemdUnitFile({ ...VERSIONED, argv: [STABLE, 'serve'] });
+    host.files.set(unitPath, body);
+
+    expect(await createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE)).toBe(
+      false
     );
-
-    expect(await createUserServiceManager(IDENTITY, host.deps()).retarget(STABLE)).toBe(false);
-    expect(host.argv).toEqual([]);
+    expect(host.files.get(unitPath)).toBe(body);
+    expect(host.argv).toEqual([
+      ['systemctl', '--user', '--no-block', 'restart', 'example.service'],
+    ]);
   });
 
-  it('on linux does nothing when no unit is installed', async () => {
+  it('on linux writes nothing when no unit is installed', async () => {
     const host = new FakeServiceHost();
-    expect(await createUserServiceManager(IDENTITY, host.deps()).retarget(STABLE)).toBe(false);
+    expect(await createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE)).toBe(
+      false
+    );
     expect(host.files.size).toBe(0);
   });
 
-  it('on darwin rewrites the plist and boots the loaded job out so the next start rereads it', async () => {
-    const host = new FakeServiceHost({ platform: 'darwin' });
-    const plistPath = '/home/test/Library/LaunchAgents/com.example.unit.plist';
-    host.files.set(plistPath, renderLaunchdPlistFile('com.example.unit', VERSIONED));
+  it('on darwin rewrites the plist, boots the job out, bootstraps it again and kicks it', async () => {
+    const host = darwinHost();
 
-    expect(await createUserServiceManager(IDENTITY, host.deps()).retarget(STABLE)).toBe(true);
+    expect(await createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE)).toBe(
+      true
+    );
 
-    expect(execPathFromUnitBody(host.files.get(plistPath) ?? '')).toBe(STABLE);
-    expect(host.argv).toEqual([['launchctl', 'bootout', 'gui/1000/com.example.unit']]);
+    expect(execPathFromUnitBody(host.files.get(PLIST_PATH) ?? '')).toBe(STABLE);
+    expect(host.argv).toEqual([
+      ['launchctl', 'bootout', LAUNCHD_TARGET],
+      BOOTSTRAP,
+      ['launchctl', 'kickstart', '-k', LAUNCHD_TARGET],
+    ]);
   });
 
-  it('on darwin leaves a plist that already runs the program alone', async () => {
-    const host = new FakeServiceHost({ platform: 'darwin' });
+  // A bootstrap right after a bootout often answers error 5 while the old job
+  // is still exiting. Tolerating it left the job out of the domain with the
+  // restart reported as done.
+  it('on darwin retries a bootstrap that answers error 5 and then kicks the job', async () => {
+    const host = darwinHost([eio(), eio()]);
+
+    expect(await createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE)).toBe(
+      true
+    );
+
+    expect(host.argv.filter((argv) => argv[1] === 'bootstrap')).toHaveLength(3);
+    expect(host.argv.at(-1)).toEqual(['launchctl', 'kickstart', '-k', LAUNCHD_TARGET]);
+    // Each retry waits, and the waits grow.
+    expect(host.sleeps).toHaveLength(2);
+    expect(host.sleeps[1]).toBeGreaterThan(host.sleeps[0] ?? 0);
+  });
+
+  it('on darwin gives up on a bootstrap that keeps answering error 5, without a kickstart', async () => {
+    const host = darwinHost(Array.from({ length: 20 }, eio));
+
+    await expect(
+      createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE)
+    ).rejects.toMatchObject({
+      message: `launchctl bootstrap failed (exit 5): ${EIO_STDERR}`,
+    });
+
+    // Bounded: a handful of attempts, not the twenty the host would answer.
+    const attempts = host.argv.filter((argv) => argv[1] === 'bootstrap').length;
+    expect(attempts).toBeGreaterThan(1);
+    expect(attempts).toBeLessThanOrEqual(6);
+    expect(host.argv.some((argv) => argv[1] === 'kickstart')).toBe(false);
+  });
+
+  it('on darwin does not retry a bootstrap refusal that is not error 5', async () => {
+    const host = darwinHost([{ exitCode: 1, stdout: '', stderr: 'Load failed: 1: bad plist' }]);
+
+    await expect(
+      createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE)
+    ).rejects.toMatchObject({
+      message: 'launchctl bootstrap failed (exit 1): Load failed: 1: bad plist',
+    });
+
+    expect(host.argv.filter((argv) => argv[1] === 'bootstrap')).toHaveLength(1);
+    expect(host.sleeps).toEqual([]);
+  });
+
+  it('on darwin only restarts a plist that already runs the program', async () => {
+    const host = darwinHost();
     host.files.set(
-      '/home/test/Library/LaunchAgents/com.example.unit.plist',
+      PLIST_PATH,
       renderLaunchdPlistFile('com.example.unit', { ...VERSIONED, argv: [STABLE, 'serve'] })
     );
 
-    expect(await createUserServiceManager(IDENTITY, host.deps()).retarget(STABLE)).toBe(false);
-    expect(host.argv).toEqual([]);
+    expect(await createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(STABLE)).toBe(
+      false
+    );
+    expect(host.argv.some((argv) => argv[1] === 'bootout')).toBe(false);
+    expect(host.argv.at(-1)).toEqual(['launchctl', 'kickstart', '-k', LAUNCHD_TARGET]);
+  });
+
+  it('on darwin install retries a bootstrap that answers error 5 too', async () => {
+    const host = darwinHost([eio()]);
+
+    await createUserServiceManager(IDENTITY, host.deps()).install(DEFINITION);
+
+    expect(host.argv.filter((argv) => argv[1] === 'bootstrap')).toHaveLength(2);
+    expect(host.argv.at(-1)).toEqual(['launchctl', 'kickstart', '-k', LAUNCHD_TARGET]);
   });
 
   describe('on win32', () => {
@@ -794,11 +888,16 @@ describe('createUserServiceManager retarget', () => {
     it('swaps the program in the runner script and keeps everything else in it', async () => {
       const host = hostWithTask(taskArgumentsFor(WINDOWS_DEFINITION));
 
-      expect(await createUserServiceManager(IDENTITY, host.deps()).retarget(NEW_PROGRAM)).toBe(
-        true
-      );
+      expect(
+        await createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(NEW_PROGRAM)
+      ).toBe(true);
 
-      const setScript = scriptsRun(host).find((script) => script.includes('Set-ScheduledTask'));
+      const scripts = scriptsRun(host);
+      // Retarget first, then the restart that starts what was written.
+      expect(scripts.findIndex((script) => script.includes('Set-ScheduledTask'))).toBeLessThan(
+        scripts.findIndex((script) => script.includes('Start-ScheduledTask'))
+      );
+      const setScript = scripts.find((script) => script.includes('Set-ScheduledTask'));
       expect(setScript).toContain("Set-ScheduledTask -TaskName 'Example Unit' -Action $action");
       expect(setScript).not.toContain('Register-ScheduledTask');
       // The new argument is computed here and handed over whole; the script
@@ -813,29 +912,30 @@ describe('createUserServiceManager retarget', () => {
       expect(programFromTaskAction('powershell.exe', newArgument ?? null)).toBe(NEW_PROGRAM);
     });
 
-    it('reports no change when the task is absent or already runs the program', async () => {
+    it('only restarts when the task is absent or already runs the program', async () => {
       const absent = hostWithTask(null);
-      expect(await createUserServiceManager(IDENTITY, absent.deps()).retarget('C:\\x.exe')).toBe(
-        false
-      );
+      expect(
+        await createUserServiceManager(IDENTITY, absent.deps()).restartRetargeted('C:\\x.exe')
+      ).toBe(false);
       const current = hostWithTask(taskArgumentsFor(WINDOWS_DEFINITION));
-      expect(await createUserServiceManager(IDENTITY, current.deps()).retarget(OLD_PROGRAM)).toBe(
-        false
-      );
+      expect(
+        await createUserServiceManager(IDENTITY, current.deps()).restartRetargeted(OLD_PROGRAM)
+      ).toBe(false);
       for (const host of [absent, current]) {
-        expect(scriptsRun(host).filter((script) => script.includes('Set-ScheduledTask'))).toEqual(
-          []
-        );
+        const scripts = scriptsRun(host);
+        expect(scripts.filter((script) => script.includes('Set-ScheduledTask'))).toEqual([]);
+        expect(scripts.some((script) => script.includes('Start-ScheduledTask'))).toBe(true);
       }
     });
 
-    it('refuses a task that does not run an encoded runner script', async () => {
+    it('refuses a task that does not run an encoded runner script, without restarting', async () => {
       const host = hostWithTask('-NoProfile -File C:\\other.ps1');
       await expect(
-        createUserServiceManager(IDENTITY, host.deps()).retarget('C:\\x.exe')
+        createUserServiceManager(IDENTITY, host.deps()).restartRetargeted('C:\\x.exe')
       ).rejects.toMatchObject({
         message: expect.stringContaining('does not run an encoded runner script'),
       });
+      expect(scriptsRun(host).some((script) => script.includes('Start-ScheduledTask'))).toBe(false);
     });
 
     it('refuses a program that pushes the argument over what Task Scheduler accepts, before writing', async () => {
@@ -843,21 +943,25 @@ describe('createUserServiceManager retarget', () => {
       const tooLong = `C:\\${'long\\'.repeat(1_200)}mangostudio.exe`;
 
       const failure = await createUserServiceManager(IDENTITY, host.deps())
-        .retarget(tooLong)
+        .restartRetargeted(tooLong)
         .catch((error: unknown) => error);
 
       expect(failure).toBeInstanceOf(RuntimeServiceManagementError);
       expect((failure as Error).message).toMatch(/is \d+ characters, over the 8192 Task Scheduler/);
-      expect(scriptsRun(host).filter((script) => script.includes('Set-ScheduledTask'))).toEqual([]);
+      const scripts = scriptsRun(host);
+      expect(scripts.filter((script) => script.includes('Set-ScheduledTask'))).toEqual([]);
+      expect(scripts.some((script) => script.includes('Start-ScheduledTask'))).toBe(false);
     });
 
     it('names the cmdlet and exit code when Task Scheduler refuses the write', async () => {
       const host = hostWithTask(taskArgumentsFor(WINDOWS_DEFINITION), 1);
       await expect(
-        createUserServiceManager(IDENTITY, host.deps()).retarget(NEW_PROGRAM)
+        createUserServiceManager(IDENTITY, host.deps()).restartRetargeted(NEW_PROGRAM)
       ).rejects.toMatchObject({
         message: 'Set-ScheduledTask failed (exit 1): Access is denied',
       });
+      // A task left as it was is not started as if it had been moved.
+      expect(scriptsRun(host).some((script) => script.includes('Start-ScheduledTask'))).toBe(false);
     });
 
     it('replaces only the first program line of the runner script', () => {
