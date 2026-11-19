@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { dirname, win32 } from 'node:path';
+import { dirname, isAbsolute, relative, win32 } from 'node:path';
 
 import type { ResourceKind } from '@mangostudio/shared/library';
 import {
@@ -303,9 +303,12 @@ describe('library target registry', () => {
     );
     expect(getConfig().configFilePath).toBe(TEST_MANAGED_CONFIG_PATH);
     for (const id of ['mango-skills', 'mango-agents', 'mango-instructions', 'mango-settings']) {
-      const path = getLibraryLocation(id as never)?.resolvePath(env);
+      const path = getLibraryLocation(id as never)?.resolvePath(env) ?? '';
+      // The env is the host's, so the host's own path rules decide containment;
+      // a "/" prefix check would never match a Windows path.
+      const fromHome = relative(configHome ?? '', path);
       expect(
-        path?.startsWith(`${configHome}/`),
+        fromHome !== '' && !fromHome.startsWith('..') && !isAbsolute(fromHome),
         `(${id}): expected a path under ${configHome} | received ${path}`
       ).toBe(true);
     }
