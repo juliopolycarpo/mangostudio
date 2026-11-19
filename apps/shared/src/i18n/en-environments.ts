@@ -728,6 +728,22 @@ export const messages: FeatureMessages<'environments'> = {
             'checkout {checkout} differs from server {server}; restart or rebuild if unexpected',
           'core.detail.frontendBuildMissing': '{path} missing; rebuild frontend assets to compare',
           'core.detail.frontendBuildDiffers': 'frontend {frontend} differs from server {server}',
+          'install.label.installedVia': 'Installed via',
+          'install.detail.installedVia': '{manager} · channel {channel}',
+          'install.detail.installedViaLegacy':
+            '{manager} · channel {channel} · legacy layout, run mangostudio upgrade to migrate',
+          'update.label.update': 'Update',
+          'update.detail.disabled': 'checks disabled',
+          'update.detail.skippedEnv': 'skipped (NO_UPDATE_NOTIFIER|DO_NOT_TRACK|CI)',
+          'update.detail.skippedDev': 'skipped (development build)',
+          'update.detail.notChecked': 'not checked yet',
+          'update.detail.checkFailed': 'check failed ({error})',
+          'update.detail.available': '{version} available — run: {command}',
+          'update.detail.availableUnnamed': 'a newer build available — run: {command}',
+          'update.detail.upToDate': 'up to date ({version}, checked {hours}h ago)',
+          'cursor.label.connector': 'Cursor connector',
+          'cursor.detail.deprecated':
+            'Deprecated provider. Use the Cursor CLI runner in the chat runner selector; this key no longer runs turns.',
         },
       },
       logs: {

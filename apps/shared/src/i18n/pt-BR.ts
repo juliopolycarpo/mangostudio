@@ -2869,6 +2869,22 @@ export const messages = {
           'core.detail.frontendBuildMissing':
             '{path} ausente; recompile os assets do frontend para comparar',
           'core.detail.frontendBuildDiffers': 'o frontend {frontend} difere do servidor {server}',
+          'install.label.installedVia': 'Instalado via',
+          'install.detail.installedVia': '{manager} · canal {channel}',
+          'install.detail.installedViaLegacy':
+            '{manager} · canal {channel} · layout legado, execute mangostudio upgrade para migrar',
+          'update.label.update': 'Atualização',
+          'update.detail.disabled': 'verificações desativadas',
+          'update.detail.skippedEnv': 'ignorado (NO_UPDATE_NOTIFIER|DO_NOT_TRACK|CI)',
+          'update.detail.skippedDev': 'ignorado (build de desenvolvimento)',
+          'update.detail.notChecked': 'ainda não verificado',
+          'update.detail.checkFailed': 'falha na verificação ({error})',
+          'update.detail.available': '{version} disponível — execute: {command}',
+          'update.detail.availableUnnamed': 'um build mais novo disponível — execute: {command}',
+          'update.detail.upToDate': 'atualizado ({version}, verificado há {hours}h)',
+          'cursor.label.connector': 'Conector Cursor',
+          'cursor.detail.deprecated':
+            'Provedor descontinuado. Use o runner Cursor CLI no seletor de runner do chat; esta chave não executa mais turnos.',
         },
       },
       logs: {

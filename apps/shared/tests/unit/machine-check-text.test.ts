@@ -103,6 +103,20 @@ const DOCTOR_KEYS = [
   'core.label.runtimeSlot',
   'core.label.serverBuild',
   'core.label.sshClient',
+  'install.label.installedVia',
+  'install.detail.installedVia',
+  'install.detail.installedViaLegacy',
+  'update.label.update',
+  'update.detail.disabled',
+  'update.detail.skippedEnv',
+  'update.detail.skippedDev',
+  'update.detail.notChecked',
+  'update.detail.checkFailed',
+  'update.detail.available',
+  'update.detail.availableUnnamed',
+  'update.detail.upToDate',
+  'cursor.label.connector',
+  'cursor.detail.deprecated',
 ] as const;
 
 describe('doctor check keys', () => {

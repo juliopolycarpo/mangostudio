@@ -7,17 +7,22 @@
  * keys and params cannot change a character of the terminal output.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { afterAll, describe, expect, it } from 'bun:test';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type {
-  AgentCliStatus,
-  RuntimeFinding,
-  RuntimeStatus,
-  VersionManagerStatus,
+import {
+  type AgentCliStatus,
+  environmentFindingTemplatesEn,
+  type RuntimeFinding,
+  type RuntimeStatus,
+  type VersionManagerStatus,
 } from '@mangostudio/shared/environments';
+import {
+  MACHINE_CHECK_TEMPLATES_EN,
+  MACHINE_DOCTOR_TEMPLATES_EN,
+} from '@mangostudio/shared/machine/check-text-en';
 import type { SecretMetadataRow } from '@mangostudio/shared/types';
 
 import {
@@ -542,47 +547,84 @@ const CHATGPT_CASES: readonly SectionCase[] = [
 // Skills
 // ---------------------------------------------------------------------------
 
-describe('skills section, English text', () => {
-  let root: string;
+/** One temporary root for every skills case, each in its own subdirectory; removed after the file. */
+const SKILLS_ROOT = mkdtempSync(join(tmpdir(), 'doctor-sections-skills-'));
 
-  beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), 'doctor-sections-skills-'));
-  });
+afterAll(() => {
+  rmSync(SKILLS_ROOT, { recursive: true, force: true });
+});
 
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true });
-  });
+interface SkillsDirs {
+  readonly mango: string;
+  readonly agents: string;
+  readonly claude: string;
+}
 
-  function writeSkill(dir: string, slug: string, frontmatter: string): void {
-    mkdirSync(join(dir, slug), { recursive: true });
-    writeFileSync(join(dir, slug, 'SKILL.md'), `---\n${frontmatter}\n---\n\nBody.\n`, 'utf8');
+/** The three source directories of one case; known up front so an expected row can quote them. */
+function skillsDirs(caseName: string): SkillsDirs {
+  const root = join(SKILLS_ROOT, caseName);
+  return { mango: join(root, 'mango'), agents: join(root, 'agents'), claude: join(root, 'claude') };
+}
+
+function writeSkill(dir: string, slug: string, frontmatter: string): void {
+  mkdirSync(join(dir, slug), { recursive: true });
+  writeFileSync(join(dir, slug, 'SKILL.md'), `---\n${frontmatter}\n---\n\nBody.\n`, 'utf8');
+}
+
+/** A directory that is a plain file, so reading it as a source fails. */
+function writeUnreadableSource(path: string): void {
+  mkdirSync(join(path, '..'), { recursive: true });
+  writeFileSync(path, 'not a directory');
+}
+
+function skillsRows(
+  dirs: SkillsDirs,
+  input: {
+    origin: 'default' | 'toml' | 'env';
+    toggles?: { agents: boolean; claude: boolean };
+    disabled?: string[];
   }
+): CheckResult[] {
+  return collectSkillsDoctorChecks({
+    configDir: dirs.mango,
+    configOrigin: input.origin,
+    sourceToggles: input.toggles ?? { agents: false, claude: false },
+    disabledKeys: new Set(input.disabled ?? []),
+    thirdPartyDirs: { agents: dirs.agents, claude: dirs.claude },
+  });
+}
 
-  it('prints every source and skill state as it always has', () => {
-    const mango = join(root, 'mango');
-    const agents = join(root, 'agents');
-    const claude = join(root, 'claude');
-    writeSkill(mango, 'alpha', 'name: alpha\ndescription: Alpha');
-    writeSkill(mango, 'broken', 'name: nope\ndescription: bad');
-    writeSkill(mango, 'muted', 'name: muted\ndescription: off');
-    writeSkill(mango, 'shared', 'name: shared\ndescription: mango');
-    writeSkill(agents, 'shared', 'name: shared\ndescription: agents');
-    // `claude` is a plain file, so the source cannot be read.
-    writeFileSync(claude, 'not a directory');
+const STATES_DIRS = skillsDirs('states');
+const UNREADABLE_DIRS = skillsDirs('unreadable');
+const SOLO_DIRS = skillsDirs('solo');
+const WITHHELD_DIRS = skillsDirs('withheld');
 
-    const rows = collectSkillsDoctorChecks({
-      configDir: mango,
-      configOrigin: 'toml',
-      sourceToggles: { agents: true, claude: true },
-      disabledKeys: new Set(['mango:muted']),
-      thirdPartyDirs: { agents, claude },
-    });
-
-    expect(english(rows)).toEqual([
-      { label: 'Skills config', status: 'ok', detail: `${mango} (from toml)` },
-      { label: 'Skills mango', status: 'ok', detail: `${mango} — 4 skill(s)` },
-      { label: 'Skills agents', status: 'ok', detail: `${agents} — 1 skill(s)` },
-      { label: 'Skills claude', status: 'fail', detail: `${claude} (not readable)` },
+const SKILLS_CASES: readonly SectionCase[] = [
+  {
+    name: 'every source and skill state, from a toml config',
+    rows: () => {
+      const { mango, agents, claude } = STATES_DIRS;
+      writeSkill(mango, 'alpha', 'name: alpha\ndescription: Alpha');
+      writeSkill(mango, 'broken', 'name: nope\ndescription: bad');
+      writeSkill(mango, 'muted', 'name: muted\ndescription: off');
+      writeSkill(mango, 'shared', 'name: shared\ndescription: mango');
+      writeSkill(agents, 'shared', 'name: shared\ndescription: agents');
+      writeUnreadableSource(claude);
+      return skillsRows(STATES_DIRS, {
+        origin: 'toml',
+        toggles: { agents: true, claude: true },
+        disabled: ['mango:muted'],
+      });
+    },
+    expected: [
+      { label: 'Skills config', status: 'ok', detail: `${STATES_DIRS.mango} (from toml)` },
+      { label: 'Skills mango', status: 'ok', detail: `${STATES_DIRS.mango} — 4 skill(s)` },
+      { label: 'Skills agents', status: 'ok', detail: `${STATES_DIRS.agents} — 1 skill(s)` },
+      {
+        label: 'Skills claude',
+        status: 'fail',
+        detail: `${STATES_DIRS.claude} (not readable)`,
+      },
       {
         label: 'Skill agents:shared',
         status: 'warn',
@@ -594,67 +636,77 @@ describe('skills section, English text', () => {
         detail: 'Frontmatter "name" must match the skill directory name.',
       },
       { label: 'Skill mango:muted', status: 'ok', detail: 'disabled in settings' },
-    ]);
-  });
-
-  it('prints disabled and missing sources, and the other config origins', () => {
-    const mango = join(root, 'mango');
-    const agents = join(root, 'agents');
-    const claude = join(root, 'claude');
-    writeFileSync(claude, 'not a directory');
-
-    const fromEnv = collectSkillsDoctorChecks({
-      configDir: mango,
-      configOrigin: 'env',
-      sourceToggles: { agents: false, claude: false },
-      disabledKeys: new Set(),
-      thirdPartyDirs: { agents, claude },
-    });
-    const fromDefault = collectSkillsDoctorChecks({
-      configDir: mango,
-      configOrigin: 'default',
-      sourceToggles: { agents: false, claude: false },
-      disabledKeys: new Set(),
-      thirdPartyDirs: { agents, claude },
-    });
-
-    expect(english(fromEnv)).toEqual([
-      { label: 'Skills config', status: 'ok', detail: `${mango} (from env)` },
-      { label: 'Skills mango', status: 'ok', detail: `${mango} (no skills directory yet)` },
+    ],
+  },
+  {
+    name: 'missing and unreadable sources that are switched off, from an env config',
+    rows: () => {
+      writeUnreadableSource(UNREADABLE_DIRS.claude);
+      return skillsRows(UNREADABLE_DIRS, { origin: 'env' });
+    },
+    expected: [
+      { label: 'Skills config', status: 'ok', detail: `${UNREADABLE_DIRS.mango} (from env)` },
+      {
+        label: 'Skills mango',
+        status: 'ok',
+        detail: `${UNREADABLE_DIRS.mango} (no skills directory yet)`,
+      },
       {
         label: 'Skills agents',
         status: 'ok',
-        detail: `${agents} (no skills directory yet) (source disabled)`,
+        detail: `${UNREADABLE_DIRS.agents} (no skills directory yet) (source disabled)`,
       },
       {
         label: 'Skills claude',
         status: 'warn',
-        detail: `${claude} (not readable, source disabled)`,
+        detail: `${UNREADABLE_DIRS.claude} (not readable, source disabled)`,
       },
-    ]);
-    expect(fromDefault[0]).toEqual(expect.objectContaining({ detail: `${mango} (from default)` }));
-  });
-
-  it('prints a populated source that is switched off', () => {
-    const mango = join(root, 'mango');
-    const agents = join(root, 'agents');
-    writeSkill(agents, 'solo', 'name: solo\ndescription: Solo');
-
-    const rows = collectSkillsDoctorChecks({
-      configDir: mango,
-      configOrigin: 'default',
-      sourceToggles: { agents: false, claude: false },
-      disabledKeys: new Set(),
-      thirdPartyDirs: { agents, claude: join(root, 'claude') },
-    });
-
-    expect(english(rows).find((row) => row.label === 'Skills agents')).toEqual({
-      label: 'Skills agents',
-      status: 'ok',
-      detail: `${agents} — 1 skill(s) (source disabled)`,
-    });
-  });
-});
+    ],
+  },
+  {
+    name: 'a default config and a populated source that is switched off',
+    rows: () => {
+      writeSkill(SOLO_DIRS.agents, 'solo', 'name: solo\ndescription: Solo');
+      return skillsRows(SOLO_DIRS, { origin: 'default' }).slice(0, 3);
+    },
+    expected: [
+      { label: 'Skills config', status: 'ok', detail: `${SOLO_DIRS.mango} (from default)` },
+      {
+        label: 'Skills mango',
+        status: 'ok',
+        detail: `${SOLO_DIRS.mango} (no skills directory yet)`,
+      },
+      {
+        label: 'Skills agents',
+        status: 'ok',
+        detail: `${SOLO_DIRS.agents} — 1 skill(s) (source disabled)`,
+      },
+    ],
+  },
+  // A symlink to nowhere stands for a higher-priority source that could not be scanned.
+  ...(process.platform === 'win32'
+    ? []
+    : [
+        {
+          name: 'a skill whose higher-priority location could not be scanned',
+          rows: () => {
+            writeSkill(WITHHELD_DIRS.claude, 'fallback', 'name: fallback\ndescription: Claude');
+            symlinkSync(join(WITHHELD_DIRS.mango, 'missing'), WITHHELD_DIRS.agents, 'dir');
+            return skillsRows(WITHHELD_DIRS, {
+              origin: 'default',
+              toggles: { agents: true, claude: true },
+            }).filter((row) => row.label === 'Skill claude:fallback');
+          },
+          expected: [
+            {
+              label: 'Skill claude:fallback',
+              status: 'warn',
+              detail: 'higher-priority skill location could not be scanned',
+            },
+          ],
+        } satisfies SectionCase,
+      ]),
+];
 
 // ---------------------------------------------------------------------------
 // MCP
@@ -1164,23 +1216,96 @@ const LIBRARY_CASES: readonly SectionCase[] = [
 
 // ---------------------------------------------------------------------------
 
-describe('doctor sections beyond the core, English text', () => {
-  const groups: ReadonlyArray<readonly [string, readonly SectionCase[]]> = [
-    ['Installed via, Update, Cursor connector', SERVICE_CASES],
-    ['ChatGPT', CHATGPT_CASES],
-    ['MCP', MCP_CASES],
-    ['environments', ENVIRONMENT_CASES],
-    ['library', LIBRARY_CASES],
-  ];
+interface SectionGroup {
+  readonly name: string;
+  /** The key namespaces this section's templates live under (`update.label.update`). */
+  readonly prefixes: readonly string[];
+  /** Whether the section's rows carry keys yet. */
+  readonly keyed: boolean;
+  readonly cases: readonly SectionCase[];
+}
 
-  for (const [group, cases] of groups) {
-    describe(group, () => {
-      it.each(cases.map((testCase) => [testCase.name, testCase] as const))(
+const GROUPS: readonly SectionGroup[] = [
+  {
+    name: 'Installed via, Update, Cursor connector',
+    prefixes: ['install', 'update', 'cursor'],
+    keyed: true,
+    cases: SERVICE_CASES,
+  },
+  { name: 'ChatGPT', prefixes: ['chatgpt'], keyed: false, cases: CHATGPT_CASES },
+  { name: 'skills', prefixes: ['skills'], keyed: false, cases: SKILLS_CASES },
+  { name: 'MCP', prefixes: ['mcp'], keyed: false, cases: MCP_CASES },
+  { name: 'environments', prefixes: ['env'], keyed: false, cases: ENVIRONMENT_CASES },
+  { name: 'library', prefixes: ['library'], keyed: false, cases: LIBRARY_CASES },
+];
+
+describe('doctor sections beyond the core, English text', () => {
+  for (const group of GROUPS) {
+    describe(group.name, () => {
+      it.each(group.cases.map((testCase) => [testCase.name, testCase] as const))(
         '%s',
         async (_name, testCase) => {
           expect(english(await testCase.rows())).toEqual([...testCase.expected]);
         }
       );
+    });
+  }
+});
+
+function placeholdersOf(template: string): string[] {
+  return [...template.matchAll(/\{(\w+)\}/g)].map((match) => match[1] as string).sort();
+}
+
+const TEMPLATES: Readonly<Record<string, string | undefined>> = MACHINE_CHECK_TEMPLATES_EN;
+const FINDING_CODES = new Set(Object.keys(environmentFindingTemplatesEn));
+
+describe('doctor sections beyond the core, keys', () => {
+  for (const group of GROUPS.filter((candidate) => candidate.keyed)) {
+    describe(group.name, () => {
+      // One case after another: the service cases set `VERSION` for the length of a run.
+      const rowsOfGroup = async (): Promise<CheckResult[]> => {
+        const rows: CheckResult[] = [];
+        for (const testCase of group.cases) rows.push(...(await testCase.rows()));
+        return rows;
+      };
+
+      it('sends keys the English dictionary has a template for, on every row', async () => {
+        for (const row of await rowsOfGroup()) {
+          expect(
+            [row.labelKey, row.detailKey].map((key) =>
+              key === undefined ? false : TEMPLATES[key] !== undefined
+            ),
+            `(row "${row.label}"): expected labelKey ${row.labelKey} and detailKey ${row.detailKey} to be English templates`
+          ).toEqual([true, true]);
+        }
+      });
+
+      it('gives each row the params its two templates read, and no template a param it lacks', async () => {
+        for (const row of await rowsOfGroup()) {
+          const used = [
+            ...new Set([
+              ...placeholdersOf(TEMPLATES[row.labelKey as string] as string),
+              ...placeholdersOf(TEMPLATES[row.detailKey as string] as string),
+            ]),
+          ].sort();
+          const sent = Object.keys(row.params ?? {}).sort();
+          // A finding row carries every param the finding has, which can be
+          // more than its sentence reads; any other row sends exactly its own.
+          const isFindingRow = FINDING_CODES.has(row.detailKey as string);
+          expect(
+            isFindingRow ? used.filter((name) => !sent.includes(name)) : sent,
+            `(params of "${row.label}" / ${row.detailKey}): expected ${isFindingRow ? 'every placeholder to have a param' : `exactly the placeholders ${used.join(', ')}`}`
+          ).toEqual(isFindingRow ? [] : used);
+        }
+      });
+
+      it('exercises every template under its namespaces, so none is dead and none goes unpinned', async () => {
+        const sent = new Set((await rowsOfGroup()).flatMap((row) => [row.labelKey, row.detailKey]));
+        const unsent = Object.keys(MACHINE_DOCTOR_TEMPLATES_EN).filter(
+          (key) => group.prefixes.some((prefix) => key.startsWith(`${prefix}.`)) && !sent.has(key)
+        );
+        expect(unsent, `(${group.name} templates no row sends)`).toEqual([]);
+      });
     });
   }
 });

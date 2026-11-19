@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 
 import { en } from '@mangostudio/shared/i18n';
 import type {
+  MachineCheck,
   MachineDoctorReport,
   MachineLogTail,
   MachineStatus,
@@ -385,6 +386,77 @@ describe('MachinePage', () => {
       );
       expect(doctor.textContent).not.toContain('superseded LTS');
     });
+  });
+
+  describe('doctor rows of the sections beyond the core, in Portuguese', () => {
+    // One row per section as the hub sends it: English beside the keys. Each
+    // expectation is what the pt-BR templates make of the row's params.
+    const SECTION_ROWS: ReadonlyArray<{
+      readonly section: string;
+      readonly check: MachineCheck;
+      readonly label: string;
+      readonly detail: string;
+    }> = [
+      {
+        section: 'Installed via',
+        check: {
+          label: 'Installed via',
+          labelKey: 'install.label.installedVia',
+          status: 'ok',
+          detail:
+            'install script · channel stable · legacy layout, run mangostudio upgrade to migrate',
+          detailKey: 'install.detail.installedViaLegacy',
+          params: { manager: 'install script', channel: 'stable' },
+        },
+        label: 'Instalado via',
+        detail:
+          'install script · canal stable · layout legado, execute mangostudio upgrade para migrar',
+      },
+      {
+        section: 'Update',
+        check: {
+          label: 'Update',
+          labelKey: 'update.label.update',
+          status: 'warn',
+          detail: '0.2.0 available — run: mangostudio upgrade',
+          detailKey: 'update.detail.available',
+          params: { version: '0.2.0', command: 'mangostudio upgrade' },
+        },
+        label: 'Atualização',
+        detail: '0.2.0 disponível — execute: mangostudio upgrade',
+      },
+      {
+        section: 'Cursor connector',
+        check: {
+          label: 'Cursor connector',
+          labelKey: 'cursor.label.connector',
+          status: 'warn',
+          detail: 'Deprecated provider.',
+          detailKey: 'cursor.detail.deprecated',
+        },
+        label: 'Conector Cursor',
+        detail:
+          'Provedor descontinuado. Use o runner Cursor CLI no seletor de runner do chat; esta chave não executa mais turnos.',
+      },
+    ];
+
+    it.each(SECTION_ROWS.map((entry) => [entry.section, entry] as const))(
+      'words the %s row from the pt-BR templates',
+      async (_section, entry) => {
+        localStorage.setItem(LOCALE_STORAGE_KEY, 'pt-BR');
+        mountScenario(STATUS, UPDATE_STATUS, {
+          checks: [entry.check],
+          warnings: entry.check.status === 'warn' ? 1 : 0,
+          failures: entry.check.status === 'fail' ? 1 : 0,
+        });
+        render(<MachinePage />);
+
+        const doctor = await screen.findByTestId('machine-doctor');
+        await waitFor(() => expect(within(doctor).getByText(entry.label)).toBeTruthy());
+        expect(doctor.textContent).toContain(entry.detail);
+        expect(doctor.textContent).not.toContain(entry.check.detail);
+      }
+    );
   });
 
   it('confirms a restart, posts it, and announces the hand-over', async () => {
