@@ -65,6 +65,24 @@ The Node and Bun runtime statuses carry that answer as `autoSelection`: `reason`
 that builds a spawn's `PATH`, so the card's "Processes run …" line names the installation
 processes get rather than the one the inherited `PATH` happens to put first.
 
+A terminal shell runs the user's startup files after that environment is in place, and an `nvm
+use`, `fnm env` or `volta` line in them rewrites `PATH`. When a selection resolves to directories,
+`terminal.open` therefore launches the shell through a shim (`terminal/shell_init.rs`) that runs
+the usual startup first and puts the pinned directories back in front:
+
+- **bash:** `--rcfile` on a shim that sources `~/.bashrc`. A login launch (macOS) ignores
+  `--rcfile`, so the shim sources what `bash -l` reads instead: `/etc/profile`, then the first of
+  `~/.bash_profile`, `~/.bash_login`, `~/.profile`.
+- **zsh:** `ZDOTDIR` points at a shim directory holding the four startup files. Each sources the
+  real one from the user's own `ZDOTDIR` (or `$HOME`); the last file zsh reads (`.zshrc`, or
+  `.zlogin` for a login shell) re-pins and restores `ZDOTDIR`.
+- **PowerShell:** `-NoExit -Command` prepends after PowerShell has loaded `$PROFILE`.
+
+Shims live in a private directory under the OS temp directory and are removed when the session
+ends; nothing is written to the user's home. Bash and zsh on a Windows host keep the plain launch.
+The pin is applied once, after startup: a hook that re-runs per directory (`fnm env --use-on-cd`)
+can still move the selection when the user `cd`s.
+
 ## What the scanner knows
 
 Each installation carries a `pathSource`: `nvm`, `fnm` and `volta` come from the

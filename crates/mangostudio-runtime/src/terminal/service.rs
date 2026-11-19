@@ -20,6 +20,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::flow::{ExitInfo, OutputFrame, SCROLLBACK_MAX_BYTES, TerminalFlow};
 use super::pty::{DefaultPtySpawner, PtyError, PtyHandle, PtyRequest, PtySpawner};
+use super::shell_init::{self, ShellInit};
 use crate::blocking::run_blocking;
 use crate::commands::{environment, toolchain};
 use crate::consent::read::{CONSENT_READ_TIMEOUT, ConsentRead, ConsentReader, read_consent};
@@ -109,6 +110,8 @@ struct Entry {
     close_scheduled: AtomicBool,
     close_result: AsyncMutex<Option<Result<(), Arc<std::io::Error>>>>,
     consent_revoked: Arc<AtomicBool>,
+    /// Keeps the shell's startup shim files until the session is gone.
+    _shell_init: Option<ShellInit>,
 }
 
 impl Entry {
@@ -316,6 +319,7 @@ impl Service {
             close_scheduled: AtomicBool::new(false),
             close_result: AsyncMutex::new(None),
             consent_revoked,
+            _shell_init: prepared.shell_init.take(),
         });
         {
             let mut sessions = self.sessions.lock().unwrap_or_else(|p| p.into_inner());
@@ -903,6 +907,8 @@ struct Prepared {
     scrollback_bytes: usize,
     login: bool,
     cursor_alias: Option<Vec<PathBuf>>,
+    /// Shim files that re-pin the toolchain; removed when the session's entry is dropped.
+    shell_init: Option<ShellInit>,
 }
 
 impl Prepared {
@@ -979,6 +985,7 @@ fn prepare(params: OpenParams, host: PathEnv) -> Result<Prepared, RemoteError> {
         _ => &[],
     };
     let mut cursor_alias = None;
+    let mut shell_init = None;
     let (program, args) = if let Some(target) = params.login_target {
         let descriptors = crate::login::descriptors();
         let descriptor = descriptors
@@ -1015,12 +1022,38 @@ fn prepare(params: OpenParams, host: PathEnv) -> Result<Prepared, RemoteError> {
                 return Err(RemoteError::new(codes::UNAVAILABLE, message));
             }
         };
-        (program, descriptor.args.clone())
-    } else {
         (
-            shell_program(shell, &host)?,
-            args.iter().map(|value| (*value).to_owned()).collect(),
+            program,
+            descriptor.args.iter().map(OsString::from).collect(),
         )
+    } else {
+        let program = shell_program(shell, &host)?;
+        // The startup files the shell runs next can rewrite PATH (nvm, fnm, volta), so the
+        // pinned toolchain is put back in front once they are done.
+        let pinned = toolchain::pinned_dirs(
+            &host,
+            params.toolchain.as_ref(),
+            &toolchain::NativeToolchainFs,
+        );
+        let original_zdotdir = env.get("ZDOTDIR").cloned();
+        let scratch_parent = std::env::temp_dir();
+        shell_init = shell_init::plan(&shell_init::Launch {
+            shell,
+            login: host.platform == "darwin",
+            windows: host.is_windows(),
+            pinned: &pinned,
+            path_separator: host.path_list_separator(),
+            original_zdotdir: original_zdotdir.as_deref(),
+            scratch_parent: &scratch_parent,
+        });
+        let args = match &shell_init {
+            Some(init) => init.args.clone(),
+            None => args.iter().map(OsString::from).collect(),
+        };
+        if let Some(init) = &shell_init {
+            env.extend(init.env.iter().cloned());
+        }
+        (program, args)
     };
     let mut request = PtyRequest::new(program, args, cols, rows);
     request.cwd = Some(cwd.clone());
@@ -1037,6 +1070,7 @@ fn prepare(params: OpenParams, host: PathEnv) -> Result<Prepared, RemoteError> {
         scrollback_bytes,
         login,
         cursor_alias,
+        shell_init,
     })
 }
 

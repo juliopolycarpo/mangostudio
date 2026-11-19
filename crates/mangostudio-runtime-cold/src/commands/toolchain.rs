@@ -202,10 +202,7 @@ pub fn build(
     let Some(selection) = selection else {
         return env;
     };
-    let resolved = [
-        resolve(host, "node", &selection.node, fs),
-        resolve(host, "bun", &selection.bun, fs),
-    ];
+    let resolved = resolve_selection(host, selection, fs);
     let dirs: Vec<_> = resolved
         .iter()
         .flatten()
@@ -236,6 +233,41 @@ pub fn build(
     }
     env.insert(key, path);
     env
+}
+
+/// The directories [`build`] puts at the front of `PATH`, in order: Node's, then Bun's.
+/// A shell that runs the user's startup files afterwards uses this to put them back in front.
+///
+/// # Example
+///
+/// ```
+/// use mangostudio_runtime_cold::commands::toolchain::{pinned_dirs, NativeToolchainFs};
+/// use mangostudio_runtime_cold::probing::detection::path_env::PathEnv;
+/// assert!(pinned_dirs(&PathEnv::default(), None, &NativeToolchainFs).is_empty());
+/// ```
+pub fn pinned_dirs(
+    host: &PathEnv,
+    selection: Option<&Selection>,
+    fs: &dyn ToolchainFs,
+) -> Vec<String> {
+    selection
+        .map(|selection| resolve_selection(host, selection, fs))
+        .unwrap_or_default()
+        .into_iter()
+        .flatten()
+        .map(|value| value.dir)
+        .collect()
+}
+
+fn resolve_selection(
+    host: &PathEnv,
+    selection: &Selection,
+    fs: &dyn ToolchainFs,
+) -> [Option<Resolved>; 2] {
+    [
+        resolve(host, "node", &selection.node, fs),
+        resolve(host, "bun", &selection.bun, fs),
+    ]
 }
 
 fn resolve(host: &PathEnv, runtime: &str, choice: &str, fs: &dyn ToolchainFs) -> Option<Resolved> {
@@ -477,6 +509,30 @@ mod tests {
             node: "auto".into(),
             bun: "auto".into(),
         }
+    }
+
+    #[test]
+    fn pinned_dirs_list_exactly_the_directories_build_prepends() {
+        let host = host("linux");
+        let fs = FakeFs::default();
+        assert!(
+            pinned_dirs(&host, None, &fs).is_empty(),
+            "expected no pinned dirs without a selection"
+        );
+        let selection = Selection {
+            node: "/opt/node/bin/node".into(),
+            bun: "/opt/bun/bin/bun".into(),
+        };
+        let dirs = pinned_dirs(&host, Some(&selection), &fs);
+        assert_eq!(
+            dirs,
+            ["/opt/node/bin", "/opt/bun/bin"],
+            "expected node then bun directories | received {dirs:?}"
+        );
+        assert_eq!(
+            build(&host, Some(&selection), &fs)["PATH"],
+            format!("{}:/base", dirs.join(":"))
+        );
     }
 
     #[test]
