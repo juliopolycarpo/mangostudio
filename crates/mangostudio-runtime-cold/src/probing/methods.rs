@@ -129,7 +129,6 @@ struct ProbeVersionManagersParams {
 #[serde(rename_all = "camelCase")]
 struct SelfAgentParams {
     version: String,
-    config_home: Option<String>,
     executable_path: Option<String>,
 }
 
@@ -750,21 +749,20 @@ fn health_for_agent(base_health: RuntimeHealth, findings: &[RuntimeFinding]) -> 
 }
 
 /// Mirrors `describeSelfAgent`: MangoStudio never scans itself — it
-/// reports this binary's own version, executable path, and config home
-/// straight from `params.self` (the hub pins these for its own machine),
-/// falling back to this process's own facts (`std::env::current_exe`,
-/// [`locations::mango_config_home`]) only when the caller did not. Every
-/// route that reaches this method is already behind `requireAuth`, so
+/// reports this binary's own version and executable path straight from
+/// `params.self` (the hub pins these for its own machine), falling back to
+/// `std::env::current_exe` when the caller did not. Its config home is
+/// [`locations::mango_config_home`] like every other target's
+/// ([`resolve_config_home`]): the hub pins it in `pathEnv` beside the other
+/// MangoStudio directories, so it and the `mango-*` locations share one root.
+/// Every route that reaches this method is already behind `requireAuth`, so
 /// `authenticated`/`authSignal` are always `true`/`session` — this
 /// process only ever answers on behalf of a signed-in session.
 async fn describe_self_agent(
     path_env: &Arc<PathEnv>,
     self_params: &SelfAgentParams,
 ) -> AgentCliStatus {
-    let config_home = self_params
-        .config_home
-        .clone()
-        .unwrap_or_else(|| locations::mango_config_home(path_env));
+    let config_home = resolve_config_home(AgentTargetId::Mangostudio, path_env);
     let executable_path = self_params.executable_path.clone().unwrap_or_else(|| {
         std::env::current_exe()
             .map(|path| path.to_string_lossy().into_owned())
@@ -1416,7 +1414,6 @@ mod tests {
     fn self_params(version: &str) -> SelfAgentParams {
         SelfAgentParams {
             version: version.to_string(),
-            config_home: None,
             executable_path: None,
         }
     }
@@ -1441,6 +1438,42 @@ mod tests {
         assert_eq!(statuses[0]["authSignal"], "session");
         assert_eq!(statuses[0]["effective"]["version"], "9.9.9");
         assert!(!statuses[0]["locations"].as_array().unwrap().is_empty());
+    }
+
+    /// The config home and every `mango-*` location come from the hub's one
+    /// `MANGOSTUDIO_CONFIG_HOME` pin, never from a second field.
+    #[tokio::test]
+    async fn probe_agent_clis_roots_mangostudio_locations_at_the_pinned_config_home() {
+        let params = ProbeAgentClisParams {
+            budget: None,
+            path_env: Some(PathEnvOverride {
+                env: Some(HashMap::from([(
+                    "MANGOSTUDIO_CONFIG_HOME".to_string(),
+                    "/pinned/hub-config".to_string(),
+                )])),
+            }),
+            target_ids: Some(vec![AgentTargetId::Mangostudio]),
+            installable: None,
+            self_: self_params("9.9.9"),
+        };
+        let result = handle_probe_agent_clis(params, CancellationToken::new())
+            .await
+            .unwrap();
+        let status = &result["statuses"][0];
+        assert_eq!(status["configHome"], "/pinned/hub-config");
+        let locations = status["locations"].as_array().unwrap();
+        for id in ["mango-instructions", "mango-settings"] {
+            let location = locations
+                .iter()
+                .find(|location| location["id"] == id)
+                .unwrap_or_else(|| panic!("expected a {id} location | received {locations:?}"));
+            assert!(
+                location["path"]
+                    .as_str()
+                    .is_some_and(|path| path.starts_with("/pinned/hub-config/")),
+                "expected {id} under /pinned/hub-config | received {location:?}"
+            );
+        }
     }
 
     #[cfg(unix)]

@@ -6633,9 +6633,6 @@
               "version": {
                 "type": "string"
               },
-              "configHome": {
-                "type": "string"
-              },
               "executablePath": {
                 "type": "string"
               }

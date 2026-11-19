@@ -1127,6 +1127,15 @@ export function loadConfigForTest(partial: Partial<MangoConfig> = {}): MangoConf
   if (!cfg.images.dir) {
     cfg.images.dir = join(TEST_MANAGED_CONFIG_DIR, 'images');
   }
+  // The library directories sit beside the managed config file, as they sit
+  // beside ~/.mango/config.toml in production, so a probe's config home and its
+  // `mango-*` locations share one root.
+  if (!cfg.agents.dir) {
+    cfg.agents.dir = join(TEST_MANAGED_CONFIG_DIR, 'agents');
+  }
+  if (!cfg.skills.dir) {
+    cfg.skills.dir = join(TEST_MANAGED_CONFIG_DIR, 'skills');
+  }
   const configFilePath = partial.configFilePath ?? TEST_MANAGED_CONFIG_PATH;
 
   computeDerived(cfg, configFilePath);

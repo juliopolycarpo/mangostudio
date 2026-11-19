@@ -297,9 +297,12 @@ fails silently:
   bytes were going; the runtime's own `PathEnv` is where they would actually
   land. Those agree for Local, on the hub's own machine, and are allowed to disagree between
   machines.
-  The hub sends its MangoStudio directory pins (`SKILLS_DIR`/`AGENTS_DIR`) to
-  Local only — for writes, remote source reads and undo exactly as for scans
-  (`libraryWritePathEnv`) — so a remote machine resolves its own.
+  The hub sends its MangoStudio directory pins (`MANGOSTUDIO_CONFIG_HOME`,
+  `SKILLS_DIR`, `AGENTS_DIR`) to Local only — for writes, remote source reads and
+  undo exactly as for scans (`libraryWritePathEnv`) — so a remote machine
+  resolves its own. `MANGOSTUDIO_CONFIG_HOME` is the directory of the loaded
+  config file and the one root of the `mangostudio` target: `configHome`, and
+  every `mango-*` location unless `SKILLS_DIR`/`AGENTS_DIR` moves it on purpose.
 - **The manifest is untrusted input.** `library.undo` drives `rm -rf` and
   overwriting copies from a JSON file under a caller-supplied root, so every
   entry has to resolve inside the registry location it names and every backup

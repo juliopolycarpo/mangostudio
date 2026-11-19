@@ -85,18 +85,38 @@ function homePath(...parts: string[]): (env: PathEnv) => string | null {
   return (env) => (supportsHomeLocations(env) ? pathApi(env).join(env.homeDir, ...parts) : null);
 }
 
-function mangoSkillsPath(env: PathEnv): string | null {
-  if (!supportsHomeLocations(env)) return null;
-  return configuredDir(env, 'SKILLS_DIR', ['.mango', 'skills']);
-}
+/**
+ * Env key a hub uses to say where its config.toml lives. It is derived from the
+ * resolved configuration (never parsed from the process environment), so it
+ * travels in an injected `PathEnv` exactly like `SKILLS_DIR`. Unset, MangoStudio's
+ * config home is `~/.mango`.
+ */
+export const MANGO_CONFIG_HOME_ENV_KEY = 'MANGOSTUDIO_CONFIG_HOME';
 
-function mangoAgentsPath(env: PathEnv): string | null {
-  if (!supportsHomeLocations(env)) return null;
-  return configuredDir(env, 'AGENTS_DIR', ['.mango', 'agents']);
-}
-
+/**
+ * The one definition of MangoStudio's config home. Every `mango-*` location
+ * below hangs off it, so a relocated config file moves them together.
+ */
 function mangoConfigHome(env: PathEnv): string {
-  return pathApi(env).join(env.homeDir, '.mango');
+  return configuredDir(env, MANGO_CONFIG_HOME_ENV_KEY, ['.mango']);
+}
+
+function mangoPath(...parts: string[]): (env: PathEnv) => string | null {
+  return (env) => {
+    if (!supportsHomeLocations(env)) return null;
+    return pathApi(env).join(mangoConfigHome(env), ...parts);
+  };
+}
+
+/** A directory with its own override that defaults to a child of the config home. */
+function mangoConfiguredDir(variable: string, child: string): (env: PathEnv) => string | null {
+  return (env) => {
+    if (!supportsHomeLocations(env)) return null;
+    const configured = env.env[variable]?.trim();
+    return configured
+      ? resolveEnvPath(env, configured)
+      : pathApi(env).join(mangoConfigHome(env), child);
+  };
 }
 
 function claudeConfigHome(env: PathEnv): string {
@@ -157,7 +177,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
     id: 'mango-skills',
     kind: 'skill',
     scope: 'home',
-    resolvePath: mangoSkillsPath,
+    resolvePath: mangoConfiguredDir('SKILLS_DIR', 'skills'),
     access: 'read-write',
     layout: 'directory-of-dirs',
     format: 'markdown-frontmatter',
@@ -221,7 +241,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
     id: 'mango-agents',
     kind: 'subagent',
     scope: 'home',
-    resolvePath: mangoAgentsPath,
+    resolvePath: mangoConfiguredDir('AGENTS_DIR', 'agents'),
     access: 'read-write',
     layout: 'directory-of-files',
     format: 'markdown-frontmatter',
@@ -304,7 +324,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
     id: 'mango-instructions',
     kind: 'instruction',
     scope: 'home',
-    resolvePath: homePath('.mango', 'AGENTS.md'),
+    resolvePath: mangoPath('AGENTS.md'),
     access: 'read-write',
     layout: 'single-file',
     resourceSlug: 'global',
@@ -382,7 +402,7 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
     id: 'mango-settings',
     kind: 'setting',
     scope: 'home',
-    resolvePath: homePath('.mango', 'config.toml'),
+    resolvePath: mangoPath('config.toml'),
     access: 'read-only',
     layout: 'single-file',
     resourceSlug: 'settings',

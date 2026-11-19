@@ -24,9 +24,8 @@
 //!   the whole fact this crate needs and never change independently of the
 //!   table above.
 //! - `claudeConfigHome`/`codexConfigHome`/`cursorConfigHome` (plus
-//!   `mangoConfigHome`, `apps/runtime`'s wire calls
-//!   `TargetDefinition.resolveConfigHome` for `mangostudio`'s own
-//!   `describeSelfAgent`), as [`claude_config_home`]/[`codex_config_home`]/
+//!   `mangoConfigHome`, which `TargetDefinition.resolveConfigHome` returns
+//!   for `mangostudio`), as [`claude_config_home`]/[`codex_config_home`]/
 //!   [`cursor_config_home`]/[`mango_config_home`].
 //!
 //! - Each row's `format` and `resourceSlug`, which this table carries for
@@ -401,26 +400,47 @@ fn home_path(env: &PathEnv, parts: &[&str]) -> Option<String> {
     Some(join_path(&env.platform, &all))
 }
 
-/// `<home>/.mango`, unconditionally — MangoStudio's own config home always
-/// resolves, on every platform this crate runs on. Mirrors
+/// The env key a hub pins to say where its config.toml lives. Mirrors
+/// `registry.ts`'s `MANGO_CONFIG_HOME_ENV_KEY`.
+const MANGO_CONFIG_HOME_ENV_KEY: &str = "MANGOSTUDIO_CONFIG_HOME";
+
+/// MangoStudio's own config home: the hub's pinned `MANGOSTUDIO_CONFIG_HOME`
+/// when set, `<home>/.mango` otherwise — it always resolves, on every platform
+/// this crate runs on. Every `mango-*` location hangs off it. Mirrors
 /// `registry.ts`'s `mangoConfigHome`.
 #[must_use]
 pub fn mango_config_home(env: &PathEnv) -> String {
-    join_path(&env.platform, &[&env.home_dir, ".mango"])
+    configured_dir(env, MANGO_CONFIG_HOME_ENV_KEY, &[".mango"])
+}
+
+fn mango_path(env: &PathEnv, parts: &[&str]) -> Option<String> {
+    if !supports_home_locations(env) {
+        return None;
+    }
+    let home = mango_config_home(env);
+    let mut all = vec![home.as_str()];
+    all.extend_from_slice(parts);
+    Some(join_path(&env.platform, &all))
+}
+
+/// `variable`'s override when set, else `<config home>/<child>`. Mirrors
+/// `registry.ts`'s `mangoConfiguredDir`.
+fn mango_configured_dir(env: &PathEnv, variable: &str, child: &str) -> Option<String> {
+    if !supports_home_locations(env) {
+        return None;
+    }
+    match env.non_blank_var(variable) {
+        Some(configured) => Some(resolve_env_path(&env.platform, &env.home_dir, configured)),
+        None => mango_path(env, &[child]),
+    }
 }
 
 fn mango_skills_path(env: &PathEnv) -> Option<String> {
-    if !supports_home_locations(env) {
-        return None;
-    }
-    Some(configured_dir(env, "SKILLS_DIR", &[".mango", "skills"]))
+    mango_configured_dir(env, "SKILLS_DIR", "skills")
 }
 
 fn mango_agents_path(env: &PathEnv) -> Option<String> {
-    if !supports_home_locations(env) {
-        return None;
-    }
-    Some(configured_dir(env, "AGENTS_DIR", &[".mango", "agents"]))
+    mango_configured_dir(env, "AGENTS_DIR", "agents")
 }
 
 fn agents_skills_path(env: &PathEnv) -> Option<String> {
@@ -428,11 +448,11 @@ fn agents_skills_path(env: &PathEnv) -> Option<String> {
 }
 
 fn mango_instructions_path(env: &PathEnv) -> Option<String> {
-    home_path(env, &[".mango", "AGENTS.md"])
+    mango_path(env, &["AGENTS.md"])
 }
 
 fn mango_settings_path(env: &PathEnv) -> Option<String> {
-    home_path(env, &[".mango", "config.toml"])
+    mango_path(env, &["config.toml"])
 }
 
 /// Claude's config home, honouring `CLAUDE_CONFIG_DIR`. Mirrors
@@ -984,6 +1004,55 @@ mod tests {
         assert_eq!(
             received, "C:\\Users\\shared\\claude",
             "expected a relative win32 override resolved against home | received {received:?}"
+        );
+    }
+
+    #[test]
+    fn every_mango_location_hangs_off_the_one_config_home() {
+        let relocated = env(
+            "linux",
+            "/home/tester",
+            &[("MANGOSTUDIO_CONFIG_HOME", "/relocated/mango")],
+        );
+        assert_eq!(mango_config_home(&relocated), "/relocated/mango");
+        for id in [
+            "mango-skills",
+            "mango-agents",
+            "mango-instructions",
+            "mango-settings",
+        ] {
+            let definition = location_by_id(id).unwrap();
+            let received = (definition.resolve_path)(&relocated);
+            assert!(
+                received
+                    .as_deref()
+                    .is_some_and(|path| path.starts_with("/relocated/mango/")),
+                "expected {id} under the pinned config home /relocated/mango | received {received:?}"
+            );
+        }
+
+        let unpinned = env("linux", "/home/tester", &[]);
+        assert_eq!(mango_config_home(&unpinned), "/home/tester/.mango");
+        assert_eq!(
+            mango_settings_path(&unpinned).as_deref(),
+            Some("/home/tester/.mango/config.toml")
+        );
+    }
+
+    #[test]
+    fn an_explicit_skills_dir_still_wins_over_the_pinned_config_home() {
+        let e = env(
+            "linux",
+            "/home/tester",
+            &[
+                ("MANGOSTUDIO_CONFIG_HOME", "/relocated/mango"),
+                ("SKILLS_DIR", "/elsewhere/skills"),
+            ],
+        );
+        assert_eq!(
+            mango_skills_path(&e).as_deref(),
+            Some("/elsewhere/skills"),
+            "expected SKILLS_DIR to keep its own override"
         );
     }
 

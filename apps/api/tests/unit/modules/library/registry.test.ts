@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { win32 } from 'node:path';
+import { dirname, win32 } from 'node:path';
 
 import type { ResourceKind } from '@mangostudio/shared/library';
 import {
@@ -17,11 +17,14 @@ import {
   LIBRARY_TARGET_DEFINITIONS,
   listLibraryTargetDescriptors,
   listLibraryTargetLocationIds,
+  MANGO_CONFIG_HOME_ENV_KEY,
 } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 import Value from 'typebox/value';
 
+import { getConfig, TEST_MANAGED_CONFIG_PATH } from '../../../../src/lib/config';
 import {
+  createLibraryPathEnv,
   describeLocation,
   describeTargetLocations,
 } from '../../../../src/modules/library/infrastructure/location-probe';
@@ -222,6 +225,90 @@ describe('library target registry', () => {
         env: { CODEX_HOME: '/Volumes/config/codex' },
       })
     ).toBe('/Volumes/config/codex');
+  });
+
+  /**
+   * `resolveConfigHome` for `mangostudio` is read by the agent-CLI probe, so it
+   * is no longer a registry-only fact the totality test above could not catch
+   * drifting. Every `mango-*` location the target reads has to hang off it.
+   */
+  it('roots every MangoStudio location at the one config home', () => {
+    const mango = getLibraryTarget('mangostudio');
+    const mangoLocationIds = listLibraryTargetLocationIds('mangostudio').filter((id) =>
+      id.startsWith('mango-')
+    );
+    expect(mangoLocationIds.sort()).toEqual([
+      'mango-agents',
+      'mango-instructions',
+      'mango-settings',
+      'mango-skills',
+    ]);
+
+    const environments: ReadonlyArray<[string, PathEnv, string]> = [
+      ['default home', LINUX_ENV, '/home/ada/.mango'],
+      [
+        'pinned config home',
+        { ...LINUX_ENV, env: { [MANGO_CONFIG_HOME_ENV_KEY]: '/srv/mango' } },
+        '/srv/mango',
+      ],
+      [
+        'pinned relative to home',
+        { ...LINUX_ENV, env: { [MANGO_CONFIG_HOME_ENV_KEY]: 'dotfiles/mango' } },
+        '/home/ada/dotfiles/mango',
+      ],
+      [
+        'windows default',
+        { platform: 'win32', homeDir: String.raw`C:\Users\Ada`, env: {} },
+        String.raw`C:\Users\Ada\.mango`,
+      ],
+    ];
+    for (const [label, env, expectedHome] of environments) {
+      expect(mango?.resolveConfigHome(env), `(${label}): configHome`).toBe(expectedHome);
+      const separator = env.platform === 'win32' ? '\\' : '/';
+      for (const id of mangoLocationIds) {
+        const path = getLibraryLocation(id as never)?.resolvePath(env);
+        expect(
+          path?.startsWith(`${expectedHome}${separator}`),
+          `(${label}): expected ${id} under ${expectedHome} | received ${path}`
+        ).toBe(true);
+      }
+    }
+  });
+
+  it('lets SKILLS_DIR and AGENTS_DIR leave the config home on purpose', () => {
+    const env: PathEnv = {
+      ...LINUX_ENV,
+      env: {
+        [MANGO_CONFIG_HOME_ENV_KEY]: '/srv/mango',
+        SKILLS_DIR: '/data/skills',
+        AGENTS_DIR: '/data/agents',
+      },
+    };
+
+    expect(getLibraryLocation('mango-skills')?.resolvePath(env)).toBe('/data/skills');
+    expect(getLibraryLocation('mango-agents')?.resolvePath(env)).toBe('/data/agents');
+    expect(getLibraryLocation('mango-settings')?.resolvePath(env)).toBe('/srv/mango/config.toml');
+  });
+
+  /**
+   * The seam this closes: under the test-managed config the probe reported the
+   * test directory as `configHome` while `mango-*` resolved into `~/.mango`.
+   */
+  it('shares one root between configHome and the mango locations under the managed test config', () => {
+    const env = createLibraryPathEnv();
+    const configHome = getLibraryTarget('mangostudio')?.resolveConfigHome(env);
+
+    expect(configHome, '(configHome): expected the directory of the loaded config file').toBe(
+      dirname(TEST_MANAGED_CONFIG_PATH)
+    );
+    expect(getConfig().configFilePath).toBe(TEST_MANAGED_CONFIG_PATH);
+    for (const id of ['mango-skills', 'mango-agents', 'mango-instructions', 'mango-settings']) {
+      const path = getLibraryLocation(id as never)?.resolvePath(env);
+      expect(
+        path?.startsWith(`${configHome}/`),
+        `(${id}): expected a path under ${configHome} | received ${path}`
+      ).toBe(true);
+    }
   });
 
   it('honors Cursor XDG config without moving unrelated Cursor locations', () => {

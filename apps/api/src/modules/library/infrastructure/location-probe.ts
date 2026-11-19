@@ -9,6 +9,7 @@
 
 import { accessSync, constants, existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { dirname } from 'node:path';
 
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments';
 import type {
@@ -20,6 +21,7 @@ import type { LocationFsProbe } from '@mangostudio/shared/library/host';
 import {
   describeLocation as describeLocationWith,
   describeTargetLocations as describeTargetLocationsWith,
+  MANGO_CONFIG_HOME_ENV_KEY,
 } from '@mangostudio/shared/library/host';
 import type { PathEnv } from '@mangostudio/shared/runtime-env';
 
@@ -76,14 +78,23 @@ export function createLibraryPathEnv(overrides: Partial<PathEnv> = {}): PathEnv 
 }
 
 /**
- * The MangoStudio library directories as this hub's configuration resolved
- * them. They are product configuration rather than a property of a host, so
- * they travel to a runtime probing the hub's own machine — and deliberately do
- * not travel anywhere else, where the hub's paths would name nothing.
+ * MangoStudio's config home and library directories as this hub's configuration
+ * resolved them. They are product configuration rather than a property of a
+ * host, so they travel to a runtime probing the hub's own machine — and
+ * deliberately do not travel anywhere else, where the hub's paths would name
+ * nothing.
+ *
+ * The config home is the directory holding the config file the hub actually
+ * loaded, which is what every `mango-*` location and `AgentCliStatus.configHome`
+ * hang off. Nothing else may derive it.
  */
 export function configuredLibraryEnv(): Record<string, string> {
   const config = getConfig();
-  return { AGENTS_DIR: config.agents.dir, SKILLS_DIR: config.skills.dir };
+  return {
+    [MANGO_CONFIG_HOME_ENV_KEY]: dirname(config.configFilePath),
+    AGENTS_DIR: config.agents.dir,
+    SKILLS_DIR: config.skills.dir,
+  };
 }
 
 /**
