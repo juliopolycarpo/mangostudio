@@ -67,6 +67,12 @@ export interface FakeTerminalRuntimeClientOptions {
   /** Awaited before the *first* `terminal.write` call resolves; later calls are immediate. */
   readonly gateFirstWrite?: () => Promise<unknown>;
   /**
+   * Refusals the runtime answers `terminal.write` with, one per call in order,
+   * after the call is recorded; once they run out, writes succeed. A refused
+   * write is recorded too, as a real runtime saw the request either way.
+   */
+  readonly refuseWrites?: readonly Error[];
+  /**
    * Frames the runtime emits in the same read as the *first* `terminal.attach`
    * response. A real frame port dispatches a batch synchronously, so these
    * reach listeners before the hub's `await` on the response resumes — the
@@ -119,6 +125,7 @@ export class FakeTerminalRuntimeClient implements TerminalRuntimeClient {
   };
   #gateFirstDetach: (() => Promise<unknown>) | undefined;
   #gateFirstWrite: (() => Promise<unknown>) | undefined;
+  readonly #refuseWrites: Error[];
   #outputWithAttachResponse: readonly RuntimeTerminalOutputEvent[] | undefined;
 
   constructor(options: FakeTerminalRuntimeClientOptions = {}) {
@@ -135,6 +142,7 @@ export class FakeTerminalRuntimeClient implements TerminalRuntimeClient {
     this.#gateFirstList = options.gateFirstList;
     this.#gateFirstDetach = options.gateFirstDetach;
     this.#gateFirstWrite = options.gateFirstWrite;
+    this.#refuseWrites = [...(options.refuseWrites ?? [])];
     this.#outputWithAttachResponse = options.outputWithFirstAttachResponse;
   }
 
@@ -233,6 +241,8 @@ export class FakeTerminalRuntimeClient implements TerminalRuntimeClient {
       const gate = this.#gateFirstWrite;
       this.#gateFirstWrite = undefined;
       if (gate) await gate();
+      const refusal = this.#refuseWrites.shift();
+      if (refusal) throw refusal;
       return { ok: true as const };
     },
     resize: (params) => {

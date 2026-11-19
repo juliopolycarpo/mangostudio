@@ -93,6 +93,13 @@ describe('terminal wire codec', () => {
     expect([...frame]).toEqual([TERMINAL_CLIENT_FRAME.ACK, 1, 2, 3, 4]);
   });
 
+  it('round-trips a refused-write error frame', () => {
+    const error = { code: 'consent_unconfirmed', retryable: true } as const;
+    expect(
+      decodeTerminalServerMessage(encodeTerminalServerMessage({ type: 'error', error }))
+    ).toEqual({ type: 'error', error });
+  });
+
   it('refuses a client message above the socket payload limit', () => {
     const oversized = new Uint8Array(TERMINAL_CLIENT_MESSAGE_MAX_BYTES + 1);
     expect(() => decodeTerminalClientMessage(oversized)).toThrow(TerminalWireError);
@@ -107,8 +114,13 @@ describe('terminal wire codec', () => {
       'type must be 0..3; received 9'
     );
     expect(() => decodeTerminalServerMessage(new Uint8Array([7]))).toThrow(
-      'type must be 0..3; received 7'
+      'type must be 0..4; received 7'
     );
+    expect(() =>
+      decodeTerminalServerMessage(
+        new Uint8Array([TERMINAL_SERVER_FRAME.ERROR, ...bytes('{"code":"boom","retryable":true}')])
+      )
+    ).toThrow('error body does not match its schema');
     expect(() =>
       decodeTerminalClientMessage(new Uint8Array([TERMINAL_CLIENT_FRAME.ACK, 1, 2]))
     ).toThrow('ack body must be 4 bytes; received 2');

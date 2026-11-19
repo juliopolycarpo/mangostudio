@@ -26,6 +26,7 @@ import {
   TERMINAL_SOCKET_PATH,
   type TerminalExit,
   type TerminalNotice,
+  type TerminalWriteError,
 } from '@mangostudio/shared/terminal';
 import { useEffect, useRef, useState } from 'react';
 
@@ -57,6 +58,8 @@ interface TerminalSocketCallbacks {
   readonly onData: (bytes: Uint8Array) => void;
   readonly onExit: (exit: TerminalExit) => void;
   readonly onNotice: (notice: TerminalNotice) => void;
+  /** The runtime refused input the user typed; the hub says whether typing again can work. */
+  readonly onWriteError: (error: TerminalWriteError) => void;
   readonly onStatusChange: (status: TerminalSocketStatus) => void;
   /**
    * Fires once the transport is open, before any scrollback replay arrives.
@@ -253,6 +256,9 @@ export function createTerminalSocket(options: TerminalSocketOptions): TerminalSo
       case 'notice':
         options.onNotice(message.notice);
         return;
+      case 'error':
+        options.onWriteError(message.error);
+        return;
       case 'pong':
         return;
     }
@@ -374,6 +380,7 @@ export function useTerminalSocket(options: UseTerminalSocketOptions): UseTermina
       onData: (bytes) => callbacksRef.current.onData(bytes),
       onExit: (exit) => callbacksRef.current.onExit(exit),
       onNotice: (notice) => callbacksRef.current.onNotice(notice),
+      onWriteError: (error) => callbacksRef.current.onWriteError(error),
       onConnected: () => callbacksRef.current.onConnected(),
     });
     socketRef.current = socket;

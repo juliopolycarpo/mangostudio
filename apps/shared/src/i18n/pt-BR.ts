@@ -2113,6 +2113,9 @@ export const messages = {
     exitedConsentRevoked: 'Terminal fechado porque o acesso ao shell foi revogado.',
     dropped: '{bytes} bytes de saída foram descartados porque o visualizador não acompanhou.',
     runtimeDisconnected: 'O runtime se desconectou; esta sessão terminou.',
+    inputNotConfirmed:
+      'Sua entrada não foi entregue: não foi possível confirmar o acesso ao shell a tempo. Digite novamente.',
+    inputRefused: 'Sua entrada não foi entregue ao shell.',
     closeConfirmTitle: 'Fechar este terminal?',
     closeConfirmDescription: 'O shell e tudo o que ele estiver executando serão interrompidos.',
     cancel: 'Cancelar',

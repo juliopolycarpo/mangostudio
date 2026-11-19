@@ -37,8 +37,14 @@ payload never receives it.
 
 The browser talks to `/api/terminal/:id`, a WebSocket route of its own. `/api/ws` stays
 invalidation-only. Frames are binary with a one-byte type prefix: client `data`, `resize`,
-`ack`, `ping`; server `data`, `exit`, `notice`, `pong`. The codec lives in
+`ack`, `ping`; server `data`, `exit`, `notice`, `pong`, `error`. The codec lives in
 `@mangostudio/shared/terminal`.
+
+An `error` frame reports a `data` frame the runtime refused: a `code` and whether it is
+`retryable`. The hub retries a transient refusal (a consent read that timed out) once, holding
+later input behind it, before reporting `consent_unconfirmed`. `consent_revoked` is permanent,
+so the socket closes after the frame. The runtime keeps a shell grant confirmed in the last 30
+seconds for input when a later consent read is slow; a denial still revokes the session at once.
 
 ## Flow control
 

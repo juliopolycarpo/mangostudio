@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, jest } from 'bun:test';
 import {
   decodeTerminalClientMessage,
   TERMINAL_SOCKET_CLOSE_CODES,
+  type TerminalWriteError,
 } from '@mangostudio/shared/terminal';
 
 import {
@@ -23,10 +24,12 @@ describe('createTerminalSocket', () => {
   let statuses: TerminalSocketStatus[] = [];
   let data: Uint8Array[] = [];
   let connectedCount = 0;
+  let writeErrors: TerminalWriteError[] = [];
   let onUnauthorized: ReturnType<typeof jest.fn>;
 
   beforeEach(() => {
     FakeTerminalSocket.instances = [];
+    writeErrors = [];
     statuses = [];
     data = [];
     connectedCount = 0;
@@ -48,6 +51,7 @@ describe('createTerminalSocket', () => {
       onData: (bytes) => data.push(bytes),
       onExit: () => undefined,
       onNotice: () => undefined,
+      onWriteError: (error) => writeErrors.push(error),
       onConnected: () => {
         connectedCount += 1;
       },
@@ -86,6 +90,18 @@ describe('createTerminalSocket', () => {
 
     expect(data).toHaveLength(1);
     expect(new TextDecoder().decode(data[0])).toBe('mango\n');
+  });
+
+  it('forwards a refused-write error frame to onWriteError', () => {
+    createSocket();
+    lastSocket().open();
+
+    lastSocket().emitServerMessage({
+      type: 'error',
+      error: { code: 'consent_unconfirmed', retryable: true },
+    });
+
+    expect(writeErrors).toEqual([{ code: 'consent_unconfirmed', retryable: true }]);
   });
 
   it('ignores a frame it cannot decode instead of throwing out of onmessage', () => {
