@@ -24,6 +24,7 @@ import { useForceRefresh } from '../hooks/use-force-refresh';
 import { useIssueToNewChat } from '../hooks/use-issue-to-new-chat';
 import { type GithubPanelPrefs, ISSUE_FILTERS, PR_FILTERS } from '../lib/github-panel-prefs';
 import { onGithubCreatePrRequest } from '../lib/github-panel-request';
+import { type WriteAccess, writeAccessOf } from '../lib/write-access';
 import { githubIssuesQueryOptions, githubPrsQueryOptions } from '../queries';
 import { CreatePrForm } from './CreatePrForm';
 import { GithubIssueRow } from './GithubIssueRow';
@@ -180,27 +181,6 @@ export function GithubRepoSection({
 /** True once a list has answered that the repository cannot be read, so its controls have nothing to act on. */
 function isUnavailable(data: { readonly state: string } | undefined): boolean {
   return data !== undefined && data.state !== 'ok';
-}
-
-/**
- * What the pull request list says about writing to this machine.
- *
- *  - `pending`: the first read is still in flight, so nothing is known;
- *  - `unanswered`: the read failed and no earlier answer survives, so nothing is
- *    known either, but the user is looking at a failure and not at a spinner;
- *  - `allowed`: the list answered and the machine accepts `gh` writes;
- *  - `refused`: the list answered and the machine refuses them, or the
- *    repository cannot be read at all (no write control is shown then).
- *
- * An earlier answer outlives a failed refetch (`data` stays), so a refetch error
- * after a good read does not turn a known answer back into an unknown one.
- */
-type WriteAccess = 'pending' | 'unanswered' | 'allowed' | 'refused';
-
-function writeAccessOf(query: UseQueryResult<GithubPrsResponse, Error>): WriteAccess {
-  const { data } = query;
-  if (data === undefined) return query.isError ? 'unanswered' : 'pending';
-  return data.state === 'ok' && data.canMutate ? 'allowed' : 'refused';
 }
 
 /** The filter row, generic over the two closed filter unions the lists take. */

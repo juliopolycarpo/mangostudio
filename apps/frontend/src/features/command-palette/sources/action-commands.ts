@@ -51,6 +51,13 @@ export interface ActionCommandParams {
    */
   readonly githubPanelVisible: boolean;
   /**
+   * False once the chat's pull request list has answered that this machine
+   * refuses `gh` writes (or that the repository cannot be read), which is when
+   * the panel withholds its own Create pull request button. Without this gate
+   * the row runs, the panel opens, and nothing visible happens.
+   */
+  readonly githubCreatePrAllowed: boolean;
+  /**
    * False once the user removes the Terminal panel from the rail in settings,
    * on the same reasoning as `githubPanelVisible`.
    */
@@ -113,6 +120,7 @@ export function actionCommands({
   resolvedTheme,
   hasChat,
   githubPanelVisible,
+  githubCreatePrAllowed,
   terminalPanelVisible,
   isGenerating,
   chatHasTurns,
@@ -234,15 +242,22 @@ export function actionCommands({
         icon: GitPullRequest,
         run: onOpenGithubPanel,
       },
-      {
-        id: 'action:github-create-pr',
-        section: 'actions',
-        // Reuses the panel's own wording rather than a second translation of
-        // the same sentence; the row runs the same affordance the panel does.
-        label: t.github.actions.createPr,
-        icon: GitPullRequest,
-        run: onCreateGithubPr,
-      },
+      // Omitted rather than disabled, like the other conditional rows here: a
+      // CommandItem has no disabled affordance.
+      ...(githubCreatePrAllowed
+        ? [
+            {
+              id: 'action:github-create-pr',
+              section: 'actions' as const,
+              // Reuses the panel's own wording rather than a second translation
+              // of the same sentence; the row runs the same affordance the
+              // panel does.
+              label: t.github.actions.createPr,
+              icon: GitPullRequest,
+              run: onCreateGithubPr,
+            },
+          ]
+        : []),
       {
         id: 'action:github-review-requests',
         section: 'actions',
