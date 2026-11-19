@@ -20,9 +20,12 @@
  * bound to a package subdirectory of the same checkout shares the same HEAD,
  * index and working tree just as much as one bound to the root (#944). The
  * initiating chat is published synchronously and unconditionally; the sibling
- * enumeration is one database read that runs after it and is failure-isolated,
+ * enumeration runs after it and is failure-isolated,
  * because the write already happened and a lookup error must not turn it into
- * an apparent failure. Siblings in *other* checkouts of the same repository are
+ * an apparent failure. A sibling counts when the runtime says its workdir is
+ * the same directory (or under the same root), so a binding through a symlink,
+ * or under another casing on a case-folding volume, still hears about the write
+ * (#950; see `findSiblingChatIds`). Siblings in *other* checkouts of the same repository are
  * outside that set; they hear about the write on the repo-scoped topic, which
  * is published alongside (see `publishRepoInvalidation`, #945). The workdir
  * enumeration stays for tabs that never learned a repo key.
@@ -30,17 +33,13 @@
 
 import { type GitScope, gitTopic } from '@mangostudio/shared/realtime';
 
-import { getDb } from '../../../db/database';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { getRealtimeBus } from '../../../services/realtime/realtime-bus';
-import {
-  listChatIdsByWorkdir,
-  listChatIdsUnderWorktreeRoot,
-} from '../../chats/infrastructure/chat-repository';
 import {
   publishRepoInvalidation,
   type RepoInvalidationOptions,
 } from '../../git/application/repo-invalidation';
+import { findSiblingChatIds } from './github-sibling-chats';
 
 const logger = createDiagnosticLogger('github-realtime');
 
@@ -71,11 +70,15 @@ export interface GithubInvalidationTarget {
 }
 
 export type ListSiblingChatIds = (
-  userId: string,
-  environmentId: string,
-  workdir: string,
-  root?: string
+  target: GithubInvalidationTarget,
+  signal: AbortSignal
 ) => Promise<string[]>;
+
+/**
+ * Bounds the sibling lookup. It resolves directories on the runtime, and a hung
+ * mount must not keep a fire-and-forget fan-out alive indefinitely.
+ */
+const SIBLING_LOOKUP_TIMEOUT_MS = 15_000;
 
 export interface GithubRealtimeOptions {
   /** Injected so a test can enumerate siblings without a database. */
@@ -84,10 +87,8 @@ export interface GithubRealtimeOptions {
   readonly repoInvalidation?: RepoInvalidationOptions;
 }
 
-const defaultListSiblingChatIds: ListSiblingChatIds = (userId, environmentId, workdir, root) =>
-  root
-    ? listChatIdsUnderWorktreeRoot(userId, environmentId, root, getDb())
-    : listChatIdsByWorkdir(userId, environmentId, workdir, getDb());
+const defaultListSiblingChatIds: ListSiblingChatIds = (target, signal) =>
+  findSiblingChatIds(target, signal);
 
 /**
  * Publishes only after the write has succeeded. Resolves once the fan-out has
@@ -128,10 +129,8 @@ export async function publishGithubWriteInvalidation(
   const listSiblingChatIds = options.listSiblingChatIds ?? defaultListSiblingChatIds;
   try {
     const chatIds = await listSiblingChatIds(
-      target.userId,
-      target.environmentId,
-      target.workdir,
-      target.root
+      target,
+      AbortSignal.timeout(SIBLING_LOOKUP_TIMEOUT_MS)
     );
     for (const chatId of new Set(chatIds)) {
       if (chatId === target.chatId) continue;

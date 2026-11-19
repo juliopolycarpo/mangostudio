@@ -268,7 +268,7 @@ jobs:
         shell: bash
         env:
           TS_HOME_TREE: 814a421cef442f2dd6c24b13a70fcea00e45576b
-          TS_LIBRARY_TREE: 5ecbf15d46a87ac2c2e8c24dc9d14a47a76b209e
+          TS_LIBRARY_TREE: 8552f4eb67b2485327cc65fa915a76d43c1679c5
         run: |
           status=0
           for pinned in "ts-home:$TS_HOME_TREE" "ts-library:$TS_LIBRARY_TREE"; do

@@ -209,31 +209,176 @@ describe('restartLauncher', () => {
   const CARGO = '/home/j/.cargo/bin/mangostudio';
   const NPM = '/usr/local/lib/node_modules/mangostudio/bin/mangostudio.js';
 
-  it("names cargo's Unix shim, the one launcher that execs in place", () => {
-    // crates/mangostudio-launcher calls CommandExt::exec on Unix, so the pid the
-    // restart spawned is the pid the hub writes to its state file.
-    expect(restartLauncher({ manager: 'cargo', launcherPath: CARGO }, 'linux')).toBe(CARGO);
-    expect(restartLauncher({ manager: 'cargo', launcherPath: CARGO }, 'darwin')).toBe(CARGO);
+  const CARGO_WINDOWS = 'C:\\Users\\j\\.cargo\\bin\\mangostudio.exe';
+  const BREW_EXEC = '/opt/homebrew/Cellar/mangostudio/0.1.1/libexec/mangostudio';
+  const LINUXBREW_EXEC = '/home/linuxbrew/.linuxbrew/Cellar/mangostudio/0.1.1/libexec/mangostudio';
+  const PNPM_EXEC =
+    '/home/j/.local/share/pnpm/global/5/.pnpm/@mangostudio+cli-linux-x64@0.1.1/node_modules/@mangostudio/cli-linux-x64/mangostudio';
+  const SCOOP_EXEC = 'C:\\Users\\j\\scoop\\apps\\mangostudio\\0.1.1\\mangostudio.exe';
+
+  /** A machine where exactly these paths exist, standing in for what a manager left on disk. */
+  function filesystemWith(...paths: string[]): (path: string) => boolean {
+    return (path) => paths.includes(path);
+  }
+
+  it("names cargo's shim from the launcher marker, on every platform", () => {
+    const pathExists = filesystemWith();
+    expect(
+      restartLauncher(
+        { manager: 'cargo', launcherPath: CARGO },
+        { platform: 'linux', execPath: '/x', pathExists }
+      )
+    ).toBe(CARGO);
+    expect(
+      restartLauncher(
+        { manager: 'cargo', launcherPath: CARGO_WINDOWS },
+        { platform: 'win32', execPath: 'C:\\x.exe', pathExists }
+      )
+    ).toBe(CARGO_WINDOWS);
   });
 
-  it('refuses the same shim on Windows, where it spawns the binary and waits', () => {
-    // The Windows arm calls .status(): the hub is a grandchild, so
-    // confirmStarted never sees its own child's pid in the state file.
-    expect(restartLauncher({ manager: 'cargo', launcherPath: CARGO }, 'win32')).toBeUndefined();
+  it("names Homebrew's prefix bin symlink, which the next upgrade relinks", () => {
+    expect(
+      restartLauncher(
+        { manager: 'homebrew' },
+        {
+          platform: 'darwin',
+          execPath: BREW_EXEC,
+          pathExists: filesystemWith('/opt/homebrew/bin/mangostudio'),
+        }
+      )
+    ).toBe('/opt/homebrew/bin/mangostudio');
+    expect(
+      restartLauncher(
+        { manager: 'homebrew' },
+        {
+          platform: 'linux',
+          execPath: LINUXBREW_EXEC,
+          pathExists: filesystemWith('/home/linuxbrew/.linuxbrew/bin/mangostudio'),
+        }
+      )
+    ).toBe('/home/linuxbrew/.linuxbrew/bin/mangostudio');
   });
 
-  it('refuses the npm wrapper, which spawnSyncs the platform binary', () => {
-    // Same pid split, plus the path is a .js file CreateProcess cannot start
-    // at all. Re-execing process.execPath is correct for npm anyway: the
-    // platform package's path carries no version, so npm replaced it in place.
-    for (const manager of ['npm', 'bun', 'pnpm'] as const) {
-      expect(restartLauncher({ manager, launcherPath: NPM }, 'linux')).toBeUndefined();
+  it("names pnpm's shim in the pnpm home on POSIX", () => {
+    expect(
+      restartLauncher(
+        { manager: 'pnpm', launcherPath: NPM },
+        {
+          platform: 'linux',
+          execPath: PNPM_EXEC,
+          pathExists: filesystemWith('/home/j/.local/share/pnpm/mangostudio'),
+        }
+      )
+    ).toBe('/home/j/.local/share/pnpm/mangostudio');
+  });
+
+  it("names Scoop's current junction on Windows, keeping backslashes", () => {
+    expect(
+      restartLauncher(
+        { manager: 'scoop' },
+        {
+          platform: 'win32',
+          execPath: SCOOP_EXEC,
+          pathExists: filesystemWith(
+            'C:\\Users\\j\\scoop\\apps\\mangostudio\\current\\mangostudio.exe'
+          ),
+        }
+      )
+    ).toBe('C:\\Users\\j\\scoop\\apps\\mangostudio\\current\\mangostudio.exe');
+  });
+
+  it('reads a global Scoop install and a different drive the same way', () => {
+    expect(
+      restartLauncher(
+        { manager: 'scoop' },
+        {
+          platform: 'win32',
+          execPath: 'D:\\ProgramData\\scoop\\apps\\mangostudio\\0.1.1\\mangostudio.exe',
+          pathExists: () => true,
+        }
+      )
+    ).toBe('D:\\ProgramData\\scoop\\apps\\mangostudio\\current\\mangostudio.exe');
+  });
+
+  it('offers no launcher the manager did not leave on disk, so the restart can fall back', () => {
+    const none = filesystemWith();
+    expect(
+      restartLauncher(
+        { manager: 'homebrew' },
+        { platform: 'darwin', execPath: BREW_EXEC, pathExists: none }
+      )
+    ).toBeUndefined();
+    expect(
+      restartLauncher(
+        { manager: 'pnpm' },
+        { platform: 'linux', execPath: PNPM_EXEC, pathExists: none }
+      )
+    ).toBeUndefined();
+    expect(
+      restartLauncher(
+        { manager: 'scoop' },
+        { platform: 'win32', execPath: SCOOP_EXEC, pathExists: none }
+      )
+    ).toBeUndefined();
+  });
+
+  it('offers no launcher when the executable path does not have the manager layout', () => {
+    const anything = (): boolean => true;
+    expect(
+      restartLauncher(
+        { manager: 'homebrew' },
+        { platform: 'linux', execPath: '/usr/local/bin/mangostudio', pathExists: anything }
+      )
+    ).toBeUndefined();
+    expect(
+      restartLauncher(
+        { manager: 'pnpm' },
+        { platform: 'linux', execPath: '/usr/local/bin/mangostudio', pathExists: anything }
+      )
+    ).toBeUndefined();
+    expect(
+      restartLauncher(
+        { manager: 'scoop' },
+        { platform: 'win32', execPath: 'C:\\tools\\mangostudio.exe', pathExists: anything }
+      )
+    ).toBeUndefined();
+  });
+
+  it('leaves the Windows pnpm shim to the delegate waiter: a .cmd cannot be spawned with the restart argv', () => {
+    expect(
+      restartLauncher(
+        { manager: 'pnpm' },
+        {
+          platform: 'win32',
+          execPath:
+            'C:\\Users\\j\\AppData\\Local\\pnpm\\global\\5\\.pnpm\\@mangostudio+cli-win32-x64@0.1.1\\node_modules\\@mangostudio\\cli-win32-x64\\mangostudio.exe',
+          pathExists: () => true,
+        }
+      )
+    ).toBeUndefined();
+  });
+
+  it('keeps npm and bun on their own path, which carries no version, and never offers the .js wrapper', () => {
+    for (const manager of ['npm', 'bun'] as const) {
+      expect(
+        restartLauncher(
+          { manager, launcherPath: NPM },
+          { platform: 'linux', execPath: '/x/mangostudio', pathExists: () => true }
+        )
+      ).toBeUndefined();
     }
   });
 
-  it('has nothing to name for a manager that leaves no marker', () => {
-    expect(restartLauncher({ manager: 'homebrew' }, 'darwin')).toBeUndefined();
-    expect(restartLauncher({ manager: 'self-managed' }, 'linux')).toBeUndefined();
+  it('has nothing to name for self-managed or unknown installs', () => {
+    for (const manager of ['self-managed', 'unknown', 'source', 'docker'] as const) {
+      expect(
+        restartLauncher(
+          { manager },
+          { platform: 'linux', execPath: BREW_EXEC, pathExists: () => true }
+        )
+      ).toBeUndefined();
+    }
   });
 });
 

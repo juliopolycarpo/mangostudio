@@ -273,7 +273,9 @@ Imports entre workspaces usam nomes de pacote (`@mangostudio/shared`), nunca cam
 
 O código do browser importa constantes de UI e helpers puros pelos subpaths `environments/values`,
 `external-agents/values`, `library/values`, `runtime-home/values` e `generation/values`.
-Os limites de logs usam `machine/limits`. Por exemplo:
+Os limites de logs usam `machine/limits` e o limite de quadros SSE usa `streaming/limits`; o
+frontend importa só tipos do barrel `streaming`, pois importá-lo em runtime coloca todos os
+schemas de chunk no chunk de entrada. Por exemplo:
 
 ```ts
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';

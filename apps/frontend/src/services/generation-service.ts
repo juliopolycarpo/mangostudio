@@ -6,7 +6,8 @@ import type {
   GenerateImageResponse,
   RespondStreamBody,
 } from '@mangostudio/shared/generation';
-import { SSE_FRAME_MAX_CHARS, type StreamChunk } from '@mangostudio/shared/streaming';
+import type { StreamChunk } from '@mangostudio/shared/streaming';
+import { SSE_FRAME_MAX_CHARS } from '@mangostudio/shared/streaming/limits';
 import { DelimitedTextSplitter } from '@mangostudio/shared/utils/delimited-text-splitter';
 
 import { getApiBaseUrl } from '../lib/api-base-url';

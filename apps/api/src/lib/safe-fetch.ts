@@ -125,6 +125,16 @@ export interface SafeFetchOptions {
    * redirect target the caller did not choose would leak it there.
    */
   readonly headers?: Readonly<Record<string, string>>;
+  /**
+   * Credential headers for exactly one host. They go out only on a hop whose
+   * host equals `host`, so a redirect to anywhere else (a release asset CDN,
+   * say) is sent without them, and one back to `host` carries them again.
+   * Callers must keep the secret here and never in `headers`.
+   */
+  readonly credentialsForHost?: {
+    readonly host: string;
+    readonly headers: Readonly<Record<string, string>>;
+  };
 }
 
 export interface SafeFetchResult {
@@ -260,11 +270,12 @@ async function requestOnce(
   options: SafeFetchOptions,
   signal: AbortSignal | undefined
 ): Promise<Response> {
+  const headers = headersForHop(url, options);
   try {
     return await deps.fetch(url, {
       redirect: 'manual',
       ...(signal && { signal }),
-      ...(options.headers && { headers: options.headers }),
+      ...(headers && { headers }),
     });
   } catch (error) {
     const abort = abortFailure(options, signal);
@@ -272,6 +283,16 @@ async function requestOnce(
     const detail = error instanceof Error ? error.message : 'Unknown network error.';
     throw new SafeFetchError(`Request failed: ${detail}`, 'network', undefined, detail);
   }
+}
+
+/** The headers for one hop: the shared ones, plus the credential only when this hop is its host. */
+function headersForHop(
+  url: URL,
+  options: SafeFetchOptions
+): Readonly<Record<string, string>> | undefined {
+  const { credentialsForHost } = options;
+  if (url.host !== credentialsForHost?.host) return options.headers;
+  return { ...options.headers, ...credentialsForHost.headers };
 }
 
 async function assertAllowedAddress(deps: SafeFetchDeps, url: URL): Promise<void> {

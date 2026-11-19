@@ -432,6 +432,21 @@ export function getCargoTargetDir(env: NodeJS.ProcessEnv = process.env): string 
   return dir && dir.length > 0 ? dir : undefined;
 }
 
+/**
+ * The token for `api.github.com` lookups, read the way `install.sh` and
+ * `install.ps1` read it: `GITHUB_TOKEN`, else `GH_TOKEN`, with an empty value
+ * counting as unset (CI systems export an empty `GITHUB_TOKEN` when no secret
+ * is wired). A value holding whitespace or control characters is dropped, so
+ * the request goes out anonymous instead of failing to build its header; the
+ * value is never echoed.
+ */
+// Usage: getGithubApiToken({ GITHUB_TOKEN: 'ghp_x' }) // → "ghp_x"
+export function getGithubApiToken(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const token = env.GITHUB_TOKEN?.trim() || env.GH_TOKEN?.trim();
+  // eslint-disable-next-line no-control-regex -- control characters are exactly what is refused.
+  return token && !/[\s\u0000-\u001f\u007f]/.test(token) ? token : undefined;
+}
+
 /** What a build reports when no release stamped a version into it. */
 const DEVELOPMENT_VERSION = 'dev';
 

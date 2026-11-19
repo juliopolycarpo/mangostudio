@@ -244,8 +244,9 @@ describe('OverviewPage', () => {
     expect(await within(local).findByTestId('environment-toolchain-summary')).toHaveTextContent(
       'Node not installed · Bun 1.3.14'
     );
-    // remote-dev is disconnected, so its toolchain summary never fetches —
-    // a sleeping machine must not wake just because its card is on screen.
+    // Nothing probed remote-dev, and the summary never probes on its own, so
+    // its card has no line — a sleeping machine must not wake just because
+    // its card is on screen.
     expect(within(remote).queryByTestId('environment-toolchain-summary')).not.toBeInTheDocument();
     expect(within(remote).getByRole('button', { name: 'Connect' })).toBeInTheDocument();
     expect(within(remote).getByRole('button', { name: 'Edit name' })).toBeInTheDocument();

@@ -391,8 +391,15 @@ resolvem a pre-release canary mais recente na lista de releases do GitHub.
 Essa consulta é anônima por padrão e divide o limite de 60 requisições por hora
 do IP. Defina `GITHUB_TOKEN` (ou `GH_TOKEN`, se a primeira não existir) e os dois
 instaladores enviam `Authorization: Bearer <token>` somente a `api.github.com`;
-os downloads dos assets nunca recebem o token. O `mangostudio upgrade` do hub
-não repassa essas variáveis ao script embutido.
+os downloads dos assets nunca recebem o token. O hub lê as mesmas variáveis nas
+próprias chamadas a `api.github.com` (a verificação de atualização estável e a
+lista de releases canary usada pela verificação e por `mangostudio upgrade
+--canary`) e restringe o cabeçalho a esse host: ele é descartado em um
+redirecionamento para outro host e nunca vai para downloads de `github.com`. O
+`mangostudio upgrade` entrega ao script embutido um arquivo já baixado, então o
+script não faz chamada à API e não recebe as variáveis. Um hub iniciado com
+`serve -d` só as enxerga se elas sobreviverem ao ambiente destacado, o que hoje
+não acontece.
 
 Os canais publicam de forma independente após aprovação. Antes de declarar
 no-op, a verificação baixa os sete pacotes npm e compara arquivos, hashes e

@@ -12,7 +12,7 @@ import { HIDDEN_WINDOW } from '@mangostudio/shared/process';
 import { RUNTIME_CONFIG_ENV_KEYS } from '../lib/config';
 import { ensureRuntimeDirs, getServerLogPath } from '../lib/mango-paths';
 import { isStandaloneExecutable } from '../lib/runtime-paths';
-import { readState } from '../lib/server-state';
+import { readState, type ServerState } from '../lib/server-state';
 import type { HubExecutable } from '../modules/machine/domain/hub-executable';
 import { CliError } from './errors';
 import { confirmsHealthy } from './health';
@@ -52,16 +52,15 @@ export function restartExecutableOptions(
   executable: Pick<HubExecutable, 'pointer' | 'argv'>,
   launcherPath?: string
 ): Pick<DetachOptions, 'executable'> {
-  // A manager-owned install is launched through a stable shim
-  // (`~/.cargo/bin/mangostudio`) whose whole job is to run the version that
-  // manager has installed. `process.execPath` names the version directory
-  // this process came from, so after a delegated upgrade re-execing it starts
-  // the *old* build again — and Homebrew may have removed that directory
-  // outright when it cleaned the Cellar. The shim is the only path that
-  // survives the manager replacing what is underneath it. Callers pass the
-  // path through `restartLauncher`, which drops every launcher that spawns
-  // the binary as a child instead of becoming it — `confirmStarted` below
-  // matches pids, and a supervising launcher hands back the wrong one.
+  // A manager-owned install is launched through a path that follows the
+  // manager's upgrade (`~/.cargo/bin/mangostudio`, Homebrew's
+  // `<prefix>/bin/mangostudio`, ...). `process.execPath` names the version
+  // directory this process came from, so after a delegated upgrade re-execing
+  // it starts the *old* build again — and Homebrew may have removed that
+  // directory outright when it cleaned the Cellar. Callers pass the path
+  // through `restartLauncher`. A launcher that supervises the binary as a
+  // child is fine here: `confirmStarted` below accepts the hub it started
+  // rather than requiring the spawned pid.
   if (launcherPath) return { executable: [launcherPath] };
   return executable.pointer === 'current' ? { executable: executable.argv } : {};
 }
@@ -79,7 +78,11 @@ export interface DetachDeps {
 const START_TIMEOUT_MS = 5000;
 const POLL_INTERVAL_MS = 100;
 
-/** Spawn a detached server and resolve once it is healthy. // Usage: await spawnDetached(3001, 'localhost') */
+/**
+ * Spawn a detached server and resolve once it is healthy. `pid` is the hub's,
+ * which differs from the spawned process when the executable is a launcher
+ * that supervises the binary. // Usage: await spawnDetached(3001, 'localhost')
+ */
 export async function spawnDetached(
   port: number,
   host: string,
@@ -90,11 +93,16 @@ export async function spawnDetached(
   await ensureRuntimeDirs();
 
   const logFile = getServerLogPath(d.now());
+  const spawnedAt = d.now();
   const childPid = d.spawn(port, host, logFile, options);
 
   const budget = START_TIMEOUT_MS + (options.waitForPid ? RESTART_WAIT_TIMEOUT_MS : 0);
-  await confirmStarted({ pid: childPid, port, host, logFile }, d, budget);
-  return { pid: childPid, port, logFile };
+  const hubPid = await confirmStarted(
+    { pid: childPid, port, host, logFile, spawnedAt, predecessorPid: options.waitForPid },
+    d,
+    budget
+  );
+  return { pid: hubPid, port, logFile };
 }
 
 interface PendingChild {
@@ -102,18 +110,40 @@ interface PendingChild {
   port: number;
   host: string;
   logFile: string;
+  /** `now()` just before the spawn: a state file older than this was not written by the child. */
+  spawnedAt: number;
+  /** The hub this child replaces, whose state file may still be on disk. */
+  predecessorPid: number | undefined;
 }
 
 /**
- * Poll until the child is healthy, or fail fast if it dies or times out. A bind
- * to one explicit LAN address cannot be probed over loopback, so there the
- * state file naming this pid is the readiness signal — see `confirmsHealthy`.
+ * Whether a state file was written by the hub this spawn produced. The spawned
+ * pid is the hub when the executable becomes the binary; a launcher that runs
+ * the binary as a child (the pnpm shim, the Windows cargo shim) writes its
+ * child's pid instead, so a hub that is not the spawned process also counts
+ * when it started after the spawn and is not the predecessor. Both guards keep
+ * the old hub's leftover file from reading as the successor.
+ */
+function namesSpawnedHub(state: ServerState, child: PendingChild, d: DetachDeps): boolean {
+  if (state.pid === child.pid) return true;
+  return (
+    state.pid !== child.predecessorPid &&
+    state.startedAt >= child.spawnedAt &&
+    d.controller.isAlive(state.pid)
+  );
+}
+
+/**
+ * Poll until the hub the spawn produced is healthy, or fail fast if the
+ * spawned process dies or the budget runs out; resolves to the hub's pid. A
+ * bind to one explicit LAN address cannot be probed over loopback, so there
+ * the state file is the readiness signal — see `confirmsHealthy`.
  */
 async function confirmStarted(
   child: PendingChild,
   d: DetachDeps,
   timeoutMs: number
-): Promise<void> {
+): Promise<number> {
   const deadline = d.now() + timeoutMs;
 
   while (d.now() < deadline) {
@@ -121,8 +151,12 @@ async function confirmStarted(
       throw new CliError(`Server failed to start. See logs: ${child.logFile}`);
     }
     const state = await d.readState();
-    if (state?.pid === child.pid && (await d.confirmsHealthy(child.host, child.port))) {
-      return;
+    if (
+      state &&
+      namesSpawnedHub(state, child, d) &&
+      (await d.confirmsHealthy(child.host, child.port))
+    ) {
+      return state.pid;
     }
     await d.sleep(POLL_INTERVAL_MS);
   }

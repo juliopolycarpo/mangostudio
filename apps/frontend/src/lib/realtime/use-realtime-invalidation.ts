@@ -87,7 +87,9 @@ export function resetRealtimeInvalidations(): void {
  * Callers invalidate with their own `queryClient`, so this hook needs no
  * knowledge of query keys. Treat a `subscribed` signal as "anything cached for
  * this topic may be stale" — events published while the socket was down are lost
- * by design, so the ack is the barrier to refresh behind.
+ * by design, so the ack is the barrier to refresh behind. A query read after the
+ * ack's `requestedAt` is already past that barrier; `invalidateForSignal` applies
+ * that rule, so an ack does not refetch what the same page load just fetched.
  *
  * The socket is an optimization. Keep existing mutation invalidations and
  * refetch-on-reconnect exactly as they are: a permanently failing socket must
@@ -96,8 +98,8 @@ export function resetRealtimeInvalidations(): void {
  * Pass `null` while the topic is unknown (no chat selected yet, for instance).
  *
  * @example
- * useRealtimeInvalidation(ACTIVITY_TOPIC, 'activity-feed', () =>
- *   queryClient.invalidateQueries({ queryKey: activityKeys.all })
+ * useRealtimeInvalidation(ACTIVITY_TOPIC, 'activity-feed', (signal) =>
+ *   invalidateForSignal(queryClient, signal, { queryKey: activityKeys.all })
  * );
  */
 export function useRealtimeInvalidation(

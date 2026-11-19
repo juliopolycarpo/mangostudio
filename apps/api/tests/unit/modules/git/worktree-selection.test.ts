@@ -5,6 +5,7 @@ import type { GitWorktree } from '@mangostudio/shared/git';
 import type { ParsedWorktree } from '../../../../src/modules/git/domain/worktree-parser';
 import {
   findWorktree,
+  isSameDirectory,
   isSameWorktreePath,
   isWithinWorktree,
   markBoundByOtherChat,
@@ -227,6 +228,29 @@ describe('isWithinWorktree', () => {
   it('is false when either side has no spelling to compare', () => {
     expect(isWithinWorktree([], ['/work/feature'], posixPaths)).toBe(false);
     expect(isWithinWorktree(['/work/feature'], [], posixPaths)).toBe(false);
+  });
+});
+
+describe('isSameDirectory', () => {
+  it('matches two spellings of one directory through any pairing', () => {
+    expect(isSameDirectory(['/home/me/wt', '/data/wt'], ['/data/wt'], posixPaths)).toBe(true);
+    expect(isSameDirectory(['/data/wt'], ['/home/me/wt', '/data/wt'], posixPaths)).toBe(true);
+  });
+
+  it('does not match a parent, a child, or a sibling of the same prefix', () => {
+    expect(isSameDirectory(['/work/feature'], ['/work'], posixPaths)).toBe(false);
+    expect(isSameDirectory(['/work/feature/pkg'], ['/work/feature'], posixPaths)).toBe(false);
+    expect(isSameDirectory(['/work/feature-two'], ['/work/feature'], posixPaths)).toBe(false);
+  });
+
+  it('folds case only where the target does', () => {
+    expect(isSameDirectory(['c:\\repo'], ['C:\\Repo'], pathsFor('win32'))).toBe(true);
+    expect(isSameDirectory(['/Repo'], ['/repo'], posixPaths)).toBe(false);
+  });
+
+  it('is false when either side has no spelling to compare', () => {
+    expect(isSameDirectory([], ['/work'], posixPaths)).toBe(false);
+    expect(isSameDirectory(['/work'], [], posixPaths)).toBe(false);
   });
 });
 

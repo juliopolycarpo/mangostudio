@@ -1,7 +1,7 @@
 /**
  * The streaming turn against a MangoStudio-owned provider, in both shapes it
- * supports: a plain text stream, and a provider that runs its own tool loop and
- * emits `AgentEvent`s.
+ * supports: a plain text stream, and an agent-turn provider that emits
+ * `AgentEvent`s while MangoStudio runs the tool loop.
  *
  * These were written against Cursor, which is now deprecated and refuses every
  * turn. The pipeline they cover was never Cursor-specific, so they run against a
@@ -33,7 +33,9 @@ import {
 import {
   buildRespondStreamRequest,
   createTestStreamDb,
+  makeRegisteredTool,
   mockNoopTools,
+  mockToolsModule,
   mockVerifiedChatOwnership,
   parsePersistedParts,
   parseSseEvents,
@@ -43,6 +45,13 @@ import {
 const mockModule = moduleMockerFor(import.meta.dir);
 
 const realCatalog = { ...realCatalogNs };
+
+const READ_FILE_TOOL = makeRegisteredTool(
+  'read_file',
+  'Read a file from the workspace.',
+  () => Promise.resolve('# MangoStudio'),
+  { type: 'object', properties: { path: { type: 'string' } } }
+);
 
 let TEST_USER!: UserFixture;
 
@@ -125,7 +134,6 @@ async function mockAgentTurnProvider(
         streaming: true,
         reasoning: true,
         tools: true,
-        internalAgentTools: true,
         statefulContinuation: false,
       },
     }),
@@ -253,31 +261,30 @@ describe('POST /respond/stream — legacy text-stream provider', () => {
 });
 
 describe('POST /respond/stream — agent-turn provider', () => {
-  it('streams a full turn with real tool_call/tool_result parts and no internal-tool system event', async () => {
+  it('runs MangoStudio-managed tool calls across iterations with real tool_call/tool_result parts', async () => {
     const insertedMessages: Array<Record<string, unknown>> = [];
     const receivedRequests: AgentTurnRequest[] = [];
 
     await mockAgentTurnProvider(async function* stream(req) {
       receivedRequests.push(req);
       await Promise.resolve();
-      yield { type: 'reasoning_delta', text: 'Inspecting…' };
-      yield { type: 'tool_call_started', callId: 'mango-tool-1', name: 'read_file' };
-      yield {
-        type: 'tool_call_completed',
-        callId: 'mango-tool-1',
-        name: 'read_file',
-        arguments: '{"path":"README.md"}',
-      };
-      yield {
-        type: 'tool_result',
-        callId: 'mango-tool-1',
-        name: 'read_file',
-        result: '# MangoStudio',
-        isError: false,
-      };
+      if (receivedRequests.length === 1) {
+        yield { type: 'reasoning_delta', text: 'Inspecting…' };
+        yield { type: 'tool_call_started', callId: 'mango-tool-1', name: 'read_file' };
+        yield {
+          type: 'tool_call_completed',
+          callId: 'mango-tool-1',
+          name: 'read_file',
+          arguments: '{"path":"README.md"}',
+        };
+        yield { type: 'turn_completed' };
+        return;
+      }
       yield { type: 'assistant_text_delta', text: 'The README describes MangoStudio.' };
       yield { type: 'turn_completed' };
     }, insertedMessages);
+    // The orchestrator, not the provider, executes the call and feeds the result back.
+    await mockToolsModule([READ_FILE_TOOL]);
     await mockModule('../../../src/db/database', mockStreamDb(insertedMessages));
 
     const { app, restore } = createAuthenticatedApiTestApp(TEST_USER, respondStreamRoutes);
@@ -314,24 +321,30 @@ describe('POST /respond/stream — agent-turn provider', () => {
     expect(sseEvents.find((event) => event.type === 'system_event')).toBeUndefined();
     expect(sseEvents.find((event) => event.type === 'done')).toBeDefined();
 
-    // Provider ran its internal loop: exactly one iteration, no fed-back results.
-    expect(receivedRequests).toHaveLength(1);
+    // Two iterations: the first has no results, the second carries the executed call's output.
+    expect(receivedRequests).toHaveLength(2);
     expect(receivedRequests[0]?.toolResults).toBeUndefined();
     expect(receivedRequests[0]?.chatId).toBe('stream-agent-chat');
+    expect(receivedRequests[1]?.toolResults).toHaveLength(1);
 
     const aiMessage = insertedMessages.find((message) => message.role === 'ai');
     expect(aiMessage).toBeDefined();
     const parts = parsePersistedParts(aiMessage?.parts);
-    expect(parts).toContainEqual({
-      type: 'tool_call',
-      toolCallId: 'mango-tool-1',
-      name: 'read_file',
-      args: { path: 'README.md' },
-    });
+    // The executing owner stamps an `execution` snapshot on the call; a provider-supplied
+    // result would not have one.
+    expect(parts).toContainEqual(
+      expect.objectContaining({
+        type: 'tool_call',
+        toolCallId: 'mango-tool-1',
+        name: 'read_file',
+        args: { path: 'README.md' },
+        execution: expect.objectContaining({ status: 'succeeded', source: 'builtin' }),
+      })
+    );
     expect(parts).toContainEqual({
       type: 'tool_result',
       toolCallId: 'mango-tool-1',
-      content: '# MangoStudio',
+      content: JSON.stringify('# MangoStudio'),
       isError: false,
     });
     expect(parts.some((part) => part.type === 'system_event')).toBe(false);

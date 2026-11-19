@@ -162,7 +162,9 @@ const openAICompatibleProvider: AIProvider = {
 
   async generateText(req: TextGenerationRequest): Promise<TextGenerationResult> {
     const { client } = await lifecycle.prepareRuntime(req.userId, req.modelName);
-    return generateChatCompletionText(client, req, 'No text returned from OpenAI-compatible API.');
+    return generateChatCompletionText(client, req, 'No text returned from OpenAI-compatible API.', {
+      call: 'OpenAI-compatible generateText',
+    });
   },
 
   async *generateAgentTurnStream(req: AgentTurnRequest): AsyncIterable<AgentEvent> {

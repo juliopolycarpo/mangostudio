@@ -11,6 +11,7 @@ import {
   buildPersistedContextSnapshot,
   computeContextSnapshot,
 } from '../../../services/providers/core/context-policy';
+import { generateTextWithIdleDeadline } from '../../../services/providers/core/generate-text-with-idle-deadline';
 import {
   getProvider,
   getProviderForModel,
@@ -56,6 +57,8 @@ export interface CompactChatInput {
   chatId: string;
   userId: string;
   model?: string;
+  /** Aborts the vendor call, e.g. when the HTTP client disconnects. */
+  signal?: AbortSignal;
 }
 
 interface OwnedChat {
@@ -123,6 +126,7 @@ async function generateSummary(params: {
   userId: string;
   chatId: string;
   environmentId: string;
+  signal?: AbortSignal;
   db: Kysely<Database>;
 }): Promise<string> {
   const history = await loadHistory(params.chatId, {}, params.db);
@@ -131,7 +135,9 @@ async function generateSummary(params: {
   const provider = params.providerType
     ? getProvider(params.providerType)
     : await getProviderForModel(params.modelName, params.userId);
-  const result = await provider.generateText({
+  // A summary of a long chat can take minutes, so it is bounded by the vendor's
+  // silence rather than by a whole-response deadline.
+  const result = await generateTextWithIdleDeadline(provider, {
     userId: params.userId,
     environmentId: params.environmentId,
     chatId: params.chatId,
@@ -139,6 +145,7 @@ async function generateSummary(params: {
     prompt: formatSummaryPrompt(history),
     systemPrompt: SUMMARY_SYSTEM_PROMPT,
     modelName: params.modelName,
+    signal: params.signal,
     generationConfig: {
       thinkingEnabled: false,
       reasoningEffort: 'medium',
@@ -215,6 +222,7 @@ export async function compactChatUseCase(
     userId: input.userId,
     chatId: input.chatId,
     environmentId: chat.environmentId,
+    signal: input.signal,
     db,
   });
   const result = await persistSummaryMessage({
@@ -246,6 +254,7 @@ export async function summarizeToNewChatUseCase(
     userId: input.userId,
     chatId: input.chatId,
     environmentId: sourceChat.environmentId,
+    signal: input.signal,
     db,
   });
   const nextChat = await createChat(

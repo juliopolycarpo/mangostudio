@@ -146,6 +146,7 @@ pub struct InvocationConsent {
 /// assert!(consent.granted);
 /// assert!(consent.recorded);
 /// assert!(consent.allow.shell);
+/// # std::fs::remove_dir_all(&home).unwrap();
 /// ```
 #[must_use]
 pub fn consent_by_invocation(

@@ -11,6 +11,7 @@ import {
   isAttachmentSupportedByProvider,
   unsupportedAttachmentNotes,
 } from '../core/attachment-content';
+import { TEXT_GENERATION_TIMEOUT_MS, withGenerationDeadline } from '../core/generation-deadline';
 import type {
   GenerationConfig,
   ModelCapabilities,
@@ -29,6 +30,13 @@ interface GeminiTextAttachmentOptions {
   modelCapabilities?: ModelCapabilities;
 }
 
+/** The caller's abort and the deadline that bounds one non-streaming Gemini reply. */
+interface GeminiTextDeadline {
+  readonly signal?: AbortSignal;
+  /** {@link TEXT_GENERATION_TIMEOUT_MS} when omitted. */
+  readonly timeoutMs?: number;
+}
+
 /**
  * Generates a text response using the Gemini API.
  * Reconstructs conversation context from persisted messages.
@@ -40,7 +48,8 @@ export async function generateGeminiText(
   systemPrompt?: string,
   modelName?: string,
   attachmentOptions: GeminiTextAttachmentOptions = {},
-  client?: ReturnType<typeof createGeminiClient>
+  client?: ReturnType<typeof createGeminiClient>,
+  deadline: GeminiTextDeadline = {}
 ): Promise<string> {
   if (!modelName) {
     throw new Error('No Gemini text model was provided.');
@@ -63,7 +72,17 @@ export async function generateGeminiText(
     config.systemInstruction = systemPrompt;
   }
 
-  const response = await ai.models.generateContent({ model: modelName, contents, config });
+  const response = await withGenerationDeadline(
+    'Gemini generateText',
+    deadline.signal,
+    deadline.timeoutMs ?? TEXT_GENERATION_TIMEOUT_MS,
+    (signal) =>
+      ai.models.generateContent({
+        model: modelName,
+        contents,
+        config: { ...config, abortSignal: signal },
+      })
+  );
 
   if (response.promptFeedback?.blockReason) {
     throw new Error(`Prompt blocked: ${response.promptFeedback.blockReason}`);
