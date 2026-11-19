@@ -167,7 +167,7 @@ export const ListChatsQuerySchema = Type.Object({
   cursor: Type.Optional(Type.String()),
   /**
    * Keeps only the chats whose title, workdir folder name or runner label
-   * contains this text (compared without regard to ASCII case), newest first
+   * contains this text (compared without regard to case or accents), newest first
    * and paged like the whole list. Surrounding whitespace is ignored and a blank
    * value lists everything. At most `CHAT_SEARCH_MAX_LENGTH` characters, else 422.
    */

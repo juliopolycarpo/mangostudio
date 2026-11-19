@@ -31,6 +31,7 @@ import type {
 
 import { getDb } from '../../../src/db/database';
 import { workspaceCargoTargetDir } from '../../../src/lib/runtime-paths';
+import { chatSearchKey } from '../../../src/modules/chats/domain/chat-search-key';
 import { createExternalApprovalRegistry } from '../../../src/modules/external-agents/application/external-approval-registry';
 import { createExternalCommandCatalogCache } from '../../../src/modules/external-agents/application/external-command-catalog-cache';
 import {
@@ -176,6 +177,12 @@ export async function insertCursorChat(
       runnerKind: 'external',
       runnerTargetId: 'cursor',
       workdir,
+      searchText: chatSearchKey({
+        title: 'rust external-agent qualification',
+        workdir,
+        runnerKind: 'external',
+        runnerTargetId: 'cursor',
+      }),
       environmentId,
     })
     .execute();

@@ -2,6 +2,7 @@ import { fixtures } from '@mangostudio/shared/test-utils';
 import type { SecretSource } from '@mangostudio/shared/types';
 
 import { getDb } from '../../../src/db/database';
+import { chatSearchKey } from '../../../src/modules/chats/domain/chat-search-key';
 
 export interface UserFixture {
   id: string;
@@ -136,6 +137,12 @@ export async function insertTestChat(
       userId: chat.userId,
       runnerKind: 'mangostudio',
       runnerAgentId: 'default',
+      searchText: chatSearchKey({
+        title: chat.title,
+        workdir: null,
+        runnerKind: 'mangostudio',
+        runnerTargetId: null,
+      }),
     })
     .execute();
 
