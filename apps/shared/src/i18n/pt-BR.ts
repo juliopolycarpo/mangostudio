@@ -4492,6 +4492,21 @@ export const messages = {
       lineNumbersUnobserved:
         'Os números de linha de "{path}" nunca foram observados: a última leitura foi uma visão de bytes (hex ou base64), que não atribui numeração. Leia o arquivo novamente como texto com read_file primeiro e então tente substituir este trecho.',
     },
+    retry: {
+      action: 'Tentar de novo',
+      retrying: 'Tentando de novo…',
+      confirmTitle: 'Executar {tool} novamente?',
+      confirmDescription:
+        'A chamada roda de novo com os mesmos argumentos e pode alterar o que a primeira execução já alterou.',
+      confirmDescriptionOutcomeUnknown:
+        'A primeira execução pode já ter surtido efeito antes de parar. Rodar de novo pode repetir esse efeito.',
+      argumentsLabel: 'Argumentos',
+      noArguments: 'Sem argumentos',
+      confirmAction: 'Executar novamente',
+      cancel: 'Cancelar',
+      failed: 'Não foi possível tentar a chamada de novo.',
+      byYou: 'Reexecutada por você',
+    },
   },
 
   errors: {

@@ -107,47 +107,29 @@ export async function resolveTurnContext(
     }));
 
   const { modelId, providerType } = resolvedModel;
-  const workdir = chat.workdir ?? undefined;
 
   const provider = providerType
     ? getProvider(providerType)
     : await getProviderForModel(modelId, input.userId);
-  const [runtimeClient, environmentName] = await Promise.all([
-    getRuntimeClient(input.userId, chat.environmentId),
-    resolveEnvironmentDisplayName(input.userId, chat.environmentId),
-  ]);
-
-  const [agentRuntime, appSettings] = await Promise.all([
-    resolveAgentRuntime({
-      db,
+  const {
+    workdir,
+    workdirPolicy,
+    agentRuntime,
+    multiAgentSettings,
+    delegateToolAvailable,
+    toolDefinitions,
+    allowedToolNames,
+  } = await resolveTurnToolRuntime(
+    {
+      chat,
       userId: input.userId,
       agentId: requestedAgentId,
+      profile: resolvedAgentProfile,
       provider: provider.providerType,
       requestRuntimeSettings: getRequestRuntimeSettings(provider.providerType, input),
-      profile: resolvedAgentProfile,
-      runtimeManifest: runtimeClient.manifest,
-      environmentId: chat.environmentId,
-      environmentName,
-    }),
-    getAppSettings(db, input.userId),
-  ]);
-
-  const multiAgentSettings = appSettings.multiAgentSettings;
-  const restrictToolsToWorkdir = resolveEffectiveRestrictToolsToWorkdir(
-    appSettings.workspaceSettings?.restrictToolsToWorkdir ??
-      DEFAULT_WORKSPACE_SETTINGS.restrictToolsToWorkdir,
-    chat.restrictToolsToWorkdir
+    },
+    db
   );
-  const workdirPolicy = buildWorkdirPolicy(workdir, restrictToolsToWorkdir);
-  const delegateToolAvailable = shouldExposeDelegateTool({
-    profile: agentRuntime.profile,
-    settings: multiAgentSettings,
-  });
-
-  const toolDefinitions = agentRuntime.toolDefinitions.filter(
-    (tool) => tool.name !== DELEGATE_TO_AGENT_TOOL_NAME || delegateToolAvailable
-  );
-  const allowedToolNames = new Set(toolDefinitions.map((tool) => tool.name));
 
   let effectiveSystemPrompt = agentRuntime.effectiveSystemPrompt;
   if (
@@ -196,6 +178,86 @@ export async function resolveTurnContext(
     delegateToolAvailable,
     effectiveSystemPrompt,
     continuationSystemPrompt,
+  };
+}
+
+export interface TurnToolRuntimeInput {
+  chat: OwnedChatRecord;
+  userId: string;
+  agentId: AgentId;
+  profile: AgentProfile;
+  provider: ProviderType;
+  requestRuntimeSettings?: Partial<ProviderRuntimeSettings>;
+}
+
+export interface TurnToolRuntime {
+  workdir: string | undefined;
+  workdirPolicy: WorkdirPolicy | undefined;
+  agentRuntime: ResolvedAgentRuntime;
+  multiAgentSettings: MultiAgentSettings;
+  delegateToolAvailable: boolean;
+  toolDefinitions: ToolDefinition[];
+  allowedToolNames: Set<string>;
+}
+
+/**
+ * Everything a turn needs to decide which tools may run and under what limits:
+ * the agent's resolved runtime for this chat's machine, the workdir policy, and
+ * the allow-list. It needs no model or prompt, so a tool-only turn (a user's
+ * retry of one call) resolves the same allow-list and settings a model turn does.
+ *
+ * // Usage: const { agentRuntime, allowedToolNames } = await resolveTurnToolRuntime(input, db);
+ */
+export async function resolveTurnToolRuntime(
+  input: TurnToolRuntimeInput,
+  db: Kysely<Database>
+): Promise<TurnToolRuntime> {
+  const { chat } = input;
+  const workdir = chat.workdir ?? undefined;
+  const [runtimeClient, environmentName] = await Promise.all([
+    getRuntimeClient(input.userId, chat.environmentId),
+    resolveEnvironmentDisplayName(input.userId, chat.environmentId),
+  ]);
+
+  const [agentRuntime, appSettings] = await Promise.all([
+    resolveAgentRuntime({
+      db,
+      userId: input.userId,
+      agentId: input.agentId,
+      provider: input.provider,
+      requestRuntimeSettings: input.requestRuntimeSettings,
+      profile: input.profile,
+      runtimeManifest: runtimeClient.manifest,
+      environmentId: chat.environmentId,
+      environmentName,
+    }),
+    getAppSettings(db, input.userId),
+  ]);
+
+  const multiAgentSettings = appSettings.multiAgentSettings;
+  const restrictToolsToWorkdir = resolveEffectiveRestrictToolsToWorkdir(
+    appSettings.workspaceSettings?.restrictToolsToWorkdir ??
+      DEFAULT_WORKSPACE_SETTINGS.restrictToolsToWorkdir,
+    chat.restrictToolsToWorkdir
+  );
+  const workdirPolicy = buildWorkdirPolicy(workdir, restrictToolsToWorkdir);
+  const delegateToolAvailable = shouldExposeDelegateTool({
+    profile: agentRuntime.profile,
+    settings: multiAgentSettings,
+  });
+
+  const toolDefinitions = agentRuntime.toolDefinitions.filter(
+    (tool) => tool.name !== DELEGATE_TO_AGENT_TOOL_NAME || delegateToolAvailable
+  );
+  const allowedToolNames = new Set(toolDefinitions.map((tool) => tool.name));
+  return {
+    workdir,
+    workdirPolicy,
+    agentRuntime,
+    multiAgentSettings,
+    delegateToolAvailable,
+    toolDefinitions,
+    allowedToolNames,
   };
 }
 

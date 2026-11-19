@@ -102,6 +102,7 @@ export function register(): void {
       category: 'system',
       enabledByDefault: true,
       canDisable: true,
+      retrySafety: 'confirmation_required',
       requiredCapabilities: ['fsWrite'],
       defaultParameters: {
         allowedPaths: [],

@@ -27,6 +27,7 @@ import { ThinkingBlock } from './ThinkingBlock';
 import { TimelineItem } from './TimelineItem';
 import { TodoListPart } from './TodoListPart';
 import { planToolGroups } from './tool-call-grouping';
+import { collectRetriedCallIds, ToolCallRetryProvider } from './ToolCallRetryContext';
 
 /**
  * Folds each `tool_loop_exhausted` system event into the error part that follows it.
@@ -105,7 +106,8 @@ export function MessageParts({
   // own "Cancelled".
   const stoppedByUser =
     externalTurn?.type === 'external_turn' && externalTurn.terminalReason === 'cancelled-by-user';
-  return (
+  const retriedCallIds = useMemo(() => collectRetriedCallIds(parts), [parts]);
+  const timeline = (
     <>
       <div className="chat-timeline min-w-0">
         {parts.map((part, idx) => {
@@ -306,5 +308,13 @@ export function MessageParts({
       </div>
       {externalTurn?.type === 'external_turn' ? <ExternalTurnFooter part={externalTurn} /> : null}
     </>
+  );
+  // Without a chat there is nowhere to send a retry, so the cards stay inert.
+  return chatId === null ? (
+    timeline
+  ) : (
+    <ToolCallRetryProvider chatId={chatId} messageId={messageId} retriedCallIds={retriedCallIds}>
+      {timeline}
+    </ToolCallRetryProvider>
   );
 }

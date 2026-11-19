@@ -186,6 +186,8 @@ function buildSettings(label: string, description: string): RegisteredTool['sett
     // Command execution is powerful; require explicit opt-in.
     enabledByDefault: false,
     canDisable: true,
+    // A command can do anything; nothing here says a second run is harmless.
+    retrySafety: 'confirmation_required',
     requiredCapabilities: ['shell'],
     // The command runs in a child process, so there is no path list to snapshot
     // before the fact. By default nothing a checkpoint could restore afterwards;

@@ -20,6 +20,7 @@ import {
   withCheckpointSnapshot,
 } from './message-checkpoint-deltas';
 import { decodeMessageParts, readMessageParts } from './message-parts-codec';
+import { annotateUserRetriedToolResults } from './user-retry-annotation';
 
 export interface CreateMessageData {
   id: string;
@@ -458,14 +459,18 @@ export async function loadRichHistory(
   // A corrupt message stays in the history as plain text (`parts` undefined): its
   // `text` is the same denormalized copy `loadHistory` sends, and dropping the
   // turn would break the user/assistant alternation providers expect.
-  return rows.map((row) => ({
-    id: row.id,
-    role: row.role,
-    text: row.expandedText ?? row.text,
-    parts: readMessageParts(row),
-    providerState: row.providerState ?? null,
-    modelName: row.modelName ?? null,
-  }));
+  return rows.map((row) => {
+    const parts = readMessageParts(row);
+    return {
+      id: row.id,
+      role: row.role,
+      text: row.expandedText ?? row.text,
+      // The model is told which results the user, not it, asked for.
+      parts: parts && annotateUserRetriedToolResults(parts),
+      providerState: row.providerState ?? null,
+      modelName: row.modelName ?? null,
+    };
+  });
 }
 
 export async function verifyMessageOwnership(
