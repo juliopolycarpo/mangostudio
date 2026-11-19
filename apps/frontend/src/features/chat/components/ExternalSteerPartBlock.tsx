@@ -10,7 +10,8 @@
  *
  * `status` arrives resolved. The composer that sent this already knows
  * whether it was accepted before the part appears here at all, so there is no
- * pending state to render — only what happened.
+ * pending state to render — only what happened. That includes "unknown": a
+ * delivery the hub could not confirm either way stays that way after a reload.
  */
 
 import type { ExternalSteerPart } from '@mangostudio/shared/types';
@@ -46,6 +47,13 @@ export function ExternalSteerPartBlock({ part }: ExternalSteerPartBlockProps) {
           tone="danger"
           title={`${labels.rejectedLabel}${part.reasonCode ? ` — ${labels.reason[part.reasonCode]}` : ''}`}
         />
+      ) : null}
+      {/* Warning, not danger: the agent may well have taken it, so this is not
+          a refusal. The hint is what stops a blind resend delivering it twice. */}
+      {part.status === 'delivery-unknown' ? (
+        <Callout tone="warning" title={labels.deliveryUnknownLabel}>
+          {labels.deliveryUnknownHint}
+        </Callout>
       ) : null}
     </div>
   );

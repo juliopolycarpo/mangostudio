@@ -1345,6 +1345,33 @@ export const ExternalAgentSteerResultSchema = Type.Union([
 export type ExternalAgentSteerResult = Static<typeof ExternalAgentSteerResultSchema>;
 
 /**
+ * What the hub answers when it cannot tell whether a steer reached the agent:
+ * the hub's deadline passed, the connection closed under the call, or the
+ * runtime answered with an error that does not prove the vendor was never
+ * called.
+ *
+ * Hub-only. The runtime never says this (it either answers or fails), so it is
+ * not a member of {@link ExternalAgentSteerResultSchema}, which the runtime
+ * contract also uses. It is not a rejection either: the agent may have taken
+ * the steer, and a rejection is final and invites a resend that would then
+ * deliver it twice.
+ */
+export const ExternalSteerDeliveryUnknownResultSchema = Type.Object(
+  { accepted: Type.Literal(false), deliveryUnknown: Type.Literal(true) },
+  { additionalProperties: false }
+);
+export type ExternalSteerDeliveryUnknownResult = Static<
+  typeof ExternalSteerDeliveryUnknownResultSchema
+>;
+
+/** The steer route's answer: the runtime's result, or the hub's "delivery unknown". */
+export const ExternalSteerResponseSchema = Type.Union([
+  ExternalAgentSteerResultSchema,
+  ExternalSteerDeliveryUnknownResultSchema,
+]);
+export type ExternalSteerResponse = Static<typeof ExternalSteerResponseSchema>;
+
+/**
  * What a native review is pointed at.
  *
  * A discriminated union with one member, deliberately. Codex's own

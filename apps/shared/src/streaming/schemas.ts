@@ -577,7 +577,7 @@ const SSEExternalAccountLimitsEventSchema = Type.Object(
  * something — so it is built directly by the turn controller, the same way
  * `external_session_started` and `external_turn_completed` are. One chunk per
  * attempt: the durable record starts `accepted` optimistically and is
- * corrected in place on a rejection, but the client only needs the resolved
+ * corrected in place on a rejection or an unknown delivery, but the client only needs the resolved
  * outcome, not the intermediate state nobody could have acted on anyway.
  */
 const SSEExternalSteerEventSchema = Type.Union([
@@ -598,6 +598,17 @@ const SSEExternalSteerEventSchema = Type.Union([
       text: Type.String(),
       status: Type.Literal('rejected'),
       reasonCode: ExternalSteerRejectionReasonSchema,
+      done: Type.Literal(false),
+    },
+    { additionalProperties: false }
+  ),
+  /** The hub cannot tell whether the agent got the steer; see `ExternalSteerPart`. */
+  Type.Object(
+    {
+      type: Type.Literal('external_steer'),
+      clientMessageId: Type.String(),
+      text: Type.String(),
+      status: Type.Literal('delivery-unknown'),
       done: Type.Literal(false),
     },
     { additionalProperties: false }

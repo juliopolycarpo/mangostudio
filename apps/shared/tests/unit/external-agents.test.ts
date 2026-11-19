@@ -37,7 +37,9 @@ import {
   ExternalIdentityIsolationSchema,
   externalRemedyFor,
   externalRemedyForError,
+  ExternalSteerDeliveryUnknownResultSchema,
   ExternalSteerRejectionReasonSchema,
+  ExternalSteerResponseSchema,
   NO_EXTERNAL_AGENT_CAPABILITIES,
   normalizeApprovalRouting,
   normalizePermissionLevel,
@@ -422,6 +424,35 @@ describe('steering', () => {
   it('rejects an unrecognized reasonCode', () => {
     expect(Value.Check(ExternalSteerRejectionReasonSchema, 'turn-already-completed')).toBe(true);
     expect(Value.Check(ExternalSteerRejectionReasonSchema, 'made-up')).toBe(false);
+  });
+
+  it('keeps delivery-unknown out of the runtime contract and in the hub route response', () => {
+    const unknown = { accepted: false, deliveryUnknown: true };
+
+    // The runtime either answers or fails: it never reports "unknown", and the
+    // reason set the runtime contract shares stays refusals only.
+    expect(Value.Check(ExternalAgentSteerResultSchema, unknown)).toBe(false);
+    expect(Value.Check(ExternalSteerRejectionReasonSchema, 'delivery-unknown')).toBe(false);
+    expect(Value.Check(ExternalSteerDeliveryUnknownResultSchema, unknown)).toBe(true);
+    expect(Value.Check(ExternalSteerResponseSchema, unknown)).toBe(true);
+    expect(Value.Check(ExternalSteerResponseSchema, { accepted: true })).toBe(true);
+    expect(
+      Value.Check(ExternalSteerResponseSchema, { accepted: false, reasonCode: 'id-reused' })
+    ).toBe(true);
+  });
+
+  it('keeps the unknown-delivery result closed', () => {
+    for (const value of [
+      { accepted: false, deliveryUnknown: false },
+      { accepted: true, deliveryUnknown: true },
+      { accepted: false, deliveryUnknown: true, reasonCode: 'turn-not-steerable' },
+      { accepted: false },
+    ]) {
+      expect(
+        Value.Check(ExternalSteerDeliveryUnknownResultSchema, value),
+        `(steer response): expected ${JSON.stringify(value)} to be refused as an unknown-delivery result`
+      ).toBe(false);
+    }
   });
 });
 

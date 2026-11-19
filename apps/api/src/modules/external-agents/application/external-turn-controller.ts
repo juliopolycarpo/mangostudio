@@ -38,12 +38,12 @@ import {
   type ExternalAgentError,
   type ExternalAgentEvent,
   ExternalAgentEventSchema,
-  type ExternalAgentSteerResult,
   type ExternalAgentTargetId,
   type ExternalApprovalRequest,
   type ExternalConversationResetReason,
   type ExternalReviewTarget,
   type ExternalSteerRejectionReason,
+  type ExternalSteerResponse,
   type ExternalTurnTerminalReason,
   type ExternalUsage,
 } from '@mangostudio/shared/external-agents';
@@ -259,7 +259,7 @@ interface ExternalTurnObserver {
   onSteer?(steer: {
     readonly clientMessageId: string;
     readonly text: string;
-    readonly status: 'accepted' | 'rejected';
+    readonly status: 'accepted' | 'rejected' | 'delivery-unknown';
     readonly reasonCode?: ExternalSteerRejectionReason;
   }): void;
   onTerminal?(reason: ExternalTurnTerminalReason, error?: ExternalAgentError): void;
@@ -478,13 +478,20 @@ export interface ExternalTurnController {
    * call. A repeat with different text under the same id is `id-reused`
    * rather than an answer to either attempt — it is a composer edit, not the
    * retry the id exists to make safe.
+   *
+   * A failure that does not say whether the vendor got the steer (the hub's
+   * deadline, a connection closed under the call, an error the runtime
+   * answered) resolves to `{ accepted: false, deliveryUnknown: true }` rather
+   * than throwing, and the part is recorded `delivery-unknown`. The id keeps
+   * that answer: the runtime drops its own steer receipt when the vendor call
+   * fails, so dispatching the id again could deliver the steer twice.
    */
   steer(input: {
     readonly userId: string;
     readonly chatId: string;
     readonly clientMessageId: string;
     readonly text: string;
-  }): Promise<ExternalAgentSteerResult>;
+  }): Promise<ExternalSteerResponse>;
 }
 
 /**
@@ -514,15 +521,15 @@ interface LiveExternalTurn {
    *
    * The text travels with the promise so a repeat under the same id is only
    * ever answered from cache when it repeats the same text too — the
-   * idempotent retry a lost acknowledgement legitimately causes. A promise
-   * that rejected stays cached exactly the same way: the caller already
-   * recorded the attempt and may have already called the vendor, so a naive
-   * retry must reuse that failure rather than recording and dispatching a
+   * idempotent retry a lost acknowledgement legitimately causes. An attempt
+   * whose delivery is unknown stays cached exactly the same way: the caller
+   * already recorded it and may have already called the vendor, so a naive
+   * retry must reuse that answer rather than recording and dispatching a
    * second one for an outcome the server never learned.
    */
   readonly steerAttempts: Map<
     string,
-    { readonly text: string; readonly promise: Promise<ExternalAgentSteerResult> }
+    { readonly text: string; readonly promise: Promise<ExternalSteerResponse> }
   >;
   /**
    * `clientMessageId`s whose durable write has happened but whose outcome has
@@ -1550,7 +1557,7 @@ export function createExternalTurnController(
         return await existing.promise;
       }
 
-      const attempt = (async (): Promise<ExternalAgentSteerResult> => {
+      const attempt = (async (): Promise<ExternalSteerResponse> => {
         // Marks every vendor event applied from here until this steer is
         // reported as durably-after it, so `onEnvelope` holds them back
         // instead of notifying a live listener out of the durable order.
@@ -1601,6 +1608,20 @@ export function createExternalTurnController(
           }
 
           const outcome = await resolveSteerOutcome(live, input);
+          if ('deliveryUnknown' in outcome) {
+            live.transcript.resolveSteerDeliveryUnknown(input.clientMessageId);
+            // Best effort, unlike the rejection below: the answer is already
+            // decided, and a database error here must not turn it back into a
+            // thrown failure that a same-id retry would replay as a 5xx. The
+            // turn's own final write carries the correction either way.
+            await live.writer.write({ force: true });
+            live.observer?.onSteer?.({
+              clientMessageId: input.clientMessageId,
+              text: input.text,
+              status: 'delivery-unknown',
+            });
+            return outcome;
+          }
           if (!outcome.accepted) {
             live.transcript.resolveSteerRejected(input.clientMessageId, outcome.reasonCode);
             await live.writer.writeRequired();
@@ -1618,9 +1639,9 @@ export function createExternalTurnController(
         }
       })();
       // Cached before it settles, and never deleted: a concurrent repeat
-      // shares this promise, and one that later throws stays cached too, so a
-      // retry reuses this same attempt instead of recording and dispatching a
-      // second one.
+      // shares this promise, and one whose delivery is unknown (or that throws
+      // before dispatch) stays cached too, so a retry reuses this same attempt
+      // instead of recording and dispatching a second one.
       live.steerAttempts.set(input.clientMessageId, { text: input.text, promise: attempt });
       return await attempt;
     },
@@ -1640,7 +1661,7 @@ export function createExternalTurnController(
 async function resolveSteerOutcome(
   live: { readonly handle: ExternalSessionHandle; readonly external: ActiveExternalTurn },
   input: { readonly clientMessageId: string; readonly text: string }
-): Promise<ExternalAgentSteerResult> {
+): Promise<ExternalSteerResponse> {
   if (!live.handle.capabilities.steering) return { accepted: false, reasonCode: 'not-supported' };
   const nativeTurnId = live.external.nativeTurnId;
   if (!nativeTurnId) return { accepted: false, reasonCode: 'turn-already-completed' };
@@ -1659,15 +1680,23 @@ async function resolveSteerOutcome(
     }
     // The request provably never reached a vendor, so this is a refusal like
     // any other: it settles through the caller's rejection path and the id's
-    // outcome is final. Any other failure leaves delivery unknown and is
-    // rethrown untouched; how that is recorded is an open owner decision.
+    // outcome is final.
     if (classifySubmissionFailure(error) === 'not-submitted') {
       // The closest closed reason that stays true: the turn may well still be
       // running, so `turn-already-completed` would say it had finished, and
       // `session-lost` would claim a loss the hub cannot prove.
       return { accepted: false, reasonCode: 'turn-not-steerable' };
     }
-    throw error;
+    // Any other failure (the hub's deadline, a connection closed under the
+    // call, an error the runtime answered) cannot say whether the vendor took
+    // the steer. It is neither accepted nor rejected, so it is reported as its
+    // own outcome and the caller records it; the cause stays in the log.
+    logger.warn('steer_delivery_unknown', {
+      sessionId: live.handle.sessionId,
+      clientMessageId: input.clientMessageId,
+      error: String(error),
+    });
+    return { accepted: false, deliveryUnknown: true };
   }
 }
 

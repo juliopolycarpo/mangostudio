@@ -42,6 +42,7 @@ import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors'
 import {
   ExternalAgentSteerResultSchema,
   ExternalReviewTargetSchema,
+  ExternalSteerResponseSchema,
   schemaMaxLengthFor,
 } from '@mangostudio/shared/external-agents';
 import { Elysia, status, t } from 'elysia';
@@ -205,7 +206,9 @@ export function createExternalAgentTurnRoutes(
         params: t.Object({ id: t.String({ minLength: 1, maxLength: 256 }) }),
         body: SteerBodySchema,
         response: {
-          200: ExternalAgentSteerResultSchema,
+          // Includes `{ accepted: false, deliveryUnknown: true }`: the hub
+          // learned that it cannot tell, which is an answer, not a failure.
+          200: ExternalSteerResponseSchema,
           401: ApiErrorResponseSchema,
           409: ExternalAgentSteerResultSchema,
         },
@@ -220,6 +223,10 @@ export function createExternalAgentTurnRoutes(
         // Every rejection reads as a conflict: the chat and the request are
         // both well-formed, but the turn this was addressed to is not there to
         // steer, right now, for whichever of the reasonCode's causes applies.
+        // An unknown delivery is not one: the request was fine and the turn may
+        // well have taken the steer, so it stays a 200 the client reads as
+        // "check the agent's reply", never a conflict it would treat as refused.
+        if ('deliveryUnknown' in result) return result;
         if (!result.accepted) return status(409, result);
         return result;
       }
