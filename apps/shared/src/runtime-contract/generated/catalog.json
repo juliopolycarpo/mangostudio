@@ -10806,6 +10806,9 @@
             "minLength": 1,
             "maxLength": 256
           },
+          "terminal": {
+            "type": "boolean"
+          },
           "event": {
             "anyOf": [
               {

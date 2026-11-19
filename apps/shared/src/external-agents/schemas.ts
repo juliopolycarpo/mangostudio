@@ -1533,6 +1533,18 @@ export const ExternalAgentEventEnvelopeSchema = Type.Object(
      * compatible.
      */
     idempotencyKey: Type.Optional(ExternalAgentOpaqueIdSchema),
+    /**
+     * The runtime's own statement that this event ends the turn for `nativeTurnId`, set on every
+     * event it treats as an ending (`completed`, `cancelled`, `error`, and any ending kind a later
+     * runtime adds). A hub honours it without interpreting `event`, so a turn whose last event is
+     * a kind this hub has never heard of still ends at once instead of waiting out silence.
+     *
+     * Absent means "not marked", never "not terminal": a runtime emits the key only to a hub that
+     * announced `HUB_TERMINAL_MARKER_CAPABILITY` (runtime-contract/manifest) in its hello. The envelope is closed, so a
+     * hub built before this key fails the whole frame check and drops the event; announcing the
+     * capability is the hub's promise that its schema declares the key.
+     */
+    terminal: Type.Optional(Type.Boolean()),
     event: ExternalAgentEventSchema,
   },
   { additionalProperties: false }

@@ -26,6 +26,27 @@ pub mod supervisor;
 pub(crate) mod turns;
 pub(crate) mod wire;
 
+/// Whether the hub said, in its hello, that its event envelope schema declares `terminal`.
+///
+/// The envelope is closed, so a hub built before the key drops any event that carries it. A runtime
+/// therefore marks terminal events only for a hub that announced this, and an older hub, which
+/// never does, keeps receiving envelopes it can read. The key is spelled as
+/// `HUB_TERMINAL_MARKER_CAPABILITY` in `apps/shared/src/runtime-contract/manifest.ts`.
+///
+/// # Example
+///
+/// ```ignore
+/// let reads = hub_reads_terminal_marker(&context.remote().capabilities);
+/// ```
+pub(crate) fn hub_reads_terminal_marker(
+    capabilities: &serde_json::Map<String, serde_json::Value>,
+) -> bool {
+    capabilities
+        .get("externalAgentTerminalMarker")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+}
+
 /// Whether the hub said, in its hello, that it withdrew this connection's
 /// external-agent isolation claim.
 ///
