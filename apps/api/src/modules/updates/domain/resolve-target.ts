@@ -46,6 +46,8 @@ export interface UpgradeTargetContext {
   readonly currentVersion: string;
   /** This build's own source commit, when it is a canary build. */
   readonly buildSha?: string;
+  /** Raises the `api.github.com` rate limit for the canary lookup; never sent to another host. */
+  readonly githubToken?: string;
 }
 
 /** Only refusal this resolver produces; every other refusal reason belongs to `upgrade-plan.ts`'s per-origin table. */
@@ -125,7 +127,7 @@ async function resolveCanaryLatest(
   // one immutable release per green commit, so a build's own tag names itself
   // and reading the target off the running version would resolve every upgrade
   // to the version already installed.
-  const tagVersion = await resolveLatestCanaryVersion(deps);
+  const tagVersion = await resolveLatestCanaryVersion(deps, context.githubToken);
   const manifest = await fetchCanaryManifestForTag(deps, tagVersion);
   const version = manifest?.version ?? tagVersion;
   const assetName = hubArchiveName(tagVersion, context.platformId);

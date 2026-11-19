@@ -50,7 +50,12 @@ import {
 } from '../../../cli/process-control';
 import { sleep } from '../../../cli/sleep';
 import { type BuildInfo, getBuildInfo, isKnownBuildSha } from '../../../lib/build-info';
-import { getConfig, getVersion, RUNTIME_CONFIG_ENV_KEYS } from '../../../lib/config';
+import {
+  getConfig,
+  getGithubApiToken,
+  getVersion,
+  RUNTIME_CONFIG_ENV_KEYS,
+} from '../../../lib/config';
 import { getUpgradeLogPath } from '../../../lib/mango-paths';
 import type { SafeFetchDeps } from '../../../lib/safe-fetch';
 import { readLiveState, readState, type ServerState } from '../../../lib/server-state';
@@ -638,6 +643,7 @@ async function runSelf(
   emit: EmitUpgradeEvent
 ): Promise<UpgradeReport> {
   const buildInfo = d.getBuildInfo();
+  const githubToken = getGithubApiToken(d.env);
   const context: UpgradeTargetContext = {
     platformId: d.platformId,
     currentVersion: d.getVersion(),
@@ -647,6 +653,7 @@ async function runSelf(
     // build with no BUILD_GIT_SHA stamped in — falling back to its version
     // check instead, the same as if this build genuinely had no sha to offer.
     ...(isKnownBuildSha(buildInfo) ? { buildSha: buildInfo.gitSha } : {}),
+    ...(githubToken ? { githubToken } : {}),
   };
   const resolved = await d.resolveUpgradeTarget(
     { channel, version: request.version, sha: request.sha },
