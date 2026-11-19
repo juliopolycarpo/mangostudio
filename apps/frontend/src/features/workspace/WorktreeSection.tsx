@@ -35,19 +35,15 @@ type WorktreeLabels = Messages['git']['worktrees'];
  * The repository's worktrees, listed under the Git panel's branch and change
  * groups.
  *
- * `repoRoot` is what the calling chat resolved to, which is how the row the
- * chat is working in is marked and kept out of reach of the remove button.
+ * The row the chat is working in is the one the server flags `isCurrent`; it is
+ * marked and kept out of reach of the remove button. The client does not
+ * compare paths itself, since the server's comparison honours the runtime's
+ * separators and casing and a string match here would not.
  *
  * @example
- * <WorktreeSection chatId={chatId} repoRoot={state.root} />
+ * <WorktreeSection chatId={chatId} />
  */
-export function WorktreeSection({
-  chatId,
-  repoRoot,
-}: {
-  readonly chatId: string;
-  readonly repoRoot: string;
-}) {
+export function WorktreeSection({ chatId }: { readonly chatId: string }) {
   const { t } = useI18n();
   const { toast } = useToast();
   const labels = t.git.worktrees;
@@ -112,7 +108,6 @@ export function WorktreeSection({
 
       <WorktreeList
         worktrees={worktrees}
-        repoRoot={repoRoot}
         loading={worktreesQuery.isLoading}
         error={worktreesQuery.error}
         pending={removeMutation.isPending}
@@ -146,7 +141,6 @@ export function WorktreeSection({
 
 function WorktreeList({
   worktrees,
-  repoRoot,
   loading,
   error,
   pending,
@@ -154,7 +148,6 @@ function WorktreeList({
   onRemove,
 }: {
   readonly worktrees: readonly GitWorktree[];
-  readonly repoRoot: string;
   readonly loading: boolean;
   readonly error: Error | null;
   readonly pending: boolean;
@@ -191,7 +184,7 @@ function WorktreeList({
         <WorktreeRow
           key={worktree.path}
           worktree={worktree}
-          isCurrent={worktree.path === repoRoot}
+          isCurrent={worktree.isCurrent}
           pending={pending}
           onRemove={() => onRemove(worktree)}
         />

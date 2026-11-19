@@ -77,6 +77,43 @@ describe('GitHub read service', () => {
     });
   });
 
+  /**
+   * The write controls hang off these two responses, so they say whether a write
+   * can run on this machine. The flag is read per request rather than stored with
+   * the cached payload: consent can change inside the cache window, and a
+   * refresh-less re-read should not keep offering a refused action.
+   */
+  it('reports whether writes can run on the pull request list and detail', async () => {
+    const stdout = { 'repo.view': repoOutput, 'pr.list': prListOutput };
+    const allowed = createService(new FakeGithubCli({ stdout, canMutate: true }));
+    const refused = createService(new FakeGithubCli({ stdout, canMutate: false }));
+
+    await expect(
+      allowed.listPullRequests({ ...repoRequest, filter: 'open', limit: 20 })
+    ).resolves.toMatchObject({ state: 'ok', canMutate: true });
+    await expect(
+      refused.listPullRequests({ ...repoRequest, filter: 'open', limit: 20 })
+    ).resolves.toMatchObject({ state: 'ok', canMutate: false });
+  });
+
+  it('answers the write flag from the current consent, not from the cached payload', async () => {
+    let canMutate = true;
+    const client = new FakeGithubCli({
+      stdout: { 'repo.view': repoOutput, 'pr.list': prListOutput },
+    });
+    client.canMutate = () => Promise.resolve(canMutate);
+    const reads = createService(client);
+    const request = { ...repoRequest, filter: 'open' as const, limit: 20 };
+
+    expect(await reads.listPullRequests(request)).toMatchObject({ canMutate: true });
+    canMutate = false;
+    const second = await reads.listPullRequests(request);
+
+    // Served from the cache (one `pr.list`), yet the flag follows consent.
+    expect(client.ids().filter((id) => id === 'pr.list')).toHaveLength(1);
+    expect(second).toMatchObject({ state: 'ok', canMutate: false });
+  });
+
   it('reports every non-ok state without ever running the command', async () => {
     const unavailable = createService(new FakeGithubCli({ available: false }));
     await expect(

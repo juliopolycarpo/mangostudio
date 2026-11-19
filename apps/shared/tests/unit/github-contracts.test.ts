@@ -416,7 +416,13 @@ describe('GitHub panel responses', () => {
   });
 
   it('carries a cached-at stamp on every read payload', () => {
-    const prs = { state: 'ok', cachedAt: 1_756_119_600_000, repo, prs: [prSummary] };
+    const prs = {
+      state: 'ok',
+      cachedAt: 1_756_119_600_000,
+      canMutate: true,
+      repo,
+      prs: [prSummary],
+    };
     expect(Value.Check(GithubPrsResponseSchema, prs)).toBe(true);
     const { cachedAt: _dropped, ...withoutStamp } = prs;
     expect(Value.Check(GithubPrsResponseSchema, withoutStamp)).toBe(false);
@@ -434,6 +440,7 @@ describe('GitHub panel responses', () => {
       Value.Check(GithubPrDetailResponseSchema, {
         state: 'ok',
         cachedAt: 1,
+        canMutate: true,
         repo,
         pr: prDetail,
       })
@@ -456,6 +463,25 @@ describe('GitHub panel responses', () => {
         truncated: false,
       })
     ).toBe(true);
+  });
+
+  /**
+   * The two responses the write controls hang off say whether the machine lets
+   * writes run. Required, not optional: an absent flag would have to be read as
+   * either "yes" (the bug: offering writes a read-only machine refuses) or
+   * "no" (hiding them on every older hub), and neither is a safe default.
+   */
+  it('tells the pull request list and detail whether writes can run', () => {
+    const prs = { state: 'ok', cachedAt: 1, canMutate: false, repo, prs: [prSummary] };
+    const detail = { state: 'ok', cachedAt: 1, canMutate: false, repo, pr: prDetail };
+    expect(Value.Check(GithubPrsResponseSchema, prs)).toBe(true);
+    expect(Value.Check(GithubPrDetailResponseSchema, detail)).toBe(true);
+
+    const { canMutate: _prsFlag, ...prsWithout } = prs;
+    const { canMutate: _detailFlag, ...detailWithout } = detail;
+    expect(Value.Check(GithubPrsResponseSchema, prsWithout)).toBe(false);
+    expect(Value.Check(GithubPrDetailResponseSchema, detailWithout)).toBe(false);
+    expect(Value.Check(GithubPrsResponseSchema, { ...prs, canMutate: 'yes' })).toBe(false);
   });
 
   it('omits the repository from the cross-repo inbox', () => {

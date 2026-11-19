@@ -15,8 +15,8 @@ import {
 import { parseWorktreeList } from '../domain/worktree-parser';
 import {
   findWorktree,
-  isSameWorktreePath,
   isWithinWorktree,
+  markCurrentWorktree,
   type WorktreePathSemantics,
 } from '../domain/worktree-selection';
 import { GitCliError, type GitRuntimeSelection, runGit } from '../infrastructure/git-cli';
@@ -44,12 +44,12 @@ type WorktreeMutation = 'worktreeAdd' | 'worktreeRemove';
  */
 export async function listWorktrees(
   workdir: string,
-  signal?: AbortSignal,
-  selection?: GitRuntimeSelection
+  signal: AbortSignal | undefined,
+  selection: GitRuntimeSelection
 ): Promise<GitWorktreeListResponse> {
   try {
     const root = await requireRepoRoot(workdir, signal, selection);
-    return await readWorktreeList(root, signal, selection);
+    return await readWorktreeList(root, await readTargetPaths(selection), signal, selection);
   } catch (error) {
     return mapWorktreeFailure(error, 'Listing worktrees');
   }
@@ -122,7 +122,7 @@ export function removeWorktree(
     'Removing worktree',
     'worktreeRemove',
     async (root, selection, paths) => {
-      const { worktrees } = await readWorktreeList(root, signal, selection);
+      const { worktrees } = await readWorktreeList(root, paths, signal, selection);
       // The target machine's path semantics, not the hub's: these are paths on
       // that filesystem, and comparing them through `node:path` here would
       // match nothing at all whenever the two platforms disagree. Reused from
@@ -136,7 +136,7 @@ export function removeWorktree(
           ERROR_CODES.NOT_FOUND
         );
       }
-      refuseUnremovableWorktree(worktree, root, paths);
+      refuseUnremovableWorktree(worktree);
       refuseWorktreeBoundToAnotherChat(worktree, await otherChatWorkdirs(), paths);
       // Git's own canonical path goes on the command line, not the caller's
       // spelling of it: the entry has already been identified, and re-sending
@@ -165,15 +165,12 @@ export function removeWorktree(
  * already refuses it without `--force` and knows far better than a second
  * status read here whether the tree is dirty.
  */
-function refuseUnremovableWorktree(
-  worktree: GitWorktree,
-  root: string,
-  paths: WorktreePathSemantics
-): void {
+function refuseUnremovableWorktree(worktree: GitWorktree): void {
   if (worktree.isMain) {
     throw new GitWriteError('The main worktree cannot be removed.', 409, ERROR_CODES.CONFLICT);
   }
-  if (isSameWorktreePath(worktree.path, root, paths)) {
+  // The same flag the list reports, so the panel never offers what this refuses.
+  if (worktree.isCurrent) {
     throw new GitWriteError(
       'This chat is working in that worktree. Point it elsewhere before removing it.',
       409,
@@ -245,7 +242,7 @@ async function runWorktreeMutation(
       root,
       async () => {
         await mutation(root, selection, paths);
-        return await readWorktreeList(root, signal, selection);
+        return await readWorktreeList(root, paths, signal, selection);
       },
       signal
     );
@@ -256,17 +253,19 @@ async function runWorktreeMutation(
   }
 }
 
+/** `root` is the calling chat's repository root, which is what `isCurrent` is measured against. */
 async function readWorktreeList(
   root: string,
-  signal?: AbortSignal,
-  selection?: GitRuntimeSelection
+  paths: WorktreePathSemantics,
+  signal: AbortSignal | undefined,
+  selection: GitRuntimeSelection
 ): Promise<GitWorktreeListResponse> {
   const result = await runGit(['worktree', 'list', '--porcelain', '-z'], {
     cwd: root,
     signal,
     ...selection,
   });
-  return { worktrees: parseWorktreeList(result.stdout) };
+  return { worktrees: markCurrentWorktree(parseWorktreeList(result.stdout), root, paths) };
 }
 
 /** How the machine that owns the repository writes and compares its own paths. */

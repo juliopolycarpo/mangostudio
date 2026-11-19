@@ -6,6 +6,7 @@ import {
   findWorktree,
   isSameWorktreePath,
   isWithinWorktree,
+  markCurrentWorktree,
   type WorktreePathSemantics,
 } from '../../../../src/modules/git/domain/worktree-selection';
 import { createTargetPaths } from '../../../../src/services/runtime-client/target-paths';
@@ -34,6 +35,7 @@ function worktree(path: string, overrides: Partial<GitWorktree> = {}): GitWorktr
     isDetached: false,
     isLocked: false,
     isPrunable: false,
+    isCurrent: false,
     ...overrides,
   };
 }
@@ -98,6 +100,43 @@ describe('findWorktree', () => {
     expect(
       findWorktree(windowsWorktrees, 'c:\\repo', 'c:\\work\\feature', windowsPaths)?.path
     ).toBe('C:\\Work\\Feature');
+  });
+});
+
+describe('markCurrentWorktree', () => {
+  const { isCurrent: _unused, ...parsedMain } = worktree('/repo', { isMain: true });
+  const { isCurrent: _unusedToo, ...parsedLinked } = worktree('/work/feature');
+
+  it('flags only the worktree the root names', () => {
+    const marked = markCurrentWorktree([parsedMain, parsedLinked], '/work/feature', posixPaths);
+
+    expect(marked.map(({ path, isCurrent }) => [path, isCurrent])).toEqual([
+      ['/repo', false],
+      ['/work/feature', true],
+    ]);
+  });
+
+  it('sees through a trailing separator and a dot segment in the root', () => {
+    const marked = markCurrentWorktree([parsedMain, parsedLinked], '/work/./feature/', posixPaths);
+
+    expect(marked.map((entry) => entry.isCurrent)).toEqual([false, true]);
+  });
+
+  it('folds case on a Windows runtime, so a differently cased root still matches', () => {
+    const windowsPaths = pathsFor('win32');
+    const marked = markCurrentWorktree(
+      [{ ...parsedLinked, path: 'C:\\Work\\Feature' }],
+      'c:\\work\\feature\\',
+      windowsPaths
+    );
+
+    expect(marked[0]?.isCurrent).toBe(true);
+  });
+
+  it('keeps casing significant on posix and flags nothing when no entry matches', () => {
+    const marked = markCurrentWorktree([parsedMain, parsedLinked], '/Work/Feature', posixPaths);
+
+    expect(marked.map((entry) => entry.isCurrent)).toEqual([false, false]);
   });
 });
 

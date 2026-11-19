@@ -232,6 +232,7 @@ export async function refreshAppSettingsAfterConflict(
 ): Promise<void> {
   if (!isAppSettingsConflict(error)) return;
   recordAppSettingsConflict(queryClient);
+  conflictRefreshes.add(queryClient);
   // Keep a failed or still-pending refresh visible to every writer. Cached
   // preferences from before the conflict are not a valid retry baseline.
   await queryClient.invalidateQueries({
@@ -241,12 +242,44 @@ export async function refreshAppSettingsAfterConflict(
   // Default cancellation restores the state from before the canceled read,
   // which can clear the conflict invalidation while the new read is pending.
   await queryClient.cancelQueries({ queryKey: appSettingsKeys.current() }, { revert: false });
-  await queryClient.fetchQuery({ ...appSettingsQueryOptions(), staleTime: 0 }).catch(() => {
-    void queryClient.invalidateQueries({
-      queryKey: appSettingsKeys.current(),
-      refetchType: 'none',
+  await queryClient
+    .fetchQuery({ ...appSettingsQueryOptions(), staleTime: 0 })
+    .then(() => {
+      conflictRefreshes.delete(queryClient);
+    })
+    .catch(() => {
+      void queryClient.invalidateQueries({
+        queryKey: appSettingsKeys.current(),
+        refetchType: 'none',
+      });
     });
-  });
+}
+
+/**
+ * Caches whose last conflict refresh has not yet produced a read, so the
+ * invalidation on their app-settings query means "rejected", not just "stale".
+ */
+const conflictRefreshes = new WeakSet<QueryClient>();
+
+/**
+ * Whether a rejected (409) snapshot is still waiting for its refresh, or the
+ * refresh failed. While it is, the cached settings are not a valid base for
+ * another edit. An ordinary invalidation (a realtime event, the subscription
+ * ack, library detection) does not count: the cache is merely stale, a
+ * keystroke may build on it, and the refetch that lands is rebased under the
+ * unsent edits.
+ *
+ * Any successful read clears the invalidation, and with it the conflict: the
+ * refresh may not be the read that lands first.
+ *
+ * @example
+ * if (appSettingsConflictRefreshPending(queryClient)) return refuseEdit();
+ */
+export function appSettingsConflictRefreshPending(queryClient: QueryClient): boolean {
+  if (!conflictRefreshes.has(queryClient)) return false;
+  if (queryClient.getQueryState(appSettingsKeys.current())?.isInvalidated === true) return true;
+  conflictRefreshes.delete(queryClient);
+  return false;
 }
 
 /**

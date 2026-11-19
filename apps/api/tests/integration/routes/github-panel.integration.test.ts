@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 
+import { ERROR_CODES } from '@mangostudio/shared/errors';
 import {
   GithubCreatePrResponseSchema,
   GithubInboxResponseSchema,
@@ -19,7 +20,10 @@ import { createGithubCache } from '../../../src/modules/github/application/githu
 import { createGithubReadService } from '../../../src/modules/github/application/github-read-service';
 import { createGithubWriteService } from '../../../src/modules/github/application/github-write-service';
 import { createGithubRoutes } from '../../../src/modules/github/http/github-routes';
-import { GhCliError } from '../../../src/modules/github/infrastructure/gh-cli';
+import {
+  GhCliError,
+  GhMutationDeniedError,
+} from '../../../src/modules/github/infrastructure/gh-cli';
 import { insertTestChat, insertTestUser } from '../../support/factories';
 import {
   createApiTestApp,
@@ -233,6 +237,7 @@ describe('GitHub panel reads', () => {
     expect(payload).toEqual({
       state: 'ok',
       cachedAt: 1_000,
+      canMutate: true,
       repo: {
         nameWithOwner: 'mango/mangostudio',
         defaultBranch: 'main',
@@ -257,6 +262,25 @@ describe('GitHub panel reads', () => {
     });
     // The full per-check array must never reach the client.
     expect(JSON.stringify(payload)).not.toContain('__typename');
+  });
+
+  it('tells the panel a read-only machine cannot run the write actions', async () => {
+    const { user, chat } = await createChatWithWorkdir();
+    const { plugin } = createPanelPlugin({ canMutate: false });
+    const { app, restore } = createAuthenticatedApiTestApp(user, plugin);
+    restoreAuth = restore;
+
+    const prs = await expectSchemaValid(
+      await get(app, '/github/prs', { chatId: chat.id, filter: 'open' }),
+      GithubPrsResponseSchema
+    );
+    const detail = await expectSchemaValid(
+      await get(app, '/github/pr', { chatId: chat.id, number: '7' }),
+      GithubPrDetailResponseSchema
+    );
+
+    expect(prs).toMatchObject({ state: 'ok', canMutate: false });
+    expect(detail).toMatchObject({ state: 'ok', canMutate: false });
   });
 
   it('serves schema-valid issues', async () => {
@@ -524,6 +548,36 @@ describe('GitHub panel writes', () => {
       head: 'feat/panel',
       draft: true,
     });
+  });
+
+  /**
+   * A write the machine's consent refuses is the owner's setting at work, not a
+   * server fault: it used to surface as the fixed 500 "GitHub context could not
+   * be read", which says neither what happened nor that retrying cannot help.
+   */
+  it('answers 403 when the machine refuses writes, for every write route', async () => {
+    for (const path of ['/github/pr', '/github/pr/ready', '/github/pr/checkout']) {
+      const { user, chat } = await createChatWithWorkdir();
+      const denied = () => Promise.reject(new GhMutationDeniedError());
+      const { plugin } = createPanelPlugin({
+        respond: { 'pr.create': denied, 'pr.ready': denied, 'pr.checkout': denied },
+      });
+      const { app, restore } = createAuthenticatedApiTestApp(user, plugin);
+      try {
+        const response = await post(
+          app,
+          path,
+          path === '/github/pr'
+            ? { chatId: chat.id, title: 'Add the panel' }
+            : { chatId: chat.id, number: 7 }
+        );
+
+        expect(response.status).toBe(403);
+        expect(await response.json()).toMatchObject({ code: ERROR_CODES.PERMISSION_DENIED });
+      } finally {
+        restore();
+      }
+    }
   });
 
   it('marks a pull request ready and checks one out', async () => {

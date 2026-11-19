@@ -170,21 +170,26 @@ export async function readAppSettings(
  *
  * @example
  * return writeAppSettings(db, user.id, { thinkingEnabled: false });
+ *
+ * `writerId` is the writing tab's id, carried onto the invalidation this write
+ * publishes so that tab can skip its own echo.
  */
 export async function writeAppSettings(
   db: Kysely<Database>,
   userId: string,
   patch: AppSettingsPutBody,
-  expectedRevision?: string
+  expectedRevision?: string,
+  writerId?: string
 ): Promise<AppSettingsResponse> {
-  return answer(await persistAppSettings(db, userId, patch, expectedRevision), false);
+  return answer(await persistAppSettings(db, userId, patch, expectedRevision, writerId), false);
 }
 
 async function persistAppSettings(
   db: Kysely<Database>,
   userId: string,
   patch: AppSettingsPutBody,
-  expectedRevision?: string
+  expectedRevision?: string,
+  writerId?: string
 ) {
   const snapshot = await patchAppSettingsSnapshot(
     db,
@@ -193,7 +198,7 @@ async function persistAppSettings(
     await libraryLocationDefaultsForWrite(),
     expectedRevision
   );
-  publishSettingsInvalidation(userId, 'app');
+  publishSettingsInvalidation(userId, 'app', writerId);
   return snapshot;
 }
 

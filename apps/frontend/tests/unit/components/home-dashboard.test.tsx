@@ -250,10 +250,10 @@ describe('HomePage', () => {
       );
       expect(batched).toHaveLength(1);
       // Two folders, three chats: the second session on `mango` shares the
-      // first one's worktree and has nothing of its own to report.
-      // Every chat with a folder, in one request — the same ids the sidebar and
-      // the uncommitted-work card ask for, so the three share one cache entry
-      // instead of splitting into a request each.
+      // first one's worktree and has nothing of its own to report. The
+      // workspace list asks for its two representatives and the
+      // uncommitted-work card for all three in the same turn, and the shared
+      // batcher sends them as one request instead of one each.
       // eslint-disable-next-line @typescript-eslint/no-base-to-string -- The fixture expects the request body to contain serialized JSON.
       const body = JSON.parse(String(batched[0][1]?.body)) as { chatIds: string[] };
       expect([...body.chatIds].sort()).toEqual(['chat-1', 'chat-2', 'chat-3']);

@@ -11,6 +11,7 @@ const VALID_FRAMES: readonly RealtimeServerMessage[] = [
   { type: 'subscribed', topics: ['settings', 'git:chat-1'] },
   { type: 'invalidate', topic: 'settings' },
   { type: 'invalidate', topic: 'settings', scopes: ['app', 'provider'] },
+  { type: 'invalidate', topic: 'settings', scopes: ['app'], writerId: 'tab-1' },
   { type: 'invalidate', topic: 'git:chat-1' },
   { type: 'invalidate', topic: 'git:chat-1', scopes: ['state', 'diffs'] },
   { type: 'error', error: 'Unsupported realtime topic' },
@@ -72,9 +73,32 @@ describe('parseServerMessage', () => {
     });
   });
 
+  it('keeps the writer id of an invalidation', () => {
+    expect(
+      parseServerMessage(
+        '{"type":"invalidate","topic":"settings","scopes":["app"],"writerId":"t1"}'
+      )
+    ).toEqual({ type: 'invalidate', topic: 'settings', scopes: ['app'], writerId: 't1' });
+  });
+
+  it('drops a malformed writer id but keeps the refresh it rode on', () => {
+    // The id only narrows how a tab treats an event; losing it must never cost
+    // the invalidation itself, or a tab could miss another tab's write.
+    for (const writerId of ['""', '7', 'null', '{}']) {
+      const parsed = parseServerMessage(
+        `{"type":"invalidate","topic":"settings","scopes":["app"],"writerId":${writerId}}`
+      );
+      expect(parsed).toEqual({ type: 'invalidate', topic: 'settings', scopes: ['app'] });
+      expect(parsed).not.toHaveProperty('writerId');
+    }
+  });
+
   it('omits absent optional fields rather than setting them undefined', () => {
     expect(parseServerMessage('{"type":"invalidate","topic":"settings"}')).not.toHaveProperty(
       'scopes'
+    );
+    expect(parseServerMessage('{"type":"invalidate","topic":"settings"}')).not.toHaveProperty(
+      'writerId'
     );
     expect(parseServerMessage('{"type":"error","error":"nope"}')).not.toHaveProperty('code');
   });

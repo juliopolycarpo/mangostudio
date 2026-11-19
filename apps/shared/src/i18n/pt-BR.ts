@@ -2044,6 +2044,8 @@ export const messages = {
         'Esta branch ainda não existe no remoto. Ela será publicada antes de o pull request ser aberto.',
       pushError: 'Não foi possível publicar a branch, então o pull request não foi criado.',
       noBranch: 'Faça checkout de uma branch para criar um pull request.',
+      readOnly:
+        'As escritas no GitHub estão desativadas nesta máquina, então aqui os pull requests só podem ser lidos.',
     },
 
     /**

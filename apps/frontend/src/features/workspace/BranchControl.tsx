@@ -39,7 +39,10 @@ export function BranchControl({
   const { toast } = useToast();
   const labels = t.git.branch;
   const branches = useGitBranches(chatId);
-  const prAnnotations = useBranchPrAnnotations(chatId);
+  // The tags decorate rows inside the dropdown, so the pull request list they
+  // come from is read only once the dropdown has been opened.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const prAnnotations = useBranchPrAnnotations(chatId, menuOpen);
   const switchMutation = useSwitchBranch(chatId);
   const createMutation = useCreateBranch(chatId);
   const checkoutRemoteMutation = useCheckoutRemoteBranch(chatId);
@@ -183,7 +186,11 @@ export function BranchControl({
 
   return (
     <>
-      <details ref={menuRef} className="relative">
+      <details
+        ref={menuRef}
+        className="relative"
+        onToggle={(event) => setMenuOpen(event.currentTarget.open)}
+      >
         <summary
           aria-label={labels.menu}
           className="flex h-8 cursor-pointer list-none items-center gap-2 rounded-sm px-2 text-fg transition-colors hover:bg-fill-hover [&::-webkit-details-marker]:hidden"

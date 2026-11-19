@@ -47,11 +47,12 @@ function worktree(path: string, overrides: Partial<GitWorktree> = {}): GitWorktr
     isDetached: false,
     isLocked: false,
     isPrunable: false,
+    isCurrent: false,
     ...overrides,
   };
 }
 
-const mainWorktree = worktree('/repo', { isMain: true });
+const mainWorktree = worktree('/repo', { isMain: true, isCurrent: true });
 const linkedWorktree = worktree('/work/feature', { branch: 'feat/panel' });
 
 beforeEach(() => {
@@ -66,8 +67,8 @@ beforeEach(() => {
   hooks.remove.mockReset();
 });
 
-function renderSection(repoRoot = '/repo') {
-  return render(<WorktreeSection chatId="chat-1" repoRoot={repoRoot} />);
+function renderSection() {
+  return render(<WorktreeSection chatId="chat-1" />);
 }
 
 describe('WorktreeSection', () => {
@@ -84,9 +85,14 @@ describe('WorktreeSection', () => {
   });
 
   it('offers no removal for the main worktree or the one this chat lives in', () => {
-    hooks.data = { worktrees: [mainWorktree, linkedWorktree] };
+    hooks.data = {
+      worktrees: [
+        { ...mainWorktree, isCurrent: false },
+        { ...linkedWorktree, isCurrent: true },
+      ],
+    };
 
-    renderSection('/work/feature');
+    renderSection();
 
     expect(
       screen.queryByRole('button', { name: labels.removeLabel.replace('{path}', '/repo') })
@@ -94,6 +100,32 @@ describe('WorktreeSection', () => {
     expect(
       screen.queryByRole('button', {
         name: labels.removeLabel.replace('{path}', '/work/feature'),
+      })
+    ).toBeNull();
+  });
+
+  /**
+   * The server decides which row is the chat's own, after normalising both
+   * spellings. A client-side `path === repoRoot` missed any difference between
+   * `git rev-parse --show-toplevel` and `git worktree list` (a trailing
+   * separator, Windows casing), left the row unbadged and offered a delete the
+   * server then refused with 409. The row's path here shares no spelling with
+   * any root the client could compare it to.
+   */
+  it('trusts the server flag for the current row however its path is spelled', () => {
+    hooks.data = {
+      worktrees: [
+        worktree('/repo', { isMain: true }),
+        worktree('C:\\Work\\Feature', { branch: 'feat/panel', isCurrent: true }),
+      ],
+    };
+
+    renderSection();
+
+    expect(screen.getByText(labels.badges.current)).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', {
+        name: labels.removeLabel.replace('{path}', 'C:\\Work\\Feature'),
       })
     ).toBeNull();
   });

@@ -1,6 +1,7 @@
 import type { AppSettingsPutBody, AppSettingsResponse } from '@mangostudio/shared/app-settings';
 
 import { client } from '@/lib/api-client';
+import { tabWriterHeaders } from '@/lib/realtime/writer-id';
 import { ApiError } from '@/lib/utils';
 
 /**
@@ -18,7 +19,8 @@ export async function updateAppSettings(
   revision?: string
 ): Promise<AppSettingsResponse> {
   const { data, error } = await client.api.settings.app.put(patch, {
-    headers: revision === undefined ? {} : { 'if-match': revision },
+    // The writer id lets this tab recognise the realtime echo of this very write.
+    headers: { ...tabWriterHeaders(), ...(revision === undefined ? {} : { 'if-match': revision }) },
   });
   if (error) throw new ApiError(error.value);
   return data as AppSettingsResponse;

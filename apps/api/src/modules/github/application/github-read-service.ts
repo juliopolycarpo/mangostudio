@@ -112,6 +112,9 @@ export interface GithubReadServiceOptions {
   readonly homeCwd?: (selection: GhRuntimeSelection) => Promise<string>;
 }
 
+/** An `ok` response gains `canMutate`; every unavailable state passes through unchanged. */
+type WithMutateFlag<R> = R extends { state: 'ok' } ? R & { canMutate: boolean } : R;
+
 /**
  * Builds the six reads over one gh facade and one cache.
  *
@@ -147,6 +150,26 @@ export function createGithubReadService(options: GithubReadServiceOptions = {}):
       },
       { bypass: request.refresh }
     );
+  }
+
+  /**
+   * Adds `canMutate` to an `ok` response, read from the machine's current
+   * consent on every call rather than stored in the cached payload — consent
+   * can change inside the cache window, and this answer costs a manifest lookup.
+   * Builds a new object: the cached one is shared between requests.
+   */
+  async function withMutateFlag<R extends { state: string }>(
+    request: GithubRepoRequest,
+    response: R
+  ): Promise<WithMutateFlag<R>> {
+    // The casts are the conditional type's price: `R` is a union of the four
+    // unavailable states and one `ok` member, and TypeScript cannot narrow a
+    // distributive conditional from a runtime `state` check.
+    if (response.state !== 'ok') return response as WithMutateFlag<R>;
+    return {
+      ...response,
+      canMutate: await client.canMutate(request.selection),
+    } as WithMutateFlag<R>;
   }
 
   const target = (request: GithubRepoRequest) => ({
@@ -194,17 +217,20 @@ export function createGithubReadService(options: GithubReadServiceOptions = {}):
   }
 
   return {
-    listPullRequests: (request) =>
-      readRepoScoped(request, `prs:${request.filter}:${request.limit}`, async () => {
-        const result = await client.run(
-          'pr.list',
-          { filter: request.filter, limit: request.limit },
-          target(request)
-        );
-        return {
-          prs: readGhOutput('pr.list', result.stdout, GhPrSummaryListSchema, toPrSummaries),
-        };
-      }),
+    listPullRequests: async (request) =>
+      await withMutateFlag(
+        request,
+        await readRepoScoped(request, `prs:${request.filter}:${request.limit}`, async () => {
+          const result = await client.run(
+            'pr.list',
+            { filter: request.filter, limit: request.limit },
+            target(request)
+          );
+          return {
+            prs: readGhOutput('pr.list', result.stdout, GhPrSummaryListSchema, toPrSummaries),
+          };
+        })
+      ),
 
     listIssues: (request) =>
       readRepoScoped(request, `issues:${request.filter}:${request.limit}`, async () => {
@@ -218,11 +244,16 @@ export function createGithubReadService(options: GithubReadServiceOptions = {}):
         };
       }),
 
-    getPullRequest: (request) =>
-      readRepoScoped(request, `pr:${request.number}`, async () => {
-        const result = await client.run('pr.view', { number: request.number }, target(request));
-        return { pr: readGhOutput('pr.view', result.stdout, GhPrDetailOutputSchema, toPrDetail) };
-      }),
+    getPullRequest: async (request) =>
+      await withMutateFlag(
+        request,
+        await readRepoScoped(request, `pr:${request.number}`, async () => {
+          const result = await client.run('pr.view', { number: request.number }, target(request));
+          return {
+            pr: readGhOutput('pr.view', result.stdout, GhPrDetailOutputSchema, toPrDetail),
+          };
+        })
+      ),
 
     getPullRequestChecks: (request) =>
       readRepoScoped(request, `checks:${request.number}`, async () => {

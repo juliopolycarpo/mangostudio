@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -202,6 +202,42 @@ describe('Git worktree routes', () => {
     expect(await dashedPath.json()).toMatchObject({ code: ERROR_CODES.VALIDATION });
     expect(dashedBranch.status).toBe(422);
   });
+
+  /**
+   * "Which row is this chat's own" is decided here, through the same path
+   * normalisation the removal guard uses, so the panel never offers a delete the
+   * server will refuse.
+   */
+  it.skipIf(!hasGit)(
+    'flags only the worktree the calling chat resolves to as current',
+    async () => {
+      const { root, parent } = await createTempRepo();
+      const linked = join(parent, 'feature');
+      await runFixtureGit(root, ['worktree', 'add', '-b', 'feat/panel', linked]);
+      // Bound to a subdirectory: the chat's root is the linked worktree, not its workdir.
+      const nested = join(linked, 'packages');
+      await mkdir(nested);
+      const { app, chatId, user } = await createChatFixture(nested);
+      const mainChatId = await addChat(user.id, root);
+
+      const fromLinked = (await (
+        await listWorktrees(app, chatId)
+      ).json()) as GitWorktreeListResponse;
+      const fromMain = (await (
+        await listWorktrees(app, mainChatId)
+      ).json()) as GitWorktreeListResponse;
+
+      expect(Value.Check(GitWorktreeListResponseSchema, fromLinked)).toBe(true);
+      expect(fromLinked.worktrees.map(({ path, isCurrent }) => [path, isCurrent])).toEqual([
+        [asGitPath(root), false],
+        [asGitPath(linked), true],
+      ]);
+      expect(fromMain.worktrees.map(({ path, isCurrent }) => [path, isCurrent])).toEqual([
+        [asGitPath(root), true],
+        [asGitPath(linked), false],
+      ]);
+    }
+  );
 
   it.skipIf(!hasGit)('refuses a path another worktree already occupies', async () => {
     const { root, parent } = await createTempRepo();

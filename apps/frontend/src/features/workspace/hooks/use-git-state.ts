@@ -3,7 +3,6 @@ import {
   type CommitResponse,
   type DiscardPathsBody,
   type GenerateCommitMessageResponse,
-  GIT_BATCH_STATE_MAX_CHAT_IDS,
   type GitBatchStateResponse,
   type GitBranchesResponse,
   type GitCommitDetailsResponse,
@@ -37,6 +36,7 @@ import { client } from '@/lib/api-client';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
 import { ApiError } from '@/lib/utils';
 
+import { createGitSummaryBatcher, type GitSummaryBatcher } from './git-summary-batcher';
 import { githubContextKeys } from './use-github-context';
 
 const gitStateKeys = {
@@ -44,9 +44,11 @@ const gitStateKeys = {
   detail: (chatId: string) => [...gitStateKeys.all, chatId] as const,
 };
 
-const gitSummariesKeys = {
-  all: ['git-summaries'] as const,
-  chunk: (chatIds: readonly string[]) => [...gitSummariesKeys.all, chatIds] as const,
+// One entry per chat, not per request: a badge keeps its cached answer when the
+// rows around it change, and a git write reaches it by chat id.
+const gitSummaryKeys = {
+  all: ['git-summary'] as const,
+  detail: (chatId: string) => [...gitSummaryKeys.all, chatId] as const,
 };
 
 const gitStashKeys = {
@@ -208,9 +210,12 @@ export async function invalidateGitScopes(
   };
   await Promise.all([
     ...scopes.map((scope) => queryClient.invalidateQueries({ queryKey: keys[scope] })),
-    // Batched summaries are chunk-keyed, so the state scope reaches them by
-    // membership rather than by key prefix.
-    ...(scopes.includes('state') ? [invalidateGitSummaries(queryClient, chatId)] : []),
+    // The list badges are a slimmer read of the same state; invalidating a chat
+    // that is on screen refetches its badge, and one scrolled away only goes
+    // stale, to refresh when its row returns.
+    ...(scopes.includes('state')
+      ? [queryClient.invalidateQueries({ queryKey: gitSummaryKeys.detail(chatId) })]
+      : []),
     // Worktrees share the `branches` scope rather than owning one: which branch
     // is checked out where is exactly what a worktree write changes, and the
     // server publishes the same scope for both.
@@ -231,92 +236,119 @@ export async function invalidateGitScopes(
   ]);
 }
 
-/** Invalidates only the summary chunks that contain this chat. */
-function invalidateGitSummaries(queryClient: QueryClient, chatId: string): Promise<void> {
-  return queryClient.invalidateQueries({
-    queryKey: gitSummariesKeys.all,
-    predicate: (query) => {
-      const chunk = query.queryKey[1];
-      return Array.isArray(chunk) && chunk.includes(chatId);
-    },
-  });
+async function fetchGitSummaryChunk(
+  chatIds: readonly string[]
+): Promise<Record<string, GitSummary>> {
+  const { data, error } = await client.api.git.state.batch.post({ chatIds: [...chatIds] });
+  if (error) throw new ApiError(error.value);
+  return (data as GitBatchStateResponse).states;
+}
+
+const gitSummaryBatchers = new WeakMap<QueryClient, GitSummaryBatcher>();
+
+/**
+ * One batcher per query client, shared by every surface that shows badges, so
+ * the sidebar and a dashboard card that mount in the same turn leave as one
+ * request rather than one each.
+ */
+function gitSummaryBatcherFor(queryClient: QueryClient): GitSummaryBatcher {
+  let batcher = gitSummaryBatchers.get(queryClient);
+  if (!batcher) {
+    batcher = createGitSummaryBatcher(fetchGitSummaryChunk);
+    gitSummaryBatchers.set(queryClient, batcher);
+  }
+  return batcher;
 }
 
 /**
- * Slim git badges for a list of chats, fetched through the batched endpoint so
- * N visible rows cost one request per {@link GIT_BATCH_STATE_MAX_CHAT_IDS} ids
- * instead of an N+1 fan-out of `GET /git/state`.
+ * Slim git badges for the chats a surface is showing, fetched through the
+ * batched endpoint so N rows cost one request per
+ * `GIT_BATCH_STATE_MAX_CHAT_IDS` ids instead of an N+1 fan-out of
+ * `GET /git/state`.
+ *
+ * Pass the rows on screen, not the account: every id costs a `git status` on
+ * the host. Each chat is cached on its own, so ids that leave the list keep their
+ * badge for the cache's lifetime and a list that shifts by a few rows asks only
+ * about the new ones. Reads that start together share a request.
  *
  * A missing key means the query is still loading; `null` means the server has
  * no answer for that chat (no workdir, not a repo, or not this user's).
+ *
+ * `includeCached` also returns every other badge the cache still holds. A list
+ * that moves its window reports it after a short settle, and a row that comes
+ * back into view in that gap would otherwise show no badge until the window
+ * catches up, a flicker for an answer already in hand. Those entries are not
+ * observed, so they are as old as when they were last on screen; they refresh
+ * when their ids are asked for again.
+ *
+ * @example
+ * const summaries = useBatchedGitSummaries(idsInView, { includeCached: true });
  */
 export function useBatchedGitSummaries(
-  chatIds: readonly string[]
+  chatIds: readonly string[],
+  { includeCached = false }: { includeCached?: boolean } = {}
 ): Record<string, GitSummary | null> {
-  const chunks = useChatIdChunks(chatIds);
+  const queryClient = useQueryClient();
+  const uniqueChatIds = useUniqueChatIds(chatIds);
+  const batcher = gitSummaryBatcherFor(queryClient);
 
   const queries = useMemo(
     () =>
-      chunks.map((chunk) => ({
-        queryKey: gitSummariesKeys.chunk(chunk),
-        queryFn: async (): Promise<GitBatchStateResponse> => {
-          const { data, error } = await client.api.git.state.batch.post({ chatIds: chunk });
-          if (error) throw new ApiError(error.value);
-          return data as GitBatchStateResponse;
-        },
+      uniqueChatIds.map((chatId) => ({
+        queryKey: gitSummaryKeys.detail(chatId),
+        queryFn: () => batcher.load(chatId),
         staleTime: 30_000,
-        // List badges have no realtime topic; focus is their freshness signal
-        // even though the query client default disables it.
+        // Only mounted queries refetch on focus, so this covers exactly the
+        // rows on screen. List badges have no realtime topic of their own;
+        // focus is their freshness signal even though the query client default
+        // disables it.
         refetchOnWindowFocus: true,
       })),
-    [chunks]
+    [uniqueChatIds, batcher]
   );
 
   // Stable identity plus a plain object: `useQueries` only structurally shares
-  // the combined result (skipping re-renders on untouched chunks) when the
+  // the combined result (skipping re-renders on untouched chats) when the
   // combine function is referentially stable and the result is a plain
   // array/object — a Map or an inline arrow would defeat both layers.
   const combine = useCallback(
-    (results: UseQueryResult<GitBatchStateResponse>[]) => {
+    (results: UseQueryResult<GitSummary | null>[]) => {
       const summaries: Record<string, GitSummary | null> = {};
-      results.forEach((result, index) => {
-        // A settled chunk answers even when it failed: the server omits chats
-        // it has no answer for, and an errored chunk has no answers at all, so
-        // both degrade to a resolved `null` rather than a permanent spinner.
-        if (result.isPending) return;
-        const states = result.data?.states ?? {};
-        for (const chatId of chunks[index] ?? []) {
-          summaries[chatId] = states[chatId] ?? null;
+      if (includeCached) {
+        for (const query of queryClient.getQueryCache().findAll({ queryKey: gitSummaryKeys.all })) {
+          const cached = query.state.data as GitSummary | null | undefined;
+          const chatId = query.queryKey[1];
+          if (cached !== undefined && typeof chatId === 'string') summaries[chatId] = cached;
         }
+      }
+      results.forEach((result, index) => {
+        // A settled read answers even when it failed: the server omits chats it
+        // has no answer for, and an errored request has none at all, so both
+        // degrade to a resolved `null` rather than a permanent spinner.
+        if (result.isPending) return;
+        const chatId = uniqueChatIds[index];
+        if (chatId !== undefined) summaries[chatId] = result.data ?? null;
       });
       return summaries;
     },
-    [chunks]
+    [uniqueChatIds, includeCached, queryClient]
   );
 
   return useQueries({ queries, combine });
 }
 
 /**
- * Sorted, deduplicated 50-id chunks. Sorting keeps the query key independent of
- * row order, so reordering the sidebar does not refetch every badge.
+ * The ids without duplicates, in the caller's order.
  *
- * The memo keys on the array's identity, which is why the caller on
- * `_authenticated.tsx` memoizes the list it passes: that layout re-renders once
- * per streamed token, and the dedupe and sort would otherwise run over the
- * whole list on every one of them. A caller that does pass a fresh array pays
- * that sort but nothing worse — the record this hook returns still holds its
- * reference through `useQueries` structural sharing.
+ * The memo keys on the array's identity, which is why the callers memoize the
+ * list they pass: the shell re-renders once per streamed token, and the dedupe
+ * would otherwise run over the whole list on every one of them. A caller that
+ * does pass a fresh array pays that pass but nothing worse — the record this
+ * hook returns still holds its reference through `useQueries` structural
+ * sharing.
  */
-function useChatIdChunks(chatIds: readonly string[]): string[][] {
-  return useMemo(() => {
-    const sorted = [...new Set(chatIds)].sort();
-    const chunks: string[][] = [];
-    for (let start = 0; start < sorted.length; start += GIT_BATCH_STATE_MAX_CHAT_IDS) {
-      chunks.push(sorted.slice(start, start + GIT_BATCH_STATE_MAX_CHAT_IDS));
-    }
-    return chunks;
-  }, [chatIds]);
+function useUniqueChatIds(chatIds: readonly string[]): string[] {
+  return useMemo(() => [...new Set(chatIds)], [chatIds]);
 }
 
 export function useGitState(chatId: string) {

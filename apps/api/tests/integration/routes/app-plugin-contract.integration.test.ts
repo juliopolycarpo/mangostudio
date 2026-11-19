@@ -131,7 +131,7 @@ describe('CORS policy', () => {
       'GET, POST, PUT, DELETE, OPTIONS'
     );
     expect(response.headers.get('access-control-allow-headers')).toBe(
-      'Content-Type, Authorization, x-api-key, If-Match'
+      'Content-Type, Authorization, x-api-key, If-Match, x-mangostudio-writer-id'
     );
     expect(response.headers.get('vary')).toContain('Origin');
   });

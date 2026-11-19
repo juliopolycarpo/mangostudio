@@ -16,7 +16,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
 
 import { updateAppSettings } from '@/features/settings/app/api';
-import { markAppSettingsLocalWrite } from '@/features/settings/app/local-write-window';
 import {
   appSettingsForWrite,
   appSettingsQueryOptions,
@@ -50,10 +49,6 @@ export function useOnboardingProgress(): OnboardingProgress {
     onMutate: () => ({ write: beginAppSettingsWrite(queryClient) }),
     onError: (error, _variables, context) => context?.write.reject(error),
     onSuccess: async (saved, _variables, context) => {
-      // The write window has to open here as well as at the click: the server
-      // publishes its own `app` invalidation for this write, and without the
-      // window that echo would refetch over the value it just confirmed.
-      markAppSettingsLocalWrite();
       await context.write.publish(saved);
     },
   });
@@ -72,14 +67,12 @@ export function useOnboardingProgress(): OnboardingProgress {
       const current = onboardingFor(snapshot);
       const next = updater(current);
       if (next === current) return;
-      markAppSettingsLocalWrite();
       await mutateAsync({ next, revision: appSettingsRevision(snapshot) });
     },
     [mutateAsync, queryClient]
   );
 
   const reset = useCallback(async () => {
-    markAppSettingsLocalWrite();
     const snapshot = await appSettingsForWrite(queryClient);
     await mutateAsync({ next: null, revision: appSettingsRevision(snapshot) });
   }, [mutateAsync, queryClient]);
