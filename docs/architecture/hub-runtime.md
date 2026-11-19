@@ -90,7 +90,10 @@ codes (§10), and frame limits (§11).
 
 The error vocabulary is the ten codes the protocol reserves (§6.3) plus this application's
 own — `RUNTIME_UPDATE_REFUSED` today — in `apps/shared/src/runtime-contract/errors.ts`. A
-consent refusal is `DENIED` with `details.kind = "consent_denied"`. Runtime service failures
+consent refusal is `DENIED` with `details.kind = "consent_denied"`, and only that: the API facade
+rebuilds `RuntimeConsentDeniedError` from it (a `missing` capability list also counts, as a
+fallback), while any other `DENIED` becomes `RuntimePolicyDeniedError`, a plain refusal that
+never tells the owner to change a consent setting. Runtime service failures
 add a typed `details.kind` of their own; the API facade translates those details back into
 its existing tool and checkpoint errors.
 

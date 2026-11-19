@@ -498,3 +498,28 @@ async fn gc_purges_and_prunes_under_the_owner() {
         .unwrap();
     assert_eq!(listed, json!({ "sets": [] }));
 }
+
+/// Regression for a withdrawn-then-regranted write: the fallback refusal used
+/// to be a bare `DENIED`, which the hub no longer reads as a consent refusal.
+#[test]
+fn a_withdrawn_consent_fallback_is_still_a_consent_refusal_on_the_wire() {
+    let error = consent_withdrawn_denial("library.undo", "host", Interrupt::ConsentWithdrawn);
+    let body = json!({
+        "code": error.code,
+        "message": error.message,
+        "details": error.details,
+    });
+    assert_eq!(
+        body,
+        json!({
+            "code": "DENIED",
+            "message": "Library write consent was withdrawn before this operation ran.",
+            "details": {
+                "kind": "consent_denied",
+                "method": "library.undo",
+                "slot": "host",
+            },
+        }),
+        "expected a DENIED carrying details.kind consent_denied | received: {body}"
+    );
+}

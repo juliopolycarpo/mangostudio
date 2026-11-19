@@ -222,3 +222,25 @@ export class RuntimeConsentDeniedError extends Error {
     this.name = 'RuntimeConsentDeniedError';
   }
 }
+
+/**
+ * The runtime answered `DENIED` for a reason that is not consent.
+ *
+ * `DENIED` is the protocol's "the method exists but policy refuses it", and
+ * consent is only one such policy. This is every other refusal: callers treat
+ * it as a plain refusal and must not tell the owner to change a consent
+ * setting, because none is involved. {@link RuntimeConsentDeniedError} is the
+ * one that means that. The runtime's own error rides along as `cause`, so a
+ * caller that walks the chain still sees its `details.kind`.
+ */
+export class RuntimePolicyDeniedError extends Error {
+  constructor(
+    message: string,
+    /** The wire `details` the runtime attached, unchanged. */
+    readonly details: Readonly<Record<string, unknown>> = {},
+    options?: ErrorOptions
+  ) {
+    super(message, options);
+    this.name = 'RuntimePolicyDeniedError';
+  }
+}

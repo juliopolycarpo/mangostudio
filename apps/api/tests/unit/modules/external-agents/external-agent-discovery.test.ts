@@ -13,6 +13,7 @@ import {
   EXTERNAL_AGENT_DISCOVERY_LAUNCH_REFUSED_CODE,
   type RuntimeCapabilityManifest,
   RuntimeConsentDeniedError,
+  RuntimePolicyDeniedError,
 } from '@mangostudio/shared/runtime-contract';
 import Value from 'typebox/value';
 
@@ -1208,6 +1209,28 @@ describe('external agent discovery — runtime authority', () => {
         unavailableReason: 'runtime-denied',
       },
     ]);
+  });
+
+  it('does not report a non-consent DENIED as a consent refusal', async () => {
+    const manifest = runtimeManifest({
+      externalAgents: ['codex'],
+      features: { ...runtimeManifest().features, externalAgents: true },
+      identityIsolation: {
+        method: 'single-user-host',
+        credentialHomeFingerprint: 'credential-home-v1',
+      },
+    });
+    const policyRefusal = new RuntimePolicyDeniedError('discovery refused by policy');
+    const authority = createRuntimeAuthoritativeAgentDiscovery(() =>
+      Promise.resolve({
+        manifest,
+        externalAgents: { discover: () => Promise.reject(policyRefusal) },
+      })
+    );
+
+    await expect(
+      authority.describe(SCOPE, ['codex'], { signal: new AbortController().signal })
+    ).rejects.toBe(policyRefusal);
   });
 
   it('discovers eligible targets and preserves model, account and configuration data', async () => {

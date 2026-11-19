@@ -10,7 +10,10 @@
 
 import { RemoteError, RESERVED_ERROR_CODES } from '@mangostudio/protocol';
 import { LOCAL_ENVIRONMENT_ID, type ToolchainSelection } from '@mangostudio/shared/environments';
-import { RuntimeConsentDeniedError } from '@mangostudio/shared/runtime-contract';
+import {
+  RuntimeConsentDeniedError,
+  RuntimePolicyDeniedError,
+} from '@mangostudio/shared/runtime-contract';
 import {
   TERMINAL_DEFAULT_COLS,
   TERMINAL_DEFAULT_ROWS,
@@ -538,10 +541,14 @@ export function createTerminalSessionService(
         } catch (error) {
           // A timeout or lost response cannot prove that the runtime refused
           // the open. Close by id; retain an ambiguous live PTY if cleanup fails.
-          const consentDenied =
-            error instanceof RuntimeConsentDeniedError ||
+          // Any `DENIED` is a refusal before the first byte, so none leaves a PTY to
+          // retain. Only a consent refusal may say the machine stopped granting access.
+          const consentDenied = error instanceof RuntimeConsentDeniedError;
+          const refused =
+            consentDenied ||
+            error instanceof RuntimePolicyDeniedError ||
             (error instanceof RemoteError && error.code === RESERVED_ERROR_CODES.DENIED);
-          if (!(await closeUnclaimed()) && !consentDenied) {
+          if (!(await closeUnclaimed()) && !refused) {
             retainUnclaimed(
               body.shell ?? client.manifest.shells[0] ?? 'bash',
               cwd ?? client.manifest.homeDir

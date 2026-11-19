@@ -311,6 +311,36 @@ mod tests {
         assert_eq!(details["capability"], json!("shell"));
     }
 
+    /// The hub tells a consent refusal from every other `DENIED` by this exact
+    /// body (`details.kind` first, a `missing` list second), so the whole of it
+    /// is pinned, not field by field. The hub-side twin is
+    /// `apps/api/tests/unit/services/runtime-client/runtime-client-denied.test.ts`,
+    /// which feeds the same JSON through the client.
+    #[test]
+    fn consent_denial_wire_shape_is_pinned_for_the_hub() {
+        let error = consent_denial("shell.run", &["shell".to_string()], "host");
+        let body = json!({
+            "code": error.code,
+            "message": error.message,
+            "details": error.details,
+        });
+        assert_eq!(
+            body,
+            json!({
+                "code": "DENIED",
+                "message": "\"shell.run\" is refused: this machine has not granted shell. Run \"mangostudio-runtime setup --slot host\" there to change what a hub may do.",
+                "details": {
+                    "kind": "consent_denied",
+                    "method": "shell.run",
+                    "missing": ["shell"],
+                    "slot": "host",
+                    "capability": "shell",
+                },
+            }),
+            "expected the consent_denial body the hub's DENIED translation keys on | received: {body}"
+        );
+    }
+
     #[test]
     fn consent_denial_joins_more_than_one_missing_capability_with_or() {
         let missing = vec!["fsRead".to_string(), "fsWrite".to_string()];

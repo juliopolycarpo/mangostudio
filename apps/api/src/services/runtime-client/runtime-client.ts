@@ -32,6 +32,7 @@ import {
   type RuntimeSettingsSourcesResult,
 } from '@mangostudio/shared/library';
 import {
+  CONSENT_DENIED_KIND,
   FileNotReadError,
   GrepPatternError,
   PartialReadError,
@@ -101,6 +102,7 @@ import {
   type RuntimeMoveFileResult,
   type RuntimeMutationResult,
   type RuntimePathPolicyParams,
+  RuntimePolicyDeniedError,
   type RuntimeProbeAgentClisParams,
   type RuntimeProbeAgentClisResult,
   type RuntimeProbeRuntimesParams,
@@ -897,15 +899,10 @@ function translateRuntimeError(error: unknown): Error {
     return new ToolExecutionTimedOutError(error.message, { cause: error });
   }
   if (error.code === RESERVED_ERROR_CODES.DENIED) {
-    const missing = error.details?.missing;
-    return new RuntimeConsentDeniedError(error.message, {
-      capability: detailString(error, 'capability'),
-      method: detailString(error, 'method'),
-      slot: detailString(error, 'slot'),
-      ...(Array.isArray(missing)
-        ? { missing: missing.filter((entry): entry is string => typeof entry === 'string') }
-        : {}),
-    });
+    // `DENIED` is any policy refusal, and consent is one. Only a consent
+    // refusal may become the error callers present as "turn on consent".
+    if (isConsentRefusal(error)) return consentDeniedFrom(error);
+    return new RuntimePolicyDeniedError(error.message, error.details ?? {}, { cause: error });
   }
 
   const kind = detailString(error, 'kind');
@@ -943,11 +940,7 @@ function translateRuntimeError(error: unknown): Error {
       return new McpConnectionError(error.message, { cause: error });
     case 'consent_denied':
       // Older peers that still emit INTERNAL + details.kind=consent_denied.
-      return new RuntimeConsentDeniedError(error.message, {
-        capability: detailString(error, 'capability'),
-        method: detailString(error, 'method'),
-        slot: detailString(error, 'slot'),
-      });
+      return consentDeniedFrom(error);
     default:
       // `mcp_call` deliberately stays a RemoteError: the turn pipeline
       // classifies it from the `mcpFailure` detail the runtime attached, and
@@ -955,6 +948,34 @@ function translateRuntimeError(error: unknown): Error {
       // retain their kind, dispatch and cleanup facts for the submission policy.
       return error;
   }
+}
+
+/**
+ * Whether a wire `DENIED` is the machine owner's consent refusal.
+ *
+ * The runtime marks one with `details.kind = "consent_denied"`
+ * (`consent_denial` in `crates/mangostudio-runtime-core/src/ports/authorization.rs`,
+ * and the TypeScript runtime's `consentDenial` before it). A `missing`
+ * capability list also counts: it is what a consent refusal names, and no
+ * runtime has sent one without the kind, so that clause is a defensive
+ * fallback for a peer that drops the kind rather than a shape seen in the field.
+ */
+function isConsentRefusal(error: RemoteError): boolean {
+  return (
+    detailString(error, 'kind') === CONSENT_DENIED_KIND || Array.isArray(error.details?.missing)
+  );
+}
+
+function consentDeniedFrom(error: RemoteError): RuntimeConsentDeniedError {
+  const missing = error.details?.missing;
+  return new RuntimeConsentDeniedError(error.message, {
+    capability: detailString(error, 'capability'),
+    method: detailString(error, 'method'),
+    slot: detailString(error, 'slot'),
+    ...(Array.isArray(missing)
+      ? { missing: missing.filter((entry): entry is string => typeof entry === 'string') }
+      : {}),
+  });
 }
 
 function detailString(error: RemoteError, key: string): string | undefined {
