@@ -209,7 +209,7 @@ export async function generateAnthropicText(
   const response = await withGenerationDeadline(
     'Anthropic generateText',
     req.signal,
-    options.timeoutMs ?? TEXT_GENERATION_TIMEOUT_MS,
+    options.timeoutMs ?? req.timeoutMs ?? TEXT_GENERATION_TIMEOUT_MS,
     (signal) =>
       client.messages.create(
         {

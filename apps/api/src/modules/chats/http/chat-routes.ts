@@ -233,10 +233,15 @@ export const chatRoutes = (app: Elysia) =>
             503: ApiErrorResponseSchema,
           },
         },
-        async ({ params, body, user }) => {
+        async ({ params, body, request, user }) => {
           try {
             return await compactChatUseCase(
-              { chatId: params.id, userId: user?.id ?? '', model: body.model },
+              {
+                chatId: params.id,
+                userId: user?.id ?? '',
+                model: body.model,
+                signal: request.signal,
+              },
               getDb()
             );
           } catch (err) {
@@ -258,10 +263,15 @@ export const chatRoutes = (app: Elysia) =>
             503: ApiErrorResponseSchema,
           },
         },
-        async ({ params, body, user }) => {
+        async ({ params, body, request, user }) => {
           try {
             return await summarizeToNewChatUseCase(
-              { chatId: params.id, userId: user?.id ?? '', model: body.model },
+              {
+                chatId: params.id,
+                userId: user?.id ?? '',
+                model: body.model,
+                signal: request.signal,
+              },
               getDb()
             );
           } catch (err) {

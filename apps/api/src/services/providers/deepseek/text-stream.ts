@@ -27,7 +27,7 @@ export async function* streamDeepSeekText(
   req: TextGenerationRequest,
   options: DeepSeekTextOptions = {}
 ): AsyncIterable<StreamingChunk> {
-  const timeoutMs = options.timeoutMs ?? TEXT_GENERATION_TIMEOUT_MS;
+  const timeoutMs = options.timeoutMs ?? req.timeoutMs ?? TEXT_GENERATION_TIMEOUT_MS;
   const deadline = AbortSignal.timeout(timeoutMs);
   const signal = req.signal ? AbortSignal.any([req.signal, deadline]) : deadline;
   const body = buildDeepSeekRequestBody({

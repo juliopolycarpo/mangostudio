@@ -14,7 +14,7 @@ export async function generateChatCompletionText(
   const completion = await withGenerationDeadline(
     options.call ?? 'OpenAI generateText',
     req.signal,
-    options.timeoutMs ?? TEXT_GENERATION_TIMEOUT_MS,
+    options.timeoutMs ?? req.timeoutMs ?? TEXT_GENERATION_TIMEOUT_MS,
     (signal) =>
       client.chat.completions.create(
         { model: req.modelName, messages: buildChatMessages(req), stream: false },

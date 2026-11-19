@@ -162,6 +162,26 @@ describe('generateText deadlines', () => {
     expectDeadline(outcome, 'OpenAI-compatible generateText');
   });
 
+  it('takes the budget a call site names on the request', async () => {
+    const outcome = await settle(
+      generateChatCompletionText(
+        createSilentChatCompletionsClient(),
+        { ...baseReq, timeoutMs: DEADLINE_MS },
+        'empty'
+      )
+    );
+
+    expectDeadline(outcome, 'OpenAI generateText');
+  });
+
+  it('takes the request budget for an Anthropic reply too', async () => {
+    const outcome = await settle(
+      generateAnthropicText(createSilentAnthropicClient(), { ...baseReq, timeoutMs: DEADLINE_MS })
+    );
+
+    expectDeadline(outcome, 'Anthropic generateText');
+  });
+
   it('bounds an Anthropic reply that never comes', async () => {
     const outcome = await settle(
       generateAnthropicText(createSilentAnthropicClient(), baseReq, { timeoutMs: DEADLINE_MS })

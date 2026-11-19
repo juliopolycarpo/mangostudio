@@ -176,7 +176,7 @@ export function generateChatGptText(
   return withGenerationDeadline(
     'ChatGPT generateText',
     req.signal,
-    options.timeoutMs ?? TEXT_GENERATION_TIMEOUT_MS,
+    options.timeoutMs ?? req.timeoutMs ?? TEXT_GENERATION_TIMEOUT_MS,
     async (signal) => {
       let text = '';
       for await (const chunk of streamWithAuthRetry(req.userId, req.modelName, (client) =>

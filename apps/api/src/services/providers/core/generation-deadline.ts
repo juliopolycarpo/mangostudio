@@ -1,12 +1,27 @@
 /**
- * Hub-side deadline for a provider's non-streaming `generateText`.
+ * Hub-side deadlines for a provider's text generation.
  *
  * Bun's handler limit ends a slow request after 255 s, and the provider SDKs
  * default to minutes, so a vendor that accepts the connection and never answers
- * would hold a respond, a title, a compaction or a commit message that long.
- * The same 120 s bounds the DeepSeek stream, whose deadline this one matches.
+ * would hold a request that long. Each call site picks the budget that fits it:
+ * a short one for a title, a commit message or a library suggestion, and an idle
+ * deadline for a reply that may legitimately run for minutes
+ * (`generateTextWithIdleDeadline`).
+ */
+
+/**
+ * The whole-response deadline of `generateText` when the request names none,
+ * and the longest silence `generateTextWithIdleDeadline` tolerates. It also
+ * bounds the DeepSeek stream.
  */
 export const TEXT_GENERATION_TIMEOUT_MS = 120_000;
+
+/**
+ * The whole-response budget for a short generation: a chat title, a commit
+ * message, a library suggestion. They cap their output at a few hundred tokens,
+ * so a minute without an answer means the vendor is stuck, not slow.
+ */
+export const SHORT_TEXT_GENERATION_TIMEOUT_MS = 60_000;
 
 /** `call` ran past its deadline without the caller aborting it. */
 export class GenerationDeadlineError extends Error {
