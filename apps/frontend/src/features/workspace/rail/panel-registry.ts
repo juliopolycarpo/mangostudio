@@ -9,11 +9,11 @@ import {
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 
-import { TerminalRailPanel } from '@/features/terminal/TerminalRailPanel';
 import { type RetryableLazy, retryableLazy } from '@/lib/retryable-lazy';
 
 // The bodies of the panels that pull the most code (the repository view, the
-// GitHub review queue, the todo list) load the first time their panel is shown.
+// GitHub review queue, the todo list, the terminal's session tabs and queries)
+// load the first time their panel is shown.
 // This registry is reachable from the command palette and the chat page, so a
 // static import here would put all of it in the entry chunk of every
 // authenticated route, whether or not the rail ever opens. The dock only needs
@@ -28,6 +28,11 @@ const GithubPanel = retryableLazy<RailPanelContentProps>(() =>
 );
 const TodoRailPanel = retryableLazy<RailPanelContentProps>(() =>
   import('./TodoRailPanel').then((module) => ({ default: module.TodoRailPanel }))
+);
+const TerminalPanel = retryableLazy<RailPanelContentProps>(() =>
+  import('@/features/terminal/TerminalRailPanel').then((module) => ({
+    default: module.TerminalRailPanel,
+  }))
 );
 
 export interface RailPanelAvailabilityState {
@@ -95,7 +100,8 @@ export const WORKSPACE_PANEL_REGISTRY: readonly RailPanelDefinition[] = [
     id: 'terminal',
     icon: TerminalSquare,
     availability: ({ chatId }) => Boolean(chatId),
-    component: TerminalRailPanel,
+    component: TerminalPanel.Component,
+    lazyBody: TerminalPanel,
   },
 ];
 
