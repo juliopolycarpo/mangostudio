@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'bun:test';
 
-import type { RuntimeImplementation } from '@mangostudio/shared/runtime-contract';
+import type {
+  RuntimeCapabilityManifest,
+  RuntimeImplementation,
+} from '@mangostudio/shared/runtime-contract';
 import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 import { RUNTIME_CONSENT_PRESETS } from '@mangostudio/shared/runtime-home';
 
-import { capabilityManifestFromHealth } from '../../../../src/services/runtime-client/manifest-from-health';
+import {
+  capabilityManifestFromHealth,
+  pruneUnknownExternalAgentHealth,
+} from '../../../../src/services/runtime-client/manifest-from-health';
 
 const baseReport = {
   schemaVersion: 1,
@@ -133,6 +139,124 @@ describe('capabilityManifestFromHealth', () => {
     expect(capabilityManifestFromHealth(report).identityIsolation).toEqual({
       method: 'single-user-host',
       credentialHomeFingerprint: 'credential-home-v1',
+    });
+  });
+
+  describe('a health report naming a target id this build has no enum member for', () => {
+    const newerPeer: RuntimeHealthReport = {
+      ...baseReport,
+      profile: 'full',
+      allow: { ...RUNTIME_CONSENT_PRESETS.full, externalAgents: true },
+      externalAgents: {
+        targets: ['codex', 'gemini', 'cursor'],
+        liveSessionCount: 3,
+        liveSessions: [
+          { sessionId: 's-1', targetId: 'codex', ageMs: 5, state: 'running' },
+          { sessionId: 's-2', targetId: 'gemini', ageMs: 6, state: 'running' },
+          { sessionId: 's-3', targetId: 'gemini', ageMs: 7, state: 'idle' },
+        ],
+      },
+    };
+
+    it('projects only the known targets into the manifest', () => {
+      expect(capabilityManifestFromHealth(newerPeer).externalAgents).toEqual(['codex', 'cursor']);
+    });
+
+    it('omits externalAgents when every reported target is unknown', () => {
+      const onlyUnknown: RuntimeHealthReport = {
+        ...newerPeer,
+        externalAgents: { targets: ['gemini'], liveSessionCount: 0, liveSessions: [] },
+      };
+      expect(
+        'externalAgents' in capabilityManifestFromHealth(onlyUnknown),
+        'expected no externalAgents key: an empty list would claim the peer hosts none'
+      ).toBe(false);
+    });
+
+    it('prunes unknown targets and sessions, names each skipped id once, and keeps the true count', () => {
+      const pruned = pruneUnknownExternalAgentHealth(newerPeer);
+
+      expect(pruned.skippedTargetIds).toEqual(['gemini']);
+      expect(pruned.report.externalAgents).toEqual({
+        targets: ['codex', 'cursor'],
+        liveSessionCount: 3,
+        liveSessions: [{ sessionId: 's-1', targetId: 'codex', ageMs: 5, state: 'running' }],
+      });
+    });
+
+    it('returns the same report when every target is known or there is no subtree', () => {
+      const known: RuntimeHealthReport = {
+        ...newerPeer,
+        externalAgents: { targets: ['codex'], liveSessionCount: 0, liveSessions: [] },
+      };
+      const { externalAgents: _omitted, ...withoutSubtree } = newerPeer;
+
+      expect(pruneUnknownExternalAgentHealth(known)).toEqual({
+        report: known,
+        skippedTargetIds: [],
+      });
+      expect(pruneUnknownExternalAgentHealth(withoutSubtree)).toEqual({
+        report: withoutSubtree,
+        skippedTargetIds: [],
+      });
+    });
+  });
+
+  // Regression for #2570. Absence of `identityIsolation` is the fail-closed reading: discovery,
+  // native sessions and turn configuration send no `isolation`, and the runtime answers
+  // EXTERNAL_ISOLATION_UNPROVEN, so nothing gated on the attestation is offered.
+  describe('a health report attesting an isolation method this build has no enum member for', () => {
+    const attestingMethod = (method: string): RuntimeHealthReport => ({
+      ...baseReport,
+      profile: 'full',
+      allow: { ...RUNTIME_CONSENT_PRESETS.full, externalAgents: true },
+      externalAgents: {
+        targets: ['codex'],
+        identityIsolation: { method, credentialHomeFingerprint: 'credential-home-v1' },
+        liveSessionCount: 0,
+        liveSessions: [],
+      },
+    });
+    const handshakeAttesting: RuntimeCapabilityManifest = {
+      ...capabilityManifestFromHealth(attestingMethod('os-account')),
+      identityIsolation: { method: 'os-account', credentialHomeFingerprint: 'credential-home-v1' },
+    };
+
+    it('projects no attestation into the manifest, and no handshake one survives it', () => {
+      const manifest = capabilityManifestFromHealth(
+        attestingMethod('micro-vm'),
+        handshakeAttesting
+      );
+
+      expect(
+        'identityIsolation' in manifest,
+        'expected no identityIsolation key: an unknown method is unproven isolation, never a known one'
+      ).toBe(false);
+      expect(manifest.externalAgents, 'the rest of the manifest still refreshes').toEqual([
+        'codex',
+      ]);
+    });
+
+    it('drops the attestation from the pruned report and names the method', () => {
+      const pruned = pruneUnknownExternalAgentHealth(attestingMethod('micro-vm'));
+
+      expect(pruned.skippedIsolationMethod).toBe('micro-vm');
+      expect(pruned.skippedTargetIds).toEqual([]);
+      expect(pruned.report.externalAgents).toEqual({
+        targets: ['codex'],
+        liveSessionCount: 0,
+        liveSessions: [],
+      });
+    });
+
+    it('keeps a known method and reports nothing skipped', () => {
+      const known = attestingMethod('container');
+
+      expect(pruneUnknownExternalAgentHealth(known)).toEqual({
+        report: known,
+        skippedTargetIds: [],
+      });
+      expect(pruneUnknownExternalAgentHealth(known).skippedIsolationMethod).toBeUndefined();
     });
   });
 

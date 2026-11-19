@@ -6,6 +6,7 @@
 import type { MachineStatus } from '@mangostudio/shared/machine';
 
 import { Callout } from '@/components/ui/Callout';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 
 import { MachineCard, MachineFact, type MachineFactPart, MachineFacts } from './MachineCard';
@@ -15,7 +16,7 @@ interface InstallFactsCardProps {
 }
 
 export function InstallFactsCard({ status }: InstallFactsCardProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const m = t.environments.machine;
   const { runtimeBinary, hostSlot } = status;
 

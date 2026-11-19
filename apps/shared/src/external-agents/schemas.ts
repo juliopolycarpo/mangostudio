@@ -83,8 +83,11 @@ export {
  * against `String.prototype.length`, i.e. UTF-16 units, so the schema bound is
  * the code-point limit doubled: a correctly bounded string can never be
  * rejected here, and an unbounded one is still refused before it is persisted.
+ *
+ * Exported so the SSE chunks that project these events carry the same bound
+ * from the same table, instead of restating the numbers in `streaming/`.
  */
-function VendorText(limit: ExternalTextLimit, options?: { minLength?: number }) {
+export function VendorText(limit: ExternalTextLimit, options?: { minLength?: number }) {
   return Type.String({ ...options, maxLength: schemaMaxLengthFor(limit) });
 }
 
@@ -172,14 +175,38 @@ export const ExternalSupportedConfigurationListSchema = ReadonlyArraySchema(
   { maxItems: EXTERNAL_PERMISSION_LEVELS.length * EXTERNAL_APPROVAL_ROUTINGS.length }
 );
 
+/**
+ * The methods this build can interpret. Closed wherever the hub produces or
+ * forwards an attestation; `runtime.health` reads a bounded string instead
+ * (`RuntimeHealthTokenSchema`) and the hub narrows it with
+ * {@link isExternalIdentityIsolationMethod}.
+ */
+export const ExternalIdentityIsolationMethodSchema = Type.Union([
+  Type.Literal('single-user-host'),
+  Type.Literal('os-account'),
+  Type.Literal('container'),
+]);
+
+export type ExternalIdentityIsolationMethod = Static<typeof ExternalIdentityIsolationMethodSchema>;
+
+/**
+ * Narrows a method string a newer runtime may have invented to one this build
+ * can interpret.
+ *
+ * @example
+ * isExternalIdentityIsolationMethod('os-account'); // true
+ * isExternalIdentityIsolationMethod('micro-vm'); // false
+ */
+export function isExternalIdentityIsolationMethod(
+  value: string
+): value is ExternalIdentityIsolationMethod {
+  return ExternalIdentityIsolationMethodSchema.anyOf.some((literal) => literal.const === value);
+}
+
 /** How a runtime proves that vendor credentials cannot cross MangoStudio users. */
 export const ExternalIdentityIsolationSchema = Type.Object(
   {
-    method: Type.Union([
-      Type.Literal('single-user-host'),
-      Type.Literal('os-account'),
-      Type.Literal('container'),
-    ]),
+    method: ExternalIdentityIsolationMethodSchema,
     /** Opaque, non-reversible digest used only to detect a changed credential home. */
     credentialHomeFingerprint: Type.String({ minLength: 1, maxLength: 128 }),
   },
@@ -1332,14 +1359,97 @@ export const ExternalAgentSteerParamsSchema = Type.Object(
 );
 export type ExternalAgentSteerParams = Static<typeof ExternalAgentSteerParamsSchema>;
 
+/** The agent took the steer. */
+export const ExternalSteerAcceptedResultSchema = Type.Object(
+  { accepted: Type.Literal(true) },
+  { additionalProperties: false }
+);
+export type ExternalSteerAcceptedResult = Static<typeof ExternalSteerAcceptedResultSchema>;
+
+/** The steer was refused, for a reason the composer can name. The steer route's 409 body. */
+export const ExternalSteerRejectedResultSchema = Type.Object(
+  { accepted: Type.Literal(false), reasonCode: ExternalSteerRejectionReasonSchema },
+  { additionalProperties: false }
+);
+export type ExternalSteerRejectedResult = Static<typeof ExternalSteerRejectedResultSchema>;
+
+/** What the runtime answers a steer with: taken or refused, never "unknown". */
 export const ExternalAgentSteerResultSchema = Type.Union([
-  Type.Object({ accepted: Type.Literal(true) }, { additionalProperties: false }),
-  Type.Object(
-    { accepted: Type.Literal(false), reasonCode: ExternalSteerRejectionReasonSchema },
-    { additionalProperties: false }
-  ),
+  ExternalSteerAcceptedResultSchema,
+  ExternalSteerRejectedResultSchema,
 ]);
 export type ExternalAgentSteerResult = Static<typeof ExternalAgentSteerResultSchema>;
+
+/**
+ * What the hub answers when it cannot tell whether a steer reached the agent:
+ * the hub's deadline passed, the connection closed under the call, or the
+ * runtime answered with an error that does not prove the vendor was never
+ * called.
+ *
+ * Hub-only. The runtime never says this (it either answers or fails), so it is
+ * not a member of {@link ExternalAgentSteerResultSchema}, which the runtime
+ * contract also uses. It is not a rejection either: the agent may have taken
+ * the steer, and a rejection is final and invites a resend that would then
+ * deliver it twice.
+ */
+export const ExternalSteerDeliveryUnknownResultSchema = Type.Object(
+  { accepted: Type.Literal(false), deliveryUnknown: Type.Literal(true) },
+  { additionalProperties: false }
+);
+export type ExternalSteerDeliveryUnknownResult = Static<
+  typeof ExternalSteerDeliveryUnknownResultSchema
+>;
+
+/**
+ * The steer route's 200 body: the outcomes that are not a refusal. Accepted, or
+ * the hub's "delivery unknown", which is an answer rather than a failure. A
+ * refusal answers 409 with {@link ExternalSteerRejectedResultSchema}, so Eden's
+ * `data` can never type as one.
+ */
+export const ExternalSteerSuccessResponseSchema = Type.Union([
+  ExternalSteerAcceptedResultSchema,
+  ExternalSteerDeliveryUnknownResultSchema,
+]);
+export type ExternalSteerSuccessResponse = Static<typeof ExternalSteerSuccessResponseSchema>;
+
+/** Every outcome a steer has, across the route's statuses. What the hub's controller returns. */
+export const ExternalSteerResponseSchema = Type.Union([
+  ExternalSteerSuccessResponseSchema,
+  ExternalSteerRejectedResultSchema,
+]);
+export type ExternalSteerResponse = Static<typeof ExternalSteerResponseSchema>;
+
+/** The approval was recorded. `optionId` is echoed so a client that raced another answer can reconcile. */
+export const ExternalApprovalAnswerAcceptedSchema = Type.Object(
+  {
+    status: Type.Literal('accepted'),
+    optionId: VendorText('vendorId', { minLength: 1 }),
+  },
+  { additionalProperties: false }
+);
+export type ExternalApprovalAnswerAccepted = Static<typeof ExternalApprovalAnswerAcceptedSchema>;
+
+/**
+ * The answer was refused: 400 (unknown option), 404 (no such approval for this
+ * user) or 409 (expired, already resolved, or bound to another turn). The
+ * reason is the registry's closed vocabulary on the hub side; the wire only
+ * promises a short string.
+ */
+export const ExternalApprovalAnswerRejectedSchema = Type.Object(
+  {
+    status: Type.Literal('rejected'),
+    reason: Type.String({ maxLength: 128 }),
+  },
+  { additionalProperties: false }
+);
+export type ExternalApprovalAnswerRejected = Static<typeof ExternalApprovalAnswerRejectedSchema>;
+
+/** Both outcomes of answering an approval, for a caller that treats a refusal as a value. */
+export const ExternalApprovalAnswerResultSchema = Type.Union([
+  ExternalApprovalAnswerAcceptedSchema,
+  ExternalApprovalAnswerRejectedSchema,
+]);
+export type ExternalApprovalAnswerResult = Static<typeof ExternalApprovalAnswerResultSchema>;
 
 /**
  * What a native review is pointed at.

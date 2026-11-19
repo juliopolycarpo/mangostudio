@@ -40,8 +40,11 @@
 import { ChatRunnerConfigurationSchema, ChatSchema } from '@mangostudio/shared/chat';
 import { ApiErrorResponseSchema, ERROR_CODES } from '@mangostudio/shared/errors';
 import {
-  ExternalAgentSteerResultSchema,
+  ExternalApprovalAnswerAcceptedSchema,
+  ExternalApprovalAnswerRejectedSchema,
   ExternalReviewTargetSchema,
+  ExternalSteerRejectedResultSchema,
+  ExternalSteerSuccessResponseSchema,
   schemaMaxLengthFor,
 } from '@mangostudio/shared/external-agents';
 import { Elysia, status, t } from 'elysia';
@@ -72,13 +75,6 @@ const VendorIdSchema = t.String({ minLength: 1, maxLength: schemaMaxLengthFor('v
 const RespondBodySchema = t.Object({
   requestId: VendorIdSchema,
   optionId: VendorIdSchema,
-});
-
-const RespondResponseSchema = t.Object({
-  status: t.Union([t.Literal('accepted'), t.Literal('rejected')]),
-  /** Echoed back so a client that raced another answer can reconcile. */
-  optionId: t.Optional(VendorIdSchema),
-  reason: t.Optional(t.String({ maxLength: 128 })),
 });
 
 const SteerBodySchema = t.Object({
@@ -181,11 +177,13 @@ export function createExternalAgentTurnRoutes(
         params: t.Object({ id: t.String({ minLength: 1, maxLength: 256 }) }),
         body: RespondBodySchema,
         response: {
-          200: RespondResponseSchema,
-          400: RespondResponseSchema,
+          // 200 is the accepted answer only; each refusal status carries the
+          // rejected body, which is what lets Eden type `data` as accepted.
+          200: ExternalApprovalAnswerAcceptedSchema,
+          400: ExternalApprovalAnswerRejectedSchema,
           401: ApiErrorResponseSchema,
-          404: RespondResponseSchema,
-          409: RespondResponseSchema,
+          404: ExternalApprovalAnswerRejectedSchema,
+          409: ExternalApprovalAnswerRejectedSchema,
         },
       },
       async ({ params, body, user }) => {
@@ -205,9 +203,12 @@ export function createExternalAgentTurnRoutes(
         params: t.Object({ id: t.String({ minLength: 1, maxLength: 256 }) }),
         body: SteerBodySchema,
         response: {
-          200: ExternalAgentSteerResultSchema,
+          // Includes `{ accepted: false, deliveryUnknown: true }`: the hub
+          // learned that it cannot tell, which is an answer, not a failure.
+          // Refusals are the 409's alone.
+          200: ExternalSteerSuccessResponseSchema,
           401: ApiErrorResponseSchema,
-          409: ExternalAgentSteerResultSchema,
+          409: ExternalSteerRejectedResultSchema,
         },
       },
       async ({ params, body, user }) => {
@@ -220,6 +221,10 @@ export function createExternalAgentTurnRoutes(
         // Every rejection reads as a conflict: the chat and the request are
         // both well-formed, but the turn this was addressed to is not there to
         // steer, right now, for whichever of the reasonCode's causes applies.
+        // An unknown delivery is not one: the request was fine and the turn may
+        // well have taken the steer, so it stays a 200 the client reads as
+        // "check the agent's reply", never a conflict it would treat as refused.
+        if ('deliveryUnknown' in result) return result;
         if (!result.accepted) return status(409, result);
         return result;
       }

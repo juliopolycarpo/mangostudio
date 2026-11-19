@@ -27,11 +27,31 @@ function respondWithDisclosures(
   });
 }
 
+interface TrustGrantFixture {
+  targetId: string;
+  environmentId: string;
+  workspacePath: string;
+  version: number;
+  acceptedAt: number;
+}
+
+function respondWithTrustGrants(
+  fetchScenario: ReturnType<typeof createFetchScenario>,
+  grants: TrustGrantFixture[]
+) {
+  fetchScenario.respondWithJson('GET', '/api/external-agents/workspace-trust', {
+    body: { grants },
+  });
+}
+
 describe('ExternalAgentSettingsPage', () => {
   const fetchScenario = createFetchScenario();
 
   beforeEach(() => {
     fetchScenario.install();
+    // Most cases are about the notices; the trust list is simply empty for them.
+    respondWithTrustGrants(fetchScenario, []);
+    fetchScenario.respondWithJson('GET', '/api/environments', { body: [] });
   });
 
   afterEach(() => {
@@ -106,5 +126,80 @@ describe('ExternalAgentSettingsPage', () => {
       await screen.findByText(/first time you run Claude Code, Codex or Cursor/i)
     ).toBeInTheDocument();
     expect(screen.queryByText(/stops any turn running now/i)).toBeNull();
+  });
+
+  describe('trusted folders', () => {
+    const GRANT: TrustGrantFixture = {
+      targetId: 'cursor',
+      environmentId: 'local',
+      workspacePath: '/home/dev/repo',
+      version: 1,
+      acceptedAt: ACKNOWLEDGED_AT,
+    };
+
+    it('lists each trusted folder with its vendor and machine', async () => {
+      respondWithDisclosures(fetchScenario, []);
+      respondWithTrustGrants(fetchScenario, [GRANT]);
+
+      render(<ExternalAgentSettingsPage />);
+
+      expect(await screen.findByText('/home/dev/repo')).toBeInTheDocument();
+      expect(screen.getByText(/Cursor CLI · local · Trusted/)).toBeInTheDocument();
+      // Withdrawing a folder reaches every chat on it, and says a running turn is spared.
+      expect(screen.getByText(/A turn already running keeps going/i)).toBeInTheDocument();
+    });
+
+    it('says no folder is trusted only once the answer has arrived', async () => {
+      respondWithDisclosures(fetchScenario, []);
+
+      render(<ExternalAgentSettingsPage />);
+
+      expect(screen.queryByText(/No trusted folders yet/i)).toBeNull();
+      expect(await screen.findByText(/No trusted folders yet/i)).toBeInTheDocument();
+    });
+
+    it('withdraws exactly the folder whose row was clicked, by its stored key', async () => {
+      respondWithDisclosures(fetchScenario, []);
+      respondWithTrustGrants(fetchScenario, [GRANT]);
+      fetchScenario.respondWithJson('DELETE', '/api/external-agents/workspace-trust', {
+        body: { revoked: true },
+      });
+
+      render(<ExternalAgentSettingsPage />);
+      await userEvent.click(await screen.findByRole('button', { name: /withdraw/i }));
+
+      // The body is the assertion: a revoke that sent a re-spelled path, or only
+      // part of the key, would match nothing server-side or the wrong grant.
+      await waitFor(() => {
+        const call = fetchScenario.fetchMock.mock.calls.find(
+          ([, init]) => (init?.method ?? 'GET').toUpperCase() === 'DELETE'
+        );
+        const body = call?.[1]?.body;
+        if (typeof body !== 'string') {
+          throw new Error(
+            `(workspace-trust revoke): expected a JSON string body | received: ${typeof body}`
+          );
+        }
+        expect(JSON.parse(body)).toEqual({
+          targetId: 'cursor',
+          environmentId: 'local',
+          workspacePath: '/home/dev/repo',
+        });
+      });
+    });
+
+    it('tells the user when a withdrawal did not go through', async () => {
+      respondWithDisclosures(fetchScenario, []);
+      respondWithTrustGrants(fetchScenario, [GRANT]);
+      fetchScenario.respondWithJson('DELETE', '/api/external-agents/workspace-trust', {
+        status: 404,
+        body: { error: 'No trusted workspace matches that request.', code: 'NOT_FOUND' },
+      });
+
+      render(<ExternalAgentSettingsPage />);
+      await userEvent.click(await screen.findByRole('button', { name: /withdraw/i }));
+
+      expect(await screen.findByText(/could not be withdrawn/i)).toBeInTheDocument();
+    });
   });
 });

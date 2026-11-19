@@ -1,4 +1,5 @@
-import { GIT_BATCH_STATE_MAX_CHAT_IDS, type GitSummary } from '@mangostudio/shared/git';
+import type { GitSummary } from '@mangostudio/shared/git';
+import { GIT_BATCH_STATE_MAX_CHAT_IDS } from '@mangostudio/shared/git/limits';
 
 /** One request to `POST /git/state/batch`; resolves with the answers it got. */
 export type FetchGitSummaryChunk = (

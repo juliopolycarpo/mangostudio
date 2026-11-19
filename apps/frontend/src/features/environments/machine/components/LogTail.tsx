@@ -8,6 +8,7 @@ import type { MachineLogTail } from '@mangostudio/shared/machine';
 import { RefreshCw } from 'lucide-react';
 
 import { Button } from '@/components/ui/Button';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
@@ -18,7 +19,7 @@ import { useMachineLogs } from '../queries';
 import { MachineCard } from './MachineCard';
 
 function LogBody({ tail }: { readonly tail: MachineLogTail }) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const m = t.environments.machine.logs;
   return (
     <>
@@ -44,7 +45,7 @@ function LogBody({ tail }: { readonly tail: MachineLogTail }) {
  * already has content", and a sixth state would re-indent the whole thing.
  */
 function LogContent({ logs }: { readonly logs: ReturnType<typeof useMachineLogs> }) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const m = t.environments.machine.logs;
 
   if (logs.isPending && !logs.data)
@@ -72,7 +73,7 @@ function LogContent({ logs }: { readonly logs: ReturnType<typeof useMachineLogs>
 }
 
 export function LogTail() {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const m = t.environments.machine.logs;
   const logs = useMachineLogs();
 

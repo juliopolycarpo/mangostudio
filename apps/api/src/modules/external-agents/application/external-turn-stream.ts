@@ -606,7 +606,7 @@ function openStream(
                   externalSteerChunk({
                     clientMessageId: steer.clientMessageId,
                     text: steer.text,
-                    status: 'accepted',
+                    status: steer.status,
                   })
                 );
               },

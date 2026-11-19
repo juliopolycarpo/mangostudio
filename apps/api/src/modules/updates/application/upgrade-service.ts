@@ -63,6 +63,7 @@ import {
   createHubServiceManager,
   currentHubExecutable,
   currentInstallOriginProbe,
+  restartHubService,
 } from '../../machine/application/hub-service';
 import type { HubExecutable } from '../../machine/domain/hub-executable';
 import { hubLaunchMode } from '../../machine/domain/hub-process';
@@ -829,7 +830,9 @@ async function defaultRestartHub(input: {
   launcherPath?: string;
 }): Promise<void> {
   if (input.launch === 'service') {
-    await createHubServiceManager().restart();
+    // A unit written before it named the manager's launcher still records the
+    // version this upgrade just replaced; the restart moves it onto the launcher.
+    await restartHubService(createHubServiceManager(), input.launcherPath);
     return;
   }
   const controller = createProcessController();

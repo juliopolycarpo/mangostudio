@@ -1,4 +1,10 @@
-import type { DeferredNamespace, LoadedMessages, Locale } from '@mangostudio/shared/i18n';
+import type {
+  CoreMessages,
+  DeferredNamespace,
+  FeatureNamespace,
+  LoadedMessages,
+  Locale,
+} from '@mangostudio/shared/i18n';
 import type { ReactNode } from 'react';
 import {
   createContext,
@@ -14,15 +20,24 @@ import {
 
 import { StartupSpinner } from '@/components/layout/StartupSpinner';
 import {
+  type AnyFeatureMessages,
   detectLocale,
   LOCALE_STORAGE_KEY,
   localeDictionaries,
   type LocaleDictionaryStore,
   type ResolvedDictionary,
+  withFeatureMessages,
 } from '@/lib/locale-dictionaries';
 
+/** The namespace an argument of `useI18n` asks for: itself, or the one a feature's English messages carry. */
+type NamespaceOf<Argument> = Argument extends DeferredNamespace
+  ? Argument
+  : Argument extends AnyFeatureMessages
+    ? Extract<keyof Argument, FeatureNamespace>
+    : never;
+
 /** What `useI18n(...namespaces)` returns: `t` holds the eager namespaces plus the ones named. */
-interface I18nContextValue<Namespaces extends DeferredNamespace = never> {
+interface I18nContextValue<Namespaces extends DeferredNamespace | FeatureNamespace = never> {
   t: LoadedMessages<Namespaces>;
   locale: Locale;
   setLocale: (locale: Locale) => void;
@@ -123,17 +138,34 @@ export function I18nProvider({ children, dictionaries = localeDictionaries }: I1
  * render before that has to sit under a Suspense boundary that says what shows
  * meanwhile. A chunk that cannot be fetched throws to the nearest error boundary.
  *
+ * A feature namespace (`library`, `git`, `github`) is split: its eager keys are in
+ * `t` always, and the rest arrive when the component passes the feature's English
+ * messages (`useI18n(libraryMessages)`). A component that imports them is part of
+ * the feature's lazy chunk, so the keys come with the code and nothing is fetched
+ * or awaited; another locale's dictionary already holds them.
+ *
  * Usage: `const { t } = useI18n('settings'); return <h1>{t.settings.tabs.general}</h1>;`
  */
-export function useI18n<Namespaces extends DeferredNamespace = never>(
-  ...namespaces: Namespaces[]
-): I18nContextValue<Namespaces> {
+export function useI18n<
+  const Requested extends readonly (DeferredNamespace | AnyFeatureMessages)[] = readonly [],
+>(...requested: Requested): I18nContextValue<NamespaceOf<Requested[number]>> {
   const ctx = use(I18nContext);
   if (!ctx) throw new Error('useI18n deve ser usado dentro de I18nProvider');
   const { dictionary, dictionaries, setLocale } = ctx;
-  const t =
+  const namespaces = requested.filter(
+    (name): name is DeferredNamespace => typeof name === 'string'
+  );
+  const features = requested.filter((name): name is AnyFeatureMessages => typeof name !== 'string');
+  const withNamespaces =
     dictionaries.namespaces(dictionary, namespaces) ??
     use(dictionaries.loadNamespaces(dictionary, namespaces));
+  // Each feature's English keys are merged one at a time; every step is a
+  // `withFeatureMessages` result for the keys named so far, and the last one has them all.
+  // The cast is the type this call promised: the namespaces and features it was given.
+  const t = features.reduce<CoreMessages>(
+    (messages, feature) => withFeatureMessages(messages, feature),
+    withNamespaces
+  ) as LoadedMessages<NamespaceOf<Requested[number]>>;
   // Memoized so a caller can keep the whole result in a dependency list.
   return useMemo(
     () => ({ t, locale: dictionary.locale, setLocale }),

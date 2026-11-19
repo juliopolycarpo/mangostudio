@@ -1,14 +1,15 @@
 import { posix, win32 } from 'node:path';
 
 import type { PathEnv } from '../runtime-env';
-import type {
-  LibraryLocationId,
-  LibraryScope,
-  LibraryTargetDescriptor,
-  LibraryTargetId,
-  LocationAccess,
-  ResourceFormat,
-  ResourceKind,
+import {
+  CUSTOM_INSTRUCTION_LOCATION_ID,
+  type LibraryLocationId,
+  type LibraryScope,
+  type LibraryTargetDescriptor,
+  type LibraryTargetId,
+  type LocationAccess,
+  type ResourceFormat,
+  type ResourceKind,
 } from './schemas';
 
 export type LibraryLocationLayout = 'directory-of-dirs' | 'directory-of-files' | 'single-file';
@@ -443,6 +444,45 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
   },
 ];
 
+/**
+ * A user-named instruction file, the one location kind whose path is not code-defined.
+ *
+ * Prompt rules let a user point at any absolute or `~` path, so that feature
+ * exists and the registry models it rather than keeping a second path table
+ * beside it. What it does not do is widen the write boundary: this definition
+ * is `read-only`, is not a row of {@link LIBRARY_LOCATION_DEFINITIONS}, and is
+ * in no target's `reads`. Every id a client can name for a write therefore
+ * still resolves through the closed table, where `getLibraryLocation` answers
+ * `undefined` for it and a preview or apply refuses it as unknown.
+ *
+ * The caller owns path validation (absolute, expected extension): by the time
+ * a path reaches this factory it is a trusted, already-checked string.
+ *
+ * @example
+ * defineCustomInstructionLocation('/srv/rules/team.md').access; // 'read-only'
+ */
+export interface CustomInstructionLocation extends LocationDefinition {
+  readonly id: typeof CUSTOM_INSTRUCTION_LOCATION_ID;
+  readonly access: 'read-only';
+}
+
+export function defineCustomInstructionLocation(absolutePath: string): CustomInstructionLocation {
+  return {
+    id: CUSTOM_INSTRUCTION_LOCATION_ID,
+    kind: 'instruction',
+    scope: 'home',
+    resolvePath: () => absolutePath,
+    access: 'read-only',
+    layout: 'single-file',
+    // Not `global`: that slug is the vendors' one global instruction file, and a
+    // user-named file must never be grouped with it as a copy of the same resource.
+    resourceSlug: 'custom',
+    format: 'markdown-plain',
+    // MangoStudio's prompt composer is the only reader of a custom file.
+    readBy: ['mangostudio'],
+  };
+}
+
 export const LIBRARY_TARGET_DEFINITIONS: readonly TargetDefinition[] = [
   {
     id: 'mangostudio',
@@ -602,6 +642,11 @@ export function assertLibraryRegistryConsistency(): void {
   }
 
   for (const location of LIBRARY_LOCATION_DEFINITIONS) {
+    // The id names a kind the table must never hold: a row under it would make a
+    // user path a write destination through the same lookup every write uses.
+    if (location.id === CUSTOM_INSTRUCTION_LOCATION_ID) {
+      throw new Error(`Location id "${location.id}" is reserved for custom instruction files.`);
+    }
     if (location.layout === 'single-file' && !location.resourceSlug) {
       throw new Error(`Single-file location "${location.id}" must declare a resourceSlug.`);
     }

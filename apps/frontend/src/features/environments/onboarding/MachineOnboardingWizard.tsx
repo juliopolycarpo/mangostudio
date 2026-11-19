@@ -19,6 +19,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { Dialog } from '@/components/ui/Dialog';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
@@ -49,7 +50,7 @@ interface MachineOnboardingWizardProps {
 }
 
 export function MachineOnboardingWizard({ environmentId, onClose }: MachineOnboardingWizardProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.onboarding;
 
   const environments = useEnvironmentEntitiesQuery();
@@ -170,7 +171,7 @@ interface StepBodyProps {
 }
 
 function StepBody(props: StepBodyProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.onboarding;
 
   switch (props.step) {

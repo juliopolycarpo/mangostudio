@@ -1,10 +1,12 @@
 import type {
+  FixedRuleFileKind,
   PromptInjectionRole,
   PromptSendFrequency,
   PromptSettings,
+  RuleFileSetting,
 } from '@mangostudio/shared/prompt-rules';
 
-import { loadRuleFileContent } from './rule-file-resolver';
+import { loadFixedRuleFileContent, loadRuleFileContent } from './rule-file-resolver';
 
 interface AppliedRuleFile {
   label: string;
@@ -28,28 +30,54 @@ function buildRuleDelimiter(label: string, path: string, open: boolean): string 
   return `<${tag} label="${label}" path="${path}">`;
 }
 
+interface ApplicableRule {
+  label: string;
+  /** What the prompt and `appliedRuleFiles` show: the path as the user's setting names it. */
+  path: string;
+  injectionRole: PromptInjectionRole;
+  /**
+   * Set for a built-in file. Its content is read from the library registry's
+   * location, never from the stored `path`, which is only a label that cannot
+   * follow `CLAUDE_CONFIG_DIR`.
+   */
+  fixedKind?: FixedRuleFileKind;
+}
+
 function collectApplicableRules(
   settings: PromptSettings | undefined,
   isFirstTurn: boolean
-): Array<{ label: string; path: string; injectionRole: PromptInjectionRole }> {
+): ApplicableRule[] {
   if (!settings) return [];
 
-  const rules: Array<{ label: string; path: string; injectionRole: PromptInjectionRole }> = [];
-  const allRules = [settings.agentsMd, settings.claudeMd, ...settings.customRules];
+  const rules: ApplicableRule[] = [];
+  const allRules: Array<{ rule: RuleFileSetting; fixedKind?: FixedRuleFileKind }> = [
+    { rule: settings.agentsMd, fixedKind: 'agents' },
+    { rule: settings.claudeMd, fixedKind: 'claude' },
+    ...settings.customRules.map((rule) => ({ rule })),
+  ];
 
-  for (const rule of allRules) {
+  for (const { rule, fixedKind } of allRules) {
     if (!rule.enabled) continue;
     if (!ruleApplies(rule.sendFrequency, isFirstTurn)) continue;
 
-    rules.push({ label: rule.label, path: rule.path, injectionRole: rule.injectionRole });
+    rules.push({
+      label: rule.label,
+      path: rule.path,
+      injectionRole: rule.injectionRole,
+      ...(fixedKind && { fixedKind }),
+    });
   }
 
   return rules;
 }
 
+function loadApplicableRuleContent(rule: ApplicableRule): string | null {
+  return rule.fixedKind ? loadFixedRuleFileContent(rule.fixedKind) : loadRuleFileContent(rule.path);
+}
+
 function composeSystemPrompt(
   baseSystemPrompt: string,
-  rules: Array<{ label: string; path: string; injectionRole: PromptInjectionRole }>
+  rules: ApplicableRule[]
 ): { prompt: string; applied: AppliedRuleFile[] } {
   const applied: AppliedRuleFile[] = [];
 
@@ -57,7 +85,7 @@ function composeSystemPrompt(
   for (const rule of rules) {
     if (rule.injectionRole !== 'system') continue;
 
-    const content = loadRuleFileContent(rule.path);
+    const content = loadApplicableRuleContent(rule);
     if (content === null) continue;
 
     result += `\n\n${buildRuleDelimiter(rule.label, rule.path, true)}\n${
@@ -72,7 +100,7 @@ function composeSystemPrompt(
 
 function composeUserPrompt(
   visiblePrompt: string,
-  rules: Array<{ label: string; path: string; injectionRole: PromptInjectionRole }>
+  rules: ApplicableRule[]
 ): { prompt: string; applied: AppliedRuleFile[] } {
   const applied: AppliedRuleFile[] = [];
   const parts: string[] = [];
@@ -80,7 +108,7 @@ function composeUserPrompt(
   for (const rule of rules) {
     if (rule.injectionRole !== 'user') continue;
 
-    const content = loadRuleFileContent(rule.path);
+    const content = loadApplicableRuleContent(rule);
     if (content === null) continue;
 
     parts.push(

@@ -1513,6 +1513,26 @@ script stops going through it. The launcher reuses the guarded create/shape-chec
 direct child of the OS temp directory with the expected name and refuses `..` segments. A run
 killed with `SIGKILL` cannot clean up and leaves its directory in the OS temp directory.
 
+The launcher also gives the tests a temp directory of their own. It creates
+`<tmpdir>/mangostudio-test-tmp-<random>`, points `TMPDIR`, `TMP` and `TEMP` at it, puts the
+test home inside it (so the home is still a direct child of the temp directory the tests see),
+and removes it when the run ends. A run that exits 0 but left anything else in it fails with
+exit code 1 and a message naming each entry, such as
+`with-test-home: tests left 1 entry in their temp directory … | expected: none | received: skill-diag-a1b2c3`.
+A run that already failed keeps its own exit code and still lists the leftovers. This covers
+the root-scripts lane too, because the worker runner starts every root and API worker through
+the launcher. Nothing in `/tmp` outlives a lane, and a test that forgets its cleanup fails its
+lane instead of filling the machine over days.
+
+In a test, make temporary directories through `useScratchDirs()` from
+`scripts/tests/support/scratch-dirs.ts`: it removes them after each test, or after the file
+with `useScratchDirs('all')`. Build a file-wide fixture in `beforeAll`, not while the file is
+collected. `afterAll` does not run for a file whose tests are all filtered out
+(`--test-name-pattern`), which is how the nested runner in
+`scripts/tests/supervision-fixtures.unit.test.ts` leaked a fixture per file per run. A process a
+test spawns that deliberately keeps its scratch directory when it fails (the benchmarks do)
+gets `TMPDIR` pointed at a directory the test removes.
+
 The frontend, shared, protocol and root-scripts lanes were checked with a `node:fs` spy and
 do not read or write the real home (only `lstat` ancestor walks of the home directory itself
 in the path-containment tests), so they are not behind the launcher.

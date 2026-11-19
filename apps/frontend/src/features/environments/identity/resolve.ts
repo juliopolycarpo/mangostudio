@@ -68,11 +68,28 @@ function takeCharacters(value: string, count: number): string {
 }
 
 /**
+ * Whether the registry may rename this subject.
+ *
+ * An MCP server already has a name the user chose and edits in its own form,
+ * and that name travels with exports and imports; a second, registry-side name
+ * would put two renames on one card. Its identity keeps the avatar fields only.
+ */
+export function isIdentityNameEditable(subjectKey: string): boolean {
+  return !subjectKey.startsWith('mcp:');
+}
+
+/**
  * Resolves one subject against the stored overrides.
  *
  * `fallbackName` is the product name the caller already knows how to compute
  * (`format.ts#displayName`), which keeps the i18n dictionary out of this module
  * and keeps the existing "unknown id degrades to the raw id" rule intact.
+ *
+ * For a subject whose name is not editable here, a display name stored before
+ * that rule existed is ignored on read, not cleared: no data is rewritten, and
+ * every surface that resolves the subject agrees with the card. The stored
+ * name is reported as absent so the editor never sends a patch that clears it
+ * as a side effect of saving the monogram or image.
  */
 export function resolveToolIdentity(
   identities: ToolIdentityMap,
@@ -80,7 +97,8 @@ export function resolveToolIdentity(
   fallbackName: string
 ): ResolvedToolIdentity {
   const stored: ToolIdentity | undefined = identities[subjectKey];
-  const name = stored?.displayName ?? fallbackName;
+  const storedName = isIdentityNameEditable(subjectKey) ? (stored?.displayName ?? null) : null;
+  const name = storedName ?? fallbackName;
 
   return {
     subjectKey,
@@ -89,7 +107,7 @@ export function resolveToolIdentity(
     // whatever the tool is currently called.
     monogram: stored?.monogram ?? deriveMonogram(name),
     image: toolImageDisplay(subjectKey, stored?.image ?? null, stored?.updatedAt ?? 0),
-    storedName: stored?.displayName ?? null,
+    storedName,
     storedMonogram: stored?.monogram ?? null,
     storedImage: stored?.image ?? null,
     customized: Boolean(stored),

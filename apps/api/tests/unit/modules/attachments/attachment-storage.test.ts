@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -37,8 +37,18 @@ describe('attachment storage paths', () => {
 });
 
 describe('removeAttachmentFile', () => {
+  let root: string;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'attachment-remove-'));
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it('removes an existing file', async () => {
-    const path = join(mkdtempSync(join(tmpdir(), 'attachment-remove-')), 'file.png');
+    const path = join(root, 'file.png');
     writeFileSync(path, 'bytes');
 
     await removeAttachmentFile(path);
@@ -47,13 +57,13 @@ describe('removeAttachmentFile', () => {
   });
 
   it('treats an already missing file as removed', async () => {
-    const path = join(mkdtempSync(join(tmpdir(), 'attachment-remove-')), 'missing.png');
+    const path = join(root, 'missing.png');
 
     await expect(removeAttachmentFile(path)).resolves.toBeUndefined();
   });
 
   it('rejects when the path cannot be removed as a file', async () => {
-    const directory = join(mkdtempSync(join(tmpdir(), 'attachment-remove-')), 'dir');
+    const directory = join(root, 'dir');
     mkdirSync(directory);
 
     await expect(removeAttachmentFile(directory)).rejects.toThrow();

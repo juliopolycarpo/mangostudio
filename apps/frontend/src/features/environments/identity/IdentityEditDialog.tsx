@@ -15,11 +15,12 @@ import { Callout } from '@/components/ui/Callout';
 import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
 import { ToolAvatar, type ToolImageDisplay } from '@/components/ui/ToolAvatar';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 
 import { buildToolIdentityPatch } from './dirty-patch';
-import { deriveMonogram, type ResolvedToolIdentity } from './resolve';
+import { deriveMonogram, isIdentityNameEditable, type ResolvedToolIdentity } from './resolve';
 import { IMAGE_URL_PATTERN, ToolImageFields, type ToolImageMode } from './ToolImageFields';
 import { useSaveToolIdentity } from './use-tool-identities';
 
@@ -61,9 +62,12 @@ function useFilePreviewUrl(file: File | null): string | null {
 }
 
 export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityEditDialogProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.identity;
   const save = useSaveToolIdentity();
+  // Without a name field the draft name stays empty, which matches the absent
+  // stored name `resolveToolIdentity` reports for such a subject: no name patch.
+  const nameEditable = isIdentityNameEditable(identity.subjectKey);
 
   // Seeded from the stored overrides, never from the resolved values: a stored
   // monogram that happens to equal the derived one still has to come back as
@@ -136,7 +140,9 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
     <Dialog
       testId="identity-edit-dialog"
       onClose={onClose}
-      title={formatMessage(labels.dialogTitle, { name: identity.name })}
+      title={formatMessage(nameEditable ? labels.dialogTitle : labels.customizeDialogTitle, {
+        name: identity.name,
+      })}
       truncateTitle
       description={labels.preview}
       leading={
@@ -165,19 +171,21 @@ export function IdentityEditDialog({ identity, defaultName, onClose }: IdentityE
       }
     >
       <div className="space-y-4">
-        <Input
-          id="tool-identity-name"
-          label={labels.nameLabel}
-          value={name}
-          // The dialog exists to edit this field; opening it and landing
-          // outside the form is the keyboard user's version of a dead end.
-          // eslint-disable-next-line jsx-a11y/no-autofocus -- Focus the field this dialog edits.
-          autoFocus
-          maxLength={64}
-          placeholder={formatMessage(labels.namePlaceholder, { name: defaultName })}
-          onChange={(event) => setName(event.target.value)}
-          hint={labels.nameHint}
-        />
+        {nameEditable && (
+          <Input
+            id="tool-identity-name"
+            label={labels.nameLabel}
+            value={name}
+            // The dialog exists to edit this field; opening it and landing
+            // outside the form is the keyboard user's version of a dead end.
+            // eslint-disable-next-line jsx-a11y/no-autofocus -- Focus the field this dialog edits.
+            autoFocus
+            maxLength={64}
+            placeholder={formatMessage(labels.namePlaceholder, { name: defaultName })}
+            onChange={(event) => setName(event.target.value)}
+            hint={labels.nameHint}
+          />
+        )}
 
         <Input
           id="tool-identity-monogram"

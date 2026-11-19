@@ -1,13 +1,21 @@
-import { afterAll, describe, expect, test } from 'bun:test';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { beforeAll, describe, expect, test } from 'bun:test';
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-const root = mkdtempSync(join(tmpdir(), 'mangostudio-bun-lint-'));
-copyFileSync(join(import.meta.dir, '../../bunfig.toml'), join(root, 'bunfig.toml'));
-writeFileSync(join(root, 'tsconfig.json'), '{"compilerOptions":{"target":"ESNext","strict":true}}');
+import { useScratchDirs } from './support/scratch-dirs';
 
-afterAll(() => rmSync(root, { recursive: true, force: true }));
+let root = '';
+const makeDir = useScratchDirs('all');
+// Built in beforeAll, not at collection: afterAll does not run for a file whose
+// tests are all filtered out, which would leave the directory behind.
+beforeAll(() => {
+  root = makeDir('mangostudio-bun-lint-');
+  copyFileSync(join(import.meta.dir, '../../bunfig.toml'), join(root, 'bunfig.toml'));
+  writeFileSync(
+    join(root, 'tsconfig.json'),
+    '{"compilerOptions":{"target":"ESNext","strict":true}}'
+  );
+});
 
 function writeFixture(path: string, source: string): void {
   const destination = join(root, path);

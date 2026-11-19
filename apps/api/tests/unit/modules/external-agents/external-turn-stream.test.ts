@@ -139,9 +139,12 @@ function harness(
      * with this error, as a runtime that refuses it would.
      */
     readonly reopenRefusal?: () => Error;
+    /** Scripted `external-agent.steer` failure, as a runtime whose answer was lost would give. */
+    readonly steerFailure?: () => Error;
   } = {}
 ) {
   const runtime = createFakeExternalRuntime({
+    ...(options.steerFailure ? { steerFailure: options.steerFailure } : {}),
     ...(options.sessionCapabilities ? { capabilities: options.sessionCapabilities } : {}),
     ...(options.turnFailure ? { turnFailure: options.turnFailure } : {}),
     ...(options.openFailure ? { openFailure: options.openFailure } : {}),
@@ -527,6 +530,46 @@ describe('external turn stream', () => {
         { id: 'deny', rawLabel: 'Deny', isDestructive: true },
       ],
     });
+  });
+
+  it('tells a live listener when a steer left delivery unknown, with no reason code', async () => {
+    const { runtime, controller, stream } = harness({
+      steerFailure: () => new Error('connection closed under the call'),
+    });
+    const result = await stream(
+      {
+        userId,
+        chat: chatRecord(),
+        chatId,
+        prompt: 'refactor the parser',
+        attachmentIds: [],
+        externalTurn: undefined,
+      },
+      getDb()
+    );
+    if (!result.ok) throw new Error('the send was refused');
+
+    const reading = readChunks(result.response);
+    await waitForTurnStart(runtime);
+    const outcome = await controller.steer({
+      userId,
+      chatId,
+      clientMessageId: 'steer-1',
+      text: 'use the existing helper',
+    });
+    expect(outcome).toEqual({ accepted: false, deliveryUnknown: true });
+
+    runtime.emit({ type: 'completed' });
+    const chunks = await reading;
+    expect(chunks.filter((chunk) => chunk.type === 'external_steer')).toEqual([
+      {
+        type: 'external_steer',
+        clientMessageId: 'steer-1',
+        text: 'use the existing helper',
+        status: 'delivery-unknown',
+        done: false,
+      },
+    ]);
   });
 
   it('binds an answer to the live turn without the client naming it', async () => {

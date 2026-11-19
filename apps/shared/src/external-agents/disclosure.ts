@@ -114,6 +114,45 @@ export const ExternalWorkspaceTrustSchema = Type.Object(
 export type ExternalWorkspaceTrust = Static<typeof ExternalWorkspaceTrustSchema>;
 
 /**
+ * The grants a user can see and withdraw, `GET /external-agents/workspace-trust`.
+ *
+ * Only grants that currently let a turn through: a row from an older workspace
+ * trust text version already reads as "ask again", so listing it as trusted
+ * would claim a consent the gate no longer honors.
+ */
+export const ExternalWorkspaceTrustListResponseSchema = Type.Object({
+  grants: ReadonlyArraySchema(ExternalWorkspaceTrustSchema, {
+    maxItems: EXTERNAL_WORKSPACE_TRUST_MAX_ENTRIES,
+  }),
+});
+
+export type ExternalWorkspaceTrustListResponse = Static<
+  typeof ExternalWorkspaceTrustListResponseSchema
+>;
+
+/**
+ * Names the grant to withdraw, `DELETE /external-agents/workspace-trust`.
+ *
+ * The same `(target, environment, workspace)` key the grant was stored under,
+ * and the path is the stored string, sent back as listed. The server matches it
+ * literally and never canonicalizes it again: that would need the machine's
+ * runtime, and a grant must stay revocable exactly when that machine is offline.
+ */
+export const ExternalWorkspaceTrustRevokeBodySchema = Type.Pick(ExternalWorkspaceTrustSchema, [
+  'targetId',
+  'environmentId',
+  'workspacePath',
+]);
+
+export type ExternalWorkspaceTrustRevokeBody = Static<
+  typeof ExternalWorkspaceTrustRevokeBodySchema
+>;
+
+export const ExternalWorkspaceTrustRevokeResponseSchema = Type.Object({
+  revoked: Type.Literal(true),
+});
+
+/**
  * What a vendor should run when a chat has not said.
  *
  * The bottom of the resolution chain a chat's own choice sits above, so that
@@ -217,6 +256,20 @@ export function withWorkspaceTrust(
   return next.length <= EXTERNAL_WORKSPACE_TRUST_MAX_ENTRIES
     ? next
     : next.slice(next.length - EXTERNAL_WORKSPACE_TRUST_MAX_ENTRIES);
+}
+
+/**
+ * The list without this workspace's grant.
+ *
+ * Matches the stored key literally and keeps every other entry, whatever its
+ * version. Pure, like {@link withWorkspaceTrust}; the caller compares lengths to
+ * learn whether anything was there to remove.
+ */
+export function withoutWorkspaceTrust(
+  entries: readonly ExternalWorkspaceTrust[],
+  key: ExternalWorkspaceTrustKey
+): ExternalWorkspaceTrust[] {
+  return entries.filter((entry) => !matchesKey(entry, key));
 }
 
 /**

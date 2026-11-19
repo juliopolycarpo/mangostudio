@@ -10,6 +10,7 @@
 
 import type { LibraryLocationStatus, LibraryUnreadableEntry } from '@mangostudio/shared/library';
 
+import { libraryMessages } from '@/features/library/library-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 
 interface UnrecognisedEntriesProps {
@@ -30,7 +31,7 @@ function groupByLocation(
 }
 
 export function UnrecognisedEntries({ entries, locations }: UnrecognisedEntriesProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library.unreadable;
 
   if (entries.length === 0) return null;

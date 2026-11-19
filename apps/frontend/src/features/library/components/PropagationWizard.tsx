@@ -24,6 +24,7 @@ import { useMemo } from 'react';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { useEnvironmentEntitiesQuery } from '@/features/environments/queries';
+import { libraryMessages } from '@/features/library/library-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 
@@ -68,7 +69,7 @@ export function PropagationWizard({
   environmentId,
   onClose,
 }: PropagationWizardProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
   const environmentsQuery = useEnvironmentEntitiesQuery();
   const environments = environmentsQuery.data ?? EMPTY_ENVIRONMENTS;

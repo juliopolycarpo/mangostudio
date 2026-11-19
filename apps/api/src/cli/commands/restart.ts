@@ -15,7 +15,9 @@ import {
 import {
   createHubServiceManager,
   currentHubExecutable,
+  currentHubExecutableProbe,
   currentLauncherPath,
+  restartHubService,
 } from '../../modules/machine/application/hub-service';
 import type { HubExecutable } from '../../modules/machine/domain/hub-executable';
 import { hubLaunchMode, hubUrl } from '../../modules/machine/domain/hub-process';
@@ -55,15 +57,34 @@ export interface RestartDeps {
    * directory this process runs from is the manager's to replace.
    */
   launcherPath: () => string | undefined;
+  /** Whether a path exists; the launcher a stale unit moves to must be one the manager left. */
+  pathExists: (path: string) => boolean;
   /** Runs the launcher with `--version` before the old hub is stopped; throws when it cannot run. */
   readTargetVersion: (argv: readonly string[]) => Promise<string>;
 }
 
 const COMEBACK_TIMEOUT_MS = 20_000;
 
-/** Restart the running server, or start the service when nothing runs. // Usage: await runRestart() */
+/**
+ * Restart the running server, or start the service when nothing runs.
+ *
+ * On launchd the hub's web restart runs this command from a one-shot helper
+ * agent (see `UserServiceManager.startRetargetHelper`). Whatever ran it, the
+ * helper is removed last: a plist left in LaunchAgents would run this again at
+ * the next login. A failure to remove it is not worth failing the restart for;
+ * the next hub start removes it too.
+ * // Usage: await runRestart()
+ */
 export async function runRestart(deps: Partial<RestartDeps> = {}): Promise<void> {
   const d = resolveDeps(deps);
+  try {
+    await restartHub(d);
+  } finally {
+    await d.manager.removeRetargetHelper().catch(() => undefined);
+  }
+}
+
+async function restartHub(d: Required<RestartDeps>): Promise<void> {
   const state = await d.readState();
   // A recycled pid (token mismatch) reads as no instance, like a dead one; an unconfirmed pid
   // goes on to `stopPidOrThrow`, which refuses it.
@@ -77,7 +98,7 @@ export async function runRestart(deps: Partial<RestartDeps> = {}): Promise<void>
 
   const mode = hubLaunchMode(state);
   if (mode === 'service') {
-    await d.manager.restart();
+    await bringUpUnit(d, { start: false });
     d.log(`Restart requested through ${state.service}.`);
     const next = await waitForComeback(state.pid, d);
     d.log(`MangoStudio restarted (PID ${next.pid}, ${hubUrl(next.host, next.port)}).`);
@@ -99,11 +120,26 @@ async function startInstalledService(d: Required<RestartDeps>): Promise<void> {
       'No running instance to restart. Start one with "mangostudio serve -d", or install the service with "mangostudio service install".'
     );
   }
-  await d.manager.start();
+  await bringUpUnit(d, { start: true });
   const next = await waitForComeback(null, d);
   d.log(
     `MangoStudio started through ${status.unitName} (PID ${next.pid}, ${hubUrl(next.host, next.port)}).`
   );
+}
+
+/**
+ * A unit installed before it named the manager's launcher records a versioned
+ * path that an upgrade replaced; the supervisor moves it onto the launcher as
+ * part of the start or bounce, or the restart runs the old build (or none at
+ * all).
+ */
+async function bringUpUnit(d: Required<RestartDeps>, options: { start: boolean }): Promise<void> {
+  const moved = await restartHubService(d.manager, d.launcherPath(), {
+    ...options,
+    probe: { platform: d.platform, pathExists: d.pathExists },
+    warn: d.log,
+  });
+  if (moved) d.log(`Updated the service unit to run ${moved.to} (it named ${moved.from}).`);
 }
 
 /**
@@ -173,6 +209,7 @@ function resolveDeps(deps: Partial<RestartDeps>): Required<RestartDeps> {
     requestShutdown: deps.requestShutdown ?? requestHubShutdown,
     executable: deps.executable ?? (() => currentHubExecutable()),
     launcherPath: deps.launcherPath ?? currentLauncherPath,
+    pathExists: deps.pathExists ?? currentHubExecutableProbe().pathExists,
     readTargetVersion: deps.readTargetVersion ?? readRestartTargetVersion,
   };
 }

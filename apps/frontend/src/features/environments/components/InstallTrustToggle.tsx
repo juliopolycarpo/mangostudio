@@ -15,6 +15,7 @@ import { useId, useState } from 'react';
 
 import { Callout } from '@/components/ui/Callout';
 import { ToggleSwitch } from '@/components/ui/Toggle';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
@@ -26,7 +27,7 @@ interface InstallTrustToggleProps {
 }
 
 export function InstallTrustToggle({ environment }: InstallTrustToggleProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const trust = t.environments.trust;
   const update = useUpdateEnvironmentMutation();
   const [error, setError] = useState<string | null>(null);

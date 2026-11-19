@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { join } from 'node:path';
 
 import {
   MACHINE_CHECK_DETAIL_MAX,
@@ -134,6 +135,8 @@ function makeService(
       pid: 42,
     }),
     executable: () => ({ argv: ['/home/j/.mango/dist/current/mangostudio'], pointer: 'current' }),
+    // Hermetic by default: the real one probes this process's own install origin.
+    launcherPath: () => undefined,
     serviceLogFile: () => '/home/j/.mango/logs/service.log',
     secretPersisted: () => true,
     spawnSuccessor: (next) => {
@@ -317,6 +320,117 @@ describe('machineService.restart', () => {
     expect(recorder.shutdowns).toBe(0);
   });
 
+  describe('of a service whose unit still names a replaced version', () => {
+    /** Homebrew's layout for the platform: the versioned path a stale unit names, and the launcher. */
+    const HOMEBREW = {
+      linux: {
+        cellar: '/home/linuxbrew/.linuxbrew/Cellar/mangostudio/0.1.1/libexec/mangostudio',
+        launcher: '/home/linuxbrew/.linuxbrew/bin/mangostudio',
+      },
+      darwin: {
+        cellar: '/opt/homebrew/Cellar/mangostudio/0.1.1/libexec/mangostudio',
+        launcher: '/opt/homebrew/bin/mangostudio',
+      },
+    } as const;
+
+    /** What the supervisor was asked to do; status reads (the page's and the stale check's) are not verbs. */
+    const verbs = (manager: FakeServiceManager): string[] =>
+      manager.calls.filter((call) => call !== 'status');
+
+    function staleServiceHub(
+      platform: 'linux' | 'darwin',
+      extra: Partial<MachineServiceDeps> = {}
+    ) {
+      const { cellar: CELLAR, launcher: LAUNCHER } = HOMEBREW[platform];
+      const made = makeService(
+        {
+          environment: () => ({
+            platform,
+            standalone: true,
+            container: false,
+            serverHost: '127.0.0.1',
+            serverPort: 3001,
+            homeDir: '/home/j/.mango',
+            logsDir: '/home/j/.mango/logs',
+            configFile: '/home/j/.mango/config.toml',
+            version: '0.1.1',
+            hostSlotDir: '/home/j/.mango/runtime/host',
+            pid: 42,
+          }),
+          launcherPath: () => LAUNCHER,
+          pathExists: () => true,
+          ...extra,
+        },
+        SERVICE
+      );
+      made.manager.setStatus({ ...installedAndRunning(), execPath: CELLAR });
+      return { ...made, launcher: LAUNCHER };
+    }
+
+    // The web restart ran `manager.restart()` against the stale unit, so a hub
+    // started from a Cellar entry that `brew upgrade` removed never came back.
+    it('moves the unit onto the launcher as part of the restart', async () => {
+      const { service, manager, recorder, launcher } = staleServiceHub('linux');
+
+      await service.restart(LOCAL);
+      await recorder.flush();
+
+      expect(verbs(manager)).toEqual(['restartRetargeted']);
+      expect(manager.retargeted).toEqual([launcher]);
+      expect(manager.retargetHelpers).toEqual([]);
+    });
+
+    it('still restarts the unit as installed when the move fails', async () => {
+      const { service, manager, recorder } = staleServiceHub('linux');
+      manager.restartRetargetedFailWith = new Error('read-only unit directory');
+
+      await service.restart(LOCAL);
+      await recorder.flush();
+
+      expect(verbs(manager)).toEqual(['restartRetargeted', 'restart']);
+    });
+
+    // launchd ends the hub's own job at the bootout, and the bootstrap that
+    // follows would die with it: a job of its own, outside the hub's, has to
+    // finish it.
+    it('on launchd hands the move to a one-shot launchd helper outside the unit', async () => {
+      const { service, manager, recorder, launcher } = staleServiceHub('darwin');
+
+      await service.restart(LOCAL);
+      await recorder.flush();
+
+      expect(verbs(manager)).toEqual(['startRetargetHelper']);
+      expect(manager.retargetHelpers).toEqual([
+        {
+          launcherPath: launcher,
+          // In the hub's own log directory, next to service.log.
+          logFile: join('/home/j/.mango/logs', 'service-retarget.log'),
+        },
+      ]);
+    });
+
+    it('on launchd falls back to restarting the unit in place when the helper cannot be loaded', async () => {
+      const { service, manager, recorder } = staleServiceHub('darwin');
+      manager.startRetargetHelperFailWith = new Error('launchctl bootstrap failed (exit 5)');
+
+      await service.restart(LOCAL);
+      await recorder.flush();
+
+      expect(verbs(manager)).toEqual(['startRetargetHelper', 'restart']);
+    });
+
+    it('on launchd restarts in place when the unit is not stale', async () => {
+      const { service, manager, recorder, launcher } = staleServiceHub('darwin');
+      manager.setStatus({ execPath: launcher });
+
+      await service.restart(LOCAL);
+      await recorder.flush();
+
+      expect(verbs(manager)).toEqual(['restart']);
+      expect(manager.retargetHelpers).toEqual([]);
+    });
+  });
+
   it('refuses a remote browser with the guard, and a foreground hub with the command', async () => {
     const { service } = makeService();
     await expect(service.restart({ clientIp: '10.0.0.7' })).rejects.toBeInstanceOf(
@@ -345,6 +459,18 @@ describe('machineService.service', () => {
     expect(recorder.shutdowns).toBe(0);
     await recorder.flush();
     expect(recorder.shutdowns).toBe(1);
+  });
+
+  it("installs the package manager's launcher, not the versioned path this hub runs from", async () => {
+    const { service, manager } = makeService({
+      executable: () => ({
+        argv: ['/opt/homebrew/Cellar/mangostudio/0.1.1/libexec/mangostudio'],
+        pointer: 'external',
+      }),
+      launcherPath: () => '/opt/homebrew/bin/mangostudio',
+    });
+    await service.service('install', LOCAL);
+    expect(manager.installed[0]?.argv).toEqual(['/opt/homebrew/bin/mangostudio', 'serve']);
   });
 
   it('bakes the running bind target into the unit when it differs from config', async () => {

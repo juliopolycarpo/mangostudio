@@ -1,6 +1,5 @@
-import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { describe, expect, test } from 'bun:test';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 
 import { SUITE_FLAGS } from '../ci/rust-lanes';
@@ -16,6 +15,7 @@ import {
   RUST_WORKSPACE_PATHS,
 } from '../lib/rust-lanes';
 import { readText } from './support/read-text';
+import { useScratchDirs } from './support/scratch-dirs';
 import { extractOnBlock } from './support/workflow-blocks';
 
 // scripts/lib/rust-lanes.ts is the one manifest behind cargo-shim.yml's
@@ -312,41 +312,45 @@ describe('discoverQualificationTests', () => {
   });
 
   describe('on a synthetic tree', () => {
-    const root = mkdtempSync(join(tmpdir(), 'rust-lanes-'));
-    const write = (path: string, text: string) => {
-      const full = join(root, path);
-      mkdirSync(dirname(full), { recursive: true });
-      writeFileSync(full, text);
-    };
-    afterAll(() => rmSync(root, { force: true, recursive: true }));
+    // Built inside the test: a run that filters it out creates nothing.
+    const makeDir = useScratchDirs();
+    const syntheticTree = (): string => {
+      const root = makeDir('rust-lanes-');
+      const write = (path: string, text: string) => {
+        const full = join(root, path);
+        mkdirSync(dirname(full), { recursive: true });
+        writeFileSync(full, text);
+      };
 
-    write(RUST_BINARY_RESOLVER, 'export const resolve = () => 1;\n');
-    write(
-      'apps/api/tests/support/rust-client.ts',
-      "import { resolve } from './rust-runtime-binary';\n"
-    );
-    write('apps/api/tests/support/cycle-a.ts', "import './cycle-b';\n");
-    write('apps/api/tests/support/cycle-b.ts', "import './cycle-a';\n");
-    write(
-      'apps/api/tests/integration/direct.integration.test.ts',
-      "import { resolve } from '../support/rust-runtime-binary';\n"
-    );
-    write(
-      'apps/api/tests/integration/nested/transitive.integration.test.ts',
-      "import { client } from '../../support/rust-client.ts';\n"
-    );
-    write(
-      'apps/api/tests/unit/dynamic.test.ts',
-      "const m = await import('../support/rust-client');\n"
-    );
-    write('apps/api/tests/unit/plain.test.ts', "import '../support/cycle-a';\n");
-    write(
-      'apps/api/tests/integration/other.integration.test.ts',
-      "import { x } from 'bun:test';\n"
-    );
+      write(RUST_BINARY_RESOLVER, 'export const resolve = () => 1;\n');
+      write(
+        'apps/api/tests/support/rust-client.ts',
+        "import { resolve } from './rust-runtime-binary';\n"
+      );
+      write('apps/api/tests/support/cycle-a.ts', "import './cycle-b';\n");
+      write('apps/api/tests/support/cycle-b.ts', "import './cycle-a';\n");
+      write(
+        'apps/api/tests/integration/direct.integration.test.ts',
+        "import { resolve } from '../support/rust-runtime-binary';\n"
+      );
+      write(
+        'apps/api/tests/integration/nested/transitive.integration.test.ts',
+        "import { client } from '../../support/rust-client.ts';\n"
+      );
+      write(
+        'apps/api/tests/unit/dynamic.test.ts',
+        "const m = await import('../support/rust-client');\n"
+      );
+      write('apps/api/tests/unit/plain.test.ts', "import '../support/cycle-a';\n");
+      write(
+        'apps/api/tests/integration/other.integration.test.ts',
+        "import { x } from 'bun:test';\n"
+      );
+      return root;
+    };
 
     test('follows direct, transitive, and dynamic imports and survives cycles', () => {
-      expect(discoverQualificationTests(root)).toEqual({
+      expect(discoverQualificationTests(syntheticTree())).toEqual({
         unit: ['tests/unit/dynamic.test.ts'],
         integration: [
           'tests/integration/direct.integration.test.ts',
@@ -360,23 +364,26 @@ describe('discoverQualificationTests', () => {
     // a -> b, b -> a, a -> c, c -> resolver. Searching from a visits b while a
     // is still open, so b's own answer is incomplete there; a later test that
     // imports only b must still be selected.
-    const root = mkdtempSync(join(tmpdir(), 'rust-lanes-cycle-'));
-    const write = (path: string, text: string) => {
-      const full = join(root, path);
-      mkdirSync(dirname(full), { recursive: true });
-      writeFileSync(full, text);
-    };
-    afterAll(() => rmSync(root, { force: true, recursive: true }));
+    const makeDir = useScratchDirs();
+    const cycleTree = (): string => {
+      const root = makeDir('rust-lanes-cycle-');
+      const write = (path: string, text: string) => {
+        const full = join(root, path);
+        mkdirSync(dirname(full), { recursive: true });
+        writeFileSync(full, text);
+      };
 
-    write(RUST_BINARY_RESOLVER, 'export const resolve = () => 1;\n');
-    write('apps/api/tests/support/a.ts', "import './b';\nimport './c';\n");
-    write('apps/api/tests/support/b.ts', "import './a';\n");
-    write('apps/api/tests/support/c.ts', "import './rust-runtime-binary';\n");
-    write('apps/api/tests/integration/a-first.integration.test.ts', "import '../support/a';\n");
-    write('apps/api/tests/integration/b-second.integration.test.ts', "import '../support/b';\n");
+      write(RUST_BINARY_RESOLVER, 'export const resolve = () => 1;\n');
+      write('apps/api/tests/support/a.ts', "import './b';\nimport './c';\n");
+      write('apps/api/tests/support/b.ts', "import './a';\n");
+      write('apps/api/tests/support/c.ts', "import './rust-runtime-binary';\n");
+      write('apps/api/tests/integration/a-first.integration.test.ts', "import '../support/a';\n");
+      write('apps/api/tests/integration/b-second.integration.test.ts', "import '../support/b';\n");
+      return root;
+    };
 
     test('selects a test that enters the cycle at the module searched mid-cycle', () => {
-      expect(discoverQualificationTests(root).integration).toEqual([
+      expect(discoverQualificationTests(cycleTree()).integration).toEqual([
         'tests/integration/a-first.integration.test.ts',
         'tests/integration/b-second.integration.test.ts',
       ]);

@@ -10,7 +10,7 @@
  * whole answer.
  */
 
-import type { CoreMessages } from '@mangostudio/shared/i18n';
+import type { Messages } from '@mangostudio/shared/i18n';
 import type { LibraryLocationStatus } from '@mangostudio/shared/library';
 import {
   Check,
@@ -22,6 +22,7 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 
+import { libraryMessages } from '@/features/library/library-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage, formatRelativeTime } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
@@ -100,7 +101,7 @@ interface CoverageCellProps {
 }
 
 export function CoverageCell({ cell, resourceSlug, locations }: CoverageCellProps) {
-  const { t, locale } = useI18n();
+  const { t, locale } = useI18n(libraryMessages);
   const l = t.library;
   const stateLabel = l.cellState[cell.state];
   const label = formatMessage(l.matrix.cellLabel, {
@@ -148,7 +149,7 @@ function locationPath(
 function cellTitle(
   cell: Cell,
   locations: readonly LibraryLocationStatus[],
-  l: CoreMessages['library'],
+  l: Messages['library'],
   locale: string
 ): string {
   if (cell.state === 'absent') return l.tooltip.absent;

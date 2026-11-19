@@ -21,6 +21,7 @@ import { Callout } from '@/components/ui/Callout';
 import { MicroLabel } from '@/components/ui/MicroLabel';
 import { EnvironmentScopeNotice } from '@/features/environments/components/EnvironmentScopeNotice';
 import { useEnvironmentScope } from '@/features/environments/use-environment-scope';
+import { libraryMessages } from '@/features/library/library-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
@@ -64,7 +65,7 @@ export function ResourceDetail({
    */
   readonly initialCompare?: boolean;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
   const scope = useEnvironmentScope();
   const isLocal = scope.environmentId === LOCAL_ENVIRONMENT_ID;

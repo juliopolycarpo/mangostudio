@@ -1585,3 +1585,187 @@ describe('install.ps1 npm tarball extraction', () => {
     90000
   );
 });
+
+// The Cargo launcher serializes installs of one version on an exclusive lock on
+// `<install root>\.launcher-<version>.lock`; install.ps1 takes it around the version directory
+// swap and a prune's removal. The holder below is a launcher stand-in that shares nothing with
+// install.ps1 but the lock file: its own FileStream.Lock over the largest range, which overlaps
+// the launcher's whole-file LockFileEx.
+describe('install.ps1 version lock', () => {
+  /** Hold the lock of `version` in the Windows `root` for `seconds`, or until released. */
+  async function holdLauncherLock(root: string, version: string, seconds: number) {
+    const lockPath = `${root}\\.launcher-${version}.lock`;
+    const holder = Bun.spawn({
+      cmd: [
+        POWERSHELL as string,
+        '-NoProfile',
+        '-Command',
+        `$ErrorActionPreference = 'Stop'; $fs = New-Object System.IO.FileStream(${psQuote(lockPath)}, 'OpenOrCreate', 'ReadWrite', 'ReadWrite'); $fs.Lock(0, [long]::MaxValue); [Console]::Out.WriteLine('locked'); [Console]::Out.Flush(); Start-Sleep -Seconds ${seconds}`,
+      ],
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const { value } = await holder.stdout.getReader().read();
+    const announced = new TextDecoder().decode(value);
+    if (!announced.includes('locked')) {
+      holder.kill();
+      throw new Error(
+        `lock holder for ${lockPath} | expected: locked | received: ${JSON.stringify(announced)} ${await new Response(holder.stderr).text()}`
+      );
+    }
+    return {
+      async release() {
+        holder.kill();
+        await holder.exited;
+      },
+    };
+  }
+
+  // The same rule as install.sh: plain digits (at most 9) are kept, anything else warns and
+  // falls back to 3600. Each answer is "<value>=<seconds>/<warned>".
+  test.skipIf(!POWERSHELL)(
+    'Get-InstallLockTimeoutSeconds keeps plain digits and warns about anything else',
+    () => {
+      const l = layout();
+      const values = ['0', '7', '123456789', '10s', '-1', '1.5', '+5', ' 5', '1234567890'];
+      const script = values
+        .map(
+          (value) =>
+            `$env:MANGOSTUDIO_INSTALL_LOCK_TIMEOUT = ${psQuote(value)}; ` +
+            `$out = @(Get-InstallLockTimeoutSeconds 3>&1); ` +
+            `Write-Output ('[' + ${psQuote(value)} + ']=' + $out[-1] + '/' + ($out.Count -gt 1))`
+        )
+        .join('; ');
+
+      const result = runDotSourced(l.scriptPath, script);
+
+      const lines = result.stdout.replace(/\r/g, '').split('\n');
+      const expected = [
+        '[0]=0/False',
+        '[7]=7/False',
+        '[123456789]=123456789/False',
+        '[10s]=3600/True',
+        '[-1]=3600/True',
+        '[1.5]=3600/True',
+        '[+5]=3600/True',
+        '[ 5]=3600/True',
+        '[1234567890]=3600/True',
+      ];
+      expect(
+        lines.filter((line) => line.startsWith('[')),
+        `expected the timeout rule of install.sh | received: ${JSON.stringify(result)}`
+      ).toEqual(expected);
+    },
+    60000
+  );
+
+  test.skipIf(!POWERSHELL)(
+    'Enter-VersionLock holds the lock until Exit-VersionLock and then gives up at the timeout',
+    () => {
+      const l = layout();
+      mkdirSync(l.rootLinux, { recursive: true });
+
+      const result = runDotSourced(
+        l.scriptPath,
+        `$env:MANGOSTUDIO_INSTALL_LOCK_TIMEOUT = '1'; ` +
+          `$first = Enter-VersionLock ${psQuote(l.root)} '0.1.0'; ` +
+          `Write-Output ('first=' + ($null -ne $first)); ` +
+          `try { Enter-VersionLock ${psQuote(l.root)} '0.1.0' | Out-Null; Write-Output 'second=taken' } catch { Write-Output ('second=' + $_.Exception.Message) }; ` +
+          `Exit-VersionLock $first; ` +
+          `$third = Enter-VersionLock ${psQuote(l.root)} '0.1.0'; ` +
+          `Write-Output ('third=' + ($null -ne $third)); Exit-VersionLock $third`
+      );
+
+      const lines = result.stdout.replace(/\r/g, '').split('\n');
+      expect(lines, JSON.stringify(result)).toContain('first=True');
+      expect(
+        lines.find((line) => line.startsWith('second=')),
+        `expected the second holder to give up at the timeout, naming the lock file | received: ${JSON.stringify(lines)}`
+      ).toContain(`${l.root}\\.launcher-0.1.0.lock`);
+      expect(lines, JSON.stringify(result)).toContain('third=True');
+    },
+    60000
+  );
+
+  test.skipIf(!POWERSHELL)(
+    '-Prune leaves a version whose lock is held, and removes it once the lock is free',
+    async () => {
+      const l = layout();
+      craftInstalledState(l, '0.2.0', { previousVersion: '0.1.0' });
+      mkdirSync(join(l.rootLinux, '0.1.0'), { recursive: true });
+      mkdirSync(join(l.rootLinux, '0.0.9'), { recursive: true });
+      const lock = await holdLauncherLock(l.root, '0.0.9', 120);
+      try {
+        const held = run(l.scriptPath, ['-Prune'], {
+          ...l.env,
+          MANGOSTUDIO_INSTALL_LOCK_TIMEOUT: '1',
+        });
+
+        expect(held.exitCode, JSON.stringify(held)).toBe(0);
+        expect(held.stdout).toContain('Could not remove 0.0.9');
+        expect(existsSync(join(l.rootLinux, '0.0.9'))).toBe(true);
+      } finally {
+        await lock.release();
+      }
+
+      const free = run(l.scriptPath, ['-Prune'], l.env);
+
+      expect(free.exitCode, JSON.stringify(free)).toBe(0);
+      expect(existsSync(join(l.rootLinux, '0.0.9'))).toBe(false);
+    },
+    120000
+  );
+
+  test.skipIf(!POWERSHELL)(
+    '-Prune waits for a held lock and removes the version once the holder is done',
+    async () => {
+      const l = layout();
+      craftInstalledState(l, '0.2.0', { previousVersion: '0.1.0' });
+      mkdirSync(join(l.rootLinux, '0.1.0'), { recursive: true });
+      mkdirSync(join(l.rootLinux, '0.0.9'), { recursive: true });
+      const lock = await holdLauncherLock(l.root, '0.0.9', 6);
+      try {
+        const result = run(l.scriptPath, ['-Prune'], l.env);
+
+        expect(result.exitCode, JSON.stringify(result)).toBe(0);
+        expect(result.stdout).toContain('Waiting for another installer');
+        expect(result.stdout).toContain('Removed 0.0.9');
+        expect(existsSync(join(l.rootLinux, '0.0.9'))).toBe(false);
+      } finally {
+        await lock.release();
+      }
+    },
+    120000
+  );
+
+  test.skipIf(!POWERSHELL || !WINDOWS_BINARY)(
+    'an install that outwaits the lock timeout fails naming the lock, keeps the tree and leaves no scratch',
+    async () => {
+      const goodVersion = discoverRealVersion();
+      const l = layout();
+      const archive = buildReleaseZip(l.linuxDir, `mangostudio-${goodVersion}-windows-x64.zip`);
+      const first = run(l.scriptPath, ['-Local', archive], l.env);
+      expect(first.exitCode, JSON.stringify(first)).toBe(0);
+      const marker = join(l.rootLinux, goodVersion, 'old-install-marker');
+      writeFileSync(marker, 'laid down by the first install');
+      const lock = await holdLauncherLock(l.root, goodVersion, 120);
+      try {
+        const result = run(l.scriptPath, ['-Local', archive], {
+          ...l.env,
+          MANGOSTUDIO_INSTALL_LOCK_TIMEOUT: '1',
+        });
+
+        expect(result.exitCode, JSON.stringify(result)).not.toBe(0);
+        // Windows PowerShell wraps stderr at the console width, so compare without whitespace.
+        expect(result.stderr.replace(/\s+/g, '')).toContain(`.launcher-${goodVersion}.lock`);
+        expect(existsSync(marker), `expected ${marker} untouched`).toBe(true);
+        expect(readdirSync(l.rootLinux).filter((entry) => entry.startsWith('.install-'))).toEqual(
+          []
+        );
+      } finally {
+        await lock.release();
+      }
+    },
+    180000
+  );
+});

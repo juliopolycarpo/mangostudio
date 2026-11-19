@@ -24,6 +24,22 @@ import { sendTextMessage, UnsupportedChatRunnerError } from '../application/send
 import { EmptyTextTurnError } from '../application/text-turn-content';
 import { modelUnavailableResponse } from './model-unavailable-response';
 
+/**
+ * The request's abort signal, aborted with the reason the streaming route uses for
+ * the same event, so the turn records a hang-up as `client_disconnect`.
+ */
+function clientDisconnectSignal(requestSignal: AbortSignal): AbortSignal {
+  const disconnect = new AbortController();
+  if (requestSignal.aborted) {
+    disconnect.abort('client_disconnect');
+  } else {
+    requestSignal.addEventListener('abort', () => disconnect.abort('client_disconnect'), {
+      once: true,
+    });
+  }
+  return disconnect.signal;
+}
+
 export const respondRoutes = (app: Elysia) =>
   app.group('', (app) =>
     app
@@ -105,7 +121,7 @@ export const respondRoutes = (app: Elysia) =>
               systemPrompt: body.systemPrompt,
               // The client hanging up cancels the vendor call. The keyed path
               // above does not pass it: that work outlives its request on purpose.
-              signal: request.signal,
+              signal: clientDisconnectSignal(request.signal),
             },
             getDb()
           );

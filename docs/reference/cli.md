@@ -104,10 +104,23 @@ The unit runs `serve` through whichever program survives an upgrade:
   on Windows — the junction, never the `bin` shim: a `.cmd` would make the
   supervisor supervise `cmd.exe`), so a new version is picked up without
   touching the unit.
-- **Package manager** — the resolved executable, wherever the manager put it.
-  Not the manager's own launcher: the npm wrapper and the Cargo shim on Windows
-  spawn the binary as a child, so a supervisor pointed at one would track the
-  wrapper and not the hub.
+- **Package manager** — the path the manager keeps pointing at the installed
+  build, so the unit follows its upgrades: Homebrew's `<prefix>/bin/mangostudio`,
+  pnpm's shim in the pnpm home (POSIX), Scoop's `current` directory. npm and bun
+  put no version in the resolved executable's path, so it is used as is. Never
+  the npm wrapper, which is a `.js` file. A unit written by an earlier release
+  with a versioned path is moved onto the launcher by `mangostudio restart`, by
+  an upgrade's restart and by the machine page's restart, keeping its
+  environment and arguments. If the rewrite fails the unit is restarted as it was
+  and a warning names `mangostudio service install` as the repair. If the unit
+  was rewritten and its restart fails, that error is reported as it is, saying
+  the unit was updated; there is no second restart. On macOS the machine page's
+  restart cannot do this from inside the hub, whose own launchd job the bootout
+  ends, so it loads a one-shot LaunchAgent (`com.mangostudio.hub.retarget`) that
+  runs `mangostudio restart` and removes itself at the end, logging to
+  `~/.mango/logs/service-retarget.log`; the next hub start removes one that never
+  got there. Its plist lives in `~/.mango/run`, not `~/Library/LaunchAgents`, so
+  a missed cleanup can never run `restart` at login. If that agent cannot be loaded the unit is kicked in place.
 - **Source checkout** — the workspace entry through Bun, with the directory
   `install` was run from as the unit's working directory.
 - **Installer layout with no launcher yet** — this version's own directory. The
@@ -267,10 +280,20 @@ archives, the registry's `dist.integrity` for an npm tarball), then write the
 install script embedded in its own binary to a temp file and run it with
 `--local <archive>` (`bash` on POSIX; `pwsh` when present, else
 `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File`, on
-Windows). The script extracts, smokes `mangostudio --version`, moves the
-`current` pointer, rewrites `install-origin.json` with `origin: upgrade`, and
-prunes. No executable code is ever downloaded — only archives, verified before
-the script sees them. The script receives `MANGOSTUDIO_INSTALL_ORIGIN=upgrade`,
+Windows). The script extracts, smokes `mangostudio --version`, replaces the
+version directory while holding the per-version lock the Cargo launcher takes
+(`.launcher-<version>.lock` in the dist root), so a script and a launcher
+installing one version take turns, moves the `current` pointer, rewrites
+`install-origin.json` with `origin: upgrade`, and prunes. A prune takes the same
+lock before it removes a version, which creates that version's lock file if it
+was missing and leaves it behind: the empty `.launcher-<version>.lock` files of
+pruned versions stay in the dist root. They are harmless and are not deleted,
+because unlinking a lock file while another process holds it would let two
+installers lock different files of the same name. `MANGOSTUDIO_INSTALL_LOCK_TIMEOUT`
+(whole seconds, default 3600) bounds how long a script waits for the lock; a
+value that is not plain digits is replaced with the default after a warning.
+No executable code is ever downloaded — only archives, verified before the
+script sees them. The script receives `MANGOSTUDIO_INSTALL_ORIGIN=upgrade`,
 `MANGOSTUDIO_INSTALL_DIR` (the detected dist root) and, when the origin record
 names one, `MANGOSTUDIO_BIN_DIR`. A legacy layout (version directories with no
 `current` and no origin record) is migrated by that first run. `--rollback`

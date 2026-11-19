@@ -11,6 +11,8 @@ const LIGHTWEIGHT_SUBPATHS = [
   'library/values',
   'runtime-home/values',
   'machine/limits',
+  'streaming/limits',
+  'git/limits',
 ] as const;
 const manifest = JSON.parse(readFileSync(resolve(SHARED_ROOT, 'package.json'), 'utf8')) as {
   exports: Record<string, string>;

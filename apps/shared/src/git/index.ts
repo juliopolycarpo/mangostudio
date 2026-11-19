@@ -7,6 +7,7 @@ export {
   parseCommitMessageOutput,
   splitCommitMessage,
 } from './commit-message';
+export { GIT_BATCH_STATE_MAX_CHAT_IDS } from './limits';
 export {
   type GitDiffHunk,
   type GitDiffLine,
@@ -32,7 +33,6 @@ export {
   GenerateCommitMessageBodySchema,
   type GenerateCommitMessageResponse,
   GenerateCommitMessageResponseSchema,
-  GIT_BATCH_STATE_MAX_CHAT_IDS,
   type GitBatchStateRequest,
   GitBatchStateRequestSchema,
   type GitBatchStateResponse,

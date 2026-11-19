@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Callout } from '@/components/ui/Callout';
 import { Checkbox } from '@/components/ui/Checkbox';
 import { MicroLabel } from '@/components/ui/MicroLabel';
+import { libraryMessages } from '@/features/library/library-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 
@@ -41,7 +42,7 @@ export function AdaptationNotes({
   onSelectStrategy,
   onToggleAcknowledged,
 }: AdaptationNotesProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
   const groupName = useId();
   const acknowledgeId = useId();

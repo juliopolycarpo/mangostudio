@@ -17,6 +17,7 @@ import type { CoreMessages, Messages } from '@mangostudio/shared/i18n';
 import { Button } from '@/components/ui/Button';
 import { Callout } from '@/components/ui/Callout';
 import { MicroLabel } from '@/components/ui/MicroLabel';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { resolveApiErrorMessage } from '@/lib/utils';
@@ -57,7 +58,7 @@ interface RuntimeCardProps {
 }
 
 export function RuntimeCard({ status, recipes, environmentId, children }: RuntimeCardProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const e = t.environments;
   const probe = useProbeRuntime(environmentId);
   const { resolve } = useToolIdentities();

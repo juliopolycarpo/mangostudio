@@ -360,15 +360,76 @@ describe('RuntimeHealthReportSchema', () => {
       }
     });
 
+    it('accepts a target id this build has no enum member for, in targets and in a live session', () => {
+      // Regression for #2557: an additive enum member failed the whole report.
+      const withNewVendor = {
+        ...externalAgents,
+        targets: ['codex', 'new-vendor'],
+        liveSessionCount: 2,
+        liveSessions: [
+          ...externalAgents.liveSessions,
+          { sessionId: 'session-2', targetId: 'new-vendor', ageMs: 9, state: 'running' },
+        ],
+      };
+      expect(
+        Value.Check(RuntimeHealthReportSchema, withExternalAgents(withNewVendor)),
+        'expected a report naming an unknown but well-formed target id to be accepted'
+      ).toBe(true);
+    });
+
+    it('accepts an isolation method this build has no enum member for', () => {
+      // Regression for #2570: an additive method failed the whole report.
+      const withNewMethod = {
+        ...externalAgents,
+        identityIsolation: { method: 'micro-vm', credentialHomeFingerprint: 'sha256:home' },
+      };
+      expect(
+        Value.Check(RuntimeHealthReportSchema, withExternalAgents(withNewMethod)),
+        'expected a report naming an unknown but well-formed isolation method to be accepted'
+      ).toBe(true);
+    });
+
+    it('still rejects an isolation method that is not a bounded, URL-safe token', () => {
+      const fingerprint = 'sha256:home';
+      const methods: readonly (readonly [string, unknown])[] = [
+        ['a method that is not a string', 3],
+        ['an empty method', ''],
+        ['a method that is not URL-safe', 'micro vm/../x'],
+        ['a method past 64 characters', 'a'.repeat(65)],
+      ];
+      for (const [label, method] of methods) {
+        expect(
+          Value.Check(
+            RuntimeHealthReportSchema,
+            withExternalAgents({
+              ...externalAgents,
+              identityIsolation: { method, credentialHomeFingerprint: fingerprint },
+            })
+          ),
+          `expected ${label} (${JSON.stringify(method)}) to be rejected`
+        ).toBe(false);
+      }
+    });
+
     it('still rejects a wrong type on a known member', () => {
       const wrong: readonly (readonly [string, unknown])[] = [
         ['liveSessionCount as a string', { ...externalAgents, liveSessionCount: '1' }],
-        ['a target that is not a known id', { ...externalAgents, targets: ['not-a-target'] }],
+        ['a target id that is not a string', { ...externalAgents, targets: [3] }],
+        ['an empty target id', { ...externalAgents, targets: [''] }],
+        ['a target id that is not URL-safe', { ...externalAgents, targets: ['new vendor/../x'] }],
+        ['a target id past 64 characters', { ...externalAgents, targets: ['a'.repeat(65)] }],
         [
-          'an isolation method that is not a known one',
+          'a live session whose target id is not URL-safe',
           {
             ...externalAgents,
-            identityIsolation: { method: 'vm', credentialHomeFingerprint: 'x' },
+            liveSessions: [{ ...externalAgents.liveSessions[0], targetId: 'codex?x=1' }],
+          },
+        ],
+        [
+          'more target ids than the cap',
+          {
+            ...externalAgents,
+            targets: Array.from({ length: 33 }, (_, index) => `vendor-${index}`),
           },
         ],
         [

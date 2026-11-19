@@ -12,6 +12,7 @@ import { useParams } from '@tanstack/react-router';
 
 import { TabNav } from '@/components/ui/TabNav';
 import { useEnvironmentScope } from '@/features/environments/use-environment-scope';
+import { libraryMessages } from '@/features/library/library-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 
 import { libraryKindPath } from '../format';
@@ -27,7 +28,7 @@ const TABS = [
 ] as const;
 
 export function LibraryTabs() {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const scope = useEnvironmentScope();
   const search = libraryEnvironmentSearch(scope.environmentId);
   // The layout renders above every child route, so the child's param is read

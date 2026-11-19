@@ -23,10 +23,7 @@
 
 import Type, { type Static } from 'typebox';
 
-import {
-  ExternalAgentTargetIdSchema,
-  ExternalIdentityIsolationSchema,
-} from '../external-agents/schemas';
+import { ExternalIdentityIsolationSchema } from '../external-agents/schemas';
 import { ReadonlyArraySchema, ReadonlyRecordSchema } from '../schema-helpers';
 import {
   type ResolvedRuntimeCapabilityAllow,
@@ -384,33 +381,63 @@ export type RuntimeServiceStatus = Static<typeof RuntimeServiceStatusSchema>;
 export const RUNTIME_HEALTH_LIVE_SESSION_LIMIT = 128;
 
 /**
+ * An enum-valued health member as health *reports* it: any bounded, URL-safe
+ * token, not the hub's closed enum. An additive enum member is the same kind of
+ * newer-peer change as an additive field, and it cannot be ignored by dropping
+ * an unknown key — the report would be refused whole and the manifest frozen.
+ * The hub decides what a value it does not know means, and logs it: it skips an
+ * unknown target id, and reads an unknown isolation method as unproven
+ * (`pruneUnknownExternalAgentHealth`, in the API).
+ *
+ * Reader-side only. Everywhere the hub *produces* the value — the manifest's
+ * `externalAgents` and `identityIsolation`, a chat's runner, an external-agent
+ * call — the enum stays closed, so a value this build cannot name never leaves it.
+ */
+export const RuntimeHealthTokenSchema = Type.String({
+  minLength: 1,
+  maxLength: 64,
+  pattern: '^[A-Za-z0-9][A-Za-z0-9_-]*$',
+});
+
+/**
+ * How many target ids health may list. Looser than today's three on purpose: a
+ * runtime hosting a fourth vendor must still pass this cap, or the new id would
+ * fail the report through the array bound instead of the enum.
+ */
+export const RUNTIME_HEALTH_TARGET_LIMIT = 32;
+
+/**
+ * The identity attestation reuses {@link ExternalIdentityIsolationSchema}'s
+ * members but not its closure or its method enum: that schema stays closed
+ * where the attestation is a reviewed, positive claim (`hello`, and the
+ * `isolation` the hub sends back). Health is only a report of it, and the hub
+ * copies out the two members it knows, and only for a method it knows, rather
+ * than forwarding the object (`manifest-from-health.ts`).
+ */
+const RuntimeHealthIdentityIsolationSchema = Type.Object({
+  ...ExternalIdentityIsolationSchema.properties,
+  method: RuntimeHealthTokenSchema,
+});
+
+const RuntimeHealthLiveSessionSchema = Type.Object({
+  sessionId: Type.String({ minLength: 1, maxLength: 256 }),
+  targetId: RuntimeHealthTokenSchema,
+  ageMs: Type.Integer({ minimum: 0 }),
+  state: Type.String({ minLength: 1, maxLength: 64 }),
+});
+
+/**
  * The `externalAgents` subtree of `runtime.health` is open: a member this build
  * has not named is accepted and ignored, like the rest of the report. The hub
  * reads health from a runtime that may be newer than itself, and one rejected
  * field takes the whole report with it — the manifest then stays frozen at its
  * handshake value with nothing to say so. Known members stay strictly typed,
- * so a wrong type is still refused.
- *
- * The identity attestation reuses {@link ExternalIdentityIsolationSchema}'s
- * members but not its closure: that schema stays closed where the attestation
- * is a reviewed, positive claim (`hello`, and the `isolation` the hub sends
- * back). Health is only a report of it, and the hub copies out the two members
- * it knows rather than forwarding the object (`manifest-from-health.ts`).
+ * so a wrong type is still refused; an enum-valued one is read as a
+ * {@link RuntimeHealthTokenSchema}.
  */
-const RuntimeHealthIdentityIsolationSchema = Type.Object(
-  ExternalIdentityIsolationSchema.properties
-);
-
-const RuntimeHealthLiveSessionSchema = Type.Object({
-  sessionId: Type.String({ minLength: 1, maxLength: 256 }),
-  targetId: ExternalAgentTargetIdSchema,
-  ageMs: Type.Integer({ minimum: 0 }),
-  state: Type.String({ minLength: 1, maxLength: 64 }),
-});
-
 export const RuntimeExternalAgentHealthSchema = Type.Object({
-  targets: ReadonlyArraySchema(ExternalAgentTargetIdSchema, {
-    maxItems: ExternalAgentTargetIdSchema.anyOf.length,
+  targets: ReadonlyArraySchema(RuntimeHealthTokenSchema, {
+    maxItems: RUNTIME_HEALTH_TARGET_LIMIT,
     uniqueItems: true,
   }),
   identityIsolation: Type.Optional(RuntimeHealthIdentityIsolationSchema),

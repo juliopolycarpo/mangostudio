@@ -13,6 +13,7 @@ import { useState } from 'react';
 
 import { Callout } from '@/components/ui/Callout';
 import { useToast } from '@/components/ui/Toast';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 
@@ -34,7 +35,7 @@ import { ServiceCard } from './ServiceCard';
 import { UpdateCard } from './UpdateCard';
 
 export function MachinePage() {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const m = t.environments.machine;
   const { toast } = useToast();
   const status = useMachineStatus();

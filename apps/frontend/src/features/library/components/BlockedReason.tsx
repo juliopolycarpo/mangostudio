@@ -10,6 +10,7 @@
 import type { PropagationBlockedReason, RemovalBlockedReason } from '@mangostudio/shared/library';
 import { Ban } from 'lucide-react';
 
+import { libraryMessages } from '@/features/library/library-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_SM } from '@/lib/icon-sizes';
 
@@ -21,7 +22,7 @@ export function BlockedReason({
   readonly reason: PropagationBlockedReason | RemovalBlockedReason;
   readonly action?: React.ReactNode;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const messages = t.library.blockedReason as Record<string, string | undefined>;
 
   return (

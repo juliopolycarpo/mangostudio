@@ -107,13 +107,13 @@ files = ["**/*.{ts,tsx}", "apps/frontend/**/*.{js,jsx,mjs,cjs,mts,cts}"]
 "no-restricted-syntax" = [
   "error",
   { selector = "ForInStatement", message = "Use an explicit iterable instead of for-in." },
-  { selector = "ImportExpression[source.value=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|en-settings|en-onboarding|pt-BR))?$/]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
-  { selector = "ImportExpression[source.quasis.0.value.cooked=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|en-settings|en-onboarding|pt-BR))?$/][source.expressions.length=0]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
-  { selector = "CallExpression[callee.name='require'][arguments.0.value=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|en-settings|en-onboarding|pt-BR))?$/]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
-  { selector = "CallExpression[callee.name='require'][arguments.0.quasis.0.value.cooked=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|en-settings|en-onboarding|pt-BR))?$/][arguments.0.expressions.length=0]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
-  { selector = "CallExpression[callee.object.name='module']:is([callee.property.name='require'], [callee.property.value='require'], [callee.property.quasis.0.value.cooked='require'][callee.property.expressions.length=0])[arguments.0.value=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|en-settings|en-onboarding|pt-BR))?$/]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
-  { selector = "CallExpression[callee.object.name='module']:is([callee.property.name='require'], [callee.property.value='require'], [callee.property.quasis.0.value.cooked='require'][callee.property.expressions.length=0])[arguments.0.quasis.0.value.cooked=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|en-settings|en-onboarding|pt-BR))?$/][arguments.0.expressions.length=0]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
-  { selector = "TSImportType[argument.literal.value=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|en-settings|en-onboarding|pt-BR))?$/]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
+  { selector = "ImportExpression[source.value=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|en-settings|en-onboarding|en-environments|en-library|en-git|en-github|pt-BR))?$/]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
+  { selector = "ImportExpression[source.quasis.0.value.cooked=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|en-settings|en-onboarding|en-environments|en-library|en-git|en-github|pt-BR))?$/][source.expressions.length=0]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
+  { selector = "CallExpression[callee.name='require'][arguments.0.value=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|en-settings|en-onboarding|en-environments|en-library|en-git|en-github|pt-BR))?$/]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
+  { selector = "CallExpression[callee.name='require'][arguments.0.quasis.0.value.cooked=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|en-settings|en-onboarding|en-environments|en-library|en-git|en-github|pt-BR))?$/][arguments.0.expressions.length=0]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
+  { selector = "CallExpression[callee.object.name='module']:is([callee.property.name='require'], [callee.property.value='require'], [callee.property.quasis.0.value.cooked='require'][callee.property.expressions.length=0])[arguments.0.value=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|en-settings|en-onboarding|en-environments|en-library|en-git|en-github|pt-BR))?$/]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
+  { selector = "CallExpression[callee.object.name='module']:is([callee.property.name='require'], [callee.property.value='require'], [callee.property.quasis.0.value.cooked='require'][callee.property.expressions.length=0])[arguments.0.quasis.0.value.cooked=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|en-settings|en-onboarding|en-environments|en-library|en-git|en-github|pt-BR))?$/][arguments.0.expressions.length=0]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
+  { selector = "TSImportType[argument.literal.value=/^@mangostudio\\/shared\\/i18n(?:\\/(?:en|en-settings|en-onboarding|en-environments|en-library|en-git|en-github|pt-BR))?$/]", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
   { selector = "ImportDeclaration[source.value='@mangostudio/shared/i18n']:not(:has(ImportSpecifier))", message = "Locale dictionaries are i18n plumbing. Render layers must localize via useI18n(); data layers must throw ApiError for failed requests." },
 ]
 "no-restricted-imports" = [
@@ -124,6 +124,10 @@ files = ["**/*.{ts,tsx}", "apps/frontend/**/*.{js,jsx,mjs,cjs,mts,cts}"]
     { name = "@mangostudio/shared/i18n/pt-BR", message = "Locale dictionaries are i18n plumbing, loaded only by lib/locale-dictionaries. Render layers must localize via useI18n()." },
     { name = "@mangostudio/shared/i18n/en-settings", message = "Locale dictionaries are i18n plumbing, loaded only by lib/locale-dictionaries. Render layers must localize via useI18n('settings')." },
     { name = "@mangostudio/shared/i18n/en-onboarding", message = "Locale dictionaries are i18n plumbing, loaded only by lib/locale-dictionaries. Render layers must localize via useI18n('onboarding')." },
+    { name = "@mangostudio/shared/i18n/en-environments", message = "Locale dictionaries are i18n plumbing, imported only by features/environments/environments-i18n.ts. Render layers must localize via useI18n(environmentsMessages)." },
+    { name = "@mangostudio/shared/i18n/en-library", message = "Locale dictionaries are i18n plumbing, imported only by features/library/library-i18n.ts. Render layers must localize via useI18n(libraryMessages)." },
+    { name = "@mangostudio/shared/i18n/en-git", message = "Locale dictionaries are i18n plumbing, imported only by features/workspace/git-i18n.ts. Render layers must localize via useI18n(gitMessages)." },
+    { name = "@mangostudio/shared/i18n/en-github", message = "Locale dictionaries are i18n plumbing, imported only by features/github/github-i18n.ts. Render layers must localize via useI18n(githubMessages)." },
   ] },
 ]
 
@@ -134,6 +138,10 @@ files = ["**/*.{ts,tsx}", "apps/frontend/**/*.{js,jsx,mjs,cjs,mts,cts}"]
 files = [
   "apps/frontend/src/hooks/use-i18n.tsx",
   "apps/frontend/src/lib/locale-dictionaries.ts",
+  "apps/frontend/src/features/environments/environments-i18n.ts",
+  "apps/frontend/src/features/library/library-i18n.ts",
+  "apps/frontend/src/features/workspace/git-i18n.ts",
+  "apps/frontend/src/features/github/github-i18n.ts",
   "apps/frontend/tests/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
 ]
 [lint.overrides.rules]

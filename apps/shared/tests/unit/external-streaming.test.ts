@@ -6,6 +6,7 @@ import { EXTERNAL_TURN_TERMINAL_REASONS, type ExternalAgentEvent } from '../../s
 import {
   externalAgentEventToStreamChunk,
   externalSessionStartedChunk,
+  externalSteerChunk,
   externalTurnCompletedChunk,
   StreamChunkSchema,
 } from '../../src/streaming';
@@ -182,6 +183,56 @@ describe('externalTurnCompletedChunk', () => {
       ).toBe(true);
     }
   );
+});
+
+describe('externalSteerChunk', () => {
+  it('projects an unknown delivery onto a valid, non-final chunk with no reason code', () => {
+    const chunk = externalSteerChunk({
+      clientMessageId: 'steer-1',
+      text: 'use the helper',
+      status: 'delivery-unknown',
+    });
+
+    expect(chunk).toEqual({
+      type: 'external_steer',
+      clientMessageId: 'steer-1',
+      text: 'use the helper',
+      status: 'delivery-unknown',
+      done: false,
+    });
+    expect(
+      Value.Check(StreamChunkSchema, chunk),
+      `(external_steer): expected a 'delivery-unknown' chunk to satisfy StreamChunkSchema | received: ${JSON.stringify(chunk)}`
+    ).toBe(true);
+  });
+
+  it('still projects accepted and rejected steers', () => {
+    const accepted = externalSteerChunk({ clientMessageId: 'a', text: 't', status: 'accepted' });
+    const rejected = externalSteerChunk({
+      clientMessageId: 'r',
+      text: 't',
+      status: 'rejected',
+      reasonCode: 'turn-not-steerable',
+    });
+
+    expect(accepted).toMatchObject({ status: 'accepted' });
+    expect(rejected).toMatchObject({ status: 'rejected', reasonCode: 'turn-not-steerable' });
+    expect(Value.Check(StreamChunkSchema, accepted)).toBe(true);
+    expect(Value.Check(StreamChunkSchema, rejected)).toBe(true);
+  });
+
+  it('refuses an unknown-delivery chunk that also claims a reason code', () => {
+    const chunk = {
+      type: 'external_steer',
+      clientMessageId: 'steer-1',
+      text: 't',
+      status: 'delivery-unknown',
+      reasonCode: 'turn-not-steerable',
+      done: false,
+    };
+
+    expect(Value.Check(StreamChunkSchema, chunk)).toBe(false);
+  });
 });
 
 describe('an external error chunk with a remedy', () => {

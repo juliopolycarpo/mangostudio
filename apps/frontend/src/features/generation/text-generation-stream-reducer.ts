@@ -970,25 +970,17 @@ function reduceExternalSteer(
   ) {
     return state;
   }
-  const steerPart =
-    chunk.status === 'rejected'
-      ? {
-          type: 'external_steer' as const,
-          targetId: externalTargetId(state.parts),
-          clientMessageId: chunk.clientMessageId,
-          text: chunk.text,
-          status: 'rejected' as const,
-          reasonCode: chunk.reasonCode,
-          createdAt: 0,
-        }
-      : {
-          type: 'external_steer' as const,
-          targetId: externalTargetId(state.parts),
-          clientMessageId: chunk.clientMessageId,
-          text: chunk.text,
-          status: 'accepted' as const,
-          createdAt: 0,
-        };
+  // `reasonCode` exists only on a rejection, so the other two statuses carry
+  // none, exactly as the stored part does.
+  const steerPart = {
+    type: 'external_steer' as const,
+    targetId: externalTargetId(state.parts),
+    clientMessageId: chunk.clientMessageId,
+    text: chunk.text,
+    status: chunk.status,
+    ...(chunk.status === 'rejected' ? { reasonCode: chunk.reasonCode } : {}),
+    createdAt: 0,
+  };
   const parts = [...state.parts, steerPart satisfies MessagePart];
   return withAiMessageUpdate({ ...state, parts }, { parts });
 }

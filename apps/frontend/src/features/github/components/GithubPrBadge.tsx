@@ -1,6 +1,7 @@
 import type { GithubPrState } from '@mangostudio/shared/github';
 
 import { Badge } from '@/components/ui/Badge';
+import { githubMessages } from '@/features/github/github-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 
 interface GithubPrBadgeProps {
@@ -22,7 +23,7 @@ interface GithubPrBadgeProps {
  * <GithubPrBadge state="MERGED" draft={false} />
  */
 export function GithubPrBadge({ state, draft }: GithubPrBadgeProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(githubMessages);
   const label = draft
     ? t.github.states.draft
     : t.github.states[state.toLowerCase() as Lowercase<GithubPrState>];

@@ -326,6 +326,126 @@ describe('sendTextMessage activity signal', () => {
   });
 });
 
+describe('sendTextMessage failed turn', () => {
+  interface TranscriptEntry {
+    readonly role: string;
+    readonly text: string;
+    readonly isGenerating: number;
+    readonly parts: Array<{ type?: string; text?: string; status?: string; reasonCode?: string }>;
+  }
+
+  async function readTranscript(chatId: string): Promise<TranscriptEntry[]> {
+    const rows = await getDb()
+      .selectFrom('messages')
+      .select(['role', 'text', 'isGenerating', 'parts'])
+      .where('chatId', '=', chatId)
+      .orderBy('timestamp', 'asc')
+      .execute();
+    return rows.map((row) => ({
+      role: row.role,
+      text: row.text,
+      isGenerating: Number(row.isGenerating),
+      parts: row.parts ? JSON.parse(row.parts) : [],
+    }));
+  }
+
+  /** Registers a provider whose call fails (or is cut short by `signal`) after the user message is saved. */
+  function registerFailingTextProvider(failure: Error): void {
+    try {
+      previousOpenAICompatibleProvider = getProvider('openai-compatible');
+    } catch {
+      previousOpenAICompatibleProvider = null;
+    }
+    registerProvider({
+      providerType: 'openai-compatible',
+      generateText: () => Promise.reject(failure),
+      listModels: () => Promise.resolve([]),
+      validateApiKey: () => Promise.resolve(),
+      resolveApiKey: () => Promise.resolve('test-key'),
+    });
+  }
+
+  async function seedFailedTurnChat(label: string): Promise<{ chatId: string; modelId: string }> {
+    const modelId = `send-text-failed-${label}-${Date.now()}`;
+    await seedConnector(modelId);
+    const chat = await createChat(
+      { title: `Send Text Failed ${label}`, userId: TEST_USER.id },
+      getDb()
+    );
+    return { chatId: chat.id, modelId };
+  }
+
+  it('leaves the user message and an assistant error part when the provider fails', async () => {
+    const { chatId, modelId } = await seedFailedTurnChat('provider');
+    const failure = new Error('vendor exploded');
+    registerFailingTextProvider(failure);
+
+    await expect(
+      sendTextMessage(
+        { chatId, userId: TEST_USER.id, prompt: 'Will this fail?', model: modelId },
+        getDb()
+      )
+    ).rejects.toBe(failure);
+
+    const transcript = await readTranscript(chatId);
+    expect(
+      transcript.map((entry) => entry.role),
+      'expected the transcript to hold the user message then an assistant reply | received an orphaned prompt'
+    ).toEqual(['user', 'ai']);
+    const reply = transcript[1];
+    expect(reply?.isGenerating, 'expected a settled assistant row').toBe(0);
+    expect(reply?.parts).toContainEqual({ type: 'error', text: 'vendor exploded' });
+    expect(reply?.parts.find((part) => part.type === 'turn_checkpoint')).toMatchObject({
+      status: 'interrupted',
+      reasonCode: 'provider_error',
+    });
+  });
+
+  it('records a client disconnect as an interruption without an error part', async () => {
+    const { chatId, modelId } = await seedFailedTurnChat('disconnect');
+    const clientDisconnect = new AbortController();
+    clientDisconnect.abort('client_disconnect');
+    registerFailingTextProvider(new Error('This operation was aborted'));
+
+    await expect(
+      sendTextMessage(
+        {
+          chatId,
+          userId: TEST_USER.id,
+          prompt: 'Hang up on me.',
+          model: modelId,
+          signal: clientDisconnect.signal,
+        },
+        getDb()
+      )
+    ).rejects.toThrow('This operation was aborted');
+
+    const reply = (await readTranscript(chatId))[1];
+    expect(reply?.role, 'expected an assistant row after the abort').toBe('ai');
+    expect(
+      reply?.parts.some((part) => part.type === 'error'),
+      'expected no error part for a client disconnect'
+    ).toBe(false);
+    expect(reply?.parts.find((part) => part.type === 'turn_checkpoint')).toMatchObject({
+      status: 'interrupted',
+      reasonCode: 'client_disconnect',
+    });
+  });
+
+  it('does not record an assistant turn for a refusal before the user message is saved', async () => {
+    const { chatId } = await seedFailedTurnChat('refusal');
+
+    await expect(
+      sendTextMessage(
+        { chatId, userId: TEST_USER.id, prompt: '   ', model: 'unresolved-model-is-not-used' },
+        getDb()
+      )
+    ).rejects.toBeInstanceOf(EmptyTextTurnError);
+
+    expect(await readTranscript(chatId)).toEqual([]);
+  });
+});
+
 function registerTextProvider(
   capturedRequests: TextGenerationRequest[],
   responseText: string

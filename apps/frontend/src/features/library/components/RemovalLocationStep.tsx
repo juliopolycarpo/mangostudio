@@ -20,6 +20,7 @@ import type {
 import { Server } from 'lucide-react';
 
 import { Callout } from '@/components/ui/Callout';
+import { libraryMessages } from '@/features/library/library-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage, formatRelativeTime } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
@@ -64,7 +65,7 @@ export function RemovalLocationStep({
   environmentName,
   onToggle,
 }: RemovalLocationStepProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
 
   return (
@@ -136,7 +137,7 @@ function RemovalRow({
     locationId: LibraryLocationId
   ) => void;
 }) {
-  const { t, locale } = useI18n();
+  const { t, locale } = useI18n(libraryMessages);
   const l = t.library;
   const removable = isRemovable(location);
   const checked = draft.removing.has(

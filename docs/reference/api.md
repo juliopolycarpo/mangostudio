@@ -176,6 +176,8 @@ SSE with `Content-Type: text/event-stream`. See [../architecture/streaming.md](.
 
 The preview body is `{ "path": "~/.mango/AGENTS.md" }` (`RuleFilePreviewBodySchema`); defaults return rule-file descriptors, not file contents.
 
+Every descriptor names the library location it is read through in `locationId`. The two built-in files are the registry's `mango-instructions` and `claude-instructions`, so their paths follow `MANGOSTUDIO_CONFIG_HOME` and `CLAUDE_CONFIG_DIR` exactly as the library does. A user-named path is `custom-instruction`: read-only, never a write destination, and not a row of the library matrix.
+
 ## Library Endpoints
 
 The read surface of the coverage matrix. Propagation, removal, and backups have

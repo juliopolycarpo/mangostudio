@@ -69,6 +69,26 @@ describe('settings inspection', () => {
     });
   });
 
+  it('reads a multi-line Codex rule and reports an unparseable rules file as a failure', () => {
+    const readable = 'prefix_rule(\n  pattern = ["git", "push"],\n  decision = "prompt",\n)';
+    const codexHooks = (rules: { name: string; content: string }[]) =>
+      inspectSettingsTarget(
+        'codex',
+        payload({ locationId: 'codex-permission-rules', present: true, sizeBytes: 1, rules })
+      ).sources.find((source) => source.locationId === 'codex-permission-rules');
+
+    expect(codexHooks([{ name: 'default.rules', content: readable }])).toMatchObject({
+      parsed: true,
+      fields: [
+        { path: 'default.rules[1].pattern', value: '["git", "push"]' },
+        { path: 'default.rules[1].decision', value: 'prompt' },
+      ],
+    });
+    expect(
+      codexHooks([{ name: 'default.rules', content: `${readable}\nrules_v2 = {"a": 1}` }])
+    ).toMatchObject({ present: true, parsed: false, failureReason: 'invalid-rules', fields: [] });
+  });
+
   // The runtime distinguishes "nothing there" from "there and unreadable", and
   // that distinction has to survive into the snapshot: one is an empty row, the
   // other is a file the user needs to go look at.

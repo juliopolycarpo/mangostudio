@@ -10211,22 +10211,12 @@
               "targets": {
                 "type": "array",
                 "items": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "const": "codex"
-                    },
-                    {
-                      "type": "string",
-                      "const": "cursor"
-                    },
-                    {
-                      "type": "string",
-                      "const": "claude"
-                    }
-                  ]
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
                 },
-                "maxItems": 3,
+                "maxItems": 32,
                 "uniqueItems": true
               },
               "identityIsolation": {
@@ -10237,20 +10227,10 @@
                 ],
                 "properties": {
                   "method": {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "const": "single-user-host"
-                      },
-                      {
-                        "type": "string",
-                        "const": "os-account"
-                      },
-                      {
-                        "type": "string",
-                        "const": "container"
-                      }
-                    ]
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
                   },
                   "credentialHomeFingerprint": {
                     "type": "string",
@@ -10280,20 +10260,10 @@
                       "maxLength": 256
                     },
                     "targetId": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "codex"
-                        },
-                        {
-                          "type": "string",
-                          "const": "cursor"
-                        },
-                        {
-                          "type": "string",
-                          "const": "claude"
-                        }
-                      ]
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
                     },
                     "ageMs": {
                       "type": "integer",

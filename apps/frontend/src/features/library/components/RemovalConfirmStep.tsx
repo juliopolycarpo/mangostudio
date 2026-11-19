@@ -14,6 +14,7 @@ import { useMemo } from 'react';
 
 import { Callout } from '@/components/ui/Callout';
 import { Checkbox } from '@/components/ui/Checkbox';
+import { libraryMessages } from '@/features/library/library-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatMessage } from '@/lib/i18n-format';
 import { ICON_MD } from '@/lib/icon-sizes';
@@ -32,7 +33,7 @@ export function RemovalConfirmStep({
   draft,
   onToggleAcknowledgement,
 }: RemovalConfirmStepProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
 
   const planned = useMemo(() => plannedRemovals(preview, draft), [preview, draft]);

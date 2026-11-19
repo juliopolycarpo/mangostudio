@@ -33,6 +33,7 @@ import { Badge } from '@/components/ui/Badge';
 import { Card } from '@/components/ui/Card';
 import { EnvironmentScopeNotice } from '@/features/environments/components/EnvironmentScopeNotice';
 import { useEnvironmentScope } from '@/features/environments/use-environment-scope';
+import { libraryMessages } from '@/features/library/library-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { formatList, formatMessage } from '@/lib/i18n-format';
 import { ICON_SM } from '@/lib/icon-sizes';
@@ -49,7 +50,7 @@ import { LibraryPageState } from './LibraryPageState';
 const CARD_GRID = 'grid grid-cols-[repeat(auto-fit,minmax(16rem,1fr))] gap-3';
 
 export function SettingsComparison() {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
   const scope = useEnvironmentScope();
   const query = useQuery(settingsComparisonQueryOptions(scope.environmentId));
@@ -151,7 +152,7 @@ export function SettingsSourcePanel({
   readonly snapshots: readonly SettingsSnapshot[];
   readonly locationLabel: (locationId: string) => string;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
   const populated = snapshots.filter((snapshot) => snapshot.sources.length > 0);
   if (populated.length === 0) return null;
@@ -188,7 +189,7 @@ function SettingsSourceRow({
   readonly source: SettingsSourceSnapshot;
   readonly label: string;
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
   const omitted = source.fields.filter((field) => field.presentation === 'omitted');
 
@@ -212,7 +213,7 @@ function SettingsSourceRow({
 }
 
 function ConceptSection({ comparison }: { readonly comparison: ConceptComparison }) {
-  const { t, locale } = useI18n();
+  const { t, locale } = useI18n(libraryMessages);
   const l = t.library;
 
   const cards: ConceptComparisonEntry[] = [];
@@ -259,7 +260,7 @@ function ConceptSection({ comparison }: { readonly comparison: ConceptComparison
 }
 
 function ConceptEntry({ entry }: { readonly entry: ConceptComparisonEntry }) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
 
   return (
@@ -321,7 +322,7 @@ function TargetCard({
  * own sentence.
  */
 export function SettingsFieldValue({ field }: { readonly field: SettingsField }) {
-  const { t } = useI18n();
+  const { t } = useI18n(libraryMessages);
   const l = t.library;
   const Glyph = field.presentation === 'omitted' ? Ban : EyeOff;
 

@@ -24,6 +24,7 @@ import { Callout } from '@/components/ui/Callout';
 import { Dialog } from '@/components/ui/Dialog';
 import { Input } from '@/components/ui/Input';
 import { MicroLabel } from '@/components/ui/MicroLabel';
+import { environmentsMessages } from '@/features/environments/environments-i18n';
 import { useI18n } from '@/hooks/use-i18n';
 import { ICON_MD } from '@/lib/icon-sizes';
 import { resolveApiErrorMessage } from '@/lib/utils';
@@ -83,7 +84,7 @@ function preferredDistro(offered: readonly WslDistribution[]): string {
 }
 
 export function AddEnvironmentDialog({ onClose, onStartOnboarding }: AddEnvironmentDialogProps) {
-  const { t } = useI18n();
+  const { t } = useI18n(environmentsMessages);
   const labels = t.environments.entities.add;
   const create = useCreateEnvironmentMutation();
   const reachGroupName = useId();

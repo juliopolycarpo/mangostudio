@@ -316,7 +316,10 @@ Cross-workspace imports use package names (`@mangostudio/shared`), never relativ
 
 Browser code imports UI constants and pure helpers through the `environments/values`,
 `external-agents/values`, `library/values`, `runtime-home/values`, and `generation/values`
-subpaths. Machine log bounds use `machine/limits`. For example:
+subpaths. Machine log bounds use `machine/limits`, the SSE frame bound uses
+`streaming/limits` and the git batch bound uses `git/limits`; the frontend takes only types from
+the `streaming` barrel, because importing it at runtime puts every chunk schema in the entry
+chunk. For example:
 
 ```ts
 import { LOCAL_ENVIRONMENT_ID } from '@mangostudio/shared/environments/values';
@@ -326,6 +329,14 @@ The original context entrypoints still export their complete wire schemas. Small
 are shared by those schemas and the lightweight values; runtime validators keep their TypeBox
 checks. `apps/shared/tests/unit/browser-values.test.ts` checks the compatibility exports and
 schema-derived choices.
+
+`apps/shared/package.json` lists the modules that run code when they load in `sideEffects`
+(today only `library/registry.ts`, which asserts its own consistency). Bun's bundler honours the
+field: a module not listed is dropped whole when nothing it exports is used, so a barrel the
+frontend imports for one constant no longer carries every re-exported schema module. It cannot
+drop a schema inside a module the frontend does use, which is why constants still move to a
+`limits` or `values` subpath. `scripts/tests/shared-side-effects-declaration.unit.test.ts` fails
+when a shared module gains a top-level statement that is not on the list.
 
 ## Database
 

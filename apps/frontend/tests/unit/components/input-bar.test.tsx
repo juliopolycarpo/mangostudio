@@ -2,6 +2,7 @@ import { describe, expect, it, jest } from 'bun:test';
 
 import type { ExternalAgentDescriptor } from '@mangostudio/shared/external-agents';
 import { NO_EXTERNAL_AGENT_CAPABILITIES } from '@mangostudio/shared/external-agents';
+import { en } from '@mangostudio/shared/i18n';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
@@ -532,6 +533,78 @@ describe('InputBar — mid-turn steering', () => {
     } finally {
       scenario.restore();
     }
+  });
+
+  describe('when the hub cannot tell whether the agent got the steer', () => {
+    function unknownDeliveryScenario() {
+      const scenario = createFetchScenario();
+      scenario
+        .respondWithJson('POST', '/api/chats/chat-1/external-agent/steer', {
+          status: 200,
+          body: { accepted: false, deliveryUnknown: true },
+        })
+        .install();
+      return scenario;
+    }
+
+    function renderSteerable() {
+      renderInputBar({
+        chatId: 'chat-1',
+        runner: EXTERNAL_RUNNER,
+        externalDescriptor: steerableDescriptor(),
+        isGenerating: true,
+        disabled: true,
+      });
+    }
+
+    it('warns to check the agent first, in a warning tone, and does not resend by itself', async () => {
+      const scenario = unknownDeliveryScenario();
+
+      try {
+        const user = userEvent.setup();
+        renderSteerable();
+
+        await user.type(screen.getByRole('textbox'), 'switch to plan mode');
+        await user.click(screen.getByRole('button', { name: 'Steer' }));
+
+        const notice = await screen.findByRole('status');
+        expect(notice).toHaveTextContent(en.externalAgents.steer.deliveryUnknownLabel);
+        expect(notice).toHaveTextContent(en.externalAgents.steer.deliveryUnknownHint);
+        expect(notice.className).toContain('bg-warning-subtle');
+        expect(notice.className).not.toContain('bg-danger-subtle');
+        // The text now lives in the transcript part; a draft left behind would
+        // ride into the next ordinary send.
+        expect(screen.getByRole('textbox')).toHaveValue('');
+        // Settled, with nothing queued behind it: a resend is the user's to make.
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(scenario.fetchMock).toHaveBeenCalledTimes(1);
+      } finally {
+        scenario.restore();
+      }
+    });
+
+    it('sends again under a fresh id only when the user does it', async () => {
+      const scenario = unknownDeliveryScenario();
+
+      try {
+        const user = userEvent.setup();
+        renderSteerable();
+
+        await user.type(screen.getByRole('textbox'), 'switch to plan mode');
+        await user.click(screen.getByRole('button', { name: 'Steer' }));
+        await screen.findByRole('status');
+        await user.type(screen.getByRole('textbox'), 'switch to plan mode');
+        await user.click(screen.getByRole('button', { name: 'Steer' }));
+        await waitFor(() => expect(scenario.fetchMock).toHaveBeenCalledTimes(2));
+
+        const [first, second] = steerBodies(scenario);
+        // The first id's answer is cached as unknown for good, so reusing it
+        // would make "send again" a no-op that cannot reach the agent.
+        expect(second?.clientMessageId).not.toBe(first?.clientMessageId);
+      } finally {
+        scenario.restore();
+      }
+    });
   });
 
   it('resends a steer that failed without an answer under the same id', async () => {
