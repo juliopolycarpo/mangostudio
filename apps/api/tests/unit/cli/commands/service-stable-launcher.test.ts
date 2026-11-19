@@ -168,9 +168,8 @@ describe('a unit written before the launcher was recorded', () => {
 
       if (layout.platform === 'win32') {
         expect(host.retargetScripts).toHaveLength(1);
-        expect(host.retargetScripts[0]).toContain(
-          `'& ' + '''${layout.launcher.replaceAll("'", "''")}'''`
-        );
+        // The task now reports the launcher, read back through the status script.
+        expect(await unitProgram(manager)).toBe(layout.launcher);
         // Retarget first, then the restart script: the restart starts what was rewritten.
         expect(host.commands.findIndex((c) => c.includes('Set-ScheduledTask'))).toBeLessThan(
           host.commands.findIndex((c) => c.includes('Start-ScheduledTask'))
@@ -310,7 +309,7 @@ describe('mangostudio restart with a stale unit', () => {
       );
       if (layout.platform === 'win32') {
         expect(host.retargetScripts).toHaveLength(1);
-        expect(host.retargetScripts[0]).toContain(layout.launcher);
+        expect(await unitProgram(manager)).toBe(layout.launcher);
       } else {
         expect(execPathFromUnitBody(host.unitBody() ?? '')).toBe(layout.launcher);
       }

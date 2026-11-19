@@ -12,8 +12,9 @@ import {
  * reads back what the manager wrote. Task Scheduler keeps no file: the host
  * remembers the `-Argument` the install script registered (`taskArguments`)
  * and answers the status script with it, which is the one thing the real
- * manager reads back. It cannot run PowerShell, so a retarget script is only
- * recorded (`retargetScripts`) and answered `retargeted`.
+ * manager reads back. It cannot run PowerShell, but a retarget script only
+ * stores the arguments the manager computed, so the host records the script
+ * (`retargetScripts`) and keeps those arguments for the next status read.
  */
 export class FakeUnitHost {
   readonly files = new Map<string, string>();
@@ -75,8 +76,13 @@ export class FakeUnitHost {
       return ok();
     }
     if (script.includes('Set-ScheduledTask')) {
+      // What a retarget stores: the new action arguments, which the status
+      // script then reads back.
       this.retargetScripts.push(script);
-      return ok('retargeted\n');
+      this.taskArguments =
+        /\$action\.Arguments = '((?:[^']|'')*)'/.exec(script)?.[1]?.replaceAll("''", "'") ??
+        this.taskArguments;
+      return ok();
     }
     if (script.includes('ConvertTo-Json')) {
       return ok(

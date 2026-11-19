@@ -227,6 +227,32 @@ ${optional.map((entry) => `${entry}\n`).join('')}  <key>RunAtLoad</key>
  */
 const SCHEDULED_TASK_ARGUMENT_MAX = 8_192;
 
+/** The encoded runner script inside a task's action arguments. */
+const TASK_ENCODED_COMMAND = /-EncodedCommand\s+(\S+)/;
+/**
+ * The runner script's program line: the first one that opens with `& '`. The
+ * environment and working directory lines before it start with `$env:` and
+ * `Set-Location`.
+ */
+const RUNNER_PROGRAM_LINE = /^& '(?:[^']|'')*'/m;
+
+/**
+ * Task Scheduler cuts an over-long argument rather than refusing it, and a
+ * cut base64 blob decodes to a truncated script — a task that registers, is
+ * reported installed, and starts a hub with half its environment or none of
+ * its program. Say so here instead.
+ */
+function assertTaskArgumentFits(taskName: string, runnerArgument: string): void {
+  if (runnerArgument.length <= SCHEDULED_TASK_ARGUMENT_MAX) return;
+  // The same refusal shape every other backend raises, so `withServiceErrors`
+  // prints it as one line and the machine route answers 409 — a bare `Error`
+  // reached the user as a stack trace and the page as a 500.
+  throw new RuntimeServiceManagementError(
+    'runtime_service_unsupported',
+    `The Scheduled Task command for ${taskName} is ${runnerArgument.length} characters, over the ${SCHEDULED_TASK_ARGUMENT_MAX} Task Scheduler accepts. Move configuration out of the environment into config.toml so the unit does not have to carry it.`
+  );
+}
+
 /**
  * The PowerShell that registers the Scheduled Task. The task runs a hidden
  * PowerShell that sets the unit's environment, moves to its working directory
@@ -239,19 +265,7 @@ export function renderScheduledTaskInstallScript(
 ): string {
   const runner = renderScheduledTaskRunnerScript(definition);
   const runnerArgument = `-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand ${encodePowerShell(runner)}`;
-  // Task Scheduler cuts an over-long argument rather than refusing it, and a
-  // cut base64 blob decodes to a truncated script — a task that registers, is
-  // reported installed, and starts a hub with half its environment or none of
-  // its program. Say so here instead.
-  if (runnerArgument.length > SCHEDULED_TASK_ARGUMENT_MAX) {
-    // The same refusal shape every other backend raises, so `withServiceErrors`
-    // prints it as one line and the machine route answers 409 — a bare `Error`
-    // reached the user as a stack trace and the page as a 500.
-    throw new RuntimeServiceManagementError(
-      'runtime_service_unsupported',
-      `The Scheduled Task command for ${taskName} is ${runnerArgument.length} characters, over the ${SCHEDULED_TASK_ARGUMENT_MAX} Task Scheduler accepts. Move configuration out of the environment into config.toml so the unit does not have to carry it.`
-    );
-  }
+  assertTaskArgumentFits(taskName, runnerArgument);
   const action = [
     'New-ScheduledTaskAction',
     "-Execute 'powershell.exe'",
@@ -353,28 +367,48 @@ function renderScheduledTaskRestartScript(taskName: string): string {
 }
 
 /**
- * Rewrite the program inside an installed task's encoded runner script and
- * leave the rest of the task (trigger, settings, environment, log file) alone.
- * Prints `retargeted` when it changed the task, `unchanged` when the task is
- * absent or already runs the program.
+ * The task's action arguments with the program inside the encoded runner
+ * script swapped for `program`; null when it already runs it. The decode,
+ * rewrite and re-encode happen here rather than in PowerShell so the transform
+ * is ordinary code under test, and the script that follows only stores the
+ * result. Throws when the task does not carry an encoded runner script (not
+ * ours to rewrite) or when the new argument would exceed what Task Scheduler
+ * keeps.
+ * // Usage: retargetScheduledTaskArguments(taskName, status.arguments, launcherPath)
  */
-export function renderScheduledTaskRetargetScript(taskName: string, program: string): string {
+export function retargetScheduledTaskArguments(
+  taskName: string,
+  taskArguments: string,
+  program: string
+): string | null {
+  const encoded = TASK_ENCODED_COMMAND.exec(taskArguments)?.[1];
+  if (!encoded) {
+    throw new RuntimeServiceManagementError(
+      'runtime_service_unsupported',
+      `The Scheduled Task ${taskName} does not run an encoded runner script; install it again.`
+    );
+  }
+  const runner = Buffer.from(encoded, 'base64').toString('utf16le');
+  // The callback form: a string replacement would read `$&` or `$1` in the path.
+  // Without the `g` flag only the first program line is replaced.
+  const updatedRunner = runner.replace(RUNNER_PROGRAM_LINE, () => `& ${psQuote(program)}`);
+  if (updatedRunner === runner) return null;
+  const updated = taskArguments.replace(
+    TASK_ENCODED_COMMAND,
+    () => `-EncodedCommand ${encodePowerShell(updatedRunner)}`
+  );
+  assertTaskArgumentFits(taskName, updated);
+  return updated;
+}
+
+/** Stores `taskArguments` as the task's action arguments, leaving trigger, settings and the rest of the action as they are. */
+function renderScheduledTaskSetArgumentsScript(taskName: string, taskArguments: string): string {
   return [
     "$ErrorActionPreference = 'Stop'",
-    `$task = Get-ScheduledTask -TaskName ${psQuote(taskName)} -ErrorAction SilentlyContinue`,
-    "if ($null -eq $task) { Write-Output 'unchanged'; exit 0 }",
+    `$task = Get-ScheduledTask -TaskName ${psQuote(taskName)}`,
     '$action = @($task.Actions)[0]',
-    "$found = [regex]::Match([string]$action.Arguments, '-EncodedCommand\\s+(\\S+)')",
-    "if (-not $found.Success) { throw 'The task does not run an encoded runner script.' }",
-    '$runner = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($found.Groups[1].Value))',
-    `$replacement = '& ' + ${psQuote(psQuote(program))}`,
-    "$pattern = '(?m)^& ''(?:[^'']|'''')*'''",
-    '$updated = [regex]::Replace($runner, $pattern, [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $replacement })',
-    "if ($updated -ceq $runner) { Write-Output 'unchanged'; exit 0 }",
-    '$encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($updated))',
-    "$action.Arguments = [regex]::Replace([string]$action.Arguments, '-EncodedCommand\\s+\\S+', ('-EncodedCommand ' + $encoded))",
+    `$action.Arguments = ${psQuote(taskArguments)}`,
     `Set-ScheduledTask -TaskName ${psQuote(taskName)} -Action $action | Out-Null`,
-    "Write-Output 'retargeted'",
   ].join('\n');
 }
 
@@ -934,17 +968,23 @@ export function createUserServiceManager(
         'Stop-ScheduledTask/Start-ScheduledTask'
       ),
     async retarget(program: string) {
-      const result = await run(
-        powershellArgv(renderScheduledTaskRetargetScript(identity.taskName, program))
-      );
-      if (result.exitCode !== 0) {
-        const detail = result.stderr.trim() || result.stdout.trim();
+      const read = await run(powershellArgv(renderScheduledTaskStatusScript(identity.taskName)));
+      if (read.exitCode !== 0) {
+        const detail = read.stderr.trim() || read.stdout.trim();
         throw new RuntimeServiceManagementError(
           'runtime_service_unsupported',
-          `Set-ScheduledTask failed (exit ${result.exitCode})${detail ? `: ${detail}` : ''}`
+          `Get-ScheduledTask failed (exit ${read.exitCode})${detail ? `: ${detail}` : ''}`
         );
       }
-      return result.stdout.trim() === 'retargeted';
+      const task = parseScheduledTaskJson(read.stdout);
+      if (!task?.installed || !task.arguments) return false;
+      const updated = retargetScheduledTaskArguments(identity.taskName, task.arguments, program);
+      if (updated === null) return false;
+      await runPowerShell(
+        renderScheduledTaskSetArgumentsScript(identity.taskName, updated),
+        'Set-ScheduledTask'
+      );
+      return true;
     },
   };
 
@@ -1024,11 +1064,12 @@ interface ScheduledTaskJson {
  * the encoded runner script; the wrapper itself when the task is not ours.
  */
 export function programFromTaskAction(execute: string, args: string | null): string {
-  const encoded = args?.match(/-EncodedCommand\s+(\S+)/)?.[1];
+  const encoded = args ? TASK_ENCODED_COMMAND.exec(args)?.[1] : undefined;
   if (!encoded) return execute;
   const script = Buffer.from(encoded, 'base64').toString('utf16le');
-  const program = script.match(/^& '((?:[^']|'')*)'/m)?.[1];
-  return program ? program.replaceAll("''", "'") : execute;
+  const quoted = RUNNER_PROGRAM_LINE.exec(script)?.[0];
+  // Drop the `& '` opener and the closing quote, then undo the doubling.
+  return quoted ? quoted.slice(3, -1).replaceAll("''", "'") : execute;
 }
 
 /** Windows PowerShell 5.1 serialises the state enum as a number; PowerShell 7 as a name. */

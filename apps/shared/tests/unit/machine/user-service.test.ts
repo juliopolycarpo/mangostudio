@@ -18,6 +18,7 @@ import {
   renderScheduledTaskRunnerScript,
   renderSystemdUnitFile,
   replaceUnitProgram,
+  retargetScheduledTaskArguments,
   systemdUserUnitPath,
   type UserServiceDefinition,
   type UserServiceExecDeps,
@@ -730,43 +731,152 @@ describe('createUserServiceManager retarget', () => {
     expect(host.argv).toEqual([]);
   });
 
-  it('on win32 rewrites the program inside the task action and reports the change', async () => {
-    const host = new FakeServiceHost({
-      platform: 'win32',
-      onExec: () => ({ exitCode: 0, stdout: 'retargeted\r\n', stderr: '' }),
+  describe('on win32', () => {
+    const OLD_PROGRAM = 'C:\\Users\\me\\scoop\\apps\\mangostudio\\0.1.1\\mangostudio.exe';
+    const NEW_PROGRAM = "C:\\Users\\it's me\\scoop\\apps\\mangostudio\\current\\mangostudio.exe";
+    const WINDOWS_DEFINITION: UserServiceDefinition = {
+      description: 'Example (serve)',
+      argv: [OLD_PROGRAM, 'serve', '--port', '4100'],
+      workingDirectory: 'C:\\Users\\me',
+      env: { EXAMPLE_LOG: 'C:\\logs\\it.log' },
+      logFile: 'C:\\logs\\example.log',
+    };
+
+    /** The `-Argument` Register-ScheduledTask records for `definition`. */
+    function taskArgumentsFor(definition: UserServiceDefinition): string {
+      const encoded = Buffer.from(renderScheduledTaskRunnerScript(definition), 'utf16le').toString(
+        'base64'
+      );
+      return `-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -EncodedCommand ${encoded}`;
+    }
+
+    function runnerOf(taskArguments: string): string {
+      return (
+        decodePowerShellArgv(['-EncodedCommand', taskArguments.split(/\s+/).at(-1) ?? '']) ?? ''
+      );
+    }
+
+    /** A host that answers the status script with `taskArguments` and records every script. */
+    function hostWithTask(taskArguments: string | null, setExit = 0): FakeServiceHost {
+      return new FakeServiceHost({
+        platform: 'win32',
+        onExec: (argv) => {
+          const script = decodePowerShellArgv(argv) ?? '';
+          if (script.includes('ConvertTo-Json')) {
+            return {
+              exitCode: 0,
+              stdout: `${JSON.stringify(
+                taskArguments === null
+                  ? { installed: false }
+                  : {
+                      installed: true,
+                      state: 3,
+                      enabled: true,
+                      execute: 'powershell.exe',
+                      arguments: taskArguments,
+                    }
+              )}\r\n`,
+              stderr: '',
+            };
+          }
+          if (script.includes('Set-ScheduledTask') && setExit !== 0) {
+            return { exitCode: setExit, stdout: '', stderr: 'Access is denied' };
+          }
+          return { exitCode: 0, stdout: '', stderr: '' };
+        },
+      });
+    }
+
+    function scriptsRun(host: FakeServiceHost): string[] {
+      return host.argv.map((argv) => decodePowerShellArgv(argv) ?? '');
+    }
+
+    it('swaps the program in the runner script and keeps everything else in it', async () => {
+      const host = hostWithTask(taskArgumentsFor(WINDOWS_DEFINITION));
+
+      expect(await createUserServiceManager(IDENTITY, host.deps()).retarget(NEW_PROGRAM)).toBe(
+        true
+      );
+
+      const setScript = scriptsRun(host).find((script) => script.includes('Set-ScheduledTask'));
+      expect(setScript).toContain("Set-ScheduledTask -TaskName 'Example Unit' -Action $action");
+      expect(setScript).not.toContain('Register-ScheduledTask');
+      // The new argument is computed here and handed over whole; the script
+      // does not decode, rewrite or re-encode anything.
+      expect(setScript).not.toContain('FromBase64String');
+      const newArgument = /\$action\.Arguments = '((?:[^']|'')*)'/
+        .exec(setScript ?? '')?.[1]
+        ?.replaceAll("''", "'");
+      expect(newArgument).toBe(
+        taskArgumentsFor({ ...WINDOWS_DEFINITION, argv: [NEW_PROGRAM, 'serve', '--port', '4100'] })
+      );
+      expect(programFromTaskAction('powershell.exe', newArgument ?? null)).toBe(NEW_PROGRAM);
     });
-    const program = "C:\\Users\\it's me\\scoop\\apps\\mangostudio\\current\\mangostudio.exe";
 
-    expect(await createUserServiceManager(IDENTITY, host.deps()).retarget(program)).toBe(true);
-
-    const script = decodePowerShellArgv(host.argv[0] ?? []) ?? '';
-    expect(script).toContain("Get-ScheduledTask -TaskName 'Example Unit'");
-    expect(script).toContain("Set-ScheduledTask -TaskName 'Example Unit' -Action $action");
-    // The replacement is the program as `renderScheduledTaskRunnerScript` quotes
-    // it: single quotes doubled, then quoted once more for the script literal.
-    expect(script).toContain(
-      "$replacement = '& ' + '''C:\\Users\\it''''s me\\scoop\\apps\\mangostudio\\current\\mangostudio.exe'''"
-    );
-    expect(script).not.toContain('Register-ScheduledTask');
-  });
-
-  it('on win32 reports no change when the task is absent or already current', async () => {
-    const host = new FakeServiceHost({
-      platform: 'win32',
-      onExec: () => ({ exitCode: 0, stdout: 'unchanged\r\n', stderr: '' }),
+    it('reports no change when the task is absent or already runs the program', async () => {
+      const absent = hostWithTask(null);
+      expect(await createUserServiceManager(IDENTITY, absent.deps()).retarget('C:\\x.exe')).toBe(
+        false
+      );
+      const current = hostWithTask(taskArgumentsFor(WINDOWS_DEFINITION));
+      expect(await createUserServiceManager(IDENTITY, current.deps()).retarget(OLD_PROGRAM)).toBe(
+        false
+      );
+      for (const host of [absent, current]) {
+        expect(scriptsRun(host).filter((script) => script.includes('Set-ScheduledTask'))).toEqual(
+          []
+        );
+      }
     });
-    expect(await createUserServiceManager(IDENTITY, host.deps()).retarget('C:\\x.exe')).toBe(false);
-  });
 
-  it('on win32 names the cmdlet and exit code when Task Scheduler refuses', async () => {
-    const host = new FakeServiceHost({
-      platform: 'win32',
-      onExec: () => ({ exitCode: 1, stdout: '', stderr: 'Access is denied' }),
+    it('refuses a task that does not run an encoded runner script', async () => {
+      const host = hostWithTask('-NoProfile -File C:\\other.ps1');
+      await expect(
+        createUserServiceManager(IDENTITY, host.deps()).retarget('C:\\x.exe')
+      ).rejects.toMatchObject({
+        message: expect.stringContaining('does not run an encoded runner script'),
+      });
     });
-    await expect(
-      createUserServiceManager(IDENTITY, host.deps()).retarget('C:\\x.exe')
-    ).rejects.toMatchObject({
-      message: 'Set-ScheduledTask failed (exit 1): Access is denied',
+
+    it('refuses a program that pushes the argument over what Task Scheduler accepts, before writing', async () => {
+      const host = hostWithTask(taskArgumentsFor(WINDOWS_DEFINITION));
+      const tooLong = `C:\\${'long\\'.repeat(1_200)}mangostudio.exe`;
+
+      const failure = await createUserServiceManager(IDENTITY, host.deps())
+        .retarget(tooLong)
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(RuntimeServiceManagementError);
+      expect((failure as Error).message).toMatch(/is \d+ characters, over the 8192 Task Scheduler/);
+      expect(scriptsRun(host).filter((script) => script.includes('Set-ScheduledTask'))).toEqual([]);
+    });
+
+    it('names the cmdlet and exit code when Task Scheduler refuses the write', async () => {
+      const host = hostWithTask(taskArgumentsFor(WINDOWS_DEFINITION), 1);
+      await expect(
+        createUserServiceManager(IDENTITY, host.deps()).retarget(NEW_PROGRAM)
+      ).rejects.toMatchObject({
+        message: 'Set-ScheduledTask failed (exit 1): Access is denied',
+      });
+    });
+
+    it('replaces only the first program line of the runner script', () => {
+      const runner = `& 'C:\\old.exe' serve\n& 'C:\\decoy.exe' tail\nexit 0`;
+      const updated = retargetScheduledTaskArguments(
+        'Example Unit',
+        `-NoProfile -EncodedCommand ${Buffer.from(runner, 'utf16le').toString('base64')}`,
+        'C:\\new.exe'
+      );
+      expect(runnerOf(updated ?? '')).toBe(`& 'C:\\new.exe' serve\n& 'C:\\decoy.exe' tail\nexit 0`);
+    });
+
+    it('does not read a `$` in the program as a replacement pattern', () => {
+      const updated = retargetScheduledTaskArguments(
+        'Example Unit',
+        taskArgumentsFor(WINDOWS_DEFINITION),
+        'C:\\$&\\$1\\new.exe'
+      );
+      expect(programFromTaskAction('powershell.exe', updated)).toBe('C:\\$&\\$1\\new.exe');
     });
   });
 });
