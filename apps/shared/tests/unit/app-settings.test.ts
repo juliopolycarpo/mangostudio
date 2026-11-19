@@ -655,11 +655,19 @@ describe('normalizeAppSettings', () => {
   it('merges dynamic library defaults while keeping MangoStudio native locations enabled', () => {
     expect(
       normalizeLibraryLocationSettings(
-        { home: { 'mango-skills': false, 'mango-agents': false, 'agents-skills': false } },
+        {
+          home: {
+            'mango-skills': false,
+            'mango-agents': false,
+            'mango-commands': false,
+            'agents-skills': false,
+          },
+        },
         {
           home: {
             'mango-skills': true,
             'mango-agents': true,
+            'mango-commands': true,
             'agents-skills': true,
             'codex-skills': true,
           },
@@ -670,6 +678,7 @@ describe('normalizeAppSettings', () => {
       home: {
         'mango-skills': true,
         'mango-agents': true,
+        'mango-commands': true,
         'agents-skills': false,
         'codex-skills': true,
       },

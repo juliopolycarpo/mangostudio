@@ -36,6 +36,12 @@ export interface CreateMessageData {
   interactionMode: InteractionMode;
   parts?: string | null;
   providerState?: string | null;
+  /**
+   * What the model received in place of `text` — set only for a user message
+   * whose typed text was a slash command. History replays it; the transcript
+   * keeps showing `text`.
+   */
+  expandedText?: string | null;
 }
 
 export interface UpdateMessageData {
@@ -64,6 +70,7 @@ interface MessageRow {
   interactionMode: InteractionMode;
   parts: string | null;
   providerState: string | null;
+  expandedText: string | null;
 }
 
 interface MappedMessage {
@@ -130,8 +137,10 @@ function mapMessage(
   generatedImages?: GeneratedImageArtifact[],
   attachments?: ChatAttachment[]
 ): MappedMessage {
+  // `expandedText` is for history only; the wire shape carries `text` alone.
+  const { expandedText: _expandedText, ...wireRow } = row;
   return {
-    ...row,
+    ...wireRow,
     isGenerating: row.isGenerating === 1,
     styleParams: parseStyleParams(row.styleParams),
     parts: readMessageParts(row),
@@ -194,6 +203,7 @@ export async function insertMessage(data: CreateMessageData, db: Kysely<Database
       interactionMode: data.interactionMode,
       parts: data.parts ?? null,
       providerState: data.providerState ?? null,
+      expandedText: data.expandedText ?? null,
     })
     .execute();
 }
@@ -395,6 +405,7 @@ export async function loadHistory(
         'role',
         'text',
         'isGenerating',
+        'expandedText',
         sql<string | null>`NULL`.as('providerState'),
         boundaryCandidateParts.as('parts'),
       ])
@@ -410,7 +421,7 @@ export async function loadHistory(
   return sliceRowsAfterCompactionBoundary(rows.reverse()).map((row) => ({
     id: row.id,
     role: row.role,
-    text: row.text,
+    text: row.expandedText ?? row.text,
   }));
 }
 
@@ -424,7 +435,16 @@ export async function loadRichHistory(
   const fetched = await withCheckpointSnapshot(db, async (snapshot) => {
     let q = snapshot
       .selectFrom('messages')
-      .select(['id', 'role', 'text', 'parts', 'providerState', 'modelName', 'isGenerating'])
+      .select([
+        'id',
+        'role',
+        'text',
+        'expandedText',
+        'parts',
+        'providerState',
+        'modelName',
+        'isGenerating',
+      ])
       .where('chatId', '=', chatId)
       .where('interactionMode', '!=', 'image')
       .orderBy('timestamp', 'desc')
@@ -441,7 +461,7 @@ export async function loadRichHistory(
   return rows.map((row) => ({
     id: row.id,
     role: row.role,
-    text: row.text,
+    text: row.expandedText ?? row.text,
     parts: readMessageParts(row),
     providerState: row.providerState ?? null,
     modelName: row.modelName ?? null,

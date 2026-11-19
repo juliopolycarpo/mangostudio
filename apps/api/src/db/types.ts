@@ -79,6 +79,8 @@ interface MessagesTable {
   interactionMode: InteractionMode;
   parts: string | null; // JSON-serialized MessagePart[]
   providerState: string | null; // opaque provider continuity JSON
+  /** What the model received in place of `text` for a slash-command user message; never sent to clients. */
+  expandedText: string | null;
 }
 
 interface MessageCheckpointDeltasTable {

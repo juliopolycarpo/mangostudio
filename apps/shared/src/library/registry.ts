@@ -279,6 +279,19 @@ export const LIBRARY_LOCATION_DEFINITIONS: readonly LocationDefinition[] = [
     readBy: ['cursor'],
   },
   {
+    // `/name args` in a native chat is expanded from this directory by the hub
+    // before the turn is built (`expandNativeSlashCommand`). It hangs off the
+    // config home with no override of its own, like `mango-settings`.
+    id: 'mango-commands',
+    kind: 'command',
+    scope: 'home',
+    resolvePath: mangoPath('commands'),
+    access: 'read-write',
+    layout: 'directory-of-files',
+    format: 'markdown-frontmatter',
+    readBy: ['mangostudio'],
+  },
+  {
     id: 'claude-commands',
     kind: 'command',
     scope: 'home',
@@ -491,11 +504,11 @@ export const LIBRARY_TARGET_DEFINITIONS: readonly TargetDefinition[] = [
     reads: {
       skill: ['mango-skills', 'agents-skills', 'claude-skills'],
       subagent: ['mango-agents'],
-      // MangoStudio has no slash commands of its own. A `.mango/commands`
-      // directory would put a tick in this column for files nothing ever loads,
-      // which is a worse answer than the honest empty one — and propagation
-      // needs no hub location to keep the vendors in step.
-      command: [],
+      // Native chats expand `/name` from `~/.mango/commands` before the turn is
+      // built, so a file here is loaded by something and the coverage tick is
+      // honest. Without that loader this location would advertise files nothing
+      // reads, which is why it landed together with it.
+      command: ['mango-commands'],
       instruction: ['mango-instructions'],
       setting: ['mango-settings'],
       hook: [],

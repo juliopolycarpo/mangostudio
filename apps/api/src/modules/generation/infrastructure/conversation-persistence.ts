@@ -43,9 +43,16 @@ export interface PersistUserMessageInput {
   admittedRunnerKind?: RunnerKind;
   chatId: string;
   text: string;
+  /** The prompt the model receives when `text` is a slash command; see `expandedText`. */
+  expandedPrompt?: string;
   attachmentIds?: string[];
   timestamp: number;
   interactionMode?: InteractionMode;
+}
+
+/** The expansion worth storing: only a prompt that differs from what was typed. */
+function expandedTextFor(typed: string, expanded: string | undefined): string | undefined {
+  return expanded !== undefined && expanded !== typed ? expanded : undefined;
 }
 
 export async function persistUserMessage(
@@ -57,6 +64,7 @@ export async function persistUserMessage(
     chatId: input.chatId,
     role: 'user',
     text: input.text,
+    expandedText: expandedTextFor(input.text, input.expandedPrompt),
     timestamp: input.timestamp,
     isGenerating: false,
     interactionMode: input.interactionMode ?? 'chat',
@@ -99,6 +107,8 @@ export interface PersistTextTurnStartInput {
   assistantMessageId: string;
   chatId: string;
   displayPrompt: string;
+  /** The prompt the model receives when `displayPrompt` is a slash command; see `expandedText`. */
+  effectivePrompt?: string;
   attachmentIds?: string[];
   timestamp: number;
   interactionMode: Exclude<InteractionMode, 'image'>;
@@ -121,6 +131,7 @@ export function persistTextTurnStart(
         chatId: input.chatId,
         role: 'user',
         text: input.displayPrompt,
+        expandedText: expandedTextFor(input.displayPrompt, input.effectivePrompt),
         timestamp: input.timestamp,
         isGenerating: false,
         interactionMode: input.interactionMode,

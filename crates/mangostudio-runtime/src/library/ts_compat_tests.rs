@@ -27,6 +27,10 @@ use crate::probing::detection::path_env::PathEnv;
 use crate::probing::locations::{LOCATION_DEFINITIONS, location_by_id};
 use crate::test_support::scratch_dir;
 
+/// Registry rows added after the corpus was recorded. Listed by id so a new
+/// row that is *not* here still fails the replay instead of being skipped.
+const LOCATIONS_ADDED_AFTER_CORPUS_FREEZE: [&str; 1] = ["mango-commands"];
+
 fn corpus() -> Value {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/ts-library/corpus.json");
     let text = std::fs::read_to_string(&path).expect("the committed TypeScript corpus is readable");
@@ -363,6 +367,9 @@ fn location_paths_and_roots_match_the_registry() {
         // matches the env's platform family (see the generator).
         let received: Vec<Value> = LOCATION_DEFINITIONS
             .iter()
+            // The frozen corpus predates these registry rows and cannot be
+            // regenerated; their paths are pinned in `probing::locations` tests.
+            .filter(|location| !LOCATIONS_ADDED_AFTER_CORPUS_FREEZE.contains(&location.id))
             .zip(case["expected"].as_array().unwrap())
             .map(|(location, expected)| {
                 let mut row = json!({ "id": location.id, "path": (location.resolve_path)(&env) });
