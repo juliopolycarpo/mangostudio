@@ -17,6 +17,7 @@ import {
   getSavedAppSettings,
   patchAppSettings,
 } from '../../../src/modules/app-settings/infrastructure/app-settings-repository';
+import { grantWorkspaceTrust } from '../../../src/modules/external-agents/application/external-workspace-trust';
 import { settingsRoutes } from '../../../src/routes/settings';
 import {
   createRealtimeBus,
@@ -567,5 +568,117 @@ describe('settings app settings conflict response', () => {
     const stored = await getSavedAppSettings(db, testUser.id);
     expect(stored.globalImageQuality).toBe('4K');
     expect(stored.thinkingEnabled).toBe(false);
+  });
+});
+
+describe('settings app settings server-owned workspace trust', () => {
+  const putBody = (app: { handle: (request: Request) => Promise<Response> }, body: unknown) =>
+    app.handle(
+      new Request('http://localhost/settings/app', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+    );
+
+  const grantedPaths = async (userId: string) =>
+    (await getSavedAppSettings(getDb(), userId)).externalAgentSettings.workspaceTrust.map(
+      (grant) => grant.workspacePath
+    );
+
+  async function userWithGrant(workspacePath: string) {
+    const user = makeTestIdentity('trust-owned-user', 'Trust Owned User');
+    await grantWorkspaceTrust(
+      { userId: user.id, targetId: 'cursor', environmentId: 'local', workspacePath },
+      getDb()
+    );
+    return user;
+  }
+
+  it('ignores a forged grant in the PUT body and keeps the stored grants', async () => {
+    const user = await userWithGrant('/work/real');
+    const { app, restore } = createAuthenticatedApiTestApp(user, settingsRoutes);
+    restoreAuth = restore;
+    const stored = await getSavedAppSettings(getDb(), user.id);
+
+    const response = await putBody(app, {
+      externalAgentSettings: {
+        ...stored.externalAgentSettings,
+        workspaceTrust: [
+          {
+            targetId: 'cursor',
+            environmentId: 'local',
+            workspacePath: '/etc/forged',
+            version: 999,
+            acceptedAt: 1,
+          },
+        ],
+      },
+    });
+    const payload = (await response.json()) as AppSettings;
+
+    expect(response.status).toBe(200);
+    expect(payload.externalAgentSettings.workspaceTrust.map((g) => g.workspacePath)).toEqual([
+      '/work/real',
+    ]);
+    expect(await grantedPaths(user.id)).toEqual(['/work/real']);
+  });
+
+  it('does not let a body that empties the list revoke a grant', async () => {
+    const user = await userWithGrant('/work/kept');
+    const { app, restore } = createAuthenticatedApiTestApp(user, settingsRoutes);
+    restoreAuth = restore;
+
+    await putBody(app, {
+      externalAgentSettings: { disclosures: {}, workspaceTrust: [] },
+    });
+
+    expect(await grantedPaths(user.id)).toEqual(['/work/kept']);
+  });
+
+  it('keeps the grants when the body omits workspaceTrust or the whole subtree', async () => {
+    const user = await userWithGrant('/work/omitted');
+    const { app, restore } = createAuthenticatedApiTestApp(user, settingsRoutes);
+    restoreAuth = restore;
+
+    const withoutField = await putBody(app, {
+      externalAgentSettings: {
+        disclosures: {},
+        defaults: { cursor: { model: 'auto' } },
+      },
+    });
+    expect(withoutField.status).toBe(200);
+    expect(await grantedPaths(user.id)).toEqual(['/work/omitted']);
+
+    const withoutSubtree = await putBody(app, { thinkingEnabled: true });
+    expect(withoutSubtree.status).toBe(200);
+    expect(await grantedPaths(user.id)).toEqual(['/work/omitted']);
+    // The rest of the subtree is still the client's to change.
+    expect(
+      (await getSavedAppSettings(getDb(), user.id)).externalAgentSettings.defaults?.cursor?.model
+    ).toBe('auto');
+  });
+
+  it('stores no grants for a user who never granted one, whatever the body carries', async () => {
+    const user = makeTestIdentity('trust-owned-empty', 'Trust Owned Empty');
+    const { app, restore } = createAuthenticatedApiTestApp(user, settingsRoutes);
+    restoreAuth = restore;
+
+    await putBody(app, {
+      externalAgentSettings: {
+        disclosures: {},
+        workspaceTrust: [
+          {
+            targetId: 'cursor',
+            environmentId: 'local',
+            workspacePath: '/etc/forged',
+            version: 1,
+            acceptedAt: 1,
+          },
+        ],
+      },
+    });
+
+    expect(await grantedPaths(user.id)).toEqual([]);
   });
 });

@@ -137,6 +137,16 @@ export const ExternalApiSettingsSchema = Type.Object({
   enabled: Type.Boolean(),
 });
 
+/**
+ * `externalAgentSettings` as a PUT accepts it. `workspaceTrust` is server-owned
+ * (the trust and revoke endpoints write it), so a body may carry it, because
+ * clients echo the whole object, or omit it; either way the stored grants win.
+ */
+const ExternalAgentSettingsPutSchema = Type.Object({
+  ...ExternalAgentSettingsSchema.properties,
+  workspaceTrust: Type.Optional(ExternalAgentSettingsSchema.properties.workspaceTrust),
+});
+
 const AppSettingsFieldsSchema = {
   promptSettings: PromptSettingsSchema,
   globalImageQuality: ImageQualitySchema,
@@ -210,6 +220,7 @@ export const AppSettingsResponseSchema = Type.Object({
 export const AppSettingsPutBodySchema = Type.Partial(
   Type.Object({
     ...AppSettingsFieldsSchema,
+    externalAgentSettings: ExternalAgentSettingsPutSchema,
     profileSettings: ProfileSettingsMapPutSchema,
   })
 );

@@ -37,6 +37,43 @@ export function mergeAppSettingsPatch(stored: unknown, patch: AppSettingsPutBody
 }
 
 /**
+ * Take the server-owned fields out of a client patch, keeping what is stored.
+ *
+ * `externalAgentSettings.workspaceTrust` is written only by the trust and
+ * revoke endpoints: they derive the canonical path on the runtime and stamp the
+ * current trust-text version, which a settings body can do neither of. A client
+ * that echoes the whole settings object still sends the field, so it is not
+ * rejected — its value is replaced by the stored one. `externalAgentSettings`
+ * is a unit that replaces whole (see `mergeAppSettingsPatch`), so merely
+ * deleting the key from the patch would wipe the stored grants instead.
+ *
+ * A patch that omits `externalAgentSettings` is returned as is: omission
+ * already keeps what is stored.
+ *
+ * @example
+ * const safe = preserveServerOwnedSettings(storedRow, bodyFromClient);
+ */
+export function preserveServerOwnedSettings(
+  stored: unknown,
+  patch: AppSettingsPutBody
+): AppSettingsPutBody {
+  if (patch.externalAgentSettings === undefined) return patch;
+  const storedAgents = isPlainRecord(stored) ? stored.externalAgentSettings : undefined;
+  const { workspaceTrust: _clientTrust, ...clientOwned } = patch.externalAgentSettings;
+  const storedTrust = isPlainRecord(storedAgents) ? storedAgents.workspaceTrust : undefined;
+  // Left undefined when nothing valid is stored, so normalization yields the
+  // empty list instead of a client-chosen one. The cast is the raw-row
+  // boundary: whatever is stored is normalized after the merge, as always.
+  return {
+    ...patch,
+    externalAgentSettings: {
+      ...clientOwned,
+      workspaceTrust: storedTrust as AppSettings['externalAgentSettings']['workspaceTrust'],
+    },
+  };
+}
+
+/**
  * Whether the value at this path holds children with separate owners, and so has
  * to merge rather than replace.
  *

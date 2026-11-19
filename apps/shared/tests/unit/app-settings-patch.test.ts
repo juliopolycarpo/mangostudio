@@ -8,6 +8,7 @@ import {
   mergeAppSettingsPatch,
   normalizeAppSettings,
   onboardingPatch,
+  preserveServerOwnedSettings,
 } from '../../src/app-settings';
 import { DEFAULT_ONBOARDING_STATE } from '../../src/onboarding';
 
@@ -188,5 +189,66 @@ describe('patching a row that predates the profileSettings nesting', () => {
     const home = normalizeAppSettings(merged).profileSettings.default.libraryLocations.home;
 
     expect(home['claude-skills']).toBe(false);
+  });
+});
+
+describe('preserveServerOwnedSettings', () => {
+  const storedGrant = {
+    targetId: 'cursor' as const,
+    environmentId: 'local',
+    workspacePath: '/work/real',
+    version: 1,
+    acceptedAt: 5,
+  };
+  const forgedGrant = { ...storedGrant, workspacePath: '/etc/forged', version: 999 };
+  const stored = { externalAgentSettings: { disclosures: {}, workspaceTrust: [storedGrant] } };
+
+  it('replaces a client-supplied workspaceTrust with the stored one', () => {
+    const safe = preserveServerOwnedSettings(stored, {
+      externalAgentSettings: { disclosures: {}, workspaceTrust: [forgedGrant] },
+    } as AppSettingsPutBody);
+
+    expect(safe.externalAgentSettings?.workspaceTrust).toEqual([storedGrant]);
+  });
+
+  it('keeps the grants when the client sends an empty list', () => {
+    const safe = preserveServerOwnedSettings(stored, {
+      externalAgentSettings: { disclosures: {}, workspaceTrust: [] },
+    } as AppSettingsPutBody);
+
+    expect(safe.externalAgentSettings?.workspaceTrust).toEqual([storedGrant]);
+  });
+
+  it('fills the stored grants in when the client omits the field', () => {
+    const safe = preserveServerOwnedSettings(stored, {
+      externalAgentSettings: { disclosures: {} },
+    } as AppSettingsPutBody);
+
+    expect(safe.externalAgentSettings?.workspaceTrust).toEqual([storedGrant]);
+  });
+
+  it('leaves the rest of the subtree to the client', () => {
+    const safe = preserveServerOwnedSettings(stored, {
+      externalAgentSettings: { disclosures: {}, defaults: { cursor: { model: 'auto' } } },
+    } as AppSettingsPutBody);
+
+    expect(safe.externalAgentSettings?.defaults).toEqual({ cursor: { model: 'auto' } });
+  });
+
+  it('returns a patch without externalAgentSettings unchanged', () => {
+    const patch = { thinkingEnabled: true } as AppSettingsPutBody;
+
+    expect(preserveServerOwnedSettings(stored, patch)).toBe(patch);
+  });
+
+  it('normalizes to no grants when nothing is stored, whatever the client sent', () => {
+    const merged = mergeAppSettingsPatch(
+      undefined,
+      preserveServerOwnedSettings(undefined, {
+        externalAgentSettings: { disclosures: {}, workspaceTrust: [forgedGrant] },
+      } as AppSettingsPutBody)
+    );
+
+    expect(normalizeAppSettings(merged).externalAgentSettings.workspaceTrust).toEqual([]);
   });
 });

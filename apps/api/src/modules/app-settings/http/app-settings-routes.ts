@@ -12,7 +12,7 @@ import type { Kysely } from 'kysely';
 import { getDb } from '../../../db/database';
 import type { Database } from '../../../db/types';
 import { requireAuth } from '../../../plugins/auth-middleware';
-import { readAppSettings, writeAppSettings } from '../application/app-settings-service';
+import { readAppSettings, writeClientAppSettings } from '../application/app-settings-service';
 import { AppSettingsConflict } from '../domain/app-settings-conflict';
 
 /**
@@ -44,10 +44,11 @@ export function createAppSettingsRoutes(database: () => Kysely<Database> = getDb
         // The body is a patch: what it omits keeps its stored value, and merging
         // happens against the row rather than against whatever the caller last
         // read. Normalization belongs after that merge, so it runs in the service.
+        // Workspace trust grants are server-owned: the body's copy is ignored.
         // Migrated from ESLint
         async ({ body, headers, user }) => {
           try {
-            return await writeAppSettings(
+            return await writeClientAppSettings(
               database(),
               user?.id ?? '',
               body,
