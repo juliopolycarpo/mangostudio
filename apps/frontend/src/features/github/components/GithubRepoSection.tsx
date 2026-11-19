@@ -182,6 +182,27 @@ function isUnavailable(data: { readonly state: string } | undefined): boolean {
   return data !== undefined && data.state !== 'ok';
 }
 
+/**
+ * What the pull request list says about writing to this machine.
+ *
+ *  - `pending`: the first read is still in flight, so nothing is known;
+ *  - `unanswered`: the read failed and no earlier answer survives, so nothing is
+ *    known either, but the user is looking at a failure and not at a spinner;
+ *  - `allowed`: the list answered and the machine accepts `gh` writes;
+ *  - `refused`: the list answered and the machine refuses them, or the
+ *    repository cannot be read at all (no write control is shown then).
+ *
+ * An earlier answer outlives a failed refetch (`data` stays), so a refetch error
+ * after a good read does not turn a known answer back into an unknown one.
+ */
+type WriteAccess = 'pending' | 'unanswered' | 'allowed' | 'refused';
+
+function writeAccessOf(query: UseQueryResult<GithubPrsResponse, Error>): WriteAccess {
+  const { data } = query;
+  if (data === undefined) return query.isError ? 'unanswered' : 'pending';
+  return data.state === 'ok' && data.canMutate ? 'allowed' : 'refused';
+}
+
 /** The filter row, generic over the two closed filter unions the lists take. */
 function FilterBar<T extends string>({
   filters,
@@ -247,12 +268,9 @@ function PrsPane({
   // unmounts with this pane either way; a flag that outlived it brought the
   // form back empty, discarding the draft while still looking like it was open.
   const [creating, setCreating] = useState(false);
-  // False until the list has answered, and on a machine whose consent refuses
-  // `gh` writes: the runtime would deny every press of a write control there,
-  // so none is offered. Read from the list because that is the response the
-  // write controls sit under.
-  const canMutate = query.data?.state === 'ok' && query.data.canMutate;
-  const listPending = query.isPending;
+  // Read from the list because that is the response the write controls sit
+  // under. See `writeAccessOf` for the four answers it can give.
+  const writeAccess = writeAccessOf(query);
 
   useEffect(() => {
     if (!openCreateForm) return;
@@ -260,15 +278,15 @@ function PrsPane({
     // detached checkout from a branch that just hasn't loaded — consuming it
     // here would open nothing and never get another chance. Wait for the
     // query so the outcome below is a real answer, not a guess mid-flight.
-    // The list is waited on for the same reason: until it answers, "may this
-    // machine write" has no answer yet.
-    if (branchLoading || listPending) return;
+    // The list is waited on for the same reason, and an errored list has not
+    // answered either: the request stays latched until a refresh brings data.
+    if (branchLoading || writeAccess === 'pending' || writeAccess === 'unanswered') return;
     // A detached checkout has no branch for `readCurrentBranch()` to name, and
     // `gh pr create` needs one — opening the form here would only trade the
     // button's own gate below for a submit that fails with a generic error.
-    if (branchName && canMutate) setCreating(true);
+    if (branchName && writeAccess === 'allowed') setCreating(true);
     onCreateFormOpened();
-  }, [openCreateForm, onCreateFormOpened, branchName, branchLoading, listPending, canMutate]);
+  }, [openCreateForm, onCreateFormOpened, branchName, branchLoading, writeAccess]);
 
   const checkout = useMutation({
     mutationFn: (number: number) => checkoutPullRequest({ chatId, number }),
@@ -308,8 +326,7 @@ function PrsPane({
           />
           <CreatePrControl
             chatId={chatId}
-            listState={query.data?.state ?? null}
-            canMutate={canMutate}
+            writeAccess={writeAccess}
             creating={creating}
             onCreatingChange={setCreating}
             needsPush={needsPush}
@@ -345,27 +362,28 @@ function PrsPane({
  * The create-pull-request affordance under the pull request filters: the
  * button, the open form, or the sentence that says why neither is offered.
  *
- * Split out so the four outcomes are a run of early returns instead of a
- * nested ternary:
- *  - the list has not answered yet: nothing, because whether this machine may
- *    write is not known and offering a write control on a guess is what this
- *    gate exists to stop;
+ * Split out so the outcomes are a run of early returns instead of a nested
+ * ternary:
+ *  - the list is still loading: nothing, because whether this machine may write
+ *    is not known yet and a button that vanishes a moment later is worse than
+ *    none;
  *  - the machine refuses `gh` writes: one quiet line saying so;
+ *  - the list failed: the button stays. A failed read says nothing about
+ *    consent, so it is not taken for a refusal; the list's own error is
+ *    already on screen, and the runtime still decides the press;
  *  - a form is open: the form;
  *  - otherwise the button, or the no-branch explanation.
  */
 function CreatePrControl({
   chatId,
-  listState,
-  canMutate,
+  writeAccess,
   creating,
   onCreatingChange,
   needsPush,
   branchName,
 }: {
   readonly chatId: string;
-  readonly listState: GithubPrsResponse['state'] | null;
-  readonly canMutate: boolean;
+  readonly writeAccess: WriteAccess;
   readonly creating: boolean;
   readonly onCreatingChange: (creating: boolean) => void;
   readonly needsPush: boolean;
@@ -373,10 +391,10 @@ function CreatePrControl({
 }) {
   const { t } = useI18n();
 
-  if (listState === 'ok' && !canMutate) {
+  if (writeAccess === 'pending') return null;
+  if (writeAccess === 'refused') {
     return <p className="text-xs text-fg-muted">{t.github.createPr.readOnly}</p>;
   }
-  if (!canMutate) return null;
   if (creating) {
     return (
       <CreatePrForm

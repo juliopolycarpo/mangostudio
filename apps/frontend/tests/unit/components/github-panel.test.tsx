@@ -84,7 +84,25 @@ interface ScenarioOverrides {
   readonly gitState?: unknown;
   /** Inbox response keyed under this environment instead of the default local one. */
   readonly inboxEnvironmentId?: string;
+  /** Answers the pull request list with this HTTP status instead of 200. */
+  readonly prsStatus?: number;
+  /** Holds the pull request list's answer back until this settles. */
+  readonly prsHeldUntil?: Promise<void>;
 }
+
+/** The pull request list's request, as the default scenario keys it. */
+const PRS_PATH = `/api/github/prs?chatId=${CHAT_ID}&filter=open`;
+
+/** A response body the pull request list reads as a failure, not as data. */
+const PRS_SERVER_ERROR = { error: 'gh exploded', code: 'INTERNAL_ERROR' };
+
+const OK_PRS_WRITABLE = {
+  state: 'ok',
+  cachedAt: Date.now(),
+  canMutate: true,
+  repo: REPO,
+  prs: [PR],
+};
 
 /** The app context every panel test renders under; only what `useApp()` reads here. */
 function fakeApp(
@@ -100,14 +118,15 @@ function installScenario(overrides: ScenarioOverrides = {}) {
   const inboxPath = overrides.inboxEnvironmentId
     ? `/api/github/inbox?environmentId=${overrides.inboxEnvironmentId}`
     : '/api/github/inbox';
-  return createFetchScenario()
+  const scenario = createFetchScenario()
     .respondWithJson('GET', `/api/git/state?chatId=${CHAT_ID}`, {
       body: overrides.gitState ?? GIT_REPO_STATE,
     })
     .respondWithJson('GET', inboxPath, {
       body: overrides.inbox ?? { state: 'ok', cachedAt: Date.now(), items: [] },
     })
-    .respondWithJson('GET', `/api/github/prs?chatId=${CHAT_ID}&filter=open`, {
+    .respondWithJson('GET', PRS_PATH, {
+      status: overrides.prsStatus ?? 200,
       body: overrides.prs ?? {
         state: 'ok',
         cachedAt: Date.now(),
@@ -117,6 +136,19 @@ function installScenario(overrides: ScenarioOverrides = {}) {
       },
     })
     .install();
+
+  const held = overrides.prsHeldUntil;
+  const answer = scenario.fetchMock.getMockImplementation();
+  if (held && answer) {
+    // Only the list waits; the git state and the inbox answer as usual, so the
+    // panel is mid-load for exactly the one read under test.
+    scenario.fetchMock.mockImplementation(async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.includes('/api/github/prs')) await held;
+      return answer(input, init);
+    });
+  }
+  return scenario;
 }
 
 async function renderPanel(
@@ -466,6 +498,103 @@ describe('GithubPanel', () => {
         await user.click(repo.getByRole('button', { name: 'Open menu' }));
 
         expect(await screen.findByText('Check out this branch')).toBeVisible();
+      } finally {
+        scenario.restore();
+      }
+    });
+  });
+
+  /**
+   * "The list has not answered" and "the machine refuses writes" are different
+   * facts. Only the second may take the create control away, and a palette
+   * request must survive the first: consuming it while the list is still loading
+   * or has failed opens nothing, says nothing, and never gets another chance.
+   */
+  describe('while the pull request list has not answered', () => {
+    const LIST_ERROR = 'Pull requests could not be loaded.';
+    const READ_ONLY_REASON =
+      'GitHub writes are turned off on this machine, so pull requests can only be read here.';
+
+    it('shows the failure and still offers the create button when the list errored', async () => {
+      const { scenario } = await renderPanel({ prsStatus: 500, prs: PRS_SERVER_ERROR });
+      try {
+        const repo = within(screen.getByTestId('github-repo-section'));
+        expect(await repo.findByText(LIST_ERROR)).toBeVisible();
+
+        // An errored list says nothing about consent, so it is not claimed as
+        // a refusal; the runtime stays the authority on the press itself.
+        expect(repo.getByRole('button', { name: 'Create pull request' })).toBeVisible();
+        expect(repo.queryByText(READ_ONLY_REASON)).toBeNull();
+      } finally {
+        scenario.restore();
+      }
+    });
+
+    it('keeps a create request latched through a failed list and opens the form once it answers', async () => {
+      const user = userEvent.setup();
+      const { scenario } = await renderPanel({ prsStatus: 500, prs: PRS_SERVER_ERROR });
+      try {
+        const repo = within(screen.getByTestId('github-repo-section'));
+        await repo.findByText(LIST_ERROR);
+
+        act(() => {
+          requestGithubCreatePr();
+        });
+        await flushAsyncRender();
+        // Nothing opened yet, and nothing was thrown away.
+        expect(screen.queryByLabelText('Title')).toBeNull();
+
+        scenario.respondWithJson('GET', `${PRS_PATH}&refresh=true`, { body: OK_PRS_WRITABLE });
+        await user.click(repo.getByRole('button', { name: 'Refresh' }));
+
+        expect(await screen.findByLabelText('Title')).toBeVisible();
+      } finally {
+        scenario.restore();
+      }
+    });
+
+    it('drops the latched request once the list answers that writes are refused', async () => {
+      const user = userEvent.setup();
+      const { scenario } = await renderPanel({ prsStatus: 500, prs: PRS_SERVER_ERROR });
+      try {
+        const repo = within(screen.getByTestId('github-repo-section'));
+        await repo.findByText(LIST_ERROR);
+        act(() => {
+          requestGithubCreatePr();
+        });
+
+        scenario.respondWithJson('GET', `${PRS_PATH}&refresh=true`, {
+          body: { ...OK_PRS_WRITABLE, canMutate: false },
+        });
+        await user.click(repo.getByRole('button', { name: 'Refresh' }));
+
+        expect(await repo.findByText(READ_ONLY_REASON)).toBeVisible();
+        expect(screen.queryByLabelText('Title')).toBeNull();
+        expect(repo.queryByRole('button', { name: 'Create pull request' })).toBeNull();
+      } finally {
+        scenario.restore();
+      }
+    });
+
+    it('holds a create request, and offers no write control, while the list is still loading', async () => {
+      const answer = Promise.withResolvers<void>();
+      const { scenario } = await renderPanel({
+        prs: OK_PRS_WRITABLE,
+        prsHeldUntil: answer.promise,
+      });
+      try {
+        const repo = within(screen.getByTestId('github-repo-section'));
+        act(() => {
+          requestGithubCreatePr();
+        });
+        await flushAsyncRender();
+
+        expect(repo.queryByRole('button', { name: 'Create pull request' })).toBeNull();
+        expect(repo.queryByText(READ_ONLY_REASON)).toBeNull();
+        expect(screen.queryByLabelText('Title')).toBeNull();
+
+        answer.resolve();
+        expect(await screen.findByLabelText('Title')).toBeVisible();
       } finally {
         scenario.restore();
       }
