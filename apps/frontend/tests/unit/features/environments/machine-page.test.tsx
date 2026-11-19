@@ -543,6 +543,19 @@ describe('MachinePage', () => {
         detail: 'Node.js não foi encontrado no PATH nem nos locais conhecidos.',
       },
       {
+        section: 'Environments, an install with no version',
+        check: {
+          label: 'Bun',
+          labelKey: 'env.label.tool',
+          status: 'ok',
+          detail: 'version unknown  /usr/bin/bun',
+          detailKey: 'env.detail.versionUnknownAndPath',
+          params: { tool: 'Bun', path: '/usr/bin/bun' },
+        },
+        label: 'Bun',
+        detail: 'versão desconhecida  /usr/bin/bun',
+      },
+      {
         section: 'Environments, versions managed',
         check: {
           label: 'Volta',

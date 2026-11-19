@@ -2978,6 +2978,7 @@ export const messages = {
           'env.label.tool': '{tool}',
           'env.label.wslExecutable': 'Executável do WSL',
           'env.detail.versionAndPath': '{version}  {path}',
+          'env.detail.versionUnknownAndPath': 'versão desconhecida  {path}',
           'env.detail.detected': 'detectado',
           'env.detail.notDetected': 'não detectado',
           'env.detail.needsAttention': 'precisa de atenção',

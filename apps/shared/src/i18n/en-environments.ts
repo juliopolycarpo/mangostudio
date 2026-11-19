@@ -829,6 +829,7 @@ export const messages: FeatureMessages<'environments'> = {
           'env.label.tool': '{tool}',
           'env.label.wslExecutable': 'WSL executable',
           'env.detail.versionAndPath': '{version}  {path}',
+          'env.detail.versionUnknownAndPath': 'version unknown  {path}',
           'env.detail.detected': 'detected',
           'env.detail.notDetected': 'not detected',
           'env.detail.needsAttention': 'needs attention',

@@ -185,6 +185,7 @@ const DOCTOR_KEYS = [
   'env.label.tool',
   'env.label.wslExecutable',
   'env.detail.versionAndPath',
+  'env.detail.versionUnknownAndPath',
   'env.detail.detected',
   'env.detail.notDetected',
   'env.detail.needsAttention',
