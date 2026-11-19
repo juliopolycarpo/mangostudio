@@ -50,8 +50,9 @@ use windows_sys::Win32::Security::Authorization::{
 use windows_sys::Win32::Security::{
     ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_SIZE_INFORMATION, AclSizeInformation,
     DACL_SECURITY_INFORMATION, EqualSid, GetAce, GetAclInformation, GetSecurityDescriptorControl,
-    GetTokenInformation, NO_INHERITANCE, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
-    PSID, SE_DACL_PROTECTED, SID_AND_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    GetTokenInformation, IsValidSid, NO_INHERITANCE, PROTECTED_DACL_SECURITY_INFORMATION,
+    PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED, SID_AND_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
+    TokenUser,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     DELETE, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
@@ -67,6 +68,10 @@ const MODIFY_ACCESS_MASK: u32 =
 /// `ACE_HEADER::AceType` of an access-allowed entry. The named constant lives
 /// in `Win32_System_SystemServices`, a feature nothing else here needs.
 const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
+
+/// The smallest SID: one revision byte, one sub-authority-count byte and the
+/// six-byte identifier authority, with no sub-authorities.
+const MIN_SID_LEN: usize = 8;
 
 /// A `HANDLE` closed on drop.
 struct OwnedHandle(HANDLE);
@@ -153,23 +158,33 @@ fn current_user_token_buffer() -> io::Result<Vec<u8>> {
 
 /// The user SID inside a `TOKEN_USER` buffer from [`current_user_token_buffer`].
 /// The returned pointer borrows `token_buffer` and must not outlive it.
-fn user_sid_in(token_buffer: &[u8]) -> PSID {
+fn user_sid_in(token_buffer: &[u8]) -> io::Result<PSID> {
     // `TOKEN_USER { User: SID_AND_ATTRIBUTES { Sid: PSID, .. } }` puts `Sid`
     // at offset 0 of the whole struct — `User` is `TOKEN_USER`'s only (and
     // so first) field, and `Sid` is `SID_AND_ATTRIBUTES`'s first field, and
     // `repr(C)` guarantees no padding before a struct's first field.
     let sid_offset =
         core::mem::offset_of!(TOKEN_USER, User) + core::mem::offset_of!(SID_AND_ATTRIBUTES, Sid);
-    // SAFETY: `token_buffer` was sized and filled by `GetTokenInformation`
-    // for `TokenUser`, which documents its layout as one `TOKEN_USER`
-    // struct followed by the SID it points at, so `sid_offset` lands within
-    // `token_buffer` and `PSID` fits before its end. `read_unaligned`
-    // rather than a place projection through a cast pointer: `Vec<u8>`'s
-    // allocation only promises byte alignment, not the alignment a `PSID`
-    // (pointer-sized) read requires. The pointer copied out still points
-    // into `token_buffer`'s own backing allocation, which the caller keeps
-    // alive for every use of it.
-    unsafe { std::ptr::read_unaligned(token_buffer.as_ptr().add(sid_offset).cast()) }
+    if token_buffer.len() < sid_offset + core::mem::size_of::<PSID>() {
+        return Err(io::Error::other(
+            "TOKEN_USER buffer is too short to hold its SID pointer",
+        ));
+    }
+    // SAFETY: the length check above puts the `PSID`-sized field at
+    // `sid_offset` inside `token_buffer`; the buffer was sized and filled by
+    // `GetTokenInformation` for `TokenUser`, which documents its layout as
+    // one `TOKEN_USER` struct followed by the SID it points at.
+    // `read_unaligned` rather than a place projection through a cast
+    // pointer: `Vec<u8>`'s allocation only promises byte alignment, not the
+    // alignment a `PSID` (pointer-sized) read requires. The pointer copied
+    // out still points into `token_buffer`'s own backing allocation, which
+    // the caller keeps alive for every use of it.
+    let sid: PSID =
+        unsafe { std::ptr::read_unaligned(token_buffer.as_ptr().add(sid_offset).cast()) };
+    if sid.is_null() {
+        return Err(io::Error::other("TOKEN_USER holds a null SID"));
+    }
+    Ok(sid)
 }
 
 /// Whether `path`'s DACL is exactly what [`restrict_to_owner`] writes: a
@@ -187,7 +202,7 @@ fn user_sid_in(token_buffer: &[u8]) -> PSID {
 /// token or the security descriptor of `path` (a missing file included).
 pub(super) fn is_owner_only(path: &Path) -> io::Result<bool> {
     let token_buffer = current_user_token_buffer()?;
-    let owner_sid = user_sid_in(&token_buffer);
+    let owner_sid = user_sid_in(&token_buffer)?;
 
     let wide_path: Vec<u16> = path
         .as_os_str()
@@ -265,24 +280,42 @@ pub(super) fn is_owner_only(path: &Path) -> io::Result<bool> {
         if fetched == 0 {
             return Err(io::Error::last_os_error());
         }
-        // SAFETY: every ACE starts with an `ACE_HEADER`, and `ace` points at
-        // one inside `dacl`. Read unaligned: ACEs are only DWORD-aligned.
-        let header = unsafe { ptr::read_unaligned(ace.cast::<ACE_HEADER>()) };
+        // `GetAce` reports success only with a pointer into the ACL, but the
+        // null check costs nothing and keeps the reads below from resting on
+        // an unchecked out-parameter.
+        let Some(ace) = ptr::NonNull::new(ace.cast::<u8>()) else {
+            return Err(io::Error::other("GetAce succeeded with a null entry"));
+        };
+        // SAFETY: `ace` is non-null and points at an entry inside `dacl`,
+        // which the descriptor guard keeps alive; every entry starts with a
+        // four-byte `ACE_HEADER`, and the ACL's own `AceCount` bounds the
+        // index, so those bytes are inside the allocation. Read unaligned:
+        // entries are only DWORD-aligned.
+        let header = unsafe { ptr::read_unaligned(ace.as_ptr().cast::<ACE_HEADER>()) };
         if header.AceType != ACCESS_ALLOWED_ACE_TYPE {
             return Ok(false);
         }
-        // SAFETY: an `ACCESS_ALLOWED_ACE_TYPE` entry is an
-        // `ACCESS_ALLOWED_ACE`, whose SID begins at its `SidStart` field, so
-        // the address of that field is the SID. Taken with `addr_of!` from
-        // the raw pointer so no reference to a possibly misaligned struct is
-        // formed.
-        let ace_sid: PSID = unsafe {
-            ptr::addr_of!((*ace.cast::<ACCESS_ALLOWED_ACE>()).SidStart)
-                .cast_mut()
-                .cast()
-        };
-        // SAFETY: both are valid SIDs: `ace_sid` points into the live ACL and
-        // `owner_sid` into `token_buffer`, which outlives this loop.
+        // An allow entry has to hold its fixed part and the smallest SID
+        // (revision, sub-authority count, six identifier-authority bytes)
+        // starting at `SidStart`. A shorter one is malformed, not ours.
+        let sid_offset = core::mem::offset_of!(ACCESS_ALLOWED_ACE, SidStart);
+        if usize::from(header.AceSize) < sid_offset + MIN_SID_LEN {
+            return Ok(false);
+        }
+        // The SID starts `sid_offset` bytes into the entry, which the size
+        // check above puts inside it. `wrapping_add` only computes the
+        // address; nothing dereferences it here, and `IsValidSid` then
+        // validates the structure before `EqualSid` reads it.
+        let ace_sid: PSID = ace.as_ptr().wrapping_add(sid_offset).cast();
+        // SAFETY: `ace_sid` points inside the live entry, at least
+        // `MIN_SID_LEN` bytes from its end, which is all `IsValidSid` needs
+        // to read the SID header it validates.
+        if unsafe { IsValidSid(ace_sid) } == 0 {
+            return Ok(false);
+        }
+        // SAFETY: both are valid SIDs: `ace_sid` was just validated and lives
+        // in the ACL, and `owner_sid` points into `token_buffer`, which
+        // outlives this loop.
         if unsafe { EqualSid(ace_sid, owner_sid) } == 0 {
             return Ok(false);
         }
@@ -299,7 +332,7 @@ pub(super) fn is_owner_only(path: &Path) -> io::Result<bool> {
 /// `path`.
 pub(super) fn restrict_to_owner(path: &Path) -> io::Result<()> {
     let token_buffer = current_user_token_buffer()?;
-    let sid = user_sid_in(&token_buffer);
+    let sid = user_sid_in(&token_buffer)?;
 
     // SAFETY: `TRUSTEE_W` is `#[repr(C)]` plain data — two pointers
     // (`pMultipleTrustee`, `ptstrName`) and two `i32` enums
