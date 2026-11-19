@@ -18,7 +18,12 @@ export interface ProbeEnvironmentKey {
 }
 
 export interface EnvironmentProbeCacheOptions {
-  readonly probe: (key: ProbeEnvironmentKey) => Promise<unknown>;
+  /**
+   * Resolves to the verdict once the probe ran to completion, `false` included.
+   * Rejects when it could not — a timeout, a dropped connection, a cancelled
+   * request — because then there is no verdict to give.
+   */
+  readonly probe: (key: ProbeEnvironmentKey) => Promise<boolean>;
   readonly now: () => number;
   readonly ttlMs: number;
 }
@@ -27,9 +32,12 @@ export interface EnvironmentProbeCacheOptions {
  * Wraps a probe so repeated asks within the TTL are free and concurrent asks
  * share one call.
  *
- * A probe that rejects caches `false` and expires on the same clock as a
- * success, so an operator who installs `gh` or runs `gh auth login` recovers
- * without restarting the hub.
+ * Only a verdict is cached. A rejection passes through untouched and is not
+ * remembered, because a probe that failed to run has not learned anything about
+ * the machine: caching it as `false` would report a slow SSH host as signed
+ * out, with advice to run `gh auth login`, for the whole TTL. A cached verdict
+ * expires on the same clock whichever way it went, so an operator who installs
+ * `gh` or runs `gh auth login` recovers without restarting the hub.
  *
  * @example
  * const isAuthed = createEnvironmentProbeCache({ probe, now: Date.now, ttlMs: 60_000 });
@@ -39,17 +47,9 @@ export function createEnvironmentProbeCache(
   options: EnvironmentProbeCacheOptions
 ): (key: ProbeEnvironmentKey) => Promise<boolean> {
   // The TTL and the in-flight deduplication are `createReadinessCache`'s job,
-  // the same one `github-cache.ts` reuses it for. Folding the rejection into
-  // `false` inside the loader rather than around the cache is what makes a
-  // failure cache and expire on the same clock as a success: the cache only
-  // ever sees a resolved boolean.
+  // the same one `github-cache.ts` reuses it for. It stores a loader's value
+  // only when the loader resolves, which is what keeps a failed probe out.
   const cache = createReadinessCache<boolean>({ ttlMs: options.ttlMs, now: options.now });
 
-  return (key) =>
-    cache.get(`${key.userId}:${key.environmentId}`, () =>
-      options.probe(key).then(
-        () => true,
-        () => false
-      )
-    );
+  return (key) => cache.get(`${key.userId}:${key.environmentId}`, () => options.probe(key));
 }

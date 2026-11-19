@@ -8,22 +8,20 @@ import {
 const DEVBOX: ProbeEnvironmentKey = { userId: 'user-1', environmentId: 'devbox' };
 const CONTAINER: ProbeEnvironmentKey = { userId: 'user-1', environmentId: 'container' };
 
-/** Records every key it was asked about, and answers from a scripted table. */
+/** Records every key it was asked about, and answers `true` only for the scripted environments. */
 class RecordingProbe {
   readonly seen: ProbeEnvironmentKey[] = [];
 
-  constructor(private readonly succeedsFor: ReadonlySet<string> = new Set()) {}
+  constructor(private readonly verdictTrueFor: ReadonlySet<string> = new Set()) {}
 
-  readonly run = (key: ProbeEnvironmentKey): Promise<unknown> => {
+  readonly run = (key: ProbeEnvironmentKey): Promise<boolean> => {
     this.seen.push(key);
-    return this.succeedsFor.has(key.environmentId)
-      ? Promise.resolve('ok')
-      : Promise.reject(new Error('probe failed'));
+    return Promise.resolve(this.verdictTrueFor.has(key.environmentId));
   };
 }
 
 describe('createEnvironmentProbeCache', () => {
-  it('maps a resolved probe to true and a rejected one to false', async () => {
+  it('passes the probe verdict through, false included', async () => {
     const probe = new RecordingProbe(new Set(['devbox']));
     const cached = createEnvironmentProbeCache({
       probe: probe.run,
@@ -64,11 +62,11 @@ describe('createEnvironmentProbeCache', () => {
     expect(probe.seen).toHaveLength(2);
   });
 
-  it('expires a failure on the same clock as a success', async () => {
+  it('expires a false verdict on the same clock as a true one', async () => {
     // Otherwise installing the tool or signing in would need a hub restart.
     let now = 0;
-    const succeedsFor = new Set<string>();
-    const probe = new RecordingProbe(succeedsFor);
+    const verdictTrueFor = new Set<string>();
+    const probe = new RecordingProbe(verdictTrueFor);
     const cached = createEnvironmentProbeCache({
       probe: probe.run,
       now: () => now,
@@ -76,12 +74,31 @@ describe('createEnvironmentProbeCache', () => {
     });
 
     expect(await cached(DEVBOX)).toBe(false);
-    succeedsFor.add('devbox');
+    verdictTrueFor.add('devbox');
     now = 59_999;
     expect(await cached(DEVBOX)).toBe(false);
     now = 60_000;
     expect(await cached(DEVBOX)).toBe(true);
     expect(probe.seen).toHaveLength(2);
+  });
+
+  it('passes a rejected probe through and asks again instead of remembering a verdict', async () => {
+    // A probe that could not run has no verdict. Caching it as `false` would
+    // report a slow host as signed out for the whole TTL.
+    const failure = new Error('probe timed out');
+    let attempts = 0;
+    const cached = createEnvironmentProbeCache({
+      probe: () => {
+        attempts += 1;
+        return attempts === 1 ? Promise.reject(failure) : Promise.resolve(true);
+      },
+      now: () => 0,
+      ttlMs: 60_000,
+    });
+
+    await expect(cached(DEVBOX)).rejects.toBe(failure);
+    expect(await cached(DEVBOX)).toBe(true);
+    expect(attempts).toBe(2);
   });
 
   it('single-flights concurrent asks for one environment but not across two', async () => {
