@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { type CompiledQuery, type KyselyPlugin } from 'kysely';
+
 import { getDb } from '../../../../src/db/database';
 import {
   listChatGeneratedImageFilenames,
@@ -9,17 +11,34 @@ import {
   sweepUnreferencedGeneratedImages,
   UNREFERENCED_IMAGE_GRACE_MS,
 } from '../../../../src/modules/generated-images/application/reclaim-generated-images';
+import { listReferencedGeneratedImageFilenames } from '../../../../src/modules/generated-images/infrastructure/generated-image-references';
 import { generatedImageFilenameFromUrl } from '../../../../src/services/generated-images/generated-image-storage';
 import { insertTestChat, insertTestUser } from '../../../support/factories';
 import {
   type GeneratedImageDirectory,
   insertImageMessage,
+  insertImagePartCheckpointDelta,
   useGeneratedImageDirectory,
 } from '../../../support/generated-image-fixtures';
 
 const HOUR_MS = 60 * 60 * 1000;
 
 let images: GeneratedImageDirectory;
+
+/** A database handle that records every statement run through it. */
+function recordStatements() {
+  const statements: CompiledQuery[] = [];
+  const plugin: KyselyPlugin = {
+    transformQuery(args) {
+      statements.push(getDb().getExecutor().compileQuery(args.node, args.queryId));
+      return args.node;
+    },
+    transformResult({ result }) {
+      return Promise.resolve(result);
+    },
+  };
+  return { db: getDb().withPlugin(plugin), statements };
+}
 
 beforeEach(() => {
   images = useGeneratedImageDirectory();
@@ -61,6 +80,92 @@ describe('listChatGeneratedImageFilenames', () => {
 
     expect([...found].sort()).toEqual([artifactUrl, legacyUrl, partUrl].map(filenameOf).sort());
   });
+
+  it('finds an image only a streaming checkpoint delta references, and only for that chat', async () => {
+    const user = await insertTestUser();
+    const chat = await insertTestChat(user.id);
+    const otherChat = await insertTestChat(user.id);
+    const deltaUrl = await images.save();
+    const otherDeltaUrl = await images.save();
+    const streaming = await insertImageMessage({
+      chatId: chat.id,
+      userId: user.id,
+      isGenerating: true,
+    });
+    const otherStreaming = await insertImageMessage({
+      chatId: otherChat.id,
+      userId: user.id,
+      isGenerating: true,
+    });
+    await insertImagePartCheckpointDelta({ messageId: streaming, seq: 1, imageUrl: deltaUrl });
+    await insertImagePartCheckpointDelta({
+      messageId: otherStreaming,
+      seq: 1,
+      imageUrl: otherDeltaUrl,
+    });
+
+    const found = await listChatGeneratedImageFilenames(getDb(), chat.id);
+
+    expect([...found]).toEqual([filenameOf(deltaUrl)]);
+  });
+});
+
+describe('listReferencedGeneratedImageFilenames paging', () => {
+  it('finds every reference when the rows span several pages, reading one bounded page at a time', async () => {
+    const user = await insertTestUser();
+    const chat = await insertTestChat(user.id);
+    const partUrls: string[] = [];
+    for (let index = 0; index < 5; index += 1) {
+      const url = await images.save();
+      partUrls.push(url);
+      await insertImageMessage({
+        chatId: chat.id,
+        userId: user.id,
+        parts: [{ type: 'generated_image', status: 'completed', imageUrl: url }],
+      });
+    }
+    const deltaUrls: string[] = [];
+    for (let seq = 1; seq <= 3; seq += 1) {
+      const url = await images.save();
+      deltaUrls.push(url);
+      const streaming = await insertImageMessage({
+        chatId: chat.id,
+        userId: user.id,
+        isGenerating: true,
+      });
+      await insertImagePartCheckpointDelta({ messageId: streaming, seq, imageUrl: url });
+    }
+    const recorded = recordStatements();
+
+    const found = await listReferencedGeneratedImageFilenames(recorded.db, {
+      chatId: chat.id,
+      pageSize: 2,
+    });
+
+    const unbounded = recorded.statements
+      .map((statement) => statement.sql)
+      .filter((sqlText) => !/\blimit\b/i.test(sqlText));
+    expect({ found: [...found].sort(), unboundedStatements: unbounded }).toEqual({
+      found: [...partUrls, ...deltaUrls].map(filenameOf).sort(),
+      unboundedStatements: [],
+    });
+  });
+
+  it('only reports the names it was asked to keep, so a sweep never holds every reference', async () => {
+    const user = await insertTestUser();
+    const chat = await insertTestChat(user.id);
+    const wantedUrl = await images.save();
+    const otherUrl = await images.save();
+    await insertImageMessage({ chatId: chat.id, userId: user.id, artifactImageUrl: wantedUrl });
+    await insertImageMessage({ chatId: chat.id, userId: user.id, artifactImageUrl: otherUrl });
+
+    const found = await listReferencedGeneratedImageFilenames(getDb(), {
+      chatId: chat.id,
+      among: new Set([filenameOf(wantedUrl)]),
+    });
+
+    expect([...found]).toEqual([filenameOf(wantedUrl)]);
+  });
 });
 
 describe('releaseGeneratedImageFiles', () => {
@@ -87,6 +192,49 @@ describe('releaseGeneratedImageFiles', () => {
 
   it('does nothing for an empty set', async () => {
     expect(await releaseGeneratedImageFiles(getDb(), new Set())).toBe(0);
+  });
+
+  it('keeps a file a streaming turn of another chat references only through a checkpoint delta', async () => {
+    const user = await insertTestUser();
+    const keeperChat = await insertTestChat(user.id);
+    const sharedUrl = await images.save();
+    const orphanUrl = await images.save();
+    const streaming = await insertImageMessage({
+      chatId: keeperChat.id,
+      userId: user.id,
+      isGenerating: true,
+    });
+    await insertImagePartCheckpointDelta({ messageId: streaming, seq: 1, imageUrl: sharedUrl });
+
+    const removed = await releaseGeneratedImageFiles(
+      getDb(),
+      new Set([orphanUrl, sharedUrl].map(filenameOf))
+    );
+
+    expect({ removed, orphan: images.exists(orphanUrl), shared: images.exists(sharedUrl) }).toEqual(
+      { removed: 1, orphan: false, shared: true }
+    );
+  });
+
+  it('reads references a bounded page at a time instead of loading them all', async () => {
+    const user = await insertTestUser();
+    const keeperChat = await insertTestChat(user.id);
+    const sharedUrl = await images.save();
+    const orphanUrl = await images.save();
+    await insertImageMessage({
+      chatId: keeperChat.id,
+      userId: user.id,
+      parts: [{ type: 'generated_image', status: 'completed', imageUrl: sharedUrl }],
+    });
+    const released = [orphanUrl, sharedUrl].map(filenameOf);
+    const recorded = recordStatements();
+
+    await releaseGeneratedImageFiles(recorded.db, new Set(released));
+
+    const unboundedStatements = recorded.statements
+      .map((statement) => statement.sql)
+      .filter((sqlText) => !/\blimit\b/i.test(sqlText));
+    expect(unboundedStatements).toEqual([]);
   });
 });
 
@@ -131,6 +279,58 @@ describe('sweepUnreferencedGeneratedImages', () => {
     expect({ removed, kept: everything.map((url) => images.exists(url)) }).toEqual({
       removed: 0,
       kept: [true, true, true, true],
+    });
+  });
+
+  it('keeps an old file that only a streaming turn checkpoint delta references', async () => {
+    const user = await insertTestUser();
+    const chat = await insertTestChat(user.id);
+    const deltaOnlyUrl = await images.save();
+    const streaming = await insertImageMessage({
+      chatId: chat.id,
+      userId: user.id,
+      isGenerating: true,
+    });
+    await insertImagePartCheckpointDelta({ messageId: streaming, seq: 1, imageUrl: deltaOnlyUrl });
+    await images.age(deltaOnlyUrl, UNREFERENCED_IMAGE_GRACE_MS + HOUR_MS);
+
+    const removed = await sweepUnreferencedGeneratedImages(getDb());
+
+    expect({ removed, deltaOnlyKept: images.exists(deltaOnlyUrl) }).toEqual({
+      removed: 0,
+      deltaOnlyKept: true,
+    });
+  });
+
+  it('keeps old files that a reference image, provider state or chat state still references', async () => {
+    const user = await insertTestUser();
+    const chat = await insertTestChat(user.id);
+    const referenceUrl = await images.save();
+    const providerStateUrl = await images.save();
+    const chatStateUrl = await images.save();
+    const messageId = await insertImageMessage({
+      chatId: chat.id,
+      userId: user.id,
+      providerState: JSON.stringify({ toolResult: providerStateUrl }),
+    });
+    await getDb()
+      .updateTable('messages')
+      .set({ referenceImage: referenceUrl })
+      .where('id', '=', messageId)
+      .execute();
+    await getDb()
+      .updateTable('chats')
+      .set({ lastProviderState: JSON.stringify({ image: chatStateUrl }) })
+      .where('id', '=', chat.id)
+      .execute();
+    const everything = [referenceUrl, providerStateUrl, chatStateUrl];
+    for (const url of everything) await images.age(url, UNREFERENCED_IMAGE_GRACE_MS + HOUR_MS);
+
+    const removed = await sweepUnreferencedGeneratedImages(getDb());
+
+    expect({ removed, kept: everything.map((url) => images.exists(url)) }).toEqual({
+      removed: 0,
+      kept: [true, true, true],
     });
   });
 

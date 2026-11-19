@@ -3,7 +3,6 @@ import type { GalleryItem } from '@mangostudio/shared/types';
 import { type Kysely, sql } from 'kysely';
 
 import type { Database, GeneratedImageSelect } from '../../../db/types';
-import { findGeneratedImageFilenames } from '../../../services/generated-images/generated-image-storage';
 import {
   type GalleryCursor,
   type GalleryEntry,
@@ -60,50 +59,6 @@ function mapGeneratedImage(row: GeneratedImageSelect): GeneratedImageArtifact {
     generationTime: row.generationTime ?? undefined,
     metadata: parseMetadata(row.metadataJson),
   };
-}
-
-/** Message columns that can carry an `/images/<name>` URL inside larger text or JSON. */
-const IMAGE_URL_BEARING_MESSAGE_COLUMNS = ['text', 'parts', 'providerState'] as const;
-
-/**
- * File names of the generated images that stored rows still point at, found in
- * `generated_images.imageUrl`, `messages.imageUrl`, and as `/images/<name>`
- * inside a message's text, parts (the image part and the tool result a turn
- * checkpoints before its artifact rows exist) and provider state.
- *
- * `chatId` narrows the scan to one chat's rows; without it the result covers
- * every chat, which is what decides whether a file is still wanted.
- *
- * @example
- * const referenced = await listReferencedGeneratedImageFilenames(db);
- */
-export async function listReferencedGeneratedImageFilenames(
-  db: Kysely<Database>,
-  scope: { chatId?: string } = {}
-): Promise<Set<string>> {
-  const filenames = new Set<string>();
-  const remember = (value: string | null): void => {
-    if (!value) return;
-    for (const filename of findGeneratedImageFilenames(value)) filenames.add(filename);
-  };
-
-  let artifactQuery = db.selectFrom('generated_images').select('imageUrl');
-  if (scope.chatId !== undefined) artifactQuery = artifactQuery.where('chatId', '=', scope.chatId);
-  for (const row of await artifactQuery.execute()) remember(row.imageUrl);
-
-  let legacyQuery = db.selectFrom('messages').select('imageUrl').where('imageUrl', 'is not', null);
-  if (scope.chatId !== undefined) legacyQuery = legacyQuery.where('chatId', '=', scope.chatId);
-  for (const row of await legacyQuery.execute()) remember(row.imageUrl);
-
-  // One narrow query per column keeps a large `providerState` out of memory for
-  // the rows that only matched through `text`.
-  for (const column of IMAGE_URL_BEARING_MESSAGE_COLUMNS) {
-    let query = db.selectFrom('messages').select(column).where(column, 'like', '%/images/%');
-    if (scope.chatId !== undefined) query = query.where('chatId', '=', scope.chatId);
-    for (const row of await query.execute()) remember(row[column]);
-  }
-
-  return filenames;
 }
 
 export async function insertGeneratedImageArtifact(

@@ -6,7 +6,7 @@ import {
   deleteStoredGeneratedImage,
   listStoredGeneratedImages,
 } from '../../../services/generated-images/generated-image-storage';
-import { listReferencedGeneratedImageFilenames } from '../infrastructure/generated-image-repository';
+import { listReferencedGeneratedImageFilenames } from '../infrastructure/generated-image-references';
 
 /**
  * How old an unreferenced file must be before a sweep removes it. A turn writes
@@ -33,7 +33,10 @@ async function removeFiles(filenames: Iterable<string>): Promise<number> {
   return removed;
 }
 
-/** File names the chat's rows point at, to read before the chat is deleted. */
+/**
+ * File names the chat's rows point at (including its streaming checkpoint
+ * deltas), to read before the chat is deleted.
+ */
 export async function listChatGeneratedImageFilenames(
   db: Kysely<Database>,
   chatId: string
@@ -58,7 +61,9 @@ export async function releaseGeneratedImageFiles(
 ): Promise<number> {
   if (filenames.size === 0) return 0;
 
-  const stillReferenced = await listReferencedGeneratedImageFilenames(db);
+  // Keeps only these names from the scan: the rest of the database's
+  // references do not matter here and are not collected.
+  const stillReferenced = await listReferencedGeneratedImageFilenames(db, { among: filenames });
   return removeFiles([...filenames].filter((filename) => !stillReferenced.has(filename)));
 }
 
@@ -86,9 +91,12 @@ export async function sweepUnreferencedGeneratedImages(
   const oldFiles = (await listStoredGeneratedImages()).filter((file) => file.modifiedAtMs < cutoff);
   if (oldFiles.length === 0) return 0;
 
-  const referenced = await listReferencedGeneratedImageFilenames(db);
+  const candidates = new Set(oldFiles.map((file) => file.filename));
+  // Only the on-disk candidates are kept from the scan, so memory follows the
+  // number of old files rather than the size of the message history.
+  const referenced = await listReferencedGeneratedImageFilenames(db, { among: candidates });
   const removed = await removeFiles(
-    oldFiles.map((file) => file.filename).filter((filename) => !referenced.has(filename))
+    [...candidates].filter((filename) => !referenced.has(filename))
   );
   if (removed > 0) logger.info('swept', { removed });
   return removed;

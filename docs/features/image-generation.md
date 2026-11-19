@@ -76,9 +76,9 @@ Images are stored on the filesystem under the configured `images.dir` directory 
 **Reclaiming space:** The files are not tied to their rows by a foreign key, so the API removes them itself:
 
 - Deleting a chat deletes the files its rows referenced, except any file another row still references.
-- A sweep runs at startup and every 6 hours. It removes files that nothing references and that are older than 24 hours, which covers a turn that wrote an image and died before recording it, and the files of a deleted user. It only touches names `saveGeneratedImage` writes (`<prefix>-<epoch ms>-<uuid>.<ext>`), so other files in a custom `images.dir` are left alone.
+- A sweep runs every 6 hours, the first one after the first stale-turn reconcile pass. It removes files that nothing references and that are older than 24 hours, which covers a turn that wrote an image and died before recording it, and the files of a deleted user. It only touches names `saveGeneratedImage` writes (`<prefix>-<epoch ms>-<uuid>.<ext>`), so other files in a custom `images.dir` are left alone.
 
-A file counts as referenced when a `generated_images` row, a legacy `messages.imageUrl`, or an `/images/<name>` URL in a message's text, parts or provider state points at it.
+A file counts as referenced when an `/images/<name>` URL appears in one of the columns listed in `IMAGE_REFERENCE_SOURCES` (`apps/api/src/modules/generated-images/infrastructure/image-reference-sources.ts`): `generated_images.imageUrl`; `messages.imageUrl`, `referenceImage`, `text`, `parts` and `providerState`; the `delta` of a streaming turn's `message_checkpoint_deltas` rows; and `chats.lastProviderState` and `lastContextState`. A schema test fails when a text column is added without being registered there or classified as holding no image URL.
 
 ## Gallery
 

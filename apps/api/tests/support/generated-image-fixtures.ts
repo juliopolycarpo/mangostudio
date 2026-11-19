@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import { getDb } from '../../src/db/database';
 import { loadConfigForTest } from '../../src/lib/config';
+import { insertCheckpointDelta } from '../../src/modules/messages/infrastructure/message-checkpoint-deltas';
 import { saveGeneratedImage } from '../../src/services/generated-images/generated-image-storage';
 
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
@@ -53,6 +54,9 @@ export async function insertImageMessage(input: {
   legacyImageUrl?: string;
   parts?: unknown[];
   text?: string;
+  providerState?: string;
+  /** A streaming turn's message: its latest content lives in checkpoint deltas. */
+  isGenerating?: boolean;
 }): Promise<string> {
   messageSequence += 1;
   const messageId = `reclaim-msg-${process.pid}-${messageSequence}`;
@@ -67,8 +71,9 @@ export async function insertImageMessage(input: {
       imageUrl: input.legacyImageUrl ?? null,
       parts: input.parts ? JSON.stringify(input.parts) : null,
       timestamp: Date.now(),
-      isGenerating: 0,
+      isGenerating: input.isGenerating ? 1 : 0,
       interactionMode: 'chat',
+      providerState: input.providerState ?? null,
     })
     .execute();
   if (input.artifactImageUrl) {
@@ -86,4 +91,30 @@ export async function insertImageMessage(input: {
       .execute();
   }
   return messageId;
+}
+
+/**
+ * Writes the checkpoint delta a streaming turn stores when its image part lands:
+ * the full `generated_image` part, as `{ ops: [{ i, part }] }`. The message must
+ * be generating, which is how production only accepts a delta.
+ */
+export async function insertImagePartCheckpointDelta(input: {
+  messageId: string;
+  seq: number;
+  imageUrl: string;
+}): Promise<void> {
+  const delta = {
+    ops: [
+      { i: 0, part: { type: 'generated_image', status: 'completed', imageUrl: input.imageUrl } },
+    ],
+  };
+  const written = await insertCheckpointDelta(
+    { messageId: input.messageId, seq: input.seq, deltaJson: JSON.stringify(delta) },
+    getDb()
+  );
+  if (!written) {
+    throw new Error(
+      `checkpoint delta not written: message ${input.messageId} must exist with isGenerating = 1`
+    );
+  }
 }
