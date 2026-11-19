@@ -352,7 +352,7 @@ impl std::error::Error for SetupError {
 /// use mangostudio_runtime_contract::manifest::ManifestProfile;
 /// use std::sync::Arc;
 ///
-/// let home = std::env::temp_dir().join("mango-setup-doctest");
+/// let home = std::env::temp_dir().join(format!("mango-setup-doctest-{}", std::process::id()));
 /// let outcome = run_non_interactive_setup(
 ///     &NonInteractiveSetupRequest {
 ///         slot: RuntimeSlot::Host,
@@ -367,8 +367,9 @@ impl std::error::Error for SetupError {
 /// assert_eq!(outcome.exit_code(), 0);
 ///
 /// // The write is visible to a real ConsentSource immediately.
-/// let source = ConsentSource::new(RuntimeSlot::Host, home);
+/// let source = ConsentSource::new(RuntimeSlot::Host, home.clone());
 /// assert!(!source.refresh().shell);
+/// # std::fs::remove_dir_all(&home).unwrap();
 /// ```
 pub fn run_non_interactive_setup(
     request: &NonInteractiveSetupRequest<'_>,
