@@ -405,35 +405,86 @@ const CURSOR_DOWNLOADS = vendorDownloads({
 });
 
 /**
- * Removes Bun's *default* root only, and proves the directory is one before
- * deleting it.
+ * The Bun root a detected binary belongs to: the `.bun` directory holding
+ * `bin/bun`, or `null` when the binary is anywhere else.
  *
- * `$BUN_INSTALL` is deliberately not expanded here. It is a prefix, not the
- * Bun directory — detection joins `bin` onto it (`wellKnownBunDirectories`) —
- * so a machine that points it at a shared location turns `rm -rf "$BUN_INSTALL"`
- * into a delete of that whole tree. A Bun installed under a custom prefix is
- * therefore detected but not removable from here: the guard fails loudly
- * rather than deleting a root this recipe cannot vouch for.
+ * `$BUN_INSTALL` is deliberately not expanded by the uninstall. It is a prefix,
+ * not the Bun directory — detection joins `bin` onto it — so a machine that
+ * points it at a shared location (`/usr/local`) would turn `rm -rf` into a
+ * delete of that whole tree. Likewise a package-manager Bun
+ * (`/opt/homebrew/bin/bun`) has a `bin/bun` but its parent is not Bun's to
+ * remove. Only a directory literally named `.bun` is vouched for. Both
+ * separators are read because the target platform, not the hub's, decides
+ * which one the path uses.
+ *
+ * @example
+ * bunRootOf('/home/me/.bun/bin/bun'); // '/home/me/.bun'
+ * bunRootOf('C:\\Users\\me\\.bun\\bin\\bun.exe'); // 'C:\\Users\\me\\.bun'
+ * bunRootOf('/usr/local/bin/bun'); // null
+ */
+export function bunRootOf(binaryPath: string): string | null {
+  const root = /^(.+)[\\/]bin[\\/]bun(?:\.exe)?$/i.exec(binaryPath)?.[1];
+  return root && /(?:^|[\\/])\.bun$/.test(root) ? root : null;
+}
+
+/** A PowerShell single-quoted literal: nothing inside is expanded. */
+function powershellQuote(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+/**
+ * Removes the Bun root of the detected installation, and only a root named
+ * `.bun` that proves itself one. When the detected binary is not under such a
+ * root the script refuses at run time rather than throwing, so a card still
+ * previews an installation it cannot uninstall.
  */
 const BUN_UNINSTALL_ARGV = platformArgv(
-  posixShellArgv(
-    [
-      'root="$HOME/.bun"',
-      '[ -x "$root/bin/bun" ] || { echo "refusing to remove $root: no bin/bun inside it" >&2; exit 1; }',
-      'rm -rf -- "$root"',
-    ].join('\n')
-  ),
-  powershellCommandArgv(
-    [
-      '$root = "$env:USERPROFILE\\.bun"',
-      // `${root}` is delimited deliberately: PowerShell parses a bare `$root:`
-      // as a drive-qualified variable and refuses to compile the script.
-      'if (-not (Test-Path -LiteralPath "$root\\uninstall.ps1")) { ' +
-        // eslint-disable-next-line no-template-curly-in-string -- literal PowerShell `${root}` delimiter for the target shell, not a JS placeholder
-        'Write-Error "refusing to remove ${root}: no uninstall.ps1 inside it"; exit 1 }',
-      '& "$root\\uninstall.ps1"',
-    ].join('; ')
-  )
+  (input, context) => {
+    assertRecipeInput(input, 'none');
+    const detected = context.binaryPaths.bun ?? '';
+    const root = bunRootOf(detected);
+    if (root === null) {
+      return [
+        'bash',
+        '-c',
+        `echo ${shellQuote(`refusing to remove the Bun at ${detected}: it is not inside a .bun directory`)} >&2; exit 1`,
+      ];
+    }
+    return [
+      'bash',
+      '-c',
+      [
+        `root=${shellQuote(root)}`,
+        '[ -x "$root/bin/bun" ] || { echo "refusing to remove $root: no bin/bun inside it" >&2; exit 1; }',
+        'rm -rf -- "$root"',
+      ].join('\n'),
+    ];
+  },
+  (input, context) => {
+    assertRecipeInput(input, 'none');
+    const detected = context.binaryPaths.bun ?? '';
+    const root = bunRootOf(detected);
+    if (root === null) {
+      return [
+        ...POWERSHELL_ARGV_PREFIX,
+        '-Command',
+        `Write-Error ${powershellQuote(`refusing to remove the Bun at ${detected}: it is not inside a .bun directory`)}; exit 1`,
+      ];
+    }
+    return [
+      ...POWERSHELL_ARGV_PREFIX,
+      '-Command',
+      [
+        `$root = ${powershellQuote(root)}`,
+        // `${root}` is delimited deliberately: PowerShell parses a bare `$root:`
+        // as a drive-qualified variable and refuses to compile the script.
+        'if (-not (Test-Path -LiteralPath "$root\\uninstall.ps1")) { ' +
+          // eslint-disable-next-line no-template-curly-in-string -- literal PowerShell `${root}` delimiter for the target shell, not a JS placeholder
+          'Write-Error "refusing to remove ${root}: no uninstall.ps1 inside it"; exit 1 }',
+        '& "$root\\uninstall.ps1"',
+      ].join('; '),
+    ];
+  }
 );
 
 const CLAUDE_UNINSTALL_ARGV = platformArgv(
@@ -484,13 +535,18 @@ export const INSTALL_RECIPES: readonly InstallRecipe[] = [
     action: 'uninstall',
     inputKind: 'none',
     platforms: ALL_PLATFORMS,
-    requires: [],
+    // The detected binary names the root to remove; with no Bun there is
+    // nothing to uninstall.
+    requires: ['bun'],
     writes: ['$HOME/.bun', '%USERPROFILE%\\.bun'],
     networkAccess: false,
     timeoutMs: DEFAULT_INSTALL_TIMEOUT_MS,
     probe: [{ kind: 'runtime', runtimeId: 'bun' }],
     argv: BUN_UNINSTALL_ARGV,
-    copyCommand: argvCopyCommand(BUN_UNINSTALL_ARGV),
+    // What a user types for the default root; the run itself removes the root
+    // of the detected installation, which a copy has no machine to resolve.
+    copyCommand: (_input, platform) =>
+      platform === 'win32' ? '& "$env:USERPROFILE\\.bun\\uninstall.ps1"' : 'rm -rf ~/.bun',
   },
   {
     id: 'nvm.install',
