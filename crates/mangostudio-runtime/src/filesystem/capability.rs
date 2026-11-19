@@ -5,7 +5,7 @@
 //! requested path, opens it once, then checks the opened object's final host
 //! path before giving that object to an operation.
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 
@@ -304,7 +304,7 @@ fn verified_parent_with_hook(
 }
 
 /// Checks an already-open directory handle and returns its relative capability.
-pub(super) fn bind_opened_directory(
+fn bind_opened_directory(
     policy: &CompiledPolicy,
     requested: &Path,
     dir: Dir,
@@ -312,6 +312,58 @@ pub(super) fn bind_opened_directory(
     let final_path = directory_final_path(&dir)?;
     let anchor = bind_authorization_anchor(policy, requested, &final_path, &final_path)?;
     Ok(BoundDir { anchor, final_path })
+}
+
+/// A subdirectory opened below a directory capability and checked against the
+/// policy, ready to be listed.
+pub(super) struct CheckedChild {
+    pub(super) dir: Dir,
+    /// The handle's final host path, which the policy admitted.
+    pub(super) final_path: PathBuf,
+}
+
+/// Opens the subdirectory `name` of `parent` without following a symlink and
+/// checks the opened handle's final path against the policy.
+///
+/// The check reads the path off the handle that is then used, so no later
+/// resolution can swap the directory between the check and the listing. That
+/// costs one open and one readlink, where [`open_directory`] binds a handle to
+/// the filesystem root for later re-opens. A walk lists each directory right
+/// after this call, so it has no use for the re-open.
+///
+/// Returns `None` when `name` is gone, is no longer a directory, or became a
+/// symlink since the parent was listed: such a child is skipped.
+///
+/// # Example
+///
+/// ```ignore
+/// if let Some(child) = open_checked_child(&policy, &requested.join(&name), &parent, &name)? {
+///     child.dir.entries().map_err(io_error)?;
+/// }
+/// ```
+pub(super) fn open_checked_child(
+    policy: &CompiledPolicy,
+    requested: &Path,
+    parent: &Dir,
+    name: &OsStr,
+) -> Result<Option<CheckedChild>, RemoteError> {
+    let dir = match parent.open_dir_nofollow(name) {
+        Ok(dir) => dir,
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound
+                    | std::io::ErrorKind::NotADirectory
+                    | std::io::ErrorKind::TooManyLinks
+            ) =>
+        {
+            return Ok(None);
+        }
+        Err(error) => return Err(io_error(error)),
+    };
+    let final_path = directory_final_path(&dir)?;
+    policy.check_final_handle_path(requested, &final_path)?;
+    Ok(Some(CheckedChild { dir, final_path }))
 }
 
 fn bind_verified_parent(
@@ -424,8 +476,10 @@ fn filesystem_root(path: &Path) -> Option<PathBuf> {
 }
 
 fn directory_final_path(dir: &Dir) -> Result<PathBuf, RemoteError> {
-    let handle = dir.try_clone().map_err(handle_error)?;
-    final_path_from_file(&handle.into_std_file()).map_err(handle_error)
+    // Reads the path off the directory's own handle. Duplicating it first, as
+    // this once did, costs a `fcntl(F_DUPFD_CLOEXEC)` per directory that took
+    // about 70 us each in the runtime process and dominated a restricted walk.
+    final_path_from_handle(dir).map_err(handle_error)
 }
 
 fn check_file_handle(
@@ -433,7 +487,7 @@ fn check_file_handle(
     requested: &Path,
     file: &File,
 ) -> Result<(), RemoteError> {
-    let final_path = final_path_from_file(file).map_err(handle_error)?;
+    let final_path = final_path_from_handle(file).map_err(handle_error)?;
     policy.check_final_handle_path(requested, &final_path)
 }
 
@@ -556,16 +610,24 @@ fn handle_error(error: std::io::Error) -> RemoteError {
     ))
 }
 
+/// The OS handle type a final path can be read from: a file descriptor on Unix,
+/// a `HANDLE` on Windows. A [`File`] and a capability [`Dir`] both qualify, so a
+/// directory's path is read off its own handle without duplicating it.
+#[cfg(unix)]
+use std::os::fd::AsFd as AsOsHandle;
+#[cfg(windows)]
+use std::os::windows::io::AsHandle as AsOsHandle;
+
 #[cfg(target_os = "linux")]
-fn final_path_from_file(file: &File) -> std::io::Result<PathBuf> {
+fn final_path_from_handle(handle: &impl AsOsHandle) -> std::io::Result<PathBuf> {
     use std::os::fd::AsRawFd as _;
 
-    std::fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd()))
+    std::fs::read_link(format!("/proc/self/fd/{}", handle.as_fd().as_raw_fd()))
 }
 
 #[cfg(target_os = "macos")]
-fn final_path_from_file(file: &File) -> std::io::Result<PathBuf> {
-    macos::final_path_from_file(file)
+fn final_path_from_handle(handle: &impl AsOsHandle) -> std::io::Result<PathBuf> {
+    macos::final_path_from_handle(handle)
 }
 
 #[cfg(target_os = "macos")]
@@ -577,17 +639,23 @@ mod macos {
     #![deny(clippy::undocumented_unsafe_blocks)]
 
     use std::ffi::{CStr, OsStr};
-    use std::fs::File;
     use std::os::fd::AsRawFd as _;
     use std::os::unix::ffi::OsStrExt as _;
     use std::path::PathBuf;
 
-    pub(super) fn final_path_from_file(file: &File) -> std::io::Result<PathBuf> {
+    use super::AsOsHandle;
+
+    pub(super) fn final_path_from_handle(handle: &impl AsOsHandle) -> std::io::Result<PathBuf> {
         let mut path = [0_i8; nix::libc::PATH_MAX as usize];
         // SAFETY: `path` is writable PATH_MAX-sized storage. The descriptor stays
         // live for the call and F_GETPATH writes a NUL-terminated path on success.
-        let result =
-            unsafe { nix::libc::fcntl(file.as_raw_fd(), nix::libc::F_GETPATH, path.as_mut_ptr()) };
+        let result = unsafe {
+            nix::libc::fcntl(
+                handle.as_fd().as_raw_fd(),
+                nix::libc::F_GETPATH,
+                path.as_mut_ptr(),
+            )
+        };
         if result == -1 {
             return Err(std::io::Error::last_os_error());
         }
@@ -598,8 +666,8 @@ mod macos {
 }
 
 #[cfg(windows)]
-fn final_path_from_file(file: &File) -> std::io::Result<PathBuf> {
-    windows::final_path_from_file(file)
+fn final_path_from_handle(handle: &impl AsOsHandle) -> std::io::Result<PathBuf> {
+    windows::final_path_from_handle(handle)
 }
 
 #[cfg(windows)]
@@ -611,7 +679,6 @@ mod windows {
     #![deny(clippy::undocumented_unsafe_blocks)]
 
     use std::ffi::OsString;
-    use std::fs::File;
     use std::os::windows::ffi::OsStringExt as _;
     use std::os::windows::io::AsRawHandle as _;
     use std::path::PathBuf;
@@ -619,14 +686,16 @@ mod windows {
         FILE_NAME_NORMALIZED, GetFinalPathNameByHandleW,
     };
 
-    pub(super) fn final_path_from_file(file: &File) -> std::io::Result<PathBuf> {
+    use super::AsOsHandle;
+
+    pub(super) fn final_path_from_handle(handle: &impl AsOsHandle) -> std::io::Result<PathBuf> {
         let mut buffer = vec![0_u16; 512];
         loop {
             // SAFETY: the handle is live, and `buffer` is writable for the exact
             // number of UTF-16 code units passed to the Windows API.
             let length = unsafe {
                 GetFinalPathNameByHandleW(
-                    file.as_raw_handle().cast(),
+                    handle.as_handle().as_raw_handle().cast(),
                     buffer.as_mut_ptr(),
                     buffer.len() as u32,
                     FILE_NAME_NORMALIZED,
@@ -645,7 +714,7 @@ mod windows {
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-fn final_path_from_file(_file: &File) -> std::io::Result<PathBuf> {
+fn final_path_from_handle<T>(_handle: &T) -> std::io::Result<PathBuf> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
         "this platform cannot report an opened filesystem object's final path",
@@ -972,6 +1041,112 @@ mod tests {
 
         assert_eq!(error.details.unwrap()["kind"], "path_access");
         assert!(!relocated.join("nested/new.txt").exists());
+    }
+
+    fn contained_policy(root: &Path) -> CompiledPolicy {
+        PathPolicy {
+            containment_root: Some(root.to_path_buf()),
+            ..PathPolicy::default()
+        }
+        .compile()
+        .unwrap()
+    }
+
+    #[test]
+    fn checked_child_reports_the_final_path_of_the_directory_it_opened() {
+        let scratch = scratch_dir("filesystem-capability-checked-child");
+        let root = scratch.join("root");
+        std::fs::create_dir_all(root.join("nested")).unwrap();
+        let policy = contained_policy(&root);
+        let parent = open_directory(&policy, &root).unwrap();
+
+        let child = parent
+            .with_dir(|dir| {
+                open_checked_child(&policy, &root.join("nested"), dir, OsStr::new("nested"))
+            })
+            .unwrap()
+            .expect("an existing subdirectory opens");
+
+        let expected = std::fs::canonicalize(root.join("nested")).unwrap();
+        assert!(
+            paths_equal(&child.final_path, &expected),
+            "expected the final path of the opened subdirectory | expected: {} | received: {}",
+            expected.display(),
+            child.final_path.display()
+        );
+    }
+
+    #[test]
+    fn checked_child_is_none_for_a_name_that_is_gone_or_not_a_directory() {
+        let scratch = scratch_dir("filesystem-capability-checked-child-gone");
+        let root = scratch.join("root");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("plain.txt"), b"x").unwrap();
+        let policy = contained_policy(&root);
+        let parent = open_directory(&policy, &root).unwrap();
+
+        for name in ["missing", "plain.txt"] {
+            let child = parent
+                .with_dir(|dir| {
+                    open_checked_child(&policy, &root.join(name), dir, OsStr::new(name))
+                })
+                .unwrap();
+            assert!(
+                child.is_none(),
+                "expected `{name}` to be skipped, not opened as a directory"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checked_child_never_opens_a_symlink_even_when_it_points_inside_the_policy() {
+        let scratch = scratch_dir("filesystem-capability-checked-child-symlink");
+        let root = scratch.join("root");
+        let outside = scratch.join("outside");
+        std::fs::create_dir_all(root.join("real")).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        std::os::unix::fs::symlink(root.join("real"), root.join("inward")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("outward")).unwrap();
+        let policy = contained_policy(&root);
+        let parent = open_directory(&policy, &root).unwrap();
+
+        for name in ["inward", "outward"] {
+            let child = parent
+                .with_dir(|dir| {
+                    open_checked_child(&policy, &root.join(name), dir, OsStr::new(name))
+                })
+                .unwrap();
+            assert!(
+                child.is_none(),
+                "expected the symlink `{name}` to be skipped, not followed"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn checked_child_refuses_a_held_parent_that_was_renamed_outside_the_policy() {
+        let scratch = scratch_dir("filesystem-capability-checked-child-held-parent-moved");
+        let root = scratch.join("root");
+        let relocated = scratch.join("relocated");
+        std::fs::create_dir_all(root.join("parent/nested")).unwrap();
+        let policy = contained_policy(&root);
+        // A handle the caller keeps, as the walk does for the directory it is in.
+        let held = Dir::open_ambient_dir(root.join("parent"), ambient_authority()).unwrap();
+
+        std::fs::rename(root.join("parent"), &relocated).unwrap();
+        let error = match open_checked_child(
+            &policy,
+            &root.join("parent/nested"),
+            &held,
+            OsStr::new("nested"),
+        ) {
+            Ok(_) => panic!("a child below a held parent that left the policy must be refused"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.details.unwrap()["kind"], "path_access");
     }
 
     #[test]
