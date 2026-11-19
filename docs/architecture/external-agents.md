@@ -488,6 +488,15 @@ namespace and filesystem both still say "isolated". So the mount table is read a
 credential home — or at `~/.claude`, `~/.codex`, `~/.cursor` and their XDG equivalents — withdraws
 the attestation. A container whose mount table cannot be read attests nothing.
 
+A runtime newer than the hub may attest a method this table does not list. `runtime.health` reads
+the method as a bounded, URL-safe string, so the report is still accepted and the rest of the
+manifest still refreshes. The hub reads an unknown method as **unproven isolation**: it drops the
+attestation, so the manifest carries no `identityIsolation` (even when `hello` announced a known
+method — the newest answer wins) and everything gated on it fails closed with
+`EXTERNAL_ISOLATION_UNPROVEN`. It logs `unknown_identity_isolation_method_skipped` once per
+environment. The enum stays closed wherever the hub produces the value: the manifest and the
+`isolation` it sends back never carry a method this build cannot name.
+
 The attestation carries a `credentialHomeFingerprint`: a non-reversible digest of the credential
 home's identity, never its contents and never a path that would leak a username. It exists so the
 hub can notice that the identity behind a session changed.

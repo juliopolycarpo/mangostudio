@@ -175,14 +175,38 @@ export const ExternalSupportedConfigurationListSchema = ReadonlyArraySchema(
   { maxItems: EXTERNAL_PERMISSION_LEVELS.length * EXTERNAL_APPROVAL_ROUTINGS.length }
 );
 
+/**
+ * The methods this build can interpret. Closed wherever the hub produces or
+ * forwards an attestation; `runtime.health` reads a bounded string instead
+ * (`RuntimeHealthTokenSchema`) and the hub narrows it with
+ * {@link isExternalIdentityIsolationMethod}.
+ */
+export const ExternalIdentityIsolationMethodSchema = Type.Union([
+  Type.Literal('single-user-host'),
+  Type.Literal('os-account'),
+  Type.Literal('container'),
+]);
+
+export type ExternalIdentityIsolationMethod = Static<typeof ExternalIdentityIsolationMethodSchema>;
+
+/**
+ * Narrows a method string a newer runtime may have invented to one this build
+ * can interpret.
+ *
+ * @example
+ * isExternalIdentityIsolationMethod('os-account'); // true
+ * isExternalIdentityIsolationMethod('micro-vm'); // false
+ */
+export function isExternalIdentityIsolationMethod(
+  value: string
+): value is ExternalIdentityIsolationMethod {
+  return ExternalIdentityIsolationMethodSchema.anyOf.some((literal) => literal.const === value);
+}
+
 /** How a runtime proves that vendor credentials cannot cross MangoStudio users. */
 export const ExternalIdentityIsolationSchema = Type.Object(
   {
-    method: Type.Union([
-      Type.Literal('single-user-host'),
-      Type.Literal('os-account'),
-      Type.Literal('container'),
-    ]),
+    method: ExternalIdentityIsolationMethodSchema,
     /** Opaque, non-reversible digest used only to detect a changed credential home. */
     credentialHomeFingerprint: Type.String({ minLength: 1, maxLength: 128 }),
   },

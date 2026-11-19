@@ -196,6 +196,8 @@ export {
   type ExternalCredits,
   ExternalCreditsSchema,
   type ExternalIdentityIsolation,
+  type ExternalIdentityIsolationMethod,
+  ExternalIdentityIsolationMethodSchema,
   ExternalIdentityIsolationSchema,
   type ExternalNativeSession,
   type ExternalNativeSessionListResponse,
@@ -244,6 +246,7 @@ export {
   ExternalUsageSchema,
   ExternalVendorIdSchema,
   isExternalAgentTargetId,
+  isExternalIdentityIsolationMethod,
   NO_EXTERNAL_AGENT_CAPABILITIES,
   VendorText,
 } from './schemas';
