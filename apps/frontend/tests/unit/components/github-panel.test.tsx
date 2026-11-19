@@ -17,9 +17,18 @@ import userEvent from '@testing-library/user-event';
 
 import { GithubPanel } from '../../../src/features/github/components/GithubPanel';
 import { requestGithubCreatePr } from '../../../src/features/github/lib/github-panel-request';
+import {
+  RAIL_PANEL_REQUEST_WINDOW_MS,
+  requestRailPanel,
+} from '../../../src/features/workspace/rail/rail-panel-request';
 import { AppContext } from '../../../src/lib/app-context';
 import { act, flushAsyncRender } from '../../support/harness/render';
 import { renderWithRouter } from '../../support/harness/render-with-router';
+import {
+  advanceTimersByTimeAsync,
+  restoreRealTimers,
+  useFakeTimers,
+} from '../../support/harness/timers';
 import { createFetchScenario } from '../../support/mocks/create-fetch-scenario';
 
 const CHAT_ID = 'chat-1';
@@ -648,6 +657,27 @@ describe('GithubPanel', () => {
     const { scenario } = await renderPanel();
     try {
       expect(await screen.findByLabelText('Title')).toBeVisible();
+    } finally {
+      scenario.restore();
+    }
+  });
+
+  /**
+   * The create-pull-request latch is paired with the rail request. When the
+   * rail never mounts inside its window the palette run is abandoned, and the
+   * form must not pop open whenever the GitHub panel is next shown.
+   */
+  it('does not open the create form for a request whose rail request was dropped', async () => {
+    useFakeTimers();
+    requestGithubCreatePr();
+    requestRailPanel('github');
+    await advanceTimersByTimeAsync(RAIL_PANEL_REQUEST_WINDOW_MS);
+    await restoreRealTimers();
+
+    const { scenario } = await renderPanel();
+    try {
+      expect(await screen.findByRole('button', { name: 'Create pull request' })).toBeVisible();
+      expect(screen.queryByLabelText('Title')).not.toBeInTheDocument();
     } finally {
       scenario.restore();
     }

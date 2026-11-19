@@ -10,8 +10,10 @@
  * listener *is* mounted is delivered directly and never latched, so a later
  * remount cannot replay a stale one.
  *
- * `rail-panel-request` is the un-latched, keyed sibling: it addresses panels by
- * id and drops a request nobody is listening for.
+ * `rail-panel-request` is the keyed sibling: it addresses panels by id and holds
+ * a request only for a short bounded window. A latch that rides along with a
+ * rail request must not outlive it, so a request the rail gave up on calls
+ * `clear()` through `onRailPanelRequestDropped`.
  *
  * @example
  * const { request, subscribe } = createLatchedRequestChannel();
@@ -23,6 +25,8 @@ export interface LatchedRequestChannel {
   request(): void;
   /** Subscribes, replaying a latched request once; returns an unsubscribe. */
   subscribe(listener: () => void): () => void;
+  /** Discards a latched request, if any. A request already delivered is unaffected. */
+  clear(): void;
 }
 
 export function createLatchedRequestChannel(): LatchedRequestChannel {
@@ -47,6 +51,10 @@ export function createLatchedRequestChannel(): LatchedRequestChannel {
       return () => {
         listeners.delete(listener);
       };
+    },
+
+    clear() {
+      pending = false;
     },
   };
 }

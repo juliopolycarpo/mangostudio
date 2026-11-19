@@ -17,10 +17,20 @@ import { DEFAULT_WORKSPACE_SETTINGS } from '@mangostudio/shared/app-settings';
 import type { Chat } from '@mangostudio/shared/chat';
 
 import type { CommandItem } from '@/features/command-palette/lib/command-item';
+import { onGithubCreatePrRequest } from '@/features/github/lib/github-panel-request';
+import {
+  onRailPanelRequest,
+  RAIL_PANEL_REQUEST_WINDOW_MS,
+} from '@/features/workspace/rail/rail-panel-request';
 import type { useAppState } from '@/hooks/use-app-state';
 import { AppContext } from '@/lib/app-context';
 
 import { act, flushAsyncRender, render, waitFor } from '../../../support/harness/render';
+import {
+  advanceTimersByTimeAsync,
+  restoreRealTimers,
+  useFakeTimers,
+} from '../../../support/harness/timers';
 import { createFetchScenario } from '../../../support/mocks/create-fetch-scenario';
 import { routerWithLinkStub } from '../../../support/mocks/router';
 
@@ -146,6 +156,49 @@ describe('useCommandRegistry', () => {
 
     expect(replacement.handleSelectChat).toHaveBeenCalledWith('c1');
     expect(onRun).toHaveBeenCalledTimes(1);
+    scenario.restore();
+  });
+
+  /**
+   * Run from /settings, the row awaits `navigate()` and fires its requests
+   * before the chat surface has committed the rail. A rail that subscribes
+   * after the row finished still has to hear both the panel and the form.
+   */
+  it('hands the GitHub create request to a rail that mounts after the navigation', async () => {
+    const { scenario, seen } = await setup();
+    navigate.mockImplementationOnce(() => new Promise((resolve) => setTimeout(resolve, 0)));
+
+    await act(async () => {
+      await seen.items.find((item) => item.id === 'action:github-create-pr')?.run();
+    });
+
+    const railPanel = jest.fn();
+    const createForm = jest.fn();
+    const unsubscribers = [onRailPanelRequest(railPanel), onGithubCreatePrRequest(createForm)];
+    for (const unsubscribe of unsubscribers) unsubscribe();
+
+    expect(railPanel).toHaveBeenCalledWith('github');
+    expect(createForm).toHaveBeenCalledTimes(1);
+    scenario.restore();
+  });
+
+  it('leaves no create-form latch behind when no rail mounts within the window', async () => {
+    const { scenario, seen } = await setup();
+    useFakeTimers();
+
+    await act(async () => {
+      await seen.items.find((item) => item.id === 'action:github-create-pr')?.run();
+    });
+    await advanceTimersByTimeAsync(RAIL_PANEL_REQUEST_WINDOW_MS);
+    await restoreRealTimers();
+
+    const railPanel = jest.fn();
+    const createForm = jest.fn();
+    const unsubscribers = [onRailPanelRequest(railPanel), onGithubCreatePrRequest(createForm)];
+    for (const unsubscribe of unsubscribers) unsubscribe();
+
+    expect(railPanel, 'rail panel request replayed after the window').not.toHaveBeenCalled();
+    expect(createForm, 'create form latch replayed after the window').not.toHaveBeenCalled();
     scenario.restore();
   });
 

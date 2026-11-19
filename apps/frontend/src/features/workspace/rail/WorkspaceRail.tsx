@@ -28,7 +28,7 @@ import { ICON_MD, ICON_SM } from '@/lib/icon-sizes';
 import { preloadWhenIdle } from '@/lib/idle-preload';
 
 import { getAvailableWorkspacePanels, type RailPanelDefinition } from './panel-registry';
-import { onRailPanelRequest } from './rail-panel-request';
+import { onRailPanelRequest, rejectRailPanelRequest } from './rail-panel-request';
 import { readRailCollapsed, writeRailCollapsed } from './rail-state';
 import { RailPanel } from './RailPanel';
 
@@ -148,6 +148,14 @@ export function WorkspaceRail({
 
   const selectPanel = useCallback(
     (panelId: WorkspacePanelId) => {
+      // A panel this rail does not offer (hidden in settings, or a todo panel
+      // with no todos) cannot be honoured. Say so, so a latch paired with the
+      // request clears instead of arming a form in whichever chat shows that
+      // panel next, and leave the rail on the panel it is already showing.
+      if (!availablePanels.some((panel) => panel.id === panelId)) {
+        rejectRailPanelRequest(panelId);
+        return;
+      }
       setActivePanelId(panelId);
       // Only a body that is already showing is worth holding up while the next
       // one loads. Opening a collapsed rail or the drawer shows the requested
@@ -165,13 +173,13 @@ export function WorkspaceRail({
       // cleared `collapsed` picked a panel nothing on screen showed.
       if (!isDesktop) setMobileOpen(true);
     },
-    [bodyOnScreen, chatId, isDesktop]
+    [availablePanels, bodyOnScreen, chatId, isDesktop]
   );
 
   // The rail has no keyboard shortcut for switching panels, so the command
   // palette and the Repository panel's branch chip are how a panel gets opened
-  // from outside. Requests arriving while a panel is not available are dropped
-  // by the effect below that re-selects the first available one.
+  // from outside. A request for a panel that is not available is rejected in
+  // `selectPanel` rather than applied and then undone by the fallback effect.
   useEffect(() => onRailPanelRequest(selectPanel), [selectPanel]);
 
   // EdgeResizeHandle already clamps and rounds against the same bounds.
