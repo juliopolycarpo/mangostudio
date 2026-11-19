@@ -95,12 +95,17 @@ function renderSource(source: SkillSourceDiagnostic): CheckResult {
       params
     );
   }
-  return keyedCheck(
-    'ok',
-    label,
-    source.enabled ? 'skills.detail.sourceCount' : 'skills.detail.sourceCountDisabled',
-    { ...params, count: source.skillCount }
-  );
+  // One sentence per count shape: "1 skill" and "2 skills" are different
+  // words in some languages, and only the plural one names the count.
+  const one = source.skillCount === 1;
+  const detailKey = source.enabled
+    ? one
+      ? 'skills.detail.sourceCountOne'
+      : 'skills.detail.sourceCountMany'
+    : one
+      ? 'skills.detail.sourceCountDisabledOne'
+      : 'skills.detail.sourceCountDisabledMany';
+  return keyedCheck('ok', label, detailKey, one ? params : { ...params, count: source.skillCount });
 }
 
 function renderSkill(skill: SkillDiagnostic): CheckResult | null {

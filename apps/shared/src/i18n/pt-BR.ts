@@ -2929,8 +2929,10 @@ export const messages = {
           'skills.detail.sourceMissing': '{dir} (ainda sem diretório de skills)',
           'skills.detail.sourceMissingDisabled':
             '{dir} (ainda sem diretório de skills) (fonte desativada)',
-          'skills.detail.sourceCount': '{dir} — {count} skill(s)',
-          'skills.detail.sourceCountDisabled': '{dir} — {count} skill(s) (fonte desativada)',
+          'skills.detail.sourceCountOne': '{dir} — 1 skill',
+          'skills.detail.sourceCountMany': '{dir} — {count} skills',
+          'skills.detail.sourceCountDisabledOne': '{dir} — 1 skill (fonte desativada)',
+          'skills.detail.sourceCountDisabledMany': '{dir} — {count} skills (fonte desativada)',
           'skills.detail.invalid': '{error}',
           'skills.detail.shadowed': 'sobreposta pela fonte {source} (maior precedência)',
           'skills.detail.disabled': 'desativada nas configurações',
@@ -2955,8 +2957,10 @@ export const messages = {
           'mcp.detail.commandNotFoundDisabled':
             '{command} não encontrado no PATH (servidor desativado)',
           'mcp.detail.probeResult': '{result}',
-          'mcp.detail.longToolNames':
-            '{count} nome(s) de ferramenta excedem {max} caracteres e foram ignorados: {names}',
+          'mcp.detail.longToolNamesOne':
+            '1 nome de ferramenta excede {max} caracteres e foi ignorado: {names}',
+          'mcp.detail.longToolNamesMany':
+            '{count} nomes de ferramenta excedem {max} caracteres e foram ignorados: {names}',
           'library.label.locations': 'locais',
           'library.label.location': '{id}',
           'library.label.divergence': 'divergência',

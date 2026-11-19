@@ -786,8 +786,10 @@ export const messages: FeatureMessages<'environments'> = {
           'skills.detail.sourceMissing': '{dir} (no skills directory yet)',
           'skills.detail.sourceMissingDisabled':
             '{dir} (no skills directory yet) (source disabled)',
-          'skills.detail.sourceCount': '{dir} — {count} skill(s)',
-          'skills.detail.sourceCountDisabled': '{dir} — {count} skill(s) (source disabled)',
+          'skills.detail.sourceCountOne': '{dir} — 1 skill',
+          'skills.detail.sourceCountMany': '{dir} — {count} skills',
+          'skills.detail.sourceCountDisabledOne': '{dir} — 1 skill (source disabled)',
+          'skills.detail.sourceCountDisabledMany': '{dir} — {count} skills (source disabled)',
           'skills.detail.invalid': '{error}',
           'skills.detail.shadowed': 'shadowed by {source} source (higher precedence)',
           'skills.detail.disabled': 'disabled in settings',
@@ -810,8 +812,9 @@ export const messages: FeatureMessages<'environments'> = {
           'mcp.detail.commandNotFound': '{command} not found on PATH (spawn would ENOENT)',
           'mcp.detail.commandNotFoundDisabled': '{command} not found on PATH (server disabled)',
           'mcp.detail.probeResult': '{result}',
-          'mcp.detail.longToolNames':
-            '{count} tool name(s) exceed {max} chars and are skipped: {names}',
+          'mcp.detail.longToolNamesOne': '1 tool name exceeds {max} chars and is skipped: {names}',
+          'mcp.detail.longToolNamesMany':
+            '{count} tool names exceed {max} chars and are skipped: {names}',
           'library.label.locations': 'locations',
           'library.label.location': '{id}',
           'library.label.divergence': 'divergence',

@@ -597,6 +597,7 @@ function skillsRows(
 const STATES_DIRS = skillsDirs('states');
 const UNREADABLE_DIRS = skillsDirs('unreadable');
 const SOLO_DIRS = skillsDirs('solo');
+const PAIR_DIRS = skillsDirs('pair');
 const WITHHELD_DIRS = skillsDirs('withheld');
 
 const SKILLS_CASES: readonly SectionCase[] = [
@@ -618,8 +619,8 @@ const SKILLS_CASES: readonly SectionCase[] = [
     },
     expected: [
       { label: 'Skills config', status: 'ok', detail: `${STATES_DIRS.mango} (from toml)` },
-      { label: 'Skills mango', status: 'ok', detail: `${STATES_DIRS.mango} — 4 skill(s)` },
-      { label: 'Skills agents', status: 'ok', detail: `${STATES_DIRS.agents} — 1 skill(s)` },
+      { label: 'Skills mango', status: 'ok', detail: `${STATES_DIRS.mango} — 4 skills` },
+      { label: 'Skills agents', status: 'ok', detail: `${STATES_DIRS.agents} — 1 skill` },
       {
         label: 'Skills claude',
         status: 'fail',
@@ -679,7 +680,24 @@ const SKILLS_CASES: readonly SectionCase[] = [
       {
         label: 'Skills agents',
         status: 'ok',
-        detail: `${SOLO_DIRS.agents} — 1 skill(s) (source disabled)`,
+        detail: `${SOLO_DIRS.agents} — 1 skill (source disabled)`,
+      },
+    ],
+  },
+  {
+    name: 'a switched-off source holding several skills',
+    rows: () => {
+      writeSkill(PAIR_DIRS.agents, 'first', 'name: first\ndescription: First');
+      writeSkill(PAIR_DIRS.agents, 'second', 'name: second\ndescription: Second');
+      return skillsRows(PAIR_DIRS, { origin: 'default' }).filter(
+        (row) => row.label === 'Skills agents'
+      );
+    },
+    expected: [
+      {
+        label: 'Skills agents',
+        status: 'ok',
+        detail: `${PAIR_DIRS.agents} — 2 skills (source disabled)`,
       },
     ],
   },
@@ -808,7 +826,33 @@ const MCP_CASES: readonly SectionCase[] = [
       {
         label: 'MCP github tools',
         status: 'warn',
-        detail: `1 tool name(s) exceed 64 chars and are skipped: mcp__github__${MCP_LONG_TOOL}`,
+        detail: `1 tool name exceeds 64 chars and is skipped: mcp__github__${MCP_LONG_TOOL}`,
+      },
+    ],
+  },
+  {
+    name: 'several tool names past the length cap',
+    rows: () =>
+      collectMcpDoctorChecks(
+        [mcpServer()],
+        { probe: true, serverRunning: false },
+        {
+          resolveCommandOnPath: () => true,
+          probeServer: () =>
+            Promise.resolve({
+              ok: true,
+              tools: [
+                { name: MCP_LONG_TOOL, description: '', inputSchema: {} },
+                { name: `${MCP_LONG_TOOL}z`, description: '', inputSchema: {} },
+              ],
+            }),
+        }
+      ).then((rows) => rows.filter((row) => row.label === 'MCP github tools')),
+    expected: [
+      {
+        label: 'MCP github tools',
+        status: 'warn',
+        detail: `2 tool names exceed 64 chars and are skipped: mcp__github__${MCP_LONG_TOOL}, mcp__github__${MCP_LONG_TOOL}z`,
       },
     ],
   },

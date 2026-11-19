@@ -99,7 +99,7 @@ describe('collectMcpDoctorChecks', () => {
 
     const tools = find(results, 'MCP github tools');
     expect(tools.status).toBe('warn');
-    expect(tools.detail).toContain('exceed 64 chars');
+    expect(tools.detail).toContain('exceeds 64 chars');
   });
 
   it('adds a note when a server is running during a probe', async () => {

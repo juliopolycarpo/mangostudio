@@ -71,13 +71,20 @@ function renderServer(server: McpServerDiagnostic): CheckResult[] {
   }
 
   if (server.longToolNames.length > 0) {
+    const count = server.longToolNames.length;
+    const shared = {
+      ...slug,
+      max: MCP_TOOL_NAME_MAX_LENGTH,
+      names: server.longToolNames.join(', '),
+    };
+    // Singular and plural are separate sentences; only the plural one names the count.
     results.push(
-      keyedCheck('warn', 'mcp.label.tools', 'mcp.detail.longToolNames', {
-        ...slug,
-        count: server.longToolNames.length,
-        max: MCP_TOOL_NAME_MAX_LENGTH,
-        names: server.longToolNames.join(', '),
-      })
+      count === 1
+        ? keyedCheck('warn', 'mcp.label.tools', 'mcp.detail.longToolNamesOne', shared)
+        : keyedCheck('warn', 'mcp.label.tools', 'mcp.detail.longToolNamesMany', {
+            ...shared,
+            count,
+          })
     );
   }
 
