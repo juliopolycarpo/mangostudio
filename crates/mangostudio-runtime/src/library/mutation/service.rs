@@ -35,6 +35,7 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use mango_protocol::error::{RemoteError, codes};
 use mango_protocol::session::CallContext;
+use mangostudio_runtime_contract::errors::CONSENT_DENIED_KIND;
 use serde::Deserialize;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
@@ -382,7 +383,11 @@ impl MutationService {
                         Interrupt::ConsentWithdrawn => authorize(&consent, "library.undo")
                             .err()
                             .unwrap_or_else(|| {
-                                RemoteError::new(codes::DENIED, interrupt.message())
+                                consent_withdrawn_denial(
+                                    "library.undo",
+                                    consent.slot().as_str(),
+                                    interrupt,
+                                )
                             }),
                     };
                     // What already landed stays landed; say so rather than
@@ -597,6 +602,23 @@ pub(crate) fn register(registry: Registry, service: Arc<MutationService>) -> Reg
                 async move { service.gc(params, context.cancel().clone()).await }
             },
         )
+}
+
+/// The refusal for a write whose consent was withdrawn mid-run but reads as
+/// granted again by the time the error is built (the owner re-granted it in
+/// between). `authorize` answers the usual case; this is its fallback.
+///
+/// It stays a consent refusal on the wire: the hub rebuilds only a
+/// `DENIED` carrying `details.kind = "consent_denied"` as a consent error, and
+/// a bare `DENIED` would reach the caller as a policy refusal that says
+/// nothing about consent. There is no capability list to name, so `missing`
+/// and `capability` stay off, as `consent_denial` leaves them when nothing is
+/// missing.
+fn consent_withdrawn_denial(method: &str, slot: &str, interrupt: Interrupt) -> RemoteError {
+    RemoteError::new(codes::DENIED, interrupt.message())
+        .with_detail("kind", CONSENT_DENIED_KIND)
+        .with_detail("method", method.to_string())
+        .with_detail("slot", slot.to_string())
 }
 
 #[cfg(test)]
