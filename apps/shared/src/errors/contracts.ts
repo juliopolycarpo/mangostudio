@@ -123,6 +123,14 @@ export const ERROR_CODES = {
    * setting the user can find.
    */
   TERMINAL_NOT_ISOLATED: 'TERMINAL_NOT_ISOLATED',
+  /**
+   * An install, update or uninstall was refused because a different operation
+   * is already changing the same runtime on the same machine. Carries
+   * `details.runtimeId`, `details.runningRecipeId` and `details.runningRunId`
+   * so the client can name the running operation. Its own code, apart from
+   * `CONFLICT`, because the remedy is to wait for or cancel that run.
+   */
+  INSTALL_RUNTIME_BUSY: 'INSTALL_RUNTIME_BUSY',
   INTERNAL: 'INTERNAL',
 } as const;
 

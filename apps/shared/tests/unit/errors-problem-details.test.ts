@@ -144,6 +144,7 @@ const PUBLISHED: [ErrorCode, string, string][] = [
     'https://mangostudio.dev/problems/terminal-not-isolated',
     'Terminal host not isolated',
   ],
+  ['INSTALL_RUNTIME_BUSY', 'https://mangostudio.dev/problems/install-runtime-busy', 'Runtime busy'],
   ['INTERNAL', 'https://mangostudio.dev/problems/internal', 'Internal server error'],
 ];
 

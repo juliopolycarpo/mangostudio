@@ -124,6 +124,26 @@ export class InstallConflictError extends Error {
   }
 }
 
+/**
+ * A different recipe is already changing the same runtime on the same machine
+ * (an update racing an uninstall, say). Same-recipe duplicates attach instead;
+ * only a conflicting pair reaches this error.
+ */
+export class InstallRuntimeBusyError extends InstallConflictError {
+  constructor(
+    readonly runtimeId: RuntimeId,
+    readonly requestedRecipeId: InstallRecipeId,
+    readonly runningRecipeId: InstallRecipeId,
+    /** Absent while the running operation is still being prepared and has no run id yet. */
+    readonly runningRunId?: string
+  ) {
+    super(
+      `Cannot start ${requestedRecipeId}: ${runningRecipeId} is already changing ${runtimeId} on this machine.`
+    );
+    this.name = 'InstallRuntimeBusyError';
+  }
+}
+
 interface PreparedInstall {
   readonly id: string;
   readonly userId: string;
@@ -158,6 +178,8 @@ interface RecentInstallStream {
 
 interface StartingInstall {
   readonly userId: string;
+  readonly recipeId: InstallRecipeId;
+  readonly environmentId: string;
   readonly promise: Promise<InstallStartResponse>;
 }
 
@@ -381,6 +403,26 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
   const activeByRun = new Map<string, ActiveInstall>();
   const recentStreams = new Map<string, RecentInstallStream>();
   const startingByRecipe = new Map<string, StartingInstall>();
+
+  const assertRuntimeNotBusy = (environmentId: string, recipe: InstallRecipe): void => {
+    const sameRuntime = (otherRecipeId: InstallRecipeId) =>
+      otherRecipeId !== recipe.id && recipesById.get(otherRecipeId)?.runtimeId === recipe.runtimeId;
+    for (const active of activeByRun.values()) {
+      if (active.environmentId === environmentId && sameRuntime(active.recipeId)) {
+        throw new InstallRuntimeBusyError(
+          recipe.runtimeId,
+          recipe.id,
+          active.recipeId,
+          active.runId
+        );
+      }
+    }
+    for (const starting of startingByRecipe.values()) {
+      if (starting.environmentId === environmentId && sameRuntime(starting.recipeId)) {
+        throw new InstallRuntimeBusyError(recipe.runtimeId, recipe.id, starting.recipeId);
+      }
+    }
+  };
 
   const resolveRecipe = (id: InstallRecipeId): InstallRecipe => {
     // Only the configured recipe set is executable. Falling back to the global
@@ -908,6 +950,10 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
 
       const environmentId = environmentIdOf(context);
       const key = activityKey(environmentId, recipe.id);
+      // Update and uninstall of one runtime write the same files, so only one
+      // recipe may run per runtime per machine. Checked in the same synchronous
+      // stretch that registers `startingByRecipe`, so two tabs cannot both pass.
+      assertRuntimeNotBusy(environmentId, recipe);
       const existing = activeByRecipe.get(key);
       if (existing) {
         if (existing.userId !== context.userId) {
@@ -1016,7 +1062,12 @@ export function createInstallService(overrides: Partial<InstallServiceDeps> = {}
           throw error;
         }
       })();
-      startingByRecipe.set(key, { userId: context.userId, promise: startPromise });
+      startingByRecipe.set(key, {
+        userId: context.userId,
+        recipeId: recipe.id,
+        environmentId,
+        promise: startPromise,
+      });
       try {
         return await startPromise;
       } finally {

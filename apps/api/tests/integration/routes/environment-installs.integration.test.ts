@@ -16,6 +16,7 @@ import { assertRequestedProfileId } from '../../../src/lib/profile-context';
 import {
   InstallBlockedError,
   type InstallRequestContext,
+  InstallRuntimeBusyError,
   type InstallService,
 } from '../../../src/modules/environments/application/install-service';
 import { createInstallRoutes } from '../../../src/modules/environments/http/install-routes';
@@ -74,7 +75,7 @@ function streamEvents(events: readonly InstallStreamEvent[]): AsyncIterable<Inst
 }
 
 function createFakeService(
-  options: { blocked?: boolean; stream?: readonly InstallStreamEvent[] } = {}
+  options: { blocked?: boolean; busy?: boolean; stream?: readonly InstallStreamEvent[] } = {}
 ) {
   let startCalls = 0;
   let lastContext: InstallRequestContext | null = null;
@@ -96,6 +97,9 @@ function createFakeService(
       assertRequestedProfileId(body.profileId, context);
       startCalls += 1;
       lastContext = context;
+      if (options.busy) {
+        throw new InstallRuntimeBusyError('bun', 'bun.uninstall', 'bun.update', 'run-running');
+      }
       if (options.blocked) {
         throw new InstallBlockedError({
           ...PREVIEW,
@@ -242,6 +246,34 @@ describe('environment install routes', () => {
     expect(Value.Check(InstallBlockedResponseSchema, payload)).toBe(true);
     expect(payload.recipe.copyCommand).toBe('bun upgrade');
     expect(payload.recipe.guard.reasons).toEqual(['disabled']);
+  });
+
+  it('answers 409 INSTALL_RUNTIME_BUSY naming the operation that holds the runtime', async () => {
+    const fake = createFakeService({ busy: true });
+    const { app, restore } = createAuthenticatedApiTestApp(
+      TEST_USER,
+      createInstallRoutes(fake.service)
+    );
+    restoreAuth = restore;
+
+    const response = await app.handle(
+      jsonRequest('http://localhost/environments/install', {
+        recipeId: 'bun.uninstall',
+        input: { kind: 'none' },
+      })
+    );
+    const payload = (await response.json()) as {
+      code: string;
+      details: Record<string, string>;
+    };
+
+    expect(response.status).toBe(409);
+    expect(payload.code).toBe('INSTALL_RUNTIME_BUSY');
+    expect(payload.details).toEqual({
+      runtimeId: 'bun',
+      runningRecipeId: 'bun.update',
+      runningRunId: 'run-running',
+    });
   });
 
   it('ignores a forged forwarded client when no proxy is trusted', async () => {
