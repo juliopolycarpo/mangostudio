@@ -39,7 +39,7 @@ export function UncommittedWorkCard({ currentChatId, onSelectChat }: Uncommitted
   // otherwise hand every render a new identity and defeat the memo below.
   const chats: readonly Chat[] = useQuery(chatListQueryOptions()).data ?? NO_CHATS;
   // Memoized for the same reason the layout's caller is: this list feeds a
-  // `useQueries` whose chunking keys on the array's identity.
+  // `useQueries` whose ids derive from the array's identity.
   const gitChatIds = useMemo(
     () => chats.filter((chat) => chat.workdir).map((chat) => chat.id),
     [chats]

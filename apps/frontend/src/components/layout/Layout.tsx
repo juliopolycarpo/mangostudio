@@ -19,6 +19,8 @@ interface LayoutProps {
   onNewChat: () => void;
   contextCache?: Map<string, ContextInfo>;
   gitSummaries?: Record<string, GitSummary | null>;
+  /** The chats whose sidebar rows are in view; see `Sidebar`. */
+  onGitRowsInViewChange?: (chatIds: readonly string[]) => void;
   /** Machines needing attention, badged on the sidebar's environments entry. */
   environmentAlertCount?: number;
   isMobileSidebarOpen?: boolean;
@@ -39,6 +41,7 @@ export function Layout({
   onNewChat,
   contextCache,
   gitSummaries,
+  onGitRowsInViewChange,
   environmentAlertCount,
   isMobileSidebarOpen = false,
   onMobileSidebarClose,
@@ -68,6 +71,7 @@ export function Layout({
         onNewChat={onNewChat}
         contextCache={contextCache}
         gitSummaries={gitSummaries}
+        onGitRowsInViewChange={onGitRowsInViewChange}
         environmentAlertCount={environmentAlertCount}
         isMobileOpen={isMobileSidebarOpen}
         onMobileClose={onMobileSidebarClose}

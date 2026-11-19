@@ -97,6 +97,42 @@ describe('useGitRealtimeInvalidation', () => {
   });
 
   /**
+   * The sidebar badge is a per-chat read of the same state. A write signaled on
+   * `git:chat-1` must refetch that badge while it is on screen and leave the
+   * badge of a neighbouring row alone.
+   */
+  it('refetches the visible badge of the signaled chat on a state-scoped event', async () => {
+    const refetchBadge = jest.fn().mockResolvedValue(null);
+    const refetchNeighbourBadge = jest.fn().mockResolvedValue(null);
+
+    renderHook(() => {
+      useQuery({
+        queryKey: ['git-summary', 'chat-1'],
+        queryFn: refetchBadge,
+        initialData: null,
+        staleTime: Number.POSITIVE_INFINITY,
+      });
+      useQuery({
+        queryKey: ['git-summary', 'chat-2'],
+        queryFn: refetchNeighbourBadge,
+        initialData: null,
+        staleTime: Number.POSITIVE_INFINITY,
+      });
+      useGitRealtimeInvalidation('chat-1');
+    });
+
+    await act(async () => {
+      await listener({
+        type: 'invalidate',
+        message: { type: 'invalidate', topic: 'git:chat-1', scopes: ['state'] },
+      });
+    });
+
+    await waitFor(() => expect(refetchBadge).toHaveBeenCalledTimes(1));
+    expect(refetchNeighbourBadge).not.toHaveBeenCalled();
+  });
+
+  /**
    * A same-client write masks this: it invalidates the GitHub panel's own
    * `githubKeys` queries explicitly alongside this event. A second mounted
    * client — another tab, or a different chat's panel sharing the query

@@ -62,14 +62,13 @@ export function WorkspacesList({
     () => groupChatsByWorkdir(chats, recentWorkdirs),
     [chats, recentWorkdirs]
   );
-  // Every chat with a folder, not just the representatives — the same list the
-  // shell and the uncommitted-work card pass. The chunk key is the sorted ids,
-  // so asking for the subset would miss their cache entry and cost a *second*
-  // batched request to learn strictly less. Only the representatives are read
-  // out of the answer.
+  // Only the representatives: they are the rows this list reads. Badges are
+  // cached per chat, so a representative the sidebar already fetched costs
+  // nothing and the rest of the account is never asked about.
   const gitChatIds = useMemo(
-    () => chats.filter((chat) => chat.workdir).map((chat) => chat.id),
-    [chats]
+    () =>
+      groups.flatMap((group) => (group.representativeChatId ? [group.representativeChatId] : [])),
+    [groups]
   );
   const summaries = useBatchedGitSummaries(gitChatIds);
 

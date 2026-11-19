@@ -44,6 +44,7 @@ import { newChatShortcutHint } from '@/lib/keyboard';
 import { cn } from '@/lib/utils';
 
 import { useLocalDayStart } from '../hooks/use-local-day-start';
+import { ROW_IN_VIEW_ATTRIBUTE, useRowsInView } from '../hooks/use-rows-in-view';
 import { filterChats } from '../lib/filter-chats';
 import { chatGroupLabel, groupChatsByDate } from '../lib/group-chats';
 import { runnerBadge } from '../lib/runner-badge';
@@ -81,6 +82,13 @@ interface Props {
    */
   gitSummaries?: Record<string, GitSummary | null>;
   /**
+   * Told which chats with a workdir are in the list's scroll window (plus a
+   * lookahead), sorted, once the window settles. The shell batches git state for
+   * exactly these ids: the list renders every chat, but only these rows can
+   * show a badge.
+   */
+  onGitRowsInViewChange?: (chatIds: readonly string[]) => void;
+  /**
    * Machines needing attention right now, badged on the environments entry.
    * Counted by the shell for the same reason the git badges are fetched there:
    * this list stays a view over what it is handed.
@@ -105,6 +113,7 @@ export function Sidebar({
   onNewChat,
   contextCache,
   gitSummaries,
+  onGitRowsInViewChange,
   environmentAlertCount = 0,
   isMobileOpen = false,
   onMobileClose,
@@ -252,6 +261,13 @@ export function Sidebar({
   }, [chats, deferredQuery, badgeLabels, groupLabels, locale, dayStartMs]);
   const searching = deferredQuery.trim().length > 0;
 
+  const listRef = useRef<HTMLElement>(null);
+  useRowsInView({
+    rootRef: listRef,
+    rowsKey: groups,
+    onChange: (ids) => onGitRowsInViewChange?.(ids),
+  });
+
   return (
     <>
       {/* Mobile overlay backdrop. `z-[45]`: above the sticky header (`z-40`) so the veil covers it, below the drawer (`z-50`). */}
@@ -370,6 +386,7 @@ export function Sidebar({
         </div>
 
         <nav
+          ref={listRef}
           className="hide-scrollbar flex-1 overflow-y-auto px-3 pb-2"
           aria-label={t.chat.sectionLabel}
         >
@@ -424,6 +441,9 @@ export function Sidebar({
                     // makes presentational. Selection is its own button instead.
                     <li
                       key={chat.id}
+                      // Only a chat with a workdir can have a git badge, so only
+                      // its row is worth reporting as in view.
+                      {...(chat.workdir ? { [ROW_IN_VIEW_ATTRIBUTE]: chat.id } : {})}
                       className={cn(
                         'group relative flex items-center rounded-sm transition-colors',
                         isCurrent
