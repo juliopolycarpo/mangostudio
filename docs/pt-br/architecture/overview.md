@@ -170,9 +170,12 @@ request em um bucket — `health`, `auth`, `general` (sessão no navegador) e
 automação não afetar sessões no mesmo IP. O `general` é o mais amplo deles: os
 buckets mais estreitos limitam uma operação cara cada um, enquanto o `general`
 limita carregamentos de página comuns, e um carregamento são muitos requests. O
-id do cliente é o IP em todos os buckets hoje (ids por chave exigem o id
-verificado após `apiKeyGuard`; ver
-issue #737). Requests bloqueados retornam `429` como `ApiErrorResponse`
+id do cliente é o IP, exceto no bucket `api-key`, que conta por id de chave
+verificado do Better Auth (`rate-limit-client-id.ts`). O limiter e o
+`apiKeyGuard` compartilham uma única verificação memoizada por request
+(`api-key-verification.ts`), e uma chave que não verifica mantém o contador por
+IP, então girar valores inválidos de `x-api-key` não gera contadores novos.
+Requests bloqueados retornam `429` como `ApiErrorResponse`
 (`code: RATE_LIMITED`) com header `Retry-After`. Os contadores expirados são
 limpos sob demanda. Headers de proxy só afetam o id do cliente quando
 `trustProxy` está habilitado explicitamente atrás de um proxy confiável.

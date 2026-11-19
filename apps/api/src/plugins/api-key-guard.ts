@@ -29,38 +29,19 @@ import { API_KEY_HEADER } from '@mangostudio/shared/api-keys';
 import { type ApiErrorResponse, ERROR_CODES } from '@mangostudio/shared/errors';
 import { type Elysia, status } from 'elysia';
 
-import { getApiKeyApi, resolveApiKeyScope } from '../auth';
+import { resolveApiKeyScope } from '../auth';
 import { getDb } from '../db/database';
 import { getSavedAppSettings } from '../modules/app-settings/infrastructure/app-settings-repository';
+import {
+  type ApiKeyVerifier,
+  apiKeyVerifier,
+  isApiKeyManagementPath,
+  isProtocolWebSocketPath,
+} from './api-key-verification';
 import { resolvePath } from './rate-limit';
-import { isAuthPath, isRuntimeSocketPath } from './rate-limit-policy';
+import { isAuthPath } from './rate-limit-policy';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
-
-/** Matches the cookie-session-only key management routes with or without `/api`. */
-function isApiKeyManagementPath(path: string): boolean {
-  return (
-    path === '/api-keys' ||
-    path.startsWith('/api-keys/') ||
-    path === '/api/api-keys' ||
-    path.startsWith('/api/api-keys/')
-  );
-}
-
-/**
- * WebSocket upgrades that own their own credential policy. The realtime route
- * rejects `x-api-key` with its stable WS error + `4401` close, and `/api/runtime`
- * authenticates a pairing token over `Authorization: Bearer`; short-circuiting
- * either here with HTTP 401/403 would prevent that handshake path from running.
- *
- * Hardening rather than a prerequisite: a Bearer-only upgrade never reaches
- * this guard, which returns immediately without `x-api-key`. What this adds is
- * that an upgrade carrying a key header is refused by the route, with a close
- * code the peer can read, instead of by a guard it has no framing to hear.
- */
-function isProtocolWebSocketPath(path: string): boolean {
-  return path === '/ws' || path === '/api/ws' || isRuntimeSocketPath(path);
-}
 
 /**
  * Minimal slice of the Elysia context this guard needs. Kept narrow and cast
@@ -75,52 +56,60 @@ interface ApiKeyGuardContext {
   request: Request;
 }
 
-export function apiKeyGuard(app: Elysia) {
-  return app.onBeforeHandle(async (context) => {
-    const ctx = context as ApiKeyGuardContext;
-    const key = ctx.request.headers.get(API_KEY_HEADER);
-    if (!key) return;
+/**
+ * @param verifier - Shared with the rate limiter so a request's key is verified
+ *   once between them (see api-key-verification.ts).
+ */
+export function createApiKeyGuard(verifier: ApiKeyVerifier) {
+  return (app: Elysia) =>
+    app.onBeforeHandle(async (context) => {
+      const ctx = context as ApiKeyGuardContext;
+      const key = ctx.request.headers.get(API_KEY_HEADER);
+      if (!key) return;
 
-    const path = resolvePath(ctx.path, ctx.request.url);
+      const path = resolvePath(ctx.path, ctx.request.url);
 
-    if (isAuthPath(path)) {
-      return status(401, {
-        error: 'Unauthorized',
-        code: ERROR_CODES.UNAUTHORIZED,
-      } satisfies ApiErrorResponse);
-    }
+      if (isAuthPath(path)) {
+        return status(401, {
+          error: 'Unauthorized',
+          code: ERROR_CODES.UNAUTHORIZED,
+        } satisfies ApiErrorResponse);
+      }
 
-    // Key-management routes own a stricter cookie-session-only response. Let
-    // requireCookieAuth distinguish a valid key from an invalid credential so
-    // the route consistently returns API_KEY_SCOPE_FORBIDDEN for key auth,
-    // even while the account's external API toggle is disabled.
-    if (isApiKeyManagementPath(path)) return;
+      // Key-management routes own a stricter cookie-session-only response. Let
+      // requireCookieAuth distinguish a valid key from an invalid credential so
+      // the route consistently returns API_KEY_SCOPE_FORBIDDEN for key auth,
+      // even while the account's external API toggle is disabled.
+      if (isApiKeyManagementPath(path)) return;
 
-    // These sockets own their credential policy after the upgrade completes.
-    if (isProtocolWebSocketPath(path)) return;
+      // These sockets own their credential policy after the upgrade completes.
+      if (isProtocolWebSocketPath(path)) return;
 
-    const result = await getApiKeyApi().verifyApiKey({ body: { key } });
-    if (!result.valid || !result.key) {
-      return status(401, {
-        error: 'Unauthorized',
-        code: ERROR_CODES.UNAUTHORIZED,
-      } satisfies ApiErrorResponse);
-    }
+      const result = await verifier.verify(ctx.request, key);
+      if (!result.valid || !result.key) {
+        return status(401, {
+          error: 'Unauthorized',
+          code: ERROR_CODES.UNAUTHORIZED,
+        } satisfies ApiErrorResponse);
+      }
 
-    const settings = await getSavedAppSettings(getDb(), result.key.referenceId);
-    if (!settings.externalApiSettings.enabled) {
-      return status(403, {
-        error: 'The external API is disabled for this account',
-        code: ERROR_CODES.EXTERNAL_API_DISABLED,
-      } satisfies ApiErrorResponse);
-    }
+      const settings = await getSavedAppSettings(getDb(), result.key.referenceId);
+      if (!settings.externalApiSettings.enabled) {
+        return status(403, {
+          error: 'The external API is disabled for this account',
+          code: ERROR_CODES.EXTERNAL_API_DISABLED,
+        } satisfies ApiErrorResponse);
+      }
 
-    const scope = resolveApiKeyScope(result.key.metadata);
-    if (scope === 'read-only' && !SAFE_METHODS.has(ctx.request.method)) {
-      return status(403, {
-        error: 'This API key is read-only',
-        code: ERROR_CODES.API_KEY_SCOPE_FORBIDDEN,
-      } satisfies ApiErrorResponse);
-    }
-  });
+      const scope = resolveApiKeyScope(result.key.metadata);
+      if (scope === 'read-only' && !SAFE_METHODS.has(ctx.request.method)) {
+        return status(403, {
+          error: 'This API key is read-only',
+          code: ERROR_CODES.API_KEY_SCOPE_FORBIDDEN,
+        } satisfies ApiErrorResponse);
+      }
+    });
 }
+
+/** The production guard, wired to the verifier the rate limiter also uses. */
+export const apiKeyGuard = createApiKeyGuard(apiKeyVerifier);

@@ -68,9 +68,11 @@ Common codes for external API traffic:
 | `RATE_LIMITED`            | 429            | Bucket limit exceeded; see `Retry-After` |
 
 Rate limiting uses separate buckets for health, auth, browser (`general`), and
-key-authenticated traffic (`api-key`). Counters are still per IP within each
-bucket today, so a burst with `x-api-key` does not consume the general counter
-for cookie traffic on the same host (per-key bucketing is tracked in #737). The
+key-authenticated traffic (`api-key`). Counters are per IP within each bucket,
+except `api-key`, which counts per key: two keys on one host have separate
+counters, and a burst with `x-api-key` does not consume the general counter for
+cookie traffic on the same host. A key that fails verification counts against the
+caller's IP instead, so rotating invalid values does not reset the limit. The
 `api-key` ceiling sits below `general` on purpose: a script makes the requests it
 means to, while `general` has to absorb a browser's per-page fan-out.
 

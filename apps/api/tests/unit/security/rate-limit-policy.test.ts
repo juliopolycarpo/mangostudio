@@ -9,7 +9,6 @@ import {
   isProbeForcePath,
   isTerminalPath,
   RATE_LIMIT_BUCKETS,
-  resolveRateLimitClientId,
 } from '../../../src/plugins/rate-limit-policy';
 
 function headersWithApiKey(value: string): Headers {
@@ -171,27 +170,5 @@ describe('rate-limit policy classification', () => {
     // bounding the browser-smoke suite and anyone hitting reload (#941).
     const REQUESTS_PER_HEAVIEST_VIEW = 15;
     expect(RATE_LIMIT_BUCKETS.general.max / REQUESTS_PER_HEAVIEST_VIEW).toBeGreaterThan(10);
-  });
-});
-
-describe('resolveRateLimitClientId', () => {
-  it('keys the api-key bucket by client IP until verified key ids exist', () => {
-    // Hashing the raw header would let rotating garbage keys escape the limiter
-    // before apiKeyGuard runs. Isolation still comes from the separate bucket.
-    const headers = headersWithApiKey('mango_same_key');
-    expect(resolveRateLimitClientId(RATE_LIMIT_BUCKETS.apiKey, headers, '1.2.3.4')).toBe('1.2.3.4');
-    expect(resolveRateLimitClientId(RATE_LIMIT_BUCKETS.apiKey, headers, '9.9.9.9')).toBe('9.9.9.9');
-  });
-
-  it('uses client IP for non api-key buckets', () => {
-    expect(
-      resolveRateLimitClientId(RATE_LIMIT_BUCKETS.general, headersWithApiKey('k'), '5.5.5.5')
-    ).toBe('5.5.5.5');
-  });
-
-  it('uses client IP when the api-key bucket has no header', () => {
-    expect(resolveRateLimitClientId(RATE_LIMIT_BUCKETS.apiKey, new Headers(), '5.5.5.5')).toBe(
-      '5.5.5.5'
-    );
   });
 });

@@ -1,8 +1,8 @@
 /**
  * Basic rate limiting plugin for Elysia.
  * Counts requests per (bucket, client id) with a configurable window and max.
- * Client id is the caller IP for every bucket today; the api-key bucket still
- * classifies separately so automation does not share the general counter.
+ * Client id is the caller IP unless `resolveClientId` says otherwise; the app
+ * uses that to key the api-key bucket by verified key id (rate-limit-client-id.ts).
  * An injected `classify` function sorts each request path into a named bucket,
  * letting route groups (e.g. health, auth, general API) carry independent
  * limits without sharing a counter.
@@ -18,7 +18,7 @@ import { type Elysia, type ElysiaStatus, status } from 'elysia';
 import { ElysiaWS } from 'elysia/ws';
 
 import { extractClientIp } from '../lib/client-ip';
-import { resolveRateLimitClientId } from './rate-limit-policy';
+import type { RateLimitClientIdResolver } from './rate-limit-client-id';
 import { type RateLimitEntry, RateLimitStore } from './rate-limit-store';
 import type { RateLimitBucket } from './rate-limit-types';
 
@@ -49,6 +49,11 @@ interface RateLimitConfig {
   classify?: (path: string, headers?: Headers, method?: string) => RateLimitBucket | null;
   /** Trust proxy headers (X-Forwarded-For, etc.) for client IP (default: false) */
   trustProxy?: boolean;
+  /**
+   * Resolve the counter key within a bucket. Defaults to the caller IP. Runs in
+   * the `onBeforeHandle` hook, so it may await work but must not read the body.
+   */
+  resolveClientId?: RateLimitClientIdResolver;
 }
 
 /** Mutable response controls Elysia exposes on the context. */
@@ -159,7 +164,7 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
         );
         return { clientIp };
       })
-      .onBeforeHandle((context) => {
+      .onBeforeHandle(async (context) => {
         // Elysia replays this hook for WebSocket messages. The HTTP upgrade
         // is already counted; message limits belong to the socket route.
         if (context instanceof ElysiaWS) return;
@@ -172,16 +177,18 @@ export function rateLimit(config: Partial<RateLimitConfig> = {}) {
         }
 
         const headers = ctx.request.headers;
-        const bucket = resolveBucket(
-          resolvePath(ctx.path, ctx.request.url),
-          headers,
-          ctx.request.method
-        );
+        const path = resolvePath(ctx.path, ctx.request.url);
+        const bucket = resolveBucket(path, headers, ctx.request.method);
         if (!bucket) {
           return; // path is exempt
         }
 
-        const clientId = resolveRateLimitClientId(bucket, headers, clientIp);
+        // `ctx.request`, not `ctx`: see extractClientIp for why the whole context
+        // must not be handed on.
+        const clientId = mergedConfig.resolveClientId
+          ? await mergedConfig.resolveClientId({ bucket, request: ctx.request, path, clientIp })
+          : clientIp;
+        // Read after the await: a slow verification must not shorten the window.
         const now = Date.now();
 
         // Lazy expiry sweep: run only when the interval has elapsed.
