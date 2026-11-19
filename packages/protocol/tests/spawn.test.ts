@@ -155,6 +155,49 @@ describe('spawn launcher', () => {
     expect(order).toEqual(['ping', 'closure:closed']);
   });
 
+  it('resolves exited only after the frames the child wrote before exiting are delivered', async () => {
+    const recording = new RecordingSpawn();
+    const peer = spawnPort({ argv: ['runtime'] }, recording.spawn);
+    const order: string[] = [];
+    peer.port.onFrame((frame) => order.push(frame.type));
+    void peer.exited.then(() => order.push('exited'));
+
+    recording.child.stdout.emit('data', Buffer.from('{"type":"ping"}\n'));
+    recording.child.emit('exit', 0, null);
+    await peer.exited;
+    // A caller that closes the port the moment `exited` resolves runs as a
+    // microtask; the frame has to be in by then, not dropped by that close.
+    peer.port.close(CLOSE_CODES.RELEASED);
+
+    expect(order).toEqual(['ping', 'exited']);
+  });
+
+  it('resolves exited behind the frames and the closure of a child error', async () => {
+    const recording = new RecordingSpawn();
+    const peer = spawnPort({ argv: ['runtime'] }, recording.spawn);
+    const order: string[] = [];
+    peer.port.onFrame((frame) => order.push(frame.type));
+    peer.port.onClosed((closure) => order.push(`closure:${closure.kind}`));
+    void peer.exited.then(() => order.push('exited'));
+
+    recording.child.stdout.emit('data', Buffer.from('{"type":"ping"}\n'));
+    recording.child.emit('error', new Error('kill EPERM'));
+    await peer.exited;
+
+    expect(order).toEqual(['ping', 'closure:closed', 'exited']);
+  });
+
+  it('still resolves exited when the port is closed while a frame waits', async () => {
+    const recording = new RecordingSpawn();
+    const peer = spawnPort({ argv: ['runtime'] }, recording.spawn);
+
+    recording.child.stdout.emit('data', Buffer.from('{"type":"ping"}\n'));
+    recording.child.emit('exit', 7, null);
+    peer.port.close(CLOSE_CODES.RELEASED);
+
+    expect(await peer.exited).toEqual({ code: 7, signal: null });
+  });
+
   it('completes the handshake and round-trips a request with a real child', async () => {
     const peer = spawnPort({ argv: [BUN, ECHO_CHILD] });
     try {

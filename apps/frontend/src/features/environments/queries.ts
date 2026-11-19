@@ -35,6 +35,7 @@ import {
 
 import { client } from '@/lib/api-client';
 import { invalidateEnvironmentUnavailableQueries } from '@/lib/environment-unavailable';
+import { invalidateForSignal } from '@/lib/realtime/read-after-subscribe';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
 import { ApiError } from '@/lib/utils';
 
@@ -84,13 +85,13 @@ function environmentEntitiesQueryOptions() {
 
 export function useEnvironmentEntitiesQuery() {
   const queryClient = useQueryClient();
-  useRealtimeInvalidation(ENVIRONMENTS_TOPIC, 'environment-entities', async () => {
-    await queryClient.invalidateQueries({ queryKey: environmentKeys.entities() });
+  useRealtimeInvalidation(ENVIRONMENTS_TOPIC, 'environment-entities', async (signal) => {
+    await invalidateForSignal(queryClient, signal, { queryKey: environmentKeys.entities() });
     // Pairing state moves on the same events: a runtime dialing in stamps its
     // credential as seen, and rotating or revoking one drops what it had
     // connected. Without this the panel keeps saying "never seen" about a
     // machine the card beside it already shows as connected.
-    await queryClient.invalidateQueries({ queryKey: environmentKeys.pairings() });
+    await invalidateForSignal(queryClient, signal, { queryKey: environmentKeys.pairings() });
     await refetchUnavailableQueriesOnConnect(queryClient);
   });
   return useQuery(environmentEntitiesQueryOptions());

@@ -18,6 +18,7 @@ import {
   readTomlStringSections,
   setTomlSectionValue,
   stringifyTomlDocument,
+  TomlParseError,
 } from '../../../src/lib/toml';
 import { redactSettingsDocument } from '../../../src/modules/library/domain/settings-redaction';
 
@@ -228,7 +229,7 @@ not_a_number = nan
   });
 
   it('rejects impossible dates instead of silently rolling into another month', () => {
-    expect(() => parseTomlDocument('date = 1979-02-30')).toThrow(/day is out of range/);
+    expect(() => parseTomlDocument('date = 1979-02-30')).toThrow(TomlParseError);
   });
 });
 
@@ -249,7 +250,7 @@ describe('TOML file readers', () => {
       }
       expect(error).toBeInstanceOf(Error);
       expect(error?.message).toContain(JSON.stringify(configPath));
-      expect(error?.message).toContain('TOML Parse error');
+      expect(error?.message).toContain('Invalid TOML document.');
       expect(error?.message).not.toContain('sk-private-fixture-SECRET');
       expect((error?.cause as Error)?.message).not.toContain('sk-private-fixture-SECRET');
     }
@@ -263,12 +264,8 @@ describe('TOML file readers', () => {
   it('rejects malformed files instead of hiding the parser error', () => {
     writeFileSync(configPath, '[auth\nsecret = "s"');
 
-    expect(() => readTomlDocument(configPath)).toThrow(
-      /(?:Invalid TOML document|TOML Parse error)/
-    );
-    expect(() => readTomlStringSections(configPath)).toThrow(
-      /(?:Invalid TOML document|TOML Parse error)/
-    );
+    expect(() => readTomlDocument(configPath)).toThrow('Invalid TOML document.');
+    expect(() => readTomlStringSections(configPath)).toThrow('Invalid TOML document.');
   });
 
   it.each([

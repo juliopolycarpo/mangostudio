@@ -61,6 +61,7 @@ assertType<
     | { status: 429; value: ApiErrorResponse }
     | { status: 500; value: ApiErrorResponse }
     | { status: 503; value: ApiErrorResponse }
+    | { status: 504; value: ApiErrorResponse }
     | null
   >
 >();
@@ -100,10 +101,11 @@ assertType<
 //    channel breaks both: the exact set of statuses the route can answer, and
 //    the body shape of every status the route itself declares. The statuses
 //    outside that declaration (401, 403, 422, 429) come from the shared auth,
-//    API-key, validation and rate-limit hooks every route inherits.
+//    API-key, validation and rate-limit hooks every route inherits. The 504 is
+//    the shared error handler's answer to a model that ran out of time.
 type InheritedHookStatus = 401 | 403 | 422 | 429;
-type ChatScopedStatus = InheritedHookStatus | 404 | 409 | 500 | 503;
-type InboxStatus = InheritedHookStatus | 500 | 503;
+type ChatScopedStatus = InheritedHookStatus | 404 | 409 | 500 | 503 | 504;
+type InboxStatus = InheritedHookStatus | 500 | 503 | 504;
 
 /**
  * Constrained to Eden's `{ status, value }` arms (or `null`) so a channel that
@@ -199,7 +201,9 @@ assertType<ErrorBodyIsApiError<ConnectorAddResponse, 403 | 404 | 409 | 410 | 500
 assertType<Equals<Extract<ErrorStatuses<ConnectorAddResponse>, 502 | 503>, 502 | 503>>();
 
 // The statuses each handler can answer with, beside what the shared hooks add.
-assertType<Equals<ErrorStatuses<SkillsListResponse>, InheritedHookStatus | 404 | 500 | 503>>();
+assertType<
+  Equals<ErrorStatuses<SkillsListResponse>, InheritedHookStatus | 404 | 500 | 503 | 504>
+>();
 assertType<Equals<ErrorStatuses<AgentGetResponse>, 401 | 404 | 409 | 422 | 500 | 503>>();
 assertType<Equals<ErrorStatuses<RuleFilePreviewResponse>, 401 | 404 | 422 | 500>>();
 assertType<ErrorBodyIsApiError<SkillsListResponse, 403 | 404 | 422 | 500 | 503>>();
@@ -231,7 +235,9 @@ assertType<SameShape<NonNullable<MessageUpdateResponse['data']>, { success: true
 // Each route answers its own failures with an `ApiErrorResponse` body, beside
 // the 401 and 422 (Elysia's body validation) the hooks add and the 500 of the
 // error handler. The chat update's 422 is also its own validation refusal.
-assertType<Equals<ErrorStatuses<ChatCompactResponse>, 401 | 422 | 400 | 404 | 409 | 500 | 503>>();
+assertType<
+  Equals<ErrorStatuses<ChatCompactResponse>, 401 | 422 | 400 | 404 | 409 | 500 | 503 | 504>
+>();
 assertType<Equals<ErrorStatuses<ChatUpdateResponse>, 401 | 422 | 400 | 404 | 500>>();
 assertType<Equals<ErrorStatuses<MessageUpdateResponse>, 401 | 422 | 404 | 409 | 500>>();
 assertType<ErrorBodyIsApiError<ChatCompactResponse, 400 | 404 | 409 | 503>>();

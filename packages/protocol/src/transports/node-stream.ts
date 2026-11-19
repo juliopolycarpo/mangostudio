@@ -29,8 +29,25 @@ export interface StreamPortOptions {
    * this; a socket does not need it. Each chunk is copied when it arrives,
    * because it is delivered after the callback returns, so a readable that
    * reuses one buffer between reads is safe.
+   *
+   * It is a workaround for that Bun defect and retires with it. #1461 tracks
+   * the upstream report; replace this line with the Bun issue and the release
+   * that fixes it, then drop the option from the launcher.
    */
   readonly deferReads?: boolean;
+}
+
+/** The port's handle plus the one question a deferred queue lets a transport ask. */
+export interface StreamPortHandle extends NdjsonPortHandle {
+  /**
+   * Resolves once every read that had arrived when it was called has been
+   * delivered to the port, or dropped because the port ended. It resolves
+   * without waiting for a turn when nothing is queued, which is always so on a
+   * port built without `deferReads`. A launcher settles its own `exited` behind
+   * it, so a caller who closes the port the moment `exited` resolves does not
+   * discard frames the child wrote first.
+   */
+  drained(): Promise<void>;
 }
 
 /**
@@ -51,7 +68,7 @@ export function createStreamPort(
   readable: NodeJS.ReadableStream,
   writable: NodeJS.WritableStream,
   options: StreamPortOptions = {}
-): NdjsonPortHandle {
+): StreamPortHandle {
   let detach = (): void => undefined;
   const deliver = options.deferReads ? deliverLaterInOrder() : deliverNow;
   const handle = createNdjsonPort({
@@ -81,6 +98,7 @@ export function createStreamPort(
     ...handle,
     failed: (error) => deliver.after(() => handle.failed(error)),
     terminate: (code, reason) => deliver.after(() => handle.terminate(code, reason)),
+    drained: () => deliver.drained(),
   };
 }
 
@@ -139,6 +157,8 @@ interface ReadDelivery {
   run(event: () => void): void;
   /** Runs behind whatever is waiting, and at once when nothing is. */
   after(event: () => void): void;
+  /** Settles once the events waiting now are delivered or dropped by `stop`. */
+  drained(): Promise<void>;
   stop(): void;
 }
 
@@ -146,6 +166,7 @@ const deliverNow: ReadDelivery = {
   holdsChunks: false,
   run: (event) => event(),
   after: (event) => event(),
+  drained: () => Promise.resolve(),
   stop: () => undefined,
 };
 
@@ -164,6 +185,17 @@ function deliverLaterInOrder(): ReadDelivery {
   let waiting: Array<() => void> = [];
   let scheduled = false;
   let stopped = false;
+  // Counted rather than inferred from `waiting`, so a `drained()` call waits
+  // for the events queued when it was made and not for a child that keeps
+  // writing after it.
+  let queuedTotal = 0;
+  let deliveredTotal = 0;
+  let drainWaiters: Array<{ readonly upTo: number; readonly resolve: () => void }> = [];
+  const releaseDrainWaiters = (): void => {
+    const ready = drainWaiters.filter((waiter) => stopped || waiter.upTo <= deliveredTotal);
+    drainWaiters = drainWaiters.filter((waiter) => !ready.includes(waiter));
+    for (const waiter of ready) waiter.resolve();
+  };
   const schedule = (): void => {
     if (scheduled) return;
     scheduled = true;
@@ -175,23 +207,36 @@ function deliverLaterInOrder(): ReadDelivery {
     // these still gets a turn of its own.
     let remaining = waiting.length;
     try {
-      while (remaining-- > 0 && !stopped) waiting.shift()?.();
+      while (remaining-- > 0 && !stopped) {
+        const event = waiting.shift();
+        deliveredTotal++;
+        event?.();
+      }
     } finally {
       if (waiting.length > 0) schedule();
+      releaseDrainWaiters();
     }
   };
   const run = (event: () => void): void => {
     if (stopped) return;
     waiting.push(event);
+    queuedTotal++;
     schedule();
   };
   return {
     holdsChunks: true,
     run,
     after: (event) => (waiting.length > 0 ? run(event) : event()),
+    drained: () =>
+      new Promise<void>((resolve) => {
+        if (stopped || deliveredTotal >= queuedTotal) resolve();
+        else drainWaiters.push({ upTo: queuedTotal, resolve });
+      }),
     stop: () => {
       stopped = true;
       waiting = [];
+      // What was dropped will never be delivered, and nobody may wait on it.
+      releaseDrainWaiters();
     },
   };
 }

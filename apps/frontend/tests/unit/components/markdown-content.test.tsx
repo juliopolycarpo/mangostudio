@@ -475,9 +475,9 @@ describe('MarkdownContent — syntax highlighting', () => {
 
   it('never loads the highlighter for a message whose fences have no grammar', async () => {
     const content = [
-      '```vue\n<template />\n```',
-      '```svelte\n<script></script>\n```',
-      '```mystery\nx\n```',
+      '```mystery\n<template />\n```',
+      '```astro\n---\n---\n```',
+      '```unknown\nx\n```',
     ].join('\n\n');
     render(<MarkdownContentRenderer content={content} />);
     // Let the effect that would import the highlighter run before asserting it did not.
@@ -487,7 +487,7 @@ describe('MarkdownContent — syntax highlighting', () => {
 
     expect(
       shiki.preloadCodeLanguages,
-      `preloadCodeLanguages calls for vue, svelte and unknown fences: ${JSON.stringify(shiki.preloadCodeLanguages.mock.calls)} | expected: none`
+      `preloadCodeLanguages calls for unsupported fences: ${JSON.stringify(shiki.preloadCodeLanguages.mock.calls)} | expected: none`
     ).not.toHaveBeenCalled();
   });
 

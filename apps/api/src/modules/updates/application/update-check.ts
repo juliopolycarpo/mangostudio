@@ -26,7 +26,13 @@ import {
 import Value from 'typebox/value';
 
 import { type BuildInfo, getBuildInfo, isKnownBuildSha } from '../../../lib/build-info';
-import { getConfig, getVersion, isDevelopmentVersion, type MangoConfig } from '../../../lib/config';
+import {
+  getConfig,
+  getGithubApiToken,
+  getVersion,
+  isDevelopmentVersion,
+  type MangoConfig,
+} from '../../../lib/config';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import { getUpdateCheckPath } from '../../../lib/mango-paths';
 import { safeFetchBytes, type SafeFetchDeps } from '../../../lib/safe-fetch';
@@ -38,7 +44,7 @@ import { fitToLimit } from '../../machine/domain/machine-limits';
 import { versionChannel } from '../domain/install-origin';
 import { RELEASES_BASE_URL } from '../domain/upgrade-plan';
 import { compareStableVersions, sharesShaPrefix, stripLeadingV } from '../domain/version-compare';
-import { resolveLatestCanaryVersion } from '../infrastructure/release-index';
+import { fetchGithubApiBytes, resolveLatestCanaryVersion } from '../infrastructure/release-index';
 
 const logger = createDiagnosticLogger('update-check');
 
@@ -227,7 +233,7 @@ function errorMessage(error: unknown): string {
 }
 
 async function checkStable(d: ResolvedDeps, currentVersion: string): Promise<UpdateCheck> {
-  const result = await safeFetchBytes(
+  const result = await fetchGithubApiBytes(
     GITHUB_LATEST_RELEASE_API,
     {
       maxBytes: FETCH_MAX_BYTES,
@@ -235,7 +241,8 @@ async function checkStable(d: ResolvedDeps, currentVersion: string): Promise<Upd
       timeoutMs: FETCH_TIMEOUT_MS,
       headers: GITHUB_API_HEADERS,
     },
-    { fetch: d.fetch, resolveHostname: d.resolveHostname }
+    { fetch: d.fetch, resolveHostname: d.resolveHostname },
+    getGithubApiToken(d.env)
   );
   const parsed = JSON.parse(new TextDecoder().decode(result.bytes)) as { tag_name?: unknown };
   if (typeof parsed.tag_name !== 'string' || !parsed.tag_name) {
@@ -258,7 +265,10 @@ async function checkCanary(d: ResolvedDeps, currentVersion: string): Promise<Upd
   // The tag is looked up, never derived from the running version: canary cuts
   // one immutable release per green commit, so `v<currentVersion>` is this
   // build's own release and would report itself as the latest forever.
-  const tag = `v${await resolveLatestCanaryVersion({ fetch: d.fetch, resolveHostname: d.resolveHostname })}`;
+  const tag = `v${await resolveLatestCanaryVersion(
+    { fetch: d.fetch, resolveHostname: d.resolveHostname },
+    getGithubApiToken(d.env)
+  )}`;
   const url = `${RELEASES_BASE_URL}/download/${tag}/${CANARY_MANIFEST_ASSET}`;
   const result = await safeFetchBytes(
     url,

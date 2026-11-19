@@ -10,8 +10,9 @@
 import type { ListActivityQuery } from '@mangostudio/shared/activity';
 import { ACTIVITY_TOPIC } from '@mangostudio/shared/realtime';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useMemo } from 'react';
+import { useMemo } from 'react';
 
+import { invalidateForSignal } from '@/lib/realtime/read-after-subscribe';
 import { useRealtimeInvalidation } from '@/lib/realtime/use-realtime-invalidation';
 
 import { activityKeys, activityQueryOptions } from './queries';
@@ -24,11 +25,10 @@ export interface UseActivityOptions {
 
 export function useActivity(options?: UseActivityOptions) {
   const queryClient = useQueryClient();
-  const invalidate = useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: activityKeys.all });
-  }, [queryClient]);
 
-  useRealtimeInvalidation(ACTIVITY_TOPIC, 'activity-feed', invalidate);
+  useRealtimeInvalidation(ACTIVITY_TOPIC, 'activity-feed', (signal) =>
+    invalidateForSignal(queryClient, signal, { queryKey: activityKeys.all })
+  );
 
   const since = options?.since;
   const workdir = options?.workdir;

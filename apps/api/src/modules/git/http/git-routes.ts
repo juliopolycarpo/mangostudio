@@ -48,6 +48,7 @@ import { Elysia, type ElysiaStatus, status } from 'elysia';
 import { getDb } from '../../../db/database';
 import { type ApiErrorStatus, apiErrorStatus } from '../../../lib/api-error-status';
 import { environmentUnavailableResponse } from '../../../lib/environment-unavailable';
+import { generationDeadlineResponse } from '../../../lib/generation-deadline-response';
 import { requireAuth } from '../../../plugins/auth-middleware';
 import { getAppSettings } from '../../app-settings/application/app-settings-service';
 import {
@@ -362,6 +363,7 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           422: ApiErrorResponseSchema,
           500: ApiErrorResponseSchema,
           503: ApiErrorResponseSchema,
+          504: ApiErrorResponseSchema,
         },
       },
       async ({ body, request, set, user }) => {
@@ -413,6 +415,8 @@ export const gitRoutes = new Elysia().use(requireAuth).group('/git', (app) =>
           if (!request.signal.aborted) {
             console.error('[git] commit message generation failed', error);
           }
+          const timedOut = generationDeadlineResponse(error);
+          if (timedOut) return timedOut;
           return status(500, {
             error: 'Commit message generation failed',
             code: ERROR_CODES.PROVIDER_ERROR,

@@ -10211,22 +10211,12 @@
               "targets": {
                 "type": "array",
                 "items": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "const": "codex"
-                    },
-                    {
-                      "type": "string",
-                      "const": "cursor"
-                    },
-                    {
-                      "type": "string",
-                      "const": "claude"
-                    }
-                  ]
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
                 },
-                "maxItems": 3,
+                "maxItems": 32,
                 "uniqueItems": true
               },
               "identityIsolation": {
@@ -10257,8 +10247,7 @@
                     "minLength": 1,
                     "maxLength": 128
                   }
-                },
-                "additionalProperties": false
+                }
               },
               "liveSessionCount": {
                 "type": "integer",
@@ -10281,20 +10270,10 @@
                       "maxLength": 256
                     },
                     "targetId": {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "codex"
-                        },
-                        {
-                          "type": "string",
-                          "const": "cursor"
-                        },
-                        {
-                          "type": "string",
-                          "const": "claude"
-                        }
-                      ]
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$"
                     },
                     "ageMs": {
                       "type": "integer",
@@ -10305,13 +10284,11 @@
                       "minLength": 1,
                       "maxLength": 64
                     }
-                  },
-                  "additionalProperties": false
+                  }
                 },
                 "maxItems": 128
               }
-            },
-            "additionalProperties": false
+            }
           },
           "terminal": {
             "type": "boolean"

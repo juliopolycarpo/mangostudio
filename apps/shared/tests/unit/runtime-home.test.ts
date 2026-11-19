@@ -324,4 +324,112 @@ describe('RuntimeHealthReportSchema', () => {
     ).toBe(true);
     expect(Value.Check(RuntimeHealthReportSchema, baseReport)).toBe(true);
   });
+
+  describe('externalAgents forward compatibility', () => {
+    const externalAgents = {
+      targets: ['codex'],
+      identityIsolation: {
+        method: 'single-user-host',
+        credentialHomeFingerprint: 'sha256:credential-home',
+      },
+      liveSessionCount: 1,
+      liveSessions: [{ sessionId: 'session-1', targetId: 'codex', ageMs: 250, state: 'running' }],
+    } as const;
+    const withExternalAgents = (subtree: unknown) => ({ ...baseReport, externalAgents: subtree });
+
+    it('accepts a member this build has not named at every level of the subtree', () => {
+      expect(Value.Check(RuntimeHealthReportSchema, withExternalAgents(externalAgents))).toBe(true);
+      const extraAtSubtree = { ...externalAgents, queuedTurns: 0 };
+      const extraAtIsolation = {
+        ...externalAgents,
+        identityIsolation: { ...externalAgents.identityIsolation, attestedBy: 'newer-runtime' },
+      };
+      const extraAtSession = {
+        ...externalAgents,
+        liveSessions: [{ ...externalAgents.liveSessions[0], pid: 4242 }],
+      };
+      for (const [where, subtree] of [
+        ['externalAgents', extraAtSubtree],
+        ['externalAgents.identityIsolation', extraAtIsolation],
+        ['externalAgents.liveSessions[]', extraAtSession],
+      ] as const) {
+        expect(
+          Value.Check(RuntimeHealthReportSchema, withExternalAgents(subtree)),
+          `expected an additive member under ${where} to be accepted`
+        ).toBe(true);
+      }
+    });
+
+    it('accepts a target id this build has no enum member for, in targets and in a live session', () => {
+      // Regression for #2557: an additive enum member failed the whole report.
+      const withNewVendor = {
+        ...externalAgents,
+        targets: ['codex', 'new-vendor'],
+        liveSessionCount: 2,
+        liveSessions: [
+          ...externalAgents.liveSessions,
+          { sessionId: 'session-2', targetId: 'new-vendor', ageMs: 9, state: 'running' },
+        ],
+      };
+      expect(
+        Value.Check(RuntimeHealthReportSchema, withExternalAgents(withNewVendor)),
+        'expected a report naming an unknown but well-formed target id to be accepted'
+      ).toBe(true);
+    });
+
+    it('still rejects a wrong type on a known member', () => {
+      const wrong: readonly (readonly [string, unknown])[] = [
+        ['liveSessionCount as a string', { ...externalAgents, liveSessionCount: '1' }],
+        ['a target id that is not a string', { ...externalAgents, targets: [3] }],
+        ['an empty target id', { ...externalAgents, targets: [''] }],
+        ['a target id that is not URL-safe', { ...externalAgents, targets: ['new vendor/../x'] }],
+        ['a target id past 64 characters', { ...externalAgents, targets: ['a'.repeat(65)] }],
+        [
+          'a live session whose target id is not URL-safe',
+          {
+            ...externalAgents,
+            liveSessions: [{ ...externalAgents.liveSessions[0], targetId: 'codex?x=1' }],
+          },
+        ],
+        [
+          'more target ids than the cap',
+          {
+            ...externalAgents,
+            targets: Array.from({ length: 33 }, (_, index) => `vendor-${index}`),
+          },
+        ],
+        [
+          'an isolation method that is not a known one',
+          {
+            ...externalAgents,
+            identityIsolation: { method: 'vm', credentialHomeFingerprint: 'x' },
+          },
+        ],
+        [
+          'an isolation without its fingerprint',
+          { ...externalAgents, identityIsolation: { method: 'container' } },
+        ],
+        [
+          'a session age as a string',
+          {
+            ...externalAgents,
+            liveSessions: [{ ...externalAgents.liveSessions[0], ageMs: '250' }],
+          },
+        ],
+        [
+          'a session with no id',
+          {
+            ...externalAgents,
+            liveSessions: [{ targetId: 'codex', ageMs: 250, state: 'running' }],
+          },
+        ],
+      ];
+      for (const [what, subtree] of wrong) {
+        expect(
+          Value.Check(RuntimeHealthReportSchema, withExternalAgents(subtree)),
+          `expected a report with ${what} to be rejected`
+        ).toBe(false);
+      }
+    });
+  });
 });

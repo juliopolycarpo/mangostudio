@@ -108,6 +108,28 @@ describe('resolveUpgradeTarget — canary latest', () => {
     ]);
   });
 
+  it('authenticates the release list with the context token and leaves github.com anonymous', async () => {
+    const tag = 'v0.2.0-canary.def5678a';
+    const host = new FakeReleaseHost({
+      [`${GITHUB_API}/releases?per_page=30`]: {
+        body: JSON.stringify([{ tag_name: tag, prerelease: true }]),
+      },
+      [`${GITHUB}/releases/download/${tag}/canary-manifest.json`]: { status: 404, body: '' },
+    });
+
+    await resolveUpgradeTarget(
+      { channel: 'canary' },
+      {
+        platformId: 'linux-x64',
+        currentVersion: '0.2.0-canary.abc1234f',
+        githubToken: 'dummy-token-not-a-secret',
+      },
+      { fetch: host.fetch, resolveHostname: host.resolveHostname }
+    );
+
+    expect(host.authorizations()).toEqual(['Bearer dummy-token-not-a-secret', undefined]);
+  });
+
   it('falls back to the tag version when the newest canary release publishes no manifest', async () => {
     const host = new FakeReleaseHost({
       [`${GITHUB_API}/releases?per_page=30`]: {

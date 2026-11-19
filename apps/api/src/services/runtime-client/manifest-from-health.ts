@@ -21,6 +21,7 @@
  * handshake needs a reconnect before the hub offers it.
  */
 
+import { isExternalAgentTargetId } from '@mangostudio/shared/external-agents';
 import {
   acceptedRuntimeImplementation,
   effectiveTools,
@@ -32,11 +33,55 @@ import type { RuntimeHealthReport } from '@mangostudio/shared/runtime-home';
 
 const SHELL_KINDS = new Set<string>(['bash', 'zsh', 'powershell']);
 
+/** A health report with the target ids this build cannot name removed, and which ids those were. */
+export interface PrunedHealthReport {
+  readonly report: RuntimeHealthReport;
+  /** Distinct, in the order first seen; empty when the report named only known targets. */
+  readonly skippedTargetIds: readonly string[];
+}
+
+/**
+ * Drops the `externalAgents` entries that name a target this build does not know.
+ *
+ * Health accepts any well-formed target id so that a newer runtime hosting one
+ * more vendor does not get its whole report refused (and the manifest frozen).
+ * What such an id *means* is the hub's call: it cannot be offered, routed to, or
+ * put in the closed manifest enum, so it is skipped here and reported to the
+ * caller to log. `liveSessionCount` stays the runtime's true total — a skipped
+ * session is still a live one on that machine.
+ *
+ * @example
+ * pruneUnknownExternalAgentTargets(report).skippedTargetIds; // ['gemini']
+ */
+export function pruneUnknownExternalAgentTargets(report: RuntimeHealthReport): PrunedHealthReport {
+  const externalAgents = report.externalAgents;
+  if (!externalAgents) return { report, skippedTargetIds: [] };
+
+  const skipped = new Set<string>();
+  const known = (targetId: string): boolean => {
+    if (isExternalAgentTargetId(targetId)) return true;
+    skipped.add(targetId);
+    return false;
+  };
+  const targets = externalAgents.targets.filter(known);
+  const liveSessions = externalAgents.liveSessions.filter((session) => known(session.targetId));
+  if (skipped.size === 0) return { report, skippedTargetIds: [] };
+
+  return {
+    report: { ...report, externalAgents: { ...externalAgents, targets, liveSessions } },
+    skippedTargetIds: [...skipped],
+  };
+}
+
 export function capabilityManifestFromHealth(
   report: RuntimeHealthReport,
   handshake?: RuntimeCapabilityManifest
 ): RuntimeCapabilityManifest {
   const allow = report.allow;
+  // Health may list ids this build cannot name; the manifest's `externalAgents`
+  // is a closed enum, so an id outside it is left out here even when the caller
+  // did not prune the report first.
+  const hostedTargets = report.externalAgents?.targets.filter(isExternalAgentTargetId) ?? [];
   // Judged once: a descriptor this build cannot interpret is not announced.
   const implementation = acceptedRuntimeImplementation(handshake?.implementation);
   const shells = allow.shell
@@ -82,11 +127,18 @@ export function capabilityManifestFromHealth(
       allowedFeatures,
       implementationCeiling(handshake, implementation)
     ),
-    ...(report.externalAgents?.targets.length
-      ? { externalAgents: [...report.externalAgents.targets] }
-      : {}),
+    ...(hostedTargets.length ? { externalAgents: hostedTargets } : {}),
+    // Two named members, not the object: health tolerates fields this build has
+    // never heard of, and the manifest (and the `isolation` sent back on every
+    // external-agent call) is a closed shape that would refuse them.
     ...(report.externalAgents?.identityIsolation
-      ? { identityIsolation: report.externalAgents.identityIsolation }
+      ? {
+          identityIsolation: {
+            method: report.externalAgents.identityIsolation.method,
+            credentialHomeFingerprint:
+              report.externalAgents.identityIsolation.credentialHomeFingerprint,
+          },
+        }
       : {}),
     ...(handshake?.enforcesPathPolicy === undefined
       ? {}

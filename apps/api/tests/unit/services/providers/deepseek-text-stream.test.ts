@@ -115,6 +115,16 @@ describe('streamDeepSeekText', () => {
     ]);
   });
 
+  it('takes the deadline a caller names on the request', async () => {
+    const chunks = await collect(
+      streamDeepSeekText(createHangingClient(), { ...baseReq, timeoutMs: 10 })
+    );
+
+    expect(chunks).toEqual([
+      { type: 'error', content: 'DeepSeek response exceeded the 10 ms deadline.', done: true },
+    ]);
+  });
+
   it('ends quietly with a done chunk when the caller aborts', async () => {
     const controller = new AbortController();
     const stream = streamDeepSeekText(createHangingClient(), {

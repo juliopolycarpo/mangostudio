@@ -209,28 +209,95 @@ export function detectInstallOrigin(probe: InstallOriginProbe): InstallOrigin {
   return fromLauncher(probe, base) ?? fromDistRoot(probe, base) ?? fromPath(probe, base);
 }
 
+/** What {@link restartLauncher} reads about this machine; every field is injected so the rules stay pure. */
+export interface RestartLauncherProbe {
+  readonly platform: NodeJS.Platform;
+  /** Real path of the running executable, symlinks resolved. */
+  readonly execPath: string;
+  /** Whether a path exists right now. A launcher the manager did not leave behind is not offered. */
+  readonly pathExists: (path: string) => boolean;
+}
+
 /**
- * The launcher a restart is allowed to re-exec, which is only a launcher that
- * *becomes* the binary rather than supervising it. `spawnDetached` confirms a
- * restart by matching the pid it spawned against the pid the hub writes to its
- * state file, so a launcher that runs the binary as a child hands back its own
- * pid and the handshake times out at 20s even though the hub came up — the
- * same split that made a `.cmd` shim unusable as a restart target.
+ * Homebrew relinks `<prefix>/bin/mangostudio` to the new Cellar entry on every
+ * upgrade (the formula installs a symlink to `libexec/mangostudio`, so `execve`
+ * through it becomes the binary). This process's own path is the Cellar entry
+ * of the version that was installed when it started, which `brew cleanup`
+ * removes.
+ */
+function homebrewLauncher(probe: RestartLauncherProbe): string | undefined {
+  if (probe.platform === 'win32') return undefined;
+  const cellar = /^(.+?)\/Cellar\//.exec(probe.execPath);
+  return cellar?.[1] ? `${cellar[1]}/bin/mangostudio` : undefined;
+}
+
+/**
+ * pnpm keeps each version under `<pnpm home>/global/<n>/…/.pnpm/mangostudio@<version>`
+ * and repoints the shim in `<pnpm home>` itself on upgrade. POSIX only: the
+ * Windows shim is a `.cmd` that `CreateProcess` cannot start with the restart's
+ * argv, and the Windows delegate comes back through PATH in its waiter instead.
+ */
+function pnpmLauncher(probe: RestartLauncherProbe): string | undefined {
+  if (probe.platform === 'win32') return undefined;
+  const home = /^(.+)\/global\/[^/]+\/(?:node_modules|\.pnpm)\//.exec(probe.execPath);
+  return home?.[1] ? `${home[1]}/mangostudio` : undefined;
+}
+
+/**
+ * Scoop installs into `apps\<app>\<version>` and repoints the `current`
+ * junction on upgrade. The shim in `scoop\shims` supervises the binary as a
+ * child; the junction's own `.exe` is the binary.
+ */
+function scoopLauncher(probe: RestartLauncherProbe): string | undefined {
+  if (probe.platform !== 'win32') return undefined;
+  const versioned = /^(.*[\\/]scoop[\\/]apps[\\/][^\\/]+)[\\/][^\\/]+[\\/]([^\\/]+)$/i.exec(
+    probe.execPath
+  );
+  return versioned?.[1] && versioned[2] ? `${versioned[1]}\\current\\${versioned[2]}` : undefined;
+}
+
+/**
+ * The path a restart after a delegated upgrade re-execs, when it is not this
+ * process's own. That path names the build the manager just replaced for
+ * every manager that puts the version in it (pnpm, Homebrew, Scoop), and may
+ * be gone. Each manager leaves a path that follows its upgrade, resolved here
+ * from the layout without running the manager:
  *
- * Only cargo's Unix shim qualifies: it replaces itself through `execve`. The
- * npm wrapper `spawnSync`s a grandchild and is a `.js` file that `CreateProcess`
- * cannot start at all, and cargo on Windows spawns and waits. Those re-exec
- * `process.execPath` instead, which is the right answer for npm — the platform
- * package's path does not carry a version, so the manager replaced the binary
- * in place. See #1024 for the managers this leaves pointing at the old build.
- * // Usage: restartLauncher(detectInstallOrigin(probe), probe.platform)
+ * - cargo: the shim that announced itself through `MANGOSTUDIO_LAUNCHER_PATH`.
+ * - Homebrew: `<prefix>/bin/mangostudio`, a symlink to the current Cellar entry.
+ * - pnpm (POSIX): the shim in the pnpm home.
+ * - Scoop: `apps\mangostudio\current\mangostudio.exe`.
+ *
+ * npm and bun are absent on purpose: their platform package's path has no
+ * version, so re-execing `process.execPath` already lands on the new build,
+ * and the npm wrapper is a `.js` file a restart cannot start directly.
+ *
+ * Some of these launchers supervise the binary as a child process instead of
+ * becoming it (the pnpm shim, the Windows cargo shim), so the pid a restart
+ * spawns is not the pid the hub writes to its state file. `confirmStarted` in
+ * `cli/detach.ts` accepts a successor instead of requiring that pid. See #1024.
+ * // Usage: restartLauncher(detectInstallOrigin(probe), { platform, execPath, pathExists })
  */
 export function restartLauncher(
   via: Pick<InstalledVia, 'manager' | 'launcherPath'>,
-  platform: NodeJS.Platform
+  probe: RestartLauncherProbe
 ): string | undefined {
-  if (platform === 'win32' || via.manager !== 'cargo') return undefined;
-  return via.launcherPath;
+  if (via.manager === 'cargo') return via.launcherPath;
+  const launcher = derivedLauncher(via.manager, probe);
+  return launcher !== undefined && probe.pathExists(launcher) ? launcher : undefined;
+}
+
+function derivedLauncher(manager: InstallManager, probe: RestartLauncherProbe): string | undefined {
+  switch (manager) {
+    case 'homebrew':
+      return homebrewLauncher(probe);
+    case 'pnpm':
+      return pnpmLauncher(probe);
+    case 'scoop':
+      return scoopLauncher(probe);
+    default:
+      return undefined;
+  }
 }
 
 /**

@@ -32,15 +32,21 @@ import {
   versionManagerStatusesQueryOptions,
 } from '../queries';
 
+/** The runtimes screen's read: it always wants the data, so it probes. */
+export function useRuntimeStatuses(environmentId?: string) {
+  return useQuery(runtimeStatusesQueryOptions(environmentId));
+}
+
 /**
- * `enabled` defaults to on for the runtimes screen, which always wants the
- * data. A caller that lists many machines at once — the entities overview's
- * toolchain summary — passes it explicitly tied to connection state, the same
- * way {@link useEnvironmentHealth} does: a sleeping remote must not wake just
- * because its card is on screen.
+ * Runtime statuses some other screen already put in the cache, never a probe.
+ *
+ * For a surface that lists many machines at once — the entities overview's
+ * toolchain summary — where one probe per card would spawn `bun`, `node`, `fnm`
+ * and `git` across the fleet for a single line of text. `data` is `undefined`
+ * until a screen that does want the probe has run it.
  */
-export function useRuntimeStatuses(environmentId?: string, enabled = true) {
-  return useQuery({ ...runtimeStatusesQueryOptions(environmentId), enabled });
+export function useCachedRuntimeStatuses(environmentId?: string) {
+  return useQuery({ ...runtimeStatusesQueryOptions(environmentId), enabled: false });
 }
 
 export function useAgentCliStatuses(environmentId?: string) {
