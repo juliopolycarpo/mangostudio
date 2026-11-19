@@ -19,6 +19,7 @@ import { persistMcpMediaParts } from '../../../services/mcp/rich-content';
 import {
   executeResolvedMcpTool,
   type ResolvedMcpToolExecution,
+  resolveMcpCallTimeoutMs,
   resolveMcpToolExecution,
 } from '../../../services/mcp/tool-bridge';
 import { isMcpToolName } from '../../../services/mcp/tool-naming';
@@ -258,7 +259,8 @@ async function executeStandardToolCall(
 
   try {
     const prepared = await prepareStandardToolCall(name, context);
-    lifecycle.transition('running');
+    const timeoutMs = resolvePreparedToolTimeoutMs(prepared);
+    lifecycle.start(timeoutMs);
     await recordToolStartBeforeRunning(name, callId, lifecycle, context);
     if (prepared.kind === 'mcp') {
       // Builtins record themselves from `executeTool`, off their declared
@@ -284,7 +286,6 @@ async function executeStandardToolCall(
           executeDelegationToolCall(delegationCallId, delegationRequest, prepared.runtime),
       });
     } else {
-      const timeoutMs = resolveEffectiveToolTimeoutMs(prepared.tool, prepared.effectiveSettings);
       const timeoutController = new AbortController();
       const parentSignal = context.signal;
       const onParentAbort = () => timeoutController.abort(parentSignal?.reason);
@@ -419,6 +420,21 @@ function shapeToolExecutionResult(
     ...(questionPart ? { questionPart } : {}),
     ...(todoPart ? { todoPart } : {}),
   };
+}
+
+/**
+ * The wall-clock budget each kind of call runs under, read from the same place
+ * that arms its timer so the lifecycle snapshot records what is enforced.
+ */
+function resolvePreparedToolTimeoutMs(prepared: PreparedStandardToolCall): number {
+  switch (prepared.kind) {
+    case 'mcp':
+      return resolveMcpCallTimeoutMs(prepared.target.server);
+    case 'delegation':
+      return prepared.runtime.settings.timeoutMs;
+    case 'builtin':
+      return resolveEffectiveToolTimeoutMs(prepared.tool, prepared.effectiveSettings);
+  }
 }
 
 /** Resolves every policy decision before a call is marked as running. */

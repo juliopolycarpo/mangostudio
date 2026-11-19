@@ -46,6 +46,8 @@ export interface ToolExecutionTransition {
   durationMs?: number;
   /** Only meaningful on a terminal transition. */
   reasonCode?: ToolExecutionReasonCode;
+  /** Only meaningful on the first `running` transition: the budget the call starts under. */
+  timeoutMs?: number;
 }
 
 /** Creates the initial `queued` snapshot for a scheduled tool call. */
@@ -73,6 +75,9 @@ export function applyToolExecutionTransition(
   const next: ToolExecutionSnapshot = { ...snapshot, status: transition.status };
   if (transition.status === 'running' && next.startedAt === undefined) {
     next.startedAt = transition.at;
+    // The budget belongs to the start: resuming from awaiting_user does not
+    // get to rewrite the limit the call began under.
+    if (transition.timeoutMs !== undefined) next.timeoutMs = transition.timeoutMs;
   }
   if (transition.status === 'awaiting_user') {
     next.awaitingUserAt = transition.at;

@@ -121,6 +121,53 @@ describe('tool execution transition table', () => {
     expect(timedOut.reasonCode).toBe('timeout');
   });
 
+  it('records the time budget when the call starts and keeps it through to the terminal state', () => {
+    let snapshot = createToolExecutionSnapshot('builtin', 1_000);
+    expect(snapshot.timeoutMs).toBeUndefined();
+
+    snapshot = applyToolExecutionTransition(snapshot, {
+      status: 'running',
+      at: 1_010,
+      timeoutMs: 30_000,
+    });
+    expect(snapshot.timeoutMs).toBe(30_000);
+
+    // A later resume must not rewrite the budget the call started under.
+    snapshot = applyToolExecutionTransition(snapshot, { status: 'awaiting_user', at: 1_020 });
+    snapshot = applyToolExecutionTransition(snapshot, {
+      status: 'running',
+      at: 1_030,
+      timeoutMs: 5_000,
+    });
+    expect(snapshot.timeoutMs).toBe(30_000);
+
+    snapshot = applyToolExecutionTransition(snapshot, {
+      status: 'timed_out',
+      at: 31_010,
+      durationMs: 30_000,
+      reasonCode: 'timeout',
+    });
+    expect(snapshot.timeoutMs).toBe(30_000);
+  });
+
+  it('ignores a time budget on any transition other than the first running one', () => {
+    const queued = createToolExecutionSnapshot('mcp', 1_000);
+    const failed = applyToolExecutionTransition(queued, {
+      status: 'failed',
+      at: 1_001,
+      timeoutMs: 30_000,
+      reasonCode: 'not_allowed',
+    });
+    expect(failed.timeoutMs).toBeUndefined();
+  });
+
+  it('rejects a non-positive or non-numeric time budget in the schema', () => {
+    const base = snapshotWithStatus('running');
+    expect(Value.Check(ToolExecutionSnapshotSchema, { ...base, timeoutMs: 30_000 })).toBe(true);
+    expect(Value.Check(ToolExecutionSnapshotSchema, { ...base, timeoutMs: 0 })).toBe(false);
+    expect(Value.Check(ToolExecutionSnapshotSchema, { ...base, timeoutMs: '30s' })).toBe(false);
+  });
+
   it('produces schema-valid snapshots at every stage', () => {
     for (const status of TOOL_EXECUTION_STATUSES) {
       const snapshot = snapshotWithStatus(status);

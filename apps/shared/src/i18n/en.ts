@@ -1869,6 +1869,8 @@ export const messages: CoreMessages = {
     },
     /** A running call's clock beside its configured time limit, e.g. `12s of 30s`. */
     elapsedOfLimit: '{elapsed} of {limit}',
+    /** The time limit a timed-out call was held to, e.g. `30s limit`. */
+    timeLimit: '{limit} limit',
     /** What a finished call produced, shown right-aligned on the timeline row. */
     summary: {
       item: '{count} item',

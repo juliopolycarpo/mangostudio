@@ -4305,6 +4305,8 @@ export const messages = {
     },
     /** O relógio de uma chamada em execução ao lado do limite de tempo configurado, ex.: `12s de 30s`. */
     elapsedOfLimit: '{elapsed} de {limit}',
+    /** O limite de tempo ao qual uma chamada esgotada estava sujeita, ex.: `limite de 30s`. */
+    timeLimit: 'limite de {limit}',
     /** O que a chamada produziu, alinhado à direita na linha da timeline. */
     summary: {
       item: '{count} item',

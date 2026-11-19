@@ -161,6 +161,27 @@ describe('ToolExecutionLifecycle', () => {
     );
   });
 
+  it('carries the time budget from start through the terminal snapshot', () => {
+    const events: ToolExecutionTransitionEvent[] = [];
+    const lifecycle = new ToolExecutionLifecycle('call-3', 'bash', (event) => events.push(event));
+    lifecycle.emitQueued();
+    lifecycle.start(45_000);
+    lifecycle.fail(new ToolExecutionTimedOutError('too slow'));
+
+    expect(events.map((event) => [event.execution.status, event.execution.timeoutMs])).toEqual([
+      ['queued', undefined],
+      ['running', 45_000],
+      ['timed_out', 45_000],
+    ]);
+  });
+
+  it('starts without a budget for a call no timer governs', () => {
+    const lifecycle = new ToolExecutionLifecycle('call-4', 'skill');
+    lifecycle.start();
+    expect(lifecycle.current.status).toBe('running');
+    expect(lifecycle.current.timeoutMs).toBeUndefined();
+  });
+
   it('supports the awaiting_user round trip', () => {
     const lifecycle = new ToolExecutionLifecycle('call-2', 'mcp__demo__ask');
     lifecycle.transition('running');

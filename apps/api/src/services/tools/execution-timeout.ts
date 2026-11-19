@@ -14,8 +14,8 @@ export class ToolExecutionTimedOutError extends Error {
   }
 }
 
-// Re-exported so the API's tools and tests keep one import site; the name is
-// shared with the chat card that displays the budget.
+// Re-exported so the API's tools and tests keep one import site; the parameter
+// name lives in the shared tool-settings contract.
 export { TOOL_EXECUTION_TIMEOUT_PARAM };
 
 export const TOOL_EXECUTION_TIMEOUT_SECONDS_DEFAULT = 30;
