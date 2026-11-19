@@ -3,7 +3,7 @@ import { describe, expect, it } from 'bun:test';
 import type { RuntimeFindingCode } from '@mangostudio/shared/environments';
 import { environmentFindingTemplatesEn } from '@mangostudio/shared/environments';
 
-import { fail, ok } from '../../../src/cli/doctor-checks';
+import type { CheckResult } from '../../../src/cli/doctor-checks';
 import {
   checkResultToFinding,
   findingParams,
@@ -119,13 +119,17 @@ describe('findingParams', () => {
 
 describe('checkResultToFinding', () => {
   it('round-trips legacy detail into a renderable finding', () => {
-    const check = ok('Config', 'loaded from /data/config.toml');
+    const check: CheckResult = {
+      label: 'Config',
+      status: 'ok',
+      detail: 'loaded from /data/config.toml',
+    };
     const finding = checkResultToFinding(check);
     expect(renderFinding(finding)).toBe(check.detail);
   });
 
   it('preserves failure detail verbatim', () => {
-    const check = fail('Database', 'file missing');
+    const check: CheckResult = { label: 'Database', status: 'fail', detail: 'file missing' };
     expect(renderFinding(checkResultToFinding(check))).toBe('file missing');
   });
 });
