@@ -68,6 +68,32 @@ export async function dismissInterruptedTurn(chatId: string, messageId: string):
 }
 
 /**
+ * Runs one tool call of an assistant message again, at the reader's request.
+ *
+ * The hub answers with the same SSE framing a turn uses, but there is no model
+ * call behind it: the new call lands on the original message. Resolves when the
+ * stream ends. A refusal (another turn running, a call that cannot be retried,
+ * a confirmation the policy requires) rejects with an `ApiError`; a failure
+ * inside the stream is delivered as an `error` chunk.
+ *
+ * @param confirmed - The reader approved the confirmation the policy asked for.
+ */
+export async function retryToolCallStream(
+  target: { readonly chatId: string; readonly messageId: string; readonly callId: string },
+  confirmed: boolean,
+  onChunk: (chunk: StreamChunk) => void,
+  signal?: AbortSignal
+): Promise<void> {
+  const { chatId, messageId, callId } = target;
+  await postStream(
+    `/api/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}/tool-calls/${encodeURIComponent(callId)}/retry`,
+    confirmed ? { confirmed: true } : {},
+    onChunk,
+    signal
+  );
+}
+
+/**
  * Calls POST /api/respond/stream and invokes onChunk for each SSE event.
  * Throws if the HTTP request fails or the response has no body; error events
  * carried inside the stream are delivered through onChunk like any other chunk.

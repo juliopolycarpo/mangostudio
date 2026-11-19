@@ -35,16 +35,30 @@ export interface ActiveTurnSnapshot {
 
 const activeTurns = new Map<string, ActiveTurn>();
 
-/**
- * A row with isGenerating = 1 must never be observable while its live turn is
- * unregistered. Register the turn before inserting its assistant row.
- */
-export function registerActiveTurn(messageId: string, turn: ActiveTurn): void {
-  activeTurns.set(messageId, turn);
+/** A live turn already holds this message; the caller must not start another. */
+export class ActiveTurnConflictError extends Error {
+  constructor(readonly messageId: string) {
+    super(`A turn is already registered for message ${messageId}.`);
+    this.name = 'ActiveTurnConflictError';
+  }
 }
 
-export function unregisterActiveTurn(messageId: string): void {
-  activeTurns.delete(messageId);
+/**
+ * A row with isGenerating = 1 must never be observable while its live turn is
+ * unregistered. Register the turn before inserting (or reopening) its
+ * assistant row.
+ *
+ * A message holds one live turn. A second registration for the same message
+ * throws instead of replacing the first, so a losing request can never take
+ * over (and later drop) the winner's stop handle. The returned release removes
+ * only this registration: once the entry is someone else's it does nothing.
+ */
+export function registerActiveTurn(messageId: string, turn: ActiveTurn): () => void {
+  if (activeTurns.has(messageId)) throw new ActiveTurnConflictError(messageId);
+  activeTurns.set(messageId, turn);
+  return () => {
+    if (activeTurns.get(messageId) === turn) activeTurns.delete(messageId);
+  };
 }
 
 export function isActiveTurn(messageId: string): boolean {

@@ -4,7 +4,16 @@ import Value from 'typebox/value';
 import { AgentIdSchema } from '../agents/schemas';
 import { ProviderTypeSchema } from '../provider-settings/schemas';
 import { TODO_MAX_ITEMS, TodoItemSchema } from '../todos/schemas';
-import { ToolExecutionStatusSchema } from '../tool-executions/schemas';
+import {
+  TOOL_RETRY_SAFETY_VALUES,
+  ToolExecutionStatusSchema,
+  type ToolRetrySafety,
+  ToolRetrySafetySchema,
+} from '../tool-executions/schemas';
+
+// The vocabulary is owned by `tool-executions`; recovery re-exports it so its
+// importers keep one entrypoint.
+export { TOOL_RETRY_SAFETY_VALUES, type ToolRetrySafety, ToolRetrySafetySchema };
 
 export const TURN_RECOVERY_VERSION = 1 as const;
 export const TURN_RECOVERY_MAX_CALLS = 50;
@@ -53,18 +62,6 @@ export const TurnInterruptionReasonCodeSchema = Type.Union([
   Type.Literal('unknown'),
 ]);
 export type TurnInterruptionReasonCode = Static<typeof TurnInterruptionReasonCodeSchema>;
-
-export const TOOL_RETRY_SAFETY_VALUES = ['safe_read', 'confirmation_required', 'unknown'] as const;
-
-// Written as a literal tuple rather than mapped from the array above:
-// TypeBox infers a union by walking a tuple, and a mapped array widens to
-// `TSchema[]`, which infers as `never` and silently erases the type.
-export const ToolRetrySafetySchema = Type.Union([
-  Type.Literal('safe_read'),
-  Type.Literal('confirmation_required'),
-  Type.Literal('unknown'),
-]);
-export type ToolRetrySafety = Static<typeof ToolRetrySafetySchema>;
 
 export const IncompleteToolCallOutcomeSchema = Type.Union([
   Type.Literal('not_started'),

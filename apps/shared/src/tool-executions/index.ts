@@ -10,9 +10,18 @@ export {
   type ToolExecutionTransition,
 } from './lifecycle';
 export {
+  type RetryToolCallBody,
+  RetryToolCallBodySchema,
+  resolveToolCallRetryEligibility,
+  type ToolCallRetryEligibility,
+  type ToolCallRetryRefusal,
+  TOOLS_NEEDING_A_MODEL_TURN,
+} from './retry';
+export {
   TOOL_EXECUTION_REASON_CODES,
   TOOL_EXECUTION_SOURCES,
   TOOL_EXECUTION_STATUSES,
+  TOOL_RETRY_SAFETY_VALUES,
   type ToolExecutionReasonCode,
   ToolExecutionReasonCodeSchema,
   type ToolExecutionSnapshot,
@@ -21,4 +30,6 @@ export {
   ToolExecutionSourceSchema,
   type ToolExecutionStatus,
   ToolExecutionStatusSchema,
+  type ToolRetrySafety,
+  ToolRetrySafetySchema,
 } from './schemas';

@@ -12,7 +12,6 @@ import { getDb } from '../../../../src/db/database';
 import {
   CHECKPOINT_MAX_INTERVAL_MS,
   CHECKPOINT_TEXT_INTERVAL_CHARS,
-  classifyToolRetrySafety,
   createDatabaseCheckpointStore,
   createTurnCheckpointPart,
   refreshTurnCheckpointPart,
@@ -147,21 +146,6 @@ describe('turn checkpoints', () => {
     expect(part.lastAssistantText).toHaveLength(8_000);
     expect(part.completedCalls).toHaveLength(50);
     expect(part.completedCalls[0]?.result).toHaveLength(2_000);
-  });
-
-  it('classifies read-only, mutating, delegated, and MCP calls conservatively', () => {
-    expect(classifyToolRetrySafety('read_file')).toBe('safe_read');
-    expect(classifyToolRetrySafety('grep')).toBe('safe_read');
-    expect(classifyToolRetrySafety('write_file')).toBe('confirmation_required');
-    expect(classifyToolRetrySafety('edit_file')).toBe('confirmation_required');
-    expect(classifyToolRetrySafety('replace_range')).toBe('confirmation_required');
-    expect(classifyToolRetrySafety('apply_patch')).toBe('confirmation_required');
-    expect(classifyToolRetrySafety('create_file')).toBe('confirmation_required');
-    expect(classifyToolRetrySafety('delete_file')).toBe('confirmation_required');
-    expect(classifyToolRetrySafety('move_file')).toBe('confirmation_required');
-    expect(classifyToolRetrySafety('run_shell')).toBe('confirmation_required');
-    expect(classifyToolRetrySafety('delegate_to_agent')).toBe('unknown');
-    expect(classifyToolRetrySafety('mcp__github__create_issue')).toBe('unknown');
   });
 });
 

@@ -291,6 +291,8 @@ export function register(): void {
       category: 'image',
       enabledByDefault: true,
       canDisable: true,
+      // Each run is a paid provider call that adds images.
+      retrySafety: 'confirmation_required',
       defaultParameters: {
         defaultQuality: GENERATE_IMAGE_DEFAULT_QUALITY,
         maxImagesPerCall: GENERATE_IMAGE_DEFAULT_MAX_IMAGES,

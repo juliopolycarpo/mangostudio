@@ -79,7 +79,17 @@ export const messages: CoreMessages = {
         session: 'session',
         library: 'on disk',
         skill: 'skill',
+        builtin: 'built-in',
       },
+      /** What each built-in slash command does, as the palette describes it. */
+      slashBuiltIn: {
+        clear: 'Start a new chat',
+        model: 'Switch this chat’s model: /model <name>',
+      },
+      slashModelSwitched: 'Model set to {model}.',
+      slashModelUsage: 'Name the model to switch to: /model <name>. Current model: {model}.',
+      slashModelNone: 'No model matches “{query}”.',
+      slashModelAmbiguous: '“{query}” fits more than one model: {models}. Type more of the name.',
       mcpPromptArgsTitle: 'Prompt arguments',
       mcpPromptInsert: 'Insert',
       mcpPromptCancel: 'Cancel',
@@ -1238,6 +1248,10 @@ export const messages: CoreMessages = {
       // template above — same reasoning as `managedBySystem`.
       toolchainAutoSystem: 'Processes run the automatic choice: {version}, a system install.',
       toolchainPinned: 'Processes run {version} from {path}.',
+      // The pin names a path the latest probe no longer found, so it cannot be
+      // in force: spawned processes fall back to whatever PATH resolves.
+      toolchainPinMissing:
+        'The pinned installation at {path} is no longer installed. Processes fall back to PATH until you pick another version or return to automatic.',
       toolchainUpdateFailed: 'The toolchain selection could not be updated.',
     },
     // Where an installation's binary was found to come from, appended to the
@@ -1936,6 +1950,21 @@ export const messages: CoreMessages = {
     errors: {
       lineNumbersUnobserved:
         'Line numbers for "{path}" were never observed: the last read was a byte view (hex or base64), which does not assign line numbers. Re-read the file as text with read_file first, then retry replacing this range.',
+    },
+    retry: {
+      action: 'Retry',
+      retrying: 'Retrying…',
+      confirmTitle: 'Run {tool} again?',
+      confirmDescription:
+        'The call runs again with the same arguments and may change what the first run already changed.',
+      confirmDescriptionOutcomeUnknown:
+        'The first run may have taken effect before it stopped. Running it again can repeat that.',
+      argumentsLabel: 'Arguments',
+      noArguments: 'No arguments',
+      confirmAction: 'Run again',
+      cancel: 'Cancel',
+      failed: 'Could not retry the tool call.',
+      byYou: 'Re-run by you',
     },
   },
 

@@ -65,7 +65,17 @@ export const messages = {
         session: 'sessão',
         library: 'em disco',
         skill: 'skill',
+        builtin: 'integrado',
       },
+      slashBuiltIn: {
+        clear: 'Iniciar um novo chat',
+        model: 'Trocar o modelo deste chat: /model <nome>',
+      },
+      slashModelSwitched: 'Modelo alterado para {model}.',
+      slashModelUsage: 'Informe o modelo: /model <nome>. Modelo atual: {model}.',
+      slashModelNone: 'Nenhum modelo corresponde a “{query}”.',
+      slashModelAmbiguous:
+        '“{query}” corresponde a mais de um modelo: {models}. Digite mais do nome.',
       mcpPromptArgsTitle: 'Argumentos do prompt',
       mcpPromptInsert: 'Inserir',
       mcpPromptCancel: 'Cancelar',
@@ -3787,6 +3797,10 @@ export const messages = {
       toolchainAutoSystem:
         'Os processos rodam a escolha automática: {version}, uma instalação do sistema.',
       toolchainPinned: 'Os processos rodam {version} a partir de {path}.',
+      // O pin aponta para um caminho que a última sondagem não encontrou mais,
+      // então não pode estar em vigor: os processos voltam ao que o PATH resolver.
+      toolchainPinMissing:
+        'A instalação fixada em {path} não está mais instalada. Os processos voltam ao PATH até você escolher outra versão ou voltar ao automático.',
       toolchainUpdateFailed: 'A seleção de toolchain não pôde ser atualizada.',
     },
     // De onde o binário de uma instalação veio, anexado à linha da instalação
@@ -4495,6 +4509,21 @@ export const messages = {
     errors: {
       lineNumbersUnobserved:
         'Os números de linha de "{path}" nunca foram observados: a última leitura foi uma visão de bytes (hex ou base64), que não atribui numeração. Leia o arquivo novamente como texto com read_file primeiro e então tente substituir este trecho.',
+    },
+    retry: {
+      action: 'Tentar de novo',
+      retrying: 'Tentando de novo…',
+      confirmTitle: 'Executar {tool} novamente?',
+      confirmDescription:
+        'A chamada roda de novo com os mesmos argumentos e pode alterar o que a primeira execução já alterou.',
+      confirmDescriptionOutcomeUnknown:
+        'A primeira execução pode já ter surtido efeito antes de parar. Rodar de novo pode repetir esse efeito.',
+      argumentsLabel: 'Argumentos',
+      noArguments: 'Sem argumentos',
+      confirmAction: 'Executar novamente',
+      cancel: 'Cancelar',
+      failed: 'Não foi possível tentar a chamada de novo.',
+      byYou: 'Reexecutada por você',
     },
   },
 

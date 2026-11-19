@@ -1,6 +1,10 @@
 /**
  * What the composer's `/` palette can offer this chat.
  *
+ * The native runner's built-in commands (`/clear`, `/model`) come first of all,
+ * ahead of the four sources below; a file or skill of the same name never takes
+ * their row.
+ *
  * Four sources, layered in order of how much they know:
  *
  * 1. **The session's own catalog**, announced by the vendor mid-turn. The only
@@ -38,6 +42,7 @@ import type { ChatRunnerConfiguration } from '@mangostudio/shared/chat';
 import type { ExternalAgentCommand } from '@mangostudio/shared/external-agents';
 import { externalAgentVendor } from '@mangostudio/shared/external-agents/values';
 import type { LibraryResource } from '@mangostudio/shared/library';
+import type { BuiltInSlashCommandName } from '@mangostudio/shared/library/values';
 import { isUsableSkill } from '@mangostudio/shared/skills';
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
@@ -46,12 +51,14 @@ import { externalCommandKeys } from '@/features/external-agents/command-catalog'
 import { externalCommandCatalogQueryOptions } from '@/features/external-agents/queries';
 import { libraryResourcesQueryOptions } from '@/features/library/queries';
 import { skillSettingsListQueryOptions } from '@/features/settings/skills/queries';
+import { useI18n } from '@/hooks/use-i18n';
 
 import { mergeSlashCommands, type SlashCommandEntry } from '../lib/slash-commands';
 import { chatCapabilitiesQueryOptions } from './use-chat-capabilities';
 
 /** Shared so an unannounced catalog is referentially stable across renders. */
 const NO_COMMANDS: readonly ExternalAgentCommand[] = [];
+const NO_BUILT_INS: readonly BuiltInSlashCommandName[] = [];
 
 /** How long an idle chat keeps the catalog its last session announced. */
 const SESSION_CATALOG_GC_MS = 60 * 60 * 1_000;
@@ -73,6 +80,12 @@ interface Options {
    */
   readonly activeModel?: string | null | undefined;
   readonly selectedAgentId?: string | undefined;
+  /**
+   * The built-in commands the composer can run right now (issue #2599). Offered
+   * ahead of every other source, and only to the native runner: an external
+   * runner's vendor owns its `/` namespace.
+   */
+  readonly builtIns?: readonly BuiltInSlashCommandName[] | undefined;
   /**
    * Whether the palette is open.
    *
@@ -107,8 +120,10 @@ export function useSlashCommands({
   environmentId,
   activeModel,
   selectedAgentId,
+  builtIns = NO_BUILT_INS,
   active,
 }: Options): SlashCommandSources {
+  const { t } = useI18n();
   const targetId = runner?.kind === 'external' ? runner.targetId : null;
 
   // A subscription, not a fetch: nothing serves this key, and the stream's
@@ -289,7 +304,19 @@ export function useSlashCommands({
               origin: 'skill' as const,
             }));
 
+    // First, so a file or skill of the same name cannot take a built-in's row:
+    // the composer runs the built-in and the hub never expands the file.
+    const builtInEntries: SlashCommandEntry[] =
+      targetId === null
+        ? builtIns.map((name) => ({
+            name,
+            description: t.chat.input.slashBuiltIn[name],
+            origin: 'builtin' as const,
+          }))
+        : [];
+
     return mergeSlashCommands(
+      builtInEntries,
       sessionEntries,
       hubCatalogEntries,
       libraryEntries,
@@ -306,6 +333,8 @@ export function useSlashCommands({
     targetId,
     advertisedKeys,
     capabilitiesQuery.isLoading,
+    builtIns,
+    t,
   ]);
 
   // Only the sources this runner actually reads can hold the palette back,

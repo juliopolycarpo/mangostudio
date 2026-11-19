@@ -361,6 +361,13 @@ export type MessagePart =
        * tool loops; readers normalize those via `resolveToolCallStatus`.
        */
       execution?: ToolExecutionSnapshot;
+      /**
+       * Set on a call the user re-ran: the `toolCallId` it runs again. The
+       * original call stays as it ended; this is a new call beside it.
+       */
+      retryOf?: string;
+      /** Set when the user, not the model, asked for this call. Absent means the model did. */
+      initiatedBy?: 'user';
     }
   | { type: 'tool_result'; toolCallId: string; content: string; isError?: boolean }
   | GeneratedImagePart

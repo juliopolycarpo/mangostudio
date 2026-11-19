@@ -3,14 +3,14 @@ import type { Kysely } from 'kysely';
 import type { Database } from '../../../db/types';
 import { createDiagnosticLogger } from '../../../lib/logger';
 import {
+  CHECKPOINT_MAX_INTERVAL_MS,
+  CHECKPOINT_TEXT_INTERVAL_CHARS,
+} from '../../generation/application/checkpoint-cadence';
+import {
   heldTailDelay,
   type HeldTailScheduler,
   HeldTailTimer,
 } from '../../generation/application/held-tail-timer';
-import {
-  CHECKPOINT_MAX_INTERVAL_MS,
-  CHECKPOINT_TEXT_INTERVAL_CHARS,
-} from '../../generation/application/turn-checkpoint';
 import type { ExternalTurnTranscript } from '../domain/external-turn-transcript';
 
 const logger = createDiagnosticLogger('external-turn-controller');

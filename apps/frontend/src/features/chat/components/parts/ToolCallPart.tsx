@@ -48,6 +48,8 @@ export function ToolCallPart({
   const entry = toToolCallEntry(parts, index, isStreaming);
   return (
     <ToolCallBlock
+      toolCallId={entry.toolCallId}
+      initiatedByUser={entry.initiatedBy === 'user'}
       name={entry.name}
       args={entry.args}
       result={entry.result}

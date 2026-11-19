@@ -139,6 +139,8 @@ export function register(): void {
       category: 'interaction',
       enabledByDefault: true,
       canDisable: true,
+      // Asking again puts a second question in front of the reader.
+      retrySafety: 'confirmation_required',
       defaultParameters: {},
       parameterDescriptors: [],
     },

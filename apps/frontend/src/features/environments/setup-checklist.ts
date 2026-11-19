@@ -23,6 +23,7 @@ import { formatMessage } from '@/lib/i18n-format';
 import {
   displayName,
   effectiveInstallation,
+  nodeInstallFollowUp,
   nodeInstallStep,
   nodeUpdateAffordance,
 } from './format';
@@ -131,9 +132,11 @@ function nodeRemedy(
   if (!installed) {
     const step = nodeInstallStep(recipes);
     if (!step) return { kind: 'none' };
+    const followUp = nodeInstallFollowUp(recipes, step);
     return {
       kind: 'install',
       step,
+      ...(followUp.length > 0 && { followUp }),
       label: formatMessage(t.environments.runtimes.install, { runtime: displayName(t, 'node') }),
     };
   }
