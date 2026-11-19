@@ -1444,12 +1444,16 @@ mod tests {
     /// `MANGOSTUDIO_CONFIG_HOME` pin, never from a second field.
     #[tokio::test]
     async fn probe_agent_clis_roots_mangostudio_locations_at_the_pinned_config_home() {
+        // A native absolute path: the probe reports paths in the host's own spelling, so a
+        // `/`-separated literal would come back with `\` on Windows.
+        let pinned = std::env::temp_dir().join("pinned").join("hub-config");
+        let pinned_text = pinned.to_string_lossy().into_owned();
         let params = ProbeAgentClisParams {
             budget: None,
             path_env: Some(PathEnvOverride {
                 env: Some(HashMap::from([(
                     "MANGOSTUDIO_CONFIG_HOME".to_string(),
-                    "/pinned/hub-config".to_string(),
+                    pinned_text.clone(),
                 )])),
             }),
             target_ids: Some(vec![AgentTargetId::Mangostudio]),
@@ -1460,7 +1464,7 @@ mod tests {
             .await
             .unwrap();
         let status = &result["statuses"][0];
-        assert_eq!(status["configHome"], "/pinned/hub-config");
+        assert_eq!(status["configHome"], pinned_text.as_str());
         let locations = status["locations"].as_array().unwrap();
         for id in ["mango-instructions", "mango-settings"] {
             let location = locations
@@ -1470,8 +1474,9 @@ mod tests {
             assert!(
                 location["path"]
                     .as_str()
-                    .is_some_and(|path| path.starts_with("/pinned/hub-config/")),
-                "expected {id} under /pinned/hub-config | received {location:?}"
+                    .map(std::path::Path::new)
+                    .is_some_and(|path| path != pinned && path.starts_with(&pinned)),
+                "expected {id} under {pinned_text} | received {location:?}"
             );
         }
     }
