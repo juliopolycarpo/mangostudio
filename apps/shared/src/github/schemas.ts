@@ -481,12 +481,16 @@ export const GithubInboxQuerySchema = Type.Object({
  * The number travels in the query rather than the path, so all three reads share
  * one schema and one route shape.
  *
+ * `refresh` is the detail view's refresh control, the same bypass the lists
+ * carry; see `GithubRefreshSchema`.
+ *
  * Usage:
  *   .get('/github/pr/checks', handler, { query: GithubPrRefQuerySchema })
  */
 export const GithubPrRefQuerySchema = Type.Object({
   chatId: Type.String({ minLength: 1 }),
   number: Type.Integer({ minimum: 1 }),
+  refresh: GithubRefreshSchema,
 });
 
 export const GithubCreatePrBodySchema = Type.Object({

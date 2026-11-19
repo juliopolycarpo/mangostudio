@@ -140,12 +140,18 @@ export function githubIssuesQueryOptions(
  * @example
  * useQuery(githubPrDetailQueryOptions('chat-1', 942));
  */
-export function githubPrDetailQueryOptions(chatId: string, number: number) {
+export function githubPrDetailQueryOptions(
+  chatId: string,
+  number: number,
+  forceRefresh?: ForceRefresh
+) {
   return queryOptions({
     queryKey: githubKeys.pr(chatId, number),
     staleTime: GITHUB_STALE_TIME_MS,
     queryFn: async (): Promise<GithubPrDetailResponse> => {
-      const { data, error } = await client.api.github.pr.get({ query: { chatId, number } });
+      const { data, error } = await client.api.github.pr.get({
+        query: { chatId, number, ...(forceRefresh?.() ? { refresh: true } : {}) },
+      });
       if (error) throw new ApiError(error.value);
       return data;
     },
@@ -158,12 +164,18 @@ export function githubPrDetailQueryOptions(chatId: string, number: number) {
  * @example
  * useQuery(githubPrChecksQueryOptions('chat-1', 942));
  */
-export function githubPrChecksQueryOptions(chatId: string, number: number) {
+export function githubPrChecksQueryOptions(
+  chatId: string,
+  number: number,
+  forceRefresh?: ForceRefresh
+) {
   return queryOptions({
     queryKey: githubKeys.checks(chatId, number),
     staleTime: GITHUB_STALE_TIME_MS,
     queryFn: async (): Promise<GithubPrChecksResponse> => {
-      const { data, error } = await client.api.github.pr.checks.get({ query: { chatId, number } });
+      const { data, error } = await client.api.github.pr.checks.get({
+        query: { chatId, number, ...(forceRefresh?.() ? { refresh: true } : {}) },
+      });
       if (error) throw new ApiError(error.value);
       return data;
     },
@@ -178,13 +190,17 @@ export function githubPrChecksQueryOptions(chatId: string, number: number) {
  * @example
  * useQuery(githubPrThreadsQueryOptions('chat-1', 942));
  */
-export function githubPrThreadsQueryOptions(chatId: string, number: number) {
+export function githubPrThreadsQueryOptions(
+  chatId: string,
+  number: number,
+  forceRefresh?: ForceRefresh
+) {
   return queryOptions({
     queryKey: githubKeys.threads(chatId, number),
     staleTime: GITHUB_STALE_TIME_MS,
     queryFn: async (): Promise<GithubPrThreadsResponse> => {
       const { data, error } = await client.api.github.pr['review-threads'].get({
-        query: { chatId, number },
+        query: { chatId, number, ...(forceRefresh?.() ? { refresh: true } : {}) },
       });
       if (error) throw new ApiError(error.value);
       return data;

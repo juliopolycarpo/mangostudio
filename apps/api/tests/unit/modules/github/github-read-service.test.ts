@@ -213,6 +213,54 @@ describe('GitHub read service', () => {
     expect(client.ids().filter((id) => id === 'pr.list')).toHaveLength(2);
   });
 
+  it('bypasses a still-fresh entry for the detail, checks and review threads on refresh', async () => {
+    const client = new FakeGithubCli({
+      stdout: {
+        'repo.view': repoOutput,
+        'pr.view': JSON.stringify({
+          number: 7,
+          title: 'Add the panel',
+          body: '',
+          url: 'https://github.example/mango/mangostudio/pull/7',
+          isDraft: false,
+          reviewDecision: '',
+          mergeStateStatus: 'CLEAN',
+          mergeable: 'MERGEABLE',
+          changedFiles: 1,
+          additions: 1,
+          deletions: 0,
+          latestReviews: [],
+          labels: [],
+        }),
+        'pr.checks': JSON.stringify([
+          { name: 'build', bucket: 'pass', state: 'SUCCESS', link: '', workflow: 'CI' },
+        ]),
+        'pr.review-threads': JSON.stringify({
+          data: {
+            repository: { pullRequest: { reviewThreads: { totalCount: 0, nodes: [] } } },
+          },
+        }),
+      },
+    });
+    const reads = createService(client);
+    const perPrReads = [
+      ['pr.view', reads.getPullRequest],
+      ['pr.checks', reads.getPullRequestChecks],
+      ['pr.review-threads', reads.getReviewThreads],
+    ] as const;
+
+    for (const [command, read] of perPrReads) {
+      const ran = () => client.ids().filter((id) => id === command).length;
+
+      await read({ ...repoRequest, number: 7 });
+      await read({ ...repoRequest, number: 7 });
+      expect(ran(), `${command} runs after two plain reads`).toBe(1);
+
+      await read({ ...repoRequest, number: 7, refresh: true });
+      expect(ran(), `${command} runs after a refresh read`).toBe(2);
+    }
+  });
+
   it('reads checks in one round trip and summarizes them from gh’s own buckets', async () => {
     const client = new FakeGithubCli({
       stdout: {
