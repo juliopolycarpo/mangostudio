@@ -1,6 +1,7 @@
 import type { Kysely } from 'kysely';
 
 import type { Database } from '../../../db/types';
+import { createDiagnosticLogger } from '../../../lib/logger';
 import { publishChatListInvalidation } from '../../../services/realtime/chat-list-invalidation';
 import { externalSessionManager } from '../../external-agents/application/external-session-manager';
 import {
@@ -12,6 +13,8 @@ import {
   releaseGeneratedImageFiles,
 } from '../../generated-images/application/reclaim-generated-images';
 import { deleteChat, verifyChatOwnership } from '../infrastructure/chat-repository';
+
+const logger = createDiagnosticLogger('delete-chat');
 
 export interface DeleteChatInput {
   chatId: string;
@@ -53,6 +56,11 @@ export async function deleteChatUseCase(
   if (owned) publishChatListInvalidation(input.userId);
   await releaseCheckpointBlobs(db, blobKeys);
   // A failure here leaves files for the periodic sweep; it must not turn a
-  // committed delete into an error response.
-  await releaseGeneratedImageFiles(db, imageFilenames).catch(() => undefined);
+  // committed delete into an error response, but it is worth a log line.
+  await releaseGeneratedImageFiles(db, imageFilenames).catch((error: unknown) => {
+    logger.warn('release_failed', {
+      chatId: input.chatId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
 }
