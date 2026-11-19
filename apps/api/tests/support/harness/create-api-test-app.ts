@@ -1,7 +1,8 @@
 import { Elysia } from 'elysia';
 import { websocket } from 'elysia/websocket';
 
-import { getAuth } from '../../../src/auth';
+import { getAuth, resetAuth } from '../../../src/auth';
+import { getDb } from '../../../src/db/database';
 import { getAuthSecretValidationMessage, getConfig } from '../../../src/lib/config';
 import { REALTIME_WEBSOCKET_OPTIONS } from '../../../src/modules/realtime/http/realtime-routes';
 import { assertTestEnvironmentReady } from '../setup/test-environment';
@@ -28,6 +29,29 @@ export function createApiTestApp(...plugins: ApiTestPlugin[]) {
   }
 
   return app;
+}
+
+/**
+ * A real Kysely instance has `withoutPlugins`; the stream suites' fake databases
+ * (`createTestStreamDb`, a bare `{ selectFrom }`) do not. Better Auth's schema check
+ * calls it, so the method is the line between the two.
+ */
+function isRealKysely(candidate: unknown): boolean {
+  return (
+    typeof (candidate as { withoutPlugins?: unknown } | undefined)?.withoutPlugins === 'function'
+  );
+}
+
+/**
+ * Whether `auth` runs over the real database. `getAuth()` memoizes the first instance for the
+ * whole process, so one built while a test had `getDb` faked (`spyOn` or `mockModule` of
+ * `src/db/database`) keeps that fake for every later file in the unisolated integration lane.
+ * Every route that reaches Better Auth then fails with `db.withoutPlugins is not a function`.
+ * // Usage: if (!authRunsOverRealDatabase(getAuth())) resetAuth();
+ */
+export function authRunsOverRealDatabase(auth: ReturnType<typeof getAuth>): boolean {
+  const database = auth.options.database as { db?: unknown } | undefined;
+  return isRealKysely(database?.db);
 }
 
 /**
@@ -58,6 +82,15 @@ export function createAuthenticatedApiTestApp(
   }
 
   const auth = getAuth();
+  if (!authRunsOverRealDatabase(auth) && isRealKysely(getDb())) {
+    // The database is real again, so this instance was memoized under a fake by an earlier test
+    // that never called its `restore()`. Drop it so the next caller rebuilds, and fail here
+    // with the cause instead of in whichever later file first signs a user up.
+    resetAuth();
+    throw new Error(
+      "(createAuthenticatedApiTestApp): expected Better Auth to run over the real database | received: an instance memoized while 'src/db/database' getDb was faked (spyOn or mockModule) and never restored; it was dropped, so re-run. Call the returned restore() in afterEach."
+    );
+  }
   const api = auth.api as Record<string, unknown>;
   const originalGetSession = auth.api.getSession.bind(auth.api);
 
@@ -88,6 +121,10 @@ export function createAuthenticatedApiTestApp(
 
   const restore = () => {
     api.getSession = originalGetSession;
+    // A suite that fakes `getDb` before building its app can be the first caller of
+    // `getAuth()`, which memoizes an instance over the fake. Dropping it here keeps the fake
+    // from outliving the test; an instance already over the real database stays.
+    if (!authRunsOverRealDatabase(auth)) resetAuth();
   };
 
   return { app, restore };
