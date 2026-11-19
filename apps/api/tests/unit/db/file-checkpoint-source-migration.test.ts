@@ -14,7 +14,7 @@ import { Migrator } from 'kysely/migration';
 import { createBunSqliteDialect } from '../../../src/db/bun-sqlite-dialect';
 import { allMigrations } from '../../../src/db/migrations';
 
-const BEFORE = '066_chat_search_text';
+const BEFORE = '067_message_expanded_text';
 const TARGET = '068_file_checkpoint_source';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the pre-068 schema is not the shape `Database` describes.

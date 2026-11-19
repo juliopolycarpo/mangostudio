@@ -108,19 +108,26 @@ function readFileCall(callId: string, path: string): ToolCall {
   return [callId, { name: 'read_file', argsStr: JSON.stringify({ path }) }];
 }
 
-/** Calls run in order, the way a streaming turn executes them. */
+/**
+ * One call at a time, each finishing before the next starts. The executor runs
+ * the calls of a single batch concurrently, so a batch of read_file then
+ * write_file races: write_file can start before the read is recorded and be
+ * refused. A real turn reads in an earlier round, which is what this models.
+ */
 async function runCalls(calls: ToolCall[], checkpointWorkspaceWrites = true) {
-  for await (const _item of executeStandardToolCallsWithProgress(calls, {
-    userId: chat.userId,
-    chatId: chat.id,
-    environmentId: LOCAL_ENVIRONMENT_ID,
-    assistantMessageId: messageId,
-    workdir,
-    db: getDb(),
-    settingsByToolName: new Map([['bash', shellSettings(checkpointWorkspaceWrites)]]),
-    allowedToolNames: new Set(['bash', 'write_file', 'read_file']),
-  })) {
-    // Drained for its effects; the filesystem and manifest are asserted below.
+  for (const call of calls) {
+    for await (const _item of executeStandardToolCallsWithProgress([call], {
+      userId: chat.userId,
+      chatId: chat.id,
+      environmentId: LOCAL_ENVIRONMENT_ID,
+      assistantMessageId: messageId,
+      workdir,
+      db: getDb(),
+      settingsByToolName: new Map([['bash', shellSettings(checkpointWorkspaceWrites)]]),
+      allowedToolNames: new Set(['bash', 'write_file', 'read_file']),
+    })) {
+      // Drained for its effects; the filesystem and manifest are asserted below.
+    }
   }
 }
 
