@@ -13,6 +13,7 @@
  * rejected promise.
  */
 
+import { existsSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { posix, win32 } from 'node:path';
 
@@ -36,8 +37,6 @@ import {
 import {
   DETACH_ENV_ALLOWLIST,
   pickAllowedEnv,
-  restartExecutableOptions,
-  spawnDetached,
   spawnDetachedWaiter,
   type SpawnDetachedWaiterInput,
 } from '../../../cli/detach';
@@ -48,6 +47,7 @@ import {
   stopPidOrThrow,
   waitForExit,
 } from '../../../cli/process-control';
+import { restartDetachedHub } from '../../../cli/restart-detached';
 import { sleep } from '../../../cli/sleep';
 import { type BuildInfo, getBuildInfo, isKnownBuildSha } from '../../../lib/build-info';
 import {
@@ -158,6 +158,8 @@ export interface UpgradeServiceDeps {
     launcherPath?: string;
   }) => Promise<void>;
   readonly currentExecutable: () => HubExecutable;
+  /** Whether a path exists; `restartLauncher` offers only a launcher the manager actually left. */
+  readonly pathExists: (path: string) => boolean;
   readonly readState: typeof readState;
   /** Whether the state file's pid is a live process — see `isStateLive`. */
   readonly isAlive: (pid: number) => boolean;
@@ -371,9 +373,12 @@ async function withRestart(
   if (decision.restart === 'scheduled' && state && launch) {
     try {
       // A delegated upgrade replaced what the manager's launcher points at,
-      // not this process's own path: come back through the launcher, where the
-      // launcher is one a restart can actually hand its pid handshake to.
-      const launcherPath = restartLauncher(installedVia, d.platform);
+      // not this process's own path: come back through the launcher.
+      const launcherPath = restartLauncher(installedVia, {
+        platform: d.platform,
+        execPath: installedVia.executable,
+        pathExists: d.pathExists,
+      });
       await d.restartHub({
         state,
         launch,
@@ -813,10 +818,10 @@ async function defaultStopHub(input: { state: ServerState; launch: HubLaunchMode
 
 /**
  * Real `restartHub` effect: service-managed bounces through the supervisor,
- * detached stops the old pid and spawns a successor through the installer's
- * `current` pointer when it resolves to one. Fire-and-forget by design — it
- * does not wait for the successor to become healthy, matching the report's
- * own `'scheduled'` wording rather than a confirmed restart.
+ * detached stops the old pid and spawns a successor through the manager's
+ * launcher or the installer's `current` pointer when one applies, resolving
+ * once the successor is healthy. A launcher that cannot run fails before the
+ * old hub is stopped, so the report names the failure with the hub still up.
  */
 async function defaultRestartHub(input: {
   state: ServerState;
@@ -828,18 +833,19 @@ async function defaultRestartHub(input: {
     return;
   }
   const controller = createProcessController();
-  await stopPidOrThrow(
-    { controller, now: Date.now, sleep },
-    input.state,
-    `MangoStudio (PID ${input.state.pid}) did not stop within 10s.`
-  );
-  await spawnDetached(
-    input.state.port,
-    input.state.host,
-    {},
+  await restartDetachedHub(
     {
-      waitForPid: input.state.pid,
-      ...restartExecutableOptions(currentHubExecutable(), input.launcherPath),
+      state: input.state,
+      executable: currentHubExecutable(),
+      launcherPath: input.launcherPath,
+    },
+    {
+      stop: () =>
+        stopPidOrThrow(
+          { controller, now: Date.now, sleep },
+          input.state,
+          `MangoStudio (PID ${input.state.pid}) did not stop within 10s.`
+        ),
     }
   );
 }
@@ -866,6 +872,7 @@ function resolveDeps(deps: Partial<UpgradeServiceDeps>): UpgradeServiceDeps {
     stopHub: deps.stopHub ?? defaultStopHub,
     restartHub: deps.restartHub ?? defaultRestartHub,
     currentExecutable: deps.currentExecutable ?? (() => currentHubExecutable()),
+    pathExists: deps.pathExists ?? existsSync,
     readState: deps.readState ?? readState,
     isAlive: deps.isAlive ?? createProcessController().isAlive,
     now: deps.now ?? Date.now,
