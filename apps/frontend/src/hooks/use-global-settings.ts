@@ -36,6 +36,7 @@ import { updateAppSettings } from '@/features/settings/app/api';
 import {
   appSettingsConfirmedWrite,
   appSettingsConflictEpoch,
+  appSettingsConflictRefreshPending,
   appSettingsKeys,
   appSettingsQueryOptions,
   appSettingsQueueCanSave,
@@ -339,9 +340,11 @@ export function useGlobalSettings() {
 
   const saveSettings = useCallback(
     (updater: (current: AppSettings) => AppSettings) => {
-      if (queryClient.getQueryState(appSettingsKeys.current())?.isInvalidated) {
+      if (appSettingsConflictRefreshPending(queryClient)) {
         // A conflict refresh is pending or failed. Do not build another whole
         // field from that rejected cache, including consent writes callers await.
+        // Only a 409 counts: an ordinary invalidation leaves the cache usable,
+        // and the refetch it starts is rebased under whatever is typed meanwhile.
         toast(t.errors.settingsSaveFailed, 'error');
         void queryClient
           .fetchQuery({ ...appSettingsQueryOptions(), staleTime: 0 })

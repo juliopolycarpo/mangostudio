@@ -7,13 +7,18 @@
  */
 import { beforeEach, describe, expect, it, jest, mock } from 'bun:test';
 
-import { type AppSettingsPutBody, DEFAULT_APP_SETTINGS } from '@mangostudio/shared/app-settings';
+import {
+  type AppSettings,
+  type AppSettingsPutBody,
+  DEFAULT_APP_SETTINGS,
+} from '@mangostudio/shared/app-settings';
+import { en } from '@mangostudio/shared/i18n';
 import { useQueryClient } from '@tanstack/react-query';
 
 import type { RealtimeTopicListener } from '@/lib/realtime/realtime-client';
 import { getTabWriterId } from '@/lib/realtime/writer-id';
 
-import { act, renderHook, waitFor } from '../../../support/harness/render';
+import { act, renderHook, screen, waitFor } from '../../../support/harness/render';
 import { setTestSession } from '../../../support/setup/auth-client-stub';
 
 const mockGet = jest.fn();
@@ -33,7 +38,9 @@ void mock.module('@/lib/realtime/realtime-client', () => ({
 const { useGlobalSettings } = await import('../../../../src/hooks/use-global-settings');
 const { useSettingsRealtimeInvalidation } =
   await import('../../../../src/features/settings/hooks/use-settings-realtime');
-const { appSettingsKeys } = await import('../../../../src/features/settings/app/queries');
+const { appSettingsKeys, refreshAppSettingsAfterConflict } =
+  await import('../../../../src/features/settings/app/queries');
+const { ApiError } = await import('../../../../src/lib/utils');
 
 const OTHER_TAB = 'other-tab-writer';
 const PROMPT_A = 'typed while the other tab saved';
@@ -118,5 +125,100 @@ describe('app settings auto-save with realtime invalidation on the same cache', 
     expect(result.current.queryClient.getQueryState(appSettingsKeys.current())?.isInvalidated).toBe(
       false
     );
+  });
+
+  // Realtime refetches now overlap typing. The invalidation guard in
+  // `saveSettings` exists for rejected (409) snapshots; an ordinary event only
+  // makes the cache stale, so a keystroke must queue and ride the refetch.
+  it('queues a keystroke typed while another tab refetch is in flight', async () => {
+    const { result } = renderBoth();
+    await waitFor(() => expect(result.current.settings.isLoading).toBe(false));
+    await waitFor(() => expect(mockSubscribe).toHaveBeenCalled());
+
+    const refetch = Promise.withResolvers<{ data: unknown; error: null }>();
+    mockGet.mockImplementation(() => refetch.promise);
+    let delivered: Promise<void> | undefined;
+    act(() => {
+      delivered = listener({
+        type: 'invalidate',
+        message: {
+          type: 'invalidate',
+          topic: 'settings',
+          scopes: ['app'],
+          writerId: OTHER_TAB,
+        } as never,
+      }) as Promise<void>;
+    });
+    await waitFor(() =>
+      expect(
+        result.current.queryClient.getQueryState(appSettingsKeys.current())?.isInvalidated
+      ).toBe(true)
+    );
+
+    // Typed before the refetch resolves.
+    act(() => result.current.settings.setTextSystemPrompt(PROMPT_A));
+    expect(
+      screen.queryByText(en.errors.settingsSaveFailed),
+      `expected no "${en.errors.settingsSaveFailed}" toast for a keystroke during an ordinary refetch | received: the toast`
+    ).toBeNull();
+
+    await act(async () => {
+      refetch.resolve({
+        data: { ...DEFAULT_APP_SETTINGS, revision: '"r2"', globalImageQuality: '4K' },
+        error: null,
+      });
+      await delivered;
+    });
+
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+    const sent = mockPut.mock.calls[0]?.[0] as AppSettingsPutBody;
+    expect(
+      sent.promptSettings?.textSystemPrompt,
+      'expected the PUT to carry the key typed during the refetch | received: the fetched value'
+    ).toBe(PROMPT_A);
+    expect(sent.globalImageQuality).toBe('4K');
+    const options = mockPut.mock.calls[0]?.[1] as { headers: Record<string, string> };
+    expect(options.headers['if-match']).toBe('"r2"');
+    expect(screen.queryByText(en.errors.settingsSaveFailed)).toBeNull();
+  });
+
+  it('still refuses a keystroke while a conflict refresh is pending, then accepts one after it lands', async () => {
+    const { result } = renderBoth();
+    await waitFor(() => expect(result.current.settings.isLoading).toBe(false));
+
+    const refresh = Promise.withResolvers<{ data: unknown; error: null }>();
+    mockGet.mockImplementation(() => refresh.promise);
+    let refreshing: Promise<void> | undefined;
+    act(() => {
+      refreshing = refreshAppSettingsAfterConflict(
+        result.current.queryClient,
+        new ApiError({ code: 'CONFLICT' })
+      );
+    });
+    await waitFor(() =>
+      expect(
+        result.current.queryClient.getQueryState(appSettingsKeys.current())?.isInvalidated
+      ).toBe(true)
+    );
+
+    act(() => result.current.settings.setTextSystemPrompt(PROMPT_A));
+    await waitFor(() => expect(screen.getByText(en.errors.settingsSaveFailed)).toBeTruthy());
+    // Refused: nothing was built from the rejected snapshot.
+    expect(
+      result.current.queryClient.getQueryData<AppSettings>(appSettingsKeys.current())
+        ?.promptSettings.textSystemPrompt
+    ).toBe(DEFAULT_APP_SETTINGS.promptSettings.textSystemPrompt);
+    expect(mockPut).not.toHaveBeenCalled();
+
+    await act(async () => {
+      refresh.resolve({ data: { ...DEFAULT_APP_SETTINGS, revision: '"r3"' }, error: null });
+      await refreshing;
+    });
+    mockGet.mockResolvedValue({ data: { ...DEFAULT_APP_SETTINGS, revision: '"r3"' }, error: null });
+
+    act(() => result.current.settings.setTextSystemPrompt(PROMPT_A));
+    await waitFor(() => expect(mockPut).toHaveBeenCalledTimes(1));
+    const options = mockPut.mock.calls[0]?.[1] as { headers: Record<string, string> };
+    expect(options.headers['if-match']).toBe('"r3"');
   });
 });
