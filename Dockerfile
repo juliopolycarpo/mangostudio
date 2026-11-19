@@ -16,8 +16,9 @@ ARG VERSION=dev
 ARG SOURCE_URL=https://github.com/juliopolycarpo/mangostudio
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates libstdc++6 \
+  && apt-get install -y --no-install-recommends ca-certificates libstdc++6 tini \
   && rm -rf /var/lib/apt/lists/* \
+  && ln -s "$(command -v tini)" /usr/local/bin/tini \
   && groupadd --system mango \
   && useradd --system --gid mango --home-dir /data --shell /usr/sbin/nologin mango \
   && mkdir -p /data /tmp \
@@ -40,5 +41,8 @@ USER mango
 VOLUME ["/data"]
 EXPOSE 3001
 
-ENTRYPOINT ["/usr/local/bin/mangostudio"]
+# tini is PID 1: it reaps orphaned processes (vendor CLIs, shells, git) the hub
+# did not spawn itself, and forwards SIGTERM to the hub. No -g: the hub already
+# stops its own children, so signalling the whole group would race that.
+ENTRYPOINT ["/usr/local/bin/tini", "--", "/usr/local/bin/mangostudio"]
 CMD ["serve"]
