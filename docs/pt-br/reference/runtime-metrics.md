@@ -188,37 +188,63 @@ hub que leva de 15 a 20 s. Se a gravação falha, o build avisa e distribui o hu
 10 MB a mais de memória); `--require-aot-order` faz o build falhar. O build de distribuição passa
 essa flag para as plataformas listadas na entrada `aot_order_platforms`: todas em um release e em
 pushes para a main (o Canary diário promove esses pacotes), e só linux-x64 em pull requests, o hub
-que o dry run de release reaproveita. Nessas execuções o tempo adicionado é de cerca de 5 s medidos localmente (14 s contra 9 s num build só do hub sem gravação; conte mais num runner) numa etapa
-de hub Linux que termina bem antes dos 6 a 12 minutos dos jobs de runtime, então o caminho crítico
-não muda. O Bun grava só no Linux, então hosts macOS e Windows compilam uma vez e dizem isso. Dos
-alvos distribuídos, os quatro Linux (x64 e arm64, glibc e musl) são construídos nativamente e
-gravam a própria ordem; só o linux-x64 glibc foi medido.
+que o dry run de release reaproveita. O Bun grava só no Linux, então hosts macOS e Windows compilam
+uma vez e dizem isso. Dos alvos distribuídos, os quatro Linux (x64 e arm64, glibc e musl) são
+construídos nativamente e gravam a própria ordem; só o linux-x64 glibc foi medido.
 
-**O que a gravação cobre.** O hub de gravação não tem `mangostudio-runtime` ao lado, porque os jobs
-do hub não esperam os jobs do runtime. A ordem cobre, portanto, o início e os caminhos de requisição
-do hub, e um lançamento do runtime Local que não encontra binário. Medido num layout instalado (hub
-com o runtime irmão), RSS ocioso após 10 s, nove rodadas intercaladas:
+**O que a gravação cobre.** O hub de gravação roda com o `mangostudio-runtime` da sua plataforma ao
+lado, como um hub instalado (`--aot-runtime-dir`, veja `docs/reference/releasing.md`), então a ordem
+cobre o código que um hub executa com o Local conectado, além do início e dos caminhos de
+requisição. O gravador confere, depois da carga, que o hub lançou o runtime como processo filho e
+faz o build falhar se não lançou, porque um hub segue sem o runtime e gravaria a ordem menor sem
+avisar. Gravar com o runtime capturou 5.818 funções contra 5.655 sem ele.
 
-| Ordem gravada                     |      VmRSS ocioso (KB) | Após a carga (KB) |
-| --------------------------------- | ---------------------: | ----------------: |
-| nenhuma                           |                 69.612 |            75.800 |
-| sem runtime (o que é distribuído) | 62.024 (61.240–63.020) |            67.920 |
-| com o runtime irmão               | 60.176 (59.908–61.808) |            66.588 |
+Medido como A/B pareado do hub produzido: mesmo código, frontend e Bun, compilado duas vezes, uma
+com a ordem gravada sem runtime (o que era distribuído) e outra com ele. Ambos rodaram de cópias no
+mesmo sistema de arquivos btrfs, com o mesmo runtime ao lado (layout instalado), 15 rodadas
+intercaladas em ordem rotativa, home novo a cada início, memória ociosa lida 10 s após a primeira
+resposta saudável e de novo 3 s após a carga, em linux-x64 glibc com a carga média do host entre 8 e 19. Medianas, com a diferença pareada por rodada (head menos base):
 
-A linha sem ordem é uma execução única; as duas linhas gravadas são medianas de nove rodadas.
-Gravar com o runtime capturou 5.683 funções contra 5.526 e economiza mais 1,3 a 1,9 MB (cerca de
-3%), com faixas disjuntas. Adotar isso faria os jobs do hub esperarem os jobs do runtime (cerca de 1
-a 3 minutos no caminho crítico do release) e exigiria o runtime musl dentro do contêiner Alpine;
-isso é acompanhado em [#2294](https://github.com/juliopolycarpo/mangostudio/issues/2294).
+| Métrica                             | Gravada sem runtime | Com runtime | Diferença pareada (faixa)          |
+| ----------------------------------- | ------------------: | ----------: | ---------------------------------- |
+| VmRSS ocioso (KB)                   |              57.788 |      56.412 | −1.236 (−2.964 a +596), 14 de 15   |
+| RssFile ocioso (KB)                 |              42.052 |      40.708 | −1.352 (−1.576 a −952), 15 de 15   |
+| RssAnon ocioso (KB)                 |              15.748 |      15.640 | −88 (−1.620 a +1.688), 9 de 15     |
+| VmRSS após a carga (KB)             |              64.696 |      63.292 | −1.388 (−1.720 a −1.012), 15 de 15 |
+| Início até a primeira resposta (ms) |               136,3 |       135,3 | +1,3 (−38 a +22), 7 de 15          |
+| CPU até a primeira resposta (ms)    |                 130 |         130 | 0 (−30 a +30)                      |
+| CPU nos 10 s ociosos (ms)           |                  40 |          30 | 0 (−20 a +10)                      |
 
-Para reproduzir, a partir de um checkout limpo de cada revisão (ambos os builds no mesmo sistema de
-arquivos):
+O VmRSS ocioso cai 2,1% (a parte respaldada por arquivo, 3,2%) e o RSS após a carga 2,1%; o tempo
+de início e a CPU ociosa não mudam (a CPU é lida em ticks de 10 ms). A economia são páginas do
+executável que um hub com o Local conectado toca e que a ordem agora mantém juntas, por isso é
+memória respaldada por arquivo. São cerca de 1,3 MB, o limite inferior dos 1,3 a 1,9 MB achados na
+primeira medição manual. Um par de gravações está por trás da tabela; um segundo par não foi
+construído.
+
+Custo no CI. Os jobs do hub agora esperam os builds de runtime Linux, que o `distribution-build.yml`
+chama à parte para que as etapas mais lentas de macOS e Windows fiquem fora da espera. Reproduzindo
+os tempos dos jobs de 40 execuções bem-sucedidas do `ci.yml` (38 pull requests, 2 pushes para a
+main; cada etapa de hub que grava ganhou 10 s para baixar o runtime e gravar por mais tempo), o fim
+dos jobs do hub, e portanto do job de empacotamento, se move por uma mediana de 13 s num pull
+request (média de 32 s, no máximo 114 s) e por 0 s nos dois pushes com perfil de distribuição; fazer
+todo hub esperar todo runtime teria custado uma mediana de 27 s e 104 s. O tempo de runner cresce
+pelo download do artefato e cerca de 4 s de gravação por etapa Linux que grava, menos de um minuto
+num release ou num push para a main. Localmente a gravação levou 4,9 s com o runtime e 5,0 s sem
+(9,0 s uma vez, num host carregado).
+
+Para reproduzir, a partir de um checkout (ambos os builds no mesmo sistema de arquivos; o runtime
+precisa carregar a versão de release do hub, então construa-o com `bun run build:runtime`):
 
 ```bash
-bun run build --binary --hub-only --production
-cp .mango/out/linux-x64/mangostudio /caminho/no/disco/head-hub
-bun run scripts/bench/hub-footprint.ts --rounds 5 --idle-seconds 10 --workload \
-  base=/caminho/no/disco/base-hub head=/caminho/no/disco/head-hub
+bun run build:runtime --platform linux-x64 --out .mango/runtime-prebuilt
+bun run build --binary --hub-only --platform linux-x64 --require-aot-order
+cp -r .mango/out/linux-x64 /caminho/no/disco/base && cp .mango/runtime-prebuilt/linux-x64/mangostudio-runtime /caminho/no/disco/base/
+bun run build --binary --hub-only --platform linux-x64 --require-aot-order \
+  --aot-runtime-dir .mango/runtime-prebuilt
+cp -r .mango/out/linux-x64 /caminho/no/disco/head && cp .mango/runtime-prebuilt/linux-x64/mangostudio-runtime /caminho/no/disco/head/
+bun run scripts/bench/hub-footprint.ts --rounds 15 --idle-seconds 10 --workload \
+  base=/caminho/no/disco/base/mangostudio head=/caminho/no/disco/head/mangostudio
 ```
 
 **Não distribuído.** `--no-compile-function-source` produziu um binário idêntico byte a byte: com

@@ -316,36 +316,64 @@ It adds one extra compile and a run, about 8 s on a loaded host to a hub-only bu
 memory); `--require-aot-order` fails the build instead. The distribution build passes it for the
 platforms its `aot_order_platforms` input lists: every platform for a release and for pushes to
 main (daily Canary promotes those bundles), and linux-x64 only on pull requests, the hub their
-release dry run reuses. On those runs the added time is about 5 s measured locally (14 s against 9 s for a plain hub-only build; allow more on a runner) on a Linux hub leg that
-finishes well before the 6 to 12 minute runtime jobs, so the critical path does not move. Bun records
-on Linux only, so macOS and Windows hosts compile once and say so. Of the shipped targets the four
-Linux ones (x64 and arm64, glibc and musl) are built natively and record their own; only linux-x64
-glibc has been measured.
+release dry run reuses. Bun records on Linux only, so macOS and Windows hosts compile once and say
+so. Of the shipped targets the four Linux ones (x64 and arm64, glibc and musl) are built natively
+and record their own; only linux-x64 glibc has been measured.
 
-**What the recording covers.** The recording hub has no `mangostudio-runtime` beside it, because
-the hub jobs do not wait for the runtime jobs. The order therefore covers the hub's start-up and
-request paths, and a Local runtime launch that finds no binary. Measured on an installed layout
-(hub with its sibling runtime), idle RSS after 10 s, nine interleaved rounds:
+**What the recording covers.** The recording hub runs with its platform's `mangostudio-runtime`
+beside it, as an installed hub does (`--aot-runtime-dir`, see `docs/reference/releasing.md`), so the
+order covers the code a hub runs once Local is attached as well as its start-up and request paths.
+The recorder checks that the hub launched the runtime as a child after the workload and fails the
+build if it did not, because a hub carries on without its runtime and would record the smaller
+order without a word. Recording with the runtime captured 5,818 functions against 5,655 without it.
 
-| Order recorded                 |        Idle VmRSS (KB) | After workload (KB) |
-| ------------------------------ | ---------------------: | ------------------: |
-| none                           |                 69,612 |              75,800 |
-| without a runtime (what ships) | 62,024 (61,240–63,020) |              67,920 |
-| with the sibling runtime       | 60,176 (59,908–61,808) |              66,588 |
+Measured as a matched A/B of the produced hub: the same source, frontend and Bun, compiled twice,
+once with the order recorded without a runtime (what shipped before) and once with it. Both ran from
+copies on one btrfs filesystem with the same runtime beside them (an installed layout), 15
+interleaved rounds in rotated order, a fresh home each start, idle memory read 10 s after the first
+healthy answer and again 3 s after the workload, on linux-x64 glibc with the host load average at 8
+to 19. Medians, with the paired per-round difference (head minus base):
 
-The no-order row is a single run; the two recorded rows are the nine-round medians. Recording with a
-runtime captured 5,683 functions against 5,526 and saves another 1.3 to 1.9 MB (about 3%) with
-disjoint ranges. Taking it would make the hub jobs wait for the runtime jobs (about 1 to 3 minutes
-on the release critical path) and need the musl runtime inside the Alpine container; that is
-tracked in [#2294](https://github.com/juliopolycarpo/mangostudio/issues/2294).
+| Metric                      | Recorded alone | With runtime | Paired difference (range)           |
+| --------------------------- | -------------: | -----------: | ----------------------------------- |
+| Idle VmRSS (KB)             |         57,788 |       56,412 | −1,236 (−2,964 to +596), 14 of 15   |
+| Idle RssFile (KB)           |         42,052 |       40,708 | −1,352 (−1,576 to −952), 15 of 15   |
+| Idle RssAnon (KB)           |         15,748 |       15,640 | −88 (−1,620 to +1,688), 9 of 15     |
+| After workload VmRSS (KB)   |         64,696 |       63,292 | −1,388 (−1,720 to −1,012), 15 of 15 |
+| Start to first healthy (ms) |          136.3 |        135.3 | +1.3 (−38 to +22), 7 of 15          |
+| CPU to first healthy (ms)   |            130 |          130 | 0 (−30 to +30)                      |
+| CPU over the 10 s idle (ms) |             40 |           30 | 0 (−20 to +10)                      |
 
-Reproduce, from a clean checkout of each revision (both builds on one filesystem):
+Idle VmRSS falls 2.1% (the file-backed part 3.2%) and RSS after the workload 2.1%; start-up time
+and idle CPU do not move (CPU is read in 10 ms ticks). The saving is pages of the executable that a
+hub with Local attached touches and the order now keeps together, so it is file-backed memory. It is
+about 1.3 MB, the low end of the 1.3 to 1.9 MB found when this was first measured by hand. One
+recording pair is behind the table; a second pair was not built.
+
+Cost in CI. The hub jobs now wait for the Linux runtime builds, which `distribution-build.yml`
+calls on their own (two calls, x64 with musl and arm64 with its probe, running in parallel) so the
+slower macOS and Windows runtime legs are not in the wait. The replay below used the Linux legs'
+own finish times, so it holds for the pair. Replaying the
+job timings of 40 successful `ci.yml` runs (38 pull requests, 2 pushes to main; each recording hub
+leg given 10 s extra for the runtime download and a longer recording) moves the end of the hub
+jobs, and so the packaging job, by a median of 13 s on a pull request (mean 32 s, at most 114 s)
+and by 0 s on the two shipping-profile pushes; making every hub wait for every runtime would have
+cost a median of 27 s and 104 s. Runner time grows by the artifact download and about 4 s of
+recording per recording Linux leg, under a minute for a release or a push to main. Locally the
+recording took 4.9 s with the runtime and 5.0 s without (9.0 s once, on a loaded host).
+
+Reproduce, from one checkout (both builds on one filesystem; the runtime must carry the hub's
+release version, so build it with `bun run build:runtime`):
 
 ```bash
-bun run build --binary --hub-only --production
-cp .mango/out/linux-x64/mangostudio /path/on/disk/head-hub
-bun run scripts/bench/hub-footprint.ts --rounds 5 --idle-seconds 10 --workload \
-  base=/path/on/disk/base-hub head=/path/on/disk/head-hub
+bun run build:runtime --platform linux-x64 --out .mango/runtime-prebuilt
+bun run build --binary --hub-only --platform linux-x64 --require-aot-order
+cp -r .mango/out/linux-x64 /path/on/disk/base && cp .mango/runtime-prebuilt/linux-x64/mangostudio-runtime /path/on/disk/base/
+bun run build --binary --hub-only --platform linux-x64 --require-aot-order \
+  --aot-runtime-dir .mango/runtime-prebuilt
+cp -r .mango/out/linux-x64 /path/on/disk/head && cp .mango/runtime-prebuilt/linux-x64/mangostudio-runtime /path/on/disk/head/
+bun run scripts/bench/hub-footprint.ts --rounds 15 --idle-seconds 10 --workload \
+  base=/path/on/disk/base/mangostudio head=/path/on/disk/head/mangostudio
 ```
 
 **Not shipped.** `--no-compile-function-source` produced a byte-identical binary: with

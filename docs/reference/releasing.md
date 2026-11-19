@@ -261,8 +261,9 @@ vouches for a build that failed.
 The hub uses Bun native AOT; `mangostudio-runtime` is the cargo binary from
 `crates/mangostudio-runtime`. `distribution-build.yml` prepares the frontend and
 binary smoke harness once and calls `.github/workflows/runtime-build.yml` for
-the eight Rust targets. Each native hub producer starts when the prepared
-frontend is ready and runs:
+the eight Rust targets in several calls: the Linux targets apart from macOS and Windows.
+Each native hub producer starts when the prepared frontend and the Linux
+runtimes are ready and runs:
 
 ```bash
 bun run build:binary --hub-only --platform <matching-host> --reuse-frontend
@@ -292,10 +293,20 @@ and the native hub artifact carries it. macOS and Windows producers compile once
 `distribution-build.yml` takes the platforms that must record through `aot_order_platforms` (space
 separated ids, or `all`; empty by default). `release.yml` passes `all`; `ci.yml` passes `all` for
 pushes, because daily Canary promotes those bundles, and only `linux-x64` for pull requests, the hub
-that the release dry run reuses. Recording adds about 5 s locally (allow more on a runner) to a Linux hub leg that finishes
-before the runtime jobs, so it does not lengthen the run. The recording hub has no runtime beside
-it; see [runtime-metrics.md](runtime-metrics.md#hub-binary-aot-function-order) for what that
-covers and what a recorded runtime would add.
+that the release dry run reuses.
+
+A recording Linux hub runs with its platform's runtime beside it, so the order also covers the code a
+hub runs once Local is attached. The hub job downloads `runtime-<source sha>-<platform>` into
+`.mango/runtime-prebuilt` and passes that directory as `--aot-runtime-dir` (or `AOT_RUNTIME_DIR`); the
+build places `<dir>/<platform>/mangostudio-runtime` beside the recording hub, and fails when the file
+is missing or when the hub did not launch it as a child after the workload. The runtime must carry the
+release version of the hub it runs beside, which the distribution's runtime call guarantees. Because
+of that, the hub jobs `need` the two calls that build Linux runtimes (`runtime` for x64 and x64 musl,
+`runtime-linux-arm64` for both arm64 targets, which its probe also waits for). The natively linked
+macOS and Windows runtimes are their own call (`runtime-hosts`), so the slow Windows legs do not hold
+the hubs back; only the packaging job waits for it. Replayed on 40 recent runs, that moves the
+packaging job by a median of 13 s on a pull request and by none on a shipping-profile push; see
+[runtime-metrics.md](runtime-metrics.md#hub-binary-aot-function-order) for the measurement.
 
 `--reuse-frontend` accepts `apps/frontend/dist/build-info.json` only when both
 the prepared build and checkout are clean, name the same HEAD and use the same
@@ -309,7 +320,8 @@ Each Rust producer records the source SHA, version, Cargo profile, and
 executable digest. When a producer cross-links a runtime, a separate job on
 the matching host runs that runtime's `--version` and records the result
 against the same digest. The distribution build calls `runtime-build.yml` once
-per cross-linked host plus once for the rest, and each host's probe
+per cross-linked host plus twice for the rest (Linux, then macOS and Windows),
+and each host's probe
 (`runtime-probe.yml`) needs only its own call, so it starts when its targets are built instead of after the
 slowest of the eight.
 

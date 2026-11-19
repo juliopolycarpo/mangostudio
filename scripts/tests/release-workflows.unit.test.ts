@@ -516,9 +516,19 @@ describe('release workflow binary gate', () => {
     for (const job of [prepare, hub, build, runtimeVersion]) {
       expect(job).toContain('ref: $' + '{{ inputs.source_sha }}');
     }
-    expect(hub).toContain('needs: [prepare]');
+    // The hubs wait for the two Linux runtime calls only (see the AOT recording test below), never
+    // for a macOS or Windows call, which is what the packaging job and the probes wait for.
+    expect(hub).toContain('needs: [prepare, runtime, runtime-linux-arm64]');
     expect(hub).toContain('include-hidden-files: true');
-    expect(hub).not.toContain('.mango/runtime-prebuilt');
+    // A hub never pairs with a runtime: the one it downloads only runs beside its recording hub,
+    // and the upload below carries neither it nor the hub's receipts for it.
+    expect(
+      hub.match(/\.mango\/runtime-prebuilt/g),
+      'the hub job names the runtime directory only to record'
+    ).toHaveLength(1);
+    expect(extractStepBlock(hub, 'Upload native hub and compiler receipt')).not.toContain(
+      'runtime-prebuilt'
+    );
     expect(hub).toContain('.mango/hub-compiles/$' + '{{ matrix.platform }}.json');
     const install = extractStepBlocks(hub).find((step) => step.includes('actions/setup-mango'));
     expect(install).toContain('if: $' + '{{ !matrix.musl }}');
@@ -593,6 +603,62 @@ describe('release workflow binary gate', () => {
     expect(build).not.toContain('bun run build --binary');
   });
 
+  test('a recording Linux hub runs beside its own platform runtime, and only the Linux runtimes gate the hubs', () => {
+    const workflow = readText('.github/workflows/distribution-build.yml');
+    const hub = extractJobBlock(workflow, 'hub');
+    const platformsOf = (job: string): string[] =>
+      JSON.parse(/platforms: '(\[[^']*\])'/.exec(extractJobBlock(workflow, job))?.[1] ?? 'null');
+    const runtimeCalls = Object.keys(distributionRuntimeCalls());
+    const linuxCalls = runtimeCalls.filter((job) =>
+      platformsOf(job).every((platform) => platform.startsWith('linux-'))
+    );
+    // The hubs wait for exactly the calls that build a Linux runtime, so a call that mixes a Linux
+    // and a macOS or Windows platform would put the slow legs on the hubs' path.
+    expect(linuxCalls.sort(), 'expected the calls that build only Linux runtimes').toEqual([
+      'runtime',
+      'runtime-linux-arm64',
+    ]);
+    expect(
+      runtimeCalls.some(
+        (job) =>
+          !linuxCalls.includes(job) &&
+          platformsOf(job).some((platform) => platform.startsWith('linux-'))
+      ),
+      'a Linux runtime built in a call the hubs do not wait for'
+    ).toBe(false);
+    expect(extractJobBlock(workflow, 'hub')).toContain(
+      `needs: [prepare, ${linuxCalls.join(', ')}]`
+    );
+    // Every release target is built by exactly one call, under the same artifact names.
+    expect(runtimeCalls.flatMap(platformsOf).sort()).toEqual(
+      ALL_BINARY_TARGETS.map((target) => target.arch).sort()
+    );
+    for (const job of runtimeCalls) {
+      expect(extractJobBlock(workflow, job), job).toContain(
+        'artifact_prefix: runtime-$' + '{{ inputs.source_sha }}'
+      );
+    }
+
+    const select = extractStepBlock(hub, 'Select AOT function order recording');
+    expect(select).toContain('linux-*) runtime_dir=".mango/runtime-prebuilt" ;;');
+    expect(select).toContain('echo "runtime_dir=$runtime_dir" >> "$GITHUB_OUTPUT"');
+    const download = extractStepBlock(hub, 'Download the runtime the recording hub runs beside');
+    expect(download).toContain('if: $' + "{{ steps.aot.outputs.runtime_dir != '' }}");
+    expect(download).toContain(
+      'name: runtime-$' + '{{ inputs.source_sha }}-$' + '{{ matrix.platform }}'
+    );
+    expect(download).toContain('path: $' + '{{ steps.aot.outputs.runtime_dir }}');
+    // Both builds read it from the environment; the Alpine one passes it into the container.
+    for (const name of ['Build native hub', 'Build native musl hub in Alpine']) {
+      expect(extractStepBlock(hub, name), name).toContain(
+        'AOT_RUNTIME_DIR: $' + '{{ steps.aot.outputs.runtime_dir }}'
+      );
+    }
+    expect(extractStepBlock(hub, 'Build native musl hub in Alpine')).toContain(
+      '-e AOT_RUNTIME_DIR'
+    );
+  });
+
   test('one reusable builder creates manifest-backed target and packaged artifacts', () => {
     const workflow = readText('.github/workflows/distribution-build.yml');
     const hub = extractJobBlock(workflow, 'hub');
@@ -649,6 +715,7 @@ describe('release workflow binary gate', () => {
     const calls = distributionRuntimeCalls();
     expect(Object.keys(calls)).toEqual([
       'runtime',
+      'runtime-hosts',
       'runtime-linux-arm64',
       'runtime-darwin-x64',
       'runtime-windows-arm64',

@@ -5,8 +5,9 @@
  * round, so a slow minute on the host lands on each of them in turn.
  *
  * Every hub gets a fresh isolated home and a fresh database ("cold" in startup.ts terms) and runs
- * without a sibling runtime: the hub's own pages, auth and chat list need none, and the runtime
- * child is a separate process that would not be in the hub's `/proc/<pid>/status` anyway.
+ * with whatever `mangostudio-runtime` sits beside the binary, as an installed hub does (none when the
+ * binary is alone): the hub's own pages, auth and chat list need none, and the runtime child is a
+ * separate process that would not be in the hub's `/proc/<pid>/status` anyway.
  *
  * Memory is read from `/proc/<pid>/status`, Linux only. `RssFile` is the executable image on
  * disk-backed files and `RssShmem` on tmpfs; keep candidates on one filesystem.
@@ -66,6 +67,31 @@ export function parseProcessStatus(status: string): ProcessMemoryKb {
   return found as unknown as ProcessMemoryKb;
 }
 
+/** `/proc` reports CPU time in clock ticks, `sysconf(_SC_CLK_TCK)`, which is 100 on Linux. */
+const CLOCK_TICKS_PER_SECOND = 100;
+
+/**
+ * User plus system CPU time of a process in milliseconds, from a `/proc/<pid>/stat` line. The
+ * command name is parenthesised and may hold spaces, so the fields are counted from the last `)`.
+ * Resolution is one clock tick (10 ms).
+ * Example: parseProcessCpuMs('4242 (mangostudio) S 1 4242 4242 0 -1 4194560 1 0 0 0 31 7 0 0 ...') // 380
+ */
+export function parseProcessCpuMs(stat: string): number {
+  const afterName = stat
+    .slice(stat.lastIndexOf(')') + 1)
+    .trim()
+    .split(/\s+/);
+  // After `)` the fields start at 3 (state); utime and stime are fields 14 and 15.
+  const utime = Number(afterName[11]);
+  const stime = Number(afterName[12]);
+  if (!Number.isSafeInteger(utime) || !Number.isSafeInteger(stime)) {
+    throw new Error(
+      `process stat: expected integer utime and stime in fields 14 and 15 | received: ${stat.slice(0, 200)}`
+    );
+  }
+  return ((utime + stime) * 1000) / CLOCK_TICKS_PER_SECOND;
+}
+
 /**
  * Parses `label=path` candidate arguments; labels must be unique.
  * Example: parseCandidates(['base=./a', 'head=./b']) // [{ label: 'base', binary: './a' }, ...]
@@ -93,11 +119,19 @@ async function readMemory(pid: number): Promise<ProcessMemoryKb> {
   return parseProcessStatus(await Bun.file(`/proc/${pid}/status`).text());
 }
 
+async function readCpuMs(pid: number): Promise<number> {
+  return parseProcessCpuMs(await Bun.file(`/proc/${pid}/stat`).text());
+}
+
 interface Row {
   readonly round: number;
   readonly label: string;
   readonly toHealthMs: number;
   readonly load1: number;
+  /** CPU time the hub had used when it first answered health: what starting it cost. */
+  readonly cpuAtHealthMs: number;
+  /** CPU time the hub used between that answer and the idle reading; null without an idle wait. */
+  readonly cpuIdleWindowMs: number | null;
   readonly atHealth: ProcessMemoryKb;
   readonly idle: ProcessMemoryKb | null;
   readonly afterWorkload: ProcessMemoryKb | null;
@@ -171,13 +205,16 @@ async function measureCandidate(
       );
     }
     const atHealth = await readMemory(child.pid);
+    const cpuAtHealthMs = await readCpuMs(child.pid);
     let idle: ProcessMemoryKb | null = null;
+    let cpuIdleWindowMs: number | null = null;
     let afterWorkload: ProcessMemoryKb | null = null;
     let workload: WorkloadResult | null = null;
     const afterIdentityRequests: Record<number, ProcessMemoryKb> = {};
     if (options.idleSeconds > 0) {
       await Bun.sleep(options.idleSeconds * 1000);
       idle = await readMemory(child.pid);
+      cpuIdleWindowMs = (await readCpuMs(child.pid)) - cpuAtHealthMs;
     }
     if (options.workload) {
       workload = await runHubWorkload(`http://127.0.0.1:${port}`);
@@ -206,6 +243,8 @@ async function measureCandidate(
       label,
       toHealthMs,
       load1,
+      cpuAtHealthMs,
+      cpuIdleWindowMs,
       atHealth,
       idle,
       afterWorkload,
@@ -315,6 +354,8 @@ async function main(): Promise<void> {
       label,
       bytes: sizes.get(label),
       toHealthMs: summarizeLatencies(mine.map((row) => row.toHealthMs)),
+      cpuAtHealthMs: median(mine.map((row) => row.cpuAtHealthMs)),
+      cpuIdleWindowMs: pick((row) => row.cpuIdleWindowMs ?? undefined),
       idleVmRssKb: pick((row) => row.idle?.VmRSS),
       idleRssAnonKb: pick((row) => row.idle?.RssAnon),
       idleRssFileKb: pick((row) => row.idle?.RssFile),
