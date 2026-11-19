@@ -17,8 +17,8 @@ use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use super::capability::{
-    BoundDir, CheckedChild, open_checked_child, open_directory_if_present, open_existing_file,
-    verify_opened_file,
+    BoundDir, CheckedChild, is_outside_policy_error, open_checked_child, open_directory_if_present,
+    open_existing_file, verify_opened_file,
 };
 use super::grep_prefilter::LinePrefilter;
 use super::io::{check_cancel, io_error, path_error, read};
@@ -1145,8 +1145,15 @@ fn walk_opened_capability(
         };
         let relative = frame.relative.join(&name);
         // A child that vanished or turned into a symlink since its parent was
-        // listed is skipped; one that resolves outside the policy is an error.
-        entering = open_checked_child(policy, &root_path.join(&relative), &frame.dir, &name)?;
+        // listed is skipped. So is one that resolves outside the policy: the
+        // frame's handle follows its directory when it is renamed, so that is a
+        // parent moved out of the policy mid-walk, and its subtree is simply no
+        // longer inside the search. Any other failure ends the request.
+        entering = match open_checked_child(policy, &root_path.join(&relative), &frame.dir, &name) {
+            Ok(child) => child,
+            Err(error) if is_outside_policy_error(&error) => None,
+            Err(error) => return Err(error),
+        };
         entering_relative = relative;
     }
 }
@@ -2015,6 +2022,58 @@ mod tests {
         assert!(
             below_victim.is_empty(),
             "expected the walk to skip the symlink that replaced `victim` and list nothing below it | entries below victim: {below_victim:?}"
+        );
+        assert!(
+            seen.contains(&Path::new("bystander").join("kept.txt")),
+            "expected the unrelated sibling to still be walked | seen: {seen:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn restricted_walk_skips_the_subtree_of_a_directory_renamed_out_of_the_policy_mid_walk() {
+        let sandbox = scratch_dir("filesystem-search-parent-moved");
+        let root = sandbox.join("root");
+        let relocated = sandbox.join("relocated");
+        fs::create_dir_all(root.join("parent/child")).unwrap();
+        fs::create_dir_all(root.join("bystander")).unwrap();
+        fs::write(root.join("parent/child/deep.txt"), "moved").unwrap();
+        fs::write(root.join("bystander/kept.txt"), "kept").unwrap();
+        let policy = PathPolicy {
+            allowed_roots: vec![root.clone()],
+            containment_root: Some(root.clone()),
+            ..PathPolicy::default()
+        }
+        .compile()
+        .unwrap();
+        let moved_when = Path::new("parent").join("child");
+        let mut moved = false;
+        let mut seen = Vec::new();
+
+        let outcome = walk(&root, false, &policy, None, &token(), |entry| {
+            seen.push(entry.relative.to_path_buf());
+            // `parent/child` is reported while the walk holds `parent`'s handle
+            // and still has to descend into `child` through it. Renaming
+            // `parent` now leaves that handle outside the policy.
+            if entry.relative == moved_when && !moved {
+                fs::rename(root.join("parent"), &relocated).unwrap();
+                moved = true;
+            }
+            Ok(WalkControl::Continue)
+        });
+
+        assert!(
+            outcome.is_ok(),
+            "expected the walk to finish and skip the moved subtree | received: {:?}",
+            outcome.err().map(|error| error.message)
+        );
+        assert!(
+            moved,
+            "expected the walk to report `parent/child` and trigger the rename | seen: {seen:?}"
+        );
+        assert!(
+            !seen.contains(&moved_when.join("deep.txt")),
+            "expected nothing below the renamed `parent` to be listed | seen: {seen:?}"
         );
         assert!(
             seen.contains(&Path::new("bystander").join("kept.txt")),

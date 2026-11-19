@@ -141,12 +141,7 @@ impl AnchoredDir {
 }
 
 fn anchored_open_error(path: &Path, error: std::io::Error) -> RemoteError {
-    if matches!(
-        error.kind(),
-        std::io::ErrorKind::NotFound
-            | std::io::ErrorKind::NotADirectory
-            | std::io::ErrorKind::TooManyLinks
-    ) {
+    if is_vanished_or_replaced_directory(&error) {
         return path_error(format!(
             "Cannot reopen \"{}\" through its policy-bound directory: {error}",
             path.display()
@@ -343,6 +338,12 @@ pub(super) struct CheckedChild {
 /// Returns `None` when `name` is gone, is no longer a directory, or became a
 /// symlink since the parent was listed: such a child is skipped.
 ///
+/// A child whose handle resolves outside the policy is an error carrying the
+/// `outsidePolicy` detail, which [`is_outside_policy_error`] recognizes. That
+/// happens when `parent` itself was renamed out of the policy after the caller
+/// opened it. A caller that holds `parent` across a walk may treat it like a
+/// skipped child; any other caller keeps the error.
+///
 /// # Example
 ///
 /// ```ignore
@@ -358,21 +359,53 @@ pub(super) fn open_checked_child(
 ) -> Result<Option<CheckedChild>, RemoteError> {
     let dir = match parent.open_dir_nofollow(name) {
         Ok(dir) => dir,
-        Err(error)
-            if matches!(
-                error.kind(),
-                std::io::ErrorKind::NotFound
-                    | std::io::ErrorKind::NotADirectory
-                    | std::io::ErrorKind::TooManyLinks
-            ) =>
-        {
-            return Ok(None);
-        }
+        Err(error) if is_vanished_or_replaced_directory(&error) => return Ok(None),
         Err(error) => return Err(io_error(error)),
     };
     let final_path = directory_final_path(&dir)?;
-    policy.check_final_handle_path(requested, &final_path)?;
+    policy
+        .check_final_handle_path(requested, &final_path)
+        .map_err(|error| error.with_detail("outsidePolicy", true))?;
     Ok(Some(CheckedChild { dir, final_path }))
+}
+
+/// Whether `error` came from [`open_checked_child`] refusing a directory that
+/// resolves outside the policy, as opposed to failing to read its path.
+pub(super) fn is_outside_policy_error(error: &RemoteError) -> bool {
+    error
+        .details
+        .as_ref()
+        .and_then(|details| details.get("outsidePolicy"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
+/// Whether a no-follow directory open failed because the name is gone, is not
+/// a directory, or is a symlink or reparse point the open refused to follow.
+///
+/// cap-std reports a refused symlink as `ELOOP` or `ENOTDIR` on Unix. On
+/// Windows it stops at a symlink or junction with
+/// `ERROR_STOPPED_ON_SYMLINK`, which std maps to
+/// [`std::io::ErrorKind::Uncategorized`]: the error kind alone cannot name it.
+fn is_vanished_or_replaced_directory(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        std::io::ErrorKind::NotFound
+            | std::io::ErrorKind::NotADirectory
+            | std::io::ErrorKind::TooManyLinks
+    ) || is_refused_symlink(error)
+}
+
+#[cfg(windows)]
+fn is_refused_symlink(error: &std::io::Error) -> bool {
+    use windows_sys::Win32::Foundation::ERROR_STOPPED_ON_SYMLINK;
+
+    error.raw_os_error() == Some(ERROR_STOPPED_ON_SYMLINK.cast_signed())
+}
+
+#[cfg(not(windows))]
+fn is_refused_symlink(_error: &std::io::Error) -> bool {
+    false
 }
 
 fn bind_verified_parent(
@@ -1155,7 +1188,93 @@ mod tests {
             Err(error) => error,
         };
 
+        assert!(
+            is_outside_policy_error(&error),
+            "expected the `outsidePolicy` marker a walk uses to skip the subtree | received: {error:?}"
+        );
         assert_eq!(error.details.unwrap()["kind"], "path_access");
+    }
+
+    #[test]
+    fn only_a_refused_policy_check_carries_the_outside_policy_marker() {
+        let unrelated = path_error("Cannot verify the opened filesystem object's final path");
+
+        assert!(
+            !is_outside_policy_error(&unrelated),
+            "expected a plain path_access error not to read as outside the policy | received: {unrelated:?}"
+        );
+    }
+
+    #[test]
+    fn a_vanished_or_replaced_directory_is_recognized_by_its_error_kind() {
+        for kind in [
+            std::io::ErrorKind::NotFound,
+            std::io::ErrorKind::NotADirectory,
+            std::io::ErrorKind::TooManyLinks,
+        ] {
+            assert!(
+                is_vanished_or_replaced_directory(&std::io::Error::from(kind)),
+                "expected {kind:?} to count as a vanished or replaced directory"
+            );
+        }
+        assert!(
+            !is_vanished_or_replaced_directory(&std::io::Error::from(
+                std::io::ErrorKind::PermissionDenied
+            )),
+            "expected PermissionDenied to stay a real failure"
+        );
+    }
+
+    /// cap-std stops at a Windows symlink or junction with this raw error,
+    /// which std reports as `Uncategorized`, so only the raw code identifies it.
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_reparse_point_refusal_counts_as_a_replaced_directory() {
+        use windows_sys::Win32::Foundation::ERROR_STOPPED_ON_SYMLINK;
+
+        let error = std::io::Error::from_raw_os_error(ERROR_STOPPED_ON_SYMLINK.cast_signed());
+
+        assert!(
+            is_vanished_or_replaced_directory(&error),
+            "expected ERROR_STOPPED_ON_SYMLINK (kind {:?}) to count as a replaced directory",
+            error.kind()
+        );
+    }
+
+    /// A junction in place of a directory is what `ERROR_STOPPED_ON_SYMLINK`
+    /// reports in practice; opening it must be skipped, not an error.
+    #[cfg(windows)]
+    #[test]
+    fn checked_child_is_none_for_a_junction() {
+        let scratch = scratch_dir("filesystem-capability-checked-child-junction");
+        let root = scratch.join("root");
+        let outside = scratch.join("outside");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        let output = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(root.join("linked"))
+            .arg(&outside)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "expected `mklink /J` to create the junction | stderr: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let policy = contained_policy(&root);
+        let parent = open_directory(&policy, &root).unwrap();
+
+        let child = parent
+            .with_dir(|dir| {
+                open_checked_child(&policy, &root.join("linked"), dir, OsStr::new("linked"))
+            })
+            .unwrap();
+
+        assert!(
+            child.is_none(),
+            "expected the junction `linked` to be skipped, not followed"
+        );
     }
 
     #[test]
