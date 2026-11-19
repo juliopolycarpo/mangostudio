@@ -44,13 +44,14 @@ use std::ptr;
 
 use windows_sys::Win32::Foundation::{CloseHandle, ERROR_SUCCESS, HANDLE, LocalFree};
 use windows_sys::Win32::Security::Authorization::{
-    EXPLICIT_ACCESS_W, GRANT_ACCESS, SE_FILE_OBJECT, SetEntriesInAclW, SetNamedSecurityInfoW,
-    TRUSTEE_IS_SID, TRUSTEE_IS_USER, TRUSTEE_W,
+    EXPLICIT_ACCESS_W, GRANT_ACCESS, GetNamedSecurityInfoW, SE_FILE_OBJECT, SetEntriesInAclW,
+    SetNamedSecurityInfoW, TRUSTEE_IS_SID, TRUSTEE_IS_USER, TRUSTEE_W,
 };
 use windows_sys::Win32::Security::{
-    ACL, DACL_SECURITY_INFORMATION, GetTokenInformation, NO_INHERITANCE,
-    PROTECTED_DACL_SECURITY_INFORMATION, PSID, SID_AND_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
-    TokenUser,
+    ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, ACL_SIZE_INFORMATION, AclSizeInformation,
+    DACL_SECURITY_INFORMATION, EqualSid, GetAce, GetAclInformation, GetSecurityDescriptorControl,
+    GetTokenInformation, NO_INHERITANCE, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+    PSID, SE_DACL_PROTECTED, SID_AND_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER, TokenUser,
 };
 use windows_sys::Win32::Storage::FileSystem::{
     DELETE, FILE_GENERIC_EXECUTE, FILE_GENERIC_READ, FILE_GENERIC_WRITE,
@@ -62,6 +63,10 @@ use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken}
 /// than this file ever needs.
 const MODIFY_ACCESS_MASK: u32 =
     FILE_GENERIC_READ | FILE_GENERIC_WRITE | FILE_GENERIC_EXECUTE | DELETE;
+
+/// `ACE_HEADER::AceType` of an access-allowed entry. The named constant lives
+/// in `Win32_System_SystemServices`, a feature nothing else here needs.
+const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
 
 /// A `HANDLE` closed on drop.
 struct OwnedHandle(HANDLE);
@@ -146,6 +151,145 @@ fn current_user_token_buffer() -> io::Result<Vec<u8>> {
     Ok(buffer)
 }
 
+/// The user SID inside a `TOKEN_USER` buffer from [`current_user_token_buffer`].
+/// The returned pointer borrows `token_buffer` and must not outlive it.
+fn user_sid_in(token_buffer: &[u8]) -> PSID {
+    // `TOKEN_USER { User: SID_AND_ATTRIBUTES { Sid: PSID, .. } }` puts `Sid`
+    // at offset 0 of the whole struct — `User` is `TOKEN_USER`'s only (and
+    // so first) field, and `Sid` is `SID_AND_ATTRIBUTES`'s first field, and
+    // `repr(C)` guarantees no padding before a struct's first field.
+    let sid_offset =
+        core::mem::offset_of!(TOKEN_USER, User) + core::mem::offset_of!(SID_AND_ATTRIBUTES, Sid);
+    // SAFETY: `token_buffer` was sized and filled by `GetTokenInformation`
+    // for `TokenUser`, which documents its layout as one `TOKEN_USER`
+    // struct followed by the SID it points at, so `sid_offset` lands within
+    // `token_buffer` and `PSID` fits before its end. `read_unaligned`
+    // rather than a place projection through a cast pointer: `Vec<u8>`'s
+    // allocation only promises byte alignment, not the alignment a `PSID`
+    // (pointer-sized) read requires. The pointer copied out still points
+    // into `token_buffer`'s own backing allocation, which the caller keeps
+    // alive for every use of it.
+    unsafe { std::ptr::read_unaligned(token_buffer.as_ptr().add(sid_offset).cast()) }
+}
+
+/// Whether `path`'s DACL is exactly what [`restrict_to_owner`] writes: a
+/// protected DACL (no inherited entries) whose every entry is an allow for
+/// this process's own account.
+///
+/// A file with a NULL DACL (everyone), an unprotected DACL, an entry for any
+/// other trustee, a deny entry or no entry at all is not owner-only. The
+/// check is deliberately strict rather than a general "who can read this"
+/// analysis: the only files it guards are ones this crate wrote through
+/// [`restrict_to_owner`], so anything that differs was changed afterwards.
+///
+/// # Errors
+/// The `io::Error` from whichever Win32 call refused: reading the process's
+/// token or the security descriptor of `path` (a missing file included).
+pub(super) fn is_owner_only(path: &Path) -> io::Result<bool> {
+    let token_buffer = current_user_token_buffer()?;
+    let owner_sid = user_sid_in(&token_buffer);
+
+    let wide_path: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut dacl: *mut ACL = ptr::null_mut();
+    let mut descriptor: PSECURITY_DESCRIPTOR = ptr::null_mut();
+    // SAFETY: `wide_path` is a NUL-terminated UTF-16 buffer that outlives
+    // the call; the owner/group/SACL out-parameters are null because only the
+    // DACL is requested; `dacl` and `descriptor` are live out-parameters. On
+    // success `descriptor` owns the allocation `dacl` points into.
+    let read = unsafe {
+        GetNamedSecurityInfoW(
+            wide_path.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            &raw mut dacl,
+            ptr::null_mut(),
+            &raw mut descriptor,
+        )
+    };
+    if read != ERROR_SUCCESS {
+        return Err(io::Error::from_raw_os_error(read as i32));
+    }
+    // Frees the descriptor (and so `dacl`) on every path out below.
+    let _descriptor_guard = LocalAlloc(descriptor);
+
+    if dacl.is_null() {
+        // A NULL DACL grants everyone full access.
+        return Ok(false);
+    }
+
+    let mut control: u16 = 0;
+    let mut revision: u32 = 0;
+    // SAFETY: `descriptor` is the live descriptor returned above; `control`
+    // and `revision` are live out-parameters.
+    let controlled =
+        unsafe { GetSecurityDescriptorControl(descriptor, &raw mut control, &raw mut revision) };
+    if controlled == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if control & SE_DACL_PROTECTED == 0 {
+        return Ok(false);
+    }
+
+    let mut size = ACL_SIZE_INFORMATION::default();
+    // SAFETY: `dacl` is the non-null ACL above, alive through the descriptor
+    // guard; `size` is a live `ACL_SIZE_INFORMATION` and its byte length is
+    // passed with the matching `AclSizeInformation` class.
+    let sized = unsafe {
+        GetAclInformation(
+            dacl,
+            (&raw mut size).cast(),
+            core::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
+            AclSizeInformation,
+        )
+    };
+    if sized == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if size.AceCount == 0 {
+        // Nobody, the owner included, can open it: not a file this crate wrote.
+        return Ok(false);
+    }
+
+    for index in 0..size.AceCount {
+        let mut ace: *mut core::ffi::c_void = ptr::null_mut();
+        // SAFETY: `dacl` is alive through the guard and `index` is below its
+        // `AceCount`; `ace` is a live out-parameter that, on success, points
+        // into `dacl`.
+        let fetched = unsafe { GetAce(dacl, index, &raw mut ace) };
+        if fetched == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: every ACE starts with an `ACE_HEADER`, and `ace` points at
+        // one inside `dacl`. Read unaligned: ACEs are only DWORD-aligned.
+        let header = unsafe { ptr::read_unaligned(ace.cast::<ACE_HEADER>()) };
+        if header.AceType != ACCESS_ALLOWED_ACE_TYPE {
+            return Ok(false);
+        }
+        // SAFETY: an `ACCESS_ALLOWED_ACE_TYPE` entry is an
+        // `ACCESS_ALLOWED_ACE`, whose SID begins at its `SidStart` field, so
+        // the address of that field is the SID. Taken with `addr_of!` from
+        // the raw pointer so no reference to a possibly misaligned struct is
+        // formed.
+        let ace_sid: PSID = unsafe {
+            ptr::addr_of!((*ace.cast::<ACCESS_ALLOWED_ACE>()).SidStart)
+                .cast_mut()
+                .cast()
+        };
+        // SAFETY: both are valid SIDs: `ace_sid` points into the live ACL and
+        // `owner_sid` into `token_buffer`, which outlives this loop.
+        if unsafe { EqualSid(ace_sid, owner_sid) } == 0 {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 /// Rewrites `path`'s DACL to grant this process's own account `(M)` and
 /// nobody else, dropping every inherited entry.
 ///
@@ -155,23 +299,7 @@ fn current_user_token_buffer() -> io::Result<Vec<u8>> {
 /// `path`.
 pub(super) fn restrict_to_owner(path: &Path) -> io::Result<()> {
     let token_buffer = current_user_token_buffer()?;
-    // `TOKEN_USER { User: SID_AND_ATTRIBUTES { Sid: PSID, .. } }` puts `Sid`
-    // at offset 0 of the whole struct — `User` is `TOKEN_USER`'s only (and
-    // so first) field, and `Sid` is `SID_AND_ATTRIBUTES`'s first field, and
-    // `repr(C)` guarantees no padding before a struct's first field.
-    let sid_offset =
-        core::mem::offset_of!(TOKEN_USER, User) + core::mem::offset_of!(SID_AND_ATTRIBUTES, Sid);
-    // SAFETY: `token_buffer` was sized and filled by `GetTokenInformation`
-    // for `TokenUser` above, which documents its layout as one `TOKEN_USER`
-    // struct followed by the SID it points at, so `sid_offset` lands within
-    // `token_buffer` and `PSID` fits before its end. `read_unaligned`
-    // rather than a place projection through a cast pointer: `Vec<u8>`'s
-    // allocation only promises byte alignment, not the alignment a `PSID`
-    // (pointer-sized) read requires. The pointer `sid` copies out still
-    // points into `token_buffer`'s own backing allocation, which outlives
-    // every use of `sid` below.
-    let sid: PSID =
-        unsafe { std::ptr::read_unaligned(token_buffer.as_ptr().add(sid_offset).cast()) };
+    let sid = user_sid_in(&token_buffer);
 
     // SAFETY: `TRUSTEE_W` is `#[repr(C)]` plain data — two pointers
     // (`pMultipleTrustee`, `ptstrName`) and two `i32` enums
@@ -234,7 +362,7 @@ pub(super) fn restrict_to_owner(path: &Path) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::restrict_to_owner;
+    use super::{is_owner_only, restrict_to_owner};
     use crate::test_support::scratch_path;
 
     #[test]
@@ -245,6 +373,47 @@ mod tests {
         assert!(restrict_to_owner(&path).is_ok());
 
         std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn a_file_restricted_to_its_owner_reads_back_as_owner_only() {
+        let path = scratch_path("owner-only-windows-roundtrip");
+        std::fs::write(&path, b"secret").unwrap();
+        restrict_to_owner(&path).unwrap();
+
+        let owner_only = is_owner_only(&path);
+
+        std::fs::remove_file(&path).ok();
+        assert!(
+            matches!(owner_only, Ok(true)),
+            "expected Ok(true) for a file restrict_to_owner just wrote | received: {owner_only:?}"
+        );
+    }
+
+    #[test]
+    fn a_file_with_its_inherited_dacl_is_not_owner_only() {
+        // A fresh file inherits its directory's entries (SYSTEM, Administrators,
+        // the owner) and an unprotected DACL.
+        let path = scratch_path("owner-only-windows-inherited");
+        std::fs::write(&path, b"secret").unwrap();
+
+        let owner_only = is_owner_only(&path);
+
+        std::fs::remove_file(&path).ok();
+        assert!(
+            matches!(owner_only, Ok(false)),
+            "expected Ok(false) for a file still carrying its inherited DACL | received: \
+             {owner_only:?}"
+        );
+    }
+
+    #[test]
+    fn a_missing_file_is_an_error_not_an_answer() {
+        let path = scratch_path("owner-only-windows-check-missing");
+        assert!(
+            is_owner_only(&path).is_err(),
+            "expected an error for a path that does not exist"
+        );
     }
 
     #[test]
