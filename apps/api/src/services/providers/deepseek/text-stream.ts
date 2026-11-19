@@ -1,12 +1,11 @@
 import type OpenAI from 'openai';
 
 import { throwOnChatCompletionsFailure } from '../core/chat-completions-errors';
+import { TEXT_GENERATION_TIMEOUT_MS } from '../core/generation-deadline';
 import { extractReasoningChunks } from '../openai/normalizers';
 import type { StreamingChunk, TextGenerationRequest, TextGenerationResult } from '../types';
 import { buildDeepSeekRequestBody } from './message-mapper';
 import { buildDeepSeekChatMessages, toErrorMessage } from './normalizers';
-
-const GENERATION_TIMEOUT_MS = 120_000;
 
 type DeepSeekChatClient = Pick<OpenAI, 'chat'>;
 
@@ -28,7 +27,7 @@ export async function* streamDeepSeekText(
   req: TextGenerationRequest,
   options: DeepSeekTextOptions = {}
 ): AsyncIterable<StreamingChunk> {
-  const timeoutMs = options.timeoutMs ?? GENERATION_TIMEOUT_MS;
+  const timeoutMs = options.timeoutMs ?? req.timeoutMs ?? TEXT_GENERATION_TIMEOUT_MS;
   const deadline = AbortSignal.timeout(timeoutMs);
   const signal = req.signal ? AbortSignal.any([req.signal, deadline]) : deadline;
   const body = buildDeepSeekRequestBody({

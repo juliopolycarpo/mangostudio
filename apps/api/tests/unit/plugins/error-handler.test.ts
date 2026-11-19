@@ -21,6 +21,7 @@ import { Elysia, t } from 'elysia';
 import Value from 'typebox/value';
 
 import { errorHandler } from '../../../src/plugins/error-handler';
+import { GenerationDeadlineError } from '../../../src/services/providers/core/generation-deadline';
 
 const SECRET = 'sk-live-do-not-log-me';
 const INTERNAL_DETAIL = '/var/secrets/private-key.pem could not be opened';
@@ -174,6 +175,27 @@ describe('errorHandler status and body mapping', () => {
       error: 'An internal error occurred',
       code: ERROR_CODES.INTERNAL,
     });
+  });
+
+  it('answers a generation deadline with 504 and a message that hides the provider', async () => {
+    capture = captureConsole();
+    const app = new Elysia().use(errorHandler).get('/slow-model', () => {
+      throw new GenerationDeadlineError(`${INTERNAL_DETAIL} text generation`, 120_000);
+    });
+
+    const response = await app.handle(new Request('http://localhost/slow-model'));
+
+    // The hub gave up on a quiet vendor: a 500 would blame the hub, and the
+    // error's own text names the provider and the deadline.
+    expect(
+      response.status,
+      `expected 504 for GenerationDeadlineError | received ${response.status}`
+    ).toBe(504);
+    expect(await errorBody(response)).toEqual({
+      error: 'The model took too long to respond',
+      code: ERROR_CODES.PROVIDER_ERROR,
+    });
+    expect(capture.lines.join('\n')).toContain('GenerationDeadlineError');
   });
 
   it('reaches the handler registered on a sibling instance', async () => {

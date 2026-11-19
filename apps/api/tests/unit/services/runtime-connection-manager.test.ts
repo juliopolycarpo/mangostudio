@@ -32,6 +32,7 @@ import {
   localLaunchFailure,
   type LocalRuntimeOpenOptions,
   type ManagedRuntimeConnection,
+  MANIFEST_REFRESH_TIMEOUT_MS,
   type RuntimeConnectContext,
   RuntimeConnectionManager,
   type RuntimeEnvironmentConnector,
@@ -2301,6 +2302,122 @@ describe('RuntimeConnectionManager', () => {
     const status = await refresh;
     expect(status.state).toBe('disconnected');
     expect(replaceCalls).toBe(0);
+  });
+
+  describe('the deadline on a manifest refresh', () => {
+    /**
+     * A peer that answered hello and then never answers `runtime.health`. Like the protocol
+     * session, it fails the request only when the caller gave it a deadline, and with the
+     * session's own message shape.
+     */
+    function silentHealthPeer(received: Array<number | undefined>) {
+      return (options?: { timeoutMs?: number }) =>
+        new Promise<RuntimeHealthReport>((_, reject) => {
+          received.push(options?.timeoutMs);
+          if (options?.timeoutMs === undefined) return;
+          setTimeout(
+            () =>
+              reject(
+                new RemoteError(
+                  RESERVED_ERROR_CODES.TIMEOUT,
+                  `Request "runtime.health" timed out after ${options.timeoutMs}ms.`
+                )
+              ),
+            options.timeoutMs
+          );
+        });
+    }
+
+    /** Settles with what the refresh did, or names the hang after `guardMs`. */
+    async function outcomeOf(refresh: Promise<unknown>, guardMs: number): Promise<string> {
+      return await Promise.race([
+        refresh.then(
+          () => 'resolved',
+          (error: unknown) => (error instanceof Error ? error.message : String(error))
+        ),
+        new Promise<string>((resolve) =>
+          setTimeout(() => resolve(`a refresh still waiting after ${guardMs}ms`), guardMs)
+        ),
+      ]);
+    }
+
+    function managerOver(
+      client: RuntimeClient,
+      options: { manifestRefreshTimeoutMs?: number } = {}
+    ) {
+      return new RuntimeConnectionManager({
+        resolveEnvironment: () => Promise.resolve(definition()),
+        connectors: { stdio: () => Promise.resolve({ client, close: () => undefined }) },
+        ...options,
+      });
+    }
+
+    it('bounds a refresh that names no timeout, and names the call and the deadline', async () => {
+      const received: Array<number | undefined> = [];
+      const probe = healthProbe(TEST_MANIFEST, silentHealthPeer(received));
+      const manager = managerOver(probe.client, { manifestRefreshTimeoutMs: 30 });
+      await manager.connect('user-1', 'devbox');
+
+      const outcome = await outcomeOf(manager.refreshManifest('user-1', 'devbox'), 1_000);
+
+      expect(
+        outcome,
+        'expected a rejection naming runtime.health and the 30ms deadline | received an unbounded wait'
+      ).toBe('Request "runtime.health" timed out after 30ms.');
+      expect(received).toEqual([30]);
+    });
+
+    it('asks every unbounded caller for the named default deadline', async () => {
+      const received: Array<number | undefined> = [];
+      const probe = healthProbe(TEST_MANIFEST, (options) => {
+        received.push(options?.timeoutMs);
+        return Promise.resolve(HEALTH_REPORT);
+      });
+      const manager = managerOver(probe.client);
+      await manager.connect('user-1', 'devbox');
+
+      await manager.refreshManifest('user-1', 'devbox');
+
+      expect(received, 'expected runtime.health to carry the default refresh deadline').toEqual([
+        MANIFEST_REFRESH_TIMEOUT_MS,
+      ]);
+    });
+
+    it('lets a caller pass a tighter deadline than the default', async () => {
+      const received: Array<number | undefined> = [];
+      const probe = healthProbe(TEST_MANIFEST, silentHealthPeer(received));
+      const manager = managerOver(probe.client, { manifestRefreshTimeoutMs: 5_000 });
+      await manager.connect('user-1', 'devbox');
+
+      const outcome = await outcomeOf(
+        manager.refreshManifest('user-1', 'devbox', { timeoutMs: 20 }),
+        1_000
+      );
+
+      expect(outcome).toBe('Request "runtime.health" timed out after 20ms.');
+      expect(received).toEqual([20]);
+    });
+
+    it('frees the background refresh slot once the deadline ends a silent read', async () => {
+      const received: Array<number | undefined> = [];
+      const probe = healthProbe(TEST_MANIFEST, silentHealthPeer(received));
+      const manager = managerOver(probe.client, { manifestRefreshTimeoutMs: 20 });
+      await manager.connect('user-1', 'devbox');
+      try {
+        setSystemTime(new Date(Date.now() + 60_000));
+        manager.refreshManifestIfStale('user-1', 'devbox');
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        setSystemTime(new Date(Date.now() + 60_000));
+        manager.refreshManifestIfStale('user-1', 'devbox');
+      } finally {
+        setSystemTime();
+      }
+
+      expect(
+        received,
+        'expected a second stale read to ask again once the first deadline freed the slot'
+      ).toEqual([20, 20]);
+    });
   });
 
   it('clears cached health and peer identity without requiring a reconnect', async () => {

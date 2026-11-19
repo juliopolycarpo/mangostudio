@@ -15,6 +15,7 @@ import { CHATGPT_BASE_INSTRUCTIONS } from '../../../../src/services/providers/ch
 import {
   CHATGPT_RESPONSES_POLICY,
   chatGptProvider,
+  generateChatGptText,
 } from '../../../../src/services/providers/chatgpt/index';
 import {
   CHATGPT_STATIC_MODEL_IDS,
@@ -457,6 +458,33 @@ describe('chatgpt provider — 401 refresh/retry policy', () => {
     };
 
     await expect(consume()).rejects.toBeInstanceOf(ChatGptReauthRequiredError);
+  });
+
+  it('bounds generateText when the backend accepts the request and never answers', async () => {
+    installTokenService({
+      fresh: makeTokenBundle({ accessToken: 'silent-access-token' }),
+      rotated: makeTokenBundle({ accessToken: 'silent-rotated-token' }),
+    });
+    // A backend that holds the response open: the fetch resolves only if its signal aborts.
+    server?.reload({ fetch: () => new Promise<Response>(() => {}) });
+
+    const outcome = await Promise.race([
+      generateChatGptText(
+        { userId: 'user-1', modelName: 'gpt-5.5', history: [], prompt: 'Hi' },
+        { timeoutMs: 40 }
+      ).then(
+        () => 'resolved',
+        (error: unknown) => (error instanceof Error ? error.message : String(error))
+      ),
+      new Promise<string>((resolve) =>
+        setTimeout(() => resolve('a generateText still pending after 2000ms'), 2_000)
+      ),
+    ]);
+
+    expect(
+      outcome,
+      'expected "ChatGPT generateText exceeded the 40 ms deadline." | received an unbounded wait'
+    ).toBe('ChatGPT generateText exceeded the 40 ms deadline.');
   });
 });
 

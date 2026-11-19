@@ -178,6 +178,11 @@ export interface RuntimeConnectionManagerOptions {
    * health would hold every connect.
    */
   readonly hostedAgentsReadTimeoutMs?: number;
+  /**
+   * Deadline on a `runtime.health` refresh whose caller names none, defaulting to
+   * {@link MANIFEST_REFRESH_TIMEOUT_MS}. A caller's own `timeoutMs` wins.
+   */
+  readonly manifestRefreshTimeoutMs?: number;
 }
 
 /**
@@ -316,6 +321,13 @@ const HEALTHY_CONNECTION_MS = 10_000;
  * polling card from making one per poll.
  */
 const MANIFEST_FRESHNESS_MS = 15_000;
+
+/**
+ * The default deadline on a `runtime.health` refresh. The protocol session fails a request only
+ * when its caller names a deadline, so a refresh that named none would wait on a peer that went
+ * quiet until the liveness ping dropped it (and a handler would wait until Bun's own limit).
+ */
+export const MANIFEST_REFRESH_TIMEOUT_MS = 10_000;
 
 /** The default bound on the connect-time read of hosted agents; see the option. */
 const HOSTED_AGENTS_READ_TIMEOUT_MS = 5_000;
@@ -505,6 +517,7 @@ export class RuntimeConnectionManager {
   readonly #discoveryCache: RuntimeDiscoveryCache;
   readonly #connectDeadlinesMs: Partial<Record<EnvironmentTransportKind, number>>;
   readonly #hostedAgentsReadTimeoutMs: number;
+  readonly #manifestRefreshTimeoutMs: number;
   readonly #openerReleaseTimeoutMs: number;
   #externalAgentsRevoked: ExternalAgentsRevokedObserver | undefined;
   #terminalsRevoked: TerminalsRevokedObserver | undefined;
@@ -518,6 +531,8 @@ export class RuntimeConnectionManager {
     this.#connectDeadlinesMs = options.connectDeadlinesMs ?? CONNECT_DEADLINE_MS;
     this.#hostedAgentsReadTimeoutMs =
       options.hostedAgentsReadTimeoutMs ?? HOSTED_AGENTS_READ_TIMEOUT_MS;
+    this.#manifestRefreshTimeoutMs =
+      options.manifestRefreshTimeoutMs ?? MANIFEST_REFRESH_TIMEOUT_MS;
     this.#publishHook = options.publish ?? (() => undefined);
     this.#recordTransition = options.recordTransition ?? recordEnvironmentStateTransition;
     this.#resolveEnvironment = options.resolveEnvironment;
@@ -1419,9 +1434,10 @@ export class RuntimeConnectionManager {
     // to answer must not be asked again by every read that arrives meanwhile.
     entry.manifestReadAtMs = Date.now();
 
-    const health = await client.health(
-      options.timeoutMs === undefined ? undefined : { timeoutMs: options.timeoutMs }
-    );
+    // Never unbounded: a caller that names no deadline gets the manager's.
+    const health = await client.health({
+      timeoutMs: options.timeoutMs ?? this.#manifestRefreshTimeoutMs,
+    });
     if (
       entry.revision !== revision ||
       entry.connection?.client !== client ||
