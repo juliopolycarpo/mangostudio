@@ -1912,8 +1912,9 @@ named tests.
 
 The wrappers live in `apps/api/tests/support/setup/spawn-diagnostics.ts` and are
 installed by that workspace's preload only, so this is an api-lane instrument.
-The CI test lanes set the flag (`.github/workflows/test.yml`); unset, nothing is
-installed and nothing is paid for.
+No CI workflow sets the flag since #922 closed; unset, nothing is installed and
+nothing is paid for. To chase a CI-only hang, set it in the `env` of the one step
+that runs the api lane, not at workflow scope.
 
 > **Local is a child process.** `createLocalRuntimeConnector` spawns the
 > `mangostudio-runtime` binary for every connection, so a test suite that connects

@@ -8,8 +8,11 @@
  * CI-only hang has a spawn in it, this is the instrument that says what it was.
  *
  * Off unless `MANGOSTUDIO_SPAWN_DIAGNOSTICS=1`, and free when off: the wrappers
- * are never installed, so nothing pays for a flag nobody set. The CI test lanes
- * set it (`.github/workflows/test.yml`); locally, set it for one run.
+ * are never installed, so nothing pays for a flag nobody set. No CI workflow
+ * sets it: #922, the hang it was added for, is closed. Set it for one local
+ * run, or in the `env` of the one step under investigation when a CI-only hang
+ * has a spawn in it, never at workflow scope (it is part of every test task's
+ * turbo cache key and only this workspace's preload reads it).
  *
  * `bun test` exposes no current-test API — neither `expect.getState()` nor a
  * hook argument carries one on 1.4.2 — so an event is stamped with elapsed time
