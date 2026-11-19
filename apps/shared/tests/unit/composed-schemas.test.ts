@@ -94,6 +94,7 @@ const REALTIME_ERROR: RealtimeErrorMessage = {
 };
 
 const RULE_FILE_PREVIEW: RuleFilePreviewResponse = {
+  locationId: 'custom-instruction',
   label: 'AGENTS.md',
   path: '/repo/AGENTS.md',
   exists: true,
@@ -205,9 +206,10 @@ const CASES: CompositeCase<object>[] = [
     schema: RuleFilePreviewResponseSchema,
     base: RULE_FILE_PREVIEW,
     optionalFields: { kind: 'agents', sizeBytes: 128, error: 'unreadable', content: '# Rules' },
-    required: ['label', 'path', 'exists', 'readable', 'truncated'],
+    required: ['locationId', 'label', 'path', 'exists', 'readable', 'truncated'],
     properties: [
       'kind',
+      'locationId',
       'label',
       'path',
       'exists',
@@ -220,6 +222,7 @@ const CASES: CompositeCase<object>[] = [
     additionalProperties: undefined,
     invalid: [
       { why: 'an inherited required field is missing', patch: { label: undefined } },
+      { why: 'the inherited location id is missing', patch: { locationId: undefined } },
       { why: 'the added required field is missing', patch: { truncated: undefined } },
       { why: 'the added field has the wrong type', patch: { truncated: 'no' } },
       { why: 'an inherited optional union is not a member', patch: { kind: 'cursor' } },

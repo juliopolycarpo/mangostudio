@@ -28,8 +28,16 @@ export const LibraryTargetIdSchema = Type.Union([
   Type.Literal('cursor'),
 ]);
 
-/** Stable id of one code-defined library location. */
+/** Stable id of one library location: a code-defined registry id, or the custom-instruction id. */
 export const LibraryLocationIdSchema = Type.String({ minLength: 1, maxLength: 64 });
+
+/**
+ * Id every user-named instruction file carries. It is the one location kind
+ * that is not a row of the registry table: the path is the user's, so the id
+ * names the kind rather than a place. It is reserved, never a write destination,
+ * and not a member of any target's `reads`; see `defineCustomInstructionLocation`.
+ */
+export const CUSTOM_INSTRUCTION_LOCATION_ID = 'custom-instruction';
 
 /**
  * Where a location is rooted. `home` resolves under the user's home directory.

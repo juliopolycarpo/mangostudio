@@ -3,6 +3,7 @@ import { dirname, isAbsolute, relative, win32 } from 'node:path';
 
 import type { ResourceKind } from '@mangostudio/shared/library';
 import {
+  CUSTOM_INSTRUCTION_LOCATION_ID,
   LibraryLocationStatusSchema,
   LibraryTargetDescriptorSchema,
 } from '@mangostudio/shared/library';
@@ -10,6 +11,7 @@ import type { LocationFsProbe } from '@mangostudio/shared/library/host';
 import {
   assertLibraryRegistryConsistency,
   COMPARABLE_RESOURCE_KINDS,
+  defineCustomInstructionLocation,
   DIRECTORY_HASHED_RESOURCE_KINDS,
   getLibraryLocation,
   getLibraryTarget,
@@ -368,6 +370,46 @@ describe('library target registry', () => {
     expect(describeTargetLocations('claude', LINUX_ENV, fs).map((status) => status.id)).toEqual(
       ids
     );
+  });
+});
+
+describe('custom-instruction location kind', () => {
+  const custom = defineCustomInstructionLocation('/srv/rules/team.md');
+
+  it('is read-only, so it can never be a write destination', () => {
+    expect(custom.access).toBe('read-only');
+    expect(custom).toMatchObject({
+      id: CUSTOM_INSTRUCTION_LOCATION_ID,
+      kind: 'instruction',
+      layout: 'single-file',
+      readBy: ['mangostudio'],
+    });
+  });
+
+  it('carries the user path unchanged on every platform', () => {
+    expect(custom.resolvePath(LINUX_ENV)).toBe('/srv/rules/team.md');
+    expect(
+      custom.resolvePath({ platform: 'win32', homeDir: String.raw`C:\Users\Ada`, env: {} })
+    ).toBe('/srv/rules/team.md');
+  });
+
+  it('stays out of the closed table that every write destination resolves through', () => {
+    expect(getLibraryLocation(CUSTOM_INSTRUCTION_LOCATION_ID)).toBeUndefined();
+    expect(LIBRARY_LOCATION_DEFINITIONS.map((location) => location.id)).not.toContain(
+      CUSTOM_INSTRUCTION_LOCATION_ID
+    );
+    for (const target of LIBRARY_TARGET_DEFINITIONS) {
+      expect(Object.values(target.reads).flat()).not.toContain(CUSTOM_INSTRUCTION_LOCATION_ID);
+    }
+  });
+
+  it('does not share the vendors global-instruction slug', () => {
+    const slugs = LIBRARY_LOCATION_DEFINITIONS.filter(
+      (location) => location.kind === 'instruction' && location.layout === 'single-file'
+    ).map((location) => location.resourceSlug);
+
+    expect(slugs).toContain('global');
+    expect(custom.resourceSlug).toBe('custom');
   });
 });
 

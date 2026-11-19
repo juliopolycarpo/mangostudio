@@ -63,6 +63,9 @@ describe('settings rule-files routes', () => {
 
     const kinds = data.files.map((f) => (f as { kind?: string }).kind).sort();
     expect(kinds).toEqual(['agents', 'claude']);
+
+    const locationIds = data.files.map((f) => (f as { locationId?: string }).locationId).sort();
+    expect(locationIds).toEqual(['claude-instructions', 'mango-instructions']);
   });
 
   it('previews a valid .md file', async () => {
