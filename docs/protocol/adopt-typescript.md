@@ -91,7 +91,10 @@ WSL and container wrappers are argv arrays the application builds.
 default) and the child still has not exited — stuck in `D` state, or a Windows process whose
 `kill()` returned `false` — it gives up rather than waiting forever, and does not invent a
 status. `child.exited` is the promise with no deadline; it always waits for the real exit, so a
-caller that needs to know for certain awaits that one instead.
+caller that needs to know for certain awaits that one instead. It resolves behind the stdout frames
+the launcher had already received, so closing the port from the `exited` continuation does not drop
+them; bytes still in the pipe at that moment are not waited for, so a caller that needs the whole
+stream waits for the port's closure.
 
 **Local socket.** A Unix domain socket or a Windows named pipe, NDJSON framed:
 
