@@ -336,11 +336,18 @@ const GitWorktreePathSchema = Type.String({ minLength: 1, maxLength: 4096 });
  *
  * The lock and prune reasons are free text Git echoes back, and both are absent
  * rather than empty when the state applies without one.
+ *
+ * `isCurrent` marks the worktree the requesting chat resolves to. The server
+ * answers it because only the server can compare the two spellings the way the
+ * runtime's filesystem would (separators, Windows casing) — the same comparison
+ * that makes it refuse to remove that worktree, so a client that offers a delete
+ * for a row without this flag is offering one the server will refuse.
  */
 export const GitWorktreeSchema = Type.Object({
   path: GitWorktreePathSchema,
   head: Type.Union([GitCommitHashSchema, Type.Null()]),
   branch: Type.Union([Type.String({ minLength: 1, maxLength: 512 }), Type.Null()]),
+  isCurrent: Type.Boolean(),
   isMain: Type.Boolean(),
   isBare: Type.Boolean(),
   isDetached: Type.Boolean(),

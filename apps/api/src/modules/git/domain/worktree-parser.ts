@@ -1,5 +1,11 @@
 import type { GitWorktree } from '@mangostudio/shared/git';
 
+/**
+ * A worktree as Git lists it. `isCurrent` is not in Git's output: it depends on
+ * which chat is asking, so it is added afterwards by `markCurrentWorktree`.
+ */
+export type ParsedWorktree = Omit<GitWorktree, 'isCurrent'>;
+
 const WORKTREE_ATTRIBUTE = 'worktree';
 const BRANCH_REF_PREFIX = 'refs/heads/';
 // The contract types `head` as a commit hash. Git only ever prints one there,
@@ -25,8 +31,8 @@ const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,64}$/i;
  * parseWorktreeList('worktree /repo\0HEAD abc1234\0branch refs/heads/main\0\0');
  * // [{ path: '/repo', head: 'abc1234', branch: 'main', isMain: true, ... }]
  */
-export function parseWorktreeList(output: string): GitWorktree[] {
-  const worktrees: GitWorktree[] = [];
+export function parseWorktreeList(output: string): ParsedWorktree[] {
+  const worktrees: ParsedWorktree[] = [];
 
   for (const record of splitRecords(output)) {
     // Git lists the main worktree first, so the first record that parses owns
@@ -58,7 +64,7 @@ function splitRecords(output: string): string[][] {
   return records;
 }
 
-function parseRecord(fields: readonly string[], isMain: boolean): GitWorktree | null {
+function parseRecord(fields: readonly string[], isMain: boolean): ParsedWorktree | null {
   // Every real record opens with `worktree <path>`; anything else is garbage
   // from a truncated capture or a future attribute Git grew.
   if (!fields[0]?.startsWith(`${WORKTREE_ATTRIBUTE} `)) return null;

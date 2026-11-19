@@ -295,7 +295,6 @@ function GitPanelContent({
           key={chatId}
           chatId={chatId}
           status={state.status}
-          repoRoot={state.root}
           githubContext={githubContext}
           amend={amend}
         />
@@ -306,13 +305,11 @@ function GitPanelContent({
 function RepositoryStatus({
   chatId,
   status,
-  repoRoot,
   githubContext,
   amend,
 }: {
   readonly chatId: string;
   readonly status: GitStatus;
-  readonly repoRoot: string;
   readonly githubContext: GithubContext | undefined;
   readonly amend: AmendMode;
 }) {
@@ -526,7 +523,7 @@ function RepositoryStatus({
         </>
       )}
 
-      <WorktreeSection chatId={chatId} repoRoot={repoRoot} />
+      <WorktreeSection chatId={chatId} />
 
       <BranchPrChip chatId={chatId} context={githubContext} />
 
