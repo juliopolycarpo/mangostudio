@@ -2040,6 +2040,10 @@ export const messages = {
       cancel: 'Cancelar',
       success: 'Pull request #{number} criado.',
       error: 'Não foi possível criar o pull request.',
+      createdUnreadable:
+        'O pull request foi criado, mas não foi possível ler seus detalhes. Não o crie novamente.',
+      openOnGithub: 'Abrir no GitHub',
+      done: 'Concluir',
       pushHint:
         'Esta branch ainda não existe no remoto. Ela será publicada antes de o pull request ser aberto.',
       pushError: 'Não foi possível publicar a branch, então o pull request não foi criado.',

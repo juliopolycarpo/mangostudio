@@ -20,9 +20,10 @@ import type {
   GithubPrSummary,
 } from '@mangostudio/shared/github';
 
+import { createDiagnosticLogger } from '../../../lib/logger';
 import { withRepoMutationLock as withRepoMutationLockDefault } from '../../git/application/git-mutation-lock';
 import { requireRepoRoot as requireRepoRootDefault } from '../../git/application/git-write-service';
-import { GhPrSummaryOutputSchema, GithubOutputError, readGhOutput } from '../domain/gh-output';
+import { GhPrSummaryOutputSchema, readGhOutput } from '../domain/gh-output';
 import { toPrSummary } from '../domain/github-normalizers';
 import {
   ghCli,
@@ -39,7 +40,9 @@ import {
 import { createGithubRepoResolver, type ResolveGithubRepo } from './github-repo-resolver';
 
 /** `https://github.com/owner/repo/pull/123` — the only thing `pr create` prints. */
-const PR_URL_NUMBER_PATTERN = /\/pull\/(\d+)\b/;
+const PR_URL_PATTERN = /https?:\/\/\S*\/pull\/(\d+)\b/;
+
+const logger = createDiagnosticLogger('github-write');
 
 /** What every write needs to reach the right checkout on the right machine. */
 export interface GithubWriteRequest {
@@ -211,9 +214,29 @@ export function createGithubWriteService(
       // settling before parsing its URL and reading it back keeps a
       // malformed readback from masking a mutation that already succeeded.
       settle(request, 'create');
-      const number = parsePullRequestNumber(created.stdout);
-      const pr = await readSummary(request, number);
-      return { state: 'ok', repo: resolution.repo, pr };
+      // Unlike `pr ready` and `pr checkout`, nothing past this point may
+      // surface as a failure: the pull request exists, and a form that reports
+      // otherwise invites the caller to open a second one. Say it was created,
+      // and link it when we can.
+      const opened = parsePullRequestUrl(created.stdout);
+      if (opened === null) {
+        logger.warn('create_url_unrecognised', {
+          chatId: request.chatId,
+          environmentId: request.selection.environmentId,
+        });
+        return { state: 'created-unreadable', url: null };
+      }
+      try {
+        const pr = await readSummary(request, opened.number);
+        return { state: 'ok', repo: resolution.repo, pr };
+      } catch (error) {
+        logger.warn('create_readback_failed', {
+          chatId: request.chatId,
+          environmentId: request.selection.environmentId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return { state: 'created-unreadable', url: opened.url };
+      }
     },
 
     async markPullRequestReady(request, body) {
@@ -230,14 +253,15 @@ export function createGithubWriteService(
 export const githubWriteService = createGithubWriteService();
 
 /**
- * Recovers the new pull request's number from the URL `gh pr create` prints.
+ * Recovers the new pull request's URL and number from what `gh pr create`
+ * prints, or `null` when nothing in it names one.
  *
- * The alternative — a bare `gh pr view` on the current branch — would answer
- * about whatever branch the working tree is on by the time it runs, which is
- * not necessarily the branch that was just used.
+ * Reading the number back from the URL — rather than running a bare `gh pr
+ * view` on the current branch — answers about the pull request that was just
+ * opened, not about whatever branch the working tree is on by the time it runs.
  */
-function parsePullRequestNumber(stdout: string): number {
-  const match = PR_URL_NUMBER_PATTERN.exec(stdout);
-  if (!match?.[1]) throw new GithubOutputError('pr.create');
-  return Number.parseInt(match[1], 10);
+function parsePullRequestUrl(stdout: string): { url: string; number: number } | null {
+  const match = PR_URL_PATTERN.exec(stdout);
+  if (!match?.[1]) return null;
+  return { url: match[0], number: Number.parseInt(match[1], 10) };
 }

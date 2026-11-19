@@ -594,6 +594,16 @@ export const GithubPrThreadsResponseSchema = Type.Union([
  * between opening the panel and pressing a button — but carry no `cachedAt`.
  * A write's result is what just happened, not a cache read, and a staleness
  * label on it would always read "now" while meaning nothing.
+ *
+ * `created-unreadable` is the one answer that is neither: `gh pr create` ran
+ * and opened the pull request, then the read-back that fills `pr` failed (an
+ * aborted request, the 15s timeout, output that would not parse). It is a 200
+ * rather than a 500 because the creation is the fact the caller must act on —
+ * a failure here made the form look like nothing happened, and the next click
+ * opened a duplicate. `url` is the link `gh` printed, or `null` when it printed
+ * nothing recognisable; it is always present so a client never has to tell
+ * "none" from "absent". `pr ready` and `pr checkout` have no such state: both
+ * are safe to repeat.
  */
 export const GithubCreatePrResponseSchema = Type.Union([
   ...GITHUB_UNAVAILABLE_MEMBERS,
@@ -601,6 +611,10 @@ export const GithubCreatePrResponseSchema = Type.Union([
     state: Type.Literal('ok'),
     repo: GithubRepoSchema,
     pr: GithubPrSummarySchema,
+  }),
+  Type.Object({
+    state: Type.Literal('created-unreadable'),
+    url: Type.Union([Type.String(), Type.Null()]),
   }),
 ]);
 

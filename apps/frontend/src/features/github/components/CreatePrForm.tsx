@@ -59,6 +59,9 @@ export function CreatePrForm({ chatId, needsPush, defaultTitle, onDone }: Create
   const [title, setTitle] = useState(defaultTitle);
   const [body, setBody] = useState('');
   const [draft, setDraft] = useState(false);
+  // Set once the server says the pull request was created but could not be
+  // read back; `url` is the link it recovered, if any.
+  const [unreadable, setUnreadable] = useState<{ readonly url: string | null } | null>(null);
   const titleId = useId();
   const bodyId = useId();
 
@@ -81,6 +84,14 @@ export function CreatePrForm({ chatId, needsPush, defaultTitle, onDone }: Create
       return await createPullRequest({ chatId, title, body: body || undefined, draft });
     },
     onSuccess: async (result) => {
+      if (result.state === 'created-unreadable') {
+        // The pull request exists; only its details could not be read back.
+        // The form is replaced rather than left open with the draft in it,
+        // because the obvious next click would open a duplicate.
+        setUnreadable({ url: result.url });
+        await queryClient.invalidateQueries({ queryKey: githubKeys.all });
+        return;
+      }
       if (result.state !== 'ok') {
         toast(t.github.connection[result.state], 'error');
         return;
@@ -110,6 +121,31 @@ export function CreatePrForm({ chatId, needsPush, defaultTitle, onDone }: Create
     if (!title.trim() || mutation.isPending) return;
     mutation.mutate();
   };
+
+  if (unreadable) {
+    return (
+      <Callout
+        tone="warning"
+        title={t.github.createPr.createdUnreadable}
+        action={
+          <Button type="button" variant="secondary" size="sm" onClick={onDone}>
+            {t.github.createPr.done}
+          </Button>
+        }
+      >
+        {unreadable.url ? (
+          <a
+            href={unreadable.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-fg underline"
+          >
+            {t.github.createPr.openOnGithub}
+          </a>
+        ) : null}
+      </Callout>
+    );
+  }
 
   return (
     <form onSubmit={submit}>

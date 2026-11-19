@@ -5,7 +5,6 @@ import { createGithubCache } from '../../../../src/modules/github/application/gi
 import { createGithubReadService } from '../../../../src/modules/github/application/github-read-service';
 import type { GithubWriteOperation } from '../../../../src/modules/github/application/github-realtime-service';
 import { createGithubWriteService } from '../../../../src/modules/github/application/github-write-service';
-import { GithubOutputError } from '../../../../src/modules/github/domain/gh-output';
 import { GhCliError } from '../../../../src/modules/github/infrastructure/gh-cli';
 import { FakeGithubCli } from '../../../support/mocks/fake-github-cli';
 
@@ -256,9 +255,7 @@ describe('GitHub write service', () => {
       Promise.resolve({})
     );
 
-    await expect(
-      writes.createPullRequest(REQUEST, { chatId: 'chat-1', title: 'T' })
-    ).rejects.toBeInstanceOf(GithubOutputError);
+    await writes.createPullRequest(REQUEST, { chatId: 'chat-1', title: 'T' });
 
     expect(published).toEqual([{ ...PUBLISHED_TARGET, operation: 'create' }]);
     const after = await cache.read({ ...SELECTION, subject: 'inbox' }, 'v', () =>
@@ -326,7 +323,50 @@ describe('GitHub write service', () => {
     expect(published).toEqual([]);
   });
 
-  it('fails loudly when gh pr create prints something without a pull request URL', async () => {
+  /**
+   * `gh pr create` has already opened the pull request when the readback runs.
+   * Answering 500 there made the form read as a failed creation, with the
+   * title and body still in it, and the obvious next click opened a second
+   * pull request for the same branch. The creation is reported instead, with
+   * the link when one could be recovered.
+   */
+  it('reports the pull request as created when the readback fails', async () => {
+    const client = new FakeGithubCli({
+      stdout: {
+        'repo.view': repoOutput,
+        'pr.create': 'https://github.example/mango/mangostudio/pull/7\n',
+      },
+      respond: { 'pr.view-summary': () => Promise.reject(new Error('runtime aborted')) },
+    });
+    const writes = createService(client);
+
+    await expect(
+      writes.createPullRequest(REQUEST, { chatId: 'chat-1', title: 'T' })
+    ).resolves.toEqual({
+      state: 'created-unreadable',
+      url: 'https://github.example/mango/mangostudio/pull/7',
+    });
+  });
+
+  it('reports the pull request as created when gh prints unreadable summary output', async () => {
+    const client = new FakeGithubCli({
+      stdout: {
+        'repo.view': repoOutput,
+        'pr.create': 'https://github.example/mango/mangostudio/pull/7\n',
+        'pr.view-summary': '{"number":',
+      },
+    });
+    const writes = createService(client);
+
+    await expect(
+      writes.createPullRequest(REQUEST, { chatId: 'chat-1', title: 'T' })
+    ).resolves.toEqual({
+      state: 'created-unreadable',
+      url: 'https://github.example/mango/mangostudio/pull/7',
+    });
+  });
+
+  it('reports the pull request as created, without a link, when gh prints no pull request URL', async () => {
     const client = new FakeGithubCli({
       stdout: { 'repo.view': repoOutput, 'pr.create': 'Warning: something else entirely' },
     });
@@ -334,7 +374,22 @@ describe('GitHub write service', () => {
 
     await expect(
       writes.createPullRequest(REQUEST, { chatId: 'chat-1', title: 'T' })
-    ).rejects.toBeInstanceOf(GithubOutputError);
+    ).resolves.toEqual({ state: 'created-unreadable', url: null });
+  });
+
+  it('still fails when gh pr create itself fails, because nothing was created', async () => {
+    const client = new FakeGithubCli({
+      stdout: { 'repo.view': repoOutput },
+      respond: {
+        'pr.create': () =>
+          Promise.reject(new GhCliError(['pr', 'create'], 1, 'a pull request already exists')),
+      },
+    });
+    const writes = createService(client);
+
+    await expect(
+      writes.createPullRequest(REQUEST, { chatId: 'chat-1', title: 'T' })
+    ).rejects.toBeInstanceOf(GhCliError);
   });
 
   /**

@@ -498,4 +498,20 @@ describe('GitHub panel responses', () => {
     expect(Value.Check(GithubPrActionResponseSchema, { state: 'ok', pr: prSummary })).toBe(true);
     expect(Value.Check(GithubPrActionResponseSchema, { state: 'ok' })).toBe(false);
   });
+
+  it('says a created pull request that could not be read back is created, with or without a link', () => {
+    const url = 'https://github.com/mango/studio/pull/7';
+    expect(Value.Check(GithubCreatePrResponseSchema, { state: 'created-unreadable', url })).toBe(
+      true
+    );
+    expect(
+      Value.Check(GithubCreatePrResponseSchema, { state: 'created-unreadable', url: null })
+    ).toBe(true);
+    // The link is always stated, so the client never has to guess between "none" and "absent".
+    expect(Value.Check(GithubCreatePrResponseSchema, { state: 'created-unreadable' })).toBe(false);
+    // Only the create answer carries it: ready and checkout are safe to retry.
+    expect(Value.Check(GithubPrActionResponseSchema, { state: 'created-unreadable', url })).toBe(
+      false
+    );
+  });
 });
