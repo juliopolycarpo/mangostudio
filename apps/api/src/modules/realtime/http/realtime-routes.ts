@@ -6,6 +6,7 @@ import {
   EXTERNAL_AGENTS_TOPIC,
   HUB_WEBSOCKET_BACKPRESSURE_LIMIT_BYTES,
   HUB_WEBSOCKET_MAX_PAYLOAD_BYTES,
+  MAX_REALTIME_ACTIVE_TOPICS,
   parseGitTopic,
   parseRepoTopic,
   REALTIME_CLOSE_CODES,
@@ -33,7 +34,6 @@ const MAX_CONNECTIONS_PER_USER = 8;
 const MAX_MESSAGES_PER_SECOND = 20;
 /** Cap in-flight + queued frames so slow handlers cannot retain unbounded work. */
 const MAX_PENDING_MESSAGES = MAX_MESSAGES_PER_SECOND;
-const MAX_ACTIVE_TOPICS = 64;
 const MESSAGE_RATE_WINDOW_MS = 1_000;
 
 /**
@@ -238,7 +238,7 @@ export function createRealtimeRoutes(dependencies: RealtimeRouteDependencies = {
 
     // Message handlers are serialized per socket, so this check sees committed
     // topics from prior frames and cannot race another subscribe commit.
-    if (state.topics.size + accepted.size > MAX_ACTIVE_TOPICS) {
+    if (state.topics.size + accepted.size > MAX_REALTIME_ACTIVE_TOPICS) {
       ws.send(errorMessage('Realtime subscription limit exceeded', ERROR_CODES.RATE_LIMITED));
       return;
     }

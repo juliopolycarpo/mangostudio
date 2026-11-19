@@ -78,6 +78,12 @@ const GIT_TOPIC_PREFIX = 'git:' as const;
 const REPO_TOPIC_PREFIX = 'repo:' as const;
 /** Topics one subscribe or unsubscribe frame may carry. */
 export const MAX_REALTIME_TOPICS_PER_MESSAGE = 32;
+/**
+ * Topics one socket may have active at once. The hub refuses a subscribe frame
+ * that would leave more, whole and with no ack, so a client budgets its topic
+ * sets against this rather than the per-message cap.
+ */
+export const MAX_REALTIME_ACTIVE_TOPICS = 64;
 const MAX_REALTIME_TOPIC_LENGTH = 256;
 
 /**
